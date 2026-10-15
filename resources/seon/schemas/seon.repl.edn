@@ -10,6 +10,17 @@
              [:seon.repl/fix {:optional true} :seon.repl/fix]]
             :findings [:vector {:description "The declared bounds this evaluation exceeded (:seon.config.eval/bounds), each with the measure, its observed value and the fix; read it to correct how you evaluate. Absent when every bound held."} :seon.repl/finding-value]
             :request [:and {:description "What the whole request cost, measured from the MCP entrance: wall time, armed calls, reads, transactions, allocation and CPU by thread, and the stage times. Read it to judge whether a form cost what it should; a request 10x over its work is wrong work."} :seon.cost/request]
+            :cost-result [:qualified-symbol {:description "The result handle the request's whole cost is bound under in the agent's context; (get result/<handle> :seon.cost/stages) reads any member."}]
+            :request-reply
+            [:map {:seon.render/ai seon.mcp/render-request-reply-ai
+                   :seon.render/html seon.mcp/render-request-reply-html
+                   :description "The reply that carries a request's cost, as seon.mcp/eval-clj prints it."}
+             [:seon.repl/request :seon.repl/request]
+             [:seon.repl/cost-result {:optional true} :seon.repl/cost-result]]
+            :request-reply-ai
+            [:map {:description "The AI face of the request reply: the cost's headline and the handle holding the whole cost."}
+             [:seon.repl/request :seon.cost/headline]
+             [:seon.repl/cost-result {:optional true} :seon.repl/cost-result]]
             :out-tokens
             [:int {:min 0 :description "Estimated tokens (seon.ai.tokens/estimate) of an evaluation's printed output, derived from the saved output when its reply is rendered."}]
             :directory

@@ -4,6 +4,7 @@
             [seon.db :as db]
             [seon.mcp :as mcp]
             [seon.render.value :as value]
+            [seon.cost-support :as cost-support]
             [seon.test-support :as support]))
 
 (deftest a-warm-redefinition-loads-only-changed-index-paths
@@ -20,7 +21,7 @@
            reply (call "(defn work {:malli/schema [:=> [:cat :int] :int]} [n] (+ 2 -2 (reduce + (range n)))) (dotimes [_ 40] (work 100))")
            reads (- (:reads @(:stats storage)) before)
            cost (fn [reply]
-                  (let [c (support/mcp-request reply)]
+                  (let [c (cost-support/bound-cost running agent-id reply)]
                     (assoc (select-keys c [:seon.cost/step :seon.cost/entrance :seon.cost/writer :seon.cost/commit :seon.cost/reads])
                            :seon.cost/stages (select-keys (:seon.cost/stages c) [:custody :test-step]))))]
          (when-let [path (System/getenv "SEON_NODE_CACHE_EVIDENCE")]

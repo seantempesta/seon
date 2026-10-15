@@ -131,16 +131,47 @@
   "`value` through the value printer against the cluster's database, `source`
   being the form that shows how it was reached; an error value prints as a
   failure. If printing itself fails, the Throwable floor prints the failure."
-  {:malli/schema [:=> [:cat :seon.schema/value :string [:maybe :seon.db/database-value] [:maybe :string]] :string]}
-  [value source database cluster-name]
+  {:malli/schema [:function
+                  [:=> [:cat :seon.schema/value :string [:maybe :seon.db/database-value] [:maybe :string]] :string]
+                  [:=> [:cat :seon.schema/value :string [:maybe :seon.db/database-value] [:maybe :string]
+                        [:maybe :qualified-symbol] [:maybe :seon.sci.eval/ctx]]
+                   :string]]}
+  ([value source database cluster-name] (printed value source database cluster-name nil nil))
+  ([value source database cluster-name function ctx]
   (try
     (let [request (cond-> {:seon.cluster.eval/source source}
                     database (assoc :seon.db/db database)
-                    cluster-name (assoc :seon.boot/cluster-name cluster-name))]
+                    cluster-name (assoc :seon.boot/cluster-name cluster-name)
+                    function (assoc :seon.render.call/function function)
+                    ctx (merge {:seon.sci.eval/ctx ctx}
+                               (let [effective (config/effective database cluster-name)]
+                                 {:seon.sci.admit/caps (config/result-caps effective)
+                                  :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms effective)})))]
       (:seon.eval/shown (if (and (map? value) (:seon.error/at value))
                           (eval/shown-failure value request nil)
                           (eval/shown-result value request nil))))
-    (catch Throwable failure (render.value/core-text failure))))
+    (catch Throwable failure (render.value/core-text failure)))))
+
+(defn request-reply
+  "The reply that carries a request's cost: the whole cost, and the handle it
+  is bound under in the agent's context when the agent has one."
+  {:malli/schema [:=> [:cat :seon.cost/request [:maybe :qualified-symbol]] :seon.repl/request-reply]}
+  [cost handle]
+  (cond-> {:seon.repl/request cost} handle (assoc :seon.repl/cost-result handle)))
+
+(defn render-request-reply-ai
+  "The reply's AI face: the cost's one line (`seon.batch/render-request-cost-ai`)
+  and the handle that holds the whole cost."
+  {:malli/schema [:=> [:cat :seon.repl/request-reply] :seon.repl/request-reply-ai]}
+  [reply]
+  (cond-> {:seon.repl/request (seon.batch/render-request-cost-ai (:seon.repl/request reply))}
+    (:seon.repl/cost-result reply) (assoc :seon.repl/cost-result (:seon.repl/cost-result reply))))
+
+(defn render-request-reply-html
+  "The reply's HTML face: the whole cost (`seon.batch/render-request-cost-html`)."
+  {:malli/schema [:=> [:cat :seon.repl/request-reply] :seon.render/hiccup]}
+  [reply]
+  (seon.batch/render-request-cost-html (:seon.repl/request reply)))
 
 (defn- result
   "The MCP CallToolResult as a JSON string: one text item per shown text."
@@ -444,11 +475,14 @@
           [[(printed custody code (db/db (get-in found [:seon.turn.loop/cluster :seon.db/connection])) cluster-name)] true {} nil]
           (= "jvm" mode) (jvm-run custody code namespace-name cluster-name)
           :else (sci-run custody code namespace-name cluster-name))]
-    [(conj texts (printed {:seon.repl/request (-> (seon.batch/request-cost started (merge stages run-stages) counts)
-                                                  (with-diff main cluster-name)
-                                                  (with-shared counters shared entrance))}
-                          code nil cluster-name))
-     failed?]))
+    (let [cost (-> (seon.batch/request-cost started (merge stages run-stages) counts)
+                   (with-diff main cluster-name)
+                   (with-shared counters shared entrance))
+          ctx (some-> (:seon.agent/routing custody) (agent/started (or agent-id "root"))
+                      (get-in [:seon.turn.loop/cluster :seon.sci.eval/agent-ctx]))
+          handle (when ctx (eval/bind-result! ctx (id/symbol-in "result" \c (id/id)) cost))]
+      [(conj texts (printed (request-reply cost handle) code main cluster-name `request-reply ctx))
+       failed?])))
 
 (defn- runtime-status
   "`runtime_status`: the cluster's health report through its AI face, printed."

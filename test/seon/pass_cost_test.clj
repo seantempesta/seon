@@ -7,6 +7,7 @@
             [seon.profile :as profile]
             [seon.task :as task]
             [seon.test :as test]
+            [seon.cost-support :as cost-support]
             [seon.test-support :as support]))
 
 (deftest a-pass-reads-its-terminal-ordinal-once
@@ -55,7 +56,7 @@
            _ (mcp/call request)
            measured (profile/measure #(json/read-str (mcp/call request)))
            reply (:seon.profile/value measured)
-           stages (:seon.cost/stages (support/mcp-request reply))]
+           stages (:seon.cost/stages (cost-support/bound-cost running agent-id reply))]
        (is (= [3] (mapv :seon.repl/value (support/mcp-replies reply))))
        (is (zero? (profile/calls-of measured 'seon.test/request-changes)))
        (is (< (get stages :test-step 0.0) 5.0))))))
@@ -81,7 +82,7 @@
        (doseq [code ["(seon.context/current-state)" "(+ 1 2)"]]
          (let [measured (profile/measure #(json/read-str (mcp/call (request code))))
                reply (:seon.profile/value measured)
-               stages (:seon.cost/stages (support/mcp-request reply))]
+               stages (:seon.cost/stages (cost-support/bound-cost running agent-id reply))]
            (is (false? (get reply "isError")))
            (is (zero? (profile/calls-of measured 'seon.test/select)))
            (is (< (get stages :test-step 0.0) 5.0))

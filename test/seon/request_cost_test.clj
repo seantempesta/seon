@@ -5,6 +5,7 @@
             [seon.db :as db]
             [seon.mcp :as mcp]
             [seon.profile :as profile]
+            [seon.cost-support :as cost-support]
             [seon.test-support :as support]))
 
 (defn- answer
@@ -19,9 +20,9 @@
   (support/with-running-agent
    (fn [running agent-id _]
      (let [ping (answer running agent-id "sci" ":ping")
-           {total :seon.cost/ms stages :seon.cost/stages} (support/mcp-request ping)
+           {total :seon.cost/ms stages :seon.cost/stages} (cost-support/bound-cost running agent-id ping)
            form-ms (:seon.repl/ms (support/mcp-reply ping) 0)
-           defined (support/mcp-request
+           defined (cost-support/bound-cost running agent-id
                     (answer running agent-id "sci" "(in-ns 'request.cost) (defn twice [x] (* 2 x))"))]
        (is (= :ping (:seon.repl/value (support/mcp-reply ping))))
        (is (pos? total) "a ping costs its real wall time, never 0")
@@ -34,7 +35,7 @@
   (support/with-running-agent
    (fn [running agent-id _]
      (let [{total :seon.cost/ms stages :seon.cost/stages :as cost}
-           (support/mcp-request (answer running agent-id "jvm" "(count (vec (range 100000)))"))]
+           (cost-support/bound-cost running agent-id (answer running agent-id "jvm" "(count (vec (range 100000)))"))]
        (is (pos? (:seon.cost/alloc-mb cost 0)) "an evaluated form's allocation is measured")
        (is (contains? cost :seon.cost/cpu-ms) "an evaluated form's CPU time is measured")
        (is (not (contains? cost :seon.cost/unmeasured)))
@@ -61,7 +62,7 @@
        (let [before (batch/jvm-counters)
              reply (answer running agent-id mode code)
              after (batch/jvm-counters)
-             cost (support/mcp-request reply)
+             cost (cost-support/bound-cost running agent-id reply)
              window (:seon.cost/jvm-window cost)
              outer (batch/jvm-window before after)]
          (is (false? (get reply "isError")))
@@ -90,8 +91,8 @@
    (fn [running agent-id connection]
      (let [_warm (answer running agent-id "sci" ":ping")
            measured (profile/measure #(answer running agent-id "sci" ":ping"))
-           ping (support/mcp-request (:seon.profile/value measured))
-           pulls (support/mcp-request
+           ping (cost-support/bound-cost running agent-id (:seon.profile/value measured))
+           pulls (cost-support/bound-cost running agent-id
                   (answer running agent-id "sci"
                           "(seon.db/pull '[:db/ident] [:db/ident :db/ident]) (seon.db/pull '[:db/ident] [:db/ident :db/ident]) (seon.db/pull '[:db/ident] [:db/ident :db/ident])"))
            ;; another thread reads the same database throughout the next request
@@ -101,7 +102,7 @@
                          ^Runnable (fn [] (while (not (.get stop))
                                             (db/pull (db/db connection) '[:db/ident] [:db/ident :db/ident])
                                             (.incrementAndGet made))))
-           noisy (support/mcp-request (answer running agent-id "sci" ":ping"))
+           noisy (cost-support/bound-cost running agent-id (answer running agent-id "sci" ":ping"))
            _ (.set stop true)
            _ (.join ^Thread noise (java.time.Duration/ofSeconds 1))]
        (is (pos? (:seon.cost/calls ping)))
@@ -126,7 +127,7 @@
      (let [before (batch/jvm-counters)
            reply (answer running agent-id "sci" "(defn tiny {:malli/schema [:=> [:cat :int] :int]} [x] (+ 1 x))")
            after (batch/jvm-counters)
-           cost (support/mcp-request reply)
+           cost (cost-support/bound-cost running agent-id reply)
            outer (batch/jvm-window before after)
            attributed (transduce (map #(get-in cost [% :seon.cost/alloc-mb] 0.0)) + 0.0
                                  [:seon.cost/entrance :seon.cost/step :seon.cost/writer :seon.cost/commit :seon.cost/tests])
@@ -146,7 +147,7 @@
            ;; stored set settles over a few requests of the same work
            runs (vec (repeatedly 6 #(answer running agent-id "sci" form)))
            seen (mapv #(:seon.repl/value (support/mcp-reply %)) runs)
-           [fourth fifth] (map support/mcp-request (take-last 2 runs))]
+           [fourth fifth] (map #(cost-support/bound-cost running agent-id %) (take-last 2 runs))]
        (is (<= 1 (seen 1) 12) "the first request wrote cost entities, at most definitions defined + tests run + top")
        (is (= (seen 4) (seen 5)) "the same work again writes none")
        (is (= (:seon.cost/transactions fourth) (:seon.cost/transactions fifth)) "accounting adds no transaction")
@@ -156,7 +157,7 @@
   (support/with-running-agent
    (fn [running agent-id _]
      (answer running agent-id "sci" "(in-ns 'request.cost.live) (defn tiny {:malli/schema [:=> [:cat :int] :int]} [x] (inc x)) (clojure.test/deftest tiny-test (clojure.test/is (= 2 (tiny 1))))")
-     (let [cost (support/mcp-request
+     (let [cost (cost-support/bound-cost running agent-id
                  (answer running agent-id "sci" "(defn tiny {:malli/schema [:=> [:cat :int] :int]} [x] (reduce + (range 20000)) (inc x)) (clojure.test/deftest tiny-test (clojure.test/is (= 2 (tiny 1))) (clojure.test/is (= 2000000 (count (vec (range 2000000))))))"))
            entry (first (filter #(= 'request.cost.live/tiny (:seon.cost.comparison/subject %)) (:seon.cost/diff cost)))]
        (is (some? entry) "the very same reply compares the redefined function")
@@ -175,7 +176,7 @@
 (deftest a-function-defined-and-called-in-one-request-is-compared-and-stored
   (support/with-running-agent
    (fn [running agent-id _]
-     (let [cost (support/mcp-request
+     (let [cost (cost-support/bound-cost running agent-id
                  (answer running agent-id "sci"
                          "(in-ns 'request.cost.own) (defn summed \"Sum.\" {:malli/schema [:=> [:cat :int] :int]} [n] (reduce + (map identity (vec (range n))))) (dotimes [_ 30] (summed 5000))"))
            entry (first (filter #(= 'request.cost.own/summed (:seon.cost.comparison/subject %)) (:seon.cost/diff cost)))
@@ -309,7 +310,7 @@
 (deftest the-reply-is-offered-after-accounting
   (support/with-running-agent
    (fn [running agent-id _]
-     (let [step (:seon.cost/step (support/mcp-request (answer running agent-id "sci" "(+ 1 2)")))]
+     (let [step (:seon.cost/step (cost-support/bound-cost running agent-id (answer running agent-id "sci" "(+ 1 2)")))]
        (is (pos? (:seon.cost/alloc-mb step 0.0)) "the reply carries the step's cost, read before it was offered")
        (is (contains? step :seon.cost/cpu-ms))))))
 
@@ -355,7 +356,7 @@
            defined (request "(defn g \"Two.\" {:malli/schema [:=> [:cat] :int]} [] 2) (deftest g-test (is (= 2 (g))))")]
        (is (nil? (support/mcp-tests read-only)) "a request that defines nothing runs no test")
        (is (< (:seon.profile/ms measured) 200) "a read-only request on a drifted branch costs no test step")
-       (is (= 1 (:seon.cost/count (:seon.cost/tests (support/mcp-request defined))))
+       (is (= 1 (:seon.cost/count (:seon.cost/tests (cost-support/bound-cost running agent-id defined))))
            "a defn runs the one test reaching it, not the branch's drift")
        (is (= {:seon.test/passed? true :seon.turn.loop/red []}
               (:seon.turn.loop/reaching (support/mcp-tests defined)))

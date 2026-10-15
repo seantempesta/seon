@@ -4,6 +4,7 @@
             [seon.mcp :as mcp]
             [seon.profile :as profile]
             [seon.render.value :as value]
+            [seon.cost-support :as cost-support]
             [seon.test-support :as support]))
 
 (defn- answer
@@ -31,7 +32,7 @@
      ;; one 100,000,016-byte array, while another thread allocates throughout
      (let [large (while-another-thread-allocates #(answer running agent-id "(alength (byte-array 100000000))"))
            small (answer running agent-id "(+ 1 2)")
-           request (support/mcp-request large)]
+           request (cost-support/bound-cost running agent-id large)]
        (is (= 100000000 (:seon.repl/value (support/mcp-reply large))))
        (is (<= 100.0 (:seon.repl/alloc-mb (support/mcp-reply large)) 101.0)
            "the evaluation's own thread, never the other thread's allocation")
@@ -39,7 +40,7 @@
        (is (pos? (:seon.cost/cpu-ms request)))
        (is (< (:seon.repl/alloc-mb (support/mcp-reply small)) 1.0))
        (let [futured (answer running agent-id "@(future (alength (byte-array 50000000)))")]
-         (is (<= 50.0 (:seon.cost/alloc-mb (support/mcp-request futured)) 51.0)
+         (is (<= 50.0 (:seon.cost/alloc-mb (cost-support/bound-cost running agent-id futured)) 51.0)
              "a future's body thread counts into the request when it exits"))
        (is (not-any? #(contains? (support/mcp-reply %) :seon.repl/findings) [large small]))))))
 
@@ -70,7 +71,7 @@
      (let [vars (:seon.repl/value (support/mcp-reply (answer running agent-id "(reduce + (map (comp count ns-interns) (all-ns)))")))
            _ (answer running agent-id "(+ 1 2)")
            measured (profile/measure #(answer running agent-id "(+ 1 2)"))
-           warm (support/mcp-request (:seon.profile/value measured))]
+           warm (cost-support/bound-cost running agent-id (:seon.profile/value measured))]
        (spit (str (System/getenv "SEON_CHECKOUT") "/tmp/astra-cost-handoff/c5-calls.edn")
              (value/core-text (assoc (dissoc measured :seon.profile/value :seon.profile/called)
                                      :context-vars vars :request warm)))

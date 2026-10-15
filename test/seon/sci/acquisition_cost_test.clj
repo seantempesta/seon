@@ -12,6 +12,7 @@
             [seon.profile :as profile]
             [seon.render.value :as value]
             [seon.sci.eval :as evaluation]
+            [seon.cost-support :as cost-support]
             [seon.test-support :as support]
             [start-flow-benchmark :as benchmark]))
 
@@ -243,7 +244,7 @@
        (mcp/call (request "(+ 1 2)"))
        (let [measured (measured ::unrelated-defn #(json/read-str (mcp/call (request "(defn other [] 2)"))))
              reply (:seon.profile/value measured)
-             cost (support/mcp-request reply)
+             cost (cost-support/bound-cost running agent-id reply)
              {:keys [derive test-step]} (:seon.cost/stages cost)]
          (is (false? (get reply "isError")))
          (is (<= (profile/calls-of measured 'seon.sci.eval/install-row!) 2)

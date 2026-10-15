@@ -20,6 +20,7 @@
             [seon.profile :as profile]
             [seon.sci.eval :as sci.eval]
             [seon.sci.observe :as observe]
+            [seon.cost-support :as cost-support]
             [seon.test-support :as support]
             [seon.task :as task]
             [seon.test :as seon.test]
@@ -2001,7 +2002,7 @@
         reply (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
                                                         "arguments" {"cluster" running "agent" agent-id
                                                                      "mode" mode "code" code}})))]
-    [(:seon.cost/transactions (support/mcp-request reply)) (count (commits-since connection before))]))
+    [(:seon.cost/transactions (cost-support/bound-cost running agent-id reply)) (count (commits-since connection before))]))
 
 (deftest a-replys-transactions-are-its-durable-commits
   (support/with-running-agent
@@ -2027,7 +2028,7 @@
          (is (= 3 (:seon.repl/value (support/mcp-reply reply))))
          (is (zero? (get called 'seon.sci.eval/regenerate-agent-context! 0)) "no regeneration")
          (is (zero? (get called 'seon.sci.eval/forked-program 0)) "no fork of a program context")
-         (is (<= (:fork (:seon.cost/stages (support/mcp-request reply))) 0.5)
+         (is (<= (:fork (:seon.cost/stages (cost-support/bound-cost running agent-id reply))) 0.5)
              "the fork stage of an unchanged program is the key comparison alone"))))))
 
 (deftest a-reply-of-commented-forms-names-them
