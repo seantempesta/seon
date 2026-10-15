@@ -4,6 +4,7 @@
             [seon.batch :as batch]
             [seon.db :as db]
             [seon.mcp :as mcp]
+            [seon.sci.eval :as eval]
             [seon.profile :as profile]
             [seon.cost-support :as cost-support]
             [seon.test-support :as support]))
@@ -30,6 +31,18 @@
        (is (<= form-ms total))
        (is (every? #(contains? stages %) [:custody :fork :read :evaluate :settle :print]))
        (is (every? #(contains? (:seon.cost/stages defined) %) [:settle :test-step]))))))
+
+(deftest a-reply-whose-render-fails-carries-the-diagnostic-beside-the-value
+  (let [reply (assoc (mcp/request-reply {:seon.cost/ms 1.0} nil)
+                     :seon.render/ai (fn [_] (throw (ex-info "the render broke" {}))))
+        shown (eval/shown-result reply {:seon.cluster.eval/source ":ping"} nil)
+        carried (mcp/with-diagnostics reply shown)]
+    (is (= (:seon.cluster.eval/diagnostics shown) (:seon.repl/diagnostics carried))
+        "the printer's diagnostic travels in the reply's data")
+    (is (string? (:seon.repl/diagnostics (mcp/render-request-reply-ai carried)))
+        "the AI face shows it")
+    (is (not (contains? (mcp/with-diagnostics reply {:seon.eval/shown "x"}) :seon.repl/diagnostics))
+        "a reply that printed cleanly carries none")))
 
 (deftest a-jvm-reply-carries-its-request-cost
   (support/with-running-agent

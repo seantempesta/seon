@@ -127,16 +127,19 @@
                       {:seon.error/message message :seon.error/member member
                        :seon.error/expected expected :seon.error/offending offending}))
 
-(defn- printed
+(defn- printed-shown
   "`value` through the value printer against the cluster's database, `source`
-  being the form that shows how it was reached; an error value prints as a
-  failure. If printing itself fails, the Throwable floor prints the failure."
+  being the form that shows how it was reached: the shown map
+  (`seon.sci.eval/shown-result`), whose text is `:seon.eval/shown` and whose
+  `:seon.cluster.eval/diagnostics` are a later stage's failures beside the value.
+  An error value prints as a failure. If printing itself fails, the Throwable
+  floor prints the failure."
   {:malli/schema [:function
-                  [:=> [:cat :seon.schema/value :string [:maybe :seon.db/database-value] [:maybe :string]] :string]
+                  [:=> [:cat :seon.schema/value :string [:maybe :seon.db/database-value] [:maybe :string]] :map]
                   [:=> [:cat :seon.schema/value :string [:maybe :seon.db/database-value] [:maybe :string]
                         [:maybe :qualified-symbol] [:maybe :seon.sci.eval/ctx]]
-                   :string]]}
-  ([value source database cluster-name] (printed value source database cluster-name nil nil))
+                   :map]]}
+  ([value source database cluster-name] (printed-shown value source database cluster-name nil nil))
   ([value source database cluster-name function ctx]
   (try
     (let [request (cond-> {:seon.cluster.eval/source source}
@@ -147,10 +150,16 @@
                                (let [effective (config/effective database cluster-name)]
                                  {:seon.sci.admit/caps (config/result-caps effective)
                                   :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms effective)})))]
-      (:seon.eval/shown (if (and (map? value) (:seon.error/at value))
-                          (eval/shown-failure value request nil)
-                          (eval/shown-result value request nil))))
-    (catch Throwable failure (render.value/core-text failure)))))
+      (if (and (map? value) (:seon.error/at value))
+        (eval/shown-failure value request nil)
+        (eval/shown-result value request nil)))
+    (catch Throwable failure {:seon.eval/shown (render.value/core-text failure)}))))
+
+(defn- printed
+  "`value` through the value printer: its shown text (`printed-shown`)."
+  {:malli/schema [:=> [:cat :seon.schema/value :string [:maybe :seon.db/database-value] [:maybe :string]] :string]}
+  [value source database cluster-name]
+  (:seon.eval/shown (printed-shown value source database cluster-name)))
 
 (defn request-reply
   "The reply that carries a request's cost: the whole cost, and the handle it
@@ -159,19 +168,31 @@
   [cost handle]
   (cond-> {:seon.repl/request cost} handle (assoc :seon.repl/cost-result handle)))
 
+(defn with-diagnostics
+  "`reply` with the diagnostics the printer attached beside its shown value
+  (`:seon.cluster.eval/diagnostics`) as `:seon.repl/diagnostics`; the reply
+  itself when it printed cleanly."
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [reply shown]
+  (cond-> reply
+    (:seon.cluster.eval/diagnostics shown) (assoc :seon.repl/diagnostics (:seon.cluster.eval/diagnostics shown))))
+
 (defn render-request-reply-ai
   "The reply's AI face: the cost's one line (`seon.batch/render-request-cost-ai`)
   and the handle that holds the whole cost."
   {:malli/schema [:=> [:cat :seon.repl/request-reply] :seon.repl/request-reply-ai]}
   [reply]
   (cond-> {:seon.repl/request (seon.batch/render-request-cost-ai (:seon.repl/request reply))}
-    (:seon.repl/cost-result reply) (assoc :seon.repl/cost-result (:seon.repl/cost-result reply))))
+    (:seon.repl/cost-result reply) (assoc :seon.repl/cost-result (:seon.repl/cost-result reply))
+    (:seon.repl/diagnostics reply) (assoc :seon.repl/diagnostics (:seon.repl/diagnostics reply))))
 
 (defn render-request-reply-html
-  "The reply's HTML face: the whole cost (`seon.batch/render-request-cost-html`)."
+  "The reply's HTML face: the whole cost (`seon.batch/render-request-cost-html`)
+  and the printer's diagnostics whole."
   {:malli/schema [:=> [:cat :seon.repl/request-reply] :seon.render/hiccup]}
   [reply]
-  (seon.batch/render-request-cost-html (:seon.repl/request reply)))
+  [:div (seon.batch/render-request-cost-html (:seon.repl/request reply))
+   (when-let [diagnostics (:seon.repl/diagnostics reply)] [:pre {:class "seon-diagnostics"} diagnostics])])
 
 (defn- result
   "The MCP CallToolResult as a JSON string: one text item per shown text."
@@ -478,10 +499,21 @@
     (let [cost (-> (seon.batch/request-cost started (merge stages run-stages) counts)
                    (with-diff main cluster-name)
                    (with-shared counters shared entrance))
-          ctx (some-> (:seon.agent/routing custody) (agent/started (or agent-id "root"))
-                      (get-in [:seon.turn.loop/cluster :seon.sci.eval/agent-ctx]))
+          ;; the agent's context holds the cost under its handle: a JVM request of an agent whose graph
+          ;; has not started acquires the same retained context its evaluation ran in (`jvm-run`)
+          ctx (or (some-> (:seon.agent/routing custody) (agent/started (or agent-id "root"))
+                          (get-in [:seon.turn.loop/cluster :seon.sci.eval/agent-ctx]))
+                  (when (and (= "jvm" mode) (map? (:seon.turn.loop/cluster custody)))
+                    (:seon.sci.eval/ctx (agent/acquire-context! (:seon.turn.loop/cluster custody)
+                                                                (or agent-id "root")))))
           handle (when ctx (eval/bind-result! ctx (id/symbol-in "result" \c (id/id)) cost))]
-      [(conj texts (printed (request-reply cost handle) code main cluster-name `request-reply ctx))
+      [(conj texts (let [reply (request-reply cost handle)
+                         print-reply #(printed-shown % code main cluster-name `request-reply ctx)
+                         shown (print-reply reply)]
+                     ;; a render failure is delivered beside the value: print again with it in the data
+                     (:seon.eval/shown (if (:seon.cluster.eval/diagnostics shown)
+                                         (print-reply (with-diagnostics reply shown))
+                                         shown))))
        failed?])))
 
 (defn- runtime-status
