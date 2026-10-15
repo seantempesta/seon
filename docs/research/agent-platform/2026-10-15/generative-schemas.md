@@ -10,8 +10,7 @@ input. An agent viewing a function (for example from a `fn.ns/symbol` reference)
 Every schema and function an agent wrote is discovered and generatively tested when it changes, visible in the UI, and
 must be green to exit a stage.
 
-This document accumulates across lanes. Section 1 is this lane (`gen-dig`, research only, no source edited). Sections 2
-and 3 are reserved for the next lanes and are empty on purpose.
+This document accumulates across lanes. Section 1 is this lane (`gen-dig`, research only, no source edited): how the libraries work, how Seon uses them, what is measured, and the facts and questions the next lanes rely on. Sections 2 and 3 are reserved for the next lanes and are empty on purpose.
 
 ## Pins and evidence used
 
@@ -19,7 +18,7 @@ and 3 are reserved for the next lanes and are empty on purpose.
 - test.check: Seon pins `org.clojure/test.check` `1.1.1` in `deps.edn`. The sources were read from
   `~/.m2/repository/org/clojure/test.check/1.1.1/test.check-1.1.1.jar` (read, never run).
 - Probes: two throwaway JVM runs with `clojure -Sdeps` on the Malli local root plus test.check 1.1.1 (forms reproduced
-  in section 3). No Seon JVM, no default, no store was touched.
+  in section 1.8). No Seon JVM, no default, no store was touched.
 - Earlier evidence: `docs/research/agent-platform/2026-10-15/dig-measured-gates.md` and
   `docs/research/agent-platform/2026-10-15/measured-gates-plan-opus.md` (section 7), and the Astra plan
   `measured-gates-plan-astra.md` (its exact counterexample is reproduced below).
@@ -63,11 +62,11 @@ and 3 are reserved for the next lanes and are empty on purpose.
 - `-and-gen`: `(gen-such-that schema (m/validator schema options) (-child-gen schema options))`. It generates from the
   FIRST child only, then keeps the values the whole `:and` validates, with `gen/such-that` and max 100 tries. Malli's
   README says so ("place the schema that is most likely to generate valid values ... as the first child").
-- Probe (section 3): `[:and base-map [:map [:error/operation [:= :x]]]]` builds (`mg/generator` returns a
+- Probe (section 1.8): `[:and base-map [:map [:error/operation [:= :x]]]]` builds (`mg/generator` returns a
   generator, `built=true`) and then `mg/generate` throws `:malli.generator/such-that-failure` (about 35 ms cold). So a
   build-only check passes such a schema. This is why `seon.test.accretion/generatable?` (boolean, builds only) can answer
   true for a schema that cannot generate.
-- Probe (section 3): `(malli.util/merge base-map override-map)` produces a single `:map` at definition time. Its
+- Probe (section 1.8): `(malli.util/merge base-map override-map)` produces a single `:map` at definition time. Its
   generator builds, `mg/generate` yields a value that validates, and 20 samples at seed 1 all validate. Malli's
   `malli.util/merge` and the `:merge` schema are the way out. (The `:merge` schema form itself was not registered in the
   probe JVM: `[:merge ...]` failed as `::m/invalid-schema`, so `:merge` needs the `malli.util` schema registry, not only
@@ -104,7 +103,7 @@ and 3 are reserved for the next lanes and are empty on purpose.
 - `malli.instrument/check`: instruments every registered function schema with `:mode` set to a function that calls
   `mg/check` on the original Var value and records the explanation. It returns nil or `symbol -> explanation`. This is the
   built-in "check every function" entry point (its docstring: "Checks all registered function schemas using generative
-  testing"). Seon does not call it (section 2).
+  testing"). Seon does not call it (section 1.7).
 - `malli.generator/function-checker` is the check body. For each arity it:
   1. generates the input from the `:input` schema, with `quick-check` and `::=>iterations` (default 100);
   2. applies the function and validates the output (`:output`) and the optional `:guard`;
@@ -136,7 +135,7 @@ and 3 are reserved for the next lanes and are empty on purpose.
   `clojure.test.check.clojure-test/defspec` wraps a property as a clojure.test deftest and reports the
   `quick-check` result with its seed.
 
-## 2. How Seon uses them today
+### 1.7 How Seon uses them today
 
 Grep over `src`, `test` and `resources` (2026-10-15):
 
@@ -160,7 +159,7 @@ Grep over `src`, `test` and `resources` (2026-10-15):
 - `every-packaged-schema-answers-generatability-as-a-boolean` (`test/seon/test/accretion_test.clj`) asserts a boolean for
   every packaged schema (declared-long, 12 s). It generates nothing.
 
-## 3. What is measured, and what is extrapolated
+### 1.8 What is measured, and what is extrapolated
 
 Measured by someone (cite the note; not re-run here):
 
@@ -198,7 +197,7 @@ Results:
 - `(malli.util/merge base-map override-map)`: generates a valid value; 20 samples at seed 1 all valid.
 - `:merge` as a bare schema form: `::m/invalid-schema` on build and generate.
 
-## 4. Facts the design can rely on
+### 1.9 Facts the design can rely on
 
 - `malli.generator/generator` only builds; `malli.generator/generate` and `malli.generator/sample` produce values and
   are where `:and` and `:not` fail (`-and-gen`, `gen-such-that`, `->such-that-opts`).
@@ -220,7 +219,7 @@ Results:
   would be a size, not a `recursion-limit`.
 - The dead dial `:seon.config.test/auto-check-cases` has no reader; any new check dial needs a reader in the same change.
 
-## 5. Open questions for web research (next lane)
+### 1.10 Open questions for web research (for the next lane)
 
 1. test.check shrinking through `gen/elements`, `gen/fmap` and `gen/such-that`: does each shrink toward a simpler value
    of the declared type, and what do `gen/elements` shrinks look like for a `:enum` of keywords?
@@ -242,3 +241,7 @@ Results:
    registry in this Malli revision (probe: `[:merge ...]` failed `::m/invalid-schema` without `malli.util` schemas)?
 8. Count (in a throwaway JVM, not default): how many of the 3,813 packaged keys fail `mg/generate` with a fixed seed and
    size, grouped by exception type and time. This is the number the design sizes its work against.
+
+## 2. Web research (next lane)
+
+## 3. Design (next lane)
