@@ -18,6 +18,7 @@
   {:red "(clojure.test/testing \"outer\" (clojure.test/testing \"inner\" (clojure.test/is (= 1 2) \"first claim\") (clojure.test/is (= :a :b) \"second claim\")))"
    :green "(clojure.test/is true)"
    :blob "(clojure.test/is (= :small (apply str (repeat 5000 \"é\"))) \"large actual\")"
+   :large-maps "(let [big (into {} (map (fn [i] [(keyword (str \"k\" i)) {:v i}]) (range 400)))] (clojure.test/is (= big (assoc-in big [:k200 :v] -1)) \"one key differs\"))"
    :thrown "(throw (ex-info \"probe thrown\" {:probe :thrown}))"})
 
 (defn- probe-source
@@ -675,3 +676,16 @@
             (is (false? (:added (first datoms))))
             (is (= b (:v (first datoms)))))
           (is (= #{s a} (stored-reach (db/db connection) s))))))))
+
+(deftest a-large-equality-failure-shows-only-the-difference
+  (support/with-database
+    (fn [connection]
+      (with-probe connection
+        (fn [_ v mode]
+          (mode :large-maps)
+          (let [failure (first (reports (run-probe connection v)))
+                actual (:seon.test.failure/actual failure)]
+            (is (str/includes? actual ":k200"))
+            (is (str/includes? actual "-1"))
+            (is (not (str/includes? actual ":k399"))
+                "the equal entries are not shown")))))))

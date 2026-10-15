@@ -1,6 +1,7 @@
 (ns seon.test.runner
   "Capture test Var results in this JVM and commit them as per-member facts."
-  (:require [seon.error.refusal]
+  (:require [clojure.data :as data]
+            [seon.error.refusal]
             [sci.ctx-store]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -156,6 +157,21 @@
                    ::failure-messages []
                    ::failure-identities #{}}))))
 
+(defn- reported-actual
+  "The value an assertion's actual text is rendered from. For a failed `=` of
+  two collections (`(not (= a b))`) it is `clojure.data/diff`'s two sides, so
+  the text names what differs and never repeats the equal part twice; the
+  whole operands stay on the event. Any other actual is itself."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [actual]
+  (let [[_ comparison] (when (and (seq? actual) (= 'not (first actual))) actual)
+        operands (when (and (seq? comparison) (= '= (first comparison))) (rest comparison))]
+    (if (and (= 2 (count operands)) (every? coll? operands))
+      (let [[only-first only-second] (data/diff (first operands) (second operands))]
+        {:seon.test.failure/only-in-first only-first
+         :seon.test.failure/only-in-second only-second})
+      actual)))
+
 (defn- report-pair
   "An assertion's expected and actual texts as ONE shown unit: one token budget
   is shared, never granted twice (CLAUDE.md \"Apply presentation limits
@@ -176,7 +192,7 @@
         share (if (and (find event :expected) (find event :actual)) (quot budget 2) budget)
         expected (when (find event :expected) (report-value (under share) (:expected event)))
         spent (if expected (min share (tokens/estimate expected)) 0)
-        actual (when (find event :actual) (report-value (under (- budget spent)) (:actual event)))]
+        actual (when (find event :actual) (report-value (under (- budget spent)) (reported-actual (:actual event))))]
     [expected actual]))
 
 (defn- failure-report
