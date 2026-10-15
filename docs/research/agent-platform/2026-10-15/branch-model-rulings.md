@@ -49,6 +49,14 @@ model below.
    and only indexed program entities (functions, tests, schemas, defs, namespaces). Agent-generated data (tasks,
    attempts, evaluations, messages, test-world facts) never merges. Branch additions nothing reaches (probes, scratch,
    experimental schemas such as run 8's `:tmp/probe`) stay on the branch and are listed in the merge report.
+5a. **The merge list is curated by tests, and the agent sees it** (owner, 10-15). The agent's block shows its merge
+   list live, derived by the same rule the merge uses: the entities the branch changed since its merge base (git's
+   three-way: a change main made is never the branch's, so it is never carried back as a revert) that its seeds reach
+   through all hops. Seeds are the task's proofs plus the branch's green tests that reach a change. Everything else the branch
+   changed is listed beside it as "stays on the branch", each item with the form that would include it (a test that
+   reaches it) or drop it (`ns-unmap!`). The agent curates the merge by writing tests, never by a hand list: to get
+   something merged, test it. The block's change section (c94977458, "reached by no test") becomes this list; one
+   function derives it for the block, the done rule's report and the merge, so what the agent sees is what merges.
 6. **Merge reuses the branch's results.** Every eval request's test step already records results keyed by reach digest;
    with ruling 1 a branch result's identity equals its identity on the merge candidate. The merge looks results up by
    digest and runs only what is missing; no candidate world boot in the normal case.
@@ -84,7 +92,7 @@ Datahike branch pointers held by the world's connection; nothing recomputes wher
 
 1. Design round (dig of the three-way commits → Opus + Astra independent plans → Fable hybrid → narrow check): own-delta
    (ruling 1-2), config reads (4), deleting the three-way readers; together with the writer slice (3).
-2. Merge by reach closure and result lookup (5, 6): after 1.
+2. Merge by reach closure and result lookup (5, 5a, 6): after 1; the merge list in the agent's block is the same derivation.
 3. `ns-unmap!` shape (8), agent-branch retirement (9), bb-load property (10): small slices beside 1.
 4. Stage exits (7): after 1 and 2, with `:outside` runs.
 5. Open defects carried (root-working-state.md "Morning"): a closed working attempt keeps its graph; the re-run NPE in
