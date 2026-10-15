@@ -1906,8 +1906,10 @@
   [input declaring]
   (let [input-form (m/form input)
         declaring-form (m/form declaring)
-        input (m/deref input)
-        declaring (m/deref declaring)]
+        ;; A `:merge` is a ref schema whose target is another ref chain's end:
+        ;; both sides follow every ref, so the same variant compares equal.
+        input (m/deref-all input)
+        declaring (m/deref-all declaring)]
     (cond
       (= input-form declaring-form) true
       (= (m/form input) (m/form declaring)) true
