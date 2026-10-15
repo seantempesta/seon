@@ -420,13 +420,15 @@
                   (fn
                     ([] (step-var))
                     ([init-args] (step-var (dissoc init-args ::graph-ref)))
+                    ;; a lifecycle transition runs no evaluation, so it builds no
+                    ;; world: a world that cannot be built would throw past this
+                    ;; catch and Flow would read the stop as still running
                     ([state transition]
-                     (in-world environment nil
-                               #(try (step-var state transition)
-                                     (catch Throwable failure
-                                       (if (and (failed! failure) (not= ::flow/stop transition))
-                                         (closed state)
-                                         state)))))
+                     (try (step-var state transition)
+                          (catch Throwable failure
+                            (if (and (failed! failure) (not= ::flow/stop transition))
+                              (closed state)
+                              state))))
                     ([state input message]
                      (in-world environment nil
                                #(with-step-start

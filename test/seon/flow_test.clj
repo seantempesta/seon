@@ -774,3 +774,22 @@
       (finally
         (flow/stop graph)
         (.shutdown ^java.util.concurrent.ExecutorService executor)))))
+
+;;; A stop transition runs no evaluation, so it needs no world. Flow reads a
+;;; throwing transition as "still running" and re-parks the proc, so a stop
+;;; that had to build an unbuildable world never exited and `join-graph!`
+;;; waited for its whole backstop (the hang of
+;;; `seon.cluster.db-flow-test/every-agent-start-has-a-task`).
+(deftest a-work-launcher-stops-though-its-cluster-admits-no-world
+  (test-support/with-database
+    (fn [connection]
+      (let [environment (test-support/environment "never-configured-cluster" connection)
+            launcher (sut/start-work-launcher!
+                      {:seon.env/environment environment
+                       ::sut/configuration (assoc test-launcher-configuration
+                                                  :seon.config.agent/turn-completion-backstop-ms 3000)})
+            stopped (future (sut/stop-work-launcher! launcher))]
+        (is (nil? (deref stopped 10000 ::still-joining))
+            "the stop returned its exit, not a timeout")
+        (is (.isTerminated ^java.util.concurrent.ExecutorService (::sut/executor launcher))
+            "the launcher's proc thread exited")))))
