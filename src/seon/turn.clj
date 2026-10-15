@@ -4260,13 +4260,15 @@
   the entry."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/entry] :seon.batch/printed]}
   [{{ctx :seon.sci.eval/ctx ordinal :seon.batch/ordinal} :seon.batch/world working :seon.batch/working
-    frame :seon.turn/frame-request limit :seon.sci.eval/time-limit-ms}
+    frame :seon.turn/frame-request limit :seon.sci.eval/time-limit-ms defining :seon.batch/defining}
    {:seon.batch/keys [value error evaluation form ns-before source] :as entry}]
   (let [request (cond-> (assoc (frame ordinal (or ns-before (second (:seon.cluster.eval/ns evaluation)) 'user))
                                ;; the form's working value: its render reads what it read
                                :seon.db/db working)
                   ;; absence is no key: a read that failed on a blank reply has no source
                   (seq source) (assoc :seon.cluster.eval/source source)
+                  ;; the form's own definitions: the database holds them and their tests' results only after the form is folded
+                  (seq defining) (assoc :seon.render.var/defining defining)
                   ;; the form prints under its own evaluation's print options
                   (:seon.print/options evaluation) (assoc :seon.print/options (:seon.print/options evaluation))
                   ;; its printed output shares the reply's one budget
@@ -5488,6 +5490,23 @@
   [tests]
   (dissoc tests :seon.source/commit-id :seon.cost/tests :seon.cost/live-tests))
 
+(defn branch-due
+  "The tests of `branch` that are in `stale`, not in `pending` and not in `ran`, the tests the step's reaching
+  run executed: a test shows once in the step's reply, in the run that executed it."
+  {:malli/schema [:=> [:cat [:vector :seon.test/sym] [:sequential :seon.test/sym] [:set :seon.test/sym] [:set :seon.test/sym]]
+                  [:vector :seon.test/sym]]}
+  [branch stale pending ran]
+  (let [due (set stale)]
+    (into [] (comp (filter due) (remove pending) (remove ran)) branch)))
+
+(defn- executed-syms
+  "The tests `run` executed, a nil or refused run having executed none."
+  {:malli/schema [:=> [:cat [:maybe :map]] [:set :seon.test/sym]]}
+  [run]
+  (if (or (nil? run) (:seon.error/at run))
+    #{}
+    (into #{} (map :seon.test/sym) (executed run))))
+
 (defn- test-costs
   "The members `runs` executed in this step, read from the connection's latest results for them: their
   allocation, in bytes, and tested reach per test (`:seon.cost/live-tests`) and summed with their wall milliseconds
@@ -5593,7 +5612,7 @@
               pending (set (:seon.turn.loop/pending platform))
               reaching (run-reaching execution (left) changed platform)
               ;; a branch test holding a current result would only answer it again
-              branched (run-branch execution (left) (into [] (comp (filter (set stale)) (remove pending)) branch))
+              branched (run-branch execution (left) (branch-due branch stale pending (executed-syms reaching)))
               proved (when (seq proofs) (run-proofs execution agent-id (left) pending))
               ;; a derivation that fails is shown beside the step's values, never in place of them
               red (try (step-reds execution agent-id)

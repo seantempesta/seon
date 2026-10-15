@@ -536,6 +536,12 @@
          "error")
        ">"))
 
+(defn- defining
+  "The symbols the observed `writes` bind: what the form being printed defines."
+  {:malli/schema [:=> [:cat [:sequential :any]] [:set :qualified-symbol]]}
+  [writes]
+  (into #{} (keep #(when (and (map? %) (= :bind (:seon.batch/op %))) (:seon.batch/sym %))) writes))
+
 (defn- print-into
   "`entry` with its shown text from the show stage (a render's own failure
   rides its shown map's diagnostics, the agent's); a failed print is the
@@ -659,7 +665,7 @@
                      (vreset! returned o)
                      (measure!)
                      (when (:seon.batch/show request)
-                       (vreset! printed (print-into request (merge base @measured o))))
+                       (vreset! printed (print-into (assoc request :seon.batch/defining (defining (vec writes))) (merge base @measured o))))
                      o)))))
         read-error (:seon.batch/read-error r)
         failure (try
@@ -682,7 +688,7 @@
                 :else (assoc base :seon.batch/error failure))
         [entry print-failure] (if (or (contains? entry :seon.batch/shown) (not (:seon.batch/show request)))
                                             [entry (second @printed)]
-                                            (within request world #(print-into request entry)))
+                                            (within request world #(print-into (assoc request :seon.batch/defining (defining (vec writes))) entry)))
         ;; published before any observation is normalized: a malformed
         ;; observation is a diagnostic beside the value, never its loss
         published (-> batch

@@ -132,6 +132,19 @@
                       :seon.render.var/example (list 'defn (symbol (name sym)) {:malli/schema [:=> [:cat :int] :int]} '[x] 'x))
       (seq counts) (assoc :seon.render.var/counts counts))))
 
+(defn- unit-status
+  "The `status` of the Var `unit` renders, nil without a symbol or database. A Var its own form
+  defines (`:seon.render.var/defining` names it) says nothing of its tests: the database holds
+  neither its definition nor their results yet, and the reply's test step is the one
+  derivation of their status for that request."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render.var/status]]}
+  [unit]
+  (let [sym (var-symbol (:seon.render/value unit))]
+    (when (and sym (:seon.db/db unit))
+      (cond-> (status (:seon.db/db unit) sym (armed? (:seon.render/value unit)))
+        (contains? (:seon.render.var/defining unit) sym)
+        (select-keys [:seon.render.var/contract :seon.render.var/example])))))
+
 (defn render-ai
   "The Var as data for the value printer: its symbol and, when it says
   something, its status, with the forms that act on it as data (a contract
@@ -140,8 +153,7 @@
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render.var/view]}
   [unit]
   (let [sym (var-symbol (:seon.render/value unit))
-        said (when (and sym (:seon.db/db unit))
-               (status (:seon.db/db unit) sym (armed? (:seon.render/value unit))))]
+        said (unit-status unit)]
     (cond-> (assoc said :seon.render.var/symbol sym)
       (or (seq (:seon.render.var/pending said)) (seq (:seon.render.var/newly-red said)))
       (assoc :seon.render/operations [(list 'my.test/check {:seon.test/changed [sym]})]))))
@@ -152,8 +164,7 @@
   [unit]
   (let [sym (var-symbol (:seon.render/value unit))
         {:seon.render.var/keys [contract example pending newly-red newly-green counts]}
-        (when (and sym (:seon.db/db unit))
-          (status (:seon.db/db unit) sym (armed? (:seon.render/value unit))))
+        (unit-status unit)
         tests (fn [label ts k]
                 (when (seq ts)
                   [:li label (when-let [n (get counts k)] (str " (" n ")")) ": "

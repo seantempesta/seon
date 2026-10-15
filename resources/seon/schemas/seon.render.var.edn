@@ -11,6 +11,7 @@
  :pending [:vector {:description "Reaching tests with no result recorded against a program holding the current definition (the first five)."} :qualified-symbol]
  :newly-red [:vector {:description "Reaching tests that passed before the current definition and fail at it (the first five)."} :qualified-symbol]
  :newly-green [:vector {:description "Reaching tests that failed before the current definition and pass at it (the first five)."} :qualified-symbol]
+ :defining [:set {:description "The symbols the form being shown defines: their tests' status is the reply's test step's, so a Var named here shows only its contract."} :qualified-symbol]
  :counts [:map-of {:description "How many names a status list holds, for a list longer than it shows."} [:enum :seon.render.var/pending :seon.render.var/newly-red :seon.render.var/newly-green] [:int {:min 1}]]
  :status [:map {:description "What a definition has to say; empty when nothing changed."}
           [:seon.render.var/contract {:optional true} :seon.render.var/contract]

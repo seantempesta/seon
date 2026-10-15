@@ -206,6 +206,8 @@
                               :seon.render.data/cursor
                               :seon.render.walk/attribute
                               :seon.ai/partial
+                              ;; the symbols the form being shown defines (the Var render's)
+                              :seon.render.var/defining
                               ;; the producers already rendering this
                               ;; chain — carried so a producer that
                               ;; delegates its own value onward cannot

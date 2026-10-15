@@ -938,7 +938,7 @@
   prepare): the fold records those as faults."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/entry] :seon.batch/printed]}
   [{{ctx :seon.sci.eval/ctx limit :seon.sci.eval/time-limit-ms profile :seon.render/profile
-     cluster :seon.boot/cluster-name} :seon.batch/world db :seon.batch/working}
+     cluster :seon.boot/cluster-name} :seon.batch/world db :seon.batch/working defining :seon.batch/defining}
    {:seon.batch/keys [value error source] :as entry}]
   (let [req (cond-> {:seon.sci.eval/ctx ctx :seon.cluster.eval/source (or source "")
                      ;; the profile derives from the form's working value and cluster
@@ -946,6 +946,8 @@
                      :seon.sci.eval/time-limit-ms (or limit 30000)
                      :seon.sci.admit/caps (:seon.sci.admit/caps (#'eval/instrumentation-config db))}
               profile (assoc :seon.render/profile profile)
+              ;; the form's own definitions: the database holds them and their tests' results only after the form is folded
+              (seq defining) (assoc :seon.render.var/defining defining)
               cluster (assoc :seon.boot/cluster-name cluster))]
     (kernel/with-arm
      ctx (or limit 30000)
@@ -1100,7 +1102,8 @@
   thread's allocation and CPU as the evaluation `arm-measures` sums; -1 on a
   thread HotSpot does not count (a virtual thread). Only root evaluates on the
   host: a host evaluation can load, reload or intern in the one JVM every
-  cluster shares, so any other agent's form is refused by name, unevaluated."
+  cluster shares, so any other agent's form is refused by name, unevaluated,
+  and its evaluation carries no measures: a refusal measured nothing."
   {:malli/schema [:=> [:cat :map :any :any] :map]}
   [{{agent-id :seon.agent/id} :seon.batch/world} form _]
   (if (not= "root" agent-id)
@@ -1113,7 +1116,7 @@
                 :seon.error/offending agent-id
                 :seon.error/member :seon.agent/id
                 :seon.error/expected "root"}))
-     :seon.batch/evaluation {:seon.eval/allocated-bytes 0 :seon.cost/cpu-ns 0}}
+     :seon.batch/evaluation {}}
   (let [bytes0 (.getCurrentThreadAllocatedBytes ^com.sun.management.ThreadMXBean thread-mx)
         cpu0 (.getCurrentThreadCpuTime thread-mx)
         outcome (try {:seon.batch/value (eval form)}

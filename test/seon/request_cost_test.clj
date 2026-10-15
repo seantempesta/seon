@@ -44,11 +44,18 @@
     (is (not (contains? (mcp/with-diagnostics reply {:seon.eval/shown "x"}) :seon.repl/diagnostics))
         "a reply that printed cleanly carries none")))
 
-(deftest a-jvm-reply-carries-its-request-cost
+(deftest a-refused-jvm-request-carries-no-measure
   (support/with-running-agent
    (fn [running agent-id _]
+     (let [cost (cost-support/bound-cost running agent-id (answer running agent-id "jvm" "(count (vec (range 100000)))"))]
+       (is (not (contains? cost :seon.cost/alloc-mb)) "a refusal measured no allocation, it is no key")
+       (is (not (contains? cost :seon.cost/cpu-ms)) "a refusal measured no CPU time")))))
+
+(deftest a-jvm-reply-carries-its-request-cost
+  (support/with-running-agent
+   (fn [running _ _]
      (let [{total :seon.cost/ms stages :seon.cost/stages :as cost}
-           (cost-support/bound-cost running agent-id (answer running agent-id "jvm" "(count (vec (range 100000)))"))]
+           (cost-support/bound-cost running "root" (answer running "root" "jvm" "(count (vec (range 100000)))"))]
        (is (pos? (:seon.cost/alloc-mb cost 0)) "an evaluated form's allocation is measured")
        (is (contains? cost :seon.cost/cpu-ms) "an evaluated form's CPU time is measured")
        (is (not (contains? cost :seon.cost/unmeasured)))
