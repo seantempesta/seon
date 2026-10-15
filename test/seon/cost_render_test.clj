@@ -18,8 +18,9 @@
    :seon.cost/stages {:custody 95.9 :unattributed 9.3}})
 
 (deftest request-cost-ai-face-is-ms-alloc-and-calls
-  (is (= {:seon.cost/ms 184.6 :seon.cost/alloc-mb 8.5 :seon.cost/calls 7303}
-         (batch/render-request-cost-ai cost)))
+  (is (= {:seon.cost/ms 184.6 :seon.cost/alloc-mb 96.9 :seon.cost/calls 7303}
+         (batch/render-request-cost-ai cost))
+      "allocation is the forms' plus the step's")
   (is (= {:seon.cost/ms 1.0} (batch/render-request-cost-ai {:seon.cost/ms 1.0 :seon.cost/reads 2}))))
 
 (deftest request-cost-html-face-holds-every-member
@@ -46,4 +47,6 @@
            "the reply shows the cost's one line")
        (is (every? #(contains? bound %) [:seon.cost/stages :seon.cost/jvm-window :seon.cost/shared :seon.cost/step])
            "the whole cost is bound under the handle the reply names")
-       (is (= (select-keys bound (keys shown)) shown) "the line is the bound cost's own members")))))
+       (is (= (select-keys bound [:seon.cost/ms :seon.cost/calls]) (dissoc shown :seon.cost/alloc-mb))
+           "ms and calls are the bound cost's own members")
+       (is (= (batch/render-request-cost-ai bound) shown) "the line is the render of the bound cost")))))

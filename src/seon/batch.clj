@@ -223,11 +223,18 @@
                    :seon.cost/stages (assoc stages :unattributed remainder)})))
 
 (defn render-request-cost-ai
-  "A request's cost as the AI face shows it: wall milliseconds, allocated
-  megabytes and armed calls, the three an agent judges a form by."
+  "A request's cost as the AI face shows it: wall milliseconds, armed calls and
+  the megabytes the whole request allocated: its forms' evaluation arms plus
+  each attributed part on its own thread (entrance, step, tests, writer,
+  commit), the parts `shared-cost` subtracts from the window."
   {:malli/schema [:=> [:cat :seon.cost/request] :seon.cost/headline]}
   [cost]
-  (select-keys cost [:seon.cost/ms :seon.cost/alloc-mb :seon.cost/calls]))
+  (let [parts (keep #(get-in cost [% :seon.cost/alloc-mb])
+                    [:seon.cost/entrance :seon.cost/step :seon.cost/tests :seon.cost/writer :seon.cost/commit])
+        total (when (or (contains? cost :seon.cost/alloc-mb) (seq parts))
+                (tenths (reduce + (:seon.cost/alloc-mb cost 0.0) parts)))]
+    (cond-> (select-keys cost [:seon.cost/ms :seon.cost/calls])
+      total (assoc :seon.cost/alloc-mb total))))
 
 (defn- cost-cell
   "One member's value as a table cell: a map is a nested table."
