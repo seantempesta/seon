@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is]]
             [seon.merge :as merge]
             [seon.cluster.agent :as cluster.agent]
+            [seon.cluster.host :as host]
             [seon.cluster.message :as message]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
@@ -18,6 +19,7 @@
             [seon.schema :as schema]
             [seon.render.value :as value]
             [seon.task :as task]
+            [seon.test :as test-runner]
             [seon.turn :as turn]
             [seon.test-support :as support]))
 
@@ -748,5 +750,74 @@
         (is (not (carried [:seon.fn/sym (sym "scratch")])) "the scratch def does not merge")
         (is (contains? (:seon.merge/stays prepared) [:seon.fn/sym (sym "scratch")]) "and is listed as staying")
         (is (true? (:seon.test/passed? prepared)) "the carried change is green on the candidate"))
+      (finally
+        (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
+
+(defn- run-facts
+  "Run `run-id`'s evaluator, input digest and each member's symbol, reach digest and reused run, on `database`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/id] :map]}
+  [database run-id]
+  (let [run (db/pull database [:seon.test.run/evaluator :seon.test.run/input-digest
+                               {:seon.test.run/members [:seon.test.member/symbol :seon.test.member/reach-digest
+                                                        :seon.test.member/reused-run]}]
+                     [:seon.test.run/id run-id])]
+    (update run :seon.test.run/members #(into {} (map (juxt :seon.test.member/symbol identity)) %))))
+
+(deftest ^{:seon.test/long "One agent test run on a chain branch, then one prepare-merge!: a nested seon.test/run on a fresh merge branch of main."
+           :seon.test/long-ms 90000}
+  a-merge-reuses-the-chain-branchs-green-at-an-unchanged-reach
+  ;; ruling 6: the seed the chain agent ran green, at the same reach digest on the candidate, executes nothing there
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        main-conn (:seon.db/connection target)
+        suffix (id/id)
+        ns-sym (symbol (str "reachreuse" suffix ".core"))
+        sym #(symbol (str ns-sym) %)
+        task-ns (str "tq.reachreuse" suffix)
+        _ (task/index-tasks! {:seon.db/connection main-conn
+                              :seon.task/files {(str "resources/seon/tasks/" task-ns ".edn")
+                                                "[#:seon.task{:name \"fix\" :plan \"Merge the tested change.\"}]"}})
+        task-sym (symbol task-ns "fix")
+        seed (sym "tested-check")
+        _ (support/transacted! main-conn [(support/namespace-entity (db/db main-conn) ns-sym)])
+        branch (keyword (str "reachreuse-" suffix))
+        agent-id (str "reachreuse-" suffix)
+        _ (registry/fork! {:seon.store/store store :seon.store/branch branch
+                           :seon.cluster.registry/from (db/commit-id (db/db main-conn)) :seon.db/db (db/db main-conn)})
+        made (volatile! [branch])]
+    (try
+      (is (nil? (host/register! main-conn agent-id branch ns-sym (:seon.cluster/name target)))
+          "main homes the chain agent on its branch")
+      (registry/on-branch store branch
+                          #(do (support/transacted! % [(support/program-entity (db/db %) [:seon.fn/sym (sym "tested")]
+                                                                               "(defn tested {:malli/schema [:=> [:cat] :int]} [] 7)")])
+                               (support/transacted! % [(support/program-entity (db/db %) [:seon.test/sym seed]
+                                                                               (str "(clojure.test/deftest ^{:seon/tasks #{'" task-sym "}} tested-check (clojure.test/is (= 7 (" (sym "tested") "))))"))])))
+      (let [execution (cluster.agent/acquire-context! target agent-id {:seon.agent/branch branch})
+            on-branch (try (db/with-branch {:seon.db/connection (:seon.db/connection execution)}
+                             #(test-runner/run
+                               {:seon.test/policy :named :seon.test/execution execution
+                                :seon.test/recording-connection (:seon.db/connection execution)
+                                :seon.test/identities #{seed}}))
+                           (finally (cluster.agent/release-context! execution)))
+            _ (is (true? (:seon.test/passed? on-branch)) "the chain agent's run of its seed is green on its branch")
+            branch-run (registry/on-branch store branch #(run-facts (db/db %) (:seon.test.run/id on-branch)))
+            measured (profile/measure #(source/prepare-merge! target store branch task-sym))
+            prepared (:seon.profile/value measured)
+            _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
+            candidate-run (registry/on-branch store (:seon.source/candidate prepared)
+                                              #(run-facts (db/db %) (:seon.test.run/id prepared)))
+            member (get-in candidate-run [:seon.test.run/members seed])
+            executed (remove :seon.test.member/reused-run (vals (:seon.test.run/members candidate-run)))]
+        (is (nil? (:seon.error/type prepared)) "the merge prepares")
+        (is (= (get-in branch-run [:seon.test.run/members seed :seon.test.member/reach-digest])
+               (:seon.test.member/reach-digest member))
+            "the seed's reach digest on the candidate is the chain branch's")
+        (is (= (:seon.test.run/input-digest branch-run) (:seon.test.run/input-digest candidate-run))
+            "the candidate's inputs are the chain branch's")
+        (is (= (:seon.test.run/id on-branch) (:seon.test.member/reused-run member))
+            "the candidate's seed answers from the chain branch's run, executing nothing")
+        (is (= [] (mapv :seon.test.member/symbol executed)) "the candidate gate executes no test")
+        (is (true? (:seon.test/passed? prepared)) "and the merge is green"))
       (finally
         (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))

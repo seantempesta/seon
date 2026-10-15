@@ -2576,14 +2576,14 @@
 
 (defn- recorded-outcomes
   "Every terminated outcome `source` (one branch's head) recorded for the identities `[[sym reach-digest] ...]` at
-  `inputs` and `evaluator`, as `[sym run-id at pass fail error]`. Read undecoded (`seon.db/undecoded-datoms`): a
+  `inputs`, whichever evaluator ran it (the reach digest names the content it ran), as `[sym run-id at pass fail error]`. Read undecoded (`seon.db/undecoded-datoms`): a
   fresh branch head answers in microseconds where a query first derives its declarations (about 2 ms a head). A
   member that answered from another run is not an outcome of its own."
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential [:tuple :seon.test/sym :seon.test/reach-digest]]
-                       :seon.test.run/input-digest :seon.test.run/evaluator]
+                       :seon.test.run/input-digest]
                   [:set [:tuple :seon.test/sym :seon.test.run/id :seon.test.run/at :seon.test/pass-count
                          :seon.test/fail-count :seon.test/error-count]]]}
-  [source identities inputs evaluator]
+  [source identities inputs]
   (let [wanted (set identities)
         entity (fn [e] (into {} (map (juxt second #(nth % 2))) (db/undecoded-datoms source :eavt [e])))
         outcome (fn [{pass :seon.test.member/pass-count fail :seon.test.member/fail-count
@@ -2600,8 +2600,7 @@
     (into #{} (keep (fn [[run _ e]]
                       (when-let [[test-symbol pass fail error] (get members e)]
                         (let [{id :seon.test.run/id at :seon.test.run/at :as recorded} (entity run)]
-                          (when (and (= inputs (:seon.test.run/input-digest recorded))
-                                     (= evaluator (:seon.test.run/evaluator recorded)))
+                          (when (= inputs (:seon.test.run/input-digest recorded))
                             [test-symbol id at pass fail error])))))
           (when (seq members) (db/undecoded-datoms source :aevt [:seon.test.run/members])))))
 
@@ -2616,25 +2615,25 @@
           (sort (db/q '[:find [?branch ...] :where [?agent :seon.agent/branch ?branch]] main)))))
 
 (defn- carried-results
-  "Each of `test-symbols` whose reuse identity `[sym reach-digest input-digest evaluator]` (`reach` holds the
-  digests) another branch's run recorded a terminated outcome for, red included, as that run's id, time and counts:
+  "Each of `test-symbols` whose reuse identity `[sym reach-digest input-digest]` (`reach` holds the
+  digests; the content, not the evaluator that ran it, ruling 6) another branch's run recorded a terminated outcome for, red included, as that run's id, time and counts:
   retained in `seon.cache` when a run recorded it (`seon.test.runner/retain-results!`), else read from the recorded
   runs of main and the other live branches (`source-branches`, `asking` excluded), each branch head read directly
   once and released. The newest outcome answers; an identity with two outcomes also carries them all under
   `::outcomes`."
   {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.store/branch] [:sequential :seon.test/sym] :map
-                       :seon.test.run/input-digest :seon.test.run/evaluator]
+                       :seon.test.run/input-digest]
                   [:map-of :seon.test/sym :map]]}
-  [database asking test-symbols reach inputs evaluator]
+  [database asking test-symbols reach inputs]
   (let [keyed (filterv #(string? (get reach %)) test-symbols)
-        cached (into {} (keep #(when-let [outcome (seon.cache/present :seon.test.runner/result [% (get reach %) inputs evaluator])]
+        cached (into {} (keep #(when-let [outcome (seon.cache/present :seon.test.runner/result [% (get reach %) inputs])]
                                  [% outcome]))
                      keyed)
         missed (mapv #(vector % (get reach %)) (remove cached keyed))
         recorded (when (seq missed)
                    (into #{} (mapcat (fn [branch]
                                        (when-let [source (db/branch-database database branch)]
-                                         (try (recorded-outcomes source missed inputs evaluator)
+                                         (try (recorded-outcomes source missed inputs)
                                               (finally (source/release! [source]))))))
                          (source-branches database asking)))]
     (into cached
@@ -2663,7 +2662,7 @@
   (`outcomes`, `[sym run-id at pass fail error]` each): a positive observation of an input the identity misses. The
   same identity again writes nothing."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id :seon.test/sym
-                       [:tuple :seon.test/sym :seon.test/reach-digest :seon.test.run/input-digest :seon.test.run/evaluator]
+                       [:tuple :seon.test/sym :seon.test/reach-digest :seon.test.run/input-digest]
                        [:sequential [:tuple :seon.test/sym :seon.test.run/id :seon.test.run/at :seon.test/pass-count
                                      :seon.test/fail-count :seon.test/error-count]]]
                   :nil]}
@@ -2672,8 +2671,7 @@
                                :seon.task/ns (symbol (namespace test-symbol))
                                :seon.task/name (str "two-outcomes-at-one-identity-" (id/id reuse-key 12))
                                :seon.task/plan (str "`" test-symbol "` recorded two outcomes at one reuse identity "
-                                                    "(reach digest " (second reuse-key) ", input digest " (nth reuse-key 2)
-                                                    ", evaluator " (nth reuse-key 3) "): runs "
+                                                    "(reach digest " (second reuse-key) ", input digest " (nth reuse-key 2) "): runs "
                                                     (str/join ", " (map #(str (nth % 1) " pass " (nth % 3) " fail " (nth % 4)
                                                                               " error " (nth % 5)) outcomes))
                                                     ". The newest answers. Find the input the test reads outside its "
@@ -2867,10 +2865,10 @@
                                (not (:seon.test/loaded-source-drift selection)))
                       (carried-results database (hash-set (get-in database [:config :branch])
                                                           (get-in (db/db recording) [:config :branch]))
-                                       runnable reach (:seon.test.run/input-digest selection) evaluator))
+                                       runnable reach (:seon.test.run/input-digest selection)))
             _ (doseq [[test-symbol {outcomes ::outcomes}] carried :when outcomes]
                 (file-two-outcomes! recording (or (:seon.agent/id execution) "root") test-symbol
-                                    [test-symbol (get reach test-symbol) (:seon.test.run/input-digest selection) evaluator]
+                                    [test-symbol (get reach test-symbol) (:seon.test.run/input-digest selection)]
                                     outcomes))
             carried-members (mapv (fn [member]
                                     (carried-member member (get reach (:seon.test.member/symbol member))

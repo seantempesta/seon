@@ -2393,18 +2393,18 @@
 
 (defn- retain-results!
   "Retain each terminated outcome of run `run-id` on `database`, red included, in `seon.cache` under its reuse
-  identity `[sym reach-digest input-digest evaluator]`, the key `seon.test/select` reuses by, naming the run: any
+  identity `[sym reach-digest input-digest]`, the key `seon.test/select` reuses by, naming the run: any
   branch asking that identity answers from it (`seon.test/carried-results`). A pure speed-up: the recorded runs
   answer a miss. Called where a member's outcome or its exit commits, whichever lands last. Only an outcome the
   body reached is retained: at least one assertion, no boundary error, terminated; a member that answered from
   another run is never retained itself. A newer outcome at a held identity replaces it: the newest answers."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/id] :nil]}
   [database run-id]
-  (doseq [[test-symbol digest pass fail error inputs evaluator at]
+  (doseq [[test-symbol digest pass fail error inputs at]
           (execution-read
-           (db/q '[:find ?symbol ?digest ?pass ?fail ?error ?inputs ?evaluator ?at :in $ ?id
+           (db/q '[:find ?symbol ?digest ?pass ?fail ?error ?inputs ?at :in $ ?id
                    :where [?run :seon.test.run/id ?id] [?run :seon.test.run/selection-tx]
-                          [?run :seon.test.run/input-digest ?inputs] [?run :seon.test.run/evaluator ?evaluator]
+                          [?run :seon.test.run/input-digest ?inputs]
                           [?run :seon.test.run/at ?at]
                           [?run :seon.test.run/members ?member]
                           [?member :seon.test.member/symbol ?symbol]
@@ -2416,7 +2416,7 @@
                           (not [?member :seon.test.member/error])
                           (not [?member :seon.test.member/reused-run])]
                  database run-id))
-          :let [reuse-key [test-symbol digest inputs evaluator]
+          :let [reuse-key [test-symbol digest inputs]
                 outcome {:seon.test.run/id run-id :seon.test.run/at at :seon.test/pass-count pass
                          :seon.test/fail-count fail :seon.test/error-count error}
                 held (cache/present ::result reuse-key)]]

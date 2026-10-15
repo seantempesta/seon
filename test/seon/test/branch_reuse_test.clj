@@ -50,13 +50,13 @@
   only the recorded runs can answer."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch [:sequential :qualified-symbol]] :nil]}
   [database branch test-symbols]
-  (doseq [[test-symbol digest inputs evaluator]
-          (db/q '[:find ?symbol ?digest ?inputs ?evaluator :in $ ?branch [?symbol ...]
+  (doseq [[test-symbol digest inputs]
+          (db/q '[:find ?symbol ?digest ?inputs :in $ ?branch [?symbol ...]
                   :where [?run :seon.test.run/branch ?branch] [?run :seon.test.run/members ?member]
                          [?member :seon.test.member/symbol ?symbol] [?member :seon.test.member/reach-digest ?digest]
-                         [?run :seon.test.run/input-digest ?inputs] [?run :seon.test.run/evaluator ?evaluator]]
+                         [?run :seon.test.run/input-digest ?inputs]]
                 database branch test-symbols)]
-    (seon.cache/evict! :seon.test.runner/result [test-symbol digest inputs evaluator])))
+    (seon.cache/evict! :seon.test.runner/result [test-symbol digest inputs])))
 
 (deftest ^{:seon.test/long "Two own-branch agents, six eval requests, each with its automatic test step: about 5 s measured on default's JVM."
            :seon.test/long-ms 20000}
