@@ -9,6 +9,7 @@
             [seon.program :as program]
             [seon.profile :as profile]
             [seon.render.value :as value]
+            [seon.sci.eval :as sci.eval]
             [seon.test :as test]
             [seon.test.runner :as runner]
             [seon.test-support :as support]))
@@ -192,8 +193,10 @@
                    first-reach (profile/measure #(runner/reach-digests changed names))
                    cold (profile/measure
                          #(:seon.test.runner/digests
-                           (@#'runner/reach-index (@#'runner/reached-graph changed names) names)))]
-               (is (= (:seon.profile/value cold) (:seon.profile/value first-reach))
+                           (@#'runner/reach-index (@#'runner/reached-graph changed names) names)))
+                   ;; every reach digest also keys the loaded commit that runs the test
+                   loaded (:seon.source/commit-id @sci.eval/loaded-identity)]
+               (is (= (update-vals (:seon.profile/value cold) #(id/id [% loaded] 64)) (:seon.profile/value first-reach))
                    "the branch's first digests equal a rebuild of its whole closure")
                (is (not= (get before reaching) (get (:seon.profile/value first-reach) reaching))
                    "the branch's change reaches the test")
@@ -245,3 +248,23 @@
                      "and runs nothing again"))
                (finally (agent/release-context! attempt))))
            (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch])))))))))
+
+(deftest ^{:seon.test/long "One nested seon.test/run of one compiled member, then two reach reads."
+           :seon.test/long-ms 15000}
+  a-result-recorded-under-one-loaded-commit-is-not-reused-under-another
+  ;; S5's merge step, 2026-10-15: a red the lazy-root NPE in the compiled platform caused (seon.sci.eval) was
+  ;; reused by reach digest after the JVM restarted onto the fix, so the step stalled on a red no body re-earned.
+  (let [execution (assoc (support/execution-handle nil) :seon.agent/id "loaded-commit-identity")
+        conn (:seon.db/connection execution)
+        test-symbol 'seon.id-test/a-host-object-has-no-identity
+        ran (test/run {:seon.test/execution execution :seon.test/recording-connection conn
+                       :seon.test/policy :named :seon.test/rerun? true :seon.test/identities #{test-symbol}})
+        database (db/db conn)
+        loaded (runner/reach-digests database [test-symbol])
+        other (runner/reach-digests database [test-symbol] {} nil (random-uuid))]
+    (is (true? (:seon.test/passed? ran)))
+    (is (not= (get loaded test-symbol) (get other test-symbol)) "another loaded commit is another identity")
+    (is (contains? (runner/result-at-reach database loaded) test-symbol)
+        "the result answers under the loaded commit that ran it")
+    (is (not (contains? (runner/result-at-reach database other) test-symbol))
+        "a platform that never ran it has no result to reuse")))

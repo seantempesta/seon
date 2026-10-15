@@ -1438,23 +1438,32 @@
            :else (zipmap readers (repeat input))))))
 
 (defn- task-reach-digests
-  "`closure-digests`, each test of `inputs` (`task-inputs`) keyed too by its input's `task-identity`."
+  "`closure-digests`, each test of `inputs` (`task-inputs`) keyed too by its input's `task-identity`, and every test
+  by `loaded`, the loaded commit L whose compiled platform (evaluator, runner, host-bound callees) runs it."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]
                        [:map-of :seon.test/sym :seon.test.member/dynamic-calls]
-                       [:or :seon.test/task-inputs :seon.test/unknown-error :seon.error/value]]
+                       [:or :seon.test/task-inputs :seon.test/unknown-error :seon.error/value]
+                       [:maybe :seon.source/commit-id]]
                   [:or :seon.test/reach-digests :seon.test/unknown-error :seon.error/value]]}
-  [database test-symbols extra-roots inputs]
-  (let [digests (closure-digests database test-symbols extra-roots)]
-    (cond (seon.error.refusal/error? digests) digests
-          (seon.error.refusal/error? inputs) inputs
-          :else (reduce-kv (fn [result test-symbol input]
-                             (if-let [digest (get result test-symbol)]
-                               (let [identity (task-identity input)]
-                                 (if (:seon.error/at identity)
-                                   (reduced identity)
-                                   (assoc result test-symbol (id/id [digest identity] 64))))
-                               result))
-                           digests inputs))))
+  [database test-symbols extra-roots inputs loaded]
+  (let [digests (closure-digests database test-symbols extra-roots)
+        keyed (cond (seon.error.refusal/error? digests) digests
+                    (seon.error.refusal/error? inputs) inputs
+                    :else (reduce-kv (fn [result test-symbol input]
+                                       (if-let [digest (get result test-symbol)]
+                                         (let [identity (task-identity input)]
+                                           (if (:seon.error/at identity)
+                                             (reduced identity)
+                                             (assoc result test-symbol (id/id [digest identity] 64))))
+                                         result))
+                                     digests inputs))]
+    (if (seon.error.refusal/error? keyed)
+      keyed
+      (update-vals keyed #(id/id [% loaded] 64)))))
+
+(def ^:private loaded-identity
+  "The JVM's loaded identity, `seon.sci.eval/loaded-identity` (which requires this namespace)."
+  (delay @(requiring-resolve 'seon.sci.eval/loaded-identity)))
 
 (defn reach-digests
   "Each test's reach digest: the content of its static closure on `database`,
@@ -1462,7 +1471,9 @@
   that closure, `:seon.test.member/dynamic-calls`), of theirs too. A test whose
   closure calls the test namespace's task reader also keys, given `task` (the
   request's `:seon.test/task`; nil: none), the content of the input it judges (`task-identity`): the one result
-  identity every recorder and reader of a task-reading test shares."
+  identity every recorder and reader of a task-reading test shares. Every digest also keys `loaded`, the loaded
+  commit L (default: the one `seon.sci.eval/loaded-identity` names): a result is evidence of the platform that ran
+  it, so a result recorded under another L is another identity and never answers here."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
                    [:or :seon.test/reach-digests :seon.test/unknown-error]]
@@ -1471,13 +1482,20 @@
                    [:or :seon.test/reach-digests :seon.test/unknown-error]]
                   [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]
                         [:map-of :seon.test/sym :seon.test.member/dynamic-calls] [:maybe :seon.test/task]]
+                   [:or :seon.test/reach-digests :seon.test/unknown-error :seon.error/value]]
+                  [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]
+                        [:map-of :seon.test/sym :seon.test.member/dynamic-calls] [:maybe :seon.test/task]
+                        [:maybe :seon.source/commit-id]]
                    [:or :seon.test/reach-digests :seon.test/unknown-error :seon.error/value]]]}
   ([database test-symbols]
    (reach-digests database test-symbols {}))
   ([database test-symbols extra-roots]
-   (task-reach-digests database test-symbols extra-roots (task-inputs database test-symbols)))
+   (task-reach-digests database test-symbols extra-roots (task-inputs database test-symbols)
+                       (:seon.source/commit-id @@loaded-identity)))
   ([database test-symbols extra-roots task]
-   (task-reach-digests database test-symbols extra-roots (task-inputs database test-symbols task))))
+   (reach-digests database test-symbols extra-roots task (:seon.source/commit-id @@loaded-identity)))
+  ([database test-symbols extra-roots task loaded]
+   (task-reach-digests database test-symbols extra-roots (task-inputs database test-symbols task) loaded)))
 
 (defn reach-memberships
   "The tested closure's function names, including unresolved targets.
