@@ -33,11 +33,14 @@ model below.
    cached by that pair and filled from the parent commit's entry. Host-bound platform code always runs as loaded.
    Drift is kept small explicitly: root merges main forward into chain branches (`git merge main`) at each restart
    batch, three-way, program entities only, conflicts listed in the agent's block (own-delta-hybrid.md P4).
-3. **The writer follows the branch.** Platform code is only what SCI cannot interpret (the compiled evaluator, writer,
-   runner); it changes globally after merge + reload. A predicate is program: the checked writer validates a branch's
-   writes with that branch's predicates (context-bound projection), so a predicate the agent defines on its branch
-   (a "branch-born predicate") can be used by its contracts before the merge
-   (`seon.schema/a-contract-naming-a-branch-predicate-is-refused-at-the-writer`).
+3. **The writer follows the branch; predicates resolve at admission and run at validation** (owner, 10-15). Each
+   branch has its own schemas (its projection is its own value). Admitting a contract checks only that it is well formed
+   and that each predicate symbol resolves to a program entity the branch holds (in the same write's db-after); the
+   stored contract names the predicate by symbol, meaning the version that branch holds. The predicate is resolved to a
+   callable and run only when data is validated (arming, instrumentation, a validated write) in the evaluating context.
+   So a predicate the agent defines on its branch can be named by its contracts before any merge; no callable is
+   threaded through the writer. Platform code is only what SCI cannot interpret; it changes globally after merge +
+   reload.
 4. **Config** (the word; never "cluster dials") is branch data like everything else (amended 10-15, below): a branch
    reads its own config. Root changes a branch's config explicitly by applying it to that branch (`seon.config/apply!`
    takes the branch's connection; an entrance `bin/seon config apply --branch B` / `--chains`). Root acts
