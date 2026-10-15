@@ -1863,7 +1863,7 @@
                     on-2 (when branch-2 (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch-2}))
                     step (when on-2 (:seon.context/step (context/current-state (db/db on-2) agent-2)))]
                 (is (string? key-2) "the second attempt starts")
-                (is (= [:working [doubled]] [(:seon.task/status step) (some :seon.source/uncontracted (:seon.source/refusals step))])
+                (is (= [:working [doubled]] [(:seon.task/status step) (some :seon.source/uncontracted (:seon.context/refusals step))])
                     "its block names the uncontracted helper the merge refused")
                 ;; the second attempt re-touches only the helper; twice keeps attempt 1's change
                 (await-on! on-2 #(not-empty (proof-runs (db/db on-2) (symbol rows "proves-u"))) ::proved-2)

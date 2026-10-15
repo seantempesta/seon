@@ -127,6 +127,24 @@
        (is (every? #(= '= (first (:expected %))) failures) "the claim is the runner's stored printed form, shown as the form it printed")
        (is (every? :actual failures))))))
 
+(deftest a-steps-refusals-are-data-without-a-read-stamp
+  ;; outside-2 (`docs/research/agent-platform/2026-10-14/outside-2.md` Misleading 2): the step showed its merge
+  ;; preview's refusals as error maps stamped with the read time and their tests' `:unknown` verdicts; the section
+  ;; shows each refusal's members, and the test it names once, under proofs, with its state
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (proof-task running connection agent-id)
+     (evaluate running agent-id proof-test)
+     (let [state (block running agent-id)
+           step (:seon.context/step state)
+           refusals (:seon.context/refusals step)]
+       (is (seq refusals) "the working step names its refusals")
+       (is (not-any? #(some (partial contains? %) [:seon.error/at :seon.error/layer :seon.source/red-tests]) refusals)
+           "no refusal carries a read stamp or a verdict per test")
+       (is (= ['tq.cs-test/shape] (mapv :seon.test/sym (get-in state [:seon.context/proofs :seon.context/proof-list])))
+           "the test a refusal names shows once, under proofs")
+       (is (= step (:seon.context/step (block running agent-id))) "two reads show the same step")))))
+
 (def ^:private backslash-proof-test
   "(ns tq.cs-test (:require [clojure.test :refer [deftest is]] [tq.cs])) (deftest ^{:seon/tasks #{'tq.cs/shape}} shape (is (= 4 (tq.cs/f 2))))")
 
@@ -227,7 +245,7 @@
        (is (= ['tq.cn/design] (mapv :seon.task/sym (:seon.context/before chain))) "the task before it, through next")
        (is (= [{:seon.task/sym 'tq.cn/design-3 :seon.task/instructions "Make the rows green."}] (:seon.context/after chain))
            "the task after it, through next, with what it will do")
-       (is (not-any? merge-refusal? (get-in before-work [:seon.context/step :seon.source/refusals]))
+       (is (not-any? merge-refusal? (get-in before-work [:seon.context/step :seon.context/refusals]))
            "before any work the step shows no merge verdict or merge refusal")
        (let [reply (json/read-str (evaluate running agent-id (str "(ns tq.cn-test (:require [clojure.test :refer [deftest is]]))\n"
                                                                   "(deftest rows (is (= 1 2) \"one row\"))")))
@@ -243,8 +261,8 @@
          (is (= [{:message "one row" :expected '(= 1 2) :actual '(not (= 1 2))}]
                 (mapv #(select-keys % [:message :expected :actual]) (:seon.context/proof-failures (first proof-list))))
              "with its last failing claim, as data")
-         (is (= [:seon.source/red-test-error] (mapv :seon.error/type (:seon.source/refusals step))) "its own done refusal")
-         (is (not-any? merge-refusal? (:seon.source/refusals step)) "and no merge's"))))))
+         (is (= [:seon.source/red-test-error] (mapv :seon.error/type (:seon.context/refusals step))) "its own done refusal")
+         (is (not-any? merge-refusal? (:seon.context/refusals step)) "and no merge's"))))))
 
 (deftest a-chain-of-one-is-judged-by-the-done-rule
   ;; outside-2 (`docs/research/agent-platform/2026-10-14/outside-2.md` Broken 1): a chain's only task, linked by no
@@ -685,7 +703,7 @@
 (defn- stable
   "`step` with each refusal's occurrence stamps (when and in which evaluation) removed: the data two reads share."
   [step]
-  (update step :seon.source/refusals (partial mapv #(dissoc % :seon.error/at :seon.error/world))))
+  (update step :seon.context/refusals (partial mapv #(dissoc % :seon.error/at :seon.error/world))))
 
 (deftest ^{:seon/tasks #{'seon.context/reached-reds-are-invisible-to-the-agent}
            :seon.test/long "An own-branch agent's setup, one change through its eval request with its test step and one fork-point run, and two reads of its block."
@@ -746,7 +764,7 @@
                                        "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (squared r))"))
        (let [step (:seon.context/step (block running agent-id))]
          (is (= {:green 1} (:seon.context/counts (:seon.context/proofs (block running agent-id)))) "the proof is green")
-         (is (= [:working ['tq.unc/squared]] [(:seon.task/status step) (some :seon.source/uncontracted (:seon.source/refusals step))])
+         (is (= [:working ['tq.unc/squared]] [(:seon.task/status step) (some :seon.source/uncontracted (:seon.context/refusals step))])
              "the uncontracted helper keeps the step working, named by its merge's refusal")
          (is (false? (context/task-done? (db/db target) agent-id)) "as the end reads it"))))))
 
@@ -775,7 +793,7 @@
          (is (= [{:seon.fn/sym 'tq.anyslot/area :seon.fn.contract/finding :seon.fn.contract.finding/any
                   :seon.fn.contract/position [:seon.fn.contract.position/input 0]}]
                 (mapv #(select-keys % [:seon.fn/sym :seon.fn.contract/finding :seon.fn.contract/position])
-                      (some :seon.source/contract-gaps (:seon.source/refusals step))))
+                      (some :seon.source/contract-gaps (:seon.context/refusals step))))
              "the section names the function, the slot and the finding")
          (is (false? (context/task-done? (db/db target) agent-id)) "as the end reads it"))))))
 
@@ -803,7 +821,7 @@
        (is (= :done (:seon.task/status (:seon.context/step (block running agent-id)))) "the red product alone is done")
        (evaluate running agent-id "(in-ns 'tq.pvu-test)\n(defn rv [s] s)")
        (let [step (:seon.context/step (block running agent-id))]
-         (is (= [:working ['tq.pvu-test/rv]] [(:seon.task/status step) (some :seon.source/uncontracted (:seon.source/refusals step))])
+         (is (= [:working ['tq.pvu-test/rv]] [(:seon.task/status step) (some :seon.source/uncontracted (:seon.context/refusals step))])
              "the helper keeps the step working, named by its merge's refusal")
          (is (false? (context/task-done? (db/db target) agent-id)) "as the end reads it"))))))
 

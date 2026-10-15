@@ -424,12 +424,20 @@
           (:seon.error/at observation) observation
           observation (merge observation (step-status observation)))))
 
+(defn- shown-refusal
+  "`refusal` as the step section shows it: its variant's members without the read's stamps (`:seon.error/at`,
+  `:seon.error/layer`), the branch the agent holds or the tests it names, each of which the proofs or the step's
+  entries show once with its state."
+  {:malli/schema [:=> [:cat :seon.error/value] :seon.context/refusal]}
+  [refusal]
+  (dissoc refusal :seon.error/at :seon.error/layer :seon.test.run/branch :seon.source/red-tests))
+
 (defn step-section
   "The step section of `verdict` (`step-verdict`), as the agent reads it: the step's kind and status, a working
-  step's done refusals (`seon.cluster.source/done-refusals`, as data), then each other test they name red or
-  unknown, and the product it owes the task after it (that task's proofs), each with its status and, when red,
-  its failing assertions. A proof is listed under the proofs section only, so each test shows once. Lists are
-  absent when empty."
+  step's done refusals (`seon.cluster.source/done-refusals`) as data (`shown-refusal`) with the form that reads them
+  whole, then each other test they name red or unknown, and the product it owes the task after it (that task's
+  proofs), each with its status and, when red, its failing assertions. A proof is listed under the proofs section
+  only, so each test shows once. Lists are absent when empty."
   {:malli/schema [:=> [:cat :seon.context/step-verdict] :seon.context/step]}
   [{step :seon.task/step own :seon.task/proofs product :seon.task/product head :seon.context/head status :seon.task/status
     refusals :seon.source/refusals}]
@@ -439,7 +447,8 @@
         red (into #{} (comp (mapcat :seon.source/red-tests) (map :seon.test/sym) (remove (into shown-proofs product))) refusals)]
     (cond-> {:seon.task/status status}
       step (assoc :seon.task/step step)
-      (seq refusals) (assoc :seon.source/refusals refusals)
+      (seq refusals) (assoc :seon.context/refusals (mapv shown-refusal refusals)
+                            :seon.render/operations ['(:seon.source/refusals (seon.context/step-verdict))])
       (seq red) (assoc :seon.context/red-tests (entries red))
       (seq owed) (assoc :seon.context/product-tests (entries owed)))))
 

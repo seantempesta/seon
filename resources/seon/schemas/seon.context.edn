@@ -91,6 +91,8 @@
                              [:seon.source/refusals :seon.source/refusals]]
                :step-verdict [:and {:description "A step's observation with its status. Producer: seon.context/step-verdict."}
                               :seon.context/step-observation :seon.context/step-status]
+               :refusal [:map {:description "One done or merge refusal as the step section shows it: its variant's members without the read's stamps (:seon.error/at, :seon.error/layer), the agent's branch or the tests it names (shown once under proofs or the step's entries). Producer: seon.context/shown-refusal; the whole refusal is seon.context/step-verdict's."}
+                         [:seon.error/type :seon.error/type] [:seon.error/message :seon.error/message]]
                :test-entry [:map {:description "One test as a step section shows it: its status and, when red, its failing assertions."}
                             [:seon.test/sym :seon.test/sym] [:seon.context/proof-status :seon.context/proof-status]
                             [:seon.context/proof-failures {:optional true} :seon.context/proof-failures]]
@@ -98,7 +100,8 @@
                        [:seon.render/operations [:vector :seon.render/read-form]]]
                :step [:map {:description "The held task's step as the done rule judges it (seon.context/step-status): its kind and status, a working step's done refusals, then the tests other than its proofs that keep it from done. Producer: seon.context/step-section."}
                       [:seon.task/step {:optional true} :seon.task/step] [:seon.task/status [:enum :done :working]]
-                      [:seon.source/refusals {:optional true :description "A working step's refusals (seon.context/step-status), as data."} :seon.source/refusals]
+                      [:seon.context/refusals {:optional true :description "A working step's refusals (seon.context/step-status) as data (seon.context/shown-refusal)."} [:vector :seon.context/refusal]]
+                      [:seon.render/operations {:optional true :description "The form that reads the refusals whole."} [:vector :seon.render/read-form]]
                       [:seon.context/start {:optional true :description "A step's first forms to run: the (in-ns) of the held task's namespace and of the tests its instructions cite. Producer: seon.context/step-start."} :seon.context/start]
                       [:seon.context/red-tests {:optional true :description "The judged tests not green other than its proofs (shown under proofs), each with its status and, when red, its failing assertions."} [:vector :seon.context/test-entry]]
                       [:seon.context/product-tests {:optional true :description "The proofs of the task after it (its :seon.task/next) that are not its own, each with its status: a Prove task writes them red."} [:vector :seon.context/test-entry]]]
