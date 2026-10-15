@@ -7,6 +7,7 @@
             [datahike.api :as d]
             [datahike.gc-guard :as gc-guard]
             [seon.cluster :as cluster]
+            [seon.cluster.agent :as cluster.agent]
             [seon.cluster.host :as host]
             [seon.cluster.process :as process]
             [seon.cluster.registry :as registry]
@@ -557,6 +558,9 @@
                                    0)}
            (select-keys instance [:seon.boot/ready-ms :seon.boot/layers :seon.boot/recovered-runs
                                   :seon.boot/failure])
+           ;; the chain branches root listens on (reactive start P2)
+           (when-let [routing (:seon.agent/routing instance)]
+             {:seon.agent/chain-routes (vec (sort (keys (:seon.agent/chain-routes @routing))))})
            (select-keys (:seon.render.web/served instance) [:seon.render.web/url :seon.render.web/wanted-port]))))
 
 (defn stop!
@@ -589,6 +593,8 @@
         (do (swap! running-instances assoc name instance)
             missed)
         (try
+          ;; db<->flow has joined, so no pass routes a chain branch again
+          (some-> (:seon.agent/routing instance) cluster.agent/release-chain-routes!)
           (some-> (:seon.flow/work-launcher instance) flow/stop-work-launcher!)
           (some-> (:seon.boot/cluster-connection instance) store/release-branch!)
           (when (:seon.store/store instance)

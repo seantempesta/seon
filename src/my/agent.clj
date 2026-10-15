@@ -221,6 +221,8 @@
         :else
         (do (doseq [[_ execution] (sort-by (comp :seon.agent/owns-connection? second) held)]
               (cluster.agent/release-context! execution))
+            ;; root's route on a chain branch holds a connection too, and Datahike deletes no connected branch
+            (some-> routing (cluster.agent/release-chain-route! lane))
             (try (registry/retire-branch! {:seon.store/store store :seon.store/branch lane})
                  {:seon.store/branch lane :my.agent/retired? true}
                  (catch clojure.lang.ExceptionInfo refused

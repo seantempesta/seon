@@ -1168,14 +1168,13 @@
                                  {:seon.agent/branch branch})))
              allocated (atom nil)]
          (try
-           (let [borrowed (or (:seon.db/connection branch-owner)
-                            (when (and isolated? (not create?) (nil? previous))
-                            (registry/active-branch-connection
-                             {:seon.store/store held-store :seon.store/branch branch})))
+           (let [;; an execution of this registry already holds the branch: borrow its connection; else take this
+                 ;; execution's own counted reference, so another holder (a chain route) never makes it own nothing
+                 borrowed (:seon.db/connection branch-owner)
                  connection (or (:seon.db/connection previous)
                                 (when-not isolated? parent)
                                 borrowed
-                                (let [connection (store/open-branch! held-store branch)]
+                                (let [connection (store/acquire-branch! held-store branch)]
                                   (reset! allocated connection)
                                   connection))
                  ;; A branch opened at the captured commit holds that commit's
@@ -1965,10 +1964,26 @@
   [branch]
   (keyword "seon.agent.route" (str (when-let [space (namespace branch)] (str space ".")) (name branch))))
 
+(defn chain-route-key
+  "The key of the wake route root holds on chain `branch`'s connection: its own, never `branch-route-key`, so a
+  graph's release, which unlistens that key, never removes the chain's route."
+  {:malli/schema [:=> [:cat :seon.store/branch] :seon.cluster.wake/key]}
+  [branch]
+  (keyword "seon.agent.chain-route" (str (when-let [space (namespace branch)] (str space ".")) (name branch))))
+
+(defn- render-route
+  "The render members of a branch route through `cluster-handle`: its render channel and interest, or none for a
+  cluster that serves no view (its branches then deliver no render wake)."
+  {:malli/schema [:=> [:cat :seon.agent/context-source] :map]}
+  [cluster-handle]
+  (set/rename-keys (select-keys cluster-handle [:seon.render.web/render-channel :seon.render.web/interest])
+                   {:seon.render.web/render-channel :seon.cluster.wake/render-channel}))
+
 (defn start-branch-flow!
   "Start `agent-id`'s graph on `execution`'s branch under `intent`.
   Answers its started entry.
-  The branch's wake route is registered first: its mailbox wakes route to the
+  The branch's wake route is registered first, unless root holds the branch's chain route (`route-chain!`), which
+  is then its one route: its mailbox wakes route to the
   agent, an unrouted recipient wakes the cluster's db<->flow, and a commit whose
   attributes meet the cluster's render interest wakes the cluster's render proc,
   since the agent's page reads its branch (`seon.render.web/agent-connection`)."
@@ -1977,15 +1992,14 @@
                   :seon.agent/started]}
   [cluster-handle execution agent-id intent]
   (let [registry (:seon.agent/routing execution)
-        route (wake/route! (merge {:seon.cluster.wake/connection (:seon.db/connection execution)
-                                   :seon.cluster.wake/channels (fn [] (channels registry))
-                                   :seon.cluster.wake/fenced? (fn [eid channel] (fenced-route? registry eid channel))
-                                   :seon.flow/plan-channel (:seon.cluster.wake/channel cluster-handle)
-                                   :seon.cluster.wake/key (branch-route-key (:seon.agent/branch execution))}
-                                  ;; a cluster that serves no view carries neither, and its branches deliver no render wake
-                                  (set/rename-keys (select-keys cluster-handle [:seon.render.web/render-channel
-                                                                                :seon.render.web/interest])
-                                                   {:seon.render.web/render-channel :seon.cluster.wake/render-channel})))]
+        branch (:seon.agent/branch execution)
+        route (when-not (some-> (:seon.agent/routing cluster-handle) deref :seon.agent/chain-routes (contains? branch))
+                (wake/route! (merge {:seon.cluster.wake/connection (:seon.db/connection execution)
+                                     :seon.cluster.wake/channels (fn [] (channels registry))
+                                     :seon.cluster.wake/fenced? (fn [eid channel] (fenced-route? registry eid channel))
+                                     :seon.flow/plan-channel (:seon.cluster.wake/channel cluster-handle)
+                                     :seon.cluster.wake/key (branch-route-key branch)}
+                                    (render-route cluster-handle))))]
     (when (map? route)
       (throw (ex-info (:seon.error/message route "The branch's wake declarations cannot route.") route)))
     (start-flow! {:seon.turn.loop/cluster (branch-handle cluster-handle execution)
@@ -2029,6 +2043,65 @@
   [handle]
   (or (:seon.store/store handle)
       (:seon.store/store (env/of (or (:seon.sci.eval/base-ctx handle) (:seon.sci.eval/ctx handle))))))
+
+(defn- route-chain!
+  "Hold one counted reference to chain `branch` (`seon.cluster.store/acquire-branch!`) and register root's wake
+  route on it under `chain-route-key`, recorded in `routing`'s `:seon.agent/chain-routes`; nil. The route has no graph
+  of its own: at each delivery it reads the branch's child registry in `routing`, where `acquire-context!` records
+  each attempt's execution, so mailbox wakes reach the current attempt and every other wake reaches db<->flow."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/routing :seon.chain/branch] :nil]}
+  [handle routing branch]
+  (let [connection (store/acquire-branch! (handle-store handle) branch)
+        child #(get-in @routing [:seon.agent/children branch])
+        key (chain-route-key branch)
+        route (try (wake/route! (merge {:seon.cluster.wake/connection connection
+                                        :seon.cluster.wake/channels (fn [] (or (some-> (child) channels) {}))
+                                        :seon.cluster.wake/fenced? (fn [eid channel] (boolean (some-> (child) (fenced-route? eid channel))))
+                                        :seon.flow/plan-channel (:seon.cluster.wake/channel handle)
+                                        :seon.cluster.wake/key key}
+                                       (render-route handle)))
+                   (catch Throwable failure
+                     (store/release-branch! connection)
+                     (throw failure)))]
+    (when (map? route)
+      (store/release-branch! connection)
+      (throw (ex-info (:seon.error/message route "The chain branch's wake declarations cannot route.") route)))
+    (swap! routing assoc-in [:seon.agent/chain-routes branch] {:seon.db/connection connection :seon.cluster.wake/key key})
+    nil))
+
+(defn release-chain-route!
+  "Release root's chain route on `branch` in `routing`: the entry leaves, then its listener and its connection
+  reference; nil, and nothing when none is held. Datahike refuses deleting a branch with an open connection, so the
+  branch owner (`my.agent/retire-branch!`) calls this before it deletes a chain branch."
+  {:malli/schema [:=> [:cat :seon.agent/routing :seon.store/branch] :nil]}
+  [routing branch]
+  (when-let [{connection :seon.db/connection key :seon.cluster.wake/key}
+             (get-in (first (swap-vals! routing update :seon.agent/chain-routes dissoc branch))
+                     [:seon.agent/chain-routes branch])]
+    (wake/unlisten! {:seon.cluster.wake/connection connection :seon.cluster.wake/key key})
+    (store/release-branch! connection))
+  nil)
+
+(defn release-chain-routes!
+  "Release every chain route `routing` holds (`release-chain-route!`); nil. A stopped cluster's last step before its
+  own connection goes."
+  {:malli/schema [:=> [:cat :seon.agent/routing] :nil]}
+  [routing]
+  (run! #(release-chain-route! routing %) (sort (keys (:seon.agent/chain-routes @routing))))
+  nil)
+
+(defn- route-chains!
+  "Hold root's route on every chain branch main names and the store holds, and release every other route
+  (TASK-CHAIN 2.2), so every commit on a chain branch wakes root whether or not a graph runs there; nil."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/routing] :nil]}
+  [handle routing]
+  (let [named (db/q '[:find [?b ...] :where [_ :seon.chain/branch ?b]] @(:seon.db/connection handle))
+        _ (when (map? named) (throw (ex-info (:seon.error/message named "db<->flow could not read the chain branches.") named)))
+        wanted (set/intersection (set named) (set (registry/branches (handle-store handle))))
+        held (set (keys (:seon.agent/chain-routes @routing)))]
+    (run! #(release-chain-route! routing %) (sort (set/difference held wanted)))
+    (run! #(route-chain! handle routing %) (sort (set/difference wanted held))))
+  nil)
 
 (defn- fork-attempt!
   "Fork an attempt's `branch` toward main at `fork-point` unless the store holds it: main's head, or a relaunched
@@ -2790,6 +2863,8 @@
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/routing] :nil]}
   [handle routing]
   (let [connection (:seon.db/connection handle)]
+    ;; root listens on every chain branch first, so a commit there wakes it whether or not a graph runs (reactive start P2)
+    (route-chains! handle routing)
     ;; a finished chain merges first, so this pass's lifecycle publishes it and retires its branch
     (merge-chains! handle)
     (finish-chains! handle routing)

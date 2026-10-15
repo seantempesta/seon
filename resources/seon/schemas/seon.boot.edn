@@ -125,6 +125,10 @@
              [:seon.boot/ready-ms {:optional true} [:int {:min 0}]]
              [:seon.boot/failure {:optional true} :seon.boot/failure]
              [:seon.boot/layers {:optional true} :seon.boot/layers]
+             [:seon.agent/chain-routes
+              {:optional true
+               :description "The chain branches root holds a wake route on (seon.cluster.agent/route-chain!)."}
+              [:vector :seon.store/branch]]
              [:seon.instrument/instrumented
               {:optional true}
               [:int {:min 0}]]],

@@ -1,7 +1,7 @@
 ---
 title: "reactive-start plan: desired state validated at the write, steps derived each pass"
 type: research
-status: "corrected after the narrow check f684c6181 (C1-C13); P1 committed, P2 next"
+status: "corrected after the narrow check f684c6181 (C1-C13); P1 and P2 done, P3 next"
 ---
 
 # Reactive start: desired state validated at the write, steps derived each pass
@@ -14,7 +14,7 @@ hold a launch (the agent resolves them in its context), and the process is one p
 The narrow check of revision 49fdd1bb5 (`reactive-start-check.md`, f684c6181) is folded in below, each correction in
 its owning section.
 
-**Phase status:** plan corrected (C1-C13 folded in); P1 committed with this revision of §2; P2 next. P3-P6 and D2 open.
+**Phase status:** plan corrected (C1-C13 folded in); P1 done (88474708b); P2 done (chain routes, counted acquisition); P3 next. P4-P6 and D2 open.
 
 **Today:** `seon.cluster.agent/run-pass!` is already a level-triggered derivation: `launch-facts`, then
 `launch-actions`, then `apply-actions!`. What fails is around it. Wakes are edge-triggered (a chain branch has a

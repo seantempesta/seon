@@ -166,8 +166,8 @@
 
 (defn run!
   "Run held chain task `:seon.task/assigned` again (TASK-CHAIN §2.7, `seon.task/run-held!`): one transaction on its
-  chain branch changing `:held` to `:running`, which wakes my plan; my next pass starts its next attempt there with
-  a new agent. Answers the task, its branch, its execution and the number and key of the attempt my next pass
+  chain branch changing `:held` to `:running`, which my route on that branch hears; my next pass starts its next
+  attempt there with a new agent. Answers the task, its branch, its execution and the number and key of the attempt my next pass
   starts (`seon.task/open-attempt?`).
 
   ## Example

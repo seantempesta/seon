@@ -232,6 +232,8 @@
     (doseq [execution (vals (:seon.agent/contexts @child))
             :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
       (agent/release-context! execution)))
+  ;; root's chain routes hold their branches' connections; a chain branch is retired only after
+  (agent/release-chain-routes! routing)
   nil)
 
 (defn- eventually
@@ -440,6 +442,7 @@
                   (doseq [execution (vals (:seon.agent/contexts @child))
                           :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
                     (agent/release-context! execution)))
+                (agent/release-chain-route! routing branch)
                 (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))))
 
 (deftest ^{:seon.test/long "One chain world: a chain fork, its first attempt's prove pass and one scripted model turn over three db<->flow passes, then a green chain's prove pass ending it done; measured 10.5 s for the first part." :seon.test/long-ms 30000}
@@ -511,6 +514,7 @@
                       (doseq [execution (vals (:seon.agent/contexts @child))
                               :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
                         (agent/release-context! execution)))
+                    (agent/release-chain-route! routing green-branch)
                     (registry/retire-branch! {:seon.store/store store :seon.store/branch green-branch}))))
               (finally
                 (when-let [child (get-in @routing [:seon.agent/children branch])]
@@ -519,6 +523,7 @@
                   (doseq [execution (vals (:seon.agent/contexts @child))
                           :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
                     (agent/release-context! execution)))
+                (agent/release-chain-route! routing branch)
                 (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))))
 
 (defn- record-on-main!
@@ -542,6 +547,7 @@
     (doseq [execution (vals (:seon.agent/contexts @child))
             :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
       (agent/release-context! execution)))
+  (agent/release-chain-route! routing branch)
   (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
   nil)
 
@@ -654,6 +660,105 @@
                                    (get-in [:seon.agent/started (str "attempt/" key-3)])))
                     "and its agent starts"))
               (finally (release-chain! routing store branch))))))))))
+
+(defn- held-chain-world
+  "Call `body` with the chain world's handle and a one-task chain c, its proof red, whose task is :held from its start,
+  so no attempt and no graph ever ran on its branch; the branch is released and retired after."
+  {:malli/schema [:=> [:cat :seon.db/connection [:=> [:cat :seon.agent/context-source :seon.task/chain :map] :seon.schema/value]]
+                  :seon.schema/value]}
+  [connection body]
+  (chain-world
+   connection {"u" [#{} "(clojure.test/is (= 1 1))"]}
+   (fn [handle]
+     (test-support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                                         :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
+                                                                                       (db/db connection) connection)
+                                         :seon.batch/sink (seon.batch/sink)
+                                         :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                         :seon.agent/id "tq-chain-author"})
+                           (symbol (str *space* "-proofs"))
+                           "(clojure.test/deftest proves-c (clojure.test/is (= 1 2)))\n")
+     (let [routing (:seon.agent/routing handle)
+           store (agent/handle-store handle)
+           chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                              [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Do c."
+                                :seon.task/proofs #{(proof "c")}}])
+           branch (:seon.chain/branch chain)]
+       (try
+         (registry/on-branch store branch
+                             #(test-support/transacted! % [[:db/add [:seon.task/id (first (:seon.task/handles chain))]
+                                                            :seon.task/execution :held]]))
+         (body handle chain {:seon.db/connection connection :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                             :my.program/base-ctx (:seon.sci.eval/ctx handle) :seon.store/store store})
+         (finally (release-chain! routing store branch)))))))
+
+(defn- chain-attempt-started?
+  "Whether attempt `n` of chain `chain`'s first task has its row on the chain branch and its graph in `routing`."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/routing :seon.task/chain :int] :boolean]}
+  [connection routing {branch :seon.chain/branch [h] :seon.task/handles} n]
+  (let [key (id/id [h n])]
+    (boolean
+     (and (db/q '[:find ?a . :in $ ?k :where [?a :seon.task/assignment ?k]] (db/branch-database (db/db connection) branch) key)
+          (some-> (get-in @routing [:seon.agent/children branch]) deref (get-in [:seon.agent/started (str "attempt/" key)]))))))
+
+(deftest ^{:seon.test/long "One chain world: a held chain's first db<->flow pass, root's run and the pass its wake asks for, which starts the first attempt's graph." :seon.test/long-ms 30000}
+  a-held-chain-with-no-graph-runs-from-run-alone
+  ;; reactive start P2 (`docs/research/agent-platform/2026-10-15/reactive-start-plan.md`): attempt 4 of the S5 chain
+  ;; was lost because no route listened on a chain branch no graph held. Root holds a route on every chain branch main
+  ;; names, so `my.root/run!` alone wakes it: the plan channel holds that wake, and the pass it asks for launches.
+  (binding [*space* "tq.chainheld"]
+    (test-support/with-database
+     (fn [connection]
+       (held-chain-world
+        connection
+        (fn [handle {branch :seon.chain/branch [h] :seon.task/handles :as chain} context]
+          (let [routing (:seon.agent/routing handle)
+                plan (:seon.cluster.wake/channel handle)]
+            (pass! handle routing)
+            (is (contains? (:seon.agent/chain-routes @routing) branch) "root listens on the chain branch with no graph there")
+            (is (not (chain-attempt-started? connection routing chain 1)) "the held task has no attempt and no graph")
+            (async/poll! plan)
+            (is (= :running (:seon.task/execution ((requiring-resolve 'my.root/run!) {:my.program/context context :seon.task/assigned h})))
+                "root runs the held task")
+            (is (= ::wake/wake (test-support/await-event! plan ::run-woke-root))
+                "its commit alone offers root's plan channel a wake, through the chain route")
+            (pass! handle routing)
+            (is (chain-attempt-started? connection routing chain 1) "the pass that wake asks for writes the attempt and starts its graph"))))))))
+
+(deftest ^{:seon.test/long "One chain world: a held chain's run, its first attempt started, stopped and closed, root's second run and the pass its wake asks for." :seon.test/long-ms 30000}
+  a-chain-route-outlives-its-attempts
+  ;; reactive start P2, the narrow check's C4: a graph's release unlistens its own route key; the chain's route has its
+  ;; own, so an ended attempt's release leaves root listening and the next run! still wakes it
+  (binding [*space* "tq.chainroute"]
+    (test-support/with-database
+     (fn [connection]
+       (held-chain-world
+        connection
+        (fn [handle {branch :seon.chain/branch [h] :seon.task/handles :as chain} context]
+          (let [routing (:seon.agent/routing handle)
+                plan (:seon.cluster.wake/channel handle)
+                run! #((requiring-resolve 'my.root/run!) {:my.program/context context :seon.task/assigned h})]
+            (pass! handle routing)
+            (run!)
+            (pass! handle routing)
+            (is (chain-attempt-started? connection routing chain 1) "attempt 1 runs")
+            ;; attempt 1 ends as db<->flow's :stop ends it: its graph stopped, its owned execution released
+            (let [child (get-in @routing [:seon.agent/children branch])]
+              (doseq [started (keys (:seon.agent/started @child))]
+                (agent/stop-flow! {:seon.agent/id started :seon.agent/routing child}))
+              (doseq [execution (vals (:seon.agent/contexts @child))
+                      :when (:seon.agent/owns-connection? execution)]
+                (agent/release-context! execution)))
+            (is (= :closed (:seon.task/outcome ((requiring-resolve 'my.root/close!)
+                                                {:my.program/context context :seon.task/assignment (id/id [h 1])
+                                                 :seon.task/reason "Root closes attempt 1."})))
+                "root closes attempt 1 and its task is held")
+            (async/poll! plan)
+            (is (= 2 (:seon.task.attempt/number (run!))) "root runs it again")
+            (is (= ::wake/wake (test-support/await-event! plan ::second-run-woke-root))
+                "the chain route outlived attempt 1's release: the second run wakes root")
+            (pass! handle routing)
+            (is (chain-attempt-started? connection routing chain 2) "and attempt 2 starts"))))))))
 
 (deftest ^{:seon.test/long "One chain world: a task-reading proof recorded green on main with no task, a chain whose first attempt proves it red and makes one scripted model call; then a chain whose proof main already holds green, ended done by its prove pass; measured with the S3a-2 row's world." :seon.test/long-ms 30000}
   a-green-recorded-without-the-task-never-proves-a-chain-task
@@ -812,6 +917,7 @@
                   (doseq [execution (vals (:seon.agent/contexts @child))
                           :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
                     (agent/release-context! execution)))
+                (agent/release-chain-route! routing branch)
                 (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))))
 
 (deftest ^{:seon.test/long "One two-task chain world: task one's start test run over three db<->flow passes, one eval request through the MCP entrance, its test step and done end, then the advance."
@@ -2060,6 +2166,7 @@
                   (doseq [execution (vals (:seon.agent/contexts @child))
                           :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
                     (agent/release-context! execution)))
+                (agent/release-chain-route! routing branch)
                 (when (contains? (registry/branches store) branch)
                   (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))))))))
 
