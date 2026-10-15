@@ -2431,8 +2431,11 @@
   attempt on main closed `:merged`. Due while main records for it no git commit and no publication refusal, its
   merge commit derived from the merge itself (`seon.merge/merge-commit`), so a restart between acceptance and its
   answer publishes exactly once; a merge that moved nothing publishes nothing. Once published, or with nothing to
-  publish, its branch is deleted (`seon.task/delete-branch!`, which joins its graphs) and its chain fact
-  retracted. A `:seon.merge/waiting` publication or a recorded refusal keeps both, for root."
+  publish, its branch and the merge branches its tasks name end (`seon.task/end-branch!`, which joins their graphs and
+  releases their connections and root's route): deleted, or kept as history when the cluster keeps ended branches
+  (`seon.config/keeps-ended-branches?`, read once per pass); its chain fact is retracted either way, so no pass reads
+  the chain again and a kept branch is found from main by its merged attempt rows (`:seon.task/branch`). A
+  `:seon.merge/waiting` publication or a recorded refusal keeps both, for root."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/routing] :nil]}
   [handle routing]
   (let [connection (:seon.db/connection handle)
@@ -2440,7 +2443,8 @@
         database @connection
         rows (db/q '[:find ?c ?b ?a ?k :where [?c :seon.chain/branch ?b] [?a :seon.task/branch ?b]
                      [?a :seon.task/outcome :merged] [?a :seon.task/assignment ?k]]
-                   database)]
+                   database)
+        keep? (delay (config/keeps-ended-branches? database (:seon.cluster/name handle)))]
     (when (map? rows) (throw (ex-info (:seon.error/message rows "db<->flow could not read the merged chains.") rows)))
     (doseq [[fact branch a key] (sort-by second rows)]
       (let [recorded #(db/pull @connection [:seon.task/git-commit :seon.task/publication-refusal] a)
@@ -2458,15 +2462,15 @@
                                     #(db/q '[:find [?b ...] :where [?t :seon.task/id _] [?t :seon.task/branch ?b]] (db/db %)))
                     :when (contains? (registry/branches store) kept)]
               ;; through the branch owner, which joins the graphs and releases the connections held there first
-              (when-let [refused (task/delete-branch! {:seon.db/connection connection :seon.store/store store
-                                                       :seon.agent/routing routing :seon.env/environment (env/of handle)}
-                                                      kept)]
-                (throw (ex-info (:seon.error/message refused "A merged chain's merge branch was not deleted.") refused)))))
+              (when-let [refused (task/end-branch! {:seon.db/connection connection :seon.store/store store
+                                                    :seon.agent/routing routing :seon.env/environment (env/of handle)}
+                                                   kept @keep?)]
+                (throw (ex-info (:seon.error/message refused "A merged chain's merge branch did not end.") refused)))))
           (when (contains? (registry/branches store) branch)
-            (when-let [refused (task/delete-branch! {:seon.db/connection connection :seon.store/store store
-                                                     :seon.agent/routing routing :seon.env/environment (env/of handle)}
-                                                    branch)]
-              (throw (ex-info (:seon.error/message refused "The merged chain's branch was not deleted.") refused))))
+            (when-let [refused (task/end-branch! {:seon.db/connection connection :seon.store/store store
+                                                  :seon.agent/routing routing :seon.env/environment (env/of handle)}
+                                                 branch @keep?)]
+              (throw (ex-info (:seon.error/message refused "The merged chain's branch did not end.") refused))))
           (write! connection [[:db/retractEntity fact]])))))
   nil)
 
@@ -2558,11 +2562,12 @@
        {})))
 
 (defn- kept?
-  "Whether `agent-id`'s merged branch stays on main `database`: its agent's cluster keeps ended branches. A
-  successor forks main, so no successor holds it."
+  "Whether `agent-id`'s merged branch stays on main `database`: its agent's cluster keeps ended branches
+  (`seon.config/keeps-ended-branches?`). A successor forks main, so no successor holds it."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
-  (true? (config/agent-cluster-dial database agent-id :seon.config.agent/keep-ended-branches?)))
+  (let [cluster (config/agent-cluster database agent-id)]
+    (and (string? cluster) (config/keeps-ended-branches? database cluster))))
 
 (defn- publication-due?
   "Whether an assignment's publication is due, from its `row` on main: its merge commit recorded, its merge
@@ -2859,9 +2864,9 @@
       :stop (do (when-let [registry (entry-registry routing agent-id)]
                   (stop-flow! {:seon.agent/id agent-id :seon.agent/routing registry :seon.agent/finish? true}))
                 (release-branch! routing branch))
-      :delete-branch (when-let [refused (task/delete-branch! {:seon.db/connection connection :seon.store/store (handle-store handle)
-                                                              :seon.agent/routing routing :seon.env/environment (env/of handle)}
-                                                             branch)]
+      :delete-branch (when-let [refused (task/end-branch! {:seon.db/connection connection :seon.store/store (handle-store handle)
+                                                           :seon.agent/routing routing :seon.env/environment (env/of handle)}
+                                                          branch false)]
                        (throw (ex-info (:seon.error/message refused "The merged assignment's branch was not deleted.") refused))))
     nil))
 

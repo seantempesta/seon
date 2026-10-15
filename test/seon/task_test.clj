@@ -466,7 +466,15 @@
                                   (keys (mr/schemas registry)))
            cluster-dials #{:seon.config.agent/max-running :seon.config.run/relaunches :seon.config.agent/keep-ended-branches?}
            declared (into #{} (map first) (m/entries (m/deref (mr/schema registry :seon.task/desired-config))))]
-       (is (every? read-by-keyword cluster-dials) "the cluster dials are read where the launch reads")
+       ;; keep-ended-branches? is read through its one reader, seon.config/keeps-ended-branches? (KEEP-BRANCHES)
+       (is (every? (into read-by-keyword
+                         (comp (map #(keyword (str (:ns %)) (:name %))) (filter cluster-dials))
+                         (:keywords (:analysis (clj-kondo/run! {:lint [(.getPath (io/resource "seon/config.clj"))]
+                                                                :cache false
+                                                                :config {:output {:canonical-paths true}
+                                                                         :analysis {:keywords true}}}))))
+                   cluster-dials)
+           "the cluster dials are read where the launch reads, or by their reader in seon.config")
        (is (= (into (apply disj read-by-keyword cluster-dials) read-generically) declared)
            "the desired config declares exactly the dials read on the chain branch")
        (is (every? #(get-in (m/properties (mr/schema registry %)) [:seon.config/dial]) declared)

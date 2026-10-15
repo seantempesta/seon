@@ -207,10 +207,15 @@
  :seon.config.agent/inbox-size 64
  :seon.config.agent/max-running 4
 
- ; AN ENDED ATTEMPT'S BRANCH GOES, so collection reclaims everything only it
- ; wrote: main keeps the one end copy and what root merged. True keeps every
- ; ended branch for audit until root retires it.
- :seon.config.agent/keep-ended-branches? false
+ ; AN ENDED BRANCH STAYS AS HISTORY (owner 2026-10-16: keep the sessions to
+ ; mine them). An assignment's, a chain's and its merge branches stay readable
+ ; by name after their end (seon.config/keeps-ended-branches?), until root
+ ; retires one (my.agent/retire-branch!). Unit: disk only, no heap. Measured
+ ; 2026-10-16 (docs/seon/schedule/cards/KEEP-BRANCHES.md): 2 to 25 MB per
+ ; chain and about 2 MB per merge branch under plain collection, about 140 KB
+ ; per branch commit. False deletes each at its end, so collection reclaims
+ ; everything only it wrote.
+ :seon.config.agent/keep-ended-branches? true
 
  ; A REFUSED TURN WRITE IS NEVER RETRIED WITHOUT BOUND. On 2026-09-17 every
  ; turn write on `default` was refused by one projection failure and the turn

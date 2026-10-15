@@ -236,6 +236,15 @@
   (agent/release-chain-routes! routing)
   nil)
 
+(defn- keep-ended!
+  "Set whether the chain world's cluster keeps ended branches (`:seon.config.agent/keep-ended-branches?`, shipped
+  true) on main `connection`, as root's config apply does; nil."
+  {:malli/schema [:=> [:cat :seon.db/connection :boolean] :nil]}
+  [connection keep?]
+  (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                  :seon.config/manifest {:seon.config.agent/keep-ended-branches? keep?}})
+  nil)
+
 (defn- eventually
   "Poll `ready?` every 20 ms for at most two seconds; its last answer. Branch deletion is detached io work."
   {:malli/schema [:=> [:cat [:=> [:cat] :seon.schema/value]] :seon.schema/value]}
@@ -1151,6 +1160,8 @@
       connection {"p" [#{} nil :prove] "i" [#{"p"} "(clojure.test/is (= 1 2))"]}
       (fn [handle]
         (let [routing (:seon.agent/routing handle)
+              ;; the deletion path: this cluster deletes ended branches
+              _ (keep-ended! connection false)
               _ (pass! handle routing)
               [[key branch agent-id]] (seq (attempts connection "p"))
               on-branch (registry/active-branch-connection {:seon.store/store (agent/handle-store handle) :seon.store/branch branch})
@@ -1202,7 +1213,8 @@
                 (is (.isTerminated ^java.util.concurrent.ExecutorService graph) "the actual graph exited")
                 (is (= :released @(:wrapped-atom branch-connection)))
                 (is (nil? (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})))
-                (is (not (contains? (registry/branches store) branch)))
+                ;; KEEP-BRANCHES: the shipped cluster keeps the closed attempt's ended branch as history
+                (is (contains? (registry/branches store) branch) "the closed branch stays, its work ended")
                 (is (empty? (db/q '[:find ?error :where [?error :seon.error/signature]] (db/db connection)))
                     "the refused merge is the candidate's, never a fault"))))))))))
 
@@ -1328,9 +1340,7 @@
             (let [routing (:seon.agent/routing handle)
                   store (agent/handle-store handle)
                   proves-e (done-checkout! connection)]
-              (when keep?
-                (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
-                                :seon.config/manifest {:seon.config.agent/keep-ended-branches? true}}))
+              (keep-ended! connection keep?)
               (pass! handle routing)
               (let [[key branch agent-id a] (end-on-branch! handle connection "e" :done proves-e twice-work)
                     intent #(:seon.task/plan (db/pull (db/db connection) [:seon.task/plan] [:seon.task/id (chain-handle "e")]))]
@@ -1375,7 +1385,9 @@
         (fn [handle]
           (let [routing (:seon.agent/routing handle)
                 store (agent/handle-store handle)
-                proves-e (done-checkout! connection)]
+                proves-e (done-checkout! connection)
+                ;; the deletion path: this cluster deletes ended branches
+                _ (keep-ended! connection false)]
             (pass! handle routing)
             (let [[key branch agent-id] (end-on-branch! handle connection "e" :done proves-e twice-work)]
               (db/with-branch {:seon.db/connection connection}
@@ -2193,14 +2205,16 @@
                         :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
                   (agent/release-context! execution))))))))))))
 
-(deftest ^{:seon.test/long "Three chain tasks each ending done at its start (one test step per agent) and one final merge (one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is merge-test's measured bound for one)."
-           :seon.test/long-ms 120000}
+(deftest ^{:seon.test/long "Two chain worlds (ended branches kept, then deleted), each three chain tasks ending done at their start (one test step per agent) and one final merge (one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is merge-test's measured bound for one)."
+           :seon.test/long-ms 240000}
   a-three-task-chain-ends-merged-with-no-hand-act
   ;; TASK-CHAIN S3b (`docs/seon/schedule/cards/TASK-CHAIN.md#2-flow`, Finish): each task's proof is green at its
   ;; start, so each ends done with no model call; root advances the chain, and the last task's done end is merged
-  ;; to main once, through `seon.merge/merge!` with the terminal attempt as its source; the branch and the chain
-  ;; fact are gone after
-  (binding [*space* "tq.chainmerged"]
+  ;; to main once, through `seon.merge/merge!` with the terminal attempt as its source; the chain fact is gone
+  ;; after, and the chain branch's work ended: kept as history, readable by name, while its cluster keeps ended
+  ;; branches (KEEP-BRANCHES, `docs/seon/schedule/cards/KEEP-BRANCHES.md`), else deleted
+  (doseq [keep? [true false]]
+  (binding [*space* (if keep? "tq.chainkept" "tq.chainmerged")]
     (test-support/with-database
      (fn [connection]
        (chain-world
@@ -2216,6 +2230,7 @@
                 branch (:seon.chain/branch chain)
                 handles (:seon.task/handles chain)
                 attempts (mapv #(id/id [% 1]) handles)]
+            (keep-ended! connection keep?)
             (try
               (doseq [[i k] (map-indexed vector attempts)]
                 (pass! handle routing)
@@ -2231,11 +2246,16 @@
                     "one merge admits every attempt: the earlier ones :done, the terminal one :merged")
                 (is (= (set handles) (set (db/q '[:find [?h ...] :in $ [?h ...] :where [_ :seon.task/id ?h]] main handles)))
                     "main holds every chain task")
-                ;; the branch's deletion is io work on the launcher (`seon.task/delete-branch!`): await its exit
-                (is (not (loop [n 0] (if (and (contains? (registry/branches store) branch) (< n 50))
-                                       (do (Thread/sleep 100) (recur (inc n)))
-                                       (contains? (registry/branches store) branch))))
-                    "the chain branch is retired")
+                ;; the branch's end is io work on the launcher (`seon.task/end-branch!`): await its exit
+                (if keep?
+                  (let [child #(some-> (get-in @routing [:seon.agent/children branch]) deref :seon.agent/contexts seq)]
+                    (is (eventually #(and (not (child)) (not (contains? (:seon.agent/chain-routes @routing) branch))))
+                        "the chain branch's work ended: no context and no route of root's holds it")
+                    (is (contains? (registry/branches store) branch) "the chain branch stays")
+                    (is (= :done (:seon.task.attempt/end (db/pull (db/branch-database main branch) [:seon.task.attempt/end]
+                                                                  [:seon.task/assignment (peek attempts)])))
+                        "and reads by its name: its terminal attempt's end"))
+                  (is (eventually #(not (contains? (registry/branches store) branch))) "the chain branch is deleted"))
                 (is (nil? (db/pull main [:db/id] [:seon.chain/first (first handles)])) "and its chain fact is gone"))
               (finally
                 (when-let [child (get-in @routing [:seon.agent/children branch])]
@@ -2246,7 +2266,7 @@
                     (agent/release-context! execution)))
                 (agent/release-chain-route! routing branch)
                 (when (contains? (registry/branches store) branch)
-                  (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))))))))
+                  (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))))))
 
 (deftest ^{:seon.test/long "One chain world: a one-task chain whose attempt's hand-written work and done end, one refused final merge (prepare-merge!'s write-back refuses) and its bail over three db<->flow passes, then root's run and the second attempt's start."
            :seon.test/long-ms 60000}

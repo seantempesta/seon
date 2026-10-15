@@ -967,6 +967,17 @@
               (effective-in db cluster-name projection (declared-projection))
               (db/projection-fallback 'seon.config/effective)))))
 
+(defn keeps-ended-branches?
+  "Whether cluster `cluster-name`'s config on `database` keeps an ended branch (an assignment's, a chain's or a
+  merge branch) as history instead of deleting it: its effective `:seon.config.agent/keep-ended-branches?`, the
+  shipped decision when its row leaves the dial undecided (KEEP-BRANCHES)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.boot/cluster-name] :boolean]}
+  [database cluster-name]
+  (let [row (effective database cluster-name)]
+    (if (:seon.error/message row)
+      (throw (ex-info (:seon.error/message row) row))
+      (true? (:seon.config.agent/keep-ended-branches? row)))))
+
 (defn- effective-in
   {:malli/schema
    [:=> [:cat [:or :seon.db/database-value :seon.db/error-result]

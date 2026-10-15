@@ -71,27 +71,33 @@ a reason to default the dial false.
 1. **One dial, every ended branch.** `:seon.config.agent/keep-ended-branches?` keeps its name: its meaning ("an ended
    branch stays") is unchanged, its reach widens from attempt branches to chain and merge branches; the description
    says so. Shipped default `true` (owner). The 16 GB rule is about heap, and a kept branch holds none.
-2. **One decision point.** `seon.task/delete-branch!` becomes `seon.task/end-branch!`: it always ends the branch's work
-   (`my.agent/retire-branch!`'s close half: retire the host, close admission, release contexts and the chain route)
-   and deletes it unless the cluster on main keeps ended branches, read once there from `seon.config/effective`, so an
-   absent row value takes the shipped default. `my.agent/retire-branch!` gains the request key `:my.agent/keep?`:
-   true ends the lane and leaves the branch. Its callers convert in the same commit: `seon.task/close!`,
-   `seon.cluster.agent/finish-chains!` (chain and merge branches) and the `:delete-branch` action of
-   `seon.cluster.agent/next-actions`. Deleted with them: `seon.cluster.agent/kept?`, the `kept?` binding in `close!`
-   and `:seon.flow.actions/kept?` (the action is always emitted; the dial is read where it acts).
-3. **No new lifecycle fact.** The chain fact is retracted at the chain's end as today (TASK-CHAIN §2.6); that is what
-   releases root's chain route (`route-chains!` routes only branches a chain fact names). A kept branch is found from
-   main by the attempt rows that merged (`:seon.task/branch`, `:seon.task.attempt/commit`). Marking the chain fact
-   "ended" instead would be a new lifecycle attribute (TASK-CHAIN lock); nothing reads it, so it is not added.
+2. **One decision point, read once per subject.** `seon.config/keeps-ended-branches?` reads the cluster's effective
+   dial (the shipped decision when its row leaves it undecided). `seon.task/delete-branch!` becomes
+   `seon.task/end-branch!` (context, branch, keep?): it always ends the branch's work through `my.agent/retire-branch!`
+   (retire the host, close admission, release contexts and root's chain route) and passes `:my.agent/keep?`, which
+   leaves the branch. Its callers: `seon.task/close!` (the agent's cluster), `seon.cluster.agent/finish-chains!` (the
+   chain branch and every merge branch its tasks name; main's cluster, read once per pass), and the `:delete-branch`
+   action (`keep?` false). For a merged assignment the plan keeps deciding (`seon.cluster.agent/kept?` withholds
+   `:delete-branch`; its `:stop` already released the branch's contexts), now through the same reader.
+3. **No new lifecycle fact; boot keeps what main names.** The chain fact is retracted at the chain's end as today
+   (TASK-CHAIN §2.6); that releases root's chain route (`route-chains!` routes only branches a chain fact names). A kept
+   branch is found from main by the rows that merged (`:seon.task/branch`, `:seon.task.attempt/commit`). Boot's sweep
+   (`seon.cluster.registry/retire-unclaimed!`) claimed only chain facts and open agents, so it deleted every kept branch
+   at the next restart; `seon.cluster.registry/cluster-claims` now also claims every branch a task or attempt row on
+   the cluster names. Deletion stays db<->flow's decision by the dial, never boot's. Marking the chain fact "ended"
+   would be a new lifecycle attribute (TASK-CHAIN lock); nothing reads it, so it is not added.
 4. **Removing a kept branch** stays root's explicit `my.agent/retire-branch!` (no `:my.agent/keep?`).
 5. **Not done (owner):** receipt facts at the attempt's end and the grader's promotion into `src`.
 
 ## Proofs (red first)
 
-- `seon.cluster.db-flow-test`: a chain whose last task ends done merges, publishes and, with the dial true, leaves its
-  chain branch readable by name (`seon.cluster.registry/branches` holds it; the agent's call rows pull on it), its chain
-  fact retracted and its route released; with the dial false the branch is gone. One table test, two rows.
-- `seon.task-test`: `close!` with the dial true keeps the branch and releases its contexts.
+- `seon.cluster.db-flow-test/a-three-task-chain-ends-merged-with-no-hand-act`, two rows: with the dial true the chain
+  branch stays, readable by name (its terminal attempt's end), no context or route of root's holds it, its chain fact
+  gone; with it false the branch is deleted. Red at HEAD for the kept row.
+- `seon.cluster.registry-test/a-chain-fact-keeps-its-branch-and-base-through-retirement`: a branch a row on main
+  names survives `retire-unclaimed!`. Red at HEAD.
+- `my.agent-test/a-kept-lane-ends-and-stays-readable-until-it-is-retired` (committed ec3b1562f).
+- Tests of the deletion path set the dial false explicitly (`seon.cluster.db-flow-test/keep-ended!`).
 
 ## Findings beside it
 

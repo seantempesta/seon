@@ -264,8 +264,11 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    `:merged`, so no earlier attempt appears on main as an open merge request. Acceptance's transaction records the
    identity of the merge to publish, so a restart between acceptance and its answer publishes exactly once. Then, in
    order: `seon.merge/publish!` (a `:seon.merge/waiting` or a publication refusal is not success: the chain fact stays
-   and root sees it); on success join the chain's graphs, release its connections, retire the branch and its base
-   (`seon.cluster.registry/retire-branch!`), then retract the chain fact. Chain tasks are runtime data and are never written into task files; when the chain's
+   and root sees it); on success end the chain branch and the merge branches its tasks name
+   (`seon.task/end-branch!`: join their graphs, release their connections and root's route, then delete them, or keep
+   them as history, readable by name, while the cluster keeps ended branches, `seon.config/keeps-ended-branches?`,
+   shipped true, KEEP-BRANCHES), then retract the chain fact. Main's rows name a kept branch (`:seon.task/branch`), so
+   boot's sweep keeps it (`seon.cluster.registry/retire-unclaimed!`). Chain tasks are runtime data and are never written into task files; when the chain's
    first task has a filed task's identity (`ns`, `name` of a task-file entry), the same write-back deletes that entry
    (owner 2026-10-14: after the merge the filed task is removed), so no done backlog entry is picked up again. On restart, a chain fact whose branch is gone
    after a recorded merge is cleaned up; one whose branch is gone otherwise is shown to root as unknown.

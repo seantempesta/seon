@@ -733,7 +733,7 @@
             fork! #(registry/fork! {:seon.store/store opened
                                     :seon.cluster.registry/from cluster
                                     :seon.store/branch %})
-            _ (run! fork! [:chain-named :chain-held :chain-unnamed :merge-kept :merge-unnamed])
+            _ (run! fork! [:chain-named :chain-held :chain-unnamed :merge-kept :merge-unnamed :chain-ended])
             connection (store/open-branch! opened cluster)
             held (store/open-branch! opened :chain-held)
             named (store/open-branch! opened :chain-named)]
@@ -741,7 +741,10 @@
           (test-support/transacted!
            connection
            {:tx-data [{:seon.chain/first "aaaaaaaaaaaa" :seon.chain/branch :chain-named}
-                      {:seon.chain/first "bbbbbbbbbbbb" :seon.chain/branch :chain-held}]})
+                      {:seon.chain/first "bbbbbbbbbbbb" :seon.chain/branch :chain-held}
+                      ;; KEEP-BRANCHES: an ended chain's merged rows on main name its kept branch, its chain fact gone
+                      {:seon.task/id (task/task-handle 'tq.claims "ended") :seon.task/ns 'tq.claims :seon.task/name "ended"
+                       :seon.task/sym 'tq.claims/ended :seon.task/branch :chain-ended}]})
           ;; MERGE-STEP: a chain's task naming its own branch (a merge step's kept merge branch) claims it
           (test-support/transacted!
            named
@@ -751,6 +754,7 @@
           (is (= #{:chain-unnamed :merge-unnamed} (registry/retire-unclaimed! opened #{source-branch}))
               "only the branches no chain fact or chain task names are retired")
           (is (contains? (registry/branches opened) :merge-kept) "a branch a chain's task names survives")
+          (is (contains? (registry/branches opened) :chain-ended) "a kept branch main's rows name survives boot")
           (is (every? (registry/branches opened) [:chain-named :chain-held])
               "a named chain, held or not, keeps its branch")
           (is (not-any? (registry/branches opened) (map registry/base-branch [:chain-named :chain-held :chain-unnamed]))

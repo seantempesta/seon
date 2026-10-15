@@ -592,8 +592,10 @@
 (defn- cluster-claims
   "The branches `branch` claims when it is a cluster branch, else nil: itself,
   the branch of every agent row on it whose admission is open, the branch of
-  every chain fact on it (`:seon.chain/branch`), held chains included, and the branch each of those chains the store
-  `held` names for a task as its own (`task-branch-claims`).
+  every chain fact on it (`:seon.chain/branch`), held chains included, the branch each of those chains the store
+  `held` names for a task as its own (`task-branch-claims`), and every branch a task or attempt row on it names
+  (`:seon.task/branch`): an ended branch kept as history (KEEP-BRANCHES) is named by its merged or closed rows, and
+  whether it is deleted is db<->flow's decision (`seon.config/keeps-ended-branches?`), never boot's.
   A cluster branch is one whose own `:seon.cluster/name` row names it through
   `cluster.branch/cluster-branch`. A fork inherits its cluster's name row, so
   the comparison, never the branch's spelling, tells a cluster from its forks."
@@ -612,6 +614,7 @@
                            :where [?agent :seon.agent/branch ?branch] (not [?agent :seon.agent/admission-closed-tx])]
                          db))
               (into chains)
+              (into (d/q '[:find [?branch ...] :where [_ :seon.task/branch ?branch]] db))
               (into (comp (filter held) (mapcat #(task-branch-claims connection %))) chains))))
       (finally (d/release-materialized-db db)))))
 

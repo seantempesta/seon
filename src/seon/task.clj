@@ -1446,22 +1446,24 @@
 (defonce ^:private process-id
   (delay (comp (requiring-resolve 'seon.cluster.process/id) (requiring-resolve 'seon.cluster.process/current-identity))))
 
-(defn delete-branch!
-  "Delete the agent branch `branch` through `context` once its agent is closed (`my.agent/retire-branch!`),
-  as io work on the environment's work launcher: retiring joins the agent's graphs and takes the store's
+(defn end-branch!
+  "End the agent branch `branch` through `context` once its agent is closed (`my.agent/retire-branch!`): join its
+  graphs and release its connections and root's route on it, then delete it, or keep it as history when `keep?`
+  (its cluster keeps ended branches, `:seon.config.agent/keep-ended-branches?`; KEEP-BRANCHES). As io work on the
+  environment's work launcher: retiring joins the agent's graphs and takes the store's
   roster permit, which a running collection holds for seconds, so the caller (an ending agent's own pass
   among them) never waits on it. Inline when no launcher accepts work, answering its refusal; a failure of the
   detached work is recorded as a fault. main itself (an agent working on main has no branch of its own) is never
-  deleted. nil, or the inline refusal."
-  {:malli/schema [:=> [:cat :seon.task/close-context :seon.store/branch] [:or :nil :seon.error/value]]}
-  [{environment :seon.env/environment connection :seon.db/connection :as context} branch]
+  ended. nil, or the inline refusal."
+  {:malli/schema [:=> [:cat :seon.task/close-context :seon.store/branch :boolean] [:or :nil :seon.error/value]]}
+  [{environment :seon.env/environment connection :seon.db/connection :as context} branch keep?]
   (let [main? (= branch (get-in (db/db connection) [:config :branch]))
-        retire! #(@retire-branch! {:seon.store/branch branch} context)
+        retire! #(@retire-branch! {:seon.store/branch branch :my.agent/keep? keep?} context)
         launcher (:seon.flow/work-launcher environment)
         submitted (when (and launcher (not main?))
                     (@submit-work! launcher
                      {:seon.env/environment environment :seon.flow/workload :io
-                      :seon.flow/submission-id (str "delete-branch-" (name branch))
+                      :seon.flow/submission-id (str "end-branch-" (name branch))
                       :seon.flow/work-fn (fn [_] (let [retired (retire!)]
                                                    (when (:seon.error/at retired)
                                                      (throw (ex-info (:seon.error/message retired) retired)))))
@@ -1469,7 +1471,7 @@
                       (fn [{failure :seon.flow/throwable}]
                         (when failure
                           (@record-fault! environment failure
-                           {:seon.error/layer :seon.task/close :seon.error/operation 'seon.task/delete-branch!
+                           {:seon.error/layer :seon.task/close :seon.error/operation 'seon.task/end-branch!
                             :seon.db.process/id (@process-id)}))
                         nil)}))]
     (when-not (or main? submitted)
@@ -1477,8 +1479,9 @@
 
 (defn close!
   "Close assignment `key` (the merge request) without merging it: write its `outcome` and `reason` at main and
-  delete its branch, closing the agent there (`delete-branch!`; a refused deletion is answered beside the closed
-  assignment), unless its agent's cluster keeps ended branches for audit (`:seon.config.agent/keep-ended-branches?`).
+  end its branch, closing the agent there (`end-branch!`; a refused deletion is answered beside the closed
+  assignment): deleted, or kept as history when its agent's cluster keeps ended branches
+  (`:seon.config.agent/keep-ended-branches?`).
   Root's decline (`my.root/close!`) ends here; root's merge closes in its own transaction (`seon.merge/merge-tx`).
   Answers the closed assignment.
 
@@ -1497,11 +1500,12 @@
                       :where [?a :seon.task/assignment ?k] [?a :seon.task/branch ?branch] [?a :seon.task/agent ?g] [?g :seon.agent/id ?id]]
                     (:db-after report) key))
         [branch agent-id] (when (sequential? row) row)
-        ;; a branch whose agent's cluster keeps ended branches stays for audit
-        kept? (and agent-id (true? (config/agent-cluster-dial (:db-after report) agent-id :seon.config.agent/keep-ended-branches?)))]
+        ;; a branch whose agent's cluster keeps ended branches stays as history
+        cluster (when agent-id (config/agent-cluster (:db-after report) agent-id))
+        kept? (and (string? cluster) (config/keeps-ended-branches? (:db-after report) cluster))]
     (cond (:seon.error/at report) report
           (:seon.error/at row) row
-          :else (let [refused (when (and branch (not kept?)) (delete-branch! context branch))]
+          :else (let [refused (when branch (end-branch! context branch kept?))]
                   (cond-> {:seon.task/assignment key :seon.task/outcome outcome}
                     reason (assoc :seon.task/reason reason)
                     refused (assoc :seon.task/delete-refusals [refused]))))))
