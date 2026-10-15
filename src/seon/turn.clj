@@ -5328,16 +5328,19 @@
   product included) has a recorded result at its current reach on `database`, the agent's branch
   (`seon.context/current-results`, what `seon.cluster.source/results-verdict` judges), red or green, reused or
   run by this attempt, whoever recorded it: an unchanged test is never run again, and a result at another
-  program's reach does not count. A task naming no proof is proved: nothing is left to prove. False when the
-  tests or their results cannot be read, so the prove pass reports that refusal."
+  program's reach does not count. A proof no deftest on `database` defines yet is proved too: it is red by its
+  absence, work its model must do (it writes the proof), so it opens the first turn as a red one does. A task naming
+  no proof is proved: nothing is left to prove. False when the tests or their results cannot be read, so the prove
+  pass reports that refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
   (let [tests (step-tests database agent-id)
-        results (when (and (set? tests) (seq tests)) (@context-current-results database tests (held-task database agent-id)))]
+        defined (when (set? tests) (into #{} (filter #(seq (db/datoms database :avet :seon.test/sym %))) tests))
+        results (when (seq defined) (@context-current-results database defined (held-task database agent-id)))]
     (cond (:seon.error/at tests) false
-          (empty? tests) true
+          (empty? defined) true
           (:seon.error/at results) false
-          :else (= tests (into #{} (map :seon.test/sym) results)))))
+          :else (= defined (into #{} (map :seon.test/sym) results)))))
 
 (defn- run-branch
   "Run `tests`, those the agent's branch defined or changed since its base (`seon.test/branch-tests`), on

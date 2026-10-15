@@ -2454,7 +2454,8 @@
   ;; S5 merge step attempt 3 (2026-10-15): the start prove pass's run could not happen (a branch test whose
   ;; namespace no longer loads), so its proof had no result, no model turn opened and no end was written: the
   ;; attempt waited silently. Every end that is not done bails to root (TASK-CHAIN §2.7): an attempt that took no turn
-  ;; and has nothing to open is stalled
+  ;; and has nothing to open is stalled. Its proof here is undefined, which opens a model turn
+  ;; (`a-pending-proof-opens-the-first-model-turn`); with no provider in this world that turn fails and it stalls
   (binding [*space* "tq.neverproved"]
     (test-support/with-database
      (fn [connection]
@@ -2567,3 +2568,33 @@
                 (doseq [kept (remove before (merge-branches store))]
                   (release-chain! routing store kept))
                 (release-chain! routing store branch))))))))))))
+
+(deftest ^{:seon.test/long "One chain world: a chain task whose one proof no deftest defines yet, a scripted model turn that defines it green, over two db<->flow passes." :seon.test/long-ms 30000}
+  a-pending-proof-opens-the-first-model-turn
+  ;; Live run 2026-10-15 (chain-10d1fd5956a9, attempt e86970ee8841): a task whose proof the agent is to write ended
+  ;; :stalled with no turn, its provider on. A proof no deftest defines yet is red by its absence: work the model
+  ;; must do, so it opens the first turn as a red proof does (AGENTS.md: a chain agent's first turn comes from its
+  ;; task's red proofs)
+  (binding [*space* "tq.pendingproof"]
+    (test-support/with-database
+     (fn [connection]
+       (fixed-chain-world
+        connection ["c"] {"u" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                   [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Write and pass c's proof."
+                                     :seon.task/proofs #{(proof "c")}}])
+                branch (:seon.chain/branch chain)
+                key (id/id [(first (:seon.task/handles chain)) 1])]
+            (try
+              (pass! handle routing)
+              (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
+                (is (= :done (await-on! on-branch #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k]
+                                                           [?a :seon.task.attempt/end ?e]]
+                                                         (db/db on-branch) key)
+                                        ::pending-proof))
+                    "the model's turn defines the pending proof green and the task ends done")
+                (is (= 1 (model-turns (db/db on-branch) (str "attempt/" key))) "after one model turn"))
+              (finally (release-chain! routing store branch))))))))))
