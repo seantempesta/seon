@@ -3158,7 +3158,7 @@
                                 (def agent-atom (atom 0))
                                 (alter-var-root #'agent-probe (constantly (fn [] 2)))")
        (is (= [43 2] (sci/eval-string* agent-ctx "[(my.program/disposable) (my.program/agent-probe)]")))
-       (is (not (:seon.error/type (my.program/ns-unmap! context (symbol "my.program" "disposable")))))
+       (is (not (:seon.error/type (my.program/unmap-subject! context (symbol "my.program" "disposable")))))
        (is (nil? (sci/resolve agent-ctx (symbol "my.program" "disposable"))))
        (is (every? (fn [[k v]] (identical? v (get value k))) held)
            "the agent's definitions, rebinding, atom and unmap write nothing of the value")

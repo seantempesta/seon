@@ -20,7 +20,7 @@
            database (db/db connection)
            before @(:env fork)
            base-before @(:env ctx)
-           refused (program/ns-unmap! context 'seon.turn/open?)]
+           refused (program/unmap-subject! context 'seon.turn/open?)]
        (is (= 'seon.turn/open? (:seon.program/blocked-subject refused)))
        (is (seq (get-in refused [:seon.error/data :seon.program/callers])))
        (is (= (db/basis-t database) (db/basis-t (db/db connection))))
@@ -46,6 +46,32 @@
        (is (nil? (db/pull (db/db connection) [:db/id] [:seon.fn/sym (symbol "my.program" "disposable")])))
        (is (nil? (sci/resolve fork (symbol "my.program" "disposable"))))
        (is (nil? (sci/resolve ctx (symbol "my.program" "disposable"))))))))
+
+(deftest ns-unmap-takes-clojure-cores-shapes-and-takes-its-context-from-the-world
+  (doseq [[form target] [["(my.program/ns-unmap! 'my.unmap.shape 'helper)" 'helper]
+                         ["(my.program/ns-unmap! 'my.unmap.shape/helper)" 'helper]]]
+    (support/with-database
+     (fn [connection]
+       (support/seed-cluster! connection "program-unmap-shape-fixture")
+       (let [ctx (support/fork-cluster-ctx connection)
+             fork (sci/fork ctx)
+             sym (symbol "my.unmap.shape" (name target))]
+         (support/transacted!
+          connection
+          [(seon-program/declaration-row
+            (db/carried-projection @connection)
+            {:seon.ns/name 'my.unmap.shape :seon.ns/source "(ns my.unmap.shape)"}
+            :all :agent)])
+         (support/transacted! connection [(support/program-fn-entity (db/db connection) sym "(defn helper [] 1)")])
+         (doseq [target-ctx [ctx fork]]
+           (sci/eval-string* target-ctx "(do (in-ns 'my.unmap.shape) (defn helper [] 1))"))
+         (support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "program-unmap-shape-fixture"
+                                        :seon.sci.eval/ctx fork :seon.batch/sink (seon.batch/sink)
+                                        :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                        :seon.agent/id "program-unmap-shape"})
+                          'user form)
+         (is (nil? (db/pull (db/db connection) [:db/id] [:seon.fn/sym sym])) form)
+         (is (nil? (sci/resolve fork sym)) form))))))
 
 (deftest namespace-and-alias-retraction-write-before-native-mutation
   (support/with-database
@@ -107,7 +133,7 @@
        (support/transacted! connection [(support/program-fn-entity (db/db connection) target "(defn lone [] 1)")])
        (doseq [target-ctx [ctx fork]]
          (sci/eval-string* target-ctx "(do (in-ns 'my.unmap.once) (defn lone [] 1))"))
-       (let [measured (profile/measure #(program/ns-unmap! context target))
+       (let [measured (profile/measure #(program/unmap-subject! context target))
              removed (:seon.profile/value measured)]
          (is (= #{target} (:seon.program/affected removed)))
          ;; One subject owns no other declaration: one breaks read, in the writer.

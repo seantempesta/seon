@@ -10,7 +10,9 @@
   (my.program/breaks {:seon.program/subject 'seon.turn/open?})
   ```"
   (:require [seon.error.refusal]
+            [seon.batch]
             [seon.db :as db]
+            [seon.env :as env]
             [clojure.set :as set]
             [clojure.string :as str]
             [seon.error :as error]
@@ -440,6 +442,14 @@
                                          :my.program/base? (boolean base)
                                          :my.program/connection? (boolean connection)}}))))
 
+(defn world-context
+  "The program context of the calling evaluation's world (`seon.batch/*world*`): its SCI context, that context's cluster base and its connection, or the refusal naming what the world lacks."
+  {:seon.fn/internal? true
+   :malli/schema [:=> [:cat] [:or :my.program/context :seon.program/context-unavailable-error]]}
+  []
+  (let [{environment :seon.env/environment ctx :seon.sci.eval/ctx} seon.batch/*world*]
+    (supplied-context (cond-> environment ctx (env/scope {:my.program/executing-ctx ctx})))))
+
 (def ^:private blocking-relations
   "The breakage relations that block a retraction."
   [:seon.program/callers :seon.program/references
@@ -537,7 +547,7 @@
              :seon.db/basis-t (db/basis-t (:db-after result))
              :seon.program/unknown (:seon.program/unknown report)})))))
 
-(defn ns-unmap!
+(defn unmap-subject!
   "Unmap a declaration's Var in the executing fork and base; the eval request records its removal.
 
   Calls breaks first, on the database the call reads (the request view, so a
@@ -545,14 +555,9 @@
   changes nothing and names the surviving referrers. The unmap is the native
   `clojure.core/ns-unmap`, which the request observes and records in its one
   recording transaction. :seon.program/unknown counts call sites without a
-  recorded argument count; dispatch and macro callers are not modelled.
-
-  ## Example
-
-  ```clojure
-  (my.program/ns-unmap! 'user/helper)
-  ```"
-  {:malli/schema [:=> [:cat :my.program/context :qualified-symbol]
+  recorded argument count; dispatch and macro callers are not modelled."
+  {:seon.fn/internal? true
+   :malli/schema [:=> [:cat :my.program/context :qualified-symbol]
                   [:or :seon.program/change :seon.program/read-refused-error :seon.program/not-found-error :seon.program/mutation-refused-error]]}
   [context subject]
   (read-result
@@ -571,6 +576,31 @@
              :seon.program/affected affected
              :seon.db/basis-t (db/basis-t database)
              :seon.program/unknown (:seon.program/unknown report)})))))
+
+(defn- unmap-world-subject!
+  {:malli/schema [:=> [:cat :qualified-symbol] [:or :seon.program/change :seon.program/read-refused-error :seon.program/not-found-error :seon.program/mutation-refused-error :seon.program/context-unavailable-error]]}
+  [subject]
+  (let [context (world-context)]
+    (if (:my.program/base-ctx context) (unmap-subject! context subject) context)))
+
+(defn ns-unmap!
+  "Unmap a declaration's Var in the executing fork and base, as `clojure.core/ns-unmap` does.
+
+  Takes a qualified symbol or a namespace and a name; the context comes from
+  the evaluation's world. Calls breaks first; a refusal changes nothing and
+  names the surviving referrers (`my.program/unmap-subject!`).
+
+  ## Example
+
+  ```clojure
+  (my.program/ns-unmap! 'user/helper)
+  (my.program/ns-unmap! 'user 'helper)
+  ```"
+  {:malli/schema [:function
+                  [:=> [:cat :qualified-symbol] [:or :seon.program/change :seon.program/read-refused-error :seon.program/not-found-error :seon.program/mutation-refused-error :seon.program/context-unavailable-error]]
+                  [:=> [:cat :symbol :symbol] [:or :seon.program/change :seon.program/read-refused-error :seon.program/not-found-error :seon.program/mutation-refused-error :seon.program/context-unavailable-error]]]}
+  ([subject] (unmap-world-subject! subject))
+  ([ns-name sym] (unmap-world-subject! (symbol (str ns-name) (name sym)))))
 
 (defn remove-ns!
   "Retract a namespace and its owned declarations, then remove it from SCI.
