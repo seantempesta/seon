@@ -130,3 +130,31 @@ keyed by `reach-owner`, because its incremental update reads `seon.db/entities-c
 branch. Proposed slice: derive the changed attribute's map from the store head's held map, with the changed entities taken from
 `datahike.versioning/merge-base` of the two commits (each side's `entities-changed-after` the base's t). Then `reach-owner` and
 `retire-replaced-revision!`'s owner key can go.
+
+## 8. Attribute maps by content (lane reach-maps, 2026-10-15)
+
+The map of an attribute at revision R derives from the store's most recent held map at revision P (any branch):
+P names a commit whose datoms of the attribute that map holds, so the entities to read again are those of
+`datahike.api/datoms-diff` (fork `771a0c4b`) between commit P and the database, limited to the attribute's AEVT
+range. No t is compared. `::reach-attribute-head` is keyed by store; `reach-owner`, `reach-changed-entities` and
+`retire-replaced-revision!` are deleted (the LRU bounds superseded maps). Patch: `reach-maps.patch` (runner,
+a `seon.db/datoms-diff` wrapper for the seon.db owner, red proof
+`seon.test.reach-test/a-new-branchs-first-attribute-map-costs-what-it-changed`). It lands after root bumps the fork
+to `771a0c4b`; it was not run: HEAD's pinned fork lacks the function, so `bin/lane commit` cannot check it.
+
+Measured on default (JVM mode, read-only, thread allocation). The first two rows come from the JVM before root's
+1a149891 restart, with warm node caches; the rest come after it:
+| probe | ms | MB |
+|---|---:|---:|
+| full map `:seon.fn/calls` (old JVM, warm) | 26-31 | 58-69 |
+| full map `:seon.fn/keywords` (old JVM, warm) | 10-13 | 22 |
+| full map `:seon.fn/calls` (new JVM) | 288-322 | 300-309 |
+| full map `:seon.fn/keywords` (new JVM) | 105 | 113 |
+| diff, consecutive main commits (238 datoms differ), first / warm | 28 / 2.8 | 38 / 9 |
+| diff, main vs `:chain-e439df9798c6` (95% of the range's leaves unshared) | 100-130 | 250 |
+| re-read of 415 changed entities onto the held map | 2-90 | 1-108 |
+
+Exact (equal to a full read, and to the plain `[e a v tx]` difference) on every pair tried. The gain holds for
+a branch that is a few commits from the held map, as a chain's first step is. A long-diverged branch costs as
+much as a full read. Open: in that case the walk allocates about 90 MB beyond its node reads (instrumented:
+children 4 MB, node opens 57 MB cold, leaves 1 MB, merge under 1 MB); not yet found.
