@@ -32,7 +32,7 @@ branch; config reads main's HEAD unless the branch wrote it.
 
 | Step | Work | Model | Waits for |
 |---|---|---|---|
-| 1 | Design round: `own-delta` (interpreted = own writes ∪ callers; every other read = the loaded program), config reads, delete the three-way readers (`seen-database`, `moved-past`, `merge-sides` and their caches); with the writer-follows-the-branch slice | dig Haiku → Opus + Astra → Fable hybrid → narrow check | — |
+| 1 | Branch runs its own HEAD (own-delta-hybrid.md 1c510bbf4): P1 interpret set by commit pair, P2 readers, P3 reach/recorder (three-way readers deleted), P4 root merges main forward, P5 config apply --branch/--chains, P6 writer uses branch predicates. Status: P1 P5 P6 in flight | Opus P1-P4, Sonnet P5-P6 | — |
 | 2 | Merge by reach closure (seeds: proofs + green branch tests reaching changes; all hops; program entities only; unreached additions reported) and by result lookup | Opus | 1 |
 | 3 | `ns-unmap!` [subject]/[ns sym] with a world-derived context; retire non-chain agent branches; bb-load property for the hook's namespaces | Sonnet ×3 | — |
 | 4 | Stage exits that tell each agent what done is, revised from `:outside` runs | Opus + Sonnet | 1, 2 |

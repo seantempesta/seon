@@ -24,15 +24,15 @@ model below.
 
 ## Rulings
 
-1. **A branch's program is its own writes.** `own-delta` = the declarations in the branch's own transactions since its
-   base (a `since` read of its own history; cost proportional to the agent's work). Interpreted in SCI = own-delta ∪
-   its callers; everything else binds the loaded program's compiled Vars (main's HEAD as loaded), and every reader of a
-   declaration the branch did not write (source, doc, references, must-reads, reach digests, the recorder's stale check)
-   reads the loaded program's row, not the branch's base copy. The three-way readers and their caches are deleted when
-   own-delta lands (`seen-database`, `moved-past`, `merge-sides`, `commit-digests`, `main-changed`, the moved map in
-   `seon.test.runner/reach-entries`, `seen-digests` in `executed-roots`).
-2. **Which declarations are compiled vs interpreted is a lookup:** the loaded program's definition digests vs the
-   branch's own writes, plus the stored call graph for callers. No per-declaration comparison against main's history.
+1. **A branch runs its own HEAD, like a git checkout** (amended 10-15, below). Every reader (source, doc, references,
+   must-reads, reach digests, the recorder) reads the branch's own database value; main's later changes are not seen
+   until they are merged. The three-way readers and their caches are deleted (`seen-database`, `moved-past`,
+   `merge-sides`, `commit-digests`, `main-changed`, the moved map in `seon.test.runner/reach-entries`, `seen-digests`).
+2. **Which declarations SCI interprets is a lookup between two pointers:** those whose digest at the branch HEAD differs
+   from the loaded commit's (`seon.sci.eval/loaded-identity`), plus their callers; a pure function of the two commit ids,
+   cached by that pair and filled from the parent commit's entry. Host-bound platform code always runs as loaded.
+   Drift is kept small explicitly: root merges main forward into chain branches (`git merge main`) at each restart
+   batch, three-way, program entities only, conflicts listed in the agent's block (own-delta-hybrid.md P4).
 3. **The writer follows the branch.** Platform code is only what SCI cannot interpret (the compiled evaluator, writer,
    runner); it changes globally after merge + reload. A predicate is program: the checked writer validates a branch's
    writes with that branch's predicates (context-bound projection), so a predicate the agent defines on its branch
