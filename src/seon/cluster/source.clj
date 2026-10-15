@@ -1727,9 +1727,11 @@
       :else
       (let [candidate (spliced base-bytes (edits))
             reindexed (file-rows after root relative-root path (String. ^bytes candidate "UTF-8"))
-            ;; Every declaration the file holds after the write: its others as they are now, the written ones as `after` holds them.
+            ;; Every declaration the file holds after the write: its others as they are now, the written ones as
+            ;; `after` holds them. An unchanged file's others are `after`'s: a written namespace row re-derives the
+            ;; declarations whose resolver context it changes (`seon.program/definition-digest`).
             expected (into {} (remove (comp #{:seon.program/absent} val))
-                           (merge (if ours (update-vals ours :seon.program/definition-digest) (file-digests before path))
+                           (merge (if ours (update-vals ours :seon.program/definition-digest) (file-digests after path))
                                   (held-digests after (set identities))))
             actual (when-not (:seon.fn/index-refused reindexed) (update-vals reindexed :seon.program/definition-digest))
             differing (vec (sort-by str (filter #(not= (get expected %) (get actual %))

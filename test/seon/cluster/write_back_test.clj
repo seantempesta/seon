@@ -279,7 +279,8 @@
   `forms` (each a function of the fixture namespace), proved by its test
   `test-name` (tagged with `tq.write-back/fix`); calls `body` with the world, then retires C and every
   branch `body` conj'd onto `:made`, and deletes the root."
-  [label test-name forms body]
+  ([label test-name forms body] (merge-world! label test-name fixture-source forms body))
+  ([label test-name source forms body]
   (let [target (support/execution-handle nil)
         store (:seon.store/store target)
         h-conn (:seon.db/connection target)
@@ -290,7 +291,7 @@
         c (keyword (str label "-c-" suffix))
         made (volatile! [c])]
     (io/make-parents file)
-    (spit file (fixture-source fixture-ns))
+    (spit file (source fixture-ns))
     (try
       (let [entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})
             _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) entities (mapv program/row-identity entities)))
@@ -306,7 +307,7 @@
           (finally (agent/release-context! candidate))))
       (finally
         (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
-        (support/delete-root! root)))))
+        (support/delete-root! root))))))
 
 (deftest ^{:seon.test/long "One agent turn on C, one prepare-merge! (file proof, then a nested seon.test/run; 60 s is merge-test's measured bound) and two analyses of a one-file fixture."
            :seon.test/long-ms 90000}
@@ -359,10 +360,13 @@
   ;; Namespaces are program entities: the agent's `ns` form adds a require, the
   ;; merge carries that entity with the declaration that needs it, and write-back
   ;; splices the `ns` form's span; the namespace's other declarations are
-  ;; re-derived under it, so the reindexed file equals the merged program.
+  ;; re-derived under it, so the reindexed file equals the merged program:
+  ;; `tagged`, unwritten, names `clojure.set` by keyword, so the added require
+  ;; is part of its meaning (S5's `seon.error/config-expectation-present-generator`).
   (let [ns-form #(str "(ns " % "\n  \"Write-back fixture.\"\n  (:require [clojure.set] [clojure.test]))")]
     (merge-world!
      "wbns" "set-check"
+     #(str (fixture-source %) "\n(defn tagged\n  \"A keyword of clojure.set's.\"\n  {:malli/schema [:=> [:cat] :keyword]}\n  []\n  :clojure.set/tag)\n")
      [ns-form (fn [_] "(clojure.test/deftest ^{:seon/tasks #{'tq.write-back/fix}} set-check (clojure.test/is (= #{1 2} (clojure.set/union #{1} #{2}))))")]
      (fn [{:keys [target store proofs c root file fixture-ns made]}]
        (let [h-conn (:seon.db/connection target)
