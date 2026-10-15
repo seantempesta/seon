@@ -1183,11 +1183,7 @@
            [:p {:class "seon-runtime-state"}
             (if open "Turn open" "Idle")
             (when since
-              (list " since " (runtime-time since) " ("
-                    [:span {:data-text (str "(() => {const m=Math.max(0,Math.floor((Date.now()-"
-                                            (.getTime ^java.util.Date since)
-                                            ")/60000));return m>=1440?Math.floor(m/1440)+' d '+Math.floor(m%1440/60)+' h':m>=60?Math.floor(m/60)+' h '+m%60+' min':m+' min'})()")}
-                     (runtime-duration since (java.util.Date.))] ")"))]
+              (list " since " (runtime-time since)))]
            (when trigger
              ;; the trigger message is its own graph node; the runtime links it
              [:div {:class "seon-runtime-trigger"}

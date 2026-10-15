@@ -84,5 +84,22 @@
                                     :seon.turn/closed-tx "datomic.tx"]])
               _ (is (:db-after closed))
               idle (text-content (transcript/render-runtime-html (assoc unit :seon.db/db @connection)))]
-          (is (str/includes? idle "Idle since "))
-          (is (str/includes? idle " ms")))))))
+          (is (str/includes? idle "Idle since ")))))))
+
+(deftest an-idle-runtime-unit-is-identical-while-nothing-happens
+  (support/with-database
+    (fn [connection]
+      (db/transact!
+       connection
+       (into (support/agent-tx @connection "root")
+             [{:db/id "agent" :seon.agent/id "idle-reader"
+               :seon.agent/branch (get-in @connection [:config :branch])
+               :seon.agent/runtime {:seon.runtime/agent "agent"}}
+              {:seon.turn/id "idle-turn" :seon.turn/agent "agent"
+               :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}]))
+      (let [unit {:seon.db/db @connection :seon.db/connection connection :seon.agent/id "idle-reader"}
+            before (transcript/render-runtime-html unit)
+            _ (Thread/sleep 20)]
+        (is (str/includes? (text-content before) "Idle since "))
+        (is (= before (transcript/render-runtime-html unit))
+            "a wall-clock member (the time since the idle instant) changes the unit's content digest on every pass")))))
