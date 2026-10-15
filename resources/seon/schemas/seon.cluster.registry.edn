@@ -34,7 +34,7 @@
                         :swept [:int {:min 0}],
                         :observed-keys [:set :seon.schema/value],
                         :key-count [:int {:min 0}],
-                        :candidates [:set [:or :keyword :uuid :string]],
+                        :candidates [:set [:or :keyword :uuid :string [:tuple [:= :datahike/commit-graph] :uuid]]],
                         :mark-duration-ms [:int {:min 0}],
                         :inventory
                         [:map
