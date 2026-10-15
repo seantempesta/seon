@@ -27,7 +27,6 @@
             [seon.cluster.agent :as agent]
             [seon.turn :as turn]
             [seon.blob :as blob]
-            [seon.bootstrap :as bootstrap]
             [seon.cache]
             [seon.db :as db]
             [seon.env :as env]
@@ -2821,126 +2820,30 @@
                 "the branch's caller runs the branch's `g` and the callee the loaded commit lacks")
             (is (nil? (sci/resolve ctx probe)) "the retracted declaration is unmapped in the fork"))))))))
 
-(deftest a-work-branch-documents-what-main-moved-past-as-main-holds-it
-  ;; Before, documentation and help read the branch's own row: chain branch
-  ;; :chain-f1f6dc8e6652 held its merge base's `seon.db/q`, whose contract named
-  ;; `seon.db/query-call-valid?` main had deleted, so its turn's help threw
-  ;; compiling that contract (S5 run 5c).
+(deftest a-work-branch-documents-a-declaration-as-its-own-head-holds-it
+  ;; The branch's documentation and source are its own row; main's later change to the same declaration
+  ;; arrives by a merge, never by a read across branches.
   (test-support/with-database
    (fn [connection]
      (let [cited [:seon.fn/sym 'my.edit/text]
-           replaced (fn [contract]
+           replaced (fn [conn contract]
                       (test-support/transacted!
-                       connection
+                       conn
                        (test-support/replacement-tx
-                        (db/db connection) cited
+                        (db/db conn) cited
                         (str "(defn text \"Replace one exact passage.\" {:malli/schema [:=> [:cat " contract "] :string]} [x] (str x))")
                         {})))]
-       ;; the merge base holds a contract main later drops a predicate from (the writer compiles a contract,
-       ;; so the predicate resolves here; on the chain branch it no longer did)
-       (replaced "[:fn {:error/message \"must be text\" :gen/elements [\"a\"]} clojure.core/string?]")
+       (replaced connection ":int")
        (with-fresh-fork
         connection
         (fn [fork]
-          (replaced ":string")
-          (is (= [:cat :string] (:in (lookup/function-documentation (db/db fork) 'my.edit/text)))
-              "the branch documents main's row, which main moved past its stale copy")
-          (is (vector? (:seon.help/groups (bootstrap/help-value (db/db fork))))
-              "help resolves its references on the branch")))))))
-
-(deftest every-view-of-a-work-branch-sees-what-main-moved-past
-  ;; Before, `merge-sides` read the branch from the value's own `:config` field, which an as-of view
-  ;; (the attempt's starting value, read by the current-state block's must-reads) does not have: the
-  ;; branch was nil and `fork-of` refused it (root on bcce0cae1, chain :chain-f1f6dc8e6652).
-  (test-support/with-database
-   (fn [connection]
-     (let [cited [:seon.fn/sym 'my.edit/text]
-           replaced (fn [contract]
-                      (test-support/transacted!
-                       connection
-                       (test-support/replacement-tx
-                        (db/db connection) cited
-                        (str "(defn text \"Replace one exact passage.\" {:malli/schema [:=> [:cat " contract "] :string]} [x] (str x))")
-                        {})))]
-       (replaced "[:fn {:error/message \"must be text\" :gen/elements [\"a\"]} clojure.core/string?]")
-       (with-fresh-fork
-        connection
-        (fn [fork]
-          (replaced ":string")
-          (let [head (db/db fork)
-                views {:connection head
-                       :branch-database (db/branch-database (db/db connection) (get-in head [:config :branch]))
-                       :as-of (db/as-of head (db/basis-t head))
-                       :with (db/with head [])}]
-            (doseq [[kind view] views]
-              (is (= [:cat :string] (:in (lookup/function-documentation view 'my.edit/text)))
-                  (str "the " (name kind) " view documents main's row"))))))))))
-
-(deftest a-work-branch-reads-what-main-moved-past-once-per-commit-pair
-  ;; Before, every `seon.cluster.registry/seen-database` call re-derived the merge sides (a pull of the fork entity
-  ;; and two opened commits) and three digest queries: S5 run 6's current-state block paid 14 s for it per turn.
-  (test-support/with-database
-   (fn [connection]
-     (let [cited [:seon.fn/sym 'my.edit/text]
-           replaced (fn [contract]
-                      (test-support/transacted!
-                       connection
-                       (test-support/replacement-tx
-                        (db/db connection) cited
-                        (str "(defn text \"Replace one exact passage.\" {:malli/schema [:=> [:cat " contract "] :string]} [x] (str x))")
-                        {})))
-           declarations [cited [:seon.fn/sym 'seon.db/q] [:seon.fn/sym 'my.program/source]
-                         [:seon.fn/sym 'seon.db/pull] [:seon.ns/name 'my.edit]]]
-       (replaced "[:fn {:error/message \"must be text\" :gen/elements [\"a\"]} clojure.core/string?]")
-       (with-fresh-fork
-        connection
-        (fn [fork]
-          (replaced ":string")
-          (let [branch (db/db fork)
-                main-head (db/commit-id (db/db connection))
-                seen #(mapv (fn [declaration] (db/commit-id (registry/seen-database branch declaration))) declarations)
-                _ (seen)
-                measured (profile/measure seen)
-                called (:seon.profile/called measured)]
-            (is (= main-head (first (:seon.profile/value measured)))
-                "the declaration main moved past reads main's head")
-            (is (= #{(db/commit-id branch)} (set (rest (:seon.profile/value measured))))
-                "the others read the branch")
-            (is (<= (get called 'seon.cluster.registry/identity-digests 0) 1)
-                "only the declaration main changed reads its branch digest")
-            (is (zero? (get called 'seon.db/pull 0)) "no fork entity is pulled")
-            (is (<= (get called 'seon.db/commit-database 0) 1)
-                "only the moved-past declaration opens main's head"))))))))
-
-(deftest a-work-branch-as-of-view-reads-its-own-digest-by-index-probe
-  ;; S5 block (`seon.context/must-reads` on `seon.context/attempt-start`, an as-of view): each declaration main
-  ;; moved past read the branch's digest with a Datalog query whose attribute is a variable, which Datahike answers
-  ;; over an as-of view by scanning its history: about 1 s and 2.3 GB per declaration on default's store.
-  (test-support/with-database
-   (fn [connection]
-     (let [cited [:seon.fn/sym 'my.edit/text]
-           replaced (fn [contract]
-                      (test-support/transacted!
-                       connection
-                       (test-support/replacement-tx
-                        (db/db connection) cited
-                        (str "(defn text \"Replace one exact passage.\" {:malli/schema [:=> [:cat " contract "] :string]} [x] (str x))")
-                        {})))]
-       (replaced "[:fn {:error/message \"must be text\" :gen/elements [\"a\"]} clojure.core/string?]")
-       (with-fresh-fork
-        connection
-        (fn [fork]
-          (replaced ":string")
-          (let [branch (db/db fork)
-                main-head (db/commit-id (db/db connection))
-                _ (registry/seen-database branch cited)
-                view (db/as-of branch (db/basis-t branch))
-                ;; the view's projection, derived once by its first digest read, is not the work measured
-                _ (#'registry/identity-digests view [[:seon.fn/sym 'seon.db/q]])
-                measured (profile/measure #(db/commit-id (registry/seen-database view cited)))]
-            (is (= main-head (:seon.profile/value measured)) "the as-of view sees main's row")
-            (is (< (:seon.profile/alloc-bytes measured) 16000000)
-                "one declaration's digest is an index probe, not a scan of the view's history"))))))))
+          (replaced connection ":string")
+          (is (= [:cat :int] (:in (lookup/function-documentation (db/db fork) 'my.edit/text)))
+              "the doc names the branch's contract, not main's")
+          (is (= [:cat :string] (:in (lookup/function-documentation (db/db connection) 'my.edit/text)))
+              "main documents its own row")
+          (is (clojure.string/includes? (:source (my.program/source (db/db fork) 'my.edit/text)) ":int")
+              "the source is the branch's row")))))))
 
 (deftest a-stored-contract-that-cannot-compile-documents-its-error
   (test-support/with-database

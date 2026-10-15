@@ -11,7 +11,6 @@
             [sci.lang]
             [sci.impl.namespaces :as sci.namespaces]
             [seon.call-preparation :as call-preparation]
-            [seon.cluster.registry :as registry]
             [seon.db :as db]
             [seon.error.refusal]
             [seon.fn.analyzer :as analyzer]
@@ -396,14 +395,13 @@
               "Accepted database override for SCI; JVM callers retain the compiled definition until write-back and reload."}))))
 
 (defn function-documentation
-  "The documentation of the program function `sym`, read from the program row
-  the branch sees (`seon.cluster.registry/seen-database`) alone (no SCI context): doc parts, agent arglists, contract and the schemas
+  "The documentation of the program function `sym`, read from the branch's own
+  program row alone (no SCI context): doc parts, agent arglists, contract and the schemas
   it names. `documentation-unavailable` when no row declares it."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol]
                   [:or :map :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
   [database sym]
-  (let [database (registry/seen-database database [:seon.fn/sym sym])
-        row (db/pull database program-documentation-selector [:seon.fn/sym sym])
+  (let [row (db/pull database program-documentation-selector [:seon.fn/sym sym])
         overrides (when (= :agent (:seon.schema.admission/source row))
                     (program/overrides database))]
     (cond

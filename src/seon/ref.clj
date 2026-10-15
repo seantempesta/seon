@@ -11,7 +11,6 @@
             [malli.registry :as mr]
             [seon.ai.tokens :as tokens]
             [seon.cache :as cache]
-            [seon.cluster.registry :as registry]
             [seon.db :as db]
             [seon.error.refusal :as refusal]
             [seon.fn.analyzer :as analyzer]
@@ -442,7 +441,7 @@
       (let [declared (cond (seq (db/datoms database :avet :seon.fn/sym reference)) [:seon.fn/sym reference]
                            (seq (db/datoms database :avet :seon.test/sym reference)) [:seon.test/sym reference]
                            :else [:seon.task/sym reference])
-            found (db/pull (registry/seen-database database declared)
+            found (db/pull database
                            [:seon.fn/sym :seon.fn/doc :seon.test/sym :seon.task/sym :seon.task/plan :seon.task/instructions]
                            declared)]
         (cond
@@ -549,8 +548,7 @@
     (cond
       attribute
       (let [pull (:seon.ref/pull (known attribute))
-            seen (registry/seen-database database [attribute reference])
-            found (db/pull seen (into pull [:seon.fn/doc :seon.ns/doc]) [attribute reference])]
+            found (db/pull database (into pull [:seon.fn/doc :seon.ns/doc]) [attribute reference])]
         (if (:seon.error/at found)
           found
           (with-inner (merge (select-keys found pull) {:seon.ref/name reference} (render attribute))
