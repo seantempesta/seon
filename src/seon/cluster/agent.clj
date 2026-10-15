@@ -1683,7 +1683,7 @@
   attempts, so their writes are no-ops by identity."
   {:malli/schema [:=> [:cat :seon.flow.actions/facts :seon.flow.actions/registry :seon.config.agent/max-running]
                   :seon.flow.actions/actions]}
-  [{:seon.flow.actions/keys [startable invalid open attempts-made relaunch created chains cluster]}
+  [{:seon.flow.actions/keys [startable invalid open attempts-made relaunch created chains branches cluster]}
    {:seon.flow.actions/keys [started paused]} max-running]
   (let [running? (= :running cluster)
         intent (fn [{intent :seon.task/execution}]
@@ -1703,7 +1703,8 @@
                                           row (merge {:seon.task/assigned handle :seon.task/assignment key
                                                       :seon.agent/id (str "attempt/" key)}
                                                      (if chain
-                                                       {:seon.task/branch chain :seon.chain/branch chain}
+                                                       ;; a task selects its branch by data, else its chain's
+                                                       {:seon.task/branch (get branches handle chain) :seon.chain/branch chain}
                                                        {:seon.task/branch (keyword (str "attempt-" key))
                                                         :seon.flow.actions/fork-point (get relaunch handle :main)}))]
                                       [(assoc row :seon.flow.actions/op :attempt :seon.task.attempt/number number)
@@ -1749,13 +1750,15 @@
                         [:seon.flow.actions/open :seon.flow.actions/open]
                         [:seon.flow.actions/attempts-made :seon.flow.actions/attempts-made]
                         [:seon.flow.actions/created :seon.flow.actions/created]
-                        [:seon.flow.actions/chains :seon.flow.actions/chains]]
+                        [:seon.flow.actions/chains :seon.flow.actions/chains]
+                        [:seon.flow.actions/branches {:optional true} :seon.flow.actions/branches]]
                    :seon.db/invalid-read-error]]}
   [head branch first-handle]
   (loop [handle first-handle
          read {:seon.flow.actions/startable #{} :seon.flow.actions/open [] :seon.flow.actions/attempts-made {}
                :seon.flow.actions/created {} :seon.flow.actions/chains {}}]
-    (let [task (db/pull head [:db/id :seon.task/execution :seon.task/attempts-made {:seon.task/next [:seon.task/id]}]
+    (let [task (db/pull head [:db/id :seon.task/execution :seon.task/attempts-made :seon.task/branch
+                              {:seon.task/next [:seon.task/id]}]
                         [:seon.task/id handle])
           created (when (:db/id task) (db/q '[:find ?tx . :in $ ?h :where [_ :seon.task/id ?h ?tx]] head handle))
           rows (when (:db/id task)
@@ -1774,13 +1777,15 @@
                            (every? :seon.task/outcome rows))
               open (for [row (sort-by :seon.task/assignment rows) :when (task/open-attempt? row)]
                      {:seon.task/assigned handle :seon.task/assignment (:seon.task/assignment row)
-                      :seon.agent/id (get-in row [:seon.task/agent :seon.agent/id]) :seon.task/branch branch
+                      :seon.agent/id (get-in row [:seon.task/agent :seon.agent/id])
+                      :seon.task/branch (:seon.task/branch task branch)
                       :seon.task/execution execution :seon.chain/branch branch})
               read (cond-> (-> read
                                (update :seon.flow.actions/open into open)
                                (assoc-in [:seon.flow.actions/chains handle] branch)
                                (assoc-in [:seon.flow.actions/created handle] created))
                      starts? (update :seon.flow.actions/startable conj handle)
+                     (:seon.task/branch task) (assoc-in [:seon.flow.actions/branches handle] (:seon.task/branch task))
                      (:seon.task/attempts-made task) (assoc-in [:seon.flow.actions/attempts-made handle]
                                                                (:seon.task/attempts-made task)))
               after (get-in task [:seon.task/next :seon.task/id])]
@@ -1796,7 +1801,8 @@
                         [:seon.flow.actions/open :seon.flow.actions/open]
                         [:seon.flow.actions/attempts-made :seon.flow.actions/attempts-made]
                         [:seon.flow.actions/created :seon.flow.actions/created]
-                        [:seon.flow.actions/chains :seon.flow.actions/chains]]
+                        [:seon.flow.actions/chains :seon.flow.actions/chains]
+                        [:seon.flow.actions/branches {:optional true} :seon.flow.actions/branches]]
                    :seon.db/invalid-read-error]]}
   [database branches]
   (let [chains (db/q '[:find ?b ?h :where [?c :seon.chain/branch ?b] [?c :seon.chain/first ?h]] database)
@@ -2074,11 +2080,11 @@
   action: the agent's creation (homed on the chain branch) and the attempt row in ONE transaction; nothing when the
   branch already holds the attempt."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.actions/action] :nil]}
-  [handle {h :seon.task/assigned agent-id :seon.agent/id branch :seon.chain/branch :as action}]
+  [handle {h :seon.task/assigned agent-id :seon.agent/id branch :seon.chain/branch works-on :seon.task/branch :as action}]
   (registry/on-branch (handle-store handle) branch
              (fn [connection]
                (let [database (db/db connection)
-                     tx (task/attempt-tx database h agent-id branch)
+                     tx (task/attempt-tx database h agent-id (or works-on branch))
                      known? (db/q '[:find ?a . :in $ ?id :where [?a :seon.agent/id ?id]] database agent-id)]
                  (when (map? tx) (throw (ex-info (:seon.error/message tx "The chain attempt could not be derived.") tx)))
                  (when (seq tx)
@@ -2089,8 +2095,27 @@
   "Start a chain task's `:start-flow` action: a NEW agent's graph on its chain branch, acquired as that agent's
   execution (`acquire-context!` with the branch), under its intent. It forks no branch and writes nothing on main."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.actions/action] :nil]}
-  [handle {agent-id :seon.agent/id branch :seon.chain/branch intent :seon.task/execution}]
-  (start-branch-flow! handle (acquire-context! handle nil {:seon.agent/branch branch}) agent-id (or intent :running))
+  [handle {agent-id :seon.agent/id branch :seon.chain/branch works-on :seon.task/branch intent :seon.task/execution
+           key :seon.task/assignment h :seon.task/assigned :as action}]
+  (let [works-on (or works-on branch)
+        store (handle-store handle)]
+    ;; a task naming its own branch: its task, agent and attempt row are placed there from the chain branch, so its
+    ;; agent reads its assignment in its own world (as `seon.task/assign!` places a task on an agent's branch)
+    (when (not= works-on branch)
+      (registry/on-branch store branch
+                (fn [on-chain]
+                  (registry/on-branch store works-on
+                            (fn [there]
+                              (when-let [refused (task/task-placed! (db/db on-chain) there h)]
+                                (throw (ex-info (:seon.error/message refused "The task could not be placed on its branch.") refused)))
+                              ;; by identity, never by the chain branch's entity ids: the task's branch forked elsewhere
+                              (let [rows (task/attempt-rows-tx (db/db on-chain) (db/db there) key)
+                                    known? (db/q '[:find ?a . :in $ ?id :where [?a :seon.agent/id ?id]] (db/db there) agent-id)]
+                                (when (map? rows) (throw (ex-info (:seon.error/message rows "The attempt's rows could not be derived.") rows)))
+                                (when (seq rows)
+                                  (write! there (into (if known? [] (creation-tx (attempt-agent action (:seon.cluster/name handle))))
+                                                      (map #(dissoc % :db/id)) rows)))))))))
+    (start-branch-flow! handle (acquire-context! handle nil {:seon.agent/branch works-on}) agent-id (or intent :running)))
   nil)
 
 (declare write-problem!)
@@ -2207,6 +2232,19 @@
                            (finally (source/release! [head]))))))
           (sort chains))))
 
+(defn- merge-step
+  "The merge step root appends after a final merge `refused` by its gate (MERGE-STEP): `seon.step.merge/template`'s
+  owned members on main `database`, the merge branch the refusal kept as its `:seon.task/branch`, the refusal's type
+  and its red tests; nil when the refusal kept no merge branch (it refused before the gate built one)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.error/value] [:maybe :seon.task/task-map]]}
+  [database refused]
+  (when-let [kept (:seon.source/candidate refused)]
+    (let [template (task/template database 'seon.step.merge/template)]
+      (when (:seon.error/at template)
+        (throw (ex-info (:seon.error/message template "The merge step's template is not ingested.") template)))
+      (cond-> (assoc template :seon.task/branch kept :seon.task/refusal (:seon.error/type refused))
+        (seq (:seon.source/red refused)) (assoc :seon.task/refused-tests (set (:seon.source/red refused)))))))
+
 (defn- merge-chains!
   "Merge every finished chain (`chain-finishes`) to main once through cluster `handle`: when the done rule
   (`seon.cluster.source/done-refusals`) refuses nothing over the chain branch at the terminal attempt's end commit,
@@ -2235,9 +2273,16 @@
                                                #(apply merge/merge! (assoc handle :seon.store/store store) key
                                                        (when (string? root) [root])))]
                     (if (:seon.error/at merged)
-                      (do (bail-chain! handle branch key h (merge-refused-reason merged)
-                                       [[:db/add [:seon.task/assignment key] :seon.task/refusal (:seon.error/type merged)]])
-                          false)
+                      (let [step (merge-step database merged)
+                            first-handle (db/q '[:find ?h . :in $ ?b :where [?c :seon.chain/branch ?b] [?c :seon.chain/first ?h]]
+                                               database branch)]
+                        (bail-chain! handle branch key h
+                                     (cond-> (merge-refused-reason merged)
+                                       step (str " Its merge branch " (name (:seon.task/branch step)) " is kept, and a held merge step"
+                                                 " after task " h " works on it: run it with my.root/run!."))
+                                     (cond-> [[:db/add [:seon.task/assignment key] :seon.task/refusal (:seon.error/type merged)]]
+                                       step (conj [:db.fn/call #'task/next-tx first-handle step])))
+                        false)
                       true))))))))))
 
 (defn- finish-chains!
@@ -2635,6 +2680,9 @@
                                                           (:seon.task/assignment action)
                                                           (when (string? root) [root])))]
                (when (:seon.error/at merged)
+                 ;; an assignment holds no merge step: the merge branch its refusal kept is retired here
+                 (when-let [kept (:seon.source/candidate merged)]
+                   (registry/retire-branch! {:seon.store/store (handle-store handle) :seon.store/branch kept}))
                  (write! connection [[:db/add a :seon.task/refusal (:seon.error/type merged)]])))
       ;; a refused publication is recorded on the assignment by publish! itself; the throw records the fault
       :publish (let [published (merge/publish! handle (:seon.task/assignment action))]

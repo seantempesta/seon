@@ -330,7 +330,9 @@
                 accepted (when (:seon.source/candidate prepared)
                            (source/accept-merge! context store prepared
                                                  {:tx-data merge-call :tx-meta meta}))
-                _ (when (:seon.source/candidate prepared)
+                ;; an accepted candidate has served; a refused one stays, the merge branch its refusal names
+                ;; (MERGE-STEP): whoever holds the refusal retires it, or root's merge step works on it
+                _ (when (:seon.source/commit-id accepted)
                     (registry/retire-branch! {:seon.store/store store :seon.store/branch (:seon.source/candidate prepared)}))
                 result (when (:seon.source/commit-id accepted)
                          (let [after (db/db connection)
@@ -345,7 +347,9 @@
                               :seon.program/conflict (into #{} (map second) (:seon.program/conflict prepared))
                              :seon.program/conflict-digests (:seon.program/conflict-digests prepared)})
               (not (:seon.source/candidate prepared)) prepared
-              (not (:seon.source/commit-id accepted)) accepted
+              (not (:seon.source/commit-id accepted))
+              (cond-> (assoc accepted :seon.source/candidate (:seon.source/candidate prepared))
+                (seq (:seon.source/red prepared)) (assoc :seon.source/red (:seon.source/red prepared)))
               (:seon.error/at result) (assoc result :seon.source/accepted accepted)
               :else (do (run! #(conflict-task! connection branch %) (:seon.merge/conflicts result))
                         (assoc result :seon.source/accepted accepted)))))))))
@@ -361,7 +365,9 @@
   over main, C and the merge base (`seon.cluster.source/tested-task-basis`), a Prove step's product beside them,
   and the tests reaching them on a fresh merge branch of main; `seon.cluster.source/accept-merge!` judges them by
   `seon.cluster.source/merge-verdict` and carries `merge-tx` in its transaction, so only an accepted candidate
-  completes the task, then the merge branch is deleted; the files the checkout `root` would hold are proven
+  completes the task, then the merge branch is deleted; a refused one is kept and named on the refusal
+  (`:seon.source/candidate`, with its red tests as `:seon.source/red`) for its caller to retire or hold a merge step
+  on (MERGE-STEP); the files the checkout `root` would hold are proven
   before any test runs. Main's commit is recorded as `:seon.task/merge-commit`, beside
   `:seon.task/merged-declarations`, how many declarations and tasks it moved
   (`seon.cluster.source/merge-accepted`) when any, on either path; publishing the

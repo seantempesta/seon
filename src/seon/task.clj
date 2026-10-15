@@ -860,6 +860,29 @@
     (when-let [failure (read-error task)] (throw (ex-info (:seon.error/message failure) failure)))
     (if (= :held (:seon.task/execution task)) [[:db/add (:db/id task) :seon.task/execution :running]] [])))
 
+(defn next-tx
+  "The transaction data appending `task` (a task map: a template's owned members and the task's own) to the chain whose
+  first task is `first-handle` at `database`, its chain branch, through the task writer (MERGE-STEP, TASK-CHAIN §2.7):
+  named by position as `chain!` names a later task, taking the last task's flowing members, `:held` and created by
+  root, and the last task's `:seon.task/next` naming it. Invoke as `[:db.fn/call seon.task/next-tx first-handle task]`,
+  beside root's bail of the last task's attempt, decided over the value the writer holds."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle :seon.task/task-map] :seon.db/tx-data]}
+  [database first-handle task]
+  (let [handles (chain-handles database first-handle)
+        last-handle (peek handles)
+        {ns :seon.task/ns first-name :seon.task/name} (db/pull database [:seon.task/ns :seon.task/name] [:seon.task/id first-handle])
+        task-name (str first-name "-" (inc (count handles)))
+        handle (task-handle ns task-name)
+        stored (stored-tasks database :seon.task/id #{last-handle})]
+    (when-let [failure (read-error stored)] (throw (ex-info (:seon.error/message failure) failure)))
+    (let [projection (db/carried-projection database)
+          flowed (select-keys (declaration projection (stored last-handle)) (flowing-members projection))
+          entity (merge flowed (dissoc task :db/id :seon.task/id :seon.task/sym :seon.task/next)
+                        {:db/id -1 :seon.task/ns ns :seon.task/name task-name :seon.task/execution :held
+                         :seon.task/created-by [:seon.agent/id "root"]})]
+      (conj (adopt-tasks-tx database [entity] #{handle} {})
+            [:db/add [:seon.task/id last-handle] :seon.task/next -1]))))
+
 (defn chain-attempts
   "Every attempt on a chain's `:seon.task/next` path, read through `store` for each chain fact on main `database`:
   its key, task, chain branch, end and outcome when it holds them."
@@ -1121,7 +1144,7 @@
           :else [(assoc row :seon.task/agent [:seon.agent/id (get-in row [:seon.task/agent :seon.agent/id])]
                         :seon.task/attempt-of [:seon.task/id handle])])))
 
-(defn- task-placed!
+(defn task-placed!
   "Write the task `handle` on the branch `target` as main `database` declares it, by the task writer, when the
   branch lacks it (root created it after the branch forked): its whole declaration, children and needs by
   identity, so a task naming one the branch lacks refuses at the writer. nil, or the refusal."

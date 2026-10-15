@@ -9,6 +9,7 @@
   (my.root/merge-requests)
   ```"
   (:require [seon.cluster.message :as message]
+            [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
             [seon.context :as context]
             [seon.db :as db]
@@ -130,7 +131,11 @@
         checkout (when-not (:seon.error/at open) (some->> (:seon.cluster/name context) (merge/checkout database)))]
     (if (:seon.error/at open)
       open
-      (if (string? checkout) (merge/merge! context key checkout) (merge/merge! context key)))))
+      (let [merged (if (string? checkout) (merge/merge! context key checkout) (merge/merge! context key))]
+        ;; a hand merge holds no merge step: the merge branch a refusal kept is retired (MERGE-STEP)
+        (when-let [kept (and (:seon.error/at merged) (:seon.source/candidate merged))]
+          (registry/retire-branch! {:seon.store/store (:seon.store/store context) :seon.store/branch kept}))
+        merged))))
 
 (defn close!
   "Close the open assignment `:seon.task/assignment` without merging it, saying why (`:seon.task/reason`): it

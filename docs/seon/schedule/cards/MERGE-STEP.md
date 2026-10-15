@@ -49,8 +49,21 @@ The change, from the data outward:
 
 | Phase | Change | Red proofs | Status |
 |---|---|---|---|
-| A | This card; TASK-CHAIN amended; `resources/seon/tasks/seon.step.merge.edn`; `:seon.task/branch` on the task schema | `seon.cluster.db-flow-test/a-refused-final-merge-keeps-its-merge-branch-and-holds-a-merge-step` (rows i and iv); `seon.cluster.db-flow-test/a-task-naming-a-branch-starts-its-attempt-there` (row ii) | landed with this card |
-| B | Keep on refusal, one retirement rule (`seon.merge/merge!`, `seon.cluster.source/prepare-merge!`); the analysis check inside the gate | the phase A deftest's merge-branch assertions | — |
-| C | The append in `seon.task` (one transaction, the template and the `next` ref); `merge-chains!` writes it on a gate refusal | the phase A deftest's merge-step assertions | — |
-| D | `:seon.task/branch` in root's launch (`seon.cluster.agent/chain-read`) with the task placed on that branch; `seon.step.merge/gate` and its deftest; the refusal in the block | `a-task-naming-a-branch-starts-its-attempt-there`; `seon.step.merge-test/gate` | — |
+| A | This card; TASK-CHAIN amended; `resources/seon/tasks/seon.step.merge.edn`; `:seon.task/branch` on the task schema | `seon.cluster.db-flow-test/a-refused-final-merge-keeps-its-merge-branch-and-holds-a-merge-step` (rows i and iv); `seon.cluster.db-flow-test/a-task-naming-a-branch-starts-its-attempt-there` (row ii) | done c09651be8 (both proofs red for the right reason) |
+| B | Keep on refusal, one retirement rule (`seon.merge/merge!`, `seon.cluster.source/prepare-merge!`); the analysis check inside the gate | the phase A deftest's merge-branch assertions | part: `seon.merge/merge!` keeps a refused merge branch and names it on the refusal (`:seon.source/candidate`, red tests as `:seon.source/red`); the hand merge (`my.root/merge!`) and the per-assignment path retire it. Open in `seon.cluster.source` (held by another lane today): the analysis check inside the gate, a conflict building its merge branch, retirement on a gate run error |
+| C | The append in `seon.task` (one transaction, the template and the `next` ref); `merge-chains!` writes it on a gate refusal | the phase A deftest's merge-step assertions | done (`seon.task/next-tx`; `merge-chains!` appends on a refusal that kept a merge branch; proof green) |
+| D | `:seon.task/branch` in root's launch (`seon.cluster.agent/chain-read`) with the task placed on that branch; `seon.step.merge/gate` and its deftest; the refusal in the block | `a-task-naming-a-branch-starts-its-attempt-there`; `seon.step.merge-test/gate` | part: launch done (`chain-read` reads `:seon.task/branch`; `launch-actions` uses it; the task, agent and row placed on that branch by identity; proof green). Open: root reads the step's end on its branch (below); `seon.step.merge/gate` and its deftest; the refusal in the block |
 | E | Root's merge of a done merge step's branch; root's instructions and held merge steps | row iii: a green merge step's branch merges on root's pass | — |
+
+## Open (2026-10-15)
+
+- **Root reads the merge step's end where its agent writes it.** The attempt row is on the chain branch (root's
+  readers walk it) and placed on the merge branch (the agent's world); the agent writes its end on the merge branch.
+  `seon.cluster.agent/chain-read`, `chain-finishes` and `seon.task/chain-attempts` read ends on the chain head only.
+  Options for root: (1) those three read a row's end on the branch its row names (one shared reader, three callers);
+  (2) on the refusal the chain moves to its merge branch (`:seon.chain/branch` re-pointed; the merge branch already
+  holds the chain's tasks and attempts from the merge's facts), so no reader changes and `:seon.task/branch` is not
+  needed by the step; (3) root copies the end onto the chain branch on the merge branch's wake.
+- **A kept merge branch survives a restart.** `seon.cluster.registry/cluster-claims` claims chain branches only; a
+  merge branch named by a chain task's `:seon.task/branch` is retired by boot's `retire-unclaimed!` until it claims
+  those too.
