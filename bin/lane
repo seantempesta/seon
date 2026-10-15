@@ -10,6 +10,9 @@
 #   bin/lane commit  LANE -m MSG --branch-evidence AGENT [--accept-red-before TEST]... PATH...
 #                                        lint, and prove PATH... by AGENT's branch evidence on the
 #                                        live root instead of a throwaway JVM (falls back to the check)
+#   bin/lane commit  LANE -m MSG --test NS... --accept-red-before NS/VAR... PATH...
+#                                        a red bin/seon check still commits when every red var is accepted AND red on HEAD
+#                                        too (`bin/seon check --at HEAD` on those vars); trailer Check-red-before-accepted:
 #   bin/lane commit  LANE -m MSG --restart-batch ... PATH...
 #                                        root only, when it has opened a restart batch: without it a commit of deps.edn
 #                                        or a reference-code/ gitlink (dependency or fork bump) is refused
@@ -464,6 +467,36 @@ branch_evidence() {
           :else (System/exit 2)))))' "$root" "$agent" "$trailer" "${SEON_CLUSTER:-default}" "$(printf '%s\n' "${paths[@]}")" "$(printf '%s\n' ${accepted[@]+"${accepted[@]}"})"
 }
 
+# After a red `bin/seon check` (args: CHECK.edn TRAILER ACCEPTED...): exit 0 when every red var of that run is accepted
+# AND red on HEAD too (the same tests run by `bin/seon check --at HEAD`: git CI semantics, a parent that is already red
+# may be committed on); writes the trailer. Exit 2 otherwise: a red outside the accepted set, a failure that is no test
+# red, or an accepted test that is green on HEAD.
+accepted_reds_gate() {
+  local result="$1" trailer="$2"; shift 2
+  local reds="" red args=() head_result="${result%.edn}-head.edn"
+  [[ -s "$result" ]] || { echo "== the check left no test run: its failure is no test red"; return 2; }
+  reds="$(bb -e '
+(let [[file & accepted] *command-line-args*
+      run (clojure.edn/read-string (slurp file))
+      red (->> (:seon.test/results run) (filter #(pos? (+ (or (:seon.test/fail-count %) 0) (or (:seon.test/error-count %) 0)))) (map (comp str :seon.test/sym)))
+      outside (remove (set accepted) red)]
+  (binding [*out* *err*] (println "== check run" (:seon.test.run/id run) "red:" (pr-str red)))
+  (cond (empty? red) (System/exit 2)
+        (seq outside) (do (binding [*out* *err*] (println "== red but not accepted:" (pr-str outside))) (System/exit 2))
+        :else (println (clojure.string/join " " red))))' "$result" "$@")" || return 2
+  for red in $reds; do args+=(--test "$red"); done
+  echo "== the accepted reds must be red on HEAD: bin/seon check --at HEAD ${args[*]}"
+  SEON_TEST_RESULT_FILE="$head_result" bin/seon check --at HEAD "${args[@]}" > /dev/null 2>&1 && { echo "== the accepted tests pass on HEAD: nothing to accept"; return 2; }
+  bb -e '
+(let [[file & reds] *command-line-args*
+      run (clojure.edn/read-string (slurp file))
+      head-red (set (->> (:seon.test/results run) (filter #(pos? (+ (or (:seon.test/fail-count %) 0) (or (:seon.test/error-count %) 0)))) (map (comp str :seon.test/sym))))
+      green (remove head-red reds)]
+  (binding [*out* *err*] (println "== HEAD run" (:seon.test.run/id run) "red:" (pr-str (sort head-red))))
+  (when (seq green) (binding [*out* *err*] (println "== not red on HEAD:" (pr-str green))) (System/exit 2)))' "$head_result" $reds || return 2
+  printf 'Check-red-before-accepted: %s\n' "$reds" > "$trailer"
+}
+
 commit() {
   local lane="$1"; shift
   valid_lane "$lane"
@@ -534,7 +567,7 @@ commit() {
     set +m
   fi
 
-  local proven_by_branch=""
+  local proven_by_branch="" proven_by_reds=""
   if [[ -n "$evidence_agent" ]]; then
     local evidence_status=0
     branch_evidence "$evidence_agent" "$scratch/trailer" "${paths[@]}" -- ${accepted[@]+"${accepted[@]}"} || evidence_status=$?
@@ -557,7 +590,12 @@ commit() {
       check_args=(--at "$revision")
     fi
     echo "== bin/seon check ${check_args[*]} ${tests[*]+"${tests[*]}"}"
-    bin/seon check "${check_args[@]}" ${tests[@]+"${tests[@]}"} || refuse "bin/seon check failed; nothing committed"
+    if [[ ${#accepted[@]} -gt 0 ]]; then
+      SEON_TEST_RESULT_FILE="$scratch/check.edn" bin/seon check "${check_args[@]}" ${tests[@]+"${tests[@]}"} && rm -f "$scratch/check.edn" ||
+        { accepted_reds_gate "$scratch/check.edn" "$scratch/trailer" "${accepted[@]}" || refuse "bin/seon check failed beyond the accepted reds; nothing committed"; proven_by_reds=1; }
+    else
+      bin/seon check "${check_args[@]}" ${tests[@]+"${tests[@]}"} || refuse "bin/seon check failed; nothing committed"
+    fi
   fi
   [[ -n "$lint_pid" ]] && { wait "$lint_pid" || true; }
   lint_pid=""
@@ -572,7 +610,7 @@ commit() {
 
   printf '%s\n' "$message" > "$scratch/message"
   # The evidence joins the message's trailer block (Co-Authored-By ...) when it ends in one.
-  if [[ -n "$proven_by_branch" ]]; then
+  if [[ -n "$proven_by_branch$proven_by_reds" ]]; then
     [[ "$(printf '%s\n' "$message" | tail -1)" =~ ^[A-Za-z-]+:\  ]] || printf '\n' >> "$scratch/message"
     cat "$scratch/trailer" >> "$scratch/message"
   fi
