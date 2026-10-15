@@ -976,8 +976,14 @@
             unchanged? (and (nil? supplied-basis)
                             (some-> (last completed) (one :seon.test.run/program-revisions)
                                     (= (runner/program-revisions-digest database))))
-            changes-since (when-not unchanged? comparison)
-            removed-files (when changes-since
+            ;; Incremental selection and explicit narrowing consume history.
+            ;; Named changes already supply their seeds; their current reach
+            ;; digest decides whether recorded evidence still applies.
+            changes-since (when (and (not unchanged?)
+                                     (or (= :incremental policy)
+                                         (:seon.test/since-previous-run? request)))
+                            comparison)
+            removed-files (when (and changes-since (= :incremental policy))
                             (selection-read!
                              (db/q '[:find [?path ...] :in $ $changes
                                      :where [$changes ?file :seon.fn.file/relative-path ?path _ false]

@@ -160,15 +160,7 @@
                   (set (map :seon.test/sym (:seon.test.run/members changed)))))
            (is (empty? (:seon.test.selection/unchanged changed)))))
        (install-selection-program! connection "(defn leaf [] 3)")
-       (let [acquire runner/reach-digests
-             requested (atom #{})
-             changed (with-redefs [runner/reach-digests
-                                  (fn [database symbols & extra-roots]
-                                    (swap! requested into symbols)
-                                    (apply acquire database symbols extra-roots))]
-                       (select!))]
-         (is (not (@requested (fixture-symbol "direct")))
-             "A test already reaching changed code cannot reuse green; do not derive its reach digest.")
+       (let [changed (select!)]
          (is (= #{(fixture-symbol "direct")}
                 (set (map :seon.test/sym (:seon.test.run/members changed)))))
          (is (= #{(fixture-symbol "unrelated")}

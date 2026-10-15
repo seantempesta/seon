@@ -787,6 +787,28 @@
          "a program write derives the set again")
      (finally (agent/release-context! child)))))))
 
+(deftest a-named-change-selects-by-current-reach-without-scanning-history
+  (support/with-database
+   (fn [connection]
+     (seed-reach-fixture! connection)
+     (let [request #(changed-request connection '[reach.fixture/b] {:seon.test/policy :named})]
+       (is (true? (:seon.test/passed? (request))))
+       (define! connection '[:seon.fn/sym reach.fixture/b]
+                "(defn b {:malli/schema [:=> [:cat :int] :int]} [x] (identity x))")
+       (let [sink (:seon.batch/sink seon.batch/*world*)
+             before (seon.batch/executed sink)
+             measured (seon.profile/measure request)
+             calls (merge-with - (seon.batch/executed sink) before)
+             result (:seon.profile/value measured)]
+         (is (= [1 0] [(:seon.test/executed-count result) (:seon.test/reused-count result)]))
+         (is (true? (:seon.test/passed? result)))
+         (is (zero? (transduce (comp (filter #(= 'seon.test/changed-definition-symbols (ffirst %)))
+                                     (map val)) + 0 calls))
+             "the request supplies its change; current reach decides reuse"))
+       (let [result (request)]
+         (is (= [0 1] [(:seon.test/executed-count result) (:seon.test/reused-count result)]))
+         (is (true? (:seon.test/passed? result))))))))
+
 (deftest a-reaching-request-selects-what-changed-since-its-previous-run
   ;; The automatic step names the branch's whole change every eval request; narrowed
   ;; to what changed since its previous run, an unrelated change neither selects the
