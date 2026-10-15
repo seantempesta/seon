@@ -62,7 +62,73 @@ and a merge of its 9 tested entities.
 
 ## R1: prior art and constraints
 
-(Haiku dig writes here.)
+Dig by lane `omb-r1` (Haiku), 2026-10-15. Gathering only: no judgement, no design. Each item cites its source. Quotes are at most two lines. Items marked **unverified** were not checked against source in this dig.
+
+### 1. Git's merge-base algorithm
+
+- **Generation v1 (topological level).** "A commit with at least one parent has topological level one more than the largest topological level among its parents." Source: https://git-scm.com/docs/commit-graph
+- **Generation v2 (corrected committer date).** "A commit with at least one parent has corrected committer date equal to the maximum of its committer date and one more than the largest corrected committer date among its parents." Same source.
+- **Why v2 exists.** The commit that adds corrected dates reports, on the Linux repo, about 635,579 commits walked with topological levels against about 167,468 with corrected dates during `git merge-base`. Source: the search summary for `commit-graph: implement corrected commit date`, https://googlers.googlesource.com/jrn/git/+/c1a09119f68d9800be53f544389f9ef83258ee7f . Secondhand: the figures come from search results, not from the page itself.
+- **Stolee's blog.** The posts were not located. The mailing-list thread names them, but no URL was found.
+- **Bound rule.** "If A and B are commits with generation numbers N and M, respectively, and N <= M, then A cannot reach B." Same commit-graph page.
+- **Walk order.** "If we walk commits using a priority queue seeded by generation numbers, then we always expand the boundary commit with highest generation number." Same page.
+- **Commits outside the graph.** Git treats them as "infinite" generation and walks until it reaches commits with a known number. Source: the commit-graph design notes, https://code.googlesource.com/git/+/HEAD/Documentation/technical/commit-graph.txt (secondhand, via search summary).
+- **paint_down_to_common**, `commit-reach.c`, https://github.com/git/git/blob/master/commit-reach.c (fetched raw). Queue comparator: `compare_commits_by_gen_then_commit_date`. Each queued commit carries PARENT1 or PARENT2. Parents of a found merge are marked STALE. The walk stops when only stale entries remain (`/* only stale entries remain */`). The early exit (`state.last_gen < state.topo_ceiling`) applies only when `MERGE_BASE_FIND_ALL` is not set. Note: the fetched text names `nonstale_queue` and `max_nonstale`, not `queue_has_nonstale`.
+- **Criss-cross.** "When the history involves criss-cross merges, there can be more than one 'best' common ancestor for two commits." `git merge-base --all` outputs every one. Without `--all`, "it is unspecified which best one is output." Source: https://git-scm.com/docs/git-merge-base (fetched raw adoc). `merge_bases_many` calls `remove_redundant` when more than one result is found (`commit-reach.c`).
+- **Recursive / ort virtual base.** **unverified.** Not fetched in this dig.
+
+### 2. Datahike upstream and our fork
+
+- **Remotes** (`reference-code/datahike`): `origin` git@github.com:seantempesta/datahike.git; `upstream` https://github.com/replikativ/datahike.git. Local `upstream/main` is at `23692d77` ("datalog-parser 0.2.43 (#1100)"). The fork's pinned HEAD is `62f94893`.
+- **Upstream search.** `gh api search/issues` over replikativ/datahike for merge-base, commit-graph and generation found no issue or PR about merge base, commit graph or LCA. Hits on "generation" are secondary-index and GC work. Nearest open issue: #951 "Online GC is unsafe with diff-buf: the freed-address stream is only sound for a linear history". That bears on merge commits. No PR query matched.
+- **Fork commits on the writer and commit records** (`git log -S":datahike/parents"`): 67edd9b6 "audit: tamper-evident commit-ids + verify-chain (#823)"; 5566ab13 "feat(versioning): fork-database — independent writable fork at a point in time"; 3224583b "Branch-head readers accept a compact head that names its commit"; 50d4b3ac "feat: :commit-graph? false — provenance opt-out, single-object commits (experimental) (#869)".
+- **Latest commit touching `src/datahike/versioning.cljc`**: c9e57c6f "Branch primary indexes by their existing commit pointer" (2026-10-12).
+- **Where parents are written.** `datahike/versioning.cljc` `branch!` (L211), `force-branch!` (L324), `commit-id` (L462), `parent-commit-ids` (L468), `merge!` (L739). `datahike/writing.cljc` L601 (`assoc-in … :datahike/parents`) and L1068 (`:datahike/merge-parents`). `datahike/writer.cljc` L271 unions merge parents across a batch.
+- **Opt-out.** `50d4b3ac` means a store with `:commit-graph? false` writes no commit record. A generation sidecar keyed by record would be absent there. See `test/datahike/test/commit_graph_test.clj`: "commits write only the branch head".
+- **Fork tests covering branch, merge and parents.** `test/datahike/test/versioning_test.cljc`: `branch-preflights-commit-records` (L186), `commit-branching-rejects-commit-graph-opt-out` (L204), `merge-shares-the-transaction-basis-fence-and-keeps-lineage-exact` (L448), `branches-of-one-store-allocate-distinct-entity-ids` (L487). Also `commit_graph_test.clj`, `branch_head_test.clj`, `gc_test.cljc`, `secondary_versioning_test.clj`.
+- **Test alias.** `reference-code/datahike/deps.edn` `:test` (L83): extra-paths `test` plus others; `:jvm-opts ["-ea" "--add-modules" "jdk.incubator.vector"]`; kaocha 1.91.1392. **unverified:** the exact run command. Not executed in this dig.
+
+### 3. Earlier Seon attempts
+
+Each row: the commit, and its own words in the message.
+
+- **`d9eb15c05` "Merge base survives collection"** (reviewed in `docs/research/agent-platform/2026-10-10/review-merge-base.md`). Design: "a branch's fork entity records its base-t … the base is the branch as-of its base-t; the parent walk and its 10000-commit bound are deleted." The review's verdict: "**Changes requested.**" This is the t-as-base design that finding 1 of `datahike-internals.md` shows is wrong across lineages.
+- **`dc5e1d348` "P1: squash cluster facts from retained immutable merge bases"**. The "retained immutable merge bases" wording is an earlier base-as-copy idea.
+- **`663e105cf` "Assess per-branch entity-id ranges …"**. Recommends "the copy-back as a squash merge from the merge base".
+- **`6521ded43` hybrid design**. Names the reason for avoiding parents: "never merge-db!/:parents (datahike.gc follows parents, pinning deleted branches)". This is a constraint on the forward merge commit.
+- **`58b1a68cc` "P4: root merges main forward into a chain branch (my.root/merge-main!, seon.merge/merge-main!)"**. Introduces the forward merge as a plain transaction, with the base ref moved by hand.
+- **`d7cbfc7d8` Plan 1**. Ruling: "a branch's base/ entry is a merge-base ref, not a copy".
+- **`c264da25e` "S4: the merge base is written with the assignment; seon.turn/fork-commit reads it on the branch"**. Stored copy on attempt rows, which is the copy the plan deletes.
+- **`969555d6d` "A Prove step ends by itself: seon.turn/fork-commit reads the branch's merge base from its own base ref (seon.cluster.registry/base-commit-id)"**. Moves the read to the base ref.
+- **`214c61330` "A retired branch has no merge base: base-commit-id reads only a base ref the store's branches hold"**.
+- **`4cfa03eab` "Relaunch base: a relaunched attempt forks its predecessor's end commit from that commit's own branch toward main, so it inherits the task's merge base"**.
+- **`c8215bfe1` "merge-main! opens the chain branch for its one action; a chain's final merge reads the base ref merge-main! advances"**.
+- **`a76a9c141` and `b064a3e8f`**: the S5 evidence. `b064a3e8f`'s message names git's diff(merge-base, HEAD) as the target model.
+
+Docs that designed a merge base or base ref: `docs/research/agent-platform/2026-10-10/review-merge-base.md` (the t-based design, changes requested); `docs/research/agent-platform/merge-task-design-2026-09-26.md` (matched grep for merge base; **not read in this dig**); `docs/seon/schedule/cards/DIAL-8.md` (the `10000` bound on `merge-base`, to be deleted with the walk).
+
+### 4. Rulings the design must keep
+
+- **`docs/seon/schedule/cards/TASK-CHAIN.md`.** No text names `:seon.task/merge-base`. The only merge-base line is L538, which deletes "the per-attempt main merge-base write". L33: "No automatic relaunch: budget spent, a bail and a refused merge all go to root." L14: "A single task is a chain of one." The rule "relaunch keeps the predecessor's base" lives only in commit `4cfa03eab`, not in TASK-CHAIN's text. **Flag:** the TASK-CHAIN text does not state the relaunch rule.
+- **`docs/research/agent-platform/2026-10-15/branch-model-rulings.md`.** L22: "No rebase. Drift is reconciled once, three-way, at the merge." L56: "the entities the branch changed since its merge base (git's". Ruling 9, L90: "each with its `base/` merge-base ref, a pointer, not a copy".
+- **`AGENTS.md` and `CLAUDE.md`** (identical text). "Merge is a root task": "`merge!` takes the whole delta since the merge base and commits only when it is green" (L341-346). L370: "the merge base (git's untrusted-contributor model: an agent never pushes)". Section header L298: "The system: one JVM, many realities". L180 names git's merge-base term as the merging vocabulary.
+- **`docs/research/agent-platform/2026-10-15/merge-closure-plan.md`.** L32: "`changed` the branch's own changes since its merge base (git's three-way". L93: "A non-chain assignment's stored `:seon.task/merge-base` is a second representation of the base ref; it retires with per-assignment merges (TASK-CHAIN S3b)."
+
+**Flags for root.** Stored merge-base copies on attempt rows, which the plan deletes, are named by:
+- `c264da25e` (`:seon.task/merge-base` on attempt rows, written by `seon.task/attempt-tx`);
+- `4cfa03eab` (relaunch base inherited from the predecessor);
+- `d9eb15c05` (`base-t` on the fork entity);
+- `merge-closure-plan.md` L93 (named as retiring with TASK-CHAIN S3b).
+
+Root must reconcile these before phase 4 deletes them.
+
+### 5. Other sources that already do this
+
+- **JGit `MergeBaseGenerator` / RevWalk merge-base filter.** Fetch of the master path returned 404, so the class is **unverified**. JGit is not on our classpath: `~/.m2/repository/org/eclipse/` holds only aether, ee4j, jetty and sisu, and `clojure -Spath` output shows no jgit (grep came back empty).
+- **Graph libraries** (JGraphT, commons-graph). No match under `~/.m2`.
+- **Git itself** (`commit-reach.c`, cited above) is the reference algorithm. Shelling out to git is not a fit for the database, which owns the commit graph.
+- **Datahike's own `datahike.versioning`** has no LCA. `branch-history` walks every ancestor, which the plan rules out.
+
 
 ## C: REPL confirmation
 
