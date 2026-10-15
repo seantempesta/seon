@@ -692,16 +692,19 @@
   it is out of the way: renamed aside first (atomic, so a reader sees the whole
   directory or none), then `held?` is read again. A launch that held it after
   the caller decided it was free gets the directory back; one that holds it
-  from here on finds none and compiles its own."
+  from here on finds none and compiles its own. The rename is the claim: when
+  another prune (or a promotion) took the directory first, `renameTo` answers
+  false and there is nothing left to remove."
   {:malli/schema [:=> [:cat :string [:fn seon.fs/file?]] :nil]}
   [repository ^java.io.File directory]
   (let [path (.getCanonicalPath directory)
         aside (io/file (.getParentFile directory)
                        (str (.getName directory) ".pruning-" (random-uuid)))]
-    (fs/move directory aside {:atomic-move true})
-    (if (held? repository path)
-      (fs/move aside directory {:atomic-move true})
-      (fs/delete-tree aside))))
+    (when (.renameTo directory aside)
+      (if (held? repository path)
+        (fs/move aside directory {:atomic-move true})
+        (fs/delete-tree aside)))
+    nil))
 
 (defn- prune-program-classes!
   "Keep `program` and the most recently used class directories; delete the

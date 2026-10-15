@@ -1,5 +1,6 @@
 (ns seon.operator-test
-  (:require [clojure.core.server :as server]
+  (:require [babashka.fs :as fs]
+            [clojure.core.server :as server]
             [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -514,3 +515,25 @@
         (is (= ["deps.edn" "reference-code/pin"] (#'operator/changed-dependencies repository base pinned))))
       (finally
         (doseq [file (reverse (file-seq (java.io.File. repository)))] (.delete ^java.io.File file))))))
+
+(deftest concurrent-prunes-of-one-stale-directory-both-complete-and-spare-the-program
+  (let [base (fs/create-temp-dir {:prefix "seon-prune-race"})
+        classes (fs/path base "target" "dev-program-classes")
+        program (fs/path classes "program")
+        stale (fs/path classes "stale.staging-1")
+        old (- (System/currentTimeMillis) (* 3 86400000))]
+    (try
+      (fs/create-dirs program)
+      (fs/create-dirs stale)
+      (.setLastModified (fs/file stale) old)
+      ;; The loser of a race finds the directory already renamed aside by the winner.
+      (let [winner (future (#'operator/prune-directory! (str base) (fs/file stale)))
+            loser (future (#'operator/prune-directory! (str base) (fs/file stale)))
+            outcomes (mapv #(try (deref % 10000 ::unfinished) (catch Throwable cause (type cause)))
+                           [winner loser])]
+        (is (= [nil nil] outcomes) "both prunes complete")
+        (is (= ["program"] (mapv #(str (fs/file-name %)) (fs/list-dir classes)))
+            "the stale directory is gone and the program is intact"))
+      (is (nil? (#'operator/prune-directory! (str base) (fs/file stale)))
+          "a prune of a directory another prune already removed completes")
+      (finally (fs/delete-tree base)))))
