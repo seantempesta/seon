@@ -2327,16 +2327,21 @@
 
 (defn- refusal-section
   "The `## Merge refusal` section of a merge step's instructions: what refused it, as references its block resolves
-  (each red test and conflicted declaration backticked), with the refusal's own message and file."
+  (each red test, conflicted declaration and offending declaration backticked), with the refusal's own message and
+  file."
   {:malli/schema [:=> [:cat :seon.error/value] :string]}
-  [{refused :seon.error/type message :seon.error/message red :seon.source/red conflict :seon.program/conflict path :seon.source/path}]
-  (str "## Merge refusal\n\n"
-       "Root's final merge refused `" refused "`" (when message (str ": " message)) "\n"
-       (when path (str "\nFile: " path "\n"))
-       (when (seq red) (str "\nRed on the merge branch:\n\n" (apply str (map #(str "- `" % "`\n") (sort red)))))
-       (when (seq conflict)
-         (str "\nChanged by main and the chain since the merge base; the chain's version is on this branch, main's is"
-              " main's head (`my.program/diff`):\n\n" (apply str (map #(str "- `" % "`\n") (sort-by str conflict)))))))
+  [{refused :seon.error/type message :seon.error/message red :seon.source/red conflict :seon.program/conflict
+    path :seon.source/path offending :seon.error/offending}]
+  (let [declarations (filter qualified-symbol? (if (coll? offending) offending [offending]))]
+    (str "## Merge refusal\n\n"
+         "Root's final merge refused `" refused "`" (when message (str ": " message)) "\n"
+         (when path (str "\nFile: " path "\n"))
+         (when (seq declarations)
+           (str "\nRefused:\n\n" (apply str (map #(str "- `" % "`\n") (sort-by str declarations)))))
+         (when (seq red) (str "\nRed on the merge branch:\n\n" (apply str (map #(str "- `" % "`\n") (sort red)))))
+         (when (seq conflict)
+           (str "\nChanged by main and the chain since the merge base; the chain's version is on this branch, main's is"
+                " main's head (`my.program/diff`):\n\n" (apply str (map #(str "- `" % "`\n") (sort-by str conflict))))))))
 
 (defn- merge-step
   "The merge step root appends after a final merge `refused` by its gate (MERGE-STEP): `seon.step.merge/template`'s

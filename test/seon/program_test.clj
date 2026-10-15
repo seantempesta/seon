@@ -239,6 +239,11 @@
                            (assoc-in [:aliases 'schema] 'seon.schema)
                            (assoc-in [:refers 'lookup] 'clojure.core.cache/lookup))))
         "Adding an alias or refer to a namespace it uses but does not spell")
+    (let [own (update entity :seon.fn/calls conj 'sample/g)]
+      (is (= (program/definition-digest own context)
+             (program/definition-digest own (-> context (update :requires conj 'sample)
+                                                (assoc-in [:aliases 'self] 'sample))))
+          "Requiring its own namespace, whose names it calls through that namespace's interns"))
     (is (not= digest (program/definition-digest
                       entity (assoc-in context [:refers 'x] 'clojure.core.cache/x)))
         "Adding a refer its source spells bare")

@@ -25,6 +25,7 @@
             [seon.cluster.agent :as agent]
             [seon.turn :as turn]
             [seon.context :as context]
+            [seon.ref :as ref]
 
             [seon.cluster.wake :as wake]
 
@@ -1959,3 +1960,15 @@
                          (:seon.db/connection (:seon.sci.eval/custody (:seon.sci.eval/ctx handle))))
              "the context's custody is the branch connection")
          (finally (agent/release-context! handle)))))))
+
+(deftest a-merge-steps-refusal-names-the-declarations-its-refusal-offends
+  ;; MERGE-STEP 3: a coverage refusal (`seon.cluster.source/results-verdict`) names its uncovered functions only in
+  ;; `:seon.error/offending`; the held step's instructions cite each, so its agent and root see which
+  (let [refusal {:seon.error/type :seon.source/test-evidence-error :seon.error/at (java.util.Date.)
+                 :seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/results-verdict
+                 :seon.error/message "A replaced function reaches no green test of the named run."
+                 :seon.error/offending ['seon.ref/names 'seon.ref/references]
+                 :seon.source/candidate :merge-test}]
+    (is (= #{'seon.ref/names 'seon.ref/references}
+           (ref/names (#'agent/refusal-section refusal)))
+        "each offending declaration is a reference of the section")))

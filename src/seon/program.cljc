@@ -525,13 +525,19 @@
   as bare symbols (by target namespace and used symbol when it carries no
   source). Imports stay whole: the analysis records no class usage. An alias
   or refer the definition does not spell therefore leaves its digest
-  unchanged, while retargeting one it spells changes the kept entry."
+  unchanged, while retargeting one it spells changes the kept entry. Its own
+  namespace's names resolve through that namespace's interns, never a
+  require (`clojure.core/load` skips a namespace loading itself), so a require of
+  its own namespace is no part of what it uses."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [entity {:keys [requires aliases refers imports]}]
-  (let [used (into (set (:seon.fn/calls entity)) (:seon.fn/references entity))
-        used-namespaces (into #{} (keep #(some-> % namespace symbol))
-                              (concat used (:seon.fn/keywords entity)))
-        source (some->> (row-identity entity) first shape :seon.program/source-attribute (get entity))
+  (let [[_ identity-value :as row-id] (row-identity entity)
+        own (when (qualified-symbol? identity-value) (symbol (namespace identity-value)))
+        used (into (set (:seon.fn/calls entity)) (:seon.fn/references entity))
+        used-namespaces (disj (into #{} (keep #(some-> % namespace symbol))
+                                    (concat used (:seon.fn/keywords entity)))
+                              own)
+        source (some->> row-id first shape :seon.program/source-attribute (get entity))
         {:keys [qualifiers symbols]}
         (when (string? source)
           (source-resolver-names source (set (keys aliases)) (set (keys refers))))]
