@@ -57,6 +57,22 @@ model below.
    reaches it) or drop it (`ns-unmap!`). The agent curates the merge by writing tests, never by a hand list: to get
    something merged, test it. The block's change section (c94977458, "reached by no test") becomes this list; one
    function derives it for the block, the done rule's report and the merge, so what the agent sees is what merges.
+5b. **Clean or not, as git decides it, then CI.** Structural: three-way per declaration (entity attribute) against the
+   merge base (`seon.program/three-way`): changed on one side only, or identically on both, is clean; changed on both
+   sides differently is a conflict. Semantic (git leaves this to CI): the merge candidate (main HEAD + the merge list)
+   runs every seed whose reach digest differs from the branch's recorded result (main moved something it reaches);
+   unchanged reach reuses the branch's green (ruling 6). Clean = no conflict and every seed green on the candidate.
+   Not clean: nothing reaches main; the candidate stays as the merge branch with its conflicts and reds as data. Like
+   `git merge main` into a feature branch, root first offers it back to the agent that has the context: main is merged
+   into the chain branch, the conflicts and reds appear in the agent's block, and the agent resolves them by `defn` and
+   tests. Root resolves by hand only when the agent cannot (ours = main, theirs = the branch, at the ordinary REPL on the
+   merge branch), then `my.root/merge!`.
+5c. **The help says all of this.** The agent's help (`resources/seon/help.md`, universal for every agent) states what
+   merges (5a), how to see the merge list in the block, how to include (test it) or drop (`my.program/ns-unmap!`) a
+   change, and what a returned conflict looks like. Root's help (`my.root/instructions` laws, and a root section) states
+   how root applies config to a branch (ruling 4), how it reads a refused or conflicted merge, how it hands it back,
+   and how it resolves by hand. Each help change lands in the commit that installs the behavior it describes, never
+   ahead of it.
 6. **Merge reuses the branch's results.** Every eval request's test step already records results keyed by reach digest;
    with ruling 1 a branch result's identity equals its identity on the merge candidate. The merge looks results up by
    digest and runs only what is missing; no candidate world boot in the normal case.
