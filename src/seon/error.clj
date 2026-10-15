@@ -36,7 +36,6 @@
             [malli.registry :as mr]
             [seon.schema.internal :as internal]
             [seon.sci.admit :as admit]
-            [clojure.pprint :as pp]
             [seon.config :as config]))
 
 ;;; ---------------------------------------------------------------------------
@@ -2041,19 +2040,6 @@
         read-arglists #(edamame/parse-string % {:auto-resolve (fn [requested] (if (= :current requested) home requested))})
         shortest (some->> arglists read-arglists (sort-by count) first)]
     (apply list sym shortest)))
-
-(defn- calling-forms
-  "The calling forms of `syms` (in order), each from its stored arglists."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]] [:vector :seon.schema/value]]}
-  [database syms]
-  (into []
-        (keep (fn [sym]
-                (let [arglists (db/q '[:find ?arglists . :in $ ?sym
-                                       :where [?f :seon.fn/sym ?sym] [?f :seon.fn/arglists ?arglists]]
-                                     database sym)]
-                  (when-not (db/read-refusal? arglists)
-                    (calling-form sym arglists)))))
-        syms))
 
 (defn- binds-local?
   "Whether clj-kondo's local analysis of `source` finds a local named `local`."
