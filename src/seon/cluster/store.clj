@@ -17,6 +17,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [datahike.connections :as connections]
+            [datahike.connector]
             [datahike.store :as datahike.store]
             [datahike.writing :as datahike.writing]
             [konserve.core :as k]
@@ -657,12 +658,17 @@
     (cond
       ; an overlay carries the shared store's flock but never owns it
       (:seon.store/overlay store)
-      ; its configuration is carried: a released connection can no longer be
-      ; dereferenced for it, and a request's handle may have released it first
-      (let [connection (:seon.store/connection-object store)]
-        (when-not (= :released @(:wrapped-atom connection))
-          (d/release connection))
-        (d/delete-database (:seon.store/overlay-configuration store)))
+      ; Every connection into the overlay, its branches' included, ends with it:
+      ; its writes go with the frontend, and a connection left open would refuse
+      ; the delete and strand the overlay. Its configuration is carried, since a
+      ; released connection can no longer be dereferenced for it.
+      (let [configuration (:seon.store/overlay-configuration store)
+            marker (datahike.store/overlay-marker configuration)]
+        (doseq [[conn-id {connection :conn}] @connections/*connections*
+                :when (and connection (= marker (peek conn-id)))]
+          (datahike.connector/release connection true)
+          (alter-meta! (:wrapped-atom connection) dissoc :seon.sci.eval/projection-state))
+        (d/delete-database configuration))
 
       (.isValid lock)
       (let [connection (:seon.store/connection-object store)]

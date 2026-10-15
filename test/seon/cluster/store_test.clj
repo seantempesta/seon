@@ -16,6 +16,8 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [datahike.connections :as connections]
+            [datahike.store]
             [konserve.core :as k]
             [konserve.filestore :as filestore]
             [seon.cluster.store :as store]
@@ -520,6 +522,27 @@
               (is (= #{:db :agent-race} (set (d/branches connection)))
                   "an update of the uncached branches starts from the store's")
               (finally (store/release-store! overlay))))
+          (finally (store/release-store! held))))
+      (finally
+        (test-support/delete-recursively! (str (io/file dir) "/.."))))))
+
+(deftest releasing-an-overlay-ends-its-open-branch-connections
+  ;; A test world released while one of its branch connections was still open
+  ;; threw `:database-has-active-connections` and stranded the overlay, its
+  ;; connections and its memory (exp-a-memory-floor.md, 2026-10-15).
+  (let [dir (fresh-dir)]
+    (try
+      (let [held (store/open-store! {:seon.store/dir dir})]
+        (try
+          (let [overlay (store/open-overlay! held)
+                marker (datahike.store/overlay-marker (:seon.store/overlay-configuration overlay))
+                in-overlay #(filter (fn [[conn-id]] (= marker (peek conn-id))) @connections/*connections*)]
+            (d/branch! (:seon.store/connection-object overlay) :db :open-member)
+            (store/acquire-branch! overlay :open-member)
+            (is (= 2 (count (in-overlay))))
+            (is (nil? (store/release-store! overlay)))
+            (is (empty? (in-overlay)) "no connection of the overlay survives its release")
+            (is (= #{:db} (set (d/branches (:seon.store/connection-object held))))))
           (finally (store/release-store! held))))
       (finally
         (test-support/delete-recursively! (str (io/file dir) "/.."))))))
