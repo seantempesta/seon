@@ -440,6 +440,18 @@
     (when-let [commit (get-in head [:meta :datahike/commit-id])]
       (commit-database origin commit))))
 
+(defn datoms-diff
+  "The datoms of `index` at `components` held by exactly one of two database values of one store,
+  `[only-a only-b]`, each a vector of `[entity attribute value tx]` with the stored values as
+  Datahike holds them. Index nodes both values share are skipped (`datahike.api/datoms-diff`), so
+  the work follows what differs between them, on any two branches or commits."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:enum :eavt :aevt] [:vector :seon.schema/value]]
+                  [:tuple [:vector [:tuple :int :keyword :seon.schema/value :int]]
+                   [:vector [:tuple :int :keyword :seon.schema/value :int]]]]}
+  [a b index components]
+  (mapv #(mapv (fn [datom] [(:e datom) (:a datom) (:v datom) (:tx datom)]) %)
+        (d/datoms-diff a b index components)))
+
 (defn undecoded-datoms
   "The datoms of `index` at `components` over `database`, as `[entity attribute value]` triples
   with the stored values as Datahike holds them. A native-typed attribute (string, instant)

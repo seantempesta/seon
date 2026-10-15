@@ -205,6 +205,39 @@
              (finally (store/release-branch! fork))))
          (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch]))))))))
 
+;; reach-maps (2026-10-15): a many-valued attribute's map was updated from `seon.db/entities-changed-after` a basis t,
+;; valid only on the branch that held it, so a new branch read the whole attribute again for each one it changed.
+(deftest a-new-branchs-first-attribute-map-costs-what-it-changed
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           reach-attribute @#'runner/reach-attribute
+           revisions #(db/content-revisions % [:seon.fn/calls])
+           store (:seon.store/store (support/execution-handle connection))
+           branch (keyword (str "reach-map-" (id/id)))
+           request {:seon.store/store store :seon.store/branch branch
+                    :seon.cluster.registry/from (db/commit-id database) :seon.db/db database}]
+       (reach-attribute database (revisions database) :seon.fn/calls :many)
+       (is (:seon.cluster/created? (registry/fork! request)))
+       (try
+         (let [fork (store/open-branch! store branch)]
+           (try
+             (support/transacted! fork [(support/revision (db/db fork) [:seon.fn/sym 'seon.id/valid?]
+                                                          {:seon.fn/calls #{'seon.id/digest}})])
+             (let [changed (db/db fork)
+                   first-map (profile/measure #(reach-attribute changed (revisions changed) :seon.fn/calls :many))
+                   cold (profile/measure #(reach-attribute changed nil :seon.fn/calls :many))]
+               (is (= (:seon.profile/value cold) (:seon.profile/value first-map))
+                   "the branch's first map equals a full read of the attribute")
+               (is (contains? (get (:seon.profile/value first-map)
+                                   (db/q '[:find ?e . :where [?e :seon.fn/sym seon.id/valid?]] changed))
+                              'seon.id/digest)
+                   "the branch's own change is in its map")
+               (is (<= (:seon.profile/alloc-bytes first-map) (quot (:seon.profile/alloc-bytes cold) 4))
+                   "the first map on a new branch allocates at most a quarter of a full read"))
+             (finally (store/release-branch! fork))))
+         (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch]))))))))
+
 (deftest a-branch-result-is-recorded-at-its-own-heads-identity
   ;; S5 run 7: the recorder judged what the body executed against another row than its reach digest read, called
   ;; every result stale and keyed none: `seon.test.runner/current-results` found no green, and the attempt's prove

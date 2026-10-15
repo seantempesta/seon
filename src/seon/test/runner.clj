@@ -865,50 +865,31 @@
                                         :seon.schema/key :seon.schema/form]
                                        (map first) reach-fact-attributes)))
 
-(defn- reach-owner
-  "The attached connection generation and the branch of the held database value."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :map]]}
+(defn- reach-store
+  "The store of a committed `database`, shared by every branch of it; nil for an uncommitted value."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :uuid]]}
   [database]
-  (when-let [identity (db/committed-value-identity database)]
-    (assoc (dissoc identity :datahike.value/commit-id)
-           :seon.store/branch (get-in (db/schema-database database) [:config :branch]))))
-
-(defn- reach-changed-entities
-  "Entities changed between two attribute content revisions, shared by map and graph derivation."
-  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword :uuid :uuid :seon.db/basis-t]
-                  [:set :seon.db/entity-id]]}
-  [database attribute before after basis]
-  (cache/lookup ::reach-changed-entities [attribute before after]
-                #(* reach-set-element-bytes (count %))
-                #(db/entities-changed-after database basis attribute)))
-
-(defn- retire-replaced-revision!
-  "Retain this branch's attribute basis and release its previous cached attribute map."
-  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword [:enum :by-value :by-entity :many] :uuid] :nil]}
-  [database attribute shape revision]
-  (let [head [(reach-owner database) attribute shape]
-        prior (cache/present ::reach-attribute-head head)]
-    (when (not= revision (::revision prior))
-      (when prior (cache/evict! ::reach-attribute [attribute shape (::revision prior)]))
-      (cache/evict! ::reach-attribute-head head)
-      (cache/lookup ::reach-attribute-head head (constantly 128)
-                    #(hash-map ::basis (db/basis-t database) ::revision revision)))
-    nil))
+  (some-> (db/committed-value-identity database) :datahike.value/connection-id first))
 
 (defn- reach-attribute
-  "An attribute's content map, updated from changed entities on the same connection generation."
+  "An attribute's content map at its revision. Derived from the store's most
+  recent held map of it, whichever branch built it: that map's revision names a
+  commit whose datoms of the attribute it holds, so only the entities whose
+  datoms differ between that commit and `database` (`seon.db/datoms-diff`) are
+  read again. A full read when no map is held."
   {:malli/schema [:=> [:cat :seon.db/database-value [:or :nil [:map-of :qualified-keyword :uuid]]
                        :qualified-keyword [:enum :by-value :by-entity :many]]
                   [:map-of :seon.schema/value :seon.schema/value]]}
   [database revisions attribute shape]
   (let [revision (get revisions attribute)
-        identity (reach-owner database)
-        head [identity attribute shape]
-        prior (when revision (cache/present ::reach-attribute-head head))
-        previous (when (and prior (< (::basis prior) (db/basis-t database)))
-                   (cache/present ::reach-attribute [attribute shape (::revision prior)]))
+        store (reach-store database)
+        head [store attribute shape]
         derive (fn []
-                 (let [changed (when previous (reach-changed-entities database attribute (::revision prior) revision (::basis prior)))
+                 (let [held (when (and revision store) (cache/present ::reach-attribute-head head))
+                       previous (when held (cache/present ::reach-attribute [attribute shape held]))
+                       changed (when-let [held-database (when previous (db/commit-database database held))]
+                                 (into #{} (comp cat (map first))
+                                       (db/datoms-diff held-database database :aevt [attribute])))
                        datoms (if changed
                                 (mapcat #(reach-read! (db/datoms database :eavt % attribute)) changed)
                                 (reach-read! (db/datoms database :aevt attribute)))
@@ -929,7 +910,12 @@
                             (* reach-set-element-bytes (transduce (map count) + 0 (vals by))) 0)))]
     (if revision
       (let [by (cache/lookup ::reach-attribute [attribute shape revision] weigh derive)]
-        (retire-replaced-revision! database attribute shape revision)
+        (when-let [superseded (when store (cache/present ::reach-attribute-head head))]
+          (when (not= revision superseded)
+            ;; the store holds one map per attribute: the next one derives from this one
+            (cache/evict! ::reach-attribute [attribute shape superseded])
+            (cache/evict! ::reach-attribute-head head)))
+        (when store (cache/lookup ::reach-attribute-head head (constantly 128) (constantly revision)))
         by)
       (derive))))
 
@@ -1276,7 +1262,7 @@
             ;; equal programs share one index
             revisions attribute-revisions
             ;; the store's most recent derivation is the prior, whichever branch built it
-            store (some-> (db/committed-value-identity database) :datahike.value/connection-id first)
+            store (reach-store database)
             current (when revisions (cache/present ::reach-index-by-revision revisions))
             covered (into (set (keys (::digests current))) (::undigested current))
             entries
