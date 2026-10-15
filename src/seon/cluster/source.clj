@@ -1377,7 +1377,9 @@
         green (into #{} (filter #(some-> (by-sym %) green-result?)) members)
         designed (into #{} (filter #(some-> (by-sym %) ((requiring-resolve 'seon.test.runner/designed-red?)))) (filter (set product) members))
         unproven (vec (sort (remove members proofs)))
-        not-green (vec (remove (into green designed) members))
+        executed (fn [test-symbol] (let [result (by-sym test-symbol)] (and result (not (:seon.error/at result)))))
+        not-run (vec (sort (remove executed members)))
+        not-green (vec (filter executed (remove (into green designed) members)))
         red-tests (red-test-verdicts run-id results not-green (set (remove (set on-target) not-green)))
         ;; A retracted function has nothing to cover: its surviving callers are the writer's refs and the
         ;; run's reaching tests. The REPL admits an uncontracted sketch with a warning; merge is where the
@@ -1387,6 +1389,7 @@
         dangling ((requiring-resolve 'seon.task/candidate-dangling) candidate main delta)]
     (cond-> []
       (or (empty? proofs) (seq unproven)) (conj (refuse "Every proof must be a member of the named run." unproven))
+      (seq not-run) (conj (refuse "Every member needs an executed result; a test that never started is unknown, not red." not-run))
       (seq red-tests) (conj (red-test-refusal evidence red-tests))
       (seq gaps)
       (conj (uncontracted-refusal (assoc evidence :seon.error/layer :seon.source/merge

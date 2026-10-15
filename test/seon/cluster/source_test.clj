@@ -513,3 +513,23 @@
        (is (= [['tq.done-test/new]]
               (mapv #(mapv :seon.test/sym (:seon.source/red-tests %)) (source/done-refusals branch (new-red base))))
            "the stray refusal names the red test")))))
+
+(deftest results-verdict-judges-a-never-started-member-as-evidence
+  ;; a member whose recorded result never started is unknown evidence; only an executed failure is a red test
+  (test-support/with-database
+   (fn [connection]
+     (let [branch (db/db connection)
+           never-started (seon.error.refusal/error
+                          :seon.test/result-unknown
+                          {:seon.error/layer :seon.test/execution :seon.error/operation 'seon.test.runner/recorded-member-results
+                           :seon.error/message "Never started." :seon.error/expected :completed-member
+                           :seon.error/offending 'tq.rv-test/proof :seon.test/execution-refusal :seon.test/population-unknown
+                           :seon.test/error-test-symbol 'tq.rv-test/proof :seon.test/run [:seon.test.run/id "run-1"]
+                           :seon.test/run-at #inst "2026-10-14"})
+           judged {:seon.source/members #{'tq.rv-test/proof} :seon.task/proofs #{'tq.rv-test/proof}
+                   :seon.source/results [never-started] :seon.program/identities #{}
+                   :seon.test.run/id "run-1" :seon.test.run/branch :tq-rv}]
+       (doseq [[row results expected]
+               [["never started: test evidence" [never-started] [:seon.source/test-evidence-error]]
+                ["executed red: a red test" [(recorded 'tq.rv-test/proof false)] [:seon.source/red-test-error]]]]
+         (is (= expected (mapv :seon.error/type (source/results-verdict branch branch (assoc judged :seon.source/results results)))) row))))))
