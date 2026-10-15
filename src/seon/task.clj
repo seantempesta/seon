@@ -1173,16 +1173,20 @@
                         :seon.task/attempt-of [:seon.task/id handle])])))
 
 (defn task-placed!
-  "Write the task `handle` on the branch `target` as main `database` declares it, by the task writer, when the
-  branch lacks it (root created it after the branch forked): its whole declaration, children and needs by
-  identity, so a task naming one the branch lacks refuses at the writer. nil, or the refusal."
+  "Write the task `handle` on the branch `target` as `database` (main, or a chain branch) holds it now, by the task
+  writer: its whole declaration, children and needs by identity, so a task naming one the branch lacks refuses at the
+  writer, over what the branch holds of it (a task root changed since it was placed is revised; one it holds as is
+  writes nothing), and its execution. nil, or the refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/connection :seon.task/handle] [:maybe :seon.error/value]]}
   [database target handle]
-  (when-not (:db/id (db/pull (db/db target) [:db/id] [:seon.task/id handle]))
-    (let [stored (stored-tasks database :seon.task/id #{handle})]
-      (or (read-error stored)
-          (let [report (refusal-data #(written target [[:db.fn/call #'adopt-tasks-tx [(dissoc (stored handle) :db/id)] #{handle} {}]]))]
-            (when (:seon.error/at report) report))))))
+  (let [stored (stored-tasks database :seon.task/id #{handle})
+        held (task-declaration (db/db target) handle)]
+    (or (read-error stored) (read-error held)
+        (let [execution (:seon.task/execution (stored handle))
+              report (refusal-data #(written target (cond-> [[:db.fn/call #'adopt-tasks-tx [(dissoc (stored handle) :db/id)] #{handle}
+                                                              (if held {handle held} {})]]
+                                                      execution (conj [:db/add [:seon.task/id handle] :seon.task/execution execution]))))]
+          (when (:seon.error/at report) report)))))
 
 (defn assign!
   "Root assigns the task `:seon.task/assigned` to the agent `:seon.task/agent`

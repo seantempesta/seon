@@ -3,7 +3,8 @@
 
 Root's final merge of your chain refused, and you hold the merge branch it built: main's latest head plus the chain's
 merge list. Your task's `:seon.task/refusal` names why and `:seon.task/refused-tests` the tests the gate found red;
-your proofs show what is still refused after each evaluation: a red test with its failure, a file that does not
+your proofs are the tests the gate found red (or, for a refusal with none, your chain's proofs) and show what is
+still refused after each evaluation: a red test with its failure, a file that does not
 analyze cleanly (for example an unresolved symbol: a namespace form lacking the require a declaration uses), a
 declaration main and the chain both changed. Fix each here with ordinary REPL work: read the owner with
 `my.program/source`, `in-ns` and `defn` the repaired declaration, or `my.program/ns-unmap!` what must not merge.
@@ -14,5 +15,4 @@ A refusal you cannot fix here (a test that is wrong, a change that must not merg
 ## Done
 
 Every refused test is green on this branch, every changed file analyzes cleanly, no conflicted declaration is left as
-the refusal found it, and no test that is green on main is red here."
-             :proofs #{seon.step.merge-test/gate}}]
+the refusal found it, and no test that is green on main is red here."}]

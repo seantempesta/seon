@@ -512,10 +512,10 @@ contract.
 
 ### Merge: `seon.step.merge/template`
 
-Instructions and proofs in `resources/seon/tasks/seon.step.merge.edn`; root appends it after a refused final merge
-(§2.7). Its proof `seon.step.merge-test/gate` is the merge gate over the supplied branch (`seon.step.merge/gate`):
-every refused test green, every changed file analyzing cleanly, no conflicted declaration left as refused
-(`MERGE-STEP.md`).
+Instructions in `resources/seon/tasks/seon.step.merge.edn`; root appends it after a refused final merge (§2.7). Its
+proofs are the merge gate's own judgment: the tests the gate found red, run at the attempt's start on the merge branch
+like any task's proofs, else (a conflict, a file that does not analyze) the chain's last task's proofs; root's merge of
+the branch runs the whole gate again (`MERGE-STEP.md`).
 
 The user conversation (today's Survey, I1–I3) becomes a task before Design after the MVP: its proof will be that the
 user's latest answer approves the current plan.

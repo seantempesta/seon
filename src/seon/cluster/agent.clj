@@ -2259,16 +2259,20 @@
 (defn- merge-step
   "The merge step root appends after a final merge `refused` by its gate (MERGE-STEP): `seon.step.merge/template`'s
   owned members on main `database`, the merge branch the refusal kept as its `:seon.task/branch`, the refusal's type
-  and its red tests; nil when the refusal kept no merge branch (it refused before the gate built one)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.error/value] [:maybe :seon.task/task-map]]}
-  [database refused]
+  and its red tests, and its proofs: those red tests, the merge gate's own judgment, run at the attempt's start on the
+  merge branch, else `proofs`, the chain's last task's (a conflict or a file that does not analyze, which root's merge
+  of the branch judges again); nil when the refusal kept no merge branch (it refused before the gate built one)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.error/value :seon.task/proofs] [:maybe :seon.task/task-map]]}
+  [database refused proofs]
   (when-let [kept (:seon.source/candidate refused)]
-    (let [template (task/template database 'seon.step.merge/template)]
+    (let [template (task/template database 'seon.step.merge/template)
+          red (set (:seon.source/red refused))]
       (when (:seon.error/at template)
         (throw (ex-info (:seon.error/message template "The merge step's template is not ingested.") template)))
       (cond-> (assoc template :seon.task/branch kept :seon.task/refusal (:seon.error/type refused)
+                     :seon.task/proofs (if (seq red) red proofs)
                      :seon.task/instructions (str (:seon.task/instructions template) "\n\n" (refusal-section refused)))
-        (seq (:seon.source/red refused)) (assoc :seon.task/refused-tests (set (:seon.source/red refused)))))))
+        (seq red) (assoc :seon.task/refused-tests red)))))
 
 (defn- merge-chains!
   "Merge every finished chain (`chain-finishes`) to main once through cluster `handle`: when the done rule
@@ -2300,7 +2304,9 @@
                                                #(apply merge/merge! (assoc handle :seon.store/store store) key
                                                        (when (string? root) [root])))]
                     (if (:seon.error/at merged)
-                      (let [step (merge-step database merged)
+                      (let [step (merge-step database merged
+                                             (set (registry/on-branch store branch
+                                                             #(:seon.task/proofs (db/pull (db/db %) [:seon.task/proofs] [:seon.task/id h])))))
                             first-handle (db/q '[:find ?h . :in $ ?b :where [?c :seon.chain/branch ?b] [?c :seon.chain/first ?h]]
                                                database branch)]
                         (bail-chain! handle branch key h
