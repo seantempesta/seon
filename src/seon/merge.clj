@@ -413,14 +413,28 @@
         (empty? missing) entities
         :else (recur (into identities missing))))))
 
+(defn- adoption-record-tx
+  "The datoms moving `head`'s adoption records (`:seon.source/commit-id` on each `:seon.cluster/name` entity, the
+  program it is built on) to `main`'s where they differ: after `git merge main` the branch is built on main's program."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] [:or :seon.db/tx-data :seon.db/invalid-read-error]]}
+  [main head]
+  (let [records #(db/q '[:find ?n ?c :where [?e :seon.cluster/name ?n] [?e :seon.source/commit-id ?c]] %)
+        [theirs ours] (map records [main head])]
+    (or (some #(when (:seon.error/at %) %) [theirs ours])
+        (into [] (keep (fn [[cluster-name commit]]
+                         (when (not= commit (get (into {} ours) cluster-name))
+                           [:db/add [:seon.cluster/name cluster-name] :seon.source/commit-id commit])))
+              (sort theirs)))))
+
 (defn merge-main!
   "Merge main forward into chain `branch` as `git merge main` does, through `execution` (root's world: main's
   connection and its store): the program declarations main changed since the branch's merge base and the branch
   did not (`seon.program/three-way` of the base, the branch head and main's head) replace the branch's rows in one
   transaction on the branch's connection, held for this one action (`seon.cluster.registry/on-branch`), whether or
   not a running graph holds it open, and the branch's merge base advances
-  to main's head (`seon.cluster.registry/advance-base!`). Only program entities move: tasks, attempts,
-  evaluations, messages and config never do. A declaration both sides changed differently is a conflict: it stays
+  to main's head (`seon.cluster.registry/advance-base!`). Only program entities and the adoption record
+  (`adoption-record-tx`, the program the branch is now built on) move: tasks, attempts, evaluations, messages and
+  config never do. A declaration both sides changed differently is a conflict: it stays
   the branch's and is answered as `:seon.program/conflict` (by symbol) with its three digests
   (`:seon.program/conflict-digests`). Answers the moved declarations, the conflicts and main's commit, or the
   first refusal as data with nothing written.
@@ -454,8 +468,10 @@
            three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))
            delta (:seon.program/changed-on-head three)
            entities (when (seq delta) (carried-entities main head delta))
-           tx (when (vector? entities) (fn/reconcile-tx head entities (vec delta)))
-           written (when (vector? tx)
+           moved (when (vector? entities) (fn/reconcile-tx head entities (vec delta)))
+           record (when three (adoption-record-tx main head))
+           tx (cond (not (vector? record)) nil (empty? delta) record (vector? moved) (into moved record) :else moved)
+           written (when (and (vector? tx) (seq tx))
                      (db/with-branch {:seon.db/connection chain-connection}
                                      #(db/transact! chain-connection {:tx-data tx})))]
        (try
@@ -464,6 +480,7 @@
            (:seon.error/at since) since
            (not (set? changed)) changed
            (not three) (some #(when (:seon.error/at %) %) maps)
+           (not (vector? record)) record
            (and (seq delta) (not (vector? entities))) entities
            (and (seq delta) (not (vector? tx))) tx
            (and written (not (:db-after written))) written

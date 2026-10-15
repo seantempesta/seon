@@ -38,3 +38,32 @@
             "the branch holds the function in main's new file"))
       (finally
         (registry/retire-branch! {:seon.store/store store :seon.store/branch chain})))))
+
+(deftest a-forward-merge-moves-the-branch-onto-mains-adoption-record
+  ;; git merge main moves what the branch is built on: after main adopts a newer program, the chain branch's
+  ;; adoption record names main's, so its test world's overlay (`seon.test/program-overlay-tx`) compares the branch
+  ;; with the program it now holds, not its fork point's (a function main deleted since would be retracted from a
+  ;; world that never held it)
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        main-conn (:seon.db/connection target)
+        suffix (id/id)
+        _ (when-not (db/pull (db/db main-conn) [:db/id] [:seon.agent/id "root"])
+            (support/transacted! main-conn (support/agent-tx (db/db main-conn) "root")))
+        {chain :seon.chain/branch}
+        (task/chain! {:seon.db/connection main-conn :seon.store/store store}
+                     [{:seon.task/ns 'fixture.forward :seon.task/name (str "record-" suffix)
+                       :seon.task/plan "Move the chain onto main's adoption record in `seon.merge/merge-main!`."}])
+        record (fn [database] (into {} (db/q '[:find ?n ?c :where [?e :seon.cluster/name ?n] [?e :seon.source/commit-id ?c]]
+                                            database)))
+        [cluster-name] (first (record (db/db main-conn)))
+        on-chain (fn [f] (registry/on-branch store chain f))]
+    (try
+      (support/transacted! main-conn [[:db/add [:seon.cluster/name cluster-name] :seon.source/commit-id
+                                       (db/commit-id (db/db main-conn))]])
+      (let [adopted (record (db/db main-conn))
+            merged (merge/merge-main! target chain)]
+        (is (nil? (:seon.error/type merged)) "the forward merge is accepted")
+        (is (= adopted (record (on-chain db/db))) "the branch is built on main's adoption record"))
+      (finally
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch chain})))))
