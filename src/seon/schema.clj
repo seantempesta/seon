@@ -608,7 +608,7 @@
          prepared (bound-forms definitions predicate-functions)
          registry
          (mr/lazy-registry
-          (mr/composite-registry (m/default-schemas) retained)
+          (mr/composite-registry internal/default-schemas retained)
           (fn [identity scope]
             (when-let [definition (get prepared identity)]
               ((if (qualified-symbol? identity) m/function-schema m/schema)
@@ -630,7 +630,7 @@
            :seon.error/throwable failure})))
      (mr/simple-registry
       (reduce (fn [entries identity] (assoc entries identity (mr/schema registry identity)))
-              (merge retained (m/default-schemas))
+              (merge retained internal/default-schemas)
               (keys definitions))))))
 
 (declare malli-form?)
@@ -771,7 +771,7 @@
 
 (defn- reference-registry
   [canonical-keys fallback]
-  (let [defaults (mr/fast-registry (m/default-schemas))
+  (let [defaults (mr/fast-registry internal/default-schemas)
         references
         (into {}
               (comp
@@ -1319,7 +1319,7 @@
 ;; false. A placeholder with no child bound admits a reference used as a type.
 (defonce ^:private structural-registry
   (let [defaults (mr/fast-registry
-                  (assoc (m/default-schemas) :fn
+                  (assoc internal/default-schemas :fn
                          (m/-simple-schema {:type :fn :pred any? :min 1 :max 1})))]
     (mr/composite-registry
      defaults
@@ -1495,7 +1495,7 @@
         ;; `projection-registry` does.
         registry (or registry
                      (mr/lazy-registry
-                      (m/default-schemas)
+                      internal/default-schemas
                       (fn [reference scope]
                         (when-let [form (get compiled-forms reference)]
                           ((if (qualified-symbol? reference) m/function-schema m/schema)
@@ -1710,7 +1710,7 @@
         ;; Every name resolves, so only how `form` names its references is
         ;; judged; a predicate is a callable, never a reference.
         registry (mr/lazy-registry
-                  (m/default-schemas)
+                  internal/default-schemas
                   (fn [identity _]
                     (cond (qualified-symbol? identity) (do (vswap! named conj identity) (m/schema :any))
                           (qualified-keyword? identity) (m/schema :any))))

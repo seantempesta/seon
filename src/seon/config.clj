@@ -489,7 +489,7 @@
   {:malli/schema [:=> [:cat] :seon.schema/projection]}
   []
   (let [forms (schema.edn/packaged-forms)
-        registry (mr/composite-registry (m/default-schemas)
+        registry (mr/composite-registry internal/default-schemas
                                         (mr/fast-registry forms))
         projection {:seon.schema.projection/forms forms
                     :seon.schema.projection/registry registry}

@@ -1759,7 +1759,7 @@
        (into #{}
              (keep (fn [[k definition]]
                      (when (and (not= k :seon.error/base)
-                                (= :and (m/type (mr/schema (:seon.schema.projection/registry projection) k)))
+                                (#{:and :merge} (m/type (mr/schema (:seon.schema.projection/registry projection) k)))
                                 (internal/extends-schema?
                                  (mr/schema (:seon.schema.projection/registry projection) k) :seon.error/base))
                        k)))

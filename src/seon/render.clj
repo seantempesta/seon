@@ -390,7 +390,7 @@
        (loop [pending (list (canonical-name projection schema-key)) seen #{}]
          (if-let [k (first pending)]
            (let [form (get forms k)
-                 named-parents (when (and (vector? form) (= :and (first form)))
+                 named-parents (when (and (vector? form) (#{:and :merge} (first form)))
                            (map #(canonical-name projection %) (filter qualified-keyword? (rest form))))]
              (recur (into (rest pending) (remove seen) named-parents) (into seen named-parents)))
            seen))))))

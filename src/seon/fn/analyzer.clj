@@ -9,6 +9,7 @@
             [edamame.core :as edamame]
             [clojure.walk :as walk]
             [malli.core :as m]
+            [seon.schema.internal :as internal]
             [clj-kondo.impl.version :as kondo.version]
             [babashka.process :as process]
             [seon.cache :as cache]
@@ -951,7 +952,7 @@
 ;; Inside `[:fn …]` a symbol is a predicate and resolves as source does.
 (def ^:private malli-schema-symbols
   "The simple symbols Malli's default registry names, derived once."
-  (into #{} (filter symbol?) (keys (m/default-schemas))))
+  (into #{} (filter symbol?) (keys internal/default-schemas)))
 
 (defn qualify-schema-symbols
   "The authored contract `form` with its symbols qualified through the namespace context, if any."

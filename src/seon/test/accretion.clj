@@ -6,7 +6,8 @@
             [malli.core :as m]
             [malli.generator :as mg]
             [malli.registry :as mr]
-            [seon.render.value :as render.value]))
+            [seon.render.value :as render.value]
+            [seon.schema.internal :as internal]))
 
 (defn generatable?
   "True when Malli can construct a generator for `schema` with `options`."
@@ -41,7 +42,7 @@
   (task 0dfdcc8e447e)."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [forms row]
-  (let [registry (mr/composite-registry (m/default-schemas)
+  (let [registry (mr/composite-registry internal/default-schemas
                                         (mr/fast-registry forms))]
     (assoc row :seon.schema/generatable?
            (try

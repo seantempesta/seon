@@ -630,7 +630,7 @@
             (boolean
              (when-let [referenced (get forms form)]
                (valued-as? referenced (conj seen form))))
-            (and (vector? form) (= :and (first form)))
+            (and (vector? form) (#{:and :merge} (first form)))
             (boolean (some #(valued-as? % seen) (remove map? (rest form))))
             (and (vector? form) (= :or (first form)))
             (let [alternatives (remove map? (rest form))]

@@ -13,6 +13,11 @@
             [malli.registry :as mr]
             [malli.util :as mu]))
 
+(def default-schemas
+  "Malli's default schemas and `malli.util/schemas` (`:merge`, `:union`, `:select-keys`),
+  the one base registry every Seon schema compiles in."
+  (merge (m/default-schemas) (mu/schemas)))
+
 (def ^:private undefined-types #{:any :some})
 
 (defn fold-walk
@@ -141,11 +146,13 @@
             (let [node-id (or (reference-id node) node)]
               (cond
                 (contains? seen node-id) false
+                ;; A `:merge` is a ref schema whose deref is the merged map, which no
+                ;; longer names its parents: read its children first.
+                (#{:and :merge} (m/type node))
+                (boolean (some #(extends? % (conj seen node-id)) (m/children node)))
                 (m/-ref-schema? node)
                 (or (= ancestor (m/-ref node))
                     (extends? (m/deref node) (conj seen node-id)))
-                (= :and (m/type node))
-                (boolean (some #(extends? % (conj seen node-id)) (m/children node)))
                 :else false)))]
     (extends? compiled #{})))
 
@@ -461,7 +468,7 @@
    (try
     (let [registry (or (:registry compile-options)
                        (mr/composite-registry
-                        (m/default-schemas)
+                        default-schemas
                         (mr/fast-registry (assoc schemas k v))))]
       (m/schema k (assoc compile-options :registry registry)))
     nil
