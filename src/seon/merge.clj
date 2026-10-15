@@ -416,7 +416,7 @@
 (defn merge-main!
   "Merge main forward into chain `branch` as `git merge main` does, through `execution` (root's world: main's
   connection and its store): the program declarations main changed since the branch's merge base and the branch
-  did not (`seon.program/three-way` of the base, the branch head and main's head) replace the branch's rows in one
+  did not (`seon.program/three-way` of the base, the branch head and main's head over what main changed) replace the branch's rows in one
   merge commit on the branch's connection whose parents add main's head (`:parents`, Datahike's `merge-db!`), held
   for this one action (`seon.cluster.registry/on-branch`), whether or not a running graph holds it open. The merge
   base is Datahike's commit graph (`seon.cluster.source/merge-base`), so after the merge it is main's head and
@@ -449,10 +449,10 @@
            base (cond (:seon.error/at base-commit) base-commit
                       current? nil
                       :else (db/commit-database head base-commit))
+           ;; only what main changed since the base can move or conflict: the three-way over that set alone
+           ;; reads the branch's digest of each, which is the conflict test (a branch-only change stays its own)
            changed (when (and base (not (:seon.error/at base)))
-                     (let [ours (program/own-changed-identities base head source/merge-bound)
-                           theirs (program/changed-identities base main source/merge-bound)]
-                       (or (some #(when (:seon.error/at %) %) [ours theirs]) (into ours theirs))))
+                     (program/changed-identities base main source/merge-bound))
            maps (when (set? changed)
                   (mapv #(program/digest-map % (assoc source/merge-bound :seon.program/identities changed)) [base head main]))
            three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))

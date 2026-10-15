@@ -53,7 +53,7 @@ the right answer is 24, and three live attempts failed, one per reader patched.
 | R2 | Haiku | call-site ledger, src + test + script + resources + docs/skills, each row verified | n/a | done, a41868d3a |
 | C | Sonnet | REPL confirmation of the approach on real data before any implementation (section below) | numbers below | done, claims 1-5 confirmed with corrections (this commit) |
 | 1 | Opus | fork: generation + small parents record per commit; `datahike.versioning/merge-base` | fork tests: fork, after merge from main, criss-cross | done, fork `593a8276` (pushed; submodule pointer not bumped) |
-| 2 | Opus | `merge-main!` writes a merge commit; one Seon reader of the merge base; every ledger reader converts | `seon.merge-forward-test/after-a-forward-merge-the-branch-changed-only-its-own-declarations`; S5: 24, `done-refusals` [] | waiting |
+| 2 | Opus | `merge-main!` writes a merge commit; one Seon reader of the merge base; every ledger reader converts | `seon.merge-forward-test/after-a-forward-merge-the-branch-changed-only-its-own-declarations`; S5: 24, `done-refusals` [] | slice 1 done (merge commit, reader, program-change readers; proof red→green; S5 24 and []); attempt-row (`:seon.task/merge-base`) readers open, blocked on the fork-point question in the Phase 2 notes |
 | 3 | Opus | own change by address-skipping index diff; history walks (`commit-at-t`, `basis-revisions`, `commit-facts`) replaced | `seon.profile/measure` on `merge-main!` and the step's change set, parent vs change | waiting |
 | 4 | Sonnet | delete what is left: base refs, `advance-base!`, the 125 `:base/*` branches, `base-t`, fork-commits, `change-base`, stored merge-base copies | ledger all converted/deleted; HEAD boots | waiting |
 
@@ -430,3 +430,75 @@ completed it. Heads: main `:cluster-default` `6ad05d39`, chain `:chain-f1f6dc8e6
    change commit ids' content and would need the writer to thread the generation, as it threads `known-head-cid`.
    Instead an ordinary commit reads its parent's small record. On S3 that is one extra GET per commit; threading the
    generation in the writer loop removes it, which is a follow-up if S3 matters.
+
+### Phase 2
+
+Lane `omb-p2` (Opus), 2026-10-15. Slice 1 is `331eec6ec` (see the ledger's "P2 slice 1" cells). Slice 2
+(the commit carrying this line) takes Argon's cause 2B (`argon-hunts-b.md`, `0dd5a91e6`): `merge-main!`'s
+three-way runs over what main changed since the merge base alone; the branch's digest of each is the conflict
+test, so the branch's own change is not walked or digested there at all. Cause 3D (`compare-branch` reading
+`branch-base-t`) went with slice 1; its own-change walk still starts at the fork's base-t, so its cost still
+follows the branch's history until phase 3's diff.
+
+**What is true now.**
+- `seon.merge/merge-main!` writes its one transaction on the chain with `:parents #{main's head}`. The merge base
+  of the chain and main is then main's head, and nothing records it. A branch whose merge base already is main's
+  head is up to date: nothing is written.
+- One reader, `seon.cluster.source/merge-base` (two commit ids, `datahike.api/merge-base`, cached in
+  `seon.cache` under `::merge-base` by the sorted pair). Datahike's named refusals (criss-cross, unknown commit or
+  branch, commit graph disabled) answer as a `:seon.program/digest-map-refusal`; no common ancestor too.
+  `merge-base-database` opens the value; `branch-merge-base` takes a branch value and its fork entity's target.
+- Own change, `seon.program/own-changed-identities`: the walk starts at the branch's own fork entity's
+  `:seon.branch/base-t`, read on the branch itself, which is a position on its own lineage (finding 1); then the
+  identities whose digest differs between the merge-base value and the head are kept. Identities come from the
+  entities (`declaration-changed-identities` reads them from history), as C1's correction requires.
+- `seon.cluster.registry/retained-before` counts each work branch's merge base as a named commit, so a
+  collection's cutoff moves back to it and every commit the graph walks to reach it survives. This replaces what
+  the base ref did for retention (`an-idle-branch-keeps-the-commit-it-forked-from-through-collection` now goes
+  through `retained-before`, as production collection does via `seon.maintenance`).
+
+**Decisions.**
+1. **`:seon.branch/base-t` is still read, on the branch only, as the walk start, until phase 3.** It is never
+   compared with another branch's database: the cross-branch readers (`branch-base-t`, `advanced-base-t`, the
+   advanced fork entity `accept-merge!` wrote on main) are deleted, and a nested fork inherits its parent's own
+   base-t only. Phase 3's diff of two values removes the walk and with it the last reader of base-t.
+2. **`:seon.branch/target` stays on the fork entity.** It is a branch's own fact naming its target branch (a name,
+   not a position), read by `branch-merge-base`, `my.agent/create-branch!` and `my.program/head-comparison`. The
+   graph cannot derive it: a merge base needs to know which branch to meet. Phase 4 shrinks the fork entity to
+   `{name target}` when `base-t` and `fork-id` go.
+3. **A branch with no fork entity has no merge base to judge against** (`branch-merge-base` nil): the cluster's
+   own branch keeps the publication base (`seon.test/change-base`'s `recorded`).
+
+**What is left, and why it stopped there (rule 9 finding).** The attempt-row rows of the ledger
+(`merge-tx`, `merged`, `chain-row`, `assignment-row`, `merge-onto`, `task/attempt-tx`, `relaunched`,
+`attempt-rows-tx`, `assigned-obligations`, `write-merge-base!`, `start-attempt!`, `fork-attempt!`,
+`lifecycle-facts`, `assignment-actions`, `apply-lifecycle!`, `my.root/merge-requests`) feed
+`seon.merge/squash-merge`, the three-way of a chain's **cluster facts** (tasks, attempts). A forward merge moves
+program entities only, never cluster facts, so for those facts the chain has NOT merged main at the forward
+merge's commit: the correct squash base is still the fork point. Reading the graph's merge base there would
+take main's changes to a task between the fork and the forward merge as the chain's changes and overwrite main.
+Those readers therefore still read the stored fork commit (attempt row, else the base ref, which nothing advances
+any more, so it now always names the fork commit). Options for root:
+- (a) **Keep the fork point as its own concept for cluster facts**: squash-merge's base is the fork commit,
+  derived from the graph (the first commit of the branch's first-parent lineage written on another branch), and
+  the attempt-row copy and base ref are deleted. Cost: a first-parent walk per chain, cacheable by head id.
+- (b) **Make the forward merge carry cluster facts too** (a full `git merge main`), so the graph base is right
+  for both; contradicts "tasks never move" and moves main's tasks onto chains.
+- (c) **Phase 3's diff for squash-merge with base = fork point** and the program three-way with base = merge
+  base: two bases by design. Recommended: (a) — the fork point is a real, different fact for facts that never
+  merge forward, and it comes from the graph, so nothing is stored.
+
+**Inherited by phase 3.** `own-changed-identities`'s walk (and `merge-main!`'s `theirs` walk on main from the base's
+t, which is cross-lineage only in the rare case that the base is a chain commit, after the chain merged into
+main) become the diff of two values; `squash-merge`'s walk; `commit-at-t`.
+**Inherited by phase 4.** Base refs (`base-branch`, `base-commit-id`, `advance-base!`, now with no caller in
+`seon.merge` and `seon.cluster.source`), the 125 stored `:base/*` branches, `:seon.task/merge-base` with the
+attempt rows (after root rules on the options above), `fork-id`/`base-t`, the `:merge-base` action op. Phase 0's
+`every-agent-start-has-a-task` is still red on HEAD and here (its `chain-world` teardown, `seon.cluster.db-flow-test`, a file outside this slice).
+
+**Measured.** S5 (`:chain-f1f6dc8e6652`, JVM-mode read-only on default; base = main's commit at the last forward
+merge, the old base ref `6ad046d3`, because the chain has no merge commit yet and its graph base is still the fork
+point `6acf6fed`): **24 identities, `done-refusals` []** (HEAD: 685, `:working`). Change set warm 27.6 ms / 53 MB
+(705 touched, 24 kept) against HEAD's 12.8 ms / 17 MB for the wrong 685; the probe request that judged the step
+on HEAD's 685 cost 2.4 s / 8.7 GB. `merge-main!` was not timed on default (it transacts).
+
