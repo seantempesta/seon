@@ -16,6 +16,11 @@ its owning section.
 
 **Phase status:** plan corrected (C1-C13 folded in); P1 done (88474708b); P2 done (chain routes, counted acquisition); P3 next. P4-P6 and D2 open.
 
+**Live check after P2 (root, 2026-10-15, default 9a8d09431 → 8592c669d):** `my.root/run!` alone started attempts on a chain branch with no graph (P2 proven live). Seon.ref chain `chain-b7ab51e090d5` merged as 00d3efdd3. What the run showed P3-P4 must cover:
+- `seon.task/chain!` wrote a task given `:execution :held` as running and launched attempt 1 at once with main's config (provider off, `:stalled`, 0 calls): the race P4 removes.
+- A merge branch (`seon.cluster/candidate-gate!` forks main) reads main's config, not the chain's, so the merge step's agent ran with no provider and stalled until root applied config to `:merge-b953f374fe17` by hand. P4's desired config must converge on every branch the chain's attempts run on, its merge branches included.
+- `bin/seon config apply ... --branch` still exits 1 on its response contract after a successful write (§5).
+
 **Today:** `seon.cluster.agent/run-pass!` is already a level-triggered derivation: `launch-facts`, then
 `launch-actions`, then `apply-actions!`. What fails is around it. Wakes are edge-triggered (a chain branch has a
 route only while a graph runs there), the environment (config) is applied after the fact, and nothing validates that
