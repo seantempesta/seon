@@ -44,7 +44,12 @@ The change, from the data outward:
 6. **Root merges the repaired branch.** A merge step that ends done is the chain's last task: root's pass merges its
    attempt's branch (the merge branch) like any finished chain; the gate runs again on main's latest head, so a moved
    main is judged again, and a new refusal holds a new merge step the same way.
-7. **Root's context shows held merge steps.** `my.root/instructions` carries the law; `my.root/merge-steps` lists each held merge step with
+7. **A merge step starts only by root's run.** It is never advanced into: a rerun predecessor's done merges again
+   from main's latest head (`seon.cluster.agent/chain-ends` skips a task whose next is a merge step,
+   `seon.cluster.agent/chain-finishes` merges it), the held step stays held and is moot once that merge publishes; a new
+   refusal appends a new merge step after it, the newest the one to run (S5 run 14, 2026-10-15: an advance started
+   the held step).
+8. **Root's context shows held merge steps.** `my.root/instructions` carries the law; `my.root/merge-steps` lists each held merge step with
    its `my.root/run!` form.
 
 ## Phases

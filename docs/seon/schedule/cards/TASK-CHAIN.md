@@ -244,7 +244,11 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    `:seon.task/refused-tests`, `:held`, and the last task's `:seon.task/next` to it. Nothing starts it; root runs it
    with `my.root/run!`, its agent works on the merge branch, its proof is the merge gate, and when it is done root
    merges that branch like any finished chain (§2.6), the gate judging main's latest head again (`MERGE-STEP.md`).
-   A merge branch is retired only by the chain's publication or root's abandonment. Root processes it once: first the problem task on main (its
+   A merge branch is retired only by the chain's publication or root's abandonment. **A merge step is never advanced
+   into:** when root reruns the task before a held merge step and it ends done, that done is a final merge again (a new
+   merge branch from main's latest head, §2.6), and the held step stays held: it is moot once the rerun merges, and a new
+   refusal appends a new merge step after it (the newest is the one to run; publication retires every merge branch the
+   chain's tasks name). Root processes it once: first the problem task on main (its
    identity derived from the terminal attempt, so a repeat writes no second one), then on the chain branch in one
    transaction the attempt's outcome `:closed` with its reason and the task's `:execution :held`. Two databases cannot
    share one transaction; this order makes each stopping point derivable on restart without an outbox. Nothing else

@@ -1818,8 +1818,9 @@
 
 (defn- chain-ends
   "The finished attempts root advances past, read on main `database` among the store's `branches`: on each chain's
-  `:seon.task/next` path, every attempt that ended :done holding no outcome, whose task has a next (a last task's
-  done goes to the merge), with its chain branch, task and end commit."
+  `:seon.task/next` path, every attempt that ended :done holding no outcome, whose task has a next that is no merge
+  step (a last task's done, or one before a held merge step, goes to the merge: `chain-finishes`), with its chain
+  branch, task and end commit."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.registry/branches]
                   [:vector [:map [:seon.chain/branch :seon.chain/branch] [:seon.task/assignment :seon.task/assignment]
                             [:seon.task/assigned :seon.task/handle] [:seon.task.attempt/commit :seon.task.attempt/commit]]]]}
@@ -1830,7 +1831,10 @@
                        (when-let [head (when (contains? branches branch) (db/branch-database database branch))]
                          (try
                            (let [rows (db/q '[:find ?k ?h ?c :in $ [?h ...]
-                                              :where [?t :seon.task/id ?h] [?t :seon.task/next _] [?a :seon.task/attempt-of ?t]
+                                              ;; a merge step (a next naming its own branch) is never advanced into:
+                                              ;; only root's run! starts it (MERGE-STEP); its predecessor's done merges
+                                              :where [?t :seon.task/id ?h] [?t :seon.task/next ?n] (not [?n :seon.task/branch _])
+                                              [?a :seon.task/attempt-of ?t]
                                               [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end :done]
                                               [?a :seon.task.attempt/commit ?c] (not [?a :seon.task/outcome _])]
                                             head (task/chain-handles head first-handle))]
@@ -2207,9 +2211,10 @@
 
 (defn- chain-finishes
   "The terminal attempts root merges, read on main `database` among the store's `branches`: on each chain's
-  `:seon.task/next` path, every attempt of a task with no next that ended :done holding no outcome (a refused merge
-  closes it), which main does not hold yet (its one merge copies it there), with its chain branch, task and end
-  commit."
+  `:seon.task/next` path, every attempt of a task with no next, or whose next is a merge step (MERGE-STEP: a rerun
+  predecessor's done merges again and the held step stays held), that ended :done holding no outcome (a refused
+  merge closes it), which main does not hold yet (its one merge copies it there), with its chain branch, task, end
+  commit and the branch its row names."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.registry/branches]
                   [:vector [:map [:seon.chain/branch :seon.chain/branch] [:seon.task/assignment :seon.task/assignment]
                             [:seon.task/assigned :seon.task/handle] [:seon.task.attempt/commit :seon.task.attempt/commit]
@@ -2220,14 +2225,20 @@
     (into [] (mapcat (fn [[branch first-handle]]
                        (when-let [head (when (contains? branches branch) (db/branch-database database branch))]
                          (try
-                           (let [last-handle (peek (task/chain-handles head first-handle))
-                                 ;; each attempt as the branch its row names holds it (`seon.task/branch-attempts`)
-                                 rows (task/branch-attempts head branch last-handle [:seon.task/outcome])]
-                             (when (map? rows) (throw (ex-info (:seon.error/message rows "db<->flow could not read a chain's ends.") rows)))
-                             (for [{k :seon.task/assignment c :seon.task.attempt/commit works-on :seon.task/branch :as row} rows
+                           ;; the tasks whose done merges: the last, and one followed by a merge step (a next naming its
+                           ;; own branch), which only root's run! starts (MERGE-STEP)
+                           (let [merging (filter #(let [after (get-in (db/pull head [{:seon.task/next [:db/id :seon.task/branch]}] [:seon.task/id %])
+                                                                      [:seon.task/next])]
+                                                    (or (nil? after) (:seon.task/branch after)))
+                                                 (task/chain-handles head first-handle))]
+                             (for [h merging
+                                   ;; each attempt as the branch its row names holds it (`seon.task/branch-attempts`)
+                                   :let [rows (task/branch-attempts head branch h [:seon.task/outcome])]
+                                   {k :seon.task/assignment c :seon.task.attempt/commit works-on :seon.task/branch :as row}
+                                   (if (map? rows) (throw (ex-info (:seon.error/message rows "db<->flow could not read a chain's ends.") rows)) rows)
                                    :when (and (= :done (:seon.task.attempt/end row)) c (not (:seon.task/outcome row))
                                               (nil? (:db/id (db/pull database [:db/id] [:seon.task/assignment k]))))]
-                               {:seon.chain/branch branch :seon.task/assignment k :seon.task/assigned last-handle
+                               {:seon.chain/branch branch :seon.task/assignment k :seon.task/assigned h
                                 :seon.task.attempt/commit c :seon.task/branch (or works-on branch)}))
                            (finally (source/release! [head]))))))
           (sort chains))))

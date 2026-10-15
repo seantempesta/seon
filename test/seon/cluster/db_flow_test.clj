@@ -2332,3 +2332,64 @@
                 (doseq [kept (remove before (merge-branches store))]
                   (release-chain! routing store kept))
                 (release-chain! routing store branch))))))))))
+
+(deftest ^{:seon.test/long "One chain world: a refused final merge holds a merge step, root reruns the step's predecessor, which ends done again, and root's pass merges it again; about six db<->flow passes." :seon.test/long-ms 60000}
+  a-rerun-predecessor-of-a-held-merge-step-merges-and-the-step-stays-held
+  ;; MERGE-STEP, S5 run 14: a held merge step starts only by root's run!. Root reruns the task before it; that task's
+  ;; done is a final merge again (a new merge branch from main's latest head), never an advance into the held step
+  (binding [*space* "tq.mergererun"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"u" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (with-merge-template! connection)
+          (let [routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                   [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Do c."
+                                     :seon.task/proofs #{(proof "u")}}])
+                branch (:seon.chain/branch chain)
+                [last-task] (:seon.task/handles chain)
+                before (merge-branches store)
+                context {:seon.db/connection connection :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                         :my.program/base-ctx (:seon.sci.eval/ctx handle) :seon.store/store store}
+                end-of (fn [on k] (await-on! on #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k]
+                                                         [?a :seon.task.attempt/end ?e]]
+                                                       (db/db on) k)
+                                             ::ended))]
+            (test-support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                                                :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
+                                                                                              (db/db connection) connection)
+                                                :seon.batch/sink (seon.batch/sink)
+                                                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                                :seon.agent/id "tq-chain-author"})
+                                  (symbol (str *space* "-proofs"))
+                                  "(clojure.test/deftest proves-u (clojure.test/is (= 1 2)))\n")
+            (try
+              (pass! handle routing)
+              (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
+                (is (= :done (end-of on-branch (id/id [last-task 1]))) "the chain's last task ends done")
+                (pass! handle routing)
+                (let [step (get-in (db/pull (db/db on-branch) [{:seon.task/next [:seon.task/id]}] [:seon.task/id last-task])
+                                   [:seon.task/next :seon.task/id])
+                      rerun (id/id [last-task 2])]
+                  (is (string? step) "the refused merge holds a merge step")
+                  (is (= 2 (:seon.task.attempt/number ((requiring-resolve 'my.root/run!) {:my.program/context context :seon.task/assigned last-task})))
+                      "root reruns the step's predecessor")
+                  (pass! handle routing)
+                  (is (= :done (end-of on-branch rerun)) "the rerun ends done")
+                  (pass! handle routing)
+                  (pass! handle routing)
+                  (let [chain-db (db/db on-branch)]
+                    (is (= :held (:seon.task/execution (db/pull chain-db [:seon.task/execution] [:seon.task/id step])))
+                        "the held merge step stays held")
+                    (is (empty? (db/q '[:find ?a :in $ ?h :where [?t :seon.task/id ?h] [?a :seon.task/attempt-of ?t]] chain-db step))
+                        "and starts no attempt")
+                    (is (str/starts-with? (str (:seon.task/reason (db/pull chain-db [:seon.task/reason] [:seon.task/assignment rerun])))
+                                          "The final merge refused it")
+                        "the rerun's done is a final merge again: main's proof is still red, so it refuses"))))
+              (finally
+                (doseq [kept (remove before (merge-branches store))]
+                  (registry/retire-branch! {:seon.store/store store :seon.store/branch kept}))
+                (release-chain! routing store branch))))))))))
