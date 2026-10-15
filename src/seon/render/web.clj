@@ -2188,26 +2188,42 @@
           (= (lineage retained) (lineage database))
           (> (long (db/basis-t retained)) (long (db/basis-t database)))))))
 
+(defn- agent-branch
+  "The branch agent `agent-id` works on, as its own row's `:seon.agent/branch` says: read on main `database`, else
+  on each branch main names for an attempt (`:seon.task/branch`) or a chain (`:seon.chain/branch`), where an attempt
+  agent's row lives; nil when none holds the agent. A deleted branch is read at its head while the store keeps it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :seon.store/branch]]}
+  [database agent-id]
+  (let [home '[:find ?branch . :in $ ?id :where [?agent :seon.agent/id ?id] [?agent :seon.agent/branch ?branch]]
+        named (db/q '[:find [?branch ...] :where (or [_ :seon.task/branch ?branch] [_ :seon.chain/branch ?branch])]
+                    database)]
+    (or (db/q home database agent-id)
+        (some (fn [branch]
+                (when-let [there (or (some-> (db/branch-connection database branch) db/db)
+                                     (db/branch-database database branch))]
+                  (db/q home there agent-id)))
+              (sort named)))))
+
 (defn- agent-connection
   "The connection an agent's page renders through: the branch the agent runs on, where its evaluations, test runs
   and task rows are written, since a render reads the database from its bound connection. A running agent's own
-  (`seon.cluster.agent/started-custody`), else this process's open connection to the branch `database` names for
-  it (`seon.db/branch-connection`); nil when neither is open."
+  (`seon.cluster.agent/started-custody`), else this process's open connection to its branch (`agent-branch`,
+  `seon.db/branch-connection`); nil when neither is open."
   {:malli/schema [:=> [:cat [:maybe :seon.agent/routing] :seon.db/database-value :seon.agent/id]
                   [:maybe :seon.db/connection]]}
   [routing database agent-id]
   (or (some-> routing (cluster.agent/started-custody agent-id) (get-in [:seon.turn.loop/cluster :seon.db/connection]))
-      (when-let [branch (db/q '[:find ?branch . :in $ ?id
-                                :where [?agent :seon.agent/id ?id] [?agent :seon.agent/branch ?branch]]
-                              database agent-id)]
-        (db/branch-connection database branch))))
+      (some->> (agent-branch database agent-id) (db/branch-connection database))))
 
 (defn- agent-database
-  "The database an agent's page renders: its branch's (`agent-connection`), else `database`."
+  "The database an agent's page renders: its branch's through its open connection (`agent-connection`), else that
+  branch's committed head (an ended agent's branch, open to no one), else `database`."
   {:malli/schema [:=> [:cat [:maybe :seon.agent/routing] :seon.db/database-value :seon.agent/id]
                   :seon.db/database-value]}
   [routing database agent-id]
-  (or (some-> (agent-connection routing database agent-id) db/db) database))
+  (or (some-> (agent-connection routing database agent-id) db/db)
+      (some->> (agent-branch database agent-id) (db/branch-database database))
+      database))
 
 (defn- derive-page!
   "Derive on this caller, sharing immutable call evidence with every reader.
@@ -2222,7 +2238,9 @@
   (let [;; an agent's page reads its own world: the branch it runs on, through that branch's connection
         connection (when (string? registration-key)
                      (agent-connection (:seon.agent/routing handle) database registration-key))
-        database (if connection (db/db connection) database)
+        database (cond connection (db/db connection)
+                       (string? registration-key) (agent-database nil database registration-key)
+                       :else database)
         handle (cond-> handle connection (assoc :seon.db/connection connection))
         cache (render/shared-cache (:seon.sci.eval/ctx handle))
         retained @cache
@@ -3152,7 +3170,7 @@
   query's `basis` (else the head), and the value at the query's cursor."
   {:malli/schema [:=> [:cat :seon.render.web/service :seon.agent/id :map] :map]}
   [{connection :seon.store/connection-object :as service} agent-id query]
-  (let [head (db/db connection)
+  (let [head (agent-database (:seon.agent/routing service) (db/db connection) agent-id)
         basis (or (some-> (get query "basis") parse-long) (db/basis-t head))
         database (db/as-of head basis)
         composed (context/model-context database
@@ -3218,8 +3236,8 @@
          :seon.render/page
          [[:section {:class "seon-session-page"}
            (transcript/render-agent-header
-            (session-controls (debug-turn-request (db/db connection) connection agent-id
-                                                  (:seon.sci.admit/caps service) service)))
+            (session-controls (debug-turn-request (agent-database (:seon.agent/routing service) (db/db connection) agent-id)
+                                                  connection agent-id (:seon.sci.admit/caps service) service)))
            [:details {:class "seon-session-context"
                       (keyword "data-on:toggle")
                       (str "el.open && @get('" (route/path ::route/agent-debug {:id agent-id} {:sent "true"}) "')")}
@@ -3297,6 +3315,40 @@
           (debug-response (assoc service ::unowned-namespace namespace-name)
                           namespace-name nil request))))))
 
+(defn- missing-agent
+  "The refusal answering a page for `agent-id`, which no branch main `database` names holds: the branches main names
+  for attempts and chains that the store no longer holds, where an ended attempt's agent lived."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :seon.error/value]}
+  [database agent-id]
+  (let [named (db/q '[:find [?branch ...] :where (or [_ :seon.task/branch ?branch] [_ :seon.chain/branch ?branch])]
+                    database)]
+    (seon.error.refusal/diagnostic
+     (java.util.Date.) :seon.render.web/render `missing-agent
+     {:seon.error/message "No agent with this id on main or on any branch main names for an attempt or a chain."
+      :seon.error/fix "An ended attempt's agent lives on its branch, deleted at its merge unless :seon.config.agent/keep-ended-branches? holds; its attempt row on main remains."
+      :seon.error/member :seon.agent/id
+      :seon.error/expected :seon.agent/id
+      :seon.error/offending agent-id
+      :seon.render.web/deleted-branches (vec (sort (remove (db/branches database) named)))})))
+
+(defn- missing-agent-response
+  "A 404 page showing `missing-agent` through the value printer's HTML face."
+  {:malli/schema [:=> [:cat [:map [:seon.store/connection-object :seon.store/connection-object] [:seon.agent/id :seon.agent/id]]
+                       :seon.agent/id]
+                  [:map [:status :int] [:headers [:map-of :string :string]] [:body :string]]]}
+  [{connection :seon.store/connection-object root :seon.agent/id} agent-id]
+  (let [database (db/db connection)]
+    (assoc (html-response
+            (shell {:seon.agent/id root
+                    ::agent-header? true
+                    :seon.render.web/feed-url (route/path ::route/feed {:id root})
+                    :seon.render/page [[:section {:class "seon-missing-agent"}
+                                        [:h1 agent-id]
+                                        (value/html {:seon.render/value (missing-agent database agent-id)
+                                                     :seon.db/db database
+                                                     :seon.render.value/root [::missing-agent agent-id]})]]}))
+           :status 404)))
+
 (defn- agent-alias-response
   [{connection :seon.store/connection-object :as service} debug? request]
   (let [agent-id (get-in request [:path-params :id])
@@ -3306,7 +3358,7 @@
       (if debug?
         (debug-response service namespace-name agent-id request)
         (page-response service agent-id))
-      (not-found request))))
+      (missing-agent-response service agent-id))))
 
 (defn- health-response
   "The health page: the cluster's health report through its HTML face, then

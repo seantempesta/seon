@@ -440,6 +440,14 @@
     (when-let [commit (get-in head [:meta :datahike/commit-id])]
       (commit-database origin commit))))
 
+(defn branches
+  "The branches `database`'s store holds: the store's `:branches` set, which `datahike.api/branch!` adds to and
+  `datahike.api/delete-branch!` removes from. A deleted branch's head stays readable until the next GC
+  (`datahike.versioning/delete-branch!`), so this set, not a readable head, says whether a branch exists."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:set :seon.store/branch]]}
+  [database]
+  (set (k/get (:store (schema-database database)) :branches nil {:sync? true})))
+
 (defn datoms-diff
   "The datoms of `index` at `components` held by exactly one of two database values of one store,
   `[only-a only-b]`, each a vector of `[entity attribute value tx]` with the stored values as
