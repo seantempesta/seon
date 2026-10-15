@@ -40,34 +40,66 @@ are option (a), and the process is one plan, a narrow check, then the build.
 
 ## 1. The model
 
-- **Desired state is data, validated at the write.** It is one value per runnable task:
-  - the task's members;
-  - its chain's branch;
-  - the branch's desired config entries.
+The owner's rulings, in order:
+- "update the data and it properly goes to the right state including setting up the env first";
+- "nothing executes until the data is validated by Malli";
+- "make sure it handles transition states too ... have the desired state be spelled out and the minimum changes are
+  applied".
 
-  Root writes it in one transaction with the task, and one named Malli schema validates it before the writer
-  transacts. Invalid desired state never exists: a refused write writes nothing and answers Malli's explanation.
-- **Each pass derives the due steps from current facts, in dependency order:**
+**Desired state spells out the whole target, as data.** It is one value per chain task, validated by
+`:seon.task/runnable` (§2) at the write, so invalid desired state never exists. It names:
+- the branch and what it must be based on: `:seon.task.desired/base`, either `[:main-at-least C]` (main's commit C is
+  an ancestor of the branch's merge base) or `:main-head` (main's head at the pass that plans);
+- the branch's config entries;
+- the task's execution (`:running`, `:held`, `:stopped`);
+- for a merge, its target (`:seon.task.desired/merge-into`, main).
 
-  | # | step | holds when (read from facts) | action when not |
-  |---|---|---|---|
-  | 1 | branch exists | `(contains? (registry/branches store) b)` | fork from main, or `:seon.chain/from` |
-  | 2 | branch listened on | the routing registry holds a route for `b` | acquire one connection on `b`, `wake/route!` it |
-  | 3 | config converged | the branch's config row equals the desired entries | apply the difference (`seon.config/apply-compiled!`) |
-  | 4 | attempt row | `seon.task/open-attempt?` on the branch | `write-chain-attempt!` |
-  | 5 | context acquirable | `acquire-context!` answers an execution for the agent on `b` | nothing (a refusal is the task's problem) |
-  | 6 | graph started | the routing registry's `:started` holds the agent | `start-chain-attempt!` |
+Dependencies are named in the data or derived from it (the base names main; the attempt names the branch), never
+implied by call order.
 
-  - A step runs only when every earlier one holds, in this pass or a later one.
-  - Each step is idempotent by identity: a pass that stops anywhere leaves the remaining steps due, and the next wake
-    derives them again.
-  - Nothing is remembered between passes: no "did the last pass do it", no marker, no outbox.
-  - Steps 1-3 are root's environment and run before any agent exists.
-- **Desired state that does not validate never starts.** The pass checks it with the same compiled validator
-  (`malli.core/validator` over the registered schema). A task that fails, such as one written before this rule, gets
-  one `:invalid-desired-state` problem task carrying `m/explain` as data, and nothing starts. This is the owner's
-  typed refusal at the owner, not a fence: the validator is the contract the writer already enforced, applied to data
-  that predates it.
+**The reconcile function is pure:** `(seon.cluster.reconcile/plan desired observed) → actions`, data in and data out.
+- `desired` is read from main and the chain branches.
+- `observed` is read once per pass: the store's branches and heads, each branch's merge base with main (the commit
+  graph, cached by commit pair as H0), each branch's config row, the attempt rows, and the routing registry,
+  transitions included.
+- An action is `{:op ... :subject ... :basis {...}}`.
+- **Every write action commits with its planning basis** as transaction metadata, and the writer checks it, so a
+  concurrent change refuses the write and the next pass re-plans. The basis is the commit ids it read: the branch head
+  and main's head; an attempt write's basis is the branch head it planned on.
+- Non-write effects (acquire, start, stop) are idempotent by identity: an agent id, a branch.
+- Events only wake: a listened commit, a timer, the boot prime.
+
+**Steps are the minimum changes from observed to desired.** A step whose observed state already holds emits nothing.
+A step runs only when its prerequisites are observed true, in this pass or a later one.
+
+| # | step | prerequisites | observed by | transition state | inverse (desired stop or retire) |
+|---|---|---|---|---|---|
+| 1 | fork the branch | desired names the branch; main readable | `(contains? (registry/branches store) b)` | none: `registry/fork!` is one atomic head write | retire the branch (`registry/retire-branch!`); prerequisites: step 6's inverse observed (graph exited) and no unmerged work, or root's close |
+| 2 | listen on the branch | 1 | routing registry `:seon.agent/chain-routes` holds `b` | none (in-memory, idempotent) | unlisten and release, after the inverse of 1 |
+| 3 | merge main forward | 1, 2; the branch's merge base is behind the desired base | `seon.cluster.source/merge-base` of the branch head and main: is C (or main's head) an ancestor of it? | durable and atomic: `seon.merge/merge-main!` writes ONE merge commit whose parents add main's head. "In progress" never persists across a crash; the commit graph shows either the merge (base = main head, satisfied) or nothing (still behind, planned again). In memory, the registry's `:seon.agent/transitions {[:merge-main b] {:basis main-head :started t}}` stops a concurrent pass from planning a second merge on the same basis | none (git has no un-merge); a stop leaves it |
+| 4 | converge config | 1, 3 (the merge never moves config, and config converges on the base it runs on) | the branch's config row against the desired entries (key by the branch head and desired digest, as H0) | none: one reconcile transaction with its basis | none |
+| 5 | write the attempt row | 1-4; desired execution `:running`; no open attempt | `seon.task/open-attempt?` on the branch | none: one transaction with basis = branch head | close the attempt (`:closed` with its reason) after the inverse of 7 |
+| 6 | acquire the context | 5 | registry entry for the agent's execution | in memory: `:seon.agent/transitions {[:acquire agent-id] {:basis head}}` while `acquire-context!` runs; a crash leaves it absent, so it is planned again | release the context (`release-context!`) after the graph exited |
+| 7 | start the graph | 6 | registry `:started` holds the agent | in memory: `{[:start agent-id] ...}` until `start-flow!` returns its started entry | stop the graph: `stop-flow!` with its bound, which joins the executor. Transition `{[:stop agent-id] {:deadline ...}}` until every proc thread exited (AGENTS "Bound admission and await actual exit"); while it is present, nothing that needs the exit (6 inverse, 5 inverse, 1 inverse) is planned. A stop past its bound keeps the transition, keeps the branch and reports the missing exit |
+
+**Transition states are first-class observed state.**
+- **In-memory transitions** (acquire, start, stop) live in the one routing registry, keyed `[step subject]` with the
+  basis they planned from. The registry is the place for live host work, observable in `status`.
+  - The pass reads them as observed state and never plans a duplicate.
+  - It completes them when their result appears: a started entry, or exited threads.
+  - A crash empties the registry: an incomplete transition is observed absent (no graph) and planned again from the
+    facts. It never resumes.
+- **Durable transitions** are single atomic commits: the fork, the forward merge, the config reconcile, the attempt
+  row. They need no "in progress" fact. The commit graph and the rows say whether they happened, so a crash during a
+  forward merge either left the merge commit (satisfied) or did not (planned once more). Never doubled: the second
+  plan's basis is the new head, whose merge base is already main's head, so it emits nothing.
+- Nothing else is remembered between passes.
+
+**Desired state that does not validate never starts.**
+- The pass checks it with the same compiled validator (`malli.core/validator` over the registered schema).
+- A task that fails, such as one written before this rule, gets one `:invalid-desired-state` problem task carrying
+  `m/explain` as data, and no step is planned for it.
+- This is the owner's typed refusal at the owner: the writer's own contract, applied to data that predates it.
 
 ## 2. The schema
 
@@ -84,6 +116,8 @@ merge-step append (`seon.cluster.agent/merge-step`'s append, MERGE-STEP) and `se
  [:seon.chain/branch :seon.chain/branch]
  [:seon.task/branch {:optional true} :seon.store/branch]   ; a merge step's own branch
  [:seon.task/model {:optional true} :seon.task/model]      ; overrides the config's model when present
+ [:seon.task.desired/base [:or [:= :main-head] [:tuple [:= :main-at-least] :seon.source/commit-id]]]
+ [:seon.task.desired/merge-into {:optional true} :seon.store/branch]   ; a merge step: main
  [:seon.task/config :seon.task/desired-config]]
 ```
 
@@ -200,10 +234,12 @@ reads it on the launch or turn path (found by grepping each dial and checking it
 | P3 | Validation at the writers (§3) | `src/seon/task.clj`, `src/my/root.clj`, `src/seon/cluster/agent.clj` (merge-step append), `test/seon/task_test.clj` | `seon.task-test/a-chain-missing-a-required-dial-is-refused-naming-it` (the explanation names `:seon.config.run/max-episode-runs`; `registry/branches` and main unchanged); `seon.task-test/a-complete-chain-is-written` |
 | P4 | Config in `chain!`'s transaction, plus the convergence step (step 3) before steps 4-6 | `src/seon/task.clj`, `src/seon/config.clj` (expose the difference step), `src/seon/cluster/agent.clj`, `src/seon/cluster/registry.clj`, `script/seon/operator.clj` (config apply on the step), `test/seon/cluster/db_flow_test.clj` | `a-chain-written-with-a-provider-has-its-first-attempt-see-it` (proof a); `config-converges-before-the-agent-starts` (proof c: the config row's tx < the attempt row's tx < the graph start, read from facts and the registry) |
 | P5 | Step derivation in `launch-facts`/`launch-actions` as the ordered steps; invalid desired state becomes a problem | `src/seon/cluster/agent.clj`, `resources/seon/schemas/seon.flow.actions.edn`, `test/seon/cluster/db_flow_test.clj` | `a-pass-stopped-mid-launch-launches-exactly-once` (proof b: apply the first action only, then wake; one attempt row, one graph); `a-task-written-before-validation-never-starts-and-shows-its-problem` |
+| P5b | The pure planner and the merge-forward step: `seon.cluster.reconcile/plan` over `(desired, observed)`; step 3 by `seon.merge/merge-main!` with its basis; in-memory transitions in the routing registry | `src/seon/cluster/reconcile.clj` (new, it replaces `launch-actions` and the chain parts of `next-actions`), `src/seon/cluster/agent.clj`, `src/seon/merge.clj` (basis on the merge commit's tx-meta), `test/seon/cluster/db_flow_test.clj` | `a-chain-based-on-mains-head-is-merged-forward-before-its-agent-starts` (main moves between `chain!` and the launch; the branch's merge base is main's new head before the attempt row's transaction); `a-forward-merge-interrupted-is-completed-once` (plan step 3, crash-shaped: drop the registry's transition without its commit, then wake: exactly one merge commit; again with the commit written: zero more) |
+| P5c | Stop and retire as inverses: desired `:stopped` or a retired chain plans stop → wait for exit → release → close → retire | `src/seon/cluster/reconcile.clj`, `src/seon/cluster/agent.clj`, `test/seon/cluster/db_flow_test.clj` | `a-stop-waits-for-exit-before-its-branch-is-retired` (a graph whose turn holds past the first pass: the branch stays in `registry/branches` while the `[:stop agent]` transition is present, and is retired only after the executor joined) |
 | P6 | Deletions (§5) and the S5 live check | as §5 | the tests above stay green; the operator test `script/seon/operator_cli_test.clj` for config apply |
 | D2 | Canceled boot query | the owner found by the probe | `seon.cluster.boot-test/boot-releases-only-what-it-acquired` |
 
-- **Order.** P1 → P2 (unblocks attempt 4 by itself) → P3 → P4 → P5 → P6. D2 is independent.
+- **Order.** P1 → P2 (unblocks attempt 4 by itself) → P3 → P4 → P5 → P5b → P5c → P6. D2 is independent.
 - **Shared file.** P2-P5 all touch `src/seon/cluster/agent.clj`, so they run one after another.
 - **Cost after P5:** one validator call per startable task per pass (a compiled `m/validator` over a map of ~25
   keys, microseconds) and one config-row comparison per chain branch, keyed by its head commit like H0.
@@ -216,8 +252,14 @@ reads it on the launch or turn path (found by grepping each dial and checking it
 > the merge-step append validate it with Malli before they transact and refuse with its explanation, writing nothing.
 > Root's pass derives, from current facts and in order, the steps from what is to what is desired: the branch exists,
 > root listens on it, its config converged, the attempt row, the agent's context acquirable, the agent's graph
-> started. A step runs only when the steps before it hold; each is idempotent and judged from facts, so a pass that
-> stops anywhere leaves the rest due for the next wake. Root holds one wake route per chain branch main names, from
+> started, and in reverse when it is desired stopped: graph stopped and exited, context released, attempt closed,
+> branch retired. Desired state names the branch's base (main's head, or at least commit C), so a branch behind it is
+> merged forward (`seon.merge/merge-main!`) before config converges and the agent starts. The plan is one pure
+> function of desired and observed state; every write it emits commits with the basis it planned from, so a
+> concurrent change refuses it and the next pass plans again. A step already satisfied emits nothing. A step that
+> takes time is a transition held in the routing registry with its basis (acquiring, starting, stopping until actual
+> exit); the next pass observes it and never plans a duplicate, and a crash, which empties the registry, is observed
+> as the step not done. Durable steps are single commits judged by the commit graph and the rows. Root holds one wake route per chain branch main names, from
 > the pass that first sees the chain fact until the chain retires, so every commit on a chain branch wakes root. A task
 > whose desired state does not validate never starts: root records one problem carrying the explanation.
 > `my.root/run!` is one validated transaction on the chain branch; the route delivers its wake.
@@ -249,3 +291,11 @@ reads it on the launch or turn path (found by grepping each dial and checking it
   model-facing ones (ai/*, run/*) with the agent and test dials left to cluster config?**
   - The owner's rule says every field execution needs, so the plan takes all of them, defaults filled.
   - Root may narrow it in the narrow check.
+- **The writer's basis check.** "Every write commits with its planning basis and the writer checks it" needs a
+  check in `seon.db`'s writer: refuse when the branch head or main's head named in `:tx-meta` is no longer current.
+  The digest check the writer runs for program entities is the nearest existing seam. The narrow check should verify
+  whether a general head-basis refusal exists, or name it as P5b's addition, priced at one commit-id comparison per
+  write.
+- **A forward merge with conflicts.** `merge-main!` still commits: the conflicts stay the branch's, and the merge base
+  becomes main's head. So step 3 is satisfied, and the conflicts go to root as the task's problem; they do not block
+  steps 4-7. Root may rule instead that a conflict holds the launch.
