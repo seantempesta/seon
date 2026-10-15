@@ -154,6 +154,12 @@
        (is (str/includes? text "run-tests") "the form that records nothing is named as wrong")
        (is (str/includes? text "reply with no form is refused") "a reply of only prose is refused")))))
 
+(deftest help-teaches-how-a-deftest-reads-the-database
+  (with-help-agent
+   (fn [connection]
+     (is (str/includes? (str/join "\n" (lines-of @connection)) "(seon.db/pull (seon.db/db)")
+         "help names the installed form a deftest reads the database with"))))
+
 (deftest help-teaches-the-schema-registration-form
   (support/with-running-agent
    (fn [running agent-id _]
