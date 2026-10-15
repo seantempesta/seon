@@ -281,15 +281,12 @@
                                                'my.turn/undeclared)
            entity (some #(when (= 'my.turn/undeclared (:sym %)) %)
                      (:functions (lookup/directory-value database 'my.turn false)))]
-       (is (contains? doc :in))
        (is (some? entity) "the undeclared entity is still listed by dir")
-       (doseq [[_label value attribute]
-               [["doc :in" (:in doc) :seon.fn/spec]
-                ["doc :out" (:out doc) :seon.fn/spec]
-]]
-         (is (= attribute (:seon.sci.eval/missing-declaration value)))
-         (is (= 'seon.sci.lookup/declaration-absent (:seon.error/operation value))))
-       (is (not= [] (:in doc)) "an absent contract never reads as a declared empty one")
+       ;; outside-2 (`docs/research/agent-platform/2026-10-14/outside-2.md` Misleading 3): an absent contract was an
+       ;; error map with its read time on each side, about 120 tokens per must-read that read as a fault to fix
+       (doseq [value [doc entity]]
+         (is (= :seon.fn/spec (:seon.sci.eval/missing-declaration value)) "one typed fact names the absent contract")
+         (is (not-any? #(contains? value %) [:in :out]) "and no side reads as a declared one or an error"))
        ;; an undocumented function has no summary: absence is no key, never an empty string
        (is (not (contains? doc :summary)))
        (is (not (contains? entity :doc)))))))

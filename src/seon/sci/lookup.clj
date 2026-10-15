@@ -256,7 +256,7 @@
 
 (defn- documentation-contract
   "The stored contract of `row` as `:in` and `:out` forms; a contract that does not compile shows its error on both
-  sides, the rest of the documentation still answers."
+  sides, the rest of the documentation still answers; an absent contract is `:seon.sci.eval/missing-declaration`."
   {:malli/schema [:=> [:cat :seon.db/database-value :map] :map]}
   [database row]
   (if-let [spec (:seon.fn/spec row)]
@@ -273,8 +273,9 @@
               (catch clojure.lang.ExceptionInfo cause
                 (let [error (uncompilable-contract (:seon.fn/sym row) cause)]
                   {:in error :out error}))))))
-    {:in (declaration-absent :seon.fn/spec)
-     :out (declaration-absent :seon.fn/spec)}))
+    ;; an uncontracted function declares neither side: one typed fact says so, never an empty contract and never
+    ;; an error map per side
+    {:seon.sci.eval/missing-declaration :seon.fn/spec}))
 
 (defn- opened-argument
   "The argument of input `form` at supplied-entry `position`, as `schemas` names it: its index in `form`, its schema
@@ -293,8 +294,9 @@
   [row contract]
   (let [spec (:seon.fn/spec row)]
     ;; a contract that did not compile holds one error, not one input per arity
-    (if (and spec (= :function (first (edn/read-string spec))) (not (map? (:in contract))))
-      (:in contract) [(:in contract)])))
+    (cond (nil? spec) []
+          (and (= :function (first (edn/read-string spec))) (not (map? (:in contract)))) (:in contract)
+          :else [(:in contract)])))
 
 (defn- agent-documentation-contract
   "The stored contract as an agent calls it: a request map's runtime-supplied entries left out and `:supplied`
