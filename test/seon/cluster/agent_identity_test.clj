@@ -65,7 +65,7 @@
                                                          :seon.cluster/name cluster-name})))
       (let [html (agent/render-identity-html {:seon.db/db @connection :seon.agent/id "root"})
             card (described html)]
-        (is (= ["None"] (get card "Tasks")))
+        (is (not (contains? card "Tasks")) "no tasks name its namespace, so the card shows no Tasks row")
         (is (re-matches #"(Idle|Turn open) · \d+ turns?" (str (first (get card "Status"))))
             "the node carries its own status")
         (is (not (contains? (test-support/hiccup-classes html) "seon-root-agents")) "no fleet table")))))
@@ -144,3 +144,20 @@
             "the supplied map wins over current-agent defaults")
         (is (= "Agent     supplied\nNamespace my.agents.supplied\nCluster   identity-cluster"
                (agent/whoami {:seon.db/db database :seon.agent/id "supplied"})))))))
+
+(deftest identity-names-where-the-agent-is-and-the-task-it-holds
+  ;; Root, live on /agent/owner-demo: the card said Namespace `user` while the agent's REPL had moved to
+  ;; `demo.view`, and "Tasks None" for an agent holding a task.
+  (with-agent
+    (fn [connection]
+      (test-support/transacted!
+       connection
+       [{:seon.turn/id "identity-run" :seon.turn/agent [:seon.agent/id agent-id]
+         :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
+        {:seon.cluster.eval/id "identity-eval" :seon.cluster.eval/run [:seon.turn/id "identity-run"]
+         :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at (java.util.Date.)
+         :seon.cluster.eval/source "(in-ns 'demo.view)" :seon.sci.eval/ending-ns 'demo.view}])
+      (test-support/assign-task! connection agent-id)
+      (let [card (described (agent/render-identity-html {:seon.db/db @connection :seon.agent/id agent-id}))]
+        (is (= ["demo.view"] (get card "Namespace")) "the namespace its latest evaluation ended in")
+        (is (= ["tq.assigned/work-identity-root"] (get card "Task")) "the task it holds")))))
