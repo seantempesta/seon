@@ -224,16 +224,19 @@
       {}))
 
 (defn- assignment-row
-  "Assignment `key`'s row, with its merge base: main's, else, for a chain's attempt, its chain branch head's
-  (`chain-row`); the stored base, else the commit its branch forked at (`seon.cluster.registry/base-commit-id`),
-  which the merge stores."
+  "Assignment `key`'s row, with its merge base: main's, with its stored base, else the commit its branch forked at
+  (`seon.cluster.registry/base-commit-id`), which the merge stores; else, for a chain's attempt, its chain branch
+  head's (`chain-row`), with the chain branch's base ref, the one merge base `merge-main!` also reads and advances."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assignment]
                   [:or [:map [:db/id :seon.db/entity-id] [:seon.task/branch :seon.task/branch]
                         [:seon.task/merge-base :seon.task/merge-base]] :seon.error/value]]}
   [database key]
   (let [on-main (db/pull database [:db/id :seon.task/branch :seon.task/merge-base] [:seon.task/assignment key])
         row (if (:seon.task/branch on-main) on-main (chain-row database key))
-        base (or (:seon.task/merge-base row) (some->> (:seon.task/branch row) (registry/base-commit-id database)))
+        ;; a chain's merge base is its branch's base ref, the one `merge-main!` advances
+        base (if (:seon.task/branch on-main)
+               (or (:seon.task/merge-base row) (registry/base-commit-id database (:seon.task/branch row)))
+               (some->> (:seon.task/branch row) (registry/base-commit-id database)))
         refuse #(refusal/diagnostic (java.util.Date.) :seon.program/write 'seon.merge/merge!
                                     {:seon.error/message % :seon.error/member :seon.task/assignment :seon.error/offending key})]
     (cond
@@ -378,7 +381,8 @@
   "Merge main forward into chain `branch` as `git merge main` does, through `execution` (root's world: main's
   connection and its store): the program declarations main changed since the branch's merge base and the branch
   did not (`seon.program/three-way` of the base, the branch head and main's head) replace the branch's rows in one
-  transaction on the branch's open connection (`seon.db/branch-connection`), and the branch's merge base advances
+  transaction on the branch's connection, held for this one action (`seon.cluster.registry/on-branch`), whether or
+  not a running graph holds it open, and the branch's merge base advances
   to main's head (`seon.cluster.registry/advance-base!`). Only program entities move: tasks, attempts,
   evaluations, messages and config never do. A declaration both sides changed differently is a conflict: it stays
   the branch's and is answered as `:seon.program/conflict` (by symbol) with its three digests
@@ -397,44 +401,43 @@
                         [:seon.program/conflict-digests :seon.program/conflict-digests]]
                    :seon.error/value]]}
   [{connection :seon.db/connection store :seon.store/store} branch]
-  (let [main (db/db connection)
-        target (get-in main [:config :branch])
-        chain-connection (db/branch-connection main branch)
-        head (some-> chain-connection db/db)
-        base (when head (source/merge-base (registry/branches store) head main target branch))
-        since (when head (source/branch-base-t head main target branch))
-        changed (when-not (some :seon.error/at [base since])
-                  (let [ours (program/changed-identities since head source/merge-bound)
-                        theirs (program/changed-identities base main source/merge-bound)]
-                    (or (some #(when (:seon.error/at %) %) [ours theirs]) (into ours theirs))))
-        maps (when (set? changed)
-               (mapv #(program/digest-map % (assoc source/merge-bound :seon.program/identities changed)) [base head main]))
-        three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))
-        delta (:seon.program/changed-on-head three)
-        entities (when (seq delta) (fn/published-index-entities main (vec delta)))
-        tx (when (vector? entities) (fn/reconcile-tx head entities (vec delta)))
-        written (when (vector? tx)
-                  (db/with-branch {:seon.db/connection chain-connection}
-                                  #(db/transact! chain-connection {:tx-data tx})))]
-    (try
-      (cond
-        (nil? head) (refusal/diagnostic (java.util.Date.) :seon.store/branch 'seon.merge/merge-main!
-                                        {:seon.error/message "Main merges forward into a chain branch this process holds open."
-                                         :seon.error/expected-key :seon.store/branch :seon.error/offending branch})
-        (:seon.error/at base) base
-        (:seon.error/at since) since
-        (not (set? changed)) changed
-        (not three) (some #(when (:seon.error/at %) %) maps)
-        (and (seq delta) (not (vector? entities))) entities
-        (and (seq delta) (not (vector? tx))) tx
-        (and written (not (:db-after written))) written
-        :else
-        (do (registry/advance-base! main branch)
-            {:seon.store/branch branch :seon.source/commit-id (db/commit-id main)
-             :seon.program/identities delta
-             :seon.program/conflict (into #{} (map second) (:seon.program/conflict three))
-             :seon.program/conflict-digests (:seon.program/conflict-digests three)}))
-      (finally (source/release! [base])))))
+  (registry/on-branch
+   store branch
+   (fn [chain-connection]
+     (let [main (db/db connection)
+           target (get-in main [:config :branch])
+           head (db/db chain-connection)
+           base (source/merge-base (registry/branches store) head main target branch)
+           since (source/branch-base-t head main target branch)
+           changed (when-not (some :seon.error/at [base since])
+                     (let [ours (program/changed-identities since head source/merge-bound)
+                           theirs (program/changed-identities base main source/merge-bound)]
+                       (or (some #(when (:seon.error/at %) %) [ours theirs]) (into ours theirs))))
+           maps (when (set? changed)
+                  (mapv #(program/digest-map % (assoc source/merge-bound :seon.program/identities changed)) [base head main]))
+           three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))
+           delta (:seon.program/changed-on-head three)
+           entities (when (seq delta) (fn/published-index-entities main (vec delta)))
+           tx (when (vector? entities) (fn/reconcile-tx head entities (vec delta)))
+           written (when (vector? tx)
+                     (db/with-branch {:seon.db/connection chain-connection}
+                                     #(db/transact! chain-connection {:tx-data tx})))]
+       (try
+         (cond
+           (:seon.error/at base) base
+           (:seon.error/at since) since
+           (not (set? changed)) changed
+           (not three) (some #(when (:seon.error/at %) %) maps)
+           (and (seq delta) (not (vector? entities))) entities
+           (and (seq delta) (not (vector? tx))) tx
+           (and written (not (:db-after written))) written
+           :else
+           (do (registry/advance-base! main branch)
+               {:seon.store/branch branch :seon.source/commit-id (db/commit-id main)
+                :seon.program/identities delta
+                :seon.program/conflict (into #{} (map second) (:seon.program/conflict three))
+                :seon.program/conflict-digests (:seon.program/conflict-digests three)}))
+         (finally (source/release! [base])))))))
 
 (defn checkout
   "The checkout cluster `cluster-name` publishes merged declarations into, as a canonical path: its
