@@ -110,8 +110,8 @@
        (is (seq forms) "help teaches forms")
        (is (every? second (:seon.repl/value resolved)) "every taught head resolves at the agent's REPL")
        (is (contains? shown ":my.agent/turns-left") "the block shows the turns left")
-       (is (not (re-find #"my\.agent/|turns-left|NEXT turn" lessons))
-           "no shelved or deleted lesson beside the keys the block shows")
+       (is (not (re-find #"my\.agent/|my\.test/check|turns-left|NEXT turn" lessons))
+           "no shelved, deleted or self-running lesson beside the keys the block shows")
        (is (not (str/includes? text "…")) "the printed help carries no elision")))))
 
 (deftest help-teaches-defn-in-the-namespace-that-owns-the-function
@@ -145,13 +145,10 @@
             (:seon.repl/value (support/reply (agent-text "(help)" agent-id running))))
          "the reply is one EDN form whose value is the help groups' titles and lines, whole; references stay in the value"))))
 
-(deftest help-teaches-running-named-tests-and-the-pending-state
+(deftest help-teaches-the-pending-state-and-that-tests-run-by-themselves
   (with-help-agent
    (fn [connection]
-     (let [lines (lines-of @connection)
-           heads (set (map first (mapcat taught-forms lines)))
-           text (str/join "\n" lines)]
-       (is (contains? heads 'my.test/check) "help teaches the installed form that runs named tests")
+     (let [text (str/join "\n" (lines-of @connection))]
        (is (str/includes? text ":pending") "help names the pending proof state")
        (is (str/includes? text "will run") "pending means recorded and not yet run")
        (is (str/includes? text "run-tests") "the form that records nothing is named as wrong")
