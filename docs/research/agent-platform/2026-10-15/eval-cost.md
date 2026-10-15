@@ -25,7 +25,23 @@ and a settled one 65 ms / 45 MB.
 | turn thread (`:seon.cost/step`) | 48.4 MB, 47 ms CPU | 23-27 MB, 22-28 ms CPU | |
 | writer (`:seon.cost/writer`) | 10.1 MB, 12 ms CPU | 6.8-7.1 MB, 6.5-8.9 ms CPU | |
 
-Per-request profile (15 back-to-back requests, `seon.profile` cells diffed, per request):
+The table above is from `ed9eb4f99`. Re-taken after root's restart onto `f4b7aab32` (pid 4912, datahike `771a0c4b`;
+slice 1, `a6157c86c`, is **not** in this JVM), fresh agent `eval-cost-b`:
+
+| stage (ms) | first request (first after restart) | settled (4 runs) |
+|---|---:|---:|
+| custody | 857.0 | 0.4-0.8 |
+| fork, read, evaluate, print | 16.4 | 2.3-3.1 |
+| settle | 67.7 | 30.6-36.9 |
+| test-step | 46.4 | 9.4-10.1 (one 26.5) |
+| unattributed | 25.8 | 7.0-10.0 |
+| **request** | **1015 ms / 1028 MB** | **54.7-75.2 ms / 42.8-75.1 MB** |
+| writer | 33.7 MB, 29.8 ms CPU | 6.9-8.4 MB, 6.1-7.2 ms CPU |
+
+The first request after a restart is acquisition (custody 857 ms: the cold JVM's branch and context build), not
+per-request work. The after-slice-1 numbers need a restart onto `a6157c86c` or later.
+
+Per-request profile on `ed9eb4f99` (15 back-to-back requests, `seon.profile` cells diffed, per request):
 `seon.turn/settle-batch!` 35.4 ms of which `seon.db/transact-call` 31.0 (a park on the commit promise);
 `seon.turn/test-step` 8.7, of which `seon.test/branch-changes` 8.2 and `seon.program/changed-identities` 5-6;
 the rest is many sub-millisecond reads (`seon.turn/agent-dial` x5, `seon.config/effective` x14,
