@@ -1,0 +1,122 @@
+diff -ru a/resources/seon/schemas/seon.context.edn b/resources/seon/schemas/seon.context.edn
+--- a/resources/seon/schemas/seon.context.edn	2026-10-15 09:38:44.332810722 +0700
++++ b/resources/seon/schemas/seon.context.edn	2026-10-15 09:39:01.330270693 +0700
+@@ -38,19 +38,17 @@
+                          [:seon.context/last-step {:optional true} :seon.context/last-step]]
+                :last-step [:string {:min 1 :description "The last step an earlier attempt's agent took: its last my.turn/wait note, else the prose it wrote with its last form, else that form's source. Producer: seon.context/last-step."}]
+                :attempts [:vector {:description "The held task's attempts by other agents, by number; absent when none. Producer: seon.context/earlier-attempts."} :seon.context/attempt]
+-               :changes [:map {:description "Every declaration the agent's branch changed since its task's merge base, by family, each by its name and the form that reads it (seon.context/branch-changes): its earlier attempts' work and its own scratch, each a name to keep or to remove (my.program/ns-unmap!); a function no test reaches says so; a declaration the branch removed is named under :seon.context/removed. Absent when nothing changed."}
++               :changes [:map {:description "Every declaration the agent's branch changed since its task's merge base, by family, each by its name and the form that reads it (seon.context/branch-changes): its earlier attempts' work and its own scratch, each a name to keep or to remove (my.program/ns-unmap!); a change its merge would not carry (seon.cluster.source/merge-list, the merge's own derivation) is :seon.context/stays; a declaration the branch removed is named under :seon.context/removed. Absent when nothing changed."}
+                          [:seon.context/functions {:optional true} [:vector :seon.context/changed]]
+                          [:seon.context/schemas {:optional true} [:vector :seon.context/changed]]
+                          [:seon.context/tests {:optional true} [:vector :seon.context/changed]]
+                          [:seon.context/tasks {:optional true} [:vector :seon.context/changed]]
+                          [:seon.context/removed {:optional true} :seon.context/removed]]
+-               :changed [:map {:description "One declaration the branch changed: its name and the form that reads it, and for a function no test reaches, :seon.context/reached-by-no-test with the form that removes it. Producer: seon.context/branch-changes."}
++               :changed [:map {:description "One declaration the branch changed: its name and the form that reads it, and for a change its merge would not carry, :seon.context/stays with the form that removes it when one exists. Producer: seon.context/branch-changes."}
+                          [:seon.ref/name :seon.ref/name]
+-                         [:seon.context/reached-by-no-test {:optional true} :seon.context/reached-by-no-test]
+-                         [:seon.context/used-by-no-function-or-test {:optional true} :seon.context/used-by-no-function-or-test]
++                         [:seon.context/stays {:optional true} :seon.context/stays]
+                          [:seon.render/operations [:vector {:min 1} :seon.render/read-form]]]
+-               :reached-by-no-test [:= {:description "Present on a changed function none of the branch's tests (its changed tests and the held task's proofs) tested as recorded: in no current result's static closure, which its reach digest covers, or dynamic calls (seon.context/tested-names). Keep it by giving it a test, or remove it."} true]
+-               :used-by-no-function-or-test [:= {:description "Present on a schema key the branch added that no function or test writes (`:seon.fn/keywords`); there is no REPL form that removes a schema key (`my.program/a-schema-key-added-on-a-branch-can-be-removed-at-the-repl`)."} true]
++               :stays [:= {:description "Present on a change the branch's merge would not carry: no seed (the held task's proofs and the branch's green tests reaching a change) reaches it through any hop (seon.cluster.source/merge-list). It stays on the branch; a test that reaches it merges it, my.program/ns-unmap! drops it."} true]
+                :removed [:vector {:description "The declarations the branch removed since its merge base, by name."} [:map [:seon.ref/name :seon.ref/name]]]
+                :turns
+                [:map {:description "Model calls left against the current wake and the held task's status."}
+diff -ru a/src/seon/context.clj b/src/seon/context.clj
+--- a/src/seon/context.clj	2026-10-15 09:38:44.309227506 +0700
++++ b/src/seon/context.clj	2026-10-15 09:39:01.329874024 +0700
+@@ -206,42 +206,27 @@
+                       {} (sort-by (comp str second) identities))]
+     (or (some #(when (:seon.error/at %) %) (mapcat val shown)) shown)))
+ 
+-(defn- tested-names
+-  "Every name the branch's `tests` tested as recorded on `database`: of each test with a result at its current
+-  identity judging `task` (`seon.test.runner/current-results`), its static closure, which that result's reach
+-  digest covers (`seon.test.runner/reach-memberships`), and the declarations its body ran outside it
+-  (`:seon.test.member/dynamic-calls`). A test with no current result tested nothing."
+-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym] :seon.task/sym]
+-                  [:or [:set :symbol] :seon.error/value]]}
+-  [database tests task]
+-  (let [names (into [] (filter #(seq (db/datoms database :avet :seon.test/sym %))) (sort tests))
+-        results (if (seq names) (runner/current-results database names task) {})
+-        recorded (when-not (:seon.error/at results)
+-                   (into [] (filter #(and (:seon.test/sym %) (not (:seon.error/at %)))) (vals results)))
+-        closures (if (seq recorded) (runner/reach-memberships database (mapv :seon.test/sym recorded)) {})]
+-    (or (some #(when (:seon.error/at %) %) [results closures])
+-        (into #{} (concat (mapcat val closures) (mapcat :seon.test.member/dynamic-calls recorded))))))
+-
+ (defn- branch-changes
+   "The declaration `identities` the branch changed since its merge base, shown on `database` by family in name order,
+-  each by its name and the form that reads it; a function none of the branch's tests (its changed tests and the held
+-  task `task`'s `proofs`) tested as recorded (`tested-names`) says so, with the form that removes it; a schema key no
+-  function or test writes (`:seon.fn/keywords`) says exactly that, with no removal form (none exists); a declaration
+-  the branch removed is named under `:seon.context/removed`. Families are absent when empty."
++  each by its name and the form that reads it, split as its merge would carry it (`seon.cluster.source/merge-list`
++  over the seeds `seon.cluster.source/merge-seeds` gives for the held task `task`'s `proofs`, the one derivation the
++  merge uses): a change no seed reaches is `:seon.context/stays`, with the form that removes it when one exists
++  (`my.program/ns-unmap!`; none for a schema key); a test that reaches it merges it. A declaration the branch removed
++  is named under `:seon.context/removed`. Families are absent when empty."
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set [:set :seon.test/sym] :seon.task/sym]
+                   [:or :seon.context/changes :seon.error/value]]}
+   [database identities proofs task]
+-  (let [tested (tested-names database (into proofs (keep (fn [[a v]] (when (= :seon.test/sym a) v))) identities) task)
+-        entry (fn [[attribute value]]
++  (let [seeds (source/merge-seeds database identities proofs task)
++        listed (if (:seon.error/at seeds) seeds (source/merge-list database identities seeds))
++        stays (:seon.merge/stays listed)
++        entry (fn [[_ value :as identity]]
+                 (let [read-form (list 'my.program/source (if (keyword? value) value (list 'quote value)))]
+-                  (cond (and (= :seon.schema/key attribute)
+-                             (empty? (db/q '[:find [?e ...] :in $ ?k :where [?e :seon.fn/keywords ?k]] database value)))
+-                        {:seon.ref/name value :seon.context/used-by-no-function-or-test true :seon.render/operations [read-form]}
+-                        (and (= :seon.fn/sym attribute) (not (contains? tested value)))
+-                        {:seon.ref/name value :seon.context/reached-by-no-test true
+-                         :seon.render/operations [read-form (list 'my.program/ns-unmap! (list 'quote value))]}
+-                        :else {:seon.ref/name value :seon.render/operations [read-form]})))
+-        shown (when-not (:seon.error/at tested)
++                  (if (contains? stays identity)
++                    {:seon.ref/name value :seon.context/stays true
++                     :seon.render/operations (cond-> [read-form]
++                                               (symbol? value) (conj (list 'my.program/ns-unmap! (list 'quote value))))}
++                    {:seon.ref/name value :seon.render/operations [read-form]})))
++        shown (when-not (:seon.error/at listed)
+                 (reduce (fn [shown [attribute value :as identity]]
+                           (if-let [family (merged-families attribute)]
+                             (if (seq (db/datoms database :avet attribute value))
+@@ -249,7 +234,7 @@
+                               (update shown :seon.context/removed (fnil conj []) {:seon.ref/name value}))
+                             shown))
+                         {} (sort-by (comp str second) identities)))]
+-    (if (:seon.error/at tested) tested shown)))
++    (if (:seon.error/at listed) listed shown)))
+ 
+ (defn- merged
+   "What main's merge `commit` moved (`seon.cluster.source/merge-accepted`), shown on `database` by family
+diff -ru a/test/seon/context_test.clj b/test/seon/context_test.clj
+--- a/test/seon/context_test.clj	2026-10-15 09:38:44.355303807 +0700
++++ b/test/seon/context_test.clj	2026-10-15 09:39:01.330869321 +0700
+@@ -942,17 +942,17 @@
+          ;; source is an analysed reference of it, which would refuse the removal and use the key
+          (is (= [{:seon.ref/name (symbol "tq.ra" "spare")}] (:seon.context/removed changes))
+              "a declaration the branch removed is named as removed, never as an unresolved problem")
+-         (is (= {:seon.ref/name 'tq.ra/squared :seon.context/reached-by-no-test true
++         (is (= {:seon.ref/name 'tq.ra/squared :seon.context/stays true
+                  :seon.render/operations ['(my.program/source 'tq.ra/squared) '(my.program/ns-unmap! 'tq.ra/squared)]}
+                 squared)
+-             "a function no test reaches says so, with the form that removes it, and no doc echo")
++             "a function no test reaches stays on the branch, with the form that removes it, and no doc echo")
+          (is (= [{:seon.ref/name 'tq.ra/area :seon.render/operations ['(my.program/source 'tq.ra/area)]}]
+                 (filterv #(= 'tq.ra/area (:seon.ref/name %)) (:seon.context/functions changes)))
+              "a changed function the recorded run of a branch test tested carries no flag")
+-         (is (= [{:seon.ref/name (keyword "tq.ra" "probe") :seon.context/used-by-no-function-or-test true
++         (is (= [{:seon.ref/name (keyword "tq.ra" "probe") :seon.context/stays true
+                   :seon.render/operations [(list 'my.program/source (keyword "tq.ra" "probe"))]}]
+                 (:seon.context/schemas changes))
+-             "a schema key the branch added that no function or test uses says exactly that, with no removal form"))
++             "a schema key no seed reaches stays too, with no removal form (none exists)"))
+        ;; a later attempt's block shows this one's last step: the note of the wait it ended its turn with
+        (evaluate running agent-id "(my.turn/wait {:my.turn/note \"Stopped at the cycle probe.\"})")
+        (is (= "Stopped at the cycle probe." (#'context/last-step (db/db target) agent-id))
