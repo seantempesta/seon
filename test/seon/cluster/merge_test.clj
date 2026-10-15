@@ -114,7 +114,7 @@
 (deftest ^{:seon/tasks #{'seon.cluster.source/a-landing-refusal-carries-its-variant}
            :seon.test/long "One prepare: one nested seon.test/run on a new candidate commit."
            :seon.test/long-ms 60000}
-  a-replaced-function-no-test-reaches-and-a-later-program-write-refuse
+  a-replaced-function-no-test-reaches-stays-and-a-later-program-write-refuses
   (let [target (support/execution-handle nil)
         store (:seon.store/store target)
         h-conn (:seon.db/connection target)
@@ -128,19 +128,21 @@
         c-conn (:seon.db/connection candidate)]
     (try
       (write! c-conn [(entity (db/db c-conn) :fn "merge-alone" "(defn merge-alone {:malli/schema [:=> [:cat] :int]} [] (inc 0))")])
-      (let [prepared (source/prepare-merge! target store c proved)
-            before (db/commit-id (db/db h-conn))
-            refusal (source/accept-merge! target store prepared)]
+      (let [prepared (source/prepare-merge! target store c proved)]
         (is (true? (:seon.test/passed? prepared)) "the test owner selects no test and refuses nothing")
-        (is (= [(sym "merge-alone")] (:seon.error/offending refusal)))
-        (is (= :seon.source/test-evidence-error (:seon.error/type refusal)) "the refusal carries its variant")
-        (is (= before (db/commit-id (db/db h-conn))))
+        (is (contains? (:seon.merge/stays prepared) [:seon.fn/sym (sym "merge-alone")])
+            "a replaced function no test reaches stays on the branch (ruling 5a)")
+        (is (not (contains? (:seon.source/expected-digests prepared) [:seon.fn/sym (sym "merge-alone")]))
+            "and the merge does not carry it")
         (testing "a program write on S after the run refuses the named run"
-          (let [s (cluster.agent/acquire-context! target nil {:seon.agent/branch (:seon.source/candidate prepared)})]
-            (try (write! (:seon.db/connection s) [(entity (db/db (:seon.db/connection s)) :fn "merge-alone" "(defn merge-alone {:malli/schema [:=> [:cat] :int]} [] 1)")])
-                 (finally (cluster.agent/release-context! s))))
-          (is (= "The tested program changed after the named run."
-                 (:seon.error/message (source/accept-merge! target store prepared)))))
+          (let [s (cluster.agent/acquire-context! target nil {:seon.agent/branch (:seon.source/candidate prepared)})
+                before (db/commit-id (db/db h-conn))]
+            (try (write! (:seon.db/connection s) [(entity (db/db (:seon.db/connection s)) :fn "merge-alone" "(defn merge-alone {:malli/schema [:=> [:cat] :int]} [] 2)")])
+                 (finally (cluster.agent/release-context! s)))
+            (let [refusal (source/accept-merge! target store prepared)]
+              (is (= "The tested program changed after the named run." (:seon.error/message refusal)))
+              (is (= :seon.source/test-evidence-error (:seon.error/type refusal)) "the refusal carries its variant")
+              (is (= before (db/commit-id (db/db h-conn))) "and nothing reaches main"))))
         (registry/retire-branch! {:seon.store/store store :seon.store/branch (:seon.source/candidate prepared)}))
       (finally
         (cluster.agent/release-context! candidate)

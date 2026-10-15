@@ -868,6 +868,29 @@
             will (into #{} (filter #(or (reached %) (not (held? %)))) changed)]
         {:seon.merge/will-merge will :seon.merge/stays (into #{} (remove will) changed)}))))
 
+(declare green-result?)
+
+(defn merge-seeds
+  "The tests that curate a merge of branch head `database` (ruling 5a): the task `task-sym`'s `proofs`, and the tests
+  of `changed` or reaching a function of it (`seon.fn/reverse-closure`) whose current result there
+  (`seon.test.runner/current-results`) is green. A red or never-run test seeds nothing."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set [:set :seon.test/sym] [:maybe :seon.task/sym]]
+                  [:or [:set :seon.test/sym] :seon.db/invalid-read-error :seon.test/execution-error :seon.test/unknown-error
+                   :seon.error/value]]}
+  [database changed proofs task-sym]
+  (let [functions (into #{} (keep (fn [[a v]] (when (= :seon.fn/sym a) v))) changed)
+        reaching (if (seq functions) (fn/reverse-closure {:seon.db/db database :seon.fn/seeds functions}) {})
+        held? #(seq (d/datoms database :avet :seon.test/sym %))
+        candidates (when-not (:seon.db/invalid-read reaching)
+                     (into [] (filter held?)
+                           (distinct (concat (keep (fn [[a v]] (when (= :seon.test/sym a) v)) changed)
+                                             (:seon.fn/tests reaching)))))
+        results (when candidates
+                  (if (seq candidates) ((requiring-resolve 'seon.test.runner/current-results) database candidates task-sym) {}))]
+    (cond (:seon.db/invalid-read reaching) reaching
+          (:seon.error/at results) results
+          :else (into (set proofs) (keep (fn [[s r]] (when (green-result? r) s))) results))))
+
 (defn- agent-owned
   "The identities of `changed` that belong to an agent the destination `head` lacks: a namespace born on `branch`
   (the destination holds none of its name) stewarded by such an agent (`:seon.ns/steward`), and each declaration
@@ -1038,19 +1061,27 @@
       (let [
             whole (when three (into (:seon.program/changed-on-branch three)
                                     (concat (:seon.program/added three) (:seon.program/retracted three))))
+            ;; the proofs and product the run is selected by, over the values the comparison holds
+            tested (when (and whole (not (:seon.error/at base))) (tested-task-basis head branch base task-sym))
+            {:seon.task/keys [step] owed :seon.task/proofs designed :seon.task/product} (:seon.task/obligations tested)
+            product (when (= :prove step) designed)
+            proofs (into (set owed) product)
+            ;; with no explicit selection the merge carries its merge list: what its seeds reach (ruling 5a)
+            conflicts (:seon.program/conflict three)
+            listed (when (and whole (not selection) (not (db/read-refusal? tested)))
+                     (let [seeds (merge-seeds branch whole proofs task-sym)]
+                       (if (:seon.error/at seeds) seeds (merge-list branch (into whole conflicts) seeds))))
+            selection (or selection (some->> listed :seon.merge/will-merge (into #{} (filter whole))))
+            ;; a conflict blocks only when it would merge; one that stays on the branch never does
+            blocking (if (set? selection) (into #{} (filter (into selection (:seon.merge/will-merge listed))) conflicts) conflicts)
             unchanged (when (and whole selection) (vec (remove whole selection)))
             reach (when (and whole selection (empty? unchanged)) (unselected-reach branch whole selection))
             ;; A selected declaration carries its namespace entity when the candidate changed it (its requires).
             delta (if (and whole selection)
                     (into selection (filter whole) (for [[_ v] selection :when (qualified-symbol? v)] [:seon.ns/name (symbol (namespace v))]))
                     whole)
-            tx (when (and delta (empty? unchanged) (empty? reach))
+            tx (when (and delta (empty? unchanged) (empty? reach) (empty? blocking))
                  (if (seq delta) (replacement branch head delta) []))
-            ;; the proofs and product the run is selected by, over the values the comparison holds
-            tested (when (and delta (not (:seon.error/at base))) (tested-task-basis head branch base task-sym))
-            {:seon.task/keys [step] owed :seon.task/proofs designed :seon.task/product} (:seon.task/obligations tested)
-            product (when (= :prove step) designed)
-            proofs (into (set owed) product)
             ;; The file the merge would write back, proven before any test runs;
             ;; an empty delta writes no file, so it names no root to judge.
             root-error (when (and root (seq tx)) (root-refusal root))
@@ -1065,7 +1096,9 @@
             root-error root-error
             (not (set? changed)) changed
             (not three) (some #(when (:seon.error/at %) %) maps)
-            (seq (:seon.program/conflict three)) three
+            (:seon.error/at listed) listed
+            (seq blocking) (assoc three :seon.program/conflict blocking
+                                  :seon.program/conflict-digests (select-keys (:seon.program/conflict-digests three) blocking))
             (seq unchanged) (refuse "A selected declaration is not a change on the candidate." unchanged)
             (:seon.db/invalid-read reach) reach
             (seq reach) (refuse "A selected declaration reaches an unselected change; select that change too."
@@ -1109,6 +1142,7 @@
                                             :seon.source/advanced-base (assoc (registry/fork-of branch candidate)
                                                                               :seon.branch/base-t (db/basis-t branch)))
                                (seq product) (assoc :seon.task/product product)
+                               listed (assoc :seon.merge/stays (into #{} (remove delta) (:seon.merge/stays listed)))
                                (some true? (vals on-main)) (assoc :seon.source/red-on-target
                                                                   (into #{} (keep (fn [[k red?]] (when red? k))) on-main))))
                   ;; the gate's judgment is the merge's: the red members its verdict names
