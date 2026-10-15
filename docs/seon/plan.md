@@ -35,10 +35,17 @@ repl. A function is returned and we auto run with tests, all of that should be v
 that's live updating the status at first. Just tailor it to your audience. I want this UI up and running so I can help
 you by saying 'that is way too much perf data for every call'."
 
-Rules for this work: no data is thrown away to shorten a reply — the full value stays (requeryable by its handle) and a
-render function per schema chooses what each audience sees: the AI face terse, the HTML face full; both faces are one
-derivation (AGENTS.md "Choosing the design" 5). The live agent view comes first because it lets the owner judge the
-context directly. No live (provider) run until the context defects below are fixed and the owner has looked at the view.
+Rules for this work (owner, 2026-10-15): **keep good data, delete garbage at its producer.** Good data an agent or the
+user may want in full stays whole and requeryable, and a render pair per schema chooses what each audience sees (AI
+terse, HTML full; one derivation, AGENTS.md "Choosing the design" 5). Garbage — output nobody asked for, data the
+producer itself says it cannot attribute, copies of values held elsewhere, JVM-internal frames — is removed from the
+producer's output, never hidden by a render: "The best solutions are the ones where the function is producing exactly
+what it wants and needs. We can always accrete more complicated outputs, but agents shouldn't be dumping MB worth of
+data unless it's intentional." If an agent is spending its context on mostly garbage, stop it and fix the producer
+first. For digging, the value printer's HTML face is already a nested expansion (`seon.print/emit-hiccup`: a
+`<details>` per collection with its summary, from the same operation stream as the text): a value with no render of
+its own is browsable in HTML by default. The live agent view comes first because it lets the owner judge the context
+directly. No live (provider) run until the context defects below are fixed and the owner has looked at the view.
 
 | # | Context defect (evidence) | Fix at the producer |
 |---|---|---|
