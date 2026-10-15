@@ -8,7 +8,8 @@
             [seon.mcp :as mcp]
             [seon.ref :as ref]
             [seon.render :as render]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [clojure.test :refer [run-tests]]))
 
 (defn- shown
   "The value of `code` evaluated as `agent-id` through `seon.mcp/call`, read back as data."
@@ -376,3 +377,9 @@
     (is (= :doc (:seon.ref/level doc)))
     (is (some #{'seon.edit/single-form} (:returns doc)) "the functions whose output names the key")
     (is (not (contains? doc :takes)) "takers are the code level's")))
+
+(deftest a-citation-ending-in-a-wildcard-is-prose
+  (let [found (seon.ref/references (seon.db/db)
+                                   {:seon.ref/text "`:seon.render.unknown/*` and `seon.task.attempt/*`"})]
+    (is (empty? (filter #(= :unresolved (:seon.ref/problem-kind %)) found))
+        "a wildcard cite is prose, not an unresolved problem")))

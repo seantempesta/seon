@@ -272,10 +272,13 @@
       (let [forms (try (edamame/parse-string-all span)
                        ;; a span that does not read is prose
                        (catch Exception _ nil))
-            [form & more] forms]
+            [form & more] forms
+            ;; a trailing * names a family of names, not a name: such a span is prose
+            wildcard? (and form (str/ends-with? (str form) "*"))]
         ;; only a span of exactly one qualified symbol or keyword is a name; a dotted bare symbol may name a namespace
         (cond
           (some? more) nil
+          wildcard? nil
           (or (qualified-symbol? form) (qualified-keyword? form)) {:seon.ref/name form}
           (and (simple-symbol? form) (str/includes? (str form) ".")) {:seon.ref/name form :seon.ref/resolve-only true})))))
 
