@@ -479,21 +479,34 @@
   [unit]
   (select-keys unit [:seon.render/output :seon.error/value]))
 
+(defn- touched-t
+  "The newest transaction among the datoms of entity `eid`; 0 when the unit names none (a derived value such as the
+  runtime unit), so a unit that reads no entity never takes the focus on first sight."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :int]] :int]}
+  [database eid]
+  (if (some? eid)
+    (transduce (map :tx) max 0 (db/datoms database :eavt eid))
+    0))
+
 (defn- unit-placements
   "Each unit's placement by element id: the transaction its content last changed at (the retained fragment's when
-  its content is unchanged, else the database's basis: a unit this process has not rendered yet counts as changed
-  now); the focus (the most recent, the later walk rank on a tie) also carries the rail's size."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:map-of :string :map]
+  its content is unchanged; a unit this process rendered before with other content changed at the database's basis;
+  a unit it has not rendered yet changed when its own entity was last written, `touched-t`, so after a restart the
+  newest run leads by its own data); the focus (the most recent, the later walk rank on a tie) also carries the
+  rail's size. `acquisition` holds each walked member's entity."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:map-of :string :map] :map
                        [:vector [:tuple :string :seon.render.walk/unit]]]
                   [:map-of :string [:map [:seon.render.web/changed-t :int] [:seon.render.web/focus? {:optional true} :boolean] [:seon.render.web/rail {:optional true} [:int {:min 0}]]]]]}
-  [database retained identified]
+  [database retained acquisition identified]
   (let [changed (mapv (fn [[element-id unit]]
                         (let [previous (get retained element-id)]
                           [element-id
                            ;; the retained evidence holds the unit it was serialized from
-                           (if (and previous (= (unit-content unit) (unit-content (first (:seon.render.fragment/evidence previous)))))
+                           (cond
+                             (nil? previous) (touched-t database (get-in acquisition [:seon.render.walk/members (:seon.render.walk/lookup unit) :seon.render.walk/eid]))
+                             (= (unit-content unit) (unit-content (first (:seon.render.fragment/evidence previous))))
                              (:seon.render.web/changed-t previous)
-                             (db/basis-t database))]))
+                             :else (db/basis-t database))]))
                       identified)
         focus (first (reduce (fn [best entry] (if (<= (second best) (second entry)) entry best))
                              [nil -1] changed))
@@ -534,7 +547,7 @@
                     (map-indexed (fn [rank unit]
                                    [(:seon.render.walk/path unit) rank]))
                     units)
-        placements (unit-placements db retained (mapv #(vector (unit-id id %) %) units))
+        placements (unit-placements db retained (:seon.render.walk/root-acquisition request) (mapv #(vector (unit-id id %) %) units))
         rows (mapv (fn [unit]
                      (let [element-id (unit-id id unit)
                            rank (get ranks (:seon.render.walk/path unit))

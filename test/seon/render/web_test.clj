@@ -573,6 +573,23 @@ handle))}}
                       (.select document "article.seon-walk-unit:not(.seon-focus-unit)"))
               "the rail orders each unit by its recency, newest first"))))))
 
+(deftest on-first-paint-the-main-panel-holds-the-newest-run-by-its-own-data
+  ;; After a restart every unit is new to the process, so recency cannot come from what this process rendered: a unit
+  ;; first seen changed when its own entity was last written, and a unit that reads no entity (Runtime) never leads.
+  (with-server
+    (fn [connection server _context]
+      (support/transacted! connection
+                           (cluster.agent/creation-tx
+                            {:seon.agent/id "restarted" :seon.cluster/name "web-test" :seon.ns/name 'my.agents.restarted}))
+      (doseq [run ["first-run" "newest-run"]]
+        (support/transacted! connection
+                             [{:seon.turn/id run :seon.turn/agent [:seon.agent/id "restarted"]
+                               :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}]))
+      (let [document (dom (.body (fetch server "/agent/restarted")))
+            focus (.select document "article.seon-focus-unit")]
+        (is (= [true] (mapv #(some? (.selectFirst ^Element % "[data-turn=newest-run]")) focus))
+            "the one main-panel unit holds the newest run, not a derived unit with no entity")))))
+
 (deftest static-resources-come-off-the-classpath
   (with-server
     (fn [_connection server _context]
