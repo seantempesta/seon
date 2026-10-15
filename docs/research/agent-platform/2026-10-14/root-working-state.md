@@ -167,3 +167,46 @@ same evidence); (c) green-at-start does not end a task whose branch carries unre
 tonight by the owner's rule). Root lean: (b) for schema keys and functions no test reaches, or (a) as a one-off.
 Also morning question 6: the chain branch's config is frozen at fork (run 8 read run 4's cap 40, provider on).
 Chain totals: 176 model calls, 5.41M prompt tokens, 3 hand acts (all root close!), 0 merges of this chain.
+
+## Afternoon 10-15 (root): resume point before compaction (~17:40 local; default runs c42256a97)
+
+Owner's order now (plan.md §0, 169bba12c and after): FIRST every context defect (C0-C16) and the live agent view; second
+generative schemas/functions (generative-schemas.md §3, 0c9113f8e); keep pushing to live agents. Rules: keep good data
+(render pairs AI terse / HTML full), delete garbage at its producer (Seon's own schemas/functions/tests; an agent's own
+REPL values are its own); never gate real-data workloads; caching by content across branches; AGENTS.md "Choosing the
+design" (676dd1f79) and "opposite of VMs" (1e7ed56dd); plan §1 drift table (d7cbfc7d8).
+
+Landed today (all live after the c42256a97 restart unless noted):
+- Branch model (rulings: docs/research/agent-platform/2026-10-15/branch-model-rulings.md): P1+P3 04fcb4c12, P2 e9730ba89,
+  P4 merge-main! 58b1a68cc (+ c8215bfe1: opens a held chain's branch; final merge reads the same base ref), P5 config
+  --branch/--chains 3418b8d7b, P6 predicates resolve at admission 0a73676ee. Three-way readers gone (~−300 lines).
+- Context: C1 cost line d32b8d8cf/cd5f02802/fd7a6f7ee (reply cost ~390 → ~30 tokens, full map under result/c… handle);
+  C2 error chains b85dc0148; C3 = diff 1119db9e1; C6/C7 aa04f7121/237721b6a (block 2,524 → 1,569 tokens); C9
+  d48669886/073d9eed8; C11 7e73ca4c7/7543e35ce; prompt prefix stable f4999d283 (+ b773d1c7c arglists stamp); render
+  diagnostics 2ff0f15a8; reply consistency 676578c36; outside agent not stalled 17dfe112e; red census fixes c68d20059
+  350b05df7 535d34007; check prune race 20022071d; test step: selection 49f7bacce, idle change discovery e0101c26b;
+  cold block fix 1 3f4c760a3; bb-load c113d7197; ns-unmap! bd220e2b3; lane release --agent 649029d26.
+- Live view (http://127.0.0.1:7994/agent/<id>, demo agent `owner-demo`): per-request units 0af8e8f08, branch wakes (live,
+  no poll) 3ca8cdcc8, identity card 2d6e0e7bb, focus layout 617244ad0 (DEFECT: main panel empty after restart → lane
+  chains-page fixing).
+- Generative: corpus script + code half 071458426 (malli.util registered), merge deref fix 064b6be6b, patch 225 variants
+  c42256a97 (such-that 251 → 1); design §3 0c9113f8e + §3.x rulings 6b69492ba.
+- Merge closure: plan 83ea93bcf, merge-list derivation 49b2ac05d (S5 chain: 9 merge, 15 stay = exactly the junk).
+
+In flight at compaction (each reports by notification):
+- merge-closure (Opus): phase 1b (merge carries only merge-list; delete agent-owned), 2 (block section = merge list), 3 (clean or not, result reuse).
+- model-turn-driver (Opus): CRITICAL — harness model turns reach the provider 0 of 3 on HEAD (seon.cluster.turn-test/a-chat-model-request-…; suspect 17dfe112e); also my.task-test red on :seon.task/model.
+- run-cost (Sonnet): request cost recorded on the run in the request's last recording transaction; Runtime unit stable.
+- chains-page (Sonnet): /chains page + fix focus main panel empty.
+- cold-block-fix-2 (Sonnet): Argon fixes 2-3 (destructive-key as-of, head-entries), each only with a measured gain.
+- gen-sweep (Sonnet): land the :merge sweep regenerated over HEAD.
+Not started / next: C16 drop :seon.error/at (after merge-closure releases source.clj; ruling: judge by :seon.error/type,
+unknown its own never-green variant, time from tx instant); gen phases 2-9; C13 idle test step (274 ms → ? after e0101c26b,
+remeasure); C14 cost diff scope (Astra filed a producer task); first request after restart 11.9 s / 12.6 GB (custody
+4.1 s, test step 6.7 s) — the cold path; Argon free (give it several tasks in ONE run, low only); retire ~142 scratch
+agent admissions (form in retire-scratch-branches report; after lanes end); converge test-support git helper copies.
+
+Path to the live run: after model-turn-driver + merge-closure 1b-3 land → restart → `(my.root/merge-main!
+{:seon.chain/branch :chain-f1f6dc8e6652})` → render the held Implement task c12a57408f49's block and read it as a model
+would → if clean and cheap: DeepSeek run (low cap; config restore after: tmp/s5-restore.edn) → owner watches
+/agent/<attempt id> and /chains → expected: proof green at start → done → merge carries only the 9 tested entities.
