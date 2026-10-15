@@ -1,7 +1,7 @@
 ---
 title: "Merge by reach closure: one merge list for the block, the done rule and the merge (rulings 5, 5a, 5b, 6)"
 type: plan
-status: "phase 0 done (c8215bfe1); 1a done (49b2ac05d); 1b done (3c5f650a0); 2 a patch (63bca068d, waits for src/seon/context.clj); 3 open (design below)"
+status: "phase 0 done (c8215bfe1); 1a done (49b2ac05d); 1b done (3c5f650a0); 2 a patch (63bca068d, waits for src/seon/context.clj); 3 cause found by reading, fix and red proof a patch (merge-reuse-phase3.patch), unrun: default down"
 created: 2026-10-15
 ---
 
@@ -59,18 +59,39 @@ merged, test it.
    staying item with its include form (a test reaching it) and drop form (`my.program/ns-unmap!`); the done rule's
    report names the same list. `seon.context` is held by lane prompt-prefix: a patch until it is free. Proof: a row in
    `seon.context-test` asserting the block's `:seon.context/changes` equals `merge-list` for the fixture.
-3. **Clean or not, then CI (5b, 6).** Found 10-15: the candidate gate (`seon.cluster/candidate-gate!` →
-   `reaching-run` → `seon.test/run` `:named`) selects and reuses on the candidate S alone: `seon.test`'s selection
-   reads `latest` results and their member facts from S, a fork of main plus the delta, so the chain branch's
-   recorded results are never seen and every seed reruns. Reuse needs the selection to read evidence from the source
-   branch head by reach digest computed on S (ruling 1 makes the identities equal), and every later reader of a
-   reused member (`merge-verdict`, `accept-merge!`'s run checks, `done-refusals` over the run) to resolve the run it
-   names on the branch that recorded it, not S. That is runner selection plus merge acceptance, critical path: an
-   Opus slice with a measured proof. Originally: A conflict among `stays` never blocks; the candidate runs only seeds whose reach
-   digest on the candidate differs from the branch's recorded result (`current-results` on the candidate: a reused
-   green is absent from the run); not clean stays as the merge branch, offered back to the agent through
-   `merge-main!` + its block. Help (5c) lands with it. Proof: a measured `seon.profile/measure` row that a merge whose
-   seeds are all green at an unchanged digest executes zero tests.
+3. **Clean or not, then CI (5b, 6).** The content-keyed lookup already exists: `seon.test/run` (in
+   `run-request`) answers each runnable member from `seon.test/carried-results`, which looks its reuse identity up in
+   `seon.cache` (`seon.test.runner/retain-results!`) and then in the recorded runs of main and every live agent branch
+   main's rows name (`seon.test/source-branches`, homed by `seon.cluster.host/register!`), and records the answer as the
+   candidate's own member with `:seon.test.member/reused-run` (`seon.test/carried-member`). So the 10-15 finding
+   ("selection reads S alone") is not the cause, and the later readers need no change: `merge-verdict` reads
+   `seon.test.runner/run-results` of S's run, which holds the carried member and its counts; `accept-merge!` judges
+   the same run. The cause found by reading (not yet reproduced: default was down for the whole slice, so no REPL or
+   `bin/seon check` run, which needs a live root): the reuse identity is `[sym reach-digest input-digest evaluator]`,
+   and `evaluator` is the request's (`(if (root-agent? execution) :compiled :interpreted)`). A chain agent's test step
+   records `:interpreted`; the candidate gate acquires S with no agent id (`cluster.agent/acquire-context! source nil`),
+   so it asks `:compiled`. The identities never meet and every seed reruns. A second component to verify on the same
+   run: `:seon.test.run/input-digest` is each database's `:seon.source/test-input-digest`; a chain branch forked before
+   a publication that changed a non-declaration gate input holds the older digest, and S (forked from main's head)
+   the newer one. That one is a real input change and correctly reruns.
+   **Fix (a), content-keyed:** the reuse identity drops the evaluator, `[sym reach-digest input-digest]`: the reach
+   digest names the content that ran, and a compiled run differing from the entities is already excluded
+   (`:seon.test/loaded-source-drift` skips carrying). Touches `seon.test/recorded-outcomes`, `carried-results`,
+   `file-two-outcomes!` and its call site, `seon.test.runner/retain-results!` and the eviction helper of
+   `seon.test.branch-reuse-test`; about 25 changed lines, nothing added. It retires the claim "A result proves what its
+   evaluator ran" for carried results only; `seon.test/select`'s own same-branch reuse keeps its evaluator filter.
+   Root decides that sentence. Patch with the red proof:
+   [merge-reuse-phase3.patch](merge-reuse-phase3.patch) (applies on 08686ce37; unrun).
+   Proof: `seon.merge-test/a-merge-reuses-the-chain-branchs-green-at-an-unchanged-reach` (in the patch): main homes a
+   chain agent on its branch, the agent runs its seed there (`:interpreted`, green), `prepare-merge!` runs the gate;
+   asserted on data: the seed's reach digest on S equals the branch's, the two runs' input digest and evaluator agree
+   (red on HEAD by the evaluator, expected), and S's member names the branch's run as `:seon.test.member/reused-run`.
+   Next: with default up, run the proof red on HEAD, apply the fix, run it green with the reaching tests
+   (`seon.test.branch-reuse-test`, `seon.merge-test`, `seon.test-test`, `seon.test.selection-test`,
+   `seon.test-reaching-test`, `seon.cluster.branch-evidence-test`), and measure the gate's executed and reused counts and
+   ms before and after on a real chain branch, plus a `seon.profile/measure` row on `prepare-merge!`. Still open from
+   the original phase: a conflict among `stays` never blocks; not clean stays as the merge branch, offered back through
+   `merge-main!` and the block; help (5c) lands with it.
 
 ## Gaps recorded
 
