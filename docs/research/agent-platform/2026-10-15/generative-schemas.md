@@ -706,3 +706,18 @@ and each deletion goes in the commit that converts its last reader.
 - `:merge`'s proxy may surprise other readers of `m/type` (phase 1 greps them all).
 - A compiled host call inside a check cannot be interrupted. It is bounded by the runner's existing actual-exit
   ownership, not by a new deadline.
+
+### 3.x Owner rulings after the design (2026-10-15, root): existing code, mining, and what a run's cost means
+
+- **Rigour for new work; mining for old.** The exit gate judges only what a branch changed since its merge base. Loading
+  and indexing `src` never runs checks and never blocks boot. Main's existing schemas and functions are checked in the
+  bulk tier root runs centrally (each once per content digest); each failure becomes a generated task in its owner's
+  tasks file (as `seon.contracts/task` does for uncontracted functions), its shrunk counterexample the red proof. Root
+  fixes critical ones; the rest are the agent task queue ("we can mine from there").
+- **Cost from a check's runs.** Record per run: armed calls (exact, JIT-independent: the gate signal) and allocation
+  (stable, but C2 escape analysis can remove allocations once a method compiles: read it from later runs, not the
+  first). Wall time is recorded as evidence, never gated: 100 runs measure the interpreter and C1, not C2 (HotSpot
+  tiered thresholds: C1 at about 200 invocations, C2 at about 5,000 plus back-edges).
+- **Branch functions are never JIT-compiled.** They run interpreted in SCI; only the interpreter is compiled. A branch
+  function's compiled performance exists only after merge and reload, so a JIT-warm benchmark (criterium-style warmup)
+  is a separate, explicit measurement of compiled functions on main, never part of a stage exit.
