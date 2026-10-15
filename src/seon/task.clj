@@ -954,16 +954,23 @@
 
 (defn hold!
   "Close chain attempt `key` on chain `branch` of `store` with `reason` and hold its task (`hold-tx`), in ONE
-  transaction on the branch; the branch and chain fact stay. Answers the closed assignment."
+  transaction on the branch, and the same on the branch its row names when that is another (a merge step's); the
+  branch and chain fact stay. Answers the closed assignment."
   {:malli/schema [:=> [:cat [:map [:seon.store/store :seon.store/store]] :seon.chain/branch :seon.task/assignment :seon.task/reason]
                   [:or :seon.task/closed :seon.error/value]]}
   [{store :seon.store/store} branch key reason]
   (registry/on-branch store branch
              (fn [on-chain]
-               (let [report (written on-chain [[:db.fn/call #'hold-tx key reason]])]
-                 (if (:seon.error/at report)
-                   report
-                   {:seon.task/assignment key :seon.task/outcome :closed :seon.task/reason reason})))))
+               (let [works-on (:seon.task/branch (db/pull (db/db on-chain) [:seon.task/branch] [:seon.task/assignment key]))
+                     report (written on-chain [[:db.fn/call #'hold-tx key reason]])
+                     ;; an attempt that worked on its own branch (a merge step's) is closed there too, where its
+                     ;; facts live and from where its merge carries them to main (MERGE-STEP)
+                     there (when (and (:db-after report) works-on (not= works-on branch)
+                                      (contains? (registry/branches store) works-on))
+                             (registry/on-branch store works-on #(written % [[:db.fn/call #'hold-tx key reason]])))]
+                 (cond (:seon.error/at report) report
+                       (:seon.error/at there) there
+                       :else {:seon.task/assignment key :seon.task/outcome :closed :seon.task/reason reason})))))
 
 (defn run-held!
   "Run held chain task `handle` again (TASK-CHAIN §2.7): ONE transaction on its chain branch changing `:held` to

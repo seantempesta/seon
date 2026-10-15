@@ -2142,7 +2142,14 @@
                                                " Change the task on its branch and run it again with (my.root/run! {:seon.task/assigned \""
                                                h "\"}), abandon the chain, or build a new one from the branch"
                                                " (seon.task/chain! with :seon.chain/from " branch ").")})
-  (registry/on-branch (handle-store handle) branch #(write! % (into [[:db.fn/call #'task/hold-tx key reason]] tx-data)))
+  (let [store (handle-store handle)
+        works-on (registry/on-branch store branch
+                                     #(:seon.task/branch (db/pull (db/db %) [:seon.task/branch] [:seon.task/assignment key])))]
+    (registry/on-branch store branch #(write! % (into [[:db.fn/call #'task/hold-tx key reason]] tx-data)))
+    ;; an attempt that worked on its own branch (a merge step's) is closed there too, where its facts live and
+    ;; from where its merge carries them to main, so no closed attempt reaches main open (MERGE-STEP)
+    (when (and works-on (not= works-on branch) (contains? (registry/branches store) works-on))
+      (registry/on-branch store works-on #(write! % [[:db.fn/call #'task/hold-tx key reason]]))))
   nil)
 
 (defn- chain-bails
@@ -2351,7 +2358,11 @@
             (doseq [kept (registry/on-branch store branch
                                     #(db/q '[:find [?b ...] :where [?t :seon.task/id _] [?t :seon.task/branch ?b]] (db/db %)))
                     :when (contains? (registry/branches store) kept)]
-              (registry/retire-branch! {:seon.store/store store :seon.store/branch kept})))
+              ;; through the branch owner, which joins the graphs and releases the connections held there first
+              (when-let [refused (task/delete-branch! {:seon.db/connection connection :seon.store/store store
+                                                       :seon.agent/routing routing :seon.env/environment (env/of handle)}
+                                                      kept)]
+                (throw (ex-info (:seon.error/message refused "A merged chain's merge branch was not deleted.") refused)))))
           (when (contains? (registry/branches store) branch)
             (when-let [refused (task/delete-branch! {:seon.db/connection connection :seon.store/store store
                                                      :seon.agent/routing routing :seon.env/environment (env/of handle)}

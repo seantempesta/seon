@@ -47,15 +47,20 @@ The change, from the data outward:
    to a held step reaches its merge branch. An attempt whose start pass could not run its proofs (S5 attempt 3: a
    branch test whose namespace no longer loads, run `c85f90457863` `:request-threw`) ends `:stalled` and bails to root,
    never waiting with no turn and no end (`seon.turn/stalled?`).
-6. **Root merges the repaired branch.** A merge step that ends done is the chain's last task: root's pass merges its
+6. **The merge branch is a fork of main with its fork entity** (`seon.cluster/candidate-gate!` forks it with
+   `seon.cluster.registry/fork!`): its own delta (`seon.program/own-changed-identities`) walks from where it forked, so
+   root's forward merge into it never hides the chain's changes written before (S5, 2026-10-15: a merge branch made with
+   `branch!` merged with an empty delta and was recorded `:merged` with none of the chain's program). A merge step
+   attempt closed by root is closed on its merge branch too, so its merge brings no open attempt to main.
+7. **Root merges the repaired branch.** A merge step that ends done is the chain's last task: root's pass merges its
    attempt's branch (the merge branch) like any finished chain; the gate runs again on main's latest head, so a moved
    main is judged again, and a new refusal holds a new merge step the same way.
-7. **A merge step starts only by root's run.** It is never advanced into: a rerun predecessor's done merges again
+8. **A merge step starts only by root's run.** It is never advanced into: a rerun predecessor's done merges again
    from main's latest head (`seon.cluster.agent/chain-ends` skips a task whose next is a merge step,
    `seon.cluster.agent/chain-finishes` merges it), the held step stays held and is moot once that merge publishes; a new
    refusal appends a new merge step after it, the newest the one to run (S5 run 14, 2026-10-15: an advance started
    the held step).
-8. **Root's context shows held merge steps.** `my.root/instructions` carries the law; `my.root/merge-steps` lists each held merge step with
+9. **Root's context shows held merge steps.** `my.root/instructions` carries the law; `my.root/merge-steps` lists each held merge step with
    its `my.root/run!` form.
 
 ## Phases

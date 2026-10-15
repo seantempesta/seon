@@ -2480,3 +2480,90 @@
                 (is (= :closed (:seon.task/outcome (db/pull (db/db on-branch) [:seon.task/outcome] [:seon.task/assignment key])))
                     "and root bails it"))
               (finally (release-chain! routing store branch))))))))))
+
+(deftest ^{:seon.test/long "One chain world: a chain whose branch defines a function, its refused final merge, a merge step after main is fixed and merged forward, and root's merge of the step; about six db<->flow passes." :seon.test/long-ms 60000}
+  a-merge-steps-merge-carries-the-chains-declarations
+  ;; S5 (2026-10-15): the merge step's merge was recorded :merged while main received none of the chain's program.
+  ;; The merge branch had no fork entity (`seon.cluster/candidate-gate!` made it with `branch!`), so after root's
+  ;; forward merge its own delta walked from main's t and missed the chain's changes written before it. A merge step's
+  ;; merge carries the chain's declarations, or it is not recorded :merged
+  (binding [*space* "tq.mergecarry"]
+    (test-support/with-database
+     (fn [connection]
+       ;; the chain's own change: its agent's one scripted turn defines a function and the proof reaching it
+       (test-support/with-provider
+        (atom []) (test-support/reply-queue [(str "(in-ns '" *space* "-proofs)\n"
+                                                  "(defn chain-made {:malli/schema [:=> [:cat] :int]} [] 7)\n"
+                                                  "(clojure.test/deftest proves-made (clojure.test/is (= 7 (chain-made))))")])
+        (fn [server]
+       (chain-world
+        connection {"u" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          ;; a checkout the merge proves its files against: an empty directory, so the chain's new namespace is a new file
+          (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                          :seon.config/manifest (assoc (test-support/provider-config server) :seon.config.ai/no-provider false
+                                                       :seon.config.fs/working-root
+                                                       (str (java.nio.file.Files/createTempDirectory
+                                                             "tq-mergecarry" (make-array java.nio.file.attribute.FileAttribute 0))))})
+          (with-merge-template! connection)
+          (let [routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                main-author #(test-support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                                                                 :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
+                                                                                                               (db/db connection) connection)
+                                                                 :seon.batch/sink (seon.batch/sink)
+                                                                 :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                                                 :seon.agent/id "tq-chain-author"})
+                                                   (symbol (str *space* "-proofs")) %)
+                ;; the chain's second proof exists, red, when it forks: its agent's turn makes it green
+                _ (main-author "(clojure.test/deftest proves-made (clojure.test/is (= 1 2)))\n")
+                chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                   [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Do c."
+                                     :seon.task/proofs #{(proof "u") (proof "made")}}])
+                branch (:seon.chain/branch chain)
+                [last-task] (:seon.task/handles chain)
+                before (merge-branches store)
+                made (symbol (str *space* "-proofs") "chain-made")
+                context {:seon.db/connection connection :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                         :my.program/base-ctx (:seon.sci.eval/ctx handle) :seon.store/store store}
+                author (fn [on source]
+                         (test-support/define! (world/world {:seon.db/connection on :seon.boot/cluster-name "tq-chain"
+                                                             :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db on))
+                                                                                                           (db/db on) on)
+                                                             :seon.batch/sink (seon.batch/sink)
+                                                             :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                                             :seon.agent/id "tq-chain-author"})
+                                               (symbol (str *space* "-proofs")) source))
+                end-of (fn [on k] (await-on! on #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k]
+                                                         [?a :seon.task.attempt/end ?e]]
+                                                       (db/db on) k)
+                                             ::ended))]
+            (try
+              (pass! handle routing)
+              (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})
+                    _ (is (= :done (end-of on-branch (id/id [last-task 1]))) "the chain's last task ends done, its change made")
+                    ;; main moves so the chain's proof is red on main's head
+                    _ (author connection "(clojure.test/deftest proves-u (clojure.test/is (= 1 2)))\n")
+                    _ (pass! handle routing)
+                    step (get-in (db/pull (db/db on-branch) [{:seon.task/next [:seon.task/id]}] [:seon.task/id last-task])
+                                 [:seon.task/next :seon.task/id])
+                    kept (:seon.task/branch (db/pull (db/db on-branch) [:seon.task/branch] [:seon.task/id (or step "")]))
+                    step-key (id/id [step 1])]
+                (is (keyword? kept) "the refused merge (its gate: a REPL declaration has no file here) holds a merge step")
+                (author connection "(clojure.test/deftest proves-u (clojure.test/is (= 1 1)))\n")
+                (is (not (:seon.error/at ((requiring-resolve 'my.root/merge-main!) {:my.program/context context :seon.chain/branch kept})))
+                    "root merges main forward into the merge branch")
+                ((requiring-resolve 'my.root/run!) {:my.program/context context :seon.task/assigned step})
+                (pass! handle routing)
+                (let [there (registry/active-branch-connection {:seon.store/store store :seon.store/branch kept})]
+                  (is (= :done (end-of there step-key)) "green at its start, the merge step ends done"))
+                (pass! handle routing)
+                (let [main (db/db connection)
+                      merged? (= :merged (:seon.task/outcome (db/pull main [:seon.task/outcome] [:seon.task/assignment step-key])))
+                      carried? (some? (:db/id (db/pull main [:db/id] [:seon.fn/sym made])))]
+                  (is (or (not merged?) carried?)
+                      "main never records the merge step :merged without the chain's declaration")))
+              (finally
+                (doseq [kept (remove before (merge-branches store))]
+                  (release-chain! routing store kept))
+                (release-chain! routing store branch))))))))))))

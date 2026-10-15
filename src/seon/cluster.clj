@@ -2735,7 +2735,13 @@
         held? (contains? (registry/branches held-store) branch)]
     (when-not (and held? (= head (registry/branch-commit-id target)))
       (when held? (registry/retire-branch! target))
-      (registry/branch! (assoc target :seon.cluster.registry/from head)))
+      ;; a fork toward the source's branch, with its fork entity: the merge base and own delta of a kept merge branch
+      ;; (a merge step's, MERGE-STEP) walk from where it forked, so a forward merge into it never hides its changes
+      (let [source-db (db/db (:seon.db/connection source))
+            forked (registry/fork! (assoc target :seon.cluster.registry/from head :seon.db/db source-db
+                                          :seon.branch/target (get-in source-db [:config :branch])))]
+        (when (:seon.error/at forked)
+          (throw (ex-info (:seon.error/message forked "The merge branch could not be forked.") forked)))))
     (let [execution (cluster.agent/acquire-context! source nil {:seon.agent/branch branch})]
       ;; The candidate's write and its test run are the candidate branch's own
       ;; work: under a caller's custody the writer refuses writes naming
