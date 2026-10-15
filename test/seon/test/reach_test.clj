@@ -167,6 +167,41 @@
              (finally (store/release-branch! fork))))
          (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch]))))))))
 
+(deftest a-new-branchs-first-reach-digest-costs-what-it-changed
+  ;; exp-c (2026-10-15): the prior reach derivation was keyed by connection generation and branch, so a new branch
+  ;; (a chain's first test step, `prepare-merge!`'s `:merge-<id>`) rebuilt the whole closure (~470 MB for 29 tests).
+  ;; The prior is any held derivation of the store, its declarations compared with the branch's by content.
+  ;; The edited definition is one the test reaches and almost nothing else calls, so the work it changes is small.
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           reaching 'seon.id-test/identity-is-a-function-of-the-values-structure
+           names (into [reaching] (take 28 (sort (db/q '[:find [?s ...] :where [_ :seon.test/sym ?s]] database))))
+           store (:seon.store/store (support/execution-handle connection))
+           branch (keyword (str "reach-new-" (id/id)))
+           request {:seon.store/store store :seon.store/branch branch
+                    :seon.cluster.registry/from (db/commit-id database) :seon.db/db database}
+           before (runner/reach-digests database names)]
+       (is (:seon.cluster/created? (registry/fork! request)))
+       (try
+         (let [fork (store/open-branch! store branch)]
+           (try
+             (support/transacted! fork [(support/revision (db/db fork) [:seon.fn/sym 'seon.id/valid?]
+                                                          {:seon.fn/doc "The new branch's own row."})])
+             (let [changed (db/db fork)
+                   first-reach (profile/measure #(runner/reach-digests changed names))
+                   cold (profile/measure
+                         #(:seon.test.runner/digests
+                           (@#'runner/reach-index (@#'runner/reached-graph changed names) names)))]
+               (is (= (:seon.profile/value cold) (:seon.profile/value first-reach))
+                   "the branch's first digests equal a rebuild of its whole closure")
+               (is (not= (get before reaching) (get (:seon.profile/value first-reach) reaching))
+                   "the branch's change reaches the test")
+               (is (<= (:seon.profile/alloc-bytes first-reach) (quot (:seon.profile/alloc-bytes cold) 4))
+                   "the first reach on a new branch allocates at most a quarter of a rebuild"))
+             (finally (store/release-branch! fork))))
+         (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch]))))))))
+
 (deftest a-branch-result-is-recorded-at-its-own-heads-identity
   ;; S5 run 7: the recorder judged what the body executed against another row than its reach digest read, called
   ;; every result stale and keyed none: `seon.test.runner/current-results` found no green, and the attempt's prove

@@ -933,6 +933,14 @@
         by)
       (derive))))
 
+(def ^:private reach-shapes
+  "Each attribute `reach-declarations` reads, to the shape of its map: a name
+  to its entity (`:by-value`), or an entity to its value or values."
+  (into {:seon.fn/sym :by-value :seon.test/sym :by-value
+         :seon.program/definition-digest :by-entity :seon.fn/doc :by-entity
+         :seon.schema/key :by-value :seon.schema/form :by-entity}
+        (map (fn [[a many?]] [a (if many? :many :by-entity)])) reach-fact-attributes))
+
 (defn- reach-declarations
   "The names, digests and reach facts; unchanged attributes reuse the held derivation."
   {:malli/schema [:function
@@ -949,15 +957,11 @@
   ([database] (reach-declarations database {}))
   ([database previous]
    (let [revisions (reach-revision-key database)
-         shapes (into [[:seon.fn/sym :by-value] [:seon.test/sym :by-value]
-                       [:seon.program/definition-digest :by-entity] [:seon.fn/doc :by-entity]
-                       [:seon.schema/key :by-value] [:seon.schema/form :by-entity]]
-                      (map (fn [[a many?]] [a (if many? :many :by-entity)])) reach-fact-attributes)
          attributes (into {}
                           (map (fn [[a shape]]
                                  [a (if (and revisions (= (get revisions a) (get (::revisions previous) a)))
                                       (get (::attributes previous) a)
-                                      (reach-attribute database revisions a shape))])) shapes)]
+                                      (reach-attribute database revisions a shape))])) reach-shapes)]
      {::rows (merge (:seon.fn/sym attributes) (:seon.test/sym attributes))
       ::digests (:seon.program/definition-digest attributes)
       ::facts (select-keys attributes (into [:seon.fn/doc] (map first) reach-fact-attributes))
@@ -1226,17 +1230,37 @@
            (reduce #(update %1 %2 (fnil conj #{}) name) removed (edges node))))))
    reverse after))
 
+(defn- differing-entities
+  "The entities whose value of one attribute differs between two of its maps of `shape`."
+  {:malli/schema [:=> [:cat [:enum :by-value :by-entity :many] [:maybe :map] :map] [:set :seon.db/entity-id]]}
+  [shape before after]
+  (let [before (or before {})
+        differing (as-> (transient #{}) found
+                    (reduce-kv (fn [found k v] (if (= v (get after k ::absent)) found (conj! found k))) found before)
+                    (reduce-kv (fn [found k _] (if (contains? before k) found (conj! found k))) found after)
+                    (persistent! found))]
+    (if (= :by-value shape)
+      (into #{} (comp (mapcat (juxt before after)) (remove nil?)) differing)
+      differing)))
+
 (defn- changed-reach
-  "The names whose facts changed since a held derivation, plus their reverse closure."
-  {:malli/schema [:=> [:cat :seon.db/database-value :map :map :map] [:set :seon.schema/value]]}
-  [database revisions declarations prior]
-  (let [entities (reduce-kv (fn [changed attribute revision]
-                              (if (= revision (get (::revisions prior) attribute)) changed
-                                  (into changed (reach-changed-entities database attribute (get (::revisions prior) attribute) revision (::basis prior)))))
-                            #{} revisions)
+  "The names whose declared content differs from a held derivation's, plus
+  their reverse closure. Each attribute whose revision differs is compared
+  map against map and each side's entities name their own rows, so a
+  derivation held on any branch of the store serves."
+  {:malli/schema [:=> [:cat :map :map] [:set :seon.schema/value]]}
+  [declarations prior]
+  (let [held (::declarations prior)
+        entities (reduce-kv (fn [changed attribute shape]
+                              (let [revision (get (::revisions declarations) attribute)]
+                                (if (and revision (= revision (get (::revisions held) attribute)))
+                                  changed
+                                  (into changed (differing-entities shape (get (::attributes held) attribute)
+                                                                    (get (::attributes declarations) attribute))))))
+                            #{} reach-shapes)
         names (into #{} (comp (filter (comp entities val)) (map key))
                     (concat (::rows declarations) (::schema-ids declarations)
-                            (::rows (::declarations prior)) (::schema-ids (::declarations prior))))]
+                            (::rows held) (::schema-ids held)))]
     (set (keys (reach-fixed-point #(hash-map ::out (get (::reverse prior) %)) ::out names)))))
 
 (defn- reach-entries
@@ -1251,21 +1275,18 @@
       (let [attribute-revisions (reach-revision-key database)
             ;; equal programs share one index
             revisions attribute-revisions
-            identity (reach-owner database)
+            ;; the store's most recent derivation is the prior, whichever branch built it
+            store (some-> (db/committed-value-identity database) :datahike.value/connection-id first)
             current (when revisions (cache/present ::reach-index-by-revision revisions))
             covered (into (set (keys (::digests current))) (::undigested current))
             entries
             (if (every? covered test-symbols)
               current
-              (let [previous-head (when identity (cache/present ::reach-head identity))
-                    previous (when previous-head
-                               (some-> (cache/present ::reach-index-by-revision (::revisions previous-head))
-                                       (assoc ::basis (::basis previous-head))))
-                    prior (or current (when (and previous (< (::basis previous) (db/basis-t database))) previous))
+              (let [prior (or current
+                                (some->> (when store (cache/present ::reach-head store))
+                                         (cache/present ::reach-index-by-revision)))
                     declarations (reach-declarations database (::declarations prior {}))
-                    changed (if (and prior (not current))
-                              (changed-reach database attribute-revisions declarations prior)
-                              #{})
+                    changed (if (and prior (not current)) (changed-reach declarations prior) #{})
                     known (apply dissoc (::component-digests prior {}) changed)
                     unknown (set/difference (set (::undigested prior)) changed)
                     {::keys [nodes schemas] :as graph}
@@ -1289,10 +1310,9 @@
                                     (* reach-set-element-bytes (transduce (map count) + 0 (vals (::reverse %)))))
                                 (constantly entries)))
                 entries))]
-        (when identity
-          (cache/evict! ::reach-head identity)
-          (cache/lookup ::reach-head identity (constantly 256)
-                        #(hash-map ::basis (db/basis-t database) ::revisions revisions)))
+        (when (and store revisions)
+          (cache/evict! ::reach-head store)
+          (cache/lookup ::reach-head store (constantly 256) (constantly revisions)))
         (assoc entries ::digests (select-keys (::digests entries) test-symbols)
                        ::undigested (filterv (set (::undigested entries)) test-symbols)))
       (catch Exception failure (reach-unavailable `reach-entries failure test-symbols)))))
