@@ -2452,6 +2452,8 @@
        (try (let [row (db/q '[:find (pull ?a [:seon.task.attempt/end :seon.task.attempt/reason]) . :in $ ?k
                               :where [?a :seon.task/assignment ?k]]
                             head key)]
+              ;; a refused read is the pass's failure, never an answer: a thrown derivation is not retained
+              (when (db/read-refusal? row) (throw (ex-info (:seon.error/message row "db<->flow could not read the attempt's end.") row)))
               (if (keyword? (:seon.task.attempt/end row)) (select-keys row [:seon.task.attempt/end :seon.task.attempt/reason]) {}))
             (finally (source/release! [head])))
        {})))
@@ -2481,10 +2483,11 @@
   [database commit agent-id]
   (cache/lookup ::admission-end [commit agent-id] (constantly 256)
     #(if-let [head (db/commit-database database commit)]
-       (try (if-let [t (db/q '[:find ?t . :in $ ?id :where [?g :seon.agent/id ?id] [?g :seon.agent/admission-closed-tx ?t]]
-                             head agent-id)]
-              {:seon.agent/admission-closed-tx t}
-              {})
+       (try (let [t (db/q '[:find ?t . :in $ ?id :where [?g :seon.agent/id ?id] [?g :seon.agent/admission-closed-tx ?t]]
+                          head agent-id)]
+              ;; a refused read is the pass's failure, never an answer: a thrown derivation is not retained
+              (when (db/read-refusal? t) (throw (ex-info (:seon.error/message t "db<->flow could not read the agent's end.") t)))
+              (if t {:seon.agent/admission-closed-tx t} {}))
             (finally (source/release! [head])))
        {})))
 
