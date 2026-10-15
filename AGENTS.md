@@ -124,7 +124,7 @@ root.
 
 ## Choosing the design
 
-How the owner chooses between designs (distilled from his rulings of 2026-10-15). Solve each concept once, as a
+How the owner chooses between designs (distilled from the owner's rulings of 2026-10-15). Solve each concept once, as a
 composable value-level mechanism, and reuse it everywhere it applies. Ask these in order before writing a design:
 
 1. **Which proven system already solved this? Take its model whole.** Branch drift is git's (`git merge main`, a
