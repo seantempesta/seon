@@ -6,6 +6,7 @@
             [clojure.core.async.impl.protocols :as async.impl]
             [clojure.data.json :as json]
             [clojure.java.io :as io]
+            [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.test :as test]
             [datahike.api :as d]
@@ -706,6 +707,19 @@
   [label]
   (.getCanonicalPath (.toFile (java.nio.file.Files/createTempDirectory
                                label (make-array java.nio.file.attribute.FileAttribute 0)))))
+
+(defn commit-root!
+  "`root` once it is a git checkout whose HEAD holds every file in it: a write-back reads each file at git HEAD
+  (`seon.cluster.source/committed-bytes`), as a real checkout holds it. Returns `root`."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [root]
+  (let [git! (fn [& args] (let [{:keys [exit err]} (apply shell/sh "git" "-C" root args)]
+                            (when-not (zero? exit) (throw (ex-info err {:git args})))))]
+    (when-not (.isDirectory (io/file root ".git"))
+      (git! "init" "-q") (git! "config" "user.email" "fixture@test.invalid") (git! "config" "user.name" "fixture"))
+    (git! "add" "-A")
+    (git! "commit" "-q" "--allow-empty" "-m" "fixture")
+    root))
 
 (defn delete-root!
   "Delete a `temp-root` directory."

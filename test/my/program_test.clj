@@ -282,6 +282,7 @@
     (io/make-parents file)
     (spit file (str "(ns " fixture-ns "\n  \"Fixture.\"\n  (:require [clojure.test]))\n\n"
                     "(defn callee\n  \"Add one.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (+ x 1))\n"))
+    (support/commit-root! root)
     (try
       (let [entities (function/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})]
         (support/transacted! h-conn (function/reconcile-tx (db/db h-conn) entities (mapv seon-program/row-identity entities)))
@@ -337,6 +338,7 @@
                          ".clj-kondo/hooks/is_message.clj" "(ns hooks.is-message)\n\n(defn is [{:keys [node]}] {:node node})\n"}]
       (io/make-parents (io/file root file))
       (spit (io/file root file) text))
+    (support/commit-root! root)
     (try
       (let [entities (function/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})]
         (support/transacted! h-conn (function/reconcile-tx (db/db h-conn) entities (mapv seon-program/row-identity entities)))
