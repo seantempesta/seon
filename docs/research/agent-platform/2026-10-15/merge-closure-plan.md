@@ -1,7 +1,7 @@
 ---
 title: "Merge by reach closure: one merge list for the block, the done rule and the merge (rulings 5, 5a, 5b, 6)"
 type: plan
-status: "phase 0 done (c8215bfe1); phase 1 in flight; phases 2-3 open"
+status: "phase 0 done (c8215bfe1); phase 1a done (49b2ac05d: merge-list, reach-closure); 1b (merge-onto selection inside prepare-merge!), 2, 3 open"
 created: 2026-10-15
 ---
 
@@ -28,7 +28,7 @@ Authority: [branch-model rulings](branch-model-rulings.md) 5, 5a, 5b, 5c, 6. One
 
 ## The one function
 
-`seon.merge/merge-list [database changed seeds]` → `{:seon.merge/will-merge identity-set :seon.merge/stays
+`seon.cluster.source/merge-list [database changed seeds]` (in source: `seon.merge` requires it, and `prepare-merge!` and `done-refusals` live there) → `{:seon.merge/will-merge identity-set :seon.merge/stays
 identity-set}`: `database` the branch head, `changed` the branch's own changes since its merge base (git's three-way:
 a change main made is never the branch's), `seeds` the tests that curate the merge. Closure = every name the seeds
 reach (`seon.test.runner/reach-closure`, new beside `reach-memberships`: the reach graph's names from the seeds plus
