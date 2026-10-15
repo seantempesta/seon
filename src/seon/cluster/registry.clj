@@ -245,8 +245,7 @@
                                   [:seon.db/connection :seon.db/connection]
                                   [:seon.boot/cluster-name :seon.boot/cluster-name]]
                        [:sequential :seon.store/branch] :seon.config/path]
-                  [:vector [:map [:seon.store/branch :seon.store/branch]
-                            [:seon.reconcile/result :seon.reconcile/result]]]]}
+                  :seon.config/branches]}
   [request branches path]
   (mapv (fn [branch]
           {:seon.store/branch branch

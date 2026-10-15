@@ -10,6 +10,10 @@
             [seon.ai :as ai]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as cluster-agent]
+            [seon.cluster.boot :as boot]
+            [seon.cluster.process :as process]
+            [seon.operator.runtime :as runtime]
+            [seon.task :as task]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.config :as config]
@@ -943,3 +947,38 @@
            (finally
              (store/release-branch! on-branch)
              (registry/retire-branch! {:seon.store/store backing :seon.store/branch branch}))))))))
+
+(deftest config-apply-on-a-branch-answers-and-converges-its-tasks-branches
+  ;; reactive start P4: `bin/seon config apply ... --branch B` wrote B's config and then exited 1, its response
+  ;; refused by `seon.cluster.boot/request!`'s own contract; it answers what it wrote on B, and on each branch B's
+  ;; tasks work on (a merge step's), converged onto B's config through the step a launch runs
+  (let [[cluster instance] (some #(when (map? (val %)) %) @runtime/running-instances)
+        main (db/db (boot/connection cluster))
+        store (:seon.store/store instance)
+        chain-branch (keyword (str "config-apply-chain-" (random-uuid)))
+        merge-branch (keyword (str "config-apply-merge-" (random-uuid)))
+        fork! #(registry/fork! {:seon.store/store store :seon.store/branch % :seon.db/db main
+                                :seon.branch/target (get-in main [:config :branch])
+                                :seon.cluster.registry/from (get-in main [:config :branch])})
+        document (doto (java.io.File/createTempFile "branch-apply" ".edn") (spit (pr-str {:seon.config.ai/max-tokens 321})))
+        reads #(:seon.config.ai/max-tokens (config/effective (db/branch-database (db/db (boot/connection cluster)) %) cluster))]
+    (is (some? cluster) "config apply is requested of this JVM's live instance")
+    (try
+      (fork! chain-branch)
+      (fork! merge-branch)
+      (registry/on-branch store chain-branch
+                          #(test-support/transacted!
+                            % (task/adopt-tasks-tx (db/db %) [{:seon.task/ns 'tq.configapply :seon.task/name "merge"
+                                                               :seon.task/plan "Merge it." :seon.task/branch merge-branch}]
+                                                   #{(task/task-handle 'tq.configapply "merge")} {})))
+      (let [response (boot/request! (merge (process/current-identity)
+                                           {:seon.operator/command :config-apply :seon.boot/cluster-name cluster
+                                            :seon.operator/managed-root (or (store/declared-operator-root) (System/getProperty "user.dir"))
+                                            :seon.config/path (.getCanonicalPath document) :seon.operator/branch chain-branch}))]
+        (is (nil? (:seon.error/at response)) "the operator's request answers")
+        (is (= [chain-branch merge-branch] (mapv :seon.store/branch (:seon.config/branches response)))
+            "it names the branch it applied and the branch that branch's task works on")
+        (is (= [321 321] [(reads chain-branch) (reads merge-branch)]) "both read the applied dial"))
+      (finally
+        (doseq [branch [chain-branch merge-branch] :when (contains? (registry/branches store) branch)]
+          (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))

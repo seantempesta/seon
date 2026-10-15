@@ -30,10 +30,15 @@ the `:config-apply` branch of `seon.cluster.boot/request!`. `seon.config/apply!`
 reconciles the selected document; `seon.config/effective`
 reads from the database.
 
-A branch reads its own config row and a merge never carries it. `bin/seon config apply [NAME] PATH --branch B`
-(or `--chains`: every `:seon.chain/branch` main names that this JVM holds open) applies the document over that
-branch's own connection (`seon.cluster.registry/apply-config-to-branches!`, `seon.db/branch-connection`); the agent's next dial
-read there sees it, main's row is unchanged.
+A branch reads its own config row and a merge never carries it. A chain's config is decided when it is written:
+`seon.task/chain!` takes `:seon.chain/config` (dial to value, or `:seon.config/absent`), validates it in each running
+task's `:seon.task/runnable` view, and writes it on the chain branch's row in the same transaction as the tasks
+(`seon.config/compiled-over`, `seon.config/compiled-tx`). Before an attempt's row is written, the branch its agent
+works on, when it is not the chain branch (a merge step's branch forks main), is converged onto the chain branch's
+decided dials (`seon.task/converge-config!`). `bin/seon config apply [NAME] PATH --branch B` (or `--chains`: every
+`:seon.chain/branch` main names) applies the document over that branch's own row
+(`seon.cluster.registry/apply-config-to-branches!`) and converges the branches B's tasks work on through the same
+step; its answer lists each branch with its reconcile result (`:seon.config/branches`). Main's row is unchanged.
 
 Boot applies the checkout's compiled entities to a branch that may not have
 reloaded the checkout's declarations. `apply-compiled!` installs an added

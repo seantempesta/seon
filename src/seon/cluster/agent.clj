@@ -2160,10 +2160,16 @@
 
 (defn- write-chain-attempt!
   "Write a chain task's `:attempt` action on its chain branch, never on main, through a connection held for this
-  action: the agent's creation (homed on the chain branch) and the attempt row in ONE transaction; nothing when the
-  branch already holds the attempt."
+  action: first the config of the branch its agent works on converged to the chain's (`seon.task/converge-config!`,
+  reactive start step 4: a merge step's branch forks main and holds main's config until then), then the agent's
+  creation (homed on the chain branch) and the attempt row in ONE transaction; nothing when the branch already holds
+  the attempt."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.actions/action] :nil]}
   [handle {h :seon.task/assigned agent-id :seon.agent/id branch :seon.chain/branch works-on :seon.task/branch :as action}]
+  (when (and works-on (not= works-on branch))
+    (let [converged (task/converge-config! (handle-store handle) (:seon.cluster/name handle) branch works-on)]
+      (when (:seon.error/at converged)
+        (throw (ex-info (:seon.error/message converged "The attempt's branch config could not converge.") converged)))))
   (registry/on-branch (handle-store handle) branch
              (fn [connection]
                (let [database (db/db connection)

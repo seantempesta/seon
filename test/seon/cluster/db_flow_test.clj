@@ -757,6 +757,87 @@
             (pass! handle routing)
             (is (chain-attempt-started? connection routing chain 2) "and attempt 2 starts"))))))))
 
+(deftest ^{:seon.test/long "One chain world: a chain written with a provider in its config, its first attempt's prove pass and one scripted model turn over two db<->flow passes." :seon.test/long-ms 30000}
+  a-chain-written-with-a-provider-has-its-first-attempt-see-it
+  ;; reactive start P4 (`docs/research/agent-platform/2026-10-15/reactive-start-plan.md`): a chain branch forked main's
+  ;; config, so attempt 1 raced root's apply and ran with main's provider off (:stalled, 0 calls). `seon.task/chain!`
+  ;; writes the chain's config in its own transaction, so the first attempt already reads it
+  (binding [*space* "tq.chainprovider"]
+    (test-support/with-database
+     (fn [connection]
+       (held-chain-world
+        connection
+        (fn [handle _ _]
+          (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                          :seon.config/manifest {:seon.config.ai/no-provider true}})
+          (let [calls (atom 0)
+                handle (assoc handle :seon.turn.loop/complete (fn [_projection _request]
+                                                                (swap! calls inc)
+                                                                {:seon.ai/text "(my.turn/wait {:my.turn/note \"Waiting for root.\"})"}))
+                routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                   [{:seon.task/ns (symbol *space*) :seon.task/name "p" :seon.task/plan "Do p."
+                                     :seon.task/proofs #{(proof "c")}}]
+                                   {:seon.chain/config {:seon.config.ai/no-provider config/absent :seon.config.ai/no-auth true
+                                                        :seon.config.ai/endpoint "http://127.0.0.1:9/chat"
+                                                        :seon.config.ai/model "fixture-provider"}})
+                branch (:seon.chain/branch chain)
+                agent-id (str "attempt/" (id/id [(first (:seon.task/handles chain)) 1]))]
+            (try
+              (pass! handle routing)
+              (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
+                (await-on! on-branch #(when (pos? (model-turns (db/db on-branch) agent-id)) true) ::first-model-turn)
+                (is (= 1 @calls) "the first attempt calls the chain's provider")
+                (is (= 1 (model-turns (db/db on-branch) agent-id)) "its first turn is a model turn on the chain branch"))
+              (is (true? (:seon.config.ai/no-provider (config/effective (db/db connection) "tq-chain")))
+                  "main's provider stays off: the chain's config is the chain branch's own")
+              (finally (release-chain! routing store branch))))))))))
+
+(deftest ^{:seon.test/long "One chain world: two chains, one on its own branch and one whose task names a branch forked from main, each first attempt started by one db<->flow pass and ended done at its start." :seon.test/long-ms 30000}
+  config-converges-before-the-agent-starts
+  ;; reactive start P4, step 4 before step 5: the branch an attempt's agent works on holds the chain's config before
+  ;; the attempt's row is written there. A merge step's branch forks main (`seon.cluster/candidate-gate!`), so it held
+  ;; main's config and its agent ran with no provider until root applied config by hand; a task naming a branch forked
+  ;; from main is that case
+  (binding [*space* "tq.chainconverge"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"u" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                main (db/db connection)
+                elsewhere :tq-converge-elsewhere
+                _ (registry/fork! {:seon.store/store store :seon.store/branch elsewhere :seon.db/db main
+                                   :seon.branch/target (get-in main [:config :branch])
+                                   :seon.cluster.registry/from (get-in main [:config :branch])})
+                chain! (fn [task-name task-branch]
+                         (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                      [(cond-> {:seon.task/ns (symbol *space*) :seon.task/name task-name :seon.task/plan "Do it."
+                                                :seon.task/proofs #{(proof "u")}}
+                                         task-branch (assoc :seon.task/branch task-branch))]
+                                      {:seon.chain/config {:seon.config.ai/max-tokens 777}}))
+                own (chain! "own" nil)
+                merge-like (chain! "named" elsewhere)]
+            (try
+              (pass! handle routing)
+              (doseq [[label chain works-on] [["on its chain branch" own (:seon.chain/branch own)]
+                                              ["on a branch forked from main" merge-like elsewhere]]]
+                (let [key (id/id [(first (:seon.task/handles chain)) 1])
+                      there (db/branch-database (db/db connection) works-on)
+                      config-tx (db/q '[:find ?tx . :where [?c :seon.config/cluster "tq-chain"] [?c :seon.config.ai/max-tokens 777 ?tx]] there)
+                      attempt-tx (db/q '[:find ?tx . :in $ ?k :where [_ :seon.task/assignment ?k ?tx]] there key)]
+                  (is (= 777 (:seon.config.ai/max-tokens (config/effective there "tq-chain"))) label)
+                  (is (and (int? config-tx) (int? attempt-tx) (< config-tx attempt-tx))
+                      "the chain's config is written there before the attempt's row")))
+              (is (not= 777 (:seon.config.ai/max-tokens (config/effective (db/db connection) "tq-chain"))) "main's row is unchanged")
+              (finally
+                (release-chain! routing store elsewhere)
+                (release-chain! routing store (:seon.chain/branch own))
+                (release-chain! routing store (:seon.chain/branch merge-like)))))))))))
+
 (deftest ^{:seon.test/long "One chain world: a task-reading proof recorded green on main with no task, a chain whose first attempt proves it red and makes one scripted model call; then a chain whose proof main already holds green, ended done by its prove pass; measured with the S3a-2 row's world." :seon.test/long-ms 30000}
   a-green-recorded-without-the-task-never-proves-a-chain-task
   ;; S5 run 1 D1 (`docs/research/agent-platform/2026-10-14/s5-run-1.md`): a test reading its task (`seon.test/task`)

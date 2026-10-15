@@ -747,16 +747,14 @@
           (throw (ex-info (str (:seon.error/message result)) result))))))
   nil)
 
-(defn apply-compiled!
-  "Exact-reconcile one already-compiled desired config entity."
+(defn compiled-tx
+  "The exact reconcile of `compiled`'s desired config entity onto `database`: its transaction data (one
+  `reconcile-call`, decided again over the value the writer holds) and how many facts differ; none when converged."
   {:malli/schema
-   [:=> [:cat :seon.db/connection :seon.config/compiled]
-    :seon.reconcile/result]}
-  [connection compiled]
-  (accrete-entity-attributes! connection (into [(:seon.config/desired-row compiled)]
-                                           (:seon.config/initialization compiled)))
-  (let [database (db/db connection)
-        projection (or (db/carried-projection database)
+   [:=> [:cat :seon.db/database-value :seon.config/compiled]
+    [:map [:seon.db/tx-data :seon.db/tx-data] [::reconcile/operations nat-int?]]]}
+  [database compiled]
+  (let [projection (or (db/carried-projection database)
                        (schema/handed-projection)
                        (do (db/projection-fallback 'seon.config/apply-compiled!)
                            (schema/projection-from-database database)))
@@ -797,17 +795,28 @@
           (seq owned-config-identities)
           (assoc ::reconcile/retain-identities owned-config-identities))
         ;; Both config dials and initialization entities are compared as facts.
-        operations (count (reconcile/plan database request))
+        operations (count (reconcile/plan database request))]
+    (when (zero? operations) (require-functions! database desired))
+    {:seon.db/tx-data (if (zero? operations) [] [[:db.fn/call #'reconcile-call desired request]])
+     ::reconcile/operations operations}))
+
+(defn apply-compiled!
+  "Exact-reconcile one already-compiled desired config entity (`compiled-tx`)."
+  {:malli/schema
+   [:=> [:cat :seon.db/connection :seon.config/compiled]
+    :seon.reconcile/result]}
+  [connection compiled]
+  (accrete-entity-attributes! connection (into [(:seon.config/desired-row compiled)]
+                                           (:seon.config/initialization compiled)))
+  (let [{tx-data :seon.db/tx-data operations ::reconcile/operations} (compiled-tx (db/db connection) compiled)
         result
         (if (zero? operations)
-          (do (require-functions! database desired)
-              {::reconcile/converged? true
-               ::reconcile/operations 0})
+          {::reconcile/converged? true
+           ::reconcile/operations 0}
           (let [transaction-result
                 (db/transact!
                  connection
-                 {:tx-data
-                  [[:db.fn/call #'reconcile-call desired request]]
+                 {:tx-data tx-data
                   :tx-meta
                   {:seon.db/process
                    [:seon.db.process/id managing-process-identity]}})]
@@ -833,6 +842,24 @@
     (into {} (map (fn [config-key] [config-key (get entity config-key absent)]))
           (:seon.config/overlay-keys entity))))
 
+(defn compiled-over
+  "`request`'s manifest compiled over the decisions cluster `:seon.boot/cluster-name`'s row at `database` already holds
+  (`held-overlay`), so it changes only its own keys: what `apply!` reconciles."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:map [:seon.boot/cluster-name :seon.boot/cluster-name]
+                        [:seon.config/manifest {:optional true} :seon.config/manifest]]]
+                  :seon.config/compiled]}
+  [database request]
+  (let [cluster-name (:seon.boot/cluster-name request)
+        ;; An omitted cluster is refused by name in `compile-manifest`.
+        held (when (and (string? cluster-name) (seq cluster-name))
+               (held-overlay database cluster-name))]
+    (compile-manifest
+     (cond-> (select-keys request [:seon.config/environment :seon.boot/cluster-name
+                                   :seon.config/default-document])
+       (or (seq held) (:seon.config/manifest request))
+       (assoc :seon.config/manifest (merge held (:seon.config/manifest request)))))))
+
 (defn apply!
   "Compile once and exact-reconcile the one desired config row.
 
@@ -852,18 +879,8 @@
     [:=> [:cat :seon.config/apply-request :seon.config/path]
      :seon.reconcile/result]]}
   ([request]
-   (let [connection (:seon.db/connection request)
-         cluster-name (:seon.boot/cluster-name request)
-         ;; An omitted cluster is refused by name in `compile-manifest`.
-         held (when (and (string? cluster-name) (seq cluster-name))
-                (held-overlay (db/db connection) cluster-name))]
-     (apply-compiled!
-      connection
-      (compile-manifest
-       (cond-> (select-keys request [:seon.config/environment :seon.boot/cluster-name
-                                     :seon.config/default-document])
-         (or (seq held) (:seon.config/manifest request))
-         (assoc :seon.config/manifest (merge held (:seon.config/manifest request))))))))
+   (let [connection (:seon.db/connection request)]
+     (apply-compiled! connection (compiled-over (db/db connection) request))))
   ([request path]
    (let [document (read-edn-map path)]
      (if (= document (default-document))

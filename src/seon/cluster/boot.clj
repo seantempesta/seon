@@ -769,9 +769,20 @@
               branches (cond (:seon.operator/branch request) [(:seon.operator/branch request)]
                              (:seon.operator/chains? request) (task/chain-branches (db/db (:seon.db/connection apply-request))))]
           (if branches
-            {:seon.boot/cluster-name cluster :seon.config/branches (registry/apply-config-to-branches!
-                                                   (assoc apply-request :seon.store/store (:seon.store/store (selected-instance cluster)))
-                                                   branches path)}
+            (let [store (:seon.store/store (selected-instance cluster))
+                  applied (registry/apply-config-to-branches! (assoc apply-request :seon.store/store store) branches path)]
+              ;; each branch's tasks that work on a branch of their own (a merge step's) converge onto what was
+              ;; just applied there, through the step an attempt's launch runs (reactive start, step 4)
+              {:seon.boot/cluster-name cluster
+               :seon.config/branches
+               (into applied
+                     (for [branch branches
+                           works-on (registry/on-branch store branch
+                                                        #(sort (db/q '[:find [?b ...] :where [?t :seon.task/id _] [?t :seon.task/branch ?b]]
+                                                                     (db/db %))))
+                           :when (and (not= works-on branch) (contains? (registry/branches store) works-on))]
+                       {:seon.store/branch works-on
+                        :seon.reconcile/result (task/converge-config! store cluster branch works-on)}))})
             (let [result (config/apply! apply-request path)]
               (if (:seon.error/at result) result
                   {:seon.boot/cluster-name cluster :seon.reconcile/result result}))))

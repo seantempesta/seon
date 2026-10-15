@@ -1106,16 +1106,55 @@
                prove
                (cond-> implement (:seon.task/proofs filed) (assoc :seon.task/proofs (:seon.task/proofs filed)))]))))
 
+(defn- config-tx
+  "The transaction data deciding `overlay` (dial to value, or `seon.config/absent`) on cluster `cluster-name`'s config
+  row at `database`, over the decisions it holds (`seon.config/compiled-over`); none for no overlay or no change."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.boot/cluster-name [:maybe :seon.chain/config]] :seon.db/tx-data]}
+  [database cluster-name overlay]
+  (if (seq overlay)
+    (:seon.db/tx-data (config/compiled-tx database (config/compiled-over database {:seon.boot/cluster-name cluster-name
+                                                                                  :seon.config/manifest overlay})))
+    []))
+
+(defn desired-manifest
+  "The chain's desired config on `database`, its chain branch, as a manifest another branch is converged to: every
+  dial of `:seon.task/desired-config` as cluster `cluster-name`'s row decides it there, `seon.config/absent` for one it
+  leaves absent; the effective read's refusal when it has none."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.boot/cluster-name]
+                  [:or :seon.config/manifest :seon.config/error :seon.db/invalid-read-error]]}
+  [database cluster-name]
+  (let [decided (desired-config database cluster-name nil)]
+    (if (refusal/error? decided)
+      decided
+      (into {} (map (fn [dial] [dial (get decided dial config/absent)]))
+            (schema-keys (db/carried-projection database) :seon.task/desired-config)))))
+
+(defn converge-config!
+  "Converge branch `to` of `store` onto the config the chain branch `from` decides for cluster `cluster-name`
+  (`desired-manifest`): ONE reconcile transaction of the dials that differ, none when they agree (reactive start, step
+  4). A merge step's branch forks main, so its config is main's until this runs. Answers the reconcile result."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.boot/cluster-name :seon.chain/branch :seon.store/branch]
+                  [:or :seon.reconcile/result :seon.error/value]]}
+  [store cluster-name from to]
+  (let [manifest (registry/on-branch store from #(desired-manifest (db/db %) cluster-name))]
+    (if (refusal/error? manifest)
+      manifest
+      (registry/on-branch store to
+                          (fn [connection]
+                            (db/with-branch {:seon.db/connection connection}
+                              #(config/apply! {:seon.db/connection connection :seon.boot/cluster-name cluster-name
+                                               :seon.config/manifest manifest})))))))
+
 (defn- chain-refusal
   "The first `:unrunnable` refusal among the first and the running `entities` of a chain on `branch` (the first runs
-  first, held or not, and carries the chain's config), each viewed under main
-  `database`'s config for the cluster its root agent names with `overlay` decided over it (`desired-config`), or the
-  config read's refusal; nil when every running task validates."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.chain/branch [:vector :map] [:maybe :seon.chain/config]]
+  first, held or not, and carries the chain's config), each viewed under main `database`'s config for `cluster-name`
+  (the cluster main's root agent names, or that read's refusal) with `overlay` decided over it (`desired-config`);
+  nil when every running task validates."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:or :seon.boot/cluster-name :seon.error/value] :seon.chain/branch
+                       [:vector :map] [:maybe :seon.chain/config]]
                   [:maybe :seon.error/value]]}
-  [database branch entities overlay]
-  (let [cluster-name (config/agent-cluster database "root")
-        config (if (string? cluster-name) (desired-config database cluster-name overlay) cluster-name)
+  [database cluster-name branch entities overlay]
+  (let [config (if (string? cluster-name) (desired-config database cluster-name overlay) cluster-name)
         projection (db/carried-projection database)]
     (if (refusal/error? config)
       config
@@ -1126,7 +1165,8 @@
   "Write `tasks` as one linked chain on its own branch, forked from main (`:seon.chain/from` names another branch
   whose head it starts from; it still merges toward main): the first map names the chain and the branch
   `chain-<handle>`, later tasks are named by position (`chain-entities`), all written in one transaction through
-  the task writer, then the chain fact on main. Before anything is written, the first and each running task's runnable view
+  the task writer with the chain's `:seon.chain/config` decisions on the branch's config row (`config-tx`), then the
+  chain fact on main. Before anything is written, the first and each running task's runnable view
   (`chain-refusal`: its members, its branch and main's config with `:seon.chain/config` decided over it) must validate,
   else its `:unrunnable` refusal answers and nothing is forked or written. A chain whose fact main holds is answered
   as it stands and nothing is written. Answers the branch, the first task and every handle in order.
@@ -1156,7 +1196,8 @@
      (if held
        (registry/on-branch store branch answer)
        (let [entities (chain-entities tasks)
-             refusal (chain-refusal main branch entities overlay)
+             cluster-name (config/agent-cluster main "root")
+             refusal (chain-refusal main cluster-name branch entities overlay)
              forked (when-not (or refusal (contains? (registry/branches store) branch))
                       (registry/fork! {:seon.store/store store :seon.store/branch branch :seon.db/db main
                                        :seon.branch/target main-branch :seon.cluster.registry/from (or from main-branch)}))
@@ -1171,9 +1212,12 @@
                                                chained (when stored
                                                          [(assoc (select-keys (first entities) [:seon.task/execution :seon.task/next :seon.task/created-by])
                                                                  :db/id [:seon.task/id first-handle])])]
-                                           (refusal-data (fn [] (written % (into [[:db.fn/call #'adopt-tasks-tx entities handles
-                                                                                   (if stored {first-handle stored} {})]]
-                                                                                 chained)))))))
+                                           ;; the chain's config decisions in the same transaction: nothing runs on
+                                           ;; the branch before its config is the chain's (reactive start, step 4)
+                                           (refusal-data (fn [] (written % (-> [[:db.fn/call #'adopt-tasks-tx entities handles
+                                                                                 (if stored {first-handle stored} {})]]
+                                                                               (into chained)
+                                                                               (into (config-tx (db/db %) cluster-name overlay)))))))))
              fact (when (:db-after written-tasks)
                     (written connection [{:seon.chain/first first-handle :seon.chain/branch branch}]))]
          (cond refusal refusal

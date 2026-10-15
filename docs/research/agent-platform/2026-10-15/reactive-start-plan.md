@@ -1,7 +1,7 @@
 ---
 title: "reactive-start plan: desired state validated at the write, steps derived each pass"
 type: research
-status: "corrected after the narrow check f684c6181 (C1-C13); P1-P3 done, P4 next"
+status: "corrected after the narrow check f684c6181 (C1-C13); P1-P4 done, P5 next"
 ---
 
 # Reactive start: desired state validated at the write, steps derived each pass
@@ -14,7 +14,7 @@ hold a launch (the agent resolves them in its context), and the process is one p
 The narrow check of revision 49fdd1bb5 (`reactive-start-check.md`, f684c6181) is folded in below, each correction in
 its owning section.
 
-**Phase status:** plan corrected (C1-C13 folded in); P1 done (88474708b); P2 done (chain routes, counted acquisition); P3 done (validation at `chain!` before its fork, at `run-tx` and the merge-step append, `:held` honored); P4 next. P5-P6 and D2 open. P3 left the advance (`seon.task/advance-tx`) unvalidated: a refusal inside a pass's write would fault every pass, so P5 validates it where advance becomes an action with a problem.
+**Phase status:** plan corrected (C1-C13 folded in); P1 done (88474708b); P2 done (chain routes, counted acquisition); P3 done (8bdd673b2: validation at `chain!` before its fork, at `run-tx` and the merge-step append, `:held` honored); P4 done (the chain's config in `chain!`'s transaction; `seon.task/converge-config!` before the attempt row on the branch the agent works on, merge branches included; `config apply --branch/--chains` answers its contract and converges the branches' task branches); P5 next. P6 and D2 open. P3 left the advance (`seon.task/advance-tx`) unvalidated: a refusal inside a pass's write would fault every pass, so P5 validates it where advance becomes an action with a problem.
 
 **Live check after P2 (root, 2026-10-15, default 9a8d09431 → 8592c669d):** `my.root/run!` alone started attempts on a chain branch with no graph (P2 proven live). Seon.ref chain `chain-b7ab51e090d5` merged as 00d3efdd3. What the run showed P3-P4 must cover:
 - `seon.task/chain!` wrote a task given `:execution :held` as running and launched attempt 1 at once with main's config (provider off, `:stalled`, 0 calls): the race P4 removes.

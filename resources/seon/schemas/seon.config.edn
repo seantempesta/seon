@@ -46,6 +46,8 @@
                 [:set :qualified-keyword]]],
               :rule :keyword,
               :path [:string {:min 1}],
+              :branches [:vector {:description "What config apply wrote on each branch it named (bin/seon config apply --branch or --chains), and on each branch those branches' tasks work on, converged onto it (seon.task/converge-config!): the branch and its reconcile result. Producer: seon.cluster.boot/request!'s :config-apply."}
+                         [:map [:seon.store/branch :seon.store/branch] [:seon.reconcile/result :seon.reconcile/result]]],
               :key :qualified-keyword,
               :refused :seon.config/rule
               :manifest-unreadable :seon.config/path
