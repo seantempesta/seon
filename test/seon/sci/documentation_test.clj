@@ -291,6 +291,22 @@
        (is (not (contains? doc :summary)))
        (is (not (contains? entity :doc)))))))
 
+(deftest an-absent-arglists-is-one-typed-fact-with-no-read-time
+  ;; prompt-prefix (f4999d283): the stamped error map made a must-read differ on every call, breaking the provider's
+  ;; cached prefix. The writer requires arglists, so a row without them is a stale branch's: dissoc it from a real row.
+  (support/with-database
+   (fn [connection]
+     (support/transacted!
+      connection
+      [(assoc (support/program-fn-entity (db/db connection) 'my.turn/undeclared "(defn undeclared [] true)")
+              :seon.fn/private? false)])
+     (let [database (db/db connection)
+           row (dissoc (db/pull database '[*] [:seon.fn/sym 'my.turn/undeclared]) :seon.fn/arglists)
+           read-doc #(@#'lookup/function-doc-map database row false)]
+       (is (= (read-doc) (read-doc)) "two reads of the doc map are equal")
+       (is (= {:seon.sci.eval/missing-declaration :seon.fn/arglists} (:arglists (read-doc))))
+       (is (not (contains? (:arglists (read-doc)) :seon.error/at)))))))
+
 (deftest clojure-test-at-the-agent-repl-reports-into-the-evaluations-output
   (support/with-database
    (fn [connection]

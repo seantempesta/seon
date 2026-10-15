@@ -184,21 +184,6 @@
                  (not [?function :seon.fn/internal? true])]
         database program-documentation-selector namespace-name))
 
-(defn- declaration-absent
-  "The typed unknown `doc` and `dir` show for an absent declaration.
-
-   An absent contract and a declared empty one are different facts, and this
-   is the surface an agent reads before deciding how to call a function: a
-   missing `:seon.fn/spec` rendered as `[]` says the function declares
-   nothing, which is a claim the row does not support (AGENTS.md section 2.4)."
-  {:malli/schema [:=> [:cat :qualified-keyword] :seon.sci.eval/declaration-absent-error]}
-  [attribute]
-  (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program 'seon.sci.lookup/declaration-absent
-   {:seon.error/message "The program row lacks a declaration; supply the declared member before relying on it."
-    :seon.error/offending attribute
-    :seon.sci.eval/missing-declaration attribute
-    :seon.error/expected :seon.sci.eval/present-declaration}))
-
 (defn- arglists-reader
   "The function that reads one arglists text as the namespace's own source
   reads it: the one reader resolves auto-resolved keywords (`{id ::id}`) in
@@ -388,7 +373,7 @@
              (ref/docstring doc))
            {:arglists (if arglists
                         (agent-arglists database (:seon.fn/sym row) arglists)
-                        (declaration-absent :seon.fn/arglists))}
+                        {:seon.sci.eval/missing-declaration :seon.fn/arglists})}
            (agent-documentation-contract database row)
            (when-let [schemas (not-empty (schema-descriptions database row))]
              {:schemas schemas})
@@ -442,7 +427,7 @@
                             (merge {:sym (:seon.fn/sym row)
                                     :arglists (if-let [arglists (:seon.fn/arglists row)]
                                                 (agent-arglists database (:seon.fn/sym row) (read-arglists arglists))
-                                                (declaration-absent :seon.fn/arglists))}
+                                                {:seon.sci.eval/missing-declaration :seon.fn/arglists})}
                                    (when-let [doc (:seon.fn/doc row)]
                                      {:doc (:summary (ref/docstring doc))})
                                    (agent-documentation-contract database row)))
