@@ -53,7 +53,7 @@ the right answer is 24, and three live attempts failed, one per reader patched.
 | R2 | Haiku | call-site ledger, src + test + script + resources + docs/skills, each row verified | n/a | done, a41868d3a |
 | C | Sonnet | REPL confirmation of the approach on real data before any implementation (section below) | numbers below | done, claims 1-5 confirmed with corrections (this commit) |
 | 1 | Opus | fork: generation + small parents record per commit; `datahike.versioning/merge-base` | fork tests: fork, after merge from main, criss-cross | done, fork `593a8276` (pushed; submodule pointer not bumped) |
-| 2 | Opus | `merge-main!` writes a merge commit; one Seon reader of the merge base; every ledger reader converts | `seon.merge-forward-test/after-a-forward-merge-the-branch-changed-only-its-own-declarations`; S5: 24, `done-refusals` [] | slice 1 done (merge commit, reader, program-change readers; proof red→green; S5 24 and []); attempt-row (`:seon.task/merge-base`) readers open, blocked on the fork-point question in the Phase 2 notes |
+| 2 | Opus | `merge-main!` writes a merge commit; one Seon reader of the merge base; every ledger reader converts | `seon.merge-forward-test/after-a-forward-merge-the-branch-changed-only-its-own-declarations`; S5: 24, `done-refusals` [] | done: slice 1 `331eec6ec`, slice 2 `aa0bf23d3`, 2b `4ca233c04` (attempt-row readers on the fork point, `seon.cluster.registry/fork-point`; `:seon.task/merge-base` neither written nor read). Still red, also on HEAD: `every-agent-start-has-a-task` (phase-0 leftover, see Phase 2b), `a-retraction-on-the-branch-retracts-on-an-unchanged-main-only`, `root-merges-main-forward-into-a-chain-branch`'s "only program attributes moved", and `my.root-test/a-jvms-first-facts-merge-follows-the-changed-facts` (763 ms / 1.5 GB on HEAD) |
 | 3 | Opus | own change by address-skipping index diff; history walks (`commit-at-t`, `basis-revisions`, `commit-facts`) replaced | `seon.profile/measure` on `merge-main!` and the step's change set, parent vs change | waiting |
 | 4 | Sonnet | delete what is left: base refs, `advance-base!`, the 125 `:base/*` branches, `base-t`, fork-commits, `change-base`, stored merge-base copies | ledger all converted/deleted; HEAD boots | waiting |
 
@@ -536,6 +536,21 @@ fork change was needed.
 before the first merge adds again. Today that needs root to merge an assignment's facts by hand (`my.root/merge!`)
 before it ends and is merged again. No run has hit it. The old stored base handled it. The graph answer would be
 "the newest first-parent commit main already squashed", which needs the squash tx-meta joined to the walk.
+
+**Phase-0 leftover, not fixed (stopped at the time bound).** `seon.cluster.db-flow-test/every-agent-start-has-a-task`
+is red on HEAD (run `85344f584c19`) and here.
+- The teardown's `retire-branch!` refusal is in `chain-world`: its `doseq` over a `seon.db/q` result was handed a
+  2-entry map. The diagnostic's offending value has class `PersistentArrayMap` and count 2, so the query answered a
+  read refusal, and the map's entries reached `retire-branch!` as vector "branches". The query itself answers `[]`
+  on default. Next step: print the refusal the fixture's `db/q` returns after `release!`, fixed in the test's owner.
+- The two assertions are `"root"` started with no assignment after `schedule/root-maintenance-seed-call`. Not yet
+  classified by commit.
+
+**S5.** After the restart onto `3dfd4a9a6`, `:chain-f1f6dc8e6652` still has no merge commit (head `6ad047ad`, one
+parent), so its graph merge base is the fork point `6acf6fed`. A read-only re-run of the 24-identity probe would
+answer 701 by construction until root runs `merge-main!` on it. This slice does not touch own change or
+`done-judged`, so slice 1's 24 and `[]` (base-ref stand-in) stand. The cold `branch-merge-base` on default cost
+2.15 s and 3.3 GB: the chain's lineage has no phase-1 records yet, and its first commit backfills them.
 
 **Inherited by phase 3.** `own-changed-identities`'s walk (and `merge-main!`'s `theirs` walk on main from the base's
 t, which is cross-lineage only in the rare case that the base is a chain commit, after the chain merged into
