@@ -1436,7 +1436,8 @@
      (let [ctx (support/fork-cluster-ctx connection)
            handle 'result/elargerender1
            source (str "{:seon.render/ai (fn [_] (throw (ex-info \"boom\" {})))"
-                       " :rows (mapv (fn [i] {:id i :title \"a title that takes some room\"}) (range 300))}")
+                       " :rows (mapv (fn [i] {:id i :title \"a title that takes some room\"}) (range 1000))}")
+           budget (:seon.render.profile/token-budget (render/agent-render-profile config/defaults))
            evaluation (support/evaluate
                        {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                         :seon.db/connection connection :seon.agent/id "large-render"
@@ -1449,8 +1450,8 @@
                                                                  :seon.cluster.eval/diagnostics])
                                        :seon.cluster.eval/source source :seon.repl/handle handle))]
        (is (not (:seon.cluster.eval/error evaluation)))
-       (is (< 1000 (:seon.eval/value-tokens evaluation)) "the whole value's estimate is recorded")
-       (is (<= (:seon.eval/shown-tokens evaluation) 1100) "the print stays within the value budget")
+       (is (< budget (:seon.eval/value-tokens evaluation)) "the whole value's estimate is recorded")
+       (is (<= (:seon.eval/shown-tokens evaluation) (* 1.1 budget)) "the print stays within the value budget")
        (is (re-find #"\(drop \d+ \(get-in result/elargerender1 \[:rows\]\)\)" shown))
        ;; The diagnostic holds the renderer's refusal as its offending value
        ;; (which has its own :seon.error/at), so count the render-layer entry.
