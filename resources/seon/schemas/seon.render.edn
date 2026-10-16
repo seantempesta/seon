@@ -115,6 +115,7 @@
                [:seon.render/output {:optional true} :seon.render/output]
                [:seon.render/outputs {:optional true} :seon.render/outputs]
                [:seon.render/options {:optional true} :seon.render/options]
+               [:seon.render/schema {:optional true} :seon.render/schema]
                [:seon.render/profile {:optional true} :seon.render/profile]
                [:seon.render/distance {:optional true} :seon.render/distance]
                [:seon.render.value/reserve {:optional true} :seon.render.value/reserve]
@@ -134,6 +135,7 @@
                [:seon.render.var/defining {:optional true} :seon.render.var/defining]
                [:seon.render/rendering {:optional true :description "The producers already rendering this chain, so a producer that delegates its own value onward is not selected for it again."} :seon.render/rendering]],
               :outputs [:set {:description "Which faces the answer carries: :text, :hiccup or both (both when absent)."} [:enum :text :hiccup]],
+              :schema [:and {:description "The schema the value's producer declared it returns (a contracted function's output): selection tries its own declared pair first, then along its ancestry, most specific first, each only where the value satisfies it (seon.render/declared-producers)."} :seon.schema/malli-form],
               :options [:map {:description "A render's own options, passed whole to the selected render, which reads them by its own input schema."}],
               :unknown-reason [:enum :time-limit :refused :unselected],
               :unknown-request

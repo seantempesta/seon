@@ -409,15 +409,6 @@
               distinct
               vec))))
 
-(defn- satisfied-alternatives
-  "The declared return alternatives of `function-symbol` that `value`
-  satisfies, by each schema's cached Malli validator. Nil for no contract."
-  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol :seon.schema/value]
-                  [:maybe [:vector :qualified-keyword]]]}
-  [projection function-symbol value]
-  (some->> (output-alternatives projection function-symbol)
-           (filterv #((schema/projection-validator projection %) value))))
-
 (defn- attribute-identity
   "The named schema a registered attribute gives the value at `path`: its
   declared component schema, else its named reference (or `:maybe` of one),
@@ -520,8 +511,9 @@
   "The renderers `value`'s declared identity names for `output`, the same way
   for every schema: the schema its producer declared on the value
   (`:seon.error/type`, the producers' declaration key), else the
-  most specific return alternative of the root call's contracted function it
-  satisfies, else the one its reaching attribute names, else its owning row
+  root value's requested schema (`:seon.render/schema`, else the root call's
+  contracted function's return): the most specific alternative it satisfies
+  with a pair, then along that schema's ancestry, else the one its reaching attribute names, else its owning row
   schema at any depth. Only a map `keyword-lookup?` permits, or a record, is
   asked. A value nobody declared is data for the floor; its members never
   select. Distinct producers."
@@ -536,7 +528,26 @@
                                          (get (or (internal/entity-properties s) (m/properties s)) output)))
                                 (filter qualified-symbol?) (distinct))
                        (most-specific projection schema-keys))))
-        satisfied (fn [schema-keys] (filterv #((schema/projection-validator projection %) value) schema-keys))]
+        satisfied (fn [schema-keys] (filterv #((schema/projection-validator projection %) value) schema-keys))
+        ;; Along the ancestry: the most specific satisfied schemas' pairs,
+        ;; else their parents', most specific first; each one the value
+        ;; satisfies (contract fit).
+        along (fn [schema-keys]
+                (loop [level (satisfied schema-keys) seen #{}]
+                  (when (seq level)
+                    (or (pairs level)
+                        (let [specific (most-specific projection level)
+                              seen (into seen specific)]
+                          (recur (satisfied (into [] (comp (remove seen) (distinct))
+                                                  (concat (remove (set specific) level)
+                                                          (mapcat #(refined-names projection %) specific))))
+                                 seen))))))
+        ;; The schema the root value's producer declared: the request's own,
+        ;; else the root call's contracted function's return.
+        requested (when (identical? value (render-value request))
+                    (if-let [declared (:seon.render/schema request)]
+                      (named-alternatives projection declared)
+                      (some->> function (output-alternatives projection))))]
     (cond
       (nil? projection) []
       ;; An attribute request stays about that attribute: its own pair.
@@ -550,8 +561,7 @@
       (not (or (render.value/keyword-lookup? value) (instance? clojure.lang.IRecord value))) []
       :else
       (or (some-> (:seon.error/type value) vector pairs)
-          (when (and function (identical? value (render-value request)))
-            (pairs (satisfied-alternatives projection function value)))
+          (some-> requested seq along)
           (some->> (attribute-identity projection (:seon.render.data/path request))
                    (named-alternatives projection) satisfied pairs)
           (some-> (entity-owner projection value (:seon.db/db request)) vector pairs)

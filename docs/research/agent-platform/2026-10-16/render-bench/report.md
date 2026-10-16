@@ -83,9 +83,22 @@ Statically, 25 of the 47 sampled AI renders declare a contract that admits a str
 
 ## Coverage gaps
 
-- **Unreached renders.** A value alone reaches only 23 of the 58 declared AI renders and 20 of the 50 HTML renders.
-  A function-return schema's render needs `:seon.render/schema` on the request, which arrives in printer P1c. The
-  HTML count is a lower bound, because the HTML face does not tag its producer.
+- **Unreached renders.** A value alone reaches only 23 of the 58 declared AI renders (47 sampled) and 20 of the 50
+  HTML renders. The HTML count is a lower bound, because the HTML face does not tag its producer.
+- **Requested schema (lane render-select).** `:seon.render/schema` joined `:seon.render/request`: selection tries the
+  requested schema's own pair, then its ancestry, each only where the value satisfies it
+  (`seon.render/declared-producers`); the REPL path already names the top-level call's contracted function, whose
+  return selection reads the same way. Every sample is now shown requested as its schema
+  (`seon.render-bench/selection-misses`, proof `seon.render-bench-test/every-pinned-sample-selects-its-schemas-declared-render`).
+  On the re-sampled set (376 schema rows): before, 124 rows selected another producer than their schema's pair;
+  after, 12, and 40 of the 47 sampled AI renders are reached (23 before). Still unreached:
+  `seon.ai/attempt-ai`, `seon.cluster.agent/render-identity-ai`, `seon.cluster.agent/render-situation-ai`,
+  `seon.health/render-ai`, `seon.problems/ai-prose`, `seon.render.transcript/render-run-ai`,
+  `seon.test.accretion/render-ai` (their root shows no selected producer; two are the known renderer failures above).
+- **`seon.problems/missing-model` selected `seon.config/render-ai`.** Not a selection defect: the sampler took the
+  cluster's config entity as a real `:seon.problems/missing-model`, an open one-key map the entity satisfies, and
+  selection rightly chose the config entity's own pair by its identity row schema. `real-samples` now skips an
+  entity another row schema owns and renders (`owned-elsewhere?`), so that schema gets a generated sample.
 - **14 schemas have no sample:**
   - `:seon.agent/namespace`
   - `:seon.agent/settings`

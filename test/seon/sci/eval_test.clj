@@ -41,6 +41,7 @@
             [sci.ctx-store]
             [seon.render :as render]
             [seon.render-simplification-test :as simplification]
+            [seon.render-test :as render-test]
             [seon.render.walk :as render.walk]
             [seon.render.web :as render.web]
             [seon.schema :as schema]
@@ -3060,3 +3061,15 @@
          (is (identical? value (:seon.profile/value warm)))
          (is (< (:seon.profile/ms warm) 0.5) "a warm lookup is under half a millisecond")
          (is (< (:seon.profile/alloc-bytes warm) 500000) "a warm lookup allocates under half a megabyte"))))))
+
+(deftest a-contracted-call-result-renders-by-its-return-schema
+  ;; The REPL shows a contracted call's value through the pair its return schema declares, not a broader one's.
+  (test-support/with-database
+   (fn [connection]
+     (render-test/declare-family! connection)
+     (let [evaluation (test-support/evaluate {:seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
+                                              :seon.cluster.eval/source "(fixture.family/child-of)"
+                                              :seon.sci.admit/caps caps
+                                              :seon.sci.eval/time-limit-ms 5000})]
+       (is (= {:rendered-by :child} (edn/read-string (:seon.eval/shown evaluation)))
+           "the child's own pair renders the call's value")))))

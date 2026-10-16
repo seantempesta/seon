@@ -168,13 +168,26 @@
       ordered
       (mapv #(nth ordered (quot (* % (dec total)) (dec n))) (range n)))))
 
+(defn- owned-elsewhere?
+  "True when `value` is an entity of another row schema than `k` that declares its own render: its identity
+  attribute's `:seon.program/row-schema` names that schema, so the value is that entity, not a `k`."
+  {:malli/schema [:=> [:cat :map :qualified-keyword :map] :boolean]}
+  [registry k value]
+  (boolean (some (fn [attribute]
+                   (let [row (:seon.program/row-schema (schema-properties registry attribute))]
+                     (and row (not= row k)
+                          (let [p (schema-properties registry row)] (or (:seon.render/ai p) (:seon.render/html p))))))
+                 (filter qualified-keyword? (keys value)))))
+
 (defn real-samples
   "Up to `per-schema` real values of schema `k` read from `database`.
-  They are entities that hold every attribute `k` requires and satisfy it,
-  each pinned by its entity id and content digest."
+  They are entities that hold every attribute `k` requires and satisfy it, and
+  are not another row schema's rendered entity (`owned-elsewhere?`), each
+  pinned by its entity id and content digest."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :qualified-keyword] [:vector :map]]}
   [database projection k]
   (let [attributes (required-attributes projection k)
+        registry (:seon.schema.projection/registry projection)
         valid? (schema/projection-validator projection k)]
     (if (empty? attributes)
       []
@@ -182,7 +195,7 @@
                            (db/q (into '[:find [?e ...] :where] (map (fn [a] ['?e a])) (sort attributes)) database))
             candidates (into []
                              (comp (map (fn [e] (db/pull database '[*] e)))
-                                   (filter #(and (edn-data? %) (fits? valid? k %)))
+                                   (filter #(and (edn-data? %) (fits? valid? k %) (not (owned-elsewhere? registry k %))))
                                    (map (fn [v] {:value v :nodes (size v) :source {:db/id (:db/id v) :digest (id/id v)}}))
                                    (filter #(<= (:nodes %) node-limit)))
                              entities)]
@@ -308,12 +321,14 @@
   (nth (vec (sort-by :seon.profile/ms measured)) (quot (dec (count measured)) 2)))
 
 (defn measure-sample
-  "Show `sample` on `face` through `seon.render.value/show`, answer the row.
+  "Show `sample` on `face` through `seon.render.value/show`, requested as `schema` (its producer's declared
+  schema, `:seon.render/schema`) when given, and answer the row.
   It holds the agent profile's budget, the selected producer, ms and allocation (median of `measured-calls` after `warm-calls`), the render output's
   tokens, the printed tokens, the cuts with their paths, whether the render answered text, and any error."
-  {:malli/schema [:=> [:cat :map [:enum :ai :html] :seon.schema/value] :map]}
-  [custody face sample]
-  (let [request (merge (baseline/unit custody sample nil) (faces face))
+  {:malli/schema [:=> [:cat :map [:enum :ai :html] :seon.schema/value [:maybe :qualified-keyword]] :map]}
+  [custody face sample schema]
+  (let [request (cond-> (merge (baseline/unit custody sample nil) (faces face))
+                  schema (assoc :seon.render/schema schema))
         show #(value/show request)
         first-call (try (profile/measure show) (catch Throwable t {::thrown t}))]
     (if-let [thrown (::thrown first-call)]
@@ -348,9 +363,9 @@
     {:commit head :short (subs head 0 9) :dirty? (boolean (seq dirty))}))
 
 (defn measure-all
-  "Every pinned sample of `samples` measured on both faces under `custody`.
-  A row names its sample, its schema and the render the schema declares for the face, so a sample whose selected
-  producer differs from the declared one reads as unreached."
+  "Every pinned sample of `samples` measured on both faces under `custody`, each requested as its schema.
+  A row names its sample, its schema and the render the schema declares for the face; a row whose selected
+  producer differs from the declared one is a selection miss (`:miss? true`)."
   {:malli/schema [:=> [:cat :map :map] [:vector :map]]}
   [custody {:keys [samples] declared-pairs :pairs}]
   (let [projection (db/carried-projection (:seon.db/db custody))
@@ -358,9 +373,21 @@
     (vec (for [sample samples
                face [:ai :html]
                :let [expected (get-in declared [(:schema sample) face])]]
-           (merge {:sample (:id sample) :schema (:schema sample) :kind (:kind sample) :render expected}
-                  (when expected {:admits-string? (admits-string? projection expected)})
-                  (measure-sample custody face (:value sample)))))))
+           (let [row (merge {:sample (:id sample) :schema (:schema sample) :kind (:kind sample) :render expected}
+                            (when expected {:admits-string? (admits-string? projection expected)})
+                            (measure-sample custody face (:value sample) (:schema sample)))]
+             (cond-> row
+               (and expected (not= expected (:producer row))) (assoc :miss? true)))))))
+
+(defn reach
+  "How many of `run`'s declared AI renders some row selected, of those its samples declare, with each selection
+  miss as `[schema declared selected]`."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [run]
+  (let [rows (filter #(and (= :ai (:face %)) (:render %)) (:rows run))]
+    {:declared (count (set (map :render rows)))
+     :reached (count (set (keep #(when (= (:render %) (:producer %)) (:render %)) rows)))
+     :misses (vec (distinct (keep #(when (not= (:render %) (:producer %)) [(:schema %) (:render %) (:producer %)]) rows)))}))
 
 (defn render-cuts
   "The pinned samples whose selected render's AI output the printer cut, each shown once under `custody`.
@@ -370,10 +397,27 @@
   (let [request (merge (baseline/unit custody {} nil) (:ai faces))]
     (into []
           (keep (fn [sample]
-                  (let [answer (value/show (assoc request :seon.render/value (:value sample)))
+                  (let [answer (value/show (cond-> (assoc request :seon.render/value (:value sample))
+                                             (:schema sample) (assoc :seon.render/schema (:schema sample))))
                         producer (get-in answer [:seon.render.value/tree :seon.render.call/selected-producer])]
                     (when (and producer (seq (:seon.render.value/cuts answer)))
                       {:sample (:id sample) :producer producer :cuts (cut-data answer)}))))
+          samples)))
+
+(defn selection-misses
+  "The pinned samples whose AI face, shown once under `custody` and requested as the sample's schema, selects a
+  producer other than the AI render that schema declares: `{:sample :schema :declared :selected}` each."
+  {:malli/schema [:=> [:cat :map :map] [:vector :map]]}
+  [custody {:keys [samples] declared-pairs :pairs}]
+  (let [request (merge (baseline/unit custody {} nil) (:ai faces))
+        declared (into {} (map (juxt :schema :ai)) declared-pairs)]
+    (into []
+          (keep (fn [{k :schema :as sample}]
+                  (when-let [expected (declared k)]
+                    (let [answer (value/show (assoc request :seon.render/value (:value sample) :seon.render/schema k))
+                          selected (get-in answer [:seon.render.value/tree :seon.render.call/selected-producer])]
+                      (when (not= expected selected)
+                        {:sample (:id sample) :schema k :declared expected :selected selected})))))
           samples)))
 
 (defn bench!

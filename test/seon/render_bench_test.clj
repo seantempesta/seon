@@ -26,3 +26,13 @@
        (doseq [[producer cuts] cut]
          (is (empty? cuts)
              (str producer " is cut by the printer on " (count cuts) " pinned sample(s), first " (:sample (first cuts)))))))))
+
+(deftest ^{:seon.test/long "Shows each of the 382 pinned schema samples once through the value printer in a test cluster."
+           :seon.test/long-ms 30000}
+  every-pinned-sample-selects-its-schemas-declared-render
+  ;; A sample requested as its schema (its producer's declared schema) renders through that schema's own AI pair.
+  (support/with-running-agent
+   (fn [_ _ connection]
+     (let [misses (bench/selection-misses (custody connection) (bench/read-samples (System/getProperty "user.dir")))]
+       (is (= [] (mapv (juxt :schema :selected) misses))
+           "every sample selects the AI render its schema declares")))))
