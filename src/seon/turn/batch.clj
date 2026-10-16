@@ -510,7 +510,11 @@
         ns-attr (if (:seon.fn/ns row) :seon.fn/ns :seon.test/ns)
         ns-ref (get row ns-attr)
         missing-ns (when (and (vector? ns-ref) (not (dbu/entid db ns-ref))) (second ns-ref))
-        row (cond-> row missing-ns (assoc ns-attr (str "namespace:" missing-ns)))]
+        ;; redefining a Var at the REPL never moves it between files: the stored file link stays
+        file (get-in existing [:seon.fn/file :db/id])
+        row (cond-> row
+              missing-ns (assoc ns-attr (str "namespace:" missing-ns))
+              (and file (not (contains? row :seon.fn/file))) (assoc :seon.fn/file file))]
     (cond-> (if (:db/id existing)
               (program/exact-replacement-tx existing row)
               [(assoc row :db/id (str (name ident) ":" v))])
