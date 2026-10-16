@@ -86,29 +86,31 @@ predecessor on the held-out set.
 
 ### The first template: a clipped output (owner, 2026-10-16)
 
-The miner finds calls whose output the printer cut, across all sessions on all branches. Each case becomes a chain of
-two tasks, made from one template:
+Deftests are the mechanism that advances tasks: a task's red proofs guide its agent, and its fix is code updates
+and/or data updates. There are no question tasks and no answer verb.
 
-1. **Investigate**, a question task. Its references are:
-   - the function;
-   - its selected render;
-   - the pinned sample values;
-   - the sessions where agents saw the cut output, each as an evaluation on its branch at its `t` (read through the
-     `:seon.ref/at` tools).
+The miner finds calls whose output the printer cut, across all sessions on all branches. Each case becomes one task
+made from one template, with these references:
+- the function;
+- its selected render;
+- the pinned sample values;
+- the sessions where agents saw the cut output, each as an evaluation on its branch at its `t` (read through the
+  `:seon.ref/at` tools).
 
-   The agent reads the render, the printer's general rules and those sessions, and judges whether the agents got the
-   information they needed. It answers through `my.agent/answer!` under a declared schema with three parts: a
-   verdict, `:render-fix`, `:printer-fix` or `:fine`; the evidence, citing the evaluations and the agent's next forms;
-   and the reason.
-2. **Fix.** This task follows only a fix verdict.
-   - **Render fix.** The proof is the render bench row on the pinned samples: the render's output is no longer cut,
-     and its cost stays within budget. Every existing printer law test stays green.
-   - **Printer fix.** The printer is compiled platform code, so a chain branch cannot prove a change to it. The
-     verdict becomes a problem task for root, and a lane proves the change through `bin/seon check`.
+Its proof is the render bench row on those samples: the render's output is not cut, and its cost stays within budget.
+That row is red today. Every existing printer law test stays green.
 
-**A `:fine` verdict is judged in the data.** A cut is good when its output is great and its elision forms say how to
-read more. The miner already shows whether agents then needed to dig. The verdict is recorded on the render's own
-declaration, as an attribute that the render bench test reads. Since the declaration is the attribute's owner, it is
+The agent reads the render, the printer's general rules and those sessions, then makes the row green by one of three
+moves:
+- **A render code change.** The render selects what the agents needed and offers elision forms for the rest.
+- **A data update.** The cut is good (great output, with elision forms that say how to read more), so the agent
+  records that on the render's own declaration, as an attribute the bench row reads.
+- **`my.task/send-back!`.** Use it, with a reason and a counterexample, when the test is wrong or the task should not
+  be done. That includes when the right fix is in the printer: the printer is compiled platform code that a chain
+  branch cannot prove, so root takes that change to a lane that proves it through `bin/seon check`.
+
+**The good-cut attribute is judged in the data.** The miner shows whether agents still needed to dig after a cut
+marked good, and a case that keeps costing turns comes back up. Since the declaration is the attribute's owner, it is
 not a list kept beside the proof. A changed render is a new declaration, so the verdict is judged again; nothing has to
 be invalidated by hand.
 
