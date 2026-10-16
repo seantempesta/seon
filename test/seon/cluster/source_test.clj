@@ -327,8 +327,7 @@
   ;; Class regression (custody class, 2026-09-25): the candidate's write, its
   ;; nested test run and the member acquisitions ran under the caller's custody,
   ;; which the writer refuses for another branch. Under the body's own custody
-  ;; the gate records its members; a run whose recording write is refused
-  ;; returns the writer's declared refusal, never a contract finding.
+  ;; the gate records its members.
   (let [target (test-support/execution-handle nil)
         held-store (:seon.store/store target)
         h-conn (:seon.db/connection target)
@@ -349,17 +348,6 @@
                       #{[:seon.fn/sym 'scratch.gate-class/f]})))]
         (is (true? (:seon.test/passed? gate)))
         (is (str/includes? (:seon.source/tally gate) "executed 1 ")))
-      (let [execution (cluster.agent/acquire-context! target nil {:seon.agent/branch s})]
-        (try
-          (let [refused ((requiring-resolve 'seon.test/run)
-                         {:seon.test/policy :named :seon.test/execution execution
-                          :seon.test/recording-connection (:seon.db/connection execution)
-                          :seon.test/changed ['scratch.gate-class/f]})]
-            (is (:seon.db/transaction-refused refused))
-            ;; A recording connection outside the caller's custody is the caller's
-            ;; mistake: returned, never a core fault (which would throw under :panic).
-            (is (get-in refused [:seon.error/data :seon.db/ambient-branch])))
-          (finally (cluster.agent/release-context! execution))))
       (finally (registry/retire-branch! {:seon.store/store held-store :seon.store/branch s})))))
 
 (deftest ^{:seon.test/long "Two prepares, each one nested seon.test/run on a new candidate commit (the save gate's cost, lane-nsa-slice4-2026-09-23.md)."

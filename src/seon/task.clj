@@ -1779,6 +1779,14 @@
                   (or (= :closed (:seon.task/outcome attempt))
                       (and (nil? (:seon.task/outcome attempt)) (contains? bailed-ends (:seon.task.attempt/end attempt))))))))
 
+(defn finished?
+  "Whether `task`'s latest attempt finished it (outcome `:done`, or `:merged` once its chain merged). A finished task's
+  `:seon.task/execution` stays `:running` by design and it can never start again (TASK-CHAIN §2.5), so what is shown of
+  a task's state derives from its attempt, as `done?` derives it on main."
+  {:malli/schema [:=> [:cat :seon.chain/task-view] :boolean]}
+  [task]
+  (contains? #{:done :merged} (:seon.task/outcome (peek (:seon.chain/attempts task)))))
+
 (defn- chain-state
   "A chain's state from its `tasks` and whether main still holds its chain fact (`current?`): unread without any
   task, done when the last task's latest attempt finished, ended when its fact is gone otherwise (root abandoned it),
@@ -1786,7 +1794,7 @@
   {:malli/schema [:=> [:cat [:vector :seon.chain/task-view] :boolean] :seon.chain/state]}
   [tasks current?]
   (cond (empty? tasks) :unread
-        (contains? #{:done :merged} (:seon.task/outcome (peek (:seon.chain/attempts (peek tasks))))) :done
+        (finished? (peek tasks)) :done
         (not current?) :ended
         (some bailed? tasks) :bailed
         :else :running))
@@ -1877,8 +1885,8 @@
      (when-let [reason (:seon.task/reason attempt)] [:p {:class "seon-chain-attempt-reason"} reason])]))
 
 (defn chain-task-html
-  "`:seon.render/html` of :seon.chain/task-view: its name, its kind (Design, Prove or Implement), its execution and
-  then its attempts, each through `attempt-html`."
+  "`:seon.render/html` of :seon.chain/task-view: its name, its kind (Design, Prove or Implement), its state (`done`
+  for a `finished?` task, else its execution) and then its attempts, each through `attempt-html`."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [{task :seon.render/value :as unit}]
   (let [held? (= :held (:seon.task/execution task))]
@@ -1887,7 +1895,7 @@
      [:div {:class "seon-chain-task-line"}
       [:span {:class "seon-chain-task-kind"} (str/capitalize (name (:seon.chain/kind task)))]
       [:span {:class "seon-chain-task-name"} (str (:seon.task/ns task) "/" (:seon.task/name task))]
-      [:span {:class "seon-chain-task-execution"} (name (:seon.task/execution task :held))]]
+      [:span {:class "seon-chain-task-execution"} (if (finished? task) "done" (name (:seon.task/execution task :held)))]]
      (if (seq (:seon.chain/attempts task))
        (into [:ol {:class "seon-chain-attempts"}]
              (map #(attempt-html (assoc unit :seon.render/value %)))

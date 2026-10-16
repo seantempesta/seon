@@ -882,6 +882,24 @@
          (finally
            (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))))
 
+(deftest a-merged-chains-task-renders-as-done-though-its-execution-stays-running
+  ;; TASK-CHAIN §2.5: a finished task stays :running and can never start again; its shown state derives from its attempt.
+  (test-support/with-database
+   (fn [connection]
+     (let [task (fn [outcome] {:seon.task/id "dddddddddddd" :seon.task/ns 'tq.face :seon.task/name "merged"
+                               :seon.chain/kind :implement :seon.task/execution :running
+                               :seon.chain/attempts [{:seon.task/assignment "eeeeeeeeeeee" :seon.task.attempt/number 1
+                                                      :seon.task.attempt/end :done :seon.task/outcome outcome :seon.agent/id "attempt/two"}]})
+           shown (fn [outcome]
+                   (let [view {:seon.chain/branch :chain-y :seon.chain/first "dddddddddddd" :seon.chain/state :done
+                               :seon.chain/tasks [(task outcome)]}
+                         html (task/chain-html {:seon.render/value view :seon.db/db (db/db connection)})]
+                     (->> (tree-seq coll? seq html)
+                          (filter #(and (vector? %) (map? (second %)) (= "seon-chain-task-execution" (:class (second %)))))
+                          (mapv #(nth % 2)))))]
+       (is (= ["done"] (shown :merged)) "a merged task shows done")
+       (is (= ["done"] (shown :done)) "a done task shows done")))))
+
 (deftest the-chain-face-composes-its-tasks-and-attempts-with-links-to-their-agents
   (test-support/with-database
    (fn [connection]
