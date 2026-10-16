@@ -5,8 +5,8 @@
   loading, or JVM-handler dependency so the edit hook can load it while Seon
   is down."
   (:require [rewrite-clj.zip :as z]
-            [seon.error.refusal :as error]
-            [seon.sci.reader :as reader]))
+            [edamame.core :as edamame]
+            [seon.error.refusal :as error]))
 
 (defn- utf8-bytes
   [text]
@@ -153,13 +153,10 @@
     (if (:my.edit/parse-byte-count parsed)
       (assoc parsed
              :seon.error/message message)
-      (let [events (reader/read
-                    {:seon.sci.reader/text source
-                     :seon.sci.reader/ns 'user
-                     :seon.config.eval.result/max-source (count source)})
-            unreadable? (if (vector? events)
-                          (boolean (some :seon.sci.reader/error events))
-                          true)]
+      (let [unreadable? (try (edamame/parse-string-all source {:all true :read-cond :allow :features #{:clj} :auto-resolve name :readers (constantly identity)})
+                             false
+                             ;; source edamame cannot read (an odd map) is not one form
+                             (catch Exception _ true))]
         (if unreadable?
           (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/single-form
            {:seon.error/message message
