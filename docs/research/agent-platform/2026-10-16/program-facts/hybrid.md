@@ -8,7 +8,7 @@ basis: "HEAD 1396fdda4; plan A docs/research/agent-platform/2026-10-16/program-f
 
 # Program facts from text: the hybrid
 
-Phase status: narrow check done (below) · P0 written, not committed (`bin/lane commit --accept-red-before` cannot accept a test absent on HEAD; patch `p0-red-proofs.patch` beside this file, four of five rows red on HEAD, `a-var-the-text-does-not-declare-is-private` green on HEAD, see §4 P0) · P1 proposed · P2 proposed · P3 proposed · P4 proposed. (Each implementing commit
+Phase status: narrow check done (below) · P0 done (red proofs landed; see this commit) (`bin/lane commit --accept-red-before` cannot accept a test absent on HEAD; patch `p0-red-proofs.patch` beside this file, four of five rows red on HEAD, `a-var-the-text-does-not-declare-is-private` green on HEAD, see §4 P0) · P1 proposed · P2 proposed · P3 proposed · P4 proposed. (Each implementing commit
 replaces its word here: `in progress <lane>`, `done <commit>`.)
 
 ## 1. The contract

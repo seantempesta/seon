@@ -583,3 +583,149 @@
            (when-let [branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id agent-id]))]
              (some-> (host/hosted (get-in @running-instances [running :seon.turn.loop/cluster]) branch) host/retire!))
            ((requiring-resolve 'seon.test-support/delete-root!) root)))))))
+
+(deftest a-namespace-row-is-its-ns-text
+  ;; each row: an `ns` form evaluated at the REPL; the row stores the text that was read,
+  ;; byte for byte, not a form printed back from the runtime namespace
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running agent-id connection]
+     (doseq [[namespace-name text]
+             [['batch-test.nstext-one "(ns batch-test.nstext-one (:require [clojure.set :as s]))"]
+              ['batch-test.nstext-two "(ns batch-test.nstext-two\n  \"A documented namespace.\"\n  ;; kept comment\n  (:require [clojure.set :as s]\n            [clojure.string :as str]))"]]]
+       (testing namespace-name
+         (eval! text agent-id running)
+         (is (= text (:seon.ns/source (db/pull (db/db connection) [:seon.ns/source] [:seon.ns/name namespace-name])))
+             "the stored ns source is the evaluated text"))))))
+
+(deftest a-repl-definition-digests-as-its-file-does
+  ;; the same ns form and definition, indexed from a file and evaluated at the REPL: one digest each
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running agent-id connection]
+     (let [suffix (id/id)
+           fixture-ns (symbol (str "digest" suffix ".core"))
+           text (str "(ns " fixture-ns "\n  \"Fixture.\"\n  (:require [clojure.string :as str]))\n\n"
+                     "(defn joined\n  \"Joined words.\"\n  {:malli/schema [:=> [:cat [:sequential :string]] :string]}\n"
+                     "  [words]\n  (str/join \" \" words))\n")
+           path (str "src/digest" suffix "/core.clj")
+           root ((requiring-resolve 'seon.test-support/temp-root) (str "digest-test-" suffix))
+           file (io/file root path)
+           digests (fn [entities]
+                     (into {} (keep (fn [e] (when-let [identity (or (:seon.fn/sym e) (:seon.ns/name e))]
+                                              [identity (:seon.program/definition-digest e)])))
+                           entities))]
+       (io/make-parents file)
+       (spit file text)
+       ((requiring-resolve 'seon.test-support/commit-root!) root)
+       (try
+         (let [indexed (digests (function/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]}))
+               joined (symbol (str fixture-ns) "joined")]
+           (eval! text agent-id running)
+           (is (= indexed
+                  (into {} (map (fn [[k _]] [k (:seon.program/definition-digest
+                                                (db/pull (db/db connection) [:seon.program/definition-digest]
+                                                         (if (= k joined) [:seon.fn/sym k] [:seon.ns/name k])))]))
+                        indexed))
+               "the namespace row and the function hold the digests the file's index holds"))
+         (finally
+           ((requiring-resolve 'seon.test-support/delete-root!) root)))))))
+
+(deftest a-var-the-text-does-not-declare-is-private
+  ;; `gen` is bound by the evaluation of `(mydef gen 3)` and named by no text: it is the
+  ;; agent's private state, never a declaration, whatever macro defined it
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running agent-id connection]
+     (eval! "(ns bp.macro-def) (defmacro mydef [n v] `(def ~n ~v))" agent-id running)
+     (eval! "(mydef gen 3)" agent-id running)
+     (let [database (db/db connection)]
+       (is (= 'clojure.core/defmacro
+              (:seon.fn/defined-by (db/pull database [:seon.fn/defined-by] [:seon.fn/sym 'bp.macro-def/mydef])))
+           "the macro the text declares is stored as a defmacro")
+       (is (nil? (:seon.fn/sym (db/pull database [:seon.fn/sym] [:seon.fn/sym 'bp.macro-def/gen])))
+           "the Var the text does not declare has no program entity")
+       (is (contains? (into #{} (db/q '[:find [?p ...] :where [_ :seon.eval/private ?p]] database))
+                      'bp.macro-def/gen)
+           "it is recorded as the agent's private state")))))
+
+(defn- recorded
+  "What `seon.turn.batch/record-form` decided, as the table compares it: the declared
+  symbols, their sources and calls, the private Vars with their reasons, the namespace's
+  aliases, and whether the facts were refused."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{:seon.batch/keys [entities private aliases facts-error]}]
+  (let [declared (filter :seon.fn/sym entities)]
+    {:recorded (into #{} (map :seon.fn/sym) declared)
+     :sources (into {} (map (juxt :seon.fn/sym :seon.fn/source)) declared)
+     :calls (into {} (map (juxt :seon.fn/sym :seon.fn/calls)) declared)
+     :private (into {} (map (juxt :seon.batch/sym :seon.batch/reason)) private)
+     :aliases (or aliases {})
+     :refused? (some? facts-error)}))
+
+(deftest the-record-stage-is-one-function-of-text
+  ;; Red by absence: `seon.turn.batch/record-form` does not exist on HEAD. Its input is the
+  ;; text the evaluation read and the one value it observed (`:seon.batch/bound`, the qualified
+  ;; names it bound, in order); no live SCI or JVM state. Each row names only the facts it is about.
+  (let [record (requiring-resolve 'seon.turn.batch/record-form)
+        ns-text "(ns bt.rec)"
+        string-require "(require '[clojure.string :as str])"
+        rows
+        [["a defn" ns-text [] "(defn f [x] x)" '[bt.rec/f]
+          {:recorded #{'bt.rec/f} :private {}}]
+         ["a redefinition in one form: the last occurrence is the declaration" ns-text []
+          "(do (defn f [] 1) (defn f [] 2))" '[bt.rec/f bt.rec/f]
+          {:recorded #{'bt.rec/f} :sources {'bt.rec/f "(defn f [] 2)"}}]
+         ["a record" ns-text [] "(defrecord R [a])" '[bt.rec/R bt.rec/->R bt.rec/map->R]
+          {:recorded #{'bt.rec/R 'bt.rec/->R 'bt.rec/map->R} :private {}}]
+         ["a protocol" ns-text [] "(defprotocol P (m [x]))" '[bt.rec/P bt.rec/m]
+          {:recorded #{'bt.rec/P 'bt.rec/m} :private {}}]
+         ["a value definition" ns-text [] "(def v 3)" '[bt.rec/v]
+          {:recorded #{'bt.rec/v} :private {}}]
+         ["a declare binds nothing" ns-text [] "(declare d)" []
+          {:recorded #{} :private {}}]
+         ["a definition that did not run" ns-text [] "(if false (def not-run 7))" []
+          {:recorded #{} :private {}}]
+         ["a custom macro's generated Var" ns-text [] "(mydef gen 3)" '[bt.rec/gen]
+          {:recorded #{} :private {'bt.rec/gen :not-declared-by-text}}]
+         ["an alias a definition uses" ns-text [string-require]
+          "(defn j [xs] (str/join \",\" xs))" '[bt.rec/j]
+          {:recorded #{'bt.rec/j} :aliases {'str 'clojure.string}}]
+         ["an alias no definition uses" ns-text [string-require] "(defn k [] 1)" '[bt.rec/k]
+          {:recorded #{'bt.rec/k} :aliases {}}]
+         ["a namespace requiring itself" ns-text ["(require '[bt.rec :as me])"] "(defn g [] (me/f))" '[bt.rec/g]
+          {:refused? true}]
+         ["an alias retargeted between two forms: the first form's" ns-text [string-require]
+          "(defn up [s] (x/upper-case s))" '[bt.rec/up]
+          {:aliases {}}]
+         ["an alias retargeted between two forms: the second form's" ns-text
+          ["(require '[clojure.string :as x])" "(ns-unalias 'bt.rec 'x)" "(alias 'x 'clojure.set)"]
+          "(defn un [] (x/union #{} #{}))" '[bt.rec/un]
+          {:aliases {'x 'clojure.set}
+           :calls {'bt.rec/un #{'clojure.set/union}}}]
+         ["a keyword resolved through an alias" "(ns bt.rec (:require [clojure.set :as s]))" []
+          "(def kw ::s/k)" '[bt.rec/kw]
+          {:recorded #{'bt.rec/kw} :aliases {'s 'clojure.set}}]
+         ["a renamed refer keeps its call edge"
+          "(ns bt.rec (:require [clojure.string :refer [join] :rename {join j}]))" []
+          "(defn jn [xs] (j \",\" xs))" '[bt.rec/jn]
+          {:recorded #{'bt.rec/jn} :calls {'bt.rec/jn #{'clojure.string/join}}}]]]
+    (when (is (some? record) "seon.turn.batch/record-form exists")
+      (doseq [[label ns-text directives source bound expected] rows]
+        (testing label
+          (is (= expected
+                 (select-keys (recorded (record #:seon.batch{:ns-text ns-text :directives directives
+                                                             :source source :bound bound}))
+                              (keys expected)))))))))
+
+(deftest an-identical-value-redefinition-keeps-no-stale-value
+  ;; `(def cell (atom 0))` evaluated twice with a `swap!` between: the context holds the second
+  ;; atom, and a context acquired from the branch's rows holds that same value, not the first atom
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running agent-id connection]
+     (eval! "(ns batch-test.stale) (def cell (atom 0))" agent-id running)
+     (eval! "(in-ns 'batch-test.stale) (swap! cell inc)" agent-id running)
+     (eval! "(in-ns 'batch-test.stale) (def cell (atom 0))" agent-id running)
+     (is (= {:current 0
+             :acquired 0}
+            {:current (:seon.repl/value ((requiring-resolve 'seon.test-support/mcp-reply)
+                                         (eval! "(in-ns 'batch-test.stale) @cell" agent-id running)))
+             :acquired (sci/eval-string* (sci.eval/base-ctx (db/db connection)) "@batch-test.stale/cell")})
+         "the evaluating context and a context acquired from the branch hold the same value"))))
