@@ -482,20 +482,22 @@
        (is (= 42 (sci/eval-string* ctx "(batch-test.value-def/uses-k1)")) "a fresh context resolves the def")
        (is (= 2 (sci/eval-string* ctx "batch-test.value-def/a")) "a def reading a def installs after it")))))
 
-(deftest a-value-def-init-runs-once-for-every-later-context
+(deftest a-value-def-keeps-its-value-in-the-evaluating-context
+  ;; The evaluating context's own Var is the value (program-facts P3): its later requests run the init no
+  ;; more, and a context derived from the branch's rows runs it itself, once per program content.
   ((requiring-resolve 'seon.test-support/with-running-agent)
    (fn [running agent-id connection]
-     (let [counter (str "batch-test.once." (id/id))]
+     (let [counter (str "batch-test.once." (id/id))
+           value (fn [code] (:seon.repl/value ((requiring-resolve 'seon.test-support/mcp-reply) (eval! code agent-id running))))]
        ;; the init's effect is a JVM-wide count no context copy can reset
        (eval! (str "(ns batch-test.once) (def counted (let [n (str (inc (parse-long (System/getProperty \""
                    counter "\" \"0\"))))] (System/setProperty \"" counter "\" n) n))")
               agent-id running)
        (eval! "(in-ns 'batch-test.once) (defn other [] 1)" agent-id running)
-       (let [ctx (sci.eval/base-ctx (db/db connection))]
-         (is (= "1" (System/getProperty counter))
-             "neither the later request nor a fresh context of the branch ran the init again")
-         (is (= "1" (sci/eval-string* ctx "batch-test.once/counted"))
-             "a fresh context holds the value the evaluation made"))))))
+       (is (= "1" (value "(in-ns 'batch-test.once) counted"))
+           "the evaluating context keeps the value its own evaluation made")
+       (is (not= "1" (sci/eval-string* (sci.eval/base-ctx (db/db connection)) "batch-test.once/counted"))
+           "a context derived from the rows ran the init itself")))))
 
 (deftest an-identical-value-def-in-two-agents-holds-two-values
   ((requiring-resolve 'seon.test-support/with-running-agent)
