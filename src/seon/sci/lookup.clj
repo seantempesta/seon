@@ -442,7 +442,7 @@
   {:malli/schema [:=> [:cat :seon.db/db [:or :symbol :seon.ref/versioned] :boolean] [:or :seon.repl/directory :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
   [database namespace-name present?]
   (if (map? namespace-name)
-    (ref/read-where database (:seon.ref/at namespace-name)
+    (ref/read-where database namespace-name
                     #(if % (directory-value % (:seon.ref/name namespace-name) present?) (ref/documentation-unavailable (:seon.ref/name namespace-name))))
     (directory-in database namespace-name present?)))
 
@@ -506,7 +506,7 @@
                   [:or :map :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
   [ctx database authored resolved]
   (if (and (map? authored) (contains? authored :seon.ref/at))
-    (ref/read-where database (:seon.ref/at authored)
+    (ref/read-where database authored
                     #(if % (documentation-in ctx % (:seon.ref/name authored) resolved) (ref/documentation-unavailable (:seon.ref/name authored))))
     (documentation-in ctx database authored resolved)))
 

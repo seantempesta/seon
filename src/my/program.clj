@@ -137,15 +137,15 @@
                      :seon.fn/declared-arities declared})))
 
 (defn- read-in
-  "`(f at-db)` on the database value `at` names (`seon.ref/read-where`), else on `database`; the refusal naming `at` when the store lacks it."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.ref/at] [:=> [:cat :seon.db/database-value] :any]] :any]}
-  [database at f]
-  (seon.ref/read-where database at
+  "`(f at-db)` on the database value `request`'s `:seon.ref/at` names (`seon.ref/read-where`), else on `database`; the refusal naming it when the store lacks it."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:map [:seon.ref/at {:optional true} :seon.ref/at]] [:=> [:cat :seon.db/database-value] :any]] :any]}
+  [database request f]
+  (seon.ref/read-where database request
                        #(if %
                           (f %)
                           (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/read 'my.program/read-in
                             {:seon.error/message "The store holds no branch or commit named by :seon.ref/at."
-                             :seon.program/not-found at
+                             :seon.program/not-found (:seon.ref/at request)
                              :seon.error/fix "Name a branch from (seon.db/branches (seon.db/db)) or a commit id."}))))
 
 (defn- read-request
@@ -173,9 +173,9 @@
                                  :seon.program/subject]]
                   [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
   [argument]
-  (let [{database :seon.db/db subject :seon.program/subject at :seon.ref/at :as request} (read-request :seon.program/subject argument)]
+  (let [{database :seon.db/db subject :seon.program/subject :as request} (read-request :seon.program/subject argument)]
     (read-result request 'my.program/callers
-                 #(read-in database at
+                 #(read-in database request
                            (fn [database]
                              (let [{identity :seon.program/identity entities :seon.program/entities}
                                    (locate database subject)]
@@ -200,9 +200,9 @@
                                  :seon.program/subject]]
                   [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
   [argument]
-  (let [{database :seon.db/db subject :seon.program/subject at :seon.ref/at :as request} (read-request :seon.program/subject argument)]
+  (let [{database :seon.db/db subject :seon.program/subject :as request} (read-request :seon.program/subject argument)]
     (read-result request 'my.program/tests-reaching
-                 #(read-in database at
+                 #(read-in database request
                            (fn [database]
                              (let [{identity :seon.program/identity} (locate database subject)]
                                (merge (observation database subject identity)
@@ -394,10 +394,10 @@
   `:seon.ref/at` (a branch or a commit) reads that database's history instead of the current one."
   {:malli/schema [:=> [:cat :my.program/history-request]
                   [:or :seon.program/history-report :seon.program/read-refused-error :seon.program/not-found-error]]}
-  [{database :seon.db/db subject :seon.program/subject at :seon.db/tx where :seon.ref/at :as request}]
+  [{database :seon.db/db subject :seon.program/subject at :seon.db/tx :as request}]
   (read-result
    request 'my.program/history
-   #(read-in database where
+   #(read-in database request
       (fn [database]
    (let [view (if at (let [result (db/as-of database at)]
  (if (:seon.db/invalid-read result)
@@ -908,8 +908,8 @@
                    :seon.program/not-found-error]]}
   [database subject]
   (cond
-    (map? subject) (let [{named :seon.ref/name at :seon.ref/at} subject]
-                     (read-in database at #(source % named)))
+    (map? subject) (let [{named :seon.ref/name} subject]
+                     (read-in database subject #(source % named)))
     (keyword? subject) (schema-source database subject)
     (simple-symbol? subject) (namespace-declarations database subject)
     (seq (db/datoms database :avet :seon.task/sym subject)) (task-source database subject)
@@ -1082,7 +1082,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :my.program/search-query]
                   [:or :my.program/search-result :seon.db/invalid-read-error :seon.program/not-found-error]]}
   [database query]
-  (read-in database (when (map? query) (:seon.ref/at query)) #(search-in % query)))
+  (read-in database (if (map? query) query {}) #(search-in % query)))
 
 (defn sizes
   "The functions and tests of a namespace with their line counts, largest first (top 20).

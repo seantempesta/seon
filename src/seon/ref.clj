@@ -647,12 +647,13 @@
       :else (cond-> (assoc resolved :seon.ref/name reference) (nil? reference) (dissoc :seon.ref/name) level (assoc :seon.ref/level level)))))
 
 (defn read-where
-  "`(f at-db)` of the database value `at` names (`seon.db/read-at`: a branch's head or a commit, released after `f`
-  answers; `(f nil)` when the store lacks it), else `(f database)` when `at` is absent. The one way a read tool
-  accepts `:seon.ref/at`."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.ref/at] [:=> [:cat [:maybe :seon.db/database-value]] :any]] :any]}
-  [database at f]
-  (if (some? at) (db/read-at database at f) (f database)))
+  "`(f at-db)` of the database value the `:seon.ref/at` of `request` names (`seon.db/read-at`: a branch's head or a
+  commit, released after `f` answers; `(f nil)` when the store lacks it), else `(f database)` when `request` has no
+  `:seon.ref/at`. The one way a read tool accepts `:seon.ref/at`."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:map [:seon.ref/at {:optional true} :seon.ref/at]]
+                       [:=> [:cat [:maybe :seon.db/database-value]] :any]] :any]}
+  [database request f]
+  (if-some [at (:seon.ref/at request)] (db/read-at database at f) (f database)))
 
 (defn- answer-at
   "`answer` of a candidate, read where its `:seon.ref/at` names (`read-where`), else on `database`; a branch or
@@ -660,7 +661,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/candidate]
                   [:or :nil :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
   [database {at :seon.ref/at :as found}]
-  (read-where database at
+  (read-where database found
               (fn [at-db]
                 (let [resolved (if at-db (answer at-db found) (unresolved (:seon.ref/name found)))]
                   (cond-> resolved (and (some? at) (map? resolved)) (assoc :seon.ref/at at))))))
