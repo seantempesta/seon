@@ -712,7 +712,7 @@
     (doseq [[step proofs product members results on-target expected why]
             [[:implement #{'tq.rule/p} #{} #{'tq.rule/p} [(green 'tq.rule/p)] nil [:done []] "its proof green"]
              [:implement #{'tq.rule/p} #{} #{'tq.rule/p 'tq.rule/r} [(green 'tq.rule/p) (red 'tq.rule/r)] #{'tq.rule/r}
-              [:working [:seon.source/red-on-target-error]] "a reaching test main already holds red stops the merge for root"]
+              [:done []] "a reaching test already red at the target is not the change's red"]
              [:implement #{'tq.rule/p} #{} #{'tq.rule/p 'tq.rule/r} [(green 'tq.rule/p) (red 'tq.rule/r)] nil
               [:working [:seon.source/red-test-error]] "a reaching test the change turned red"]
              [:implement #{'tq.rule/p} #{} #{'tq.rule/p} [] nil [:working [:seon.source/test-evidence-error]] "its proof unrun at its reach is unknown, never green"]
@@ -758,6 +758,38 @@
              [#{'tq.rule/q} #{'tq.rule/s} #{'tq.rule/q 'tq.rule/s} [(red 'tq.rule/q) (red 'tq.rule/s)] nil #{'tq.rule/s}
               [:working [:seon.source/red-test-error]] "its own proof red"]]]
       (is (= expected (judged proofs next-proofs members results on-target defined)) why))))
+
+(deftest ^{:seon.test/long "An own-branch agent's setup, one change through its eval request with its test step and one fork-point run, and two reads of its branch."
+           :seon.test/long-ms 30000}
+  the-test-step-runs-the-member-list-the-done-rule-judges
+  ;; live run 4: four chains capped on reaching tests no run of theirs selected, and 42e0 was done on 2 members while
+  ;; the merge ran 64. After one eval request, every member of the merge's list (`seon.context/step-members`) holds
+  ;; a current result on the branch, and the done rule judges exactly that list
+  (test-support/with-running-agent
+   (fn [running _ connection]
+     (let [agent-id (str "member-list-" (seon.id/id))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" (get-in (db/db connection) [:config :branch]) 'user
+                                        (:seon.cluster/name (test-support/execution-handle nil))]])
+           _ (test-support/declare-source! connection 'tq.oml
+                                           (str "(ns tq.oml (:require [clojure.test :refer [deftest is]]))\n"
+                                                "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                                "(defn side {:malli/schema [:=> [:cat :int] :int]} [r] (area r))\n"
+                                                "(deftest ^{:seon/tasks #{'tq.oml/area}} area-test (is (= 25 (area 5))))\n"
+                                                "(deftest side-test (is (= 9 (side 3))))\n")
+                                           "test")
+           {branch :seon.store/branch target :seon.db/connection} (test-support/own-branch-agent! running agent-id "(ns tq.oml)")
+           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
+                                            :seon.task/ns 'tq.oml :seon.task/name "area" :seon.task/plan "Square."}))]
+       (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
+                      :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})
+       (evaluate running agent-id "(in-ns 'tq.oml)\n(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))")
+       (let [database (db/db target)
+             members (:seon.source/members (context/step-members database agent-id #{'tq.oml/area-test}))
+             current (into #{} (map :seon.test/sym) (context/current-results database members 'tq.oml/area))
+             judged (:seon.source/judged (context/step-verdict database agent-id))]
+         (is (contains? members 'tq.oml/side-test) "the list holds a test reaching the change through a caller")
+         (is (= members current) "the step ran every member: each holds a current result on the branch")
+         (is (= members (:seon.source/members judged)) "the done rule judges that same list"))))))
 
 (defn- stable
   "`step` with each refusal's occurrence stamps (when and in which evaluation) removed: the data two reads share."

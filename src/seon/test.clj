@@ -2375,7 +2375,7 @@
    :seon.error/offending offending
    :seon.test/selection-refusal kind})
 
-(defn- host-exclusions
+(defn host-exclusions
   "Members that never execute in a JVM operating the development checkout.
 
   A member reaching a `:seon.fn/destroys` owner deletes a filesystem path it

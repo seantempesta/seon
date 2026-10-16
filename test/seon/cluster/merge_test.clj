@@ -196,7 +196,7 @@
            :seon.test/long-ms 180000}
   a-red-reaching-test-refuses-acceptance
   ;; Before, accept-merge! gated only the proofs: a green proof merged a change
-  ;; that turned another reaching test red, shown only as :seon.source/red.
+  ;; that turned another reaching test red.
   (let [target (support/execution-handle nil)
         store (:seon.store/store target)
         h-conn (:seon.db/connection target)
@@ -225,13 +225,13 @@
         (let [prepared (prepare)
               before (callee-digest)
               refusal (source/accept-merge! target store prepared)]
-          (is (= [(sym "gate-exact")] (:seon.source/red prepared)) "the gate ran it red")
+          (is (= [(sym "gate-exact")] (mapv :seon.test/sym (:seon.source/red-tests prepared))) "the gate ran it red")
           (is (= :seon.source/red-test-error (:seon.error/type refusal)))
           (is (= #{[(sym "gate-exact") :red]} (refused-tests refusal)))
           (is (= #{(:seon.test.run/id prepared)} (set (map :seon.test.run/id (:seon.source/red-tests refusal))))
               "each red test names the run that recorded it")
           (is (= before (callee-digest)) "main's program is unchanged")))
-      (testing "a test already red on the target refuses separately, named for root"
+      (testing "a test main broke after the merge base is judged at the merge base, as done judges it: the change's red"
         (write! h-conn [(test-entity h-conn "gate-broken" "(clojure.test/deftest gate-broken (clojure.test/is (= 0 (seon.cluster.merge-test/gate-callee))))")])
         (seon.test/run {:seon.test/policy :named :seon.test/execution target :seon.test/recording-connection h-conn
                         :seon.test/changed [(sym "gate-broken")]})
@@ -239,9 +239,9 @@
         (let [prepared (prepare)
               before (callee-digest)
               refusal (source/accept-merge! target store prepared)]
-          (is (= [(sym "gate-broken")] (:seon.source/red prepared)))
-          (is (= :seon.source/red-on-target-error (:seon.error/type refusal)))
-          (is (= #{[(sym "gate-broken") :red-on-target]} (refused-tests refusal)))
+          (is (= [(sym "gate-broken")] (mapv :seon.test/sym (:seon.source/red-tests prepared))))
+          (is (= :seon.source/red-test-error (:seon.error/type refusal)))
+          (is (= #{[(sym "gate-broken") :red]} (refused-tests refusal)))
           (is (= before (callee-digest)) "main's program is unchanged")))
       (finally
         (cluster.agent/release-context! candidate)
@@ -806,8 +806,9 @@
            :seon.test/long "One prepare (one nested seon.test/run on the candidate) and the gate's judgment of its red test against the target (60 s is this namespace's measured bound for one)."
            :seon.test/long-ms 120000}
   a-test-never-run-on-the-target-is-not-blamed-on-the-merge
-  ;; A test red on the candidate that fails on the target too is not the change's,
-  ;; though the target never ran it at its current reach.
+  ;; A test red on the candidate that fails at the merge base too is not the change's, though the target never ran
+  ;; it at its current reach: the merge asks the done rule's question (`seon.cluster.source/red-at-merge-base`) and
+  ;; refuses nothing for it.
   (let [target (support/execution-handle nil)
         store (:seon.store/store target)
         h-conn (:seon.db/connection target)
@@ -829,8 +830,9 @@
       (let [prepared (source/prepare-merge! target store c proved)
             _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
             refusal (source/accept-merge! target store prepared)]
-        (is (= [(sym "unrun-broken")] (:seon.source/red prepared)) "the gate ran it red")
-        (is (= :seon.source/red-on-target-error (:seon.error/type refusal)) "it stops for root, not blamed on the change"))
+        (is (= #{(sym "unrun-broken")} (:seon.source/red-on-target prepared)) "the gate ran it red, and red at the merge base")
+        (is (empty? (:seon.source/red-tests prepared)) "it is not the change's red")
+        (is (uuid? (:seon.source/commit-id refusal)) "so it refuses nothing: the merge commits"))
       (finally
         (cluster.agent/release-context! candidate)
         (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))

@@ -27,7 +27,6 @@
             [seon.turn :as turn]
             [seon.db :as db]
             [seon.error :as error]
-            [seon.fn :as fn]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -326,6 +325,19 @@
           :else (try (program/own-changed-identities base database source/merge-bound)
                      (finally (source/release! [base]))))))
 
+(defn step-members
+  "The merge's member list (`seon.cluster.source/merge-members`) of what the agent's branch `database` changed since
+  its merge base (`change`) and a merge onto main carries (`seon.cluster.source/merge-changes`), with `proofs`: what
+  the attempt's test step runs after each eval request (`seon.turn`), the list `step-observation` judges."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:set :seon.test/sym]]
+                  [:or :seon.source/member-list :seon.error/value]]}
+  [database agent-id proofs]
+  (let [delta (change database agent-id)
+        main (or (task/main-head database) database)]
+    (if (:seon.error/at delta)
+      delta
+      (source/merge-members database (source/merge-changes database main delta) proofs))))
+
 (defn current-results
   "The recorded result of each of `tests` that `database` holds at its current reach digest there judging `task`
   (nil: none), the identity the runner records it under (`seon.test.runner/current-results`): its newest completed
@@ -347,9 +359,10 @@
   or the first a chain fact on main names, `:seon.chain/first`), its
   product (the proofs of the task after it and, for a Prove step, the tests its successors are tagged with), the
   branch as the candidate, main's head (`seon.task/main-head`; the branch itself on main) and the judgment's input:
-  its proofs, the tests reaching the functions it changed since its merge base (`change`, `seon.fn/gate-sets`),
+  the merge's member list of what it changed since its merge base (`change`, `seon.cluster.source/merge-changes`,
+  `seon.cluster.source/merge-members`) with its proofs and product, its deferred members,
   their results at their current reach on the branch (`current-results`) and the newest run they came from. A
-  chain's task adds the tests the branch defines or changes, passes its product as `:seon.source/next-proofs` and
+  chain's task passes its product as `:seon.source/next-proofs` and
   the reds held red at its merge base as `:seon.source/red-on-target` (`seon.cluster.source/red-at-merge-base`) and what its merge would publish
   (`seon.cluster.source/publication`) (`seon.cluster.source/done-refusals`); any other
   joins its product to its proofs and passes the reds main holds as `:seon.source/red-on-target`
@@ -372,12 +385,11 @@
         product (cond-> (set (get-in following [:seon.task/next :seon.task/proofs]))
                   (= :prove (:seon.task/step owed)) (into (:seon.task/product owed)))
         delta (when-not (:seon.error/at owed) (change database agent-id))
-        of (fn [attribute] (into #{} (keep (fn [[a s]] (when (= attribute a) s))) (when (set? delta) delta)))
-        fns (of :seon.fn/sym)
-        reached (if (seq fns) (fn/gate-sets {:seon.db/db database :seon.fn/seeds fns}) [])
         proofs (set (:seon.task/proofs owed))
-        members (when (sequential? reached)
-                  (cond-> (-> proofs (into product) (into reached)) chained? (into (of :seon.test/sym))))
+        ;; the merge's own member list (`source/merge-members`): what the test step runs and the merge runs
+        listed (when (set? delta) (source/merge-members database (source/merge-changes database main delta) (into proofs product)))
+        members (when (and listed (not (:seon.error/at listed))) (:seon.source/members listed))
+        deferred (:seon.source/deferred listed)
         results (when members (current-results database members sym))
         ;; a chain's task asks what the merge asks of a red: is it red at the merge base (`red-at-merge-base`)
         held (when (and (vector? results) (not chained?))
@@ -406,11 +418,12 @@
                    (cond-> (merge {:seon.source/members members :seon.source/results results :seon.task/proofs proofs}
                                   (when-not (:seon.error/at published) published))
                      (seq product) (assoc :seon.source/next-proofs product)
+                     (seq deferred) (assoc :seon.source/deferred deferred)
                      (seq on-target) (assoc :seon.source/red-on-target on-target))
                    (cond-> {:seon.source/members members :seon.source/results results :seon.task/proofs (into proofs product)}
                      (seq product) (assoc :seon.task/product product)
                      (seq on-target) (assoc :seon.source/red-on-target on-target))))]
-    (or (some #(when (:seon.error/at %) %) [owed following previous first-of delta reached results held on-target head published])
+    (or (some #(when (:seon.error/at %) %) [owed following previous first-of delta listed results held on-target head published])
         (cond-> (assoc owed :seon.task/product product :seon.context/chained chained?
                        :seon.context/head head :seon.context/candidate database :seon.context/main main)
           (set? delta) (assoc :seon.program/identities delta)

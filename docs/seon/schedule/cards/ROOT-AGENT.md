@@ -100,15 +100,14 @@ The result value `:seon.source/landed` holds `:seon.source/commit-id`, `:seon.so
 and the step timings; `end-task!` puts it on the end message as `:seon.source/landing`, and `seon.context/ended`
 shows it in root's block. The merge task is decided in the same call, so `my.program/proposals` lists nothing green.
 
-**On a red gate** (`:seon.source/red-test-error`, or `:seon.source/red-on-target-error` "root decides"): `land!`
+**On a red gate** (`:seon.source/red-test-error`): `land!`
 stores the refusal on the merge task as `:seon.task/refusal` (the error map's shown text and ids, through
 `seon.blob/inline-or-stage`, with `:seon.source/red-tests` as data), leaves `:seon.task/outcome` absent, and the end
 message carries it. The invariant `no-merge-task-stays-undecided` is now red, so the next tick (§5) launches a fresh
 agent on the root task `seon.root/decide-undecided-merges` with `:seon.grant/merge-decision`. Its operations: read
 the refusal and the red tests; for `:red` (the change broke them) `my.program/decline-merge!` with a reason, which
-also creates the follow-up task `(seon.task/create! {… :seon.task/basis <task> :seon.task/plan <plan citing the red tests>})` for the next round; for `:red-on-target` (already red on main, not caused by the change) decide by reading the
-reaching test's history and accept or decline. AGENTS.md says a test already red on main stops the merge for root; the
-root agent is root here, and this card does not auto-accept it (question 2, §9). Both decisions are durable
+also creates the follow-up task `(seon.task/create! {… :seon.task/basis <task> :seon.task/plan <plan citing the red tests>})` for the next round; a test red at the merge base is not the change's and refuses nothing (`seon.cluster.source/red-at-merge-base`,
+the done rule's question, which the merge asks too). Both decisions are durable
 (`seon.task/decide!`) before the agent is answered.
 
 **On a write-back conflict** (`:seon.source/write-back-error` `:conflict`, `:seon.program/conflict-digests`: a file on
@@ -321,8 +320,8 @@ recommendation (owner 2026-10-10: decide with the recommended option, proceed an
    runs a model loop. **Answered: (a)**, §1.
 2. **A merge whose only reds are already red on main** (`:red-on-target`). (a) the root agent decides, reading the
    test's history (recommended: AGENTS.md says it stops for root, and one round of decisions will show whether a rule
-   exists); (b) auto-accept, since the change broke nothing. **Answered: (a)**; revisit after the first round with the
-   decisions as data.
+   exists); (b) auto-accept, since the change broke nothing. **Superseded (2026-10-16)**: a red at the merge base is
+   not the change's, for the done rule and the merge alike (`seon.cluster.source/red-at-merge-base`).
 3. **Git.** (a) one commit per landing by `seon.cluster.source/commit!` (recommended); (b) `bin/lane commit` through
    the shell; (c) batches at restart. **Answered: (a)**, §3.
 4. **Restart cadence.** (a) on quiescence after a host-bound landing, at most every 30 min otherwise (recommended);

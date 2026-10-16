@@ -1,6 +1,6 @@
 (ns seon.turn.test-step-verdict-test
-  "The automatic test step's verdict states which of the reaching tests ran, and a test run inside the
-  eval request that changed its reach answers the new definition."
+  "The automatic test step's verdict is over the merge's whole member list, and a test run inside the eval request
+  that changed its reach answers the new definition."
   (:require [clojure.data.json :as json]
             [clojure.test :refer [deftest is]]
             [seon.mcp :as mcp]
@@ -25,8 +25,10 @@
 
 (deftest ^{:seon.test/long "Two eval requests of an own-branch agent, each with its automatic test step: about 1 s each measured on default's JVM (agent teststep-verdict, 2026-10-14)."
            :seon.test/long-ms 15000}
-  the-step-verdict-names-the-nearest-tests-it-ran-of-those-reaching
-  ;; g <- f <- f-is-int stops the nearest-test walk; f-doubles reaches g a level further through the helper doubled?.
+  the-step-verdict-covers-every-test-of-the-member-list
+  ;; g <- f <- f-is-int stops the nearest-test walk; f-same reaches g a level further through the helper same?. The
+  ;; step runs the merge's member list (`seon.cluster.source/merge-members`), so its verdict claims a pass over both,
+  ;; the list the done rule and the merge judge, with no partial count beside it.
   (support/with-running-agent
    (fn [running _ _]
      (let [agent-id (str "step-task-proof-" (random-uuid))
@@ -36,14 +38,13 @@
                    "(defn- g \"Returns x.\" {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
                    "(defn f \"Returns g of x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (g x))\n"
                    "(deftest f-is-int (is (int? (f 1))))\n"
-                   "(defn- doubled? \"Whether f doubles x.\" {:malli/schema [:=> [:cat :int] :boolean]} [x] (= (* 2 x) (f x)))\n"
-                   "(deftest ^{:seon/tasks #{'tv.proof/f-doubles}} f-doubles (is (doubled? 1)))"))
+                   "(defn- same? \"Whether f keeps x.\" {:malli/schema [:=> [:cat :int] :boolean]} [x] (= x (f x)))\n"
+                   "(deftest f-same (is (same? 1)))"))
            step (support/mcp-tests
                  (eval-request running agent-id
                                "(in-ns 'tv.proof)\n(defn- g \"Returns x plus zero.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 0))"))]
-       (is (= {:seon.turn.loop/red [] :seon.turn.loop/nearest 1 :seon.turn.loop/reaching-count 2}
-              (:seon.turn.loop/reaching step))
-           "the verdict names the nearest tests it ran of those reaching and claims no pass over the rest")))))
+       (is (= {:seon.test/passed? true :seon.turn.loop/red []} (:seon.turn.loop/reaching step))
+           "the verdict passes over the whole member list it ran, the one done and the merge judge")))))
 
 (deftest ^{:seon.test/long "Two eval requests of an own-branch agent, each with its automatic test step: about 1 s each measured on default's JVM (agent teststep-verdict, 2026-10-14)."
            :seon.test/long-ms 15000}

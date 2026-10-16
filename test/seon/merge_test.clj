@@ -768,7 +768,7 @@
       (let [prepared (source/prepare-merge! target store branch task-sym {:root root})]
         (some->> (:seon.source/candidate prepared) (vswap! made conj))
         (is (string? (:seon.source/platform-run prepared)) "the gate ran its isolated member on the candidate's platform host")
-        (is (some #{reader} (:seon.source/red prepared))
+        (is (some #{reader} (map :seon.test/sym (:seon.source/red-tests prepared)))
             "the gate selected the bb-load test and ran it red against the candidate's files"))
       (finally
         (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))

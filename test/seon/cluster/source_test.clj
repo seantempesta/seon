@@ -529,6 +529,56 @@
               (shape (source/done-refusals branch judged)))
            "the merge's judgment refuses it the same way")))))
 
+(deftest done-and-merge-judge-one-member-list
+  ;; live run 4, chain 42e0: done judged its proof and one changed test while the merge's run selected 64 tests
+  ;; reaching its change (a changed namespace row seeds every member of the namespace), three of them red; four other
+  ;; chains capped on reaching tests no run of theirs selected. One function gives the list the test step runs, the
+  ;; done rule judges and the merge gate runs
+  (test-support/with-database
+   (fn [connection]
+     (test-support/declare-source!
+      connection 'tq.one-test
+      (str "(ns tq.one-test (:require [clojure.test :refer [deftest is]]))\n"
+           "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
+           "(defn g {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
+           "(deftest proof (is (= 1 (f 1))))\n"
+           "(deftest reaches-f (is (= 2 (f 2))))\n"
+           "(deftest reaches-g (is (= 3 (g 3))))\n"
+           "(deftest ^{:seon.test/long \"declared long\"} long-reaches-f (is (= 4 (f 4))))\n")
+      "test")
+     (let [database (db/db connection)
+           listed (fn [changed] (:seon.source/members (source/merge-members database changed #{'tq.one-test/proof})))]
+       (is (= #{'tq.one-test/proof 'tq.one-test/reaches-f} (listed #{[:seon.fn/sym 'tq.one-test/f]}))
+           "a changed function: the proof and the tests reaching it, a declared-long one aside")
+       (is (= #{'tq.one-test/proof 'tq.one-test/reaches-f 'tq.one-test/reaches-g} (listed #{[:seon.ns/name 'tq.one-test]}))
+           "a changed namespace row: the tests reaching every member of it, as the merge gate selects them")
+       (is (= #{'tq.one-test/proof 'tq.one-test/long-reaches-f} (listed #{[:seon.test/sym 'tq.one-test/long-reaches-f]}))
+           "a changed test is a member even when declared long")
+       (is (= #{} (:seon.source/deferred (source/merge-members database #{[:seon.fn/sym 'tq.one-test/f]} #{'tq.one-test/proof})))
+           "no member here runs only on a platform host")
+       (let [members (listed #{[:seon.fn/sym 'tq.one-test/f]})
+             judged {:seon.source/members members :seon.task/proofs #{'tq.one-test/proof}
+                     :seon.source/results [(recorded 'tq.one-test/proof true) (recorded 'tq.one-test/reaches-f false)]
+                     :seon.program/identities #{} :seon.test.run/id "run-1" :seon.test.run/branch :tq-one}
+             shape (fn [refusals] (mapv (juxt :seon.error/type #(mapv :seon.test/sym (:seon.source/red-tests %))) refusals))]
+         (is (= [[:seon.source/red-test-error ['tq.one-test/reaches-f]]] (shape (source/done-refusals database judged)))
+             "done refuses the reaching member turned red")
+         (is (= (shape (source/done-refusals database judged)) (shape (source/results-verdict database database judged)))
+             "and the merge's judgment of the same list refuses it the same way")
+         (let [at-base (assoc judged :seon.source/red-on-target #{'tq.one-test/reaches-f})]
+           (is (= [] (source/done-refusals database at-base) (source/results-verdict database database at-base))
+               "a member red at the merge base refuses neither"))
+         (let [proof-at-base (assoc judged :seon.source/results [(recorded 'tq.one-test/proof false) (recorded 'tq.one-test/reaches-f true)]
+                                    :seon.source/red-on-target #{'tq.one-test/proof})]
+           (is (= (shape (source/done-refusals database proof-at-base))
+                  (shape (source/results-verdict database database proof-at-base))
+                  [[:seon.source/red-test-error ['tq.one-test/proof]]])
+               "a red proof is never excused, by either"))
+         (let [deferred (assoc judged :seon.source/results [(recorded 'tq.one-test/proof true)]
+                               :seon.source/deferred #{'tq.one-test/reaches-f})]
+           (is (= [] (source/done-refusals database deferred))
+               "a deferred member is the merge's platform run's to answer, so done waits for none")))))))
+
 (deftest done-and-merge-judge-a-reaching-test-with-no-current-result-the-same-way
   ;; live run 3, chain fddd: the agent restored main's text of an existing test its change turned red, and the
   ;; attempt ended before the reaching run on that text finished; the done rule skipped the member with no current

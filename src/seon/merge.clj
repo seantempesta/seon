@@ -375,12 +375,13 @@
                                       :seon.error/message "The source branch and main changed the same declarations since the merge base; resolve on the branch and merge again."
                                       :seon.program/conflict (into #{} (map second) (:seon.program/conflict prepared))
                                       :seon.program/conflict-digests (:seon.program/conflict-digests prepared)})
-                (:seon.source/candidate prepared) (merge (select-keys prepared [:seon.source/candidate :seon.source/red])))
+                (:seon.source/candidate prepared) (merge (select-keys prepared [:seon.source/candidate :seon.source/red-tests])))
               (:seon.error/at prepared) prepared
               (not (:seon.source/candidate prepared)) prepared
               (not (:seon.source/commit-id accepted))
-              (cond-> (assoc accepted :seon.source/candidate (:seon.source/candidate prepared))
-                (seq (:seon.source/red prepared)) (assoc :seon.source/red (:seon.source/red prepared)))
+              ;; the refusal as its judge gave it: a red test names itself under `:seon.source/red-tests` on its
+              ;; own refusal, never grafted onto another cause's
+              (assoc accepted :seon.source/candidate (:seon.source/candidate prepared))
               (:seon.error/at result) (assoc result :seon.source/accepted accepted)
               :else (do (run! #(conflict-task! connection branch %) (:seon.merge/conflicts result))
                         (assoc result :seon.source/accepted accepted)))))))))
@@ -397,7 +398,7 @@
   and the tests reaching them on a fresh merge branch of main; `seon.cluster.source/accept-merge!` judges them by
   `seon.cluster.source/merge-verdict` and carries `merge-tx` in its transaction, so only an accepted candidate
   completes the task, then the merge branch is deleted; a refused one is kept and named on the refusal
-  (`:seon.source/candidate`, with its red tests as `:seon.source/red`) for its caller to retire or hold a merge step
+  (`:seon.source/candidate`; a conflict carries the gate's red tests as `:seon.source/red-tests`) for its caller to retire or hold a merge step
   on (MERGE-STEP); the files the checkout `root` would hold are proven
   before any test runs. Main's commit is recorded as `:seon.task/merge-commit`, beside
   `:seon.task/merged-declarations`, how many declarations and tasks it moved

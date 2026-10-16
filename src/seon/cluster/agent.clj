@@ -1847,9 +1847,9 @@
 
 (defn- done-judged
   "What the done rule (`seon.cluster.source/done-refusals`) judges for chain task `handle` at `at-end`, its chain
-  `branch` at the attempt's end commit: its proofs field, the next task's, the tests the branch defines or changes
-  and those reaching the functions it changed since its merge base with main (`seon.cluster.source/merge-base`,
-  `seon.program/own-changed-identities`; `seon.fn/gate-sets`), their current results there
+  `branch` at the attempt's end commit: the merge's member list (`seon.cluster.source/merge-members`) of what it
+  changed since its merge base with main (`seon.cluster.source/merge-base`, `seon.program/own-changed-identities`,
+  `seon.cluster.source/merge-changes`) with its proofs field and the next task's, its deferred members, their current results there
   (`seon.context/current-results`), the reds among them held red at that merge base
   (`seon.cluster.source/red-at-merge-base`, the merge's question), and the newest run they
   came from, else the newest the branch holds (an attempt's start runs its tests, so a done end always has one), and
@@ -1867,15 +1867,15 @@
                     base (try (program/own-changed-identities base at-end source/merge-bound)
                               (finally (source/release! [base])))
                     :else #{})
-        of (fn [attribute] (into #{} (keep (fn [[a s]] (when (= attribute a) s))) (when (set? delta) delta)))
-        reached (if (seq (of :seon.fn/sym)) (seon.fn/gate-sets {:seon.db/db at-end :seon.fn/seeds (of :seon.fn/sym)}) [])
-        members (when (sequential? reached) (-> proofs (into (of :seon.test/sym)) (into reached)))
+        ;; the merge's own member list (`seon.cluster.source/merge-members`), the one the attempt's test step ran
+        listed (when (set? delta) (source/merge-members at-end (source/merge-changes at-end database delta) (into proofs next-proofs)))
+        members (when-not (:seon.error/at listed) (:seon.source/members listed))
         results (when members (context/current-results at-end members (:seon.task/sym task)))
         held (when (and (vector? results) (uuid? base-commit))
                (source/red-at-merge-base at-end base-commit results (into proofs next-proofs)))
         published (when (and (vector? results) (set? delta))
                     (source/publication database at-end delta proofs (:seon.task/sym task) root))
-        failure (some #(when (and (map? %) (:seon.error/at %)) %) [task delta reached results held published])
+        failure (some #(when (and (map? %) (:seon.error/at %)) %) [task delta listed results held published])
         newest (fn [runs] (some->> (seq runs) (apply max-key second) first))
         run-id (when (vector? results)
                  (or (newest (keep #(when-let [[_ id] (:seon.test/run %)] [id (:seon.test/run-basis-t %)]) results))
@@ -1889,6 +1889,7 @@
                     :seon.program/identities delta :seon.test.run/id run-id :seon.test.run/branch branch}
                    published)
         (seq next-proofs) (assoc :seon.source/next-proofs next-proofs)
+        (seq (:seon.source/deferred listed)) (assoc :seon.source/deferred (:seon.source/deferred listed))
         (seq held) (assoc :seon.source/red-on-target held))))
 
 (defn launch-facts
@@ -2361,9 +2362,10 @@
   (each red test, conflicted declaration and offending declaration backticked), with the refusal's own message and
   file."
   {:malli/schema [:=> [:cat :seon.error/value] :string]}
-  [{refused :seon.error/type message :seon.error/message red :seon.source/red conflict :seon.program/conflict
+  [{refused :seon.error/type message :seon.error/message red-tests :seon.source/red-tests conflict :seon.program/conflict
     path :seon.source/path offending :seon.error/offending}]
-  (let [declarations (filter qualified-symbol? (if (coll? offending) offending [offending]))]
+  (let [declarations (filter qualified-symbol? (if (coll? offending) offending [offending]))
+        red (into #{} (map :seon.test/sym) red-tests)]
     (str "## Merge refusal\n\n"
          "Root's final merge refused `" refused "`" (when message (str ": " message)) "\n"
          (when path (str "\nFile: " path "\n"))
@@ -2384,7 +2386,7 @@
   [database refused proofs]
   (when-let [kept (:seon.source/candidate refused)]
     (let [template (task/template database 'seon.step.merge/template)
-          red (set (:seon.source/red refused))]
+          red (into #{} (map :seon.test/sym) (:seon.source/red-tests refused))]
       (when (:seon.error/at template)
         (throw (ex-info (:seon.error/message template "The merge step's template is not ingested.") template)))
       (cond-> (assoc template :seon.task/branch kept :seon.task/refusal (:seon.error/type refused)

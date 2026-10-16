@@ -2706,13 +2706,10 @@
        (:seon.db/connection execution) (:seon.cluster/name execution) files deferred))))
 
 (defn- reaching-run
-  "The tests reaching `identities`, answered on `execution` and recorded on its
-  connection. Every changed function, test and namespace is passed, deleted ones
-  included: `seon.test/run` resolves a deleted symbol through history and its
-  surviving incoming edges, and a namespace selects its members and the tests
-  that read it as a file. The isolated members it selects run on the candidate's
-  own platform host over `files` (`isolated-run`), their run as
-  `:seon.source/platform-run`. No changed function, test or namespace, no request."
+  "The merge's member list of `identities` (`seon.cluster.source/merge-members` over the candidate: the one list the
+  attempt's test step runs and the done rule judges), answered on `execution` and recorded on its connection, each
+  member reused by its reach digest. The isolated members it defers run on the candidate's own platform host over
+  `files` (`isolated-run`), their run as `:seon.source/platform-run`. No member, no request."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.reconcile/adopt-identities [:maybe [:vector :seon.source/proof]]]
                   [:map [:seon.test/passed? :boolean] [:seon.source/tally :string]
                    [:seon.source/gate-run {:optional true}
@@ -2720,14 +2717,18 @@
                    [:seon.source/platform-run {:optional true}
                     [:or :seon.test.platform/answer :seon.error/value]]]]}
   [execution identities files]
-  (let [changed (into [] (keep (fn [[a v :as identity]] (cond (#{:seon.fn/sym :seon.test/sym} a) v
-                                                               (= :seon.ns/name a) identity)))
-                      identities)
-        run (when (seq changed)
-              ((requiring-resolve 'seon.test/run)
-               {:seon.test/policy :named :seon.test/execution execution
-                :seon.test/recording-connection (:seon.db/connection execution)
-                :seon.test/changed changed :seon.test/isolate? true}))
+  (let [;; the writer's report also names the facts it touched (an assignment, a task): only declarations seed tests
+        declared (into #{} (filter (fn [[attribute]] (#{:seon.fn/sym :seon.test/sym :seon.ns/name :seon.schema/key} attribute)))
+                       identities)
+        listed (source/merge-members (db/db (:seon.db/connection execution)) declared #{})
+        members (:seon.source/members listed)
+        run (if (:seon.error/at listed)
+              listed
+              (when (seq members)
+                ((requiring-resolve 'seon.test/run)
+                 {:seon.test/policy :named :seon.test/execution execution
+                  :seon.test/recording-connection (:seon.db/connection execution)
+                  :seon.test/identities members :seon.test/isolate? true})))
         platform (when (and run (not (:seon.error/at run))) (isolated-run execution run files))
         green? #(and (pos? (:seon.test/pass-count % 0)) (zero? (:seon.test/fail-count % 0)) (zero? (:seon.test/error-count % 0)))
         ;; the in-process run's verdict with its isolated members answered by the platform run instead
@@ -2738,7 +2739,7 @@
                                  (every? empty? (map run [:seon.test/long-excluded :seon.test/pending :seon.test/unfinished]))))]
     (cond-> {:seon.test/passed? passed?
              :seon.source/tally (cond-> (if run ((requiring-resolve 'seon.test/tally) run)
-                                          "no changed function or test: no test selected")
+                                          "no member: no test selected")
                                   (:seon.test.platform/ms platform)
                                   (str " / platform " (count (:seon.test/results platform)) " in "
                                        (:seon.test.platform/ms platform) " ms"))}
