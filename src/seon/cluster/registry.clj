@@ -353,14 +353,20 @@
   nil)
 
 (defn fork-of
-  "`branch`'s own fork entity in `database`, or nil when it holds none. Of the
-  fork entities naming `branch`, its own is the one asserted last: an earlier
-  one came down from a retired branch of that name."
+  "`branch`'s own fork entity in `database`, or nil when it holds none: a value
+  whose schema does not declare `:seon.branch/name` (the store's main `:db`
+  branch) holds no fork entity. Of the fork entities naming `branch`, its own
+  is the one asserted last: an earlier one came down from a retired branch of
+  that name."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch] [:maybe :seon.branch/fork]]}
   [database branch]
   ;; Its native-typed datoms, read undecoded: a pull derives the value's declarations first, and every
   ;; declaration a branch-side reader documents reads its fork entity.
-  (when-let [named (seq (db/datoms database :avet :seon.branch/name branch))]
+  (when-let [named (when (contains? (:schema database) :seon.branch/name)
+                     (let [datoms (db/datoms database :avet :seon.branch/name branch)]
+                       (when (:seon.db/invalid-read datoms)
+                         (throw (ex-info (:seon.error/message datoms) datoms)))
+                       (seq datoms)))]
     (into {} (keep (fn [[_ attribute value]]
                      (when (#{:seon.branch/fork-id :seon.branch/name :seon.branch/target :seon.branch/base-t} attribute)
                        [attribute value])))
@@ -803,15 +809,16 @@
         heads (into #{} (map :seon.source/commit-id) (branch-heads store (branches store)))
         named (into #{}
                     (comp (mapcat (fn [branch]
-                                    (let [database (d/branch-as-db connection branch)
-                                          ;; a work branch's merge base with its target: Datahike's commit graph,
-                                          ;; walked through every commit between it and both heads
-                                          base ((requiring-resolve 'seon.cluster.source/branch-merge-base) database)
-                                          ;; and its fork point, the base of the facts a forward merge never moves
-                                          target (:seon.branch/target (fork-of database branch))
-                                          fork (when target (fork-point database (db/commit-id database) target))]
-                                      (try (cond-> (named-commits database) (uuid? base) (conj base) (uuid? fork) (conj fork))
-                                           (finally (d/release-materialized-db database))))))
+                                    (let [database (d/branch-as-db connection branch)]
+                                      (try
+                                        (let [;; a work branch's merge base with its target: Datahike's commit graph,
+                                              ;; walked through every commit between it and both heads
+                                              base ((requiring-resolve 'seon.cluster.source/branch-merge-base) database)
+                                              ;; and its fork point, the base of the facts a forward merge never moves
+                                              target (:seon.branch/target (fork-of database branch))
+                                              fork (when target (fork-point database (db/commit-id database) target))]
+                                          (cond-> (named-commits database) (uuid? base) (conj base) (uuid? fork) (conj fork)))
+                                        (finally (d/release-materialized-db database))))))
                           (remove heads))
                     (branches store))
         instants (keep #(let [{{:datahike/keys [updated-at created-at]} :meta} (head-record konserve %)]

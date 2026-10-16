@@ -511,6 +511,23 @@
       (let [cutoff (java.util.Date.)]
         (is (= cutoff (registry/retained-before opened cutoff)))))))
 
+(deftest a-branch-whose-schema-lacks-the-fork-name-holds-no-fork-and-retention-answers
+  ;; A store opened with no Seon schema: its main :db branch declares no :seon.branch/name.
+  (let [dir (str "tmp/registry-test/" (random-uuid) "/store")]
+    (.mkdirs (.getParentFile (io/file dir)))
+    (let [opened (store/open-store! {:seon.store/dir dir})]
+      (try
+        (let [database (d/branch-as-db (:seon.store/connection-object opened) :db)]
+          (try
+            (is (not (contains? (:schema database) :seon.branch/name)))
+            (is (nil? (registry/fork-of database :db)))
+            (finally (d/release-materialized-db database))))
+        (let [cutoff (java.util.Date.)]
+          (is (= cutoff (registry/retained-before opened cutoff))))
+        (finally
+          (store/release-store! opened)
+          (delete-recursively! (str (io/file dir) "/..")))))))
+
 (deftest retiring-one-cluster-reclaims-only-its-own-tail
   (with-source-store
     (fn [opened]
