@@ -491,7 +491,7 @@ accepted_reds_gate() {
   # A red test HEAD does not define is a new proof, red by design (proofs are written before the body): accepted.
   bb -e '
 (let [[file trailer & reds] *command-line-args*
-      ;; new on HEAD = HEAD's source of the test's namespace file defines no such deftest (decided from git, not the run)
+      ;; new on HEAD = the HEAD source of the test namespace file defines no such deftest (decided from git, not the run)
       defined-on-head? (fn [sym]
                          (let [[ns-name var-name] (clojure.string/split sym #"/")
                                path (str "test/" (-> ns-name (clojure.string/replace "." "/") (clojure.string/replace "-" "_")) ".clj")
