@@ -1550,6 +1550,34 @@
        (catch Exception cause
          (diagnostic (ex-message cause) (or (ex-data cause) {}) :client-failed cause))))
 
+(declare disposable-root-boot!)
+
+(defn- warmed-program-classes!
+  "`source` with our program class directory filled when it misses: a throwaway
+  JVM of the archive boots on a scratch root and stops, before any JVM of
+  `root` stops, so the replacement loads compiled classes and its ready-ms and
+  the downtime exclude the namespace compile (the way `filled-classes!` fills a
+  dependency miss). A failed warm leaves the replacement to compile as it
+  always did."
+  {:malli/schema [:=> [:cat :string :map] :map]}
+  [root source]
+  (let [began (System/nanoTime)
+        source-root (:seon.operator/source-root source)
+        classes (dependency-classes (repository-root) source-root (child-environment root))
+        program (program-classes (repository-root) source-root classes)]
+    (if (and program (not (.isDirectory (io/file program))))
+      (let [disposable (str (io/file root "data/check" (str "warm-" (.pid (java.lang.ProcessHandle/current)))))
+            boot (try (disposable-root-boot! root disposable source-root)
+                      (finally
+                        (doseq [process (selected-processes disposable)]
+                          (terminate! process (operator-silence-backstop-ms {})))
+                        (fs/delete-tree disposable)))]
+        (-> source
+            (assoc :seon.operator/program-fill {:seon.operator/ready? (:seon.operator/ready? boot)
+                                                :seon.operator/program program})
+            (assoc-in [:seon.operator/phases :seon.operator/program-fill-ms] (elapsed-ms began))))
+      source)))
+
 (defn move-to-head!
   "Replace the root's JVM with one whose program is committed HEAD, keeping the
   store and every cache.
@@ -1567,8 +1595,9 @@
         ;; The replaced JVM's program directory seeds this root's analyzer cache.
         previous-source (some-> (advertisement root nil) program-source :seon.operator/source-root)
         {source-root :seon.operator/source-root :as source}
-        (filled-classes! root (prepared-source! root "HEAD"
-                                                previous-source))
+        (warmed-program-classes! root
+                                 (filled-classes! root (prepared-source! root "HEAD"
+                                                                         previous-source)))
         began-down (System/nanoTime)
         stopped (down! request (selected-processes root))
         down-ms (elapsed-ms began-down)
@@ -1860,41 +1889,50 @@
                           (not (process-alive? pid)) (empty? (selected-processes (str child))))]
            (do (fs/delete-tree child) (str child))))))
 
+(defn- disposable-root-boot!
+  "Boot a JVM of the archive `source-root` under the scratch root `disposable`
+  and return its boot outcome with `:seon.operator/ready?`; the caller stops it."
+  {:malli/schema [:=> [:cat :string :string :string] :map]}
+  [root disposable source-root]
+  (fs/create-dirs (io/file root pinned-directory))
+  (fs/create-dirs (io/file disposable "data/source"))
+  (fs/create-sym-link (io/file disposable pinned-directory)
+                      (fs/real-path (io/file root pinned-directory)))
+  ;; A candidate's agents work in its own archive, never the checkout.
+  (let [outcome (try (launch-child! {:seon.operator/managed-root disposable
+                                     :seon.operator/throwaway? true
+                                     :seon.operator/command :start
+                                     :seon.boot/cluster-name "default"
+                                     :seon.config/environment
+                                     {:seon.config.fs/working-root source-root}}
+                                    source-root true)
+                     (catch Exception cause
+                       {:seon.operator/value
+                        (diagnostic (ex-message cause) (or (ex-data cause) {}) :client-failed cause)}))
+        missing (get-in outcome [:seon.operator/value :seon.boot/readiness :seon.boot/missing-layers])]
+    (assoc outcome :seon.operator/ready?
+           (and (not (:seon.error/message (:seon.operator/value outcome))) (vector? missing) (empty? missing)))))
+
 (defn- launched-throwaway!
   "Boot a JVM of commit `sha` under the disposable root `disposable` on
   whatever store `disposable`'s `data/store` holds: whether it reached
   readiness, its boot value and the phases. The caller stops it."
   {:malli/schema [:=> [:cat :string :string :string] :map]}
   [root disposable sha]
-  (let [began (System/nanoTime)]
-    (fs/create-dirs (io/file root pinned-directory))
-    (fs/create-dirs (io/file disposable "data/source"))
-    (fs/create-sym-link (io/file disposable pinned-directory)
-                        (fs/real-path (io/file root pinned-directory)))
-    (let [previous (some-> (advertisement root nil) program-source :seon.operator/source-root)
-          source (filled-classes! disposable (prepared-source! disposable sha previous))
-          source-root (:seon.operator/source-root source)
-          prepared-ms (elapsed-ms began)
-          ;; A candidate's agents work in its own archive, never the checkout.
-          outcome (try (launch-child! {:seon.operator/managed-root disposable
-                                       :seon.operator/throwaway? true
-                                       :seon.operator/command :start
-                                       :seon.boot/cluster-name "default"
-                                       :seon.config/environment
-                                       {:seon.config.fs/working-root source-root}}
-                                      source-root true)
-                       (catch Exception cause
-                         {:seon.operator/value
-                          (diagnostic (ex-message cause) (or (ex-data cause) {}) :client-failed cause)}))
-          value (:seon.operator/value outcome)
-          missing (get-in value [:seon.boot/readiness :seon.boot/missing-layers])]
-      {:seon.operator/ready? (and (not (:seon.error/message value)) (vector? missing) (empty? missing))
-       :seon.operator/value value
-       :seon.operator/source-root source-root
-       :seon.operator/phases (merge (:seon.operator/phases source)
-                                    {:seon.operator/prepare-ms prepared-ms
-                                     :seon.operator/boot-ms (- (elapsed-ms began) prepared-ms)
-                                     :seon.boot/ready-ms (get-in value [:seon.boot/readiness :seon.boot/ready-ms])})})))
+  (let [began (System/nanoTime)
+        previous (some-> (advertisement root nil) program-source :seon.operator/source-root)
+        source (filled-classes! disposable (prepared-source! disposable sha previous))
+        source-root (:seon.operator/source-root source)
+        prepared-ms (elapsed-ms began)
+        outcome (disposable-root-boot! root disposable source-root)
+        value (:seon.operator/value outcome)]
+    {:seon.operator/ready? (:seon.operator/ready? outcome)
+     :seon.operator/value value
+     :seon.operator/source-root source-root
+     :seon.operator/phases (merge (:seon.operator/phases source)
+                                  {:seon.operator/prepare-ms prepared-ms
+                                   :seon.operator/boot-ms (- (elapsed-ms began) prepared-ms)
+                                   :seon.boot/ready-ms (get-in value [:seon.boot/readiness :seon.boot/ready-ms])})}))
 
 ;;; A template store per published commit (card PLATFORM-STEP slice 2). A
 ;;; throwaway JVM booted onto an empty store spends most of its boot publishing
