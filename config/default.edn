@@ -358,11 +358,11 @@
  :seon.config.run/max-episode-runs 100
 
  ; HOW OFTEN a :capped or :stalled attempt with work on its branch
- ; continues by itself: its next attempt forks its end commit, so the work
- ; carries over, and keeps its merge base, so the merge takes both
- ; attempts' changes. Two (hybrid-chains D5): the per-attempt call cap
- ; already bounds each attempt's spend; an end with no work never relaunches.
- :seon.config.run/relaunches 2
+ ; continues by itself (its next attempt forks its end commit and keeps its
+ ; merge base). Zero: no automatic re-runs (owner, 2026-10-16: none until the
+ ; owner says so); every such end closes with a problem task for root, who
+ ; decides to run it again (my.root/run!).
+ :seon.config.run/relaunches 0
 
  ; WHO hears what nobody else can be told about: the agent a core fault
  ; with no namespace steward is mailed to, which wakes that agent's turn.
