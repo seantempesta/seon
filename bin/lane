@@ -491,14 +491,20 @@ accepted_reds_gate() {
   # A red test HEAD does not define is a new proof, red by design (proofs are written before the body): accepted.
   bb -e '
 (let [[file trailer & reds] *command-line-args*
+      ;; new on HEAD = HEAD's source of the test's namespace file defines no such deftest (decided from git, not the run)
+      defined-on-head? (fn [sym]
+                         (let [[ns-name var-name] (clojure.string/split sym #"/")
+                               path (str "test/" (-> ns-name (clojure.string/replace "." "/") (clojure.string/replace "-" "_")) ".clj")
+                               src (:out (clojure.java.shell/sh "git" "show" (str "HEAD:" path)))]
+                           (boolean (re-find (re-pattern (str "\\(deftest\\s+(\\^\\S+\\s+|\\^\\{[^}]*\\}\\s+)*" (java.util.regex.Pattern/quote var-name) "(\\s|\\))")) (or src "")))))
+      new-proofs (remove defined-on-head? reds)
+      old (filter defined-on-head? reds)
       run (when (.exists (java.io.File. file)) (clojure.edn/read-string (slurp file)))
-      _ (when-not (and (map? run) (:seon.test.run/id run))
-          (binding [*out* *err*] (println "== the HEAD check left no test run: nothing can be judged red on HEAD or new")) (System/exit 2))
+      _ (when (and (seq old) (not (and (map? run) (:seon.test.run/id run))))
+          (binding [*out* *err*] (println "== the HEAD check left no test run: the accepted reds HEAD defines cannot be judged red on HEAD")) (System/exit 2))
       results (:seon.test/results run)
-      head-run (set (map (comp str :seon.test/sym) results))
       head-red (set (->> results (filter #(pos? (+ (or (:seon.test/fail-count %) 0) (or (:seon.test/error-count %) 0)))) (map (comp str :seon.test/sym))))
-      new-proofs (remove head-run reds)
-      green (filter #(and (head-run %) (not (head-red %))) reds)]
+      green (remove head-red old)]
   (binding [*out* *err*] (println "== HEAD run" (:seon.test.run/id run) "red:" (pr-str (sort head-red)) "new proofs absent on HEAD:" (pr-str new-proofs)))
   (when (seq green) (binding [*out* *err*] (println "== not red on HEAD:" (pr-str green))) (System/exit 2))
   (spit trailer (str (when-let [old (seq (remove (set new-proofs) reds))] (str "Check-red-before-accepted: " (clojure.string/join " " old) "\n"))
