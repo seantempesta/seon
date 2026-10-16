@@ -94,7 +94,7 @@
     (assoc (dissoc measured :seon.profile/value :seon.profile/called)
            :members (count (:seon.profile/value measured))
            :derivations (select-keys (:seon.profile/called measured)
-                                    '[seon.test/carried-results seon.test/recorded-outcomes seon.db/undecoded-datoms]))))
+                                    '[seon.test/carried-results seon.test/recorded-outcomes seon.db/undecoded-datoms seon.db/undecoded-search]))))
 
 (defn retire!
   "Retire the probe's owned branch through the agent owner."

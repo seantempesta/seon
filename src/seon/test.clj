@@ -2609,7 +2609,8 @@
   reports]`, `reports` a red's failing reports as that run wrote them (`seon.test.runner/member-reports`), so the
   branch answering from it holds them. Read undecoded (`seon.db/undecoded-datoms`): a fresh branch head answers in
   microseconds where a query first derives its declarations (about 2 ms a head), paid only for a head holding a
-  matching red. Indexed seeks read only the missed reach digests and their owning runs. A member that answered
+  matching red. Pattern seeks read only the missed reach digests and their owning runs, using the indexes this value holds.
+  A member that answered
   from another run is not an outcome of its own."
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential [:tuple :seon.test/sym :seon.test/reach-digest]]
                        :seon.test.run/input-digest]
@@ -2628,14 +2629,14 @@
                                  (let [member (entity e)]
                                    (when-let [counts (and (wanted [(:seon.test.member/symbol member) digest]) (outcome member))]
                                      [e (into [(:seon.test.member/symbol member)] counts)]))))
-                      (mapcat #(db/undecoded-datoms source :avet [:seon.test.member/reach-digest %])
+                      (mapcat #(db/undecoded-search source [nil :seon.test.member/reach-digest %])
                               (distinct (map second identities))))
         outcomes (into [] (keep (fn [[run _ e]]
                                   (when-let [[test-symbol pass fail error] (get members e)]
                                     (let [{id :seon.test.run/id at :seon.test.run/at :as recorded} (entity run)]
                                       (when (= inputs (:seon.test.run/input-digest recorded))
                                         [e [test-symbol id at pass fail error]])))))
-                       (mapcat #(db/undecoded-datoms source :avet [:seon.test.run/members %]) (keys members)))
+                       (mapcat #(db/undecoded-search source [nil :seon.test.run/members %]) (keys members)))
         reports (runner/member-reports source (into [] (keep (fn [[e [_ _ _ _ fail error]]] (when (pos? (+ fail error)) e)))
                                                     outcomes))]
     (into #{} (map (fn [[e outcome]] (conj outcome (get reports e [])))) outcomes)))

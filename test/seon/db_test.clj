@@ -3438,3 +3438,22 @@
        (is (set? (:seon.task/proofs (db/q '[:find (pull ?e [:seon.task/proofs]) . :in $ ?id
                                             :where [?e :seon.task/id ?id]]
                                           database (:seon.task/id task)))))))))
+
+(deftest stored-patterns-read-values-from-before-an-index-was-added
+  (test-support/with-database
+   {::test-support/extra-schema
+    [{:db/ident :pattern.before/id :db/valueType :db.type/string
+      :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+     {:db/ident :pattern.before/value :db/valueType :db.type/string :db/cardinality :db.cardinality/one}]}
+   (fn [connection]
+     (test-support/transacted! connection [{:pattern.before/id "one" :pattern.before/value "wanted"}])
+     (let [before (db/db connection)
+           entity (:db/id (db/pull before [:db/id] [:pattern.before/id "one"]))
+           expected [[entity :pattern.before/value "wanted"]]]
+       (test-support/transacted! connection [{:db/ident :pattern.before/value :db/valueType :db.type/string
+                                             :db/cardinality :db.cardinality/one :db/index true}])
+       (is (empty? (d/datoms before :avet :pattern.before/value "wanted"))
+           "the older immutable value still has no AVET entry")
+       (is (= expected (db/undecoded-search before [nil :pattern.before/value "wanted"])
+                       (db/undecoded-search (db/db connection) [nil :pattern.before/value "wanted"])))
+       (is (= [] (db/undecoded-search before [nil :pattern.before/value "missing"])))))))

@@ -296,7 +296,7 @@ individually. Done/merge, context, test-step, db-flow, runner and nearest-select
 The miss in `seon.test/carried-results` calls `seon.test/recorded-outcomes` on source branches. That owner scanned
 all `:seon.test.member/reach-digest` and `:seon.test.run/members` datoms, then filtered the requested identities.
 The smaller composition is two AVET seeks: the missed reach digests, then those members' owning runs. The existing
-reach-digest attribute gains `:seon.db/index true`; `seon.db/undecoded-datoms` admits AVET as well as EAVT/AEVT.
+reach-digest attribute gains `:seon.db/index true`. The follow-up below uses the native pattern-search owner so older immutable values remain readable.
 No result entity or lifecycle attribute is added. Datahike's `datahike.schema/find-invalid-schema-updates` accepts
 monotonic index addition, and the transaction backfills AVET before publishing the new value.
 
@@ -362,3 +362,44 @@ Before Slice 4's gate, shared-tree clj-kondo (`src script test --cache false`) f
 `test/seon/test_test.clj` referenced unresolved `sut/red-evaluators` in another lane's in-flight work.
 The slice's candidate excludes that file; its archive lint must be zero errors before the commit can proceed.
 Other foreign boundaries now include source/turn edits, reference schemas, task resources and competency files.
+
+## Indexed reads on older immutable values
+
+The first index slice incorrectly assumed every source snapshot already held the new AVET index. An older
+immutable value does not. The regression `seon.db-test/stored-patterns-read-values-from-before-an-index-was-added`
+proves its raw AVET is empty, while native pattern search returns the same matching triple before and after
+index adoption. `seon.db/undecoded-search` now composes `datahike.db.interface/search`;
+`datahike.db.search/get-search-strategy-impl` chooses AVET when indexed and AEVT plus its value predicate otherwise.
+This replaces the extended raw-index API, with no bespoke fallback or snapshot mutation. On older values the
+read remains proportional to that attribute's facts until the branch adopts the index; correctness is preserved.
+
+Regression run `1464641a1775`: 2 tests, 16 assertions, green. Same-parent end-to-end pair on `b95b83af0`,
+parent `3cb94e62a892` and candidate (see raw operator output), both 2 tests / 24 assertions:
+
+| K | Stage | Parent ms | Native search ms | Parent allocation MB | Native search allocation MB |
+|---|---|---:|---:|---:|---:|
+| 1 | first | 1056.40 | 1039.10 | 1325.80 | 1325.70 |
+| 1 | repeat | 450.30 | 464.60 | 672.40 | 676.30 |
+| 1 | edge | 500.90 | 471.00 | 689.90 | 691.10 |
+| 1 | unchanged | 35.70 | 35.30 | 38.90 | 38.80 |
+| 1 | miss | 1.14 | 0.99 | 0.28 | 0.28 |
+| 1 | verdict | 4.73 | 4.57 | 6.06 | 6.06 |
+| 1 | root | 74.70 | 73.40 | 139.20 | 139.30 |
+| 3 | first | 542.80–556.80 | 518.40–533.30 | 791.20–825.90 | 767.20–826.10 |
+| 3 | repeat | 362.50–392.20 | 363.50–382.10 | 499.50–509.50 | 480.00–507.60 |
+| 3 | edge | 477.80–488.20 | 476.00–489.20 | 680.10–706.10 | 689.00–710.60 |
+| 3 | unchanged | 33.10–36.20 | 33.40–36.90 | 39.90–41.10 | 40.60–41.40 |
+| 3 | miss | 0.41–0.56 | 0.43–0.49 | 0.45–0.45 | 0.45–0.45 |
+| 3 | verdict | 4.49–4.60 | 4.25–4.46 | 6.03–6.04 | 6.08–6.10 |
+| 6 | first | 253.60–289.10 | 272.30–277.80 | 368.50–388.00 | 385.30–403.00 |
+| 6 | repeat | 213.50–233.10 | 222.00–254.90 | 292.30–301.40 | 298.60–305.80 |
+| 6 | edge | 369.40–408.00 | 419.90–442.00 | 488.30–512.80 | 491.20–520.40 |
+| 6 | unchanged | 37.00–48.10 | 36.40–42.90 | 40.80–43.60 | 41.40–43.60 |
+| 6 | miss | 0.45–0.65 | 0.46–0.97 | 0.71–0.71 | 0.71–0.71 |
+| 6 | verdict | 4.07–4.71 | 3.66–4.23 | 6.01–6.02 | 6.07–6.07 |
+
+Old-gen peaks MiB K=1/3/6: 530.80/543.61/585.19 → 531.75/549.08/590.14.
+The indexed miss retains the prior allocation (0.28/0.45/0.71 MB); sub-millisecond timing varies.
+This is a correctness repair, not a new performance claim; broader request variation is not attributed to it.
+No additional default SCI request or live-chain operation. Foreign uncommitted konserve and test-data evidence
+are excluded from the archive.

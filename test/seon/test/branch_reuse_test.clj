@@ -84,7 +84,7 @@
            green (branch-members database lane 'br.area/area-test)
            red (branch-members database lane 'br.area/red-test)]
        (is (= #{} (:seon.profile/value missing)))
-       (is (= 1 (profile/calls-of missing 'seon.db/undecoded-datoms))
+       (is (= 1 (profile/calls-of missing 'seon.db/undecoded-search))
            "a missing reach makes one index seek, without reading past outcomes")
        (is (false? (:seon.test/passed? first-check)) "the red test is red on the first branch")
        (is (false? (:seon.test/passed? second-check)) "the red test is answered red on the second branch")
