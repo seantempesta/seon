@@ -1,0 +1,110 @@
+{:prior #uuid "6ad1a1cb-8fe4-580b-a3fe-d2ec26eb2b0a",
+ :paths
+   ["script/seon/render_bench.clj"
+    "resources/seon/schemas/seon.task.edn" "test/seon/merge_test.clj"
+    "src/seon/turn/batch.clj" "test/seon/render_simplification_test.clj"
+    "src/seon/render.clj" "test/seon/sci/program_change_report_test.clj"
+    "test/seon/sci/result_handle_test.clj" "test/seon/ai_test.clj"
+    "test/seon/config_test.clj" "resources/seon/tasks/seon.test.edn"
+    "test/seon/turn/batch_test.clj" "src/seon/sci/kernel.clj"
+    "test/seon/render_bench_test.clj"
+    "resources/seon/tasks/seon.task.edn" "src/seon/cluster/agent.clj"
+    "test/seon/text_render_support.clj" "test/seon/effect_test.clj"
+    "src/seon/sci/eval.clj" "resources/seon/schemas/seon.chain.edn"
+    "test/seon/background_test.clj" "test/seon/competency/bench-v1.edn"
+    "src/seon/merge.clj" "src/seon/task.clj" "test/seon/error_test.clj"
+    "test/seon/competency_test.clj"
+    "resources/seon/tasks/seon.render.edn" "src/seon/fn/analyzer.clj"
+    "test/seon/competency_grade_test.clj" "test/seon/repl_test.clj"
+    "resources/seon/tasks/seon.turn.batch.edn"
+    "test/seon/render/transcript_test.clj" "src/seon/fn.clj"
+    "resources/seon/schemas/seon.eval.edn"
+    "resources/seon/schemas/seon.batch.edn"
+    "resources/seon/tasks/seon.sci.eval.edn" "test/seon/competency.clj"
+    "test/my/agent_test.clj" "resources/seon/tasks/seon.operator.edn"
+    "test/seon/sci/eval_test.clj"]}
+["re-deriving 560 inputs whose derivation key changed" 2841.249041]
+["findings in analyzed files: 1773; added=192; resolved=193" 13995.6235]
+["branch publication started: 600 inputs" 13996.567083]
+["schema population started" 14454.318375]
+["schema population complete; dropped 0 datoms" 14574.211083]
+["program entities started" 14575.655958]
+["contract projection started: 3884 schemas, 541 functions" 16446.063875]
+["contract projection complete" 16446.744208]
+["contract entities: 702/4210" 16583.317625]
+["contract entities: 1404/4210" 16757.988166]
+["contract entities: 2106/4210" 16853.747125]
+["contract entities: 2808/4210" 16920.409208]
+["contract entities: 3510/4210" 16979.152291]
+["contract entities: 4210/4210" 17033.132416]
+["development reconciliation transaction" 17406.076791]
+["program entities complete" 21556.487708]
+["publication source identity" 21880.984416]
+["publication branch head" 21887.090083]
+["branch publication complete" 21888.270958]
+{:seon.profile/alloc-bytes 30062050768,
+ :seon.profile/alloc-scope :thread,
+ :seon.profile/calls 6532123,
+ :seon.profile/gc-count 52,
+ :seon.profile/gc-ms 317,
+ :seon.profile/ms 21884.91,
+ :seon.profile/reads 8297,
+ :seon.cost/jvm-window
+   #:seon.cost{:scope :jvm-window,
+    :attribution :includes-unrelated-work,
+    :alloc-accuracy :approximate-counter,
+    :cpu-accuracy :os-counter,
+    :alloc-mb 35594.58812,
+    :cpu-ms 50320.411},
+ :seon.profile/ranked-by-self
+   [#:seon.profile{:sym seon.fn.analyzer/invoke-kondo,
+     :calls 2,
+     :self-ms 5075}
+    #:seon.profile{:sym seon.db/transact-call, :calls 4, :self-ms 4154}
+    #:seon.profile{:sym seon.db/pull-logical,
+     :calls 1962,
+     :self-ms 1413}
+    #:seon.profile{:sym seon.fn.analyzer/analyze,
+     :calls 2,
+     :self-ms 1173}
+    #:seon.profile{:sym seon.fn.analyzer/parse-facts,
+     :calls 486,
+     :self-ms 957}
+    #:seon.profile{:sym seon.cache/settle!, :calls 8699, :self-ms 937}
+    #:seon.profile{:sym seon.fn/analyzed-artifacts,
+     :calls 4,
+     :self-ms 613}
+    #:seon.profile{:sym seon.id/structural-digest,
+     :calls 54828,
+     :self-ms 576}
+    #:seon.profile{:sym seon.schema/contract-references,
+     :calls 6648,
+     :self-ms 556}
+    #:seon.profile{:sym seon.fn/analysis-entities-by-file,
+     :calls 2,
+     :self-ms 525}
+    #:seon.profile{:sym seon.db/query-index-patterns,
+     :calls 61,
+     :self-ms 362}
+    #:seon.profile{:sym seon.program/with-contract-facts,
+     :calls 4210,
+     :self-ms 317}
+    #:seon.profile{:sym seon.ref/names, :calls 6005, :self-ms 286}
+    #:seon.profile{:sym seon.fn.signature/declaration-metadata,
+     :calls 11224,
+     :self-ms 261}
+    #:seon.profile{:sym seon.db/write-owned-values-error,
+     :calls 4,
+     :self-ms 224}
+    #:seon.profile{:sym seon.db/vector-query-call,
+     :calls 61,
+     :self-ms 202}
+    #:seon.profile{:sym seon.schema/projection-cache-value,
+     :calls 792402,
+     :self-ms 198}
+    #:seon.profile{:sym seon.cache/present, :calls 262701, …1}
+    …2],
+ :seon.profile/value
+   #:seon.source{:built? true,
+    :branch :boot-publish-replay,
+    :expected-commit-id #uuid "6ad1a1cb-8fe4-580b-a3fe-d2ec26eb2b0a"}}

@@ -1,0 +1,1 @@
+SEON check FAILED (exit 1): The throwaway JVM from 3714d84a840274ade7ff2daabade9849a7382fe2 did not reach readiness; its tests did not run. CAUSE: [#:seon.error{:throwable-class "clojure.lang.ExceptionInfo", DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261016T121410.094.edn

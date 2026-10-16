@@ -1,0 +1,99 @@
+{:prior #uuid "6ad1af85-f0dd-5dbd-ad03-00c1f9f6a478",
+ :paths
+   ["test/seon/edit_test.clj"
+    "resources/seon/schemas/seon.render.profile.edn"
+    "src/seon/render/value.clj"
+    "resources/seon/tasks/seon.render.value.edn"
+    "test/seon/render/value_test.clj"
+    "resources/seon/tasks/seon.render.ns.edn"
+    "resources/seon/tasks/seon.edit.edn" "src/seon/cluster/source.clj"
+    "test/seon/printer_cost_test.clj"
+    "test/seon/render/value_law_test.clj"
+    "test/seon/cluster/write_back_test.clj"
+    "resources/seon/tasks/seon.print.edn"
+    "resources/seon/schemas/seon.config.render.agent.edn"
+    "config/default.edn"]}
+["re-deriving 103 inputs whose derivation key changed" 540.870875]
+["findings in analyzed files: 863; added=31; resolved=34" 5329.376459]
+["branch publication started: 117 inputs" 5330.346584]
+["schema population started" 5344.641792]
+["schema population complete; dropped 0 datoms" 5398.3375]
+["program entities started" 5399.722584]
+["contract projection started: 3884 schemas, 90 functions" 6309.733625]
+["contract projection complete" 6310.414375]
+["contract entities: 212/1268" 6339.52625]
+["contract entities: 424/1268" 6382.08225]
+["contract entities: 636/1268" 6398.457375]
+["contract entities: 848/1268" 6414.907125]
+["contract entities: 1060/1268" 6433.082875]
+["contract entities: 1268/1268" 6449.80175]
+["development reconciliation transaction" 6585.835834]
+["program entities complete" 8219.822542]
+["initialization entities" 8221.323]
+["publication source identity" 8322.364917]
+["publication branch head" 8327.831542]
+["branch publication complete" 8328.812875]
+{:seon.profile/alloc-bytes 11152174568,
+ :seon.profile/alloc-scope :thread,
+ :seon.profile/calls 2466048,
+ :seon.profile/gc-count 26,
+ :seon.profile/gc-ms 135,
+ :seon.profile/ms 8325.84,
+ :seon.profile/reads 3197,
+ :seon.cost/jvm-window
+   #:seon.cost{:scope :jvm-window,
+    :attribution :includes-unrelated-work,
+    :alloc-accuracy :approximate-counter,
+    :cpu-accuracy :os-counter,
+    :alloc-mb 13346.73056,
+    :cpu-ms 16077.092},
+ :seon.profile/ranked-by-self
+   [#:seon.profile{:sym seon.fn.analyzer/invoke-kondo,
+     :calls 2,
+     :self-ms 2291}
+    #:seon.profile{:sym seon.db/transact-call, :calls 5, :self-ms 1677}
+    #:seon.profile{:sym seon.db/pull-logical, :calls 1711, :self-ms 598}
+    #:seon.profile{:sym seon.fn.analyzer/analyze,
+     :calls 2,
+     :self-ms 575}
+    #:seon.profile{:sym seon.fn/analyzed-artifacts,
+     :calls 4,
+     :self-ms 276}
+    #:seon.profile{:sym seon.id/structural-digest,
+     :calls 20778,
+     :self-ms 219}
+    #:seon.profile{:sym seon.fn/analysis-entities-by-file,
+     :calls 2,
+     :self-ms 194}
+    #:seon.profile{:sym seon.db/query-index-patterns,
+     :calls 64,
+     :self-ms 151}
+    #:seon.profile{:sym seon.fn.signature/declaration-metadata,
+     :calls 4878,
+     :self-ms 128}
+    #:seon.profile{:sym seon.ref/names, :calls 2523, :self-ms 111}
+    #:seon.profile{:sym seon.program/with-contract-facts,
+     :calls 1268,
+     :self-ms 94}
+    #:seon.profile{:sym seon.fn/assert-clean-analysis!,
+     :calls 2,
+     :self-ms 87}
+    #:seon.profile{:sym seon.cache/present, :calls 107936, :self-ms 82}
+    #:seon.profile{:sym seon.schema/projection-cache-value,
+     :calls 278932,
+     :self-ms 69}
+    #:seon.profile{:sym seon.fn.analyzer/span-index,
+     :calls 292,
+     :self-ms 69}
+    #:seon.profile{:sym seon.fn/writes-by-writer, :calls 2, :self-ms 62}
+    #:seon.profile{:sym seon.schema/contract-references,
+     :calls 842,
+     :self-ms 61}
+    #:seon.profile{:sym seon.fn/host-bound-callers,
+     :calls 2,
+     :self-ms 61}
+    #:seon.profile{:sym seon.db/vector-query-call,
+     :calls 64,
+     :self-ms 59}
+    …1],
+ :seon.profile/value {…6}}
