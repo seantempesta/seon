@@ -11,6 +11,7 @@
   (:require [seon.cluster.message :as message]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
+            [seon.config :as config]
             [seon.context :as context]
             [seon.db :as db]
             [seon.merge :as merge]
@@ -25,6 +26,7 @@
    "Close an assignment that must not merge with (my.root/close! {:seon.task/assignment key :seon.task/reason why}); it deletes the source branch, closing the agent."
    "An agent's end reaches you as a message; (my.root/ended) shows each with its proofs, calls and merge request."
    "A chain attempt that ends other than done bails to you: its problem task names it, the attempt is :closed and its task :held on the chain branch. Change the task there and run it again with (my.root/run! {:seon.task/assigned handle})."
+   "Abandon a chain that must not run again, as git abandons a feature branch, with (my.root/abandon! {:seon.chain/branch b :seon.task/reason why}) (or :seon.task/assigned a task handle of it): every open attempt is :closed with the reason, every task, held merge steps among them, ends :cancelled, and the chain ends as a published chain does: its branches and the merge branches its tasks name are deleted, or kept as history when the cluster keeps ended branches, and main's chain fact is retracted.",
    "A chain whose final merge its gate refused (a conflict, a red test, a file that does not analyze) keeps its merge branch, main's latest head with the chain's changes on top, and holds a merge step after its last task: (my.root/merge-steps) lists each with its refusal. Nothing runs it by itself; run it with (my.root/run! {:seon.task/assigned handle}), and when it is done my pass merges its branch, judging main's latest head again."
    "Merge main forward into a chain branch, as git merge main into a feature branch, at each restart batch and before a chain's final merge: (my.root/merge-main! {:seon.chain/branch b}) moves the declarations main changed since the branch's merge base and the branch did not, as one merge commit with main's head as a parent, which is then its merge base, so the branch interprets only its own changes; a declaration both changed is answered in :seon.program/conflict and stays the branch's for its agent to resolve; tasks, attempts and config never move, so the chain's final merge carries its own changes to them since its fork point and keeps main's."
    "A branch reads its own config and a merge never carries it: apply a changed dial to a chain branch with bin/seon config apply [NAME] PATH --branch B (or --chains for every chain branch a running graph holds); the agent's next dial read there sees it and main's is unchanged."])
@@ -183,6 +185,36 @@
                    :seon.error/value]]}
   [{context :my.program/context handle :seon.task/assigned}]
   (task/run-held! (select-keys context [:seon.db/connection :seon.store/store]) handle))
+
+(defn abandon!
+  "Abandon the chain `:seon.chain/branch` (or the one holding task `:seon.task/assigned`) saying why
+  (`:seon.task/reason`), as git abandons a feature branch (TASK-CHAIN §2.7, `seon.task/abandon!`): one transaction on
+  the chain branch and one on each merge branch its tasks name close every open attempt `:closed` with the reason and
+  end every task, held merge steps included, `:cancelled`; then the chain ends as a published chain does
+  (`seon.task/end-chain!`): the branches are deleted, or kept as history when my cluster keeps ended branches
+  (`:seon.config.agent/keep-ended-branches?`), and main's chain fact is retracted. Answers the chain branch, its task
+  handles and the reason, or the refusal as data.
+
+  ## Example
+
+  ```clojure
+  (my.root/abandon! {:seon.chain/branch :chain-f1f6dc8e6652 :seon.task/reason \"Its work merged elsewhere.\"})
+  ```"
+  {:malli/schema [:=> [:cat :my.root/abandon-request]
+                  [:or [:map [:seon.chain/branch :seon.chain/branch] [:seon.task/handles :seon.task/handles]
+                        [:seon.task/reason :seon.task/reason]]
+                   :seon.error/value]]}
+  [{context :my.program/context branch :seon.chain/branch handle :seon.task/assigned reason :seon.task/reason}]
+  (let [connection (:seon.db/connection context)
+        store (:seon.store/store context)
+        database (db/db connection)
+        branch (or branch (when handle (task/chain-branch database store handle)))]
+    (if branch
+      (task/abandon! (select-keys context [:seon.db/connection :seon.store/store :seon.agent/routing :seon.env/environment])
+                     branch reason (config/keeps-ended-branches? database (:seon.cluster/name context)))
+      (refusal/diagnostic (java.util.Date.) :seon.program/write 'my.root/abandon!
+                          {:seon.error/message "Name the chain by :seon.chain/branch or by a task handle on it."
+                           :seon.error/member :seon.task/assigned :seon.error/offending handle}))))
 
 (defn merge-steps
   "The held merge steps on my cluster's chains (MERGE-STEP): each chain task naming its own branch, a refused final

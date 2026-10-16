@@ -19,6 +19,7 @@
             [seon.config :as config]
             [seon.context :as context]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.schedule :as schedule]
             [seon.ai :as ai]
             [seon.flow :as flow]
@@ -2421,6 +2422,72 @@
                 (doseq [kept (remove before (merge-branches store))]
                   (registry/retire-branch! {:seon.store/store store :seon.store/branch kept}))
                 (release-chain! routing store branch))))))))))
+
+(deftest ^{:seon.test/long "Two chain worlds (the dial true, then false): a chain green at its start ends done, root's pass refuses its final merge and holds a merge step, then root abandons the chain; about three db<->flow passes each." :seon.test/long-ms 60000}
+  abandoning-a-chain-with-a-held-merge-step-closes-its-attempts-and-ends-its-branches
+  ;; TASK-CHAIN §2.7: `my.root/abandon!` closes every open attempt with the reason, ends every task, ends the chain as
+  ;; a published chain ends (`seon.task/end-chain!`) and retracts main's chain fact; the dial keeps or deletes branches
+  (doseq [keep? [true false]]
+    (binding [*space* (str "tq.abandon" keep?)]
+      (test-support/with-database
+       (fn [connection]
+         (chain-world
+          connection {"u" [#{} "(clojure.test/is (= 1 1))"]}
+          (fn [handle]
+            (with-merge-template! connection)
+            (keep-ended! connection keep?)
+            (let [routing (:seon.agent/routing handle)
+                  store (agent/handle-store handle)
+                  chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                     [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Do c."
+                                       :seon.task/proofs #{(proof "u")}}])
+                  branch (:seon.chain/branch chain)
+                  [last-task] (:seon.task/handles chain)
+                  key (id/id [last-task 1])
+                  before (merge-branches store)
+                  context {:seon.db/connection connection :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                           :my.program/base-ctx (:seon.sci.eval/ctx handle) :seon.store/store store
+                           :seon.agent/routing routing :seon.env/environment (env/of handle)
+                           :seon.cluster/name "tq-chain"}
+                  facts #(db/q '[:find [?c ...] :in $ ?b :where [?c :seon.chain/branch ?b]] (db/db connection) branch)]
+              (test-support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                                                  :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
+                                                                                                (db/db connection) connection)
+                                                  :seon.batch/sink (seon.batch/sink)
+                                                  :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                                  :seon.agent/id "tq-chain-author"})
+                                    (symbol (str *space* "-proofs"))
+                                    "(clojure.test/deftest proves-u (clojure.test/is (= 1 2)))\n")
+              (try
+                (pass! handle routing)
+                (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
+                  (await-on! on-branch #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]]
+                                              (db/db on-branch) key)
+                             ::chain-done)
+                  (pass! handle routing)
+                  (let [kept (into #{} (remove before) (merge-branches store))
+                        step (get-in (db/pull (db/db on-branch) [{:seon.task/next [:seon.task/id]}] [:seon.task/id last-task])
+                                     [:seon.task/next :seon.task/id])
+                        abandoned ((requiring-resolve 'my.root/abandon!)
+                                   {:my.program/context context :seon.task/assigned last-task :seon.task/reason "Merged elsewhere."})
+                        gone? (fn [b] (not (contains? (registry/branches store) b)))]
+                    (is (and (= 1 (count kept)) (string? step)) "the refused merge holds a merge step on its merge branch")
+                    (is (= [last-task step] (:seon.task/handles abandoned)) "root's abandon answers the chain's tasks")
+                    (is (empty? (facts)) "main holds no chain fact")
+                    (is (= keep? (not (eventually #(and (gone? branch) (every? gone? kept)))))
+                        "the chain and merge branches are kept when the dial says so, else deleted")
+                    (when keep?
+                      (let [chain-db (registry/on-branch store branch db/db)]
+                        (is (empty? (db/q '[:find [?a ...] :where [?a :seon.task/assignment _] (not [?a :seon.task/outcome _])] chain-db))
+                            "no attempt of the chain is open")
+                        (is (= #{:cancelled} (into #{} (map #(:seon.task/execution (db/pull chain-db [:seon.task/execution] [:seon.task/id %])))
+                                                   [last-task step]))
+                            "its tasks, the held merge step among them, end :cancelled")))))
+                (finally
+                  (doseq [b (cons branch (remove before (merge-branches store)))]
+                    (when (contains? (registry/branches store) b)
+                      (registry/retire-branch! {:seon.store/store store :seon.store/branch b})))
+                  (release-chain! routing store branch)))))))))))
 
 (deftest ^{:seon.test/long "One chain world: a branch forked from main and a chain whose task names it, its attempt started by one db<->flow pass." :seon.test/long-ms 30000}
   a-task-naming-a-branch-starts-its-attempt-there

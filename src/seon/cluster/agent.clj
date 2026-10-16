@@ -2446,7 +2446,7 @@
                    database)
         keep? (delay (config/keeps-ended-branches? database (:seon.cluster/name handle)))]
     (when (map? rows) (throw (ex-info (:seon.error/message rows "db<->flow could not read the merged chains.") rows)))
-    (doseq [[fact branch a key] (sort-by second rows)]
+    (doseq [[_ branch a key] (sort-by second rows)]
       (let [recorded #(db/pull @connection [:seon.task/git-commit :seon.task/publication-refusal] a)
             accepted (source/merge-accepted connection (merge/merge-commit database a))
             _ (when (:seon.error/at accepted) (throw (ex-info (:seon.error/message accepted) accepted)))
@@ -2457,21 +2457,10 @@
           (throw (ex-info (:seon.error/message published "The chain's publication was refused.") published)))
         (when (or (not moved?) (:seon.task/git-commit (recorded)))
           ;; the merge branches its tasks named (a merge step's, MERGE-STEP) go with the chain: its merge published
-          (when (contains? (registry/branches store) branch)
-            (doseq [kept (registry/on-branch store branch
-                                    #(db/q '[:find [?b ...] :where [?t :seon.task/id _] [?t :seon.task/branch ?b]] (db/db %)))
-                    :when (contains? (registry/branches store) kept)]
-              ;; through the branch owner, which joins the graphs and releases the connections held there first
-              (when-let [refused (task/end-branch! {:seon.db/connection connection :seon.store/store store
-                                                    :seon.agent/routing routing :seon.env/environment (env/of handle)}
-                                                   kept @keep?)]
-                (throw (ex-info (:seon.error/message refused "A merged chain's merge branch did not end.") refused)))))
-          (when (contains? (registry/branches store) branch)
-            (when-let [refused (task/end-branch! {:seon.db/connection connection :seon.store/store store
-                                                  :seon.agent/routing routing :seon.env/environment (env/of handle)}
-                                                 branch @keep?)]
-              (throw (ex-info (:seon.error/message refused "The merged chain's branch did not end.") refused))))
-          (write! connection [[:db/retractEntity fact]])))))
+          (when-let [refused (task/end-chain! {:seon.db/connection connection :seon.store/store store
+                                               :seon.agent/routing routing :seon.env/environment (env/of handle)}
+                                              branch @keep?)]
+            (throw (ex-info (:seon.error/message refused "The merged chain's branch did not end.") refused)))))))
   nil)
 
 (defn- entry-registry

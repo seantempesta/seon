@@ -10,6 +10,9 @@
           :merge-request-read [:map [:seon.db/db :seon.db/database-value] [:seon.store/store {:optional true} :seon.store/store]]
           :run-request [:map {:description "The held chain task root runs again."}
                         [:my.program/context :my.program/context] [:seon.task/assigned :seon.task/handle]]
+          :abandon-request [:map {:description "The chain root abandons, by its branch or by a task handle on it, and why."}
+                            [:my.program/context :my.program/context] [:seon.chain/branch {:optional true} :seon.chain/branch]
+                            [:seon.task/assigned {:optional true} :seon.task/handle] [:seon.task/reason :seon.task/reason]]
           :merge-request-request [:map {:description "The open assignment root merges; its declarations publish into the cluster's :seon.config.fs/working-root."}
                                   [:my.program/context :my.program/context] [:seon.task/assignment :seon.task/assignment]]
           :close-request [:map {:description "The open assignment root closes without merging, and why."}

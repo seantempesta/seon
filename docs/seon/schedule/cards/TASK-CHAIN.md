@@ -294,7 +294,8 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    problem task. Root then decides, all by writing data: change the held task's plan or proofs and run it again
    (`my.root/run!`, new in S3c-1: one validated branch transaction that changes `:held` to `:running`; root's route on
    the chain branch delivers its wake, and boot's full derivation sees a committed run after any restart); or
-   abandon (record `:closed` with its reason, then the retirement of step 6); or build a new chain (`chain!` with any
+   abandon (`my.root/abandon!`: one transaction closes every open attempt `:closed` with its reason and ends every task
+   `:cancelled`, then the retirement of step 6, deleted or kept by the dial); or build a new chain (`chain!` with any
    vector of maps, `:seon.chain/from` the old chain's branch to keep its work). A send-back is a bail: the chain never
    reruns an earlier task by itself. Completed tasks and their attempts are history and are never reopened.
 8. **Restart** — recovery of facts, never of execution, through the existing owners (`seon.cluster/recover-runs!` and

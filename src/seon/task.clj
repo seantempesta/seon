@@ -1477,6 +1477,66 @@
     (when-not (or main? submitted)
       (let [retired (retire!)] (when (:seon.error/at retired) retired)))))
 
+(defn end-chain!
+  "End chain `branch` as a published chain ends (TASK-CHAIN §2.6): the merge branches its tasks name, then the chain
+  branch (`end-branch!`, deleted or kept as history by `keep?`), then main's chain fact is retracted, so no pass
+  reads the chain again. Each is ended only while the store still holds it, so a repeat finishes the rest. nil, or
+  the first branch's refusal, the fact kept."
+  {:malli/schema [:=> [:cat :seon.task/close-context :seon.chain/branch :boolean] [:or :nil :seon.error/value]]}
+  [{connection :seon.db/connection store :seon.store/store :as context} branch keep?]
+  (let [named (when (contains? (registry/branches store) branch)
+                (registry/on-branch store branch
+                                    #(db/q '[:find [?b ...] :where [?t :seon.task/id _] [?t :seon.task/branch ?b]] (db/db %))))
+        fact (db/q '[:find ?c . :in $ ?b :where [?c :seon.chain/branch ?b]] (db/db connection) branch)]
+    (when-let [failure (read-error named)] (throw (ex-info (:seon.error/message failure) failure)))
+    (or (some #(when (contains? (registry/branches store) %) (end-branch! context % keep?)) named)
+        (when (contains? (registry/branches store) branch) (end-branch! context branch keep?))
+        (do (when (integer? fact) (written connection [[:db/retractEntity fact]])) nil))))
+
+(defn abandon-tx
+  "The transaction data abandoning the chain tasks `handles` at `database`: every attempt with no outcome closes
+  `:closed` with `reason`, and every task ends `:cancelled`; a task or attempt already so, or absent here, adds
+  nothing. Invoke as `[:db.fn/call seon.task/abandon-tx handles reason]`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handles :seon.task/reason] :seon.db/tx-data]}
+  [database handles reason]
+  (into [] (mapcat (fn [handle]
+                     (let [task (db/pull database [:db/id :seon.task/execution] [:seon.task/id handle])
+                           open (when (:db/id task)
+                                  (db/q '[:find [?a ...] :in $ ?h :where [?t :seon.task/id ?h] [?a :seon.task/attempt-of ?t]
+                                          [?a :seon.task/assignment _] (not [?a :seon.task/outcome _])]
+                                        database handle))]
+                       (when-let [failure (or (read-error task) (read-error open))] (throw (ex-info (:seon.error/message failure) failure)))
+                       (when (:db/id task)
+                         (concat (when-not (= :cancelled (:seon.task/execution task)) [[:db/add (:db/id task) :seon.task/execution :cancelled]])
+                                 (mapcat #(vector [:db/add % :seon.task/outcome :closed] [:db/add % :seon.task/reason reason]) open))))))
+        handles))
+
+(defn abandon!
+  "Abandon chain `branch` with `reason` (TASK-CHAIN §2.7): ONE transaction (`abandon-tx`) on the chain branch, and one
+  on each merge branch its tasks name, closing every open attempt and ending every task, then the chain's end
+  (`end-chain!`): its branches deleted or kept as history by `keep?`, its chain fact retracted. Answers the chain
+  branch, its tasks and the reason, or the first refusal."
+  {:malli/schema [:=> [:cat :seon.task/close-context :seon.chain/branch :seon.task/reason :boolean]
+                  [:or [:map [:seon.chain/branch :seon.chain/branch] [:seon.task/handles :seon.task/handles]
+                        [:seon.task/reason :seon.task/reason]]
+                   :seon.error/value]]}
+  [{connection :seon.db/connection store :seon.store/store :as context} branch reason keep?]
+  (let [first-handle (db/q '[:find ?h . :in $ ?b :where [?c :seon.chain/branch ?b] [?c :seon.chain/first ?h]] (db/db connection) branch)]
+    (if-not (and first-handle (contains? (registry/branches store) branch))
+      (refusal/diagnostic (java.util.Date.) :seon.program/write `abandon!
+                          {:seon.error/message (str "Branch " branch " is no chain main holds.")
+                           :seon.error/member :seon.chain/branch :seon.error/offending branch})
+      (let [[handles named] (registry/on-branch store branch
+                                                (fn [on-chain]
+                                                  (let [head (db/db on-chain)]
+                                                    [(chain-handles head first-handle)
+                                                     (db/q '[:find [?b ...] :where [?t :seon.task/id _] [?t :seon.task/branch ?b]] head)])))
+            closed (some #(when (:seon.error/at %) %)
+                         (mapv (fn [on] (registry/on-branch store on #(written % [[:db.fn/call #'abandon-tx handles reason]])))
+                               (cons branch (filter #(contains? (registry/branches store) %) named))))
+            refused (when-not closed (end-chain! context branch keep?))]
+        (or closed refused {:seon.chain/branch branch :seon.task/handles handles :seon.task/reason reason})))))
+
 (defn close!
   "Close assignment `key` (the merge request) without merging it: write its `outcome` and `reason` at main and
   end its branch, closing the agent there (`end-branch!`; a refused deletion is answered beside the closed
