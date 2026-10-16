@@ -60,7 +60,17 @@
   Accepted means queued. `:my.message/keep? true` also stores my own copy.
   A resend may carry `:seon.message/id`; the recipient writes that identity once.
   An undeliverable value names recipient, intent and cause. A running recipient
-  without a graph is hosted by db<->flow's next pass; resend after it runs."
+  without a graph is hosted by db<->flow's next pass; resend after it runs.
+  Optional `:my.message/about` is a nonempty string subject identity token, stored
+  verbatim; optional `:my.message/assignment` names the evaluation assigned for
+  repair. The sender is supplied from my identity: `:seon.message/from` alone marks
+  an inside wake, never the subject or assignment.
+
+  ## Example
+
+  ```clojure
+  (my.message/send {:my.message/to \"root\" :my.message/content \"The verification passed.\"})
+  ```"
   {:malli/schema [:=> [:cat :my.message/send-request]
                   [:or :seon.message/accepted-result :seon.error/value]]}
   [{connection :seon.db/connection agent-id :seon.agent/id :as request}]

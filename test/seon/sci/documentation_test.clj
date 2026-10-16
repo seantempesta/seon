@@ -204,24 +204,24 @@
            (is (seq (db/read-evidence @captured)))))))))
 
 (deftest retained-context-receives-the-current-repl-macro-through-its-core-alias
+  ;; An agent context is a fork of a frozen program context, never of the live
+  ;; base (E4, 172b23e7c): an unchanged program keeps the retained context, and
+  ;; its core alias is the one macro its repl namespace binds.
   (support/with-database
    (fn [connection]
      (let [base (support/fork-cluster-ctx connection)
            request {:seon.sci.eval/ctx base :seon.db/db (db/db connection)
                     :seon.agent/id "documentation"}
            retained (:seon.sci.eval/ctx (evaluation/fork-for-turn request))
-           old-dir @(sci/resolve retained 'clojure.core/dir)]
-       (#'lookup/install-program-doc! base (db/db connection) (schema/handed-projection))
-       (is (not (identical? old-dir @(sci/resolve base 'clojure.core/dir))))
-       (let [updated (:seon.sci.eval/ctx
-                      (evaluation/fork-for-turn
-                       (assoc request :seon.sci.eval/agent-ctx retained)))]
-         (doseq [function ['dir 'doc]
-                 namespace-name ['clojure.core 'clojure.repl]]
-           (let [qualified (symbol (str namespace-name) (str function))]
-             (is (identical? @(sci/resolve base qualified)
-                             @(sci/resolve updated qualified))
-                 "receives its current macro root"))))))))
+           updated (:seon.sci.eval/ctx
+                    (evaluation/fork-for-turn
+                     (assoc request :seon.sci.eval/agent-ctx retained)))]
+       (doseq [function ['dir 'doc]
+               :let [root #(deref (sci/resolve %1 (symbol %2 (str function))))]]
+         (is (identical? (root retained "clojure.core") (root updated "clojure.core"))
+             "the retained context keeps its macro root on an unchanged program")
+         (is (identical? (root updated "clojure.repl") (root updated "clojure.core"))
+             "the core alias is the repl namespace's macro"))))))
 
 (deftest bare-test-macros-resolve-without-namespace-referrals
   (support/with-database
