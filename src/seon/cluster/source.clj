@@ -858,7 +858,7 @@
     []))
 
 ;; Write-back's proof, below with its helpers; prepare runs it before the gate.
-(declare proven-files lint-errors root-refusal identity-namespace new-path)
+(declare proven-files lint-errors root-refusal identity-namespace new-path write-back-refusal)
 
 (defn release!
   "Release materialized database values (the result of `compare-branch`, `commit-database`); refusals and nils are skipped."
@@ -875,11 +875,12 @@
   "What a merge of branch head `database` carries: of `changed` (the program identities the branch changed since
   its merge base), `:seon.merge/will-merge` holds those the `seeds` (the tests that curate the merge) reach through
   every hop (`seon.test.runner/reach-closure`: calls, references, the schemas their contracts name and the schemas
-  those name; a reached name carries its namespace), and every declaration the branch removed; `:seon.merge/stays`
+  those name; a reached name carries its namespace) or read as a file (every change in a namespace a seed reads,
+  `seon.test/namespace-readers`), and every declaration the branch removed; `:seon.merge/stays`
   holds the rest, which stays on the branch. One walk of the cached reach graph; no test runs."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set [:set :seon.test/sym]]
                   [:or [:map [:seon.merge/will-merge :seon.program/identity-set] [:seon.merge/stays :seon.program/identity-set]]
-                   :seon.test/unknown-error]]}
+                   :seon.test/unknown-error :seon.db/invalid-read-error]]}
   [database changed seeds]
   (let [closure ((requiring-resolve 'seon.test.runner/reach-closure) database (vec (sort seeds)))]
     (if (:seon.error/at closure)
@@ -890,14 +891,25 @@
                                             (namespace n) (conj [:seon.ns/name (symbol (namespace n))]))))
                           names)
             held? (fn [[attribute value]] (seq (d/datoms database :avet attribute value)))
-            will (into #{} (filter #(or (reached %) (not (held? %)))) changed)]
-        {:seon.merge/will-merge will :seon.merge/stays (into #{} (remove will) changed)}))))
+            namespace-of (fn [[attribute value]] (cond (= :seon.ns/name attribute) value
+                                                       (qualified-symbol? value) (symbol (namespace value))))
+            ;; a seed reading a namespace as a file (`seon.test/namespace-readers`) reaches every change in it
+            readers (reduce (fn [found ns-name]
+                              (let [more ((requiring-resolve 'seon.test/namespace-readers) database ns-name)]
+                                (if (map? more) (reduced more) (assoc found ns-name more))))
+                            {} (into (sorted-set) (keep namespace-of) changed))
+            read? (fn [identity] (some seeds (get readers (namespace-of identity))))]
+        (if (:seon.error/at readers)
+          readers
+          (let [will (into #{} (filter #(or (reached %) (read? %) (not (held? %)))) changed)]
+            {:seon.merge/will-merge will :seon.merge/stays (into #{} (remove will) changed)}))))))
 
 (declare green-result?)
 
 (defn merge-seeds
   "The tests that curate a merge of branch head `database` (ruling 5a): the task `task-sym`'s `proofs`, and the tests
-  of `changed` or reaching a function of it (`seon.fn/reverse-closure`) whose current result there
+  of `changed`, reaching a function of it (`seon.fn/reverse-closure`) or reading its namespace as a file
+  (`seon.test/namespace-readers`) whose current result there
   (`seon.test.runner/current-results`) is green. A red or never-run test seeds nothing."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set [:set :seon.test/sym] [:maybe :seon.task/sym]]
                   [:or [:set :seon.test/sym] :seon.db/invalid-read-error :seon.test/execution-error :seon.test/unknown-error
@@ -905,14 +917,23 @@
   [database changed proofs task-sym]
   (let [functions (into #{} (keep (fn [[a v]] (when (= :seon.fn/sym a) v))) changed)
         reaching (if (seq functions) (fn/reverse-closure {:seon.db/db database :seon.fn/seeds functions}) {})
+        ;; the tests that read a changed namespace as a file (`seon.test/namespace-readers`)
+        readers (reduce (fn [found ns-name]
+                          (let [more ((requiring-resolve 'seon.test/namespace-readers) database ns-name)]
+                            (if (map? more) (reduced more) (into found more))))
+                        []
+                        (into (sorted-set) (keep (fn [[a v]] (cond (= :seon.ns/name a) v
+                                                                   (qualified-symbol? v) (symbol (namespace v)))))
+                              changed))
         held? #(seq (d/datoms database :avet :seon.test/sym %))
-        candidates (when-not (:seon.db/invalid-read reaching)
+        candidates (when-not (or (:seon.db/invalid-read reaching) (map? readers))
                      (into [] (filter held?)
                            (distinct (concat (keep (fn [[a v]] (when (= :seon.test/sym a) v)) changed)
-                                             (:seon.fn/tests reaching)))))
+                                             (:seon.fn/tests reaching) readers))))
         results (when candidates
                   (if (seq candidates) ((requiring-resolve 'seon.test.runner/current-results) database candidates task-sym) {}))]
     (cond (:seon.db/invalid-read reaching) reaching
+          (map? readers) readers
           (:seon.error/at results) results
           :else (into (set proofs) (keep (fn [[s r]] (when (green-result? r) s))) results))))
 
@@ -1125,16 +1146,39 @@
     :seon.source/path (:seon.source/path (first findings)) :seon.source/lint-findings findings}))
 
 (defn- file-refusal
-  "Why the files a merge writes for `delta` (`proven-files` over `before` and the `merged` value, under the checkout
-  `root`) cannot publish: the proof's refusal, else their clj-kondo errors (`lint-refusal`); nil when they publish
-  clean."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set :seon.fn/root]
-                  [:or :nil :seon.source/write-back-error :seon.source/lint-error]]}
-  [before merged delta root]
-  (let [proof (proven-files before merged delta root)]
-    (if (:seon.error/at proof)
-      proof
-      (let [lint (lint-errors root proof)] (when (seq lint) (lint-refusal lint))))))
+  "Why the files a merge writes, `proofs` (`proven-files`) under the checkout `root`, cannot publish: their clj-kondo
+  errors (`lint-refusal`); nil when they publish clean."
+  {:malli/schema [:=> [:cat [:vector :seon.source/proof] :seon.fn/root] [:or :nil :seon.source/lint-error]]}
+  [proofs root]
+  (let [lint (lint-errors root proofs)] (when (seq lint) (lint-refusal lint))))
+
+(defn- candidate-root!
+  "The program a merge candidate holds, written under the checkout `root` as `data/candidate/<branch>`: HEAD's
+  program roots and gate inputs (`seon.test.cache/graph-roots`, resources, `seon.test.cache/gate-input-files`,
+  `seon.test.cache/gate-input-directories`) with each of `proofs`' candidate bytes over its path, as `bin/seon check`
+  materializes HEAD plus a slice. Answers the directory's path, or `:install-failed` when git or tar refuses."
+  {:malli/schema [:=> [:cat :seon.fn/root :seon.store/branch [:vector :seon.source/proof]]
+                  [:or :string :seon.source/write-back-error]]}
+  [root branch proofs]
+  (let [directory (io/file root "data" "candidate" (name branch))
+        paths (filterv #(.exists (io/file root ^String %))
+                       (concat test.cache/graph-roots ["resources"] (sort test.cache/gate-input-files)
+                               (sort test.cache/gate-input-directories)))
+        tar (io/file root "data" "candidate" (str (name branch) ".tar"))]
+    (.mkdirs directory)
+    (let [archived @(apply process/process {:dir root :out :string :err :string}
+                           "git" "archive" "--format=tar" "-o" (str tar) "HEAD" "--" paths)
+          extracted (when (zero? (:exit archived))
+                      @(process/process {:out :string :err :string} "tar" "-xf" (str tar) "-C" (str directory)))]
+      (.delete tar)
+      (if-not (and extracted (zero? (:exit extracted)))
+        (write-back-refusal :install-failed "The merge candidate's program could not be written to its root."
+                            {:seon.error/offending (str/trim (str (:err archived) (:err extracted)))})
+        (do (doseq [{path :seon.source/path candidate :seon.source/candidate-bytes} proofs]
+              (let [file (io/file directory ^String path)]
+                (io/make-parents file)
+                (Files/write (.toPath file) ^bytes candidate (make-array java.nio.file.OpenOption 0))))
+            (.getAbsolutePath directory))))))
 
 (defn- carried
   "The identities a merge of `selection`, of the branch's changes `whole`, writes: each selected one and the
@@ -1247,18 +1291,24 @@
             ;; The file the merge would write back, proven over the merged value; a refusal is the gate's, answered
             ;; with the merge branch it built (MERGE-STEP); an empty delta writes no file, so it names no root to judge.
             root-error (when (and root (seq tx)) (root-refusal root))
-            ;; The bar a lane commit holds (bin/lane): no clj-kondo error in a file the merge publishes.
-            published (when (and root (nil? root-error) (seq tx))
-                        (let [merged (db/with head {:tx-data tx})]
-                          (if (:seon.error/at merged) merged (file-refusal head merged delta root))))
+            ;; The files write-back would produce over the merged value (`proven-files`): the bar a lane commit
+            ;; holds (bin/lane), no clj-kondo error in a file the merge publishes, and the candidate root its
+            ;; program-reading tests read (`candidate-root!`).
+            proof (when (and root (nil? root-error) (seq tx))
+                    (let [merged (db/with head {:tx-data tx})]
+                      (if (:seon.error/at merged) merged (proven-files head merged delta root))))
+            published (if (vector? proof) (file-refusal proof root) proof)
             refuse #(refused :seon.program/scope %1 {:seon.error/offending %2})
+            s (keyword (str "merge-" (id/id)))
             ;; the gate's own refusals, each answered with the merge branch the gate builds: a conflict, a file that
             ;; does not analyze cleanly, a clj-kondo error in a file this merge would publish
             gate-refusal
             (cond
               (seq blocking) (assoc three :seon.program/conflict blocking
                                     :seon.program/conflict-digests (select-keys (:seon.program/conflict-digests three) blocking))
-              published published)]
+              published published)
+            ;; the program the candidate holds, for the tests that read it as files (`seon.test/program-root`)
+            program-root (when (and (vector? proof) (nil? gate-refusal) (seq proofs)) (candidate-root! root s proof))]
         (try
           (cond
             root-error root-error
@@ -1272,11 +1322,16 @@
             (db/read-refusal? tested) tested
             (:seon.error/at tx) tx
             (empty? proofs) (refuse "A merge names the tests that prove it; none were given." proofs)
+            (:seon.error/at program-root) program-root
             :else
-            (let [s (keyword (str "merge-" (id/id)))
-                  write! (fn [execution]
-                           (let [written (db/transact! (:seon.db/connection execution)
-                                                       {:tx-data (-> (vec merging) (into tx) (into recorded))})
+            (let [write! (fn [execution]
+                           (let [fork (when (string? program-root)
+                                        (db/q '[:find ?id . :in $ ?name :where [?f :seon.branch/name ?name] [?f :seon.branch/fork-id ?id]]
+                                              (db/db (:seon.db/connection execution)) s))
+                                 written (db/transact! (:seon.db/connection execution)
+                                                       {:tx-data (cond-> (-> (vec merging) (into tx) (into recorded))
+                                                                   (string? fork) (conj {:seon.branch/fork-id fork
+                                                                                         :seon.branch/program-root program-root}))})
                                  ;; The writer re-derives a merged namespace's declarations: their tests run too.
                                  touched (when-not (:seon.error/at written) (fn/report-identities written))]
                              (run! #(when (:seon.error/at %) (throw (ex-info "The merge delta was refused." %))) [written touched])
@@ -1311,7 +1366,8 @@
                 gate-refusal (cond-> (assoc gate-refusal :seon.source/candidate s)
                                (seq reds) (assoc :seon.source/red (vec (sort reds))))
                 :else (cond-> prepared (seq red) (assoc :seon.source/red (vec (sort red)))))))
-          (finally (release! [base branch]))))))))
+          (finally (release! [base branch])
+                   (when (string? program-root) (fs/delete-recursively! root program-root)))))))))
 
 (defn- red-test-verdicts
   "Each of `not-green` (the judged tests with no green result) with the run that recorded its result and its

@@ -1,5 +1,6 @@
 (ns seon.merge-test
-  (:require [clojure.java.shell :as shell]
+  (:require [clojure.java.io :as io]
+            [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.merge :as merge]
@@ -703,7 +704,7 @@
                                            {:seon.ns/name 'tq.bb-read :seon.ns/source "(ns ^{:seon/babashka true} tq.bb-read)"}
                                            :all :agent)
            _ (support/transacted! connection [ns-row (support/namespace-entity (db/db connection) 'tq.bb-reader)])
-           _ (support/transacted! connection [(support/program-entity (db/db connection) [:seon.fn/sym 'tq.bb-read/f]
+           _ (support/transacted! connection [(support/program-entity (db/db connection) [:seon.fn/sym (symbol "tq.bb-read" "f")]
                                                                       "(defn f {:malli/schema [:=> [:cat] :int]} [] 1)")])
            _ (support/transacted! connection [(support/program-entity (db/db connection) [:seon.test/sym 'tq.bb-reader/reads-bb]
                                                                       "(clojure.test/deftest ^{:seon.test/reads #{:seon/babashka}} reads-bb (clojure.test/is true))")])
@@ -714,10 +715,62 @@
            "the declared reads are indexed from the deftest's metadata")
        (is (contains? (seeds [[:seon.ns/name 'tq.bb-read]]) 'tq.bb-reader/reads-bb)
            "a changed namespace selects the test that reads its kind")
-       (is (contains? (seeds ['tq.bb-read/f]) 'tq.bb-reader/reads-bb)
+       (is (contains? (seeds [(symbol "tq.bb-read" "f")]) 'tq.bb-reader/reads-bb)
            "a changed declaration in that namespace selects it too: bb loads the whole file")
        (is (not (contains? (seeds [[:seon.ns/name 'tq.bb-read]]) 'tq.bb-reader/reads-other))
-           "a test reading another kind is not selected")))))
+           "a test reading another kind is not selected")
+       (is (= #{} (seeds [[:seon.ns/name 'tq.bb-never]])) "a namespace with no definitions seeds nothing, never an unknown")
+       (support/transacted! connection [[:db/retractEntity [:seon.fn/sym (symbol "tq.bb-read" "f")]]
+                                        [:db/retractEntity [:seon.ns/name 'tq.bb-read]]])
+       (is (contains? (seeds [[:seon.ns/name 'tq.bb-read]]) 'tq.bb-reader/reads-bb)
+           "a deleted namespace selects the tests that read what it declared, and never fails selection")))))
+
+(deftest ^{:seon.test/long "One prepare-merge! under a checkout root: a copied program tree committed to git, the candidate root written from it, and a nested seon.test/run whose bb-load test starts one bb per declared namespace."
+           :seon.test/long-ms 120000}
+  the-gate-runs-a-file-reading-test-against-the-candidate-and-refuses
+  ;; a9e4e9904 merged green while breaking the bb-load test: the gate neither selected it nor gave it the candidate's
+  ;; files. A branch making a `^{:seon/babashka true}` namespace unloadable in bb now refuses at the gate.
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        main-conn (:seon.db/connection target)
+        suffix (id/id)
+        root (support/temp-root "gate-candidate")
+        program (System/getProperty "user.dir")
+        _ (doseq [path ["src" "script" "resources" "deps.edn" "bb.edn" ".clj-kondo"]
+                  :when (.exists (io/file program path))]
+            (let [{:keys [exit err]} (shell/sh "cp" "-R" (str (io/file program path)) root)]
+              (is (zero? exit) err)))
+        _ (support/commit-root! root)
+        task-ns (str "tq.bbgate" suffix)
+        task-sym (symbol task-ns "fix")
+        _ (task/index-tasks! {:seon.db/connection main-conn
+                              :seon.task/files {(str "resources/seon/tasks/" task-ns ".edn")
+                                                "[#:seon.task{:name \"fix\" :plan \"Break a bb namespace.\" :proofs #{seon.babashka-load-test/a-declared-namespace-requiring-a-jvm-only-library-fails-to-load}}]"}})
+        broken 'seon.dev.dependency-digest/canonical-file
+        reader 'seon.babashka-load-test/declared-namespaces-load-in-babashka
+        ;; main's own green run of the reader: a merge is curated by tests green where it forked (ruling 5a)
+        on-main (db/with-branch {:seon.db/connection main-conn}
+                  #(test-runner/run {:seon.test/policy :named :seon.test/execution target
+                                     :seon.test/recording-connection main-conn :seon.test/identities #{reader}}))
+        _ (is (true? (:seon.test/passed? on-main)) "the bb-load test is green on main")
+        branch (keyword (str "bbgate-" suffix))
+        _ (registry/fork! {:seon.store/store store :seon.store/branch branch
+                           :seon.cluster.registry/from (db/commit-id (db/db main-conn)) :seon.db/db (db/db main-conn)})
+        made (volatile! [branch])]
+    (try
+      (registry/on-branch store branch
+                          #(support/transacted! % (support/replacement-tx (db/db %) [:seon.fn/sym broken]
+                                                                         "(defn- canonical-file\n  [path]\n  (java.awt.Point. 0 0))" {})))
+      (let [prepared (source/prepare-merge! target store branch task-sym {:root root})]
+        (some->> (:seon.source/candidate prepared) (vswap! made conj))
+        (is (some #{reader} (:seon.source/red prepared))
+            "the gate selected the bb-load test and ran it red against the candidate's files")
+        (is (not (.exists (io/file root "data" "candidate"
+                                                (name (or (:seon.source/candidate prepared) :absent)))))
+            "the candidate root is gone once the gate has judged it"))
+      (finally
+        (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
+        (support/delete-root! root)))))
 
 (deftest ^{:seon.test/long "One prepare-merge!: a nested seon.test/run on a fresh merge branch of main."
            :seon.test/long-ms 60000}

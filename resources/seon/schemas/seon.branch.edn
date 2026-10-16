@@ -5,9 +5,11 @@
  :target [:and {:description "The branch this fork merges into: the cluster it forked from, or for a fork of a work branch, that branch's target."} :seon.store/branch]
  :base-t [:and {:description "The branch's own transaction t its merge base toward its target is as of: the fork's t (or the parent's base, for a fork of a work branch), advanced by each merge to the t of the merged branch value. History keeps it through collection."}
           :seon.db/basis-t]
+ :program-root [:string {:min 1 :description "The directory holding the program this branch's tests read as files: a merge gate's candidate root (seon.cluster.source/candidate-root!), read by seon.test/program-root. Absent, they read the JVM's working directory."}]
  :fork [:map {:seon.db/attributes true :seon.program/partition :seon.data
               :description "A branch's fork entity: its fork id, the branch, its target and its base-t attribute (seon.cluster.source/compare-branch)."}
         [:seon.branch/fork-id :seon.branch/fork-id]
         [:seon.branch/name :seon.branch/name]
         [:seon.branch/target :seon.branch/target]
-        [:seon.branch/base-t :seon.branch/base-t]]}
+        [:seon.branch/base-t :seon.branch/base-t]
+        [:seon.branch/program-root {:optional true} :seon.branch/program-root]]}

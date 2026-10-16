@@ -781,20 +781,32 @@
                   [?f :seon.fn/arities ?a] [?f :seon.fn/sym ?symbol]]
                 database (vec closure))))))
 
-(defn- namespace-readers
+(defn namespace-readers
   "The tests that read namespace `ns-name` as a file: those whose `:seon.test/reads` names a key its stored `ns`
-  form's metadata declares (`seon.fn/declared-namespace-metadata`)."
+  form's metadata declares or declared (`seon.fn/declared-namespace-metadata`, over history)."
   {:malli/schema [:=> [:cat :seon.db/database-value :symbol] [:or [:set :seon.test/sym] :seon.db/invalid-read-error]]}
   [database ns-name]
-  (let [source (db/q '[:find ?source . :in $ ?name :where [?n :seon.ns/name ?name] [?n :seon.ns/source ?source]]
-                     database ns-name)
-        declared (when (string? source) (keys (functions/declared-namespace-metadata ns-name source)))]
-    (cond (map? source) source
+  ;; history: a deleted namespace selects the tests that read what it declared
+  (let [sources (db/q '[:find [?source ...] :in $ ?name :where [?n :seon.ns/name ?name] [?n :seon.ns/source ?source]]
+                      (db/history database) ns-name)
+        declared (when-not (map? sources)
+                   (into #{} (mapcat #(keys (functions/declared-namespace-metadata ns-name %))) sources))]
+    (cond (map? sources) sources
           (empty? declared) #{}
           :else (let [readers (db/q '[:find [?symbol ...] :in $ [?key ...]
                                       :where [?t :seon.test/reads ?key] [?t :seon.test/sym ?symbol]]
                                     database (vec (filter qualified-keyword? declared)))]
                   (if (map? readers) readers (set readers))))))
+
+(defn program-root
+  "The directory the checked-out branch's tests read the program from as files: the candidate root its merge gate
+  wrote (`:seon.branch/program-root`, `seon.cluster.source/candidate-root!`), else the JVM's working directory."
+  {:malli/schema [:=> [:cat] :string]}
+  []
+  (let [database (db/db)
+        written (when-not (db/read-refusal? database)
+                  (db/q '[:find ?root . :where [_ :seon.branch/program-root ?root]] database))]
+    (if (string? written) written (System/getProperty "user.dir"))))
 
 (defn- selection-seeds
   "Resolve supplied definition, namespace and schema identities in this database;
@@ -829,7 +841,7 @@
                           (contains? members :seon.error/at)
                           (contains? members :seon.error/layer)
                           (contains? members :seon.error/operation)) (reduced members)
-                     (empty? members) (reduced (unknown change "Namespace has no analyzed definitions."))
+                     ;; a deleted or empty namespace has no member to seed: its readers, or nothing
                      :else (into seeds members)))
              (cond
                (= attribute :seon.schema/key) (into seeds (schema-consumers database value))

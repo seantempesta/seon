@@ -69,4 +69,9 @@ declaration in it, since bb loads the whole file) whose metadata holds `k` to th
    roots from it. Proof: a fixture branch that breaks a bb namespace refuses at the gate.
 3. Sweep: convert the remaining program-reading tests to `seon.test/program-root` (scripted, one commit).
 
-Status: see the lane report; phases not committed are listed there as remaining.
+Status (2026-10-16): phase 1 committed (5588d1329). Phase 2 committed with its proof red: selection now also reaches
+`merge-seeds` and `merge-list` (a reading seed carries every change in the namespace it reads), and the candidate root
+is written and read, but the gate reuses the bb-load test's green from main, because a reach digest covers the call
+graph and not the files a test reads. Remaining in `seon.merge/the-merge-gate-judges-main-s-files-not-the-candidate`:
+fold the read namespaces' definition digests into a `:seon.test/reads` test's reach digest. Phase 3 is
+`seon.merge/program-reading-tests-read-the-candidate-root`.
