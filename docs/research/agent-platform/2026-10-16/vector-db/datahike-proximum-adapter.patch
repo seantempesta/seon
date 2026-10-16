@@ -1,0 +1,94 @@
+PATCH SKETCH (not applied; Datahike fork, src-secondary/datahike/index/secondary/proximum.clj
+and datahike.versioning / datahike.gc). Owner: Datahike fork. Lands only in a root restart batch.
+
+Each hunk names the measured or reproduced behaviour it changes
+(vector_semantics.clj / vector_bench.clj, report.md section 2).
+
+1. Clean owner: no store read per unrelated commit.
+   Measured: a commit that touches no vector costs 58-62 ms with a proximum index
+   on the branch vs 39-49 ms without (same store, same run). `-sec-flush` calls
+   `generation-addressed-owner?`, a synchronous konserve read of the commit
+   snapshot, on every Datahike commit.
+@@ (-sec-flush [_ _store _branch]
+-        (let [current @!idx
+-              synced (if (generation-addressed-owner? current)
+-                       current
+-                       (await-owner! (pproto/sync! current)))]
++        ;; A clean owner (commit-id set; every mutation clears it,
++        ;; proximum.hnsw/update-hnsw-index) already names its durable commit.
++        (let [current @!idx
++              synced (if (pproto/current-commit current)
++                       current
++                       (await-owner! (pproto/sync! current)))]
+
+2. Lazy branch: d/branch! forks nothing until the branch writes a vector.
+   Measured: branch! with a proximum index costs a native proximum branch!
+   (mmap copy; no reflink on APFS through `cp --reflink`) plus a sync! (a full
+   generation copy + 3 SHA-256 passes in 9846d3e). Seon branches per chain and
+   per test run, and every d/branch! of a store with a :proximum index pays it.
+@@ (-sec-branch [_ _store _from-branch new-branch]
+-        (let [branched (pver/branch! @!idx (keyword new-branch))]
+-          (make-proximum-index branched config)))
++        ;; Share the source commit read-only; fork on the first -transact.
++        (make-proximum-index @!idx (assoc config :fork-on-write (keyword new-branch))))
+@@ (-transact [_ tx-report]
++        ;; (when-let [b (:fork-on-write config)] (pver/branch! cur b)) then insert,
++        ;; dissoc :fork-on-write from the new reify's config.
+@@ (defmethod sec/branch-from-key-map :proximum ...)
++   ;; Return the key map unchanged (same :commit-id, :branch the source's);
++   ;; the first write on the new Datahike branch performs the native fork.
+
+3. Merge carries vectors, not their hashes.
+   Reproduced: with :db.secondary/only, the branch's datoms carry the hasch
+   string ("1bd5fe52-...") as the value; merging those datoms logs
+   :datahike/non-vector-embedding and main never receives the vector (main's
+   nearest stays the old entity). Merging with the vector value works (main's
+   HNSW re-inserts it). Two parts:
+   a. Datahike: an optional protocol method returning the secondary value for
+      an entity, so any datom-level consumer (Seon's merge, pull, diff) can
+      resolve a :db.secondary/only value:
++  (defprotocol ISecondaryValue
++    (-value [this eid attr] "The stored value of `attr` on `eid`, or nil."))
++  ;; proximum: (prox/get-vector @!idx eid) -> float[] (proximum.api-impl/get-vector)
+   b. The adapter's silent skip becomes a refusal: a non-vector value on a
+      vector attribute is the producer's defect and must fail the transaction
+      (CLAUDE.md "Make failure local and loud"), not log and drop.
+-              (do (log/warn :datahike/non-vector-embedding ...)
+-                  (make-proximum-index cur config)))
++              (throw (ex-info "A :proximum attribute's value is not a vector."
++                              {:type :proximum/non-vector-value :eid eid :value-type (type val)}))
+
+4. delete-branch! and collection reach the proximum store.
+   Reproduced: after d/delete-branch! :feature and d/gc-storage, proximum's
+   :branches is still #{:main :feature}, vectors-feature.bin and every
+   vectors-generation-*.bin remain (6 files); datahike.gc marks #{} for
+   :proximum (`mark-from-key-map :proximum`) and never visits its store.
+   Datahike owns reachability (its commit records hold each commit's proximum
+   key map), so Datahike's gc drives the secondary sweep:
++  ;; datahike.index.secondary
++  (defmulti sweep-from-key-maps! (fn [type key-maps remove-before] type))
++  ;; datahike.gc/gc-storage!: after marking, group the :secondary-index-keys of
++  ;; every reachable commit record by :type and call sweep-from-key-maps! once
++  ;; per type with exactly those key maps.
++  ;; proximum: proximum.gc/gc-from-roots! (new; mark-snapshot over the given
++  ;; commit-ids instead of :branches heads, then the existing sweep).
+   delete-branch! needs no hook then: the deleted branch's proximum commits
+   become unreachable from Datahike and the next collection sweeps them,
+   matching how Datahike itself treats a deleted branch ("accessible until the
+   next gc"). Seon's `seon.cluster.registry/retained-before` cutoff applies
+   unchanged.
+
+5. Datalog: a retrieval engine function for kNN.
+   Today no function carries :datahike/external-engine metadata for :proximum,
+   and the planner's :retrieval op passes {:query q :field f} where the adapter
+   reads {:vector :k}, so kNN is reachable only through
+   `datahike.index.secondary/-slice-ordered` on (get-in db [:secondary-indices ident]).
++  (defn nearest
++    "Entity ids and distances of the k nearest vectors to `v` in index `ident`."
++    {:datahike/external-engine {:index-key 0 :binding-columns [:entity-id :distance]
++                                :query-spec (fn [[_ident v k]] {:vector v :k k})}}
++    [ident v k])
++  ;; query: [:find ?name ?d :in $ ?q
++  ;;         :where [(datahike.index.secondary.proximum/nearest :idx/embeddings ?q 10) [[?e ?d]]]
++  ;;                [?e :seon.embedding/text-digest ?t] ...]
++  ;; and execute-external-engine builds the spec through :query-spec when present.

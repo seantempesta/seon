@@ -1,0 +1,73 @@
+PATCH SKETCH (not applied; Proximum fork seantempesta/proximum @ 9846d3e).
+Owner: Proximum fork. Lands only in a root restart batch (fork bump).
+
+Goal: sync! cost proportional to what the commit changed (dirty vector chunk +
+dirty edge chunks + PSS nodes), never to the mmap file. Konserve chunks are the
+source of truth (upstream design, proximum.vectors ns docstring); the mmap is a
+per-owner cache. 9846d3e made every sync! copy the whole capacity-sized mmap
+(`proximum.vectors/publish-mmap-generation!`) and SHA-256 it three times
+(`file-evidence` on source, temporary and destination). That is the measured
+O(capacity * dim) per-commit cost. Replace "an immutable copy of the bytes" with
+"an immutable name for the bytes": the vectors address map already names every
+chunk by an immutable konserve key, so a working mmap is valid for a commit iff
+its loaded prefix's chunk addresses equal the commit's.
+
+--- a/src/proximum/hnsw.clj   (p/sync! for HnswIndex)
+@@
+-                                       mmap-generation
+-                                       (when-let [mmap-dir (:mmap-dir state)]
+-                                         (vectors/publish-mmap-generation!
+-                                          (:mmap-path vs) mmap-dir commit-id
+-                                          (:reflink-supported? state)))
+-                                       snapshot (cond-> snapshot
+-                                                  mmap-generation
+-                                                  (assoc :mmap-generation commit-id ...))]
++                                       ;; The commit names its vectors by the address PSS root it
++                                       ;; already stores; the working mmap records which chunk
++                                       ;; addresses it holds (header bytes 32-63 + a sidecar of the
++                                       ;; chunk address vector), O(dirty chunks) to update.
++                                       _ (vectors/record-loaded-addresses! vs @(:chunk-address-map vs))]
+
+--- a/src/proximum/vectors.clj
++(defn record-loaded-addresses!
++  "Write the chunk addresses this mmap holds beside it (vectors-<owner>.addrs),
++   replacing only entries for chunks flushed since the last sync."
++  [vs address-map] ...)
++
++(defn reusable-prefix
++  "Number of leading chunks of an existing mmap whose recorded addresses equal
++   `address-map`'s; those chunks need no load."
++  [mmap-path address-map] ...)
+ (defn open-store* ...
+-        start-chunk (if mmap-compatible? (chunk-id mmap-header-count chunk-size) 0)
++        start-chunk (if mmap-compatible? (reusable-prefix actual-mmap-path address-map) 0)
+
+Restore of any commit (historical, other branch, guarded force) then loads only
+the chunks whose addresses differ: O(changed chunks) when the owner's mmap is
+the same lineage, O(N) only for a cold or diverged owner, and never at commit.
+`materialize-working-mmap!`, `publish-mmap-generation!`, `file-sha256`,
+`verify-generation!` and `sweep-mmap-generations!` are deleted with their
+callers (force-branch! materializes through open-store* like load-commit).
+Snapshots written by 9846d3e keep loading: an old :mmap-generation key is ignored
+and its chunks are loaded from konserve.
+
+Proof: proximum.branching-test (guarded force, historical restore) green; a
+sync! timing assertion at N=10k and N=100k, dim 768, shows 1-vector commit cost
+flat in N and capacity (measured parent: 270 ms at N=1k cap 20k, 700 ms at
+N=10k cap 110k; see report.md).
+
+Second, smaller sizing change (same owner): PersistentEdgeIndex CHUNK_SIZE 1024
+nodes => one layer-0 chunk is ~135 KB at M0=32, and one inserted vector dirties
+up to ~M0 neighbour chunks, so a 1-vector commit rewrites ~1.3 MB at N=10k
+(measured) and up to ~4 MB at N>=100k. A 64-node chunk bounds that to
+~M0 * 8.4 KB = ~270 KB. Measure before choosing; it is a constant, not a design
+change.
+
+Reconciled with lane embed-model (embedding/report.md, ce071b61e): its suggested
+fix keeps the generation file but takes the evidence from sync!'s chunk hash
+chain, with full verification only on restore/audit. That removes the hashing,
+but not the copy: on a filesystem without reflink (and through stock `cp
+--reflink` on macOS), every commit still writes a capacity-sized file. This
+sketch goes one step further. The evidence is the chunk address map (immutable
+konserve keys, hashes under :crypto-hash?), and no generation file is written,
+so commit cost does not depend on the filesystem.
