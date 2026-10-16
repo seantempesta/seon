@@ -1,0 +1,334 @@
+;; Printer audit (lane printer-audit-opus, 2026-10-16). One map per finding.
+;; :cat 1 direct render-fn call outside the printer (:sub "1a" non-render caller, "1b" render->render,
+;;   "1c" render or tool prints and returns the text); 2 seon.render/render-call outside the walk;
+;; 3 second printer ("3a" hand text/EDN writer, "3b" pr-str into an error message, "3c" pr-str/str into
+;;   shown hiccup or prose, "3d" pr-str as storage/identity/URL encoding, "3e" number/date layout);
+;; 4 clipping outside the printer or a hardcoded size; 5 hand-built hiccup of a domain value;
+;; 6 parallel render paths for one value; 7 printer internals (owner request 2026-10-16).
+;; :evidence :verified = code read (and probe where stated); :inferred = analysis or signature only.
+;; :one-render true = in a file lane one-render holds (context.clj, repl.clj, render/transcript.clj, render/sent.clj)
+;;   or named in its brief. Sites are file:line at HEAD db7e1b49d (dated evidence, 2026-10-16).
+[
+ {:id "F01" :cat 1 :sub "1a" :sym seon.context/model-context :evidence :verified :one-render true
+  :sites ["src/seon/context.clj:1051"] :calls [seon.context/exchange-ai] :shown "agent: provider prompt :seon.context/exchanges"
+  :conversion "Each :seon.context/exchange value goes to the printer (shown-result, consumer :seon.render/ai); its declared pair is selected there."}
+ {:id "F02" :cat 1 :sub "1a" :sym seon.context/block-views :evidence :verified :one-render true
+  :sites ["src/seon/context.clj:858" "src/seon/context.clj:859"] :calls [seon.context/current-state-ai]
+  :shown "agent: system message attempt sections and turn sections"
+  :conversion "Print the two section sub-maps of :seon.context/current-state through the printer; the split is a value split, not a render call."}
+ {:id "F03" :cat 1 :sub "1a" :sym seon.render.transcript/projected-entry :evidence :verified :one-render true
+  :sites ["src/seon/render/transcript.clj:412"] :calls [seon.context/exchange-ai seon.context/exchange-text seon.turn/render-ai]
+  :shown "agent transcript, debug AI column" :conversion "Entry values to the printer; a run entry prints as the run entity through its pair."}
+ {:id "F04" :cat 1 :sub "1a" :sym seon.render.transcript/html-entries :evidence :verified :one-render true
+  :sites ["src/seon/render/transcript.clj:498"] :calls [seon.context/exchange-html] :shown "web transcript"
+  :conversion "Printer HTML face of the exchange value."}
+ {:id "F05" :cat 1 :sub "1a" :sym seon.render.transcript/history-entries :evidence :verified :one-render true
+  :sites ["src/seon/render/transcript.clj:711"] :calls [seon.context/exchange-ai seon.context/exchange-text seon.repl/response]
+  :shown "stored history bytes (:seon.render.history/bytes, :seon.render.history/printed-value)"
+  :conversion "Store the printer's shown text of the exchange value once; never a second derivation."}
+ {:id "F06" :cat 1 :sub "1a" :sym seon.render.sent/exchange-html :evidence :verified :one-render true
+  :sites ["src/seon/render/sent.clj:77"] :calls [seon.context/exchange-html] :shown "web sent-context page"
+  :conversion "Printer HTML face per exchange (needs nested dispatch, option O1)."}
+ {:id "F07" :cat 1 :sub "1a" :sym seon.mcp/runtime-status :evidence :verified
+  :sites ["src/seon/mcp.clj:530"] :calls [seon.health/render-ai] :shown "MCP runtime_status reply"
+  :conversion "Print the health report value itself; its declared pair is selected inside the printer."}
+ {:id "F08" :cat 1 :sub "1a" :sym seon.cluster.boot/request! :evidence :verified
+  :sites ["src/seon/cluster/boot.clj:701"] :calls [seon.health/render-ai] :shown "operator: bin/seon status"
+  :conversion "value/text of the report with the cluster's database; the operator prints that text."}
+ {:id "F09" :cat 1 :sub "1a" :sym seon.render.web/debug-preview-html :evidence :verified
+  :sites ["src/seon/render/web.clj:984"] :calls [seon.error/render-html] :also "[:pre (str rendered)] prints an AI render's output with str"
+  :shown "web debug" :conversion "value/html of the refusal and of the preview value."}
+ {:id "F10" :cat 1 :sub "1a" :sym seon.render.web/experiment-preview-html :evidence :verified
+  :sites ["src/seon/render/web.clj:1056" "src/seon/render/web.clj:1058"] :calls [seon.error/render-html] :shown "web debug" :conversion "value/html."}
+ {:id "F11" :cat 1 :sub "1a" :sym seon.render.web/debug-found-values-html :evidence :verified
+  :sites ["src/seon/render/web.clj:1334"] :calls [seon.error/render-html] :shown "web debug" :conversion "value/html."}
+ {:id "F12" :cat 1 :sub "1a" :sym seon.render.web/debug-page-result :evidence :verified
+  :sites ["src/seon/render/web.clj:1741"] :calls [seon.error/render-html] :shown "web debug" :conversion "value/html."}
+ {:id "F13" :cat 1 :sub "1a" :sym seon.render.web/failed-page-result :evidence :verified
+  :sites ["src/seon/render/web.clj:2385"] :calls [seon.error/render-html] :shown "web page failure" :conversion "value/html (its total arm already falls back to core-html)."}
+ {:id "F14" :cat 1 :sub "1a" :sym seon.render.web/failure-response :evidence :verified
+  :sites ["src/seon/render/web.clj:3603"] :calls [seon.error/render-html] :shown "web 500 body"
+  :conversion "value/html; its total fallback replaces the try/core-text arm here."}
+ {:id "F15" :cat 1 :sub "1a" :sym seon.render.web/health-page-result :evidence :verified
+  :sites ["src/seon/render/web.clj:2036"] :calls [seon.health/render-html] :shown "web health page" :conversion "value/html of the report."}
+ {:id "F16" :cat 1 :sub "1a" :sym seon.render.web/chain-fragment :evidence :verified
+  :sites ["src/seon/render/web.clj:2067"] :calls [seon.task/chain-html] :shown "web chains page" :conversion "value/html of the chain view."}
+ {:id "F17" :cat 1 :sub "1a" :sym seon.render.web/sent-html :evidence :verified
+  :sites ["src/seon/render/web.clj:3186"] :calls [seon.render.sent/view-html] :shown "web sent page" :conversion "value/html of :seon.render.sent/view."}
+ {:id "F18" :cat 1 :sub "1a" :sym my.program/search-match :evidence :verified
+  :sites ["src/my/program.clj:1025"] :calls [my.program/render-source-ai] :shown "agent: candidate token estimate"
+  :conversion "A value's printed cost is the printer's charge (prepare's :seon.render.value/whole-characters), not a render-and-measure by hand."}
+ {:id "F19" :cat 1 :sub "1a" :sym seon.cluster.agent/render-id-ai :evidence :verified
+  :sites ["src/seon/cluster/agent.clj:318" "src/seon/cluster/agent.clj:377"] :calls [seon.cluster.agent/render-identity-ai seon.cluster.agent/render-identity-html]
+  :shown "agent and web callers" :conversion "Delete the wrappers; callers print the agent identity value."}
+ {:id "F20" :cat 1 :sub "1a" :sym seon.ai/registry-ai :evidence :verified
+  :sites ["src/seon/ai.clj:267" "src/seon/ai.clj:277"] :calls [seon.ai/model-ai seon.ai/model-html]
+  :shown "no static caller found" :conversion "Delete registry-ai/registry-html; the models vector prints each model through its pair."}
+
+ {:id "F21" :cat 1 :sub "1b" :sym seon.context/exchange-html :evidence :verified :one-render true
+  :sites ["src/seon/context.clj:956"] :calls [seon.context/exchange-ai] :shown "web"
+  :conversion "Both faces from one printer selection (render.value already emits text and hiccup from one tree)."}
+ {:id "F22" :cat 1 :sub "1b" :sym seon.error/render-faults-ai :evidence :verified
+  :sites ["src/seon/error.clj:2734" "src/seon/error.clj:2735" "src/seon/error.clj:2738"] :calls [seon.error/render-ai seon.error/faults-form seon.repl/source-text]
+  :shown "agent: faults" :conversion "Return the fault entities as data; the printer selects each one's pair (option O1). The form branch returns the form value."}
+ {:id "F23" :cat 1 :sub "1b" :sym seon.error/render-faults-html :evidence :verified
+  :sites ["src/seon/error.clj:2743" "src/seon/error.clj:2758"] :calls [seon.error/render-faults-html seon.error/render-html] :shown "web" :conversion "As F22."}
+ {:id "F24" :cat 1 :sub "1b" :sym seon.cluster.message/inbox-html :evidence :verified
+  :sites ["src/seon/cluster/message.clj:535" "src/seon/cluster/message.clj:588 render-inbox-html"] :calls [seon.cluster.message/render-html]
+  :shown "web inbox" :conversion "Return the message values; nested dispatch selects each message's pair."}
+ {:id "F25" :cat 1 :sub "1b" :sym seon.cluster.status/render-html :evidence :verified
+  :sites ["src/seon/cluster/status.clj:190"] :calls [seon.cluster.status/render-ai seon.render.value/html] :shown "web" :conversion "One selection, two faces."}
+ {:id "F26" :cat 1 :sub "1b" :sym seon.health/render-html :evidence :verified
+  :sites ["src/seon/health.clj:722"] :calls [seon.cluster.status/render-html] :shown "web health" :conversion "Nested dispatch."}
+ {:id "F27" :cat 1 :sub "1b" :sym seon.mcp/render-request-reply-ai :evidence :verified
+  :sites ["src/seon/mcp.clj:185" "src/seon/mcp.clj:194"] :calls [seon.batch/render-request-cost-ai seon.batch/render-request-cost-html]
+  :shown "MCP reply cost line" :conversion "Nested dispatch on :seon.cost/headline."}
+ {:id "F28" :cat 1 :sub "1b" :sym seon.problems/html-report :evidence :verified
+  :sites ["src/seon/problems.clj:630" "src/seon/problems.clj:635" "src/seon/problems.clj:687"] :calls [seon.render.test/render-html seon.problems/missing-model-html seon.render.value/core-text]
+  :shown "web problems" :conversion "Nested dispatch; leaves through the same selection."}
+ {:id "F29" :cat 1 :sub "1b" :sym seon.cluster.instruction/instruction-html :evidence :verified
+  :sites ["src/seon/cluster/instruction.clj:77"] :calls [seon.cluster.instruction/instruction-ai] :shown "web" :conversion "See F82."}
+ {:id "F30" :cat 1 :sub "1b" :sym seon.repl/render-directory-html :evidence :verified :one-render true
+  :sites ["src/seon/repl.clj:47"] :calls [seon.repl/render-directory-ai] :also "[:code (str arglists)] prints a form with str"
+  :shown "web" :conversion "Printer HTML face of the AI data."}
+ {:id "F31" :cat 1 :sub "1b" :sym seon.task/chain-html :evidence :verified
+  :sites ["src/seon/task.clj:1901" "src/seon/task.clj:1920"] :calls [seon.task/chain-task-html seon.task/attempt-html] :shown "web chains" :conversion "Nested dispatch."}
+ {:id "F32" :cat 1 :sub "1b" :sym seon.test.accretion/render-html :evidence :verified
+  :sites ["src/seon/test/accretion.clj:130"] :calls [seon.test.accretion/render-ai] :shown "web" :conversion "See F49, F82."}
+
+ {:id "F33" :cat 1 :sub "1c" :sym seon.ai/attempt-ai :evidence :verified
+  :sites ["src/seon/ai.clj:102" "src/seon/ai.clj:110 attempt-html"] :calls [seon.render.value/render-ai seon.render.value/render-html]
+  :shown "agent and web: model attempt" :conversion "Return the attempt without private provider data as data; the printer prints it under the caller's budget."}
+ {:id "F34" :cat 1 :sub "1c" :sym seon.problems/ai-prose :evidence :verified
+  :sites ["src/seon/problems.clj:740" "src/seon/problems.clj:743"] :calls [seon.problems/missing-model-ai seon.render.value/render-ai]
+  :shown "agent: problems" :conversion "Return the families map with its requery operation as data; drop its own profile choice."}
+ {:id "F35" :cat 1 :sub "1c" :sym seon.render.transcript/floor-text :evidence :verified :one-render true
+  :sites ["src/seon/render/transcript.clj:348" "src/seon/render/transcript.clj:512 with-errors"] :calls [seon.render.value/render-ai]
+  :shown "transcript extras and errors" :conversion "Values stay in the transcript value; printed once with it (option O5)."}
+ {:id "F36" :cat 1 :sub "1c" :sym seon.test.runner/report-value :evidence :verified
+  :sites ["src/seon/test/runner.clj:108"] :calls [seon.render.value/render-ai]
+  :shown "test gate log" :conversion "Legitimate printer use with a test profile, but through value/text (total), not render-ai (a refusal map leaks as the text)."}
+
+ {:id "F37" :cat 2 :sym seon.context/must-read-ai :evidence :verified :one-render true
+  :sites ["src/seon/context.clj:830"] :calls [seon.render/render-call] :shown "agent: must-reads"
+  :conversion "Must-read entries stay values; the printer selects each entry's pair at the citation's level (option O4 reference depth)."}
+ {:id "F38" :cat 2 :sym seon.render.web/render-source-call :evidence :verified :one-render true
+  :sites ["src/seon/render/web.clj:1376"] :calls [seon.render/render-call] :shown "web authored render slot"
+  :conversion "Slot value to the printer under the request profile; the invocation cache stays inside render-call beneath the printer."}
+
+ {:id "F39" :cat 3 :sub "3a" :sym seon.repl/reply-map :evidence :verified :one-render true
+  :sites ["src/seon/repl.clj:244" "src/seon/repl.clj:163 response-entries" "src/seon/repl.clj:136 shown-output"]
+  :shown "every MCP reply and every history unit an agent reads"
+  :what "Writes #:seon.repl{...} by string join of pieces printed by three entries with three budgets: value/text for :out (own spent arithmetic), core-text for findings, repairs, interrupted and alloc-mb (fixed core budget), print/string-literal for notes; plus its own comment-line repair."
+  :conversion "The reply is a map value printed once under the reply's one budget; already-printed value text enters as a raw print node (option O5)."}
+ {:id "F40" :cat 3 :sub "3a" :sym seon.repl/source-text :evidence :verified :one-render true
+  :sites ["src/seon/repl.clj:76"] :calls [clojure.pprint/write] :shown "agent: fault form via seon.error/render-faults-ai"
+  :conversion "A form is a value; the printer prints code whole (CLAUDE.md: functions print whole, as code)."}
+ {:id "F41" :cat 3 :sub "3a" :sym seon.context/exchange-text :evidence :verified :one-render true
+  :sites ["src/seon/context.clj:900"] :shown "agent transcript, history bytes"
+  :conversion "A third REPL grammar beside seon.repl/text; one exchange value printed once."}
+ {:id "F42" :cat 3 :sub "3a" :sym seon.render.transcript/message-text :evidence :verified :one-render true
+  :sites ["src/seon/render/transcript.clj:353" "src/seon/render/transcript.clj:361" "src/seon/render/transcript.clj:468 ai-output"]
+  :shown "agent transcript"
+  :what "Concatenates custody prose, (pr-str read-form), message/format-ai and floor-text of extras; ai-output joins entries with blank lines."
+  :conversion "The transcript is a vector of entry values; the printer lays it out."}
+ {:id "F43" :cat 3 :sub "3a" :sym seon.render.value/bounded-text :evidence :verified
+  :sites ["src/seon/render/value.clj:91 datum" "src/seon/render/value.clj:111" "src/seon/render/value.clj:150 link-lines" "src/seon/render/value.clj:172 throwable-text"]
+  :shown "the last resort of every core-text call"
+  :what "A second printer inside the printer: pr-str of a hand-trimmed datum (8 items, depth 3), subs to 400 chars plus …; throwable-text joins its own lines and clips at 8192 chars."
+  :conversion "One last resort: the class-and-identity line (opaque). Everything else through select-nodes with a structural profile."}
+ {:id "F44" :cat 3 :sub "3a" :sym seon.render.value/core-text :evidence :verified
+  :sites ["src/seon/context.clj:892" "src/seon/context.clj:947" "src/seon/error.clj:1235" "src/seon/error.clj:2472" "src/seon/error.clj:2501" "src/seon/error.clj:2528" "src/seon/error.clj:2530"
+          "src/seon/mcp.clj:156" "src/seon/problems.clj:640" "src/seon/repl.clj:197" "src/seon/repl.clj:199" "src/seon/repl.clj:207" "src/seon/repl.clj:226"
+          "src/seon/test.clj:411" "src/seon/test.clj:2427" "src/seon/test.clj:2496" "src/seon/test/accretion.clj:88" "src/seon/test/accretion.clj:93"
+          "src/seon/turn.clj:2855" "src/my/background.clj:16" "src/seon/cluster.clj:1571"]
+  :edge-sites-legitimate ["src/seon/cluster/boot.clj:303" "src/seon/cluster/boot.clj:839" "src/seon/cluster/boot.clj:865" "src/seon/cluster/store.clj:520" "src/seon/fault.clj:355" "src/seon/fault.clj:356" "src/seon/render/web.clj:3609" "src/seon/render/web.clj:3653" "src/seon/sci/eval.clj:4629" "src/seon/sci/eval.clj:4632" "src/seon/sci/eval.clj:4663"]
+  :shown "agent replies, web error cards, test results, stored error messages"
+  :what "The core printer (fixed 1000-token budget, no render, no database) used as a general 'print this small thing' in 21 non-edge sites, inside renders too; each call is its own budget beside the unit's one budget."
+  :conversion "Edges only. Elsewhere the value stays in its parent and prints with it (option O2 leaf charged to the parent budget)."}
+ {:id "F45" :cat 3 :sub "3a" :sym seon.cluster.message/format-ai :evidence :verified
+  :sites ["src/seon/cluster/message.clj:286" "src/seon/cluster/message.clj:317" "src/seon/cluster/message.clj:321"]
+  :shown "agent transcript via message-text; message source projection" :conversion "Delete; message-view (render-ai) is the message's AI face (F79)."}
+ {:id "F46" :cat 3 :sub "3a" :sym seon.turn/render-ai :evidence :verified
+  :sites ["src/seon/turn.clj:1490" "src/seon/turn.clj:1582"] :shown "agent transcript run entries; web via turn/render-html"
+  :what "Prose sentence with (pr-str opened) instant; not a declared render, called by name from the transcript."
+  :conversion "Return the run's facts as data (id, opened, state keyword); the printer prints the inst."}
+ {:id "F47" :cat 3 :sub "3a" :sym seon.effect/render-ai :evidence :verified
+  :sites ["src/seon/effect.clj:86" "src/seon/effect.clj:89" "src/seon/effect.clj:53 payload-face"] :shown "agent and web effect receipts"
+  :what "Prose with pr-str instants; payload-face splices request and result EDN with a token count."
+  :conversion "Return a map; request and result are values or blob refs the printer cuts with requery forms."}
+ {:id "F48" :cat 3 :sub "3a" :sym seon.error/evidence-text :evidence :verified
+  :sites ["src/seon/error.clj:2788" "src/seon/error.clj:2763 prose" "src/seon/error.clj:2776 time-limit-prose" "src/seon/error.clj:2795 edit-prose" "src/seon/error.clj:2805 elision-prose" "src/seon/error.clj:2833 unclassified-prose" "src/seon/error.clj:2844 mcp-prose" "src/seon/error.clj:2854 index-refusal-prose"]
+  :shown "agent and MCP error faces" :what "Eight prose AI faces of error variants printing evidence as attribute=pr-str lines."
+  :conversion "The error's AI face is its reply map (seon.error/render-ai already); fixed advice is a :seon.error/fix member; MCP vs context is a printer consumer option (O6), not a separate prose render."}
+ {:id "F49" :cat 3 :sub "3a" :sym seon.test.accretion/render-failure :evidence :verified
+  :sites ["src/seon/test/accretion.clj:80" "src/seon/test/accretion.clj:112 render-ai"] :shown "agent: install refusal"
+  :conversion "Return failure groups as data; arguments and actual stay values."}
+ {:id "F50" :cat 3 :sub "3a" :sym seon.db/render-transaction-html :evidence :verified
+  :sites ["src/seon/db.clj:6395 transaction-value-html"] :shown "web transaction view"
+  :what "A second HTML value printer: SimpleDateFormat instants, recursive [:dl] maps, keys sorted by str, unbounded."
+  :conversion "Delete transaction-value-html; value/html of the report's facts."}
+ {:id "F51" :cat 3 :sub "3a" :sym seon.agent/render-settings-html :evidence :verified
+  :sites ["src/seon/agent.clj:218"] :what "Own scalar formatter: format %,d, ratio to double, keyword name, joined sequentials, display divisor."
+  :shown "web" :conversion "Display divisor and unit are attribute schema properties the printer applies (option O7)."}
+ {:id "F52" :cat 3 :sub "3a" :sym seon.render.value/render-database-identity-ai :evidence :verified
+  :sites ["src/seon/render/value.clj:383"] :shown "agent" :conversion "Return the identity map; a schema-specific render living in the printer namespace (F90)."}
+ {:id "F53" :cat 3 :sub "3a" :sym seon.ai/model-ai :evidence :verified
+  :sites ["src/seon/ai.clj:214" "src/seon/ai.clj:225 model-html" "src/seon/ai.clj:177 usd-per-million"] :also "seon.ai/provider-ai returns :string"
+  :shown "agent and web model registry" :conversion "Return model data; price and rate units as declared display options (O7)."}
+ {:id "F54" :cat 3 :sub "3a" :sym seon.render.transcript/render-run-ai :evidence :inferred :one-render true
+  :sites ["src/seon/render/transcript.clj:653"] :shown "agent" :what "Declared output :string: the joined transcript text."
+  :conversion "Return the run's entries; the printer lays them out."}
+ {:id "F55" :cat 3 :sub "3a" :sym "string-returning AI renders" :evidence :inferred
+  :syms [seon.background/render-ai seon.cluster.agent/render-creation-ai seon.cluster.agent/render-situation-ai seon.cluster.instruction/instruction-ai
+         seon.db/render-rejection-ai seon.render.schema/render-ai seon.problems/missing-model-ai seon.error/render-ai]
+  :what "Declared output schema includes :string (live :malli/schema read by JVM probe, 2026-10-16). 24 of the 61 declared AI renders return text."
+  :conversion "Return the pruned data; keep text only where the text is the content itself (an instruction's words, a source)."}
+
+ {:id "F56" :cat 3 :sub "3b" :evidence :verified :shown "agent, MCP and root via error maps" :count 55
+  :by-ns {seon.db ["src/seon/db.clj:615" "src/seon/db.clj:617" "src/seon/db.clj:620" "src/seon/db.clj:1307" "src/seon/db.clj:2249" "src/seon/db.clj:2290" "src/seon/db.clj:5757"]
+          seon.error ["src/seon/error.clj:837" "src/seon/error.clj:838" "src/seon/error.clj:914" "src/seon/error.clj:919" "src/seon/error.clj:924" "src/seon/error.clj:933" "src/seon/error.clj:954" "src/seon/error.clj:992"]
+          seon.turn ["src/seon/turn.clj:3358" "src/seon/turn.clj:3360" "src/seon/turn.clj:3362" "src/seon/turn.clj:3395" "src/seon/turn.clj:4867" "src/seon/turn.clj:5003" "src/seon/turn.clj:5005" "src/seon/turn.clj:5056" "src/seon/turn.clj:5057" "src/seon/turn.clj:5141" "src/seon/turn.clj:5142"]
+          seon.fs ["src/seon/fs.clj:117" "src/seon/fs.clj:123" "src/seon/fs.clj:127" "src/seon/fs.clj:129" "src/seon/fs.clj:134" "src/seon/fs.clj:136" "src/seon/fs.clj:153" "src/seon/fs.clj:154"]
+          seon.cluster.message ["src/seon/cluster/message.clj:163" "src/seon/cluster/message.clj:222" "src/seon/cluster/message.clj:717"]
+          seon.schema ["src/seon/schema.clj:368" "src/seon/schema.clj:2014" "src/seon/schema.clj:4317"]
+          seon.fn ["src/seon/fn.clj:60" "src/seon/fn.clj:61" "src/seon/fn.clj:4096"]
+          seon.instrument ["src/seon/instrument.clj:332" "src/seon/instrument.clj:374"]
+          seon.agent ["src/seon/agent.clj:27"] seon.cluster ["src/seon/cluster.clj:3231"] seon.fault ["src/seon/fault.clj:276"]
+          seon.schema.admission ["src/seon/schema/admission.clj:247"] seon.test ["src/seon/test.clj:1339"]
+          seon.call-preparation ["src/seon/call_preparation.clj:230"] seon.cluster.agent ["src/seon/cluster/agent.clj:388"]
+          seon.sci.eval ["src/seon/sci/eval.clj:4476"]}
+  :what "Values printed with pr-str (unbounded, no elision) into :seon.error/message. seon.turn/settle-batch-refusal! binds *print-length* nil around a whole proposals vector."
+  :conversion "Fixed message text; the value in a data key (:seon.error/offending or the variant's member) that the printer shows with the error. seon.error/explain-problem keeps path and key as problem members."}
+
+ {:id "F57" :cat 3 :sub "3c" :sym seon.render.web/debug-header-html :evidence :verified
+  :sites ["src/seon/render/web.clj:769 debug-subject-link" "src/seon/render/web.clj:811" "src/seon/render/web.clj:819" "src/seon/render/web.clj:999 debug-read-dependencies-html" "src/seon/render/web.clj:3290 debug-response" "src/seon/render/web.clj:3292" "src/seon/render/web.clj:3294" "src/seon/render/web.clj:3296"]
+  :shown "web debug" :conversion "value/html for subject, lookup refs, basis, viewer and database identity."}
+ {:id "F58" :cat 3 :sub "3c" :sym seon.render.transcript/turn-header :evidence :verified :one-render true
+  :sites ["src/seon/render/transcript.clj:740" "src/seon/render/transcript.clj:801 cost-html" "src/seon/render/transcript.clj:1023 runtime-duration"]
+  :shown "web" :conversion "The run entity's HTML face; instants and durations through the printer (duration unit declared, O7)."}
+ {:id "F59" :cat 3 :sub "3c" :sym seon.batch/cost-cell :evidence :verified
+  :sites ["src/seon/batch.clj:250"] :shown "web cost table" :conversion "value/html."}
+ {:id "F60" :cat 3 :sub "3c" :sym seon.render.sent/call-header :evidence :verified :one-render true
+  :sites ["src/seon/render/sent.clj:79"] :what "[:dd (str v)] of call facts." :shown "web sent page"
+  :conversion "The attempt entity printed through its pair (seon.ai/attempt-html)."}
+ {:id "F61" :cat 3 :sub "3c" :sym seon.context/cost-badge :evidence :verified :one-render true
+  :sites ["src/seon/context.clj:921" "src/seon/context.clj:945 reply-html label"] :shown "web" :conversion "Cost map as value; MB unit declared on :seon.eval/allocated-bytes (O7)."}
+
+ {:id "F62" :cat 3 :sub "3d" :evidence :verified :shown "stored facts, URLs, DOM ids, generated code (not display)" :count 63
+  :by-ns {seon.program ["src/seon/program.cljc:997" "src/seon/program.cljc:1078" "src/seon/program.cljc:1103" "src/seon/program.cljc:1112" "src/seon/program.cljc:1197" "src/seon/program.cljc:1206" "src/seon/program.cljc:1223" "src/seon/program.cljc:1299" "src/seon/program.cljc:1348"]
+          seon.sci.reader ["src/seon/sci/reader.cljc:289" "src/seon/sci/reader.cljc:302" "src/seon/sci/reader.cljc:340"]
+          seon.fn.signature ["src/seon/fn/signature.cljc:70" "src/seon/fn/signature.cljc:81" "src/seon/fn/signature.cljc:93"]
+          seon.turn ["src/seon/turn.clj:3788 settings-edn" "src/seon/turn.clj:3790 usage-edn"] seon.turn.batch ["src/seon/turn/batch.clj:491"]
+          seon.schema ["src/seon/schema.clj:3957"] seon.config ["src/seon/config.clj:603"]
+          seon.error ["src/seon/error.clj:472 size" "src/seon/error.clj:493 size" "src/seon/error.clj:3002" "src/seon/error.clj:1787 url" "src/seon/error.clj:2593 url" "src/seon/error.clj:2610 url"]
+          seon.cluster.message ["src/seon/cluster/message.clj:199 refused-chain-limit stored as a string" "src/seon/cluster/message.clj:272 url"]
+          seon.background ["src/seon/background.clj:55 result-observation stored as a string"]
+          seon.cluster.registry ["src/seon/cluster/registry.clj:887"]
+          seon.render.web ["src/seon/render/web.clj:275" "src/seon/render/web.clj:276" "src/seon/render/web.clj:284" "src/seon/render/web.clj:290" "src/seon/render/web.clj:294" "src/seon/render/web.clj:438" "src/seon/render/web.clj:870" "src/seon/render/web.clj:887"]
+          seon.render.transcript ["src/seon/render/transcript.clj:1032"]
+          seon.render.hiccup ["src/seon/render/hiccup.clj:280" "src/seon/render/hiccup.clj:281" "src/seon/render/hiccup.clj:303" "src/seon/render/hiccup.clj:306" "src/seon/render/hiccup.clj:322" "src/seon/render/hiccup.clj:327"]
+          seon.fs ["src/seon/fs.clj:25"] seon.fn ["src/seon/fn.clj:1371" "src/seon/fn.clj:2764"] seon.fn.analyzer ["src/seon/fn/analyzer.clj:94" "src/seon/fn/analyzer.clj:928"]
+          seon.env ["src/seon/env.clj:58" "src/seon/env.clj:60" "src/seon/env.clj:90"] seon.render ["src/seon/render.clj:1495"]}
+  :what "EDN encoding for storage, sizes, digests, URL params, DOM ids and generated source. Several store data as a string attribute (settings-edn, usage-edn, key-edn, arity, binding form, refused-chain-limit, result-observation)."
+  :conversion "One canonical encoder (seon.sci.admit/canonical-edn) where text is required (URLs, generated source, blobs); data stored as data elsewhere; sizes measured once at seon.blob/inline-or-stage. Lower priority than display findings."}
+
+ {:id "F63" :cat 3 :sub "3e" :evidence :verified :shown "web and agent"
+  :sites ["src/seon/ai.clj:177" "src/seon/ai.clj:214" "src/seon/ai.clj:225" "src/seon/agent.clj:218" "src/seon/context.clj:921" "src/seon/render/transcript.clj:801" "src/seon/render/transcript.clj:1023" "src/seon/render/transcript.clj:1024" "src/seon/db.clj:6395 SimpleDateFormat" "src/seon/repl.clj:226 alloc-mb rounding"]
+  :conversion "Unit and precision are attribute schema properties (:seon.config/display-unit exists); the printer applies them (O7)."}
+
+ {:id "F64" :cat 4 :sym seon.context/exchange-ai :evidence :verified :one-render true
+  :sites ["src/seon/context.clj:884" "src/seon/context.clj:933 reply-html"] :shown "agent history"
+  :what "A second elision mechanism: an :older reply over :seon.config.context/reference-tokens is replaced by a reference built here and printed by core-text."
+  :conversion "Age is a printer option (O3): the history unit prints under a position budget; the printer's whole-value elision (handle, tokens, requery) replaces this."}
+ {:id "F65" :cat 4 :sym seon.render.value/text-limits :evidence :verified
+  :sites ["src/seon/render/value.clj:87 text-limits {:chars 400 :items 8 :depth 3 :entries 12 :links 8 :frames 10 :suppressed 3 :throwable-chars 8192}" "src/seon/render/value.clj:193 core-profile token-budget 1000" "src/seon/render/value.clj:567 scalar-bound 32, chunk-width 32, name-bound 256, nest-cap 6, sorted-bound 64, tuple-bound 8"]
+  :shown "everything printed" :what "Policy numbers hardcoded in the printer (CLAUDE.md: a hardcoded policy number is a defect). See F85-F88 for their measured effect."
+  :conversion "Profile dials read from the unit's render profile."}
+ {:id "F66" :cat 4 :sym seon.error/render-chain-ai :evidence :verified
+  :sites ["src/seon/error.clj:2514"] :what "Takes (:frames text-limits) frames: the printer's own constant used as a render's clip." :shown "agent"
+  :conversion "First-party filtering is selection; the count cut is the printer's (drop form)."}
+ {:id "F67" :cat 4 :sym seon.test.platform/run-check! :evidence :verified
+  :sites ["src/seon/test/platform.clj:150"] :what "(take-last 30 (str/split-lines output)) stored in the refusal." :shown "root and agent: platform check refusal"
+  :conversion "Store the output whole (inline-or-stage); the printer shows its tail (O8 tail-first cut)."}
+ {:id "F68" :cat 4 :sym seon.test.accretion/render-ai :evidence :verified
+  :sites ["src/seon/test/accretion.clj:112"] :what "take 3 failures per group, 'N more in the blob' prose, no runnable form." :shown "agent"
+  :conversion "Return the groups whole; the printer cuts with a drop form."}
+ {:id "F69" :cat 4 :sym seon.db/render-transaction-ai :evidence :verified
+  :sites ["src/seon/db.clj:6389"] :what "take 3 pull operations, silently: no count." :shown "agent: every transaction reply"
+  :conversion "Offer every identity's operation; the printer cuts with its count."}
+ {:id "F70" :cat 4 :sym my.program/sizes :evidence :verified
+  :sites ["src/my/program.clj:1104"] :what ":largest (take 20 rows) hardcoded." :shown "agent tool" :conversion "Return the sorted rows; the printer cuts."}
+ {:id "F71" :cat 4 :sym seon.health/render-ai :evidence :inferred
+  :sites ["src/seon/health.clj:663"] :what "take shown found, counts beside." :shown "agent, MCP, operator"
+  :conversion "Selection in a render is allowed when it names count and requery; confirm `shown` is a dial."}
+ {:id "F72" :cat 4 :sym seon.render.var/status :evidence :inferred
+  :sites ["src/seon/render/var.clj:130"] :what "take shown-tests with :seon.render.var/counts beside." :shown "agent: defn reply" :conversion "As F71."}
+ {:id "F73" :cat 4 :sym seon.error/nearest-names :evidence :verified
+  :sites ["src/seon/error.clj:1890 take 8" "src/seon/error.clj:1966" "src/seon/error.clj:1987" "src/seon/error.clj:2024" "src/seon/error.clj:2068" "src/seon/error.clj:2155" "src/seon/error.clj:2176 take 3" "src/seon/error.clj:2179 take 3"]
+  :what "Producer 'did you mean' selections with hardcoded counts." :shown "agent errors"
+  :conversion "Producer selection is legitimate; the counts become dials, or the ranked list returns whole for the printer to cut."}
+ {:id "F74" :cat 4 :sym seon.problems/resolution-text :evidence :verified
+  :sites ["src/seon/problems.clj:572"] :what "(subs digest 0 8) in prose." :shown "agent and web" :conversion "Digest as data."}
+ {:id "F75" :cat 4 :sym seon.render.transcript/reasoning-disclosure :evidence :verified :one-render true
+  :sites ["src/seon/render/transcript.clj:416"] :what "First line plus a literal … as an HTML summary." :shown "web" :conversion "Minor; the printer's HTML long-string face."}
+
+ {:id "F76" :cat 5 :evidence :inferred :shown "web"
+  :what "96 hiccup leaves built as [:code|:dd|:td|:span|:pre|:p|:li|:h* (str|pr-str|name ...)] in 24 files; most are labels and counts; the domain-value ones are F30, F50, F51, F57-F61."
+  :by-file {"src/seon/render/web.clj" 22 "src/seon/render/ns.clj" 7 "src/seon/health.clj" 7 "src/seon/effect.clj" 7 "src/seon/render/transcript.clj" 6 "src/seon/render/schema.clj" 6 "src/seon/config.clj" 5 "src/seon/render/sent.clj" 4 "src/seon/cluster/agent.clj" 4 "src/seon/cluster.clj" 4 "src/seon/task.clj" 3 "src/seon/error.clj" 3 "src/seon/db.clj" 3 "eleven other files" 11}
+  :conversion "A domain value inside a page is a nested value the printer dispatches (O1); labels and counts stay."}
+ {:id "F77" :cat 5 :sym seon.render.transcript/render-runtime-html :evidence :inferred :one-render true
+  :sites ["src/seon/render/transcript.clj:1041 runtime-turn-table" "src/seon/render/transcript.clj:1118 session-header"]
+  :shown "web runtime page" :conversion "Run and message entities through their pairs."}
+
+ {:id "F78" :cat 6 :sym seon.repl/render-ai :evidence :verified :one-render true
+  :paths [seon.repl/render-ai seon.repl/render-html seon.repl/render-emission-html seon.repl/text seon.context/exchange-ai seon.context/exchange-html seon.context/exchange-text seon.render.transcript/history-entries]
+  :value "one evaluation" :conversion "One pair on one schema, one shown text stored once."}
+ {:id "F79" :cat 6 :sym seon.cluster.message/format-ai :evidence :verified
+  :paths [seon.cluster.message/render-ai seon.cluster.message/format-ai seon.render.transcript/message-text] :value "one message" :conversion "render-ai only."}
+ {:id "F80" :cat 6 :sym seon.turn/render-ai :evidence :verified
+  :paths [seon.turn/render-ai seon.turn/render-html seon.render.transcript/render-run-ai seon.render.transcript/turn-header] :value "one run"
+  :conversion "One declared pair on the run entity."}
+ {:id "F81" :cat 6 :sym seon.error/mcp-prose :evidence :verified
+  :paths [seon.error/render-ai seon.error/ai-prose seon.error/mcp-prose seon.error/finding-ai seon.problems/ai-prose] :value "one error or fault"
+  :conversion "One AI face; MCP vs context is a consumer option (O6); distance selects finding detail (O4)."}
+ {:id "F82" :cat 6 :evidence :verified
+  :paths [seon.test.accretion/render-html seon.turn/render-html seon.cluster.instruction/instruction-html]
+  :value "HTML faces made by wrapping the AI face's text in [:pre] or [:p]" :conversion "Both faces from one printer selection."}
+ {:id "F83" :cat 6 :sym seon.ai/registry-ai :evidence :verified :paths [seon.ai/registry-ai seon.ai/model-ai] :value "models" :conversion "Delete the registry pair (no callers)."}
+ {:id "F84" :cat 6 :sym seon.render.transcript/render-history-ai :evidence :verified :one-render true
+  :paths [seon.render.transcript/render-history-ai seon.render.transcript/render-history-html] :value "turn history"
+  :what "AI face returns \"\" while the HTML face shows headers: a pair in name only." :conversion "A real AI face, or no pair."}
+
+ ;; ---------------- category 7: the printer's own internals (owner request 2026-10-16)
+ {:id "F85" :cat 7 :sym seon.render.value/sibling-level :evidence :verified
+  :sites ["src/seon/render/value.clj:1272"] :probe "JVM 2026-10-16, default, agent profile 6144 tokens"
+  :what "Members of a sequence or a set larger than 64 sit one level deeper per doubling of their position. On a real query result ([:find ?s ?d] over :seon.fn/doc, 4,956 tuples, 422,365 tokens whole) the printer showed 257 tuples with content, of which 99 had their docstring cut, then 196 lines of empty `[…2]` placeholders (428 tokens, 7% of the budget, zero information), then …4502."
+  :conversion "A collection past its fit point stops with one count and one drop form; members are never shown collapsed in a run. Breadth across members of one sequence is not more useful than whole members."}
+ {:id "F86" :cat 7 :sym seon.render.value/string-shown :evidence :verified
+  :sites ["src/seon/render/value.clj:835" "src/seon/render/value.clj:1382 fill-string" "src/seon/render/value.clj:1396 fill-strings"]
+  :probe "seon.sci.eval/shown-result's function entity at 1024 tokens: :seon.fn/doc (1,050 chars) shown to 259 chars (…+791) while two 64-hex digests, :seon.fn/keywords (292 tokens whole) and :seon.fn/calls sets are admitted at earlier levels; :seon.fn/source cut …+6786."
+  :what "A string is admitted at a 32-character chunk and grows one doubling chunk per level, competing with every structural expansion at the same level; leftover budget fills strings last. A long docstring beside many small fields gets an equal share, not the share its usefulness earns."
+  :conversion "Strings whole when they fit what remains after structure; collections collapse first (see recommended policy)."}
+ {:id "F87" :cat 7 :sym seon.render.value/member-rank :evidence :verified
+  :sites ["src/seon/render/value.clj:667" "src/seon/render/value.clj:680 sorts?" "src/seon/render/value.clj:690 held-order"]
+  :what "Map members ranked identity, then scalars and strings of at most 32 chars, then long strings, then collections; maps up to 64 keyword keys are re-sorted alphabetically within rank. The 32-char threshold (scalar-bound) decides that a docstring ranks after a digest."
+  :conversion "Rank by kind only (scalars and names, strings, collections) with no length threshold; keep the held order inside a rank for array maps."}
+ {:id "F88" :cat 7 :sym seon.render.value/text-limits :evidence :verified
+  :callers {seon.render.value/datum "src/seon/render/value.clj:91" seon.render.value/bounded-text "src/seon/render/value.clj:111" seon.render.value/link-lines "src/seon/render/value.clj:150"
+            seon.render.value/throwable-text "src/seon/render/value.clj:172" seon.render.value/shown-chain "src/seon/render/value.clj:211" seon.error/render-chain-ai "src/seon/error.clj:2514"}
+  :core-text-callers "F44: 21 non-edge sites, 11 edge sites, 5 script sites (script/seon/central_round.clj, rename_flow_actions.clj, rename_task_intent.clj, sentinel.clj, vocabulary.clj)"
+  :what "The second printer inside the printer: datum (8 items, depth 3), bounded-text (pr-str, subs 400, …), throwable-text (8192 chars), core-profile 1000 tokens."
+  :conversion "Delete datum, bounded-text, throwable-text and text-limits; core-text keeps the one selection with a structural profile and only opaque as its last resort."}
+ {:id "F89" :cat 7 :sym seon.render.value/make-node :evidence :verified
+  :sites ["src/seon/render/value.clj:1104"] :what "Only the root is offered to its render (rule 10, `(when (zero? id) (declared ...))`). This is what forces renders to call child renders by name (all of 1b) and pages to print children themselves (F44, F76)."
+  :conversion "Offer every reached keyword-lookup map and Var to declared selection under the same budget (option O1); a render's own output is not re-offered."}
+ {:id "F90" :cat 7 :evidence :verified
+  :sites ["src/seon/render/value.clj:1066 declared: :seon.schema/identity-projection lookup" "src/seon/render/value.clj:1076 walk-with-related: an entity root's one-hop related values attached inside the printer" "src/seon/render/value.clj:374 render-database-identity-ai" "src/seon/render/value.clj:1246 reference-value: database schema read per ref attribute"]
+  :what "No branch on a particular Seon schema was found in the printer's selection or emission (classify branches on class only; member-rank and reference-value use the database's general identity and ref schema). Three schema-aware pieces live in the printer namespace: the identity-projection lookup, the related-entities attachment (a walk concern) and one schema-specific render."
+  :conversion "Move render-database-identity-ai to the db namespace's pair; move with-related to the walk that builds the value; keep reference-value as the printer's general reference rule."}
+ {:id "F91" :cat 7 :sym seon.sci.eval/shown-result :evidence :verified
+  :sites ["src/seon/sci/eval.clj:4563" "src/seon/render/value.clj:298 text" "src/seon/render/value.clj:311 html" "src/seon/render/value.clj:1829 prepare" "src/seon/render/value.clj:1926 render-ai" "src/seon/render/value.clj:237 core-text" "src/seon/sci/eval.clj:4485 floor-text"]
+  :what "Seven public entries into one printer, three budgets (profile, fixed core, caller-stated spent/reserve); callers choose among them (prepare 6, render-ai-data 3, text 4, html 21, core-text 42, shown-result 8)."
+  :conversion "One entry: (print value options) returning both faces; options carry consumer, budget, position, detail; core is an internal fallback, not an entry."}
+]
