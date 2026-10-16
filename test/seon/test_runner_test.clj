@@ -12,6 +12,7 @@
             [sci.core :as sci]
             [seon.error :as error]
             [seon.operator.runtime]
+            [seon.program :as program]
             [seon.test :as sut]
             [seon.test.runner :as runner]
             [seon.test-support :as test-support]))
@@ -395,6 +396,50 @@
         (test-support/transacted! connection [changed])
         (is (not= before (get (runner/reach-digests (db/db connection) [test-symbol]) test-symbol))
             "reuse keyed by reach sees the same change")))))
+
+(deftest a-change-in-a-read-namespace-changes-its-readers-reach-digest
+  ;; a9e4e9904: the gate reused the bb-load test's green from main, because its reach digest covered the call graph
+  ;; and not the namespaces it reads as files (`:seon.test/reads`) from the gate's candidate root.
+  (test-support/with-database
+    (fn [connection]
+      (let [suffix (str (random-uuid))
+            read-ns (symbol (str "reach.read" suffix))
+            other-ns (symbol (str "reach.unread" suffix))
+            reader (symbol (str "reach.reader" suffix) "reads")
+            plain (symbol (str "reach.reader" suffix) "plain")
+            row (fn [declared source]
+                  (program/declaration-row (db/carried-projection (db/db connection))
+                                           {:seon.ns/name declared :seon.ns/source source} :all :agent))
+            define! (fn [declaration body]
+                      (test-support/transacted! connection (test-support/replacement-tx (db/db connection) declaration
+                                                                                        (str "(defn " (name (second declaration)) " {:malli/schema [:=> [:cat] :int]} [] " body ")") {})))
+            f [:seon.fn/sym (symbol (str read-ns) "f")]
+            g [:seon.fn/sym (symbol (str other-ns) "g")]
+            _ (test-support/transacted! connection [(row read-ns (str "(ns ^{:tq/read-kind true} " read-ns ")"))
+                                                    (row other-ns (str "(ns " other-ns ")"))
+                                                    (test-support/namespace-entity (db/db connection) (symbol (namespace reader)))])
+            _ (define! f 1)
+            _ (define! g 1)
+            _ (doseq [[test-symbol source] [[reader "(clojure.test/deftest ^{:seon.test/reads #{:tq/read-kind}} reads (clojure.test/is true))"]
+                                         [plain "(clojure.test/deftest plain (clojure.test/is true))"]]]
+                (test-support/transacted! connection (test-support/replacement-tx (db/db connection) [:seon.test/sym test-symbol] source {})))
+            digests #(runner/reach-digests (db/db connection) [reader plain])
+            archive (digests)
+            _ (define! f 2)
+            _ (is (= archive (digests)) "without a candidate root the reader reads the loaded archive, which a change on the branch leaves")
+            fork (db/q '[:find ?id . :in $ ?name :where [?f :seon.branch/name ?name] [?f :seon.branch/fork-id ?id]]
+                       (db/db connection) (get-in (db/db connection) [:config :branch]))
+            _ (is (some? fork) "the test's branch has its fork entity")
+            _ (test-support/transacted! connection [{:seon.branch/fork-id fork :seon.branch/program-root (str "/candidate/" suffix)}])
+            initial (digests)]
+        (is (every? string? (vals initial)) "both tests have a reach digest")
+        (is (not= (get archive reader) (get initial reader)) "read from a candidate root, the reader keys that root's content")
+        (define! g 2)
+        (is (= initial (digests)) "a change in a namespace nobody reads changes neither digest")
+        (define! f 3)
+        (let [after (digests)]
+          (is (not= (get initial reader) (get after reader)) "a change in a read namespace is the reader's new identity")
+          (is (= (get initial plain) (get after plain)) "a test reading nothing keeps its identity"))))))
 
 (deftest undigested-declarations-never-share-a-reuse-key
   ;; Entities admitted before the digest was required: the writer now refuses

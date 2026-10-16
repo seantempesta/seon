@@ -746,7 +746,9 @@
         _ (task/index-tasks! {:seon.db/connection main-conn
                               :seon.task/files {(str "resources/seon/tasks/" task-ns ".edn")
                                                 "[#:seon.task{:name \"fix\" :plan \"Break a bb namespace.\" :proofs #{seon.babashka-load-test/a-declared-namespace-requiring-a-jvm-only-library-fails-to-load}}]"}})
-        broken 'seon.dev.dependency-digest/canonical-file
+        ;; a bb namespace function only test-root tests reach: a script-root deftest reaching the change (as
+        ;; `seon.operator-move-test` reaches `seon.dev.dependency-digest`) refuses the gate's request as unknown coverage
+        broken 'seon.dev.docstring/format-findings
         reader 'seon.babashka-load-test/declared-namespaces-load-in-babashka
         ;; main's own green run of the reader: a merge is curated by tests green where it forked (ruling 5a)
         on-main (db/with-branch {:seon.db/connection main-conn}
@@ -760,7 +762,7 @@
     (try
       (registry/on-branch store branch
                           #(support/transacted! % (support/replacement-tx (db/db %) [:seon.fn/sym broken]
-                                                                         "(defn- canonical-file\n  [path]\n  (java.awt.Point. 0 0))" {})))
+                                                                         "(defn format-findings\n  [request]\n  (java.awt.Point. 0 0))" {})))
       (let [prepared (source/prepare-merge! target store branch task-sym {:root root})]
         (some->> (:seon.source/candidate prepared) (vswap! made conj))
         (is (some #{reader} (:seon.source/red prepared))
