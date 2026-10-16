@@ -362,6 +362,8 @@
                                    context-byte-limit))))))))
 
 (defn- occurrences
+  "The non-overlapping positions of the nonempty search string in source."
+  {:malli/schema [:=> [:cat :string :my.edit/old-string] [:vector nat-int?]]}
   [^String source ^String sought]
   (loop [offset 0
          found []]
@@ -401,7 +403,7 @@
   "Answers `source` with its one exact occurrence of `old-string` replaced by
   `new-string`, or the no-match or ambiguous-match error with the matching lines."
   {:malli/schema
-   [:=> [:cat :string :string :string]
+   [:=> [:cat :string :my.edit/old-string :my.edit/new-string]
     [:or :string :my.edit/no-match-error :my.edit/ambiguous-match-error]]}
   [source old-string new-string]
   (let [positions (occurrences source old-string)]

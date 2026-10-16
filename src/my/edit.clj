@@ -87,7 +87,7 @@
   (effect/request! #'exact! request))
 
 (defn text
-  "Answers `source` with the one exact occurrence of `old-string` replaced by `new-string`.
+  "Answers `source` with the one exact occurrence of nonempty `old-string` replaced by `new-string`.
 
   Zero occurrences answer `:my.edit/no-match-error`, several
   `:my.edit/ambiguous-match-error`, each with the matching lines in
@@ -99,7 +99,7 @@
   (my.edit/text \"(def example 1)\" \"1\" \"2\")
   ```"
   {:malli/schema
-   [:=> [:cat :string :string :string]
+   [:=> [:cat :string :my.edit/old-string :my.edit/new-string]
     [:or :string :my.edit/no-match-error :my.edit/ambiguous-match-error]]
    :seon.workload :compute}
   [source old-string new-string]

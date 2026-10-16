@@ -38,6 +38,19 @@
       (is (= :my.edit/ambiguous-match-error (:seon.error/type many)))
       (is (= [1 3] (get-in many [:seon.error/data :seon.edit/lines]))))))
 
+(deftest text-rejects-empty-search-before-entry
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)]
+       (doseq [[source operation]
+               [["(my.edit/text \"source\" \"\" \"replacement\")" 'my.edit/text]
+                ["(seon.edit/text \"source\" \"\" \"replacement\")" 'seon.edit/text]
+                ["(my.edit/text \"\" \"\" \"replacement\")" 'my.edit/text]
+                ["(seon.edit/text \"\" \"\" \"replacement\")" 'seon.edit/text]]]
+         (let [refusal (support/agent-value ctx source)]
+           (is (= :input (:seon.instrument/check refusal)))
+           (is (= operation (:seon.instrument/fn refusal)))))))))
+
 (deftest public-entries-declare-resolvable-io-capabilities
   (support/with-database
     (fn [connection]
