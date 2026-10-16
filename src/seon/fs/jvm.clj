@@ -316,21 +316,14 @@
 (defn- window-pass
   "Read exactly the requested window and digest exactly what is returned.
 
-  The bound and the read are the SAME quantity here, which is the whole point:
-  this pass takes no whole-file ceiling because it cannot read more than it
-  returns. Seeking to `byte-offset` and stopping after `window-limit` bytes
-  makes a windowed `my.fs/read` cost the window rather than the file, so a
-  window of an arbitrarily large file is an ordinary read.
-
-  The class this kills is a bound measured against something other than the
-  thing it bounds. The pass this replaced streamed the WHOLE file so it could
-  promise a whole-file digest, and refused as soon as that running total
-  crossed the ceiling — so `:my.fs/byte-offset` and `:my.fs/max-bytes` only
-  selected bytes out of a stream they never bounded, and the affordance that
-  exists FOR large files was the one large files could not use. There is no
-  ceiling parameter here to compare against the wrong quantity."
-  [^SeekableByteChannel channel byte-offset window-limit]
-  (let [octets (byte-array (int window-limit))
+  The window is bounded by `window-limit`, the bytes left in the file and the
+  read ceiling: a window past the ceiling refuses, so a read never answers a
+  silent prefix, and a window of an arbitrarily large file costs the window."
+  [^SeekableByteChannel channel path byte-offset window-limit read-limit]
+  (let [window (min window-limit (max 0 (- (.size channel) byte-offset)))
+        _ (when (> window read-limit)
+            (read-limit-refusal! path window read-limit))
+        octets (byte-array (int window))
         ^ByteBuffer buffer (ByteBuffer/wrap octets)
         digest (MessageDigest/getInstance "SHA-256")]
     (when (pos? byte-offset)
@@ -479,7 +472,7 @@
       (let [pass (if complete?
                    (whole-file-pass channel path (:seon.fs.jvm/size before)
                                     read-limit)
-                   (window-pass channel byte-offset window-limit))
+                   (window-pass channel path byte-offset window-limit read-limit))
             after (relative-observation directory entry-name)]
         (when-not (same-observation? before after)
           (refuse! :my.fs/changed-during-read
@@ -533,20 +526,19 @@
                      {:my.fs/path path})))))
 
 (defn- read
-  "The agent-facing WINDOW read: bounded by the window, never by the file.
+  "The agent-facing read: the window `:my.fs/max-bytes` names from
+  `:my.fs/byte-offset`, else the rest of the file.
 
-  The window this returns is `:my.fs/max-bytes` capped by the inline ceiling,
-  and that is also the entire cost — no size of surrounding file can refuse
-  it. That is the affordance the docstring promises for a file too large to
-  take whole, and it now works on a file of any size."
+  The cost is the window returned. A window past the read ceiling refuses
+  with `:my.fs/read-limit` and never answers a silent prefix; the value
+  printer decides what of a large text is shown."
   {:malli/schema
    [:=> [:cat :my.fs/read-request :seon.config/effective]
     [:or :my.fs/read-result :seon.error/value]]}
   [request effective]
   (read-window
    request effective
-   (long (min (:seon.config.fs/max-inline-bytes effective)
-              (or (:my.fs/max-bytes request) Long/MAX_VALUE)))
+   (long (or (:my.fs/max-bytes request) Long/MAX_VALUE))
    false))
 
 (defn- read-complete

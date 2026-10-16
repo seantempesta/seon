@@ -443,3 +443,22 @@
           (is (false? (:my.fs/regular-file? result)))
           (is (false? (:my.fs/directory? result)))
           (is (not (contains? result :my.fs/byte-size))))))))
+
+(deftest a-read-returns-the-whole-file-unless-a-window-is-asked
+  ;; The inline dial bounds what an edit may produce, never what a read returns:
+  ;; a read that answered a silent prefix cost an agent nine calls on one file.
+  (with-temp-tree
+    (fn [root]
+      (let [text (apply str (repeat 20000 "0123456789"))
+            _ (write-octets! (.resolve root "big.txt") (.getBytes ^String text StandardCharsets/UTF_8))
+            settings (assoc (policy root) :seon.config.fs/max-read-bytes 300000)
+            whole ((handler 'read) {:my.fs/path "big.txt"} settings)
+            window ((handler 'read) {:my.fs/path "big.txt" :my.fs/max-bytes 50000} settings)
+            over ((handler 'read) {:my.fs/path "big.txt"}
+                  (assoc settings :seon.config.fs/max-read-bytes 100000))]
+        (is (= text (:my.fs/text whole)) "no window asked: the value is the whole file")
+        (is (true? (:my.fs/eof? whole)))
+        (is (= (sha-256 (.getBytes ^String text StandardCharsets/UTF_8)) (:my.fs/digest whole)))
+        (is (= 50000 (:my.fs/bytes-read window)) "a window larger than the inline dial is honoured")
+        (is (false? (:my.fs/eof? window)))
+        (is (string? (:my.fs/read-limit over)) "past the read ceiling it refuses loudly, never a prefix")))))

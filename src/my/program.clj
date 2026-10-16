@@ -1042,7 +1042,7 @@
                   [:or :my.program/search-result :seon.db/invalid-read-error]]}
   [database query]
   (let [{:keys [text limit] :or {limit 8}} (if (map? query) query {:text query})
-        needle (if (keyword? text) (str text) text)
+        needle (if (string? text) text (str text))
         sources (source-matches database needle)]
     (if (:seon.db/invalid-read sources)
       sources
@@ -1058,10 +1058,10 @@
                           (ranked-matches database rows tests (cond-> limit key-hit dec)))]
         (cond-> {:count (count matches) :matches matches}
           (< (count matches) (+ (count rows) (if key-hit 1 0)))
-          (assoc :more (list 'my.program/search (cond-> {:text text :limit (* 3 limit)} (map? query) (merge (select-keys query [:seon.ref/at]))))))))))
+          (assoc :more (list 'my.program/search (cond-> {:text (cond-> text (symbol? text) str) :limit (* 3 limit)} (map? query) (merge (select-keys query [:seon.ref/at]))))))))))
 
 (defn search
-  "Search the program for a string or keyword: the schema key itself, the owners the vocabulary's entries cite and
+  "Search the program for a string, symbol or keyword: the schema key itself, the owners the vocabulary's entries cite and
   each declaration whose source holds the text, one match per declaration, each with its expansion's token cost.
 
   Ranked: owners before tests (a test namespace's helpers rank with its tests), then the schema key and vocabulary
@@ -1074,6 +1074,7 @@
   ```clojure
   (my.program/search :seon.render/form)
   (my.program/search \"program context\")
+  (my.program/search 'seon.effect/render-ai)
   (my.program/search {:text \"java.util.Date.\" :limit 25})
   (my.program/search {:text \"program context\" :seon.ref/at :chain-f1f6dc8e6652})
   ```

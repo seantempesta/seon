@@ -38,25 +38,28 @@
 (schema.edn/load! {})
 
 (defn read
-  "Read a bounded window of one file.
+  "Read one file, whole unless a window is asked.
 
-  Returns :my.fs/text (or :my.fs/bytes), :my.fs/window-digest,
-  :my.fs/file-bytes, :my.fs/bytes-read and :my.fs/eof?. The whole-file
-  :my.fs/digest appears only for a complete read. Page with
-  :my.fs/byte-offset and :my.fs/max-bytes.
+  Takes a path string or a request map. Returns :my.fs/text (or :my.fs/bytes),
+  :my.fs/window-digest, :my.fs/file-bytes, :my.fs/bytes-read and :my.fs/eof?.
+  The whole-file :my.fs/digest appears when the whole file is returned. Ask a
+  window with :my.fs/byte-offset and :my.fs/max-bytes; a file past the read
+  ceiling refuses, never answers a prefix. The value printer shows a large
+  text with the form that reads the rest.
 
   ## Example
 
   ```clojure
+  (my.fs/read \"AGENTS.md\")
   (my.fs/read {:my.fs/path \"AGENTS.md\" :my.fs/max-bytes 1024})
   ```"
   {:malli/schema
-   [:=> [:cat :my.fs/read-request]
+   [:=> [:cat [:or :my.fs/path :my.fs/read-request]]
     [:or :my.fs/read-result :my.fs/tool-error]]
    :seon.workload :io
    :seon.effect/capability 'seon.fs.jvm/read}
   [request]
-  (effect/request! #'read request))
+  (effect/request! #'read (if (string? request) {:my.fs/path request} request)))
 
 (defn write!
   "Write one file only if its content precondition holds.

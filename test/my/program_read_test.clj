@@ -102,3 +102,13 @@
      (let [read (program/source (db/db connection) 'pr.read/answer)]
        (is (= {:sym 'pr.read/answer :kind :task :plan "Answer the symbol." :instructions "Read it."} read)
            "a task symbol answers its plan and instructions, not a not-found refusal")))))
+
+(deftest search-takes-a-symbol-as-the-text-of-its-name
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           by-string (program/search database "seon.task/task-handle")]
+       (are [query] (= by-string (program/search database query))
+         'seon.task/task-handle
+         {:text 'seon.task/task-handle})
+       (is (seq (:matches by-string)))))))

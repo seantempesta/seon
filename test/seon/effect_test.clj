@@ -954,6 +954,19 @@
         (.delete (java.io.File. path))
         (.delete (.getParentFile (java.io.File. path)))))))
 
+(deftest a-read-takes-a-path-string-as-the-map-of-that-path
+  (test-support/with-database
+    (fn [connection]
+      (seed-effect-run! connection)
+      (let [path (temporary-path connection)]
+        (binding [effect/*request-context* (request-context connection)]
+          (my.fs/write! {:my.fs/path path
+                         :my.fs/content {:my.fs/text "line1\n"}
+                         :my.fs/precondition {:my.fs/expected-absence? true}})
+          (is (= "line1\n" (:my.fs/text (my.fs/read path))))
+          (is (= (my.fs/read {:my.fs/path path}) (my.fs/read path))))
+        (.delete (java.io.File. path))))))
+
 (deftest tool-runtime-failures-return-the-producer-error-value
   ;; THE CLASS: a tool's runtime failure was reported as the armed output
   ;; contract refusing the error itself (`:my.fs/error` demanded members no

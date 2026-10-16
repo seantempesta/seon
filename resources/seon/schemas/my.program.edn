@@ -47,7 +47,7 @@
  [:int {:min 0 :description "The tokens a candidate's AI face costs when expanded (my.program/source), estimated before the agent picks it."}]
  :my.program/producer :seon.program/declaration-identity
  :my.program/search-query
- [:or :string :keyword [:map [:text [:or :string :keyword]] [:limit {:optional true} [:int {:min 1}]] [:seon.ref/at {:optional true} :seon.ref/at]]]
+ [:or :string :keyword :symbol [:map [:text [:or :string :keyword :symbol]] [:limit {:optional true} [:int {:min 1}]] [:seon.ref/at {:optional true} :seon.ref/at]]]
  :my.program/search-match
  [:or {:description "One search candidate: a declaration with its first matching line, or a schema key with the declaration producing it."}
   [:map [:sym :qualified-symbol] [:line {:optional true} :int] [:snippet {:optional true} :string]
