@@ -1,7 +1,7 @@
 ---
 title: "Context self-improvement loop: fewer model turns per task, measured on a benchmark that cannot be gamed"
 type: research
-status: owning plan, 2026-10-16 (recursive goal set by the owner)
+status: owning plan, 2026-10-16 (recursive goal; learn from all gathered data, no repeated benchmark runs)
 ---
 
 # Context self-improvement loop
@@ -11,66 +11,82 @@ things in between runs to lower the amount of turns an agent needs to achieve th
 examples and develop a benchmark. No cheating though and just putting the answers in the help text exactly! How can we
 enforce that? Lets try self audits from gemini flash so we get an outside perspective."
 
-## What exists (measured, not planned)
 
-- **The bench machinery.** `seon.competency/launch!`, `seon.competency/grade` and `seon.competency/table` in
-  `test/seon/competency.clj` (BENCH-1, BENCH-3; `docs/seon/schedule/cards/README-bench.md`). The design and its
-  strategy dials (S1-S8) are in `docs/research/agent-platform/2026-10-08/competency/competency-spec.md`.
-- **Noise floor (E0).** One cell, T1 typed × 5, varied by 2 of 5 green across batches. So a 5-run difference of 2 is
-  noise; 3 or more of 5, or non-overlapping ranges of calls to green, is signal.
-- **Cost (E0+E1).** 65 DeepSeek-flash runs cost US$0.099 in total.
-- **Prior result (E1).** Typed task wording beat prose, and became the default.
-- **Live corpus.** Only 4 model attempts survive (`context-patterns.md`, beba51b31), because branches were deleted at
-  publication. Lane keep-receipts is making every ended branch kept by default (owner ruling 10-16).
-- **Where the turns go.** The classifier dataset is `context-patterns.edn`. Known waste:
-  - history elision drops a just-read source, which the agent then re-reads;
-  - `in-ns` churn;
-  - `dir` lists no deftests;
-  - unrun proofs were shown red.
+Owner, later the same day:
+- "I want recursive self improvement. That's the goal."
+- "No we don't want to benchmark the agents several times. I want a way to use all the data we are gathering to learn
+  from it. This needs to be recursive so it improves over time not a consensus that's expensive and we have limited
+  changes."
+- "No automatic re-runs in the system until we have shit under control and I say so."
 
-  Lane context-fix is fixing the top items now.
-- **Task stock.** About 929 filed tasks in 106 `resources/seon/tasks/*.edn` files, plus git history full of
-  "fix + regression test" commits.
-- **Outside auditors.** Gemini via `bin/agy-agent` (`.agents/skills/agy-lanes/SKILL.md`). Flash-high is the measured
-  best auditor: in the 10-14 audit run its 11 findings all quoted real code. The weekly Gemini quota is **22% left
-  (resets 2026-10-21)**, so audits must be rationed: about one Flash-high audit per accepted change.
-- **Gap in the launcher.** `launch!` predates task chains. It assigns at main on a per-agent branch. It must run
-  through the real setup transaction (`seon.task/chain!`, P3/P4) so the bench measures the pipeline agents actually
-  use.
+So this plan replaces the earlier design, which ran a fixed task set several times with train, dev and held-out
+splits. Nothing runs twice for measurement. Every real task runs once, as itself, merges as usual, and keeps its
+branch. The data is everything those runs record.
 
-## The loop (one iteration, about 30-60 min, about US$0.10-0.50 of DeepSeek)
+## What exists
 
-1. **Measure.** Run the train set at the current HEAD, n = 5 per task, plus 5 more where a cell is near the
-   threshold. The grade per run is calls to green (a capped run counts as cap + 1), green share, tokens, and wasted
-   forms by class.
-2. **Mine.** Read every evaluation of the run from the kept branches as of its time: the value, the selected render,
-   the printed tokens and cuts, and the agent's next form. Charge a wasted turn to a render or a printer cut when the
-   next form follows the elision form or reads the same handle, or when the agent calls `doc`, `source` or a requery
-   on what it was just shown. Add render errors and text-returning renders (the render bench's signals), and classify
-   the rest with the `context-patterns` classifier promoted to code. Rank causes by wasted turns × frequency. The
-   values agents actually saw become the render bench's pinned samples (`render-bench/`), weighted by frequency.
-3. **Hypothesise.** Root writes one change at the producer of the top class, plus its predicted turns saved.
-   - The producer is help, a render function, a docstring, a contract message, a dial default or a template.
-   - The change must be general: it states the class of situation it helps, never a task.
-4. **Pre-judge (optional, for anything non-trivial).** Flash-low judges the proposal against the waste evidence before
-   it is built (agy use 2).
-5. **Build and prove.** Commit through `bin/lane commit` as usual, plus the leak check (below).
-6. **Re-measure.** Run train + dev at the candidate.
-   - **Accept** when train turns drop beyond the noise floor, dev does not regress, and the green share does not drop.
-   - **Revert** otherwise. A revert is data too: record it.
-7. **Audit.** A blind Flash-high audit of the accepted diff (spec below). Every finding is reproduced by root before
-   anyone acts on it.
-8. **Record.** Append one row to `bench-ledger.md`: HEAD, change, hypothesis, predicted vs measured turns per set,
-   audit verdict, cost.
+- **Kept branches.** Every ended branch stays as history (`:seon.config.agent/keep-ended-branches?`, shipped true).
+  Each evaluation an agent made is on its branch: the form, the value's printed text and cuts, the selected render,
+  errors, timing, and the agent's next form.
+- **A grader for one attempt.** Lane bench, 912c9341e, built `seon.competency/grade`:
+  - end and green;
+  - model calls and calls to green;
+  - forms by class (read, re-read, probe, progress, wait, navigation, search, repeat, unresolved, contract refusal,
+    error);
+  - tokens, wall time, evaluation time and allocation.
 
-Every K = 5 accepted changes, a **separate lane** runs the held-out test set and reports only aggregates. Root never
-sees per-task output from it (below).
+  It grades a kept attempt read-only in about 70 ms. Its repeat launcher and the 7-task set
+  (`test/seon/competency/bench-v1.edn`) are not used by this plan.
+- **First data point.** The live run's chain (`live-run.md`, attempt 5548298627d3) took 27 calls, 16 of them spent
+  adding a require to an existing `ns` form.
+- **The render bench** (lane render-bench) measures each render on pinned real samples: tokens, cuts, cost, text
+  violations. It is the proof row for render fixes. It is a deterministic measurement of code, not a model run.
+
+## Learning from every step, not from repeated runs
+
+A run is not one data point; each step is. One chain of 27 calls holds 27 decisions, each with the context the agent
+had and what it did next. That is why repeats are unnecessary: the signal is per situation, and situations recur
+across different real tasks.
+
+1. **Record situations.** The miner reads every kept branch as of each evaluation. It writes one situation record per
+   step: what was shown (value schema, selected render, tokens, cuts, errors, which references the context resolved)
+   and what the agent did next. It runs over data only, in milliseconds per attempt, and never starts a model call.
+2. **Attribute waste to a cause.** A step is a wasted turn when the next form:
+   - follows an elision form or reads the same handle (a cut hid what was needed);
+   - re-reads something already shown, or calls `doc`, `source` or a requery on it (the render or context left it
+     out);
+   - repeats a refused or erroring form (the error did not say how to fix it);
+   - searches for an owner the plan could have named (the task text was untyped).
+
+   The cause is the producer that made what was shown: a render, a printer cut, a docstring, an error constructor,
+   help text, a task template. Charging is deterministic from the data.
+3. **Rank causes** by wasted turns, summed over all recorded steps and weighted by how often the situation occurs.
+4. **Fix the top cause** as a task from a template (below), proven by its red deftest. It runs once as real work and
+   merges.
+5. **Learn whether it worked from later real work.** For each cause, the miner tracks its waste rate per occurrence by
+   commit: wasted turns per occurrence of that situation, before and after the fixing commit. The occurrences come
+   from whatever real tasks run next. The headline trend is turns per task and calls to green over time.
+   - A fix whose rate does not fall is reopened, with the new evidence in its task.
+   - Nothing is re-run to check it.
+6. **New causes come from the unexplained.** Waste no current cause explains is clustered: embed the step's shown
+   context and next form with EmbeddingGemma 2 (`embedding/fast/`), then group the steps by similarity. A recurring
+   cluster becomes a new named cause, and the class list grows from the data instead of being fixed up front.
+
+Each fix is targeted at a measured cause and checked by that cause's rate on later, different tasks. That costs
+nothing beyond the work we were doing anyway, and the signal accumulates with every task.
+
+**Honesty.**
+- A fix must be general: it changes a producer for a class of situation, never text that answers one task. The leak
+  rule stays: context may name a concept's owner, never a task's solution.
+- Because a fix is judged on later tasks it was not written for, overfitting to one task shows up as a rate that
+  does not fall.
+- A render that hides everything gets no cuts, but the dig rate on later runs catches it.
 
 ## Recursive: Seon improves Seon
 
 Owner, 2026-10-16: "I want recursive self improvement. That's the goal." The loop above is the first stage: root
-optimises and lanes build. It becomes recursive in three steps. Each step happens only when the previous one beats its
-predecessor on the held-out set.
+optimises and lanes build. It becomes recursive in three steps. Each step happens only when the previous one
+lowers the waste rates on later real work faster than its predecessor did.
 
 1. **The fixes are Seon tasks.** Each ranked cause becomes a task through `seon.task/chain!`, one per render or
    producer, so the lanes are file-disjoint. Its proofs are the render bench row on the pinned real samples (no cut,
@@ -78,11 +94,10 @@ predecessor on the held-out set.
    ordinary merge accepts them. General printer changes stay with our lanes. The agents fixing the context work
    inside the context they are fixing, and their own runs are mined in the next round.
 2. **The loop's machinery is in scope.** The miner, the ranker, the task template that turns a cause into a task, help
-   and the step templates are ordinary Seon code and data. A change to them is measured exactly like a context change:
-   turns per task on the held-out set at the next round.
-3. **Seon agents optimise.** A Seon chain takes over the hypothesise step: read the ranked causes, write the change
-   and its predicted saving. Root keeps only acceptance, which is the measured rule, and the owner-gated items under
-   "Separation of duties".
+   and the step templates are ordinary Seon code and data. A change to them is judged by the same signal: the waste rates
+   and turns per task on later real work.
+3. **Seon agents optimise.** A Seon chain takes over choosing and specifying the fixes: it reads the ranked causes and
+   writes the task with its red proof and predicted saving. Root keeps merging, and the owner keeps the fixed points.
 
 ### The first template: a clipped output (owner, 2026-10-16)
 
@@ -121,113 +136,29 @@ be invalidated by hand.
 - renders return data.
 
 Fixed points, which no optimiser changes:
-- the grader;
-- the held-out set and its hash;
-- the leak test;
+- the miner's waste definitions and the grader;
+- the leak rule;
 - the call cap and the model;
-- the CLAUDE.md laws.
+- the CLAUDE.md laws;
+- no automatic re-runs.
 
-A gain counts only on chains the change was not tuned on, split by chain, never by step. A render that shows nothing
-gets no cuts, so the dig rate on the next round's replays is the counter-metric that catches it.
-
-## The benchmark
-
-Twenty to thirty tasks, each meeting competency-spec §1: typed plan, red proof, an oracle that goes red to green, and
-"cannot be copied".
-
-- **Replay tasks (SWE-bench-style, from our own history).**
-  - Source: a past commit that fixed something and added a regression test.
-  - Setup, written as data in `chain!`'s setup transaction: the fix's declarations reverted on a fresh chain branch,
-    which makes the proof red.
-  - Plan: written from the filed task or issue text, never from the diff.
-  - Oracle: the commit's own fix.
-  - Candidates come from `git log` with a test added under `test/` and a filed task retired in the same commit. The
-    seon.ref wildcard task and the 10-15 fixes are the first examples.
-- **Competency tasks.** T1-T4 typed (they exist), T9h, and the T14 family once paging lands. These cover generic REPL
-  skills.
-- **Variants.** Each task gets 2 paraphrased plans, and where possible renamed namespaces and symbols (seeded by the
-  run). A gain that survives renaming and paraphrase is general; a gain that disappears under them was memorised.
-- **Splits.** About 40% train (the optimiser sees everything), 20% dev (aggregate per task only), and 40% held-out
-  test. The test set is authored by a lane that does not optimise, and is only run by it.
-
-## Enforcing "no cheating"
-
-No single rule stops a capable optimiser, so the plan stacks mechanisms. Each catches what the others miss.
-
-1. **A leak test (automated, part of every commit's check).** A new deftest, `seon.bench-test/context-holds-no-bench-answer`.
-   - For every bench task it takes the answer fingerprint: the identifiers the oracle creates or changes, distinctive
-     literals and strings in the oracle and proof, and the proof's test name.
-   - It fails if any context-producing source contains them in an answer-shaped way: `resources/seon/help.md`, the
-     step templates `resources/seon/tasks/seon.step.*.edn`, the render functions, and the docstrings of `my.*` tools.
-   - Names that already existed in the program before the task are allowed. The rule is that the context may name the
-     owner of a concept, but may never contain the task's solution.
-   - Each task also carries a canary GUID in its plan, and the test fails on that GUID appearing anywhere outside the
-     task file.
-2. **Held-out test set, sealed by commitment.**
-   - The test set lives in its own files, owned and run by a separate lane (never root, never the optimiser).
-   - Its SHA-256 is committed when the set is frozen, so later tampering is visible.
-   - Root sees only aggregate scores.
-   - The overfitting alarm: if train turns fall and held-out turns do not, after K changes, the last K changes are
-     reviewed for leakage and the loop pauses.
-   - Honest limit: root can technically read the files. The commitment plus the audit plus the generalisation gap make
-     cheating detectable, not impossible.
-3. **Paraphrase and rename robustness.** Every accepted gain must hold on the task's paraphrased and renamed variants
-   (the "scramble non-semantic fields" diagnostic, below). A change that helps only one wording of a task is rejected.
-4. **Separation of duties.** The optimiser may change context producers only. Changing any of these needs the owner's
-   approval:
-   - the grader (`seon.competency/grade`), task files, proofs or oracles;
-   - the call cap, the model, or the bench config.
-
-   The leak test and the bench files get their own lane ownership, so a context lane cannot edit them. This blocks the
-   classic games: raising the cap, loosening proofs, choosing easier tasks.
-5. **A generality rule per change.** Each change states the situation class it helps ("a reply over N tokens the agent
-   asked to read"). The audit checks that the class is real and occurs outside the bench (count it across the kept
-   branches and the live corpus, per CLAUDE.md "Count before designing").
-6. **Outside audit by Gemini Flash.** Spec sketch below.
-
-### Audit spec (Flash-high, read-only, archive tree; `AGY_TREE=archive`)
-
-> Audit one accepted context change for overfitting to a benchmark. You see: the diff, the bench task plans and proofs
-> (train and dev only), the measured before/after table, and the change's stated situation class. Do not edit. Answer,
-> with quotes from the diff and the tasks: (1) does any added text give a task's solution, its specific names or
-> literals, or steer toward one task's answer? (2) is the situation class real, and how often does it occur in
-> `context-patterns.edn` and the kept branches outside the bench? (3) would the change help a plausible task not in
-> the bench? Construct one. (4) did anything outside context producers change (grader, proofs, cap, tasks)?
-> Verdict: general / suspicious / leak, with evidence.
-
-Ration: 1 audit per accepted change (about 1-2% of weekly quota each), plus 1 Argon-low design audit of this plan
-itself before phase 2. When Gemini is out, the same spec runs on GPT or Claude through agy's separate bucket (still an
-outside model to root, though not to the Claude family).
 
 ## Phases
 
-| Phase | What | Owner | Proof |
-|---|---|---|---|
-| L0 | Prerequisites: P3/P4 land (`chain!` is the setup transaction), branches kept, the grade reads end facts (context-patterns fix 6) | flow-pass, keep-receipts | a bench run's branch is readable after the merge or cap |
-| L1 | Port `launch!` onto `chain!` (each run = a chain of one, its setup and config as data); promote the form classifier into code | Sonnet lane | a fixture-provider launch grades from a kept chain branch |
-| L2 | Benchmark v1: mine 10 replay candidates (Haiku dig over git log, verified), author tasks + oracles + 2 paraphrases (Sonnet), split; freeze held-out with its hash | Haiku → Sonnet; held-out by a separate lane | every oracle red→green; leak test green on the empty context |
-| L3 | Leak test + canaries + lane ownership of bench files | Sonnet | the leak test fails on a planted answer line in help.md, passes on HEAD |
-| L4 | Baseline: train + dev + held-out at HEAD, n = 5 (about 150 runs, about US$0.25) | root + held-out lane | `bench-ledger.md` row 0 |
-| L5 | Iterations: the loop above, root as optimiser, lanes for builds, Flash for audits | root | ledger rows; held-out check every 5 accepted changes |
-| L6 | Automate the measuring half (one script: run sets → mine → table → ledger draft); keep hypothesis and acceptance with root | Sonnet | one command produces the ledger row |
+| Phase | What | Proof |
+|---|---|---|
+| M1 | The miner: one situation record per step over every kept branch, read-only, with the shown context, the cause candidates and the next form | a deftest over a fixture chain: the records name each step's render, cuts and next form; the cost per attempt is measured |
+| M2 | Waste attribution and ranking by cause; the per-cause rate by commit | a deftest: the live run's 16 ns-require calls are charged to one cause |
+| M3 | The first template, a clipped output (above); the miner files its tasks through `seon.task/chain!` | a filed task's red bench row turns green by its fix |
+| M4 | Unexplained waste clustered by embeddings into proposed new causes | the clusters over the kept branches, reviewed by root before any becomes a cause |
+| M5 | A Seon chain chooses and specifies fixes | its fixes lower the waste rates at least as well as root's did |
 
-The first iterations are cheap and already queued: context-fix's elision, `dir`, `in-ns`, must-read and help fixes
-are exactly loop changes. Run L4's baseline on the commit before them and again after them, and they become loop
-iteration 1 with a real before/after number.
-
-## Decisions for the owner
-
-1. **The split and the sealing.** 40/20/40 with a hash commitment and a separate held-out lane (recommended), or a
-   simpler train/test 50/50 with root seeing test aggregates only.
-2. **Audit rationing.** One Flash-high audit per accepted change (recommended, about 1-2% weekly each; quota is 22% now),
-   or batch audits every 5 changes to stretch the quota.
-3. **Who optimises.** Decided (owner, 2026-10-16: recursive self-improvement is the goal): root optimises first, with
-   lanes and DeepSeek chains building, and a Seon chain takes over the hypothesise step once it beats root on held-out
-   (see "Recursive: Seon improves Seon"). Acceptance is always the measured rule, never a judgement.
-4. **Budget.** Proposed: up to US$2 of DeepSeek per day of loop work (about 1,300 runs), and stop if a day's changes
-   show no held-out gain.
+Today the corpus is small: one model attempt with 27 calls, plus whatever the next real tasks produce. The first
+real tasks to run are the known fixes, which are ordinary work anyway; their runs are the corpus.
 
 ## Research notes
+
+(Kept from the earlier benchmark design; the leakage notes still apply to the leak rule.)
 
 - **Eval-to-prompt leakage is the known failure.** Few-shot or help content drawn from the eval set raises the score
   without raising real performance. Keep a locked test set separate from what feeds the prompt, and use fresh unseen
