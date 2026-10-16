@@ -1,0 +1,34 @@
+diff --git a/test/seon/render_bench_test.clj b/test/seon/render_bench_test.clj
+new file mode 100644
+index 000000000..98ae2955e
+--- /dev/null
++++ b/test/seon/render_bench_test.clj
+@@ -0,0 +1,28 @@
++(ns seon.render-bench-test
++  "The render benchmark's feedback loop: a render whose output the value printer cuts fails a test that names it.
++  The samples are the pinned fixture `seon.render-bench/samples-path`; the renders are the ones its schemas declare."
++  (:require [clojure.test :refer [deftest is]]
++            [seon.db :as db]
++            [seon.render-bench :as bench]
++            [seon.test-support :as support]))
++
++(defn- custody
++  "The bench's custody on `connection`: its database, a fork of the member's SCI context and its cluster."
++  {:malli/schema [:=> [:cat :seon.db/connection] :map]}
++  [connection]
++  (let [database (db/db connection)]
++    {:seon.db/db database
++     :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
++     :seon.boot/cluster-name (db/q '[:find ?name . :where [_ :seon.config/cluster ?name]] database)}))
++
++(deftest ^{:seon.test/long "Shows each of the 392 pinned samples once through the value printer in a test cluster."
++           :seon.test/long-ms 30000}
++  no-declared-render-output-is-cut-by-the-printer
++  (support/with-running-agent
++   (fn [_ _ connection]
++     (let [cut (group-by :producer (bench/render-cuts (custody connection) (bench/read-samples (System/getProperty "user.dir"))))]
++       (is (= [] (vec (keys cut)))
++           "no declared render's output is cut by the printer")
++       (doseq [[producer cuts] cut]
++         (is (empty? cuts)
++             (str producer " is cut by the printer on " (count cuts) " pinned sample(s), first " (:sample (first cuts)))))))))
