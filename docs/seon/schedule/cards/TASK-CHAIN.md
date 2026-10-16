@@ -71,8 +71,8 @@ Derived, never authored: `:seon.task/references` (the names `plan` and `instruct
 derived by the one task writer. Kept as they are: `:seon.task/created-by`, `cron`, `zone`, `function`.
 
 **Deleted** (each with the commit that converts its last reader, §6): `intent` (renamed), `step`, `product`,
-`children`, `needs`, `:seon.task/tasks` and every `:seon/tasks` tag, `:seon.task.attempt/relaunch`,
-`:seon.config.run/relaunches`. The 17 task-file entries carrying `needs` (19 links, between filed backlog tasks) lose
+`children`, `needs`, `:seon.task/tasks` and every `:seon/tasks` tag, `:seon.task.attempt/relaunch` and
+`:seon.config.run/relaunches` (both deleted). The 17 task-file entries carrying `needs` (19 links, between filed backlog tasks) lose
 them: their order is root's schedule, not a chain. Stored data under a renamed or deleted attribute is not migrated:
 the slice that retires it lands in a restart batch with a reset (recorded tasks re-ingest from files).
 
@@ -175,7 +175,7 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    chain fact on main) and its branch's config under `:seon.task/desired-config`, every dial the launch and the turn
    loop read on that branch decided (a value of its dial schema or the explicit absent decision, as
    `seon.config/effective` answers over the shipped document); the cluster dials root reads from main
-   (`:seon.config.agent/max-running`, `:seon.config.run/relaunches`, `:seon.config.agent/keep-ended-branches?`) are
+   (`:seon.config.agent/max-running`, `:seon.config.agent/keep-ended-branches?`) are
    not a chain's. `seon.task/chain!`, the task writer, `my.root/run!` and the merge-step append validate it with Malli
    before they transact and refuse with its explanation, writing nothing. Root's pass derives, from current facts and
    in order, the steps from what is to what is desired: the branch exists, root listens on it, it is merged forward to
@@ -607,10 +607,12 @@ one named commit. No compatibility copy.
   strings), 33 in `src`. Order: the sweep writes the proofs fields first (S2c-1), readers switch to the field (S2a/S2b),
   then tags and their readers are deleted (S2c-2). Acceptance: before/after task→proof sets equal (union) for retained
   tests; no non-deftest proof; no live old attribute or ingestion path.
-- Lifecycle: the relaunch path (`seon.cluster.agent/assignment-actions`' relaunch rows, `allowance-left`,
-  `:seon.flow.actions/allowance-left`, `work-left?`, `:seon.flow.actions/relaunch`, the fork-point relaunch clauses in `plan`
-  and `fork-attempt!`, `seon.task/relaunched`, the `:relaunch` kind of `seon.task/end-kinds`, the relaunch clause of
-  `seon.task/ready`); `copied?` in `assignment-actions`; `seed-attempt!` and the per-attempt main merge-base write;
+- Lifecycle: the relaunch path, deleted (owner, 2026-10-16: no automatic re-runs; a capped, stalled or refused end closes
+  with a problem task and root runs it again with `my.root/run!`): `seon.cluster.agent/assignment-actions`' relaunch
+  rows, `allowance-left`, `:seon.flow.actions/allowance-left`, `:seon.flow.actions/relaunch`, the fork-point of
+  `plan` and `fork-attempt!` (an attempt forks main's head), `seon.task/relaunched`, the `:relaunch` end kind of
+  `seon.task/end-kind`, the relaunch clause of `seon.task/ready`, `:seon.task.attempt/relaunch` and
+  `:seon.config.run/relaunches`; still to delete: `copied?` in `assignment-actions`; `seed-attempt!` and the per-attempt main merge-base write;
   per-step `:merge`, `:publish` and `:delete-branch` for tasks with a `next`; the per-assignment branch fork of today's
   single-task launch (a single task is a chain of one).
 - Start (reactive start, §2.2): the post-hoc chain config apply (`bin/seon config apply --chains` and `--branch` on a

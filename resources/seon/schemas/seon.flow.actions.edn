@@ -12,7 +12,6 @@
  :chains [:map-of {:description "Per chain task db<->flow may start, the chain branch its attempts live on (seon.cluster.agent/chain-facts): never a branch per task."} :seon.task/handle :seon.chain/branch]
  :branches [:map-of {:description "Per chain task naming its own :seon.task/branch, that branch: its attempts check it out instead of the chain's (TASK-CHAIN 2.2, MERGE-STEP)."} :seon.task/handle :seon.task/branch]
  :attempts-made [:map-of {:description "Per task, its :seon.task/attempts-made: its next attempt is one more."} :seon.task/handle :seon.task/attempts-made]
- :relaunch [:map-of {:description "Per task whose latest attempt db<->flow relaunched (seon.task/relaunched), the commit its next attempt forks: that attempt's end commit."} :seon.task/handle :seon.source/commit-id]
  :created [:map-of {:description "Per task, the transaction of its identity datom: the oldest starts first."} :seon.task/handle [:int {:min 0}]]
  :cluster [:enum {:description "The cluster's intent: :paused starts nothing new and pauses every graph."} :running :paused]
  :facts [:map {:description "What db<->flow reads on main before it plans (seon.cluster.agent/launch-facts)."}
@@ -20,7 +19,6 @@
          [:seon.flow.actions/invalid :seon.flow.actions/invalid]
          [:seon.flow.actions/open :seon.flow.actions/open]
          [:seon.flow.actions/attempts-made :seon.flow.actions/attempts-made]
-         [:seon.flow.actions/relaunch :seon.flow.actions/relaunch]
          [:seon.flow.actions/created :seon.flow.actions/created]
          [:seon.flow.actions/chains {:optional true} :seon.flow.actions/chains]
          [:seon.flow.actions/branches {:optional true} :seon.flow.actions/branches]
@@ -31,10 +29,9 @@
  :registry [:map {:description "What db<->flow reads of the registry before it plans: the live graphs by agent."}
           [:seon.flow.actions/started :seon.flow.actions/started]
           [:seon.flow.actions/paused :seon.flow.actions/paused]]
- :op [:enum {:description "One effect db<->flow applies: write an attempt, start its flow, write a problem task, make a graph follow its intent; or, for an ended assignment (seon.cluster.agent/next-actions), squash-merge its branch, publish its merged declarations into the checkout, write its non-merged end on main, write its end on main with its relaunch, stop its graph, delete its branch."}
-      :attempt :start-flow :problem :pause :resume :stop :cancel :merge :publish :close :relaunch :delete-branch]
- :fork-point [:or {:description "Where an attempt's branch forks: main's head, which holds every need's merge, or a relaunched attempt's end commit (:seon.flow.plan/relaunch)."} [:= :main] :seon.source/commit-id]
- :class [:enum {:description "Which problem a :problem action records: a :running leaf that does not validate, or an ended assignment whose work is unfinished and has no relaunch left."} :invalid-task :unfinished-task]
+ :op [:enum {:description "One effect db<->flow applies: write an attempt, start its flow, write a problem task, make a graph follow its intent; or, for an ended assignment (seon.cluster.agent/next-actions), squash-merge its branch, publish its merged declarations into the checkout, write its non-merged end on main, stop its graph, delete its branch."}
+      :attempt :start-flow :problem :pause :resume :stop :cancel :merge :publish :close :delete-branch]
+ :class [:enum {:description "Which problem a :problem action records: a :running leaf that does not validate, or an ended assignment whose work is unfinished."} :invalid-task :unfinished-task]
  :action [:map {:description "One planned effect. :attempt carries the next attempt's number and fork point; :start-flow the intent its graph starts under and the fork point; a chain task's :attempt and :start-flow carry its chain branch instead, where both happen; a taskless agent's :stop and :delete-branch name no task."}
           [:seon.flow.actions/op :seon.flow.actions/op]
           [:seon.task/assigned {:optional true} :seon.task/assigned]
@@ -44,11 +41,9 @@
           [:seon.task/branch {:optional true} :seon.task/branch]
           [:seon.task.attempt/end {:optional true} :seon.task.attempt/end]
           [:seon.task/execution {:optional true} :seon.task/execution]
-          [:seon.flow.actions/fork-point {:optional true} :seon.flow.actions/fork-point]
           [:seon.chain/branch {:optional true} :seon.chain/branch]
           [:seon.flow.actions/class {:optional true} :seon.flow.actions/class]
           [:seon.task.attempt/reason {:optional true} :seon.task.attempt/reason]
-          [:seon.task.attempt/relaunch {:optional true} :seon.task.attempt/relaunch]
           [:seon.task/plan {:optional true} :seon.task/plan]
           [:db/id {:optional true} :seon.db/entity-id]]
  :actions [:vector :seon.flow.actions/action]
@@ -58,7 +53,6 @@
  :started? [:boolean {:description "Whether the registry holds the assignment's agent's graph."}]
  :kept? [:boolean {:description "Whether a merged branch stays: its cluster keeps ended branches (:seon.config.agent/keep-ended-branches?), never for a successor, which forks main."}]
  :publish? [:boolean {:description "Present (true) when the assignment merged declarations main records no git commit or publication refusal for: its publication into the checkout is due (seon.merge/publish!)."}]
- :allowance-left [:int {:min 0 :description "How many relaunches the assignment's task has left: :seon.config.run/relaunches less its relaunched attempts on main."}]
  :exited? [:boolean {:description "Whether the assignment's graph has actually exited: no registry entry holds it (seon.cluster.agent/stop-flow! drops the entry only after its executor joined). A requested stop or a cancellation is not an exit."}]
  :work-left? [:boolean {:description "Whether the ended assignment's branch holds declarations main lacks (seon.cluster.source/unmerged-count), read while its end is undecided on main."}]
  :refused? [:boolean {:description "Whether main records a refusal the assignment's merge returned (:seon.task/refusal) and no merged outcome."}]
@@ -75,7 +69,6 @@
                    [:seon.flow.actions/started? :seon.flow.actions/started?]
                    [:seon.flow.actions/kept? :seon.flow.actions/kept?]
                    [:seon.flow.actions/publish? {:optional true} :seon.flow.actions/publish?]
-                   [:seon.flow.actions/allowance-left :seon.flow.actions/allowance-left]
                    [:seon.flow.actions/exited? :seon.flow.actions/exited?]
                    [:seon.flow.actions/work-left? :seon.flow.actions/work-left?]
                    [:seon.flow.actions/refused? :seon.flow.actions/refused?]

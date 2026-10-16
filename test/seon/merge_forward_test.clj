@@ -47,12 +47,12 @@
 (deftest a-forward-merge-is-a-merge-commit-on-mains-head
   ;; git merge main: the branch's new head has main's head as a parent, so Datahike's commit graph makes main's head
   ;; the merge base (`seon.cluster.source/merge-base`) and nothing stores it; the branch is built on main's adoption
-  ;; record at that base; a relaunch forked from the branch's end has the same base
+  ;; record at that base; a branch forked from this branch's end has the same base
   (let [target (support/execution-handle nil)
         store (:seon.store/store target)
         main-conn (:seon.db/connection target)
         suffix (id/id)
-        relaunch (keyword (str "relaunch-" suffix))
+        sibling (keyword (str "sibling-" suffix))
         _ (when-not (db/pull (db/db main-conn) [:db/id] [:seon.agent/id "root"])
             (support/transacted! main-conn (support/agent-tx (db/db main-conn) "root")))
         {chain :seon.chain/branch}
@@ -78,12 +78,12 @@
         (is (= adopted (record (db/commit-database head base))) "the branch is built on main's record at its merge base")
         (is (= #{} (:seon.program/identities (merge/merge-main! target chain))) "an up-to-date branch merges nothing")
         (is (= (db/commit-id head) (db/commit-id (on-chain db/db))) "and writes no commit")
-        (registry/fork! {:seon.store/store store :seon.store/branch relaunch :seon.branch/target (get-in (db/db main-conn) [:config :branch])
+        (registry/fork! {:seon.store/store store :seon.store/branch sibling :seon.branch/target (get-in (db/db main-conn) [:config :branch])
                          :seon.cluster.registry/from chain :seon.db/db head})
-        (let [forked (registry/on-branch store relaunch db/db)]
-          (is (= main-commit (source/branch-merge-base forked)) "a relaunch forked from the branch's end has the same base")))
+        (let [forked (registry/on-branch store sibling db/db)]
+          (is (= main-commit (source/branch-merge-base forked)) "a branch forked from this branch's end has the same base")))
       (finally
-        (registry/retire-branch! {:seon.store/store store :seon.store/branch relaunch})
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch sibling})
         (registry/retire-branch! {:seon.store/store store :seon.store/branch chain})))))
 
 (deftest after-a-forward-merge-the-branch-changed-only-its-own-declarations

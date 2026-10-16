@@ -299,7 +299,7 @@
 (defn send-backs
   "The latest send-back to the task `handle` on `database`: the attempt of another step that ended
   `:sent-back` targeting it, as its sender and the reason it recorded (`seon.turn/end-task-call`); a vector,
-  empty when none was sent. The relaunched agent reads why it was sent back."
+  empty when none was sent. The next attempt's agent reads why it was sent back."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] :seon.context/send-backs]}
   [database handle]
   (let [sent (db/q '[:find ?tx ?sender ?reason :in $ ?handle
@@ -313,8 +313,7 @@
 
 (defn- change
   "The declaration identities the agent's branch `database` changed since its merge base with its target
-  (`seon.cluster.source/branch-merge-base`, Datahike's commit graph: a relaunched attempt forks its predecessor's end,
-  so the change is the task's across attempts): git's diff of that base and the branch
+  (`seon.cluster.source/branch-merge-base`, Datahike's commit graph): git's diff of that base and the branch
   (`seon.program/own-changed-identities`); empty on main."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :seon.program/identity-set :seon.error/value]]}
   [database _agent-id]

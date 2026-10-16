@@ -203,7 +203,7 @@
        (is (contains? attributes :seon.error/shown-blob))
        (is (every? (set (#'registry/attributes-valued-as database :seon.source/commit-id))
                    [:seon.task/merge-base :seon.task.attempt/commit])
-           "the commits a merge and a relaunch read by id are declared commit ids")
+           "the commits a merge reads by id are declared commit ids")
        (is (not (contains? attributes :seon.agent/runtime))
            "a component ref naming an entity schema is not a digest")
        (is (not (contains? attributes :seon.test/sym))
@@ -981,19 +981,18 @@
        nil))))
 
 (deftest
-  a-relaunch-fork-keeps-the-fork-point
-  ;; a relaunched attempt forks its predecessor's end commit, a commit of the predecessor's branch
-  ;; (`seon.cluster.agent/fork-attempt!`); its first-parent history walks through that branch to the main commit
-  ;; the predecessor forked at, so both share one fork point, and main moving on changes neither
+  a-fork-from-another-branchs-commit-keeps-the-fork-point
+  ;; a branch forked from another work branch's commit: its first-parent history walks through that branch to the main
+  ;; commit the first branch forked at, so both share one fork point, and main moving on changes neither
   (with-program-store
    (fn [store connection]
-     (let [first-branch :attempt-relaunch-1
-           second-branch :attempt-relaunch-2
+     (let [first-branch :branch-from-main-1
+           second-branch :branch-from-main-2
            forked-at (db/commit-id (db/db connection))
            fork-point #(registry/fork-point (db/db connection) (registry/head-commit-id (db/db connection) %) :db)
            write! (fn [branch]
                     (let [held (store/open-branch! store branch)]
-                      (try (d/transact held [{:seon.agent/id (str "relaunch-" (random-uuid))}])
+                      (try (d/transact held [{:seon.agent/id (str "fork-" (random-uuid))}])
                            (db/commit-id (db/db held))
                            (finally (store/release-branch! held)))))]
        (try
@@ -1008,8 +1007,8 @@
                                                            :seon.db/db end-db})))
              (finally (source/release! [end-db])))
            (write! second-branch)
-           (is (= forked-at (fork-point first-branch)) "the first attempt forked from main at its commit")
-           (is (= forked-at (fork-point second-branch)) "the relaunch keeps that fork point"))
+           (is (= forked-at (fork-point first-branch)) "the first branch forked from main at its commit")
+           (is (= forked-at (fork-point second-branch)) "the second keeps that fork point"))
          (finally
            (doseq [b [first-branch second-branch]]
              (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))

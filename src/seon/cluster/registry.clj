@@ -436,8 +436,7 @@
 
 (defn fork-point
   "The commit the branch whose head is `commit` forked from `target` at: the first commit of its first-parent
-  history written on `target` (`first-parent-where`), the head itself when the branch wrote nothing. A relaunch
-  forked from another work branch's commit walks through that branch to the same commit. The facts a forward merge
+  history written on `target` (`first-parent-where`), the head itself when the branch wrote nothing. The facts a forward merge
   never moves (tasks, attempts) are the branch's own changes since this commit. Derived from the commit graph,
   never stored; nil when the walk reaches a commit the store no longer holds."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/commit-id :seon.store/branch]

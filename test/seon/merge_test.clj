@@ -895,7 +895,7 @@
         (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
 
 (deftest a-merge-that-closes-its-attempt-merged-ends-its-task
-  ;; A merged task reads as ended on main, so no later pass relaunches it (owner 2026-10-16, live run a9e4e9904:
+  ;; A merged task reads as ended on main, so no later pass assigns it again (owner 2026-10-16, live run a9e4e9904:
   ;; the merged task stayed :running). The task's own running fact (here on main) and one the branch wrote both end.
   (support/with-database
    (fn [connection]

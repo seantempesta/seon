@@ -84,7 +84,7 @@
  :outcome [:enum {:description "How an attempt ended its task's part of a chain: done (its proofs passed and the chain moved on), merged (seon.merge/merge-tx, in the merge's transaction, for a :done end), or closed (another end merged, or root's decline with a reason, seon.task/close!); absence means open. A merge task generated before assignments carried it records it too."} :done :merged :closed]
  :landed [:uuid {:description "The main commit a merge task's landing made (seon.cluster.source/land! on a green end, seon.turn/end-task!)."}]
  :landed-git [:and {:description "The git commit a merge task's landing made in the checkout."} :seon.git/commit]
- :refusal [:qualified-keyword {:description "The error type of the refusal a merge task's landing, or an assignment's merge (seon.merge/merge! through db<->flow's :merge), returned (a red gate, a contract, lint or write-back refusal): the candidate's own, so the same db<->flow pass relaunches the assignment from its end commit while its allowance lasts and otherwise closes it for root (seon.cluster.agent/assignment-actions)."}]
+ :refusal [:qualified-keyword {:description "The error type of the refusal a merge task's landing, or an assignment's merge (seon.merge/merge! through db<->flow's :merge), returned (a red gate, a contract, lint or write-back refusal): the candidate's own, so the same db<->flow pass closes it for root (seon.cluster.agent/assignment-actions)."}]
  :publication-refusal [:qualified-keyword {:description "The error type of the refusal an assignment's publication (seon.merge/publish!) met (a write-back, index or commit refusal); the merge stays as it is for root, and no pass publishes it again until root retracts this."}]
  :verdict [:string {:min 1 :description "On root's problem task for a bailed chain attempt: the verdict that ended it, as the canonical EDN (seon.id/printed; clojure.edn reads it back) of a :seon.task/last-verdict. Producer: seon.cluster.agent/bail-chain!; reader: seon.render.ns/task-ai."}]
  :test-error [:map {:description "The error that stopped a bailed attempt's latest test run: its :seon.error/type, :seon.error/operation and :seon.error/message (:seon.test.run/stopped-error, carried by :seon.agent/end-test-error); the cause the stalled attempt's own reply gave no one."}
@@ -136,8 +136,7 @@
                   [:seon.task/merge-commit {:optional true} :seon.task/merge-commit]
                   [:seon.task/merged-declarations {:optional true} :seon.task/merged-declarations]
                   [:seon.task/git-commit {:optional true} :seon.task/git-commit] [:seon.task/refusal {:optional true} :seon.task/refusal]
-                  [:seon.task/publication-refusal {:optional true} :seon.task/publication-refusal]
-                  [:seon.task.attempt/relaunch {:optional true} :seon.task.attempt/relaunch]]
+                  [:seon.task/publication-refusal {:optional true} :seon.task/publication-refusal]]
  :merge [:and {:seon.db/index true :description "The merge task an end message names."} :seon.task/handle]
  :closed-by [:enum {:description "What closed a task (seon.task/resolution): root's merge outcome, or for a parent its children all done."} :seon.task/outcome :seon.task/children]
  :resolution [:map {:description "Why a task is closed: derived, never stored."}
@@ -184,7 +183,7 @@
  :chain [:map {:description "A chain as seon.task/chain! answers it: its branch, its first task and every task in order."}
          [:seon.chain/branch :seon.chain/branch] [:seon.chain/first :seon.chain/first] [:seon.task/handles :seon.task/handles]]
  :edges [:map [:seon.task/subjects :seon.task/subjects] [:seon.task/referrers :seon.task/referrers]]
- :desired-config [:map {:closed true :description "The config a chain task runs under: every dial the launch and the turn loop read on its chain branch, each decided (a value of its dial schema, or absent by the explicit decision seon.config/effective answers over the shipped config/default.edn), read from the branch's own config row. The cluster dials root reads from main (:seon.config.agent/max-running, :seon.config.run/relaunches, :seon.config.agent/keep-ended-branches?) are not here. seon.task-test/the-runnable-schema-names-every-dial-the-launch-reads checks the list against the readers."}
+ :desired-config [:map {:closed true :description "The config a chain task runs under: every dial the launch and the turn loop read on its chain branch, each decided (a value of its dial schema, or absent by the explicit decision seon.config/effective answers over the shipped config/default.edn), read from the branch's own config row. The cluster dials root reads from main (:seon.config.agent/max-running, :seon.config.agent/keep-ended-branches?) are not here. seon.task-test/the-runnable-schema-names-every-dial-the-launch-reads checks the list against the readers."}
                   [:seon.config.agent/inbox-size {:optional true} :seon.config.agent/inbox-size]
                   [:seon.config.agent/show-all-settings {:optional true} :seon.config.agent/show-all-settings]
                   [:seon.config.agent/turn-completion-backstop-ms {:optional true} :seon.config.agent/turn-completion-backstop-ms]

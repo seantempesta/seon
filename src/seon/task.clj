@@ -1274,25 +1274,6 @@
         (let [number (if (and (:db/id latest) (open-attempt? latest)) made (inc (or made 0)))]
           [number (id/id [handle number])]))))
 
-(defn relaunched
-  "The end commit of task `handle`'s latest attempt in `database` when db<->flow relaunched it
-  (`:seon.task.attempt/relaunch`, `seon.cluster.agent/close!`): its next attempt forks that commit, so the work
-  carries over and its fork point stays the predecessor's (`seon.cluster.registry/fork-point` walks through it), so
-  its merge takes both attempts' changes; nil otherwise."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
-                  [:or :nil [:map [:seon.task.attempt/commit :seon.task.attempt/commit]]
-                   :seon.db/invalid-read-error]]}
-  [database handle]
-  (let [latest (db/q '[:find (max ?n) . :in $ ?h
-                       :where [?t :seon.task/id ?h] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/number ?n]]
-                     database handle)
-        row (when (int? latest)
-              (db/q '[:find (pull ?a [:seon.task.attempt/relaunch :seon.task.attempt/commit]) .
-                      :in $ ?h ?n :where [?t :seon.task/id ?h] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/number ?n]]
-                    database handle latest))]
-    (or (read-error latest) (read-error row)
-        (when (:seon.task.attempt/relaunch row) (select-keys row [:seon.task.attempt/commit])))))
-
 (defn attempt-tx
   "The transaction data writing the next attempt of task `handle` by `agent-id` on `branch` at main
   `database`: its row, numbered one more than the task's `:seon.task/attempts-made` (written beside it) and identified by
@@ -1590,7 +1571,7 @@
 
 (def ^:private end-kinds
   "Per attempt end, what follows it (`end-kind`): the one table every end decision reads."
-  {:done :merge :sent-back :merge :capped :relaunch :stalled :relaunch :given-back :close :error :close
+  {:done :merge :sent-back :merge :capped :close :stalled :close :given-back :close :error :close
    :cancelled :cancel})
 
 (defn end-kind
@@ -1600,7 +1581,7 @@
   (end-kinds end))
 
 (def ^:private blocking-ends
-  "The ends whose attempt keeps its task from being ready again until db<->flow relaunches it: those that merge nothing."
+  "The ends whose attempt keeps its task from being ready again until root runs it again (`run-held!`): those that merge nothing."
   (into #{} (remove (comp #{:merge} end-kind)) (keys end-kinds)))
 
 (def ready-rules
@@ -1670,7 +1651,7 @@
 (defn ready
   "The handles of every task that should be running now in `database` (main's): the leaves whose
   execution is :running (their own, else their nearest ancestor's, the `execution` rule: ingestion writes
-  :held on every new task no task owns, so one :running fact on a subject launches its steps), not done, without an attempt db<->flow did not relaunch (`:seon.task.attempt/relaunch`) whose end merges nothing
+  :held on every new task no task owns, so one :running fact on a subject launches its steps), not done, without an attempt whose end merges nothing
   (`end-kind`; an :error end, a failed start among them, is terminal too: no pass assigns it again by itself) or whose
   merge was refused (`:seon.task/refusal`) and closed, minus those a need blocks.
   The execution is bound to a variable, then compared: Datahike loses the rule's binding of `?t` for the
@@ -1681,9 +1662,9 @@
   (let [eligible (db/q '[:find ?t ?h :in $ % ?blocking :where (execution ?t ?x) [(= ?x :running)]
                          [?t :seon.task/id ?h] (not [?t :seon.task/children _]) (not (leaf-done ?t))
                          (not-join [?t ?blocking] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/end ?e]
-                                   [(contains? ?blocking ?e)] [(missing? $ ?a :seon.task.attempt/relaunch)])
+                                   [(contains? ?blocking ?e)])
                          (not-join [?t] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/end _] [?a :seon.task/refusal _]
-                                   (not [?a :seon.task/outcome :merged]) [(missing? $ ?a :seon.task.attempt/relaunch)])]
+                                   (not [?a :seon.task/outcome :merged]))]
                        database ready-rules blocking-ends)
         blocked (when-not (read-error eligible) (db/q '[:find [?t ...] :in $ % :where (blocked ?t)] database ready-rules))]
     (or (read-error eligible) (read-error blocked)
