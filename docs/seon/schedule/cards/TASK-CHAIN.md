@@ -247,7 +247,7 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    from the finished task's `:seon.task/next`, decided at the writer as a `:db.fn/call` over the held value, so a
    repeated pass finds the outcome and writes nothing): the finished attempt gets `:seon.task/outcome :done`; the next
    task receives the finished task's flowing members (the finished value wins) with re-derived references, and
-   `:execution :running`. The finished task stays `:running` but can never start again (its latest attempt is `:done`).
+   `:execution :running`. The finished task stays `:running` on its branch but can never start again (its latest attempt is `:done`); the final merge ends it on main (§2.6).
    The plan phase of the same pass reads the branch after the advance and starts the next agent, as `run-pass!` already
    re-derives after `:stop` and `:merge`. Each task keeps the plan it was given: the plan's history is the chain's
    history.
@@ -261,7 +261,9 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    defines or changes (with members = proofs alone, a red test left on the branch merged, measured) and every reaching
    test, all green, contracts complete, replaced functions covered. In its one transaction it admits all the chain's
    tasks and attempts, closes every intermediate attempt (`:done` stays its outcome) and marks the terminal one
-   `:merged`, so no earlier attempt appears on main as an open merge request. Acceptance's transaction records the
+   `:merged`, so no earlier attempt appears on main as an open merge request; the task the terminal attempt
+   assigns and every task the merge carries in `:running` read `:stopped` on main (`seon.merge/merge-tx`), so a merged
+   task never reads as runnable (owner 2026-10-16: no automatic re-runs). Acceptance's transaction records the
    identity of the merge to publish, so a restart between acceptance and its answer publishes exactly once. Then, in
    order: `seon.merge/publish!` (a `:seon.merge/waiting` or a publication refusal is not success: the chain fact stays
    and root sees it); on success end the chain branch and the merge branches its tasks name

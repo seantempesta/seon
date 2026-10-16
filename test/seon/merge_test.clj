@@ -811,3 +811,25 @@
         (is (true? (:seon.test/passed? prepared)) "and the merge is green"))
       (finally
         (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
+
+(deftest a-merge-that-closes-its-attempt-merged-ends-its-task
+  ;; A merged task reads as ended on main, so no later pass relaunches it (owner 2026-10-16, live run a9e4e9904:
+  ;; the merged task stayed :running). The task's own running fact (here on main) and one the branch wrote both end.
+  (support/with-database
+   (fn [connection]
+     (let [born (task/task-handle 'fixture.tasks "merge-ends-next")]
+       (support/transacted! connection (support/agent-tx (db/db connection) "merge-ends"))
+       (support/assign-task! connection "merge-ends")
+       (let [a (:e (last (d/datoms (db/db connection) :aevt :seon.task/assignment)))
+             assigned (:v (first (d/datoms (db/db connection) :eavt a :seon.task/attempt-of)))
+             fork (db/commit-id (db/db connection))
+             target (db/db connection)
+             _ (support/transacted! connection [(assoc (support/task-row born "b") :seon.task/execution :running)
+                                                {:db/id a :seon.task.attempt/end :done}])
+             commit (db/commit-id (db/db connection))
+             merged (db/with target {:tx-data (merge/merge-tx target a commit (schema/handed-projection) fork)})]
+         (is (= :merged (:seon.task/outcome (db/pull merged [:seon.task/outcome] a))) "the attempt merged")
+         (is (= :stopped (:seon.task/execution (db/pull merged [:seon.task/execution] assigned)))
+             "the task it assigns no longer reads :running")
+         (is (= :stopped (:seon.task/execution (db/pull merged [:seon.task/execution] [:seon.task/id born])))
+             "a task the merge carries in :running ends too"))))))

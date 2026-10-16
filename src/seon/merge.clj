@@ -162,15 +162,18 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id :seon.source/commit-id :seon.schema/projection
                        :seon.merge/fork-point]
                   [:map [:tx-data :seon.store/transaction-data] [:conflicts :seon.merge/conflicts]
-                   [:end {:optional true} :seon.task.attempt/end]]]}
+                   [:end {:optional true} :seon.task.attempt/end] [:task {:optional true} :seon.db/entity-id]]]}
   [database a commit projection base-commit]
   ;; read from the datoms: inside the writer the value carries no projection of its own
   (if (= base-commit commit)
     {:tx-data [] :conflicts []}
     (let [base (db/commit-database database base-commit)
           source (db/commit-database database commit)]
-      (try (let [end (:v (first (d/datoms source :eavt a :seon.task.attempt/end)))]
-             (cond-> (squash-merge source base database projection) end (assoc :end end)))
+      (try (let [end (:v (first (d/datoms source :eavt a :seon.task.attempt/end)))
+                 task (:v (first (d/datoms source :eavt a :seon.task/attempt-of)))]
+             (cond-> (squash-merge source base database projection)
+               end (assoc :end end)
+               task (assoc :task task)))
            (finally (source/release! [base source]))))))
 
 (defn merge-tx
@@ -181,16 +184,22 @@
   closed in the same transaction by its source's end: `:closed` when it ended `:sent-back` (its work goes back to
   its target), `:merged` when it ended `:done`, which `merge!` carries only inside an accepted candidate's
   transaction (`seon.cluster.source/accept-merge!`); any other source, one not yet ended among them, merges its
-  facts and stays open. A `:root` conflict keeps main's value (`merge!` answers it)."
+  facts and stays open. Closed `:merged`, the merge ends its work: the task it assigns and every task its facts carry
+  in `:running` read `:stopped`, so no later pass starts a merged task again (TASK-CHAIN 2.6). A `:root` conflict
+  keeps main's value (`merge!` answers it)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id :seon.source/commit-id :seon.schema/projection
                        :seon.merge/fork-point]
                   :seon.store/transaction-data]}
   [database a commit projection fork]
   (if (= fork commit)
     []
-    (let [{:keys [tx-data end]} (merged database a commit projection fork)
-          outcome (when (empty? (d/datoms database :eavt a :seon.task/outcome)) ({:sent-back :closed :done :merged} end))]
+    (let [{:keys [tx-data end task]} (merged database a commit projection fork)
+          outcome (when (empty? (d/datoms database :eavt a :seon.task/outcome)) ({:sent-back :closed :done :merged} end))
+          ended (fn [[op e attribute v :as datom]]
+                  (if (and (= :db/add op) (= :seon.task/execution attribute) (= :running v)) [op e attribute :stopped] datom))]
       (cond-> tx-data
+        (= :merged outcome) (->> (mapv ended))
+        (and (= :merged outcome) task) (conj [:db/add task :seon.task/execution :stopped])
         outcome (conj [:db/add a :seon.task/outcome outcome])))))
 
 (defn- assigned-task
