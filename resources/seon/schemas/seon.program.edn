@@ -287,7 +287,7 @@
   [:seon.program/unknown :seon.program/unknown]
   [:seon.program/history :seon.program/history]]
  :seon.program/read-operation :qualified-symbol
- :seon.program/not-found :seon.program/subject
+ :seon.program/not-found [:or :seon.program/subject :seon.ref/at]
  :seon.program/missing-context-members [:set {:min 1} :qualified-keyword]
  :seon.program/blocked-subject :seon.program/subject
  :seon.program/native-operation :qualified-symbol

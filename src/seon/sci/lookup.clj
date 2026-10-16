@@ -397,8 +397,7 @@
       (:seon.fn/sym row) (function-doc-map database row (boolean (some #{sym} overrides)))
       :else (ref/documentation-unavailable sym))))
 
-(defn directory-value
-  "Return current public function summaries and declared schemas for a namespace."
+(defn- directory-in
   {:malli/schema [:=> [:cat :seon.db/db :symbol :boolean] [:or :seon.repl/directory :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
   [database namespace-name present?]
   (let [namespace-row (db/pull database
@@ -438,6 +437,15 @@
           (assoc :tests (vec (sort-by str (map :seon.test/sym (:seon.test/_ns namespace-row)))))))
       :else (ref/documentation-unavailable namespace-name))))
 
+(defn directory-value
+  "Return current public function summaries and declared schemas for a namespace, read where `:seon.ref/at` names when the namespace is the map `{:seon.ref/name ns :seon.ref/at at}` (`seon.ref/read-where`)."
+  {:malli/schema [:=> [:cat :seon.db/db [:or :symbol :seon.ref/versioned] :boolean] [:or :seon.repl/directory :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
+  [database namespace-name present?]
+  (if (map? namespace-name)
+    (ref/read-where database (:seon.ref/at namespace-name)
+                    #(if % (directory-value % (:seon.ref/name namespace-name) present?) (ref/documentation-unavailable (:seon.ref/name namespace-name))))
+    (directory-in database namespace-name present?)))
+
 (defn reference-in
   "The qualified symbol of the Var an authored symbol resolves to in the calling
   SCI namespace, else the authored syntax unchanged."
@@ -474,8 +482,7 @@
         (merge (when doc (ref/docstring doc))
                {:publics (vec (sort (distinct publics)))})))))
 
-(defn documentation-value
-  "Read documentation for a public function, SCI Var, named override, schema key or namespace."
+(defn- documentation-in
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/db :seon.sci.eval/authored-reference :seon.sci.eval/authored-reference]
                   [:or :map :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
   [ctx database authored resolved]
@@ -493,6 +500,16 @@
         found))
     :else (namespace-documentation ctx database resolved authored)))
 
+(defn documentation-value
+  "Read documentation for a public function, SCI Var, named override, schema key or namespace, read where `:seon.ref/at` names when `authored` is the map `{:seon.ref/name name :seon.ref/at at}` (`seon.ref/read-where`)."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/db :seon.sci.eval/authored-reference :seon.sci.eval/authored-reference]
+                  [:or :map :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
+  [ctx database authored resolved]
+  (if (and (map? authored) (contains? authored :seon.ref/at))
+    (ref/read-where database (:seon.ref/at authored)
+                    #(if % (documentation-in ctx % (:seon.ref/name authored) resolved) (ref/documentation-unavailable (:seon.ref/name authored))))
+    (documentation-in ctx database authored resolved)))
+
 (defn- program-doc-var
   "Resolve in the calling SCI namespace; read facts when the form executes."
   {:malli/schema [:=> [:cat] :seon.schema/value]}
@@ -502,7 +519,8 @@
    (fn [_form _env authored]
      `(let [authored# '~authored]
         (seon.sci.lookup/documentation-value
-         (seon.db/db) authored# (seon.sci.lookup/reference-in authored#))))
+         (seon.db/db) authored#
+         (seon.sci.lookup/reference-in (if (clojure.core/map? authored#) (:seon.ref/name authored#) authored#)))))
    {:ns (sci/create-ns 'clojure.repl)}))
 
 (defn- program-dir-var
@@ -513,7 +531,7 @@
    (fn [_form _env namespace-name]
      `(seon.sci.lookup/directory-value
        (seon.db/db) '~namespace-name
-       (boolean (clojure.core/find-ns '~namespace-name))))
+       (boolean (clojure.core/find-ns (let [named# '~namespace-name] (if (clojure.core/map? named#) (:seon.ref/name named#) named#))))))
    {:ns (sci/create-ns 'clojure.repl)}))
 
 (defn stored-source

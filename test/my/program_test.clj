@@ -17,6 +17,7 @@
             [seon.fn :as function]
             [seon.profile :as profile]
             [seon.schema :as schema]
+            [seon.sci.lookup :as lookup]
             [seon.test-support :as support]))
 
 (deftest a-function-called-through-its-callers-is-reached-by-their-tests
@@ -497,3 +498,41 @@
   (let [found (program/source (db/db) 'seon.id/id)]
     (is (= (:source found) (program/render-source-ai {:seon.render/value found})) "the AI face is the source text alone")
     (is (integer? (:line found)) "the line stays on the value as data")))
+
+(deftest a-read-tool-given-a-branch-or-commit-answers-that-version
+  ;; owner, 2026-10-16: the read tools accept the optional `:seon.ref/at` (a branch's head or a commit) as `my.program/source`
+  ;; does, through `seon.ref/read-where`; absent, they read the database they were given.
+  (support/with-database
+   (fn [connection]
+     (let [branch-doc (str "Branch" " doc.") main-doc (str "Main" " doc.")
+           sym 'my.at.fixture/target
+           ns-sym 'my.at.fixture
+           identity [:seon.fn/sym sym]
+           _ (support/transacted! connection [(support/namespace-entity (db/db connection) ns-sym)
+                                              (support/program-fn-entity (db/db connection) sym (str "(defn target \"" main-doc "\" [] 1)"))])
+           main (db/db connection)
+           main-commit (db/commit-id main)
+           branch (get-in (db/db connection) [:config :branch])
+           _ (support/transacted! connection (support/replacement-tx (db/db connection) identity (str "(defn target \"" branch-doc "\" [] 42)") {}))
+           _ (support/transacted! connection
+                                  [(support/program-fn-entity (db/db connection) 'my.at.fixture/caller "(defn caller [] (target))"
+                                                              {:seon.fn/calls #{sym}})
+                                   (support/program-entity (db/db connection) [:seon.test/sym 'my.at.fixture/target-test]
+                                                           "(clojure.test/deftest target-test (clojure.test/is (= 42 (target))))" {})])
+           ctx (support/fork-cluster-ctx connection)
+           text? (fn [needle] #(boolean (some (fn [x] (and (string? x) (clojure.string/includes? x needle))) (tree-seq coll? seq %))))
+           site? (fn [r] (contains? (set (map :seon.fn/sym (:seon.program/call-sites r))) 'my.at.fixture/caller))
+           rows [["source" (fn [at] (program/source main (if at {:seon.ref/name sym :seon.ref/at at} sym))) (text? branch-doc) (text? main-doc)]
+                 ["doc" (fn [at] (lookup/documentation-value ctx main (if at {:seon.ref/name sym :seon.ref/at at} sym) sym)) (text? branch-doc) (text? main-doc)]
+                 ["dir" (fn [at] (lookup/directory-value main (if at {:seon.ref/name ns-sym :seon.ref/at at} ns-sym) true)) (text? branch-doc) (text? main-doc)]
+                 ["callers" (fn [at] (program/callers (cond-> {:seon.db/db main :seon.program/subject sym} at (assoc :seon.ref/at at)))) site? (complement site?)]
+                 ["tests-reaching" (fn [at] (program/tests-reaching (cond-> {:seon.db/db main :seon.program/subject sym} at (assoc :seon.ref/at at))))
+                  #(contains? (set (:seon.program/gating %)) 'my.at.fixture/target-test) #(not (contains? (set (:seon.program/gating %)) 'my.at.fixture/target-test))]
+                 ["search" (fn [at] (program/search main (cond-> {:text branch-doc} at (assoc :seon.ref/at at)))) #(pos? (:count %)) #(zero? (:count %))]
+                 ["history" (fn [at] (program/history (cond-> {:seon.db/db main :seon.program/subject sym} at (assoc :seon.ref/at at))))
+                  #(< 1 (count (:seon.program/history %))) #(= 1 (count (:seon.program/history %)))]]]
+       (doseq [[tool read branch? main?] rows]
+         (is (branch? (read branch)) (str tool " at the branch answers the branch's version"))
+         (is (main? (read main-commit)) (str tool " at main's commit answers main's version"))
+         (is (main? (read nil)) (str tool " without :seon.ref/at answers the given database"))
+         (is (not (branch? (read nil))) (str tool " without :seon.ref/at never answers the branch's version")))))))

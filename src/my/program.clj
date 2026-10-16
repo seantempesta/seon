@@ -136,6 +136,18 @@
                      :seon.program/call-sites (vec (mapcat site-of sorted pulled))
                      :seon.fn/declared-arities declared})))
 
+(defn- read-in
+  "`(f at-db)` on the database value `at` names (`seon.ref/read-where`), else on `database`; the refusal naming `at` when the store lacks it."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.ref/at] [:=> [:cat :seon.db/database-value] :any]] :any]}
+  [database at f]
+  (seon.ref/read-where database at
+                       #(if %
+                          (f %)
+                          (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/read 'my.program/read-in
+                            {:seon.error/message "The store holds no branch or commit named by :seon.ref/at."
+                             :seon.program/not-found at
+                             :seon.error/fix "Name a branch from (seon.db/branches (seon.db/db)) or a commit id."}))))
+
 (defn- read-request
   "The request map of a read called with a request map or a bare subject (under `subject-key`); a request without `:seon.db/db` reads the calling evaluation's current database."
   {:malli/schema [:=> [:cat :qualified-keyword [:or :map :symbol :qualified-keyword]] :map]}
@@ -152,17 +164,23 @@
 
   ```clojure
   (my.program/callers 'seon.turn/open?)
-  ```"
-  {:malli/schema [:=> [:cat [:or [:map [:seon.db/db {:optional true} :seon.db/database-value] [:seon.program/subject :seon.program/subject]]
+  (my.program/callers {:seon.program/subject 'seon.turn/open? :seon.ref/at :chain-f1f6dc8e6652})
+  ```
+
+  `:seon.ref/at` (a branch or a commit) reads there instead of the current database."
+  {:malli/schema [:=> [:cat [:or [:map [:seon.db/db {:optional true} :seon.db/database-value] [:seon.program/subject :seon.program/subject]
+                                  [:seon.ref/at {:optional true} :seon.ref/at]]
                                  :seon.program/subject]]
                   [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
   [argument]
-  (let [{database :seon.db/db subject :seon.program/subject :as request} (read-request :seon.program/subject argument)]
+  (let [{database :seon.db/db subject :seon.program/subject at :seon.ref/at :as request} (read-request :seon.program/subject argument)]
     (read-result request 'my.program/callers
-                 #(let [{identity :seon.program/identity entities :seon.program/entities}
-                        (locate database subject)]
-                    (merge (observation database subject identity)
-                           (dissoc (caller-data database subject (first entities)) :seon.program/callers))))))
+                 #(read-in database at
+                           (fn [database]
+                             (let [{identity :seon.program/identity entities :seon.program/entities}
+                                   (locate database subject)]
+                               (merge (observation database subject identity)
+                                      (dissoc (caller-data database subject (first entities)) :seon.program/callers))))))))
 
 (defn tests-reaching
   "Read the current gate set, derived by seon.fn/gate-set.
@@ -173,21 +191,27 @@
 
   ```clojure
   (my.program/tests-reaching 'seon.turn/open?)
-  ```"
-  {:malli/schema [:=> [:cat [:or [:map [:seon.db/db {:optional true} :seon.db/database-value] [:seon.program/subject :seon.program/subject]]
+  (my.program/tests-reaching {:seon.program/subject 'seon.turn/open? :seon.ref/at :chain-f1f6dc8e6652})
+  ```
+
+  `:seon.ref/at` (a branch or a commit) reads there instead of the current database."
+  {:malli/schema [:=> [:cat [:or [:map [:seon.db/db {:optional true} :seon.db/database-value] [:seon.program/subject :seon.program/subject]
+                                  [:seon.ref/at {:optional true} :seon.ref/at]]
                                  :seon.program/subject]]
                   [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
   [argument]
-  (let [{database :seon.db/db subject :seon.program/subject :as request} (read-request :seon.program/subject argument)]
+  (let [{database :seon.db/db subject :seon.program/subject at :seon.ref/at :as request} (read-request :seon.program/subject argument)]
     (read-result request 'my.program/tests-reaching
-                 #(let [{identity :seon.program/identity} (locate database subject)]
-                    (merge (observation database subject identity)
-                           (present-groups
-                            {:seon.program/gating
-                             (mapv symbol (let [result (function/gate-set
-                                                    database subject)]
-                                            (if (:seon.db/invalid-read result)
-                                              (throw (ex-info (:seon.error/message result) result)) result)))}))))))
+                 #(read-in database at
+                           (fn [database]
+                             (let [{identity :seon.program/identity} (locate database subject)]
+                               (merge (observation database subject identity)
+                                      (present-groups
+                                       {:seon.program/gating
+                                        (mapv symbol (let [result (function/gate-set
+                                                                   database subject)]
+                                                       (if (:seon.db/invalid-read result)
+                                                         (throw (ex-info (:seon.error/message result) result)) result)))}))))))))
 
 (defn- contract-users
   "The functions whose contract names `schema-key` in any arity role, sorted."
@@ -364,13 +388,18 @@
 
   ```clojure
   (my.program/history {:seon.program/subject 'seon.turn/open?})
-  ```"
+  (my.program/history {:seon.program/subject 'seon.turn/open? :seon.ref/at :chain-f1f6dc8e6652})
+  ```
+
+  `:seon.ref/at` (a branch or a commit) reads that database's history instead of the current one."
   {:malli/schema [:=> [:cat :my.program/history-request]
                   [:or :seon.program/history-report :seon.program/read-refused-error :seon.program/not-found-error]]}
-  [{database :seon.db/db subject :seon.program/subject at :seon.db/tx :as request}]
+  [{database :seon.db/db subject :seon.program/subject at :seon.db/tx where :seon.ref/at :as request}]
   (read-result
    request 'my.program/history
-   #(let [view (if at (let [result (db/as-of database at)]
+   #(read-in database where
+      (fn [database]
+   (let [view (if at (let [result (db/as-of database at)]
  (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result)) database)
@@ -411,7 +440,7 @@
                    (sort-by (juxt (fn [event] (nth event 2))
                                   (fn [event] (nth event 3)) first) events))]
       (cond-> (assoc (observation database subject identity) :seon.program/history entries)
-        at (assoc :seon.db/tx at)))))
+        at (assoc :seon.db/tx at)))))))
 
 (defn supplied-context
   "Supply the executing SCI context and its held acquisition resources.
@@ -880,7 +909,7 @@
   [database subject]
   (cond
     (map? subject) (let [{named :seon.ref/name at :seon.ref/at} subject]
-                     (db/read-at database at #(if % (source % named) (not-found database named))))
+                     (read-in database at #(source % named)))
     (keyword? subject) (schema-source database subject)
     (simple-symbol? subject) (namespace-declarations database subject)
     (seq (db/datoms database :avet :seon.task/sym subject)) (task-source database subject)
@@ -1007,22 +1036,8 @@
                    (take limit))
           (take limit (sort-by key groups)))))
 
-(defn search
-  "Search the program for a string or keyword: the schema key itself, the owners the vocabulary's entries cite and
-  each declaration whose source holds the text, one match per declaration, each with its expansion's token cost.
-
-  Ranked: owners before tests (a test namespace's helpers rank with its tests), then the schema key and vocabulary
-  owners, then name matches, then most recorded use (callers and reaching tests), then symbol. The query is the
-  text, or {:text text :limit n}; :count is the matches returned and :more the form reading more. :line counts from
-  the declaration's first line (my.program/source gives its file line).
-
-  ## Example
-
-  ```clojure
-  (my.program/search :seon.render/form)
-  (my.program/search \"program context\")
-  (my.program/search {:text \"java.util.Date.\" :limit 25})
-  ```"
+(defn- search-in
+  "The matches `search` finds on `database`."
   {:malli/schema [:=> [:cat :seon.db/database-value :my.program/search-query]
                   [:or :my.program/search-result :seon.db/invalid-read-error]]}
   [database query]
@@ -1043,7 +1058,31 @@
                           (ranked-matches database rows tests (cond-> limit key-hit dec)))]
         (cond-> {:count (count matches) :matches matches}
           (< (count matches) (+ (count rows) (if key-hit 1 0)))
-          (assoc :more (list 'my.program/search {:text text :limit (* 3 limit)})))))))
+          (assoc :more (list 'my.program/search (cond-> {:text text :limit (* 3 limit)} (map? query) (merge (select-keys query [:seon.ref/at]))))))))))
+
+(defn search
+  "Search the program for a string or keyword: the schema key itself, the owners the vocabulary's entries cite and
+  each declaration whose source holds the text, one match per declaration, each with its expansion's token cost.
+
+  Ranked: owners before tests (a test namespace's helpers rank with its tests), then the schema key and vocabulary
+  owners, then name matches, then most recorded use (callers and reaching tests), then symbol. The query is the
+  text, or {:text text :limit n}; :count is the matches returned and :more the form reading more. :line counts from
+  the declaration's first line (my.program/source gives its file line).
+
+  ## Example
+
+  ```clojure
+  (my.program/search :seon.render/form)
+  (my.program/search \"program context\")
+  (my.program/search {:text \"java.util.Date.\" :limit 25})
+  (my.program/search {:text \"program context\" :seon.ref/at :chain-f1f6dc8e6652})
+  ```
+
+  `:seon.ref/at` (a branch or a commit) searches that database's program."
+  {:malli/schema [:=> [:cat :seon.db/database-value :my.program/search-query]
+                  [:or :my.program/search-result :seon.db/invalid-read-error :seon.program/not-found-error]]}
+  [database query]
+  (read-in database (when (map? query) (:seon.ref/at query)) #(search-in % query)))
 
 (defn sizes
   "The functions and tests of a namespace with their line counts, largest first (top 20).
