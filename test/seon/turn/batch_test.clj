@@ -500,3 +500,39 @@
             agent-id running)
      (is (= #{} (into #{} (db/q '[:find [?p ...] :where [_ :seon.eval/private ?p]] (db/db connection))))
          "the form defined nothing: no platform Var is recorded as the agent's private state"))))
+
+(deftest an-identical-redefinition-leaves-every-owned-attribute-of-the-stored-row-unchanged
+  ;; redefining a Var with its committed text changes nothing a file holds, so the
+  ;; row the REPL records keeps all it owns (file link, spans, source, calls)
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running agent-id connection]
+     (let [suffix (id/id)
+           fixture-ns (symbol (str "identical" suffix ".core"))
+           path (str "src/identical" suffix "/core.clj")
+           root ((requiring-resolve 'seon.test-support/temp-root) (str "identical-test-" suffix))
+           file (io/file root path)
+           function-form "(defn callee\n  \"Add one.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (+ x 1))"
+           test-form "(deftest adds-one\n  (is (= 2 (callee 1))))"
+           owned (fn [identity-attribute database sym]
+                   (let [attributes (:seon.program/owned-attributes (get (program/shapes) identity-attribute))]
+                     (select-keys (db/pull database '[*] [identity-attribute sym]) attributes)))]
+       (io/make-parents file)
+       (spit file (str "(ns " fixture-ns "\n  \"Fixture.\"\n  (:require [clojure.test :refer [deftest is]]))\n\n"
+                       function-form "\n\n" test-form "\n"))
+       ((requiring-resolve 'seon.test-support/commit-root!) root)
+       (try
+         (let [entities (function/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})]
+           ((requiring-resolve 'seon.test-support/transacted!)
+            connection (function/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
+           (eval! (str "(in-ns '" fixture-ns ")") agent-id running)
+           (let [agent-connection connection]
+             (doseq [[identity-attribute sym form] [[:seon.fn/sym (symbol (str fixture-ns) "callee") function-form]
+                                                    [:seon.test/sym (symbol (str fixture-ns) "adds-one") test-form]]]
+               (let [before (owned identity-attribute (db/db agent-connection) sym)]
+                 (eval! form agent-id running)
+                 (is (= before (owned identity-attribute (db/db agent-connection) sym))
+                     (str (name identity-attribute) " keeps every owned attribute when redefined identically"))))))
+         (finally
+           (when-let [branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id agent-id]))]
+             (some-> (host/hosted (get-in @running-instances [running :seon.turn.loop/cluster]) branch) host/retire!))
+           ((requiring-resolve 'seon.test-support/delete-root!) root)))))))

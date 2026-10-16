@@ -65,6 +65,11 @@
   (merge {:seon.ns/name namespace-name}
          (#'eval/binding-rows (#'eval/reader-context ctx namespace-name))))
 
+(def ^:private file-attributes
+  "The owned attributes a form evaluated from text cannot know: where its declaration lives in a file.
+  A redefinition's row omits them and keeps the stored ones (`entity-facts`)."
+  [:seon.fn/file :seon.fn/form-span])
+
 (defn analyzed-entities
   "The program entities one analysis derives, keyed by [request-index utf8-offset name]."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map] :map] :map]}
@@ -91,7 +96,7 @@
                           ns-row (:seon.fn/namespace-row (nth requests i))
                           row (program/declaration-row
                                projection
-                               (program/canonical-row shapes (dissoc entity :seon.fn/file :seon.fn/form-span))
+                               (program/canonical-row shapes (apply dissoc entity file-attributes))
                                :all :agent)]
                       [[i (- s (form-starts i)) (name (or (:seon.fn/sym entity) (:seon.test/sym entity)))]
                        (assoc row :seon.program/definition-digest
@@ -501,8 +506,9 @@
           (into (mapcat identity) entities)))))
 
 (defn- entity-facts
-  "A row's facts on `db`: the exact replacement of its stored identity, else
-  the new entity (and its namespace, when `db` holds none)."
+  "A row's facts on `db`: none when its stored identity already holds this
+  definition digest, else the exact replacement of it, else the new entity
+  (and its namespace, when `db` holds none)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/row] :seon.store/transaction-data]}
   [db row]
   (let [[ident v] (program/row-identity row)
@@ -510,14 +516,15 @@
         ns-attr (if (:seon.fn/ns row) :seon.fn/ns :seon.test/ns)
         ns-ref (get row ns-attr)
         missing-ns (when (and (vector? ns-ref) (not (dbu/entid db ns-ref))) (second ns-ref))
-        ;; redefining a Var at the REPL never moves it between files: the stored file link stays
-        file (get-in existing [:seon.fn/file :db/id])
-        row (cond-> row
-              missing-ns (assoc ns-attr (str "namespace:" missing-ns))
-              (and file (not (contains? row :seon.fn/file))) (assoc :seon.fn/file file))]
-    (cond-> (if (:db/id existing)
-              (program/exact-replacement-tx existing row)
-              [(assoc row :db/id (str (name ident) ":" v))])
+        row (cond-> row missing-ns (assoc ns-attr (str "namespace:" missing-ns)))
+        digest (:seon.program/definition-digest row)]
+    (cond-> (cond
+              ;; the stored definition already is this one: the file link, spans, admission and
+              ;; analysis the stored row owns stay, as redefining a Var never edits its file
+              (and digest (= digest (:seon.program/definition-digest existing))) []
+              (:db/id existing) (program/exact-replacement-tx
+                                 existing (merge (select-keys existing file-attributes) row))
+              :else [(assoc row :db/id (str (name ident) ":" v))])
       missing-ns (conj {:db/id (str "namespace:" missing-ns) :seon.ns/name missing-ns}))))
 
 (defn- declared-bindings
