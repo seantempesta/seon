@@ -13,6 +13,7 @@
        (cost/report result)
        (is (= 26 (:members (first (:verdict result)))))
        (is (= 1 (:members (first (:miss result)))))
+       (is (= 1 (:members (first (:reach-miss result)))))
        (is (= 2 (get-in result [:repeat 0 :derivations 'seon.test/bounded-result] 0)))
        (is (zero? (get-in result [:repeat 0 :derivations 'seon.fn/gate-edges] 0)))
        (is (zero? (get-in result [:unchanged 0 :derivations 'seon.test/run] 0)))
@@ -32,4 +33,5 @@
          (cost/report result)
          (is (= (repeat k 26) (map :members (:verdict result))))
          (is (= (repeat k 1) (map :members (:miss result))))
+         (is (= (repeat k 1) (map :members (:reach-miss result))))
          (is (every? (comp false? :failed?) (mapcat result [:first :repeat :edge :unchanged]))))))))

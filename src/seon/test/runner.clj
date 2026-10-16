@@ -2710,22 +2710,80 @@
                     true)
     (catch Exception failure (result-read-error "latest-results" failure))))
 
+(defn- members-at-reaches
+  "The executions recorded at the requested content identities, by member entity."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:map-of :seon.test/sym [:set :seon.test/reach-digest]]]
+                  [:map-of :int :seon.test/sym]]}
+  [database reaches]
+  (into {} (for [[test-symbol digests] reaches
+                 digest digests
+                 [member] (db/undecoded-search database [nil :seon.test.member/reach-digest digest])
+                 :when (= test-symbol (nth (first (db/undecoded-datoms database :eavt [member :seon.test.member/symbol])) 2 nil))]
+             [member test-symbol])))
+
 (defn result-at-reach
-  "Each test of `reaches` (test to reach digest) with the result of its newest admitted execution recorded on
-  `database` under exactly that digest, however many later executions at other digests exist; a test none ran
-  there is absent. One `:seon.test.member/symbol` index read per test and one digest read per member, then the
-  newest-execution reads once for the whole set."
+  "Each test of `reaches` with its newest admitted execution at exactly that content digest. A missing digest
+  reads no execution history: one native pattern seek per requested digest, then only its matching members."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/reach-digests]
                   [:or [:map-of :seon.test/sym [:or :seon.test/result :seon.test/result-unknown]] :seon.test/execution-error]]}
   [database reaches]
   (try
-    (let [members (into {} (for [[test-symbol digest] reaches
-                                 {member :e} (execution-read (db/datoms database :avet :seon.test.member/symbol test-symbol))
-                                 :when (= digest (:v (first (execution-read (db/datoms database :eavt member :seon.test.member/reach-digest)))))]
-                             [member test-symbol]))]
-      (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity))
-            (newest-results database members false)))
+    (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity))
+          (newest-results database (members-at-reaches database (update-vals reaches hash-set)) false))
     (catch Exception failure (result-read-error "result-at-reach" failure))))
+
+(defn- dynamic-call-inputs
+  "Fold changed members into the sparse recorded dynamic-call inputs; nil changes acquire the named inputs."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]
+                       [:maybe [:map-of :int [:tuple :seon.test/sym :seon.test.member/dynamic-calls]]]
+                       [:maybe [:set :int]]]
+                  [:map-of :int [:tuple :seon.test/sym :seon.test.member/dynamic-calls]]]}
+  [database names prior changed]
+  (let [selected (set names)
+        members (or changed
+                    (execution-read
+                     (db/q '[:find [?member ...] :in $ [?symbol ...]
+                             :where [?member :seon.test.member/symbol ?symbol]
+                                    [?member :seon.test.member/dynamic-calls]
+                                    [?member :seon.test.member/reach-digest]] database names)))
+        inputs (into {} (keep (fn [member]
+                               (let [sym (:seon.test.member/symbol member)
+                                     calls (:seon.test.member/dynamic-calls member)]
+                                 (when (and (selected sym) (seq calls) (:seon.test.member/reach-digest member))
+                                   [(:db/id member) [sym (into (sorted-set) calls)]]))))
+                     (execution-read (db/pull-many database
+                                                   [:db/id :seon.test.member/symbol :seon.test.member/dynamic-calls :seon.test.member/reach-digest]
+                                                   (vec members))))]
+    (merge (when changed (apply dissoc prior changed)) inputs)))
+
+(defn- current-reaches
+  "Current content identities for the requested tests and their recorded dynamic-call sets."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym] [:maybe :seon.test/task]
+                       [:map-of :int [:tuple :seon.test/sym :seon.test.member/dynamic-calls]]]
+                  [:or [:map-of :seon.test/sym [:set :seon.test/reach-digest]] :seon.error/value]]}
+  [database names task inputs]
+  (let [sets (update-vals (reduce (fn [result [test-symbol dynamic]] (update result test-symbol conj dynamic))
+                                   (zipmap names (repeat #{(sorted-set)})) (vals inputs)) vec)]
+    (reduce (fn [result i]
+              (let [round (into {} (keep (fn [[test-symbol dynamic]]
+                                          (when-let [d (nth dynamic i nil)] [test-symbol d]))) sets)
+                    digests (reach-digests database (vec (keys round)) (into {} (filter (comp seq val)) round) task)]
+                (if (seon.error.refusal/error? digests) (reduced digests)
+                  (reduce-kv (fn [out test-symbol digest]
+                               (update out test-symbol (fnil conj #{}) digest)) result digests))))
+            {} (range (apply max 0 (map count (vals sets)))))))
+
+(defn- recording-attributes
+  "The attributes owned by recorded executions and their reports, from their entity schemas."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:set :qualified-keyword]]}
+  [database]
+  (let [projection (db/carried-projection database)]
+    (schema/projection-cache-value
+     projection ::recording-attributes
+     #(into #{} (comp (mapcat (fn [k] (schema.internal/entity-entries
+                                      (m/schema k {:registry (:seon.schema.projection/registry projection)}))))
+                     (map first))
+            [:seon.test.run/run :seon.test.member/member :seon.test.report/report]))))
 
 (defn- result-revisions
   "The current-result lookup's content revisions; empty without authority.
@@ -2735,12 +2793,53 @@
   (let [projection (db/carried-projection database)
         attributes (schema/projection-cache-value
                     projection ::result-attributes
-                    #(into (program/program-attributes projection)
-                           (comp (mapcat (fn [k] (schema.internal/entity-entries
-                                                 (m/schema k {:registry (:seon.schema.projection/registry projection)}))))
-                                 (map first))
-                           [:seon.test.run/run :seon.test.member/member :seon.test.report/report :seon.task/task]))]
+                    #(into (into (program/program-attributes projection) (recording-attributes database))
+                           (map first)
+                           (schema.internal/entity-entries
+                            (m/schema :seon.task/task {:registry (:seon.schema.projection/registry projection)}))))]
     (or (db/content-revisions database (vec attributes)) {})))
+
+(defn- changed-result-data
+  "Changed entities and the tests whose recorded execution or report they affect."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value
+                       [:map-of :qualified-keyword :uuid] [:map-of :qualified-keyword :uuid]]
+                  [:map [::entities [:set :int]] [::tests [:set :seon.test/sym]]]]}
+  [before database previous revisions]
+  (let [attributes (recording-attributes database)
+        entities (if (= (select-keys previous attributes) (select-keys revisions attributes)) #{}
+                   (into #{} (comp cat (filter #(attributes (second %))) (map first))
+                         (db/datoms-diff before database :aevt [])))
+        read-tests (fn [value]
+                     (execution-read
+                      (db/q '[:find [?symbol ...] :in $ [?changed ...]
+                              :where (or-join [?changed ?member]
+                                       [(identity ?changed) ?member]
+                                       [?changed :seon.test.run/members ?member]
+                                       [?changed :seon.test.run/covered-by ?member]
+                                       [?member :seon.test.member/failures ?changed])
+                                     [?member :seon.test.member/symbol ?symbol]]
+                            value (vec entities))))]
+    {::entities entities ::tests (if (seq entities) (into (set (read-tests before)) (read-tests database)) #{})}))
+
+(defn- fold-current-results
+  "Keep outcomes with unchanged reach and recording facts; read only the missed tests' current executions."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.db/database-value] [:maybe :map]
+                       [:map-of :qualified-keyword :uuid] [:vector :seon.test/sym] [:maybe :seon.test/task]]
+                  :map]}
+  [database before prior revisions names task]
+  (let [changed (when before (changed-result-data before database (::revisions prior) revisions))
+        inputs (dynamic-call-inputs database names (::inputs prior) (::entities changed))
+        reaches (current-reaches database names task inputs)]
+    (if (:seon.error/at reaches) reaches
+      (let [changed-tests (if before (::tests changed) (set names))
+            kept (into #{} (filter #(and (not (changed-tests %)) (= (get (::reaches prior) %) (get reaches %)))) names)
+            missed (apply dissoc reaches kept)
+            members (members-at-reaches database missed)
+            read-results (when (seq members) (newest-results database members false))]
+        {::commit (db/commit-id database) ::revisions revisions ::reaches reaches ::inputs inputs
+         ::results (into (select-keys (::results prior) kept)
+                         (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity))
+                         read-results)}))))
 
 (defn current-results
   "Each of `test-symbols` with the result of its newest admitted execution on `database` recorded at its current
@@ -2748,6 +2847,7 @@
   execution's own body ran outside its closure (`:seon.test.member/dynamic-calls`) and the task's content, the one
   identity the recorder writes (`record`) and selection reuses by. A test none ran at its identity is absent. One
   reach read per distinct set of a test's dynamic calls, then the newest-execution reads once for the whole set.
+  Dynamic call inputs fold by their changed facts; current identities seek only matching executions.
   Held by program, task and result content revisions; evaluation recording leaves the result unchanged."
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.test/sym] [:maybe :seon.test/task]]
                   [:or [:map-of :seon.test/sym [:or :seon.test/result :seon.test/result-unknown]]
@@ -2756,37 +2856,27 @@
   (try
     (let [revisions (result-revisions database)
           names (vec (sort (distinct test-symbols)))
+          loaded (:seon.source/commit-id @@loaded-identity)
+          key [revisions names task loaded]
+          head [(db/content-revisions database [:seon.task/id :seon.schema/key :seon.schema/form]) names task loaded]
           derive (fn []
-                (let [ran (into {} (for [test-symbol (distinct test-symbols)
-                                         {member :e} (execution-read (db/datoms database :avet :seon.test.member/symbol test-symbol))
-                                         :let [digest (:v (first (execution-read (db/datoms database :eavt member :seon.test.member/reach-digest))))]
-                                         :when digest]
-                                     [member [test-symbol digest (into (sorted-set) (map :v) (execution-read (db/datoms database :eavt member :seon.test.member/dynamic-calls)))]]))
-                      ;; each test's distinct dynamic sets, read in rounds of one set per test
-                      sets (reduce (fn [result [test-symbol _ dynamic]] (update result test-symbol (fnil conj #{}) dynamic)) {} (vals ran))
-                      rounds (apply max 0 (map count (vals sets)))
-                      identities (reduce (fn [result i]
-                                           (if (seon.error.refusal/error? result)
-                                             (reduced result)
-                                             (let [round (into {} (keep (fn [[test-symbol dynamic]] (when-let [d (nth (vec dynamic) i nil)] [test-symbol d]))) sets)
-                                                   digests (reach-digests database (vec (keys round)) (into {} (filter (comp seq val)) round) task)]
-                                               (if (seon.error.refusal/error? digests)
-                                                 (reduced digests)
-                                                 (into result (map (fn [[test-symbol d]] [[test-symbol d] (get digests test-symbol)])) round)))))
-                                         {} (range rounds))]
-                  (if (seon.error.refusal/error? identities)
-                    identities
-                    (let [members (into {} (keep (fn [[member [test-symbol digest dynamic]]]
-                                                   (when (= digest (get identities [test-symbol dynamic])) [member test-symbol])))
-                                        ran)]
-                      (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity))
-                            (newest-results database members false))))))]
-      (if (seq revisions)
-        (cache/lookup ::current-results [revisions names task (:seon.source/commit-id @@loaded-identity)]
-                      #(+ (* 96 (count revisions)) (* 512 (count %))
-                          (* 1024 (transduce (map (comp count :seon.test.failure/reports val)) + 0 %)))
-                      derive #(not (:seon.error/at %)))
-        (derive)))
+                   (let [prior-key (when (seq revisions) (cache/present ::current-result-head head))
+                         prior (when prior-key (cache/present ::current-results prior-key))
+                         fold #(fold-current-results database % prior revisions names task)]
+                     (if prior (db/read-at database (::commit prior) fold) (fold nil))))
+          held (if (seq revisions)
+                 (cache/lookup ::current-results key
+                               #(+ (* 96 (count revisions)) (* 768 (count (::results %)))
+                                   (* 192 (count (::inputs %)))
+                                   (* 128 (transduce (map (comp count second val)) + 0 (::inputs %)))
+                                   (* 1024 (transduce (map (comp count :seon.test.failure/reports val)) + 0 (::results %))))
+                               derive #(not (:seon.error/at %)))
+                 (derive))]
+      (if (:seon.error/at held) held
+        (do (when (seq revisions)
+              (cache/evict! ::current-result-head head)
+              (cache/lookup ::current-result-head head (constantly (+ 256 (* 128 (count names)))) (constantly key)))
+            (::results held))))
     (catch Exception failure (result-read-error "current-results" failure))))
 
 (defn red-result?

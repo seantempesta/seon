@@ -96,6 +96,18 @@
            :derivations (select-keys (:seon.profile/called measured)
                                     '[seon.test/carried-results seon.test/recorded-outcomes seon.db/undecoded-datoms seon.db/undecoded-search]))))
 
+(defn reach-miss
+  "Read one current outcome through the runner's indexed reach lookup."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{connection :seon.db/connection}]
+  (let [database (db/db connection)
+        reaches (runner/reach-digests database ['agent.cost.probe/narrow-test])
+        measured (profile/measure #(runner/result-at-reach database reaches))]
+    (assoc (dissoc measured :seon.profile/value :seon.profile/called)
+           :members (count (:seon.profile/value measured))
+           :derivations (select-keys (:seon.profile/called measured)
+                                    '[seon.test.runner/result-at-reach seon.db/datoms seon.db/undecoded-search]))))
+
 (defn retire!
   "Retire the probe's owned branch through the agent owner."
   {:malli/schema [:=> [:cat :string :map] :map]}
@@ -136,7 +148,7 @@
             edge-requests (together "(defn narrow {:malli/schema [:=> [:cat :int] :int]} [x] (- x 0))")
             unchanged (together "(+ 1 2)")
             misses (mapv cache-miss agents)]
-        {:k k :width width :graph-changes graph-changes :first first-requests :repeat repeat-requests :edge edge-requests :unchanged unchanged :miss misses
+        {:k k :width width :graph-changes graph-changes :first first-requests :repeat repeat-requests :edge edge-requests :unchanged unchanged :miss misses :reach-miss (mapv reach-miss agents)
          :old-gen (mapv (fn [^MemoryPoolMXBean pool]
                           {:pool (.getName pool) :peak-bytes (.getUsed (.getPeakUsage pool))
                            :used-bytes (.getUsed (.getUsage pool)) :max-bytes (.getMax (.getUsage pool))}) pools)
@@ -157,7 +169,7 @@
   (let [path (str "/tmp/change-cost-probe-" (:k result) ".edn")
         write! #(spit path (str (value/core-text %) "\n") :append true)]
     (spit path "")
-    (doseq [stage [:first :repeat :edge :unchanged :miss :verdict :root]
+    (doseq [stage [:first :repeat :edge :unchanged :miss :reach-miss :verdict :root]
             measured (get result stage)]
       (write! {:k (:k result) :stage stage
                :measurement (select-keys measured [:request :failed? :status :members

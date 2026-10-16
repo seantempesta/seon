@@ -539,11 +539,42 @@
              measured (profile/measure current)]
          (is (= held (:seon.profile/value measured)))
          (is (= 1 (get-in held [proof :seon.test/pass-count])))
-         (is (zero? (profile/calls-of measured 'seon.test.runner/newest-results))))
+         (is (zero? (profile/calls-of measured 'seon.test.runner/newest-results)))
+         (test-support/declare-source! connection 'tq.unrelated
+                                       "(ns tq.unrelated) (defn value {:malli/schema [:=> [:cat] :int]} [] 42)")
+         (let [after (profile/measure current)]
+           (is (= held (:seon.profile/value after)))
+           (is (zero? (profile/calls-of after 'seon.test.runner/newest-results))
+               "an unrelated declaration keeps the held execution")))
        (test-support/transacted! connection (test-support/replacement-tx (db/db connection) [:seon.fn/sym 'tq.current/f] (source 2) {}))
        (is (= {} (current)))
        (run!)
        (is (= 1 (get-in (current) [proof :seon.test/fail-count])))))))
+
+(deftest current-results-fold-recorded-dynamic-calls
+  (test-support/with-database
+   (fn [connection]
+     (let [proof 'tq.dynamicfold/proof
+           names [proof]
+           source (fn [n target]
+                    (str "(ns tq.dynamicfold (:require [clojure.test :refer [deftest is]]))\n"
+                         "(defn f {:malli/schema [:=> [:cat] :int]} [] " n ")\n"
+                         "(defn g {:malli/schema [:=> [:cat] :int]} [] 2)\n"
+                         "(deftest proof (is (= 1 ((resolve (symbol \"tq.dynamicfold\" \"" target "\"))))))\n"))
+           current #(runner/current-results (db/db connection) names nil)
+           execute #(sut/run {:seon.test/execution (test-support/execution-handle connection)
+                              :seon.test/recording-connection connection
+                              :seon.test/policy :named :seon.test/identities #{proof}})]
+       (doseq [[n target expected] [[1 "f" 0] [2 "f" 1] [2 "g" 1] [1 "f" 0]]]
+         (test-support/declare-source! connection 'tq.dynamicfold (source n target))
+         (execute)
+         (let [database (db/db connection)
+               held (current)
+               result-key [(#'runner/result-revisions database) names nil
+                           (:seon.source/commit-id @seon.sci.eval/loaded-identity)]]
+           (is (= expected (get-in held [proof :seon.test/fail-count])))
+           (cache/evict! :seon.test.runner/current-results result-key)
+           (is (= held (current)) "folded and freshly read dynamic inputs judge the same result")))))))
 
 (deftest a-result-at-the-base-reach-digest-survives-later-runs
   ;; the proof runs green at the base program, then red once the change reaches it: its base run stays readable by
@@ -567,7 +598,10 @@
        (is (not= base (get (runner/reach-digests database [proof]) proof)) "the change reaches the proof")
        (is (= [0 1] (counts (first (runner/latest-results database [proof])))) "the newest execution is red")
        (is (= [1 0] (counts (get (runner/result-at-reach database {proof base}) proof))) "the base run answers at the base digest")
-       (is (= {} (runner/result-at-reach database {proof (apply str (repeat 64 "0"))})) "no run at a digest is absent")))))
+       (let [miss (profile/measure #(runner/result-at-reach database {proof (apply str (repeat 64 "0"))}))]
+         (is (= {} (:seon.profile/value miss)) "no run at a digest is absent")
+         (is (zero? (profile/calls-of miss 'seon.db/datoms))
+             "an absent reach does not enumerate this test's executions"))))))
 
 
 (deftest a-red-members-reply-carries-its-first-failing-expected-and-actual

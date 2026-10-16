@@ -403,3 +403,71 @@ The indexed miss retains the prior allocation (0.28/0.45/0.71 MB); sub-milliseco
 This is a correctness repair, not a new performance claim; broader request variation is not attributed to it.
 No additional default SCI request or live-chain operation. Foreign uncommitted konserve and test-data evidence
 are excluded from the archive.
+
+## Slice 5: fold held outcomes and seek current reaches
+
+`seon.test.runner/current-results` previously rebuilt every requested test from all its recorded executions: a
+symbol index read, then digest and dynamic-call reads per execution, followed by result reads for every selected
+member. It now holds one immutable value containing recorded dynamic inputs, current reach identities and outcomes.
+Its content key is the existing program/task/result revision map, requested names, task and loaded identity.
+A content-keyed hint locates a prior value; it is not currency. The value's commit is reopened through
+`seon.db/read-at`, and `seon.db/datoms-diff` skips shared index nodes. One diff selects changed execution/report
+entities; their direct, run-member and report-owner relationships identify affected tests on both values.
+Unchanged reach plus unchanged result facts keeps the held outcome. Only misses seek their current digest through
+`seon.db/undecoded-search`. The verdict's runner lookup returns the folded result map. No database or connection
+is retained, no new atom or stored lifecycle attribute. Cold acquisition reads only requested dynamic-call facts
+and the requested digest matches; static execution histories are no longer enumerated to discover their digests.
+
+`seon.test.runner/result-at-reach` uses the same `members-at-reaches` derivation. The old symbol-history loop is
+deleted. The absent-digest regression was red on parent `2b7e715c1b4d` (3 native execution reads versus 0).
+The unrelated-declaration regression was red on parent `ee2593db1df4` (one `newest-results` call versus 0).
+`current-results-fold-recorded-dynamic-calls` proves dynamic target changes, changed bodies, reverts and cache
+eviction agree with a fresh derivation. Focused candidate `b4ea883acbc6`: 6 tests / 46 assertions, including
+done/merge and accumulated-members-equals-full-merge. Existing task/dynamic/loaded-identity tests also passed.
+
+An intermediate version made hundreds of per-attribute diff calls; it was not committed. The final version
+performs one native index diff, then selects recording attributes derived from the run/member/report schemas.
+Same-parent pair on `538e731c3`, `7d3c07dcad3c` / `8c8a77dc7c80`, 2 tests / 27 assertions each:
+
+| K | Stage | Parent ms | Slice 5 ms | Parent allocation MB | Slice 5 allocation MB |
+|---|---|---:|---:|---:|---:|
+| 1 | first | 1023.40 | 1072.50 | 1324.80 | 1322.50 |
+| 1 | repeat | 435.10 | 444.70 | 671.50 | 678.70 |
+| 1 | edge | 444.90 | 441.30 | 690.90 | 685.40 |
+| 1 | unchanged | 34.30 | 33.20 | 38.60 | 36.90 |
+| 1 | miss | 0.73 | 1.03 | 0.29 | 0.28 |
+| 1 | reach-miss | 2.51 | 1.19 | 2.27 | 1.06 |
+| 1 | verdict | 4.81 | 4.52 | 6.06 | 6.07 |
+| 1 | root | 70.80 | 73.40 | 138.50 | 138.50 |
+| 3 | first | 524.40–555.20 | 515.30–533.10 | 777.30–807.70 | 754.60–799.00 |
+| 3 | repeat | 352.90–377.50 | 342.50–371.30 | 504.90–509.00 | 489.70–515.80 |
+| 3 | edge | 477.20–486.10 | 464.30–483.30 | 682.10–709.10 | 682.70–702.90 |
+| 3 | unchanged | 32.70–35.00 | 29.20–47.20 | 39.60–40.90 | 38.20–39.20 |
+| 3 | miss | 0.41–0.51 | 0.39–0.45 | 0.44–0.45 | 0.44–0.45 |
+| 3 | reach-miss | 1.64–1.94 | 0.85–1.05 | 2.76–2.76 | 1.06–1.06 |
+| 3 | verdict | 4.15–4.53 | 3.94–4.61 | 6.02–6.03 | 6.03–6.05 |
+| 6 | first | 253.90–281.90 | 260.90–295.40 | 370.80–388.00 | 371.20–384.10 |
+| 6 | repeat | 232.20–256.40 | 212.30–231.40 | 291.80–304.00 | 297.20–307.90 |
+| 6 | edge | 353.10–379.80 | 368.40–400.90 | 482.80–517.00 | 480.60–515.90 |
+| 6 | unchanged | 40.30–43.40 | 34.50–44.40 | 41.90–44.10 | 38.30–40.00 |
+| 6 | miss | 0.44–0.76 | 0.47–0.62 | 0.70–0.70 | 0.70–0.70 |
+| 6 | reach-miss | 1.14–1.38 | 0.77–1.05 | 2.14–2.32 | 1.06–1.06 |
+| 6 | verdict | 3.69–4.36 | 3.97–4.51 | 6.01–6.02 | 6.02–6.03 |
+
+Old-gen peaks MiB K=1/3/6: 491.56/534.73/594.85 → 528.37/554.03/601.26.
+The direct reach lookup gains consistently (K1 2.51→1.19 ms; K6 1.14–1.38→0.77–1.05 ms, allocation
+2.14–2.32→1.06 MB). Complete repeat/edge wall times remain mixed; no general request speed-up is claimed.
+The first request still runs 25 bodies and the task-reading proof still hashes all declarations after a change.
+`admitted-members` still validates the selected runs' membership history, and repeated executions at the same
+requested digest can return several matches. Those are explicitly remaining costs, not a claim of zero historical
+reads throughout the runner. The fold avoids those reads for held outcomes; an evicted outcome still takes them.
+The context additionally rechecks every named test's existence twice per verdict; that is the next deletion.
+Foreign konserve and test-data evidence are excluded. No default restart or root SCI request.
+
+Slice 5's first gate ran 50 tests: 339 passes, two fixture errors, no failing assertions (`aa40b76f1636`).
+The two errors reproduce on unmodified HEAD `538e731c3`, run `7d3733b5c867` (6 passes, 2 errors):
+`seon.test.selection-test/named-selection-reuses-green-members-by-reachable-content` and
+`seon.test.selection-test/selection-derives-bases-obligations-and-exact-symbol-reach`. Both call their
+`complete-selection!` fixture with a database lacking a commit; the canonical provenance writer refuses it.
+They are excluded by var from the final green gate and are not claimed as verified. All 48 other selected tests,
+including the runner namespace and both done/merge laws, passed the first gate. No foreign fixture was edited.
