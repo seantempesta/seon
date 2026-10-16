@@ -531,8 +531,8 @@ definition with the same input is computed once for every branch and agent that 
   model call. One rule judges every task done, `seon.cluster.source/done-refusals` (TASK-CHAIN §2.4: proofs green, no
   regression of main, no stray red, no contract gap), and root advances the chain. Every other end bails to root with a
   problem task, the task held and the branch kept; nothing relaunches by itself: root changes the held task and runs it
-  again (`my.root/run!`), abandons the chain or builds a new one. A question task declares its answer's Malli schema and
-  `my.agent/answer!` stores the validated answer as ordinary Datahike data for its proofs to read; `my.task/send-back!`,
+  again (`my.root/run!`), abandons the chain or builds a new one. Proofs guide the agent and the fix is code or data
+  updates; there are no question tasks or answer verb (owner, 2026-10-16). `my.task/send-back!`,
   with a required reason and a counterexample, bails a broken or impossible task to root; an agent's other task verbs
   are `my.task/current` and `my.task/update!` (`clojure.core/update` on a member), and
   success has no verb; a reply is `my.message/send` then `my.turn/wait`; a model agent's own `:work` task ends by

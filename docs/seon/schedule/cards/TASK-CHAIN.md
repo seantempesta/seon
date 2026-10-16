@@ -556,8 +556,9 @@ proofs are the merge gate's own judgment: the tests the gate found red, run at t
 like any task's proofs, else (a conflict, a file that does not analyze) the chain's last task's proofs; root's merge of
 the branch runs the whole gate again (`MERGE-STEP.md`).
 
-The user conversation (today's Survey, I1–I3) becomes a task before Design after the MVP: its proof will be that the
-user's latest answer approves the current plan.
+The user conversation (I1) is messages: a user's reply is an ordinary message delivered as a wake. There are no question
+tasks and no answer verb (owner, 2026-10-16): a task's proofs guide the agent, its fix is code and/or data updates, and
+`my.task/send-back!` bails a task whose tests are wrong or which should not be done. I2 and I3 are retired.
 
 ## 5. Scheduling
 
@@ -672,7 +673,7 @@ Beside the slices, file-disjoint: the reference-syntax page `docs/seon/architect
 read form for task references in `seon.ref/brief`; the errors cut (`errors-cut-plan.md`, E1 landed 5a08c13af).
 
 Retired acceptance tests (they test the copies design): A1, A3, A4, A6's relaunch rows, A7, I3 and the rest of the
-2026-10-13 table; I0 and A5/A5b stay green as they are. I1/I2 wait for the user-conversation task.
+2026-10-13 table; I0 and A5/A5b stay green as they are. I1 waits for the user-conversation task; I2 is retired.
 
 **Settled beside the slices (2026-10-14):** a REPL `def` is a program entity like a file's (de1f48c23); render
 invocations live in one `seon.cache` kind and must-reads render through `seon.render/render-call` (35cafc1dc); a

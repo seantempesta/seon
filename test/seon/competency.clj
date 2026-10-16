@@ -82,7 +82,7 @@
   '#{def defn defn- defmacro defmulti defmethod deftest clojure.test/deftest seon.schema/register!
      my.program/ns-unmap! my.program/remove-ns! my.program/write-branch! my.task/update! my.edit/text})
 
-(def ^:private wait-heads '#{my.turn/wait my.task/send-back! my.message/send my.agent/answer!})
+(def ^:private wait-heads '#{my.turn/wait my.task/send-back! my.message/send})
 
 (def productive
   "The form classes that move a run forward; a model call holding none of them is a wasted call."
