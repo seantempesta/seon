@@ -5690,11 +5690,14 @@
              #(@stored-namespace-context
                (declaration-value projection database identity-attrs namespace-entity))))))))))
 
-(defn- namespace-digests-tx
+(defn namespace-digests-tx
   "Transaction data re-deriving, on the transaction's own value `database`, the
-  digest of every function and test of `namespaces` (the namespace rows this
-  transaction writes) that its definition under the stored namespace row no
-  longer produces: a require or alias change changes their resolver context.
+  digest of every function and test of `namespaces` that its definition under
+  the stored namespace row no longer produces: a require or alias change
+  changes their resolver context (the namespace rows this transaction writes),
+  and a change to the digest formula (`seon.program/definition-digest`) changes
+  every stored digest, which publication and the forward merge convert
+  (`seon.program/a-digest-change-converts-every-stored-declaration`).
   Declarations the transaction writes itself (`written`) keep the writer's check."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection [:set :symbol]
                        [:set :seon.program/declaration-identity]]

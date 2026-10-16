@@ -502,8 +502,23 @@
                   (mapv #(program/digest-map % (assoc source/merge-bound :seon.program/identities changed)) [base head main]))
            three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))
            delta (:seon.program/changed-on-head three)
+           ;; the branch's own declarations since the base, converted to the digest main's formula produces
+           ;; (`seon.program/a-digest-change-converts-every-stored-declaration`); main's rows arrive converted in delta
+           own (when three (program/changed-identities base head source/merge-bound))
+           own-namespaces (when (set? own)
+                            (into #{} (keep (fn [[attribute v]]
+                                              (case attribute
+                                                (:seon.fn/sym :seon.test/sym) (symbol (namespace v))
+                                                :seon.ns/name v
+                                                nil)))
+                                  own))
            entities (when (seq delta) (carried-entities main head delta))
-           tx (cond (not three) nil (empty? delta) [] (vector? entities) (fn/reconcile-tx head entities (vec delta)) :else nil)
+           tx (cond (not three) nil (not (set? own)) nil (empty? delta) [] (vector? entities) (fn/reconcile-tx head entities (vec delta)) :else nil)
+           tx (when (vector? tx)
+                (cond-> tx
+                  (seq own-namespaces) (conj [:db.fn/call db/namespace-digests-tx (db/carried-projection main)
+                                              own-namespaces
+                                              (into #{} (filter (comp #{:seon.fn/sym :seon.test/sym} first)) delta)])))
            ;; the branch keeps its own version of a declaration both sides changed (git's ours, the target), and the
            ;; merge commit records it unmerged beside main's (theirs)
            tx (when (vector? tx)
@@ -519,6 +534,7 @@
            (:seon.error/at base) base
            (not (set? changed)) changed
            (not three) (some #(when (:seon.error/at %) %) maps)
+           (not (set? own)) own
            (and (seq delta) (not (vector? entities))) entities
            (not (vector? tx)) tx
            (not (:db-after written)) written

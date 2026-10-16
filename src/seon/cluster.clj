@@ -2532,9 +2532,17 @@
                                              {:seon.boot/population :seon.fn/population})))
                  ;; Tasks are data the publication admitted, never program entities:
                  ;; the tasks it changed since the prior adoption merge, empty when the cluster agrees.
-                 (require-committed! ((requiring-resolve 'seon.task/adopt-tasks-call)
-                                      published-database (db/db connection) prior-database)
-                                     {:seon.boot/population :seon.task/rows}))]
+                 (concat
+                  (require-committed! ((requiring-resolve 'seon.task/adopt-tasks-call)
+                                       published-database (db/db connection) prior-database)
+                                      {:seon.boot/population :seon.task/rows})
+                  ;; A declaration no file declares is never republished: its digest follows the formula here, in
+                  ;; the same transaction (`seon.program/a-digest-change-converts-every-stored-declaration`).
+                  (let [database (db/db connection)]
+                    (db/namespace-digests-tx
+                     database projection
+                     (set (d/q '[:find [?n ...] :where [?e :seon.ns/name ?n] (not [?e :seon.fn/file _])] database))
+                     (into #{} (filter (comp #{:seon.fn/sym :seon.test/sym} first)) program-identities)))))]
     (when (next tx-data)
       (report-source-progress! "development entities")
       (require-committed!

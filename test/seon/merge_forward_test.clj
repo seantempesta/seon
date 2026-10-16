@@ -153,3 +153,45 @@
                               (source/release! [base]))))
       (finally
         (registry/retire-branch! {:seon.store/store store :seon.store/branch chain})))))
+
+(deftest ^{:seon/tasks #{'seon.program/a-digest-change-converts-every-stored-declaration}}
+  a-forward-merge-converts-the-branchs-own-declarations-to-the-current-digest
+  ;; a declaration the branch wrote under a previous `seon.program/definition-digest` formula (as a store written by
+  ;; an older JVM holds it) is converted by the forward merge, so the writer admits a copy of it (a test world's
+  ;; program overlay, `seon.test/clean-request-handle`) instead of refusing its stored digest
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        main-conn (:seon.db/connection target)
+        suffix (id/id)
+        own (symbol "seon.merge-forward-test" (str "formula-" suffix))
+        theirs (symbol "seon.merge-forward-test" (str "formula-main-" suffix))
+        defined (fn [database sym] (support/program-entity database [:seon.fn/sym sym]
+                                                           (str "(defn " (name sym) " {:malli/schema [:=> [:cat] :int]} [] 1)")))
+        _ (when-not (db/pull (db/db main-conn) [:db/id] [:seon.agent/id "root"])
+            (support/transacted! main-conn (support/agent-tx (db/db main-conn) "root")))
+        {chain :seon.chain/branch}
+        (task/chain! {:seon.db/connection main-conn :seon.store/store store}
+                     [{:seon.task/ns 'fixture.forward :seon.task/name (str "formula-" suffix)
+                       :seon.task/plan "Convert the branch's digests in `seon.merge/merge-main!`."
+                       :seon.task/proofs '#{fixture.forward/proof}}])
+        on-chain (fn [f] (registry/on-branch store chain f))
+        stored #(:seon.program/definition-digest (db/pull % [:seon.program/definition-digest] [:seon.fn/sym own]))
+        previous (id/digest 64 [:previous-formula own])]
+    (try
+      (on-chain (fn [connection]
+                  (support/transacted! connection [(defined (db/db connection) own)])
+                  ;; the previous formula's digest, as the older JVM's checked writer stored it
+                  (d/transact connection {:tx-data [[:db/add [:seon.fn/sym own] :seon.program/definition-digest previous]]})))
+      (is (= previous (on-chain #(stored (db/db %)))) "the branch holds the previous formula's digest")
+      (support/transacted! main-conn [(defined (db/db main-conn) theirs)])
+      (let [merged (merge/merge-main! target chain)]
+        (is (nil? (:seon.error/type merged)) "the forward merge is written")
+        (on-chain
+         (fn [connection]
+           (let [after (db/db connection)
+                 current (:seon.program/definition-digest (defined after own))]
+             (is (= current (stored after)) "the branch's own declaration holds the current formula's digest")
+             (is (not (:seon.error/at (db/with after [(defined after own)])))
+                 "the writer admits a copy of the converted declaration")))))
+      (finally
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch chain})))))
