@@ -60,7 +60,7 @@
          :exclusions [org.clojure/clojurescript]}
         org.replikativ/proximum
         {:git/url "https://github.com/seantempesta/proximum"
-         :git/sha "9846d3e79e1aee48474bc876d3d563d7137209c6"
+         :git/sha "9a4edc0d5b07ea37d5059135fbb72c660348bcc9"
          :exclusions [org.replikativ/konserve]}
 
         ;; The one interpreter on every tier; our fork (interrupt-fn is
