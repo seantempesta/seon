@@ -185,44 +185,32 @@
     (assoc :seon.print/requery-refusal
            "The rendered value has no stable requery identity."))))
 
+(defn- request-members
+  "The members a render receives: the explicit keys `:seon.render/request`
+  declares in the request's schema `projection`, else in the operation's handed one."
+  {:malli/schema [:=> [:cat [:maybe :seon.schema/projection]] [:vector :qualified-keyword]]}
+  [projection]
+  (m/explicit-keys (m/deref (mr/schema (:seon.schema.projection/registry (or projection (schema/handed-projection)))
+                                       :seon.render/request))))
+
 (defn- render-argument
-  [request]
+  [projection request]
   ;; The render boundary holds the database, so it is the CALLER of each
   ;; render function and passes it in the unit; caller arguments win over a
-  ;; supplied default (root ruling 2026-09-25).
-  (let [context (select-keys request
-                             [:seon.db/db
-                              :seon.sci.eval/ctx
-                              :seon.agent/id
-                              :seon.turn/id
-                              :seon.render.call/id
-                              :seon.sci.admit/caps
-                              :seon.sci.eval/time-limit-ms
-                              :seon.db/connection
-                              :seon.render.data/total
-                              :seon.render/distance
-                              :seon.render/profile
-                              :seon.render.value/root
-                              :seon.render.data/cursor
-                              :seon.render.walk/attribute
-                              :seon.ai/partial
-                              ;; the symbols the form being shown defines (the Var render's)
-                              :seon.render.var/defining
-                              ;; the producers already rendering this
-                              ;; chain — carried so a producer that
-                              ;; delegates its own value onward cannot
-                              ;; be selected for it a second time
-                              :seon.render/rendering])
+  ;; supplied default (root ruling 2026-09-25). A render receives the members
+  ;; the request schema declares, its own `:seon.render/options` whole.
+  (let [connection (or (:seon.db/connection request)
+                       (get-in request [:seon.sci.eval/ctx :seon.sci.eval/custody :seon.db/connection]))
+        database (or (:seon.db/db request) (some-> connection db/db))
+        context (select-keys request (request-members projection))
         profile (target-profile request)
         value (render-value request)
         ;; A render unit's database is required: a request that names no
         ;; database value renders against its connection's current one (its
         ;; own, else its SCI context's custody).
-        connection (or (:seon.db/connection request)
-                       (get-in request [:seon.sci.eval/ctx :seon.sci.eval/custody :seon.db/connection]))
         context (cond-> context
-                  (and (not (:seon.db/db context)) connection)
-                  (assoc :seon.db/db (db/db connection))
+                  (and (not (:seon.db/db context)) database)
+                  (assoc :seon.db/db database)
                   profile (assoc :seon.render/profile profile)
                   (and (counted? value)
                        (not (contains? context :seon.render.data/total)))
@@ -234,12 +222,12 @@
     (assoc context :seon.render/value value)))
 
 (defn- producer-argument
-  [request]
+  [projection request]
   ;; Existing declared producers accept the qualified attributes of the value
   ;; they render together with render custody. Keep that established contract
   ;; for producer selection and invocation. The universal floor is the sole
   ;; exception below: arbitrary value keys never become its unit keys.
-  (let [argument (render-argument request)
+  (let [argument (render-argument projection request)
         value (:seon.render/value argument)
         ;; Transaction shape is for schema selection. Invocation preserves
         ;; the pulled value and the names reached through its refs.
@@ -516,7 +504,7 @@
                     {attribute value})
                   (:seon.db/db request))
                  attribute)
-            unit (producer-argument request)]
+            unit (producer-argument projection request)]
         ;; The declared contract decides whether this pair takes the raw
         ;; attribute or its render unit with database custody.
         (if (and (not (schema/function-accepts-in? projection selected [attribute-value]))
@@ -524,8 +512,8 @@
           unit
           attribute-value))
       (if (floor-producer? selected)
-        (render-argument request)
-        (producer-argument request)))))
+        (render-argument projection request)
+        (producer-argument projection request)))))
 
 (defn- declared-producers
   "The renderers `value`'s declared identity names for `output`, the same way
@@ -636,17 +624,16 @@
     {:seon.render.selection/stage (selection-stage :explicit-value :no-match)}))
 
 (defn- inline-rendered
-  "Inline rendered data at its face's edge: AI text or HTML Hiccup as given,
-  any other data through that face's own floor emitter."
-  {:malli/schema [:=> [:cat :map :seon.render/output :seon.schema/value]
+  "Inline rendered data at its face's edge: HTML Hiccup as given, AI data
+  (a string included, as the string it is) through the value printer."
+  {:malli/schema [:=> [:cat [:maybe :seon.schema/projection] :map :seon.render/output :seon.schema/value]
                   [:or :seon.render/rendered :seon.render/error-result]]}
-  [request output rendered]
+  [projection request output rendered]
   (cond
-    (and (= :seon.render/ai output) (string? rendered)) rendered
     (and (= :seon.render/html output) (hiccup/hiccup? rendered)) rendered
     (= :seon.render/form output) rendered
     :else ((if (= :seon.render/html output) render.value/render-html render.value/render-ai)
-           (cond-> (assoc (render-argument request) :seon.render/value rendered)
+           (cond-> (assoc (render-argument projection request) :seon.render/value rendered)
              (:seon.db/db request) (assoc :seon.db/db (:seon.db/db request))))))
 
 (defn- viewing-namespace
@@ -676,14 +663,15 @@
 (defn- namespace-stage
   "The viewing agent's own render functions (owner, 2026-09-25): a public
   function of its namespace whose contract accepts this render argument and
-  returns OUTPUT's face. Candidates are sorted; more than one is refused."
+  returns OUTPUT's face: AI data (`:seon.render/ai-data`, never text), HTML
+  hiccup or a read form. Candidates are sorted; more than one is refused."
   [request projection output]
   (let [{namespace-name :seon.render/namespace candidates :seon.render/viewer-functions}
         (if (find request :seon.render/viewer-functions) request (viewer request))
         ;; A face is a render output, never the schema's declaration of its
         ;; renderer (the face keys name functions).
-        output-schema (case output :seon.render/ai :string :seon.render/html :seon.render/hiccup :seon.render/form :seon.render/read-form)
-        argument (delay (producer-argument request))
+        output-schema (case output :seon.render/ai :seon.render/ai-data :seon.render/html :seon.render/hiccup :seon.render/form :seon.render/read-form)
+        argument (delay (producer-argument projection request))
         evidence (mapv (fn [candidate]
                          (if (or (schema/function-accepts-and-returns-in?
                                   projection candidate [@argument] output-schema)
@@ -1356,7 +1344,7 @@
       (not (or (qualified-symbol? selected) (fn? selected)))
       {:seon.print/node {:seon.print/face :seon.print/projected
                          :seon.render/output output
-                         :seon.print/value (inline-rendered request output selected)}}
+                         :seon.print/value (inline-rendered projection request output selected)}}
       :else
       ;; A source producer's REPL entries reach the face only evaluated: the
       ;; request's `:seon.sci.eval/evaluate-source` (the one REPL path, as a
@@ -1367,7 +1355,7 @@
             blocks (:seon.render/source-blocks face)
             text (if blocks (clojure.string/join "\n\n" (map :seon.render/source blocks)) face)
             source? (and (contains? answer :face) (= output :seon.render/ai)
-                         (source-producer? projection selected [(producer-argument request)]))
+                         (source-producer? projection selected [(producer-argument projection request)]))
             evaluated (when source?
                         (if-let [evaluate (:seon.sci.eval/evaluate-source request)]
                           (evaluate request text)
@@ -1393,7 +1381,7 @@
   [request output selected]
   (if-not (or (qualified-symbol? selected) (fn? selected))
     ;; A value's own rendered data is its face as given.
-    (inline-rendered request output selected)
+    (inline-rendered (request-projection request) request output selected)
     (let [{face :face failure :failure :as answer} (produce request output selected)]
       (if (contains? answer :face) face failure))))
 

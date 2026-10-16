@@ -957,8 +957,8 @@ handle))}}
      (support/transacted! connection (support/agent-tx @connection "juniper"))
      (let [ctx (support/fork-cluster-ctx connection)
            in-viewer #(sci/binding [sci/ns (sci/create-ns 'my.agents.juniper)] (sci/eval-form ctx %))
-           source (str "(defn agent-view {:malli/schema [:=> [:cat [:map [:seon.agent/id :seon.agent/id]]] :string]} [unit] "
-                       "(swap! calls inc) (str \"rendered \" (:seon.agent/id unit)))")
+           source (str "(defn agent-view {:malli/schema [:=> [:cat [:map [:seon.agent/id :seon.agent/id]]] :seon.render/ai-data]} [unit] "
+                       "(swap! calls inc) {:rendered (:seon.agent/id unit)})")
            _ (in-viewer '(def calls (atom 0)))
            _ (support/transacted! connection [(support/program-fn-entity (db/db connection) 'my.agents.juniper/agent-view source)])
            _ (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)

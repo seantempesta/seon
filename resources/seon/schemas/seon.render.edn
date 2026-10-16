@@ -109,6 +109,32 @@
                  :seon.render/ambiguous-error :seon.render/request-error :seon.config/error
                  :seon.render/inline]]],
               :distance [:int {:min 0}],
+              :request
+              [:map {:description "One request to the value printer's one entry (seon.render.value/show): the value, what to answer, and the render inputs a selected render receives. Open: every member but the value is optional, and a render receives exactly the members declared here (seon.render/render-argument)."}
+               [:seon.render/value :seon.render/value]
+               [:seon.render/output {:optional true} :seon.render/output]
+               [:seon.render/outputs {:optional true} :seon.render/outputs]
+               [:seon.render/options {:optional true} :seon.render/options]
+               [:seon.render/profile {:optional true} :seon.render/profile]
+               [:seon.render/distance {:optional true} :seon.render/distance]
+               [:seon.render.value/reserve {:optional true} :seon.render.value/reserve]
+               [:seon.db/db {:optional true} :seon.db/database-value]
+               [:seon.db/connection {:optional true} :seon.db/connection]
+               [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]
+               [:seon.agent/id {:optional true} :seon.agent/id]
+               [:seon.turn/id {:optional true} :seon.turn/id]
+               [:seon.render.call/id {:optional true} :seon.render.call/id]
+               [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps]
+               [:seon.sci.eval/time-limit-ms {:optional true} :seon.sci.eval/time-limit-ms]
+               [:seon.render.data/total {:optional true} :seon.render.data/total]
+               [:seon.render.value/root {:optional true} :seon.render.value/root]
+               [:seon.render.data/cursor {:optional true} :seon.render.data/cursor]
+               [:seon.render.walk/attribute {:optional true} :seon.render.walk/attribute]
+               [:seon.ai/partial {:optional true} :seon.ai/partial]
+               [:seon.render.var/defining {:optional true} :seon.render.var/defining]
+               [:seon.render/rendering {:optional true :description "The producers already rendering this chain, so a producer that delegates its own value onward is not selected for it again."} :seon.render/rendering]],
+              :outputs [:set {:description "Which faces the answer carries: :text, :hiccup or both (both when absent)."} [:enum :text :hiccup]],
+              :options [:map {:description "A render's own options, passed whole to the selected render, which reads them by its own input schema."}],
               :unknown-reason [:enum :time-limit :refused :unselected],
               :unknown-request
               [:map

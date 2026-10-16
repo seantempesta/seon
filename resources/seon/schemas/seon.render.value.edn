@@ -52,6 +52,26 @@
                      [:seon.render.value/elisions {:optional true} :seon.render.value/elisions]
                      [:seon.render.value/whole-characters {:optional true} :seon.render.value/whole-characters]
                      [:seon.render.value/full? {:optional true} :seon.render.value/full?]],
+                    :shown
+                    [:map {:description "What the one entry (seon.render.value/show) answers: the selected tree, its cuts as data with the forms that read their rest, its token size, diagnostics, and the text or hiccup the request asked for."}
+                     [:seon.render.value/tree :seon.render.value/tree]
+                     [:seon.render.value/options :seon.print/options]
+                     [:seon.render.value/truncated? :seon.render.value/truncated?]
+                     [:seon.render.value/tokens :seon.render.value/tokens]
+                     [:seon.render.value/cuts {:optional true} :seon.render.value/cuts]
+                     [:seon.render.value/text {:optional true} :seon.render.value/text]
+                     [:seon.render.value/html {:optional true} :seon.render.value/html]
+                     [:seon.render.call/selected-producer {:optional true} :qualified-symbol]
+                     [:seon.render.call/source-output? {:optional true} :boolean]
+                     [:seon.render.value/diagnostics {:optional true} :seon.render.value/diagnostics]
+                     [:seon.render.value/value-text {:optional true} :seon.render.value/value-text]
+                     [:seon.render.value/elisions {:optional true} :seon.render.value/elisions]
+                     [:seon.render.value/whole-characters {:optional true} :seon.render.value/whole-characters]
+                     [:seon.render.value/full? {:optional true} :seon.render.value/full?]],
+                    :tokens [:int {:min 0 :description "Estimated tokens of the shown text (seon.ai.tokens/estimate)."}],
+                    :cuts [:vector {:description "Every cut of the selected tree, in tree order: each elided node with its path, what it omitted, the bound that cut it and the continuation form that reads the rest."} :seon.print/node],
+                    :reserve [:int {:min 0 :description "Characters of the one budget another part of the same unit already took."}],
+                    :root [:or {:description "The caller-supplied address of a printed value's root: a result handle or block name, or an identity vector."} :qualified-symbol :qualified-keyword [:vector :seon.schema/value]],
                     :elisions [:int {:min 0 :description "How many cuts the selection made: each node that shows less than it holds."}],
                     :whole-characters [:int {:min 0 :description "Estimated characters of the whole value: the shown text plus each cut's omitted part (seon.render.value/omitted-characters), never a second print; a lower bound when a lazy tail is pending."}],
                     :full? [:boolean {:description "The value opted into printing whole (seon.print/full): no budget and no structural bound applied."}],

@@ -304,6 +304,8 @@
         shown (value/render-ai request)]
     (is (= raw (edn/read-string shown)))
     (is (< 3 (count (str/split-lines shown))))
+    (is (= shown (:seon.render.value/text (value/show (assoc request :seon.render/outputs #{:text}))))
+        "the one entry lays out the same text")
     (is (str/includes? (hiccup/->string (value/render-html request))
                        (apply str (repeat 180 "x"))))))
 
@@ -927,13 +929,17 @@
 
 (deftest a-value-s-own-rendered-data-is-its-ai-face
   ;; The master override (AGENTS render law): a value's own :seon.render/ai
-  ;; key may be the rendered data itself. Only a named producer has indexed
-  ;; contracts to read source intent from, so rendered data is shown as given.
+  ;; key may be the rendered data itself, printed by the value printer; an AI
+  ;; face is data, so a string there prints as the string it is.
   (support/with-database
    (fn [connection]
-     (is (= "just text"
+     (is (= "{:summary 1}"
             (:seon.render.value/text
-             (value/prepare (render-request connection {:seon.render/ai "just text" :x 1}))))))))
+             (value/prepare (render-request connection {:seon.render/ai {:summary 1} :x 1})))))
+     (is (= "\"just text\""
+            (:seon.render.value/text
+             (value/prepare (render-request connection {:seon.render/ai "just text" :x 1}))))
+         "an AI face is never text shown as written"))))
 
 (deftest a-value-s-own-inline-function-renders-it
   ;; The master override's third form (AGENTS render law): an inline function
@@ -976,7 +982,7 @@
   (filter #(and (vector? %) (= tag (first %))) (tree-seq vector? seq hiccup)))
 
 (deftest a-render-text-past-the-budget-is-cut-at-a-line-end-with-its-dig-form
-  ;; Render text is a string shown as written and cut like one: at a line end
+  ;; A producer's render text is a string shown as written and cut like one: at a line end
   ;; when one fits, counted, and read whole with `seon.print/full` on the handle.
   (support/with-database
    (fn [connection]
@@ -989,13 +995,13 @@
                       (value/prepare (assoc (render-request connection raw) :seon.render/profile probe-profile
                                             :seon.render.value/root root)))]
        (doseq [[row raw root line-end? full?]
-               [[:own-text {:seon.render/ai lines} 'result/e0123456789ab true true]
+               [[:own-text {:seon.render/ai (fn [_] lines)} 'result/e0123456789ab true true]
                 [:producer-text {:seon.render/ai (fn [_] lines)} 'result/e0123456789ab true true]
-                [:crlf {:seon.render/ai crlf} 'result/e0123456789ab true true]
-                [:first-line-past-the-budget {:seon.render/ai long-line} 'result/e0123456789ab false true]
-                [:sparse-lines {:seon.render/ai sparse} 'result/e0123456789ab true true]
-                [:short-first-line {:seon.render/ai short-first} 'result/e0123456789ab true true]
-                [:no-result-handle {:seon.render/ai lines} [:seon.render.value-test/registered :text] true false]]]
+                [:crlf {:seon.render/ai (fn [_] crlf)} 'result/e0123456789ab true true]
+                [:first-line-past-the-budget {:seon.render/ai (fn [_] long-line)} 'result/e0123456789ab false true]
+                [:sparse-lines {:seon.render/ai (fn [_] sparse)} 'result/e0123456789ab true true]
+                [:short-first-line {:seon.render/ai (fn [_] short-first)} 'result/e0123456789ab true true]
+                [:no-result-handle {:seon.render/ai (fn [_] lines)} [:seon.render.value-test/registered :text] true false]]]
          (let [projection (prepared raw root)
                [cut & more] (tree-cuts projection)
                text (:seon.render.value/text projection)]
@@ -1163,7 +1169,7 @@
        (is (= "{:k {\"x\" 1}}" (text {:k (sorted-map "x" 1)})))
        (is (= "{z 1}" (text (sorted-map-by compare 'z 1))))
        (is (nil? (:seon.render.value/diagnostics (prepared (sorted-map 'b 2 'a 1)))))
-       (is (= "custom face" (text (sorted-map :seon.render/ai "custom face" :x 1))))
+       (is (= "{:face 1}" (text (sorted-map :seon.render/ai {:face 1} :x 1))))
        (is (false? (value/keyword-lookup? (sorted-map 'a 1))))
        (is (true? (value/keyword-lookup? (sorted-map :a 1))))))))
 
@@ -1521,3 +1527,45 @@
        (is (= (str "{:db/id 7, :seon.turn/agent [:seon.agent/id " (pr-str id) "]}")
               (text {:db/id 7 :seon.turn/agent eid}))
            "with :db/id the map is an entity and the integer is resolved")))))
+
+(deftest show-answers-tree-text-and-cuts
+  ;; One entry, one request: the answer holds the selected tree, its text, the
+  ;; cuts as data with the forms that read their rest, and its token size.
+  (support/with-database
+   (fn [connection]
+     (support/transacted! connection [(support/task-row "showcuts0001" (apply str (repeat 400 "plan ")))])
+     (let [database (db/db connection)
+           handle 'result/e0123456789ab
+           refusal (db/transact! connection [[:db.fn/retractAttribute [:seon.fn/sym 'seon.id/id]
+                                              :seon.program/analyzed-source-digest]])
+           evaluation (support/evaluate {:seon.cluster.eval/source "(vec (range 2000))"
+                                         :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+                                         :seon.sci.admit/caps caps})
+           shapes {:function-entity (db/pull database '[*] [:seon.fn/sym 'seon.sci.eval/shown-result])
+                   :task (db/pull database '[*] [:seon.task/id "showcuts0001"])
+                   :error refusal
+                   :query (db/q '[:find ?symbol ?doc :where [?e :seon.fn/sym ?symbol] [?e :seon.fn/doc ?doc]] database)
+                   :evaluation (dissoc evaluation :seon.sci.eval/ctx)}
+           profile (assoc (render/agent-render-profile (support/effective-config))
+                          :seon.render.profile/token-budget 256)]
+       (doseq [[shape raw] shapes
+               :let [shown (value/show {:seon.render/value raw
+                                        :seon.render/profile profile
+                                        :seon.render.call/id [::show shape]
+                                        :seon.repl/handle handle
+                                        :seon.db/db database
+                                        :seon.render/outputs #{:text}})
+                     cuts (:seon.render.value/cuts shown)]]
+         (is (print/node? (:seon.render.value/tree shown)) (str shape " answers its selected tree"))
+         (is (string? (:seon.render.value/text shown)) (str shape " answers its text"))
+         (is (not (contains? shown :seon.render.value/html)) (str shape " builds no HTML when only text is asked for"))
+         (is (= (tokens/estimate (:seon.render.value/text shown)) (:seon.render.value/tokens shown))
+             (str shape " answers the token size of its text"))
+         (is (<= (:seon.render.value/tokens shown) 256) (str shape " stays inside its budget"))
+         (is (or (= :error shape) (seq cuts)) (str shape " is cut at this budget"))
+         (is (= (set (tree-cuts shown)) (set cuts)) (str shape " answers every cut of its tree as data"))
+         (is (every? (comp vector? :seon.render.data/path) cuts) (str shape " names each cut's path"))
+         (is (every? #(some #{handle} (tree-seq coll? seq (:seon.print/continuation %)))
+                     (remove :seon.print/raw? (filter :seon.print/continuation cuts)))
+             (str shape " continues each cut on the value's handle"))
+         (is (or (empty? cuts) (some :seon.print/continuation cuts)) (str shape " offers a form for its rest")))))))

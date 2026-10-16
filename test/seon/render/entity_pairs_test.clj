@@ -240,7 +240,7 @@
       connection
       [(support/program-fn-entity
         (db/db connection) 'my.agents.viewer/agent-view
-        "(defn agent-view {:malli/schema [:=> [:cat [:map [:seon.agent/id :seon.agent/id]]] :string]} [unit] \"viewer's view\")")])
+        "(defn agent-view {:malli/schema [:=> [:cat [:map [:seon.agent/id :seon.agent/id]]] :seon.render/ai-data]} [unit] {:view (:seon.agent/id unit)})")])
      (let [database (db/db connection)
            ctx (support/fork-cluster-ctx connection)
            selected (fn [viewer value output]
@@ -277,7 +277,7 @@
         connection
         [(support/program-fn-entity
           (db/db connection) 'my.agents.db-viewer/probe-view
-          "(defn probe-view {:malli/schema [:=> [:cat :seon.render/unit] :string]} [unit] (str \"db:\" (some-> (:seon.db/db unit) :max-tx)))")])
+          "(defn probe-view {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/ai-data]} [unit] {:db (some-> (:seon.db/db unit) :max-tx)})")])
        (let [database (db/db connection)
              ctx (support/fork-cluster-ctx connection)
              rendered (fn [value]
@@ -288,7 +288,7 @@
                           :seon.render/profile (render/agent-render-profile config/defaults)
                           :seon.sci.admit/caps (config/result-caps config/defaults)
                           :seon.sci.eval/time-limit-ms 5000}))]
-         (is (= (str "db:" (:max-tx database)) (rendered {:probe/label "x"}))
+         (is (= (str "{:db " (:max-tx database) "}") (rendered {:probe/label "x"}))
              "an omitted declared database is the request's own, supplied")
-         (is (= (str "db:" (:max-tx earlier)) (rendered {:probe/label "x" :seon.db/db earlier}))
+         (is (= (str "{:db " (:max-tx earlier) "}") (rendered {:probe/label "x" :seon.db/db earlier}))
              "a database the caller's value carries is never replaced"))))))

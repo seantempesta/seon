@@ -4706,9 +4706,11 @@
         ;; value then shows as bounded plain Clojure printing.
         [projection shown]
         (try
-          (let [projection (render.value/prepare
+          (let [projection (render.value/show
                             (cond-> (assoc (dissoc request :seon.cluster.eval/output)
                                            :seon.render/value value
+                                           :seon.render/output :seon.render/ai
+                                           :seon.render/outputs #{:text}
                                            :seon.render.call/id
                                            [:seon.cluster.eval/source
                                             (:seon.cluster.eval/source request)])
@@ -4721,7 +4723,7 @@
             [projection
              (if (contains? projection :seon.render.value/root-description) projection
                  (or (:seon.render.value/value-text projection)
-                     (render.value/render-ai-data projection)))])
+                     (:seon.render.value/text projection)))])
           (catch Throwable failure
             [{:seon.render.value/diagnostics [{:seon.render.data/path [] :seon.render.value/failure failure}]}
              (render.value/core-text value)]))
@@ -4737,7 +4739,10 @@
     ;; the whole-value nor the override size is recorded for the bounds to judge.
     (cond-> {:seon.sci.admit/value value
              :seon.eval/shown shown
-             :seon.eval/shown-tokens (tokens/estimate shown)}
+             ;; the one entry's token size, when the shown text is its text
+             :seon.eval/shown-tokens (or (when-not (:seon.render.value/value-text projection)
+                                           (:seon.render.value/tokens projection))
+                                         (tokens/estimate shown))}
       (int? (:seon.render.value/whole-characters projection))
       (assoc :seon.eval/value-tokens
              (tokens/estimate-of-characters (:seon.render.value/whole-characters projection)))
