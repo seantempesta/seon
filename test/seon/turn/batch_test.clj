@@ -151,6 +151,7 @@
        (spit file (str "(ns " fixture-ns "\n  \"Fixture.\"\n  (:require [clojure.string :as str]))\n\n"
                        "(defn joined\n  \"Joined words.\"\n  {:malli/schema [:=> [:cat [:sequential :string]] :string]}\n  [words]\n  (str/join \" \" words))\n\n"
                        "(defn callee\n  \"Add one.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (+ x 1))\n"))
+       ((requiring-resolve 'seon.test-support/commit-root!) root)
        (try
          (let [entities (function/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})]
            ((requiring-resolve 'seon.test-support/transacted!)
@@ -204,6 +205,7 @@
        (io/make-parents file)
        (spit file (str "(ns ^{:seon.test/platform \"Moving part: a sample.\"}\n    " fixture-ns
                        "\n  (:require [clojure.test :refer [deftest is]]))\n"))
+       ((requiring-resolve 'seon.test-support/commit-root!) root)
        (try
          (let [entities (function/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})]
            ((requiring-resolve 'seon.test-support/transacted!)
@@ -251,6 +253,7 @@
        (spit file (str "(ns " fixture-ns "\n  \"Fixture.\")\n\n"
                        "(defn head\n  \"The first number.\"\n  " contract "\n  [xs]\n  (first xs))\n\n"
                        "(defn callee\n  \"Add one.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (+ x 1))\n"))
+       ((requiring-resolve 'seon.test-support/commit-root!) root)
        (try
          (let [entities (function/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})]
            ((requiring-resolve 'seon.test-support/transacted!)
