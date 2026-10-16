@@ -5,6 +5,7 @@
             [seon.cache]
             [seon.db :as db]
             [seon.mcp :as mcp]
+            [seon.profile :as profile]
             [seon.test :as sut]
             [seon.test-support :as support]))
 
@@ -68,6 +69,11 @@
            {first-lane :seon.store/branch first-connection :seon.db/connection} (support/own-branch-agent! running first-agent program)
            first-check (agent-value running first-agent check)
            first-db (db/db first-connection)
+           inputs (db/q '[:find ?inputs . :in $ ?branch :where
+                           [?run :seon.test.run/branch ?branch] [?run :seon.test.run/input-digest ?inputs]]
+                         first-db first-lane)
+           missing (profile/measure #(#'sut/recorded-outcomes first-db
+                                       [['br.area/area-test (apply str (repeat 64 "0"))]] inputs))
            first-runs (set (map :seon.test.run/id (db/q '[:find [(pull ?run [:seon.test.run/id]) ...] :in $ ?branch
                                                           :where [?run :seon.test.run/branch ?branch]]
                                                         first-db first-lane)))
@@ -77,6 +83,9 @@
            database (db/db connection)
            green (branch-members database lane 'br.area/area-test)
            red (branch-members database lane 'br.area/red-test)]
+       (is (= #{} (:seon.profile/value missing)))
+       (is (= 1 (profile/calls-of missing 'seon.db/undecoded-datoms))
+           "a missing reach makes one index seek, without reading past outcomes")
        (is (false? (:seon.test/passed? first-check)) "the red test is red on the first branch")
        (is (false? (:seon.test/passed? second-check)) "the red test is answered red on the second branch")
        (is (= 0 (:seon.test/executed-count second-check)) "the second branch executes nothing")

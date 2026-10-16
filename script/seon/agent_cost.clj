@@ -1,6 +1,7 @@
 (ns seon.agent-cost
   "Chain request measurements through the MCP entrance, with branch-local tasks and tests."
   (:require [my.agent]
+            [seon.cache :as cache]
             [seon.cluster.host :as host]
             [seon.context :as context]
             [seon.db :as db]
@@ -9,6 +10,8 @@
             [seon.profile :as profile]
             [seon.render.value :as value]
             [seon.task :as task]
+            [seon.test :as test]
+            [seon.test.runner :as runner]
             [seon.test-support :as support])
   (:import [java.lang.management ManagementFactory MemoryPoolMXBean]
            [java.util.concurrent CountDownLatch]))
@@ -39,6 +42,7 @@
                                     '[seon.cluster.source/merge-members seon.fn/gate-edges
                                       seon.test.runner/newest-results seon.db/entities-changed-after
                                       seon.test/run seon.test/bounded-result
+                                      seon.test/carried-results seon.test/recorded-outcomes
                                       seon.test.runner/program-content-digest seon.program/digest-map])
            :request (some :seon.repl/request replies))))
 
@@ -72,6 +76,25 @@
            :status (:seon.task/status value)
            :members (count (get-in value [:seon.source/judged :seon.source/members]))
            :refusals (:seon.source/refusals value))))
+
+(defn cache-miss
+  "Recover one evicted outcome through the production cross-branch result lookup."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{connection :seon.db/connection}]
+  (let [database (db/db connection)
+        test-symbol 'agent.cost.probe/narrow-test
+        digest (get (runner/reach-digests database [test-symbol]) test-symbol)
+        inputs (db/q '[:find ?inputs . :in $ ?symbol ?digest :where
+                       [?member :seon.test.member/symbol ?symbol]
+                       [?member :seon.test.member/reach-digest ?digest]
+                       [?run :seon.test.run/members ?member] [?run :seon.test.run/input-digest ?inputs]]
+                     database test-symbol digest)
+        _ (cache/evict! :seon.test.runner/result [test-symbol digest inputs])
+        measured (profile/measure #(#'test/carried-results database #{} [test-symbol] {test-symbol digest} inputs))]
+    (assoc (dissoc measured :seon.profile/value :seon.profile/called)
+           :members (count (:seon.profile/value measured))
+           :derivations (select-keys (:seon.profile/called measured)
+                                    '[seon.test/carried-results seon.test/recorded-outcomes seon.db/undecoded-datoms]))))
 
 (defn retire!
   "Retire the probe's owned branch through the agent owner."
@@ -111,8 +134,9 @@
                                                        (when (some seq diff) [a diff]))))
                                           (keys (revisions after)))) first-heads second-heads))
             edge-requests (together "(defn narrow {:malli/schema [:=> [:cat :int] :int]} [x] (- x 0))")
-            unchanged (together "(+ 1 2)")]
-        {:k k :width width :graph-changes graph-changes :first first-requests :repeat repeat-requests :edge edge-requests :unchanged unchanged
+            unchanged (together "(+ 1 2)")
+            misses (mapv cache-miss agents)]
+        {:k k :width width :graph-changes graph-changes :first first-requests :repeat repeat-requests :edge edge-requests :unchanged unchanged :miss misses
          :old-gen (mapv (fn [^MemoryPoolMXBean pool]
                           {:pool (.getName pool) :peak-bytes (.getUsed (.getPeakUsage pool))
                            :used-bytes (.getUsed (.getUsage pool)) :max-bytes (.getMax (.getUsage pool))}) pools)
@@ -133,7 +157,7 @@
   (let [path (str "/tmp/change-cost-probe-" (:k result) ".edn")
         write! #(spit path (str (value/core-text %) "\n") :append true)]
     (spit path "")
-    (doseq [stage [:first :repeat :edge :unchanged :verdict :root]
+    (doseq [stage [:first :repeat :edge :unchanged :miss :verdict :root]
             measured (get result stage)]
       (write! {:k (:k result) :stage stage
                :measurement (select-keys measured [:request :failed? :status :members

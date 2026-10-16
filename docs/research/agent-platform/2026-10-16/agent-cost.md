@@ -222,7 +222,7 @@ those held results. Do not claim the owner's full first-principles design is ins
 also cost the change. The first request, the whole-program dependency of task-reading proofs, and production
 slow-root reproduction remain open measurements. The first probe alone understated the task-reading path.
 
-## Slice 3: fold call-edge changes (new window)
+## Slice 3: fold call-edge changes (`6f1d9b0cc`)
 
 Default was restarted by root onto `d76806d39` before this window. At entry it was ready but faulted, with existing
 malformed-contract and recorded-error findings. A fresh `change-cost-fold` agent read its current-state block
@@ -255,7 +255,10 @@ explicit; the full first-principles target is not claimed complete.
 
 The probe now also changes `narrow` from `(+ 0 x)` to `(- x 0)` after the original repeat. This adds/removes
 call edges and reaches one test plus the task-reading proof. The unchanged request follows that edit.
-The final quiet pair ran parent first, then candidate, without overlapping check JVMs or edit-hook evaluations.
+The final quiet pair ran parent first, then candidate, without overlapping owned check JVMs or edit-hook evaluations.
+Its actual Git parent was `d2d1caf91` (which includes the earlier render merge `225a66566`), not the running JVM's
+`d76806d39` named in the commit message. Parent/candidate runs were `171bf2f5b8b8` / `64742ce56a04`.
+The commit gate `c9a50ce72df5` passed 36 tests / 267 assertions, 54.5 s test time, 85.7 s total, 2.57 s publication.
 
 | K | Stage | Parent ms | Slice 3 ms | Parent allocation MB | Slice 3 allocation MB |
 |---|---|---:|---:|---:|---:|
@@ -287,3 +290,75 @@ Foreign boundary includes the dirty konserve gitlink, unrelated hook evidence, a
 `src/seon/context.clj` and `test/seon/context_test.clj` that appeared during this window. They are excluded from every
 candidate. The pre-existing three-argument host-exclusions test remains excluded; green host vars are named
 individually. Done/merge, context, test-step, db-flow, runner and nearest-selection proofs are named in the commit gate.
+
+## Slice 4: indexed result-cache misses
+
+The miss in `seon.test/carried-results` calls `seon.test/recorded-outcomes` on source branches. That owner scanned
+all `:seon.test.member/reach-digest` and `:seon.test.run/members` datoms, then filtered the requested identities.
+The smaller composition is two AVET seeks: the missed reach digests, then those members' owning runs. The existing
+reach-digest attribute gains `:seon.db/index true`; `seon.db/undecoded-datoms` admits AVET as well as EAVT/AEVT.
+No result entity or lifecycle attribute is added. Datahike's `datahike.schema/find-invalid-schema-updates` accepts
+monotonic index addition, and the transaction backfills AVET before publishing the new value.
+
+Own-branch installation evidence: `change-cost-fold` called `seon.schema/register!` with the exact new form in
+`resources/seon/schemas/seon.test.member.edn`. `result/e39d1aed1f650` returned the new declaration and a usage check
+of 0 stored values / 0 failing, 46 ms / 48.9 MB for the form. The automatic test step was **not green**: 13 reds
+and a pending tail, including `seon.cluster.host-test/an-sci-send-from-the-cluster-supplies-its-handle-and-resumes-a-stopped-agent`
+whose test thread remained live at its bound. Complete request `result/caaa31bebfa1f`: 12,924.7 ms, 7,236.9 MB
+allocated, 1,838,066 calls. No further SCI requests were made on that branch while this pending work was unresolved.
+The recorded `seon.agent-call-edges-test/admitted-declarations-retain-call-dependencies-across-turn-order` error
+calls `seon.test/reach-digest` with string `"my.agents.edge-probe/target-test"` where the installed contract requires
+a qualified symbol. Other reported reds concern older turn/host fixtures and need separate classification;
+this broad automatic result is not claimed as proof of the index slice. The candidate archive's named tests
+and publication/reload are its proof. Default was not stopped or restarted.
+
+The explicit miss stage evicts only the narrow test's `[symbol reach-digest input-digest]` entry, then measures
+`seon.test/carried-results`, the same owner called by an eval request's test runner. Each source branch holds
+26 tests plus repeat executions; one requested outcome is recovered. The no-match regression in
+`seon.test.branch-reuse-test/a-result-carries-to-another-branch-of-the-same-program` was red on the parent
+(`efe8267ab1fa`: 33 passes / 1 failure, three raw reads versus one). Candidate `4a53cdf8487f` passed all 34
+assertions, including carried greens, red counts and red reports after cache eviction.
+
+The final pair held Git HEAD at `134d66ed6` throughout both checks; parent `1cff1cb8d1d8`, candidate
+`4963a5476170`, each two tests / 24 assertions. Checks ran sequentially; other lanes were active on the host.
+Attribute only the miss-stage gain to this small change: the much larger full-request wall-time differences
+are not matched by their allocations and are not claimed as this slice's speed-up.
+
+| K | Stage | Parent ms | Slice 4 ms | Parent allocation MB | Slice 4 allocation MB |
+|---|---|---:|---:|---:|---:|
+| 1 | first | 1780.70 | 1458.60 | 1321.90 | 1322.40 |
+| 1 | repeat | 704.00 | 513.80 | 671.80 | 671.40 |
+| 1 | edge | 719.50 | 529.60 | 698.70 | 693.20 |
+| 1 | unchanged | 55.70 | 48.10 | 39.40 | 38.60 |
+| 1 | miss | 2.09 | 1.61 | 0.86 | 0.28 |
+| 1 | verdict | 8.91 | 7.82 | 6.10 | 6.06 |
+| 1 | root | 130.10 | 117.40 | 141.20 | 139.60 |
+| 3 | first | 778.00–786.60 | 755.00–759.90 | 791.50–843.80 | 795.20–819.20 |
+| 3 | repeat | 502.70–522.40 | 456.60–465.50 | 489.30–517.30 | 484.20–507.60 |
+| 3 | edge | 648.20–698.90 | 635.30–655.20 | 662.50–715.40 | 656.90–706.50 |
+| 3 | unchanged | 52.40–57.50 | 43.40–44.70 | 40.30–40.80 | 39.70–40.30 |
+| 3 | miss | 1.32–2.17 | 0.66–0.95 | 1.61–1.62 | 0.45–0.45 |
+| 3 | verdict | 5.98–8.54 | 4.80–4.99 | 6.08–6.09 | 6.03–6.04 |
+| 6 | first | 343.60–373.60 | 284.10–337.80 | 382.20–404.60 | 367.40–381.80 |
+| 6 | repeat | 296.40–313.30 | 302.00–338.00 | 301.20–304.60 | 292.50–303.70 |
+| 6 | edge | 482.60–527.10 | 460.70–498.00 | 491.40–522.40 | 486.60–511.10 |
+| 6 | unchanged | 53.00–63.30 | 45.60–62.20 | 41.70–44.50 | 41.10–43.10 |
+| 6 | miss | 1.86–2.50 | 0.57–0.78 | 2.97–2.97 | 0.71–0.71 |
+| 6 | verdict | 4.77–6.50 | 4.63–10.58 | 6.06–6.07 | 6.02–6.02 |
+
+Old-gen peaks MiB, K=1 / 3 / 6: 501.22 / 520.75 / 573.04 → 457.38 / 490.61 / 542.08.
+The cache-miss recovery stage at K=6 falls from 1.86–2.50 ms / 2.97 MB to 0.57–0.78 ms / 0.71 MB. It seeks only
+matching content; it does not enumerate other tests' executions or runs. Repeated executions of the same requested
+content can still produce several matches. Source-branch discovery still visits the branch heads it searches.
+Candidate publication/reload took 10.57 s in the paired run (one schema index and its consumers); this is a
+one-time publication cost, not a sub-second request claim. Own branch registration's broad red test step remains
+an unresolved verification boundary, separately recorded above.
+
+Still separate: `seon.test.runner/current-results` misses reconstruct all requested results from member histories.
+This slice fixes the cross-branch result-cache recovery owner; it does not claim that the verdict's held-result fold
+is complete. That owner and the task-proof whole-program hash are next.
+
+Before Slice 4's gate, shared-tree clj-kondo (`src script test --cache false`) found one foreign error:
+`test/seon/test_test.clj` referenced unresolved `sut/red-evaluators` in another lane's in-flight work.
+The slice's candidate excludes that file; its archive lint must be zero errors before the commit can proceed.
+Other foreign boundaries now include source/turn edits, reference schemas, task resources and competency files.

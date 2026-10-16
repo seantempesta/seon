@@ -472,9 +472,9 @@
 (defn undecoded-datoms
   "The datoms of `index` at `components` over `database`, as `[entity attribute value]` triples
   with the stored values as Datahike holds them. A native-typed attribute (string, instant)
-  needs no decoding. It acquires no declarations, so a fresh branch head reads in microseconds
+  needs no decoding. AVET requires an indexed attribute. It acquires no declarations, so a fresh branch head reads in microseconds
   where `datoms` derives the head's schema first (about 40 ms per branch head, 30 heads 1.2 s)."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:enum :eavt :aevt] [:vector :seon.schema/value]]
+  {:malli/schema [:=> [:cat :seon.db/database-value [:enum :eavt :aevt :avet] [:vector :seon.schema/value]]
                   [:vector [:tuple :int :keyword :seon.schema/value]]]}
   [database index components]
   (mapv (fn [datom] [(:e datom) (:a datom) (:v datom)])
