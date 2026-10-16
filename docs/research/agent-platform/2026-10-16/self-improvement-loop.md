@@ -72,6 +72,16 @@ across different real tasks.
    context and next form with EmbeddingGemma 2 (`embedding/fast/`), then group the steps by similarity. A recurring
    cluster becomes a new named cause, and the class list grows from the data instead of being fixed up front.
 
+**Many different views are the exploration.** Owner, 2026-10-16: "everyone has a different view of the system and can
+choose what branch they want to follow ... I want lots of agents with very different views rather than a traditional
+every agent follows the same 50k token instruction list." Each agent's context comes from its own task's references,
+its branch and the renders it selects, not from a shared instruction list. Different agents therefore meet similar
+situations through different views. The miner compares them directly: for one situation class, the waste rate under
+each view (which render, which references, which template) shows which view works. That comparison is the
+experiment, and it comes free from the variety of real work, with no repeated runs. Two consequences follow:
+- fixes improve the producers of views (renders, references, templates), never a growing common instruction text;
+- the shared help stays small.
+
 Each fix is targeted at a measured cause and checked by that cause's rate on later, different tasks. That costs
 nothing beyond the work we were doing anyway, and the signal accumulates with every task.
 
