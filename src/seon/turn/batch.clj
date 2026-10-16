@@ -1,11 +1,11 @@
 (ns seon.turn.batch
   "The program stages of the one REPL path, and every entrant's request.
 
-  derive   a form's ordered writes -> its program change: clj-kondo's
-           analysis of the form, each definition's write joined to exactly
-           one analyzed definition by its source occurrence, entities for the
-           joined, namespaces the form changed, schema keys whose registered
-           form the working value does not hold yet, removals in write order
+  derive   a form's ordered writes -> its program change: `record-form`,
+           clj-kondo's analysis of the text the form read joined by qualified
+           name to what it bound, namespaces the form changed, schema keys
+           whose registered form the working value does not hold yet,
+           removals in write order
   facts    a program change -> transaction data on a database value
   apply    that transaction on the working value through the writer's own
            validation (`seon.db/with`); a refusal is the form's facts error
@@ -19,6 +19,7 @@
   Entrants (`turn-request`, `code-request`, `jvm-request`, `test-request`)
   are `seon.batch/evaluate-batch` requests that differ only in these values."
   (:require [clj-kondo.core :as kondo]
+            [edamame.core :as edamame]
             [clojure.edn :as edn]
             [clojure.string :as str]
             [sci.impl.vars]
@@ -30,7 +31,6 @@
             [seon.config :as config]
             [seon.fn :as sfn]
             [seon.batch]
-            [seon.blob :as blob]
             [seon.cluster.source :as source]
             [seon.fn.analyzer :as analyzer]
             [seon.program :as program]
@@ -52,11 +52,6 @@
 ;;; Analysis and the join
 ;;; ---------------------------------------------------------------------------
 
-(defn- line-starts
-  {:malli/schema [:=> [:cat :string] [:vector nat-int?]]}
-  [^String text]
-  (into [0] (keep-indexed (fn [i c] (when (= \newline c) (inc i)))) text))
-
 (defn namespace-entity
   "The namespace fact a form's analysis resolves through: SCI's live resolver
   bindings (aliases, refers, requires, imports) of `namespace-name`."
@@ -70,45 +65,6 @@
   A redefinition's row omits them and keeps the stored ones (`entity-facts`)."
   [:seon.fn/file :seon.fn/form-span])
 
-(defn analyzed-entities
-  "The program entities one analysis derives, keyed by [request-index utf8-offset name]."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map] :map] :map]}
-  [db requests analysis]
-  (let [{a :seon.fn/analysis text :seon.fn/source spans :seon.fn/source-spans
-         function-entities :seon.fn/function-rows} analysis
-        context (#'sfn/text-context text)
-        byte-starts (:seon.fn/byte-line-starts context)
-        functions (into (#'sfn/first-party-function-symbols a) (map :seon.fn/sym) function-entities)
-        submitted (#'sfn/source-analysis a (ffirst spans) (second (peek spans)))
-        projection (db/carried-projection db)
-        entities (#'sfn/analysis-entities-by-file
-                  submitted functions {"<stdin>" context}
-                  (#'sfn/program-targets db (#'sfn/population-targets projection (#'sfn/invoked-attributes submitted)) functions)
-                  projection)
-        form-starts (mapv (fn [[first-row _]] (nth byte-starts (dec first-row))) spans)
-        form-of (fn [offset] (last (keep-indexed (fn [i s] (when (<= s offset) i)) form-starts)))
-        shapes (program/shapes-in projection)]
-    (into {}
-          (keep (fn [entity]
-                  (when (and (or (:seon.fn/sym entity) (:seon.test/sym entity)) (:seon.fn/form-span entity))
-                    (let [[s _] (:seon.fn/form-span entity)
-                          i (form-of s)
-                          ns-row (:seon.fn/namespace-row (nth requests i))
-                          row (program/declaration-row
-                               projection
-                               (program/canonical-row shapes (apply dissoc entity file-attributes))
-                               :all :agent)]
-                      [[i (- s (form-starts i)) (name (or (:seon.fn/sym entity) (:seon.test/sym entity)))]
-                       (assoc row :seon.program/definition-digest
-                              (db/definition-digest-of projection row ns-row))]))))
-          (get entities "<stdin>"))))
-
-(defn- synthetic
-  "An entry position [line column] in the analysis' synthetic coordinates."
-  {:malli/schema [:=> [:cat :map [:tuple pos-int? pos-int?]] [:tuple pos-int? pos-int?]]}
-  [{:keys [first-row line column]} [l c]]
-  [(+ first-row (- l line)) (if (= l line) (+ 1 (- c column)) c)])
-
 (defn- span-of
   "An analyzer entry's [row col end-row end-col]. A usage clj-kondo records
   inside a macro's expansion (the `->` of a `cond->`, the `if` of a `case`)
@@ -116,53 +72,6 @@
   {:malli/schema [:=> [:cat :map] [:tuple [:maybe int?] [:maybe int?] [:maybe int?] [:maybe int?]]]}
   [{r ::analyzer/row c ::analyzer/col er ::analyzer/end-row ec ::analyzer/end-col}]
   [r c er ec])
-
-(defn- contains-pos?
-  {:malli/schema [:=> [:cat :map [:tuple int? int?]] :boolean]}
-  [d [r c]]
-  (let [[row col end-row end-col] (span-of d)]
-    (boolean (and row end-row
-                  (or (< row r) (and (= row r) (<= col c)))
-                  (or (< r end-row) (and (= r end-row) (< c end-col)))))))
-
-(defn join-write
-  "The one analyzed definition a definition's final root write is.
-
-  Its origin is the source occurrence SCI evaluated it as (the SCI fork's
-  producer origin): the def form's own span, or the innermost macro call
-  whose expansion made it. A write with no origin rebinds a Var outside any
-  definition (intern, alter-var-root) and keeps its value unpersisted. A
-  write whose producer names its member (a record's constructor helper)
-  belongs to that declaration. An origin without its complete span joins
-  nothing."
-  {:malli/schema [:=> [:cat :map :map :seon.batch/write] :seon.batch/join]}
-  [analysis coords {sym :seon.batch/sym origin :seon.batch/origin member :seon.batch/member-of}]
-  (let [a (:seon.fn/analysis analysis)
-        same (filter #(= (name sym) (str (::analyzer/name %))) (::analyzer/var-definitions a))]
-    (cond
-      member {:seon.batch/join :member :seon.batch/member-of member}
-      (nil? origin) {:seon.batch/join :rebound}
-      (not (and (:end-line origin) (:end-column origin)))
-      {:seon.batch/join :unanalyzed :seon.batch/reason :no-complete-span}
-      :else
-      (let [span (into (synthetic coords [(:line origin) (:column origin)])
-                       (synthetic coords [(:end-line origin) (:end-column origin)]))
-            ;; a generated definition's owning macro call, by its complete span
-            call (when (:expanded-by origin)
-                   (first (filter #(= span (span-of %)) (::analyzer/var-usages a))))
-            op (when call (symbol (str (::analyzer/to call)) (str (::analyzer/name call))))
-            cs (distinct
-                (if (:expanded-by origin)
-                  (when call (filter #(and (contains-pos? call [(::analyzer/row %) (::analyzer/col %)])
-                                           (= op (::analyzer/defined-by %))) same))
-                  ;; an authored definition: its complete span exactly
-                  (filter #(= span (span-of %)) same)))]
-        (case (count cs)
-          0 {:seon.batch/join :unanalyzed :seon.batch/reason :no-definition-at-origin}
-          1 (cond-> {:seon.batch/join :matched :seon.batch/definition (first cs)}
-              (not= (namespace sym) (str (::analyzer/ns (first cs))))
-              (assoc :seon.batch/other-namespace true))
-          {:seon.batch/join :unanalyzed :seon.batch/reason :ambiguous})))))
 
 (defn captured-locals
   "Locals of `source`'s enclosing form that the definition spanning `span`
@@ -182,53 +91,102 @@
         outside (into {} (keep (fn [l] (when-not (inside? l) [(:id l) (:name l)]))) locals)]
     (into #{} (keep (fn [u] (when (inside? u) (get outside (:id u))))) local-usages)))
 
+(defn- text-namespace
+  "The namespace an `ns` text declares."
+  {:malli/schema [:=> [:cat :string] :symbol]}
+  [ns-text]
+  (second (edamame/parse-string ns-text {:all true :read-cond :allow :features #{:clj}
+                                         :auto-resolve (fn [_] 'user) :readers (fn [_] identity)})))
+
+(defn- used-aliases
+  "The aliases the form's analysis resolved a usage or keyword through: local -> target."
+  {:malli/schema [:=> [:cat :map] :seon.batch/aliases]}
+  [analysis]
+  (into {} (concat (keep (fn [u] (when-let [a (::analyzer/alias u)] [a (::analyzer/to u)])) (::analyzer/var-usages analysis))
+                   (keep (fn [k] (when-let [a (::analyzer/alias k)] [(symbol (str a)) (symbol (str (::analyzer/ns k)))]))
+                         (::analyzer/keywords analysis)))))
+
+(defn- self-require-refusal
+  "The refusal of a namespace text that requires its own namespace, as Clojure cannot load it."
+  {:malli/schema [:=> [:cat :map :symbol] [:maybe :seon.error/value]]}
+  [analysis n]
+  (when (some #(= :self-requiring-namespace (::analyzer/type %)) (::analyzer/findings analysis))
+    (seon.error.refusal/diagnostic
+     (java.util.Date.) :seon.sci.eval/program `record-form
+     {:seon.error/message (str "Cyclic load dependency: " n " requires itself; the require is refused and records nothing.")
+      :seon.error/offending {n #{n}}
+      :seon.error/member :seon.ns/requires
+      :seon.error/expected :seon.sci.eval/acyclic-bindings})))
+
+(defn record-form
+  "What one evaluated form declares: clj-kondo's analysis of the text it read
+  (the namespace's `ns` text and the directives evaluated in it since, or the
+  `ns` form `namespace-row` prints to, after the `declare` prelude of the
+  program's and `declared`'s names, then `source`) joined by qualified name to
+  `bound`, what the evaluation bound. A bound Var the text declares is a row
+  (the last occurrence of its name, as the last root write is its value); one
+  it does not is the agent's private state. `database` is the program the rows
+  resolve against."
+  {:malli/schema [:=> [:cat [:map
+                             [:seon.batch/source [:maybe :string]]
+                             [:seon.batch/bound :seon.batch/bound]
+                             [:seon.batch/ns-text {:optional true} :seon.batch/ns-text]
+                             [:seon.batch/directives {:optional true} :seon.batch/directives]
+                             [:seon.batch/ns {:optional true} :seon.batch/ns]
+                             [:seon.batch/namespace-row {:optional true} :map]
+                             [:seon.batch/declared {:optional true} [:vector :qualified-symbol]]
+                             [:seon.batch/database :seon.db/database-value]]]
+                  :seon.batch/record]}
+  [{:seon.batch/keys [source bound ns-text directives namespace-row declared database] form-ns :seon.batch/ns}]
+  (let [bound (vec (distinct bound))
+        private (fn [reason] (mapv (fn [sym] {:seon.batch/sym sym :seon.batch/join :unanalyzed :seon.batch/reason reason}) bound))]
+    (if-not source
+      {:seon.batch/entities [] :seon.batch/private (private :no-source) :seon.batch/aliases {}}
+      (let [n (or form-ns (text-namespace ns-text))
+            request (cond-> {:namespace-name n :form-source source :seon.fn/declared (vec declared)}
+                      ns-text (assoc :seon.fn/namespace-source ns-text :seon.fn/directives (vec directives))
+                      namespace-row (assoc :seon.fn/namespace-row namespace-row))
+            {a :seon.fn/analysis text :seon.fn/source [[first-row last-row]] :seon.fn/source-spans
+             function-entities :seon.fn/function-rows} (#'sfn/runtime-analysis-batch database [request])
+            submitted (#'sfn/source-analysis a first-row last-row)
+            functions (into (#'sfn/first-party-function-symbols a) (map :seon.fn/sym) function-entities)
+            projection (db/carried-projection database)
+            analyzed (#'sfn/analysis-entities-by-file
+                      submitted functions {"<stdin>" (#'sfn/text-context text)}
+                      (#'sfn/program-targets database (#'sfn/population-targets projection (#'sfn/invoked-attributes submitted)) functions)
+                      projection)
+            shapes (program/shapes-in projection)
+            qualified (fn [d] (symbol (str (::analyzer/ns d)) (str (::analyzer/name d))))
+            ;; the last occurrence of each name is its declaration
+            definitions (into {} (map (juxt qualified identity)) (::analyzer/var-definitions submitted))
+            rows (into {} (keep (fn [entity]
+                                  (when-let [sym (or (:seon.fn/sym entity) (:seon.test/sym entity))]
+                                    [sym (cond-> (program/declaration-row
+                                                  projection (program/canonical-row shapes (apply dissoc entity file-attributes)) :all :agent)
+                                           namespace-row (as-> row (assoc row :seon.program/definition-digest
+                                                                          (db/definition-digest-of projection row namespace-row))))])))
+                       (get analyzed "<stdin>"))
+            decided (mapv (fn [sym]
+                            (let [d (get definitions sym)
+                                  [r c er ec] (when d (span-of d))
+                                  captured (when (and d (not= [first-row 1] [r c]))
+                                             (captured-locals source [(inc (- r first-row)) c (inc (- er first-row)) ec]))]
+                              (cond
+                                (not (and d (get rows sym))) {:seon.batch/sym sym :seon.batch/join :unanalyzed
+                                                              :seon.batch/reason :not-declared-by-text}
+                                (seq captured) {:seon.batch/sym sym :seon.batch/join :unanalyzed
+                                                :seon.batch/reason :captures-locals :seon.batch/captured captured}
+                                :else (get rows sym))))
+                          bound)
+            refusal (when ns-text (self-require-refusal a n))]
+        (cond-> {:seon.batch/entities (filterv (complement :seon.batch/join) decided)
+                 :seon.batch/private (filterv :seon.batch/join decided)
+                 :seon.batch/aliases (used-aliases submitted)}
+          refusal (assoc :seon.batch/facts-error refusal))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; derive: one form's writes -> its program change
 ;;; ---------------------------------------------------------------------------
-
-(defn- entry-coords
-  {:malli/schema [:=> [:cat :map :map] :map]}
-  [analysis entry]
-  {:first-row (ffirst (:seon.fn/source-spans analysis))
-   :line (:seon.batch/line entry) :column (:seon.batch/column entry)})
-
-(defn- local-offset
-  "UTF-8 offset, within `source`, of synthetic position [r c] of an analysis
-  that placed `source` at `first-row`."
-  {:malli/schema [:=> [:cat :string int? [:tuple int? int?]] nat-int?]}
-  [^String source first-row [r c]]
-  (let [ls (line-starts source)]
-    (blob/utf8-size (subs source 0 (+ (get ls (- r first-row)) (dec c))))))
-
-(defn- definition-source
-  {:malli/schema [:=> [:cat :map :map] :string]}
-  [analysis d]
-  (let [t (:seon.fn/source analysis) ls (line-starts t)
-        [r c er ec] (span-of d)
-        off (fn [l col] (+ (get ls (dec l)) (dec col)))]
-    (subs t (off r c) (off er ec))))
-
-(defn- form-relative-expansions
-  "The observed expansions the analyzer needs: a macro call that is the owning
-  call of a generated definition (a bind's origin, `:expanded-by`) and that
-  clj-kondo cannot analyze itself (a Clojure core macro such as `defn` or
-  `defmacro` it knows; substituting SCI's expansion would hide the authored
-  form). Their call spans move from the batch's text coordinates to the form's
-  own (its first line 1, its first column 1): the analyzer places them at the
-  form's first row."
-  {:malli/schema [:=> [:cat :seon.batch/entry [:vector :seon.batch/write]] [:vector :seon.batch/write]]}
-  [{line :seon.batch/line column :seon.batch/column} writes]
-  (let [relative (fn [[l c]] [(inc (- l line)) (if (= l line) (inc (- c column)) c)])
-        owning (into #{} (keep (fn [{op :seon.batch/op {:keys [line column end-line end-column expanded-by]} :seon.batch/origin}]
-                                 (when (and (= :bind op) expanded-by end-line)
-                                   [line column end-line end-column])))
-                     writes)]
-    (into [] (comp (filter #(and (= :expansion (:seon.batch/op %))
-                                 (owning (:seon.batch/call-span %))
-                                 (not (str/starts-with? (str (namespace (:seon.batch/macro %))) "clojure."))))
-                   (map (fn [{[l c el ec] :seon.batch/call-span :as w}]
-                          (assoc w :seon.batch/call-span (into (relative [l c]) (relative [el ec]))))))
-          writes)))
 
 (defn- live-bindings
   "A reader context's resolver bindings as `seon.sci.eval/row-bindings` shapes them."
@@ -262,61 +220,6 @@
                      :seon.sci.eval/fixtures {}})))))
       (namespace-entity ctx namespace-name)))
 
-(defn- analyze-form
-  "One clj-kondo analysis of `source` in `namespace-name`, every Var the batch has
-  bound declared, with its entities; `namespace-row` names the namespace fact
-  each namespace resolves through (`stored-namespace-row`)."
-  {:malli/schema [:=> [:cat [:=> [:cat :symbol] :map] :seon.db/database-value :symbol :string [:vector :qualified-symbol]
-                       [:vector :seon.batch/write]] :map]}
-  [namespace-row db namespace-name source declared expansions]
-  (let [req (cond-> {:namespace-name namespace-name :form-source source
-                     :seon.fn/namespace-row (namespace-row namespace-name)
-                     :seon.fn/declared declared}
-              ;; the evaluation's observed expansions: the analyzer's hooks
-              ;; (analyzer-expansion-hooks patch) analyze a generated definition at its call
-              (seq expansions) (assoc :seon.batch/expansions expansions))
-        analysis (#'sfn/runtime-analysis-batch db [req])]
-    {:analysis analysis :entities (analyzed-entities db [req] analysis)}))
-
-(defn- write-entity
-  "The program row of one joined definition write, or the reason it has none.
-  Its contract facts read `projection`, the one the write was armed under,
-  bound as `ctx` binds its predicates (`seon.sci.kernel/context-bound-projection`)."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:=> [:cat :symbol] :map] :seon.db/database-value :seon.schema/projection :map :map :seon.batch/write [:vector :qualified-symbol]] :map]}
-  [ctx namespace-row db projection entry {:keys [analysis entities]} {sym :seon.batch/sym :as write} declared]
-  (let [coords (entry-coords analysis entry)
-        first-row (:first-row coords)
-        source (:seon.batch/source entry)
-        j (join-write analysis coords write)
-        d (:seon.batch/definition j)
-        [r c er ec] (when d (span-of d))
-        nested? (and d (not= [first-row 1] [r c]))
-        captured (when nested?
-                   (captured-locals source [(inc (- r first-row)) c (inc (- er first-row)) ec]))
-        row (when (and d (empty? captured))
-              (if (:seon.batch/other-namespace j)
-                (first (vals (:entities (analyze-form namespace-row db (symbol (namespace sym)) (definition-source analysis d) declared []))))
-                (get entities [0 (local-offset source first-row [r c]) (name sym)])))]
-    ;; every top-level def is a program row, as a file's is (`seon.fn/function-definition?`):
-    ;; a value def's row is its source, never its value
-    (cond
-      (seq captured) {:seon.batch/private {:seon.batch/sym sym :seon.batch/join :unanalyzed
-                                           :seon.batch/reason :captures-locals
-                                           :seon.batch/captured captured}}
-      ;; a contracted function's row carries its parsed contract facts
-      ;; (:seon.fn/arities, their input/output refs), as the index's rows do:
-      ;; the schema usage guard and arity checks read them
-      ;; the analysis row holds the authored contract (`:seon.fn/spec`, its
-      ;; predicates symbols); they resolve as this context resolves them
-      row {:seon.batch/row (if-let [spec (:seon.fn/spec row)]
-                             (sfn/contract-facts-row
-                              (sci.ctx-store/with-ctx ctx
-                                (kernel/context-bound-projection ctx projection (edn/read-string spec)))
-                              (namespace-row (symbol (namespace sym)))
-                              row)
-                             row)}
-      :else {:seon.batch/private (-> j (dissoc :seon.batch/definition) (assoc :seon.batch/sym sym))})))
-
 (defn- changed-schema-keys
   "Schema keys whose form in the batch's delta the working value does not hold."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value] [:set :qualified-keyword]]}
@@ -349,10 +252,13 @@
   [{{ctx :seon.sci.eval/ctx} :seon.batch/world :as request} state working entry writes]
   (let [declared (-> (vec (:declared state))
                      (into (keep #(when (= :bind (:seon.batch/op %)) (:seon.batch/sym %))) writes)
-                     ;; a `declare` binds no root, so no write names it: its namespace's
-                     ;; unbound Vars join the prelude so a call to one is an edge
-                     (into (for [w writes :when (= :namespace (:seon.batch/op w))
-                                 :let [n (:seon.batch/ns w)]
+                     ;; a `declare` binds no root, so no write names it: the unbound Vars of
+                     ;; the form's namespace and of those it wrote join the prelude, so a call
+                     ;; to one is an edge, as the file's `declare` makes it
+                     (into (for [n (into #{(:seon.batch/ns-before entry)}
+                                         (keep #(when (= :namespace (:seon.batch/op %)) (:seon.batch/ns %)))
+                                         writes)
+                                 :when n
                                  [s v] (get-in @(:env ctx) [:namespaces n])
                                  :when (and (symbol? s) (instance? sci.lang.Var v) (not (sci.impl.vars/hasRoot v)))]
                              (symbol (str n) (str s))))
@@ -363,41 +269,42 @@
                                                 (= :root (:seon.batch/kind w)))
                                          (assoc m (:seon.batch/var w) w) m))
                              {} writes))
+        bound (into [] (comp (filter (set finals)) (map :seon.batch/sym)) writes)
         namespaces (into #{} (comp (filter #(= :namespace (:seon.batch/op %))) (map :seon.batch/ns)) writes)
         namespace-row (partial stored-namespace-row ctx working namespaces)
-        analyzed (when (and (seq finals) (:seon.batch/source entry))
-                   (analyze-form namespace-row working (:seon.batch/ns-before entry) (:seon.batch/source entry) declared
-                                 (form-relative-expansions entry writes)))
+        n (:seon.batch/ns-before entry)
+        recorded (when (seq bound)
+                   (record-form {:seon.batch/source (:seon.batch/source entry) :seon.batch/bound bound
+                                 :seon.batch/ns n :seon.batch/namespace-row (namespace-row n)
+                                 :seon.batch/declared declared :seon.batch/database working}))
+        _ (when-let [refusal (:seon.batch/facts-error recorded)]
+            (throw (ex-info (:seon.error/message refusal) refusal)))
         ;; the projection each write was armed under (`seon.sci.arm/arm!`):
         ;; it holds a schema this form registered before the batch applies it
-        projection (when analyzed (arm/arming-projection request working))
-        ;; a Var this context shares with its base answers its root and
-        ;; metadata per context (`sci.lang.Var`): read them as `ctx` binds
-        ;; them, never as the base bound them before this request redefined it
-        by-var (sci.ctx-store/with-ctx ctx
-                 (into {} (map (fn [w] [(:seon.batch/var w)
-                                        (if analyzed
-                                          (write-entity ctx namespace-row working projection entry analyzed w declared)
-                                          {:seon.batch/private {:seon.batch/sym (:seon.batch/sym w)
-                                                                :seon.batch/join :unanalyzed
-                                                                :seon.batch/reason :no-source}})]))
-                       finals))
+        projection (when (seq (:seon.batch/entities recorded)) (arm/arming-projection request working))
+        ;; a contracted function's row carries its parsed contract facts
+        ;; (:seon.fn/arities, their input/output refs), as the index's rows do;
+        ;; its authored contract's predicates resolve as this context resolves
+        ;; them, under the projection the write was armed under
+        rows (sci.ctx-store/with-ctx ctx
+               (into {} (map (fn [row]
+                               (let [sym (:seon.fn/sym row (:seon.test/sym row))]
+                                 [sym (if-let [spec (:seon.fn/spec row)]
+                                        (sfn/contract-facts-row
+                                         (kernel/context-bound-projection ctx projection (edn/read-string spec))
+                                         (namespace-row (symbol (namespace sym)))
+                                         row)
+                                        row)])))
+                     (:seon.batch/entities recorded)))
+        private (into {} (map (juxt :seon.batch/sym identity)) (:seon.batch/private recorded))
         ;; execution order: a later write supersedes an earlier one by identity
         program (reduce (fn [m w]
                           (case (:seon.batch/op w)
-                            :bind (if (identical? w (some #(when (identical? (:seon.batch/var w) (:seon.batch/var %)) %) finals))
-                                    (let [{:seon.batch/keys [row private]} (get by-var (:seon.batch/var w))
-                                          sym (:seon.batch/sym w)]
-                                      (cond
-                                        row (assoc m sym [:entity row])
-                                        ;; a rebinding withdraws a row this batch proposed for
-                                        ;; the name: its source no longer describes the root
-                                        (and (= :rebound (:seon.batch/join private))
-                                             (dbu/entid working [:seon.fn/sym sym])
-                                             (not (dbu/entid (:seon.batch/basis request) [:seon.fn/sym sym])))
-                                        (assoc m sym [:withdrawn private])
-                                        :else (assoc m sym [:private private])))
-                                    m)
+                            :bind (let [sym (:seon.batch/sym w)]
+                                    (cond
+                                      (not (identical? w (some #(when (identical? (:seon.batch/var w) (:seon.batch/var %)) %) finals))) m
+                                      (get rows sym) (assoc m sym [:entity (get rows sym)])
+                                      :else (assoc m sym [:private (get private sym)])))
                             :unmap (assoc m (:seon.batch/sym w) [:removed])
                             :remove-ns (let [n (:seon.batch/ns w)]
                                          (-> (into {} (remove (fn [[s _]] (= (str n) (namespace s)))) m)
@@ -408,7 +315,7 @@
         entities (vec (keep (fn [[_ [tag x]]] (when (= :entity tag) x)) program))
         schema-keys (changed-schema-keys request working)
         change {:seon.batch/entities entities
-                :seon.batch/removals (vec (keep (fn [[k [tag]]] (when (#{:removed :removed-ns :withdrawn} tag) k)) program))
+                :seon.batch/removals (vec (keep (fn [[k [tag]]] (when (#{:removed :removed-ns} tag) k)) program))
                 :seon.batch/schema-keys schema-keys
                 :seon.batch/namespaces (into (apply disj namespaces removed-ns)
                                              ;; a definition names its namespace only to create it: a stored
@@ -416,7 +323,7 @@
                                              (comp (keep #(some-> % :seon.fn/ns second))
                                                    (remove #(dbu/entid working [:seon.ns/name %])))
                                              entities)
-                :seon.batch/private (vec (keep (fn [[_ [tag x]]] (when (#{:private :withdrawn} tag) x)) program))
+                :seon.batch/private (vec (keep (fn [[_ [tag x]]] (when (= :private tag) x)) program))
                 :seon.batch/notes (into (schema-notes request working schema-keys)
                                         (keep (fn [w] (when-let [e (:seon.batch/arm-error w)]
                                                         {:seon.batch/sym (:seon.batch/sym w) :seon.batch/arm-error e})))
@@ -782,7 +689,7 @@
 
 (defn private-fact
   "`:seon.eval/private`: the Vars this entry's change classed as the agent's private
-  state (`write-entity`), the one decision the reply's note reads; nil when none."
+  state (`record-form`), the one decision the reply's note reads; nil when none."
   {:malli/schema [:=> [:cat :seon.batch/entry] [:maybe [:map [:seon.eval/private [:set :qualified-symbol]]]]]}
   [{private :seon.batch/private}]
   (when (seq private)

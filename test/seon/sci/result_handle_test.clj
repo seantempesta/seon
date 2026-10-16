@@ -14,7 +14,7 @@
 
 (defn- analyzed
   "A program run of `text` with handles: its values, the Vars it bound, the
-  first handle's value and its analyze-form calls."
+  first handle's value and its record-form calls."
   {:malli/schema [:=> [:cat :seon.db/connection :string] [:map-of :keyword :seon.schema/value]]}
   [connection text]
   (let [basis (db/db connection)
@@ -34,11 +34,11 @@
                                           (assoc (frame ordinal namespace-name)
                                                  :seon.repl/handle (symbol "result" (str "ehandle" ordinal))))))
                     (dissoc :seon.batch/settle))
-        [result calls] (support/armed-calls '#{seon.turn.batch/analyze-form} #(batch/evaluate-batch request))]
+        [result calls] (support/armed-calls '#{seon.turn.batch/record-form} #(batch/evaluate-batch request))]
     {:values (mapv :seon.batch/value (:seon.batch/entries result))
      :bound (mapv :seon.batch/sym (filter #(= :bind (:seon.batch/op %)) (:seon.batch/writes result)))
      :handle (sci/eval-string* (get-in request [:seon.batch/world :seon.sci.eval/ctx]) "result/ehandle0")
-     :analyzed (get calls 'seon.turn.batch/analyze-form)}))
+     :analyzed (get calls 'seon.turn.batch/record-form)}))
 
 (deftest only-a-defining-form-is-analyzed
   (support/with-database

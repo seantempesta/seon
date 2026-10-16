@@ -8,7 +8,6 @@
             [clojure.edn :as edn]
             [edamame.core :as edamame]
             [clojure.walk :as walk]
-            [malli.core :as m]
             [seon.schema.internal :as internal]
             [clj-kondo.impl.version :as kondo.version]
             [babashka.process :as process]
@@ -67,33 +66,6 @@
           [:type-mismatch :redundant-str-call :is-message-not-string
            :redundant-primitive-coercion :equals-float :not-empty?
            :constant-condition]))
-
-(defn expansion-hooks
-  "clj-kondo `:analyze-call` hooks carrying the macro expansions an evaluation
-  observed (the SCI fork's expansion observer): for each expanded macro, a
-  hook answering the recorded expansion for the call node whose COMPLETE span
-  is an observed occurrence's, and leaving every other call as written. Each
-  occurrence's span is the form's own (its first line 1, first column 1);
-  the form sits at `first-row` of the analyzed text. Nil when none was
-  observed."
-  {:malli/schema [:=> [:cat [:sequential [:map [:seon.batch/macro :qualified-symbol]
-                                          [:seon.batch/call-span [:tuple pos-int? pos-int? pos-int? pos-int?]]
-                                          [:seon.batch/expansion :seon.batch/form]]]
-                       pos-int?]
-                  [:maybe :map]]}
-  [expansions first-row]
-  (let [by-macro (group-by :seon.batch/macro expansions)
-        row (fn [r] (+ r (dec first-row)))]
-    (when (seq by-macro)
-      {:__dangerously-allow-string-hooks__ true
-       :analyze-call
-       (into {} (for [[macro events] by-macro
-                      :let [at (into {} (for [{[l c el ec] :seon.batch/call-span e :seon.batch/expansion} events]
-                                          [[(row l) c (row el) ec] e]))]]
-                  [macro (str "(require '[clj-kondo.hooks-api :as api])\n"
-                              "(let [at '" (pr-str at) "]\n"
-                              "  (fn [{:keys [node]}] (let [{:keys [row col end-row end-col]} (meta node)]"
-                              " (when-some [e (get at [row col end-row end-col])] {:node (api/coerce e)}))))")]))})))
 
 (defn- present-values
   [entry selected-keys]
@@ -771,7 +743,6 @@
       [::paths {:optional true} [:vector {:min 1} [:string {:min 1}]]]
       [::cache-root {:optional true} :string]
       [::config-root {:optional true} :string]
-      [::hooks {:optional true :description "clj-kondo :hooks merged into the analysis config (expansion-hooks)."} :map]
       [::sources {:optional true}
        [:map-of {:min 1} [:string {:min 1}] :string]]]
       [:or [:map [::paths :some]] [:map [::sources :some]]]]]
@@ -786,7 +757,7 @@
      [::findings [:vector :map]]
      [::unanalyzed-namespaces [:set :symbol]]
      [::mentioned-symbols [:set :qualified-symbol]]]]}
-  [{::keys [paths sources cache-root config-root hooks]}]
+  [{::keys [paths sources cache-root config-root]}]
   ;; A trusted diagnostic must preserve each call as one coherent record.
   ;; clj-kondo's parallel analysis has combined an outer call's location and
   ;; arity with an inner call's resolved var, then emitted the corruption
@@ -806,7 +777,7 @@
                                  (java.io.BufferedReader. (java.io.StringReader. stdin-source))
                                  *in*)]
                  (invoke-kondo
-                  (cond-> {:lint lint-paths :config (cond-> publication-config hooks (assoc :hooks hooks))}
+                  (cond-> {:lint lint-paths :config publication-config}
                     cache-root (assoc :cache-dir cache-root)
                     config-root (assoc :config-dir config-root)
                     (nil? cache-root) (assoc :cache false))))

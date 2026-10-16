@@ -661,9 +661,9 @@
      :refused? (some? facts-error)}))
 
 (deftest the-record-stage-is-one-function-of-text
-  ;; Red by absence: `seon.turn.batch/record-form` does not exist on HEAD. Its input is the
-  ;; text the evaluation read and the one value it observed (`:seon.batch/bound`, the qualified
-  ;; names it bound, in order); no live SCI or JVM state. Each row names only the facts it is about.
+  ;; Its input is the text the evaluation read, the one value it observed (`:seon.batch/bound`,
+  ;; the qualified names it bound, in order) and the program the rows resolve against (a
+  ;; database value); no live SCI or JVM state. Each row names only the facts it is about.
   (let [record (requiring-resolve 'seon.turn.batch/record-form)
         ns-text "(ns bt.rec)"
         string-require "(require '[clojure.string :as str])"
@@ -673,10 +673,12 @@
          ["a redefinition in one form: the last occurrence is the declaration" ns-text []
           "(do (defn f [] 1) (defn f [] 2))" '[bt.rec/f bt.rec/f]
           {:recorded #{'bt.rec/f} :sources {'bt.rec/f "(defn f [] 2)"}}]
+         ;; as a file is indexed: the record's constructors and the protocol's methods are
+         ;; declarations, the record type and the protocol Var are not
          ["a record" ns-text [] "(defrecord R [a])" '[bt.rec/R bt.rec/->R bt.rec/map->R]
-          {:recorded #{'bt.rec/R 'bt.rec/->R 'bt.rec/map->R} :private {}}]
+          {:recorded #{'bt.rec/->R 'bt.rec/map->R} :private {'bt.rec/R :not-declared-by-text}}]
          ["a protocol" ns-text [] "(defprotocol P (m [x]))" '[bt.rec/P bt.rec/m]
-          {:recorded #{'bt.rec/P 'bt.rec/m} :private {}}]
+          {:recorded #{'bt.rec/m} :private {'bt.rec/P :not-declared-by-text}}]
          ["a value definition" ns-text [] "(def v 3)" '[bt.rec/v]
           {:recorded #{'bt.rec/v} :private {}}]
          ["a declare binds nothing" ns-text [] "(declare d)" []
@@ -699,21 +701,31 @@
           ["(require '[clojure.string :as x])" "(ns-unalias 'bt.rec 'x)" "(alias 'x 'clojure.set)"]
           "(defn un [] (x/union #{} #{}))" '[bt.rec/un]
           {:aliases {'x 'clojure.set}
-           :calls {'bt.rec/un #{'clojure.set/union}}}]
+           :calls {'bt.rec/un #{'clojure.core/defn 'clojure.set/union}}}]
          ["a keyword resolved through an alias" "(ns bt.rec (:require [clojure.set :as s]))" []
           "(def kw ::s/k)" '[bt.rec/kw]
-          {:recorded #{'bt.rec/kw} :aliases {'s 'clojure.set}}]
-         ["a renamed refer keeps its call edge"
-          "(ns bt.rec (:require [clojure.string :refer [join] :rename {join j}]))" []
-          "(defn jn [xs] (j \",\" xs))" '[bt.rec/jn]
-          {:recorded #{'bt.rec/jn} :calls {'bt.rec/jn #{'clojure.string/join}}}]]]
-    (when (is (some? record) "seon.turn.batch/record-form exists")
-      (doseq [[label ns-text directives source bound expected] rows]
-        (testing label
-          (is (= expected
-                 (select-keys (recorded (record #:seon.batch{:ns-text ns-text :directives directives
-                                                             :source source :bound bound}))
-                              (keys expected)))))))))
+          {:recorded #{'bt.rec/kw} :aliases {'s 'clojure.set}}]]]
+    ((requiring-resolve 'seon.test-support/with-database)
+     (fn [connection]
+       (doseq [[label ns-text directives source bound expected] rows]
+         (testing label
+           (is (= expected
+                  (select-keys (recorded (record #:seon.batch{:ns-text ns-text :directives directives
+                                                              :source source :bound bound
+                                                              :database (db/db connection)}))
+                               (keys expected))))))))))
+
+(deftest a-renamed-refer-keeps-its-call-edge-in-the-record-stage
+  ;; Red until program-facts P2: `seon.fn.analyzer/namespace-context` refuses an `ns` text whose
+  ;; require renames a refer (task `seon.fn/a-renamed-refer-drops-its-call-edge`)
+  ((requiring-resolve 'seon.test-support/with-database)
+   (fn [connection]
+     (is (= {:recorded #{'bt.rec/jn} :calls {'bt.rec/jn #{'clojure.core/defn 'clojure.string/join}}}
+            (select-keys (recorded ((requiring-resolve 'seon.turn.batch/record-form)
+                                    #:seon.batch{:ns-text "(ns bt.rec (:require [clojure.string :refer [join] :rename {join j}]))"
+                                                 :directives [] :source "(defn jn [xs] (j \",\" xs))" :bound '[bt.rec/jn]
+                                                 :database (db/db connection)}))
+                         [:recorded :calls]))))))
 
 (deftest an-identical-value-redefinition-keeps-no-stale-value
   ;; `(def cell (atom 0))` evaluated twice with a `swap!` between: the context holds the second

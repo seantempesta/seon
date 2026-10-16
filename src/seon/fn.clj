@@ -1052,9 +1052,10 @@
   Every form retains its exact source row span, excluding context declarations.
   Unknown-namespace usages carry no target identity and are excluded by the
   shared usage projection instead of being remapped to the calling namespace.
-  A request's observed macro expansions (`:seon.batch/expansions`, in the
-  form's own coordinates) become the analyzer's hooks at that form's first
-  row, so a generated definition is analyzed at its call. The analysis holds
+  A request carrying `:seon.fn/namespace-source` (the namespace's `ns` text)
+  and `:seon.fn/directives` (the texts evaluated in it since) is analyzed
+  under that text, as a file is; otherwise under the `ns` form its namespace
+  row prints to. The analysis holds
   the dependency analysis of the namespaces it used (`dependencies`, default
   the checkout's cache), so no caller classifies a host call without it."
   {:malli/schema [:function
@@ -1105,12 +1106,14 @@
                                              (db/pull database [:seon.ns/source] [:seon.ns/name namespace-name]))]
                             (declared-namespace-metadata namespace-name stored))
                  namespace-source
-                 (print/form-text (runtime-namespace-form
-                                   namespace-name
-                                   (update namespace-entity :seon.ns/refers
-                                           (fnil into []) interpreter-refers)
-                                   referenced
-                                   declared))
+                 (if-let [text (:seon.fn/namespace-source (first group))]
+                   (str/join "\n" (cons text (:seon.fn/directives (first group))))
+                   (print/form-text (runtime-namespace-form
+                                     namespace-name
+                                     (update namespace-entity :seon.ns/refers
+                                             (fnil into []) interpreter-refers)
+                                     referenced
+                                     declared)))
                  authored (into #{} (map :seon.ns.refer/local) (:seon.ns/refers namespace-entity))]
              (reduce (fn [{:keys [lines] :as state} {form-source :form-source}]
                        (let [form-lines (count (filter #{\newline} form-source))]
@@ -1122,24 +1125,17 @@
                          (update :chunks conj namespace-source "\n")
                          (update :lines + (count (filter #{\newline} namespace-source)) 1)
                          (update :namespaces update namespace-name
-                                 #(or % {:seon.ns/source (print/form-text (runtime-namespace-form namespace-name namespace-entity referenced nil))
-                                         :seon.fn/synthetic-refers (into #{} (comp (map :seon.ns.refer/local) (remove authored)) interpreter-refers)})))
+                                 #(or % (if-let [text (:seon.fn/namespace-source (first group))]
+                                          {:seon.ns/source text}
+                                          {:seon.ns/source (print/form-text (runtime-namespace-form namespace-name namespace-entity referenced nil))
+                                           :seon.fn/synthetic-refers (into #{} (comp (map :seon.ns.refer/local) (remove authored)) interpreter-refers)}))))
                      group)))
          (let [opening (if (seq prelude) (str prelude "\n") "")]
            {:chunks [opening] :lines (count (filter #{\newline} opening)) :spans [] :namespaces {}})
          (partition-by :namespace-name requests))
         source (apply str chunks)
-        ;; the expansions each form's evaluation observed, placed at that
-        ;; form's first row: a generated definition is analyzed at its call
-        hooks (reduce (fn [acc [request [first-row _]]]
-                        (if-let [expansions (seq (:seon.batch/expansions request))]
-                          (merge-with merge acc (analyzer/expansion-hooks (vec expansions) first-row))
-                          acc))
-                      nil
-                      (map vector requests spans))
         analysis
-        (-> (with-in-str source
-              (analyzer/analyze (cond-> {::analyzer/paths ["-"]} hooks (assoc ::analyzer/hooks hooks))))
+        (-> (with-in-str source (analyzer/analyze {::analyzer/paths ["-"]}))
             (assoc :seon.fn/runtime-namespaces namespaces))
         analysis (with-dependency-analysis
                    analysis
