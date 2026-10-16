@@ -222,12 +222,11 @@
   nil)
 
 (defn- release!
-  "Stop every graph db<->flow started on an attempt branch under `routing` and release those branch
-  executions, as a process exit drops its registry; the fixture's own execution stays."
+  "Stop every graph db<->flow started on a branch under `routing` and release those branch executions, as a
+  process exit drops its registry; the fixture's own execution holds `routing` itself, never a child of it."
   {:malli/schema [:=> [:cat :seon.agent/routing] :nil]}
   [routing]
-  (doseq [[branch child] (:seon.agent/children @routing)
-          :when (str/starts-with? (name branch) "attempt-")]
+  (doseq [[_ child] (:seon.agent/children @routing)]
     (doseq [agent-id (keys (:seon.agent/started @child))]
       (agent/stop-flow! {:seon.agent/id agent-id :seon.agent/routing child}))
     (doseq [execution (vals (:seon.agent/contexts @child))
@@ -324,10 +323,11 @@
   ;; root, whom an attempt's end tells, homed on this cluster's branch, and the proofs' author
   (test-support/transacted! connection (test-support/agent-tx (db/db connection) "root" 'user))
   (test-support/transacted! connection (test-support/agent-tx (db/db connection) "tq-chain-author"))
-  ;; the proofs as an agent defines them: a fresh attempt's world acquires them from the program facts
+  ;; the proofs as an agent defines them: a fresh attempt's world acquires them from the program facts; the
+  ;; definer's context is forked from the execution holding `connection`, so the connection keeps carrying that
+  ;; execution's registry and the cluster handle below arms its graphs there
   (test-support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
-                                      :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
-                                                                                    (db/db connection) connection)
+                                      :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection "tq-chain")
                                       :seon.batch/sink (seon.batch/sink)
                                       :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
                                       :seon.agent/id "tq-chain-author"})
@@ -2199,9 +2199,42 @@
                   "no graph starts without an assignment or scheduled work"))
             (finally
               ;; root's graph, started on the cluster's branch, is stopped here; chain-world's `release!` releases the
-              ;; attempt branches (the cluster branch's own context holds the fixture's connection)
+              ;; branch executions
               (doseq [agent-id (keys (:seon.agent/started @routing))]
                 (agent/stop-flow! {:seon.agent/id agent-id :seon.agent/routing routing})))))))))))
+
+(deftest
+  releasing-every-execution-of-a-world-where-root-started-leaves-its-connection-open
+  ;; root starts on the cluster's own branch and borrows the cluster's connection; releasing every execution the
+  ;; cluster's registry records, as a process exit does, releases only what each acquisition opened, so the
+  ;; cluster's connection and branch stay open (`seon.cluster.agent/acquire-context!`)
+  (binding [*space* "tq.rootrelease"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"r" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)
+                branch (get-in @connection [:config :branch])]
+            (test-support/transacted! connection [[:db.fn/call #'schedule/root-maintenance-seed-call]])
+            (pass! handle routing)
+            (is (some? (agent/started routing "root")) "root started on the cluster's branch")
+            (is (= {:seon.agent/owns-connection? false :seon.agent/owns-branch? false}
+                   (select-keys (get-in @routing [:seon.agent/contexts [branch "root"]])
+                                [:seon.agent/owns-connection? :seon.agent/owns-branch?]))
+                "root's execution borrows the cluster's connection and branch")
+            (agent/stop-flow! {:seon.agent/id "root" :seon.agent/routing routing})
+            (doseq [[_ child] (:seon.agent/children @routing)]
+              (doseq [agent-id (keys (:seon.agent/started @child))]
+                (agent/stop-flow! {:seon.agent/id agent-id :seon.agent/routing child}))
+              (doseq [execution (vals (:seon.agent/contexts @child))
+                      :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
+                (agent/release-context! execution)))
+            (agent/release-context! (get-in @routing [:seon.agent/contexts [branch "root"]]))
+            (is (= branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id "root"])))
+                "the cluster's connection still reads")
+            (is (contains? (set (registry/branches (agent/handle-store handle))) branch)
+                "the cluster's branch remains"))))))))
 
 (deftest ^{:seon.test/long "Two chain worlds (ended branches kept, then deleted), each three chain tasks ending done at their start (one test step per agent) and one final merge (one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is merge-test's measured bound for one)."
            :seon.test/long-ms 240000}
