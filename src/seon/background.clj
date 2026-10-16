@@ -9,15 +9,20 @@
 (schema.edn/load! {})
 
 (defn render-ai
-  "Render a background error as steering text."
+  "Render a background error as data: the message with the error's own
+  members, which the value printer prints."
   {:malli/schema
-   [:=>
-    [:cat [:or :my.background/invalid-call-error
-           :my.background/invalid-result-error
-           :my.background/missing-result-error]]
-    :string]}
+   [:=> [:cat [:or :my.background/invalid-call-error
+               :my.background/invalid-result-error
+               :my.background/missing-result-error]]
+    :seon.render/ai-data]}
   [error]
-  (:seon.error/message error))
+  (select-keys error
+               [:seon.error/message
+                :seon.error/type
+                :my.background/call-source
+                :my.background/result-observation
+                :my.background/missing-result-ref]))
 
 (defn render-html
   "Render a background error as Hiccup."

@@ -25,9 +25,12 @@
           ai (background/render-ai error)
           html (background/render-html error)]
       (is ((schema/projection-validator (schema/handed-projection) schema-key) error))
-      (is (= message ai))
+      (is (not (string? ai))
+          "the AI face is data the value printer prints, not text")
+      (is (= message (:seon.error/message ai))
+          "the data carries what the text carried")
+      (is (= value (get ai member)))
       (is (= [:p message] html))
-      (is ((schema/projection-validator (schema/handed-projection) :seon.render/ai) ai))
       (is ((schema/projection-validator (schema/handed-projection) :seon.render/hiccup) html)))))
 
 (deftest background-macro-expands-one-direct-call
