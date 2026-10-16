@@ -281,13 +281,13 @@
 
 (defn provider-ai
   "Render one model provider descriptor without its credential value."
-  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/ai-data]}
   [unit]
   (let [provider (:seon.render/value unit unit)]
-    (str "Model provider " (:seon.ai.model/provider-id provider)
-         " · " (:seon.config.ai/endpoint provider)
-         " · output budget field "
-         (:seon.ai.model/output-token-wire-key provider) ".")))
+    {:seon.ai.model/provider-id (:seon.ai.model/provider-id provider)
+     :seon.config.ai/endpoint (:seon.config.ai/endpoint provider)
+     :seon.ai.model/output-token-wire-key
+     (:seon.ai.model/output-token-wire-key provider)}))
 
 (defn provider-html
   "Render one model provider descriptor as a readable card."
