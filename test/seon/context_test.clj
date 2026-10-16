@@ -12,6 +12,7 @@
             [seon.id]
             [seon.instrument :as instrument]
             [seon.mcp :as mcp]
+            [seon.profile :as profile]
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
             [seon.eval]
@@ -806,7 +807,10 @@
        (let [database (db/db target)
              members (:seon.source/members (context/step-members database agent-id #{'tq.oml/area-test}))
              current (into #{} (map :seon.test/sym) (context/current-results database members 'tq.oml/area))
-             judged (:seon.source/judged (context/step-verdict database agent-id))]
+             judged (:seon.source/judged (context/step-verdict database agent-id))
+             held (profile/measure #(context/current-results database members 'tq.oml/area))]
+         (is (zero? (profile/calls-of held 'seon.db/datoms))
+             "a held result list does not re-read each test's declaration")
          (is (contains? members 'tq.oml/side-test) "the list holds a test reaching the change through a caller")
          (is (= members current) "the step ran every member: each holds a current result on the branch")
          (is (= members (:seon.source/members judged)) "the done rule judges that same list"))))))

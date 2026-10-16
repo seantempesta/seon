@@ -74,6 +74,8 @@
         value (:seon.profile/value measured)]
     (assoc (dissoc measured :seon.profile/value :seon.profile/called)
            :status (:seon.task/status value)
+           :derivations (select-keys (:seon.profile/called measured)
+                                    '[seon.db/datoms seon.context/current-results seon.test.runner/current-results])
            :members (count (get-in value [:seon.source/judged :seon.source/members]))
            :refusals (:seon.source/refusals value))))
 

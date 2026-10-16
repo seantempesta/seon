@@ -6,6 +6,7 @@
   attempt records the basis it was assembled at."
   (:require [clojure.string :as str]
             [seon.batch :as batch]
+            [seon.cache :as cache]
             [seon.id :as id]
             [seon.print :as print]
             [seon.bootstrap :as bootstrap]
@@ -122,6 +123,19 @@
          (= 0 (:seon.test/fail-count result) (:seon.test/error-count result))) :green
     :else :red))
 
+(defn- declared-tests
+  "The requested test names declared on this value, held by the names and their declaration revision."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym]]
+                  [:or [:vector :seon.test/sym] :seon.error/value]]}
+  [database names]
+  (let [revisions (db/content-revisions database [:seon.test/sym])
+        derive #(let [found (db/q '[:find [?name ...] :in $ [?name ...]
+                                    :where [_ :seon.test/sym ?name]] database (vec names))]
+                  (if (:seon.error/at found) found (vec (sort found))))]
+    (if revisions
+      (cache/lookup ::declared-tests [revisions names] #(+ 128 (* 128 (count %))) derive vector?)
+      (derive))))
+
 (defn- head-entries
   "Each of `names` `database` holds, by symbol, with its status at its current reach judging `task` (nil: none)
   and, when red, its failing assertions; the reads' refusal when one refuses."
@@ -131,11 +145,13 @@
                   [:=> [:cat :seon.db/database-value [:set :seon.test/sym] [:maybe :seon.task/sym] :map]
                    [:or :seon.context/head :seon.error/value]]]}
   ([database names task]
-   (let [present (into [] (filter #(seq (db/datoms database :avet :seon.test/sym %))) (sort names))]
-     (head-entries database names task (if (seq present) (runner/current-results database present task) {}))))
+   (let [present (declared-tests database names)]
+     (if (:seon.error/at present) present
+       (head-entries database names task (if (seq present) (runner/current-results database present task) {})))))
   ([database names _task by-sym]
-   (let [names (into [] (filter #(seq (db/datoms database :avet :seon.test/sym %))) (sort names))]
-     (or (when (:seon.error/at by-sym) by-sym)
+   (let [names (declared-tests database names)]
+     (or (when (:seon.error/at names) names)
+         (when (:seon.error/at by-sym) by-sym)
          (into {} (for [s names
                         :let [result (get by-sym s)
                               status (proof-status result)
@@ -347,8 +363,10 @@
   {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym] [:maybe :seon.task/sym]]
                   [:or :seon.source/results :seon.error/value]]}
   [database tests task]
-  (let [names (into [] (filter #(seq (db/datoms database :avet :seon.test/sym %))) (sort tests))
-        current (if (seq names) (runner/current-results database names task) {})]
+  (let [names (declared-tests database tests)
+        current (cond (:seon.error/at names) names
+                      (seq names) (runner/current-results database names task)
+                      :else {})]
     (if (:seon.error/at current)
       current
       (into [] (comp (map current) (filter #(and % (not (:seon.error/at %)) (:seon.test/sym %)))) names))))

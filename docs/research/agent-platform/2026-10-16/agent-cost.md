@@ -471,3 +471,45 @@ The two errors reproduce on unmodified HEAD `538e731c3`, run `7d3733b5c867` (6 p
 `complete-selection!` fixture with a database lacking a commit; the canonical provenance writer refuses it.
 They are excluded by var from the final green gate and are not claimed as verified. All 48 other selected tests,
 including the runner namespace and both done/merge laws, passed the first gate. No foreign fixture was edited.
+
+## Slice 6: verdict declaration lookup
+
+The runner now returns held outcomes, but `seon.context/current-results` and both arities of `head-entries` still
+read every test declaration again. One `declared-tests` value replaces those three loops: a batched declaration
+query held by the requested names and `:seon.test/sym` content revision. A body edit does not change membership.
+A declaration addition/deletion does, and reacquires that value. The result lookup and proof status view consume
+the same declared names. Refused reads return their error instead of being treated as a present declaration.
+
+Parent regression `74ab15e07ab3`: 3 passes / 1 failure; a second held-result read still called `db/datoms` twice.
+Same-parent pair on `51c745cde`, `82361c696b88` / `6f02db8416d6`, 27 assertions each:
+
+| K | Stage | Parent ms | Slice 6 ms | Parent allocation MB | Slice 6 allocation MB |
+|---|---|---:|---:|---:|---:|
+| 1 | first | 1031.00 | 1124.00 | 1323.60 | 1324.60 |
+| 1 | repeat | 443.80 | 454.10 | 678.60 | 679.00 |
+| 1 | edge | 440.30 | 441.90 | 687.20 | 685.20 |
+| 1 | unchanged | 33.20 | 39.30 | 37.70 | 36.90 |
+| 1 | miss | 1.04 | 0.95 | 0.28 | 0.28 |
+| 1 | reach-miss | 1.21 | 1.24 | 1.06 | 1.06 |
+| 1 | verdict | 4.68 | 4.18 | 6.06 | 5.28 |
+| 1 | root | 70.90 | 72.70 | 139.20 | 139.30 |
+| 3 | first | 539.60–540.40 | 508.80–531.70 | 787.30–809.30 | 741.10–817.40 |
+| 3 | repeat | 371.60–384.70 | 342.50–355.80 | 513.30–518.20 | 508.20–516.50 |
+| 3 | edge | 472.00–477.30 | 473.00–511.30 | 703.10–706.40 | 677.30–706.00 |
+| 3 | unchanged | 35.50–40.90 | 33.80–38.20 | 38.40–39.50 | 38.20–39.10 |
+| 3 | miss | 0.40–0.42 | 0.43–0.50 | 0.44–0.45 | 0.44–0.45 |
+| 3 | reach-miss | 0.92–1.00 | 0.97–1.17 | 1.06–1.06 | 1.06–1.06 |
+| 3 | verdict | 4.00–4.52 | 3.91–4.40 | 6.02–6.04 | 5.24–5.26 |
+| 6 | first | 240.70–268.90 | 245.80–268.60 | 368.30–382.50 | 363.20–388.60 |
+| 6 | repeat | 203.80–226.00 | 212.50–228.70 | 304.90–309.10 | 300.60–307.70 |
+| 6 | edge | 366.70–399.80 | 356.10–390.10 | 486.20–511.10 | 484.50–515.10 |
+| 6 | unchanged | 34.00–46.60 | 37.90–51.20 | 38.90–40.30 | 39.10–40.50 |
+| 6 | miss | 0.47–0.59 | 0.43–0.56 | 0.70–0.70 | 0.70–0.70 |
+| 6 | reach-miss | 0.72–0.97 | 0.69–0.90 | 1.06–1.06 | 1.06–1.06 |
+| 6 | verdict | 3.71–4.37 | 3.25–3.52 | 6.01–6.02 | 5.23–5.24 |
+
+Old-gen peaks MiB K=1/3/6: 548.30/579.50/607.05 → 558.44/578.70/618.58.
+Verdict K1 4.68→4.18 ms; K6 3.71–4.37→3.25–3.52 ms, allocation about 6.02→5.24 MB.
+This is a modest verdict gain, not a claim of cheaper first requests (that pair's K1 first request was slower).
+The verdict still builds its judgment/render data; it no longer re-reads the held list's declaration per member.
+The runner's outcomes remain one lookup over its folded map.
