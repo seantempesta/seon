@@ -1574,8 +1574,9 @@
 
 (defn done-refusals
   "Every refusal the done rule gives a task over the recorded results in `judged`, the same for every task: each
-  of its `:seon.task/proofs` without an executed current result (absent, or a result that never started: unknown
-  evidence, never red; an empty set never finishes) or whose executed result is not green; each other
+  of its `:seon.task/proofs` and other `:seon.source/members` (the next task's proofs aside) without an executed
+  current result (absent, or a result that never started: unknown evidence, never red or green, as the merge judges
+  it; an empty proof set never finishes), each proof whose executed result is not green; each other
   member red here that is not red at the merge base (`:seon.source/red-on-target`, `seon.test/fork-point-red`'s
   question, as the merge asks it: a red with no result there is the change's), and each red test defined or changed
   on the branch (in `:seon.program/identities`, `:seon.source/stray-red-error`), unless it is one of the
@@ -1603,7 +1604,8 @@
         by-sym (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity)) results)
         on-base (set on-base)
         executed (fn [test-symbol] (let [result (by-sym test-symbol)] (and result (not (:seon.error/at result)))))
-        unknown (vec (sort (remove executed proofs)))
+        ;; every member the merge judges needs a current executed result (`results-verdict`): none is unknown, never green
+        unknown (vec (sort (remove executed (into (set proofs) (remove (set next-proofs)) members))))
         red-proofs (filterv #(and (executed %) (not (green-result? (by-sym %)))) proofs)
         others (into #{} (filter #(some-> (by-sym %) red?)) (remove (into (set proofs) next-proofs) members))
         stray (filterv #(delta [:seon.test/sym %]) others)
@@ -1617,7 +1619,8 @@
       (seq open) (conj (unmerged-refusal branch open evidence))
       (or (empty? proofs) (seq unknown))
       (conj (seon.error.refusal/error :seon.source/test-evidence-error
-             (assoc evidence :seon.error/message "Every proof needs a current recorded result; an empty proof set never finishes."
+             (assoc evidence :seon.error/message (str "Every proof and every other member needs a current executed result; a test with none"
+                                                        " is unknown, not green, and an empty proof set never finishes.")
                     :seon.error/offending unknown)))
       (seq (into red-proofs regressed))
       (conj (red-test-refusal (assoc evidence :seon.error/message "A proof, or a test not red at the merge base, is not green here.")

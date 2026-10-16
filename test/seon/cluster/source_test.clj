@@ -529,6 +529,25 @@
               (shape (source/done-refusals branch judged)))
            "the merge's judgment refuses it the same way")))))
 
+(deftest done-and-merge-judge-a-reaching-test-with-no-current-result-the-same-way
+  ;; live run 3, chain fddd: the agent restored main's text of an existing test its change turned red, and the
+  ;; attempt ended before the reaching run on that text finished; the done rule skipped the member with no current
+  ;; result while the merge ran it red. A member with no executed result is unknown evidence for both judges.
+  (test-support/with-database
+   (fn [connection]
+     (let [branch (db/db connection)
+           judged {:seon.source/members #{'tq.unknown-test/proof 'tq.unknown-test/reaching}
+                   :seon.task/proofs #{'tq.unknown-test/proof}
+                   :seon.source/results [(recorded 'tq.unknown-test/proof true)]
+                   :seon.program/identities #{} :seon.test.run/id "run-1" :seon.test.run/branch :tq-unknown}
+           shape (fn [refusals] (mapv (juxt :seon.error/type :seon.error/offending) refusals))]
+       (is (= [[:seon.source/test-evidence-error ['tq.unknown-test/reaching]]]
+              (shape (source/done-refusals branch judged)))
+           "the done rule refuses the reaching member with no current result, naming it")
+       (is (= (shape (source/results-verdict branch branch judged))
+              (shape (source/done-refusals branch judged)))
+           "the merge's judgment refuses it the same way")))))
+
 (deftest an-uncovered-refusal-names-the-red-tests-reaching-it
   ;; live run 2, chain ce9d: its proof was green, but the one test the call graph walks to seon.effect/render-ai
   ;; was red, so the done rule refused render-ai as reached by no green test, naming no test; the agent spent its
