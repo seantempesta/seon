@@ -51,3 +51,9 @@
   (let [text (slurp (io/resource "seon/help.md"))
         bare (re-seq #"(?<![\w/.:-]):(?:value|error|findings|result|ms|alloc-mb)(?![\w/-])" text)]
     (is (empty? bare) "the reply's keys are named as :seon.repl/* keys")))
+
+(deftest help-teaches-that-the-namespace-persists
+  (let [text (slurp (io/resource "seon/help.md"))]
+    (is (not (str/includes? text "2. Enter the namespace")) "entering a namespace is not a numbered step every definition repeats")
+    (is (str/includes? text "stays in the namespace") "the REPL keeps the namespace the last form left")
+    (is (str/includes? text "needs no in-ns") "a fully qualified name needs no in-ns")))

@@ -22,7 +22,7 @@ Your current-state block is the last part of every request; (seon.context/curren
 
 1. Read the owner: (my.program/source 'seon.db/q), (doc seon.db/q), (my.program/search :seon.task/plan).
 
-2. Enter the namespace that owns it with the :seon.context/start form, (in-ns 'the.owner.ns). A definition changes the namespace it is evaluated in; :seon.context/namespace names the one you are in.
+2. Your REPL stays in the namespace your last form left, across requests; :seon.context/namespace names it, and :seon.context/start appears only when you are not in the owner's. Send (in-ns 'the.owner.ns) once, when that namespace differs from yours, before a defn that must land in it. A fully qualified call, such as (my.program/source 'seon.db/q), needs no in-ns, and a repeated in-ns is a wasted form.
 
 3. Define the function in the namespace that owns it, its contract on the defn: (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (inc x)). It replaces the whole definition on your branch, comments included: keep the ;; comments you were shown unless you mean to delete them. A defn without a contract is admitted with a warning in `:seon.repl/findings`, and merge refuses it; that holds for defn- too, every function you define needs a complete contract. Prefer a plain Malli schema such as :string, :int, [:vector :int] or a registered keyword over [:fn] when one exists. A predicate in a contract is a named existing function, and [:fn] declares an :error/message and a bounded generator: {:malli/schema [:=> [:cat [:fn {:error/message "an even integer" :gen/elements [0 2 4]} clojure.core/even?]] :int]}. The predicate must already be a JVM function for now: one you define on your branch is refused when your step is written.
 
