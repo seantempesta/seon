@@ -219,7 +219,7 @@
  ; SCI fork and its turns' provider calls).
  ; Unit: open attempts on this cluster.
  :seon.config.agent/inbox-size 64
- :seon.config.agent/max-running 4
+ :seon.config.agent/max-running 0
 
  ; AN ENDED BRANCH STAYS AS HISTORY (owner 2026-10-16: keep the sessions to
  ; mine them). An assignment's, a chain's and its merge branches stay readable
