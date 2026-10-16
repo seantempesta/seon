@@ -239,6 +239,12 @@
                            (assoc-in [:aliases 'schema] 'seon.schema)
                            (assoc-in [:refers 'lookup] 'clojure.core.cache/lookup))))
         "Adding an alias or refer to a namespace it uses but does not spell")
+    (let [qualified (assoc entity :seon.fn/references #{'seon.operator.runtime/running-instances})]
+      ;; A fully qualified name resolves to the same Var whether or not its namespace is required:
+      ;; an auto-required scratch def must not rewrite its neighbours' digests.
+      (is (= (program/definition-digest qualified context)
+             (program/definition-digest qualified (update context :requires conj 'seon.operator.runtime)))
+          "Requiring a namespace it names only fully qualified"))
     (let [own (update entity :seon.fn/calls conj 'sample/g)]
       (is (= (program/definition-digest own context)
              (program/definition-digest own (-> context (update :requires conj 'sample)

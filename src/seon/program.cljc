@@ -548,12 +548,16 @@
 
 (defn- declaration-digest
   "The digest of `declaration` (its attributes) with `used`, the part of the
-  resolver context its usages resolve through (nil: none)."
+  resolver context its usages resolve through (nil: none), less its requires:
+  a fully qualified name means the same Var whether or not its namespace is
+  required, and an alias or refer carries the namespace it resolves through.
+  A require another definition's evaluation adds (`seon.sci.eval/auto-require!`)
+  therefore leaves the digest unchanged; it changes the namespace's own row."
   {:malli/schema [:=> [:cat :map [:maybe :map]] :seon.program/definition-digest]}
   [declaration used]
   (id/id (cond-> {:seon.program/declaration
                   (apply dissoc declaration definition-digest-excluded-attributes)}
-           used (assoc :seon.program/resolver-context used))
+           used (assoc :seon.program/resolver-context (dissoc used :requires)))
          64))
 
 (defn definition-digest
