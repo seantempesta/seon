@@ -687,7 +687,8 @@
 
 (deftest a-step-is-done-only-when-its-merge-would-accept
   ;; the step's status is the one results judgment the merge makes over its run, here over the branch's own
-  ;; recorded results: done exactly when it refuses nothing, and a working step names each refusal's type
+  ;; recorded results: done exactly when it refuses nothing, and a working step names each refusal's type;
+  ;; a member with no executed result is unknown evidence, never red (73734df97, 4765c5ceb)
   (let [database (db/db *connection*)
         green #(result % 1 0 0)
         red #(result % 0 1 0 [{:type :fail}])
@@ -708,12 +709,12 @@
               [:working [:seon.source/red-on-target-error]] "a reaching test main already holds red stops the merge for root"]
              [:implement #{'tq.rule/p} #{} #{'tq.rule/p 'tq.rule/r} [(green 'tq.rule/p) (red 'tq.rule/r)] nil
               [:working [:seon.source/red-test-error]] "a reaching test the change turned red"]
-             [:implement #{'tq.rule/p} #{} #{'tq.rule/p} [] nil [:working [:seon.source/red-test-error]] "its proof unrun at its reach is unknown, never green"]
+             [:implement #{'tq.rule/p} #{} #{'tq.rule/p} [] nil [:working [:seon.source/test-evidence-error]] "its proof unrun at its reach is unknown, never green"]
              [:implement #{'tq.rule/p} #{} #{'tq.rule/p} [(red 'tq.rule/p)] nil [:working [:seon.source/red-test-error]] "its proof red"]
              [:implement #{} #{} #{} [] nil [:working [:seon.source/test-evidence-error]] "no proof proves nothing"]
              [:prove #{} #{'tq.rule/s} #{'tq.rule/s} [(red 'tq.rule/s)] nil [:done []] "its product red by a failing assertion"]
              [:prove #{} #{'tq.rule/s} #{'tq.rule/s} [(result 'tq.rule/s 0 1 0)] nil [:working [:seon.source/red-test-error]] "a red with no failing report ran nothing"]
-             [:prove #{} #{'tq.rule/s 'tq.rule/l} #{'tq.rule/s 'tq.rule/l} [(red 'tq.rule/s)] nil [:working [:seon.source/red-test-error]] "a declared product test nobody wrote"]
+             [:prove #{} #{'tq.rule/s 'tq.rule/l} #{'tq.rule/s 'tq.rule/l} [(red 'tq.rule/s)] nil [:working [:seon.source/test-evidence-error]] "a declared product test nobody wrote"]
              [:prove #{'tq.rule/q} #{'tq.rule/s} #{'tq.rule/q 'tq.rule/s} [(red 'tq.rule/q) (red 'tq.rule/s)] nil [:working [:seon.source/red-test-error]] "its own proof red"]]]
       (is (= expected (judged step proofs product members results on-target)) why))))
 
@@ -910,7 +911,9 @@
   ;; TASK-CHAIN §2.7: root runs a held task again (`my.root/run!`) on the branch its capped attempt left; the new
   ;; attempt's block shows that attempt (its number, end, outcome, reason and model calls) and every declaration the
   ;; branch changed since its fork, by name with the form that reads it, so the agent sees its earlier work and its
-  ;; scratch without reading again
+  ;; scratch without reading again. The task is :outside: its agent is an outside agent evaluating through
+  ;; MCP, and since 7d79cb7ce an assignment places the task's :running execution on the branch, so a
+  ;; model-run task would open its own turn and refuse every later evaluation (agent-already-running).
   (test-support/with-running-agent
    (fn [running _ connection]
      (let [agent-id (str "rerun-" (seon.id/id))
@@ -924,7 +927,8 @@
                                                 "(deftest area-test (is (= 25 (area 5))))\n")
                                            "test")
            [first-task] (linked-chain! connection [{:seon.task/ns 'tq.ra :seon.task/name "implement" :seon.task/plan "Square."
-                                                    :seon.task/instructions "Make area square." :seon.task/proofs #{'tq.ra/area-test}}])
+                                                    :seon.task/instructions "Make area square." :seon.task/proofs #{'tq.ra/area-test}
+                                                    :seon.task/model :outside}])
            {branch :seon.store/branch target :seon.db/connection} (test-support/own-branch-agent! running agent-id "(ns tq.ra)")
            context-source (test-support/running-cluster running)
            assign! #(task/assign! {:seon.agent/context-source context-source :seon.db/connection connection
