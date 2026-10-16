@@ -59,7 +59,7 @@
    :seon.error/at :seon.error/layer :seon.error/operation :seon.error/data-edn
    {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
    {:seon.cluster.eval/run
-    [:db/id :seon.turn/id {:seon.turn/opened-tx [:db/id :db/txInstant]}
+    [:db/id :seon.turn/id {:seon.turn/opened-tx [:db/id :db/txInstant]} {:seon.turn/attempts [:db/id]}
      {:seon.turn/agent
       [:db/id
        :seon.agent/id
@@ -223,6 +223,8 @@
      ::ordinal (:seon.cluster.eval/ordinal receipt)
      ::run-id (get-in receipt [:seon.cluster.eval/run
                                :seon.turn/id])
+     ;; a run carrying a model attempt is a model exchange, aged as the model sees it
+     ::model-run? (boolean (seq (get-in receipt [:seon.cluster.eval/run :seon.turn/attempts])))
      ::run-opened-at (get-in receipt [:seon.cluster.eval/run
                                       :seon.turn/opened-tx :db/txInstant])
      ::source (:seon.cluster.eval/source receipt)
@@ -370,14 +372,32 @@
          sentence
          (when (seq extra) (str "\n" (floor-text unit extra))))))
 
+(defn- exchange-basis
+  "What ages the unit's agent's evaluations as exchanges (`seon.context/exchange-basis`); a refused read is thrown
+  whole."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.context/exchange-basis]}
+  [unit]
+  (read-or-throw (context/exchange-basis (:seon.db/db unit) (:seon.agent/id unit))))
+
+(defn- entry-exchange
+  "Evaluation entry `entry` as :seon.context/exchange under `basis`, its emission read on the unit's database unless
+  the caller holds it (`held?`)."
+  {:malli/schema [:=> [:cat :seon.render/unit :seon.context/exchange-basis :map :boolean] :seon.context/exchange]}
+  [unit basis entry held?]
+  (context/exchange basis
+                    (repl/entity-emission (cond-> (::entity entry) (not held?) (assoc :seon.db/db (:seon.db/db unit))))
+                    (::run-id entry) (boolean (::model-run? entry))))
+
 (defn- projected-entry
-  [unit entry detail]
+  [unit basis entry detail]
   ;; Every value this entry renders through the floor is rooted at the entry's
   ;; own durable identity, so `value/node-id` never refuses for a
   ;; caller-supplied root the entry already has, and an elided value names a
   ;; requery identity a reader can actually pull.
-  (let [unit (assoc unit :seon.render.value/root (::root entry))]
+  (let [unit (assoc unit :seon.render.value/root (::root entry))
+        exchange (when (= :eval (::kind entry)) (entry-exchange unit basis entry false))]
     {::kind (::kind entry)
+     ::exchange exchange
      ::id (::id entry)
      ::at (::at entry)
      ::ordinal (::ordinal entry)
@@ -387,11 +407,9 @@
      ::execution-error? (some? (::error entry))
      ::text (case (::kind entry)
               :message (message-text unit entry)
-              ;; One frozen form or settled evaluation, through the one REPL
-              ;; generator: `repl/text` emits a prompt line and no response
-              ;; when nothing has settled, so running needs no second arm.
-              :eval (repl/text (repl/entity-emission
-                          (assoc (::entity entry) :seon.db/db (:seon.db/db unit))))
+              ;; One evaluation as its agent's model sees it: the AI face of its
+              ;; exchange, whose HTML face the page shows.
+              :eval (context/exchange-text (context/exchange-ai exchange))
               ;; The run's own `:seon.render/ai`, with no grammar of its own.
               :run (or (turn/render-ai (::entity entry)) ""))}))
 
@@ -475,9 +493,10 @@
                   :data-transcript-detail (some-> (::detail entry) name)}
                  (::execution-error? entry)
                  (assoc :data-transcript-error "true"))
-           (if (= :attempt (::kind entry))
-             (reasoning-disclosure (::reasoning entry))
-             [:pre [:code {:class "seon-emission-bytes"} (repl/syntax-spans (::text entry))]])]))
+           (cond
+             (= :attempt (::kind entry)) (reasoning-disclosure (::reasoning entry))
+             (::exchange entry) (context/exchange-html (::exchange entry))
+             :else [:pre [:code {:class "seon-emission-bytes"} (repl/syntax-spans (::text entry))]])]))
    entries))
 
 (defn- html-output
@@ -580,8 +599,9 @@
         entries (if (or (some? (:seon.turn.loop/evaluated-sources unit))
                         (and db agent-id))
                   (candidate-history unit)
-                  [])]
-    {::entries (mapv #(projected-entry unit % :full) entries)}))
+                  [])
+        basis (when (some #(= :eval (::kind %)) entries) (exchange-basis unit))]
+    {::entries (mapv #(projected-entry unit basis % :full) entries)}))
 
 (defn render-ai
   "Render one agent's bounded messages and faithful REPL session."
@@ -672,17 +692,15 @@
   (let [db (:seon.db/db unit)
         held? (some? (:seon.turn.loop/evaluated-sources unit))
         candidates (candidate-history unit)
+        basis (when (some #(= :eval (::kind %)) candidates) (exchange-basis unit))
         entries
         (mapv
          (fn [entry]
-           ;; ONE GENERATOR. The bytes are `seon.repl/text`'s, so this unit,
-           ;; the debug page's AI column and the provider prompt cannot drift
-           ;; apart: there is no second place that decides how an evaluation
-           ;; reads.
-           (let [emitted (repl/entity-emission
-                          ;; a held evaluation is this pass's own: nothing to
-                          ;; resolve or compare against stored history
-                          (if held? (::entity entry) (assoc (::entity entry) :seon.db/db db)))]
+           ;; ONE RENDER. The bytes are the AI face of the evaluation's exchange
+           ;; (`seon.context/exchange-ai`), what the provider prompt sends; a held
+           ;; evaluation is this pass's own: nothing to resolve against stored history
+           (let [exchange (entry-exchange unit basis entry held?)
+                 emitted (:seon.context/emission exchange)]
              {:seon.render.history/call-id
               [:seon.render.transcript/entry (::kind entry) (::id entry)]
               :seon.cluster.eval/ordinal (::ordinal entry)
@@ -690,7 +708,7 @@
               (or (::read-basis entry) (entry-basis db entry))
               :seon.render.history/form (::source entry)
               :seon.render.history/printed-value (repl/response emitted)
-              :seon.render.history/bytes (repl/text emitted)}))
+              :seon.render.history/bytes (context/exchange-text (context/exchange-ai exchange))}))
          (filterv #(= :eval (::kind %)) candidates))]
     entries))
 

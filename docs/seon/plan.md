@@ -204,7 +204,7 @@ Everything that describes copies, subjects, children, `needs`, `seon.task/effect
   shows prompt growth caps agents. Stage 6, history by reference, is installed by size (S5 run 4b prompt cost; the
   card's declaration-showing rule is not): an exchange
   other than the newest whose reply is over `:seon.config.context/reference-tokens`
-  shows its form, result handle, reply size in estimated tokens and requery form (`seon.context/exchange-form`).
+  shows its form, result handle, reply size in estimated tokens and requery form (`seon.context/exchange-ai`).
 - Publication (a compiled check is 32–45 s measured) and boot's whole-program derivation: platform commits pay the
   existing check; per-file derivation inputs when the chain runs show the cost dominating.
 - Merging through git objects or a dedicated checkout: committed only if a real collision is observed.

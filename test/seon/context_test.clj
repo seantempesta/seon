@@ -546,6 +546,12 @@
          (is (= (pop before) (subvec after 0 (dec (count before))))
              "every message but the last is identical in the next request: the provider's prefix cache holds"))))))
 
+(defn- sent-as
+  "What a model pass sends of `emission` at `age` under the reference dial `limit`: the AI face of its exchange."
+  {:malli/schema [:=> [:cat :seon.repl/emission :seon.context/age :seon.config.context/reference-tokens] :seon.context/exchange-unit]}
+  [emission age limit]
+  (context/exchange-ai {:seon.context/emission emission :seon.context/age age :seon.config.context/reference-tokens limit}))
+
 (deftest an-older-history-unit-over-the-dial-is-shown-by-reference
   (test-support/with-running-agent
    (fn [running agent-id connection]
@@ -554,8 +560,8 @@
            [evaluation] (seon.eval/of-agent database agent-id '[* {:seon.cluster.eval/ns [:db/id :seon.ns/name]}])
            emission (repl/entity-emission (assoc evaluation :seon.db/db database))
            handle (:seon.repl/handle emission)
-           older (context/exchange-form emission :older 400)
-           whole (context/exchange-form emission :older 1000000)]
+           older (sent-as emission :older 400)
+           whole (sent-as emission :older 1000000)]
        (is (qualified-symbol? handle) "the evaluation holds a result handle")
        (is (= {:seon.repl/handle handle :seon.render/operations [(list 'get-in handle [])]}
               (dissoc (:seon.context/reference older) :seon.context/reply-tokens))
@@ -564,7 +570,7 @@
            "the reference carries the whole reply's size in estimated tokens")
        (is (< (tokens/estimate (:seon.ai/reply older)) 100) "the older unit carries no reply text")
        (is (not (contains? whole :seon.context/reference)) "a reply under the dial is shown whole")
-       (is (not (contains? (context/exchange-form emission :newest 400) :seon.context/reference))
+       (is (not (contains? (sent-as emission :newest 400) :seon.context/reference))
            "the newest unit is shown whole")))))
 
 (deftest an-older-source-read-is-shown-whole-under-the-shipped-dial
@@ -574,7 +580,7 @@
      (let [database (db/db connection)
            [evaluation] (seon.eval/of-agent database agent-id '[* {:seon.cluster.eval/ns [:db/id :seon.ns/name]}])
            emission (repl/entity-emission (assoc evaluation :seon.db/db database))
-           older (context/exchange-form emission :older (:seon.config.context/reference-tokens config/defaults))]
+           older (sent-as emission :older (:seon.config.context/reference-tokens config/defaults))]
        (is (> (tokens/estimate (:seon.ai/reply older)) 400) "the source read is over the old 400-token dial")
        (is (not (contains? older :seon.context/reference)) "the agent's own read stays in its history whole")))))
 

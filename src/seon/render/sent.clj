@@ -4,11 +4,9 @@
   since no prompt is stored. The HTML face shows its sections with their sizes in estimated tokens, each exchange's
   forms paired with what the REPL answered, and every cut: an older reply sent by reference
   (`:seon.config.context/reference-tokens`) and the value printer's cuts inside a reply."
-  (:require [seon.ai.tokens :as tokens]
-            [seon.config :as config]
+  (:require [seon.config :as config]
             [seon.context :as context]
             [seon.db :as db]
-            [seon.repl :as repl]
             [seon.render.value :as value]))
 
 (def ^:private call-selector
@@ -44,84 +42,39 @@
 
 (defn view
   "Agent `agent-id`'s context as `seon.context/model-context` assembles it over `database`, its branch, with
-  `request`'s render inputs, and the reference dial in force there: at the head, what its next call is sent; for
-  `call`, what that call was sent, at its recorded basis (`call-database`)."
+  `request`'s render inputs, beside its exchanges as :seon.context/exchange values (`seon.context/exchange-values`),
+  whose AI face is what the context sends: at the head, what its next call is sent; for `call`, what that call was
+  sent, at its recorded basis (`call-database`)."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/database-value :seon.sci.eval/shown-request :seon.agent/id] :seon.render.sent/view]
                   [:=> [:cat :seon.db/database-value :seon.sci.eval/shown-request :seon.agent/id :seon.render.sent/call]
                    :seon.render.sent/view]]}
   ([database request agent-id]
    (let [dials (config/effective database (db/q '[:find ?n . :where [_ :seon.config/cluster ?n]] database))
-         limit (when-not (:seon.error/at dials) (:seon.config.context/reference-tokens dials))]
+         exchanges (when-not (:seon.error/at dials) (context/exchange-values database agent-id dials))]
      (cond-> {:seon.render.sent/basis (db/basis-t database)
               :seon.render.sent/context (context/model-context database request agent-id)}
-       limit (assoc :seon.config.context/reference-tokens limit))))
+       (vector? exchanges) (assoc :seon.render.sent/exchanges exchanges))))
   ([database request agent-id call]
    (assoc (view (call-database database (:seon.ai.attempt/basis-t call)) request agent-id)
           :seon.render.sent/call call)))
-
-(defn- highlight
-  "`text` as `[:code ...]`, its tokens colored by the REPL's lossless lexer (`seon.repl/syntax-spans`)."
-  {:malli/schema [:=> [:cat :string] :seon.render/hiccup]}
-  [text]
-  (into [:code {:class "seon-sent-code"}] (repl/syntax-spans text)))
-
-(defn- token-badge
-  "`text`'s size in estimated tokens as a badge."
-  {:malli/schema [:=> [:cat :string] :seon.render/hiccup]}
-  [text]
-  [:span {:class "seon-sent-tokens"} (str "≈" (tokens/estimate text) " tokens")])
-
-(defn- cut-count
-  "How many of the value printer's cuts highlighted `code` holds."
-  {:malli/schema [:=> [:cat :seon.render/hiccup] :int]}
-  [code]
-  (count (filter #(= "seon-syntax-elision" (get-in % [1 :class])) (drop 2 code))))
 
 (defn- text-section
   "One whole section of the context: its `title`, its size and its highlighted `text`."
   {:malli/schema [:=> [:cat :string :string :string] :seon.render/hiccup]}
   [kind title text]
   [:section {:class (str "seon-sent-section seon-sent-" kind)}
-   [:header [:h3 title] (token-badge text)]
-   [:pre {:class "seon-sent-text"} (highlight text)]])
-
-(defn- reply-html
-  "What the REPL answered one form as the model was sent it: the reply whole, with a count of the value printer's
-  cuts in it, or by reference when it was over `limit` tokens: its handle, its size and the form that reads it whole."
-  {:malli/schema [:=> [:cat :seon.context/exchange-unit [:maybe :seon.config.context/reference-tokens]] :seon.render/hiccup]}
-  [{reply :seon.ai/reply reference :seon.context/reference} limit]
-  (let [shown (highlight (or reply ""))
-        cuts (cut-count shown)]
-    [:div {:class (str "seon-sent-reply" (when reference " seon-sent-referenced"))}
-     [:div {:class "seon-sent-label"}
-      [:span "reply"]
-      (when reply (token-badge reply))
-      (when (pos? cuts) [:span {:class "seon-sent-cut"} (str cuts (if (= 1 cuts) " cut" " cuts") " by the value printer's budget")])]
-     (when reference
-       [:div {:class "seon-sent-elision" :data-handle (str (:seon.repl/handle reference))}
-        [:span {:class "seon-sent-cut"}
-         (str "elided: " (:seon.context/reply-tokens reference) " tokens"
-              (when limit (str " over :seon.config.context/reference-tokens " limit)))]
-        (into [:span {:class "seon-sent-requery"}]
-              (map #(highlight (value/core-text %)))
-              (:seon.render/operations reference))])
-     (when reply [:pre {:class "seon-sent-text"} shown])]))
+   [:header [:h3 title] (context/token-badge text)]
+   [:pre {:class "seon-sent-text"} (context/code-html text)]])
 
 (defn- exchange-html
-  "One model reply's exchange: each form it sent paired with what the REPL answered."
-  {:malli/schema [:=> [:cat :seon.ai/exchange :int [:maybe :seon.config.context/reference-tokens]] :seon.render/hiccup]}
-  [units index limit]
+  "One model reply's exchange: each evaluation through the exchange's HTML face (`seon.context/exchange-html`)."
+  {:malli/schema [:=> [:cat [:vector :seon.context/exchange] :int] :seon.render/hiccup]}
+  [exchanges index]
   [:li {:class "seon-sent-exchange" :data-exchange (str index)}
-   [:header [:h4 (str "Reply " (inc index))] [:span {:class "seon-sent-count"} (str (count units) (if (= 1 (count units)) " form" " forms"))]]
-   (into [:ol {:class "seon-sent-pairs"}]
-         (map (fn [unit]
-                [:li {:class "seon-sent-pair"}
-                 [:div {:class "seon-sent-form"}
-                  [:div {:class "seon-sent-label"} [:span "form"] (token-badge (:seon.ai/form unit))]
-                  [:pre {:class "seon-sent-text"} (highlight (:seon.ai/form unit))]]
-                 (reply-html unit limit)]))
-         units)])
+   [:header [:h4 (str "Reply " (inc index))]
+    [:span {:class "seon-sent-count"} (str (count exchanges) (if (= 1 (count exchanges)) " form" " forms"))]]
+   (into [:div {:class "seon-sent-pairs"}] (map context/exchange-html) exchanges)])
 
 (defn- call-header
   "A call's facts: its run, basis, model, finish and the provider's token counts; for the next call, its basis."
@@ -142,8 +95,7 @@
   sections, each sized in estimated tokens; the assembler's refusal through the value printer when it refused."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [{shown :seon.render/value database :seon.db/db}]
-  (let [{call :seon.render.sent/call sent :seon.render.sent/context limit :seon.config.context/reference-tokens} shown
-        exchanges (:seon.context/exchanges sent)]
+  (let [{call :seon.render.sent/call sent :seon.render.sent/context exchanges :seon.render.sent/exchanges} shown]
     [:article (cond-> {:class "seon-sent" :data-basis (str (:seon.render.sent/basis shown))}
                 call (assoc :data-call (:seon.ai.attempt/id call)))
      (call-header shown)
@@ -158,6 +110,6 @@
          [:header [:h3 "Exchanges"]
           [:span {:class "seon-sent-count"} (str (count exchanges) " replies, " (reduce + (map count exchanges)) " forms")]]
          (into [:ol {:class "seon-sent-exchange-list"}]
-               (map-indexed (fn [index units] (exchange-html units index limit)))
+               (map-indexed (fn [index units] (exchange-html units index)))
                exchanges)]
         (text-section "prompt" "Turn sections" (:seon.ai/prompt sent))))]))

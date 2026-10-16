@@ -321,7 +321,7 @@ serve the later `scan` acceptance; the loop works crudely after 1–3.
    its entry is the rejected source with its diagnostic while the installed body is unchanged; a deleted one shows
    `:deleted`; the referenced entry comes first). Files: `src/seon/context.clj`,
    `resources/seon/schemas/seon.context.edn`, `test/seon/context_test.clj`.
-6. **History refers instead of repeating.** `seon.context/exchange-form` drops the `:value` of a declaration-showing
+6. **History refers instead of repeating.** `seon.context/exchange-ai` drops the `:value` of a declaration-showing
    reply for `:working-set [sym]` (`:changed` when the digest moved), replaces an admitted definition's form with its
    head, and shows a failed definition as its head plus offending span with the retrieval form; `seon.repl/response-entries`
    gains the key and `changed-since?` folds into it. Proof

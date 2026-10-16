@@ -12,9 +12,10 @@
         [:seon.turn/id :seon.turn/id]]
  :calls [:vector {:description "An agent's model calls, oldest first. Producer: seon.render.sent/calls."} :seon.render.sent/call]
  :view [:map {:seon.render/html seon.render.sent/view-html
-              :description "An agent's context as `seon.context/model-context` assembles it, or that assembler's refusal, at a basis: a call's recorded one (the call present), else its branch head (its next call). With the dial that elides older replies. Producer: seon.render.sent/view."}
+              :description "An agent's context as `seon.context/model-context` assembles it, or that assembler's refusal, at a basis: a call's recorded one (the call present), else its branch head (its next call). Beside it its exchanges, whose AI face is what the context sends and whose HTML face the view shows. Producer: seon.render.sent/view."}
         [:seon.render.sent/basis :seon.render.sent/basis]
         [:seon.render.sent/call {:optional true} :seon.render.sent/call]
         [:seon.render.sent/context [:or :seon.context/model-context :seon.error/value]]
-        [:seon.config.context/reference-tokens {:optional true} :seon.config.context/reference-tokens]]
+        [:seon.render.sent/exchanges {:optional true} :seon.render.sent/exchanges]]
+ :exchanges [:vector {:description "An agent's model exchanges as seon.context/exchange-values derives them, one vector per model call row."} [:vector :seon.context/exchange]]
  :basis [:int {:min 0 :description "The basis t of the database value a view's context was assembled over."}]}

@@ -5,6 +5,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [seon.ai :as ai]
             [seon.db :as db]
             [seon.env :as env]
             [seon.blob :as blob]
@@ -952,6 +953,8 @@
                            :seon.cluster.wake/channel channel
                            :seon.render/context-channel channel
                            :seon.turn.loop/completion channel
+                           ;; no form calls a model: the provider is declared, never reached
+                           :seon.turn.loop/complete #'ai/complete
                            :seon.sci.admit/caps (config/result-caps defaults)
                            :seon.config.eval/time-limit-ms 5000})
            reply (str ";; a definition worth keeping\n"

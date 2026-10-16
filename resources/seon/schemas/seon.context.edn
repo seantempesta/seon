@@ -132,13 +132,24 @@
                 [:seon.context/turns :seon.context/turns]],
                :cost [:vector {:description "The branch's stored function costs whose digest differs from main's beside main's value, most self time spent first, at most :seon.config.test.cost/top. Producer: seon.context/current-state."} :seon.cost/comparison]
                :exchanges :seon.ai/exchanges
-               :age [:enum {:description "A history unit's age among the agent's model exchanges: the newest, or older. Producer: seon.context/exchanges."} :newest :older]
+               :age [:enum {:description "A history unit's age among the agent's model exchanges: the newest, or older. Producer: seon.context/exchange-age."} :newest :older]
+               :emission :seon.repl/emission
+               :newest-run :seon.turn/id
+               :exchange [:map {:description "One evaluation as the agent's model sees it: its emission, its age among the agent's model exchanges and the reference dial in force. Its AI face is what a model pass sends, its HTML face what the transcript and the debug view show. Producer: seon.context/exchange."
+                                :seon.render/ai seon.context/exchange-ai
+                                :seon.render/html seon.context/exchange-html}
+                          [:seon.context/emission :seon.context/emission]
+                          [:seon.context/age :seon.context/age]
+                          [:seon.config.context/reference-tokens :seon.config.context/reference-tokens]]
+               :exchange-basis [:map {:description "What ages an agent's evaluations as exchanges: its newest run carrying a model attempt, absent when none, and the reference dial. Producer: seon.context/exchange-basis."}
+                                [:seon.context/newest-run {:optional true} :seon.context/newest-run]
+                                [:seon.config.context/reference-tokens :seon.config.context/reference-tokens]]
                :reply-tokens [:int {:min 0 :description "The estimated tokens of the reply an older history unit shows by reference (seon.ai.tokens/estimate)."}]
-               :reference [:map {:description "An older history unit's reply shown by reference: the evaluation's result handle, its reply's size in estimated tokens and the form that reads the value whole. Producer: seon.context/exchange-form."}
+               :reference [:map {:description "An older history unit's reply shown by reference: the evaluation's result handle, its reply's size in estimated tokens and the form that reads the value whole. Producer: seon.context/exchange-ai."}
                            [:seon.repl/handle :seon.repl/handle]
                            [:seon.context/reply-tokens :seon.context/reply-tokens]
                            [:seon.render/operations :seon.render/operations]]
-               :exchange-unit [:map {:description "One evaluation of a model exchange as a model pass shows it: its form, and its reply whole or by reference. Producer: seon.context/exchange-form."}
+               :exchange-unit [:map {:description "One evaluation of a model exchange as a model pass shows it: its form, and its reply whole or by reference. Producer: seon.context/exchange-ai, the AI face of :seon.context/exchange."}
                                [:seon.ai/form :seon.ai/form]
                                [:seon.ai/reply {:optional true} :seon.ai/reply]
                                [:seon.context/reference {:optional true} :seon.context/reference]]
