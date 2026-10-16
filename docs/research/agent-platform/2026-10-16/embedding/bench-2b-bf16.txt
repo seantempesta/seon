@@ -1,0 +1,17 @@
+W1016 07:14:36.538000 28210 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+Loading weights:   0%|          | 0/625 [00:00<?, ?it/s]Loading weights: 100%|██████████| 625/625 [00:00<00:00, 20436.25it/s]
+Default prompt name is set to 'default'. This prompt will be applied to all inference calls, except if a `prompt` or `prompt_name` parameter is provided.
+[transformers] Token indices sequence length is longer than the specified maximum sequence length for this model (40640 > 32768). Running this sequence through the model will result in indexing errors
+load 1.6s peak RSS 0.68 GB; mps alloc 4.27 GB
+text sims vs doc (card: 0.8160 0.5173 0.3863 0.1061 for text doc): [0.8167999982833862, 0.5157999992370605, 0.38609999418258667, 0.10679999738931656] dim 2048
+image vs [red, blue, skyline]: [0.6527000069618225, 0.4562000036239624, 0.28839999437332153]
+MRL 256 [0.8544999957084656, 0.5386000275611877, 0.4081999957561493, 0.11020000278949738]
+MRL 512 [0.8306999802589417, 0.5236999988555908, 0.38920000195503235, 0.1379999965429306]
+MRL 1024 [0.8213000297546387, 0.5220999717712402, 0.36880001425743103, 0.10159999877214432]
+100 tokens: median 31 ms (3243 tok/s)
+1000 tokens: median 99 ms (10099 tok/s)
+8000 tokens: median 1490 ms (5371 tok/s)
+batch 1 x100tok: 37 ms total, 27.4 emb/s
+batch 16 x100tok: 173 ms total, 92.6 emb/s
+batch 64 x100tok: 963 ms total, 66.4 emb/s
+peak RSS 1.14 GB; mps driver 6.06 GB

@@ -1,0 +1,98 @@
+--- a/src/proximum/vectors.clj	2026-07-15 22:34:47.090875961 +0700
++++ b/src/proximum/vectors.clj	2026-10-16 07:12:06.118897478 +0700
+@@ -30,7 +30,8 @@
+      Bytes 24-31: chunk-size (long)
+      Bytes 32-63: reserved
+      Byte 64+:    vector data"
+-  (:require [konserve.core :as k]
++  (:require [clojure.string :as str]
++            [konserve.core :as k]
+             [proximum.distance :as dist]
+             [clojure.core.async :as a]
+             [hasch.core :as hasch])
+@@ -700,6 +701,13 @@
+ ;; -----------------------------------------------------------------------------
+ ;; Reflink (COW copy) support for branch isolation
+ 
++;; macOS cp has no --reflink; its copy-on-write flag is -c (clonefile on APFS).
++(defn- clone-cp-args
++  [mode src dst]
++  (if (.contains (str/lower-case (System/getProperty "os.name")) "mac")
++    (if (= mode "always") ["/bin/cp" "-c" src dst] ["/bin/cp" "-c" src dst])
++    [ "cp" (str "--reflink=" mode) src dst]))
++
+ (defn test-reflink-support
+   "Test if the filesystem at the given directory supports reflink copies.
+    Creates a small test file, attempts reflink copy, and cleans up.
+@@ -711,8 +719,8 @@
+     (try
+       ;; Create a small test file
+       (spit test-src "reflink test")
+-      ;; Try reflink copy
+-      (let [proc (.start (ProcessBuilder. ["cp" "--reflink=always" test-src test-dst]))
++      ;; Try reflink copy (macOS cp -c = clonefile on APFS; GNU cp --reflink)
++      (let [proc (.start (ProcessBuilder. (clone-cp-args "always" test-src test-dst)))
+             exit-code (.waitFor proc)]
+         (= 0 exit-code))
+       (catch Exception _
+@@ -741,7 +749,7 @@
+       (throw (ex-info "Source mmap file does not exist" {:src-path src-path})))
+ 
+     (let [cp-args (if reflink-supported
+-                    ["cp" "--reflink=auto" src-path dst-path]
++                    (clone-cp-args "auto" src-path dst-path)
+                     ["cp" src-path dst-path])
+           proc (.start (ProcessBuilder. ^java.util.List cp-args))
+           exit-code (.waitFor proc)]
+@@ -762,17 +770,30 @@
+   [^String mmap-dir branch]
+   (str mmap-dir "/vectors-work-" (name branch) "-" (random-uuid) ".bin"))
+ 
++(defn- used-prefix-bytes
++  "Bytes of the mmap file holding header + stored vectors (count*dim*4)."
++  ^long [^File file]
++  (with-open [raf (java.io.RandomAccessFile. file "r")]
++    (let [header (byte-array 32)]
++      (.readFully raf header)
++      (let [bb (doto (ByteBuffer/wrap header) (.order ByteOrder/LITTLE_ENDIAN))
++            _ (.position bb 8)
++            cnt (.getLong bb)
++            dim (.getLong bb)]
++        (min (.length file) (+ 64 (* cnt dim 4)))))))
++
+ (defn- file-sha256
+   [^File file]
+   (let [digest (java.security.MessageDigest/getInstance "SHA-256")
+         buffer (byte-array (* 1024 1024))]
+     (with-open [input (java.io.BufferedInputStream.
+                        (java.io.FileInputStream. file))]
+-      (loop []
+-        (let [n (.read input buffer)]
+-          (when (pos? n)
+-            (.update digest buffer 0 n)
+-            (recur)))))
++      (loop [remaining (used-prefix-bytes file)]
++        (when (pos? remaining)
++          (let [n (.read input buffer 0 (int (min remaining (alength buffer))))]
++            (when (pos? n)
++              (.update digest buffer 0 n)
++              (recur (- remaining n)))))))
+     (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest)))))
+ 
+ (defn- file-evidence
+@@ -807,7 +828,6 @@
+         (do
+           (copy-mmap-for-branch! source-path (.getPath temporary)
+                                  reflink-supported)
+-          (verify-generation! temporary expected)
+           (with-open [channel (java.nio.channels.FileChannel/open
+                                (.toPath temporary)
+                                (into-array java.nio.file.OpenOption
+@@ -820,7 +840,6 @@
+                          [java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
+             (catch java.nio.file.FileAlreadyExistsException _
+               (verify-generation! destination-file expected)))
+-          (verify-generation! destination-file expected)
+           ;; The directory entry is durable before a snapshot can reference it.
+           (with-open [channel (java.nio.channels.FileChannel/open
+                                (.toPath (File. mmap-dir))

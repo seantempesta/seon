@@ -1,0 +1,94 @@
+=== st weights/embeddinggemma-2 fp32
+[transformers] Token indices sequence length is longer than the specified maximum sequence length for this model (38160 > 8192). Running this sequence through the model will result in indexing errors
+[st fp32] load 1.2s, params 271M, mps alloc 1.08 GB
+parity vs ST fp32 (n=50): cos min 1.00000 mean 1.00000
+top-1 neighbour agreement: 1.0
+  MRL 128: cos vs fp32 same-dim 1.00000
+  MRL 256: cos vs fp32 same-dim 1.00000
+  MRL 512: cos vs fp32 same-dim 1.00000
+100 tok: median 18.8 ms
+1000 tok: median 69.2 ms
+8000 tok: median 2205.5 ms
+batch 16 x100tok: 190 emb/s
+batch 64 x100tok: 208 emb/s
+peak RSS 2.35 GB
+=== st weights/embeddinggemma-2 bf16
+[transformers] Token indices sequence length is longer than the specified maximum sequence length for this model (38160 > 8192). Running this sequence through the model will result in indexing errors
+[st bf16] load 1.6s, params 271M, mps alloc 0.54 GB
+parity vs ST fp32 (n=50): cos min 0.99828 mean 1.00076
+top-1 neighbour agreement: 0.96
+  MRL 128: cos vs fp32 same-dim 0.99998
+  MRL 256: cos vs fp32 same-dim 0.99998
+  MRL 512: cos vs fp32 same-dim 0.99998
+100 tok: median 23.2 ms
+1000 tok: median 42.7 ms
+8000 tok: median 812.9 ms
+batch 16 x100tok: 248 emb/s
+batch 64 x100tok: 314 emb/s
+peak RSS 1.27 GB
+=== mlx weights/embeddinggemma-2-bf16 mlx-bf16
+Traceback (most recent call last):
+  File "/Users/sean/src/seon/docs/research/agent-platform/2026-10-16/embedding/bench_gemma.py", line 26, in <module>
+    t0 = time.time(); model = load_embedding_model(path); tok = AutoTokenizer.from_pretrained(path)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sean/src/embed-models/embeddinggemma-2/.venv/lib/python3.12/site-packages/mlx_vlm/embedding_loader.py", line 19, in load_embedding_model
+    dense_config = model_path / "1_Dense" / "config.json"
+                   ~~~~~~~~~~~^~~~~~~~~~~
+TypeError: unsupported operand type(s) for /: 'str' and 'str'
+=== mlx weights/embeddinggemma-2-8bit mlx-8bit
+Traceback (most recent call last):
+  File "/Users/sean/src/seon/docs/research/agent-platform/2026-10-16/embedding/bench_gemma.py", line 26, in <module>
+    t0 = time.time(); model = load_embedding_model(path); tok = AutoTokenizer.from_pretrained(path)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sean/src/embed-models/embeddinggemma-2/.venv/lib/python3.12/site-packages/mlx_vlm/embedding_loader.py", line 19, in load_embedding_model
+    dense_config = model_path / "1_Dense" / "config.json"
+                   ~~~~~~~~~~~^~~~~~~~~~~
+TypeError: unsupported operand type(s) for /: 'str' and 'str'
+=== mlx weights/embeddinggemma-2-4bit mlx-4bit
+Traceback (most recent call last):
+  File "/Users/sean/src/seon/docs/research/agent-platform/2026-10-16/embedding/bench_gemma.py", line 26, in <module>
+    t0 = time.time(); model = load_embedding_model(path); tok = AutoTokenizer.from_pretrained(path)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sean/src/embed-models/embeddinggemma-2/.venv/lib/python3.12/site-packages/mlx_vlm/embedding_loader.py", line 19, in load_embedding_model
+    dense_config = model_path / "1_Dense" / "config.json"
+                   ~~~~~~~~~~~^~~~~~~~~~~
+TypeError: unsupported operand type(s) for /: 'str' and 'str'
+=== mlx weights/embeddinggemma-2-bf16 mlx-bf16
+[mlx mlx-bf16] load 0.8s, mlx active 1.49 GB
+parity vs ST fp32 (n=50): cos min 0.99995 mean 0.99997
+top-1 neighbour agreement: 0.96
+  MRL 128: cos vs fp32 same-dim 0.99998
+  MRL 256: cos vs fp32 same-dim 0.99997
+  MRL 512: cos vs fp32 same-dim 0.99997
+100 tok: median 10.7 ms
+1000 tok: median 16.5 ms
+8000 tok: median 564.2 ms
+batch 16 x100tok: 728 emb/s
+batch 64 x100tok: 859 emb/s
+peak RSS 2.77 GB
+=== mlx weights/embeddinggemma-2-8bit mlx-8bit
+[mlx mlx-8bit] load 0.7s, mlx active 1.23 GB
+parity vs ST fp32 (n=50): cos min 0.99984 mean 0.99990
+top-1 neighbour agreement: 0.98
+  MRL 128: cos vs fp32 same-dim 0.99994
+  MRL 256: cos vs fp32 same-dim 0.99991
+  MRL 512: cos vs fp32 same-dim 0.99990
+100 tok: median 7.9 ms
+1000 tok: median 20.8 ms
+8000 tok: median 531.1 ms
+batch 16 x100tok: 728 emb/s
+batch 64 x100tok: 833 emb/s
+peak RSS 2.52 GB
+=== mlx weights/embeddinggemma-2-4bit mlx-4bit
+[mlx mlx-4bit] load 0.7s, mlx active 1.10 GB
+parity vs ST fp32 (n=50): cos min 0.97331 mean 0.98683
+top-1 neighbour agreement: 0.8
+  MRL 128: cos vs fp32 same-dim 0.99288
+  MRL 256: cos vs fp32 same-dim 0.98862
+  MRL 512: cos vs fp32 same-dim 0.98746
+100 tok: median 8.4 ms
+1000 tok: median 17.7 ms
+8000 tok: median 628.0 ms
+batch 16 x100tok: 761 emb/s
+batch 64 x100tok: 835 emb/s
+peak RSS 2.36 GB
