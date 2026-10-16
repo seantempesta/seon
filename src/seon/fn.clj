@@ -953,7 +953,7 @@
                      :seon.ns.refer/target-name local}))))
         (keys (:seon.schema.projection/forms projection))))
 
-(defn- declared-namespace-metadata
+(defn declared-namespace-metadata
   "The metadata a stored `ns` form declares: its name's metadata merged with
   its attr-map, as clj-kondo reads a file's `ns` form."
   {:malli/schema [:=> [:cat :symbol :string] :map]}

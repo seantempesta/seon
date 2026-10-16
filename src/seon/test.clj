@@ -781,50 +781,78 @@
                   [?f :seon.fn/arities ?a] [?f :seon.fn/sym ?symbol]]
                 database (vec closure))))))
 
+(defn- namespace-readers
+  "The tests that read namespace `ns-name` as a file: those whose `:seon.test/reads` names a key its stored `ns`
+  form's metadata declares (`seon.fn/declared-namespace-metadata`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol] [:or [:set :seon.test/sym] :seon.db/invalid-read-error]]}
+  [database ns-name]
+  (let [source (db/q '[:find ?source . :in $ ?name :where [?n :seon.ns/name ?name] [?n :seon.ns/source ?source]]
+                     database ns-name)
+        declared (when (string? source) (keys (functions/declared-namespace-metadata ns-name source)))]
+    (cond (map? source) source
+          (empty? declared) #{}
+          :else (let [readers (db/q '[:find [?symbol ...] :in $ [?key ...]
+                                      :where [?t :seon.test/reads ?key] [?t :seon.test/sym ?symbol]]
+                                    database (vec (filter qualified-keyword? declared)))]
+                  (if (map? readers) readers (set readers))))))
+
 (defn- selection-seeds
   "Resolve supplied definition, namespace and schema identities in this database;
-  a schema seeds the functions whose contracts name it (`schema-consumers`)."
+  a schema seeds the functions whose contracts name it (`schema-consumers`), and a change in a namespace seeds
+  the tests that read that namespace as a file (`namespace-readers`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/changed]
                   [:or [:set :qualified-symbol] :seon.test/selection-error :seon.test/unknown-error
                    :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
   [database changed]
-  (reduce
-   (fn [seeds change]
-     (let [[attribute value] (if (vector? change) change [:seon.fn/sym change])]
-       (if (= attribute :seon.ns/name)
-         (let [members (db/q '[:find [?symbol ...] :in $ ?name
-                               :where [?n :seon.ns/name ?name]
-                               (or-join [?e ?n] [?e :seon.fn/ns ?n] [?e :seon.test/ns ?n])
-                               (or [?e :seon.fn/sym ?symbol] [?e :seon.test/sym ?symbol])]
-                             database value)]
-           (cond (and (map? members)
-                      (contains? members :seon.error/at)
-                      (contains? members :seon.error/layer)
-                      (contains? members :seon.error/operation)) (reduced members)
-                 (empty? members) (reduced (unknown change "Namespace has no analyzed definitions."))
-                 :else (into seeds members)))
-         (cond
-           (= attribute :seon.schema/key) (into seeds (schema-consumers database value))
-           (qualified-symbol? value)
-           (let [known (db/q '[:find ?e . :in $ ?symbol
-                               :where (or [?e :seon.fn/sym ?symbol]
-                                          [?e :seon.test/sym ?symbol]
-                                          [?e :seon.fn/calls ?symbol]
-                                          [?e :seon.fn/references ?symbol]
-                                          [?e :seon.test/subject ?symbol])]
-                             (db/history database) value)]
-             (cond (and (map? known)
-                        (contains? known :seon.error/at)
-                        (contains? known :seon.error/layer)
-                        (contains? known :seon.error/operation)) (reduced known)
-                   known (conj seeds value)
-                   :else (reduced (selection-refusal database :seon.test/identity-unresolved
-                                   "Changed identity has no definition, history or incoming edge."
-                                   [:seon.fn/sym value]))))
-           :else
-           (reduced (selection-refusal database :seon.test/coverage-unknown
-                                       "This changed declaration has no bounded graph selection." change))))))
-   #{} changed))
+  (let [readers (reduce (fn [seeds ns-name]
+                          (let [found (namespace-readers database ns-name)]
+                            (if (map? found) (reduced found) (into seeds found))))
+                        #{}
+                        (into (sorted-set)
+                              (keep (fn [change]
+                                      (let [[attribute value] (if (vector? change) change [:seon.fn/sym change])]
+                                        (cond (= :seon.ns/name attribute) value
+                                              (qualified-symbol? value) (symbol (namespace value))))))
+                              changed))]
+    (if (map? readers)
+      readers
+      (reduce
+       (fn [seeds change]
+         (let [[attribute value] (if (vector? change) change [:seon.fn/sym change])]
+           (if (= attribute :seon.ns/name)
+             (let [members (db/q '[:find [?symbol ...] :in $ ?name
+                                   :where [?n :seon.ns/name ?name]
+                                   (or-join [?e ?n] [?e :seon.fn/ns ?n] [?e :seon.test/ns ?n])
+                                   (or [?e :seon.fn/sym ?symbol] [?e :seon.test/sym ?symbol])]
+                                 database value)]
+               (cond (and (map? members)
+                          (contains? members :seon.error/at)
+                          (contains? members :seon.error/layer)
+                          (contains? members :seon.error/operation)) (reduced members)
+                     (empty? members) (reduced (unknown change "Namespace has no analyzed definitions."))
+                     :else (into seeds members)))
+             (cond
+               (= attribute :seon.schema/key) (into seeds (schema-consumers database value))
+               (qualified-symbol? value)
+               (let [known (db/q '[:find ?e . :in $ ?symbol
+                                   :where (or [?e :seon.fn/sym ?symbol]
+                                              [?e :seon.test/sym ?symbol]
+                                              [?e :seon.fn/calls ?symbol]
+                                              [?e :seon.fn/references ?symbol]
+                                              [?e :seon.test/subject ?symbol])]
+                                 (db/history database) value)]
+                 (cond (and (map? known)
+                            (contains? known :seon.error/at)
+                            (contains? known :seon.error/layer)
+                            (contains? known :seon.error/operation)) (reduced known)
+                       known (conj seeds value)
+                       :else (reduced (selection-refusal database :seon.test/identity-unresolved
+                                       "Changed identity has no definition, history or incoming edge."
+                                       [:seon.fn/sym value]))))
+               :else
+               (reduced (selection-refusal database :seon.test/coverage-unknown
+                                           "This changed declaration has no bounded graph selection." change))))))
+       readers changed))))
 
 (defn green-members
   "Member identities with positive, terminated assertion evidence."

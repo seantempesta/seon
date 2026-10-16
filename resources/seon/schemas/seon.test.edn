@@ -18,6 +18,10 @@
             :platform
             [:string {:min 1
                       :description "The declared reason this test is a platform regression: a moving part whose breakage poisons the bulk tier. Indexed from the test Var's or its namespace's :seon.test/platform metadata, so the tier partition reads the fact the coordinator already holds instead of re-reading Var metadata."}],
+            :reads
+            [:set {:seon.db/index true
+                   :description "The namespace metadata keys whose namespaces this test reads as files (a `bb` classpath, a source scan) rather than calls: a change in any namespace whose `ns` form declares one of them selects it (seon.test/selection-seeds). Indexed from the test Var's or its namespace's :seon.test/reads metadata."}
+             :qualified-keyword],
             :fixture
             [:string {:min 1
                       :description "The declared reason this namespace's tests are fixture material another test asserts over, never gate members: a deliberate failure, an assertionless example, a usage sample. Declared once on the ns form and lifted onto every test entity, so bare selection excludes it by fact instead of by a filename that does not end in _test."}],
@@ -134,6 +138,7 @@
              [:seon.test/long-ms {:optional true} :seon.test/long-ms]
              [:seon.test/platform {:optional true} :seon.test/platform]
              [:seon.test/fixture {:optional true} :seon.test/fixture]
+             [:seon.test/reads {:optional true} :seon.test/reads]
              [:seon.test/subject {:optional true} :seon.test/subject]
              [:seon.test/pass-count
               {:optional true :seon.program/written-by seon.test.runner/record-tx}

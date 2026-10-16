@@ -345,7 +345,7 @@
   published row whether a test is a platform regression, and bare namespace
   selection asks whether a namespace is fixture material, in place of the
   `_test` filename convention that answered it before."
-  [:seon.test/long :seon.test/long-ms :seon.test/platform :seon.test/fixture])
+  [:seon.test/long :seon.test/long-ms :seon.test/platform :seon.test/fixture :seon.test/reads])
 
 (defn test-markers
   "The declared markers for one test: its own metadata, then its namespace's.

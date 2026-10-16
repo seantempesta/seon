@@ -694,6 +694,31 @@
                                [[:seon.fn/sym (sym "reach-f")] [:seon.fn/sym (sym "reach-scratch")]])))
            "with no seed every change that is not a removal stays: an empty closure, never a refusal")))))
 
+(deftest a-change-in-a-namespace-selects-the-tests-that-read-it-as-a-file
+  ;; a9e4e9904: the bb-load test reads `seon.edit`'s file and calls none of it, so the gate never ran it. A test
+  ;; declaring `:seon.test/reads #{k}` is selected by a change in any namespace whose `ns` form declares `k`.
+  (support/with-database
+   (fn [connection]
+     (let [ns-row (program/declaration-row (db/carried-projection (db/db connection))
+                                           {:seon.ns/name 'tq.bb-read :seon.ns/source "(ns ^{:seon/babashka true} tq.bb-read)"}
+                                           :all :agent)
+           _ (support/transacted! connection [ns-row (support/namespace-entity (db/db connection) 'tq.bb-reader)])
+           _ (support/transacted! connection [(support/program-entity (db/db connection) [:seon.fn/sym 'tq.bb-read/f]
+                                                                      "(defn f {:malli/schema [:=> [:cat] :int]} [] 1)")])
+           _ (support/transacted! connection [(support/program-entity (db/db connection) [:seon.test/sym 'tq.bb-reader/reads-bb]
+                                                                      "(clojure.test/deftest ^{:seon.test/reads #{:seon/babashka}} reads-bb (clojure.test/is true))")])
+           _ (support/transacted! connection [(support/program-entity (db/db connection) [:seon.test/sym 'tq.bb-reader/reads-other]
+                                                                      "(clojure.test/deftest ^{:seon.test/reads #{:tq/other}} reads-other (clojure.test/is true))")])
+           seeds #((deref #'test-runner/selection-seeds) (db/db connection) %)]
+       (is (= #{:seon/babashka} (:seon.test/reads (db/pull (db/db connection) [:seon.test/reads] [:seon.test/sym 'tq.bb-reader/reads-bb])))
+           "the declared reads are indexed from the deftest's metadata")
+       (is (contains? (seeds [[:seon.ns/name 'tq.bb-read]]) 'tq.bb-reader/reads-bb)
+           "a changed namespace selects the test that reads its kind")
+       (is (contains? (seeds ['tq.bb-read/f]) 'tq.bb-reader/reads-bb)
+           "a changed declaration in that namespace selects it too: bb loads the whole file")
+       (is (not (contains? (seeds [[:seon.ns/name 'tq.bb-read]]) 'tq.bb-reader/reads-other))
+           "a test reading another kind is not selected")))))
+
 (deftest ^{:seon.test/long "One prepare-merge!: a nested seon.test/run on a fresh merge branch of main."
            :seon.test/long-ms 60000}
   a-prepared-merge-carries-its-merge-list-and-a-staying-conflict-refuses

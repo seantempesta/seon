@@ -2693,15 +2693,18 @@
 
 (defn- reaching-run
   "The tests reaching `identities`, answered on `execution` and recorded on its
-  connection. Every changed function and test is passed, deleted ones
+  connection. Every changed function, test and namespace is passed, deleted ones
   included: `seon.test/run` resolves a deleted symbol through history and its
-  surviving incoming edges. No changed function or test, no request."
+  surviving incoming edges, and a namespace selects its members and the tests
+  that read it as a file. No changed function, test or namespace, no request."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.reconcile/adopt-identities]
                   [:map [:seon.test/passed? :boolean] [:seon.source/tally :string]
                    [:seon.source/gate-run {:optional true}
                     [:or :seon.test/run-result :seon.error/value]]]]}
   [execution identities]
-  (let [changed (into [] (keep (fn [[a v]] (when (#{:seon.fn/sym :seon.test/sym} a) v))) identities)
+  (let [changed (into [] (keep (fn [[a v :as identity]] (cond (#{:seon.fn/sym :seon.test/sym} a) v
+                                                               (= :seon.ns/name a) identity)))
+                      identities)
         run (when (seq changed)
               ((requiring-resolve 'seon.test/run)
                {:seon.test/policy :named :seon.test/execution execution

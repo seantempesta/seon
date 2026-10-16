@@ -59,7 +59,7 @@
                                         "-e" (str "(require '[clojure.string :as str]) " code))]
     (apply disj (edn/read-string out) namespaces)))
 
-(deftest declared-namespaces-load-in-babashka
+(deftest ^{:seon.test/reads #{:seon/babashka}} declared-namespaces-load-in-babashka
   (let [namespaces (declared hook-roots)]
     (is (contains? namespaces 'seon.edit))
     (is (= {} (bb-failures [] namespaces)))
