@@ -9,7 +9,8 @@
   live call against the real provider is the falsifier the orchestrator
   runs once by hand; a suite that needs a paid call to be green is a
   suite nobody runs."
-  (:require [clojure.data.json :as json]
+  (:require [seon.text-render-support :as text-render]
+            [clojure.data.json :as json]
             [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -1298,3 +1299,21 @@
           completion (#'ai/streamed-completion
                       (java.io.ByteArrayInputStream. (.getBytes ^String body "UTF-8")) nil)]
       (is (= ";; plan\n(+ 1 2)" (:seon.ai/text completion))))))
+
+(deftest the-model-ai-render-returns-data
+  (text-render/with-ai-face
+    "seon.ai.model/entity#0"
+    (fn [sample answer]
+      (is (not (string? (text-render/render-output answer)))
+          "the AI face is data the value printer prints, not text")
+      (is (text-render/carries? answer (:seon.ai.model/id sample))
+          "the data carries what the text carried"))))
+
+(deftest the-provider-ai-render-returns-data
+  (text-render/with-ai-face
+    "seon.ai.model/provider-entity#0"
+    (fn [sample answer]
+      (is (not (string? (text-render/render-output answer)))
+          "the AI face is data the value printer prints, not text")
+      (is (text-render/carries? answer (:seon.ai.model/provider-id sample))
+          "the data carries what the text carried"))))

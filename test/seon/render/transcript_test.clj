@@ -1,5 +1,6 @@
 (ns seon.render.transcript-test
-  (:require [clojure.core.async :as async]
+  (:require [seon.text-render-support :as text-render]
+            [clojure.core.async :as async]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
@@ -1303,3 +1304,34 @@
                (statuses "step-run-1"))
             "the newer run holds its step's tests with their live status")
         (is (= {} (statuses "step-run-0")) "a test run selected after the next run opened is not the older run's")))))
+
+(deftest the-run-ai-render-returns-data
+  (support/with-database
+   (fn [connection]
+     (support/transacted!
+      connection
+      (into (support/agent-tx @connection "run-data-agent")
+            [{:seon.turn/id "run-data" :seon.turn/agent [:seon.agent/id "run-data-agent"]
+              :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
+             {:seon.cluster.eval/id "eval-data"
+              :seon.cluster.eval/run [:seon.turn/id "run-data"]
+              :seon.cluster.eval/ordinal 0
+              :seon.cluster.eval/origin :model
+              :seon.cluster.eval/source "(+ 1 1)"
+              :seon.cluster.eval/at #inst "2026-09-06T00:00:01.000-00:00"
+              :seon.eval/shown "2"}]))
+     (let [database (db/db connection)
+           rendered (render/render-call
+                     {:seon.db/db database
+                      :seon.db/connection connection
+                      :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+                      :seon.render/namespace 'seon.flow
+                      :seon.render/value (db/pull database '[*] [:seon.turn/id "run-data"])
+                      :seon.render/output :seon.render/ai
+                      :seon.render/profile (render/agent-render-profile (support/effective-config))
+                      :seon.sci.admit/caps caps
+                      :seon.sci.eval/time-limit-ms 30000})]
+       (is (not (string? rendered))
+           "the AI face is data the value printer prints, not text")
+       (is (some #(and (string? %) (str/includes? % "(+ 1 1)")) (text-render/leaves rendered))
+           "the data carries the evaluation the text carried")))))

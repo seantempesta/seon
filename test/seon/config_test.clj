@@ -1,6 +1,7 @@
 (ns seon.config-test
   "Acceptance proofs for the one manifest compiler and config apply."
-  (:require [malli.core] [malli.registry] [clojure.edn :as edn]
+  (:require [seon.text-render-support :as text-render]
+            [malli.core] [malli.registry] [clojure.edn :as edn]
             [datahike.api]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -982,3 +983,12 @@
       (finally
         (doseq [branch [chain-branch merge-branch] :when (contains? (registry/branches store) branch)]
           (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))
+
+(deftest the-config-ai-render-returns-data
+  (text-render/with-ai-face
+    "seon.config/entity#0"
+    (fn [sample answer]
+      (is (not (string? (text-render/render-output answer)))
+          "the AI face is data the value printer prints, not text")
+      (is (text-render/carries? answer (:seon.config.ai/model sample))
+          "the data carries what the text carried"))))

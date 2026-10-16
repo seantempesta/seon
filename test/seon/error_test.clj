@@ -1,6 +1,7 @@
 (ns seon.error-test
   "Error identity, normalization and recording behavior."
-  (:require [seon.error.refusal]
+  (:require [seon.text-render-support :as text-render]
+            [seon.error.refusal]
             [clojure.core.async.flow :as-alias flow]
             [clojure.edn :as edn]
             [clojure.string :as str]
@@ -1983,3 +1984,19 @@
            (is (= 'str/subs (:seon.error/offending failure)))))
        (testing "a name nothing resembles still has no key"
          (is (not (contains? (nearest "(str/qqqzzz \"abc\" 1)") :seon.error/nearest))))))))
+
+(deftest the-elision-ai-render-returns-data
+  (text-render/with-ai-face
+    "seon.render.walk/elided-error#0"
+    (fn [_ answer]
+      (is (not (string? (text-render/render-output answer)))
+          "the AI face is data the value printer prints, not text"))))
+
+(deftest the-mcp-error-ai-render-returns-data
+  (text-render/with-ai-face
+    "seon.dev.mcp/projection-failed-error#0"
+    (fn [sample answer]
+      (is (not (string? (text-render/render-output answer)))
+          "the AI face is data the value printer prints, not text")
+      (is (text-render/carries? answer (:seon.error/message sample))
+          "the data carries what the text carried"))))

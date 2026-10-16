@@ -1,6 +1,7 @@
 (ns seon.repl-test
   "The REPL response grammar: what an agent reads back for one form."
-  (:require [clojure.data.json :as json]
+  (:require [seon.text-render-support :as text-render]
+            [clojure.data.json :as json]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as check]
@@ -564,3 +565,12 @@
                                 [\\ false] [\- false] [\_ false] [\. false]]]
     (is (= expected (#'seon.repl/token-boundary? character))
         "token-boundary? must answer the documented truth value")))
+
+(deftest the-evaluation-ai-render-returns-data
+  (text-render/with-ai-face
+    "seon.cluster.eval/receipt#0"
+    (fn [sample answer]
+      (is (not (string? (text-render/render-output answer)))
+          "the AI face is data the value printer prints, not text")
+      (is (text-render/carries? answer (:seon.cluster.eval/source sample))
+          "the data carries what the text carried"))))

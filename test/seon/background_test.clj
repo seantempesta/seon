@@ -1,5 +1,6 @@
 (ns seon.background-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [seon.text-render-support :as text-render]
+            [clojure.test :refer [deftest is]]
             [seon.turn :as turn]
 
             [seon.db :as db]
@@ -50,3 +51,12 @@
                        (map :seon.effect/id)
                        (:seon.effect/_to (db/pull @connection '[{:seon.effect/_to [:seon.effect/id]}] [:seon.agent/id "background-agent"])))))
           (is (nil? (:seon.turn/trigger opened))))))))
+
+(deftest the-background-error-ai-render-returns-data
+  (text-render/with-ai-face
+    "my.background/invalid-call-error#0"
+    (fn [sample answer]
+      (is (not (string? (text-render/render-output answer)))
+          "the AI face is data the value printer prints, not text")
+      (is (text-render/carries? answer (:seon.error/message sample))
+          "the data carries what the text carried"))))

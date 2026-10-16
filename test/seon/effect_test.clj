@@ -1,5 +1,6 @@
 (ns seon.effect-test
-  (:require [my.edit]
+  (:require [seon.text-render-support :as text-render]
+            [my.edit]
             [my.fs]
             [my.shell]
             [clojure.core.async :as async]
@@ -1089,3 +1090,12 @@
             (is (true? (#'effect/accepts-request? database
                         (symbol owner-symbol) request))
                 "must accept a well-formed at the effect door")))))))
+
+(deftest the-effect-ai-render-returns-data
+  (text-render/with-ai-face
+    "seon.effect/receipt#0"
+    (fn [sample answer]
+      (is (not (string? (text-render/render-output answer)))
+          "the AI face is data the value printer prints, not text")
+      (is (text-render/carries? answer (:seon.effect/id sample))
+          "the data carries what the text carried"))))
