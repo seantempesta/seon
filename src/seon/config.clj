@@ -50,18 +50,22 @@
   :seon.config/absent)
 
 (defn render-ai
-  "`:seon.render/ai` — the bounded decision face of one effective config."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  "`:seon.render/ai` — the bounded decision face of one effective config.
+
+  Returns its data: the configuration's identity and the dials an agent
+  budgets by, as keys the value printer can elide, requery or re-render.
+  `:seon.config/absent` when the unit names no configuration."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:or :seon.config/ai-view [:= :seon.config/absent]]]}
   [unit]
   (when-let [cluster (:seon.config/cluster unit)]
-    (str
-     "Configuration " cluster ".\n"
-     "Model " (:seon.config.ai/model unit)
-     " (thinking " (name (:seon.config.ai/thinking unit))
-     ", max " (:seon.config.ai/max-tokens unit) " output tokens); "
-     "evaluation " (:seon.config.eval/time-limit-ms unit) " ms; Flow "
-     (:seon.config.flow.compute/concurrency unit) " compute / "
-     (:seon.config.flow.io/concurrency unit) " I/O.")))
+    {:seon.config/cluster cluster
+     :seon.config.ai/model (:seon.config.ai/model unit)
+     :seon.config.ai/thinking (:seon.config.ai/thinking unit)
+     :seon.config.ai/max-tokens (:seon.config.ai/max-tokens unit)
+     :seon.config.eval/time-limit-ms (:seon.config.eval/time-limit-ms unit)
+     :seon.config.flow.compute/concurrency (:seon.config.flow.compute/concurrency unit)
+     :seon.config.flow.io/concurrency (:seon.config.flow.io/concurrency unit)}))
 
 (defn render-html
   "`:seon.render/html` — one readable effective-configuration card."

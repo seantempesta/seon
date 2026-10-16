@@ -78,5 +78,6 @@
  :seon.config/error
  [:map
   {:seon.db/attributes true}
-  [:seon.config/rule :seon.config/rule]]]
+  [:seon.config/rule :seon.config/rule]]],
+              :ai-view [:map {:description "One effective configuration as its AI face shows it, as data the value printer prints."} [:seon.config/cluster :seon.config/cluster] [:seon.config.ai/model :seon.config.ai/model] [:seon.config.ai/thinking :seon.config.ai/thinking] [:seon.config.ai/max-tokens :seon.config.ai/max-tokens] [:seon.config.eval/time-limit-ms :seon.config.eval/time-limit-ms] [:seon.config.flow.compute/concurrency :seon.config.flow.compute/concurrency] [:seon.config.flow.io/concurrency :seon.config.flow.io/concurrency]]
 }
