@@ -132,4 +132,6 @@
   [:seon.ai.model/last-latency-ms
    {:optional true}
    :seon.ai.model/last-latency-ms]
-  [:seon.ai/usage {:optional true} :seon.ai/usage]]}
+  [:seon.ai/usage {:optional true} :seon.ai/usage]]
+
+ :seon.ai.model/ai-face [:map [:seon.ai.model/id :seon.ai.model/id] [:seon.ai.model/provider-id {:optional true} :seon.ai.model/provider-id] [:seon.ai.model/context-window-tokens {:optional true} :seon.ai.model/context-window-tokens] [:seon.ai.model/max-output-tokens {:optional true} :seon.ai.model/max-output-tokens] [:seon.ai.model/input-usd-per-mtok {:optional true} :seon.ai.model/input-usd-per-mtok] [:seon.ai.model/cached-input-usd-per-mtok {:optional true} :seon.ai.model/cached-input-usd-per-mtok] [:seon.ai.model/output-usd-per-mtok {:optional true} :seon.ai.model/output-usd-per-mtok] [:seon.ai.model/input-modalities {:optional true} :seon.ai.model/input-modalities] [:seon.ai.model/last-latency-ms {:optional true} :seon.ai.model/last-latency-ms] [:seon.ai.model/last-tokens-per-second {:optional true} :seon.ai.model/last-tokens-per-second] [:seon.ai.model/last-used-at {:optional true} :seon.ai.model/last-used-at]]}

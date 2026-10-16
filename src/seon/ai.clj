@@ -181,40 +181,83 @@
   (when-let [price (usd-per-million value)]
     (str label " " price)))
 
-(defn model-ai
-  "Render one model's capabilities, economics, and latest observation."
-  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
-  [unit]
-  (let [model (rendered-model unit)
-        provider (:seon.ai.model/provider model)
+(defn- model-ai-text
+  "The model registry's one-line-plus text for one AI-face `data` map."
+  {:malli/schema [:=> [:cat :seon.ai.model/ai-face] :string]}
+  [data]
+  (let [provider-id (:seon.ai.model/provider-id data)
         price-parts
         (keep identity
-              [(labelled-price
-                "input" (:seon.ai.model/input-usd-per-mtok model))
-               (labelled-price
-                "cached input"
-                (:seon.ai.model/cached-input-usd-per-mtok model))
-               (labelled-price
-                "output" (:seon.ai.model/output-usd-per-mtok model))])]
+              [(when (contains? data :seon.ai.model/input-usd-per-mtok)
+                 (str "input " (usd-per-million (:seon.ai.model/input-usd-per-mtok data))))
+               (when (contains? data :seon.ai.model/cached-input-usd-per-mtok)
+                 (str "cached input " (usd-per-million (:seon.ai.model/cached-input-usd-per-mtok data))))
+               (when (contains? data :seon.ai.model/output-usd-per-mtok)
+                 (str "output " (usd-per-million (:seon.ai.model/output-usd-per-mtok data))))])]
     (str
-     "Model " (:seon.ai.model/id model)
-     (when-let [provider-id (:seon.ai.model/provider-id provider)]
-       (str " · provider " provider-id))
-     (when-let [context (:seon.ai.model/context-window-tokens model)]
+     "Model " (:seon.ai.model/id data)
+     (when provider-id (str " · provider " provider-id))
+     (when-let [context (:seon.ai.model/context-window-tokens data)]
        (str " · context " context " tokens"))
-     (when-let [maximum (:seon.ai.model/max-output-tokens model)]
+     (when-let [maximum (:seon.ai.model/max-output-tokens data)]
        (str " · maximum output " maximum " tokens"))
      (when (seq price-parts)
        (str "\nPricing: " (str/join ", " price-parts) "."))
-     (when-let [modalities (seq (:seon.ai.model/input-modalities model))]
+     (when-let [modalities (seq (:seon.ai.model/input-modalities data))]
        (str "\nInputs: " (str/join ", " (sort (map name modalities))) "."))
-     (when-let [latency (:seon.ai.model/last-latency-ms model)]
+     (when-let [latency (:seon.ai.model/last-latency-ms data)]
        (str "\nLatest: " latency " ms"
-            (when-let [rate (:seon.ai.model/last-tokens-per-second model)]
+            (when-let [rate (:seon.ai.model/last-tokens-per-second data)]
               (str ", " (format "%.2f" (double rate)) " tokens/s"))
-            (when-let [used-at (:seon.ai.model/last-used-at model)]
+            (when-let [used-at (:seon.ai.model/last-used-at data)]
               (str " at " used-at))
             ".")))))
+
+(defn model-ai
+  "Render one model's capabilities, economics, and latest observation."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.ai.model/ai-face]}
+  [unit]
+  (let [model (rendered-model unit)]
+    (cond-> {:seon.ai.model/id (:seon.ai.model/id model)}
+      (:seon.ai.model/provider-id (:seon.ai.model/provider model))
+      (assoc :seon.ai.model/provider-id
+             (:seon.ai.model/provider-id (:seon.ai.model/provider model)))
+
+      (contains? model :seon.ai.model/context-window-tokens)
+      (assoc :seon.ai.model/context-window-tokens
+             (:seon.ai.model/context-window-tokens model))
+
+      (contains? model :seon.ai.model/max-output-tokens)
+      (assoc :seon.ai.model/max-output-tokens
+             (:seon.ai.model/max-output-tokens model))
+
+      (contains? model :seon.ai.model/input-usd-per-mtok)
+      (assoc :seon.ai.model/input-usd-per-mtok
+             (:seon.ai.model/input-usd-per-mtok model))
+
+      (contains? model :seon.ai.model/cached-input-usd-per-mtok)
+      (assoc :seon.ai.model/cached-input-usd-per-mtok
+             (:seon.ai.model/cached-input-usd-per-mtok model))
+
+      (contains? model :seon.ai.model/output-usd-per-mtok)
+      (assoc :seon.ai.model/output-usd-per-mtok
+             (:seon.ai.model/output-usd-per-mtok model))
+
+      (seq (:seon.ai.model/input-modalities model))
+      (assoc :seon.ai.model/input-modalities
+             (:seon.ai.model/input-modalities model))
+
+      (contains? model :seon.ai.model/last-latency-ms)
+      (assoc :seon.ai.model/last-latency-ms
+             (:seon.ai.model/last-latency-ms model))
+
+      (contains? model :seon.ai.model/last-tokens-per-second)
+      (assoc :seon.ai.model/last-tokens-per-second
+             (:seon.ai.model/last-tokens-per-second model))
+
+      (contains? model :seon.ai.model/last-used-at)
+      (assoc :seon.ai.model/last-used-at
+             (:seon.ai.model/last-used-at model)))))
 
 (defn model-html
   "Render one model as a readable registry card."
@@ -264,8 +307,8 @@
   [database]
   (str "Available models\n"
        (str/join "\n"
-                 (map #(model-ai {:seon.db/db database
-                                  :seon.render/value %})
+                 (map #(model-ai-text (model-ai {:seon.db/db database
+                                                 :seon.render/value %}))
                       (models database)))))
 
 (defn registry-html
