@@ -1,151 +1,159 @@
 (ns seon.competency-grade-test
-  "A competency run is graded from its agent's stored facts."
+  "The context bench: a chain run is launched through `seon.task/chain!` and graded from its kept branch; its forms
+  are classed, and tables compare by the noise rule."
   (:require [clojure.core.async :as async]
-            [clojure.data.json :as json]
-            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
-            [seon.cluster.host :as host]
+            [seon.cluster.agent :as agent]
+            [seon.cluster.registry :as registry]
             [seon.competency :as competency]
+            [seon.config :as config]
             [seon.db :as db]
-            [seon.eval.drive]
-            [seon.id]
-            [seon.mcp :as mcp]
-            [seon.operator.runtime]
-            [seon.task :as task]
+            [seon.flow :as flow]
+            [seon.batch]
+            [seon.sci.eval :as sci.eval]
+            [seon.turn.world :as world]
             [seon.test-support :as support]))
 
-(defn- agent-eval
-  "The reply map of `code` evaluated as `agent-id` through `seon.mcp/call`."
-  {:malli/schema [:=> [:cat :string :seon.agent/id :string] :seon.schema/value]}
-  [running agent-id code]
-  (support/mcp-reply (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
-                                                               "arguments" {"code" code "agent" agent-id "cluster" running}})))))
-
-(defn- wake!
-  "Wake the running agent's proc once, as a message would."
-  {:malli/schema [:=> [:cat :string :seon.agent/id] :nil]}
-  [running agent-id]
-  (async/offer! (:seon.cluster.wake/channel
-                 (get-in @(:seon.agent/routing (:seon.turn.loop/cluster (get @seon.operator.runtime/running-instances running)))
-                         [:seon.agent/started agent-id]))
-                :seon.agent/wake)
+(defn- pass!
+  "One db<->flow pass over `handle`, as root's proc runs it on a wake: synchronous."
+  {:malli/schema [:=> [:cat :seon.agent/context-source] :nil]}
+  [handle]
+  (agent/db<->flow {:seon.turn.loop/cluster handle :seon.agent/routing (:seon.agent/routing handle)}
+                   :seon.flow/plan :seon.agent/test-wake)
   nil)
 
-(defn- model-run!
-  "Assign `task-sym` to `agent-id`, answer its model calls with `replies` from a fixture provider under a cap
-  of as many calls, and return once that many call rows are closed."
-  {:malli/schema [:=> [:cat :string :seon.agent/id :seon.db/connection :seon.task/sym [:vector :string]] :nil]}
-  [running agent-id connection task-sym replies]
-  (let [closed #(or (db/q '[:find (count ?call) . :in $ ?agent-id
-                            :where [?agent :seon.agent/id ?agent-id] [?call :seon.turn/agent ?agent]
-                            [?call :seon.turn/attempts _] [?call :seon.turn/closed-tx _]]
-                          (db/db connection) agent-id)
-                    0)
-        id (db/q '[:find ?id . :in $ ?sym :where [?t :seon.task/sym ?sym] [?t :seon.task/id ?id]] (db/db connection) task-sym)]
-    (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
-                   :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
-    (support/with-provider
-     (atom []) (support/reply-queue replies)
-     (fn [server]
-       (agent-eval running agent-id (str "(my.agent/settings! "
-                                         (seon.id/printed (assoc (support/provider-config server)
-                                                                 :seon.config.ai/no-provider false
-                                                                 :seon.config.run/max-episode-runs (count replies)))
-                                         ")"))
-       (let [cluster-name (:seon.cluster/name (support/execution-handle nil))
-             outside (java.util.concurrent.FutureTask.
-                      ^java.util.concurrent.Callable
-                      #(seon.eval.drive/inbound! connection cluster-name cluster/boot-process-identity
-                                                 agent-id "Work your task."))]
-         (.start (Thread. outside))
-         (.get outside))
-       (wake! running agent-id)
-       (loop [tries 600]
-         (when (and (pos? tries) (< (closed) (count replies)))
-           (Thread/sleep 50)
-           (recur (dec tries))))
-       nil))))
+(defn- release-chain!
+  "Stop the graphs db<->flow started on chain `branch` under `routing`, release their executions, retire the branch."
+  {:malli/schema [:=> [:cat :seon.agent/routing :seon.store/store :seon.chain/branch] :nil]}
+  [routing store branch]
+  (when-let [child (get-in @routing [:seon.agent/children branch])]
+    (doseq [started (keys (:seon.agent/started @child))]
+      (agent/stop-flow! {:seon.agent/id started :seon.agent/routing child}))
+    (doseq [execution (vals (:seon.agent/contexts @child))
+            :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
+      (agent/release-context! execution)))
+  (agent/release-chain-route! routing branch)
+  (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
+  nil)
 
-(deftest ^{:seon.test/long "One fixture-model pass whose form arms a contracted function, then its proof's step."
-           :seon.test/long-ms 60000}
-  a-fixture-model-run-grades-green
-  (support/with-running-agent
-   (fn [running agent-id connection]
-     (let [task 'seon.competency/area-is-contracted
-           red (competency/grade (db/db connection) agent-id task)]
-       (model-run! running agent-id connection task
-                   ["(ns comp.geo)\n(defn area {:malli/schema [:=> [:cat [:int {:min 1}] [:int {:min 1}]] [:int {:min 1}]]} [w h] (* w h))\n(ns comp.geo)"])
-       ;; the proof's step records after the call row closes: wait for what production waits for, its result
-       (let [graded (loop [tries 300]
-                      (let [graded (competency/grade (db/db connection) agent-id task)]
-                        (if (or (:seon.competency/green? graded) (zero? tries))
-                          graded
-                          (do (Thread/sleep 100) (recur (dec tries))))))]
-         (is (= {:green 1} (:seon.competency/proofs graded)))
-         (is (= [false 0] [(:seon.competency/green? red) (:seon.competency/model-calls red)]) "before the run: red, no call")
-         (is (= {:seon.competency/green? true :seon.competency/model-calls 1 :seon.competency/calls-to-green 1
-                 :seon.competency/forms 3 :seon.competency/repeated-forms 1 :seon.competency/agent-errors 0
-                 :seon.competency/no-form-calls 0}
-                (select-keys graded [:seon.competency/green? :seon.competency/model-calls :seon.competency/calls-to-green
-                                     :seon.competency/forms :seon.competency/repeated-forms
-                                     :seon.competency/agent-errors :seon.competency/no-form-calls]))
-             "one model call turned the proof green; its repeated ns form counts as wasted"))))))
+(defn- with-root
+  "Call `body` with a cluster handle over `connection`, the executing member's own cluster with root homed on it,
+  as boot arms root's."
+  {:malli/schema [:=> [:cat :seon.db/connection [:=> [:cat :seon.agent/context-source] :seon.schema/value]] :seon.schema/value]}
+  [connection body]
+  (let [cluster-name (:seon.cluster/name (support/execution-handle connection))
+        environment (support/environment cluster-name connection)]
+    (support/transacted! connection (support/agent-tx (db/db connection) "root" 'user))
+    (with-open [launcher (support/closeable
+                          (flow/start-work-launcher!
+                           {:seon.env/environment environment
+                            :seon.flow/configuration (select-keys (config/effective (db/db connection) cluster-name)
+                                                                  flow/flow-workload-attributes)})
+                          flow/stop-work-launcher!)]
+      (let [ctx (support/fork-cluster-ctx connection cluster-name)]
+        (body (support/cluster-handle
+               {:seon.env/environment (assoc environment :seon.flow/work-launcher @launcher)
+                :seon.db/connection connection :seon.cluster/name cluster-name :seon.sci.eval/ctx ctx
+                :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
+                :seon.db.process/id cluster/boot-process-identity}))))))
 
-(defn- fixture-answer
-  "A fixture model for T1: its solution, unindented as a model writes it, until a request shows it was
-  evaluated, then a reply with no form."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [document]
-  (if (some #(str/includes? (str (get % "content")) "symbol comp.geo/area") (get document "messages"))
-    ";; The proof is green; I wait."
-    "(ns comp.geo)\n(defn area {:malli/schema [:=> [:cat [:int {:min 1}] [:int {:min 1}]] [:int {:min 1}]]} [w h] (* w h))"))
+(def ^:private fixture-task
+  "A bench entry whose proof the harness defines red in the member's world and whose oracle redefines it green, as
+  the db<->flow chain tests' fixed worlds do: launch and grade, not the bench tasks, are what it proves."
+  {:seon.competency/id :fixture-proof
+   :seon.competency/split :train
+   :seon.competency/task {:seon.task/ns 'bench.fixture :seon.task/name "prove-it"
+                          :seon.task/plan "Make `bench.fixture-proofs/proves-it` green."
+                          :seon.task/proofs #{'bench.fixture-proofs/proves-it}}
+   :seon.competency/oracle "(in-ns 'bench.fixture-proofs)\n(clojure.test/deftest proves-it (clojure.test/is (= 1 1)))"})
 
-(defn- home-root!
-  "Name the member's branch as root's home, as a running cluster's root row names its own branch, so a task
-  home exists apart from the bench agents' branches."
-  {:malli/schema [:=> [:cat :seon.db/connection] :nil]}
-  [connection]
-  (let [database (db/db connection)
-        branch (get-in database [:config :branch])
-        root (db/pull database [:db/id] [:seon.agent/id "root"])]
-    (db/transact! connection (if (:db/id root)
-                               [[:db/add (:db/id root) :seon.agent/branch branch]]
-                               [[:db.fn/call #'host/home-call "root" branch 'user
-                                 (:seon.cluster/name (support/execution-handle nil))]]))
-    nil))
+(defn- launched
+  "The grades of `runs` fixture-model runs of `fixture-task` launched on `handle`'s cluster, its proof defined red
+  first, the model answering its oracle, while a thread runs db<->flow passes as root's proc would on each wake."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection pos-int?] [:vector :map]]}
+  [handle connection runs]
+  (support/transacted! connection (support/agent-tx (db/db connection) "bench-author" 'user))
+  (support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name (:seon.cluster/name handle)
+                                 :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
+                                                                               (db/db connection) connection)
+                                 :seon.batch/sink (seon.batch/sink)
+                                 :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                 :seon.agent/id "bench-author"})
+                   'bench.fixture-proofs
+                   "(clojure.test/deftest proves-it (clojure.test/is (= 1 2)))\n")
+  (support/with-provider
+   (atom []) (constantly (:seon.competency/oracle fixture-task))
+   (fn [server]
+     (let [done (async/promise-chan)
+           ;; root's proc, woken by each chain's writes in a running cluster; a fixture cluster runs none
+           root (async/thread (loop [] (when-not (async/poll! done) (pass! handle) (Thread/sleep 100) (recur)))
+                              ::root-stopped)]
+       (try
+         (competency/launch!
+          {:seon.db/connection connection :seon.store/store (agent/handle-store handle)
+           :seon.competency/tasks [fixture-task]
+           :seon.competency/variants
+           [{:seon.competency/variant :fixture
+             :seon.chain/config (assoc (support/provider-config server)
+                                       :seon.config.ai/no-provider config/absent
+                                       :seon.config.run/max-episode-runs 3)}]
+           :seon.competency/runs runs :seon.competency/poll-ms 100
+           :seon.competency/deadline-ms 50000})
+         (finally
+           (async/put! done true)
+           (support/await-event! root ::root-stopped)))))))
 
-(deftest ^{:seon.test/long "Four fixture-model runs on their own branches, each one model call, its proof's step and a waiting reply."
-           :seon.test/long-ms 120000}
-  a-launch-grades-each-run
-  (support/with-running-agent
-   (fn [running _agent-id connection]
-     (home-root! connection)
-     (support/with-provider
-      (atom []) fixture-answer
-      (fn [server]
-        (let [settings (assoc (support/provider-config server)
-                              :seon.config.ai/no-provider false :seon.config.run/max-episode-runs 3)
-              grades (competency/launch!
-                      {:seon.competency/cluster running
-                       :seon.competency/cells [{:seon.competency/task 'seon.competency/area-is-contracted
-                                                :seon.competency/strategy :defaults :seon.competency/settings settings}
-                                               {:seon.competency/task 'seon.competency/area-is-contracted-typed
-                                                :seon.competency/strategy :defaults :seon.competency/settings settings}]
-                       :seon.competency/runs 2 :seon.competency/poll-ms 100 :seon.competency/deadline-ms 60000})]
-          (is (= (repeat 4 {:seon.competency/green? true :seon.competency/calls-to-green 1
-                            :seon.competency/model-calls 1 :seon.competency/no-form-calls 0
-                            :seon.competency/terminal :done :seon.competency/retired? true
-                            :seon.competency/max-episode-runs 3})
-                 (map #(-> (select-keys % [:seon.competency/green? :seon.competency/calls-to-green
-                                           :seon.competency/model-calls :seon.competency/no-form-calls
-                                           :seon.competency/terminal :seon.competency/retired?])
-                           (assoc :seon.competency/max-episode-runs
-                                  (get-in % [:seon.competency/variant :seon.config.run/max-episode-runs])))
-                      grades))
-              "each run turned its proof green in one call and was done without another, carries its variant and was retired")
-          (is (= [['seon.competency/area-is-contracted 2 2 1] ['seon.competency/area-is-contracted-typed 2 2 1]]
-                 (mapv (juxt :seon.competency/task :seon.competency/runs :seon.competency/green
-                             :seon.competency/calls-to-green-median)
-                       (competency/table grades)))
-              "one table row per cell")))))))
+(deftest ^{:seon.test/long "Two fixture-model chain runs of one task, each a chain fork, its prove pass, one model call and its proof step over db<->flow passes; measured 5.6 s."
+           :seon.test/long-ms 20000}
+  a-launch-grades-each-chain-run-from-its-branch
+  (support/with-database
+   (fn [connection]
+     (with-root
+      connection
+      (fn [handle]
+        (let [grades (launched handle connection 2)]
+          (try
+            (is (= (repeat 2 {:seon.competency/end :done :seon.competency/green? true :seon.competency/model-calls 1
+                              :seon.competency/calls-to-green 1 :seon.competency/wasted-calls 0
+                              :seon.competency/classes {:navigation 1 :progress 1} :seon.competency/cap 3})
+                   (map #(select-keys % [:seon.competency/end :seon.competency/green? :seon.competency/model-calls
+                                         :seon.competency/calls-to-green :seon.competency/wasted-calls
+                                         :seon.competency/classes :seon.competency/cap])
+                        grades))
+                "each run's attempt ended done in one model call, read on its chain branch")
+            (is (= [[:fixture-proof :fixture 2 2 1]]
+                   (mapv (juxt :seon.competency/id :seon.competency/variant :seon.competency/runs
+                               :seon.competency/green :seon.competency/score-median)
+                         (competency/table grades)))
+                "one table row per task and variant")
+            (finally
+              (doseq [branch (keep :seon.chain/branch grades)]
+                (release-chain! (:seon.agent/routing handle) (agent/handle-store handle) branch))))))))))
+
+(deftest forms-are-classed-by-what-they-did
+  (is (= [:navigation :read :re-read :probe :repeat :progress :unresolved :contract-refusal :search :wait :progress]
+         (mapv :seon.competency/class
+               (competency/classify
+                (mapv #(hash-map :seon.cluster.eval/source (first %) :seon.cluster.eval/error (second %))
+                      [["(in-ns 'comp.geo)"]
+                       ["(my.program/source 'comp.geo/area)"]
+                       ["(my.program/source 'comp.geo/area)"]
+                       ["(comp.geo/area 2 3)"]
+                       ["(comp.geo/area 2 3)"]
+                       ["(defn area [w h] (* w h))"]
+                       ["(seon.db/database-value)" "Unable to resolve symbol: seon.db/database-value"]
+                       ["(my.program/source \"area\")" "my.program/source refused argument 1 `subject`: expected a symbol."]
+                       ["(dir comp.geo)"]
+                       ["(my.turn/wait {:my.turn/note \"Done.\"})"]
+                       ["(ns comp.app (:require [comp.util :as u]))"]]))))))
+
+(deftest a-difference-counts-only-beyond-the-noise-floor
+  (let [row (fn [green [lo hi]] {:seon.competency/id :t :seon.competency/variant :v :seon.competency/green green
+                                 :seon.competency/score-median lo :seon.competency/score-range [lo hi]})]
+    (is (= [:noise :better :worse :better]
+           (mapv (fn [[before after]] (:seon.competency/verdict (first (competency/compare-tables [before] [after]))))
+                 [[(row 3 [2 5]) (row 5 [2 4])]
+                  [(row 1 [4 11]) (row 4 [2 3])]
+                  [(row 5 [2 3]) (row 5 [5 7])]
+                  [(row 2 [8 11]) (row 2 [3 6])]])))))

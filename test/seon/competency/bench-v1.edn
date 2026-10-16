@@ -1,0 +1,53 @@
+;; Bench task set v1 (lane bench, 2026-10-16): seven small tasks, each one chain task for `seon.competency/launch!`.
+;; Every task creates a namespace main does not hold, so its proof is red on main; its oracle is the known solution an
+;; agent would evaluate. Split by task (self-improvement-loop.md "The benchmark"): :train the optimiser sees whole,
+;; :held-out is run for aggregates only. v1 is authored by one lane, so its held-out split is not yet sealed.
+[{:seon.competency/id :t1-area
+  :seon.competency/split :train
+  :seon.competency/task
+  #:seon.task{:ns seon.competency :name "area-is-contracted"
+              :plan "Define `comp.geo/area` of a width and a height, answering their product, contracted `[:=> [:cat [:int {:min 1}] [:int {:min 1}]] [:int {:min 1}]]`. Done when `seon.competency-test/t1-area-is-contracted` is green: `(comp.geo/area 2 3)` answers 6, `(comp.geo/area -1 3)` answers the contract's error value, and the Var's metadata holds the contract."
+              :proofs #{seon.competency-test/t1-area-is-contracted}}
+  :seon.competency/oracle "(ns comp.geo)\n(defn area {:malli/schema [:=> [:cat [:int {:min 1}] [:int {:min 1}]] [:int {:min 1}]]} [w h] (* w h))"}
+ {:seon.competency/id :t2-qty
+  :seon.competency/split :train
+  :seon.competency/task
+  #:seon.task{:ns seon.competency :name "quantity-schema-then-function"
+              :plan "Register `:comp.order/qty` as `[:int {:min 1}]` with `seon.schema/register!`, then define `comp.order/double-qty` contracted `[:=> [:cat :comp.order/qty] :int]`, answering its quantity doubled. Done when `seon.competency-test/t2-quantity-schema-then-function` is green: `(seon.schema/schema-definition :comp.order/qty)` answers `[:int {:min 1}]`, `(comp.order/double-qty 2)` answers 4 and `(comp.order/double-qty 0)` answers the contract's error value."
+              :proofs #{seon.competency-test/t2-quantity-schema-then-function}}
+  :seon.competency/oracle "(seon.schema/register! :comp.order/qty [:int {:min 1}])\n(ns comp.order)\n(defn double-qty {:malli/schema [:=> [:cat :comp.order/qty] :int]} [q] (* 2 q))"}
+ {:seon.competency/id :t6-word-count
+  :seon.competency/split :train
+  :seon.competency/task
+  #:seon.task{:ns seon.competency :name "word-count"
+              :plan "Define `comp.text/word-count` contracted `[:=> [:cat :string] [:int {:min 0}]]`, answering how many whitespace-separated words its string holds. Done when `seon.competency-test/t6-word-count` is green: `(comp.text/word-count \"a b  c\")` answers 3, `(comp.text/word-count \"  \")` answers 0 and `(comp.text/word-count 7)` answers the contract's error value."
+              :proofs #{seon.competency-test/t6-word-count}}
+  :seon.competency/oracle "(ns comp.text (:require [clojure.string :as str]))\n(defn word-count {:malli/schema [:=> [:cat :string] [:int {:min 0}]]} [s] (count (remove str/blank? (str/split s #\"\\s+\"))))"}
+ {:seon.competency/id :t8-digit-sum
+  :seon.competency/split :train
+  :seon.competency/task
+  #:seon.task{:ns seon.competency :name "digit-sum-is-tested"
+              :plan "Define `comp.digits/digit-sum` contracted `[:=> [:cat [:int {:min 0}]] [:int {:min 0}]]`, answering the sum of its integer's decimal digits. Then write the deftest `comp.digits-test/digit-sum-adds-digits` with at least three `clojure.test/is` assertions about it, and make it pass. Done when `seon.competency-test/t8-digit-sum-is-tested` is green: `(mapv comp.digits/digit-sum [0 7 123 9999])` answers `[0 7 6 36]`, `(comp.digits/digit-sum -1)` answers the contract's error value, and running the tests of `comp.digits-test` makes three or more passing assertions and no failure."
+              :proofs #{seon.competency-test/t8-digit-sum-is-tested}}
+  :seon.competency/oracle "(ns comp.digits)\n(defn digit-sum {:malli/schema [:=> [:cat [:int {:min 0}]] [:int {:min 0}]]} [n] (reduce + (map #(- (int %) 48) (str n))))\n(ns comp.digits-test (:require [clojure.test :refer [deftest is]] [comp.digits :as d]))\n(deftest digit-sum-adds-digits (is (= 0 (d/digit-sum 0))) (is (= 6 (d/digit-sum 123))) (is (= 36 (d/digit-sum 9999))))"}
+ {:seon.competency/id :t4-alias
+  :seon.competency/split :held-out
+  :seon.competency/task
+  #:seon.task{:ns seon.competency :name "app-calls-util-through-an-alias"
+              :plan "Define `comp.util/clamp` contracted `[:=> [:cat :int] :int]`, keeping an integer within 0 to 10, and `comp.app/bounded` with the same contract, in a `comp.app` whose `ns` form requires `comp.util` as `u` and whose body calls `u/clamp`. Done when `seon.competency-test/t4-app-calls-util-through-an-alias` is green: `(mapv comp.app/bounded [15 -3 7])` answers `[10 0 7]` and `(ns-aliases 'comp.app)` maps `u` to `comp.util`."
+              :proofs #{seon.competency-test/t4-app-calls-util-through-an-alias}}
+  :seon.competency/oracle "(ns comp.util)\n(defn clamp {:malli/schema [:=> [:cat :int] :int]} [x] (max 0 (min 10 x)))\n(ns comp.app (:require [comp.util :as u]))\n(defn bounded {:malli/schema [:=> [:cat :int] :int]} [x] (u/clamp x))"}
+ {:seon.competency/id :t7-index-by-id
+  :seon.competency/split :held-out
+  :seon.competency/task
+  #:seon.task{:ns seon.competency :name "index-by-id"
+              :plan "Define `comp.coll/index-by-id` contracted `[:=> [:cat [:vector [:map [:id :int]]]] [:map-of :int [:map [:id :int]]]]`, answering a map from each item's `:id` to the item. Done when `seon.competency-test/t7-index-by-id` is green: `(comp.coll/index-by-id [{:id 1 :n \"a\"} {:id 2}])` answers `{1 {:id 1 :n \"a\"} 2 {:id 2}}`, `(comp.coll/index-by-id [])` answers `{}`, and `(comp.coll/index-by-id [{:n 1}])` answers the contract's error value."
+              :proofs #{seon.competency-test/t7-index-by-id}}
+  :seon.competency/oracle "(ns comp.coll)\n(defn index-by-id {:malli/schema [:=> [:cat [:vector [:map [:id :int]]]] [:map-of :int [:map [:id :int]]]]} [items] (into {} (map (juxt :id identity)) items))"}
+ {:seon.competency/id :t9-initials
+  :seon.competency/split :held-out
+  :seon.competency/task
+  #:seon.task{:ns seon.competency :name "initials"
+              :plan "Define `comp.names/initials` contracted `[:=> [:cat :string] :string]`, answering the first character of each whitespace-separated word of its string, in order, case kept. Done when `seon.competency-test/t9-initials` is green: `(mapv comp.names/initials [\"Ada Lovelace\" \"  grace  brewster hopper \" \"\"])` answers `[\"AL\" \"gbh\" \"\"]` and `(comp.names/initials nil)` answers the contract's error value."
+              :proofs #{seon.competency-test/t9-initials}}
+  :seon.competency/oracle "(ns comp.names (:require [clojure.string :as str]))\n(defn initials {:malli/schema [:=> [:cat :string] :string]} [s] (apply str (map first (remove str/blank? (str/split (str/trim s) #\"\\s+\")))))"}]
