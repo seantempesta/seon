@@ -939,6 +939,93 @@
 
 (declare agent-owned)
 
+(defn- contribution
+  "The nearest-test contribution of one changed declaration."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity]
+                  [:or [:map [:seon.fn/tests :seon.fn/tests] [:seon.fn/walked [:set :qualified-symbol]]]
+                   :seon.error/value]]}
+  [database identity]
+  (let [selected ((requiring-resolve 'seon.test/reaching-selection)
+                  {:seon.db/db database :seon.test/changed [identity]})]
+    (if (:seon.error/at selected) selected
+      (update selected :seon.fn/tests
+              #(into [] (remove (fn [test] (:seon.test/long (db/pull database [:seon.test/long] [:seon.test/sym test])))) %)))))
+
+(defn- remove-contribution
+  "Remove one declaration's contribution, retaining tests shared with other declarations."
+  {:malli/schema [:=> [:cat :map :seon.program/identity] :map]}
+  [held identity]
+  (let [{tests :seon.fn/tests walked :seon.fn/walked} (get-in held [::contributions identity])]
+    (-> (reduce (fn [state test]
+                  (let [n (dec (get-in state [::counts test]))]
+                    (if (pos? n) (assoc-in state [::counts test] n)
+                      (-> state (update ::counts dissoc test) (update ::reached disj test))))) held tests)
+        (update ::walkers #(reduce (fn [m target]
+                                    (let [remaining (disj (get m target) identity)]
+                                      (if (seq remaining) (assoc m target remaining) (dissoc m target))))
+                                  % walked))
+        (update ::contributions dissoc identity))))
+
+(defn- add-contribution
+  "Add one declaration's tests and reverse dependency entries to the held fold."
+  {:malli/schema [:=> [:cat :map :seon.program/identity
+                       [:map [:seon.fn/tests :seon.fn/tests] [:seon.fn/walked [:set :qualified-symbol]]]] :map]}
+  [held identity selected]
+  (-> (reduce (fn [state test]
+                (-> state (update-in [::counts test] (fnil inc 0)) (update ::reached conj test)))
+              held (:seon.fn/tests selected))
+      (update ::walkers #(reduce (fn [m target] (update m target (fnil conj #{}) identity))
+                                % (:seon.fn/walked selected)))
+      (assoc-in [::contributions identity] selected)))
+
+(defn- fold-members
+  "Update the contribution fold for changed identities and changed incoming call edges."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set :map [:set :qualified-symbol]]
+                  [:or :map :seon.error/value]]}
+  [database changed held targets]
+  (let [previous (set (keys (::contributions held)))
+        affected (into #{} (mapcat #(get-in held [::walkers %])) targets)
+        removed (into affected (remove changed) previous)
+        added (into (into #{} (filter changed) affected) (remove previous) changed)
+        remaining (reduce remove-contribution held removed)]
+    (reduce (fn [state identity]
+              (let [selected (contribution database identity)]
+                (if (:seon.error/at selected) (reduced selected)
+                  (add-contribution state identity selected))))
+            remaining added)))
+
+(defn- member-contributions
+  "The held union of per-identity selections; call-edge changes replace only their dependent contributions."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set :seon.schema/value]
+                  [:or :map :seon.error/value]]}
+  [database changed revisions]
+  (let [edges [:seon.fn/calls :seon.test/subject]
+        key [revisions changed]
+        head (when (map? revisions) (apply dissoc revisions edges))
+        empty-fold {::contributions {} ::walkers {} ::counts {} ::reached #{}}
+        derive (fn []
+                 (let [prior-key (when head (seon.cache/present ::member-head head))
+                       prior (when prior-key (seon.cache/present ::member-contributions prior-key))
+                       update-fold (fn [before]
+                                     (let [targets (when before
+                                                     (into #{} (comp (mapcat #(apply concat (db/datoms-diff before database :aevt [%])))
+                                                                      (map #(nth % 2))) edges))]
+                                       (assoc (fold-members database changed (if before prior empty-fold) (or targets #{}))
+                                              ::commit (db/commit-id database))))]
+                   (if prior (db/read-at database (::commit prior) update-fold) (update-fold nil))))]
+    (if (seq revisions)
+      (let [held (seon.cache/lookup ::member-contributions key
+                                   #(+ 256 (* 96 (count revisions)) (* 160 (count changed)) (* 192 (count (::counts %)))
+                                       (* 160 (+ (count (::contributions %))
+                                                 (transduce (map count) + 0 (vals (::walkers %)))
+                                                 (transduce (map (comp count :seon.fn/tests val)) + 0 (::contributions %)))))
+                                   derive #(not (:seon.error/at %)))]
+        (when (and head (not (:seon.error/at held)))
+          (seon.cache/evict! ::member-head head)
+          (seon.cache/lookup ::member-head head (constantly (+ 256 (* 96 (count head)))) (constantly key)))
+        held)
+      (derive))))
+
 (defn merge-members
   "The member list of a merge of `changed` (declaration identities) on `database`, with `proofs`: the one list the
   attempt's test step runs after each eval request (`seon.turn`), the done rule judges (`done-refusals`) and the merge
@@ -948,7 +1035,7 @@
   schema the functions whose contracts name it) but those declared long. `:seon.source/deferred` holds the members
   that run only on a platform host (`seon.test/host-exclusions` of an isolated run): the merge's platform run answers
   them. Held by selection's content revisions (`seon.test/selection-revisions`), changed identities and proofs.
-  Result and evaluation writes reuse the list. Reads only."
+  Call-edge changes fold only the contributions whose walks read those targets; result and evaluation writes reuse the list. Reads only."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set [:set :seon.test/sym]]
                   [:or :seon.source/member-list :seon.error/value]]}
   [database changed proofs]
@@ -957,14 +1044,14 @@
                 (let [held? #(seq (d/datoms database :avet :seon.test/sym %))
                       seeds (into [] (filter (fn [[attribute]] (#{:seon.fn/sym :seon.test/sym :seon.ns/name :seon.schema/key} attribute)))
                                   (sort-by str changed))
-                      reached (if (seq seeds) ((requiring-resolve 'seon.test/reaching) {:seon.db/db database :seon.test/changed seeds}) [])
+                      folded (member-contributions database (set seeds) revisions)
+                      reached (::reached folded)
                       named (into (set proofs) (keep (fn [[a v]] (when (= :seon.test/sym a) v))) changed)
-                      long? #(:seon.test/long (db/pull database [:seon.test/long] [:seon.test/sym %]))
-                      members (when (sequential? reached)
-                                (into (into #{} (filter held?) named) (comp (filter held?) (remove named) (remove long?)) reached))
+                      members (when (set? reached)
+                                (into reached (filter held?) named))
                       isolated (when members
                                  ((requiring-resolve 'seon.test/host-exclusions) database nil true (vec (sort members))))]
-                  (cond (not (sequential? reached)) reached
+                  (cond (:seon.error/at folded) folded
                         (:seon.error/at isolated) isolated
                         :else {:seon.source/members members
                                :seon.source/deferred (into #{} (map :seon.test/sym)

@@ -110,8 +110,9 @@
                                                      (let [diff (db/datoms-diff before after :aevt [a])]
                                                        (when (some seq diff) [a diff]))))
                                           (keys (revisions after)))) first-heads second-heads))
+            edge-requests (together "(defn narrow {:malli/schema [:=> [:cat :int] :int]} [x] (- x 0))")
             unchanged (together "(+ 1 2)")]
-        {:k k :width width :graph-changes graph-changes :first first-requests :repeat repeat-requests :unchanged unchanged
+        {:k k :width width :graph-changes graph-changes :first first-requests :repeat repeat-requests :edge edge-requests :unchanged unchanged
          :old-gen (mapv (fn [^MemoryPoolMXBean pool]
                           {:pool (.getName pool) :peak-bytes (.getUsed (.getPeakUsage pool))
                            :used-bytes (.getUsed (.getUsage pool)) :max-bytes (.getMax (.getUsage pool))}) pools)
@@ -132,7 +133,7 @@
   (let [path (str "/tmp/change-cost-probe-" (:k result) ".edn")
         write! #(spit path (str (value/core-text %) "\n") :append true)]
     (spit path "")
-    (doseq [stage [:first :repeat :unchanged :verdict :root]
+    (doseq [stage [:first :repeat :edge :unchanged :verdict :root]
             measured (get result stage)]
       (write! {:k (:k result) :stage stage
                :measurement (select-keys measured [:request :failed? :status :members

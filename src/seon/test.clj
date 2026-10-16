@@ -479,19 +479,7 @@
                     :seon.test/reads :seon.test/fixture-observation :seon.test/long]
         revisions (db/content-revisions database attributes)]
     (if revisions
-      (let [edge-attributes (seon.cache/lookup
-                             ::edge-attributes
-                             (select-keys revisions [:seon.fn/invokes :seon.fn/reference-to :seon.schema/key])
-                             #(* 64 (count %))
-                             #(let [found (db/q '[:find [?attribute ...]
-                                       :where (or-join [?attribute]
-                                                       [_ :seon.fn/invokes ?attribute]
-                                                       (and [?declaration :seon.fn/reference-to :seon.fn/sym]
-                                                            [?declaration :seon.schema/key ?attribute]))]
-                                     database)]
-                                (if (db/read-refusal? found)
-                                  (throw (ex-info "Declared selection edges could not be read." found))
-                                  found)))]
+      (let [edge-attributes (functions/declared-edge-attributes database)]
         (merge revisions (db/content-revisions database edge-attributes)))
       (or (db/as-of-key database) []))))
 
@@ -1324,18 +1312,24 @@
           refusal
           (throw failure))))))
 
+(defn reaching-selection
+  "The reaching tests and visited call targets for explicit changed identities."
+  {:malli/schema [:=> [:cat :seon.test/reaching-request]
+                  [:or [:map [:seon.fn/tests :seon.fn/tests] [:seon.fn/walked [:set :qualified-symbol]]]
+                   :seon.test/selection-error :seon.test/unknown-error
+                   :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
+  [{database :seon.db/db changed :seon.test/changed}]
+  (let [seeds (selection-seeds database changed)]
+    (if (map? seeds) seeds (functions/selection-walk database seeds))))
+
 (defn reaching
   "Return tests reaching explicit changed definitions through the same union graph owner."
   {:malli/schema [:=> [:cat :seon.test/reaching-request]
                   [:or [:vector :seon.test/sym] :seon.test/selection-error :seon.test/unknown-error
                    :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
-  [{database :seon.db/db changed :seon.test/changed}]
-  (let [seeds (selection-seeds database changed)]
-    (if (and (map? seeds)
-             (contains? seeds :seon.error/at)
-             (contains? seeds :seon.error/layer)
-             (contains? seeds :seon.error/operation)) seeds
-      (functions/gate-sets {:seon.db/db database :seon.fn/seeds seeds}))))
+  [request]
+  (let [selected (reaching-selection request)]
+    (if (:seon.error/at selected) selected (:seon.fn/tests selected))))
 
 (defn selection-admission
   "Prepare the same complete admission for either execution host, before any body starts."

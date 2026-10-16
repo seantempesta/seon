@@ -16,7 +16,7 @@
        (is (zero? (get-in result [:repeat 0 :derivations 'seon.fn/gate-edges] 0)))
        (is (zero? (get-in result [:unchanged 0 :derivations 'seon.test/run] 0)))
        (is (zero? (get-in result [:root 0 :derivations 'seon.db/entities-changed-after] 0)))
-       (doseq [request (concat (:first result) (:repeat result) (:unchanged result))]
+       (doseq [request (concat (:first result) (:repeat result) (:edge result) (:unchanged result))]
          (is (false? (:failed? request)))
          (is (pos? (get-in request [:request :seon.cost/ms])))
          (is (pos? (:seon.profile/ms request))))))))
@@ -30,4 +30,4 @@
        (let [result (cost/group-run running 24 k)]
          (cost/report result)
          (is (= (repeat k 26) (map :members (:verdict result))))
-         (is (every? (comp false? :failed?) (mapcat result [:first :repeat :unchanged]))))))))
+         (is (every? (comp false? :failed?) (mapcat result [:first :repeat :edge :unchanged]))))))))

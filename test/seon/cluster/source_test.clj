@@ -1,5 +1,10 @@
 (ns seon.cluster.source-test
-  (:require [clojure.java.io :as io]
+  (:require [seon.batch]
+            [seon.config]
+            [seon.turn.world :as world]
+            [seon.cache]
+            [seon.test]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
@@ -661,3 +666,43 @@
                [["never started: test evidence" [never-started] [:seon.source/test-evidence-error]]
                 ["executed red: a red test" [(recorded 'tq.rv-test/proof false)] [:seon.source/red-test-error]]]]
          (is (= expected (mapv :seon.error/type (source/results-verdict branch branch (assoc judged :seon.source/results results)))) row))))))
+
+(deftest member-fold-equals-the-full-merge-list
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "default")
+     (test-support/transacted! connection [(test-support/namespace-entity (db/db connection) 'cost.fold)])
+     (let [context (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection)) (db/db connection) connection)
+           evaluation (world/world {:seon.db/connection connection :seon.boot/cluster-name "default"
+                                    :seon.sci.eval/ctx context :seon.batch/sink (seon.batch/sink)
+                                    :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms seon.config/defaults)
+                                    :seon.agent/id "member-fold"})
+           changed #{[:seon.fn/sym 'cost.fold/a] [:seon.fn/sym 'cost.fold/c]}
+           define! #(test-support/define! evaluation 'cost.fold %)]
+       (define! (str "(defn a {:malli/schema [:=> [:cat :int] :int]} [x] x) "
+                     "(defn b {:malli/schema [:=> [:cat :int] :int]} [x] x) "
+                     "(defn c {:malli/schema [:=> [:cat :int] :int]} [x] x) "
+                     "(defn middle {:malli/schema [:=> [:cat :int] :int]} [x] (a x)) "
+                     "(clojure.test/deftest left (clojure.test/is (= 1 (middle 1)))) "
+                     "(clojure.test/deftest shared (clojure.test/is (= (a 1) (c 1)))) "
+                     "(clojure.test/deftest right (clojure.test/is (= 1 (c 1))))"))
+       (source/merge-members (db/db connection) changed #{})
+       (define! "(defn middle {:malli/schema [:=> [:cat :int] :int]} [x] (a (+ x 0)))")
+       (let [measured (profile/measure #(source/merge-members (db/db connection) changed #{}))]
+         (is (= #{'cost.fold/left 'cost.fold/shared 'cost.fold/right}
+                (:seon.source/members (:seon.profile/value measured))))
+         (is (zero? (profile/calls-of measured 'seon.fn/nearest-tests))
+             "an edge outside every selection walk leaves the accumulated contributions held"))
+       (doseq [[callee identities expected] [["b" changed #{'cost.fold/shared 'cost.fold/right}]
+                                             ["a" changed #{'cost.fold/left 'cost.fold/shared 'cost.fold/right}]
+                                             ["b" #{[:seon.fn/sym 'cost.fold/c]} #{'cost.fold/shared 'cost.fold/right}]
+                                             ["a" #{} #{}]]]
+         (define! (str "(defn middle {:malli/schema [:=> [:cat :int] :int]} [x] (" callee " x))"))
+         (let [database (db/db connection)
+               folded (source/merge-members database identities #{})
+               revisions (seon.test/selection-revisions database)]
+           (is (= expected (:seon.source/members folded)))
+           (seon.cache/evict! :seon.cluster.source/members [revisions identities #{}])
+           (seon.cache/evict! :seon.cluster.source/member-contributions [revisions identities])
+           (is (= folded (source/merge-members database identities #{}))
+               "the fold and a full derivation after eviction agree")))))))

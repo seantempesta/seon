@@ -221,3 +221,69 @@ Include deletion, revert, changed task proof, dynamic calls and held-cache evict
 those held results. Do not claim the owner's full first-principles design is installed until these miss paths
 also cost the change. The first request, the whole-program dependency of task-reading proofs, and production
 slow-root reproduction remain open measurements. The first probe alone understated the task-reading path.
+
+## Slice 3: fold call-edge changes (new window)
+
+Default was restarted by root onto `d76806d39` before this window. At entry it was ready but faulted, with existing
+malformed-contract and recorded-error findings. A fresh `change-cost-fold` agent read its current-state block
+(160.3 ms request, 194.2 MB); no root SCI request, model request, live-chain modification or restart was made.
+
+`seon.fn/nearest-tests` already propagates each seed independently and stops at its nearest tests. The fold keeps
+that algorithm: `seon.fn/selection-walk` returns its tests and visited targets, and `seon.test/reaching-selection`
+resolves definition/namespace/schema inputs before that same walk. `seon.cluster.source/member-contributions`
+holds each changed identity's contribution, a reverse map from visited targets to contributors, and shared-test
+counts. The diff of call and subject attributes replaces only contributions that read a changed target. Removing
+or reverting a changed identity subtracts its contribution; a test shared with another contributor stays held.
+Long tests are filtered when the contribution is produced; named proofs/changed tests retain their old semantics.
+No new atom or lifecycle fact is involved. A missing fold derives through the same owner from its inputs.
+
+The auxiliary conservative graph, `seon.fn/gate-edges`, does not read ordinary calls or subjects. It is now held
+by the identity and declared-edge attributes it actually reads. `seon.fn/declared-edge-attributes` owns the shared
+declared-attribute discovery previously nested in `seon.test/selection-revisions`. A call edit no longer rereads
+all program identities for host/deferred classification. The latter still traverses its conservative reach.
+
+`seon.cluster.source-test/member-fold-equals-the-full-merge-list` covers edge removal/restoration, a shared test,
+identity removal/revert and eviction. It compares the fold with the same owner's full derivation after eviction.
+Its no-rewalk assertion was red on parent (`25fd6e125cc2`, 9 passes / 1 failure: one nearest walk instead of zero),
+then green with done/merge and nearest-seed union (`261643a66ce1`, 3 tests / 21 assertions). The complete probe plus
+fold law passed `044d83b4af5b` (3 tests / 31 assertions).
+
+This is a call/subject-edge fold, not a completed fold of every selection input: changes to declaration identities,
+namespace/schema expansion, declared invocation attributes or host declarations still acquire a new contribution
+fold. Host/deferred classification and source's changed-identity set comparison also remain. These limits are
+explicit; the full first-principles target is not claimed complete.
+
+The probe now also changes `narrow` from `(+ 0 x)` to `(- x 0)` after the original repeat. This adds/removes
+call edges and reaches one test plus the task-reading proof. The unchanged request follows that edit.
+The final quiet pair ran parent first, then candidate, without overlapping check JVMs or edit-hook evaluations.
+
+| K | Stage | Parent ms | Slice 3 ms | Parent allocation MB | Slice 3 allocation MB |
+|---|---|---:|---:|---:|---:|
+| 1 | first | 1221.40 | 1268.60 | 1360.70 | 1316.30 |
+| 1 | repeat | 461.70 | 452.70 | 660.90 | 667.00 |
+| 1 | edge | 491.30 | 462.90 | 733.70 | 689.90 |
+| 1 | unchanged | 36.10 | 37.10 | 38.10 | 38.80 |
+| 1 | verdict | 4.94 | 4.80 | 5.88 | 6.05 |
+| 1 | root | 75.00 | 77.20 | 138.00 | 138.50 |
+| 3 | first | 609.40–609.60 | 593.00–608.60 | 795.20–854.30 | 762.10–818.40 |
+| 3 | repeat | 377.60–391.00 | 393.50–426.20 | 494.20–500.90 | 480.00–505.30 |
+| 3 | edge | 394.40–412.40 | 372.90–381.30 | 533.40–558.30 | 516.20–523.10 |
+| 3 | unchanged | 35.00–40.30 | 36.10–39.00 | 37.50–38.30 | 39.60–40.40 |
+| 3 | verdict | 4.09–4.38 | 4.12–4.59 | 5.83–5.85 | 6.02–6.04 |
+| 6 | first | 286.50–318.40 | 273.70–307.10 | 410.30–427.60 | 366.10–443.00 |
+| 6 | repeat | 227.30–254.90 | 214.60–249.20 | 282.70–290.40 | 293.90–303.70 |
+| 6 | edge | 255.40–292.70 | 223.20–247.50 | 338.70–390.20 | 305.00–315.10 |
+| 6 | unchanged | 36.60–41.80 | 46.20–50.20 | 38.30–39.20 | 40.10–41.90 |
+| 6 | verdict | 3.85–9.76 | 3.89–5.81 | 5.82–6.21 | 6.01–6.02 |
+
+Old-generation peaks (MiB), K=1 / 3 / 6: parent 350.17 / 407.27 / 469.14; candidate 397.08 / 454.93 / 526.44.
+The retained auxiliary graph costs memory; K=6 still fits comfortably inside 4 GiB. No memory saving is claimed.
+The edge-changing request is the gain: K=1 491.3 → 462.9 ms and 733.7 → 689.9 MB; K=6 255.4–292.7 →
+223.2–247.5 ms. First-request wall time and K=3 repeat did not improve in this pair; K=6 unchanged requests were
+slower (46–50 ms versus 37–42 ms). The candidate does not meet the final changed-input target: program hashing,
+current-result misses and host classification still cost more than the changed inputs.
+
+Foreign boundary includes the dirty konserve gitlink, unrelated hook evidence, and in-flight edits to
+`src/seon/context.clj` and `test/seon/context_test.clj` that appeared during this window. They are excluded from every
+candidate. The pre-existing three-argument host-exclusions test remains excluded; green host vars are named
+individually. Done/merge, context, test-step, db-flow, runner and nearest-selection proofs are named in the commit gate.

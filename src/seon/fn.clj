@@ -1833,6 +1833,22 @@
   [value]
   (if (db/read-refusal? value) (throw (ex-info "Call reach unavailable." value)) value))
 
+(defn declared-edge-attributes
+  "The attributes declared to hold invocation targets or function references."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :qualified-keyword]]}
+  [database]
+  (let [revisions (db/content-revisions database [:seon.fn/invokes :seon.fn/reference-to :seon.schema/key])
+        derive #(vec (read-or-throw!
+                       (db/q '[:find [?attribute ...]
+                               :where (or-join [?attribute]
+                                               [_ :seon.fn/invokes ?attribute]
+                                               (and [?declaration :seon.fn/reference-to :seon.fn/sym]
+                                                    [?declaration :seon.schema/key ?attribute]))]
+                             database)))]
+    (if revisions
+      (cache/lookup ::edge-attributes revisions #(+ 384 (* 64 (count %))) derive)
+      (derive))))
+
 (defn- declared-callers
   "The caller entities of the requested declared invocation targets."
   {:malli/schema [:function
@@ -1917,7 +1933,7 @@
       {:seon.fn/affected (set/difference (set/intersection (set (vals identities)) seen) tests)
        :seon.fn/tests (vec (sort (set/intersection tests seen)))})))
 
-(defn- gate-edges
+(defn- derive-gate-edges
   "The program's identities, test names and incoming named edges, read once."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:or [:map [:seon.fn/identities [:map-of :int :qualified-symbol]]
@@ -1953,6 +1969,28 @@
                        result))
                    {} (concat (for [[target callers] declared caller callers] [caller target])
                               file-references handlers))}))))
+
+(defn- gate-edges
+  "The held identity and declared-edge joins; ordinary call-edge edits do not change these inputs."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or [:map [:seon.fn/identities [:map-of :int :qualified-symbol]]
+                        [:seon.fn/tests [:set :qualified-symbol]]
+                        [:seon.fn/incoming [:map-of :qualified-symbol [:set :qualified-symbol]]]]
+                   :seon.db/invalid-read-error]]}
+  [database]
+  (let [revisions (db/content-revisions
+                   database (into [:seon.fn/sym :seon.test/sym :seon.fn/invokes :seon.fn/reference-to
+                                   :seon.schema/key :seon.fn/unresolved-references :seon.fn/file
+                                   :seon.effect/capability :db/valueType]
+                                  (declared-edge-attributes database)))]
+    (if revisions
+      (cache/lookup ::gate-edges revisions
+                    #(+ (* 96 (count revisions)) (* 160 (+ (count (:seon.fn/identities %))
+                                                          (count (:seon.fn/tests %))
+                                                          (count (:seon.fn/incoming %))
+                                                          (transduce (map count) + 0 (vals (:seon.fn/incoming %))))))
+                    #(derive-gate-edges database) #(not (:seon.db/invalid-read %)))
+      (derive-gate-edges database))))
 
 (defn- gate-sets-in
   "Select tests through surviving named edges in one immutable database.
@@ -2034,7 +2072,7 @@
   so each seed selects its own nearest tests in one walk (one caller seek per walked function and level, as
   `walk-callers`). `subject-datoms` are the `:seon.test/subject` datoms. Throws a read refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym] [:int {:min 1}] :seon.db/datoms]
-                  [:map [::tests :seon.fn/tests]]]}
+                  [:map [::tests :seon.fn/tests] [::walked [:set :qualified-symbol]]]]}
   [database seeds depth subject-datoms]
   (let [read! read-or-throw!
         pairs (fn [attribute entities]
@@ -2061,7 +2099,8 @@
            found (into {} (map (fn [t] [t #{t}])) seed-tests)
            level 0]
       (if (empty? frontier)
-        {::tests (vec (sort (into #{} (mapcat val) found)))}
+        {::tests (vec (sort (into #{} (mapcat val) found)))
+         ::walked (set (keys propagated))}
         (let [declared (declared-callers read! database (vec (keys frontier)))
               by-caller (into {} (map (fn [f] [f (into (set (map :e (read! (db/datoms database :avet :seon.fn/calls f))))
                                                        (get declared f))]))
@@ -2114,16 +2153,25 @@
     (catch clojure.lang.ExceptionInfo failure
       (if (db/read-refusal? (ex-data failure)) (ex-data failure) (throw failure)))))
 
+(defn selection-walk
+  "The nearest tests of `seeds` and the target names whose incoming edges the walk read."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym]]
+                  [:or [:map [::tests :seon.fn/tests] [::walked [:set :qualified-symbol]]]
+                   :seon.db/invalid-read-error]]}
+  [database seeds]
+  (try
+    (nearest-tests database seeds 2 (read-or-throw! (db/datoms database :aevt :seon.test/subject)))
+    (catch clojure.lang.ExceptionInfo failure
+      (if (db/read-refusal? (ex-data failure)) (ex-data failure) (throw failure)))))
+
 (defn- reaching-tests
   "The tests the walk of `seeds` selects: those calling a seed or a caller within
   the nearest level holding a test (`seon.fn/closure-walk`)."
   {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym]]
                   [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
   [database seeds]
-  (try
-    (::tests (closure-walk database seeds 2))
-    (catch clojure.lang.ExceptionInfo failure
-      (if (db/read-refusal? (ex-data failure)) (ex-data failure) (throw failure)))))
+  (let [selected (selection-walk database seeds)]
+    (if (:seon.db/invalid-read selected) selected (::tests selected))))
 
 (defn gate-sets
   "Select the tests exercising changed definitions (`seon.fn/reverse-closure`).
