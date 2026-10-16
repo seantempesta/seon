@@ -2305,7 +2305,8 @@
   nil)
 
 (defn- chain-finishes
-  "The terminal attempts root merges, read on main `database` among the store's `branches`: on each chain's
+  "The terminal attempts root merges, read on main `database` among the store's `branches` (a chain whose fact
+  says `:seon.chain/merge? false` has none: it ends at its last done, branch kept): on each chain's
   `:seon.task/next` path, every attempt of a task with no next, or whose next is a merge step (MERGE-STEP: a rerun
   predecessor's done merges again and the held step stays held), that ended :done holding no outcome (a refused
   merge closes it), which main does not hold yet (its one merge copies it there), with its chain branch, task, end
@@ -2315,7 +2316,7 @@
                             [:seon.task/assigned :seon.task/handle] [:seon.task.attempt/commit :seon.task.attempt/commit]
                             [:seon.task/branch :seon.task/branch]]]]}
   [database branches]
-  (let [chains (db/q '[:find ?b ?h :where [?c :seon.chain/branch ?b] [?c :seon.chain/first ?h]] database)]
+  (let [chains (db/q '[:find ?b ?h :where [?c :seon.chain/branch ?b] [?c :seon.chain/first ?h] (not [?c :seon.chain/merge? false])] database)]
     (when (map? chains) (throw (ex-info (:seon.error/message chains "db<->flow could not read the chains.") chains)))
     (into [] (mapcat (fn [[branch first-handle]]
                        (when-let [head (when (contains? branches branch) (db/branch-database database branch))]

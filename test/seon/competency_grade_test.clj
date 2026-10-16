@@ -131,6 +131,31 @@
               (doseq [branch (keep :seon.chain/branch grades)]
                 (release-chain! (:seon.agent/routing handle) (agent/handle-store handle) branch))))))))))
 
+(deftest ^{:seon.test/long "One fixture-model chain run as the bench launches it, then root's passes after its done."
+           :seon.test/long-ms 20000}
+  a-bench-chain-ends-done-unmerged-with-its-branch-kept
+  (support/with-database
+   (fn [connection]
+     (with-root
+      connection
+      (fn [handle]
+        (let [grades (launched handle connection 1)
+              branch (:seon.chain/branch (first grades))
+              assignment (:seon.competency/assignment (first grades))]
+          (try
+            (dotimes [_ 3] (pass! handle))
+            (let [main (db/db connection)
+                  head (db/branch-database main branch)]
+              (is (false? (db/q '[:find ?m . :in $ ?b :where [?c :seon.chain/branch ?b] [?c :seon.chain/merge? ?m]] main branch))
+                  "the chain fact on main records the decision")
+              (is (nil? (:db/id (db/pull main [:db/id] [:seon.task/assignment assignment])))
+                  "main holds no row of the attempt: no merge request was made and none bailed")
+              (is (= :done (db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]]
+                                 head assignment))
+                  "its end stays readable on the kept branch"))
+            (finally
+              (release-chain! (:seon.agent/routing handle) (agent/handle-store handle) branch)))))))))
+
 (deftest forms-are-classed-by-what-they-did
   (is (= [:navigation :read :re-read :probe :repeat :progress :unresolved :contract-refusal :search :wait :progress]
          (mapv :seon.competency/class

@@ -169,8 +169,9 @@
             [:seon.task/execution {:optional true} :seon.task/execution]]
  :chain-context [:map {:description "What creating a chain writes through: main's connection, which holds the chain fact, and the store whose branches hold the chain's branch."}
                  [:seon.db/connection :seon.db/connection] [:seon.store/store :seon.store/store]]
- :chain-options [:map {:description "How a chain starts: :seon.chain/from names the branch whose head it forks from instead of main's; :seon.chain/config the chain's own config decisions over main's."}
-                 [:seon.chain/from {:optional true} :seon.chain/from] [:seon.chain/config {:optional true} :seon.chain/config]]
+ :chain-options [:map {:description "How a chain starts: :seon.chain/from names the branch whose head it forks from instead of main's; :seon.chain/config the chain's own config decisions over main's; :seon.chain/merge? false ends it at its last task's done with no merge."}
+                 [:seon.chain/from {:optional true} :seon.chain/from] [:seon.chain/config {:optional true} :seon.chain/config]
+                 [:seon.chain/merge? {:optional true} :seon.chain/merge?]]
  :handles [:vector {:min 1 :description "Task handles in chain order, along :seon.task/next."} :seon.task/handle]
  :chain [:map {:description "A chain as seon.task/chain! answers it: its branch, its first task and every task in order."}
          [:seon.chain/branch :seon.chain/branch] [:seon.chain/first :seon.chain/first] [:seon.task/handles :seon.task/handles]]

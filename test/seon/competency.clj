@@ -238,11 +238,12 @@
          (finally (d/release-materialized-db head)))))
 
 (defn- start-run!
-  "Write `run`'s chain through `context` (main's connection and the store) with its variant's config; the run with
+  "Write `run`'s chain through `context` (main's connection and the store) with its variant's config, never merged
+  (`:seon.chain/merge?` false: a bench run must leave main and the checkout unchanged); the run with
   its chain branch and first attempt's key, or with `chain!`'s refusal."
   {:malli/schema [:=> [:cat :seon.task/chain-context :map] :map]}
   [context {task-map :seon.competency/task-map config :seon.chain/config :as run}]
-  (let [chain (task/chain! context [task-map] {:seon.chain/config config})]
+  (let [chain (task/chain! context [task-map] {:seon.chain/config config :seon.chain/merge? false})]
     (if-let [branch (:seon.chain/branch chain)]
       (assoc run :seon.chain/branch branch :seon.task/assignment (id/id [(first (:seon.task/handles chain)) 1]))
       (assoc run :seon.competency/refusal chain))))
@@ -283,7 +284,7 @@
   Each run is a chain of one: its task named `<name>-<variant>-<launch>-<i>`, written by `seon.task/chain!` through
   main's `:seon.db/connection` and `:seon.store/store`. Root's db<->flow launches, runs and ends it; this waits, polling
   every `:seon.competency/poll-ms`, until each attempt has ended or `:seon.competency/deadline-ms` passed, then grades
-  each on its chain branch. Branches stay as the cluster keeps them."
+  each on its chain branch. A run's chain never merges (`:seon.chain/merge?` false): its branch stays for reading."
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.store/store :seon.store/store]
                              [:seon.competency/tasks [:vector :map]]
                              [:seon.competency/variants [:vector [:map [:seon.competency/variant :keyword]

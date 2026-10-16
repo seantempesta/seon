@@ -4,12 +4,14 @@
                :description "The chain's first task, by its :seon.task/id: the chain's identity, since only the first task supplies a chain's name."}
          :seon.task/handle]
  :from [:and {:description "The branch whose head a new chain forks from instead of main's (seon.task/chain!): it selects only the starting head; the chain's base and merge target stay main."} :seon.store/branch]
+ :merge? [:boolean {:description "Whether root merges the chain branch to main when its last task is done (seon.task/chain!, default true). False ends the chain at that done with its branch kept for reading: no merge request, no publication (a bench run is CI on a branch that is never merged). Written on the chain fact only when decided."}]
  :config [:map-of {:description "A chain's own config decisions as seon.task/chain! takes them: dial to value, or seon.config/absent to decide it absent, over main's effective config. Only the dials of :seon.task/desired-config are a chain's; the runnable view refuses any other."}
           :qualified-keyword :seon.schema/value]
  :chain [:map {:seon.db/attributes true :seon.program/partition :seon.data
                :description "The chain fact on main, one per chain: discovery, not status. Root finds every chain through it and reads the chain's state on its branch."}
          [:seon.chain/first :seon.chain/first]
-         [:seon.chain/branch :seon.chain/branch]]
+         [:seon.chain/branch :seon.chain/branch]
+         [:seon.chain/merge? {:optional true} :seon.chain/merge?]]
  :state [:enum {:description "A chain's state from its tasks (seon.task/chain-views): unread when its branch and main hold no task, done when the last task's latest attempt finished, ended when main no longer holds its chain fact otherwise (root abandoned it), bailed when a task's latest attempt was closed by root or ended without finishing, else running."}
          :running :bailed :done :unread :ended]
  :kind [:enum {:description "A chain task's kind from its :seon.task/step: Prove, Implement, else Design."} :design :prove :implement]

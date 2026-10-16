@@ -1179,7 +1179,7 @@
   whose head it starts from; it still merges toward main): the first map names the chain and the branch
   `chain-<handle>`, later tasks are named by position (`chain-entities`), all written in one transaction through
   the task writer with the chain's `:seon.chain/config` decisions on the branch's config row (`config-tx`), then the
-  chain fact on main. Before anything is written, the first and each running task's runnable view
+  chain fact on main (carrying `:seon.chain/merge?` when given: false ends the chain at its last done, unmerged). Before anything is written, the first and each running task's runnable view
   (`chain-refusal`: its members, its branch and main's config with `:seon.chain/config` decided over it) must validate,
   else its `:unrunnable` refusal answers and nothing is forked or written. A chain whose fact main holds is answered
   as it stands and nothing is written. Answers the branch, the first task and every handle in order.
@@ -1197,7 +1197,7 @@
                   [:=> [:cat :seon.task/chain-context [:vector {:min 1} :seon.task/task-map] :seon.task/chain-options]
                    [:or :seon.task/chain :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]]}
   ([context tasks] (chain! context tasks {}))
-  ([{connection :seon.db/connection store :seon.store/store} tasks {from :seon.chain/from overlay :seon.chain/config}]
+  ([{connection :seon.db/connection store :seon.store/store} tasks {from :seon.chain/from overlay :seon.chain/config merge? :seon.chain/merge?}]
    (let [main (db/db connection)
          main-branch (get-in main [:config :branch])
          {ns :seon.task/ns first-name :seon.task/name} (first tasks)
@@ -1232,7 +1232,8 @@
                                                                                (into chained)
                                                                                (into (config-tx (db/db %) cluster-name overlay)))))))))
              fact (when (:db-after written-tasks)
-                    (written connection [{:seon.chain/first first-handle :seon.chain/branch branch}]))]
+                    (written connection [(cond-> {:seon.chain/first first-handle :seon.chain/branch branch}
+                                           (some? merge?) (assoc :seon.chain/merge? merge?))]))]
          (cond refusal refusal
                (:seon.error/at forked) forked
                (not (:db-after written-tasks)) written-tasks

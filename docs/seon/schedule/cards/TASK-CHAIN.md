@@ -104,7 +104,7 @@ One entity on main per chain: `:seon.chain/branch` (the branch keyword) and `:se
 the pass that first sees it, root holds a route on the chain branch too, so every later commit there wakes root, §2.2), and counted by `seon.cluster.registry/cluster-claims` (a `[_ :seon.chain/branch ?b]` clause evaluated on main, since
 `cluster-claims` answers only for a cluster branch, holding the branch and its `base/` ref) so
 boot's `seon.cluster.registry/retire-unclaimed!` keeps its branch, failed or held chains included (measured: without the
-clause all twenty probe chains were unclaimed). It is discovery, not status: root reads the chain's state on its branch.
+clause all twenty probe chains were unclaimed). It is discovery, not status: root reads the chain's state on its branch. One optional member, `:seon.chain/merge?` (boolean, written by `seon.task/chain!` from `{:seon.chain/merge? false}` and only when given), decides the chain's end: false ends it at its last task's done with no merge request and no publication (§2.6); absent or true merges (owner 2026-10-16: a bench run is CI on a branch that is never merged).
 (Not `datahike.reference`: with one store its store id is redundant, an eid selector cannot be written before the eid
 exists, and `resolve-reference` needs a live connection.)
 
@@ -251,7 +251,7 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    The plan phase of the same pass reads the branch after the advance and starts the next agent, as `run-pass!` already
    re-derives after `:stop` and `:merge`. Each task keeps the plan it was given: the plan's history is the chain's
    history.
-6. **Finish** — a done task with no `next`: root merges the chain branch to main once. The merge owner
+6. **Finish** — a done task with no `next`: root merges the chain branch to main once. A chain whose fact says `:seon.chain/merge? false` is the exception: `seon.cluster.agent/chain-finishes` reads no terminal attempt of it, so the done attempt stays on the kept chain branch, readable by name (`seon.task/chain-views` shows the chain `:done`), main gets no merge request, no row of it and no git commit; its intermediate tasks still advance. The merge owner
    (`seon.merge/merge!` → `seon.cluster.source/prepare-merge!` → `seon.cluster.source/accept-merge!`) takes the chain
    branch and the terminal attempt as its source; `seon.merge/assignment-row`, `seon.merge/assigned-task` and
    `seon.cluster.source/tested-task-basis` read the held source branch, main only as the destination. The candidate
