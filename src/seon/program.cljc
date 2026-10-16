@@ -904,27 +904,73 @@
               (changed-attributes base database attributes))))))
 
 #?(:clj
+   (defn- differing-declarations
+     "The declaration identities whose digest datoms differ between two immutable values."
+     {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value
+                          [:map [:seon.program/max-datoms :seon.program/max-datoms]]]
+                     [:or :seon.program/identity-set :seon.program/digest-map-refusal]]}
+     [before after {:seon.program/keys [max-datoms]}]
+     (let [[diff q carried] (map requiring-resolve '[seon.db/datoms-diff seon.db/q seon.db/carried-projection])
+           entities (into #{} (comp cat (map first)) (diff before after :aevt [:seon.program/definition-digest]))
+           families (:seon.program/compared-families (declaration-families (carried after)))]
+       (if (> (count entities) max-datoms)
+         (digest-map-refusal :seon.program/read-bound "The changed declarations exceed their datom bound."
+                             {:seon.program/max-datoms max-datoms})
+         (reduce (fn [found database]
+                   (let [rows (if (seq entities)
+                                (q '[:find ?a ?v :in $ [?e ...] [?a ...] :where [?e ?a ?v]]
+                                   database (vec entities) (vec families)) [])]
+                     (if (:seon.error/at rows)
+                       (reduced (digest-map-refusal :seon.program/read
+                                                   "Changed declaration identities could not be read."
+                                                   {:seon.error/offending rows}))
+                       (into found rows))))
+                 #{} [before after])))))
+
+#?(:clj
+   (defn- fold-changes
+     "Replace the touched identities in a held delta with their current comparison to the merge base."
+     {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.db/database-value
+                          :seon.program/identity-set [:map [:seon.program/max-datoms :seon.program/max-datoms]]]
+                     [:or :seon.program/identity-set :seon.program/digest-map-refusal]]}
+     [base before after held bounds]
+     (let [touched (differing-declarations before after bounds)
+           [a b] (when (and (set? touched) (seq touched))
+                   (mapv #(digest-map % (assoc bounds :seon.program/identities touched)) [base after]))]
+       (cond (not (set? touched)) touched
+             (empty? touched) held
+             (:seon.error/at a) a
+             (:seon.error/at b) b
+             :else (into (reduce disj held touched) (remove #(= (get a %) (get b %))) touched)))))
+
+#?(:clj
    (defn own-changed-identities
-     "The declarations `head`, a branch, holds at another digest than `merge-base` (the value at its merge base,
-  `seon.cluster.source/merge-base`), among those its own lineage changed: git's diff of the merge base and HEAD.
-  The walk starts at the branch's fork, the `:seon.branch/base-t` its own fork entity records (read on `head`, a
-  position on `head`'s lineage, so no t of another branch is ever compared); a value with no fork entity, the
-  cluster's own branch, walks from the merge base's t. What a forward merge moved in holds the merge base's digest,
-  so it is never the branch's change."
+     "The declarations at different digests from `merge-base`, folded by content revision.
+  Datahike's index diff skips shared nodes; only declarations changed since the held value are compared again.
+  A missing derivation starts from the merge base. No transaction number crosses a lineage."
      {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value
                           [:map [:seon.program/max-datoms :seon.program/max-datoms]]]
                      [:or :seon.program/identity-set :seon.program/digest-map-refusal]]}
      [merge-base head bounds]
-     (let [fork ((requiring-resolve 'seon.cluster.registry/fork-of) head (get-in head [:config :branch]))
-           touched (changed-identities (or (:seon.branch/base-t fork) merge-base) head bounds)
-           ;; a refused walk is the answer: only a non-empty identity set scopes the digest reads
-           [before after] (when (and (set? touched) (seq touched))
-                            (mapv #(digest-map % (assoc bounds :seon.program/identities touched)) [merge-base head]))]
-       (cond (not (set? touched)) touched
-             (empty? touched) touched
-             (:seon.error/at before) before
-             (:seon.error/at after) after
-             :else (into #{} (remove #(= (get before %) (get after %))) touched)))))
+     (let [[revisions read-at] (map requiring-resolve '[seon.db/content-revisions seon.db/read-at])
+           revision #(get (revisions % [:seon.program/definition-digest]) :seon.program/definition-digest)
+           base-key (revision merge-base)
+           head-key (revision head)
+           key [base-key head-key bounds]
+           derive (fn []
+                    (let [prior-key (when base-key (seon.cache/present ::change-head [base-key bounds]))
+                          prior (when prior-key (seon.cache/present ::changes prior-key))]
+                      (if (set? prior)
+                        (read-at head (second prior-key)
+                                 #(fold-changes merge-base (or % merge-base) head (if % prior #{}) bounds))
+                        (fold-changes merge-base merge-base head #{} bounds))))]
+       (if (and base-key head-key)
+         (let [changed (seon.cache/lookup ::changes key #(* 160 (count %)) derive set?)]
+           (when (set? changed)
+             (seon.cache/evict! ::change-head [base-key bounds])
+             (seon.cache/lookup ::change-head [base-key bounds] (constantly 256) (constantly key)))
+           changed)
+         (derive)))))
 
 (defn three-way
   "Classify branch and head declaration identities relative to base.

@@ -947,25 +947,34 @@
   selection walks it (`seon.test/reaching`: a namespace seeds its members and the tests reading it as a file, a
   schema the functions whose contracts name it) but those declared long. `:seon.source/deferred` holds the members
   that run only on a platform host (`seon.test/host-exclusions` of an isolated run): the merge's platform run answers
-  them. Reads only."
+  them. Held by selection's content revisions (`seon.test/selection-revisions`), changed identities and proofs.
+  Result and evaluation writes reuse the list. Reads only."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set [:set :seon.test/sym]]
                   [:or :seon.source/member-list :seon.error/value]]}
   [database changed proofs]
-  (let [held? #(seq (d/datoms database :avet :seon.test/sym %))
-        seeds (into [] (filter (fn [[attribute]] (#{:seon.fn/sym :seon.test/sym :seon.ns/name :seon.schema/key} attribute)))
-                    (sort-by str changed))
-        reached (if (seq seeds) ((requiring-resolve 'seon.test/reaching) {:seon.db/db database :seon.test/changed seeds}) [])
-        named (into (set proofs) (keep (fn [[a v]] (when (= :seon.test/sym a) v))) changed)
-        long? #(:seon.test/long (db/pull database [:seon.test/long] [:seon.test/sym %]))
-        members (when (sequential? reached)
-                  (into (into #{} (filter held?) named) (comp (filter held?) (remove named) (remove long?)) reached))
-        isolated (when members
-                   ((requiring-resolve 'seon.test/host-exclusions) database nil true (vec (sort members))))]
-    (cond (not (sequential? reached)) reached
-          (:seon.error/at isolated) isolated
-          :else {:seon.source/members members
-                 :seon.source/deferred (into #{} (map :seon.test/sym)
-                                             (concat (:seon.test/destructive-excluded isolated) (:seon.test/deferred isolated)))})))
+  (let [revisions ((requiring-resolve 'seon.test/selection-revisions) database)
+        derive (fn []
+                (let [held? #(seq (d/datoms database :avet :seon.test/sym %))
+                      seeds (into [] (filter (fn [[attribute]] (#{:seon.fn/sym :seon.test/sym :seon.ns/name :seon.schema/key} attribute)))
+                                  (sort-by str changed))
+                      reached (if (seq seeds) ((requiring-resolve 'seon.test/reaching) {:seon.db/db database :seon.test/changed seeds}) [])
+                      named (into (set proofs) (keep (fn [[a v]] (when (= :seon.test/sym a) v))) changed)
+                      long? #(:seon.test/long (db/pull database [:seon.test/long] [:seon.test/sym %]))
+                      members (when (sequential? reached)
+                                (into (into #{} (filter held?) named) (comp (filter held?) (remove named) (remove long?)) reached))
+                      isolated (when members
+                                 ((requiring-resolve 'seon.test/host-exclusions) database nil true (vec (sort members))))]
+                  (cond (not (sequential? reached)) reached
+                        (:seon.error/at isolated) isolated
+                        :else {:seon.source/members members
+                               :seon.source/deferred (into #{} (map :seon.test/sym)
+                                                           (concat (:seon.test/destructive-excluded isolated) (:seon.test/deferred isolated)))})))]
+    (if revisions
+      (seon.cache/lookup ::members [revisions changed proofs]
+                         #(+ (* 96 (count revisions)) (* 160 (+ (count changed) (count proofs)
+                                                               (count (:seon.source/members %)))))
+                         derive #(not (:seon.error/at %)))
+      (derive))))
 
 (defn merge-changes
   "Of `changed`, the identities branch `database` changed, those a merge onto `head` carries: all but an agent's

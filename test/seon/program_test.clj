@@ -9,6 +9,7 @@
             [datahike.api :as d]
             [seon.cache]
             [seon.cluster :as cluster]
+            [seon.cluster.source :as source]
             [seon.cluster.agent :as agent]
             [seon.eval]
             [seon.fn]
@@ -360,6 +361,33 @@
         "the stub is no declaration: absent, as the removal left it")
     (is (= {[:seon.fn/sym 'kept/f] digest-a} (program/digest-map stub bound))
         "the whole map omits it too")))
+
+(deftest declaration-difference-uses-values-not-lineage
+  (test-support/with-database
+   (fn [connection]
+     (let [text #(str "(ns cost.delta (:require [clojure.test :refer [deftest is]])) "
+                     "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] " % ") "
+                     "(deftest proof (is (= 1 (f 1))))")]
+       (test-support/declare-source! connection 'cost.delta (text "x") "test")
+       (let [base (db/db connection)
+             bounds source/merge-bound]
+         (doseq [[body expected] [["(inc x)" #{[:seon.fn/sym 'cost.delta/f]}]
+                                 ["(+ x 2)" #{[:seon.fn/sym 'cost.delta/f]}]
+                                 ["x" #{}]]]
+           (test-support/declare-source! connection 'cost.delta (text body) "test")
+           (let [head (db/db connection)
+                 measured (profile/measure #(program/own-changed-identities base head bounds))
+                 folded (:seon.profile/value measured)
+                 history (program/changed-identities base head bounds)
+                 scoped (assoc bounds :seon.program/identities history)
+                 base-digests (program/digest-map base scoped)
+                 full-digests (program/digest-map head scoped)
+                 full (into #{} (remove #(= (get base-digests %) (get full-digests %)))
+                            (into (set (keys base-digests)) (keys full-digests)))]
+             (is (= expected folded full))
+             (is (= (source/merge-members head full #{}) (source/merge-members head folded #{})))
+             (is (zero? (profile/calls-of measured 'seon.db/entities-changed-after)))))
+         (is (= #{} (program/own-changed-identities base (db/db connection) bounds))))))))
 
 (deftest three-way-classifies-every-base-branch-head-state
   (let [states [:seon.program/absent digest-a digest-b digest-c]

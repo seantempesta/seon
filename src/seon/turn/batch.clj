@@ -414,7 +414,7 @@
 
 (defn- entity-facts
   "A row's facts on `db`: none when its stored identity already holds this
-  definition digest, else the exact replacement of it, else the new entity
+  definition digest, else the source owner's reconciliation (retaining equal refs and components), else the new entity
   (and its namespace, when `db` holds none)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/row] :seon.store/transaction-data]}
   [db row]
@@ -429,8 +429,9 @@
               ;; the stored definition already is this one: the file link, spans, admission and
               ;; analysis the stored row owns stay, as redefining a Var never edits its file
               (and digest (= digest (:seon.program/definition-digest existing))) []
-              (:db/id existing) (program/exact-replacement-tx
-                                 existing (merge (select-keys existing file-attributes) row))
+              (:db/id existing)
+              (let [tx (sfn/reconcile-tx db [(merge (select-keys existing file-attributes) row)] [])]
+                (if (:seon.error/at tx) (throw (ex-info (:seon.error/message tx) tx)) tx))
               :else [(assoc row :db/id (str (name ident) ":" v))])
       missing-ns (conj {:db/id (str "namespace:" missing-ns) :seon.ns/name missing-ns}))))
 

@@ -12,6 +12,7 @@
             [seon.error.refusal]
             [seon.fn :as fn]
             [seon.id :as id]
+            [seon.profile :as profile]
             [seon.task :as task]
             [seon.schema.datahike]
             [sci.core :as sci]
@@ -578,6 +579,24 @@
                                :seon.source/deferred #{'tq.one-test/reaches-f})]
            (is (= [] (source/done-refusals database deferred))
                "a deferred member is the merge's platform run's to answer, so done waits for none")))))))
+
+(deftest unchanged-call-graph-reuses-the-merges-member-list
+  (test-support/with-database
+   (fn [connection]
+     (let [declare! #(test-support/declare-source!
+                     connection 'tq.cached-test
+                     (str "(ns tq.cached-test (:require [clojure.test :refer [deftest is]]))\n"
+                          "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
+                          "(deftest proof (is (= 1 " % ")))\n") "test")
+           changed #{[:seon.fn/sym 'tq.cached-test/f]}]
+       (declare! "(f 1)")
+       (let [database (db/db connection)
+             first-list (source/merge-members database changed #{})
+             repeated (profile/measure #(source/merge-members database changed #{}))]
+         (is (= first-list (:seon.profile/value repeated)))
+         (is (zero? (profile/calls-of repeated 'seon.test/reaching))))
+       (declare! "1")
+       (is (= #{} (:seon.source/members (source/merge-members (db/db connection) changed #{}))))))))
 
 (deftest done-and-merge-judge-a-reaching-test-with-no-current-result-the-same-way
   ;; live run 3, chain fddd: the agent restored main's text of an existing test its change turned red, and the

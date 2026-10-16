@@ -522,6 +522,29 @@
              (finally (store/release-branch! fork))))
          (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch]))))))))
 
+(deftest current-results-reuse-held-content-and-refresh-after-a-change
+  (test-support/with-database
+   (fn [connection]
+     (let [source #(str "(ns tq.current (:require [clojure.test :refer [deftest is]]))\n"
+                        "(defn f {:malli/schema [:=> [:cat] :int]} [] " % ")\n"
+                        "(deftest proof (is (= 1 (f))))\n")
+           proof 'tq.current/proof
+           run! #(sut/run {:seon.test/execution (test-support/execution-handle connection)
+                           :seon.test/recording-connection connection
+                           :seon.test/policy :named :seon.test/identities #{proof}})
+           current #(runner/current-results (db/db connection) [proof] nil)]
+       (test-support/declare-source! connection 'tq.current (source 1))
+       (run!)
+       (let [held (current)
+             measured (profile/measure current)]
+         (is (= held (:seon.profile/value measured)))
+         (is (= 1 (get-in held [proof :seon.test/pass-count])))
+         (is (zero? (profile/calls-of measured 'seon.test.runner/newest-results))))
+       (test-support/transacted! connection (test-support/replacement-tx (db/db connection) [:seon.fn/sym 'tq.current/f] (source 2) {}))
+       (is (= {} (current)))
+       (run!)
+       (is (= 1 (get-in (current) [proof :seon.test/fail-count])))))))
+
 (deftest a-result-at-the-base-reach-digest-survives-later-runs
   ;; the proof runs green at the base program, then red once the change reaches it: its base run stays readable by
   ;; the reach digest it had there, while the newest execution is the red one

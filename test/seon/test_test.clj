@@ -57,6 +57,17 @@
                                       #{'seon.test-test}))
            "an identity inside a requested namespace is counted once")))))
 
+(deftest staleness-reads-the-requested-results-together
+  (test-support/with-database
+   (fn [connection]
+     (test-support/declare-source!
+      connection 'tq.stale
+      "(ns tq.stale (:require [clojure.test :refer [deftest is]]))\n(deftest a (is true))\n(deftest b (is true))")
+     (let [names ['tq.stale/a 'tq.stale/b]
+           measured (profile/measure #(sut/stale (db/db connection) names))]
+       (is (= names (:seon.profile/value measured)))
+       (is (= 1 (profile/calls-of measured 'seon.test.runner/current-results)))))))
+
 (deftest resolution-follows-admitted-source-and-acquisition
   (test-support/with-database
    (fn [connection]

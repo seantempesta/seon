@@ -4,6 +4,8 @@
   (:require [clojure.data.json :as json]
             [clojure.test :refer [deftest is]]
             [seon.mcp :as mcp]
+            [seon.db :as db]
+            [seon.test.runner :as runner]
             [seon.test-support :as support]))
 
 (defn- eval-request
@@ -45,6 +47,36 @@
                                "(in-ns 'tv.proof)\n(defn- g \"Returns x plus zero.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 0))"))]
        (is (= {:seon.test/passed? true :seon.turn.loop/red []} (:seon.turn.loop/reaching step))
            "the verdict passes over the whole member list it ran, the one done and the merge judge")))))
+
+(deftest ^{:seon.test/long "An own-branch agent's setup and one changed definition, with their automatic test steps."
+           :seon.test/long-ms 15000}
+  a-request-keeps-the-record-of-an-unaffected-test
+  (support/with-running-agent
+   (fn [running _ _]
+     (let [agent-id (str "step-change-" (random-uuid))
+           {connection :seon.db/connection}
+           (support/own-branch-agent!
+            running agent-id
+            (str "(ns tv.change (:require [clojure.test :refer [deftest is]]))\n"
+                 "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
+                 "(defn g {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
+                 "(deftest f-test (is (= 1 (f 1))))\n"
+                 "(deftest g-test (is (= 1 (g 1))))"))
+           results #(runner/current-results (db/db connection) ['tv.change/f-test 'tv.change/g-test] nil)
+           before (results)
+           basis (db/basis-t (db/db connection))
+           _ (eval-request running agent-id "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 0))")
+           after (results)]
+       (is (every? #(= 1 (:seon.test/pass-count %)) (vals before)))
+       (is (= (get-in before ['tv.change/g-test :seon.test/run])
+              (get-in after ['tv.change/g-test :seon.test/run])))
+       (is (not= (get-in before ['tv.change/f-test :seon.test/run])
+                 (get-in after ['tv.change/f-test :seon.test/run])))
+       (is (= #{'tv.change/f-test}
+              (set (db/q '[:find [?s ...] :in $ ?basis :where
+                           [?r :seon.test.run/selection-tx ?t] [(> ?t ?basis)]
+                           [?r :seon.test.run/identities ?s]]
+                         (db/db connection) basis))))))))
 
 (deftest ^{:seon.test/long "Two eval requests of an own-branch agent, each with its automatic test step: about 1 s each measured on default's JVM (agent teststep-verdict, 2026-10-14)."
            :seon.test/long-ms 15000}

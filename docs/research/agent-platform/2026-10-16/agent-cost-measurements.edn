@@ -1,0 +1,1474 @@
+; Parent: 61fa266164142dff7f55cb969ba789b2ba18f2e6; same-graph request probe.
+{:k 1, :stage :first, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 5116144,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 275638,
+    :seon.profile/gc-count 1,
+    :seon.profile/gc-ms 3,
+    :seon.profile/ms 1141.22,
+    :seon.profile/reads 1951,
+    :agent "agent-cost-ed575546-ffd4-4ceb-9a33-e395a73b46e4-0",
+    :request #:seon.cost{:ms 1137.1, :calls 208168, :alloc-mb 1183.3},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 1214.570616,
+       :cpu-ms 2360.448}}}
+{:k 1, :stage :repeat, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 3975440,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 183922,
+    :seon.profile/gc-count 1,
+    :seon.profile/gc-ms 4,
+    :seon.profile/ms 423.7,
+    :seon.profile/reads 2304,
+    :agent "agent-cost-ed575546-ffd4-4ceb-9a33-e395a73b46e4-0",
+    :request #:seon.cost{:ms 420.4, :calls 132010, :alloc-mb 500.3},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 550.286392,
+       :cpu-ms 1044.331}}}
+{:k 1, :stage :unchanged, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 3204032,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 89507,
+    :seon.profile/gc-count 0,
+    :seon.profile/gc-ms 0,
+    :seon.profile/ms 123.4,
+    :seon.profile/reads 1392,
+    :agent "agent-cost-ed575546-ffd4-4ceb-9a33-e395a73b46e4-0",
+    :request #:seon.cost{:ms 120.8, :calls 66559, :alloc-mb 123.2},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 162.5566,
+       :cpu-ms 269.174}}}
+{:k 1, :stage :verdict, :measurement {:members 26,
+    :status :working,
+    :seon.profile/alloc-bytes 30404456,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 29168,
+    :seon.profile/gc-count 0,
+    :seon.profile/gc-ms 0,
+    :seon.profile/ms 19.67,
+    :seon.profile/reads 764,
+    :refusals
+      [{:seon.error/at #inst "2026-10-16T10:56:07.541Z",
+        :seon.error/layer :seon.source/merge,
+        :seon.error/operation seon.cluster.source/accept-merge!,
+        :seon.test.run/branch :agent-d3c4459d36df,
+        :seon.source/refused-test-run "05376abce874",
+        :seon.error/type :seon.source/red-test-error,
+        :seon.error/message
+          "A test of the named run is not green; a merge commits only when every test is.",
+        :seon.source/red-tests
+          [{:seon.test/sym agent.cost.probe/pending,
+            :seon.test.run/id "21cd7da16cba",
+            :seon.source/verdict :red}]}],
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 62.083992,
+       :cpu-ms 57.35}}}
+{:k 1, :stage :root, :measurement {:agent "root",
+    :failed? false,
+    :seon.profile/alloc-bytes 8250456,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 20321,
+    :seon.profile/gc-count 0,
+    :seon.profile/gc-ms 0,
+    :seon.profile/ms 86.31,
+    :seon.profile/reads 340,
+    :request #:seon.cost{:ms 84.2, :calls 11258, :alloc-mb 139.0},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 143.630008,
+       :cpu-ms 201.428}}}
+{:k 1, :old-gen {:pool "G1 Eden Space",
+     :peak-bytes 1019215872,
+     :used-bytes 637534208,
+     :max-bytes -1}}
+{:k 1, :old-gen {:pool "G1 Old Gen",
+     :peak-bytes 413016464,
+     :used-bytes 413016464,
+     :max-bytes 4294967296}}
+{:k 1, :old-gen {:pool "G1 Survivor Space",
+     :peak-bytes 44040192,
+     :used-bytes 44040192,
+     :max-bytes -1}}
+{:k 3, :stage :first, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 4371800,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 339668,
+    :seon.profile/gc-count 1,
+    :seon.profile/gc-ms 4,
+    :seon.profile/ms 353.24,
+    :seon.profile/reads 5310,
+    :agent "agent-cost-20eca9e9-2ed6-43c6-8273-60238bde7f66-0",
+    :request #:seon.cost{:ms 351.0, :calls 80213, :alloc-mb 414.4},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 1253.379104,
+       :cpu-ms 1858.442}}}
+{:k 3, :stage :first, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 4492808,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 311821,
+    :seon.profile/gc-count 1,
+    :seon.profile/gc-ms 4,
+    :seon.profile/ms 334.71,
+    :seon.profile/reads 4705,
+    :agent "agent-cost-20eca9e9-2ed6-43c6-8273-60238bde7f66-1",
+    :request #:seon.cost{:ms 332.7, :calls 80410, :alloc-mb 407.1},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 1184.352648,
+       :cpu-ms 1721.725}}}
+{:k 3, :stage :first, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 4303184,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 293765,
+    :seon.profile/gc-count 1,
+    :seon.profile/gc-ms 4,
+    :seon.profile/ms 320.43,
+    :seon.profile/reads 4441,
+    :agent "agent-cost-20eca9e9-2ed6-43c6-8273-60238bde7f66-2",
+    :request #:seon.cost{:ms 318.1, :calls 81208, :alloc-mb 408.9},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 1129.671192,
+       :cpu-ms 1622.636}}}
+{:k 3, :stage :repeat, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 3667432,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 395901,
+    :seon.profile/gc-count 2,
+    :seon.profile/gc-ms 9,
+    :seon.profile/ms 341.38,
+    :seon.profile/reads 6664,
+    :agent "agent-cost-20eca9e9-2ed6-43c6-8273-60238bde7f66-0",
+    :request #:seon.cost{:ms 339.3, :calls 106302, :alloc-mb 377.9},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 1231.49472,
+       :cpu-ms 2109.987}}}
+{:k 3, :stage :repeat, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 3717024,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 368257,
+    :seon.profile/gc-count 2,
+    :seon.profile/gc-ms 9,
+    :seon.profile/ms 327.73,
+    :seon.profile/reads 6233,
+    :agent "agent-cost-20eca9e9-2ed6-43c6-8273-60238bde7f66-1",
+    :request #:seon.cost{:ms 324.5, :calls 108182, :alloc-mb 388.9},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 1170.571208,
+       :cpu-ms 2013.421}}}
+{:k 3, :stage :repeat, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 3659192,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 395896,
+    :seon.profile/gc-count 2,
+    :seon.profile/gc-ms 9,
+    :seon.profile/ms 340.7,
+    :seon.profile/reads 6664,
+    :agent "agent-cost-20eca9e9-2ed6-43c6-8273-60238bde7f66-2",
+    :request #:seon.cost{:ms 338.1, :calls 106224, :alloc-mb 381.3},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 1231.49472,
+       :cpu-ms 2109.971}}}
+{:k 3, :stage :unchanged, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 3764328,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 278546,
+    :seon.profile/gc-count 0,
+    :seon.profile/gc-ms 0,
+    :seon.profile/ms 144.68,
+    :seon.profile/reads 4360,
+    :agent "agent-cost-20eca9e9-2ed6-43c6-8273-60238bde7f66-0",
+    :request #:seon.cost{:ms 141.6, :calls 66500, :alloc-mb 129.8},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 559.599264,
+       :cpu-ms 921.107}}}
+{:k 3, :stage :unchanged, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 3591120,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 221843,
+    :seon.profile/gc-count 0,
+    :seon.profile/gc-ms 0,
+    :seon.profile/ms 122.65,
+    :seon.profile/reads 3486,
+    :agent "agent-cost-20eca9e9-2ed6-43c6-8273-60238bde7f66-1",
+    :request #:seon.cost{:ms 120.4, :calls 66484, :alloc-mb 127.4},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 464.33516,
+       :cpu-ms 777.406}}}
+{:k 3, :stage :unchanged, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 3670448,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 276257,
+    :seon.profile/gc-count 0,
+    :seon.profile/gc-ms 0,
+    :seon.profile/ms 143.63,
+    :seon.profile/reads 4339,
+    :agent "agent-cost-20eca9e9-2ed6-43c6-8273-60238bde7f66-2",
+    :request #:seon.cost{:ms 141.4, :calls 66468, :alloc-mb 130.6},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 556.763184,
+       :cpu-ms 915.436}}}
+{:k 3, :stage :verdict, :measurement {:members 26,
+    :status :working,
+    :seon.profile/alloc-bytes 30140688,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 41899,
+    :seon.profile/gc-count 0,
+    :seon.profile/gc-ms 0,
+    :seon.profile/ms 18.2,
+    :seon.profile/reads 1120,
+    :refusals
+      [{:seon.error/at #inst "2026-10-16T10:56:14.680Z",
+        :seon.error/layer :seon.source/merge,
+        :seon.error/operation seon.cluster.source/accept-merge!,
+        :seon.test.run/branch :agent-9006224a7f25,
+        :seon.source/refused-test-run "0dcbdfd82fd4",
+        :seon.error/type :seon.source/red-test-error,
+        :seon.error/message
+          "A test of the named run is not green; a merge commits only when every test is.",
+        :seon.source/red-tests
+          [{:seon.test/sym agent.cost.probe/pending,
+            :seon.test.run/id "680d65173bbb",
+            :seon.source/verdict :red}]}],
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 90.699272,
+       :cpu-ms 99.666}}}
+{:k 3, :stage :verdict, :measurement {:members 26,
+    :status :working,
+    :seon.profile/alloc-bytes 30120248,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 14734,
+    :seon.profile/gc-count 0,
+    :seon.profile/gc-ms 0,
+    :seon.profile/ms 17.41,
+    :seon.profile/reads 386,
+    :refusals
+      [{:seon.error/at #inst "2026-10-16T10:56:14.700Z",
+        :seon.error/layer :seon.source/merge,
+        :seon.error/operation seon.cluster.source/accept-merge!,
+        :seon.test.run/branch :agent-15de30116006,
+        :seon.source/refused-test-run "aac0d67541b0",
+        :seon.error/type :seon.source/red-test-error,
+        :seon.error/message
+          "A test of the named run is not green; a merge commits only when every test is.",
+        :seon.source/red-tests
+          [{:seon.test/sym agent.cost.probe/pending,
+            :seon.test.run/id "a94aac17dac4",
+            :seon.source/verdict :red}]}],
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 31.097088,
+       :cpu-ms 32.882}}}
+{:k 3, :stage :verdict, :measurement {:members 26,
+    :status :working,
+    :seon.profile/alloc-bytes 30116664,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 14734,
+    :seon.profile/gc-count 0,
+    :seon.profile/gc-ms 0,
+    :seon.profile/ms 16.91,
+    :seon.profile/reads 386,
+    :refusals
+      [{:seon.error/at #inst "2026-10-16T10:56:14.719Z",
+        :seon.error/layer :seon.source/merge,
+        :seon.error/operation seon.cluster.source/accept-merge!,
+        :seon.test.run/branch :agent-aec2722c81d5,
+        :seon.source/refused-test-run "2f34ee67d49c",
+        :seon.error/type :seon.source/red-test-error,
+        :seon.error/message
+          "A test of the named run is not green; a merge commits only when every test is.",
+        :seon.source/red-tests
+          [{:seon.test/sym agent.cost.probe/pending,
+            :seon.test.run/id "2fd9cfaef172",
+            :seon.source/verdict :red}]}],
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 31.09352,
+       :cpu-ms 32.555}}}
+{:k 3, :old-gen {:pool "G1 Eden Space",
+     :peak-bytes 996147200,
+     :used-bytes 891289600,
+     :max-bytes -1}}
+{:k 3, :old-gen {:pool "G1 Old Gen",
+     :peak-bytes 435349008,
+     :used-bytes 435349008,
+     :max-bytes 4294967296}}
+{:k 3, :old-gen {:pool "G1 Survivor Space",
+     :peak-bytes 52428800,
+     :used-bytes 50331648,
+     :max-bytes -1}}
+{:k 6, :stage :first, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 4907072,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 662633,
+    :seon.profile/gc-count 3,
+    :seon.profile/gc-ms 13,
+    :seon.profile/ms 348.23,
+    :seon.profile/reads 10328,
+    :agent "agent-cost-92daafc5-0378-43cd-97c1-93f2c4100090-0",
+    :request #:seon.cost{:ms 346.1, :calls 80504, :alloc-mb 429.0},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 2536.755664,
+       :cpu-ms 2682.658}}}
+{:k 6, :stage :first, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 4817816,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 693817,
+    :seon.profile/gc-count 3,
+    :seon.profile/gc-ms 13,
+    :seon.profile/ms 359.6,
+    :seon.profile/reads 11095,
+    :agent "agent-cost-92daafc5-0378-43cd-97c1-93f2c4100090-1",
+    :request #:seon.cost{:ms 357.8, :calls 80522, :alloc-mb 431.0},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 2601.952632,
+       :cpu-ms 2758.971}}}
+{:k 6, :stage :first, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 5247512,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 567562,
+    :seon.profile/gc-count 3,
+    :seon.profile/gc-ms 13,
+    :seon.profile/ms 313.49,
+    :seon.profile/reads 8547,
+    :agent "agent-cost-92daafc5-0378-43cd-97c1-93f2c4100090-2",
+    :request #:seon.cost{:ms 311.2, :calls 80490, :alloc-mb 432.4},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 2250.619568,
+       :cpu-ms 2338.263}}}
+{:k 6, :stage :first, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 4764400,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 602322,
+    :seon.profile/gc-count 3,
+    :seon.profile/gc-ms 13,
+    :seon.profile/ms 327.29,
+    :seon.profile/reads 9220,
+    :agent "agent-cost-92daafc5-0378-43cd-97c1-93f2c4100090-3",
+    :request #:seon.cost{:ms 324.7, :calls 80457, :alloc-mb 433.6},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 2357.766224,
+       :cpu-ms 2476.595}}}
+{:k 6, :stage :first, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 4927096,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 598439,
+    :seon.profile/gc-count 3,
+    :seon.profile/gc-ms 13,
+    :seon.profile/ms 326.17,
+    :seon.profile/reads 9122,
+    :agent "agent-cost-92daafc5-0378-43cd-97c1-93f2c4100090-4",
+    :request #:seon.cost{:ms 324.2, :calls 80533, :alloc-mb 391.2},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 2347.678888,
+       :cpu-ms 2470.575}}}
+{:k 6, :stage :first, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 4480432,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 623225,
+    :seon.profile/gc-count 3,
+    :seon.profile/gc-ms 13,
+    :seon.profile/ms 334.81,
+    :seon.profile/reads 9501,
+    :agent "agent-cost-92daafc5-0378-43cd-97c1-93f2c4100090-5",
+    :request #:seon.cost{:ms 332.0, :calls 77056, :alloc-mb 420.5},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 2424.807536,
+       :cpu-ms 2558.01}}}
+{:k 6, :stage :repeat, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 3907520,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 758675,
+    :seon.profile/gc-count 3,
+    :seon.profile/gc-ms 13,
+    :seon.profile/ms 332.32,
+    :seon.profile/reads 12899,
+    :agent "agent-cost-92daafc5-0378-43cd-97c1-93f2c4100090-0",
+    :request #:seon.cost{:ms 330.5, :calls 106284, :alloc-mb 385.2},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 2384.984576,
+       :cpu-ms 2869.726}}}
+{:k 6, :stage :repeat, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 3820944,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 602399,
+    :seon.profile/gc-count 2,
+    :seon.profile/gc-ms 8,
+    :seon.profile/ms 280.32,
+    :seon.profile/reads 10107,
+    :agent "agent-cost-92daafc5-0378-43cd-97c1-93f2c4100090-1",
+    :request #:seon.cost{:ms 277.6, :calls 103724, :alloc-mb 315.1},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 2014.828616,
+       :cpu-ms 2483.238}}}
+{:k 6, :stage :repeat, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 4085448,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 732779,
+    :seon.profile/gc-count 3,
+    :seon.profile/gc-ms 13,
+    :seon.profile/ms 323.37,
+    :seon.profile/reads 12497,
+    :agent "agent-cost-92daafc5-0378-43cd-97c1-93f2c4100090-2",
+    :request #:seon.cost{:ms 320.9, :calls 105413, :alloc-mb 405.4},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 2329.1442,
+       :cpu-ms 2801.035}}}
+{:k 6, :stage :repeat, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 4156912,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 780097,
+    :seon.profile/gc-count 3,
+    :seon.profile/gc-ms 13,
+    :seon.profile/ms 338.82,
+    :seon.profile/reads 13139,
+    :agent "agent-cost-92daafc5-0378-43cd-97c1-93f2c4100090-3",
+    :request #:seon.cost{:ms 336.1, :calls 106220, :alloc-mb 399.1},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 2432.161568,
+       :cpu-ms 2943.038}}}
+{:k 6, :stage :repeat, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 4053784,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 781204,
+    :seon.profile/gc-count 3,
+    :seon.profile/gc-ms 13,
+    :seon.profile/ms 339.06,
+    :seon.profile/reads 13161,
+    :agent "agent-cost-92daafc5-0378-43cd-97c1-93f2c4100090-4",
+    :request #:seon.cost{:ms 336.8, :calls 106255, :alloc-mb 409.1},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 2434.577424,
+       :cpu-ms 2949.107}}}
+{:k 6, :stage :repeat, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 3902736,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 751899,
+    :seon.profile/gc-count 3,
+    :seon.profile/gc-ms 13,
+    :seon.profile/ms 329.94,
+    :seon.profile/reads 12840,
+    :agent "agent-cost-92daafc5-0378-43cd-97c1-93f2c4100090-5",
+    :request #:seon.cost{:ms 327.0, :calls 106175, :alloc-mb 392.5},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 2370.046504,
+       :cpu-ms 2850.433}}}
+{:k 6, :stage :unchanged, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 4232784,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 550090,
+    :seon.profile/gc-count 1,
+    :seon.profile/gc-ms 4,
+    :seon.profile/ms 166.12,
+    :seon.profile/reads 8676,
+    :agent "agent-cost-92daafc5-0378-43cd-97c1-93f2c4100090-0",
+    :request #:seon.cost{:ms 163.1, :calls 66544, :alloc-mb 135.9},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 1115.391528,
+       :cpu-ms 1537.062}}}
+{:k 6, :stage :unchanged, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 3929080,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 436118,
+    :seon.profile/gc-count 1,
+    :seon.profile/gc-ms 4,
+    :seon.profile/ms 135.36,
+    :seon.profile/reads 6879,
+    :agent "agent-cost-92daafc5-0378-43cd-97c1-93f2c4100090-1",
+    :request #:seon.cost{:ms 132.8, :calls 66528, :alloc-mb 134.2},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 900.999536,
+       :cpu-ms 1239.487}}}
+{:k 6, :stage :unchanged, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 3932376,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 484715,
+    :seon.profile/gc-count 1,
+    :seon.profile/gc-ms 4,
+    :seon.profile/ms 148.74,
+    :seon.profile/reads 7432,
+    :agent "agent-cost-92daafc5-0378-43cd-97c1-93f2c4100090-2",
+    :request #:seon.cost{:ms 146.0, :calls 66513, :alloc-mb 132.0},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 987.027128,
+       :cpu-ms 1378.853}}}
+{:k 6, :stage :unchanged, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 4059304,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 550127,
+    :seon.profile/gc-count 1,
+    :seon.profile/gc-ms 4,
+    :seon.profile/ms 166.28,
+    :seon.profile/reads 8676,
+    :agent "agent-cost-92daafc5-0378-43cd-97c1-93f2c4100090-3",
+    :request #:seon.cost{:ms 163.3, :calls 66501, :alloc-mb 136.6},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 1115.396376,
+       :cpu-ms 1537.151}}}
+{:k 6, :stage :unchanged, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 4079640,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 551055,
+    :seon.profile/gc-count 1,
+    :seon.profile/gc-ms 4,
+    :seon.profile/ms 166.72,
+    :seon.profile/reads 8684,
+    :agent "agent-cost-92daafc5-0378-43cd-97c1-93f2c4100090-4",
+    :request #:seon.cost{:ms 163.7, :calls 66477, :alloc-mb 135.9},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 1115.482024,
+       :cpu-ms 1537.842}}}
+{:k 6, :stage :unchanged, :measurement {:failed? false,
+    :seon.profile/alloc-bytes 3981184,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 462201,
+    :seon.profile/gc-count 1,
+    :seon.profile/gc-ms 4,
+    :seon.profile/ms 143.04,
+    :seon.profile/reads 7176,
+    :agent "agent-cost-92daafc5-0378-43cd-97c1-93f2c4100090-5",
+    :request #:seon.cost{:ms 141.0, :calls 66465, :alloc-mb 136.5},
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 942.269344,
+       :cpu-ms 1309.822}}}
+{:k 6, :stage :verdict, :measurement {:members 26,
+    :status :working,
+    :seon.profile/alloc-bytes 38589648,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 68292,
+    :seon.profile/gc-count 0,
+    :seon.profile/gc-ms 0,
+    :seon.profile/ms 24.37,
+    :seon.profile/reads 1709,
+    :refusals
+      [{:seon.error/at #inst "2026-10-16T10:56:26.791Z",
+        :seon.error/layer :seon.source/merge,
+        :seon.error/operation seon.cluster.source/accept-merge!,
+        :seon.test.run/branch :agent-0cefde221732,
+        :seon.source/refused-test-run "1eaa81e8009f",
+        :seon.error/type :seon.source/red-test-error,
+        :seon.error/message
+          "A test of the named run is not green; a merge commits only when every test is.",
+        :seon.source/red-tests
+          [{:seon.test/sym agent.cost.probe/pending,
+            :seon.test.run/id "8dd15d884792",
+            :seon.source/verdict :red}]}],
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 167.800584,
+       :cpu-ms 166.312}}}
+{:k 6, :stage :verdict, :measurement {:members 26,
+    :status :working,
+    :seon.profile/alloc-bytes 30118392,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 14734,
+    :seon.profile/gc-count 0,
+    :seon.profile/gc-ms 0,
+    :seon.profile/ms 17.3,
+    :seon.profile/reads 386,
+    :refusals
+      [{:seon.error/at #inst "2026-10-16T10:56:26.811Z",
+        :seon.error/layer :seon.source/merge,
+        :seon.error/operation seon.cluster.source/accept-merge!,
+        :seon.test.run/branch :agent-8ddc9c5209fc,
+        :seon.source/refused-test-run "70bab9f80162",
+        :seon.error/type :seon.source/red-test-error,
+        :seon.error/message
+          "A test of the named run is not green; a merge commits only when every test is.",
+        :seon.source/red-tests
+          [{:seon.test/sym agent.cost.probe/pending,
+            :seon.test.run/id "f836e2e279e5",
+            :seon.source/verdict :red}]}],
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 31.10144,
+       :cpu-ms 20.366}}}
+{:k 6, :stage :verdict, :measurement {:members 26,
+    :status :working,
+    :seon.profile/alloc-bytes 30123232,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 14734,
+    :seon.profile/gc-count 0,
+    :seon.profile/gc-ms 0,
+    :seon.profile/ms 16.83,
+    :seon.profile/reads 386,
+    :refusals
+      [{:seon.error/at #inst "2026-10-16T10:56:26.830Z",
+        :seon.error/layer :seon.source/merge,
+        :seon.error/operation seon.cluster.source/accept-merge!,
+        :seon.test.run/branch :agent-f52fccd684e8,
+        :seon.source/refused-test-run "c384a18b00db",
+        :seon.error/type :seon.source/red-test-error,
+        :seon.error/message
+          "A test of the named run is not green; a merge commits only when every test is.",
+        :seon.source/red-tests
+          [{:seon.test/sym agent.cost.probe/pending,
+            :seon.test.run/id "f0187a0d299f",
+            :seon.source/verdict :red}]}],
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 31.106328,
+       :cpu-ms 20.149}}}
+{:k 6, :stage :verdict, :measurement {:members 26,
+    :status :working,
+    :seon.profile/alloc-bytes 30106520,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 14734,
+    :seon.profile/gc-count 0,
+    :seon.profile/gc-ms 0,
+    :seon.profile/ms 16.58,
+    :seon.profile/reads 386,
+    :refusals
+      [{:seon.error/at #inst "2026-10-16T10:56:26.849Z",
+        :seon.error/layer :seon.source/merge,
+        :seon.error/operation seon.cluster.source/accept-merge!,
+        :seon.test.run/branch :agent-f04d3cb70a42,
+        :seon.source/refused-test-run "7ce2c0c09a7f",
+        :seon.error/type :seon.source/red-test-error,
+        :seon.error/message
+          "A test of the named run is not green; a merge commits only when every test is.",
+        :seon.source/red-tests
+          [{:seon.test/sym agent.cost.probe/pending,
+            :seon.test.run/id "6d03903cb3e4",
+            :seon.source/verdict :red}]}],
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 31.089696,
+       :cpu-ms 26.825}}}
+{:k 6, :stage :verdict, :measurement {:members 26,
+    :status :working,
+    :seon.profile/alloc-bytes 30101400,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 14734,
+    :seon.profile/gc-count 0,
+    :seon.profile/gc-ms 0,
+    :seon.profile/ms 16.82,
+    :seon.profile/reads 386,
+    :refusals
+      [{:seon.error/at #inst "2026-10-16T10:56:26.868Z",
+        :seon.error/layer :seon.source/merge,
+        :seon.error/operation seon.cluster.source/accept-merge!,
+        :seon.test.run/branch :agent-0e4477b035e4,
+        :seon.source/refused-test-run "c0780923aee6",
+        :seon.error/type :seon.source/red-test-error,
+        :seon.error/message
+          "A test of the named run is not green; a merge commits only when every test is.",
+        :seon.source/red-tests
+          [{:seon.test/sym agent.cost.probe/pending,
+            :seon.test.run/id "1b32e8bab672",
+            :seon.source/verdict :red}]}],
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 31.084512,
+       :cpu-ms 20.86}}}
+{:k 6, :stage :verdict, :measurement {:members 26,
+    :status :working,
+    :seon.profile/alloc-bytes 30110424,
+    :seon.profile/alloc-scope :thread,
+    :seon.profile/calls 14734,
+    :seon.profile/gc-count 0,
+    :seon.profile/gc-ms 0,
+    :seon.profile/ms 15.69,
+    :seon.profile/reads 386,
+    :refusals
+      [{:seon.error/at #inst "2026-10-16T10:56:26.886Z",
+        :seon.error/layer :seon.source/merge,
+        :seon.error/operation seon.cluster.source/accept-merge!,
+        :seon.test.run/branch :agent-50e96ee42b7b,
+        :seon.source/refused-test-run "8152eb0f3236",
+        :seon.error/type :seon.source/red-test-error,
+        :seon.error/message
+          "A test of the named run is not green; a merge commits only when every test is.",
+        :seon.source/red-tests
+          [{:seon.test/sym agent.cost.probe/pending,
+            :seon.test.run/id "55ef0cb5410f",
+            :seon.source/verdict :red}]}],
+    :seon.cost/jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 31.093536,
+       :cpu-ms 19.971}}}
+{:k 6, :old-gen {:pool "G1 Eden Space",
+     :peak-bytes 960495616,
+     :used-bytes 792723456,
+     :max-bytes -1}}
+{:k 6, :old-gen {:pool "G1 Old Gen",
+     :peak-bytes 493937208,
+     :used-bytes 493937208,
+     :max-bytes 4294967296}}
+{:k 6, :old-gen {:pool "G1 Survivor Space",
+     :peak-bytes 64588896,
+     :used-bytes 54525952,
+     :max-bytes -1}}
+; Candidate: changed-declaration fold, content reuse, stale-only execution and batched result reads.
+{:k 1,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 1029.77,
+    :seon.profile/alloc-bytes 5098528,
+    :seon.profile/reads 1679,
+    :seon.profile/calls 255194,
+    :request #:seon.cost{:ms 1026.7, :calls 188802, :alloc-mb 1064.0}}}
+{:k 1,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 2,
+    seon.fn/gate-edges 1,
+    seon.test.runner/newest-results 7,
+    seon.test/run 1,
+    seon.test/bounded-result 24}}
+{:k 1,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 294.75,
+    :seon.profile/alloc-bytes 4013136,
+    :seon.profile/reads 1391,
+    :seon.profile/calls 123410,
+    :request #:seon.cost{:ms 285.8, :calls 76973, :alloc-mb 353.7}}}
+{:k 1,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 4,
+    seon.test.runner/newest-results 9,
+    seon.test/run 1,
+    seon.test/bounded-result 1}}
+{:k 1,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 40.82,
+    :seon.profile/alloc-bytes 3246288,
+    :seon.profile/reads 509,
+    :seon.profile/calls 31443,
+    :request #:seon.cost{:ms 35.6, :calls 21538, :alloc-mb 37.4}}}
+{:k 1,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 1,
+    seon.test.runner/newest-results 2}}
+{:k 1,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 5.37,
+    :seon.profile/alloc-bytes 6025240,
+    :seon.profile/reads 244,
+    :seon.profile/calls 8202}}
+{:k 1, :stage :verdict, :derivations nil}
+{:k 1,
+ :stage :root,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 88.59,
+    :seon.profile/alloc-bytes 8152624,
+    :seon.profile/reads 331,
+    :seon.profile/calls 20064,
+    :request #:seon.cost{:ms 86.3, :calls 10884, :alloc-mb 138.1}}}
+{:k 1,
+ :stage :root,
+ :derivations
+   {seon.cluster.source/merge-members 1, seon.fn/gate-edges 1}}
+{:k 1,
+ :old-gen
+   {:pool "G1 Eden Space",
+    :peak-bytes 1254096896,
+    :used-bytes 310378496,
+    :max-bytes -1}}
+{:k 1,
+ :old-gen
+   {:pool "G1 Old Gen",
+    :peak-bytes 412849856,
+    :used-bytes 412849856,
+    :max-bytes 4294967296}}
+{:k 1,
+ :old-gen
+   {:pool "G1 Survivor Space",
+    :peak-bytes 92274688,
+    :used-bytes 81788928,
+    :max-bytes -1}}
+{:k 3,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 268.29,
+    :seon.profile/alloc-bytes 4548424,
+    :seon.profile/reads 3954,
+    :seon.profile/calls 239476,
+    :request #:seon.cost{:ms 266.1, :calls 60058, :alloc-mb 280.6}}}
+{:k 3,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 6,
+    seon.fn/gate-edges 3,
+    seon.test.runner/newest-results 15,
+    seon.test/run 6}}
+{:k 3,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 290.35,
+    :seon.profile/alloc-bytes 4596648,
+    :seon.profile/reads 4205,
+    :seon.profile/calls 259430,
+    :request #:seon.cost{:ms 288.1, :calls 60273, :alloc-mb 294.8}}}
+{:k 3,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 7,
+    seon.fn/gate-edges 3,
+    seon.test.runner/newest-results 16,
+    seon.test/run 6}}
+{:k 3,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 290.34,
+    :seon.profile/alloc-bytes 4379344,
+    :seon.profile/reads 4205,
+    :seon.profile/calls 259430,
+    :request #:seon.cost{:ms 288.1, :calls 63201, :alloc-mb 298.7}}}
+{:k 3,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 7,
+    seon.fn/gate-edges 3,
+    seon.test.runner/newest-results 16,
+    seon.test/run 6}}
+{:k 3,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 170.04,
+    :seon.profile/alloc-bytes 3741136,
+    :seon.profile/reads 3150,
+    :seon.profile/calls 174205,
+    :request #:seon.cost{:ms 168.0, :calls 51926, :alloc-mb 180.4}}}
+{:k 3,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 6,
+    seon.test.runner/newest-results 15,
+    seon.test/run 5}}
+{:k 3,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 198.93,
+    :seon.profile/alloc-bytes 3702376,
+    :seon.profile/reads 4024,
+    :seon.profile/calls 217453,
+    :request #:seon.cost{:ms 196.8, :calls 50652, :alloc-mb 172.8}}}
+{:k 3,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 9,
+    seon.test.runner/newest-results 18,
+    seon.test/run 6}}
+{:k 3,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 198.77,
+    :seon.profile/alloc-bytes 3500264,
+    :seon.profile/reads 4024,
+    :seon.profile/calls 217453,
+    :request #:seon.cost{:ms 196.6, :calls 50782, :alloc-mb 172.0}}}
+{:k 3,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 9,
+    seon.test.runner/newest-results 18,
+    seon.test/run 6}}
+{:k 3,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 41.46,
+    :seon.profile/alloc-bytes 3495344,
+    :seon.profile/reads 1537,
+    :seon.profile/calls 85823,
+    :request #:seon.cost{:ms 39.3, :calls 21480, :alloc-mb 37.7}}}
+{:k 3,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 3,
+    seon.test.runner/newest-results 6}}
+{:k 3,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 44.6,
+    :seon.profile/alloc-bytes 3326456,
+    :seon.profile/reads 1590,
+    :seon.profile/calls 93048,
+    :request #:seon.cost{:ms 42.7, :calls 21464, :alloc-mb 38.0}}}
+{:k 3,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 3,
+    seon.test.runner/newest-results 6}}
+{:k 3,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 44.53,
+    :seon.profile/alloc-bytes 3623640,
+    :seon.profile/reads 1586,
+    :seon.profile/calls 92816,
+    :request #:seon.cost{:ms 42.7, :calls 21448, :alloc-mb 37.9}}}
+{:k 3,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 3,
+    seon.test.runner/newest-results 6}}
+{:k 3,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 5.62,
+    :seon.profile/alloc-bytes 6002576,
+    :seon.profile/reads 457,
+    :seon.profile/calls 18346}}
+{:k 3, :stage :verdict, :derivations nil}
+{:k 3,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 5.02,
+    :seon.profile/alloc-bytes 5985808,
+    :seon.profile/reads 238,
+    :seon.profile/calls 8488}}
+{:k 3, :stage :verdict, :derivations nil}
+{:k 3,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 4.67,
+    :seon.profile/alloc-bytes 5992216,
+    :seon.profile/reads 159,
+    :seon.profile/calls 5041}}
+{:k 3, :stage :verdict, :derivations nil}
+{:k 3,
+ :old-gen
+   {:pool "G1 Eden Space",
+    :peak-bytes 1247805440,
+    :used-bytes 685768704,
+    :max-bytes -1}}
+{:k 3,
+ :old-gen
+   {:pool "G1 Old Gen",
+    :peak-bytes 442964896,
+    :used-bytes 442964896,
+    :max-bytes 4294967296}}
+{:k 3,
+ :old-gen
+   {:pool "G1 Survivor Space",
+    :peak-bytes 75403688,
+    :used-bytes 75403688,
+    :max-bytes -1}}
+{:k 6,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 286.9,
+    :seon.profile/alloc-bytes 4868432,
+    :seon.profile/reads 8761,
+    :seon.profile/calls 536722,
+    :request #:seon.cost{:ms 285.0, :calls 60297, :alloc-mb 344.6}}}
+{:k 6,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 17,
+    seon.fn/gate-edges 6,
+    seon.test.runner/newest-results 35,
+    seon.test/run 12}}
+{:k 6,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 275.49,
+    :seon.profile/alloc-bytes 4803232,
+    :seon.profile/reads 7938,
+    :seon.profile/calls 500872,
+    :request #:seon.cost{:ms 273.5, :calls 60343, :alloc-mb 316.2}}}
+{:k 6,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 12,
+    seon.fn/gate-edges 6,
+    seon.test.runner/newest-results 33,
+    seon.test/run 12}}
+{:k 6,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 267.08,
+    :seon.profile/alloc-bytes 5032176,
+    :seon.profile/reads 7809,
+    :seon.profile/calls 484658,
+    :request #:seon.cost{:ms 264.5, :calls 60311, :alloc-mb 316.3}}}
+{:k 6,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 12,
+    seon.fn/gate-edges 6,
+    seon.test.runner/newest-results 30,
+    seon.test/run 12}}
+{:k 6,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 269.77,
+    :seon.profile/alloc-bytes 4955216,
+    :seon.profile/reads 7821,
+    :seon.profile/calls 488373,
+    :request #:seon.cost{:ms 267.8, :calls 60228, :alloc-mb 315.6}}}
+{:k 6,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 12,
+    seon.fn/gate-edges 6,
+    seon.test.runner/newest-results 30,
+    seon.test/run 12}}
+{:k 6,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 264.0,
+    :seon.profile/alloc-bytes 4967976,
+    :seon.profile/reads 7788,
+    :seon.profile/calls 480282,
+    :request #:seon.cost{:ms 261.2, :calls 60196, :alloc-mb 316.7}}}
+{:k 6,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 12,
+    seon.fn/gate-edges 6,
+    seon.test.runner/newest-results 30,
+    seon.test/run 12}}
+{:k 6,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 264.45,
+    :seon.profile/alloc-bytes 4544504,
+    :seon.profile/reads 7792,
+    :seon.profile/calls 480627,
+    :request #:seon.cost{:ms 262.0, :calls 56967, :alloc-mb 299.5}}}
+{:k 6,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 12,
+    seon.fn/gate-edges 6,
+    seon.test.runner/newest-results 30,
+    seon.test/run 12}}
+{:k 6,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 196.92,
+    :seon.profile/alloc-bytes 3970568,
+    :seon.profile/reads 7419,
+    :seon.profile/calls 411790,
+    :request #:seon.cost{:ms 194.3, :calls 49043, :alloc-mb 169.0}}}
+{:k 6,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 15,
+    seon.test.runner/newest-results 35,
+    seon.test/run 12}}
+{:k 6,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 188.77,
+    :seon.profile/alloc-bytes 3817000,
+    :seon.profile/reads 7287,
+    :seon.profile/calls 392778,
+    :request #:seon.cost{:ms 186.5, :calls 50874, :alloc-mb 173.4}}}
+{:k 6,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 15,
+    seon.test.runner/newest-results 33,
+    seon.test/run 12}}
+{:k 6,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 168.41,
+    :seon.profile/alloc-bytes 3861544,
+    :seon.profile/reads 5690,
+    :seon.profile/calls 329602,
+    :request #:seon.cost{:ms 166.3, :calls 50794, :alloc-mb 174.6}}}
+{:k 6,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 9,
+    seon.test.runner/newest-results 27,
+    seon.test/run 12}}
+{:k 6,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 195.3,
+    :seon.profile/alloc-bytes 4014760,
+    :seon.profile/reads 7387,
+    :seon.profile/calls 408446,
+    :request #:seon.cost{:ms 192.5, :calls 50789, :alloc-mb 175.9}}}
+{:k 6,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 15,
+    seon.test.runner/newest-results 35,
+    seon.test/run 12}}
+{:k 6,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 190.7,
+    :seon.profile/alloc-bytes 4290248,
+    :seon.profile/reads 7295,
+    :seon.profile/calls 396263,
+    :request #:seon.cost{:ms 188.5, :calls 50802, :alloc-mb 176.9}}}
+{:k 6,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 15,
+    seon.test.runner/newest-results 33,
+    seon.test/run 12}}
+{:k 6,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 172.12,
+    :seon.profile/alloc-bytes 4309776,
+    :seon.profile/reads 6041,
+    :seon.profile/calls 342219,
+    :request #:seon.cost{:ms 169.1, :calls 50770, :alloc-mb 175.0}}}
+{:k 6,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 11,
+    seon.test.runner/newest-results 27,
+    seon.test/run 12}}
+{:k 6,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 57.18,
+    :seon.profile/alloc-bytes 3838640,
+    :seon.profile/reads 3028,
+    :seon.profile/calls 179217,
+    :request #:seon.cost{:ms 54.5, :calls 21528, :alloc-mb 39.0}}}
+{:k 6,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 7,
+    seon.test.runner/newest-results 12}}
+{:k 6,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 64.69,
+    :seon.profile/alloc-bytes 4012352,
+    :seon.profile/reads 3812,
+    :seon.profile/calls 212748,
+    :request #:seon.cost{:ms 62.0, :calls 21512, :alloc-mb 38.6}}}
+{:k 6,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 12,
+    seon.test.runner/newest-results 12}}
+{:k 6,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 54.66,
+    :seon.profile/alloc-bytes 3798168,
+    :seon.profile/reads 2936,
+    :seon.profile/calls 169624,
+    :request #:seon.cost{:ms 51.2, :calls 21496, :alloc-mb 38.7}}}
+{:k 6,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 7,
+    seon.test.runner/newest-results 12}}
+{:k 6,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 59.3,
+    :seon.profile/alloc-bytes 3867648,
+    :seon.profile/reads 3264,
+    :seon.profile/calls 189456,
+    :request #:seon.cost{:ms 56.6, :calls 21480, :alloc-mb 38.7}}}
+{:k 6,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 8,
+    seon.test.runner/newest-results 12}}
+{:k 6,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 55.08,
+    :seon.profile/alloc-bytes 4046904,
+    :seon.profile/reads 2943,
+    :seon.profile/calls 170303,
+    :request #:seon.cost{:ms 52.2, :calls 21464, :alloc-mb 38.6}}}
+{:k 6,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 7,
+    seon.test.runner/newest-results 12}}
+{:k 6,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 54.87,
+    :seon.profile/alloc-bytes 4165928,
+    :seon.profile/reads 2947,
+    :seon.profile/calls 170601,
+    :request #:seon.cost{:ms 51.1, :calls 21448, :alloc-mb 38.2}}}
+{:k 6,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 7,
+    seon.test.runner/newest-results 12}}
+{:k 6,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 4.82,
+    :seon.profile/alloc-bytes 5983152,
+    :seon.profile/reads 306,
+    :seon.profile/calls 9538}}
+{:k 6, :stage :verdict, :derivations nil}
+{:k 6,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 4.55,
+    :seon.profile/alloc-bytes 5982688,
+    :seon.profile/reads 159,
+    :seon.profile/calls 5041}}
+{:k 6, :stage :verdict, :derivations nil}
+{:k 6,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 4.51,
+    :seon.profile/alloc-bytes 5984696,
+    :seon.profile/reads 159,
+    :seon.profile/calls 5041}}
+{:k 6, :stage :verdict, :derivations nil}
+{:k 6,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 4.39,
+    :seon.profile/alloc-bytes 5981600,
+    :seon.profile/reads 159,
+    :seon.profile/calls 5041}}
+{:k 6, :stage :verdict, :derivations nil}
+{:k 6,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 4.46,
+    :seon.profile/alloc-bytes 5982352,
+    :seon.profile/reads 159,
+    :seon.profile/calls 5041}}
+{:k 6, :stage :verdict, :derivations nil}
+{:k 6,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 4.38,
+    :seon.profile/alloc-bytes 5983992,
+    :seon.profile/reads 159,
+    :seon.profile/calls 5041}}
+{:k 6, :stage :verdict, :derivations nil}
+{:k 6,
+ :old-gen
+   {:pool "G1 Eden Space",
+    :peak-bytes 1205862400,
+    :used-bytes 278921216,
+    :max-bytes -1}}
+{:k 6,
+ :old-gen
+   {:pool "G1 Old Gen",
+    :peak-bytes 500641952,
+    :used-bytes 500641952,
+    :max-bytes 4294967296}}
+{:k 6,
+ :old-gen
+   {:pool "G1 Survivor Space",
+    :peak-bytes 75344952,
+    :used-bytes 71303168,
+    :max-bytes -1}}

@@ -5571,7 +5571,7 @@
             (sort-by (comp str :seon.test/sym) (mapcat :seon.source/red-tests (:seon.source/refusals verdict)))))))
 
 (defn- test-step
-  "The pass's automatic test step, in order on one acquisition of the agent's world: the merge's member list of the
+  "The pass's automatic test step, in order on one acquisition of the agent's world: stale tests from the merge's member list of the
   branch's change since its merge base (`seon.context/step-members`, `seon.cluster.source/merge-members`: what the
   done rule judges and the merge runs) but its proofs and deferred members, then the other tests its branch defined
   or changed since its base (`seon.test/branch-tests`; a member answers from the record just made), then the held
@@ -5616,12 +5616,12 @@
               connection (:seon.db/connection execution)
               platform (platform-proof (db/db connection) changed)
               pending (set (:seon.turn.loop/pending platform))
-              reaching (run-reaching execution (left) (into [] (remove pending) members) task)
+              reaching (run-reaching execution (left) (into [] (comp (filter (set stale)) (remove pending)) members) task)
               ;; a reaching red is the change's unless red at the merge base: the done rule reads that result
               based (run-merge-base execution (left) reaching)
               ;; a branch test holding a current result would only answer it again
               branched (run-branch execution (left) (branch-due branch stale pending (executed-syms reaching)))
-              proved (when (seq proofs) (run-proofs execution agent-id (left) pending))
+              proved (when (some (set stale) proofs) (run-proofs execution agent-id (left) pending))
               ;; a derivation that fails is shown beside the step's values, never in place of them
               red (try (step-reds execution agent-id)
                        (catch Throwable failure
@@ -5630,7 +5630,7 @@
                               (Date.) :seon.turn/test-step `step-reds
                               {:seon.error/message "The tests the change broke could not be judged."
                                :seon.error/exception-class (.getName (class failure))}))))]
-          ;; the reaching summary is over the whole member list, the one the done rule and the merge judge
+          ;; the summary names this request's work; the verdict reads all held member results
           (some-> (summary (ran-something branched) (ran-something proved) (ran-something reaching) platform)
                   (merge (test-costs (db/db connection) [branched proved reaching]))
                   (cond-> (or (:seon.error/at red) (seq red)) (assoc :seon.turn.loop/broken red))

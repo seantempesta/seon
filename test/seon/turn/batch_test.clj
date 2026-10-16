@@ -102,6 +102,19 @@
        (is (false? (get reply "isError"))
            "diff answers, not a refusal, after the namespace the agent stood in was removed")))))
 
+(deftest a-body-edit-preserves-an-unchanged-namespace-reference
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running _ _]
+     (let [agent-id (str "reference-cost-" (id/id))
+           {connection :seon.db/connection}
+           ((requiring-resolve 'seon.test-support/own-branch-agent!)
+            running agent-id "(ns cost.references) (defn f {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 0))")
+           before (db/db connection)
+           reply (eval! "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (+ 0 x))" agent-id running)
+           after (db/db connection)]
+       (is (false? (get reply "isError")))
+       (is (= [[] []] (db/datoms-diff before after :aevt [:seon.fn/ns])))))))
+
 (deftest a-later-request-redefining-a-contracted-defn-is-admitted-as-written
   ;; each row: request 1 defines, request 2 redefines the same name; the
   ;; second definition is read as the agent's context binds it, never as

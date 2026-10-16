@@ -465,36 +465,42 @@
                     "in the owner's own metadata at its definition."))
       :else (into {} entities))))
 
-(defn- destructive-key
-  "The content key of the destructive program graph: the program's revisions
-  plus the revisions of the data attributes declared edges name (`:seon.fn/invokes`
-  holders, `:seon.fn/reference-to` keys); empty when the value carries no
-  revision authority. Equal keys prove equal walks."
-  {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:or [:tuple] [:tuple :seon.schema/value [:map-of :qualified-keyword :uuid]]]]}
+(defn selection-revisions
+  "The content revisions of test selection's call graph, namespace readers and host declarations.
+  Declared invocation attributes contribute their own revisions; changing a body without changing its edges
+  leaves selection unchanged. An as-of value uses its immutable commit and time point."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil [:map-of :qualified-keyword :uuid] [:tuple :qualified-keyword :uuid [:or :int :inst]]]]}
   [database]
-  (if-let [program (or (runner/program-revisions database)
-                       (db/as-of-key database))]
-    (let [edge-attributes (seon.cache/lookup ::edge-attributes program (comp #(+ 256 (* 64 %)) count)
-                                             #(db/q '[:find [?attribute ...]
-                                                      :where (or-join [?attribute]
-                                                                      [_ :seon.fn/invokes ?attribute]
-                                                                      (and [?declaration :seon.fn/reference-to :seon.fn/sym]
-                                                                           [?declaration :seon.schema/key ?attribute]))]
-                                                    database)
-                                             vector?)]
-      (if (vector? edge-attributes)
-        [program (select-keys (get-in database [:cache-context :datahike.cache/attribute-revisions])
-                              edge-attributes)]
-        []))
-    []))
+  (let [attributes [:seon.fn/sym :seon.test/sym :seon.fn/calls :seon.fn/references :seon.test/subject
+                    :seon.fn/host-bound? :seon.fn/invokes :seon.fn/reference-to :seon.schema/key
+                    :seon.fn/unresolved-references :seon.fn/file :seon.effect/capability :seon.fn/destroys
+                    :seon.schema/references :seon.fn.arity/input-refs :seon.fn.arity/output-refs :seon.fn/arities
+                    :seon.fn/ns :seon.test/ns :seon.ns/name :seon.ns/source
+                    :seon.test/reads :seon.test/fixture-observation :seon.test/long]
+        revisions (db/content-revisions database attributes)]
+    (if revisions
+      (let [edge-attributes (seon.cache/lookup
+                             ::edge-attributes
+                             (select-keys revisions [:seon.fn/invokes :seon.fn/reference-to :seon.schema/key])
+                             #(* 64 (count %))
+                             #(let [found (db/q '[:find [?attribute ...]
+                                       :where (or-join [?attribute]
+                                                       [_ :seon.fn/invokes ?attribute]
+                                                       (and [?declaration :seon.fn/reference-to :seon.fn/sym]
+                                                            [?declaration :seon.schema/key ?attribute]))]
+                                     database)]
+                                (if (db/read-refusal? found)
+                                  (throw (ex-info "Declared selection edges could not be read." found))
+                                  found)))]
+        (merge revisions (db/content-revisions database edge-attributes)))
+      (db/as-of-key database))))
 
 (defn- destructive-reach
   "Every test symbol whose reach includes a destructive owner, mapped to it.
 
   Membership is the shared `:seon.fn/calls` derivation `seon.fn/tests-reaching`,
   walked from each owner `destroyers` names; kept in `seon.cache` by
-  `destructive-key`."
+  `selection-revisions`."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:or [:map-of :seon.test/sym :seon.fn/sym] :seon.error/value]]}
   [database]
@@ -507,7 +513,7 @@
                        by-owner
                        (reduce (fn [reached [owner tests]] (reduce #(assoc %1 %2 owner) reached tests))
                                {} (sort by-owner)))))))]
-    (let [memo-key (destructive-key database)]
+    (let [memo-key (selection-revisions database)]
       (if (seq memo-key)
         (seon.cache/lookup ::destructive-reach memo-key #(+ 256 (* 128 (count %))) walk
                            #(not (:seon.error/at %)))
@@ -586,7 +592,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym]
                   [:or :seon.test/host-report :seon.error/value]]}
   [database test-symbol]
-  (let [memo-key (destructive-key database)
+  (let [memo-key (selection-revisions database)
         derive-host (fn []
                       (let [owners (destroyers database)]
                         (if (and (map? owners) (contains? owners :seon.error/at) (contains? owners :seon.error/layer) (contains? owners :seon.error/operation))
@@ -696,7 +702,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/declaration-identity] [:maybe :string]]}
   [database [attribute value]]
   (when (#{:seon.fn/sym :seon.test/sym} attribute)
-    (some->> (selection-read! (db/q '[:find ?e . :in $ ?a ?v :where [?e ?a ?v]] database attribute value))
+    (some->> (selection-read! (db/datoms database :avet attribute value)) first :e
              (db/behavior-digest database))))
 
 (defn- behavior-changed
@@ -1675,35 +1681,36 @@
     (if (:seon.error/at results) results
         (or (first results) (unknown test-symbol "No admitted execution is recorded for this test.")))))
 
-(defn- current-result
-  "`test-symbol`'s result at its current identity judging `task` (nil: none, `seon.test.runner/current-results`)
-  that still describes its source and inputs; nil when it holds none."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym [:maybe :seon.task/sym]]
-                  [:or :nil :seon.test/result :seon.test/result-unknown :seon.test/host-error :seon.error/value]]}
-  [database test-symbol task]
+(defn- current-results
+  "The requested results at current inputs and identity, judging `task`; absent tests have no current result."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.test/sym] [:maybe :seon.task/sym]]
+                  [:or [:map-of :seon.test/sym [:or :seon.test/result :seon.test/result-unknown]]
+                   :seon.error/value]]}
+  [database test-symbols task]
   (let [inputs (db/q '[:find [?digest ...] :where [_ :seon.source/test-input-digest ?digest]] database)
-        current (runner/current-results database [test-symbol] task)
-        present (db/pull database [:seon.test/source :seon.test/fixture-observation]
-                         [:seon.test/sym test-symbol])
-        result (when (map? current) (get current test-symbol))]
-    (or (first (filter :seon.error/at [inputs current present]))
-        (when (and (:seon.test/source present)
-                   (not (:seon.test/fixture-observation present))
-                   (= #{(:seon.test.run/input-digest result)} (set inputs)))
-          result))))
+        current (runner/current-results database test-symbols task)]
+    (or (first (filter :seon.error/at [inputs current]))
+        (reduce-kv
+         (fn [results test-symbol result]
+           (let [present (db/pull database [:seon.test/source :seon.test/fixture-observation]
+                                  [:seon.test/sym test-symbol])]
+             (cond (:seon.error/at present) (reduced present)
+                   (and (:seon.test/source present)
+                        (not (:seon.test/fixture-observation present))
+                        (= #{(:seon.test.run/input-digest result)} (set inputs)))
+                   (assoc results test-symbol result)
+                   :else results)))
+         {} current))))
 
 (defn- stale-in
+  "The requested tests absent from the one current-result lookup."
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol] [:maybe :seon.task/sym]]
                   [:or [:vector :qualified-symbol] :seon.test/execution-error :seon.error/value]]}
   [database test-symbols task]
-  (reduce (fn [result test-symbol]
-            (let [current (current-result database test-symbol task)]
-              (cond
-                (:seon.error/at current)
-                (reduced (assoc current :seon.test/execution-refusal :seon.test/sym))
-                current result
-                :else (conj result test-symbol))))
-          [] test-symbols))
+  (let [current (current-results database test-symbols task)]
+    (if (:seon.error/at current)
+      (assoc current :seon.test/execution-refusal :seon.test/sym)
+      (into [] (remove #(contains? current %)) test-symbols))))
 
 (defn stale
   "Source-bearing tests without a result at their current inputs and identity.
@@ -1856,7 +1863,7 @@
 
 (defn verified?
   "Whether the test's result is green at its current identity.
-  The identity is `current-result`'s; given a program digest, the latest
+  The identity is `current-results`'s; given a program digest, the latest
   admitted native result's program instead.
   Missing execution is false; unavailable recorded evidence remains a refusal."
   {:malli/schema
@@ -1866,7 +1873,8 @@
     [:=> [:cat :seon.db/database-value :seon.test/sym :seon.test.run/program-digest]
      [:or :boolean :seon.test/host-error]]]}
   ([database test-symbol]
-   (let [result (current-result database test-symbol nil)]
+   (let [results (current-results database [test-symbol] nil)
+         result (if (:seon.error/at results) results (get results test-symbol))]
      (cond
        (:seon.error/at result) result
        ;; none current, or a member's typed unknown, is unverified
@@ -2151,16 +2159,6 @@
                                (= behavior (behavior-of candidate declaration)))))
                          changed))))))
 
-(defn- untouched?
-  "Whether `candidate`, a work branch, wrote no declaration digest since its fork (`seon.cluster.registry/fork-of`,
-  the walk's start in `seon.program/own-changed-identities`): its branch delta is then empty whatever its merge
-  base, so the merge base is not read. False on a branch with no fork entity or a refused read."
-  {:malli/schema [:=> [:cat :seon.db/database-value] :boolean]}
-  [candidate]
-  (let [t (:seon.branch/base-t (registry/fork-of candidate (get-in candidate [:config :branch])))
-        touched (when t (program/changed-identities t candidate source/merge-bound))]
-    (and (set? touched) (empty? touched))))
-
 (defn branch-changes
   "Every declaration `execution`'s program changed since its base (`change-base`: the published commit on the
   cluster's own branch, the merge base on a work branch), the `branch-delta`: empty when nothing changed;
@@ -2176,11 +2174,12 @@
                        "The cluster records no adopted source commit to compare my program against: there is no change to check."
                        cluster)
       (let [store (or (:seon.store/store execution) (:seon.store/store (env/of execution)))
-            candidate (db/db (:seon.db/connection execution))]
-        (if (untouched? candidate)
-          []
-          (let [base (change-base cluster candidate recorded)]
-            (if (:seon.error/at base) base (branch-delta (source/database store base) candidate))))))))
+            candidate (db/db (:seon.db/connection execution))
+            base (change-base cluster candidate recorded)]
+        (if (:seon.error/at base) base
+          (let [before (source/database store base)]
+            (try (branch-delta before candidate)
+                 (finally (source/release! [before])))))))))
 
 (defn branch-tests
   "The tests `execution`'s branch defined or changed since its base (`branch-changes`), sorted: empty when none."
