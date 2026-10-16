@@ -1,0 +1,76 @@
+diff --git a/src/seon/sci/eval.clj b/src/seon/sci/eval.clj
+index bf36348e4..d9cbd959e 100644
+--- a/src/seon/sci/eval.clj
++++ b/src/seon/sci/eval.clj
+@@ -514,6 +514,15 @@
+           (remove (fn [[sci-var binding]] (identical? binding (get inherited sci-var))))
+           (get env :sci/var-bindings {}))))
+ 
++(defn- own-binding?
++  "Whether `ctx` wrote its own binding of `sci-var` since its fork."
++  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.sci.eval/sci-var] :boolean]}
++  [ctx sci-var]
++  (let [env @(:env ctx)
++        bound (get-in env [:sci/var-bindings sci-var] absent-intern)]
++    (not (or (identical? bound absent-intern)
++             (identical? bound (get-in env [::inherited-var-bindings sci-var]))))))
++
+ (defn- turn-interns
+   "This context's own definitions: the Vars it wrote since its fork.
+ 
+@@ -1074,16 +1083,15 @@
+                   ::missing-function-row function-symbol
+                   :seon.fn/sym function-symbol
+                   :seon.error/expected :seon.sci.eval/acquired-function}))))
+-    ;; An uninstalled program symbol has no SCI entry, so one present is this
+-    ;; context's own definition, which survives its first install (AGENTS.md).
+-    (when-not (and (not (contains? interpreted function-symbol))
+-                   (not (source-namespace? ctx namespace-name))
+-                   (not (overridden-row? loaded db (db/pull db '[*] [:seon.fn/sym function-symbol])))
+-                   (or (when (contains? (get-in @(:env ctx) [:namespaces namespace-name])
+-                                        (symbol (name function-symbol)))
+-                         ;; Recorded so `acquire!` still carries it once installed.
+-                         (swap! (::kernel/program-snapshot ctx) assoc-in
+-                                [:functions function-symbol ::context-defined?] true))
++    ;; No install has written an uninstalled symbol's Var, so a binding of it
++    ;; this context wrote since its fork is its own definition, which survives
++    ;; its first install (AGENTS.md); recorded so `acquire!` still carries it.
++    (when-not (or (when (some->> (sci/resolve ctx function-symbol) (own-binding? ctx))
++                    (swap! (::kernel/program-snapshot ctx) assoc-in
++                           [:functions function-symbol ::context-defined?] true))
++                  (and (not (contains? interpreted function-symbol))
++                       (not (source-namespace? ctx namespace-name))
++                       (not (overridden-row? loaded db (db/pull db '[*] [:seon.fn/sym function-symbol])))
+                        (install-jvm-root! ctx function-symbol)))
+     (let [namespace-row (kernel/program-namespace ctx namespace-name)]
+       (install-declared-classes! ctx [namespace-row])
+diff --git a/test/seon/render_simplification_test.clj b/test/seon/render_simplification_test.clj
+index cbcd35071..05c9a1839 100644
+--- a/test/seon/render_simplification_test.clj
++++ b/test/seon/render_simplification_test.clj
+@@ -4,6 +4,7 @@
+             [clojure.test :refer [deftest is]]
+             [malli.core :as m]
+             [sci.core :as sci]
++            [sci.impl.utils]
+             [seon.cluster.agent :as agent]
+             [seon.cache]
+             [seon.config :as config]
+@@ -515,13 +516,11 @@
+            ctx (support/fork-cluster-ctx connection)
+            request (render-request database ctx fixture-b
+                                    {:seon.ns/name fixture-b})]
+-       ;; Acquisition is not invocation: acquire the program the value holds
+-       ;; first, so the trap observes only the renderer's invocation.
+        (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db database})
+-       (with-redefs [clojure.core/requiring-resolve
+-                     (fn [& _]
+-                       (throw (ex-info "compiled resolver trap" {})))]
+-         (is (= (str "B:" fixture-b) (render-ai request))))
++       (is (= (str "B:" fixture-b) (render-ai request)))
++       (is (sci.impl.utils/var?
++            (sci/resolve ctx 'seon.render-simplification.fixture-b/namespace-ai))
++           "the declared renderer is resolved as the context's SCI Var")
+        (sci/binding [sci/ns (sci/create-ns fixture-b)]
+          (sci/eval-form
+           ctx
