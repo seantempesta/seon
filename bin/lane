@@ -491,7 +491,9 @@ accepted_reds_gate() {
   # A red test HEAD does not define is a new proof, red by design (proofs are written before the body): accepted.
   bb -e '
 (let [[file trailer & reds] *command-line-args*
-      run (if (.exists (java.io.File. file)) (or (clojure.edn/read-string (slurp file)) {}) {})
+      run (when (.exists (java.io.File. file)) (clojure.edn/read-string (slurp file)))
+      _ (when-not (and (map? run) (:seon.test.run/id run))
+          (binding [*out* *err*] (println "== the HEAD check left no test run: nothing can be judged red on HEAD or new")) (System/exit 2))
       results (:seon.test/results run)
       head-run (set (map (comp str :seon.test/sym) results))
       head-red (set (->> results (filter #(pos? (+ (or (:seon.test/fail-count %) 0) (or (:seon.test/error-count %) 0)))) (map (comp str :seon.test/sym))))
