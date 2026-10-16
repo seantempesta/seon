@@ -71,6 +71,7 @@
                  [:seon.test.run/deadline :seon.test.run/deadline]
                  [:seon.test.run/dead-workers {:optional true} :seon.test.run/dead-workers]],
                 :stopped [:enum {:description "Why this request stopped before running every reserved member. Its members with no completed outcome were never started (:program-unknown: a failed adoption left the loaded program unknown; :request-threw: the request itself threw, for example its test world could not be built): each reads as an unknown, never green, and no longer covers a later request."} :deadline :member-unfinished :recording-refused :platform-red :program-unknown :request-threw],
+                :stopped-error [:string {:min 1 :description "The error value of the throwable that stopped this run `:request-threw`, as canonical EDN (seon.id/printed; clojure.edn reads it back): its :seon.error/type, :seon.error/operation and :seon.error/message, never a stack. Producer: seon.test.runner/record-interrupted!; reader: seon.context/end-summary-tx."}],
                 :terminated? [:boolean {:description "Caller observed execution return or exact process exit; a bound firing alone is false."}],
                 :claim-completion
                 [:and :seon.test.run/completion
@@ -131,6 +132,7 @@
                  [:seon.test.run/evaluator {:optional true} :seon.test.run/evaluator]
                  [:seon.test.run/policy {:optional true} :seon.test.run/policy]
                  [:seon.test.run/include-long? {:optional true} :seon.test.run/include-long?]
+                 [:seon.test.run/stopped-error {:optional true} :seon.test.run/stopped-error]
                  [:seon.test.run/change-basis-t {:optional true} :seon.test.run/change-basis-t]
                  [:seon.test.run/namespaces {:optional true} :seon.test.run/namespaces]
                  [:seon.test.run/identities {:optional true} :seon.test.run/identities]

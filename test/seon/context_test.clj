@@ -1018,3 +1018,21 @@
        (evaluate running agent-id "(my.turn/wait {:my.turn/note \"Stopped at the cycle probe.\"})")
        (is (= "Stopped at the cycle probe." (#'context/last-step (db/db target) agent-id))
            "an attempt's last step is the note of its last wait")))))
+
+(deftest
+  a-stalled-attempts-verdict-names-the-error-that-stopped-its-test-run
+  ;; The run a throw stopped keeps the error's type, operation and message (`seon.test.runner/record-interrupted!`);
+  ;; the end summary carries it and the bail's verdict reads it back as data.
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (proof-task running connection agent-id)
+     (let [error {:seon.error/type :seon.test/unknown-error :seon.error/operation 'seon.test/run
+                  :seon.error/message "The stored definition digest is not the one its definition produces"}]
+       (test-support/transacted! connection [{:seon.test.run/id "aaaabbbbcccc" :seon.test.run/at (java.util.Date.)
+                                              :seon.test.run/stopped :request-threw
+                                              :seon.test.run/stopped-error (seon.id/printed error)}])
+       (let [[summary] (context/end-summary-tx (db/db connection) agent-id)]
+         (is (= (seon.id/printed error) (:seon.agent/end-test-error summary)) "the end records the stopping error")
+         (is (= error (:seon.task/test-error (#'agent/attempt-verdict summary)))
+             "so the attempt's verdict names it as data")
+         (is (not (contains? (#'agent/attempt-verdict (dissoc summary :seon.agent/end-test-error)) :seon.task/test-error))))))))

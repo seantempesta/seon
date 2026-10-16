@@ -641,6 +641,14 @@
         (seq counts) (assoc :seon.task/proof-counts counts)
         (seq counts) (assoc :seon.task/red-proofs (vec (sort (:seon.agent/end-red-proofs row))))))))
 
+(defn- stopped-error
+  "The error of the latest run on `branch-db` that a throw stopped (`:seon.test.run/stopped-error`, as
+  `seon.test.runner/record-interrupted!` wrote it); nil when none."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:maybe :seon.test.run/stopped-error]]}
+  [branch-db]
+  (some->> (db/q '[:find ?at ?e :where [?r :seon.test.run/stopped-error ?e] [?r :seon.test.run/at ?at]] branch-db)
+           (sort-by first) last second))
+
 (defn end-summary-tx
   "Transaction data recording the outcome of the task `agent-id` holds, derived from its branch in `database`
   (calls, tokens, proof counts and red proofs): what the end summary needs after the branch is retired. Empty
@@ -655,9 +663,11 @@
         outcome (when branch-db (branch-end-summary branch-db agent-id sym))]
     (if (or (nil? outcome) (:seon.error/at outcome))
       []
-      (let [refusals (:seon.source/refusals (step-verdict branch-db agent-id))]
+      (let [refusals (:seon.source/refusals (step-verdict branch-db agent-id))
+            test-error (stopped-error branch-db)]
         [(cond-> (assoc (end-summary-facts outcome) :seon.agent/id agent-id)
-           (seq refusals) (assoc :seon.agent/end-refusals (id/printed (mapv refusal-data refusals))))]))))
+           (seq refusals) (assoc :seon.agent/end-refusals (id/printed (mapv refusal-data refusals)))
+           test-error (assoc :seon.agent/end-test-error test-error))]))))
 
 (defn ended
   "The value a task's end message `entry` (an inbox entry carrying `:seon.task/end`) stands for: the task, how it

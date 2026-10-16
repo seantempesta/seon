@@ -242,7 +242,8 @@
   [:seon.test/command {:optional true} :seon.test/command]]
  :seon.test/unknown :string
  :seon.test/unknown-error
- [:merge :seon.error/base [:map [:seon.test/unknown :seon.test/unknown]]]
+ [:merge :seon.error/base [:map [:seon.test/unknown :seon.test/unknown]
+                           [:seon.fault/recorded {:optional true} :seon.fault/recorded]]]
  :seon.test/next-tier
  [:or [:= :none] [:vector [:vector [:string {:min 1}]]]]
  :seon.test/command [:vector [:string {:min 1}]]

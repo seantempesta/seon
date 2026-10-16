@@ -3275,6 +3275,23 @@
           (carry-world-projection! view cluster)
           {:seon.db/connection view :seon.store/store store})))))
 
+(defn- record-thrown!
+  "Record `failure`, the exception that ended `request`, once through `seon.fault/fault!` on the request's
+  recording connection (the execution's branch when it names none), as `run-request`'s core faults are: cluster
+  from the execution, the agent. The receipt; nil when the request names no connection or its storage refused
+  (the refusal rides `failure` as suppressed)."
+  {:malli/schema [:=> [:cat :seon.test/request :seon.error/throwable] [:maybe :seon.fault/recorded]]}
+  [{execution :seon.test/execution :as request} ^Throwable failure]
+  (let [connection (or (:seon.test/recording-connection request) (:seon.db/connection execution))]
+    (when connection
+      (try (fault/fault! (env/environment {:seon.boot/cluster-name (:seon.cluster/name execution)
+                                           :seon.db/connection connection})
+                         failure
+                         (cond-> {:seon.error/layer :seon.test/execution :seon.error/operation `run
+                                  :seon.db.process/id (cluster.process/id (cluster.process/current-identity))}
+                           (:seon.agent/id execution) (assoc :seon.agent/id (:seon.agent/id execution))))
+           (catch Throwable refused (.addSuppressed failure refused) nil)))))
+
 (defn run
   "Answer one test request on the execution value it names.
 
@@ -3332,12 +3349,15 @@
        ;; request translated is the unknown outcome of this request, its cause kept.
        (catch Throwable failure
          ;; a message-less exception states none: the diagnostic takes its cause chain's
-         (assoc (seon.error.refusal/diagnostic
-                 (cond-> {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/execution
-                          :seon.error/operation 'seon.test/run :seon.error/throwable failure}
-                   (ex-message failure) (assoc :seon.error/message (ex-message failure))))
-                :seon.test/unknown "The request ended in an exception."
-                :seon.test/next-tier :none))))
+         (let [recorded (record-thrown! request failure)]
+          (cond-> (assoc (seon.error.refusal/diagnostic
+                         (cond-> {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/execution
+                                  :seon.error/operation 'seon.test/run :seon.error/throwable failure}
+                           (ex-message failure) (assoc :seon.error/message (ex-message failure))))
+                        :seon.test/unknown "The request ended in an exception."
+                        :seon.test/next-tier :none)
+           ;; recorded once, here at the entrant: its receipt names the occurrence
+           recorded (assoc :seon.fault/recorded recorded))))))
 
 (defn- unfulfilled
   "Why a run that did not pass did not, counted per kind of unfulfilled

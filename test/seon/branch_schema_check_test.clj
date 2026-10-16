@@ -3,6 +3,7 @@
   `my.test/check` builds from that branch."
   (:require [clojure.data.json :as json]
             [clojure.test :refer [deftest is]]
+            [seon.db :as db]
             [seon.mcp :as mcp]
             [seon.test :as test]
             [seon.test-support :as support]))
@@ -44,6 +45,22 @@
          (is (some? (:seon.test/unknown result)) "an unknown error, not a throw")
          (is (= class-name (-> result :seon.error/chain first :seon.error/throwable-class)) "the cause is kept")
          (is (= (ex-message thrown) (-> result :seon.error/chain first :seon.error/message))))))))
+
+(deftest a-thrown-request-records-its-error
+  ;; seon.test/a-thrown-request-records-its-error: the entrant records the throw once and returns its receipt
+  (support/with-running-agent
+   (fn [_running _agent-id connection]
+     (let [result (test/run {:seon.test/execution (support/execution-handle connection)
+                             :seon.test/recording-connection connection
+                             :seon.test/policy :named
+                             :seon.test/identities #{'seon.competency-test/t1-area-is-contracted}
+                             :seon.db/writer (fn [_connection _transaction] (throw (ex-info "injected throw" {})))})
+           occurrence (get-in result [:seon.fault/recorded :seon.error.occurrence/id])]
+       (is (some? (:seon.test/unknown result)) "still an error value, not a throw")
+       (is (true? (get-in result [:seon.fault/recorded :seon.fault/committed?])) "the receipt says it was recorded")
+       (is (some? occurrence) "and names the occurrence")
+       (is (some? (db/q '[:find ?o . :in $ ?id :where [?o :seon.error.occurrence/id ?id]] (db/db connection) occurrence))
+           "which the recording connection holds")))))
 
 (deftest a-failing-check-reply-carries-no-runner-report-in-out
   (support/with-running-agent

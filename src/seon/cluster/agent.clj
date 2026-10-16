@@ -2245,12 +2245,13 @@
   as data; empty when the agent recorded none."
   {:malli/schema [:=> [:cat [:maybe :map]] :seon.task/last-verdict]}
   [{green :seon.agent/end-green red :seon.agent/end-red pending :seon.agent/end-pending red-proofs :seon.agent/end-red-proofs
-    refusals :seon.agent/end-refusals}]
+    refusals :seon.agent/end-refusals test-error :seon.agent/end-test-error}]
   (let [counts (cond-> {} green (assoc :green green) red (assoc :red red) pending (assoc :pending pending))]
     (cond-> {}
       (seq counts) (assoc :seon.task/proof-counts counts)
       (seq red-proofs) (assoc :seon.task/red-proofs (vec (sort red-proofs)))
-      refusals (assoc :seon.source/refusals (edn/read-string refusals)))))
+      refusals (assoc :seon.source/refusals (edn/read-string refusals))
+      test-error (assoc :seon.task/test-error (edn/read-string test-error)))))
 
 (defn- chain-bails
   "The ended chain attempts root bails, read through `store` on main `database` (`seon.task/chain-attempts`):
@@ -2271,7 +2272,7 @@
                                           (db/pull (db/db connection)
                                                    [:seon.task.attempt/reason
                                                     {:seon.task/agent [:seon.agent/end-green :seon.agent/end-red :seon.agent/end-pending
-                                                                       :seon.agent/end-red-proofs :seon.agent/end-refusals]}]
+                                                                       :seon.agent/end-red-proofs :seon.agent/end-refusals :seon.agent/end-test-error]}]
                                                    [:seon.task/assignment key])]
                                       (assoc (select-keys row [:seon.chain/branch :seon.task/assignment :seon.task/assigned])
                                              :seon.task/reason (str "The attempt ended " end (if why (str ": " why) "."))

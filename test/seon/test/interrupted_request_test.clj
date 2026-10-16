@@ -1,7 +1,8 @@
 (ns seon.test.interrupted-request-test
   "A request that throws leaves no member open, and open test evidence makes
   only its own problem family unknown."
-  (:require [clojure.set :as set]
+  (:require [clojure.edn :as edn]
+            [clojure.set :as set]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [malli.core :as m]
@@ -219,3 +220,17 @@
        (is (= [:seon.test.run/id first-run] (:seon.test/run (first (by-symbol interrupted))))
            "the open member stays its own unknown in its own run")
        (is (:seon.error/at (first (by-symbol interrupted))))))))
+
+(deftest a-thrown-request-keeps-its-error-on-its-run
+  ;; seon.test/a-thrown-request-records-its-error: the run's stored record carries the error value, not a stack
+  (support/with-database
+   (fn [connection]
+     (let [{run-id :seon.test.run/id completion ::completion} (admitted-run! connection)
+           failure (ex-info "The test world's program overlay was refused" {:seon.error/type :seon.db/transaction-refused-error
+                                                                            :seon.error/operation 'seon.db/transact!})
+           _ (runner/record-interrupted! connection completion failure)
+           stored (:seon.test.run/stopped-error
+                   (db/pull (db/db connection) [:seon.test.run/stopped-error] [:seon.test.run/id run-id]))]
+       (is (= {:seon.error/type :seon.db/transaction-refused-error :seon.error/operation 'seon.db/transact!
+               :seon.error/message "The test world's program overlay was refused"}
+              (edn/read-string stored)))))))

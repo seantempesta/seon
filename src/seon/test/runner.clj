@@ -2539,9 +2539,24 @@
       (retain-results! (:db-after report) run-id))
     report))
 
+(defn thrown-error
+  "The error value `failure` stands for, as data: its `:seon.error/type` (the first cause link that declares one,
+  else `:seon.test/unknown-error`), its operation (likewise, else `seon.test/run`) and its message (else its class
+  name). A reference to the error, never its stack."
+  {:malli/schema [:=> [:cat :seon.error/throwable]
+                  [:map [:seon.error/type :keyword] [:seon.error/operation :qualified-symbol]
+                   [:seon.error/message [:string {:min 1}]]]]}
+  [^Throwable failure]
+  (let [links (seon.error.refusal/cause-links failure)
+        declared (fn [k] (some #(k (ex-data %)) links))]
+    {:seon.error/type (or (declared :seon.error/type) :seon.test/unknown-error)
+     :seon.error/operation (or (declared :seon.error/operation) 'seon.test/run)
+     :seon.error/message (or (not-empty (ex-message failure)) (.getName (class failure)))}))
+
 (defn record-interrupted!
-  "Stop `completion`'s run with `:request-threw` and commit the results its
-  members captured before `failure`, the throwable that ended the request.
+  "Stop `completion`'s run with `:request-threw`, keeping `failure`'s error value (`thrown-error`) on the run as
+  `:seon.test.run/stopped-error`, and commit the results its members captured before `failure`, the throwable
+  that ended the request.
 
   The throw is the request's, never a member's: a member with no outcome
   gains no result, so it reads as an unknown (never green, never a designed
@@ -2549,7 +2564,7 @@
   are left as they are."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.test.run/completion :seon.error/throwable]
                   [:or :seon.test/results :seon.db/error-result]]}
-  [connection completion ^Throwable _failure]
+  [connection completion ^Throwable failure]
   (let [run-id (get-in completion [:seon.test.run/provenance :seon.test.run/id])
         completed (into #{} (keep #(when (:seon.test.member/completed-tx %) (:seon.test.member/symbol %)))
                         (execution-members (db/db connection) run-id))
@@ -2559,7 +2574,9 @@
                                                       :seon.test.runner/results captured))
                    [])
         stopped (when-not (seon.error.refusal/error? recorded)
-                  (db/transact! connection [[:db/add [:seon.test.run/id run-id] :seon.test.run/stopped :request-threw]]))]
+                  (db/transact! connection [[:db/add [:seon.test.run/id run-id] :seon.test.run/stopped :request-threw]
+                                            [:db/add [:seon.test.run/id run-id] :seon.test.run/stopped-error
+                                             (id/printed (thrown-error failure))]]))]
     (if (seon.error.refusal/error? stopped) stopped recorded)))
 
 (def ^:private run-result-query
