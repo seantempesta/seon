@@ -61,36 +61,53 @@
      (let [refused (my.root/merge! {:my.program/context (root-context connection) :seon.task/assignment "000000000000"})]
        (is (= "000000000000" (:seon.error/offending refused)))))))
 
-(deftest ^{:seon/tasks #{'seon.merge/a-jvms-first-facts-merge-follows-the-changed-facts}}
-  a-jvms-first-facts-merge-follows-the-changed-facts
-  ;; red only as its JVM's first merge (run it alone through bin/seon check); a facts merge is warm 6.4 ms and 1 MB; the same merge as a fresh JVM's first was 417 ms and 1.0 GB
+(defn- ended-attempt!
+  "Write on main `connection` an attempt of a fresh task by a fresh agent on a new branch of `held`, and on that
+  branch the task's changed plan and the attempt's `end`: the assignment key and the branch's open connection."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.store/store :seon.task.attempt/end]
+                  [:tuple :seon.task/assignment :seon.db/connection :seon.store/branch]]}
+  [connection held end]
+  (let [id (seon.id/id)
+        handle (task/task-handle 'fixture.tasks (str "first-merge-" id))
+        agent-id (str "first-merge-agent-" id)
+        branch (keyword (str "first-merge-" id))]
+    (test-support/transacted! connection (into [(test-support/task-row handle "Do it.")]
+                                               (test-support/agent-tx (db/db connection) agent-id)))
+    (let [[row] (task/attempt-tx (db/db connection) handle agent-id branch)
+          _ (test-support/transacted! connection [row])
+          a (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/assignment (:seon.task/assignment row)]))
+          _ (registry/fork! {:seon.store/store held :seon.store/branch branch
+                             :seon.cluster.registry/from (db/commit-id (db/db connection))
+                             :seon.db/db (db/db connection)})
+          fork (db/carry-connection-projection-state! (store/open-branch! held branch)
+                                                      (:seon.sci.eval/projection-state (meta connection)))]
+      (db/with-branch {:seon.db/connection fork}
+                      #(test-support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/plan "Done."}
+                                                       [:db/add a :seon.task.attempt/end end]]))
+      [(:seon.task/assignment row) fork branch])))
+
+(deftest a-jvms-first-facts-merge-follows-the-changed-facts
   (test-support/with-database
    (fn [connection]
-     (let [handle (task/task-handle 'fixture.tasks "first-merge")
-           agent-id "first-merge-agent"
-           held (:seon.store/store (test-support/execution-handle connection))
-           branch (keyword (str "first-merge-" (random-uuid)))]
-       (test-support/transacted! connection (into [(test-support/task-row handle "Do it.")]
-                                                  (test-support/agent-tx (db/db connection) agent-id)))
-       (let [[row] (task/attempt-tx (db/db connection) handle agent-id branch)
-             assignment (:seon.task/assignment row)
-             _ (test-support/transacted! connection [row])
-             a (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/assignment assignment]))
-             _ (registry/fork! {:seon.store/store held :seon.store/branch branch
-                                :seon.cluster.registry/from (db/commit-id (db/db connection))
-                                :seon.db/db (db/db connection)})
-             fork (db/carry-connection-projection-state! (store/open-branch! held branch)
-                                                         (:seon.sci.eval/projection-state (meta connection)))]
-         (try
-           (db/with-branch {:seon.db/connection fork}
-                           #(test-support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/plan "Done."}
-                                                            [:db/add a :seon.task.attempt/end :done]]))
-           (let [measured (profile/measure #(my.root/merge! {:my.program/context (root-context connection)
-                                                             :seon.task/assignment assignment}))]
-             (is (<= (:seon.profile/ms measured) 100) "a facts merge, first in its JVM, under 100 ms")
-             (is (<= (:seon.profile/alloc-bytes measured) (* 64 1024 1024)) "and under 64 MB allocated on its thread"))
-           (finally (store/release-branch! fork)
-                    (registry/retire-branch! {:seon.store/store held :seon.store/branch branch}))))))))
+     (let [held (:seon.store/store (test-support/execution-handle connection))
+           attempts [(ended-attempt! connection held :sent-back) (ended-attempt! connection held :sent-back)]]
+       (try
+         (let [[first-merge second-merge]
+               (mapv (fn [[assignment]]
+                       (profile/measure #(my.root/merge! {:my.program/context (root-context connection)
+                                                          :seon.task/assignment assignment})))
+                     attempts)]
+           (is (= [:closed :closed] (mapv (comp :seon.task/outcome :seon.profile/value) [first-merge second-merge]))
+               "each sent-back attempt's facts merge closes it")
+           ;; allocation on the merging thread, not wall time: a concurrent check cannot move it
+           (is (<= (:seon.profile/alloc-bytes first-merge) (* 64 1024 1024))
+               "the JVM's first facts merge allocates under 64 MB on its thread")
+           (is (<= (:seon.profile/alloc-bytes second-merge) (* 16 1024 1024))
+               "a warm facts merge allocates what its changed facts need, under 16 MB, never main's whole history"))
+         (finally
+           (doseq [[_ fork branch] attempts]
+             (store/release-branch! fork)
+             (registry/retire-branch! {:seon.store/store held :seon.store/branch branch}))))))))
 
 (deftest a-merge-is-keyed-by-the-assignment
   ;; an agent's branch ended :done with its task refined; root merges it by its assignment

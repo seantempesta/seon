@@ -311,8 +311,16 @@
     (refuse! ::source-absent "the adopted source commit is unavailable"
              {:seon.source/commit-id commit-id})))
 
+(defn- changed-datoms
+  "The entity and attribute of every datom held by exactly one of `before` and `after`, two commits of one store:
+  their EAVT index diff (`seon.db/datoms-diff`), so the work follows what changed, never main's whole history."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value]
+                  [:vector [:map [:e :int] [:a :keyword]]]]}
+  [before after]
+  (into [] (comp cat (map (fn [[e a]] {:e e :a a}))) (db/datoms-diff before after :eavt [])))
+
 (defn changed-identities
-  "Publication report identities, or history since the cluster's adopted commit."
+  "Publication report identities, or what changed since the cluster's adopted commit."
   {:malli/schema
    [:=> [:cat :seon.store/store :seon.source/published :seon.source/commit-id]
     :seon.reconcile/adopt-identities]}
@@ -332,8 +340,7 @@
           (try
             (let [identities (fn/report-identities
                               before after
-                              (vec (d/datoms (d/since (d/history after) (db/basis-t before))
-                                             :eavt)))]
+                              (changed-datoms before after))]
               (when (:seon.db/invalid-read identities)
                 (refuse! ::publish-readback-failed "Publication changes could not be read." identities))
               identities)
@@ -2375,7 +2382,7 @@
     (try
       (if-not before
         parent
-        (let [datoms (vec (d/datoms (d/since (d/history after) (db/basis-t before)) :eavt))
+        (let [datoms (changed-datoms before after)
               declared (fn/report-identities before after datoms (vec program/identity-attributes))
               ;; a task is a declaration too: each entity whose task facts moved, by its symbol, unless it is a
               ;; runtime task (`:seon.task/created-by`, a chain's among them), which no task file declares
