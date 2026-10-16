@@ -2190,15 +2190,50 @@ pre.seon-debug-candidate-preview,
   font-size: 0.72rem;
 }
 
-/* --- the chains page (/chains): seon.task/chain-html in a slot ordered by state, bailed chains first --- */
-.seon-main:has(.seon-chain-slot, .seon-chains-header) { display: flex; flex-direction: column; gap: 0.65rem; }
+/* --- the chains page (/chains): seon.task/chain-html in a slot ordered by state, bailed chains first.
+   A chain is a card: its branch and state, then its tasks in next order, each task's attempts as rows that link
+   to the agent's page and to what its model calls were sent. Only a bailed chain or a closed attempt is red. --- */
+.seon-main:has(.seon-chain-slot, .seon-chains-header) { display: flex; flex-direction: column; gap: 0.75rem; max-width: 72rem; }
 .seon-chains-header { padding: 0.5rem 0; }
-.seon-chains-header h1 { font-size: 1rem; }
-.seon-chain { padding: 0.75rem; border: 1px solid var(--color-base-800); background: var(--color-base-950); }
-.seon-chain > header { display: flex; gap: 0.75rem; align-items: baseline; }
+.seon-chains-header h1 { font-size: 1rem; color: var(--color-text-50); }
+.seon-chains-header p { color: var(--color-text-400); font-size: 0.7rem; }
+.seon-chain { padding: 0; border: 1px solid var(--color-base-800); border-left: 3px solid var(--color-base-700); background: var(--color-base-950); font-size: 0.72rem; }
+.seon-chain-running { border-left-color: var(--color-signal); }
+.seon-chain-done { border-left-color: var(--color-success); }
+.seon-chain-ended, .seon-chain-unread { border-left-color: var(--color-text-600); opacity: 0.85; }
+.seon-chain > header { display: flex; flex-wrap: wrap; gap: 0.25rem 0.9rem; align-items: baseline; padding: 0.45rem 0.75rem; background: var(--color-base-900); border-bottom: 1px solid var(--color-base-800); }
+.seon-chain > header h2 { margin: 0; font-size: 0.8rem; font-weight: 600; color: var(--color-text-100); }
+.seon-chain-state { padding: 0 0.4rem; border: 1px solid currentColor; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-300); }
+.seon-chain-running .seon-chain-state { color: var(--color-signal); }
+.seon-chain-done .seon-chain-state { color: var(--color-success); }
+.seon-chain-bailed .seon-chain-state { color: var(--color-error); }
+.seon-chain-totals { margin-left: auto; color: var(--color-text-400); font-variant-numeric: tabular-nums; }
 .seon-chain-tasks, .seon-chain-attempts { list-style: none; margin: 0; padding: 0; }
-.seon-chain-task { padding: 0.35rem 0; border-top: 1px solid var(--color-base-800); }
-.seon-chain-task > span, .seon-chain-attempt > span, .seon-chain-attempt > a { margin-right: 0.75rem; font-size: 0.75rem; }
-.seon-chain-attempts { margin-left: 1.25rem; }
-.seon-chain-held { opacity: 0.7; }
-.seon-chain-loud, .seon-chain-bailed { border-left: 3px solid #e5484d; color: #ff9592; }
+.seon-chain-task { padding: 0.45rem 0.75rem; border-top: 1px solid var(--color-base-850); }
+.seon-chain-task:first-child { border-top: 0; }
+.seon-chain-task-line { display: flex; flex-wrap: wrap; gap: 0.2rem 0.75rem; align-items: baseline; }
+.seon-chain-task-kind { min-width: 5.5rem; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-eval); }
+.seon-chain-task-name { color: var(--color-text-100); overflow-wrap: anywhere; }
+.seon-chain-task-execution { color: var(--color-text-400); }
+.seon-chain-none { margin: 0.2rem 0 0 6.25rem; color: var(--color-text-500); }
+.seon-chain-attempts { margin: 0.3rem 0 0 6.25rem; display: grid; gap: 0.25rem; }
+.seon-chain-attempt { padding: 0.25rem 0.5rem; border-left: 2px solid var(--color-base-700); background: var(--color-base-900); }
+.seon-chain-outcome-done, .seon-chain-outcome-merged { border-left-color: var(--color-success); }
+.seon-chain-outcome-open { border-left-color: var(--color-signal); }
+.seon-chain-attempt-line, .seon-chain-merge { display: flex; flex-wrap: wrap; gap: 0.15rem 0.85rem; align-items: baseline; }
+.seon-chain-attempt-number { color: var(--color-text-50); font-weight: 600; }
+.seon-chain-attempt-end { color: var(--color-text-200); }
+.seon-chain-attempt-outcome { color: var(--color-text-300); }
+.seon-chain-outcome-merged .seon-chain-attempt-outcome, .seon-chain-outcome-done .seon-chain-attempt-outcome { color: var(--color-success); }
+.seon-chain-fact { color: var(--color-text-200); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.seon-chain-label { margin-right: 0.3rem; color: var(--color-text-500); }
+.seon-chain-merge { margin-top: 0.15rem; font-size: 0.66rem; }
+.seon-chain-agent { display: inline-flex; gap: 0.6rem; margin-left: auto; }
+.seon-chain-agent a { color: var(--color-info); text-decoration: none; border-bottom: 1px dotted currentColor; }
+.seon-chain-agent a:hover { color: var(--color-text-50); }
+.seon-chain-attempt-reason { margin: 0.2rem 0 0; color: var(--color-text-300); font-size: 0.68rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.seon-chain-held { opacity: 0.75; }
+.seon-chain-loud { border-left-color: var(--color-error) !important; }
+.seon-chain-loud .seon-chain-attempt-reason { color: #ff9592; }
+.seon-chain-bailed { border-left-color: var(--color-error); }
+@media (max-width: 750px) { .seon-chain-attempts, .seon-chain-none { margin-left: 0.75rem; } .seon-chain-agent { margin-left: 0; } }

@@ -869,10 +869,13 @@
                                                                                [:db/add [:seon.task/assignment key] :seon.task/reason "Out of turns."]])
                                            key)))]
            (is (= [{:seon.task.attempt/number 1 :seon.task.attempt/end :capped :seon.task/outcome :closed
-                    :seon.task/reason "Out of turns." :seon.agent/id "root" :seon.task/assignment key}]
+                    :seon.task/reason "Out of turns." :seon.agent/id "root" :seon.task/assignment key :seon.task/branch branch}]
                   (:seon.chain/attempts (first (:seon.chain/tasks (chain-view)))))
-               "an attempt joins its end, outcome and reason, and names its agent")
-           (is (= :bailed (:seon.chain/state (chain-view))) "a task whose latest attempt root closed bails its chain"))
+               "an attempt joins its end, outcome and reason, names its agent and the branch it works on")
+           (is (= :bailed (:seon.chain/state (chain-view))) "a task whose latest attempt root closed bails its chain")
+           (test-support/transacted! connection [[:db/retractEntity [:seon.chain/first first-task]]])
+           (is (= [:ended 1] ((juxt :seon.chain/state #(count (:seon.chain/attempts (first (:seon.chain/tasks %))))) (chain-view)))
+               "a chain whose fact main retracted unfinished stays listed from main's history, ended, with its attempts"))
          (is (= [:unread []] ((juxt :seon.chain/state :seon.chain/tasks)
                               (first (task/chain-views (db/db connection) {}))))
              "a chain whose branch has no database and whose tasks main lacks is unread")
@@ -895,7 +898,8 @@
         attributes (fn [tag] (keep #(when (and (= tag (first %)) (map? (second %))) (second %)) elements))]
     (is (= ["bbbbbbbbbbbb" "cccccccccccc"] (mapv :data-task (filter :data-task (attributes :li))))
         "the chain's tasks render in order, one item each")
-    (is (= ["/agent/attempt%2Fone"] (mapv :href (attributes :a))) "an attempt links to its agent's page")
+    (is (= ["/agent/attempt%2Fone" "/agent/attempt%2Fone/debug"] (mapv :href (attributes :a)))
+        "an attempt links to its agent's page and to its debug page, which shows what each model call was sent")
     (is (= ["bailed"] (mapv :data-state (filter :data-state (attributes :article)))) "the chain states its state")
     (is (some #(re-find #"seon-chain-loud" (:class %)) (filter :data-task (attributes :li)))
         "a bailed task is marked loud")

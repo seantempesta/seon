@@ -2040,8 +2040,8 @@
   "seon-chains-header")
 
 (def ^:private chain-state-rank
-  "Where a chain state sits on the chains page: bailed chains lead, loud, then the running ones."
-  {:bailed 0 :running 1 :unread 2 :done 3})
+  "Where a chain state sits on the chains page: bailed chains lead, loud, then the running ones, then the ended."
+  {:bailed 0 :running 1 :unread 2 :done 3 :ended 4})
 
 (defn- chain-database
   "A chain branch's database value: this process's open connection to it (the freshest), else its committed head."

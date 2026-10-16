@@ -10,18 +10,25 @@
                :description "The chain fact on main, one per chain: discovery, not status. Root finds every chain through it and reads the chain's state on its branch."}
          [:seon.chain/first :seon.chain/first]
          [:seon.chain/branch :seon.chain/branch]]
- :state [:enum {:description "A chain's state from its tasks (seon.task/chain-views): bailed when a task's latest attempt was closed by root or ended without finishing, done when the last task's latest attempt finished, unread when its branch and main hold no task, else running."}
-         :running :bailed :done :unread]
+ :state [:enum {:description "A chain's state from its tasks (seon.task/chain-views): unread when its branch and main hold no task, done when the last task's latest attempt finished, ended when main no longer holds its chain fact otherwise (root abandoned it), bailed when a task's latest attempt was closed by root or ended without finishing, else running."}
+         :running :bailed :done :unread :ended]
  :kind [:enum {:description "A chain task's kind from its :seon.task/step: Prove, Implement, else Design."} :design :prove :implement]
  :attempt-view [:map {:seon.render/html seon.task/attempt-html
-                      :description "One attempt of a chain task: main's row (number, outcome, reasons) overlaid by the branch's (the agent's end), the agent named by id. Producer: seon.task/chain-views."}
+                      :description "One attempt of a chain task: main's row (number, outcome, reasons, what its merge made) overlaid by the branch's (the agent's end), the agent named by id with its end summary. Producer: seon.task/chain-views."}
                 [:seon.task/assignment :seon.task/assignment]
                 [:seon.task.attempt/number {:optional true} :seon.task.attempt/number]
                 [:seon.task.attempt/end {:optional true} :seon.task.attempt/end]
                 [:seon.task.attempt/reason {:optional true} :seon.task.attempt/reason]
                 [:seon.task/outcome {:optional true} :seon.task/outcome]
                 [:seon.task/reason {:optional true} :seon.task/reason]
-                [:seon.agent/id {:optional true} :seon.agent/id]]
+                [:seon.agent/id {:optional true} :seon.agent/id]
+                [:seon.agent/end-calls {:optional true} :seon.agent/end-calls]
+                [:seon.agent/end-prompt-tokens {:optional true} :seon.agent/end-prompt-tokens]
+                [:seon.agent/end-completion-tokens {:optional true} :seon.agent/end-completion-tokens]
+                [:seon.task/branch {:optional true} :seon.task/branch]
+                [:seon.task/merge-commit {:optional true} :seon.task/merge-commit]
+                [:seon.task/merged-declarations {:optional true} :seon.task/merged-declarations]
+                [:seon.task/git-commit {:optional true} :seon.task/git-commit]]
  :attempts [:vector :seon.chain/attempt-view]
  :task-view [:map {:seon.render/html seon.task/chain-task-html
                    :description "One task of a chain in the chains page: its name, kind and execution, and its attempts in order. Producer: seon.task/chain-views."}
