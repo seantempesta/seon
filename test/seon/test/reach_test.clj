@@ -9,6 +9,7 @@
             [seon.program :as program]
             [seon.profile :as profile]
             [seon.render.value :as value]
+            [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.test :as test]
             [seon.test.runner :as runner]
@@ -59,6 +60,33 @@
          (is (string? before))
          (is (string? after))
          (is (not= before after)))))))
+
+(deftest bookkeeping-keeps-the-program-content-digest
+  (support/with-database
+   (fn [connection]
+     (support/declare-source! connection 'tq.content
+                             "(ns tq.content) (defn f {:malli/schema [:=> [:cat] :int]} [] 1)")
+     (let [before (runner/program-content-digest (db/db connection))]
+       (support/transacted!
+        connection
+        [{:seon.source/digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] (db/db connection))
+          :seon.source/test-input-digest (id/digest 64 [::bookkeeping])}])
+       (let [measured (profile/measure #(runner/program-content-digest (db/db connection)))]
+         (is (string? before))
+         (is (= before (:seon.profile/value measured)))
+         (is (zero? (profile/calls-of measured 'seon.program/digest-map))))
+       (support/transacted! connection [(support/revision (db/db connection) [:seon.fn/sym 'tq.content/f]
+                                                        {:seon.fn/doc "Changed content."})])
+       (is (not= before (runner/program-content-digest (db/db connection))))))))
+
+(deftest content-revision-contracts-are-admitted-for-agents
+  (support/with-database
+   (fn [connection]
+     (doseq [sym ['seon.test/selection-revisions 'seon.test.runner/result-revisions]]
+       (is (map? (schema/projection-with-function-contract
+                  (db/carried-projection (db/db connection)) sym
+                  (:malli/schema (meta (requiring-resolve sym)))
+                  {:seon.schema.admission/source :agent})))))))
 
 (defn- oracle-closure
   "A test's reach recomputed from each row's own pulled facts: calls,

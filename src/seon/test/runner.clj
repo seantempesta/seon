@@ -1365,13 +1365,17 @@
 (defn program-content-digest
   "The content of `database`'s program: the digest of its declarations' definition digests
   (`seon.program/digest-map`), equal on every value holding the same declarations, whatever connection, commit or
-  as-of view; derived once per commit (`seon.cache`). The refusal when the declarations cannot be read whole."
+  as-of view; held by declaration identity and digest revisions (`seon.cache`). Recording evaluations or test
+  results preserves the digest. The refusal when the declarations cannot be read whole."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or :seon.program/definition-digest :seon.program/digest-map-refusal]]}
   [database]
-  (let [derive #(let [digests (program/digest-map database program-content-bound)]
+  (let [families (:seon.program/compared-families
+                  (program/declaration-families (db/carried-projection database)))
+        revisions (db/content-revisions database (into [:seon.program/definition-digest] families))
+        derive #(let [digests (program/digest-map database program-content-bound)]
                   (if (:seon.error/at digests) digests (id/digest 64 [(into (sorted-map) digests)])))]
-    (if-let [commit (:datahike.value/commit-id (db/committed-value-identity database))]
-      (cache/lookup ::program-content commit (constantly 128) derive string?)
+    (if revisions
+      (cache/lookup ::program-content revisions (constantly (+ 128 (* 96 (count revisions)))) derive string?)
       (derive))))
 
 (defn task-input
@@ -2724,8 +2728,9 @@
     (catch Exception failure (result-read-error "result-at-reach" failure))))
 
 (defn- result-revisions
-  "The content revisions read by current result lookup, derived from its owning entity schemas."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil [:map-of :qualified-keyword :uuid]]]}
+  "The current-result lookup's content revisions; empty without authority.
+  Attributes come from the owning entity schemas."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:map-of :qualified-keyword :uuid]]}
   [database]
   (let [projection (db/carried-projection database)
         attributes (schema/projection-cache-value
@@ -2735,7 +2740,7 @@
                                                  (m/schema k {:registry (:seon.schema.projection/registry projection)}))))
                                  (map first))
                            [:seon.test.run/run :seon.test.member/member :seon.test.report/report :seon.task/task]))]
-    (db/content-revisions database (vec attributes))))
+    (or (db/content-revisions database (vec attributes)) {})))
 
 (defn current-results
   "Each of `test-symbols` with the result of its newest admitted execution on `database` recorded at its current
@@ -2776,7 +2781,7 @@
                                         ran)]
                       (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity))
                             (newest-results database members false))))))]
-      (if revisions
+      (if (seq revisions)
         (cache/lookup ::current-results [revisions names task (:seon.source/commit-id @@loaded-identity)]
                       #(+ (* 96 (count revisions)) (* 512 (count %))
                           (* 1024 (transduce (map (comp count :seon.test.failure/reports val)) + 0 %)))

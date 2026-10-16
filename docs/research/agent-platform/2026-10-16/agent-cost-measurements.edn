@@ -1472,3 +1472,1339 @@
     :peak-bytes 75344952,
     :used-bytes 71303168,
     :max-bytes -1}}
+; Slice 2 parent: task-reading proof; parent is 5b71e4670.
+{:k 1,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 1367.89,
+    :seon.profile/alloc-bytes 5752824,
+    :seon.profile/reads 1806,
+    :seon.profile/calls 391457,
+    :request #:seon.cost{:ms 1364.5, :calls 299881, :alloc-mb 1570.3}}}
+{:k 1,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 2,
+    seon.fn/gate-edges 1,
+    seon.test.runner/newest-results 7,
+    seon.test/run 2,
+    seon.test/bounded-result 25,
+    seon.test.runner/program-content-digest 5,
+    seon.program/digest-map 5}}
+{:k 1,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 601.59,
+    :seon.profile/alloc-bytes 4691872,
+    :seon.profile/reads 1409,
+    :seon.profile/calls 256664,
+    :request #:seon.cost{:ms 598.8, :calls 188512, :alloc-mb 866.2}}}
+{:k 1,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 3,
+    seon.test.runner/newest-results 9,
+    seon.test/run 2,
+    seon.test/bounded-result 2,
+    seon.test.runner/program-content-digest 7,
+    seon.program/digest-map 5}}
+{:k 1,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 38.35,
+    :seon.profile/alloc-bytes 3438912,
+    :seon.profile/reads 548,
+    :seon.profile/calls 32471,
+    :request #:seon.cost{:ms 36.1, :calls 21659, :alloc-mb 37.9}}}
+{:k 1,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 1,
+    seon.test.runner/newest-results 2}}
+{:k 1,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 5.3,
+    :seon.profile/alloc-bytes 6043648,
+    :seon.profile/reads 307,
+    :seon.profile/calls 9449}}
+{:k 1, :stage :verdict, :derivations nil}
+{:k 1,
+ :stage :root,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 93.96,
+    :seon.profile/alloc-bytes 8391520,
+    :seon.profile/reads 331,
+    :seon.profile/calls 20064,
+    :request #:seon.cost{:ms 91.5, :calls 10884, :alloc-mb 146.7}}}
+{:k 1,
+ :stage :root,
+ :derivations
+   {seon.cluster.source/merge-members 1,
+    seon.fn/gate-edges 1,
+    seon.program/digest-map 2}}
+{:k 1,
+ :old-gen
+   {:pool "G1 Eden Space",
+    :peak-bytes 1281359872,
+    :used-bytes 1178599424,
+    :max-bytes -1}}
+{:k 1,
+ :old-gen
+   {:pool "G1 Old Gen",
+    :peak-bytes 417596208,
+    :used-bytes 417596208,
+    :max-bytes 4294967296}}
+{:k 1,
+ :old-gen
+   {:pool "G1 Survivor Space",
+    :peak-bytes 72351744,
+    :used-bytes 72351744,
+    :max-bytes -1}}
+{:k 3,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 810.66,
+    :seon.profile/alloc-bytes 5536696,
+    :seon.profile/reads 5480,
+    :seon.profile/calls 757430,
+    :request #:seon.cost{:ms 808.0, :calls 186741, :alloc-mb 1048.5}}}
+{:k 3,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 6,
+    seon.fn/gate-edges 3,
+    seon.test.runner/newest-results 24,
+    seon.test/run 9,
+    seon.test/bounded-result 3,
+    seon.test.runner/program-content-digest 18,
+    seon.program/digest-map 15}}
+{:k 3,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 810.34,
+    :seon.profile/alloc-bytes 5508896,
+    :seon.profile/reads 5477,
+    :seon.profile/calls 756702,
+    :request #:seon.cost{:ms 808.0, :calls 187085, :alloc-mb 1051.7}}}
+{:k 3,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 6,
+    seon.fn/gate-edges 3,
+    seon.test.runner/newest-results 21,
+    seon.test/run 9,
+    seon.test/bounded-result 3,
+    seon.test.runner/program-content-digest 18,
+    seon.program/digest-map 15}}
+{:k 3,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 811.23,
+    :seon.profile/alloc-bytes 5389344,
+    :seon.profile/reads 5489,
+    :seon.profile/calls 758802,
+    :request #:seon.cost{:ms 808.0, :calls 187757, :alloc-mb 1052.7}}}
+{:k 3,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 6,
+    seon.fn/gate-edges 3,
+    seon.test.runner/newest-results 24,
+    seon.test/run 9,
+    seon.test/bounded-result 3,
+    seon.test.runner/program-content-digest 18,
+    seon.program/digest-map 15}}
+{:k 3,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 528.43,
+    :seon.profile/alloc-bytes 4975208,
+    :seon.profile/reads 4100,
+    :seon.profile/calls 607191,
+    :request #:seon.cost{:ms 526.3, :calls 166565, :alloc-mb 710.3}}}
+{:k 3,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 9,
+    seon.test.runner/newest-results 18,
+    seon.test/run 9,
+    seon.test/bounded-result 3,
+    seon.test.runner/program-content-digest 15,
+    seon.program/digest-map 15}}
+{:k 3,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 530.09,
+    :seon.profile/alloc-bytes 4896296,
+    :seon.profile/reads 4115,
+    :seon.profile/calls 609017,
+    :request #:seon.cost{:ms 527.6, :calls 163523, :alloc-mb 701.1}}}
+{:k 3,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 9,
+    seon.test.runner/newest-results 18,
+    seon.test/run 9,
+    seon.test/bounded-result 3,
+    seon.test.runner/program-content-digest 15,
+    seon.program/digest-map 15}}
+{:k 3,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 555.76,
+    :seon.profile/alloc-bytes 4915784,
+    :seon.profile/reads 4703,
+    :seon.profile/calls 636427,
+    :request #:seon.cost{:ms 553.4, :calls 163574, :alloc-mb 700.6}}}
+{:k 3,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 11,
+    seon.test.runner/newest-results 23,
+    seon.test/run 9,
+    seon.test/bounded-result 3,
+    seon.test.runner/program-content-digest 17,
+    seon.program/digest-map 15}}
+{:k 3,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 50.66,
+    :seon.profile/alloc-bytes 3947504,
+    :seon.profile/reads 1637,
+    :seon.profile/calls 95089,
+    :request #:seon.cost{:ms 47.7, :calls 21601, :alloc-mb 39.9}}}
+{:k 3,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 4,
+    seon.test.runner/newest-results 6}}
+{:k 3,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 49.7,
+    :seon.profile/alloc-bytes 3935440,
+    :seon.profile/reads 1610,
+    :seon.profile/calls 92462,
+    :request #:seon.cost{:ms 47.3, :calls 21585, :alloc-mb 39.6}}}
+{:k 3,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 4,
+    seon.test.runner/newest-results 6}}
+{:k 3,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 51.66,
+    :seon.profile/alloc-bytes 4189704,
+    :seon.profile/reads 1666,
+    :seon.profile/calls 98353,
+    :request #:seon.cost{:ms 48.6, :calls 21569, :alloc-mb 39.9}}}
+{:k 3,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 4,
+    seon.test.runner/newest-results 6}}
+{:k 3,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 5.23,
+    :seon.profile/alloc-bytes 6069776,
+    :seon.profile/reads 540,
+    :seon.profile/calls 16026}}
+{:k 3, :stage :verdict, :derivations nil}
+{:k 3,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 5.02,
+    :seon.profile/alloc-bytes 6055400,
+    :seon.profile/reads 159,
+    :seon.profile/calls 5069}}
+{:k 3, :stage :verdict, :derivations nil}
+{:k 3,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 4.8,
+    :seon.profile/alloc-bytes 6055552,
+    :seon.profile/reads 159,
+    :seon.profile/calls 5069}}
+{:k 3, :stage :verdict, :derivations nil}
+{:k 3,
+ :old-gen
+   {:pool "G1 Eden Space",
+    :peak-bytes 1247805440,
+    :used-bytes 559939584,
+    :max-bytes -1}}
+{:k 3,
+ :old-gen
+   {:pool "G1 Old Gen",
+    :peak-bytes 464059744,
+    :used-bytes 464059744,
+    :max-bytes 4294967296}}
+{:k 3,
+ :old-gen
+   {:pool "G1 Survivor Space",
+    :peak-bytes 79691776,
+    :used-bytes 66904544,
+    :max-bytes -1}}
+{:k 6,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 515.21,
+    :seon.profile/alloc-bytes 5104752,
+    :seon.profile/reads 9257,
+    :seon.profile/calls 931977,
+    :request #:seon.cost{:ms 513.3, :calls 122201, :alloc-mb 684.4}}}
+{:k 6,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 17,
+    seon.fn/gate-edges 6,
+    seon.test.runner/newest-results 35,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 29,
+    seon.program/digest-map 30}}
+{:k 6,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 481.4,
+    :seon.profile/alloc-bytes 5480592,
+    :seon.profile/reads 8205,
+    :seon.profile/calls 881591,
+    :request #:seon.cost{:ms 473.1, :calls 122196, :alloc-mb 650.9}}}
+{:k 6,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 12,
+    seon.fn/gate-edges 6,
+    seon.test.runner/newest-results 31,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 26,
+    seon.program/digest-map 30}}
+{:k 6,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 486.44,
+    :seon.profile/alloc-bytes 5579112,
+    :seon.profile/reads 8568,
+    :seon.profile/calls 899429,
+    :request #:seon.cost{:ms 483.4, :calls 122118, :alloc-mb 649.7}}}
+{:k 6,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 14,
+    seon.fn/gate-edges 6,
+    seon.test.runner/newest-results 33,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 27,
+    seon.program/digest-map 30}}
+{:k 6,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 484.56,
+    :seon.profile/alloc-bytes 5151176,
+    :seon.profile/reads 8465,
+    :seon.profile/calls 893623,
+    :request #:seon.cost{:ms 482.3, :calls 122176, :alloc-mb 643.1}}}
+{:k 6,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 14,
+    seon.fn/gate-edges 6,
+    seon.test.runner/newest-results 33,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 27,
+    seon.program/digest-map 30}}
+{:k 6,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 467.15,
+    :seon.profile/alloc-bytes 5261216,
+    :seon.profile/reads 8057,
+    :seon.profile/calls 861802,
+    :request #:seon.cost{:ms 464.7, :calls 122100, :alloc-mb 628.7}}}
+{:k 6,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 12,
+    seon.fn/gate-edges 6,
+    seon.test.runner/newest-results 29,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 24,
+    seon.program/digest-map 30}}
+{:k 6,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 466.02,
+    :seon.profile/alloc-bytes 4750528,
+    :seon.profile/reads 8048,
+    :seon.profile/calls 860361,
+    :request #:seon.cost{:ms 463.8, :calls 121039, :alloc-mb 616.5}}}
+{:k 6,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 12,
+    seon.fn/gate-edges 6,
+    seon.test.runner/newest-results 29,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 24,
+    seon.program/digest-map 30}}
+{:k 6,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 378.83,
+    :seon.profile/alloc-bytes 4130496,
+    :seon.profile/reads 7121,
+    :seon.profile/calls 755811,
+    :request #:seon.cost{:ms 376.5, :calls 110898, :alloc-mb 484.9}}}
+{:k 6,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 13,
+    seon.test.runner/newest-results 31,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 25,
+    seon.program/digest-map 30}}
+{:k 6,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 377.29,
+    :seon.profile/alloc-bytes 4026232,
+    :seon.profile/reads 7074,
+    :seon.profile/calls 751048,
+    :request #:seon.cost{:ms 374.6, :calls 112768, :alloc-mb 492.3}}}
+{:k 6,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 13,
+    seon.test.runner/newest-results 30,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 25,
+    seon.program/digest-map 30}}
+{:k 6,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 385.41,
+    :seon.profile/alloc-bytes 4186720,
+    :seon.profile/reads 7568,
+    :seon.profile/calls 782476,
+    :request #:seon.cost{:ms 383.3, :calls 112754, :alloc-mb 494.7}}}
+{:k 6,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 15,
+    seon.test.runner/newest-results 34,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 28,
+    seon.program/digest-map 30}}
+{:k 6,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 385.63,
+    :seon.profile/alloc-bytes 4136080,
+    :seon.profile/reads 7569,
+    :seon.profile/calls 782668,
+    :request #:seon.cost{:ms 383.0, :calls 112722, :alloc-mb 491.1}}}
+{:k 6,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 15,
+    seon.test.runner/newest-results 34,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 28,
+    seon.program/digest-map 30}}
+{:k 6,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 376.64,
+    :seon.profile/alloc-bytes 4412616,
+    :seon.profile/reads 7041,
+    :seon.profile/calls 748715,
+    :request #:seon.cost{:ms 374.5, :calls 112777, :alloc-mb 494.0}}}
+{:k 6,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 13,
+    seon.test.runner/newest-results 30,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 25,
+    seon.program/digest-map 30}}
+{:k 6,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 395.13,
+    :seon.profile/alloc-bytes 4517080,
+    :seon.profile/reads 8211,
+    :seon.profile/calls 814001,
+    :request #:seon.cost{:ms 393.1, :calls 112769, :alloc-mb 499.7}}}
+{:k 6,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 18,
+    seon.test.runner/newest-results 36,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 30,
+    seon.program/digest-map 30}}
+{:k 6,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 52.09,
+    :seon.profile/alloc-bytes 4375568,
+    :seon.profile/reads 2994,
+    :seon.profile/calls 180502,
+    :request #:seon.cost{:ms 44.7, :calls 21589, :alloc-mb 40.2}}}
+{:k 6,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 6,
+    seon.test.runner/newest-results 12}}
+{:k 6,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 52.28,
+    :seon.profile/alloc-bytes 3529592,
+    :seon.profile/reads 2994,
+    :seon.profile/calls 180472,
+    :request #:seon.cost{:ms 49.6, :calls 21572, :alloc-mb 40.1}}}
+{:k 6,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 6,
+    seon.test.runner/newest-results 12}}
+{:k 6,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 52.31,
+    :seon.profile/alloc-bytes 4391928,
+    :seon.profile/reads 2996,
+    :seon.profile/calls 180574,
+    :request #:seon.cost{:ms 49.7, :calls 21557, :alloc-mb 40.3}}}
+{:k 6,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 6,
+    seon.test.runner/newest-results 12}}
+{:k 6,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 52.31,
+    :seon.profile/alloc-bytes 4239416,
+    :seon.profile/reads 2996,
+    :seon.profile/calls 180579,
+    :request #:seon.cost{:ms 45.0, :calls 21540, :alloc-mb 40.3}}}
+{:k 6,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 6,
+    seon.test.runner/newest-results 12}}
+{:k 6,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 52.13,
+    :seon.profile/alloc-bytes 3898888,
+    :seon.profile/reads 2990,
+    :seon.profile/calls 179779,
+    :request #:seon.cost{:ms 49.4, :calls 21525, :alloc-mb 40.1}}}
+{:k 6,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 6,
+    seon.test.runner/newest-results 12}}
+{:k 6,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 52.31,
+    :seon.profile/alloc-bytes 4422536,
+    :seon.profile/reads 2996,
+    :seon.profile/calls 180644,
+    :request #:seon.cost{:ms 45.2, :calls 21509, :alloc-mb 40.8}}}
+{:k 6,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 6,
+    seon.test.runner/newest-results 12}}
+{:k 6,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 6.59,
+    :seon.profile/alloc-bytes 6046880,
+    :seon.profile/reads 1081,
+    :seon.profile/calls 34305}}
+{:k 6, :stage :verdict, :derivations nil}
+{:k 6,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 4.79,
+    :seon.profile/alloc-bytes 6045768,
+    :seon.profile/reads 159,
+    :seon.profile/calls 5055}}
+{:k 6, :stage :verdict, :derivations nil}
+{:k 6,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 4.69,
+    :seon.profile/alloc-bytes 6044312,
+    :seon.profile/reads 159,
+    :seon.profile/calls 5055}}
+{:k 6, :stage :verdict, :derivations nil}
+{:k 6,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 4.68,
+    :seon.profile/alloc-bytes 6044544,
+    :seon.profile/reads 159,
+    :seon.profile/calls 5055}}
+{:k 6, :stage :verdict, :derivations nil}
+{:k 6,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 4.64,
+    :seon.profile/alloc-bytes 6045576,
+    :seon.profile/reads 159,
+    :seon.profile/calls 5055}}
+{:k 6, :stage :verdict, :derivations nil}
+{:k 6,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 4.6,
+    :seon.profile/alloc-bytes 6043768,
+    :seon.profile/reads 159,
+    :seon.profile/calls 5055}}
+{:k 6, :stage :verdict, :derivations nil}
+{:k 6,
+ :old-gen
+   {:pool "G1 Eden Space",
+    :peak-bytes 1212153856,
+    :used-bytes 167772160,
+    :max-bytes -1}}
+{:k 6,
+ :old-gen
+   {:pool "G1 Old Gen",
+    :peak-bytes 520660360,
+    :used-bytes 520660360,
+    :max-bytes 4294967296}}
+{:k 6,
+ :old-gen
+   {:pool "G1 Survivor Space",
+    :peak-bytes 88080384,
+    :used-bytes 60817408,
+    :max-bytes -1}}
+; Slice 2 candidate: task-reading proof; parent is 5b71e4670.
+{:k 1,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 1236.94,
+    :seon.profile/alloc-bytes 5716152,
+    :seon.profile/reads 1806,
+    :seon.profile/calls 348886,
+    :request #:seon.cost{:ms 1232.7, :calls 258876, :alloc-mb 1371.6}}}
+{:k 1,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 2,
+    seon.fn/gate-edges 1,
+    seon.test.runner/newest-results 7,
+    seon.test/run 2,
+    seon.test/bounded-result 25,
+    seon.test.runner/program-content-digest 5,
+    seon.program/digest-map 3}}
+{:k 1,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 499.34,
+    :seon.profile/alloc-bytes 4674072,
+    :seon.profile/reads 1407,
+    :seon.profile/calls 216774,
+    :request #:seon.cost{:ms 496.5, :calls 149991, :alloc-mb 670.6}}}
+{:k 1,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 3,
+    seon.test.runner/newest-results 9,
+    seon.test/run 2,
+    seon.test/bounded-result 2,
+    seon.test.runner/program-content-digest 6,
+    seon.program/digest-map 3}}
+{:k 1,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 38.19,
+    :seon.profile/alloc-bytes 3378576,
+    :seon.profile/reads 549,
+    :seon.profile/calls 32195,
+    :request #:seon.cost{:ms 35.8, :calls 21449, :alloc-mb 37.9}}}
+{:k 1,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 1,
+    seon.test.runner/newest-results 2}}
+{:k 1,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 7.34,
+    :seon.profile/alloc-bytes 6038488,
+    :seon.profile/reads 305,
+    :seon.profile/calls 9246}}
+{:k 1, :stage :verdict, :derivations nil}
+{:k 1,
+ :stage :root,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 87.6,
+    :seon.profile/alloc-bytes 8130424,
+    :seon.profile/reads 331,
+    :seon.profile/calls 19592,
+    :request #:seon.cost{:ms 85.5, :calls 10666, :alloc-mb 146.7}}}
+{:k 1,
+ :stage :root,
+ :derivations
+   {seon.cluster.source/merge-members 1,
+    seon.fn/gate-edges 1,
+    seon.program/digest-map 2}}
+{:k 1,
+ :old-gen
+   {:pool "G1 Eden Space",
+    :peak-bytes 1251999744,
+    :used-bytes 784334848,
+    :max-bytes -1}}
+{:k 1,
+ :old-gen
+   {:pool "G1 Old Gen",
+    :peak-bytes 413392584,
+    :used-bytes 413392584,
+    :max-bytes 4294967296}}
+{:k 1,
+ :old-gen
+   {:pool "G1 Survivor Space",
+    :peak-bytes 92274688,
+    :used-bytes 90177536,
+    :max-bytes -1}}
+{:k 3,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 686.64,
+    :seon.profile/alloc-bytes 5429048,
+    :seon.profile/reads 5264,
+    :seon.profile/calls 624421,
+    :request #:seon.cost{:ms 683.6, :calls 148465, :alloc-mb 808.2}}}
+{:k 3,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 6,
+    seon.fn/gate-edges 3,
+    seon.test.runner/newest-results 20,
+    seon.test/run 9,
+    seon.test/bounded-result 3,
+    seon.test.runner/program-content-digest 15,
+    seon.program/digest-map 9}}
+{:k 3,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 697.18,
+    :seon.profile/alloc-bytes 5470296,
+    :seon.profile/reads 5669,
+    :seon.profile/calls 646050,
+    :request #:seon.cost{:ms 695.0, :calls 146020, :alloc-mb 842.3}}}
+{:k 3,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 8,
+    seon.fn/gate-edges 3,
+    seon.test.runner/newest-results 23,
+    seon.test/run 9,
+    seon.test/bounded-result 3,
+    seon.test.runner/program-content-digest 17,
+    seon.program/digest-map 9}}
+{:k 3,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 686.68,
+    :seon.profile/alloc-bytes 5318256,
+    :seon.profile/reads 5264,
+    :seon.profile/calls 624312,
+    :request #:seon.cost{:ms 683.8, :calls 148842, :alloc-mb 876.2}}}
+{:k 3,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 6,
+    seon.fn/gate-edges 3,
+    seon.test.runner/newest-results 20,
+    seon.test/run 9,
+    seon.test/bounded-result 3,
+    seon.test.runner/program-content-digest 15,
+    seon.program/digest-map 9}}
+{:k 3,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 402.66,
+    :seon.profile/alloc-bytes 4980808,
+    :seon.profile/reads 4316,
+    :seon.profile/calls 500265,
+    :request #:seon.cost{:ms 398.9, :calls 126689, :alloc-mb 502.4}}}
+{:k 3,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 7,
+    seon.test.runner/newest-results 23,
+    seon.test/run 9,
+    seon.test/bounded-result 3,
+    seon.test.runner/program-content-digest 18,
+    seon.program/digest-map 9}}
+{:k 3,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 402.38,
+    :seon.profile/alloc-bytes 4952640,
+    :seon.profile/reads 4310,
+    :seon.profile/calls 499658,
+    :request #:seon.cost{:ms 399.2, :calls 126748, :alloc-mb 482.2}}}
+{:k 3,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 7,
+    seon.test.runner/newest-results 22,
+    seon.test/run 9,
+    seon.test/bounded-result 3,
+    seon.test.runner/program-content-digest 18,
+    seon.program/digest-map 9}}
+{:k 3,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 408.85,
+    :seon.profile/alloc-bytes 4839376,
+    :seon.profile/reads 4598,
+    :seon.profile/calls 513624,
+    :request #:seon.cost{:ms 406.8, :calls 127195, :alloc-mb 499.5}}}
+{:k 3,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 9,
+    seon.test.runner/newest-results 24,
+    seon.test/run 9,
+    seon.test/bounded-result 3,
+    seon.test.runner/program-content-digest 18,
+    seon.program/digest-map 9}}
+{:k 3,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 42.51,
+    :seon.profile/alloc-bytes 3441744,
+    :seon.profile/reads 1609,
+    :seon.profile/calls 91173,
+    :request #:seon.cost{:ms 40.2, :calls 21390, :alloc-mb 38.8}}}
+{:k 3,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 4,
+    seon.test.runner/newest-results 6}}
+{:k 3,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 42.37,
+    :seon.profile/alloc-bytes 3510600,
+    :seon.profile/reads 1603,
+    :seon.profile/calls 90645,
+    :request #:seon.cost{:ms 40.0, :calls 21375, :alloc-mb 38.8}}}
+{:k 3,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 4,
+    seon.test.runner/newest-results 6}}
+{:k 3,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 42.18,
+    :seon.profile/alloc-bytes 3969704,
+    :seon.profile/reads 1602,
+    :seon.profile/calls 90569,
+    :request #:seon.cost{:ms 39.5, :calls 21359, :alloc-mb 38.9}}}
+{:k 3,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 4,
+    seon.test.runner/newest-results 6}}
+{:k 3,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 6.19,
+    :seon.profile/alloc-bytes 6270128,
+    :seon.profile/reads 628,
+    :seon.profile/calls 21145}}
+{:k 3, :stage :verdict, :derivations nil}
+{:k 3,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 5.22,
+    :seon.profile/alloc-bytes 6003544,
+    :seon.profile/reads 159,
+    :seon.profile/calls 5165}}
+{:k 3, :stage :verdict, :derivations nil}
+{:k 3,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 4.92,
+    :seon.profile/alloc-bytes 6004320,
+    :seon.profile/reads 159,
+    :seon.profile/calls 5049}}
+{:k 3, :stage :verdict, :derivations nil}
+{:k 3,
+ :old-gen
+   {:pool "G1 Eden Space",
+    :peak-bytes 1262485504,
+    :used-bytes 2097152,
+    :max-bytes -1}}
+{:k 3,
+ :old-gen
+   {:pool "G1 Old Gen",
+    :peak-bytes 472568912,
+    :used-bytes 472568912,
+    :max-bytes 4294967296}}
+{:k 3,
+ :old-gen
+   {:pool "G1 Survivor Space",
+    :peak-bytes 84901736,
+    :used-bytes 69206016,
+    :max-bytes -1}}
+{:k 6,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 345.0,
+    :seon.profile/alloc-bytes 4961056,
+    :seon.profile/reads 8743,
+    :seon.profile/calls 671650,
+    :request #:seon.cost{:ms 343.0, :calls 83713, :alloc-mb 467.2}}}
+{:k 6,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 15,
+    seon.fn/gate-edges 6,
+    seon.test.runner/newest-results 33,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 27,
+    seon.program/digest-map 18}}
+{:k 6,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 346.48,
+    :seon.profile/alloc-bytes 4963384,
+    :seon.profile/reads 8748,
+    :seon.profile/calls 673650,
+    :request #:seon.cost{:ms 344.7, :calls 83734, :alloc-mb 428.3}}}
+{:k 6,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 15,
+    seon.fn/gate-edges 6,
+    seon.test.runner/newest-results 33,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 27,
+    seon.program/digest-map 18}}
+{:k 6,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 345.98,
+    :seon.profile/alloc-bytes 5040584,
+    :seon.profile/reads 8747,
+    :seon.profile/calls 673138,
+    :request #:seon.cost{:ms 343.2, :calls 83729, :alloc-mb 430.9}}}
+{:k 6,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 15,
+    seon.fn/gate-edges 6,
+    seon.test.runner/newest-results 33,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 27,
+    seon.program/digest-map 18}}
+{:k 6,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 329.21,
+    :seon.profile/alloc-bytes 5267344,
+    :seon.profile/reads 8134,
+    :seon.profile/calls 636124,
+    :request #:seon.cost{:ms 326.5, :calls 83644, :alloc-mb 419.1}}}
+{:k 6,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 12,
+    seon.fn/gate-edges 6,
+    seon.test.runner/newest-results 31,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 25,
+    seon.program/digest-map 18}}
+{:k 6,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 329.22,
+    :seon.profile/alloc-bytes 5132008,
+    :seon.profile/reads 8134,
+    :seon.profile/calls 636125,
+    :request #:seon.cost{:ms 326.5, :calls 83612, :alloc-mb 421.8}}}
+{:k 6,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 12,
+    seon.fn/gate-edges 6,
+    seon.test.runner/newest-results 31,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 25,
+    seon.program/digest-map 18}}
+{:k 6,
+ :stage :first,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 318.6,
+    :seon.profile/alloc-bytes 4675408,
+    :seon.profile/reads 7699,
+    :seon.profile/calls 612289,
+    :request #:seon.cost{:ms 316.6, :calls 80307, :alloc-mb 411.2}}}
+{:k 6,
+ :stage :first,
+ :derivations
+   {seon.cluster.source/merge-members 12,
+    seon.fn/gate-edges 6,
+    seon.test.runner/newest-results 30,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 24,
+    seon.program/digest-map 18}}
+{:k 6,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 297.82,
+    :seon.profile/alloc-bytes 4174264,
+    :seon.profile/reads 7166,
+    :seon.profile/calls 526439,
+    :request #:seon.cost{:ms 295.1, :calls 74616, :alloc-mb 292.2}}}
+{:k 6,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 14,
+    seon.test.runner/newest-results 32,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 26,
+    seon.program/digest-map 18}}
+{:k 6,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 297.49,
+    :seon.profile/alloc-bytes 4054040,
+    :seon.profile/reads 7160,
+    :seon.profile/calls 525312,
+    :request #:seon.cost{:ms 295.1, :calls 74512, :alloc-mb 292.9}}}
+{:k 6,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 14,
+    seon.test.runner/newest-results 32,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 26,
+    seon.program/digest-map 18}}
+{:k 6,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 303.66,
+    :seon.profile/alloc-bytes 4155744,
+    :seon.profile/reads 7393,
+    :seon.profile/calls 544227,
+    :request #:seon.cost{:ms 301.1, :calls 72586, :alloc-mb 285.0}}}
+{:k 6,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 14,
+    seon.test.runner/newest-results 33,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 28,
+    seon.program/digest-map 18}}
+{:k 6,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 311.42,
+    :seon.profile/alloc-bytes 4228096,
+    :seon.profile/reads 7963,
+    :seon.profile/calls 572543,
+    :request #:seon.cost{:ms 308.9, :calls 74474, :alloc-mb 293.9}}}
+{:k 6,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 17,
+    seon.test.runner/newest-results 37,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 31,
+    seon.program/digest-map 18}}
+{:k 6,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 302.26,
+    :seon.profile/alloc-bytes 4436648,
+    :seon.profile/reads 7348,
+    :seon.profile/calls 539377,
+    :request #:seon.cost{:ms 300.1, :calls 74527, :alloc-mb 293.5}}}
+{:k 6,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 14,
+    seon.test.runner/newest-results 33,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 27,
+    seon.program/digest-map 18}}
+{:k 6,
+ :stage :repeat,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 325.03,
+    :seon.profile/alloc-bytes 4222920,
+    :seon.profile/reads 8655,
+    :seon.profile/calls 601153,
+    :request #:seon.cost{:ms 323.1, :calls 74462, :alloc-mb 299.3}}}
+{:k 6,
+ :stage :repeat,
+ :derivations
+   {seon.cluster.source/merge-members 20,
+    seon.test.runner/newest-results 38,
+    seon.test/run 18,
+    seon.test.runner/program-content-digest 32,
+    seon.program/digest-map 18}}
+{:k 6,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 46.3,
+    :seon.profile/alloc-bytes 3826904,
+    :seon.profile/reads 3004,
+    :seon.profile/calls 163698,
+    :request #:seon.cost{:ms 44.0, :calls 21378, :alloc-mb 39.6}}}
+{:k 6,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 7,
+    seon.test.runner/newest-results 12}}
+{:k 6,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 51.15,
+    :seon.profile/alloc-bytes 4200080,
+    :seon.profile/reads 3129,
+    :seon.profile/calls 184273,
+    :request #:seon.cost{:ms 49.3, :calls 21363, :alloc-mb 40.0}}}
+{:k 6,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 7,
+    seon.test.runner/newest-results 12}}
+{:k 6,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 49.68,
+    :seon.profile/alloc-bytes 3959984,
+    :seon.profile/reads 3073,
+    :seon.profile/calls 177432,
+    :request #:seon.cost{:ms 47.9, :calls 21347, :alloc-mb 39.5}}}
+{:k 6,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 7,
+    seon.test.runner/newest-results 12}}
+{:k 6,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 49.45,
+    :seon.profile/alloc-bytes 3957168,
+    :seon.profile/reads 3082,
+    :seon.profile/calls 178619,
+    :request #:seon.cost{:ms 47.2, :calls 21331, :alloc-mb 39.5}}}
+{:k 6,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 7,
+    seon.test.runner/newest-results 12}}
+{:k 6,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 48.44,
+    :seon.profile/alloc-bytes 3898272,
+    :seon.profile/reads 3037,
+    :seon.profile/calls 171290,
+    :request #:seon.cost{:ms 46.4, :calls 21315, :alloc-mb 40.4}}}
+{:k 6,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 7,
+    seon.test.runner/newest-results 12}}
+{:k 6,
+ :stage :unchanged,
+ :measurement
+   {:failed? false,
+    :seon.profile/ms 48.45,
+    :seon.profile/alloc-bytes 3641800,
+    :seon.profile/reads 3038,
+    :seon.profile/calls 171271,
+    :request #:seon.cost{:ms 46.9, :calls 21299, :alloc-mb 39.0}}}
+{:k 6,
+ :stage :unchanged,
+ :derivations
+   {seon.cluster.source/merge-members 7,
+    seon.test.runner/newest-results 12}}
+{:k 6,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 6.44,
+    :seon.profile/alloc-bytes 6776432,
+    :seon.profile/reads 943,
+    :seon.profile/calls 31747}}
+{:k 6, :stage :verdict, :derivations nil}
+{:k 6,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 4.69,
+    :seon.profile/alloc-bytes 5996912,
+    :seon.profile/reads 160,
+    :seon.profile/calls 5359}}
+{:k 6, :stage :verdict, :derivations nil}
+{:k 6,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 4.71,
+    :seon.profile/alloc-bytes 5996328,
+    :seon.profile/reads 159,
+    :seon.profile/calls 5035}}
+{:k 6, :stage :verdict, :derivations nil}
+{:k 6,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 4.54,
+    :seon.profile/alloc-bytes 5995400,
+    :seon.profile/reads 159,
+    :seon.profile/calls 5035}}
+{:k 6, :stage :verdict, :derivations nil}
+{:k 6,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 4.47,
+    :seon.profile/alloc-bytes 5993136,
+    :seon.profile/reads 159,
+    :seon.profile/calls 5035}}
+{:k 6, :stage :verdict, :derivations nil}
+{:k 6,
+ :stage :verdict,
+ :measurement
+   {:status :working,
+    :members 26,
+    :seon.profile/ms 4.39,
+    :seon.profile/alloc-bytes 5988616,
+    :seon.profile/reads 159,
+    :seon.profile/calls 5035}}
+{:k 6, :stage :verdict, :derivations nil}
+{:k 6,
+ :old-gen
+   {:pool "G1 Eden Space",
+    :peak-bytes 1222639616,
+    :used-bytes 780140544,
+    :max-bytes -1}}
+{:k 6,
+ :old-gen
+   {:pool "G1 Old Gen",
+    :peak-bytes 525992808,
+    :used-bytes 525992808,
+    :max-bytes 4294967296}}
+{:k 6,
+ :old-gen
+   {:pool "G1 Survivor Space",
+    :peak-bytes 78535144,
+    :used-bytes 72351744,
+    :max-bytes -1}}

@@ -17,11 +17,11 @@
   "A contracted function with `width` reaching tests in the probe namespace."
   {:malli/schema [:=> [:cat pos-int?] :string]}
   [width]
-  (str "(ns agent.cost.probe (:require [clojure.test :refer [deftest is]]))\n"
+  (str "(ns agent.cost.probe (:require [clojure.test :refer [deftest is]] [seon.test :as test]))\n"
        "(defn value {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
        "(defn narrow {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 0))\n"
        "(deftest narrow-test (is (= 1 (narrow 1))))\n"
-       "(deftest pending (is false))\n"
+       "(deftest pending (is (nil? (test/task))))\n"
        (apply str (for [i (range width)]
                     (str "(deftest value-" i " (is (= " i " (value " i "))))\n")))))
 
@@ -38,7 +38,8 @@
            :derivations (select-keys (:seon.profile/called measured)
                                     '[seon.cluster.source/merge-members seon.fn/gate-edges
                                       seon.test.runner/newest-results seon.db/entities-changed-after
-                                      seon.test/run seon.test/bounded-result])
+                                      seon.test/run seon.test/bounded-result
+                                      seon.test.runner/program-content-digest seon.program/digest-map])
            :request (some :seon.repl/request replies))))
 
 (defn prepare!

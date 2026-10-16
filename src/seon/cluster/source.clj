@@ -969,7 +969,7 @@
                         :else {:seon.source/members members
                                :seon.source/deferred (into #{} (map :seon.test/sym)
                                                            (concat (:seon.test/destructive-excluded isolated) (:seon.test/deferred isolated)))})))]
-    (if revisions
+    (if (seq revisions)
       (seon.cache/lookup ::members [revisions changed proofs]
                          #(+ (* 96 (count revisions)) (* 160 (+ (count changed) (count proofs)
                                                                (count (:seon.source/members %)))))

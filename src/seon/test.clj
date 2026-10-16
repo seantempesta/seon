@@ -468,8 +468,8 @@
 (defn selection-revisions
   "The content revisions of test selection's call graph, namespace readers and host declarations.
   Declared invocation attributes contribute their own revisions; changing a body without changing its edges
-  leaves selection unchanged. An as-of value uses its immutable commit and time point."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil [:map-of :qualified-keyword :uuid] [:tuple :qualified-keyword :uuid [:or :int :inst]]]]}
+  leaves selection unchanged. An as-of value uses its immutable commit and time point; no authority is []."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or [:tuple] [:map-of :qualified-keyword :uuid] [:tuple :qualified-keyword :uuid [:or :int :inst]]]]}
   [database]
   (let [attributes [:seon.fn/sym :seon.test/sym :seon.fn/calls :seon.fn/references :seon.test/subject
                     :seon.fn/host-bound? :seon.fn/invokes :seon.fn/reference-to :seon.schema/key
@@ -493,7 +493,7 @@
                                   (throw (ex-info "Declared selection edges could not be read." found))
                                   found)))]
         (merge revisions (db/content-revisions database edge-attributes)))
-      (db/as-of-key database))))
+      (or (db/as-of-key database) []))))
 
 (defn- destructive-reach
   "Every test symbol whose reach includes a destructive owner, mapped to it.

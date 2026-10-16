@@ -14,7 +14,8 @@ of membership and verdict when graph edges change.
 
 ## Probe and authority
 
-Parent: `61fa266164142dff7f55cb969ba789b2ba18f2e6`. The candidate is the change-cost commit carrying this note.
+Slice 1: `61fa266164142dff7f55cb969ba789b2ba18f2e6` → `5b71e4670`. Slice 2 is the commit carrying
+this revision of the note, with `5b71e4670` as parent.
 Both were published and reloaded on disposable live-store branches, then measured in separate committed-archive
 check JVMs with the same probe and a 4 GiB heap. Only one check ran at a time. Default was neither stopped nor
 restarted. Its existing memory-pressure health finding was reported at entry; no open model turns were observed.
@@ -48,10 +49,10 @@ all changed/new production functions retain contracts. No atom, schema dial or l
 
 ## Measurements
 
-The same probe on parent and the final slice, before committing. K=3 and K=6 entries are per-request ranges;
+The original constant-proof probe on parent and Slice 1, before committing. K=3 and K=6 entries are per-request ranges;
 old-generation peaks are for the whole group. Allocation is decimal MB, retained memory MiB.
-Raw measurement values are in [agent-cost-measurements.edn](agent-cost-measurements.edn), parent first, candidate
-second. They were copied from the value printer's output; all records parse as EDN.
+Raw measurement values are in [agent-cost-measurements.edn](agent-cost-measurements.edn), with parent/candidate
+sections for each slice. They were copied from the value printer's output; all records parse as EDN.
 
 | K | Stage | Parent ms | Slice ms | Parent allocation MB | Slice allocation MB |
 |---|---|---:|---:|---:|---:|
@@ -91,6 +92,58 @@ not a justified steady-state target. Root's reported 1.2–1.7 s cross-lineage c
 live parent branch-change lookup was 6.79 ms / 8.1 MB. The code path that walked history has nevertheless been
 removed, and the regression asserts no history walk. No root speed-up is claimed.
 
+## Slice 2: task-reading proofs
+
+The original placeholder proof was `(is false)`. It did not exercise `seon.test.runner/task-identity`, a missing
+case in the first probe. The current probe uses `(is (nil? (test/task)))`, with `test` aliased to `seon.test`:
+it is red while judging the assigned task and remains current on an unchanged request. Its installed input
+identity includes the whole branch program, so a declaration change runs this proof as well as the narrow test.
+The repeat assertion therefore changes from one bounded test to two; the member list remains 26.
+
+On Slice 1, the task-reading repeat cost 598.8 ms / 866.2 MB. `seon.test.runner/program-content-digest` keyed its
+cache by commit, so result transactions rehashed unchanged program content. Slice 2 keys that existing derivation
+by the declared identity-family and definition-digest revisions. The returned digest is unchanged. The narrow
+regression proves a bookkeeping write reuses it and a declaration edit changes it.
+
+Quiet paired run: the parent check finished before the candidate check began; no edit-hook evaluations overlapped
+either measurement. Both use the task-reading probe. Runs `f2048c12d606` and `4145a9ef01e7`, each 2 tests / 18
+assertions green. Check time 55.9 / 59.3 s, test execution 29.0 / 28.5 s; candidate publication 2.86 s.
+
+| K | Stage | Slice 1 ms | Slice 2 ms | Slice 1 allocation MB | Slice 2 allocation MB |
+|---|---|---:|---:|---:|---:|
+| 1 | First | 1364.5 | 1232.7 | 1570.3 | 1371.6 |
+| 1 | Repeat, two tests | 598.8 | 496.5 | 866.2 | 670.6 |
+| 1 | Unchanged | 36.1 | 35.8 | 37.9 | 37.9 |
+| 1 | Verdict | 5.30 | 7.34 | 6.04 | 6.04 |
+| 1 | Root | 91.5 | 85.5 | 146.7 | 146.7 |
+| 3 | First | 808.0 | 683.6–695.0 | 1048.5–1052.7 | 808.2–876.2 |
+| 3 | Repeat | 526.3–553.4 | 398.9–406.8 | 700.6–710.3 | 482.2–502.4 |
+| 3 | Unchanged | 47.3–48.6 | 39.5–40.2 | 39.6–39.9 | 38.8–38.9 |
+| 3 | Verdict | 4.80–5.23 | 4.92–6.19 | 6.06–6.07 | 6.00–6.27 |
+| 6 | First | 463.8–513.3 | 316.6–344.7 | 616.5–684.4 | 411.2–467.2 |
+| 6 | Repeat | 374.5–393.1 | 295.1–323.1 | 484.9–499.7 | 285.0–299.3 |
+| 6 | Unchanged | 44.7–49.7 | 44.0–49.3 | 40.1–40.8 | 39.0–40.4 |
+| 6 | Verdict | 4.60–6.59 | 4.39–6.44 | 6.04–6.05 | 5.99–6.78 |
+
+Old-generation peak MiB: K=1 398.25 → 394.24, K=3 442.56 → 450.68, K=6 496.54 → 501.63. No retained-memory
+improvement is claimed. Verdict and no-change costs are essentially unchanged; the K=1 verdict wall time is
+higher, with the same allocation. The gain is on changed requests, not every stage.
+
+History matters here: `064809752` introduced the content digest to fix task evidence disappearing across
+connections and as-of reads. Its regression, `seon.task-test/a-task-reading-result-is-current-on-every-value-of-its-content`,
+is in the second commit gate. Replacing the returned digest with an attribute revision would reintroduce that
+identity error. Only the cache key changes. A declaration change still hashes the full program; eliminating that
+last whole-program dependency requires an incremental content identity or task-proof evidence keyed by what it
+actually read. The current test path does not record database read evidence for task proofs. Dropping the program
+input now would wrongly reuse proofs that inspect the branch through the task reader.
+
+The live edit hook also found that Slice 1's new `selection-revisions` and `result-revisions` contracts used bare
+nilable returns, which authored admission refuses although archived boot accepts them. Slice 2 returns an empty
+collection when revision authority is absent, as the admission rule permits, and retains the uncached behavior.
+`seon.test.reach-test/content-revision-contracts-are-admitted-for-agents` checks both through
+`seon.schema/projection-with-function-contract` with agent admission. Together with the bookkeeping regression,
+run `ebee995a2abd` passed 2 tests / 6 assertions. No entry-policy relaxation was made.
+
 ## What changed, and what is still proportional to too much
 
 | Owner / derivation | Before | This slice | Required next step |
@@ -104,6 +157,7 @@ removed, and the regression asserts no history walk. No root speed-up is claimed
 | `seon.test.runner/current-results` | Re-read member execution histories and re-derive reaches each call | Hold the existing answer by program/task/result revisions and loaded platform; a repeated judgment reuses it | A relevant revision invalidates the whole requested set; needs per-reach result accumulation |
 | `seon.turn/test-step` | Pass every member/proof into the runner when anything was stale | Run only stale reaching tests; run proofs only when a proof is stale | Membership/staleness acquisition still inspects the accumulated list |
 | `seon.context/step-observation`, `seon.context/step-verdict`, `seon.cluster.agent/done-judged` | Independently invoke the shared full derivations | Reuse the owners' content-valid answers; observed verdict 4–6 ms | No held verdict fold yet; judgment still walks held members |
+| `seon.test.runner/program-content-digest` | Whole-program read after every new commit for task-reading proofs | Same content digest retained across bookkeeping writes by declaration revisions | Still a whole-program read/hash after an actual declaration change |
 | Root request | Could compare a transaction number from another lineage | Immutable database comparison, no transaction-number lineage walk | Reproduce the owner's slow production root case before claiming its cost fixed |
 
 The fold cache stores values and revision identifiers in `seon.cache`, never database objects. Miss recovery uses
@@ -130,8 +184,10 @@ Two hypotheses were rejected before committing: unchanged contract components we
 because analysis records the new call edge. The final probe swaps the operands of the existing `+` call instead.
 No unsupported component-churn fix or claim remains.
 
-Checks before the final commit gate:
+Checks, with final gate results also retained in the commit output:
 
+- Slice 1 commit gate `12457a428a48`: 38 tests / 221 assertions green, 50.2 s execution, 2.94 s publication;
+  full lint zero errors / 1816 warnings.
 - Combined fold/reuse regressions and K=1/3/6 probe: run `3232eadf1414`, 6 tests / 34 assertions, green.
 - Context, done/merge, test-step, db-flow and inherited runner evidence: run `513ece4e178d`, 15 tests / 122 assertions,
   green, 18.0 s test execution; candidate publication 4.79 s. The same vars are named again in the commit gate.
@@ -150,6 +206,7 @@ compiled and run in the isolated candidate, not loaded into default. No default 
 
 ## Reproduce and continue
 
+The current probe includes the task-reading proof. The constant-proof version is committed in `5b71e4670`.
 Run the two named probe tests with `bin/seon check`, including `script/seon/agent_cost.clj` and
 `test/seon/agent_cost_test.clj` as candidate paths. For parent, include only those two paths; for the slice, include
 its production and regression paths too. Name each long test by var:
@@ -162,4 +219,5 @@ than invalidating whole selection/result keys. Its red proof must change an edge
 identities, assert agreement with the full merge list, and measure the complete request against this slice.
 Include deletion, revert, changed task proof, dynamic calls and held-cache eviction. Then fold verdict counts from
 those held results. Do not claim the owner's full first-principles design is installed until these miss paths
-also cost the change. The 24-test first request and production slow-root reproduction remain open measurements.
+also cost the change. The first request, the whole-program dependency of task-reading proofs, and production
+slow-root reproduction remain open measurements. The first probe alone understated the task-reading path.

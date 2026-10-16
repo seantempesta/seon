@@ -12,7 +12,7 @@
                          :root [(cost/request running "root" "(+ 1 2)")])]
        (cost/report result)
        (is (= 26 (:members (first (:verdict result)))))
-       (is (= 1 (get-in result [:repeat 0 :derivations 'seon.test/bounded-result] 0)))
+       (is (= 2 (get-in result [:repeat 0 :derivations 'seon.test/bounded-result] 0)))
        (is (zero? (get-in result [:repeat 0 :derivations 'seon.fn/gate-edges] 0)))
        (is (zero? (get-in result [:unchanged 0 :derivations 'seon.test/run] 0)))
        (is (zero? (get-in result [:root 0 :derivations 'seon.db/entities-changed-after] 0)))
