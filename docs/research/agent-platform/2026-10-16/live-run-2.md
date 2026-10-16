@@ -106,7 +106,7 @@ task is `:stopped` on main (3714d84a8; `[:seon.task/id ...] :seon.task/execution
   support internals (`seon.render/*`, `seon.render.value/*`, `:seon.render/ai-data`, 17 model schema keys one by one,
   calls 14 to 15); call 17 a hand-written sample map with an odd number of forms; calls 17 to 19 found the pinned
   sample by reading `seon.render-bench/read-samples` and defining `samples-fallback` (a junk def, unmapped at call 19);
-  `(in-ns 'seon.ai)` re-sent in 24 of 28 calls.
+  `(in-ns 'seon.ai)` appears 24 times in 28 calls.
 - **419a `seon.config/render-ai-returns-data`: merged `9d69c5e90` (`seon.config.edn`, `config.clj`, +16/-11).** 20 calls,
   7 errors, 1 wasted. Calls 0 to 11 are reads plus two cyclic-load refusals in call 0 (`seon.config` cannot require
   `seon.text-render-support` or `my.task`: "Cyclic load dependency"), a `[:maybe ...]` defn refused in call 13 ("bare
@@ -145,7 +145,7 @@ task is `:stopped` on main (3714d84a8; `[:seon.task/id ...] :seon.task/execution
 - `my.program/search` takes `(search database query)` or `(search query)` with a string, and refuses a symbol or keyword:
   `my.program/search refused argument 1 `query`: expected :my.program/search-query (a string), got a symbol
   seon.render.transcript/render-run-ai` (91a8, call 37; same in fddd calls 4, 7, 21; 42e0 call 39; 419a call 16 for
-  `my.program/history` taking a map). Eleven refusals over five chains, every one a name the agent could resolve with
+  `my.program/history` taking a map). At least eight refusals over four chains, every one a name the agent could resolve with
   `my.program/source`.
 - Names agents invent that do not resolve (18 unresolved forms): `seon.program/search`, `seon.program/search!`,
   `my.program/declarations`, `my.program/ns-declarations`, `my.fs/find`, `seon.source/refusals`,
