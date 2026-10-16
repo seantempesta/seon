@@ -185,7 +185,9 @@
 
  ; A definition becomes a cost entity past these thresholds and is rewritten only when its per-call
  ; self time moves by the hysteresis factor.
+ :seon.config.context/reference-tokens 1500
  :seon.config.fn.cost/min-calls 20
+ :seon.config.fn.cost/cold-calls 1
  :seon.config.fn.cost/min-total-us 1000
  :seon.config.fn.cost/hysteresis 1.41
 
