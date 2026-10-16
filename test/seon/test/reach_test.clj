@@ -77,12 +77,39 @@
          (is (zero? (profile/calls-of measured 'seon.program/digest-map))))
        (support/transacted! connection [(support/revision (db/db connection) [:seon.fn/sym 'tq.content/f]
                                                         {:seon.fn/doc "Changed content."})])
-       (is (not= before (runner/program-content-digest (db/db connection))))))))
+       (let [database (db/db connection)
+             measured (profile/measure #(runner/program-content-digest database))]
+         (is (not= before (:seon.profile/value measured)))
+         (is (zero? (profile/calls-of measured 'seon.db/index-page))
+             "one declaration change does not read the full declaration indexes")
+         (is (= (:seon.profile/value measured)
+                (id/digest 64 [(into (sorted-map) (program/digest-map database runner/program-content-bound))]))))))))
+
+(deftest the-program-content-fold-equals-full-content-through-reverts-and-deletion
+  (support/with-database
+   (fn [connection]
+     (let [source #(str "(ns tq.digestfold) (defn f {:malli/schema [:=> [:cat] :int]} [] " % ")")
+           full #(id/digest 64 [(into (sorted-map) (program/digest-map % runner/program-content-bound))])]
+       (support/declare-source! connection 'tq.digestfold (source 1))
+       (let [base (db/db connection)
+             original (runner/program-content-digest base)]
+         (is (= original (full base)))
+         (doseq [n [2 3 1]]
+           (support/declare-source! connection 'tq.digestfold (source n))
+           (let [database (db/db connection)
+                 measured (profile/measure #(runner/program-content-digest database))]
+             (is (= (full database) (:seon.profile/value measured)))
+             (is (zero? (profile/calls-of measured 'seon.db/index-page)))))
+         (is (= original (runner/program-content-digest (db/db connection))))
+         (support/transacted! connection [[:db/retractEntity [:seon.fn/sym (symbol "tq.digestfold" "f")]]])
+         (let [database (db/db connection)]
+           (is (= (full database) (runner/program-content-digest database)))
+           (is (= original (runner/program-content-digest (db/as-of database (db/basis-t base)))))))))))
 
 (deftest content-revision-contracts-are-admitted-for-agents
   (support/with-database
    (fn [connection]
-     (doseq [sym ['seon.test/selection-revisions 'seon.test.runner/result-revisions]]
+     (doseq [sym ['seon.test/selection-revisions 'seon.test.runner/result-revisions 'seon.program/content-digest 'seon.id/fold-map]]
        (is (map? (schema/projection-with-function-contract
                   (db/carried-projection (db/db connection)) sym
                   (:malli/schema (meta (requiring-resolve sym)))

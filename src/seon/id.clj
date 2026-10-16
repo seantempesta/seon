@@ -129,9 +129,9 @@
   payload; a map's or set's members each digested apart and summed, so entry
   order never matters. Equal values (Clojure `=`) digest equal, except that a
   vector and a list differ. Metadata is ignored. A value with no encoding
-  throws `:seon.id/unhashable-error`."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Identity hashes the structure of arbitrary data, including nested heterogeneous values and nil.", :gen/elements [nil false 0 "" :k [] {}]}]] [:fn clojure.core/bytes?]]}
-  ^bytes [data]
+  throws `:seon.id/unhashable-error`. Entry mode hashes a map entry without a collection tag; map mode returns its count and hash sum."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Identity hashes the structure of arbitrary data, including nested heterogeneous values and nil.", :gen/elements [nil false 0 "" :k [] {}]}] [:enum :value :entry :map]] [:or 'bytes? [:map [::count :int] [::sum 'integer?]]]]}
+  [data mode]
   (let [;; one digester per unordered nesting depth, reused
         levels (ArrayList.)
         _ (.add levels (MessageDigest/getInstance "SHA-256"))
@@ -207,7 +207,8 @@
                                           :seon.error/message "seon.id cannot hash a host object; hash its data instead."
                                           :seon.id/class (.getName (class x))}))))
         stack (ArrayDeque.)]
-    (loop [x data visit? true]
+    (when (= :entry mode) (.push stack (frame :bare data (long-array 1) nil)))
+    (let [state (loop [x data visit? (not= :entry mode)]
       (if visit?
         (do (some->> (visit! x) (.push stack))
             (recur nil false))
@@ -238,10 +239,14 @@
                       :else (tag! 22))
                 (length! (count coll))
                 (dotimes [i 4] (long! (aget acc i)))
-                (recur nil false)))
-            :leave (do (.pop stack) (leave! (aget top 3)) (recur nil false))))))
-    (flush!)
-    (.digest ^MessageDigest (current))))
+                (if (and (= :map mode) (.isEmpty stack))
+                  (let [sum (ByteBuffer/allocate 32)]
+                    (dotimes [i 4] (.putLong sum (aget acc i)))
+                    {::count (count coll) ::sum (BigInteger. 1 (.array sum))})
+                  (recur nil false))))
+            :leave (do (.pop stack) (leave! (aget top 3)) (recur nil false))))))]
+      (flush!)
+      (if (= :map mode) state (.digest ^MessageDigest (current))))))
 
 (defn id
   "The first n (default 12) hex characters of the SHA-256 of `data`'s
@@ -258,7 +263,7 @@
   ([] (id (random-uuid)))
   ([data] (id data default-length))
   ([data n]
-   (subs (hex (structural-digest data)) 0 n)))
+   (subs (hex (structural-digest data :value)) 0 n)))
 
 (defn digest
   "The stable id of a thing that IS its `parts`: `length` hex characters of
@@ -266,6 +271,28 @@
   {:malli/schema [:=> [:cat [:int {:min 1, :max 64}] [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Identity hashes the structure of arbitrary data, including nested heterogeneous values and nil.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:string {:min 1, :max 64}]]}
   [length parts]
   (id (vec parts) length))
+
+(defn fold-map
+  "The digest of one plain map identity part after removing and adding entries. Retain the returned count and
+  hash sum for the next change; its digest is exactly `(digest 64 [the-map])`, including for an empty map."
+  {:malli/schema [:=> [:cat [:maybe [:map [::count [:int {:min 0}]] [::sum 'integer?]]] :map :map]
+                  [:map [::count [:int {:min 0}]] [::sum 'integer?]
+                   [::digest [:string {:min 64 :max 64}]]]]}
+  [held removed added]
+  (let [number (fn ^BigInteger [entry] (BigInteger. 1 (structural-digest (vec entry) :entry)))
+        without (reduce (fn [^BigInteger total entry] (.subtract total (number entry)))
+                        (biginteger (::sum (or held (structural-digest added :map)))) removed)
+        sum (.mod ^BigInteger (reduce (fn [^BigInteger total entry] (.add total (number entry))) without (when held added))
+                  (.shiftLeft BigInteger/ONE 256))
+        n (+ (get held ::count 0) (- (count added) (count removed)))
+        raw (.toByteArray sum)
+        encoded (byte-array 32)
+        _ (System/arraycopy raw (max 0 (- (alength raw) 32)) encoded (max 0 (- 32 (alength raw)))
+                            (min 32 (alength raw)))
+        ; The existing structural encoding: vector, map, count, sum, end vector.
+        bytes (doto (ByteBuffer/allocate 39)
+                (.put (byte 17)) (.put (byte 20)) (.putInt (int n)) (.put encoded) (.put (byte 19)))]
+    {::count n ::sum sum ::digest (sha-256 [(.array bytes)])}))
 
 (defn symbol-in
   "The readable symbol `ns/<letter><id>` for an id — a Clojure symbol may

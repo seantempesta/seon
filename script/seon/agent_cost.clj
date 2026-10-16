@@ -43,7 +43,8 @@
                                       seon.test.runner/newest-results seon.db/entities-changed-after
                                       seon.test/run seon.test/bounded-result
                                       seon.test/carried-results seon.test/recorded-outcomes
-                                      seon.test.runner/program-content-digest seon.program/digest-map])
+                                      seon.test.runner/program-content-digest seon.program/digest-map
+                                      seon.program/content-digest seon.id/fold-map seon.db/index-page])
            :request (some :seon.repl/request replies))))
 
 (defn prepare!

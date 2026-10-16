@@ -9,8 +9,8 @@ created: 2026-10-16
 The eval recording already holds before/after database values. Test selection derives changed declarations,
 reaching members and current results from them; the done rule consumes those same results. This slice folds
 changed declaration identities with Datahike's immutable index diff, retains content-valid membership/results,
-and batches result reads before running only stale tests. It does not complete the requested incremental fold
-of membership and verdict when graph edges change.
+and batches result reads before running only stale tests. The second window extends that fold to call-edge
+contributions, held outcomes and the program content digest; the Remaining section names the incomplete paths.
 
 ## Probe and authority
 
@@ -146,19 +146,22 @@ run `ebee995a2abd` passed 2 tests / 6 assertions. No entry-policy relaxation was
 
 ## What changed, and what is still proportional to too much
 
-| Owner / derivation | Before | This slice | Required next step |
+Current after the second window's slices (the slice tables below preserve each parent comparison):
+
+| Owner / derivation | Before | Now | Remaining cost |
 |---|---|---|---|
-| `seon.program/own-changed-identities` | History from fork/base, then compare every touched declaration to base on each call | Held identity set, immutable diff from held digest revision, compare only touched identities to base; exact repeat reuses the set | A missing cache entry still compares base to head; alternating branches sharing a base can make the held revision farther away |
-| `seon.test/branch-changes` | Extra fork-history scan in `untouched?`, then branch delta | Deletes that scan; reads/release the base and uses the same fold | `behavior-changed` still visits accumulated changed identities |
-| `seon.turn.batch/entity-facts` | Equal namespace refs could be retracted/reasserted during a body edit | Uses `seon.fn/reconcile-tx`; unchanged refs retain their datoms and graph revision | None for this reproduced churn |
-| `seon.cluster.source/merge-members` | Re-derive whole accumulated member list on every call | Same derivation held by selection revisions, changed identities and proofs | A graph change or newly accumulated identity still rebuilds the full list; needs per-change contribution fold |
-| `seon.test/selection-revisions` | Destructive/host graph key included every program-body revision | Key contains graph/selection input revisions and declared edge attributes | Graph rebuild still scans program identities and declared-edge attributes on a miss |
-| `seon.test/stale-in` | One current-result lookup and input-digest query per member | One batch lookup and input-digest query, then fold requested results | Still traverses requested members; use affected identities to update held status |
-| `seon.test.runner/current-results` | Re-read member execution histories and re-derive reaches each call | Hold the existing answer by program/task/result revisions and loaded platform; a repeated judgment reuses it | A relevant revision invalidates the whole requested set; needs per-reach result accumulation |
-| `seon.turn/test-step` | Pass every member/proof into the runner when anything was stale | Run only stale reaching tests; run proofs only when a proof is stale | Membership/staleness acquisition still inspects the accumulated list |
-| `seon.context/step-observation`, `seon.context/step-verdict`, `seon.cluster.agent/done-judged` | Independently invoke the shared full derivations | Reuse the owners' content-valid answers; observed verdict 4–6 ms | No held verdict fold yet; judgment still walks held members |
-| `seon.test.runner/program-content-digest` | Whole-program read after every new commit for task-reading proofs | Same content digest retained across bookkeeping writes by declaration revisions | Still a whole-program read/hash after an actual declaration change |
-| Root request | Could compare a transaction number from another lineage | Immutable database comparison, no transaction-number lineage walk | Reproduce the owner's slow production root case before claiming its cost fixed |
+| `seon.program/own-changed-identities` | Whole accumulated branch delta per request | Held identity set, native diff from held digest revision, compare touched identities to base | Cold acquisition; shared hints can compare more distant branch values |
+| `seon.test/branch-changes` | Fork-history scan plus branch delta | Same immutable-value fold; no transaction-number lineage walk | `behavior-changed` still visits accumulated changed identities |
+| `seon.turn.batch/entity-facts` | Equal namespace refs retracted/reasserted on body edits | Existing `seon.fn/reconcile-tx` preserves equal datoms | No reproduced churn remains |
+| `seon.cluster.source/merge-members` | Rebuild accumulated test list on graph changes | Fold each changed identity's contribution; call-edge diff reaches its dependent contributions | Non-call selection-input changes still reacquire contributions; changed-identity set comparisons and host exclusions visit held sets |
+| `seon.test/selection-revisions` | Whole program-body revisions invalidated graph selection | Actual graph and selection input revisions | Cold selection still derives the graph |
+| `seon.test/stale-in` | Per-member result and input queries | Batched current-result lookup and requested input query | Traversal of requested members |
+| `seon.test.runner/current-results` | Re-read executions and rederive all reaches | Held result map; update recorded members and changed reaches; digest-index lookup for misses | Cold selected-run membership validation still reads its history; repeated same-digest executions can yield several matches |
+| `seon.test.runner/recorded-outcomes` | Scan all runs/outcomes on branch heads | Native pattern search by missed reach digest | Branch-head discovery; old snapshots without the new index use Datahike's native AEVT search |
+| `seon.turn/test-step` | Feed whole list to runner after any stale result | Run stale reaching tests and stale proofs | Held membership/status traversal |
+| `seon.context/step-verdict` | Full derivations plus per-member existence reads | Held results as one map lookup; declared names cached by content | Judgment/render data still traverses the held list; measured about 3–5 ms |
+| `seon.test.runner/program-content-digest` | Read/sort/hash every declaration after one actual change | `seon.program/content-digest` folds changed entries into the exact existing map digest | Cold/temporal acquisition reads the full map once |
+| Root request | Could compare a transaction number from another lineage | Immutable database comparison | Production slow-root reproduction remains open; synthetic regression proves no history walk |
 
 The fold cache stores values and revision identifiers in `seon.cache`, never database objects. Miss recovery uses
 `seon.db/read-at` and releases the read value. It does not stamp a connection. Result and member caches are central,
@@ -214,13 +217,26 @@ its production and regression paths too. Name each long test by var:
 `seon.agent-cost-test/concurrent-chain-requests`. The probe writes small complete EDN values under
 `/tmp/change-cost-probe-1.edn`, `/tmp/change-cost-probe-3.edn`, `/tmp/change-cost-probe-6.edn`.
 
-Next slice: fold member contributions and current results from the actual request's before/after change, rather
-than invalidating whole selection/result keys. Its red proof must change an edge after accumulating many changed
-identities, assert agreement with the full merge list, and measure the complete request against this slice.
-Include deletion, revert, changed task proof, dynamic calls and held-cache eviction. Then fold verdict counts from
-those held results. Do not claim the owner's full first-principles design is installed until these miss paths
-also cost the change. The first request, the whole-program dependency of task-reading proofs, and production
-slow-root reproduction remain open measurements. The first probe alone understated the task-reading path.
+## Remaining
+
+In the requested order:
+
+1. **Membership:** ordinary call-graph edits now fold contributions. Extend that same treatment to the other
+   selection inputs (declaration identities, namespace/schema expansion, declared invocations and host flags).
+   Remove the held changed-identity/host-exclusion list walks where measurements justify the next slice.
+2. **Misses:** digest lookup reads only requested reaches, but a cold result still validates the matching runs'
+   membership histories. Replace that validation with the immutable admitted value it needs. Repeated executions
+   of the same reach and branch-head discovery remain measurable work. Old snapshots lacking the added index use
+   Datahike's native fallback, not an invalid AVET seek.
+3. **Verdict:** outcomes and declared names are held; the measured verdict is milliseconds. It still constructs
+   judgment/render data by walking the held list. A truly constant-time aggregate verdict remains unfinished;
+   preserve the done/merge one-derivation law when changing it.
+4. **Task proof:** the whole-program hash after a warm declaration change is replaced by the exact digest fold.
+   Cold/temporal acquisition remains full-map work. The first request still runs many tests and remains near a
+   second; repeat requests are substantially above the plain-defn floor. Do not claim the full cost target met.
+
+The production slow-root case and long-lived K=6 retention remain unmeasured. The small K=6 probe fits 4 GiB,
+but is not a steady-state soak. Both done/merge laws and the unchanged-request zero-test assertion remain required.
 
 ## Slice 3: fold call-edge changes (`6f1d9b0cc`)
 
@@ -513,3 +529,72 @@ Verdict K1 4.68→4.18 ms; K6 3.71–4.37→3.25–3.52 ms, allocation about 6.0
 This is a modest verdict gain, not a claim of cheaper first requests (that pair's K1 first request was slower).
 The verdict still builds its judgment/render data; it no longer re-reads the held list's declaration per member.
 The runner's outcomes remain one lookup over its folded map.
+
+## Slice 7: preserve the exact program digest and fold its inputs
+
+The task reader can inspect its supplied branch database, so dropping that program from its input identity would
+be unsound. The existing `seon.id/structural-digest` already hashes unordered maps by summing each encoded entry's
+SHA-256 modulo 2^256, then hashing the map tag, count and sum. Hold that count/sum as an immutable value at `seon.id`;
+subtract the removed entries and add the new ones. `seon.id/fold-map` must produce exactly the existing
+`seon.id/digest` of `[the-map]`, including empty maps, nested values, entry replacement, deletion and reversion.
+It reuses the same structural encoder for entry bytes and Java BigInteger arithmetic for the sum. No new hash
+algorithm or encoding is introduced. Hasch 0.4.100's HashRef/map composition was inspected and a pure JVM
+prototype matched its full map hash (result/ed2094e903aa6, 5 ms form / 65.1 ms request); changing identity encoding
+is unnecessary here, so it is not used. An earlier pure prototype referenced the private encoder as public
+(result/e19f8ec7496e8); that compile error was corrected with a private Var call in the scratch expression. No
+platform Var was changed, and no SCI request was made as root.
+
+`seon.program/content-digest` owns the folded declaration-map digest. Its key is the definition/identity content
+revisions and read bound. A held commit supplies the before value; native index differences identify only changed
+declarations, and `digest-map` reads those scoped identities on each side. The final fold hashes those entries
+plus a fixed-size digest frame, rather than the whole map. A cold/temporal value still acquires its full map once.
+The runner's old full-map read/sort/hash body is deleted in the same slice. This is a constant-sized held value,
+not an atom, a per-agent cache or a second program registry. The full-map digest remains the reference law.
+
+Cold acquisition uses the structural encoder's existing one-pass unordered sum, not one encoder allocation per
+entry. The first candidate exposed that mistake: K1 first-request allocation rose from 1322.6 to 1468.2 MB despite
+warm gains. It was not committed. Reusing the encoder's existing sum removes the extra buffer per declaration.
+The final hash laws include 100 deterministic generated map transitions and full program-map comparisons after
+replacement, reversion, deletion and an as-of read. Candidate `ade969fcf27a`: 10 tests, 80 passes, no errors;
+4.723 s tests / 49.545 s complete check. Contract admission and Babashka loading also pass. Parent
+`a48272d8a93c` is red on the warm full-index-read assertion. No hash encoding or existing identity changes.
+
+Final same-parent pair on `169422141`: `86d1013224a3` / `8ae4792c5408`, 27 assertions each.
+
+| K | Stage | Parent ms | Slice 7 ms | Parent allocation MB | Slice 7 allocation MB |
+|---|---|---:|---:|---:|---:|
+| 1 | first | 1077.60 | 1065.60 | 1323.40 | 1316.10 |
+| 1 | repeat | 449.50 | 405.30 | 678.90 | 584.90 |
+| 1 | edge | 447.50 | 399.40 | 685.70 | 589.40 |
+| 1 | unchanged | 37.60 | 33.30 | 36.70 | 36.90 |
+| 1 | miss | 0.76 | 0.95 | 0.29 | 0.28 |
+| 1 | reach-miss | 1.27 | 1.22 | 1.07 | 1.07 |
+| 1 | verdict | 3.99 | 4.09 | 5.27 | 5.27 |
+| 1 | root | 75.40 | 100.90 | 138.30 | 140.00 |
+| 3 | first | 517.40–517.70 | 483.40–485.80 | 756.00–819.30 | 652.20–729.50 |
+| 3 | repeat | 362.30–376.90 | 326.30–344.30 | 511.40–517.20 | 418.30–421.50 |
+| 3 | edge | 482.20–501.20 | 441.00–445.40 | 694.50–708.20 | 582.50–612.30 |
+| 3 | unchanged | 41.10–45.80 | 31.70–34.10 | 38.40–39.30 | 38.30–39.10 |
+| 3 | miss | 0.50–0.65 | 0.41–0.54 | 0.44–0.45 | 0.44–0.45 |
+| 3 | reach-miss | 1.08–1.27 | 0.83–1.05 | 1.06–1.06 | 1.06–1.06 |
+| 3 | verdict | 4.59–4.66 | 3.57–3.88 | 5.23–5.24 | 5.25–5.26 |
+| 6 | first | 253.80–289.40 | 206.10–221.40 | 365.80–387.00 | 277.70–294.20 |
+| 6 | repeat | 212.60–266.50 | 156.30–177.30 | 302.50–400.20 | 201.10–215.50 |
+| 6 | edge | 348.00–430.60 | 296.70–345.10 | 476.90–514.90 | 385.70–417.00 |
+| 6 | unchanged | 31.60–59.00 | 32.10–38.80 | 38.10–40.10 | 37.70–40.30 |
+| 6 | miss | 0.44–0.57 | 0.44–0.66 | 0.69–0.69 | 0.70–0.70 |
+| 6 | reach-miss | 0.73–0.93 | 0.68–0.92 | 1.06–1.06 | 1.06–1.06 |
+| 6 | verdict | 3.55–3.80 | 3.33–3.83 | 5.22–5.23 | 5.23–5.25 |
+
+Old-gen peak MiB K=1/3/6: 514.34/557.04/595.59 → 622.95/642.08/683.60.
+Warm request cost improves at every K; K1 repeat 449.5→405.3 ms / 678.9→584.9 MB, K6 repeat
+212.6–266.5→156.3–177.3 ms / 302.5–400.2→201.1–215.5 MB. K1 first allocation 1323.4→1316.1 MB
+removes the rejected cold allocation regression. Old-generation high-water increased; no retained-memory gain
+is claimed. Root arithmetic varies independently: the earlier pair was 102.3→78.0 ms, the final pair
+75.4→100.9 ms; no root timing improvement is claimed. The no-lineage-walk regression stays green.
+
+The final slice gate names context, both done/merge laws, test-step, long db-flow vars, the runner namespace,
+task-content/as-of tests, the exact-hash laws, contract admission and Babashka loading. The pre-existing selection
+fixture reds identified above remain excluded by var. Foreign `reference-code/konserve`, untracked
+`reference-code/http-kit`, `tmp/test-data-assertions/proofs.edn` and other research artifacts are excluded
+from the candidate. Default remains on `d76806d39`; no live DeepSeek chain was touched.

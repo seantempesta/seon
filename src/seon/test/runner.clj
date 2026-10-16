@@ -1363,20 +1363,11 @@
   {:seon.program/max-datoms 1000000})
 
 (defn program-content-digest
-  "The content of `database`'s program: the digest of its declarations' definition digests
-  (`seon.program/digest-map`), equal on every value holding the same declarations, whatever connection, commit or
-  as-of view; held by declaration identity and digest revisions (`seon.cache`). Recording evaluations or test
-  results preserves the digest. The refusal when the declarations cannot be read whole."
+  "The content of the requesting branch's declarations, equal on every value of that content. The program
+  owner folds its exact map digest by changed identities; bookkeeping leaves it unchanged."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or :seon.program/definition-digest :seon.program/digest-map-refusal]]}
   [database]
-  (let [families (:seon.program/compared-families
-                  (program/declaration-families (db/carried-projection database)))
-        revisions (db/content-revisions database (into [:seon.program/definition-digest] families))
-        derive #(let [digests (program/digest-map database program-content-bound)]
-                  (if (:seon.error/at digests) digests (id/digest 64 [(into (sorted-map) digests)])))]
-    (if revisions
-      (cache/lookup ::program-content revisions (constantly (+ 128 (* 96 (count revisions)))) derive string?)
-      (derive))))
+  (program/content-digest database program-content-bound))
 
 (defn task-input
   "What a test body judging task `sym` reads (`seon.test/task`): the task entity on `database`, the requesting

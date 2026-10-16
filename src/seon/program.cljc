@@ -928,6 +928,57 @@
                  #{} [before after])))))
 
 #?(:clj
+   (defn- fold-content-digest
+     "Fold changed declaration entries into the held map digest, preserving its exact structural encoding."
+     {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.db/database-value] [:maybe :map]
+                          [:map [:seon.program/max-datoms :seon.program/max-datoms]]
+                          [:set :qualified-keyword] [:map-of :qualified-keyword :uuid]] :map]}
+     [database before held bounds families revisions]
+     (let [diff (requiring-resolve 'seon.db/datoms-diff)
+           changed (when before (differing-declarations before database bounds))
+           changed (if (and before (set? changed))
+                     (into changed
+                           (mapcat (fn [attribute]
+                                     (map (fn [[_ a v]] [a v])
+                                          (apply concat (diff before database :aevt [attribute])))))
+                           (filter #(not= (get (::revisions held) %) (get revisions %)) families))
+                     changed)
+           scoped (cond-> bounds before (assoc :seon.program/identities changed))
+           old (if before (when (set? changed) (digest-map before scoped)) {})
+           current (when (or (not before) (set? changed)) (digest-map database scoped))]
+       (or (some #(when (:seon.error/at %) %) [changed old current])
+           (assoc (id/fold-map (when before held) old current)
+                  ::commit ((requiring-resolve 'seon.db/commit-id) database) ::revisions revisions)))))
+
+#?(:clj
+   (defn content-digest
+     "The exact digest of the declaration map as one identity part, folded from changed identities. A cold or
+  temporal value acquires its map once; a committed value reads only entries changed from the held commit."
+     {:malli/schema [:=> [:cat :seon.db/database-value
+                          [:map [:seon.program/max-datoms :seon.program/max-datoms]]]
+                     [:or :seon.program/definition-digest :seon.program/digest-map-refusal]]}
+     [database bounds]
+     (let [[carried content-revisions read-at] (map requiring-resolve '[seon.db/carried-projection seon.db/content-revisions seon.db/read-at])
+           families (:seon.program/compared-families (declaration-families (carried database)))
+           revisions (content-revisions database (into [:seon.program/definition-digest] families))
+           key [revisions bounds]
+           head [families bounds]
+           derive (fn []
+                    (let [prior-key (when revisions (seon.cache/present ::content-head head))
+                          prior (when prior-key (seon.cache/present ::content prior-key))
+                          fold #(fold-content-digest database % prior bounds families (or revisions {}))]
+                      (if prior (read-at database (::commit prior) fold) (fold nil))))
+           held (if revisions
+                  (seon.cache/lookup ::content key (constantly (+ 256 (* 96 (count revisions)))) derive
+                                     #(string? (::id/digest %)))
+                  (derive))]
+       (if (:seon.error/at held) held
+         (do (when revisions
+               (seon.cache/evict! ::content-head head)
+               (seon.cache/lookup ::content-head head (constantly (+ 256 (* 128 (count families)))) (constantly key)))
+             (::id/digest held))))))
+
+#?(:clj
    (defn- fold-changes
      "Replace the touched identities in a held delta with their current comparison to the merge base."
      {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.db/database-value

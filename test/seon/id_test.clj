@@ -70,6 +70,22 @@
     :seed 2026100701)
    "An identity changed with entry order:"))
 
+(deftest a-map-digest-fold-is-the-existing-full-digest
+  (test-support/assert-check!
+   (tc/quick-check
+    100
+    (prop/for-all [before (gen/map gen/keyword value-generator {:max-elements 5})
+                   after (gen/map gen/keyword value-generator {:max-elements 5})]
+      (let [changed (into #{} (filter #(not= (find before %) (find after %)))
+                          (into (set (keys before)) (keys after)))
+            held (id/fold-map nil {} before)
+            folded (id/fold-map held (select-keys before changed) (select-keys after changed))
+            reverted (id/fold-map folded (select-keys after changed) (select-keys before changed))]
+        (and (= (id/digest 64 [before]) (:seon.id/digest held) (:seon.id/digest reverted))
+             (= (id/digest 64 [after]) (:seon.id/digest folded)))))
+    :seed 2026101601)
+   "The map fold changed its structural digest."))
+
 (deftest a-host-object-has-no-identity
   (is (= :seon.id/unhashable-error
          (try (id/id (Object.)) (catch clojure.lang.ExceptionInfo e (:seon.error/type (ex-data e)))))))
