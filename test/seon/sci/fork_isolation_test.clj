@@ -9,6 +9,8 @@
   invisible, and the shared base is never mutated by any fork."
   (:require [clojure.test :refer [deftest is]]
             [sci.core :as sci]
+            [seon.db]
+            [seon.sci.eval]
             [seon.test-support :as test-support]))
 
 (deftest sibling-forks-of-one-base-are-mutually-invisible
@@ -28,3 +30,14 @@
           (is (thrown? Throwable
                        (sci/eval-string* fork-c "sibling-private"))
               "a later fork of the same base sees neither sibling's def"))))))
+
+(deftest a-fork-onto-a-held-connection-leaves-its-holder-in-custody
+  ;; The fixture's execution holds the connection; a fork for that connection
+  ;; carries its own environment and leaves the holder's on the connection.
+  (test-support/with-database
+    (fn [connection]
+      (let [routing (test-support/attempt-routing connection)
+            database (seon.db/db connection)]
+        (seon.sci.eval/fork-cluster-ctx (seon.sci.eval/base-ctx database) database connection)
+        (is (identical? routing (test-support/attempt-routing connection))
+            "the connection still answers its holder's registry")))))

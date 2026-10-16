@@ -4403,15 +4403,19 @@
            [:seon.sci.eval/loaded-connection {:optional true} :seon.db/connection]
            [:seon.sci.eval/acquired-basis {:optional true} :map]]]
      :seon.sci.eval/ctx]]}
-  ;; The fork keeps the base context's cluster, else the one its world names.
+  ;; The receiving branch's environment is the one its connection carries, its
+  ;; holder's registry included; a connection no execution holds yet receives
+  ;; the base context's environment.
   ([base-ctx db connection]
-   (fork-cluster-ctx base-ctx db connection
-                     (projection-state db (schema/projection-from-database db)
-                                       (or (:seon.boot/cluster-name (env/of base-ctx))
-                                           (carried-cluster-name connection db)))
-                     (if-let [environment (env/of base-ctx)]
-                       {:seon.env/environment environment}
-                       {})))
+   (let [environment (or (some-> (:seon.sci.eval/projection-state (meta connection)) deref)
+                         (env/of base-ctx))]
+     (fork-cluster-ctx base-ctx db connection
+                       (projection-state db (schema/projection-from-database db)
+                                         (or (:seon.boot/cluster-name environment)
+                                             (carried-cluster-name connection db)))
+                       (if environment
+                         {:seon.env/environment environment}
+                         {}))))
   ([base-ctx db connection supplied-projection-state]
    (fork-cluster-ctx base-ctx db connection supplied-projection-state {}))
   ([base-ctx db connection supplied-projection-state arm-request]
