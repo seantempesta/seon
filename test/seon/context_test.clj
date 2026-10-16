@@ -740,14 +740,14 @@
                                                       :seon.program/identities (into #{} (map #(vector :seon.test/sym %)) defined)
                                                       :seon.test.run/id "a1b2c3d4e5f6" :seon.test.run/branch :tq-branch}
                                                (seq next-proofs) (assoc :seon.source/next-proofs next-proofs)
-                                               (seq on-target) (assoc :seon.source/green-on-target on-target))})]
+                                               (seq on-target) (assoc :seon.source/red-on-target on-target))})]
                    [status (mapv :seon.error/type refusals)]))]
     (doseq [[proofs next-proofs members results on-target defined expected why]
             [[#{'tq.rule/p} #{} #{'tq.rule/p} [(green 'tq.rule/p)] nil #{} [:done []] "its proof green"]
-             [#{'tq.rule/p} #{} #{'tq.rule/p 'tq.rule/r} [(green 'tq.rule/p) (red 'tq.rule/r)] #{'tq.rule/r} #{}
-              [:working [:seon.source/red-test-error]] "a reaching test main holds green is red here"]
              [#{'tq.rule/p} #{} #{'tq.rule/p 'tq.rule/r} [(green 'tq.rule/p) (red 'tq.rule/r)] nil #{}
-              [:done []] "a reaching red main holds no green result for is unknown, never a regression"]
+              [:working [:seon.source/red-test-error]] "a reaching test red here and not at the merge base is the change's"]
+             [#{'tq.rule/p} #{} #{'tq.rule/p 'tq.rule/r} [(green 'tq.rule/p) (red 'tq.rule/r)] #{'tq.rule/r} #{}
+              [:done []] "a reaching test red at the merge base too is not the change's"]
              [#{'tq.rule/p} #{} #{'tq.rule/p} [] nil #{} [:working [:seon.source/test-evidence-error]] "its proof unrun at its reach is unknown, never green"]
              [#{'tq.rule/p} #{} #{'tq.rule/p} [(red 'tq.rule/p)] nil #{} [:working [:seon.source/red-test-error]] "its proof red"]
              [#{} #{} #{} [] nil #{} [:working [:seon.source/test-evidence-error]] "no proof proves nothing"]

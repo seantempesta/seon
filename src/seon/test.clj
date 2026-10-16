@@ -3400,10 +3400,24 @@
            (when-let [refusal (:seon.test/recording-refusal result)]
              (str "\nrecording refused: " (:seon.error/message refusal)))))))
 
+(defn held-red
+  "Of `tests`, those `base` (a commit's database value) holds that hold a result at their reach there, on `base` or
+  on `recorded` (the database a run of that commit recorded on, `fork-point-red`), each true when it is red there.
+  Reads only: a test holding no result is absent."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:sequential :seon.test/sym]]
+                  [:or [:map-of :seon.test/sym :boolean] :seon.error/value]]}
+  [base recorded tests]
+  (let [present (into [] (comp (distinct) (filter #(seq (db/datoms base :avet :seon.test/sym %)))) (sort tests))
+        reach (when (seq present) (runner/reach-digests base present))
+        held (when (and (seq present) (not (:seon.error/at reach)))
+               [(runner/result-at-reach base reach) (runner/result-at-reach recorded reach)])]
+    (or (some #(when (:seon.error/at %) %) (cons reach held))
+        (update-vals (apply merge {} held) runner/red-result?))))
+
 (defn fork-point-red
   "Of `tests`, those the commit `commit` holds, each true when it is red there: the result held at its reach in
-  that commit, on the commit or on `execution`'s branch, else one run on a branch forked at that commit from
-  `execution`, recorded on `execution`'s connection, where the next call reads it at the same key, bounded by
+  that commit, on the commit or on `execution`'s branch (`held-red`), else one run on a branch forked at that commit
+  from `execution`, recorded on `execution`'s connection, where the next call reads it at the same key, bounded by
   `limit-ms` (else the cluster's check dial). A test with no result even then is not red there."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.source/commit-id [:sequential :seon.test/sym] [:maybe pos-int?]]
                   [:or [:map-of :seon.test/sym :boolean] :seon.error/value]]}
@@ -3412,13 +3426,9 @@
         fork (source/database store commit)
         recording (:seon.db/connection execution)
         present (into [] (comp (distinct) (filter #(seq (db/datoms fork :avet :seon.test/sym %)))) (sort tests))
-        reach (when (seq present) (runner/reach-digests fork present))
-        held (when (and (seq present) (not (:seon.error/at reach)))
-               [(runner/result-at-reach fork reach) (runner/result-at-reach (db/db recording) reach)])
-        inherited (when (and (seq present) (not-any? :seon.error/at (cons reach held)))
-                    (update-vals (apply merge held) runner/red-result?))
-        due (into #{} (remove #(contains? inherited %)) present)
-        ran (when (and inherited (seq due))
+        inherited (held-red fork (db/db recording) present)
+        due (when-not (:seon.error/at inherited) (into #{} (remove #(contains? inherited %)) present))
+        ran (when (seq due)
               (let [child (@acquire-context! execution nil {:seon.agent/isolate? true :seon.cluster.registry/from commit})]
                 (try (db/with-branch
                       {:seon.db/connection recording}
@@ -3426,7 +3436,7 @@
                                      :seon.test/identities due :seon.test/rerun? true :seon.test/include-long? true}
                               limit-ms (assoc :seon.test/check-time-limit-ms limit-ms))))
                      (finally (@release-context! child)))))]
-    (or (some #(when (:seon.error/at %) %) (concat [reach ran] held))
+    (or (some #(when (:seon.error/at %) %) [inherited ran])
         (merge (zipmap present (repeat false))
                (into {} (keep #(when-let [test-symbol (:seon.test/sym %)] [test-symbol (runner/red-result? %)]))
                      (:seon.test/results ran))

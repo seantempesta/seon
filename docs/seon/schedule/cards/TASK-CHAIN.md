@@ -208,13 +208,17 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    `[:=> [:cat :seon.db/database-value :seon.source/judged] :seon.source/refusals]`,
    arguments `[branch judged]`, a function of recorded results that runs no test and reads `branch` only for
    contracts. Everything else is data in `judged`, whose builder (S3a-3) reads main: `:seon.source/next-proofs` (the
-   next task's proofs, absent on the last task) and `:seon.source/green-on-target` (the judged tests main holds green
-   at main's own current reach, `seon.context/current-results` over main's value, as `:seon.source/red-on-target`
-   holds main's reds; equal reach digests would never fire, measured). It refuses:
+   next task's proofs, absent on the last task) and `:seon.source/red-on-target` (the judged reds already red at the
+   branch's merge base, `seon.cluster.source/red-at-merge-base`: the result held at each test's reach in that commit,
+   on the commit or on the branch, the question `seon.test/fork-point-red` answers for the merge). The attempt's test
+   step runs a reaching red at the merge base when no result is held there (`seon.test/fork-point-red`, recorded on
+   the branch, reused by reach digest), so done and merge judge a red reaching test the same way. It refuses:
    - a proof with no current result (`:seon.source/test-evidence-error`), or one not green
      (`:seon.source/red-test-error`); an empty proof set never finishes;
-   - a test the branch holds red that main holds green, unless it is one of the next task's proofs (Prove adding a red
-     row to an existing table test is its job) (`:seon.source/red-test-error`);
+   - a test the branch holds red that is not red at the merge base (no result there is the change's), unless it is
+     one of the next task's proofs (Prove adding a red row to an existing table test is its job)
+     (`:seon.source/red-test-error`, verdict `:red`, as the merge names it;
+     `seon.cluster.source-test/done-and-merge-judge-a-red-reaching-test-the-same-way`);
    - a test defined or changed on the branch (in `:seon.program/identities`) that is red and is not one of the next
      task's proofs (`:seon.source/stray-red-error`: on the last task, which has no next, every such red refuses, as the
      final merge does);
@@ -226,7 +230,8 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
      checkout (`seon.merge/checkout`; none, nothing to write) hold a clj-kondo error
      (`seon.cluster.source/lint-refusal`, `:seon.source/lint-error` with each finding's file, row, column and type);
      and on the last task (no next proofs) each function of its `:seon.source/merge-identities` no green test
-     reaches (`:seon.source/test-evidence-error`, the merge's coverage clause). Files that do not prove at all (no
+     reaches (`:seon.source/test-evidence-error`, the merge's coverage clause, naming the red tests that reach each
+     as `:seon.source/red-tests`; a refused reach read is its own refusal, never "uncovered"). Files that do not prove at all (no
      file for a namespace, a conflict with the checkout, a namespace form missing a require) leave nothing to lint and
      stay the gate's refusals (MERGE-STEP 2). Done and merge are one judgment: a
      task the merge would refuse for what its branch holds is not done, so its agent gets a turn with the refusal as

@@ -80,6 +80,10 @@
   (delay (requiring-resolve 'seon.test/reaching)))
 (defonce ^:private test-branch-tests
   (delay (requiring-resolve 'seon.test/branch-tests)))
+(defonce ^:private test-fork-point-red
+  (delay (requiring-resolve 'seon.test/fork-point-red)))
+(defonce ^:private source-branch-merge-base
+  (delay (requiring-resolve 'seon.cluster.source/branch-merge-base)))
 (defonce ^:private fn-reverse-closure
   (delay (requiring-resolve 'seon.fn/reverse-closure)))
 (defn stage-reply!
@@ -5419,6 +5423,21 @@
                   :else (let [tests (into #{} (remove (set (:seon.turn.loop/pending platform))) reached)]
                           (when (seq tests) (@test-run (assoc request :seon.test/identities tests)))))))))
 
+(defn- run-merge-base
+  "Ask the merge base what the merge asks of each test `reaching` (the reaching request's run) left red: its result
+  at the branch's merge base (`seon.test/fork-point-red`), run there once when no result is held and recorded on the
+  agent's branch, where the done rule reads it (`seon.cluster.source/red-at-merge-base`), bounded by `limit-ms`.
+  Nil when no test is red or the branch has no merge base (main)."
+  {:malli/schema [:=> [:cat :seon.agent/execution-handle pos-int? [:maybe [:or :seon.test/run-result :seon.error/value]]]
+                  [:or :nil [:map-of :seon.test/sym :boolean] :seon.error/value]]}
+  [execution limit-ms reaching]
+  (let [reds (into [] (comp (filter #(pos? (+ (:seon.test/fail-count % 0) (:seon.test/error-count % 0))))
+                            (map :seon.test/sym) (filter symbol?))
+                   (:seon.test/results reaching))
+        commit (when (seq reds) (@source-branch-merge-base (db/db (:seon.db/connection execution))))]
+    (cond (:seon.error/at commit) commit
+          (uuid? commit) (@test-fork-point-red execution commit reds limit-ms))))
+
 (defn- pending-syms
   "The tests a run left unrun: never started, or started and still live at its bound."
   {:malli/schema [:=> [:cat :seon.test/run-result] [:vector :seon.test/sym]]}
@@ -5611,6 +5630,8 @@
               platform (platform-proof (db/db connection) changed)
               pending (set (:seon.turn.loop/pending platform))
               reaching (run-reaching execution (left) changed platform)
+              ;; a reaching red is the change's unless red at the merge base: the done rule reads that result
+              based (run-merge-base execution (left) reaching)
               ;; a branch test holding a current result would only answer it again
               branched (run-branch execution (left) (branch-due branch stale pending (executed-syms reaching)))
               proved (when (seq proofs) (run-proofs execution agent-id (left) pending))
@@ -5626,7 +5647,8 @@
                   (cond-> (and (nil? platform) reaching (ran-something reaching))
                     (update :seon.turn.loop/reaching #(partial-reaching (db/db connection) changed reaching %)))
                   (merge (test-costs (db/db connection) [branched proved reaching]))
-                  (cond-> (or (:seon.error/at red) (seq red)) (assoc :seon.turn.loop/broken red))))))
+                  (cond-> (or (:seon.error/at red) (seq red)) (assoc :seon.turn.loop/broken red))
+                  (cond-> (:seon.error/at based) (assoc-in [:seon.turn.loop/reaching :seon.turn.loop/test-error] based))))))
     (catch Throwable failure
       {:seon.turn.loop/proofs
        {:seon.turn.loop/test-error

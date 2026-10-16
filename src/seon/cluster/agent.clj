@@ -81,7 +81,6 @@
             [seon.turn :as turn]
             [seon.context :as context]
             [seon.fn]
-            [seon.test.runner :as runner]
             [seon.config :as config]
             [seon.db :as db]
             ;; loaded for agents: the root opening names (seon.cluster.status/agents {})
@@ -1850,7 +1849,8 @@
   `branch` at the attempt's end commit: its proofs field, the next task's, the tests the branch defines or changes
   and those reaching the functions it changed since its merge base with main (`seon.cluster.source/merge-base`,
   `seon.program/own-changed-identities`; `seon.fn/gate-sets`), their current results there
-  (`seon.context/current-results`), those main `database` holds green at its own reach, and the newest run they
+  (`seon.context/current-results`), the reds among them held red at that merge base
+  (`seon.cluster.source/red-at-merge-base`, the merge's question), and the newest run they
   came from, else the newest the branch holds (an attempt's start runs its tests, so a done end always has one), and
   what its merge would publish under the checkout `root` (`seon.cluster.source/publication`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.chain/branch :seon.task/handle
@@ -1870,7 +1870,8 @@
         reached (if (seq (of :seon.fn/sym)) (seon.fn/gate-sets {:seon.db/db at-end :seon.fn/seeds (of :seon.fn/sym)}) [])
         members (when (sequential? reached) (-> proofs (into (of :seon.test/sym)) (into reached)))
         results (when members (context/current-results at-end members (:seon.task/sym task)))
-        held (when (vector? results) (context/current-results database members nil))
+        held (when (and (vector? results) (uuid? base-commit))
+               (source/red-at-merge-base at-end base-commit results (into proofs next-proofs)))
         published (when (and (vector? results) (set? delta))
                     (source/publication database at-end delta proofs (:seon.task/sym task) root))
         failure (some #(when (and (map? %) (:seon.error/at %)) %) [task delta reached results held published])
@@ -1887,10 +1888,7 @@
                     :seon.program/identities delta :seon.test.run/id run-id :seon.test.run/branch branch}
                    published)
         (seq next-proofs) (assoc :seon.source/next-proofs next-proofs)
-        (seq held) (assoc :seon.source/green-on-target
-                          (into #{} (comp (remove runner/red-result?) (filter #(pos? (:seon.test/pass-count % 0)))
-                                          (map :seon.test/sym))
-                                held)))))
+        (seq held) (assoc :seon.source/red-on-target held))))
 
 (defn launch-facts
   "What db<->flow reads on main `database` before it plans.

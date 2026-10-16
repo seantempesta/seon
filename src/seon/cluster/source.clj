@@ -1476,13 +1476,35 @@
   "A replaced function reaches no green test of the named run.")
 
 (defn- uncovered-functions
-  "The functions among `identities` that `database` holds which no test of `covering` reaches (`seon.fn/gate-sets`):
-  what a merge refuses as uncovered."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set [:set :seon.test/sym]] [:vector :seon.fn/sym]]}
+  "The functions among `identities` that `database` holds which no test of `covering` reaches (`seon.fn/gate-sets`),
+  each with the tests that do reach it: what a merge refuses as uncovered, and what would cover it once green. A
+  refused reach read (`seon.fn/gate-sets`) answers that refusal, never an uncovered function."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set [:set :seon.test/sym]]
+                  [:or [:map-of :seon.fn/sym [:vector :seon.test/sym]] :seon.db/invalid-read-error]]}
   [database identities covering]
-  (vec (for [[a f] identities :when (= :seon.fn/sym a)
-             :when (:db/id (db/pull database [:db/id] [a f]))
-             :when (not-any? covering (fn/gate-sets {:seon.db/db database :seon.fn/seeds #{f}}))] f)))
+  (reduce (fn [uncovered [a f]]
+            (if (and (= :seon.fn/sym a) (:db/id (db/pull database [:db/id] [a f])))
+              (let [reaching (fn/gate-sets {:seon.db/db database :seon.fn/seeds #{f}})]
+                (cond (db/read-refusal? reaching) (reduced reaching)
+                      (not-any? covering reaching) (assoc uncovered f reaching)
+                      :else uncovered))
+              uncovered))
+          {} identities))
+
+(defn- uncovered-refusal
+  "The `:seon.source/test-evidence-error` refusing `uncovered` (`uncovered-functions`) with `evidence`'s members: the
+  functions as `:seon.error/offending`, and each red test of `results` reaching one as `:seon.source/red-tests`
+  (`red-test-verdicts`), the test whose green would cover it."
+  {:malli/schema [:=> [:cat :map [:map-of :seon.fn/sym [:vector :seon.test/sym]] [:vector :map]]
+                  :seon.source/test-evidence-error]}
+  [evidence uncovered results]
+  (let [red? (requiring-resolve 'seon.test.runner/red-result?)
+        red (into #{} (comp (filter red?) (map #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)))) results)
+        reaching (vec (sort (filter red (into #{} (mapcat val) uncovered))))]
+    (seon.error.refusal/error :seon.source/test-evidence-error
+     (cond-> (assoc evidence :seon.error/message uncovered-message :seon.error/offending (vec (sort (keys uncovered))))
+       (seq reaching) (assoc :seon.source/red-tests
+                             (red-test-verdicts (:seon.source/refused-test-run evidence) results reaching (set reaching)))))))
 
 (defn results-verdict
   "Every refusal the recorded results in `judged` give the candidate: each of its `:seon.task/proofs` among its
@@ -1530,7 +1552,11 @@
       (conj (uncontracted-refusal (assoc evidence :seon.error/layer :seon.source/merge
                                          :seon.error/operation 'seon.cluster.source/results-verdict)
                                   gaps))
-      (seq uncovered) (conj (refuse uncovered-message uncovered))
+      (db/read-refusal? uncovered) (conj uncovered)
+      (and (seq uncovered) (not (db/read-refusal? uncovered)))
+      (conj (uncovered-refusal (assoc evidence :seon.error/layer :seon.source/merge
+                                      :seon.error/operation 'seon.cluster.source/results-verdict)
+                               uncovered results))
       (:seon.error/at dangling) (conj dangling)
       (and (not (:seon.error/at dangling)) (seq dangling))
       (conj (refuse "The merged program names tasks the destination has not admitted." dangling)))))
@@ -1559,11 +1585,29 @@
           :seon.program/conflict (into #{} (map :seon.unmerged/name) entries)
           :seon.unmerged/entries (mapv #(assoc % :seon.unmerged/versions (versions database %)) entries))))
 
+(defn red-at-merge-base
+  "Of the red results among `results` other than `exempt`'s, the tests red at `branch`'s merge base `base-commit`,
+  as recorded at their reach there, on the base or on `branch` (`seon.test/held-red`, the question
+  `seon.test/fork-point-red` answers for the merge, which the attempt's test step runs when no result is held): the
+  done rule's `:seon.source/red-on-target`. A red with no result at the base is the change's. Reads only."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.source/commit-id] :seon.source/results [:set :seon.test/sym]]
+                  [:or [:set :seon.test/sym] :seon.error/value]]}
+  [branch base-commit results exempt]
+  (let [red? (requiring-resolve 'seon.test.runner/red-result?)
+        reds (into [] (comp (filter red?) (map :seon.test/sym) (remove exempt)) results)
+        base (when (and (seq reds) (uuid? base-commit)) (db/commit-database branch base-commit))]
+    (if-not base
+      #{}
+      (try (let [held ((requiring-resolve 'seon.test/held-red) base branch reds)]
+             (if (:seon.error/at held) held (into #{} (keep (fn [[k red]] (when red k))) held)))
+           (finally (release! [base]))))))
+
 (defn done-refusals
   "Every refusal the done rule gives a task over the recorded results in `judged`, the same for every task: each
   of its `:seon.task/proofs` without an executed current result (absent, or a result that never started: unknown
   evidence, never red; an empty set never finishes) or whose executed result is not green; each other
-  member red here that `:seon.source/green-on-target` holds green on main, and each red test defined or changed
+  member red here that is not red at the merge base (`:seon.source/red-on-target`, `seon.test/fork-point-red`'s
+  question, as the merge asks it: a red with no result there is the change's), and each red test defined or changed
   on the branch (in `:seon.program/identities`, `:seon.source/stray-red-error`), unless it is one of the
   `:seon.source/next-proofs` (none on the last task); and every function of the identities `branch` holds with a
   contract gap (`contract-gaps`); and what the branch alone decides of its merge (`publication`): its
@@ -1580,20 +1624,20 @@
   ```"
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/judged] :seon.source/refusals]}
   [branch {members :seon.source/members results :seon.source/results proofs :seon.task/proofs
-           next-proofs :seon.source/next-proofs on-main :seon.source/green-on-target delta :seon.program/identities
+           next-proofs :seon.source/next-proofs on-base :seon.source/red-on-target delta :seon.program/identities
            lint :seon.source/lint-refusal merging :seon.source/merge-identities
            run-id :seon.test.run/id s :seon.test.run/branch}]
   (let [evidence {:seon.test.run/branch s :seon.source/refused-test-run run-id
                   :seon.error/layer :seon.source/done :seon.error/operation 'seon.cluster.source/done-refusals}
         red? (requiring-resolve 'seon.test.runner/red-result?)
         by-sym (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity)) results)
-        on-main (set on-main)
+        on-base (set on-base)
         executed (fn [test-symbol] (let [result (by-sym test-symbol)] (and result (not (:seon.error/at result)))))
         unknown (vec (sort (remove executed proofs)))
         red-proofs (filterv #(and (executed %) (not (green-result? (by-sym %)))) proofs)
         others (into #{} (filter #(some-> (by-sym %) red?)) (remove (into (set proofs) next-proofs) members))
-        regressed (filterv on-main others)
-        stray (filterv #(and (delta [:seon.test/sym %]) (not (on-main %))) others)
+        stray (filterv #(delta [:seon.test/sym %]) others)
+        regressed (filterv #(not (or (on-base %) (delta [:seon.test/sym %]))) others)
         verdicts (fn [tests] (red-test-verdicts run-id results tests (set tests)))
         gaps (contract-gaps branch delta)
         green (into #{} (filter #(some-> (by-sym %) green-result?)) members)
@@ -1606,7 +1650,7 @@
              (assoc evidence :seon.error/message "Every proof needs a current recorded result; an empty proof set never finishes."
                     :seon.error/offending unknown)))
       (seq (into red-proofs regressed))
-      (conj (red-test-refusal (assoc evidence :seon.error/message "A proof, or a test main holds green, is not green here.")
+      (conj (red-test-refusal (assoc evidence :seon.error/message "A proof, or a test not red at the merge base, is not green here.")
                               (verdicts (into red-proofs regressed))))
       (seq stray)
       (conj (seon.error.refusal/error :seon.source/stray-red-error
@@ -1614,9 +1658,8 @@
                     :seon.source/red-tests (verdicts stray))))
       (seq gaps) (conj (uncontracted-refusal evidence gaps))
       lint (conj lint)
-      (seq uncovered)
-      (conj (seon.error.refusal/error :seon.source/test-evidence-error
-             (assoc evidence :seon.error/message uncovered-message :seon.error/offending uncovered))))))
+      (db/read-refusal? uncovered) (conj uncovered)
+      (and (seq uncovered) (not (db/read-refusal? uncovered))) (conj (uncovered-refusal evidence uncovered results)))))
 
 (defn merge-verdict
   "Every refusal of the candidate `prepared` (`prepare-merge!`'s value) names, judged from what `main`, the

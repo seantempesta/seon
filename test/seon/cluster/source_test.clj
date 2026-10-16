@@ -477,14 +477,13 @@
                 ["the same red among the next proofs: done"
                  (assoc (new-red base) :seon.source/next-proofs #{'tq.done-test/new}) []]
                 ["the terminal task with a branch-new red: refused" (new-red base) [:seon.source/stray-red-error]]
-                ["a test main holds green, red here: refused"
-                 (red base 'tq.done-test/existing :seon.source/green-on-target #{'tq.done-test/existing})
-                 [:seon.source/red-test-error]]
+                ["a reaching test red here with no result at the merge base is the change's: refused"
+                 (red base 'tq.done-test/existing) [:seon.source/red-test-error]]
                 ["the same red as a next proof, a row added to an existing table: done"
-                 (red base 'tq.done-test/existing :seon.source/green-on-target #{'tq.done-test/existing}
-                      :seon.source/next-proofs #{'tq.done-test/existing})
+                 (red base 'tq.done-test/existing :seon.source/next-proofs #{'tq.done-test/existing})
                  []]
-                ["main holding no result is not a regression" (red base 'tq.done-test/existing) []]
+                ["a test red at the merge base too is not the change's"
+                 (red base 'tq.done-test/existing :seon.source/red-on-target #{'tq.done-test/existing}) []]
                 ["a new function with an :any slot: refused"
                  (update base :seon.program/identities conj [:seon.fn/sym 'tq.done/loose]) [:seon.source/uncontracted-error]]
                 ["a contracted stub no test reaches: done"
@@ -501,6 +500,58 @@
        (is (= [['tq.done-test/new]]
               (mapv #(mapv :seon.test/sym (:seon.source/red-tests %)) (source/done-refusals branch (new-red base))))
            "the stray refusal names the red test")))))
+
+(deftest done-and-merge-judge-a-red-reaching-test-the-same-way
+  ;; live run 2, chain ce9d: a reaching test red after the change with no result on main; the done rule counted it
+  ;; no regression and the merge counted it the change's. One question for both: red unless red at the merge base
+  ;; (`seon.cluster.source/red-at-merge-base` for done, `seon.test/fork-point-red` for the merge)
+  (test-support/with-database
+   (fn [connection]
+     (test-support/declare-source!
+      connection 'tq.same-test
+      (str "(ns tq.same-test (:require [clojure.test :refer [deftest is]]))\n"
+           "(deftest reaching (is (= 1 1)))\n")
+      "test")
+     (let [branch (db/db connection)
+           results [(recorded 'tq.same-test/proof true) (recorded 'tq.same-test/reaching false)]
+           judged {:seon.source/members #{'tq.same-test/proof 'tq.same-test/reaching}
+                   :seon.task/proofs #{'tq.same-test/proof} :seon.source/results results
+                   :seon.program/identities #{} :seon.test.run/id "run-1" :seon.test.run/branch :tq-same}
+           shape (fn [refusals] (mapv (juxt :seon.error/type #(mapv (juxt :seon.test/sym :seon.source/verdict) (:seon.source/red-tests %)))
+                                      refusals))
+           on-base (source/red-at-merge-base branch (db/commit-id branch) results #{'tq.same-test/proof})]
+       (is (= #{} on-base) "a red with no result held at the merge base is not red there")
+       (is (= [[:seon.source/red-test-error [['tq.same-test/reaching :red]]]]
+              (shape (source/done-refusals branch (cond-> judged (seq on-base) (assoc :seon.source/red-on-target on-base)))))
+           "the done rule refuses it as the change's, naming the test")
+       (is (= (shape (source/results-verdict branch branch judged))
+              (shape (source/done-refusals branch judged)))
+           "the merge's judgment refuses it the same way")))))
+
+(deftest an-uncovered-refusal-names-the-red-tests-reaching-it
+  ;; live run 2, chain ce9d: its proof was green, but the one test the call graph walks to seon.effect/render-ai
+  ;; was red, so the done rule refused render-ai as reached by no green test, naming no test; the agent spent its
+  ;; last four calls querying runs by hand for what would satisfy the refusal
+  (test-support/with-database
+   (fn [connection]
+     (test-support/declare-source!
+      connection 'tq.reach
+      "(ns tq.reach)\n(defn stub {:malli/schema [:=> [:cat :int] :int]} [x] x)\n")
+     (test-support/declare-source!
+      connection 'tq.reach-test
+      (str "(ns tq.reach-test (:require [clojure.test :refer [deftest is]]))\n"
+           "(deftest ^{:seon.test/subject \"tq.reach/stub\"} reaches (is (= 1 1)))\n")
+      "test")
+     (let [judged {:seon.source/members #{'tq.reach-test/proof 'tq.reach-test/reaches}
+                   :seon.task/proofs #{'tq.reach-test/proof}
+                   :seon.source/results [(recorded 'tq.reach-test/proof true) (recorded 'tq.reach-test/reaches false)]
+                   :seon.program/identities #{[:seon.fn/sym 'tq.reach/stub]}
+                   :seon.source/merge-identities #{[:seon.fn/sym 'tq.reach/stub]}
+                   :seon.test.run/id "run-1" :seon.test.run/branch :tq-reach}
+           uncovered (filterv #(= ['tq.reach/stub] (:seon.error/offending %))
+                              (source/done-refusals (db/db connection) judged))]
+       (is (= [['tq.reach-test/reaches]] (mapv #(mapv :seon.test/sym (:seon.source/red-tests %)) uncovered))
+           "the refusal names the red test that would cover the function once green")))))
 
 (deftest results-verdict-judges-a-never-started-member-as-evidence
   ;; a member whose recorded result never started is unknown evidence; only an executed failure is a red test
