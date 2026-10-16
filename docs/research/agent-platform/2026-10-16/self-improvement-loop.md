@@ -84,6 +84,40 @@ predecessor on the held-out set.
    and its predicted saving. Root keeps only acceptance, which is the measured rule, and the owner-gated items under
    "Separation of duties".
 
+### The first template: a clipped output (owner, 2026-10-16)
+
+The miner finds calls whose output the printer cut, across all sessions on all branches. Each case becomes a chain of
+two tasks, made from one template:
+
+1. **Investigate**, a question task. Its references are:
+   - the function;
+   - its selected render;
+   - the pinned sample values;
+   - the sessions where agents saw the cut output, each as an evaluation on its branch at its `t` (read through the
+     `:seon.ref/at` tools).
+
+   The agent reads the render, the printer's general rules and those sessions, and judges whether the agents got the
+   information they needed. It answers through `my.agent/answer!` under a declared schema with three parts: a
+   verdict, `:render-fix`, `:printer-fix` or `:fine`; the evidence, citing the evaluations and the agent's next forms;
+   and the reason.
+2. **Fix.** This task follows only a fix verdict.
+   - **Render fix.** The proof is the render bench row on the pinned samples: the render's output is no longer cut,
+     and its cost stays within budget. Every existing printer law test stays green.
+   - **Printer fix.** The printer is compiled platform code, so a chain branch cannot prove a change to it. The
+     verdict becomes a problem task for root, and a lane proves the change through `bin/seon check`.
+
+**A `:fine` verdict is judged in the data.** A cut is good when its output is great and its elision forms say how to
+read more. The miner already shows whether agents then needed to dig. The verdict is recorded on the render's own
+declaration, as an attribute that the render bench test reads. Since the declaration is the attribute's owner, it is
+not a list kept beside the proof. A changed render is a new declaration, so the verdict is judged again; nothing has to
+be invalidated by hand.
+
+**Instructions the template carries:**
+- the value printer stays general, with no key or schema named in it;
+- its token budget is a fixed dial;
+- all specificity belongs in render functions;
+- renders return data.
+
 Fixed points, which no optimiser changes:
 - the grader;
 - the held-out set and its hash;
