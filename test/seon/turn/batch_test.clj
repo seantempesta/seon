@@ -497,6 +497,24 @@
          (is (= "1" (sci/eval-string* ctx "batch-test.once/counted"))
              "a fresh context holds the value the evaluation made"))))))
 
+(deftest an-identical-value-def-in-two-agents-holds-two-values
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running _ _]
+     (let [agent! (fn []
+                    (let [agent-id (str "cells-" (id/id))]
+                      ((requiring-resolve 'seon.test-support/own-branch-agent!) running agent-id "(in-ns 'user)")
+                      agent-id))
+           value (fn [agent code] (:seon.repl/value ((requiring-resolve 'seon.test-support/mcp-reply) (eval! code agent running))))
+           first-agent (agent!)
+           other (agent!)]
+       (eval! "(ns batch-test.cells) (def cell (atom 0))" first-agent running)
+       (eval! "(ns batch-test.cells) (def cell (atom 0))" other running)
+       (eval! "(in-ns 'batch-test.cells) (swap! cell inc)" first-agent running)
+       (is (= 0 (value other "(in-ns 'batch-test.cells) @cell"))
+           "the other agent's own cell is its own")
+       (is (= 0 (value other "(sci.core/eval-string* (seon.sci.eval/base-ctx (seon.db/db)) \"@batch-test.cells/cell\")"))
+           "the program context of the other agent's branch holds no atom the first agent made")))))
+
 (deftest removals-in-one-request-are-judged-as-one-set
   ((requiring-resolve 'seon.test-support/with-running-agent)
    (fn [running agent-id connection]

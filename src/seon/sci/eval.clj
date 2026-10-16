@@ -985,9 +985,12 @@
 
 (declare install-declared-classes! install-jvm-root! overridden-row? source-namespace?)
 
-;; A value definition's init runs once: its evaluation's value, kept by the
-;; definition's content, is what every later context of that definition binds.
-(declare row-definition-digest)
+;; An agent's value definition's init runs once per compartment: the value
+;; its evaluation made is the identity the agent created (an atom, a
+;; connection), so it is kept by the branch that holds it and the
+;; definition's digest, and every later context of that branch binds it.
+;; Another branch with the same definition evaluates its own.
+(declare row-definition-digest store-identity)
 
 (def ^:private value-definers '#{clojure.core/def clojure.core/defonce})
 
@@ -996,19 +999,48 @@
   evaluating context holds as well."
   1024)
 
-(defn- kept-value
-  "The binding an evaluation made for the value definition `row` (a `def` or
-  `defonce` read rather than called), by the row's definition digest; nil
-  when no evaluation's value is kept (a JVM restart), so its init runs."
-  {:malli/schema [:=> [:cat :map] [:maybe :seon.sci.eval/binding]]}
+(defn- compartment
+  "The branch `database` reads, as its store and branch name: the compartment
+  whose agent's values its program binds."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:tuple :map :keyword]]}
+  [database]
+  [(store-identity database) (get-in database [:config :branch])])
+
+(defn- agent-value-definition?
+  "Whether `row` is an agent's value definition: a `def` or `defonce` it
+  evaluated, read rather than called."
+  {:malli/schema [:=> [:cat :map] :boolean]}
   [row]
-  (when (and (seon.fn/value-definition? (:seon.fn/arglists row "")) (value-definers (:seon.fn/defined-by row)))
-    (seon.cache/present ::kept-value (row-definition-digest row))))
+  (boolean (and (= :agent (:seon.schema.admission/source row))
+                (seon.fn/value-definition? (:seon.fn/arglists row ""))
+                (value-definers (:seon.fn/defined-by row)))))
+
+(defn- value-key
+  "Where the value of the agent value definition `row` on `database`'s branch is kept."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map] [:tuple [:tuple :map :keyword] :seon.program/definition-digest]]}
+  [database row]
+  [(compartment database) (row-definition-digest row)])
+
+(defn- keep-value!
+  "Keep `evaluated` as the value of `row` on `database`'s branch, unless one is kept already: the first evaluation's."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map :seon.sci.eval/binding] :nil]}
+  [database row evaluated]
+  (seon.cache/lookup ::kept-value (value-key database row) (constantly evaluated-value-bytes) (constantly evaluated))
+  nil)
+
+(defn- kept-value
+  "The binding the agent value definition `row` was evaluated to on
+  `database`'s branch; nil for any other row, or when no value is kept (a
+  JVM restart, an eviction), so its init runs."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map] [:maybe :seon.sci.eval/binding]]}
+  [database row]
+  (when (agent-value-definition? row)
+    (seon.cache/present ::kept-value (value-key database row))))
 
 (defn- keep-evaluated-values!
-  "Keep, by definition digest, the value each value definition among
-  `installations` was evaluated to, as committed in `db`: a later context of
-  the same definition binds it rather than running its init again."
+  "Keep the value each agent value definition among `installations` was
+  evaluated to, as committed on `db`'s branch: a later context of that branch
+  binds it rather than running its init again."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:sequential [:map [:seon.program/row :seon.program/row]
                                      [:seon.sci.eval/evaluation :seon.sci.eval/evaluation]]]]
@@ -1019,11 +1051,8 @@
                 recorded (when sym (find (:seon.sci.eval/bindings evaluation) sym))]
           :when recorded
           :let [committed (db/pull db '[*] [:seon.fn/sym sym])]
-          :when (and (seon.fn/value-definition? (:seon.fn/arglists committed ""))
-                     (value-definers (:seon.fn/defined-by committed)))]
-    (seon.cache/lookup ::kept-value (row-definition-digest committed)
-                       (constantly evaluated-value-bytes)
-                       (constantly (val recorded)))))
+          :when (agent-value-definition? committed)]
+    (keep-value! db committed (val recorded))))
 
 (defn- install-function-from-database!
   "Install one selected function from the acquired database snapshot. A definition
@@ -1068,10 +1097,13 @@
       (let [row (db/pull db '[*] [:seon.fn/sym function-symbol])
             form (:seon.sci.reader/form (one-event source namespace-name ctx (count source)))]
         (sci/binding [sci/ns (context-namespace ctx namespace-name)]
-          (sci/eval-form ctx (if-let [{value :seon.sci.eval/value} (kept-value row)]
-                               ;; the definition as written, its init the value its evaluation made
-                               (with-meta (apply list (concat (butlast form) [(list 'quote value)])) (meta form))
-                               form)))
+          (if-let [{value :seon.sci.eval/value} (kept-value db row)]
+            ;; the definition as written, its init the value its evaluation made
+            (sci/eval-form ctx (with-meta (apply list (concat (butlast form) [(list 'quote value)])) (meta form)))
+            (let [defined (sci/eval-form ctx form)]
+              ;; a branch's first evaluation of it here is the one its later contexts bind
+              (when (and (agent-value-definition? row) (sci.utils/var? defined) (sci.vars/hasRoot defined))
+                (keep-value! db row {:seon.sci.eval/value @defined :seon.sci.eval/metadata (meta defined)})))))
         (install-function-contract! ctx row (context-projection ctx) db))))
     (kernel/mark-installed! ctx function-symbol)
     function-symbol))
@@ -2992,6 +3024,20 @@
       (throw (ex-info (:seon.error/message pairs) pairs)))
     (set pairs)))
 
+(defn- agent-value-definitions
+  "The agent value definitions (`agent-value-definition?`) among `symbols` in `database`."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :qualified-symbol]] [:set :qualified-symbol]]}
+  [database symbols]
+  (if (empty? symbols)
+    #{}
+    (let [found (db/q '[:find [?sym ...] :in $ [?sym ...] [?definer ...]
+                        :where [?f :seon.fn/sym ?sym] [?f :seon.schema.admission/source :agent]
+                               [?f :seon.fn/arglists "()"] [?f :seon.fn/defined-by ?definer]]
+                      database symbols (vec value-definers))]
+      (when (db/read-refusal? found)
+        (throw (ex-info (:seon.error/message found) found)))
+      (set found))))
+
 (defn- derive-overlay-plan
   "What `database` changes of the `loaded` commit, the interpret set I(B, L):
   the functions whose digest differs (`::overridden`, where the behavior differs
@@ -3035,7 +3081,11 @@
                                           (not (held-namespaces (namespace-key %)))))
                          rows)
         tests (into [] (comp (filter :seon.test/sym) (map test-row) (remove held-tests)) rows)
-        held (into {} (map (juxt identity own)) (concat overridden added))]
+        held (into {} (map (juxt identity own)) (concat overridden added))
+        ;; an agent's value definition binds the value its branch's evaluation
+        ;; made (`kept-value`): such a program is that branch's own
+        owner (when (seq (agent-value-definitions database (vec (keys held))))
+                (compartment database))]
     {::overridden overridden
      ::added added
      ::retracted retracted
@@ -3046,10 +3096,11 @@
      ;; definitions by digest, its retractions, its namespaces by name, source
      ;; and bindings, its tests by row content. Entity ids differ per branch
      ;; for equal programs.
-     ::digest (id/digest 32 [held
-                             (vec (sort retracted))
-                             (mapv (juxt :seon.ns/name namespace-key) namespaces)
-                             tests])}))
+     ::digest (id/digest 32 (cond-> [held
+                                     (vec (sort retracted))
+                                     (mapv (juxt :seon.ns/name namespace-key) namespaces)
+                                     tests]
+                              owner (conj owner)))}))
 
 (defn- overlay-plan
   "The overlay of one program against the loaded commit, once per pair: keyed
