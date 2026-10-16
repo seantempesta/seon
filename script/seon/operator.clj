@@ -1550,7 +1550,7 @@
        (catch Exception cause
          (diagnostic (ex-message cause) (or (ex-data cause) {}) :client-failed cause))))
 
-(declare disposable-root-boot!)
+(declare linked-pins! disposable-root-boot!)
 
 (defn- warmed-program-classes!
   "`source` with our program class directory filled when it misses: a throwaway
@@ -1567,7 +1567,8 @@
         program (program-classes (repository-root) source-root classes)]
     (if (and program (not (.isDirectory (io/file program))))
       (let [disposable (str (io/file root "data/check" (str "warm-" (.pid (java.lang.ProcessHandle/current)))))
-            boot (try (disposable-root-boot! root disposable source-root)
+            boot (try (linked-pins! root disposable)
+                      (disposable-root-boot! root disposable source-root)
                       (finally
                         (doseq [process (selected-processes disposable)]
                           (terminate! process (operator-silence-backstop-ms {})))
@@ -1889,15 +1890,23 @@
                           (not (process-alive? pid)) (empty? (selected-processes (str child))))]
            (do (fs/delete-tree child) (str child))))))
 
-(defn- disposable-root-boot!
-  "Boot a JVM of the archive `source-root` under the scratch root `disposable`
-  and return its boot outcome with `:seon.operator/ready?`; the caller stops it."
-  {:malli/schema [:=> [:cat :string :string :string] :map]}
-  [root disposable source-root]
+(defn- linked-pins!
+  "Link the scratch root `disposable`'s pin directory to `root`'s, so its archive
+  preparation extracts each gitlink pin once for every root; before anything
+  prepares a source under `disposable`, which would make the directory itself."
+  {:malli/schema [:=> [:cat :string :string] :any]}
+  [root disposable]
   (fs/create-dirs (io/file root pinned-directory))
   (fs/create-dirs (io/file disposable "data/source"))
   (fs/create-sym-link (io/file disposable pinned-directory)
-                      (fs/real-path (io/file root pinned-directory)))
+                      (fs/real-path (io/file root pinned-directory))))
+
+(defn- disposable-root-boot!
+  "Boot a JVM of the archive `source-root` under the scratch root `disposable`
+  (its pins linked, `linked-pins!`) and return its boot outcome with
+  `:seon.operator/ready?`; the caller stops it."
+  {:malli/schema [:=> [:cat :string :string :string] :map]}
+  [root disposable source-root]
   ;; A candidate's agents work in its own archive, never the checkout.
   (let [outcome (try (launch-child! {:seon.operator/managed-root disposable
                                      :seon.operator/throwaway? true
@@ -1920,6 +1929,7 @@
   {:malli/schema [:=> [:cat :string :string :string] :map]}
   [root disposable sha]
   (let [began (System/nanoTime)
+        _ (linked-pins! root disposable)
         previous (some-> (advertisement root nil) program-source :seon.operator/source-root)
         source (filled-classes! disposable (prepared-source! disposable sha previous))
         source-root (:seon.operator/source-root source)
