@@ -4,6 +4,7 @@
             [clojure.test :refer [deftest is]]
             [malli.core :as m]
             [sci.core :as sci]
+            [sci.impl.utils]
             [seon.cluster.agent :as agent]
             [seon.cache]
             [seon.config :as config]
@@ -515,13 +516,10 @@
            ctx (support/fork-cluster-ctx connection)
            request (render-request database ctx fixture-b
                                    {:seon.ns/name fixture-b})]
-       ;; Acquisition is not invocation: acquire the program the value holds
-       ;; first, so the trap observes only the renderer's invocation.
        (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db database})
-       (with-redefs [clojure.core/requiring-resolve
-                     (fn [& _]
-                       (throw (ex-info "compiled resolver trap" {})))]
-         (is (= (str "B:" fixture-b) (render-ai request))))
+       (is (= (str "B:" fixture-b) (render-ai request)))
+       (is (sci.impl.utils/var? (sci/resolve ctx 'seon.render-simplification.fixture-b/namespace-ai))
+           "the declared renderer is the context's SCI Var")
        (sci/binding [sci/ns (sci/create-ns fixture-b)]
          (sci/eval-form
           ctx
@@ -656,8 +654,8 @@
                      :seon.ns/doc "one"}])
      (declare-fixture-subjects! connection)
      (let [ctx (support/fork-cluster-ctx connection)
-           invoke kernel/invoke
-           invocations (atom 0)
+           ;; the renderer counts its own invocations in the viewing context
+           invocations #(sci/eval-string* ctx "@seon.render-simplification.fixture-a/invocations")
            request (fn [call-id calls]
                      (assoc (render-request (db/db connection) ctx fixture-a
                                             {:seon.ns/name fixture-a})
@@ -665,9 +663,11 @@
                             :seon.render.call/id call-id
                             :seon.render/captured-calls calls))]
        (sci/binding [sci/ns (sci/create-ns fixture-a)]
+         (sci/eval-form ctx '(def invocations (atom 0)))
          (sci/eval-form
           ctx
           '(defn namespace-ai [value]
+             (swap! invocations inc)
              (str "A:" (:seon.ns/name value) ":"
                   (seon.db/q
                    '[:find ?doc .
@@ -676,16 +676,13 @@
                      [?namespace :seon.ns/name ?name]
                      [?namespace :seon.ns/doc ?doc]]
                    (:seon.ns/name value))))))
-       (with-redefs [kernel/invoke (fn [invocation]
-                                    (swap! invocations inc)
-                                    (invoke invocation))]
-         (let [first-output (target-call 'seon.render 'render-call
+       (let [first-output (target-call 'seon.render 'render-call
                                          (request [:debug] (atom {})))]
            (let [second-captured (atom {})
                  second-output (target-call 'seon.render 'render-call
                                             (request [:context] second-captured))]
              (is (= (str "A:" fixture-a ":one") first-output second-output))
-             (is (= 1 @invocations)
+             (is (= 1 (invocations))
                  "the second presentation reuses the raw invocation")
              (is (some (comp seq :seon.render.call/read-evidence)
                        (vals @second-captured))
@@ -696,7 +693,7 @@
                    (target-call 'seon.render 'render-call
                                 (request [:unrelated] (atom {})))]
                (is (= second-output unrelated-output))
-               (is (= 1 @invocations)
+               (is (= 1 (invocations))
                    "an unrelated transaction does not invoke again")
                (db/transact! connection
                              [{:seon.ns/name fixture-a
@@ -705,8 +702,8 @@
                      (target-call 'seon.render 'render-call
                                   (request [:changed] (atom {})))]
                  (is (= (str "A:" fixture-a ":two") relevant-output))
-                 (is (= 2 @invocations)
-                     "a changed read dependency invokes again"))))))))))
+                 (is (= 2 (invocations))
+                     "a changed read dependency invokes again")))))))))
 
 (deftest
   authored-source-invocation-reuses-one-stored-run-across-presentations

@@ -316,6 +316,25 @@
                  :seon.fn/sym function-symbol})))))
   function-symbol)
 
+(defn own-definition?
+  "Whether `ctx` defined the inherited `sci-var` itself since its fork.
+
+  It wrote its own binding of it, one it did not inherit at the fork
+  (`:seon.sci.eval/inherited-var-bindings`), and the binding holds a root that
+  is a definition: an install's unbinding of a Var it installs again holds
+  none, and a closure member's lazy root (`:seon.sci.eval/lazy-member`) is the
+  placeholder the install replaces."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.sci.eval/sci-var] :boolean]}
+  [ctx sci-var]
+  (let [env @(:env ctx)
+        bound (get-in env [:sci/var-bindings sci-var] ::absent)]
+    (boolean
+     (and (not (identical? bound ::absent))
+          (not (identical? bound (get-in env [:seon.sci.eval/inherited-var-bindings sci-var])))
+          (sci.ctx-store/with-ctx ctx
+            (and (sci.vars/hasRoot sci-var)
+                 (not (:seon.sci.eval/lazy-member (meta @sci-var)))))))))
+
 (defn held-apart-var
   "The SCI Var `ctx` holds `predicate` apart in, or nil when `ctx` calls the
   shared definition: `ctx` has its own binding of the Var (a branch `defn` of

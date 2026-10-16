@@ -985,75 +985,6 @@
 
 (declare install-declared-classes! install-jvm-root! overridden-row? source-namespace?)
 
-;; An agent's value definition's init runs once per compartment: the value
-;; its evaluation made is the identity the agent created (an atom, a
-;; connection), so it is kept by the branch that holds it and the
-;; definition's digest, and every later context of that branch binds it.
-;; Another branch with the same definition evaluates its own.
-(declare row-definition-digest store-identity)
-
-(def ^:private value-definers '#{clojure.core/def clojure.core/defonce})
-
-(def ^:private evaluated-value-bytes
-  "What one kept value weighs in `seon.cache`: a reference to an object its
-  evaluating context holds as well."
-  1024)
-
-(defn- compartment
-  "The branch `database` reads, as its store and branch name: the compartment
-  whose agent's values its program binds."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:tuple :map :keyword]]}
-  [database]
-  [(store-identity database) (get-in database [:config :branch])])
-
-(defn- agent-value-definition?
-  "Whether `row` is an agent's value definition: a `def` or `defonce` it
-  evaluated, read rather than called."
-  {:malli/schema [:=> [:cat :map] :boolean]}
-  [row]
-  (boolean (and (= :agent (:seon.schema.admission/source row))
-                (seon.fn/value-definition? (:seon.fn/arglists row ""))
-                (value-definers (:seon.fn/defined-by row)))))
-
-(defn- value-key
-  "Where the value of the agent value definition `row` on `database`'s branch is kept."
-  {:malli/schema [:=> [:cat :seon.db/database-value :map] [:tuple [:tuple :map :keyword] :seon.program/definition-digest]]}
-  [database row]
-  [(compartment database) (row-definition-digest row)])
-
-(defn- keep-value!
-  "Keep `evaluated` as the value of `row` on `database`'s branch, unless one is kept already: the first evaluation's."
-  {:malli/schema [:=> [:cat :seon.db/database-value :map :seon.sci.eval/binding] :nil]}
-  [database row evaluated]
-  (seon.cache/lookup ::kept-value (value-key database row) (constantly evaluated-value-bytes) (constantly evaluated))
-  nil)
-
-(defn- kept-value
-  "The binding the agent value definition `row` was evaluated to on
-  `database`'s branch; nil for any other row, or when no value is kept (a
-  JVM restart, an eviction), so its init runs."
-  {:malli/schema [:=> [:cat :seon.db/database-value :map] [:maybe :seon.sci.eval/binding]]}
-  [database row]
-  (when (agent-value-definition? row)
-    (seon.cache/present ::kept-value (value-key database row))))
-
-(defn- keep-evaluated-values!
-  "Keep the value each agent value definition among `installations` was
-  evaluated to, as committed on `db`'s branch: a later context of that branch
-  binds it rather than running its init again."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       [:sequential [:map [:seon.program/row :seon.program/row]
-                                     [:seon.sci.eval/evaluation :seon.sci.eval/evaluation]]]]
-                  :nil]}
-  [db installations]
-  (doseq [{row :seon.program/row evaluation :seon.sci.eval/evaluation} installations
-          :let [sym (some-> (:seon.fn/sym row) str symbol)
-                recorded (when sym (find (:seon.sci.eval/bindings evaluation) sym))]
-          :when recorded
-          :let [committed (db/pull db '[*] [:seon.fn/sym sym])]
-          :when (agent-value-definition? committed)]
-    (keep-value! db committed (val recorded))))
-
 (defn- install-function-from-database!
   "Install one selected function from the acquired database snapshot. A definition
   the loaded program holds unchanged binds its compiled Var, exactly as acquisition
@@ -1074,17 +1005,16 @@
                   ::missing-function-row function-symbol
                   :seon.fn/sym function-symbol
                   :seon.error/expected :seon.sci.eval/acquired-function}))))
-    ;; An uninstalled program symbol has no SCI entry, so one present is this
-    ;; context's own definition, which survives its first install (AGENTS.md).
+    ;; The evaluating context's own definition of an uninstalled program
+    ;; symbol is its value and survives the symbol's first install
+    ;; (AGENTS.md); recorded so `acquire!` still carries it. An interpreted
+    ;; symbol's Var holds the overlay's own root until it installs.
     (when-not (and (not (contains? interpreted function-symbol))
-                   (not (source-namespace? ctx namespace-name))
-                   (not (overridden-row? loaded db (db/pull db '[*] [:seon.fn/sym function-symbol])))
-                   (or (when (contains? (get-in @(:env ctx) [:namespaces namespace-name])
-                                        (symbol (name function-symbol)))
-                         ;; Recorded so `acquire!` still carries it once installed.
-                         (swap! (::kernel/program-snapshot ctx) assoc-in
-                                [:functions function-symbol ::context-defined?] true))
-                       (install-jvm-root! ctx function-symbol)))
+                   (or (when (some->> (sci/resolve ctx function-symbol) (kernel/own-definition? ctx))
+                         (swap! (::kernel/program-snapshot ctx) update ::context-defined (fnil conj #{}) function-symbol))
+                       (and (not (source-namespace? ctx namespace-name))
+                            (not (overridden-row? loaded db (db/pull db '[*] [:seon.fn/sym function-symbol])))
+                            (install-jvm-root! ctx function-symbol))))
     (let [namespace-row (kernel/program-namespace ctx namespace-name)]
       (install-declared-classes! ctx [namespace-row])
       ;; Only a namespace the context does not hold yet takes its bindings from
@@ -1097,13 +1027,7 @@
       (let [row (db/pull db '[*] [:seon.fn/sym function-symbol])
             form (:seon.sci.reader/form (one-event source namespace-name ctx (count source)))]
         (sci/binding [sci/ns (context-namespace ctx namespace-name)]
-          (if-let [{value :seon.sci.eval/value} (kept-value db row)]
-            ;; the definition as written, its init the value its evaluation made
-            (sci/eval-form ctx (with-meta (apply list (concat (butlast form) [(list 'quote value)])) (meta form)))
-            (let [defined (sci/eval-form ctx form)]
-              ;; a branch's first evaluation of it here is the one its later contexts bind
-              (when (and (agent-value-definition? row) (sci.utils/var? defined) (sci.vars/hasRoot defined))
-                (keep-value! db row {:seon.sci.eval/value @defined :seon.sci.eval/metadata (meta defined)})))))
+          (sci/eval-form ctx form))
         (install-function-contract! ctx row (context-projection ctx) db))))
     (kernel/mark-installed! ctx function-symbol)
     function-symbol))
@@ -1513,7 +1437,6 @@
   [{ctx :seon.sci.eval/ctx
     db :seon.db/db
     row :seon.program/row
-    evaluated? ::evaluated?
     prepared-projection ::prepared-projection}]
   (let [projection (or prepared-projection
                        (context-projection ctx)
@@ -1584,7 +1507,6 @@
               ;; called.
               unloaded? (source-namespace? ctx namespace-name)
               interpreted? (or interpreted? unloaded?)
-              evaluated-row? (boolean (or evaluated? (::evaluated? row)))
               compiled? (and host-row (not changed?) (not unloaded?))
               refusal (when (and host-row (not compiled?) (not unloaded?))
                         (interpretation-error function-symbol
@@ -1598,18 +1520,12 @@
               ;; working. An agent's evaluation keeps the returned refusal.
               result
               (cond
-                (and refusal (not evaluated-row?)) (install-refusing-root! ctx function-symbol refusal)
-                refusal refusal
+                refusal (install-refusing-root! ctx function-symbol refusal)
                 :else
                   (if (or (not interpreted?) compiled?)
                     (if (install-jvm-root! ctx function-symbol) :jvm :unavailable)
                     (try
-                      (if (or evaluated? (::evaluated? row))
-                        (do
-                          (kernel/mark-installed! ctx function-symbol)
-                          (when (:seon.fn/spec committed)
-                            (install-function-contract! ctx committed next-projection db)))
-                        (install-function-from-database! ctx db function-symbol))
+                      (install-function-from-database! ctx db function-symbol)
                       :interpreted
                       (catch Throwable failure
                         ;; An unarmable contract or an unreadable cluster
@@ -1626,8 +1542,7 @@
               ;; host-bound caller does; with no compiled Var it refuses by
               ;; name when called, carrying its whole cause, never refusing
               ;; the acquisition and so every later form.
-              failed (when (and (map? result) (not refusal) (not evaluated-row?)
-                                (= :core admission))
+              failed (when (and (map? result) (not refusal) (= :core admission))
                        result)
               result (cond (not failed) result
                            (install-jvm-root! ctx function-symbol) :jvm
@@ -1652,13 +1567,11 @@
 
       :seon.test/sym
       (let [namespace-name (second (:seon.test/ns row))
-            event (when-not (or evaluated? (::evaluated? row))
-                    (one-event (:seon.test/source committed)
-                               namespace-name ctx
-                               (count (:seon.test/source committed))))]
-        (when event
-          (sci/binding [sci/ns (context-namespace ctx namespace-name)]
-            (sci/eval-form ctx (:seon.sci.reader/form event))))
+            event (one-event (:seon.test/source committed)
+                             namespace-name ctx
+                             (count (:seon.test/source committed)))]
+        (sci/binding [sci/ns (context-namespace ctx namespace-name)]
+          (sci/eval-form ctx (:seon.sci.reader/form event)))
         {:seon.schema/projection projection
          :seon.sci.eval/installed 1})
 
@@ -1714,31 +1627,6 @@
   (kernel/with-world-ctx ctx
     #(sci/eval-form ctx form)))
 
-(defn- transfer-evaluated-roots!
-  "Install into `ctx` each evaluated definition of `installations`, from the
-  root and metadata its evaluation recorded. A name `ctx` already holds takes
-  them as its binding of its Var (`sci.core/intern` of an existing name)."
-  [ctx installations]
-  (let [roots (into {} (mapcat (comp :seon.sci.eval/bindings
-                                    :seon.sci.eval/evaluation)) installations)]
-    (doseq [qualified (into #{} (keep #(some-> % str symbol))
-                           (mapcat (comp (juxt :seon.fn/sym :seon.test/sym)
-                                         :seon.program/row) installations))
-            :let [recorded (get roots qualified)]
-            :when recorded]
-      (let [namespace-name (symbol (namespace qualified))
-            local-name (symbol (name qualified))
-            metadata (:seon.sci.eval/metadata recorded)]
-        (when-not (sci/find-ns ctx namespace-name)
-          (sci/add-namespace! ctx namespace-name {}))
-        (sci.ctx-store/with-ctx ctx
-          (let [installed (sci/intern ctx namespace-name (with-meta local-name metadata)
-                                      (:seon.sci.eval/value recorded))]
-            ;; SCI intern replaces an existing root without adopting symbol
-            ;; metadata. The evaluated :test body and contract belong to
-            ;; the replacement too; retain only the destination's ns.
-            (reset-meta! installed (merge metadata (select-keys (meta installed) [:ns])))))))))
-
 (declare program-key-input acquired-database? stale-reach reinterpret-reach! interpret-affected!
          namespace-row install-caller-host-bindings! install-required-libraries! acquisition-refusal)
 
@@ -1765,87 +1653,27 @@
   [ctx test-symbol]
   (contains? (some-> (::kernel/program-snapshot ctx) deref ::interpreted-tests) test-symbol))
 
-(defn- installation-covers-program-change?
-  "True when everything the settlement `report` changed since the context's
-  acquired program is one of `installations` or leaves its program row
-  canonically equal.
-
-  Three facts, each from its owner: `written-on`, the committed value the
-  write started from, is the report's `:db-before` (equal basis on one branch:
-  no commit between them); the context acquired `written-on`'s program
-  (`acquired-database?`, which follows a branch to its parent's recorded
-  basis); and the report's `:db-after` ends at its own transaction (Datahike's
-  writer hands every report of a batch the batch's final value,
-  datahike/writer.cljc:229-264). Then the report's datoms name every change,
-  and each changed component's owning parents join from those few children
-  in the final value (a parent that lost a child is itself in the datoms).
-  Anything else is not covered: the next acquisition derives from the head, as
-  for any unknown change. Cost: proportional to the
-  settlement's datoms, never to the store's history (task 361088de3d56)."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.db/transaction-report
-                       [:sequential [:map [:seon.program/row :seon.program/row]]] :seon.schema/projection]
-                  [:or :nil :boolean]]}
-  [ctx written-on report installations projection]
-  (when (and (= (db/basis-t written-on) (db/basis-t (:db-before report)))
-             (= (get-in written-on [:config :branch]) (get-in report [:db-before :config :branch]))
-             (= (db/basis-t (:db-after report)) (:tx (first (:tx-data report))))
-             (acquired-database? ctx written-on))
-    (let [before written-on
-          after (:db-after report)
-          identities (set (map (comp program/row-identity :seon.program/row)
-                               installations))
-          shapes (program/shapes-in projection)
-          components (into []
-                           (keep (fn [[attribute properties]]
-                                   (when (:db/isComponent properties) attribute)))
-                           (:schema (db/schema-database after)))
-          touched (into #{} (map :e) (:tx-data report))
-          parents (loop [frontier (vec touched) seen #{}]
-                    (if (or (empty? frontier) (empty? components))
-                      seen
-                      (let [incoming (db/q '[:find [?parent ...]
-                                             :in $ [?child ...] [?attribute ...]
-                                             :where [?parent ?attribute ?child]]
-                                           after frontier components)]
-                        (when-not (or (:seon.db/invalid-read incoming) (:seon.schema/expected-value incoming))
-                          (recur (vec (remove seen incoming)) (into seen incoming))))))]
-      (when parents
-        (let [candidates (vec (into touched parents))
-              ;; Only program rows decide coverage: pull the identity
-              ;; attributes of every touched entity (turns and evaluations
-              ;; among them), then every attribute of the program rows alone.
-              marks (fn [database] (db/pull-many database (vec program/identity-attributes) candidates))
-              marked-old (marks before)
-              marked-current (marks after)
-              eids (if (some #(or (:seon.db/invalid-read %) (:seon.schema/expected-value %))
-                             [marked-old marked-current])
-                     candidates
-                     (into [] (keep (fn [[eid old-mark current-mark]]
-                                      (when (or (program/row-identity old-mark)
-                                                (program/row-identity current-mark))
-                                        eid)))
-                           (map vector candidates marked-old marked-current)))
-              old (db/pull-many before '[*] eids)
-              current (db/pull-many after '[*] eids)]
-          (and (not (or (:seon.db/invalid-read old) (:seon.schema/expected-value old)))
-               (not (or (:seon.db/invalid-read current) (:seon.schema/expected-value current)))
-               (every?
-                (fn [[eid old-row current-row]]
-                  (let [identity (or (program/row-identity current-row)
-                                     (program/row-identity old-row))]
-                    (or (nil? identity)
-                        (contains? identities identity)
-                        (and (not (contains? parents eid))
-                             (= (program/canonical-row shapes old-row)
-                                (program/canonical-row shapes current-row))))))
-                (map vector eids old current))))))))
+(defn- settled-on-acquired-basis?
+  "Whether the settlement `report` wrote on the very value `ctx` acquired:
+  its `:db-before` is `written-on` (one branch, one basis), `ctx` acquired
+  `written-on`'s program (`acquired-database?`) and its `:db-after` ends at its
+  own transaction (Datahike's writer hands every report of a batch the batch's
+  final value). Then the settled program is the one `ctx` evaluated."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.db/transaction-report] :boolean]}
+  [ctx written-on report]
+  (boolean
+   (and (= (db/basis-t written-on) (db/basis-t (:db-before report)))
+        (= (get-in written-on [:config :branch]) (get-in report [:db-before :config :branch]))
+        (= (db/basis-t (:db-after report)) (:tx (first (:tx-data report))))
+        (acquired-database? ctx written-on))))
 
 (defn- record-settled-rows!
   "Record in the evaluating context `ctx` the rows its own evaluations
   committed: their entries in its program snapshot, so its next regeneration
-  reads them unchanged rather than another writer's, and, when they cover the
-  whole program change, the settled commit's basis and program key, so its
-  next request forks nothing. Its roots are already the ones it evaluated."
+  reads them unchanged rather than another writer's, and, when the settlement
+  wrote on the value it acquired (`settled-on-acquired-basis?`), the settled
+  commit's basis and program key, so its next request forks nothing. Its
+  roots are already the ones it evaluated."
   [ctx db installations report written-on]
   (let [committed (into [] (keep #(some->> (:seon.fn/sym (:seon.program/row %))
                                            (vector :seon.fn/sym)
@@ -1853,25 +1681,21 @@
                         installations)]
     (swap! (::kernel/program-snapshot ctx) update :functions
            #(into (if (seq %) % (sorted-map)) (map (juxt :seon.fn/sym committed-function)) committed))
-    (when (and report written-on
-               (installation-covers-program-change?
-                ctx written-on report installations (context-projection ctx)))
+    (when (and report written-on (settled-on-acquired-basis? ctx written-on report))
       (let [input (program-key-input db ctx)]
         (swap! (::kernel/program-snapshot ctx)
                #(cond-> (assoc % ::acquired-basis (acquired-basis db)) input (assoc ::program-key input)))))
     []))
 
 (defn install-evaluated-rows!
-  "Install committed rows from the evaluations that produced them.
+  "Record committed rows in the context that evaluated them.
 
-  With the evaluating context (`agent-ctx`), which holds every root its forms
-  bound, settlement only records the rows in it (`record-settled-rows!`):
-  `ctx`, the execution's base, is never written, so it stays the program
-  context of the content it acquired and takes the settled program by content
-  at its next `acquire!`. Without one, the rows install into `ctx` from their
-  evaluations' recorded roots: the complete batch first, since installing one
-  root at a time cannot resolve a same-batch test's reference to a same-batch
-  function, while replaying source would execute the definitions twice."
+  The evaluating context (`agent-ctx`, else `ctx` itself) holds every root its
+  forms bound, so settlement only records the rows in it
+  (`record-settled-rows!`): nothing is evaluated or copied again. `ctx`, an
+  execution's base, is never written when an `agent-ctx` evaluated: it stays
+  the program context of the content it acquired and takes the settled
+  program by content at its next `acquire!`."
   {:malli/schema
    [:=>
     [:cat
@@ -1894,48 +1718,7 @@
     report :seon.db/transaction-report
     written-on :seon.sci.eval/written-on
     agent-ctx :seon.sci.eval/agent-ctx}]
-  (keep-evaluated-values! db installations)
-  (if agent-ctx
-    (record-settled-rows! agent-ctx db installations report written-on)
-    (sci.ctx-store/with-ctx ctx
-      (let [batch (into #{} (keep (comp #(some-> % str symbol) (some-fn :seon.fn/sym :seon.test/sym) :seon.program/row))
-                        installations)
-            functions (into [] (keep (comp #(some-> % str symbol) :seon.fn/sym :seon.program/row)) installations)
-            previous (into {} (map (fn [sym] [sym (sci/resolve ctx sym)])) functions)]
-        (transfer-evaluated-roots! ctx installations)
-        ;; THE COMMITTED VALUE'S PROJECTION: every schema and contract the
-        ;; batch wrote, and every registration an earlier run committed,
-        ;; derived once per committed value (memoized).
-        (let [projection (schema/projection-from-database db)
-              installed (mapv (fn [{program-row :seon.program/row}]
-                                (install-row!
-                                 {:seon.sci.eval/ctx ctx
-                                  :seon.db/db db
-                                  :seon.program/row program-row
-                                  ::evaluated? true
-                                  ::prepared-projection projection}))
-                              installations)]
-          (when (and report written-on
-                     (every? :seon.sci.eval/installed installed)
-                     (installation-covers-program-change?
-                      ctx written-on report installations (context-projection ctx)))
-            (let [input (program-key-input db ctx)]
-              (swap! (::kernel/program-snapshot ctx)
-                     #(cond-> (assoc % ::acquired-basis (acquired-basis db)) input (assoc ::program-key input)))))
-          ;; A definition that landed in a new Var of `ctx` leaves the callers and
-          ;; tests analyzed against its previous Var calling that one: they are
-          ;; analyzed again here, as one Clojure Var would be seen.
-          (doseq [sym functions
-                  :let [before (get previous sym)]
-                  :when (and before (not (identical? before (sci/resolve ctx sym))))]
-            (reinterpret-reach! ctx db (stale-reach ctx db sym (complement batch))))
-          ;; A caller `ctx` still runs compiled never sees a redefinition: the
-          ;; reverse closure of these definitions is bound lazily once, so the
-          ;; next eval request calls the branch's program, as one Clojure Var
-          ;; would.
-          (when (seq functions)
-            (interpret-affected! ctx db functions))
-          installed)))))
+  (record-settled-rows! (or agent-ctx ctx) db installations report written-on))
 
 (defn- classpath-locatable?
   "Whether THIS PROCESS's own classpath can serve one namespace's source.
@@ -3024,20 +2807,6 @@
       (throw (ex-info (:seon.error/message pairs) pairs)))
     (set pairs)))
 
-(defn- agent-value-definitions
-  "The agent value definitions (`agent-value-definition?`) among `symbols` in `database`."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :qualified-symbol]] [:set :qualified-symbol]]}
-  [database symbols]
-  (if (empty? symbols)
-    #{}
-    (let [found (db/q '[:find [?sym ...] :in $ [?sym ...] [?definer ...]
-                        :where [?f :seon.fn/sym ?sym] [?f :seon.schema.admission/source :agent]
-                               [?f :seon.fn/arglists "()"] [?f :seon.fn/defined-by ?definer]]
-                      database symbols (vec value-definers))]
-      (when (db/read-refusal? found)
-        (throw (ex-info (:seon.error/message found) found)))
-      (set found))))
-
 (defn- derive-overlay-plan
   "What `database` changes of the `loaded` commit, the interpret set I(B, L):
   the functions whose digest differs (`::overridden`, where the behavior differs
@@ -3081,11 +2850,7 @@
                                           (not (held-namespaces (namespace-key %)))))
                          rows)
         tests (into [] (comp (filter :seon.test/sym) (map test-row) (remove held-tests)) rows)
-        held (into {} (map (juxt identity own)) (concat overridden added))
-        ;; an agent's value definition binds the value its branch's evaluation
-        ;; made (`kept-value`): such a program is that branch's own
-        owner (when (seq (agent-value-definitions database (vec (keys held))))
-                (compartment database))]
+        held (into {} (map (juxt identity own)) (concat overridden added))]
     {::overridden overridden
      ::added added
      ::retracted retracted
@@ -3096,11 +2861,10 @@
      ;; definitions by digest, its retractions, its namespaces by name, source
      ;; and bindings, its tests by row content. Entity ids differ per branch
      ;; for equal programs.
-     ::digest (id/digest 32 (cond-> [held
-                                     (vec (sort retracted))
-                                     (mapv (juxt :seon.ns/name namespace-key) namespaces)
-                                     tests]
-                              owner (conj owner)))}))
+     ::digest (id/digest 32 [held
+                             (vec (sort retracted))
+                             (mapv (juxt :seon.ns/name namespace-key) namespaces)
+                             tests])}))
 
 (defn- overlay-plan
   "The overlay of one program against the loaded commit, once per pair: keyed
@@ -3228,15 +2992,20 @@
                   [:fn clojure.core/ifn?]]}
   [ctx database sym sci-var]
   (let [projection (db/carried-projection database)]
-    (fn lazy-member [& args]
-      (let [executing (executing-ctx ctx)
-            held #(sci.ctx-store/with-ctx executing @sci-var)]
-        (when (identical? lazy-member (held))
-          (promote-member! executing
-                           (cond-> (source-database executing)
-                             projection (vary-meta assoc :seon.schema/projection projection))
-                           sym sci-var lazy-member))
-        (apply (held) args)))))
+    ;; marked as the placeholder it is: no context's own definition
+    ;; (`seon.sci.kernel/own-definition?`)
+    (with-meta
+      (fn lazy-member [& args]
+        (let [executing (executing-ctx ctx)
+              held #(sci.ctx-store/with-ctx executing @sci-var)
+              pending (held)]
+          (when (::lazy-member (meta pending))
+            (promote-member! executing
+                             (cond-> (source-database executing)
+                               projection (vary-meta assoc :seon.schema/projection projection))
+                             sym sci-var pending))
+          (apply (held) args)))
+      {::lazy-member sym})))
 
 (defn- bind-lazy-members!
   "Bind each function of `members` in `ctx` to its `lazy-root`, creating the
@@ -3629,8 +3398,10 @@
                            (filter private-names)
                            @(::kernel/installed-functions ctx)))
                ::kernel/program-snapshot
-               (atom (update @(::kernel/program-snapshot forked) :functions merge
-                             (select-keys (:functions snapshot) snapshot-names)))
+               (atom (cond-> (update @(::kernel/program-snapshot forked) :functions merge
+                                     (select-keys (:functions snapshot) snapshot-names))
+                       (seq (::context-defined snapshot))
+                       (assoc ::context-defined (into #{} (filter snapshot-names) (::context-defined snapshot)))))
                :seon.sci.eval/private-state :preserved-in-memory)]
     ;; The regenerated context takes a new generation, so it writes no Var
     ;; its earlier forks share in place; the Vars born in the ones it held
@@ -4313,7 +4084,7 @@
               program-tests (set (::interpreted-tests generated-snapshot))
               own (into [] (keep (fn [[qualified {sci-var :seon.sci.eval/var}]]
                                    (when-not (or (and (contains? installed qualified)
-                                                      (not (get-in snapshot [:functions qualified ::context-defined?])))
+                                                      (not (contains? (::context-defined snapshot) qualified)))
                                                  (contains? replaced qualified)
                                                  (contains? program-tests qualified))
                                      [(symbol (namespace qualified)) (symbol (name qualified)) sci-var

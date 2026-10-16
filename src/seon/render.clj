@@ -18,6 +18,7 @@
             [malli.core :as m]
             [malli.transform :as mt]
             [sci.core :as sci]
+            [sci.ctx-store]
             [seon.ai.tokens :as tokens]
             [seon.cache]
             [seon.config :as config]
@@ -879,6 +880,19 @@
     {:functions (into {} (map #(vector % (get (:functions snapshot) %))) symbols)
      :namespaces (into {} (map #(vector % (get (:namespaces snapshot) %))) namespaces)}))
 
+(defn- context-callable
+  "The callable `ctx` runs for `selected` that no program entity describes,
+  else nil: the context's own definition (`seon.sci.kernel/own-definition?`)
+  or a private one. Its identity changes on redefinition and never pretends to
+  be program data."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:or :nil :map] :seon.fn/sym] [:maybe [:fn clojure.core/ifn?]]]}
+  [ctx snapshot selected]
+  (when-let [sci-var (sci/resolve ctx selected)]
+    (when (or (not (get-in snapshot [:functions selected]))
+              (sci.kernel/own-definition? ctx sci-var))
+      (let [callable (sci.ctx-store/with-ctx ctx @sci-var)]
+        (when (ifn? callable) callable)))))
+
 (defn call-cache-evidence
   "Describe a retained call's code, projection, and supplied input."
   {:malli/schema [:=> [:cat :map :qualified-symbol] :map]}
@@ -898,10 +912,7 @@
     {:seon.db/db (:seon.db/db request)
      ::program-snapshot snapshot
      ::program-evidence program
-     ;; Private SCI definitions have no durable entity. Their actual callable
-     ;; identity changes on redefinition and never pretends to be program data.
-     ::private-callable (when-not (get-in snapshot [:functions selected])
-                          (some-> (sci/resolve ctx selected) deref))
+     ::private-callable (context-callable ctx snapshot selected)
      ::projection projection
      ::projection-evidence (select-keys projection
                                        [:seon.schema.projection/forms
@@ -931,10 +942,7 @@
          (= (::projection-evidence previous)
             (select-keys projection [:seon.schema.projection/forms
                                      :seon.schema.projection/function-contracts]))
-         (or (get-in snapshot [:functions selected])
-             (identical? (::private-callable previous)
-                         (some-> (sci/resolve ctx selected) deref)))
-         true)))
+         (identical? (::private-callable previous) (context-callable ctx snapshot selected)))))
 
 (defn same-committed-database?
   "True for committed values of the same connection generation and commit.
