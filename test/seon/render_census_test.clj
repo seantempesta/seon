@@ -23,10 +23,6 @@
   "Functions that call a selected render: no function outside the printer set calls them."
   '#{seon.render/render-call seon.render/declared-projection seon.render/selection})
 
-(def ^:private text-as-content
-  "AI renders whose answer is text by design, not a rendering of data as text."
-  '#{my.program/render-source-ai seon.cluster.instruction/instruction-ai})
-
 (def ^:private source-files (delay (census/files ["src"] [".clj" ".cljc"])))
 
 (def ^:private faces
@@ -122,14 +118,13 @@
        (mapv #(nth % 2))))
 
 (defn- string-renders
-  "The AI render symbols outside the printer set and `text-as-content` whose contract output admits a string."
+  "The AI render symbols outside the printer set whose contract output admits a string: an AI render returns data, never text."
   {:malli/schema [:=> [:cat :any [:set :qualified-symbol]] [:vector :qualified-symbol]]}
   [registry ai-renders]
   (vec (sort (for [sym ai-renders
                    :let [v (try (requiring-resolve sym) (catch Throwable _ nil))
                          contract (:malli/schema (meta v))]
                    :when (and contract (not (contains? printer-namespaces (symbol (namespace sym))))
-                              (not (contains? text-as-content sym))
                               (some #(admits-string? registry %) (outputs contract)))]
                sym))))
 
@@ -142,7 +137,7 @@
            ai-renders (:seon.render/ai (render-faces))]
        (is (> (count ai-renders) 40) "the census found the declared AI renders")
        (is (= [] (string-renders registry ai-renders))
-           "each AI render's output schema admits a string and its pair does not declare text as content")))))
+           "no AI render's output schema admits a string: AI renders return data (owner, 2026-10-16)")))))
 
 (deftest the-render-rules-catch-a-planted-call-and-a-string-render
   (let [calls (planted (str "(ns seon.census-planted (:require [seon.render :as render] [seon.error :as error]))\n"

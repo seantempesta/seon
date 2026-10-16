@@ -57,8 +57,11 @@ show.
    `seon.source-census-test/no-timeout-or-limit-is-a-hardcoded-number`, 42 sites) plus a render census whose render
    set is derived from `seon.schema.edn/packaged-forms` (pairs are also declared in Clojure source: `seon.bootstrap`,
    `seon.render`, `seon.schema.edn`, `seon.sci.lookup`).
-7. **String-returning AI renders become data** (22 of the 27 that admit `:string`; `my.program/render-source-ai`
-   and `seon.cluster.instruction/instruction-ai` carry text as content and stay).
+7. **Every AI render returns data, never text** (owner, 2026-10-16: "ai renders DO NOT RETURN TEXT ... They return
+   data"). All renders whose output admits `:string` become data, including `my.program/render-source-ai`,
+   `seon.cluster.instruction/instruction-ai` and `seon.render/render-default-ai-source` (source or instruction words
+   are a string member of a data value, never the render's whole answer). `seon.render/namespace-stage`'s AI output
+   schema `:string` becomes the AI data schema.
 8. **`seon.print/printed`, `seon.print/full`, `*budget*` and the `:seon.print/budget` metadata stay** as the
    already-printed value and the agent's explicit widening.
 
