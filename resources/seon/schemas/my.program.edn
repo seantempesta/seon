@@ -24,6 +24,9 @@
   [:members [:map-of :qualified-keyword [:map [:description {:optional true} :string] [:form {:optional true} :seon.schema/definition]]]]
   [:referenced-by [:vector :qualified-keyword]] [:writes [:vector :qualified-symbol]]
   [:datoms {:optional true} [:int {:min 0}]]]
+ :my.program/resolve-request
+ [:map {:description "my.program/resolve!'s request: the declaration, and the connection of the branch it is unmerged on, filled from the evaluation's world."}
+  [:seon.db/connection :seon.db/connection] [:seon.program/subject :seon.program/subject]]
  :my.program/read-request [:map [:seon.db/db :seon.db/database-value]]
  :my.program/subject-request
  [:map [:seon.db/db :seon.db/database-value]

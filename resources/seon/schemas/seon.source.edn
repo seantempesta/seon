@@ -165,8 +165,9 @@
               [:map {:description "A write-back proven before installation: the file, the bytes it was analyzed from, the candidate and its entities."}
                [:seon.source/path :seon.source/path] [:seon.source/base-digest :seon.source/base-digest]
                [:seon.source/candidate-bytes :seon.source/candidate-bytes] [:seon.source/proof-rows :seon.source/proof-rows]],
-              :conflict-error [:merge {:description "seon.merge/merge! refused: the source branch and main changed the same declarations since the merge base (seon.program/three-way)."} :seon.error/base
-                               [:map [:seon.program/conflict :seon.program/conflict] [:seon.program/conflict-digests {:optional true :description "Always present; optional because a stored error keeps only storable members, and this map has no attribute."} :seon.program/conflict-digests]]],
+              :conflict-error [:merge {:description "seon.merge/merge! refused: the source branch and main changed the same declarations since the merge base (seon.program/three-way); or the done rule refused a branch's unresolved unmerged entries (seon.cluster.source/unmerged-refusal)."} :seon.error/base
+                               [:map [:seon.program/conflict :seon.program/conflict] [:seon.program/conflict-digests {:optional true :description "Always present on a merge's refusal; optional because a stored error keeps only storable members, and this map has no attribute."} :seon.program/conflict-digests]
+                                [:seon.unmerged/entries {:optional true :description "The done rule's: each unresolved unmerged entry with the commits its versions are read at."} :seon.unmerged/entries]]],
               :base-commit-id [:uuid {:description "The branch's commit a merge was transacted onto."}],
               :expected-digests
               [:map-of {:description "The digest each merged declaration held on the destination when the merge was prepared; a merge's basis."}

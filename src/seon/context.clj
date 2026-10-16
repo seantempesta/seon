@@ -359,12 +359,14 @@
   (let [owed (task/assigned-obligations database sym)
         main (or (task/main-head database) database)
         following (when-not (:seon.error/at owed)
-                    (db/pull database [:seon.task/id {:seon.task/next [:seon.task/proofs]}] [:seon.task/sym sym]))
-        ;; a chain's task (linked by next, or a chain's first: a chain of one links nothing) is judged by the done
+                    (db/pull database [:seon.task/id :seon.task/branch {:seon.task/next [:seon.task/proofs]}] [:seon.task/sym sym]))
+        ;; a chain's task (linked by next, a chain's first: a chain of one links nothing, or one naming its own
+        ;; branch, a merge step on its merge branch, where its predecessor is not placed) is judged by the done
         ;; rule; any other by its merge's preview until TASK-CHAIN S3e deletes the subject/needs model
         previous (db/q '[:find ?p . :in $ ?s :where [?t :seon.task/sym ?s] [?p :seon.task/next ?t]] database sym)
         first-of (when-let [id (:seon.task/id following)] (db/pull main [:seon.chain/branch] [:seon.chain/first id]))
-        chained? (or (some? (:seon.task/next following)) (some? previous) (some? (:seon.chain/branch first-of)))
+        chained? (or (some? (:seon.task/next following)) (some? previous) (some? (:seon.chain/branch first-of))
+                     (some? (:seon.task/branch following)))
         product (cond-> (set (get-in following [:seon.task/next :seon.task/proofs]))
                   (= :prove (:seon.task/step owed)) (into (:seon.task/product owed)))
         delta (when-not (:seon.error/at owed) (change database agent-id))

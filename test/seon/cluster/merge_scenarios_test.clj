@@ -56,7 +56,7 @@
   a-conflict-merge-step-resolves-the-conflict-and-merges-onto-main
   ;; Owner, 2026-10-16: main has moved and changed the same declaration the chain changed. git refuses the merge with
   ;; a conflict, someone resolves it, and the resolution is what lands. MERGE-STEP: the gate refuses on the conflict,
-  ;; keeps its merge branch (main's head with the chain's version forced on top) and holds a merge step; its agent sees
+  ;; keeps its merge branch (main's head, main winning the conflict, recorded unmerged) and holds a merge step; its agent sees
   ;; the conflict as data and resolves it at the REPL; root merges the repaired branch onto main's latest head
   (with-bindings {#'seon.cluster.db-flow-test/*space* space}
     (test-support/with-database
@@ -125,14 +125,22 @@
                        (is (keyword? kept) "naming the merge branch the gate kept")
                        (is (str/includes? (str (:seon.task/instructions held)) (str shared))
                            "its instructions name the conflicted declaration")
-                       ;; git's model: a conflict stays unmerged until someone resolves it; the merge branch the step
-                       ;; works on is main's head with the chain's version forced on top, so its comparison with main
-                       ;; still has to name the conflict, or the next merge carries the chain's version over main's
+                       ;; git's model: a conflict stays unmerged until someone resolves it. Main wins on the merge
+                       ;; branch (owner, 2026-10-16): it holds main's version, the conflict recorded beside it as data,
+                       ;; so its comparison with main still names the conflict
                        (let [main (db/db connection)
+                             merge-db (db/branch-database main kept)
                              {:keys [three base branch]} (seon.cluster.source/compare-branch store kept main (get-in main [:config :branch]))]
+                         (is (= (shared-source 3) (source-of merge-db)) "the merge branch holds main's version: main wins")
+                         (is (= [shared] (mapv :seon.unmerged/name (seon.cluster.source/unmerged merge-db)))
+                             "the conflict is unmerged data on the merge branch")
+                         (is (every? (first (seon.cluster.source/unmerged merge-db))
+                                     [:seon.unmerged/base-digest :seon.unmerged/ours-digest :seon.unmerged/theirs-digest
+                                      :seon.unmerged/theirs-commit])
+                             "naming the base, main's and the chain's versions")
                          (is (contains? (:seon.program/conflict three) [:seon.fn/sym shared])
                              "the merge branch still holds the conflict against main until it is resolved")
-                         (seon.cluster.source/release! (filter some? [base branch])))
+                         (seon.cluster.source/release! (filter some? [base branch merge-db])))
                        ((requiring-resolve 'my.root/run!) {:my.program/context context :seon.task/assigned step})
                        (#'seon.cluster.db-flow-test/pass! handle routing)
                        (let [there (registry/active-branch-connection {:seon.store/store store :seon.store/branch kept})]
@@ -153,3 +161,84 @@
                        (#'seon.cluster.db-flow-test/release-chain! routing store kept))
                      (#'seon.cluster.db-flow-test/release-chain! routing store branch)))))))))))))
 
+
+(deftest ^{:seon.test/long "One chain world: a chain changes a function no proof reaches while main changes it too; the final merge refuses on the conflict, root runs the merge step, its scripted turn keeps main's version and root's pass merges; about six db<->flow passes." :seon.test/long-ms 90000}
+  a-conflict-no-test-covers-refuses-until-it-is-resolved
+  ;; Owner, 2026-10-16: a chain change no test covers is never dropped silently. The chain changes `shared` and adds its
+  ;; own proof, which reaches nothing of it; main changes `shared` too. The merge refuses on the conflict, main wins on
+  ;; the merge branch, and the step ends only after its agent resolves the unmerged entry, here keeping main's version
+  (with-bindings {#'seon.cluster.db-flow-test/*space* space}
+    (test-support/with-database
+     (fn [connection]
+       (let [requests (atom [])
+             checkout (atom nil)
+             shared (symbol (str proofs-ns) "shared")]
+         (test-support/with-provider
+          requests (test-support/reply-queue [(str "(in-ns '" proofs-ns ")\n" (shared-source 2)
+                                                   "\n(clojure.test/deftest proves-new (clojure.test/is true))")
+                                              (str "(my.program/resolve! '" shared ")")])
+          (fn [server]
+            (#'seon.cluster.db-flow-test/chain-world
+             connection {"u" [#{} "(clojure.test/is true)"]}
+             (fn [handle]
+               (reset! checkout (#'seon.cluster.db-flow-test/checkout! connection {rows-path (rows-file 1)}))
+               (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                               :seon.config/manifest (assoc (test-support/provider-config server) :seon.config.ai/no-provider false)})
+               (#'seon.cluster.db-flow-test/with-merge-template! connection)
+               (let [routing (:seon.agent/routing handle)
+                     store (agent/handle-store handle)
+                     chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                        [{:seon.task/ns (symbol space) :seon.task/name "c" :seon.task/plan "Do c."
+                                          :seon.task/proofs #{(symbol (str proofs-ns) "proves-new")}}])
+                     branch (:seon.chain/branch chain)
+                     [last-task] (:seon.task/handles chain)
+                     before (#'seon.cluster.db-flow-test/merge-branches store)
+                     source-of (fn [database] (:seon.fn/source (db/pull database [:seon.fn/source] [:seon.fn/sym shared])))
+                     context {:seon.db/connection connection :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                              :my.program/base-ctx (:seon.sci.eval/ctx handle) :seon.store/store store}
+                     end-of (fn [on k] (#'seon.cluster.db-flow-test/await-on!
+                                        on #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k]
+                                                    [?a :seon.task.attempt/end ?e]]
+                                                  (db/db on) k)
+                                        ::ended))]
+                 (try
+                   (#'seon.cluster.db-flow-test/pass! handle routing)
+                   (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})
+                         attempt-key (id/id [last-task 1])]
+                     (is (= :done (end-of on-branch attempt-key)) "the chain's last task ends done, its change made")
+                     (is (= (shared-source 2) (source-of (db/db on-branch))) "the chain changed `shared`")
+                     (publish! connection @checkout (rows-file 3))
+                     (#'seon.cluster.db-flow-test/pass! handle routing)
+                     (let [chain-db (db/db on-branch)
+                           step (get-in (db/pull chain-db [{:seon.task/next [:seon.task/id]}] [:seon.task/id last-task])
+                                        [:seon.task/next :seon.task/id])
+                           kept (:seon.task/branch (db/pull chain-db [:seon.task/branch] [:seon.task/id (or step "")]))
+                           step-key (id/id [step 1])]
+                       (is (= :seon.source/conflict-error
+                              (:seon.task/refusal (db/pull chain-db [:seon.task/refusal] [:seon.task/assignment attempt-key])))
+                           "the final merge refuses on the conflict although no test reaches `shared`")
+                       (is (= (shared-source 3) (source-of (db/db connection))) "main keeps its own change")
+                       (is (keyword? kept) "a merge step is held on the kept merge branch")
+                       (let [merge-db (db/branch-database (db/db connection) kept)]
+                         (is (= [shared] (mapv :seon.unmerged/name (seon.cluster.source/unmerged merge-db)))
+                             "the merge branch holds `shared` unmerged although no test reaches it")
+                         (seon.cluster.source/release! [merge-db]))
+                       ((requiring-resolve 'my.root/run!) {:my.program/context context :seon.task/assigned step})
+                       (#'seon.cluster.db-flow-test/pass! handle routing)
+                       (let [there (registry/active-branch-connection {:seon.store/store store :seon.store/branch kept})]
+                         (is (= :done (end-of there step-key)) "the merge step ends done on its merge branch")
+                         (is (= 2 (count @requests))
+                             "its agent took a model turn: green proofs never end an unmerged step unseen")
+                         (is (empty? (seon.cluster.source/unmerged (db/db there))) "the agent resolved the entry")
+                         (is (= (shared-source 3) (source-of (db/db there))) "keeping main's version"))
+                       (#'seon.cluster.db-flow-test/pass! handle routing)
+                       (let [main (db/db connection)]
+                         (is (= :merged (:seon.task/outcome (db/pull main [:seon.task/outcome] [:seon.task/assignment step-key])))
+                             "root's pass merges the merge step's branch")
+                         (is (= (shared-source 3) (source-of main)) "main holds the resolution: its own version")
+                         (is (:db/id (db/pull main [:db/id] [:seon.test/sym (symbol (str proofs-ns) "proves-new")]))
+                             "and the chain's covered change"))))
+                   (finally
+                     (doseq [kept (remove before (#'seon.cluster.db-flow-test/merge-branches store))]
+                       (#'seon.cluster.db-flow-test/release-chain! routing store kept))
+                     (#'seon.cluster.db-flow-test/release-chain! routing store branch)))))))))))))

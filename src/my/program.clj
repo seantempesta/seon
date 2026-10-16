@@ -21,6 +21,7 @@
             [seon.render.value :as render.value]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
+            [seon.id]
             [seon.ref]
             [seon.test]
             [seon.test.runner :as runner]))
@@ -602,6 +603,34 @@
   ([subject] (unmap-world-subject! subject))
   ([ns-name sym] (unmap-world-subject! (symbol (str ns-name) (name sym)))))
 
+(defn- resolved-unmerged
+  "Retract the unresolved unmerged entries (`seon.cluster.source/unmerged`) of `:seon.program/subject` on the
+  connection's branch, keeping the definition the branch holds; answers the entries retracted, none when it held none."
+  {:malli/schema [:=> [:cat :my.program/resolve-request] [:or :seon.unmerged/entries :seon.error/value]]}
+  [{connection :seon.db/connection subject :seon.program/subject}]
+  (let [entries (filterv #(= subject (:seon.unmerged/name %)) (source/unmerged (db/db connection)))
+        written (when (seq entries)
+                  (db/transact! connection {:tx-data (mapv (fn [{:seon.unmerged/keys [attribute name]}]
+                                                             [:db/retractEntity [:seon.unmerged/id (seon.id/id [attribute name])]])
+                                                           entries)}))]
+    (if (:seon.error/at written) written entries)))
+
+(defn resolve!
+  "Resolve an unmerged declaration by keeping the version my branch holds, as `git add` does after a merge conflict.
+
+  A merge that met a conflict holds the target's version (ours) and records the declaration unmerged; the done rule
+  and root's merge refuse it until it is resolved. Defining the declaration resolves it; this keeps it unchanged.
+  Answers the entries resolved.
+
+  ## Example
+
+  ```clojure
+  (my.program/resolve! 'user/helper)
+  ```"
+  {:malli/schema [:=> [:cat :seon.program/subject] [:or :seon.unmerged/entries :seon.error/value]]}
+  [subject]
+  (resolved-unmerged {:seon.program/subject subject}))
+
 (defn remove-ns!
   "Retract a namespace and its owned declarations, then remove it from SCI.
 
@@ -833,20 +862,25 @@
   (my.program/source :seon.task/id)
   (my.program/source 'seon.task)
   (my.program/source 'seon.ref/fix-pathless-section)
+  (my.program/source {:seon.ref/name 'seon.task/create! :seon.ref/at :chain-f1f6dc8e6652})
   ```
 
-  A task's symbol answers its plan, instructions, proofs with their latest status and next task.
+  A task's symbol answers its plan, instructions, proofs with their latest status and next task. A subject read
+  elsewhere than my branch is the map `{:seon.ref/name subject :seon.ref/at at}`, `at` a branch or a commit
+  (a merge base's included).
 
   ## Errors
 
   an unknown subject returns a not-found error with the nearest symbols under :seon.error/expected and the forms that work under :seon.error/fix."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/subject]
+  {:malli/schema [:=> [:cat :seon.db/database-value [:or :seon.program/subject :seon.ref/versioned]]
                   [:or :my.program/declaration-source :my.program/schema-source :my.program/task-source
                    [:map [:seon.ns/name :symbol] [:seon.program/functions [:vector :qualified-symbol]]
                     [:seon.program/tests [:vector :qualified-symbol]]]
                    :seon.program/not-found-error]]}
   [database subject]
   (cond
+    (map? subject) (let [{named :seon.ref/name at :seon.ref/at} subject]
+                     (db/read-at database at #(if % (source % named) (not-found database named))))
     (keyword? subject) (schema-source database subject)
     (simple-symbol? subject) (namespace-declarations database subject)
     (seq (db/datoms database :avet :seon.task/sym subject)) (task-source database subject)

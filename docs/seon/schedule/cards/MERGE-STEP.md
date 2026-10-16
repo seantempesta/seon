@@ -37,15 +37,28 @@ The change, from the data outward:
    a task on an agent's own branch), and root reads that attempt's end there: one reader,
    `seon.task/branch-attempts`, gives every attempt as the branch its row names holds it. Boot keeps a branch a
    chain's task names (`seon.cluster.registry/cluster-claims`).
+5a. **A conflict is unmerged data; main wins** (owner, 2026-10-16). git's model whole: a merge that meets a declaration
+   both sides changed since the merge base keeps the target's version (ours: main on a merge branch, the chain on a
+   forward merge, `seon.merge/merge-main!`) and records one unmerged entry per declaration (`:seon.unmerged/entry`:
+   base, ours and theirs digests, the merge base commit and the source commit) in the merge's own transaction
+   (`seon.cluster.source/unmerged-tx`), as git's index holds stages 1 to 3. Every conflict refuses the merge, whether
+   or not its seeds reach it, so a chain change no test covers is never dropped unseen. An entry is unresolved while
+   the branch still holds ours (`seon.cluster.source/unmerged`, derived from the digest the branch holds); any write
+   of the declaration resolves it, and `my.program/resolve!` keeps ours by retracting the entry, as `git add` does.
+   The done rule refuses each unresolved entry (`seon.cluster.source/unmerged-refusal`), its base, ours and theirs
+   shown as references resolved where they live (`:seon.ref/at`, the one resolver `seon.ref/references`), so the step's
+   agent gets a turn with the conflict as data; root's comparison (`seon.cluster.source/compare-branch`) folds a
+   candidate's unresolved entries into its conflicts, so root's merge refuses them too and a merge base that moved
+   since never hides one. The entry is `:seon.data`: it never merges.
 5. **Its proofs are the merge gate's judgment.** The tests the gate found red (`:seon.task/refused-tests`) are the
    step's `:seon.task/proofs`, so the attempt's start runs them on the merge branch and the done rule
    (`seon.cluster.source/done-refusals`) needs them green; a refusal with no red test (a conflict, a file that
    does not analyze, a clj-kondo error, an uncovered function) takes the chain's last task's proofs. The done rule
    judges what the merge branch alone decides of its merge with the gate's own functions (TASK-CHAIN §2.4,
-   `seon.cluster.source/publication`): a clj-kondo error in a file the merge writes and an uncovered function are
+   `seon.cluster.source/publication`), and every unresolved unmerged entry (5a): a clj-kondo error in a file the merge writes and an uncovered function are
    its refusals, so the step's agent gets a turn with the refusal as data instead of ending done at its start and
-   re-merging into the same refusal; root's merge of the branch judges the rest (a conflict, a file that does not
-   analyze) (6). A
+   re-merging into the same refusal; root's merge of the branch judges the rest (a file that does not analyze, a
+   conflict main made since) (6). A
    separate gate deftest (`seon.step.merge-test/gate`, 7e84ba763) is deleted: it only restated the refused tests' state,
    nothing at the start ran those tests, and on S5's merge branch it errored (2026-10-15, attempt 32da963e358d).
    Each attempt's start places the task as the chain branch holds it now (`seon.task/task-placed!`), so root's change
@@ -73,10 +86,13 @@ The change, from the data outward:
 | Phase | Change | Red proofs | Status |
 |---|---|---|---|
 | A | This card; TASK-CHAIN amended; `resources/seon/tasks/seon.step.merge.edn`; `:seon.task/branch` on the task schema | `seon.cluster.db-flow-test/a-refused-final-merge-keeps-its-merge-branch-and-holds-a-merge-step` (rows i and iv); `seon.cluster.db-flow-test/a-task-naming-a-branch-starts-its-attempt-there` (row ii) | done c09651be8 |
-| B | Keep on refusal, one retirement rule (`seon.merge/merge!`, `seon.cluster.source/prepare-merge!`); the analysis and lint checks and a conflict are the gate's refusals, each answered with the merge branch the gate built (a conflicted declaration forced on top as the chain holds it); a gate run error retires its branch | the phase A deftest's merge-branch assertions; `seon.cluster.merge-test`, `seon.cluster.write-back-test` | done (merge side c62266fd4; source side with this status) |
+| B | Keep on refusal, one retirement rule (`seon.merge/merge!`, `seon.cluster.source/prepare-merge!`); the analysis and lint checks and a conflict are the gate's refusals, each answered with the merge branch the gate built (main winning each conflict, recorded unmerged, 5a); a gate run error retires its branch | the phase A deftest's merge-branch assertions; `seon.cluster.merge-test`, `seon.cluster.write-back-test` | done (merge side c62266fd4; source side with this status) |
 | C | `seon.task/next-tx` (one transaction, the template and the `next` ref); `merge-chains!` appends on a refusal that kept a merge branch | the phase A deftest's merge-step assertions | done c62266fd4 |
 | D | A task's own branch: `chain-read` reads it, `launch-actions` uses it, the task, agent and row placed there by identity; root reads an attempt where its row names (`seon.task/branch-attempts`, called by `chain-read`, `chain-finishes`, `seon.task/chain-attempts`; `seon.merge` reads the row there too); boot keeps a branch a chain's task names (`seon.cluster.registry/cluster-claims`); the step's proofs are the refused tests (the gate deftest `seon.step.merge-test/gate` of 7e84ba763 deleted, MERGE-STEP 5); the refusal in the step's instructions (`## Merge refusal`, each red test and conflicted declaration a reference its block resolves) | `a-task-naming-a-branch-starts-its-attempt-there` (end read on its branch); `seon.cluster.registry-test/a-chain-fact-keeps-its-branch-and-base-through-retirement` (a task-named branch survives); `seon.cluster.db-flow-test/a-merge-step-green-at-its-start-ends-done-with-no-model-call` | done with this status |
 | E | Root's pass merges a done merge step's attempt from its branch (the gate runs again on main's latest head); the chain's publication retires the merge branches its tasks named; `my.root/merge-steps` and root's law | `seon.cluster.db-flow-test/a-done-merge-step-merges-its-branch-onto-main` (row iii) | part: the done step's end is read on its merge branch, judged done there and taken to `seon.merge/merge!` with the merge branch as source; that world names no checkout, so its merge stops at the write-back root. Open: row iii's accepted merge in a world with a checkout (`seon.cluster.merge-test`'s), and the merge test's two reds already on c09651be8 (`a-chain-merges-once-and-closes-every-attempt` lines 1020, 1023) |
 
-Conflicts and files that do not analyze are judged by the gate root runs when it merges the repaired branch: a
-still-broken file or a conflict main made since refuses the merge again and holds a new merge step.
+| F | 5a: unmerged entries written by the merge branch build and the forward merge, main wins, every conflict refuses; the done rule and root's comparison refuse unresolved entries; `my.program/resolve!`; versioned references (`:seon.ref/at`) through `seon.ref/references` and `my.program/source` | `seon.cluster.merge-scenarios-test/a-conflict-merge-step-resolves-the-conflict-and-merges-onto-main`, `seon.cluster.merge-scenarios-test/a-conflict-no-test-covers-refuses-until-it-is-resolved`, `seon.ref-test/a-name-read-at-a-branch-or-commit-resolves-there` | in progress |
+
+Files that do not analyze are judged by the gate root runs when it merges the repaired branch: a still-broken file or
+a conflict main made since refuses the merge again and holds a new merge step. A conflict the step left unresolved
+never reaches that merge: the done rule refuses it first (5a).

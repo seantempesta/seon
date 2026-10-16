@@ -2,6 +2,7 @@
   (:require [clojure.data.json :as json]
             [clojure.string :as str]
             [clojure.test :refer [are deftest is testing]]
+            [my.program]
             [seon.config :as config]
             [seon.db :as db]
             [seon.error]
@@ -382,3 +383,24 @@
                                    {:seon.ref/text "`:seon.render.unknown/*` and `seon.task.attempt/*`"})]
     (is (empty? (filter #(= :unresolved (:seon.ref/problem-kind %)) found))
         "a wildcard cite is prose, not an unresolved problem")))
+
+(deftest a-name-read-at-a-branch-or-commit-resolves-there
+  ;; owner, 2026-10-16: a reference may name where it is read, `[name at]` in a code span and
+  ;; {:seon.ref/name name :seon.ref/at at} as data, at a branch (its head) or a commit; the merge step's three
+  ;; versions of a conflict are such references
+  (let [database (db/db)
+        commit (db/commit-id database)
+        read (fn [source] (mapv (juxt :seon.ref/name :seon.ref/at :seon.ref/level :seon.ref/problem-kind)
+                                (ref/references database source)))]
+    (is (= [['seon.ref/locate commit :doc nil]]
+           (read {:seon.ref/text (str "Read `[seon.ref/locate #uuid \"" commit "\"]` there.")}))
+        "a span naming a commit reads the name at that commit")
+    (is (= [['seon.ref/locate commit nil nil]]
+           (read {:seon.ref/text "" :seon.ref/names #{{:seon.ref/name 'seon.ref/locate :seon.ref/at commit}}}))
+        "a held versioned name reads the same")
+    (is (= [['seon.ref/locate :no-such-branch nil :unresolved]]
+           (read {:seon.ref/text "Read `[seon.ref/locate :no-such-branch]` there."}))
+        "a branch the store lacks is unresolved, never the checked-out branch's version")
+    (is (= (:source (my.program/source database 'seon.ref/locate))
+           (:source (my.program/source database {:seon.ref/name 'seon.ref/locate :seon.ref/at commit})))
+        "my.program/source reads a versioned subject at its commit")))

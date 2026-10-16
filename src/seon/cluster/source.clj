@@ -24,6 +24,7 @@
             [seon.fs :as fs]
             [seon.id :as id]
             [seon.program :as program]
+            [seon.ref]
             [seon.test.cache :as test.cache]
             [hasch.core :as hasch]
             [rewrite-clj.node :as node]
@@ -932,6 +933,65 @@
                                  (when (qualified-symbol? value) (symbol (namespace value)))))))
           changed)))
 
+(defn unmerged-tx
+  "Transaction data recording each of `identities`, conflicts whose three digests `digests` holds
+  (`:seon.program/conflict-digests`), as an unmerged entry (`:seon.unmerged/entry`) on the branch the merge writes:
+  `ours-key` and `theirs-key` name which digest of the comparison the target holds and which the source holds,
+  `base-commits` the merge base commit of each (else `base-commit`) and `theirs-commit` the source commit, where
+  each other version is read."
+  {:malli/schema [:=> [:cat :seon.program/identity-set :seon.program/conflict-digests :qualified-keyword :qualified-keyword
+                       [:map-of :seon.program/declaration-identity :seon.source/commit-id] [:maybe :seon.source/commit-id]
+                       :seon.source/commit-id]
+                  :seon.store/transaction-data]}
+  [identities digests ours-key theirs-key base-commits base-commit theirs-commit]
+  (mapv (fn [[attribute value :as identity]]
+          (let [digest (fn [k] (let [d (get-in digests [identity k])] (when (string? d) d)))
+                base (get base-commits identity base-commit)]
+            (cond-> {:seon.unmerged/id (id/id identity) :seon.unmerged/attribute attribute :seon.unmerged/name value
+                     :seon.unmerged/theirs-commit theirs-commit}
+              (digest :seon.program/base-digest) (assoc :seon.unmerged/base-digest (digest :seon.program/base-digest))
+              (digest ours-key) (assoc :seon.unmerged/ours-digest (digest ours-key))
+              (digest theirs-key) (assoc :seon.unmerged/theirs-digest (digest theirs-key))
+              base (assoc :seon.unmerged/base-commit base))))
+        (sort-by str identities)))
+
+(defn- entry-identity
+  "The declaration identity an unmerged entry names."
+  {:malli/schema [:=> [:cat :seon.unmerged/shown] :seon.program/declaration-identity]}
+  [entry]
+  [(:seon.unmerged/attribute entry) (:seon.unmerged/name entry)])
+
+(defn unmerged
+  "The unresolved unmerged entries branch `database` holds (`:seon.unmerged/entry`, git's unmerged index entries): each
+  whose declaration the branch still holds at its `:seon.unmerged/ours-digest` (absent when ours was absent). Any
+  write of the declaration resolves its entry; retracting the entry keeps ours. What the done rule
+  (`done-refusals`) and root's merge (`compare-branch`) refuse while any is left."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.unmerged/entries]}
+  [database]
+  (let [entries (into [] (map (fn [datom] (dissoc (db/pull database '[*] (:e datom)) :db/id :seon.unmerged/id)))
+                      (when (get-in database [:schema :seon.unmerged/id]) (d/datoms database :aevt :seon.unmerged/id)))
+        held (held-digests database (into #{} (map entry-identity) entries))]
+    (filterv #(= (held (entry-identity %)) (:seon.unmerged/ours-digest % :seon.program/absent)) entries)))
+
+(defn- with-unmerged
+  "`three` (`seon.program/three-way` of the merge base, the candidate and the head, whose digest maps are
+  `branch-map` and `head-map`) with each of the candidate's unresolved unmerged `entries` a conflict: a conflict
+  stays unmerged on its branch until someone resolves it, whatever the merge base has become since."
+  {:malli/schema [:=> [:cat :seon.program/three-way :seon.program/digest-map :seon.program/digest-map :seon.unmerged/entries]
+                  :seon.program/three-way]}
+  [three branch-map head-map entries]
+  (reduce (fn [three entry]
+            (let [identity (entry-identity entry)]
+              (-> (reduce #(update %1 %2 disj identity) three
+                          [:seon.program/unchanged :seon.program/changed-on-branch :seon.program/changed-on-head
+                           :seon.program/added :seon.program/retracted])
+                  (update :seon.program/conflict conj identity)
+                  (assoc-in [:seon.program/conflict-digests identity]
+                            {:seon.program/base-digest (:seon.unmerged/base-digest entry :seon.program/absent)
+                             :seon.program/branch-digest (get branch-map identity :seon.program/absent)
+                             :seon.program/head-digest (get head-map identity :seon.program/absent)}))))
+          three entries))
+
 (defn- compare-commit
   "`compare-branch` of the candidate's commit `c-id`, already read from the store's branches."
   {:malli/schema [:=> [:cat :seon.store/store :seon.source/commit-id :seon.db/database-value] :map]}
@@ -939,15 +999,19 @@
   (let [bound merge-bound
         branch (commit-database held-store c-id)
         base (merge-base-database branch head)
+        open (unmerged branch)
         ;; Only what the candidate changed since its merge base can merge or conflict: git's diff of the base
-        ;; and the candidate, walked on the candidate's own lineage.
+        ;; and the candidate, walked on the candidate's own lineage, and what it holds unmerged.
         changed (if (:seon.error/at base) base (program/own-changed-identities base branch bound))
         ;; an agent's own namespace is its compartment, never the branch's program (`agent-owned`)
-        changed (if (set? changed) (into #{} (remove (agent-owned branch head changed)) changed) changed)
+        changed (if (set? changed)
+                  (into (into #{} (remove (agent-owned branch head changed)) changed) (map entry-identity) open)
+                  changed)
         maps (when (set? changed)
                (mapv #(program/digest-map % (assoc bound :seon.program/identities changed)) [base branch head]))]
-    {:c-id c-id :base base :branch branch :head head :changed changed :maps maps
-     :three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))}))
+    {:c-id c-id :base base :branch branch :head head :changed changed :maps maps :unmerged open
+     :three (when (and maps (not-any? :seon.error/at maps))
+              (with-unmerged (apply program/three-way maps) (second maps) (nth maps 2) open))}))
 
 (defn compare-branch
   "Compare `candidate`'s committed program with `head` (a database value of the
@@ -1108,8 +1172,9 @@
   replacement, an addition (absent at the base) or a retraction (absent on the
   candidate), as `seon.program/three-way` classifies it; one reconcile
   transaction applies all three. A conflict answers the three-way value; an
-  empty delta runs the proofs alone, so a task-only change is accepted like any other. A conflicted declaration
-  is written as the source holds it (forced on top), and the conflict is answered with the merge branch built.
+  empty delta runs the proofs alone, so a task-only change is accepted like any other. Every conflict refuses,
+  whether its seeds reach it or not, and main wins it: the merge branch holds main's version, with an unmerged entry
+  (`unmerged-tx`) beside it in the gate's one write, and the conflict is answered with the merge branch built.
 
   An `:selection` option of declaration identities merges only those changes: a
   selected identity the candidate did not change, or a selected declaration
@@ -1136,7 +1201,7 @@
                    [:or :seon.source/prepared :seon.program/three-way :seon.source/write-back-error :seon.error/value]]]}
   ([source held-store candidate task-sym] (prepare-merge! source held-store candidate task-sym {}))
   ([source held-store candidate task-sym {:keys [selection root merging]}]
-  (let [{:keys [c-id base branch head changed maps three]}
+  (let [{:keys [c-id base branch head changed maps three] open :unmerged}
         (let [head (db/db (:seon.db/connection source))]
           (compare-branch held-store candidate head (get-in head [:config :branch])))]
     (if (:seon.error/at c-id)
@@ -1155,15 +1220,21 @@
                      (let [seeds (merge-seeds branch whole proofs task-sym)]
                        (if (:seon.error/at seeds) seeds (merge-list branch (into whole conflicts) seeds))))
             selection (or selection (some->> listed :seon.merge/will-merge (into #{} (filter whole))))
-            ;; a conflict blocks only when it would merge; one that stays on the branch never does
-            blocking (if (set? selection) (into #{} (filter (into selection (:seon.merge/will-merge listed))) conflicts) conflicts)
+            ;; every conflict blocks until it is resolved, whether or not its seeds reach it: a change no test
+            ;; covers is never dropped unseen (owner, 2026-10-16)
+            blocking conflicts
             unchanged (when (and whole selection) (vec (remove whole selection)))
             reach (when (and whole selection (empty? unchanged)) (unselected-reach branch whole selection))
             ;; A selected declaration carries its namespace entity when the candidate changed it (its requires).
             delta (if (and whole selection) (carried whole selection) whole)
-            ;; a conflicted declaration is forced on top as the source holds it (theirs): the merge branch is main's
-            ;; head with the source's changes, which a merge step corrects against main (MERGE-STEP)
-            delta (cond-> delta (and delta (seq blocking)) (into blocking))
+            ;; main wins every conflict (git's ours, the target): the merge branch holds main's version of each, and
+            ;; its unmerged entry beside it names the base and the source's (MERGE-STEP 6)
+            recorded (when (and (seq blocking) (not (:seon.error/at base)))
+                       (unmerged-tx blocking (:seon.program/conflict-digests three)
+                                    :seon.program/head-digest :seon.program/branch-digest
+                                    (into {} (map (juxt entry-identity :seon.unmerged/base-commit))
+                                          (filter :seon.unmerged/base-commit open))
+                                    (db/commit-id base) c-id))
             tx (when (and delta (empty? unchanged) (empty? reach))
                  (if (seq delta) (replacement branch head delta) []))
             ;; The file the merge would write back, proven over the merged value; a refusal is the gate's, answered
@@ -1197,7 +1268,8 @@
             :else
             (let [s (keyword (str "merge-" (id/id)))
                   write! (fn [execution]
-                           (let [written (db/transact! (:seon.db/connection execution) {:tx-data (into (vec merging) tx)})
+                           (let [written (db/transact! (:seon.db/connection execution)
+                                                       {:tx-data (-> (vec merging) (into tx) (into recorded))})
                                  ;; The writer re-derives a merged namespace's declarations: their tests run too.
                                  touched (when-not (:seon.error/at written) (fn/report-identities written))]
                              (run! #(when (:seon.error/at %) (throw (ex-info "The merge delta was refused." %))) [written touched])
@@ -1400,6 +1472,30 @@
       (and (not (:seon.error/at dangling)) (seq dangling))
       (conj (refuse "The merged program names tasks the destination has not admitted." dangling)))))
 
+(defn- versions
+  "`entry`'s base, ours and theirs, each a reference read where it lives (`:seon.ref/at`: the merge base commit,
+  branch `database`'s head, the source commit) and resolved at its code (`seon.ref/references`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.unmerged/shown] [:map-of :keyword :map]]}
+  [database {n :seon.unmerged/name base :seon.unmerged/base-commit theirs :seon.unmerged/theirs-commit}]
+  (let [read (fn [at] (first (seon.ref/references database {:seon.ref/text ""
+                                                              :seon.ref/names #{{:seon.ref/name n :seon.ref/at at :seon.ref/level :code}}})))]
+    (into {} (keep (fn [[k at]] (when-let [found (when at (read at))] [k found])))
+          [[:base base] [:ours (get-in database [:config :branch])] [:theirs theirs]])))
+
+(defn unmerged-refusal
+  "The `:seon.source/conflict-error` refusing the unresolved unmerged `entries` (`unmerged`) of branch `database`, as
+  the done rule refuses them, with `members` (the judged run's evidence), each entry's three versions as resolved
+  references (`versions`) and how to resolve them."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.unmerged/entries :map] :seon.source/conflict-error]}
+  [database entries members]
+  (seon.error.refusal/error :seon.source/conflict-error
+   (assoc members
+          :seon.error/message (str "Both sides of a merge changed " (str/join ", " (map :seon.unmerged/name entries))
+                                   " since their merge base; this branch holds ours (on a merge branch, main's). Resolve"
+                                   " each: keep ours with my.program/resolve!, or define theirs or a combination.")
+          :seon.program/conflict (into #{} (map :seon.unmerged/name) entries)
+          :seon.unmerged/entries (mapv #(assoc % :seon.unmerged/versions (versions database %)) entries))))
+
 (defn done-refusals
   "Every refusal the done rule gives a task over the recorded results in `judged`, the same for every task: each
   of its `:seon.task/proofs` without an executed current result (absent, or a result that never started: unknown
@@ -1410,8 +1506,9 @@
   contract gap (`contract-gaps`); and what the branch alone decides of its merge (`publication`): its
   `:seon.source/lint-refusal` (a file its merge writes holds a clj-kondo error) and, on the last task (no next
   proofs), each function of its `:seon.source/merge-identities` no green test reaches (`uncovered-functions`), as
-  the merge refuses them. Mid-chain a function no test reaches is not refused: the next task's proofs cover it.
-  Empty only for done. Runs no test; reads `branch` for contracts and coverage only.
+  the merge refuses them, and every unresolved unmerged entry the branch holds (`unmerged-refusal`), as git refuses a
+  commit while a path is unmerged. Mid-chain a function no test reaches is not refused: the next task's proofs cover
+  it. Empty only for done. Runs no test; reads `branch` for contracts and coverage only.
 
   ## Example
 
@@ -1437,8 +1534,10 @@
         verdicts (fn [tests] (red-test-verdicts run-id results tests (set tests)))
         gaps (contract-gaps branch delta)
         green (into #{} (filter #(some-> (by-sym %) green-result?)) members)
-        uncovered (when (and merging (empty? next-proofs)) (uncovered-functions branch merging green))]
+        uncovered (when (and merging (empty? next-proofs)) (uncovered-functions branch merging green))
+        open (unmerged branch)]
     (cond-> []
+      (seq open) (conj (unmerged-refusal branch open evidence))
       (or (empty? proofs) (seq unknown))
       (conj (seon.error.refusal/error :seon.source/test-evidence-error
              (assoc evidence :seon.error/message "Every proof needs a current recorded result; an empty proof set never finishes."

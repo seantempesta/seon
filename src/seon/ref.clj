@@ -269,7 +269,7 @@
                  ;; a based span that is not a URI is still a path, unresolved
                  (catch URISyntaxException _ nil))
             {:seon.ref/path span}))
-      (let [forms (try (edamame/parse-string-all span)
+      (let [forms (try (edamame/parse-string-all span {:readers {'uuid parse-uuid}})
                        ;; a span that does not read is prose
                        (catch Exception _ nil))
             [form & more] forms
@@ -280,6 +280,10 @@
           (some? more) nil
           wildcard? nil
           (or (qualified-symbol? form) (qualified-keyword? form)) {:seon.ref/name form}
+          ;; `[name at]`: the name read at a branch or a commit (`:seon.ref/at`)
+          (and (vector? form) (= 2 (count form)) (or (qualified-symbol? (first form)) (qualified-keyword? (first form)))
+               (or (keyword? (second form)) (uuid? (second form))))
+          {:seon.ref/name (first form) :seon.ref/at (second form)}
           (and (simple-symbol? form) (str/includes? (str form) ".")) {:seon.ref/name form :seon.ref/resolve-only true})))))
 
 (defn- delimiter-level
@@ -324,7 +328,7 @@
   resolve-only only when every mention of it is."
   {:malli/schema [:=> [:cat [:sequential :seon.ref/candidate]] [:vector :seon.ref/candidate]]}
   [found]
-  (let [identity-of (juxt :seon.ref/name :seon.ref/path :seon.ref/anchor :seon.ref/problem-kind)
+  (let [identity-of (juxt :seon.ref/name :seon.ref/at :seon.ref/path :seon.ref/anchor :seon.ref/problem-kind)
         explicit (into #{} (comp (remove :seon.ref/resolve-only) (map identity-of)) found)
         strongest (reduce (fn [kept {asked :seon.ref/level :as c}]
                             (cond-> kept asked (update (identity-of c) #(max-key strength (or % asked) asked))))
@@ -640,6 +644,18 @@
       (or (nil? resolved) (:seon.error/at resolved) (:seon.ref/problem-kind resolved)) resolved
       :else (cond-> (assoc resolved :seon.ref/name reference) (nil? reference) (dissoc :seon.ref/name) level (assoc :seon.ref/level level)))))
 
+(defn- answer-at
+  "`answer` of a candidate, read where its `:seon.ref/at` names (`seon.db/read-at`: a branch's head or a commit), else
+  on `database`; a branch or commit the store lacks is unresolved."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/candidate]
+                  [:or :nil :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
+  [database {at :seon.ref/at :as found}]
+  (if (some? at)
+    (db/read-at database at (fn [at-db]
+                              (let [resolved (if at-db (answer at-db found) (unresolved (:seon.ref/name found)))]
+                                (cond-> resolved (map? resolved) (assoc :seon.ref/at at)))))
+    (answer database found)))
+
 (defn- cite-once
   "`answers` with each name shown once: a name resolved at top level, or already shown below an earlier referent, is
   cited by its `:seon.ref/name` alone in every later mention, and a schema an earlier doc value described is left
@@ -667,17 +683,18 @@
 (defn references
   "Each reference `source`'s text makes, resolved on `database` or a problem; its subject never cites itself.
 
-  Held names come first, sorted, then the held paths (each read as a code span is), then the text's in first-seen
+  Held names come first, sorted, each read where its `:seon.ref/at` names when it is a versioned map (a branch or a
+  commit, as a `[name at]` code span asks), then the held paths (each read as a code span is), then the text's in first-seen
   order: code spans and links, and the prose words that name an entity."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/source]
                   [:vector [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]]}
   [database {:seon.ref/keys [text names paths document-path subject]}]
   (let [roots (set (.list (io/file (fs/source-directory))))
-        held (concat (map (fn [reference] {:seon.ref/name reference}) (sort names))
+        held (concat (map (fn [reference] (if (map? reference) reference {:seon.ref/name reference})) (sort-by str names))
                      (keep #(span-candidate roots %) (sort paths)))
         found (keep #(candidate roots document-path %) (:seon.ref/spans (document text)))]
     (->> (candidates (concat held (remove #(and subject (= subject (:seon.ref/name %))) found)))
-         (into [] (keep #(answer database %)))
+         (into [] (keep #(answer-at database %)))
          cite-once)))
 
 (defn names

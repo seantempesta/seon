@@ -645,8 +645,15 @@
           (is (= "U, the chain's" (plan landed u-handle)) "the chain's own change to U lands on main"))
         (is (nil? (db/pull after [:db/id] [:seon.task/id handle])) "main's task never moved")
         (is (seq moved) "the forward merge wrote the branch")
-        (is (every? (program/program-attributes (db/carried-projection after)) moved)
-            "only program attributes moved")
+        (is (every? (program/program-attributes (db/carried-projection after))
+                    (remove #(= "seon.unmerged" (namespace %)) moved))
+            "only program attributes moved, beside the unmerged entry")
+        (is (= [{:seon.unmerged/name (sym "forward-h") :seon.unmerged/ours-digest (digest before "forward-h")
+                 :seon.unmerged/theirs-digest (digest main "forward-h") :seon.unmerged/theirs-commit (db/commit-id main)}]
+               (mapv #(select-keys % [:seon.unmerged/name :seon.unmerged/ours-digest :seon.unmerged/theirs-digest
+                                      :seon.unmerged/theirs-commit])
+                     (source/unmerged after)))
+            "h is recorded unmerged on the branch: ours the branch's, theirs main's, in the merge commit")
         (source/release! (filter some? [base forked])))
       (finally
         (registry/retire-branch! {:seon.store/store store :seon.store/branch chain})))))
@@ -687,8 +694,10 @@
 
 (deftest ^{:seon.test/long "One prepare-merge!: a nested seon.test/run on a fresh merge branch of main."
            :seon.test/long-ms 60000}
-  a-prepared-merge-carries-its-merge-list-and-a-staying-conflict-never-refuses
-  ;; ruling 5a/5b: the tested change and its proof merge; the scratch def stays, though main changed it too
+  a-prepared-merge-carries-its-merge-list-and-a-staying-conflict-refuses
+  ;; ruling 5a/5b: the tested change and its proof merge; the scratch def stays. Owner, 2026-10-16: a conflict refuses
+  ;; whether or not its seeds reach it, so a change no test covers is never dropped unseen; main wins it on the merge
+  ;; branch, recorded unmerged
   (let [target (support/execution-handle nil)
         store (:seon.store/store target)
         main-conn (:seon.db/connection target)
@@ -718,12 +727,19 @@
       (let [prepared (source/prepare-merge! target store branch task-sym)
             _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
             carried (set (keys (:seon.source/expected-digests prepared)))]
-        (is (nil? (:seon.error/type prepared)) "a conflict in a change that stays never refuses the merge")
-        (is (= #{} (set (remove carried [[:seon.fn/sym (sym "tested")] [:seon.test/sym (sym "tested-check")]])))
-            "the tested change and its proof merge")
-        (is (not (carried [:seon.fn/sym (sym "scratch")])) "the scratch def does not merge")
-        (is (contains? (:seon.merge/stays prepared) [:seon.fn/sym (sym "scratch")]) "and is listed as staying")
-        (is (true? (:seon.test/passed? prepared)) "the carried change is green on the candidate"))
+        (is (= #{[:seon.fn/sym (sym "scratch")]} (:seon.program/conflict prepared))
+            "a conflict in a change no seed reaches refuses the merge")
+        (let [kept (db/branch-database (db/db main-conn) (:seon.source/candidate prepared))]
+          (try
+            (is (= [(sym "scratch")] (mapv :seon.unmerged/name (source/unmerged kept)))
+                "the merge branch records it unmerged")
+            (is (= "(defn scratch {:malli/schema [:=> [:cat] :int]} [] 3)"
+                   (:seon.fn/source (db/pull kept [:seon.fn/source] [:seon.fn/sym (sym "scratch")])))
+                "main wins it there")
+            (is (= "(defn tested {:malli/schema [:=> [:cat] :int]} [] 7)"
+                   (:seon.fn/source (db/pull kept [:seon.fn/source] [:seon.fn/sym (sym "tested")])))
+                "beside the tested change")
+            (finally (source/release! [kept])))))
       (finally
         (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
 

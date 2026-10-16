@@ -440,6 +440,15 @@
     (when-let [commit (get-in head [:meta :datahike/commit-id])]
       (commit-database origin commit))))
 
+(defn read-at
+  "`(f at-db)` of the database value `at` names on `database`'s store (`:seon.ref/at`: a branch's head, or a commit),
+  released after `f` answers; `(f nil)` when the store holds no such branch or commit."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/at [:=> [:cat [:maybe :seon.db/database-value]] :any]] :any]}
+  [database at f]
+  (let [at-db (if (keyword? at) (branch-database database at) (commit-database database at))]
+    (try (f at-db)
+         (finally (when at-db (d/release-materialized-db at-db))))))
+
 (defn branches
   "The branches `database`'s store holds: the store's `:branches` set, which `datahike.api/branch!` adds to and
   `datahike.api/delete-branch!` removes from. A deleted branch's head stays readable until the next GC

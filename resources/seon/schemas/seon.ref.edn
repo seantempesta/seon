@@ -1,4 +1,8 @@
 #:seon.ref{:name [:or {:description "A referenced Seon or library definition: a qualified symbol, a schema key, or a namespace's name."} :qualified-symbol :qualified-keyword simple-symbol?]
+           :at [:or {:description "Where a referenced name is read, beside it: a branch (its head) or a commit, the merge base included; absent, the reader's checked-out branch. Written {:seon.ref/name n :seon.ref/at a} as data and [n a] in a code span."}
+                :seon.store/branch :seon.source/commit-id]
+           :versioned [:map {:description "A name read at a branch or commit (:seon.ref/at): what a held reference or a REPL read names when it is not the checked-out branch's."}
+                       [:seon.ref/name :seon.ref/name] [:seon.ref/at :seon.ref/at] [:seon.ref/level {:optional true} :seon.ref/level]]
            :path [:string {:min 1 :description "A checkout-relative path, an RFC 3986 relative reference."}]
            :anchor [:string {:min 1 :description "A heading's anchor, as GitHub and commonmark's heading-anchor extension derive it."}]
            :line [:int {:min 1 :description "A 1-based line in the text, as an editor shows it."}]
@@ -43,6 +47,7 @@
            :problem-kind [:enum :unresolved :anchor-missing :line-reference :no-lead :no-summary]
            :candidate [:or
                        [:map [:seon.ref/name :seon.ref/name] [:seon.ref/line {:optional true} :seon.ref/line]
+                        [:seon.ref/at {:optional true} :seon.ref/at]
                         [:seon.ref/level {:optional true} :seon.ref/level]
                         [:seon.ref/resolve-only {:optional true} :seon.ref/resolve-only]]
                        [:map [:seon.ref/path :seon.ref/path] [:seon.ref/anchor {:optional true} :seon.ref/anchor]
@@ -54,7 +59,7 @@
                         [:seon.ref/problem-kind [:enum :anchor-missing]] [:seon.ref/anchor {:optional true} :seon.ref/anchor]]]
            :source [:map {:description "Markdown text that can carry references (an intent or docstring alone, a doc with its path), with the names and paths held beside it."}
                     [:seon.ref/text :string]
-                    [:seon.ref/names {:optional true} [:set :seon.ref/name]]
+                    [:seon.ref/names {:optional true} [:set [:or :seon.ref/name :seon.ref/versioned]]]
                     [:seon.ref/paths {:optional true :description "Held based paths with optional #anchors, each read as a code span is."} [:set [:string {:min 1}]]]
                     [:seon.ref/document-path {:optional true} :seon.ref/path]
                     [:seon.ref/subject {:optional true} :seon.ref/subject]]
@@ -63,6 +68,7 @@
                      [:seon.ref/message :seon.ref/message]
                      [:seon.ref/line {:optional true} :seon.ref/line]
                      [:seon.ref/name {:optional true} :seon.ref/name]
+                     [:seon.ref/at {:optional true} :seon.ref/at]
                      [:seon.ref/path {:optional true} :seon.ref/path]
                      [:seon.ref/anchor {:optional true} :seon.ref/anchor]]
            :message [:string {:min 1 :description "What a problem kind means and what the agent does about it: short fixed text per kind."}]
@@ -79,6 +85,7 @@
            :resolved-name [:map {:description "A name identified at the level its citation asks for: a function, library Var or schema key as the value of brief, doc or source (seon.ref/at-level); a deftest, task or namespace as its entity, pulled as its identity attribute declares, with its row's render pair as its own :seon.render/ai and :seon.render/html keys and the names its content cites, one level (seon.ref/resolve-name)."}
                            [:seon.ref/level {:optional true} :seon.ref/level]
                            [:seon.ref/name :seon.ref/name]
+                           [:seon.ref/at {:optional true} :seon.ref/at]
                            [:seon.ref/references {:optional true} :seon.ref/references]
                            [:seon.ref/line {:optional true} :seon.ref/line]
                            [:arglists {:optional true} :seon.ref/arglists]

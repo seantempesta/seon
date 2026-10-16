@@ -59,7 +59,8 @@ a word marked (target) names its rename, not yet merged.
 | merge base | the newest common ancestor commit (`git merge-base`) | base digest |
 | merge branch | the branch root's merge creates off the target, where tests run on the merged result before main moves | S, the candidate, the tested branch |
 | ours, theirs | in a conflict, ours is the target and theirs is the source, as in `git merge`; Seon never rebases | head digest, branch digest, changed-on-head |
-| unmerged | identities a conflict left unresolved on the merge branch; any write to one resolves it | conflict markers, unresolved |
+| unmerged | a declaration both sides of a merge changed since the merge base, recorded as an unmerged entry (`:seon.unmerged/entry`: base, ours and theirs digests) beside ours, which the branch holds (main wins on a merge branch); the done rule and root's merge refuse it until a write of the declaration or `my.program/resolve!` resolves it | conflict markers, unresolved |
+| at | where a referenced name is read (`:seon.ref/at`): a branch's head or a commit, the merge base included; `[name at]` in a code span, `{:seon.ref/name name :seon.ref/at at}` as data; absent, the checked-out branch | version, revision, ref spec |
 | behind | the identities main modified since the merge base (`git diff branch...main`) | head-only |
 | norm | Datahike's named, once-only data change (`:tx/norm`, `reference-code/datahike/src/datahike/norm/norm.clj`); a merge may carry one to convert main's entities | migration |
 | delete branch | `delete-branch!`: the branch leaves `d/branches`, its commits wait for retention GC; "retire" is for agents only | unlink, retire a branch |

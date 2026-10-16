@@ -445,8 +445,10 @@
   base is Datahike's commit graph (`seon.cluster.source/merge-base`), so after the merge it is main's head and
   nothing records it. Only program entities move: tasks, attempts, evaluations, messages and config never do. A
   branch whose merge base is already main's head is up to date and nothing is written. A declaration both sides
-  changed differently is a conflict: it stays the branch's and is answered as `:seon.program/conflict` (by symbol)
-  with its three digests (`:seon.program/conflict-digests`). Answers the moved declarations, the conflicts and
+  changed differently is a conflict: it stays the branch's (ours), is recorded unmerged in the merge commit
+  (`seon.cluster.source/unmerged-tx`, main's version theirs) so the done rule and root's merge refuse it until it is
+  resolved, and is answered as `:seon.program/conflict` (by symbol) with its three digests
+  (`:seon.program/conflict-digests`). Answers the moved declarations, the conflicts and
   main's commit, or the first refusal as data with nothing written.
 
   ## Example
@@ -482,6 +484,11 @@
            delta (:seon.program/changed-on-head three)
            entities (when (seq delta) (carried-entities main head delta))
            tx (cond (not three) nil (empty? delta) [] (vector? entities) (fn/reconcile-tx head entities (vec delta)) :else nil)
+           ;; the branch keeps its own version of a declaration both sides changed (git's ours, the target), and the
+           ;; merge commit records it unmerged beside main's (theirs)
+           tx (when (vector? tx)
+                (into tx (source/unmerged-tx (:seon.program/conflict three) (:seon.program/conflict-digests three)
+                                             :seon.program/branch-digest :seon.program/head-digest {} base-commit main-commit)))
            written (when (vector? tx)
                      (db/with-branch {:seon.db/connection chain-connection}
                                      #(db/transact! chain-connection {:tx-data tx :parents #{main-commit}})))]

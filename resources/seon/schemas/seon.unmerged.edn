@@ -1,0 +1,32 @@
+#:seon.unmerged
+{:id [:string {:min 12 :max 12 :seon.db/identity true :seon.program/row-schema :seon.unmerged/entry
+               :description "An unmerged entry's identity: seon.id/id of its declaration identity, so a later merge of the same declaration upserts it."}]
+ :attribute [:and {:description "The identity attribute of the unmerged declaration (:seon.fn/sym, :seon.test/sym, :seon.schema/key or :seon.ns/name)."} :seon.program/identity-attribute]
+ :name [:or {:description "The identity attribute's value: the unmerged declaration's symbol or schema key."} :symbol :keyword]
+ :base-digest [:and {:description "The declaration's definition digest at the merge base; absent when the base held none."} :seon.program/definition-digest]
+ :ours-digest [:and {:description "The digest the branch holds for the declaration after the merge (git's ours: the merge's target, main on a merge branch, the chain on a forward merge); absent when the target holds none. While the branch still holds it, the entry is unresolved (seon.cluster.source/unmerged)."} :seon.program/definition-digest]
+ :theirs-digest [:and {:description "The merge source's digest (git's theirs: the chain on a merge branch, main on a forward merge); absent when the source deleted the declaration."} :seon.program/definition-digest]
+ :base-commit [:and {:description "The merge base commit: the base version is read there."} :seon.source/commit-id]
+ :theirs-commit [:and {:description "The source commit the merge took theirs from: the source's version is read there."} :seon.source/commit-id]
+ :entry [:map {:seon.db/attributes true :seon.program/partition :seon.data
+               :description "git's unmerged index entry: one declaration both sides of a merge changed since the merge base, written by the merge (seon.cluster.source/prepare-merge!'s merge branch, seon.merge/merge-main!) in its own transaction. The branch holds ours; the entry stays unresolved while it does, and the done rule and root's merge refuse it (seon.cluster.source/unmerged). Any write of the declaration resolves it; keeping ours unchanged retracts the entry (my.program/resolve!). Data, never program: it never merges."}
+         [:seon.unmerged/id :seon.unmerged/id]
+         [:seon.unmerged/attribute :seon.unmerged/attribute]
+         [:seon.unmerged/name :seon.unmerged/name]
+         [:seon.unmerged/base-digest {:optional true} :seon.unmerged/base-digest]
+         [:seon.unmerged/ours-digest {:optional true} :seon.unmerged/ours-digest]
+         [:seon.unmerged/theirs-digest {:optional true} :seon.unmerged/theirs-digest]
+         [:seon.unmerged/base-commit {:optional true} :seon.unmerged/base-commit]
+         [:seon.unmerged/theirs-commit :seon.unmerged/theirs-commit]]
+ :entries [:vector {:description "A branch's unresolved unmerged entries (seon.cluster.source/unmerged), each with its versions as references to read."} :seon.unmerged/shown]
+ :shown [:map {:description "One unresolved unmerged entry as a merge step sees it: the declaration, its three digests and the commits each other version is read at, with the forms that read them."}
+         [:seon.unmerged/attribute :seon.unmerged/attribute]
+         [:seon.unmerged/name :seon.unmerged/name]
+         [:seon.unmerged/base-digest {:optional true} :seon.unmerged/base-digest]
+         [:seon.unmerged/ours-digest {:optional true} :seon.unmerged/ours-digest]
+         [:seon.unmerged/theirs-digest {:optional true} :seon.unmerged/theirs-digest]
+         [:seon.unmerged/base-commit {:optional true} :seon.unmerged/base-commit]
+         [:seon.unmerged/theirs-commit :seon.unmerged/theirs-commit]
+         [:seon.unmerged/versions {:optional true} :seon.unmerged/versions]]
+ :versions [:map {:description "An unmerged declaration's versions as the done rule shows them (seon.cluster.source/unmerged-refusal): base, ours and theirs, each a reference resolved where it lives (:seon.ref/at), its code its source."}
+            [:base {:optional true} :map] [:ours {:optional true} :map] [:theirs {:optional true} :map]]}
