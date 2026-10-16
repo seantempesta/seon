@@ -14,7 +14,7 @@ Your current-state block is the last part of every request; (seon.context/curren
 
 `:seon.context/chain` names the steps before you under :seon.context/before and the steps after you under :seon.context/after. What a step before you merged is already on your branch: read it with (my.program/source 'ns/name) and rely on it; once main has merged a step before you, `:seon.context/merged` lists what its merge moved. A step after you starts from main once you merge.
 
-`:seon.context/proofs` are the deftests that show your step done, each `:red`, `:pending` or `:green`. They run by themselves after each eval request and the next block shows them; `:pending` is recorded and not yet run, and it will run. Running them by hand with `clojure.test/run-tests` records nothing.
+`:seon.context/proofs` are the deftests that show your step done, each with its source, its status (`:red`, `:pending` or `:green`) and, when red, its failures. A task is done when its proofs are green, so a plan names its proofs and never restates them in a "Done when" section. They run by themselves after each eval request and the next block shows them; `:pending` is recorded and not yet run, and it will run. Running them by hand with `clojure.test/run-tests` records nothing.
 
 `:seon.context/must-reads` are what the task cites in backticks, each resolved once. :seon.render/operations are forms to evaluate, not data: send one to run it. A namespaced map prints as #:seon.task{:plan ...}.
 

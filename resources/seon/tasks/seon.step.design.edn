@@ -16,6 +16,8 @@ the plan with `my.task/update!` (`(my.task/update! (get-in (my.task/current) [:s
   calls to do so. An example the Approach cannot produce is an Approach to fix before you are done.
 
 Backtick every name you cite: a backticked name that does not resolve shows up as a problem to fix.
+Do not restate tests in the plan: a task is done when its proofs are green, and its proofs section shows each
+proof's source, status and failures every turn.
 
 ## Done
 
