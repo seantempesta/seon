@@ -123,3 +123,33 @@
              (source/release! [base])))))
       (finally
         (registry/retire-branch! {:seon.store/store store :seon.store/branch chain})))))
+
+(deftest a-change-past-its-read-bound-answers-the-refusal
+  ;; a branch that changed more declarations than the bound reads gets `changed-identities`' refusal back from
+  ;; `seon.program/own-changed-identities`, never a contract error from comparing digests over the refusal
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        main-conn (:seon.db/connection target)
+        suffix (id/id)
+        syms (mapv #(symbol "seon.merge-forward-test" (str "bound-" % "-" suffix)) (range 2))
+        defined (fn [database sym] (support/program-entity database [:seon.fn/sym sym]
+                                                           (str "(defn " (name sym) " {:malli/schema [:=> [:cat] :int]} [] 1)")))
+        _ (when-not (db/pull (db/db main-conn) [:db/id] [:seon.agent/id "root"])
+            (support/transacted! main-conn (support/agent-tx (db/db main-conn) "root")))
+        {chain :seon.chain/branch}
+        (task/chain! {:seon.db/connection main-conn :seon.store/store store}
+                     [{:seon.task/ns 'fixture.forward :seon.task/name (str "bound-" suffix)
+                       :seon.task/plan "Refuse a change past its bound in `seon.program/own-changed-identities`."
+                       :seon.task/proofs '#{fixture.forward/proof}}])]
+    (try
+      (registry/on-branch store chain
+                          (fn [connection]
+                            (doseq [sym syms] (support/transacted! connection [(defined (db/db connection) sym)]))
+                            (let [after (db/db connection)
+                                  base (source/merge-base-database after (db/db main-conn))
+                                  changed (program/own-changed-identities base after {:seon.program/max-datoms 1})]
+                              (is (= :seon.program/read-bound (:seon.program/missing-evidence changed))
+                                  "the bound's refusal is the answer")
+                              (source/release! [base]))))
+      (finally
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch chain})))))

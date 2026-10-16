@@ -917,8 +917,9 @@
      [merge-base head bounds]
      (let [fork ((requiring-resolve 'seon.cluster.registry/fork-of) head (get-in head [:config :branch]))
            touched (changed-identities (or (:seon.branch/base-t fork) merge-base) head bounds)
-           [before after] (when (seq touched)
-                            (map #(digest-map % (assoc bounds :seon.program/identities touched)) [merge-base head]))]
+           ;; a refused walk is the answer: only a non-empty identity set scopes the digest reads
+           [before after] (when (and (set? touched) (seq touched))
+                            (mapv #(digest-map % (assoc bounds :seon.program/identities touched)) [merge-base head]))]
        (cond (not (set? touched)) touched
              (empty? touched) touched
              (:seon.error/at before) before
