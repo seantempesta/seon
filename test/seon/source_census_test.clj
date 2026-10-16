@@ -51,23 +51,52 @@
   (and (seq? form) (contains? #{'def 'defonce} (first form)) (number? (last form))
        (symbol? (second form)) (policy-name? (second form))))
 
-(defn- hardcoded
-  "Sites in `{:file :in :use}` form: top-level constants and nested defaults naming a policy number."
+(defn- render-or-printer?
+  "True of the sources of the printer and of the render owners, where a number is a dial."
   [path]
-  (let [forms (census/top-level-forms path)
-        nested (fn nested [form] (cond (literal-default? form) [form]
+  (or (str/starts-with? path "src/seon/render") (= "src/seon/print.cljc" path)))
+
+(defn- numeric-def?
+  "A `def` or `defonce` whose value is a number literal."
+  [form]
+  (and (seq? form) (contains? #{'def 'defonce} (first form)) (symbol? (second form)) (number? (last form))))
+
+(defn sites-of-forms
+  "Sites in `{:file :in :uses}` form of `forms` read from `path`: top-level constants and nested defaults naming a
+  policy number, calls whose count is a literal (`seon.census/literal-count-call?`), and, in the printer and render
+  sources, every numeric `def`."
+  [path forms]
+  (let [nested (fn nested [form] (cond (literal-default? form) [form]
                                        (coll? form) (mapcat nested (if (map? form) (mapcat identity form) form))))]
     (for [form forms
           :let [uses (concat (when (constant? form) [(second form)])
-                             (map #(first (filter symbol? (rest %))) (nested form)))]
+                             (when (and (numeric-def? form) (not (constant? form)) (render-or-printer? path)) [(second form)])
+                             (map #(first (filter symbol? (rest %))) (nested form))
+                             (map first (census/literal-count-calls form)))]
           :when (seq uses)]
       {:file path :in (second form) :uses (vec uses)})))
+
+(defn- hardcoded
+  "Sites of the source file `path`."
+  [path]
+  (let [forms (census/top-level-forms path)]
+    (if (= ::census/unreadable forms) [] (sites-of-forms path forms))))
 
 (deftest ^{:seon/tasks #{'seon.source-census-test/no-timeout-or-limit-is-a-hardcoded-number}}
   no-timeout-or-limit-is-a-hardcoded-number
   (let [sites (vec (mapcat hardcoded @source-files))]
     (is (> (count @source-files) 100) "the census read the source tree")
-    (is (= [] sites) "each site is a top-level constant or an or-default naming a policy number")))
+    (is (= [] sites) "each site is a constant, an or-default or a literal count naming a policy number")))
+
+(deftest the-hardcoded-number-rule-catches-a-planted-literal-count-and-numeric-def
+  (let [sites (fn [path text] (vec (sites-of-forms path (census/read-forms text))))]
+    (is (seq (sites "src/seon/x.clj" "(defn f [s] (subs s 0 200))")) "a literal subs end is caught")
+    (is (seq (sites "src/seon/x.clj" "(defn f [xs] (take 8 xs))")) "a literal take is caught")
+    (is (seq (sites "src/seon/x.clj" "(defn f [xs] (->> xs (take-last 12)))")) "a threaded take-last is caught")
+    (is (seq (sites "src/seon/x.clj" "(defn f [xs] (drop-last 3 xs))")) "a literal drop-last is caught")
+    (is (= [] (sites "src/seon/x.clj" "(defn f [xs n] (take n (drop 3 xs)))")) "a computed count is spared")
+    (is (= [] (sites "src/seon/x.clj" "(def width 40)")) "a numeric def outside the printer and render sources is spared")
+    (is (seq (sites "src/seon/render/x.clj" "(def width 40)")) "a numeric def in a render source is caught")))
 
 (deftest ^{:seon/tasks #{'seon.problems/problems-prose-carries-no-date-or-file-line}}
   problems-prose-carries-no-date-or-file-line

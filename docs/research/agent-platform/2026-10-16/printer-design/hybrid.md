@@ -16,7 +16,7 @@ start) are applied in place below. I wrote neither plan. Code claims were re-rea
 working tree and re-checked by the narrow check at `4297a615d`; nothing was run on default by this lane. This is a
 plan, not production code.
 
-**Phase status:** P0 proposed · P1a proposed (starts after lane fix-sci-eval commits and releases
+**Phase status:** P0 done (red by design: R1 68 sites, R2 4, R3 100 (85 `src`, 15 `script`), R4 63 (42 before, 11 in render/print), R5 19; baseline recorded on `2af8586ec` in [baseline.edn](baseline.edn): docstring cut `…+791`/`…+921` at 1,024/512, 4,956-tuple query 48 ms, 77 MB, 196 `[…2]` placeholders, 40-evaluation transcript 15.9 ms direct against 29.6 ms through `prepare`) · P1a proposed (starts after lane fix-sci-eval commits and releases
 `src/seon/sci/eval.clj`) · P1b proposed (filed after P0's re-measurement) · P1c proposed · P1d proposed · P1e
 proposed · P1f proposed · P2 (inventory P2 to P6 groups) proposed. Each implementing commit updates this line.
 

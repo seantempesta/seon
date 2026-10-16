@@ -25,11 +25,66 @@
        sort
        vec))
 
-(defn top-level-forms
-  "The forms of `path`, or `[]` with the path unreadable noted by `unreadable?`."
-  [path]
-  (try (edamame/parse-string-all (slurp path) read-options)
+(defn read-forms
+  "The forms of `text`, or `::unreadable`."
+  [text]
+  (try (edamame/parse-string-all text read-options)
        (catch Exception _ ::unreadable)))
+
+(defn top-level-forms
+  "The forms of `path`, or `::unreadable`."
+  [path]
+  (read-forms (slurp path)))
+
+(def printer-files
+  "The value printer's own sources, where printing is the work."
+  #{"src/seon/print.cljc" "src/seon/render/value.clj"})
+
+(def render-files
+  "The sources that may call a render function or `seon.render/render-call`: the printer and the render owner."
+  (conj printer-files "src/seon/render.clj"))
+
+(defn file-namespace
+  "The namespace symbol a `src` file path declares by Clojure's naming rule."
+  [path]
+  (-> path (str/replace #"^src/" "") (str/replace #"\.cljc?$" "") (str/replace "/" ".") (str/replace "_" "-") symbol))
+
+(def ^:private render-keys #{:seon.render/ai :seon.render/html :seon.render/form})
+
+(defn declared-renders
+  "The render function symbols a form or datum declares under `:seon.render/ai`, `:html` or `:form`,
+  as a symbol or a quoted symbol, at any depth."
+  [x]
+  (let [named (fn [v] (cond (qualified-symbol? v) v
+                            (and (seq? v) (= 'quote (first v)) (qualified-symbol? (second v))) (second v)))]
+    (into #{}
+          (concat (when (map? x) (keep #(named (get x %)) render-keys))
+                  (when (coll? x) (mapcat declared-renders (if (map? x) (mapcat identity x) x)))))))
+
+(def ^:private counted-heads #{'subs 'take 'take-last 'drop-last})
+
+(defn literal-count-call?
+  "True when `form` calls `subs`, `take`, `take-last` or `drop-last` with a number literal as its count,
+  other than 0, 1 and -1: `subs`' end index, the others' first argument."
+  [form]
+  (and (seq? form)
+       (let [head (first form) args (rest form) n? #(and (number? %) (not (contains? #{0 1 -1} %)))]
+         (and (symbol? head) (contains? counted-heads (symbol (name head)))
+              (contains? #{nil "clojure.core"} (namespace head))
+              (if (= "subs" (name head))
+                (and (n? (last args)) (or (= 3 (count args)) (and (= 2 (count args)) (every? number? args))))
+                (n? (first args)))))))
+
+(defn literal-count-calls
+  "Every call under `form` with a literal count (`literal-count-call?`)."
+  [form]
+  (concat (when (literal-count-call? form) [form])
+          (when (coll? form) (mapcat literal-count-calls (if (map? form) (mapcat identity form) form)))))
+
+(defn emitter?
+  "True when top-level `form` is marked `^{:seon.print/emitter true}`: a definition that writes a value as text."
+  [form]
+  (boolean (and (seq? form) (some #(and (symbol? %) (:seon.print/emitter (meta %))) (take 3 form)))))
 
 (defn- owner
   [form]
