@@ -986,9 +986,21 @@
                   row))
               (sort-by :seon.task/assignment rows)))))
 
+(defn- with-main-outcomes
+  "`rows` (chain attempts read on their branches) with the outcome main `database` records for each, which wins."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector [:map [:seon.task/assignment :seon.task/assignment]]]]
+                  [:or [:vector [:map [:seon.task/assignment :seon.task/assignment]]] :seon.db/invalid-read-error]]}
+  [database rows]
+  (let [outcomes (db/q '[:find ?k ?o :in $ [?k ...] :where [?a :seon.task/assignment ?k] [?a :seon.task/outcome ?o]]
+                       database (mapv :seon.task/assignment rows))]
+    (or (read-error outcomes)
+        (let [main (into {} outcomes)]
+          (mapv #(if-let [outcome (main (:seon.task/assignment %))] (assoc % :seon.task/outcome outcome) %) rows)))))
+
 (defn chain-attempts
   "Every attempt on a chain's `:seon.task/next` path, read through `store` for each chain fact on main `database`:
-  its key, task, chain branch, end and outcome when it holds them."
+  its key, task, chain branch, end and outcome when it holds them. Main's outcome wins: the chain's merge records
+  the terminal attempt's `:merged` on main only (`seon.merge/merge-tx`), so a merged attempt is never read open."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store]
                   [:or [:vector [:map [:seon.task/assignment :seon.task/assignment] [:seon.task/assigned :seon.task/handle]
                                  [:seon.chain/branch :seon.chain/branch]
@@ -999,7 +1011,8 @@
   (let [chains (db/q '[:find ?b ?h :where [?c :seon.chain/branch ?b] [?c :seon.chain/first ?h]] database)
         held (registry/branches store)]
     (or (read-error chains)
-        (into [] (mapcat (fn [[branch first-handle]]
+        (with-main-outcomes database
+         (into [] (mapcat (fn [[branch first-handle]]
                            (when (contains? held branch)
                              (registry/on-branch store branch
                                         (fn [connection]
@@ -1013,7 +1026,7 @@
                                                            (chain-handles head first-handle))]
                                             (mapv #(assoc (dissoc % :db/id :seon.task/branch) :seon.chain/branch branch)
                                                   (sort-by :seon.task/assignment rows))))))))
-              (sort chains)))))
+              (sort chains))))))
 
 (defn chain-branch
   "The branch of the chain on main `database` whose `:seon.task/next` path holds task `handle`, read through

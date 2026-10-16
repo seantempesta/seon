@@ -3645,13 +3645,14 @@
 (defn changed-attributes
   "Attributes whose datoms may differ, using Datahike's native revisions.
   A transaction basis reads the revisions of its commit on `after`'s lineage,
-  walking only the commits after it; a value without revisions leaves every
-  attribute to be read."
+  walking only the commits after it; a value without revisions (a temporal view
+  such as `as-of`) leaves every attribute to be read."
   {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.db/basis-t]
                        :seon.db/database-value [:set :qualified-keyword]]
                   [:set :qualified-keyword]]}
   [before after attributes]
-  (let [before-context (if (instance? DB before) (:cache-context before) (basis-revisions after before))
+  (let [before-context (cond (instance? DB before) (:cache-context before)
+                             (int? before) (basis-revisions after before))
         after-context (when (instance? DB after) (:cache-context after))
         revision (fn [context attribute]
                    (get (:datahike.cache/attribute-revisions context) attribute
