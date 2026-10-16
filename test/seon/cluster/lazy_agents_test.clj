@@ -30,5 +30,8 @@
           {:seon.agent/id "waiting" :seon.message/inbound-content "Please inspect this."
            :seon.config.eval.result/max-string
            (:seon.config.eval.result/max-string config/defaults)}]])
+       ;; a model turn needs an assignment (7e39aeed3): the wake alone leaves the agent unstarted
+       (is (= #{"root"} (#'agent/agents-to-start (db/db connection) candidates)))
+       (support/assign-task! connection "waiting")
        (is (= #{"root" "waiting"}
               (#'agent/agents-to-start (db/db connection) candidates)))))))
