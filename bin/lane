@@ -495,8 +495,11 @@ accepted_reds_gate() {
       defined-on-head? (fn [sym]
                          (let [[ns-name var-name] (clojure.string/split sym #"/")
                                path (str "test/" (-> ns-name (clojure.string/replace "." "/") (clojure.string/replace "-" "_")) ".clj")
-                               src (:out (clojure.java.shell/sh "git" "show" (str "HEAD:" path)))]
-                           (boolean (re-find (re-pattern (str "\\(deftest\\s+(\\^\\S+\\s+|\\^\\{[^}]*\\}\\s+)*" (java.util.regex.Pattern/quote var-name) "(\\s|\\))")) (or src "")))))
+                               src (:out (clojure.java.shell/sh "git" "show" (str "HEAD:" path)))
+                               forms (try (edamame.core/parse-string-all (or src "") {:all true :read-cond :allow :features #{:clj}
+                                                                                       :auto-resolve name :readers (constantly identity)})
+                                          (catch Exception _ []))]
+                           (boolean (some #(and (seq? %) (= (symbol "deftest") (first %)) (= var-name (str (second %)))) forms))))
       new-proofs (remove defined-on-head? reds)
       old (filter defined-on-head? reds)
       run (when (.exists (java.io.File. file)) (clojure.edn/read-string (slurp file)))
