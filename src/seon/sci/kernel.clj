@@ -19,6 +19,7 @@
             [clojure.string :as str]
             [clojure.test.check.generators :as gen]
             [sci.core :as sci]
+            [sci.ctx-store]
             [sci.impl.utils :as sci.utils]
             [sci.impl.vars :as sci.vars]
             [seon.batch]
@@ -1105,8 +1106,11 @@
                           :seon.fn/sym function-symbol
                           :seon.error/expected :seon.sci.eval/invocation-result})))
             (let [;; The callee's own armed wrapper supplies its declared
-                  ;; defaults from this arm's context (`world-ctx`).
-                  value (apply sci-var arguments)
+                  ;; defaults from this arm's context (`world-ctx`). The Var
+                  ;; is read in the context it was resolved in: a Var holds a
+                  ;; context's root as that context's binding, which only a
+                  ;; call executing under the context reads.
+                  value (sci.ctx-store/with-ctx ctx (apply sci-var arguments))
                   invocation-record (record-fn :ok)]
               (admit/admit-value
                (cond->
