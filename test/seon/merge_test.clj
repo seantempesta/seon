@@ -1,5 +1,7 @@
 (ns seon.merge-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.java.shell :as shell]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is]]
             [seon.merge :as merge]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.host :as host]
@@ -833,3 +835,41 @@
              "the task it assigns no longer reads :running")
          (is (= :stopped (:seon.task/execution (db/pull merged [:seon.task/execution] [:seon.task/id born])))
              "a task the merge carries in :running ends too"))))))
+
+(deftest a-merge-commit-names-the-agent-and-the-models-it-called
+  ;; The merge's git commit names what wrote the change, read on the source branch the assignment names: its agent
+  ;; and the distinct models that agent's turns called, one `Model:` trailer each (live run a9e4e9904's commit
+  ;; claimed a model no turn called)
+  (support/with-database
+   (fn [connection]
+     (support/transacted! connection (support/agent-tx (db/db connection) "merge-models"))
+     (support/assign-task! connection "merge-models")
+     (let [key (:v (last (d/datoms (db/db connection) :aevt :seon.task/assignment)))
+           run-id (turn/next-id (db/db connection) "merge-models-fixture" "merge-models")
+           root (support/temp-root "merge-models")
+           git! (fn [& args] (let [{:keys [exit out err]} (apply shell/sh "git" "-C" root args)]
+                               (if (zero? exit) (str/trim out) (throw (ex-info err {:git args})))))]
+       (support/transacted! connection (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "merge-models"]
+                                                      :seon.turn/opened-tx "datomic.tx"}))
+       ;; one model attempt of the turn, as `seon.turn` records it
+       (support/transacted! connection [{:seon.ai.attempt/id (str run-id "-attempt-0") :seon.turn/_attempts [:seon.turn/id run-id]
+                                         :seon.ai.attempt/ordinal 0 :seon.ai.attempt/at #inst "2026-10-16T00:00:00Z"
+                                         :seon.ai/endpoint "https://fixture.invalid/v1/chat" :seon.ai/model "fixture-model"
+                                         :seon.ai.attempt/settings-edn "{}"}])
+       (try
+         (git! "init" "-q") (git! "config" "user.email" "mm@test.invalid") (git! "config" "user.name" "mm-test")
+         (spit (str root "/a.clj") "(ns a)\n")
+         (git! "add" "a.clj") (git! "commit" "-q" "-m" "fixture")
+         (spit (str root "/a.clj") "(ns a)\n(def x 1)\n")
+         (let [acceptance (#'merge/acceptance (db/db connection) key
+                                              {:seon.program/identities #{} :seon.source/base-commit-id (db/commit-id (db/db connection))
+                                               :seon.source/commit-id (db/commit-id (db/db connection))})
+               written {:seon.source/changed-paths ["a.clj"]
+                        :seon.source/files [{:seon.source/path "a.clj" :seon.source/base-digest "x"
+                                             :seon.source/candidate-digest "y" :seon.source/replaced []}]}
+               message (git! "log" "-1" "--format=%B" (:seon.git/commit (source/commit! root written acceptance)))
+               trailers (into #{} (filter (fn [line] (some #(str/starts-with? line %) ["Model: " "Agent: " "Co-Authored-By: "])))
+                              (str/split-lines message))]
+           (is (= #{"Agent: merge-models" "Model: fixture-model"} trailers)
+               "the commit names its agent and the model its turns called, and no other author"))
+         (finally (support/delete-root! root)))))))

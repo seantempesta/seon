@@ -106,9 +106,11 @@
                [:seon.source/commit-id :seon.source/commit-id]
                [:seon.test.run/id {:optional true} :seon.test.run/id]],
               :acceptance
-              [:map {:description "What a merge's git commit names: the assignment, the merge commit, and the run that gated it, the task and agent when they are known."}
+              [:map {:description "What a merge's git commit names: the assignment, the merge commit, and the run that gated it, the task, agent and the models it called when they are known."}
                [:seon.task/assignment :seon.task/assignment] [:seon.test.run/id {:optional true} :seon.test.run/id] [:seon.source/commit-id :seon.source/commit-id]
-               [:seon.task/sym {:optional true} :seon.task/sym] [:seon.agent/id {:optional true} :seon.agent/id]],
+               [:seon.task/sym {:optional true} :seon.task/sym] [:seon.agent/id {:optional true} :seon.agent/id]
+               [:seon.source/models {:optional true} :seon.source/models]],
+              :models [:vector {:min 1 :description "The distinct models a merge's agent called on its source branch (seon.ai/model of its turns' attempts), sorted: what wrote the change."} :seon.ai/model],
               :prepared
               [:map {:description "A prepared merge accept-merge! takes: the tested intermediate branch, its run and verdict, a Prove step's product (its tests that may stay red by design), the digest each merged declaration held on the destination, and the candidate's commit."}
                [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]

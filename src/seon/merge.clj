@@ -264,16 +264,26 @@
       :else (assoc row :seon.merge/fork-point fork))))
 
 (defn- acceptance
-  "What the git commit of assignment `key`'s merge names: the assignment, its task and agent, the run and the merge commit."
+  "What the git commit of assignment `key`'s merge names, read on the source branch its row on main `database`
+  names, where its agent's turns live: the assignment, its task and agent, the distinct models that agent's turns
+  called (`:seon.ai/model` of `:seon.turn/attempts`), the run and the merge commit."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assignment :seon.source/accepted] :seon.source/acceptance]}
   [database key accepted]
-  (let [[task-sym agent-id] (db/q '[:find [?sym ?agent] :in $ ?k
-                                   :where [?a :seon.task/assignment ?k] [?a :seon.task/assigned ?h] [?t :seon.task/id ?h]
-                                   [?t :seon.task/sym ?sym] [?a :seon.task/agent ?g] [?g :seon.agent/id ?agent]]
-                                 database key)]
-    (cond-> (assoc (select-keys accepted [:seon.test.run/id :seon.source/commit-id]) :seon.task/assignment key)
-      (symbol? task-sym) (assoc :seon.task/sym task-sym)
-      (string? agent-id) (assoc :seon.agent/id agent-id))))
+  (let [source (db/branch-database database (:seon.task/branch (db/pull database [:seon.task/branch] [:seon.task/assignment key])))]
+    (try
+      (let [[task-sym agent-id] (db/q '[:find [?sym ?agent] :in $ ?k
+                                       :where [?a :seon.task/assignment ?k] [?a :seon.task/assigned ?h] [?t :seon.task/id ?h]
+                                       [?t :seon.task/sym ?sym] [?a :seon.task/agent ?g] [?g :seon.agent/id ?agent]]
+                                     source key)
+            models (when (string? agent-id)
+                     (db/q '[:find [?model ...] :in $ ?agent :where [?g :seon.agent/id ?agent] [?run :seon.turn/agent ?g]
+                             [?run :seon.turn/attempts ?attempt] [?attempt :seon.ai/model ?model]]
+                           source agent-id))]
+        (cond-> (assoc (select-keys accepted [:seon.test.run/id :seon.source/commit-id]) :seon.task/assignment key)
+          (symbol? task-sym) (assoc :seon.task/sym task-sym)
+          (string? agent-id) (assoc :seon.agent/id agent-id)
+          (seq models) (assoc :seon.source/models (vec (sort models)))))
+      (finally (source/release! [source])))))
 
 (defn- merge-onto
   "`merge!`'s work: assignment `key`'s merge through `execution`, the checkout `:root` (when given) proving the files."

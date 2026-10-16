@@ -2496,10 +2496,11 @@
           members)))
 
 (defn- commit-message
-  "The merge's commit message: what merged and the evidence it merged on, in `bin/lane`'s trailer form."
+  "The merge's commit message: what merged and the evidence it merged on, in `bin/lane`'s trailer form, naming
+  its agent and each model it called (`:seon.source/models`)."
   {:malli/schema [:=> [:cat :seon.source/acceptance [:vector :seon.source/path]] :string]}
   [{task-sym :seon.task/sym assignment :seon.task/assignment agent-id :seon.agent/id run-id :seon.test.run/id
-    commit-id :seon.source/commit-id}
+    commit-id :seon.source/commit-id models :seon.source/models}
    paths]
   (str "Merge " (or task-sym (str "assignment " assignment)) (when agent-id (str " from agent " agent-id))
        ": merged on main as " commit-id (when run-id (str " by gate run " run-id)) "\n\n"
@@ -2507,7 +2508,8 @@
        "Assignment: " assignment "\n"
        "Merge-commit: " commit-id "\n"
        (when run-id (str "Branch-evidence-runs: " run-id "\n"))
-       "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n"))
+       (when agent-id (str "Agent: " agent-id "\n"))
+       (apply str (map #(str "Model: " % "\n") models))))
 
 (defn- call-with-commit-lock
   "`(f)` while this process holds `.git/lane-commit.lock` of the checkout `root`,
