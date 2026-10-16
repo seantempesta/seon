@@ -1384,6 +1384,29 @@
                  (seon.fn/gating-tests database seeds))
               "one walk seeded with every symbol selects the union of the per-symbol walks"))))))
 
+(deftest a-seeds-nearest-tests-do-not-depend-on-the-other-seeds
+  ;; live run 2, chain 05db: the merge seeded its proof beside seon.ai/provider-ai, the proof ended the walk at
+  ;; depth, and the test three callers above provider-ai, which the done rule had judged, never ran
+  (test-support/with-database
+    (fn [connection]
+      (transact-fixture!
+       connection
+       (into [(test-support/namespace-entity @connection 'sample.near)]
+             (map (fn [s]
+                    (test-support/program-fn-entity (db/db connection) s (str "(defn " (name (symbol s)) " [] nil)"))))
+             ['sample.near/f 'sample.near/g 'sample.near/h]))
+      (transact-fixture!
+       connection
+       [[:db/add [:seon.fn/sym 'sample.near/g] :seon.fn/calls 'sample.near/f]
+        [:db/add [:seon.fn/sym 'sample.near/h] :seon.fn/calls 'sample.near/g]
+        (analyzed-test-entity (db/db connection) 'sample.near/far {:seon.fn/calls #{'sample.near/h}})
+        (analyzed-test-entity (db/db connection) 'sample.near/proof {:seon.fn/calls #{'clojure.core/str}})])
+      (let [database (db/db connection)
+            walk #(seon.fn/gate-sets {:seon.db/db database :seon.fn/seeds %})]
+        (is (= ['sample.near/far] (walk #{'sample.near/f})))
+        (is (= ['sample.near/far 'sample.near/proof] (walk #{'sample.near/f 'sample.near/proof}))
+            "a seed test selects itself and leaves the other seed's nearest tests selected")))))
+
 (deftest a-refused-reference-read-refuses-gate-set-derivation
   (test-support/with-database
     (fn [connection]

@@ -1973,20 +1973,12 @@
                       (assoc result function-symbol selected))))
                 {} (distinct function-symbols))))))
 
-(defn- closure-walk
-  "The tests reaching `seeds` (`::tests`). Nil depth walks the complete closure
-  and returns its function names (`::affected`). A depth walks at least that
-  many caller levels, then on until some walked level holds a test, so a
-  function reached only through callers is selected by the nearest tests above
-  it. A test reaches by calling a walked function, naming one as
-  `:seon.test/subject` or being a seed. Declared invocation edges count; symbol
-  mentions do not. A host-bound caller (`:seon.fn/host-bound?` not false, the
-  rule of `seon.sci.eval/host-bound-row?`) is reached but never walked: a branch
-  keeps it compiled, so it and its callers call the compiled seed and cannot see
-  the change. Throws a read refusal."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym] [:maybe [:int {:min 1}]]]
+(defn- walk-callers
+  "`closure-walk` over `seeds` together, with the `:seon.test/subject` datoms `subject-datoms` read once by its
+  caller (one read for every seed); the complete closure's walk. Throws a read refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym] [:maybe [:int {:min 1}]] :seon.db/datoms]
                   [:map [::affected {:optional true} :seon.fn/affected] [::tests :seon.fn/tests]]]}
-  [database seeds depth]
+  [database seeds depth subject-datoms]
   (let [read! read-or-throw!
         seeds (vec seeds)
         ;; every declared edge in one walk, read per level by target
@@ -2010,7 +2002,6 @@
                   (into #{} (keep :seon.fn/sym)
                         (read! (db/pull-many database [:seon.fn/sym]
                                             (mapv #(vector :seon.fn/sym %) seeds)))))
-        subject-datoms (read! (db/datoms database :aevt :seon.test/subject))
         subjects (fn [targets] (into #{} (keep #(when (targets (:v %)) (:e %))) subject-datoms))
         seed-tests (into #{} (keep :seon.test/sym)
                          (read! (db/pull-many database [:seon.test/sym]
@@ -2036,6 +2027,79 @@
                      (conj levels [frontier callers])))))]
     (cond-> {::tests (tests-of levels)}
       (nil? depth) (assoc ::affected affected))))
+
+(defn- nearest-tests
+  "`closure-walk`'s depth walk of several `seeds` at once: each walked function carries the seeds it was reached
+  from, and a seed's lineage stops once it has walked `depth` levels and some level reached from it holds a test,
+  so each seed selects its own nearest tests in one walk (one caller seek per walked function and level, as
+  `walk-callers`). `subject-datoms` are the `:seon.test/subject` datoms. Throws a read refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym] [:int {:min 1}] :seon.db/datoms]
+                  [:map [::tests :seon.fn/tests]]]}
+  [database seeds depth subject-datoms]
+  (let [read! read-or-throw!
+        pairs (fn [attribute entities]
+                (if (empty? entities)
+                  []
+                  (read! (db/q '[:find ?entity ?symbol :in $ ?attribute [?entity ...]
+                                 :where [?entity ?attribute ?symbol]]
+                               database attribute (vec entities)))))
+        interpreted (fn [entities]
+                      (if (empty? entities)
+                        #{}
+                        (set (read! (db/q '[:find [?symbol ...] :in $ [?entity ...]
+                                            :where [?entity :seon.fn/sym ?symbol] [?entity :seon.fn/host-bound? false]]
+                                          database (vec entities))))))
+        subjects (reduce (fn [m {e :e v :v}] (update m v (fnil conj #{}) e)) {} subject-datoms)
+        seed-tests (into #{} (keep :seon.test/sym)
+                         (read! (db/pull-many database [:seon.test/sym] (mapv #(vector :seon.test/sym %) seeds))))
+        ;; origins of each entity a level names, from the frontier functions it calls or names as its subject
+        origins-of (fn [by-target frontier]
+                     (reduce-kv (fn [m f origins] (reduce #(update %1 %2 (fnil into #{}) origins) m (by-target f)))
+                                {} frontier))]
+    (loop [frontier (into {} (map (fn [s] [s #{s}])) seeds)
+           propagated frontier
+           found (into {} (map (fn [t] [t #{t}])) seed-tests)
+           level 0]
+      (if (empty? frontier)
+        {::tests (vec (sort (into #{} (mapcat val) found)))}
+        (let [declared (declared-callers read! database (vec (keys frontier)))
+              by-caller (into {} (map (fn [f] [f (into (set (map :e (read! (db/datoms database :avet :seon.fn/calls f))))
+                                                       (get declared f))]))
+                              (keys frontier))
+              callers (origins-of by-caller frontier)
+              subject-of (origins-of #(get subjects % #{}) frontier)
+              tests (merge-with into callers subject-of)
+              found (reduce (fn [found [entity test-symbol]]
+                              (reduce #(update %1 %2 (fnil conj #{}) test-symbol) found (tests entity)))
+                            found (pairs :seon.test/sym (keys tests)))
+              level (inc level)
+              open? (fn [s] (or (< level depth) (empty? (found s))))
+              walk (interpreted (keys callers))
+              next-frontier (reduce (fn [m [entity f]]
+                                      (let [fresh (into #{} (filter open?) (remove (get propagated f #{}) (callers entity)))]
+                                        (if (and (walk f) (seq fresh)) (update m f (fnil into #{}) fresh) m)))
+                                    {} (pairs :seon.fn/sym (keys callers)))]
+          (recur next-frontier (merge-with into propagated next-frontier) found level))))))
+
+(defn- closure-walk
+  "The tests reaching `seeds` (`::tests`). Nil depth walks the complete closure
+  and returns its function names (`::affected`). A depth walks each seed at least
+  that many caller levels, then on until some walked level holds a test, so a
+  function reached only through callers is selected by the nearest tests above
+  it, whatever the other seeds reach: the selection is the union of each seed's,
+  so adding a seed never drops a test another seed selects. A test reaches by
+  calling a walked function, naming one as `:seon.test/subject` or being a seed.
+  Declared invocation edges count; symbol mentions do not. A host-bound caller
+  (`:seon.fn/host-bound?` not false, the rule of `seon.sci.eval/host-bound-row?`)
+  is reached but never walked: a branch keeps it compiled, so it and its callers
+  call the compiled seed and cannot see the change. Throws a read refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym] [:maybe [:int {:min 1}]]]
+                  [:map [::affected {:optional true} :seon.fn/affected] [::tests :seon.fn/tests]]]}
+  [database seeds depth]
+  (let [subject-datoms (read-or-throw! (db/datoms database :aevt :seon.test/subject))]
+    (if depth
+      (nearest-tests database (set seeds) depth subject-datoms)
+      (walk-callers database seeds depth subject-datoms))))
 
 (defn reverse-closure
   "The transitive callers of `seeds` up to their first compiled callers, and the
