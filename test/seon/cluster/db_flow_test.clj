@@ -2,6 +2,7 @@
   "db<->flow's decision, `seon.cluster.agent/launch-actions`, as a table: facts read on
   main and the registry's live graphs in, the actions db<->flow applies out."
   (:require [clojure.core.async :as async]
+            [clojure.edn :as edn]
             [my.root]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
@@ -1460,6 +1461,58 @@
               (is (= 1 (count (attempts connection "e"))) "an end with no work is not relaunched")
               (is (not (str/includes? (intent) "my.root/merge!")) "an empty diff offers no merge")
               (is (str/includes? (intent) "my.root/close!") "it offers closing"))))))))) 
+
+(deftest ^{:seon.test/long "One chain world: a chain fork and its first attempt capped after one scripted model turn, bailed by one db<->flow pass." :seon.test/long-ms 30000}
+  a-bailed-attempt-says-why-as-data
+  ;; TASK-CHAIN §2.7 (Bail): the attempt's end records its last verdict on its agent (`seon.context/end-summary-tx`:
+  ;; the proofs' counts and the done rule's refusals), and root's problem task for the attempt carries both
+  (binding [*space* "tq.endverdict"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"u" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (test-support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                                              :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
+                                                                                            (db/db connection) connection)
+                                              :seon.batch/sink (seon.batch/sink)
+                                              :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                              :seon.agent/id "tq-chain-author"})
+                                (symbol (str *space* "-proofs"))
+                                "(clojure.test/deftest proves-c (clojure.test/is (= 1 2)))\n")
+          (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                          :seon.config/manifest {:seon.config.ai/no-provider false :seon.config.ai/no-auth true
+                                                 :seon.config.ai/endpoint "http://127.0.0.1:9/chat"
+                                                 :seon.config.ai/model "fixture-provider"
+                                                 :seon.config.run/max-episode-runs 1}})
+          (let [handle (assoc handle :seon.turn.loop/complete (fn [_projection _request]
+                                                                {:seon.ai/text "(my.turn/wait {:my.turn/note \"Waiting.\"})"}))
+                routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                   [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Do c."
+                                     :seon.task/proofs #{(proof "c")}}])
+                branch (:seon.chain/branch chain)
+                key-1 (id/id [(first (:seon.task/handles chain)) 1])]
+            (try
+              (pass! handle routing)
+              (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
+                (await-on! on-branch #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]]
+                                            (db/db on-branch) key-1)
+                           ::ended)
+                (pass! handle routing)
+                (let [plan (str (:seon.task/plan (db/pull (db/db connection) [:seon.task/plan]
+                                                          [:seon.task/sym (symbol "seon.task" (str "unfinished-task-" key-1))])))
+                      summary (db/pull (db/db on-branch) [:seon.agent/end-red :seon.agent/end-refusals]
+                                       [:seon.agent/id (str "attempt/" key-1)])
+                      refusals (some-> (:seon.agent/end-refusals summary) edn/read-string)]
+                  (is (= 1 (:seon.agent/end-red summary)) "the agent recorded its red proof at the end")
+                  (is (seq refusals) "and the done rule's refusals, read back as data")
+                  (is (every? :seon.error/type refusals) "each an error value")
+                  (is (str/includes? plan ":red 1") "the problem task shows the proofs' counts")
+                  (is (every? #(str/includes? plan (str (:seon.error/type %))) refusals)
+                      "and each refusal's type")))
+              (finally (release-chain! routing store branch)))))))))) 
 
 ;;; P4: an attempt's world holds its own assignment, so nothing it reads reaches main.
 

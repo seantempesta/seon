@@ -281,7 +281,11 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    after a recorded merge is cleaned up; one whose branch is gone otherwise is shown to root as unknown.
 7. **Bail or fail** — every end that is not done: `:capped` (turns spent; `seon.turn/turns-left` is the budget),
    `:stalled`, `:given-back`, `:sent-back` (`my.task/send-back!` with its reason), `:error`, a done that
-   `done-refusals` refuses, or a refused final merge. **A final merge refused by its gate** (a conflict, a red test on
+   `done-refusals` refuses, or a refused final merge. The attempt's end records its last verdict as data on its agent,
+   beside the end summary `seon.context/end-summary-tx` already writes (proof counts and red proofs): the done rule's
+   refusals verbatim as `:seon.agent/end-refusals` (canonical EDN, absent when none), and root's problem task for the
+   attempt (`seon.cluster.agent/chain-bails`) states both, so a capped chain whose proofs are green and whose done is
+   refused says so (`seon.cluster.db-flow-test/a-bailed-attempt-says-why-as-data`). **A final merge refused by its gate** (a conflict, a red test on
    the merge branch, or a file write-back would produce that does not analyze cleanly) keeps its merge branch
    `:merge-<id>` (main's latest head plus the chain's merge list), and root's same bail appends a merge step: in ONE
    transaction on the chain branch through the task writer, a task from `seon.step.merge/template` (named by position,

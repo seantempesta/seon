@@ -2234,6 +2234,18 @@
       (registry/on-branch store works-on #(write! % [[:db.fn/call #'task/hold-tx key reason]]))))
   nil)
 
+(defn- verdict-text
+  "The last verdict `agent` (an attempt's agent row, read from its end summary: `seon.context/end-summary-tx`) records,
+  as the sentence a bail's reason ends with: its proofs' counts by status and red proofs, and the done rule's refusals
+  as the EDN they were recorded in; empty when the agent recorded none."
+  {:malli/schema [:=> [:cat [:maybe :map]] :string]}
+  [{green :seon.agent/end-green red :seon.agent/end-red pending :seon.agent/end-pending red-proofs :seon.agent/end-red-proofs
+    refusals :seon.agent/end-refusals}]
+  (let [counts (cond-> {} green (assoc :green green) red (assoc :red red) pending (assoc :pending pending))]
+    (str (when (seq counts) (str " Its last verdict: proofs " (id/printed counts)
+                                 (when (seq red-proofs) (str ", red " (id/printed (vec (sort red-proofs))))) "."))
+         (when refusals (str " The done rule refused: " refusals)))))
+
 (defn- chain-bails
   "The ended chain attempts root bails, read through `store` on main `database` (`seon.task/chain-attempts`):
   every attempt holding no outcome whose end is neither :done (judged by the done rule and the final merge, which
@@ -2248,10 +2260,15 @@
                      (when (and end (not (:seon.task/outcome row)) (not (#{:done :cancelled} end)))
                        (registry/on-branch store branch
                                   (fn [connection]
-                                    (let [{why :seon.task.attempt/reason}
-                                          (db/pull (db/db connection) [:seon.task.attempt/reason] [:seon.task/assignment key])]
+                                    (let [{why :seon.task.attempt/reason agent :seon.task/agent}
+                                          (db/pull (db/db connection)
+                                                   [:seon.task.attempt/reason
+                                                    {:seon.task/agent [:seon.agent/end-green :seon.agent/end-red :seon.agent/end-pending
+                                                                       :seon.agent/end-red-proofs :seon.agent/end-refusals]}]
+                                                   [:seon.task/assignment key])]
                                       (assoc (select-keys row [:seon.chain/branch :seon.task/assignment :seon.task/assigned])
-                                             :seon.task/reason (str "The attempt ended " end (if why (str ": " why) ".")))))))))
+                                             :seon.task/reason (str "The attempt ended " end (if why (str ": " why) ".")
+                                                                    (verdict-text agent)))))))))
           attempts)))
 
 (defn- bail-chains!

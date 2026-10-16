@@ -6,6 +6,7 @@
   attempt records the basis it was assembled at."
   (:require [clojure.string :as str]
             [seon.batch :as batch]
+            [seon.id :as id]
             [seon.print :as print]
             [seon.bootstrap :as bootstrap]
             [seon.cluster.source :as source]
@@ -635,7 +636,9 @@
         outcome (when branch-db (branch-end-summary branch-db agent-id sym))]
     (if (or (nil? outcome) (:seon.error/at outcome))
       []
-      [(assoc (end-summary-facts outcome) :seon.agent/id agent-id)])))
+      (let [refusals (:seon.source/refusals (step-verdict branch-db agent-id))]
+        [(cond-> (assoc (end-summary-facts outcome) :seon.agent/id agent-id)
+           (seq refusals) (assoc :seon.agent/end-refusals (id/printed (mapv shown-refusal refusals))))]))))
 
 (defn ended
   "The value a task's end message `entry` (an inbox entry carrying `:seon.task/end`) stands for: the task, how it
