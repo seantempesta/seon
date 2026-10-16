@@ -89,6 +89,8 @@
            "the second branch records the red it answered from the first branch's run")
        (is (= [0 1 0] ((juxt :seon.test.member/pass-count :seon.test.member/fail-count :seon.test.member/error-count) (first red)))
            "the recorded red carries its counts: reuse never converts an outcome")
+       (is (seq (:seon.test.failure/reports (sut/recorded-result database 'br.area/red-test)))
+           "and its failing reports, read on the second branch, which never held the run that executed it")
        (is (= 2 (:seon.test/executed-count (agent-value running second-agent rerun))) "an explicit rerun executes")
        (agent-value running second-agent
                     "(in-ns 'br.area)\n(defn area \"The area.\" {:malli/schema [:=> [:cat :int] :int]} [r] (* r (+ r 0)))")

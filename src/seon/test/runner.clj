@@ -2279,6 +2279,21 @@
    :seon.test/failing-assertions
    :seon.test/failure-message])
 
+(defn member-reports
+  "The failing reports each of `members` (member entity ids) holds on `database`, by member, each the report entity
+  as written (`:seon.test.report/report`, no `:db/id`): one query and one pull for the whole set; a member holding
+  none is absent."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :int]]
+                  [:map-of :int [:vector :seon.test.report/report]]]}
+  [database members]
+  (let [pairs (when (seq members)
+                (execution-read
+                 (db/q '[:find ?member ?report :in $ [?member ...] :where [?member :seon.test.member/failures ?report]]
+                       database (vec members))))
+        pulled (zipmap (map second pairs)
+                       (when (seq pairs) (execution-read (db/pull-many database '[*] (mapv second pairs)))))]
+    (update-vals (group-by first pairs) (fn [rows] (mapv #(dissoc (get pulled (second %)) :db/id) rows)))))
+
 (defn- recorded-member-results
   "The recorded results of each `[run-id test-symbol]` in `wanted`, by symbol:
   one run pull, one member read, one report query and one report pull for the
@@ -2301,13 +2316,7 @@
         by-eid (into {} (map (juxt :db/id identity)) (vals runs))
         pairs (admitted-members database (mapv #(or (runs %) {:seon.test.run/id %}) run-ids)
                                 (mapv (fn [[id sym]] [(:db/id (runs id)) (symbol sym)]) wanted))
-        report-entities (execution-read
-                     (db/q '[:find ?member ?report :in $ [?member ...]
-                             :where [?member :seon.test.member/failures ?report]]
-                           database (mapv (comp :db/id second) pairs)))
-        reports (group-by first report-entities)
-        pulled (zipmap (map second report-entities)
-                       (execution-read (db/pull-many database '[*] (mapv second report-entities))))]
+        reports (member-reports database (mapv (comp :db/id second) pairs))]
     (into {}
           (map (fn [[run-eid member]]
                  (let [run (by-eid run-eid)
@@ -2315,8 +2324,7 @@
                                               :seon.test.run/published-base-digest
                                               :seon.test.run/overlay-input-digest
                                               :seon.test.run/input-digest])
-                       member-reports (mapv #(dissoc (get pulled (second %)) :db/id)
-                                            (get reports (:db/id member)))
+                       own-reports (get reports (:db/id member) [])
                        test-symbol (:seon.test.member/symbol member)
                        run-ref [:seon.test.run/id (:seon.test.run/id run)]]
                    [test-symbol
@@ -2350,8 +2358,8 @@
                                                  :seon.test.member/evaluator]))
                       ;; Reports only: text is built where it is shown
                       ;; (`seon.test/failure-message`), never per read.
-                      (seq member-reports)
-                      (assoc :seon.test.failure/reports member-reports)))])))
+                      (seq own-reports)
+                      (assoc :seon.test.failure/reports own-reports)))])))
           pairs)))
 
 (def ^:private harness-entries
@@ -2417,36 +2425,41 @@
 
 (defn- retain-results!
   "Retain each terminated outcome of run `run-id` on `database`, red included, in `seon.cache` under its reuse
-  identity `[sym reach-digest input-digest]`, the key `seon.test/select` reuses by, naming the run: any
-  branch asking that identity answers from it (`seon.test/carried-results`). A pure speed-up: the recorded runs
-  answer a miss. Called where a member's outcome or its exit commits, whichever lands last. Only an outcome the
-  body reached is retained: at least one assertion, no boundary error, terminated; a member that answered from
-  another run is never retained itself. A newer outcome at a held identity replaces it: the newest answers."
+  identity `[sym reach-digest input-digest]`, the key `seon.test/select` reuses by, naming the run and holding a
+  red's failing reports (`member-reports`), so a branch answering from it shows them: any branch asking that
+  identity answers from it (`seon.test/carried-results`). A pure speed-up: the recorded runs answer a miss. Called
+  where a member's outcome or its exit commits, whichever lands last. Only an outcome the body reached is retained:
+  at least one assertion, no boundary error, terminated; a member that answered from another run is never retained
+  itself. A newer outcome at a held identity replaces it: the newest answers."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/id] :nil]}
   [database run-id]
-  (doseq [[test-symbol digest pass fail error inputs at]
-          (execution-read
-           (db/q '[:find ?symbol ?digest ?pass ?fail ?error ?inputs ?at :in $ ?id
-                   :where [?run :seon.test.run/id ?id] [?run :seon.test.run/selection-tx]
-                          [?run :seon.test.run/input-digest ?inputs]
-                          [?run :seon.test.run/at ?at]
-                          [?run :seon.test.run/members ?member]
-                          [?member :seon.test.member/symbol ?symbol]
-                          [?member :seon.test.member/reach-digest ?digest]
-                          [?member :seon.test.member/completed-tx] [?member :seon.test.member/terminated-tx]
-                          [?member :seon.test.member/pass-count ?pass]
-                          [?member :seon.test.member/fail-count ?fail] [?member :seon.test.member/error-count ?error]
-                          [(+ ?pass ?fail ?error) ?assertions] [(pos? ?assertions)]
-                          (not [?member :seon.test.member/error])
-                          (not [?member :seon.test.member/reused-run])]
-                 database run-id))
-          :let [reuse-key [test-symbol digest inputs]
-                outcome {:seon.test.run/id run-id :seon.test.run/at at :seon.test/pass-count pass
-                         :seon.test/fail-count fail :seon.test/error-count error}
-                held (cache/present ::result reuse-key)]]
-    (when (and held (not= run-id (:seon.test.run/id held)) (pos? (compare at (:seon.test.run/at held))))
-      (cache/evict! ::result reuse-key))
-    (cache/lookup ::result reuse-key (constantly 256) (constantly outcome)))
+  (let [rows (execution-read
+              (db/q '[:find ?symbol ?digest ?pass ?fail ?error ?inputs ?at ?member :in $ ?id
+                      :where [?run :seon.test.run/id ?id] [?run :seon.test.run/selection-tx]
+                             [?run :seon.test.run/input-digest ?inputs]
+                             [?run :seon.test.run/at ?at]
+                             [?run :seon.test.run/members ?member]
+                             [?member :seon.test.member/symbol ?symbol]
+                             [?member :seon.test.member/reach-digest ?digest]
+                             [?member :seon.test.member/completed-tx] [?member :seon.test.member/terminated-tx]
+                             [?member :seon.test.member/pass-count ?pass]
+                             [?member :seon.test.member/fail-count ?fail] [?member :seon.test.member/error-count ?error]
+                             [(+ ?pass ?fail ?error) ?assertions] [(pos? ?assertions)]
+                             (not [?member :seon.test.member/error])
+                             (not [?member :seon.test.member/reused-run])]
+                    database run-id))
+        reports (member-reports database (into [] (keep (fn [[_ _ _ fail error _ _ member]]
+                                                          (when (pos? (+ fail error)) member)))
+                                               rows))]
+    (doseq [[test-symbol digest pass fail error inputs at member] rows
+            :let [reuse-key [test-symbol digest inputs]
+                  outcome (cond-> {:seon.test.run/id run-id :seon.test.run/at at :seon.test/pass-count pass
+                                   :seon.test/fail-count fail :seon.test/error-count error}
+                            (get reports member) (assoc :seon.test.report/values (get reports member)))
+                  held (cache/present ::result reuse-key)]]
+      (when (and held (not= run-id (:seon.test.run/id held)) (pos? (compare at (:seon.test.run/at held))))
+        (cache/evict! ::result reuse-key))
+      (cache/lookup ::result reuse-key #(+ 256 (* 1024 (count (:seon.test.report/values %)))) (constantly outcome))))
   nil)
 
 (defn commit-results!

@@ -2572,13 +2572,15 @@
 
 (defn- recorded-outcomes
   "Every terminated outcome `source` (one branch's head) recorded for the identities `[[sym reach-digest] ...]` at
-  `inputs`, whichever evaluator ran it (the reach digest names the content it ran), as `[sym run-id at pass fail error]`. Read undecoded (`seon.db/undecoded-datoms`): a
-  fresh branch head answers in microseconds where a query first derives its declarations (about 2 ms a head). A
-  member that answered from another run is not an outcome of its own."
+  `inputs`, whichever evaluator ran it (the reach digest names the content it ran), as `[sym run-id at pass fail error
+  reports]`, `reports` a red's failing reports as that run wrote them (`seon.test.runner/member-reports`), so the
+  branch answering from it holds them. Read undecoded (`seon.db/undecoded-datoms`): a fresh branch head answers in
+  microseconds where a query first derives its declarations (about 2 ms a head), paid only for a head holding a
+  matching red. A member that answered from another run is not an outcome of its own."
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential [:tuple :seon.test/sym :seon.test/reach-digest]]
                        :seon.test.run/input-digest]
                   [:set [:tuple :seon.test/sym :seon.test.run/id :seon.test.run/at :seon.test/pass-count
-                         :seon.test/fail-count :seon.test/error-count]]]}
+                         :seon.test/fail-count :seon.test/error-count [:vector :seon.test.report/report]]]]}
   [source identities inputs]
   (let [wanted (set identities)
         entity (fn [e] (into {} (map (juxt second #(nth % 2))) (db/undecoded-datoms source :eavt [e])))
@@ -2592,13 +2594,16 @@
                                  (let [member (entity e)]
                                    (when-let [counts (and (wanted [(:seon.test.member/symbol member) digest]) (outcome member))]
                                      [e (into [(:seon.test.member/symbol member)] counts)]))))
-                      (db/undecoded-datoms source :aevt [:seon.test.member/reach-digest]))]
-    (into #{} (keep (fn [[run _ e]]
-                      (when-let [[test-symbol pass fail error] (get members e)]
-                        (let [{id :seon.test.run/id at :seon.test.run/at :as recorded} (entity run)]
-                          (when (= inputs (:seon.test.run/input-digest recorded))
-                            [test-symbol id at pass fail error])))))
-          (when (seq members) (db/undecoded-datoms source :aevt [:seon.test.run/members])))))
+                      (db/undecoded-datoms source :aevt [:seon.test.member/reach-digest]))
+        outcomes (into [] (keep (fn [[run _ e]]
+                                  (when-let [[test-symbol pass fail error] (get members e)]
+                                    (let [{id :seon.test.run/id at :seon.test.run/at :as recorded} (entity run)]
+                                      (when (= inputs (:seon.test.run/input-digest recorded))
+                                        [e [test-symbol id at pass fail error]])))))
+                       (when (seq members) (db/undecoded-datoms source :aevt [:seon.test.run/members])))
+        reports (runner/member-reports source (into [] (keep (fn [[e [_ _ _ _ fail error]]] (when (pos? (+ fail error)) e)))
+                                                    outcomes))]
+    (into #{} (map (fn [[e outcome]] (conj outcome (get reports e [])))) outcomes)))
 
 (defn- source-branches
   "The live branches whose recorded runs may answer `database`'s request, `asking` excluded: main (root's branch) and
@@ -2634,24 +2639,44 @@
                          (source-branches database asking)))]
     (into cached
           (map (fn [[test-symbol rows]]
-                 (let [[_ run-id at pass fail error] (last (sort-by #(nth % 2) rows))
-                       outcomes (into #{} (map #(subvec % 3)) rows)]
+                 (let [[_ run-id at pass fail error reports] (last (sort-by #(nth % 2) rows))
+                       outcomes (into #{} (map #(subvec % 3 6)) rows)]
                    [test-symbol (cond-> {:seon.test.run/id run-id :seon.test.run/at at :seon.test/pass-count pass
                                          :seon.test/fail-count fail :seon.test/error-count error}
-                                  (< 1 (count outcomes)) (assoc ::outcomes (vec (sort-by #(nth % 2) rows))))])))
+                                  (seq reports) (assoc :seon.test.report/values reports)
+                                  (< 1 (count outcomes))
+                                  (assoc ::outcomes (mapv #(subvec % 0 6) (sort-by #(nth % 2) rows))))])))
           (group-by first recorded))))
+
+(defn- report-tempid
+  "The tempid naming the carried failing `report` in one admission transaction (`carried-reports`)."
+  {:malli/schema [:=> [:cat :seon.test.report/report] :string]}
+  [report]
+  (str "report-" (:seon.test.report/id report)))
 
 (defn- carried-member
   "The member recording `carried`'s outcome on this branch: `selected`'s symbol and reasons, the outcome's counts at
-  the current `digest`, terminated, and `:seon.test.member/reused-run` naming the run that executed it. Its failure
-  reports stay with that run, read from its owner."
+  the current `digest`, terminated, `:seon.test.member/reused-run` naming the run that executed it, and a red's
+  failing reports as that run wrote them, by their tempids in the admission that writes them (`carried-reports`), so
+  this branch's readers (`seon.test.runner/latest-results`) show the failures the outcome carries."
   {:malli/schema [:=> [:cat :map :seon.test/reach-digest :map] :map]}
-  [selected digest {run-id :seon.test.run/id pass :seon.test/pass-count fail :seon.test/fail-count error :seon.test/error-count}]
-  (assoc (select-keys selected [:seon.test.member/symbol :seon.test.member/reasons])
-         :seon.test.member/reused-run run-id :seon.test.member/reach-digest digest
-         :seon.test.member/pass-count pass :seon.test.member/fail-count fail :seon.test.member/error-count error
-         :seon.test.member/began? true :seon.test.member/ended? true
-         :seon.test.member/completed-tx "datomic.tx" :seon.test.member/terminated-tx "datomic.tx"))
+  [selected digest {run-id :seon.test.run/id pass :seon.test/pass-count fail :seon.test/fail-count error :seon.test/error-count
+                    reports :seon.test.report/values}]
+  (cond-> (assoc (select-keys selected [:seon.test.member/symbol :seon.test.member/reasons])
+                 :seon.test.member/reused-run run-id :seon.test.member/reach-digest digest
+                 :seon.test.member/pass-count pass :seon.test.member/fail-count fail :seon.test.member/error-count error
+                 :seon.test.member/began? true :seon.test.member/ended? true
+                 :seon.test.member/completed-tx "datomic.tx" :seon.test.member/terminated-tx "datomic.tx")
+    (seq reports) (assoc :seon.test.member/failures (into #{} (map report-tempid) reports))))
+
+(defn- carried-reports
+  "The failing report entities the `carried` outcomes hold (`carried-results`), each under its `report-tempid`, for the
+  admission transaction that records their members (`carried-member`): upserted by content identity, so a report this
+  branch already holds is the same entity."
+  {:malli/schema [:=> [:cat [:maybe [:map-of :seon.test/sym :map]]] [:vector :map]]}
+  [carried]
+  (into [] (comp (mapcat (comp :seon.test.report/values val)) (distinct) (map #(assoc % :db/id (report-tempid %))))
+        carried))
 
 (defn- file-two-outcomes!
   "File a problem task on `test-symbol`'s namespace naming the identity at which runs recorded two outcomes
@@ -2963,7 +2988,8 @@
                                         (some-> (:seon.test.run/program-revisions batch-provenance)
                                                 (= (runner/program-revisions-digest head)))
                                         (assoc :seon.test.run/unchanged-through-t (db/basis-t head)))
-                               report (own-write! `admit-run (write! recording [[:db.fn/call admit-run entity]]))]
+                               report (own-write! `admit-run (write! recording (cond-> [[:db.fn/call admit-run entity]]
+                                                                                 (zero? index) (into (carried-reports carried)))))]
                            (if (:seon.error/at report)
                              report
                              {::provenance batch-provenance

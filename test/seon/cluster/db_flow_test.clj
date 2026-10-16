@@ -2288,7 +2288,7 @@
                 store (agent/handle-store handle)
                 chain (task/chain! {:seon.db/connection connection :seon.store/store store}
                                    [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Do c."
-                                     :seon.task/proofs #{(proof "u")}}])
+                                     :seon.task/proofs #{(proof "u")} :seon.task/model :outside}])
                 branch (:seon.chain/branch chain)
                 [first-task] (:seon.task/handles chain)
                 key-1 (id/id [first-task 1])
@@ -2303,9 +2303,14 @@
             (try
               (pass! handle routing)
               (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
-                ;; the agent's work, by hand: its proof redefined green on the branch, then its end at that commit
+                ;; the agent's work: its proof redefined green by its own eval request, whose test step runs it
+                ;; (TASK-CHAIN 2.3), then its end at that commit, by hand
                 (await-on! on-branch #(not-empty (proof-runs (db/db on-branch) (proof "u"))) ::merge-bail-proved)
-                (define-on! on-branch (symbol (str *space* "-proofs")) "(clojure.test/deftest proves-u (clojure.test/is (= 1 1)))")
+                (agent/evaluate-source!
+                 (assoc (#'mcp/execution {:seon.turn.loop/cluster handle :seon.store/store store} (str "attempt/" key-1) nil)
+                        :seon.agent/segmenter 'seon.turn/code-sources
+                        :seon.cluster.reply/text (str "(in-ns '" *space* "-proofs)\n"
+                                                      "(clojure.test/deftest proves-u (clojure.test/is (= 1 1)))")))
                 (is (= 1 (await-on! on-branch #(:green (:seon.context/counts (context/proofs (db/db on-branch) (symbol *space* "c"))))
                                  ::merge-bail-green))
                     "its proof is green on the branch")
