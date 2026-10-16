@@ -985,6 +985,46 @@
 
 (declare install-declared-classes! install-jvm-root! overridden-row? source-namespace?)
 
+;; A value definition's init runs once: its evaluation's value, kept by the
+;; definition's content, is what every later context of that definition binds.
+(declare row-definition-digest)
+
+(def ^:private value-definers '#{clojure.core/def clojure.core/defonce})
+
+(def ^:private evaluated-value-bytes
+  "What one kept value weighs in `seon.cache`: a reference to an object its
+  evaluating context holds as well."
+  1024)
+
+(defn- kept-value
+  "The binding an evaluation made for the value definition `row` (a `def` or
+  `defonce` read rather than called), by the row's definition digest; nil
+  when no evaluation's value is kept (a JVM restart), so its init runs."
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.sci.eval/binding]]}
+  [row]
+  (when (and (seon.fn/value-definition? (:seon.fn/arglists row "")) (value-definers (:seon.fn/defined-by row)))
+    (seon.cache/present ::kept-value (row-definition-digest row))))
+
+(defn- keep-evaluated-values!
+  "Keep, by definition digest, the value each value definition among
+  `installations` was evaluated to, as committed in `db`: a later context of
+  the same definition binds it rather than running its init again."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:sequential [:map [:seon.program/row :seon.program/row]
+                                     [:seon.sci.eval/evaluation :seon.sci.eval/evaluation]]]]
+                  :nil]}
+  [db installations]
+  (doseq [{row :seon.program/row evaluation :seon.sci.eval/evaluation} installations
+          :let [sym (some-> (:seon.fn/sym row) str symbol)
+                recorded (when sym (find (:seon.sci.eval/bindings evaluation) sym))]
+          :when recorded
+          :let [committed (db/pull db '[*] [:seon.fn/sym sym])]
+          :when (and (seon.fn/value-definition? (:seon.fn/arglists committed ""))
+                     (value-definers (:seon.fn/defined-by committed)))]
+    (seon.cache/lookup ::kept-value (row-definition-digest committed)
+                       (constantly evaluated-value-bytes)
+                       (constantly (val recorded)))))
+
 (defn- install-function-from-database!
   "Install one selected function from the acquired database snapshot. A definition
   the loaded program holds unchanged binds its compiled Var, exactly as acquisition
@@ -1025,12 +1065,14 @@
         (sci/install-namespace-bindings!
          ctx namespace-name (assoc (row-bindings namespace-row) :refers {}))
         (install-namespace-bindings! ctx namespace-name (row-bindings namespace-row)))
-      (let [event (one-event source namespace-name ctx (count source))]
+      (let [row (db/pull db '[*] [:seon.fn/sym function-symbol])
+            form (:seon.sci.reader/form (one-event source namespace-name ctx (count source)))]
         (sci/binding [sci/ns (context-namespace ctx namespace-name)]
-          (sci/eval-form ctx (:seon.sci.reader/form event)))
-        (install-function-contract!
-         ctx (db/pull db '[*] [:seon.fn/sym function-symbol])
-         (context-projection ctx) db))))
+          (sci/eval-form ctx (if-let [{value :seon.sci.eval/value} (kept-value row)]
+                               ;; the definition as written, its init the value its evaluation made
+                               (with-meta (apply list (concat (butlast form) [(list 'quote value)])) (meta form))
+                               form)))
+        (install-function-contract! ctx row (context-projection ctx) db))))
     (kernel/mark-installed! ctx function-symbol)
     function-symbol))
 
@@ -1820,6 +1862,7 @@
     report :seon.db/transaction-report
     written-on :seon.sci.eval/written-on
     agent-ctx :seon.sci.eval/agent-ctx}]
+  (keep-evaluated-values! db installations)
   (if agent-ctx
     (record-settled-rows! agent-ctx db installations report written-on)
     (sci.ctx-store/with-ctx ctx

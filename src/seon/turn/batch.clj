@@ -578,24 +578,37 @@
                 (entity-facts db row))))))
       []))
 
-(defn- removal-facts
-  "Retraction of a removed Var's or namespace's stored declarations on `db`,
-  through the program owner's deletion report; surviving referrers answer
-  the owner's refusal, naming them. A subject with no stored declaration
-  (an empty namespace SCI held but never recorded) retracts nothing."
+(defn- removal-report
+  "A removed Var's or namespace's deletion report on `db`, through the program
+  owner, as `[subject report affected]`; nil for a subject with no stored
+  declaration (an empty namespace SCI held but never recorded)."
   {:malli/schema [:=> [:cat :seon.db/database-value :symbol]
-                  [:or :seon.store/transaction-data :seon.program/mutation-refused-error]]}
+                  [:maybe [:tuple :symbol :seon.program/breakage :seon.program/affected]]]}
   [db subject]
-  (let [stored? (if (qualified-symbol? subject)
-                  (or (dbu/entid db [:seon.fn/sym subject]) (dbu/entid db [:seon.test/sym subject]))
-                  (dbu/entid db [:seon.ns/name subject]))]
-    (if-not stored?
-      []
-      (let [[report subjects] (#'my.program/deletion-report db subject)]
-        (if (or (#'my.program/blocking? report) (some keyword? subjects))
-          (#'my.program/refusal 'seon.turn.batch/removal-facts report subjects)
-          (mapv (fn [target] [:db/retractEntity (:seon.program/identity (#'my.program/locate db target))])
-                (sort-by str subjects)))))))
+  (when (if (qualified-symbol? subject)
+          (or (dbu/entid db [:seon.fn/sym subject]) (dbu/entid db [:seon.test/sym subject]))
+          (dbu/entid db [:seon.ns/name subject]))
+    (into [subject] (#'my.program/deletion-report db subject))))
+
+(defn- removal-facts
+  "Retraction of the declarations of every removal `reports` names, judged as
+  one set as `ns-unmap` removes them: a referrer the same change removes holds
+  nothing back. Surviving referrers answer the owner's refusal, naming them."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential [:tuple :symbol :seon.program/breakage :seon.program/affected]]]
+                  [:or :seon.store/transaction-data :seon.program/mutation-refused-error]]}
+  [db reports]
+  (let [removed (into #{} (mapcat #(nth % 2)) reports)
+        surviving (fn [report]
+                    (reduce (fn [report relation] (update report relation #(into #{} (remove removed) %)))
+                            report (filter #(set? (get report %)) @#'my.program/blocking-relations)))
+        refused (some (fn [[_ report affected]]
+                        (let [report (surviving report)]
+                          (when (or (#'my.program/blocking? report) (some keyword? affected))
+                            (#'my.program/refusal 'seon.turn.batch/removal-facts report affected))))
+                      reports)]
+    (or refused
+        (mapv (fn [target] [:db/retractEntity (:seon.program/identity (#'my.program/locate db target))])
+              (sort-by str removed)))))
 
 (defn- binding-targets
   "The namespaces `bindings` load before their namespace: its requires and its refers' namespaces,
@@ -654,7 +667,7 @@
   (let [stx (schema-tx request db schema-keys)
         ;; entities read the schema this change registers
         db' (if (and (seq stx) (seq entities)) (let [w (db/with db stx)] (if (:seon.error/message w) db w)) db)
-        removed (mapv #(removal-facts db' %) removals)
+        removed (removal-facts db' (into [] (keep #(removal-report db' %)) removals))
         cyclic (some (fn [n]
                        (when (sci/find-ns ctx n)
                          (let [bindings (sci/namespace-bindings ctx n)
@@ -662,12 +675,12 @@
                            (when (seq closing) (refuse-cycle! ctx n bindings closing)))))
                      (sort namespaces))]
     (or cyclic
-        (first (filter :seon.error/at removed))
+        (when (:seon.error/at removed) removed)
         (-> stx
             (into (mapcat #(namespace-facts request db' entities % (not (contains? namespaces %))))
                   (sort (into (set namespaces) (keep #(let [r (or (:seon.fn/ns %) (:seon.test/ns %))] (when (vector? r) (second r)))) entities)))
             (into (mapcat #(entity-facts db' %)) entities)
-            (into cat removed)))))
+            (into removed)))))
 
 (defn apply-facts
   "`tx` on `working` through the writer's own validation. A refusal is the

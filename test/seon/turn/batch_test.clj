@@ -482,6 +482,35 @@
        (is (= 42 (sci/eval-string* ctx "(batch-test.value-def/uses-k1)")) "a fresh context resolves the def")
        (is (= 2 (sci/eval-string* ctx "batch-test.value-def/a")) "a def reading a def installs after it")))))
 
+(deftest a-value-def-init-runs-once-for-every-later-context
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running agent-id connection]
+     (let [counter (str "batch-test.once." (id/id))]
+       ;; the init's effect is a JVM-wide count no context copy can reset
+       (eval! (str "(ns batch-test.once) (def counted (let [n (str (inc (parse-long (System/getProperty \""
+                   counter "\" \"0\"))))] (System/setProperty \"" counter "\" n) n))")
+              agent-id running)
+       (eval! "(in-ns 'batch-test.once) (defn other [] 1)" agent-id running)
+       (let [ctx (sci.eval/base-ctx (db/db connection))]
+         (is (= "1" (System/getProperty counter))
+             "neither the later request nor a fresh context of the branch ran the init again")
+         (is (= "1" (sci/eval-string* ctx "batch-test.once/counted"))
+             "a fresh context holds the value the evaluation made"))))))
+
+(deftest removals-in-one-request-are-judged-as-one-set
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running agent-id connection]
+     (eval! (str "(ns batch-test.removals) (defn shared [] 3)"
+                 " (defn left [] (shared)) (defn right [] (inc (shared)))")
+            agent-id running)
+     (eval! (str "(my.program/ns-unmap! 'batch-test.removals 'left)"
+                 " (my.program/ns-unmap! 'batch-test.removals 'right)"
+                 " (my.program/ns-unmap! 'batch-test.removals 'shared)")
+            agent-id running)
+     (is (= #{} (set (db/q '[:find [?s ...] :where [?f :seon.fn/sym ?s] [(namespace ?s) ?n] [(= ?n "batch-test.removals")]]
+                           (db/db connection))))
+         "a referrer removed by the same request does not hold back its callee's removal"))))
+
 (deftest a-value-def-over-a-function-replaces-its-row
   ((requiring-resolve 'seon.test-support/with-running-agent)
    (fn [running agent-id connection]
