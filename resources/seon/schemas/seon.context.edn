@@ -89,7 +89,7 @@
                              [:seon.source/refusals :seon.source/refusals]]
                :step-verdict [:and {:description "A step's observation with its status. Producer: seon.context/step-verdict."}
                               :seon.context/step-observation :seon.context/step-status]
-               :refusal [:map {:description "One done or merge refusal as the step section shows it: its variant's members without the read's stamps (:seon.error/at, :seon.error/layer), the agent's branch or the tests it names (shown once under proofs or the step's entries). Producer: seon.context/shown-refusal; the whole refusal is seon.context/step-verdict's."}
+               :refusal [:map {:description "One done or merge refusal without the read's stamps (:seon.error/at, :seon.error/layer) and the agent's branch: as a verdict records it (seon.context/refusal-data, with the tests it names in :seon.source/red-tests) or as the step section shows it (seon.context/shown-refusal, those tests shown once under proofs or the step's entries). The whole refusal is seon.context/step-verdict's."}
                          [:seon.error/type :seon.error/type] [:seon.error/message :seon.error/message]]
                :test-entry [:map {:description "One test as a step section shows it: its status and, when red, its failing assertions."}
                             [:seon.test/sym :seon.test/sym] [:seon.context/proof-status :seon.context/proof-status]

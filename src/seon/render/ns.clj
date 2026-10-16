@@ -4,7 +4,8 @@
 
   Distance is inverse detail: zero names the node; one and beyond show its
   content, with its neighbours as names. The walk renders the neighbours."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [seon.error.refusal]
             [seon.db :as db]
             [seon.ref :as ref]
@@ -98,8 +99,8 @@
   (max 0 (long (get unit :seon.render/distance 1))))
 
 (defn task-ai
-  "One task as data: its id, symbol, name and namespace; beyond distance zero its plan and
-  the references it cites. Its subjects and proofs are its related data."
+  "One task as data: its id, symbol, name and namespace; beyond distance zero its plan, the references it cites
+  and, on a bailed attempt's problem task, the verdict that bailed it (`:seon.task/last-verdict`). Its subjects and proofs are its related data."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.task/view]}
   [unit]
   (let [task (or (:seon.render/value unit) unit)
@@ -109,7 +110,8 @@
       ;; A pulled cardinality-many value is a vector (Datahike's pull
       ;; shape); references are declared a set, so they are shown as one.
       (cond-> (merge named (select-keys task [:seon.task/plan]))
-        (seq (:seon.task/references task)) (assoc :seon.task/references (set (:seon.task/references task)))))))
+        (seq (:seon.task/references task)) (assoc :seon.task/references (set (:seon.task/references task)))
+        (:seon.task/verdict task) (assoc :seon.task/last-verdict (edn/read-string (:seon.task/verdict task)))))))
 
 (defn task-form
   "The read of a task's obligations (`seon.task/obligations`). Shown, never executed."

@@ -429,13 +429,19 @@
           (:seon.error/at observation) observation
           observation (merge observation (step-status observation)))))
 
-(defn- shown-refusal
-  "`refusal` as the step section shows it: its variant's members without the read's stamps (`:seon.error/at`,
-  `:seon.error/layer`), the branch the agent holds or the tests it names, each of which the proofs or the step's
-  entries show once with its state."
+(defn refusal-data
+  "`refusal` as a verdict records it: its variant's members without the read's stamps (`:seon.error/at`,
+  `:seon.error/layer`) and the branch the agent holds, the tests it names kept in `:seon.source/red-tests`."
   {:malli/schema [:=> [:cat :seon.error/value] :seon.context/refusal]}
   [refusal]
-  (dissoc refusal :seon.error/at :seon.error/layer :seon.test.run/branch :seon.source/red-tests))
+  (dissoc refusal :seon.error/at :seon.error/layer :seon.test.run/branch))
+
+(defn- shown-refusal
+  "`refusal` as the step section shows it: `refusal-data` without the tests it names, each of which the proofs or
+  the step's entries show once with its state."
+  {:malli/schema [:=> [:cat :seon.error/value] :seon.context/refusal]}
+  [refusal]
+  (dissoc (refusal-data refusal) :seon.source/red-tests))
 
 (defn step-section
   "The step section of `verdict` (`step-verdict`), as the agent reads it: the step's kind and status, a working
@@ -638,7 +644,7 @@
       []
       (let [refusals (:seon.source/refusals (step-verdict branch-db agent-id))]
         [(cond-> (assoc (end-summary-facts outcome) :seon.agent/id agent-id)
-           (seq refusals) (assoc :seon.agent/end-refusals (id/printed (mapv shown-refusal refusals))))]))))
+           (seq refusals) (assoc :seon.agent/end-refusals (id/printed (mapv refusal-data refusals))))]))))
 
 (defn ended
   "The value a task's end message `entry` (an inbox entry carrying `:seon.task/end`) stands for: the task, how it

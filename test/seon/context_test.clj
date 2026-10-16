@@ -793,6 +793,8 @@
          (is (= {:green 1} (:seon.context/counts (:seon.context/proofs (block running agent-id)))) "the proof is green")
          (is (= 'tq.shb/identity-test (:seon.test/sym broken)) "the broken test is shown")
          (is (= ["area keeps its side"] (mapv :message (:seon.context/proof-failures broken))) "with its failing assertion")
+         (is (every? #(and (:expected %) (:actual %)) (:seon.context/proof-failures broken)) "its expected and actual as data")
+         (is (= 1 (count (filter #(= 'tq.shb/identity-test (:seon.test/sym %)) (:seon.context/red-tests step)))) "listed once")
          (is (= (stable step) (stable current)) "my.task/current shows the same step")
          (is (= :working (:seon.task/status step)
                 (:seon.task/status (:seon.context/turns (block running agent-id))))

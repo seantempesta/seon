@@ -27,6 +27,7 @@
             [seon.fn]
             [seon.program]
             [seon.id :as id]
+            [seon.render.ns :as render.ns]
             [seon.profile :as profile]
             [seon.sci.eval :as sci.eval]
             [seon.task :as task]
@@ -1501,17 +1502,35 @@
                                             (db/db on-branch) key-1)
                            ::ended)
                 (pass! handle routing)
-                (let [plan (str (:seon.task/plan (db/pull (db/db connection) [:seon.task/plan]
-                                                          [:seon.task/sym (symbol "seon.task" (str "unfinished-task-" key-1))])))
+                (let [problem (db/pull (db/db connection) '[*] [:seon.task/sym (symbol "seon.task" (str "unfinished-task-" key-1))])
+                      shown (render.ns/task-ai {:seon.db/db (db/db connection) :seon.render/value problem :seon.render/distance 1})
+                      verdict (:seon.task/last-verdict shown)
                       summary (db/pull (db/db on-branch) [:seon.agent/end-red :seon.agent/end-refusals]
                                        [:seon.agent/id (str "attempt/" key-1)])
                       refusals (some-> (:seon.agent/end-refusals summary) edn/read-string)]
                   (is (= 1 (:seon.agent/end-red summary)) "the agent recorded its red proof at the end")
                   (is (seq refusals) "and the done rule's refusals, read back as data")
                   (is (every? :seon.error/type refusals) "each an error value")
-                  (is (str/includes? plan ":red 1") "the problem task shows the proofs' counts")
-                  (is (every? #(str/includes? plan (str (:seon.error/type %))) refusals)
-                      "and each refusal's type")))
+                  (is (= {:red 1} (:seon.task/proof-counts verdict)) "the problem task's render shows the proofs' counts as data")
+                  (is (= [(proof "c")] (:seon.task/red-proofs verdict)) "and its red proofs")
+                  (is (= refusals (:seon.source/refusals verdict)) "and each refusal as data, with the tests it names")
+                  (is (= "The attempt ended :capped." (:seon.task/reason (db/pull (db/db on-branch) [:seon.task/reason] [:seon.task/assignment key-1])))
+                      "the reason is fixed text naming the end")
+                  (is (not (str/includes? (:seon.task/plan shown) "proofs {")) "no verdict is printed into the plan")
+                  ;; a refused final merge's problem task carries its refusal as data, like a done refusal's
+                  (let [refusal {:seon.error/type :seon.source/red-test-error :seon.error/operation 'seon.merge/merge!
+                                 :seon.error/message "A test of the named run is not green."
+                                 :seon.source/red-tests [{:seon.test/sym 'tq.mr-test/rows :seon.test.run/id "a1b2c3d4e5f6" :seon.source/verdict :red}]
+                                 :seon.error/at #inst "2026-10-16" :seon.error/layer :seon.source/merge}]
+                    (#'agent/write-problem! handle {:seon.flow.actions/op :problem :seon.task/assignment "mergekey0000" :seon.task/assigned "taskhandle00"
+                                                    :seon.flow.actions/class :unfinished-task
+                                                    :seon.task/plan "Chain attempt mergekey0000 bailed: The final merge refused it."
+                                                    :seon.task/verdict (id/printed (#'agent/refusals-verdict [refusal]))})
+                    (let [merge-shown (render.ns/task-ai {:seon.db/db (db/db connection) :seon.render/distance 1
+                                                          :seon.render/value (db/pull (db/db connection) '[*] [:seon.task/sym 'seon.task/unfinished-task-mergekey0000])})
+                          [merge-refusal] (get-in merge-shown [:seon.task/last-verdict :seon.source/refusals])]
+                      (is (= ['tq.mr-test/rows] (mapv :seon.test/sym (:seon.source/red-tests merge-refusal))) "a merge refusal's red tests, as data")
+                      (is (not-any? #(contains? merge-refusal %) [:seon.error/at :seon.error/layer]) "without the read's stamps")))))
               (finally (release-chain! routing store branch)))))))))) 
 
 ;;; P4: an attempt's world holds its own assignment, so nothing it reads reaches main.
