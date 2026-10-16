@@ -685,6 +685,64 @@
         (registry/retire-branch! {:seon.store/store store :seon.store/branch c})
         (support/delete-root! root)))))
 
+(deftest a-merged-chain-retires-the-filed-entry-it-was-made-from
+  ;; TASK-CHAIN 2.6: a chain whose first task has a filed task's identity is runtime data once it merges
+  ;; (`:seon.task/created-by`), so the merge's write-back deletes that entry and keeps the file's others.
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        suffix (id/id)
+        task-ns (str "tq.wbretire" suffix)
+        path (str "resources/seon/tasks/" task-ns ".edn")
+        text "[#:seon.task{:name \"a\" :plan \"Do it.\"}\n #:seon.task{:name \"b\" :plan \"Keep it.\"}]\n"
+        handle (task/task-handle (symbol task-ns) "a")
+        root (support/temp-root (str "write-back-retire-task-" suffix))
+        c (keyword (str "write-back-retire-task-c-" suffix))
+        chain-branch (keyword (str "chain-" handle))]
+    (io/make-parents (io/file root path))
+    (spit (io/file root path) text)
+    (try
+      (let [_ (registry/fork! {:seon.store/store store :seon.store/branch c
+                               :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
+            candidate (agent/acquire-context! target nil {:seon.agent/branch c})
+            c-conn (:seon.db/connection candidate)]
+        (try
+          ;; main (here C) holds the filed entries; chain tasks are root's runtime tasks
+          (support/transacted! c-conn (support/agent-tx (db/db c-conn) "root"))
+          (is (= {:seon.task/changed? true}
+                 (select-keys (db/with-branch {:seon.db/connection c-conn}
+                                              #(task/index-tasks! {:seon.db/connection c-conn :seon.task/files {path text}}))
+                              [:seon.task/changed? :seon.error/message]))
+              "main holds both filed entries")
+          (let [chain (task/chain! {:seon.db/connection c-conn :seon.store/store store}
+                                   [{:seon.task/ns (symbol task-ns) :seon.task/name "a" :seon.task/plan "Do it, chained."
+                                     :seon.task/proofs #{(symbol task-ns "a-check")}}])
+                _ (is (= chain-branch (:seon.chain/branch chain)) "the chain forks its branch")
+                on-chain (db/branch-database (db/db c-conn) (:seon.chain/branch chain))
+                carried (db/pull on-chain [:seon.task/plan {:seon.task/created-by [:seon.agent/id]}] [:seon.task/id handle])]
+            (is (= {:seon.task/plan "Do it, chained." :seon.task/created-by {:seon.agent/id "root"}} carried)
+                "the chain's first task is the filed identity, root's runtime task")
+            ;; what the merge carries onto main for that task (`seon.merge/merge-tx`): its chain facts, ended
+            (support/transacted! c-conn [{:db/id [:seon.task/id handle] :seon.task/plan (:seon.task/plan carried)
+                                          :seon.task/created-by [:seon.agent/id "root"] :seon.task/execution :stopped}])
+            (let [accepted (source/merge-accepted c-conn (db/commit-id (db/db c-conn)))
+                  written (source/write-back! (committed! {:seon.db/connection c-conn :seon.fn/root root
+                                                           :seon.source/accepted accepted}))
+                  projection (db/carried-projection (db/db c-conn))]
+              (is (contains? (:seon.program/identities accepted) [:seon.task/sym (symbol task-ns "a")])
+                  "the merge accepts the filed task it turned into runtime data")
+              (is (= [[:seon.task/sym (symbol task-ns "a")]] (get-in written [:seon.source/files 0 :seon.source/retracted]))
+                  "the write-back retracts the entry")
+              (is (= [(symbol task-ns "b")]
+                     (mapv :seon.task/sym (task/file-declarations projection path (slurp (io/file root path)))))
+                  "the file no longer declares the merged task and keeps the other")))
+          (finally (agent/release-context! candidate))))
+      (finally
+        (when (contains? (registry/branches store) chain-branch)
+          (registry/retire-branch! {:seon.store/store store :seon.store/branch chain-branch}))
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch c})
+        (support/delete-root! root)))))
+
 (deftest ^{:seon.test/long "Two analyses of a one-file fixture (the branch's definitions and the candidate's) and one write-back."
            :seon.test/long-ms 20000}
   a-function-in-a-new-namespace-writes-back-with-its-ns-form

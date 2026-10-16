@@ -2111,6 +2111,16 @@
           :else {:seon.source/path path :seon.source/base-digest (sha-256 base-bytes)
                  :seon.source/candidate-bytes (.getBytes ^String candidate "UTF-8") :seon.source/proof-rows rows})))))
 
+(defn- filed-declaration
+  "The declaration a task file holds for the task `sym` as `database` holds it: its declaration
+  (`seon.task/task-declaration`), nil when absent or runtime data (`:seon.task/created-by`, a chain's among them),
+  which no task file declares."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym] [:or :nil :seon.task/declaration :seon.db/invalid-read-error]]}
+  [database sym]
+  (let [handle (task/task-handle (symbol (namespace sym)) (name sym))]
+    (when-not (:seon.task/created-by (db/pull database [:seon.task/created-by] [:seon.task/id handle]))
+      (task/task-declaration database handle))))
+
 (defn- task-path
   "The task file the task `sym` is declared in: its namespace's file under `resources/seon/tasks/`."
   {:malli/schema [:=> [:cat :seon.task/sym] :seon.source/path]}
@@ -2182,8 +2192,8 @@
         base-bytes (or held (.getBytes "[]" "UTF-8"))
         base-text (String. ^bytes base-bytes "UTF-8")
         projection (db/carried-projection after)
-        held (fn [database sym] (task/task-declaration database (task/task-handle (symbol (namespace sym)) (name sym))))
-        rows (vec (for [[_ sym :as identity] (sort-by str identities)] [identity (held before sym) (held after sym)]))
+        rows (vec (for [[_ sym :as identity] (sort-by str identities)]
+                    [identity (filed-declaration before sym) (filed-declaration after sym)]))
         ;; the file's declarations by symbol, as ingestion reads them; nil when it refuses the text
         read-file #(try (into {} (map (juxt :seon.task/sym (partial task/declaration projection)))
                               (task/file-declarations projection path %))
@@ -2367,8 +2377,9 @@
 (defn merge-accepted
   "The accepted merge main's merge `commit` made, as `write-back!` takes it.
   Derived from the commits on `connection`'s store alone: the declarations whose
-  definition digest the merge changed and the filed tasks whose revision it changed
-  (`[:seon.task/sym ns/name]`; a runtime task, `:seon.task/created-by`, is never a file's), the main commit it was transacted onto and
+  definition digest the merge changed and the filed tasks whose filed declaration it changed
+  (`[:seon.task/sym ns/name]`; a runtime task, `:seon.task/created-by`, is never a file's, so a filed task a chain
+  made runtime reads as removed), the main commit it was transacted onto and
   the merge commit; else the `:commit-absent` refusal."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.source/commit-id]
                   [:or :seon.source/accepted :seon.source/write-back-error]]}
@@ -2384,16 +2395,24 @@
         parent
         (let [datoms (changed-datoms before after)
               declared (fn/report-identities before after datoms (vec program/identity-attributes))
-              ;; a task is a declaration too: each entity whose task facts moved, by its symbol, unless it is a
-              ;; runtime task (`:seon.task/created-by`, a chain's among them), which no task file declares
-              sym-of (fn [e] (when-not (seq (d/datoms after :eavt e :seon.task/created-by))
-                               (some #(:v (first (d/datoms % :eavt e :seon.task/sym))) [after before])))
+              ;; a task is a declaration too: each entity whose task facts moved, by its symbol, when either side
+              ;; holds it filed; a runtime task (`:seon.task/created-by`, a chain's among them) is no file's, so a
+              ;; filed task a chain made runtime is filed before and absent after: its entry is deleted
+              filed-sym (fn [database e] (when-not (seq (d/datoms database :eavt e :seon.task/created-by))
+                                           (:v (first (d/datoms database :eavt e :seon.task/sym)))))
+              sym-of (fn [e] (some #(filed-sym % e) [after before]))
               tasks (into #{} (comp (filter #(= "seon.task" (namespace (:a %)))) (map :e) (distinct) (keep sym-of)
                                     (map #(vector :seon.task/sym %)))
-                          datoms)]
+                          datoms)
+              filed-digests (fn [database identities]
+                              (into (held-digests database identities)
+                                    (keep (fn [[attribute sym :as identity]]
+                                            (when (and (= :seon.task/sym attribute) (nil? (filed-declaration database sym)))
+                                              [identity :seon.program/absent])))
+                                    identities))]
           (when (:seon.db/invalid-read declared) (throw (ex-info (:seon.error/message declared) declared)))
           (let [touched (into (set declared) tasks)
-                [was now] (map #(held-digests % touched) [before after])]
+                [was now] (map #(filed-digests % touched) [before after])]
             {:seon.program/identities (into #{} (filter #(not= (was %) (now %))) touched)
              :seon.source/base-commit-id parent :seon.source/commit-id commit})))
       (finally (run! #(some-> % d/release-materialized-db) [before after])))))

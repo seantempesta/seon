@@ -465,8 +465,7 @@
         (.delete (java.io.File. outside))
         (.delete (.getParentFile (java.io.File. outside)))))))
 
-(deftest ^{:seon/tasks #{'seon.edit/implement-an-unreadable-odd-map-is-not-one-form}}
-  an-odd-map-anywhere-is-not-one-form
+(deftest an-odd-map-anywhere-is-not-one-form
   (doseq [[source expected]
           [["(a)" true]
            ["x" true]
@@ -484,8 +483,7 @@
     (is (= expected (seon.edit/single-form? source))
         (str "single-form? must answer its declared boolean for " source))))
 
-(deftest ^{:seon/tasks #{'seon.edit/implement-an-unreadable-odd-map-is-not-one-form}}
-  every-source-holding-an-odd-map-is-not-one-form
+(deftest every-source-holding-an-odd-map-is-not-one-form
   (let [check
         (clojure.test.check/quick-check
          300
