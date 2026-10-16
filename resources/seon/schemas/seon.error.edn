@@ -467,5 +467,6 @@
   [:seon.error/chain {:optional true} :seon.error/chain]
   [:seon.sci.eval/stacktrace {:optional true} :seon.sci.eval/stacktrace]
   [:seon.error/occurrence-count {:optional true} [:int {:min 1}]]
-  [:seon.error/shown {:optional true} :seon.error/shown]]
+  [:seon.error/shown {:optional true} :seon.error/shown]],
+             :ai-render [:map {:description "A failed MCP value lookup as an AI agent reads it: the error's message, the diagnostic evidence and the instruction."} [:seon.error/message :string] [:seon.error/evidence {:optional true} :map] [:seon.error/instruction :string]]
 }

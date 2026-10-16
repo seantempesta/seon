@@ -2843,13 +2843,14 @@
 
 (defn mcp-prose
   "`:seon.render/ai` — retrieval evidence for a failed MCP value lookup."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:string {:min 1}]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.error/ai-render]}
   [unit]
   (let [value (rendered-error-value unit)
         evidence (evidence-of value [:seon.dev.mcp/error-cluster :seon.dev.mcp/request-observation])]
-    (prose "\n" [(:seon.error/message value)
-           (evidence-text evidence)
-           "Re-read the current cluster status or value identity before requesting the data again."])))
+    (cond-> {:seon.error/message (:seon.error/message value)
+             :seon.error/instruction
+             "Re-read the current cluster status or value identity before requesting the data again."}
+      (seq evidence) (assoc :seon.error/evidence evidence))))
 
 (defn index-refusal-prose
   "`:seon.render/ai` — the precise evidence that stopped program indexing."
