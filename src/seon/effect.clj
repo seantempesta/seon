@@ -12,6 +12,7 @@
             [malli.core :as m]
             [malli.util :as mu]
             [sci.core :as sci]
+            [sci.ctx-store]
             [sci.impl.utils :as sci.utils]
             [seon.ai.tokens :as tokens]
             [seon.await :as await]
@@ -585,8 +586,11 @@
                   [:or [:map [:seon.effect/handler [:fn clojure.core/ifn?]]] [:map [:seon.error/data :map]]]]}
   [ctx database handler-symbol]
   (try (kernel/ensure-function! ctx database handler-symbol)
-       (if-let [handler (some-> (sci/resolve ctx handler-symbol) deref)]
-         {:seon.effect/handler handler}
+       ;; A Var holds a context's root as that context's binding, read only
+       ;; under the context: the handler is read, and runs, under `ctx`.
+       (if-let [handler (sci.ctx-store/with-ctx ctx (some-> (sci/resolve ctx handler-symbol) deref))]
+         {:seon.effect/handler (fn [request effective]
+                                 (sci.ctx-store/with-ctx ctx (handler request effective)))}
          {:seon.error/data {:seon.fn/sym handler-symbol}})
        (catch clojure.lang.ExceptionInfo failure
          {:seon.error/data (assoc (ex-data failure) :seon.fn/sym handler-symbol)})))
@@ -692,7 +696,7 @@
    terminal]
   (let [dials (admission settlement-request)]
     (if-let [throwable (::flow/throwable terminal)]
-      (if (instance? InterruptedException throwable)
+      (if (or (instance? InterruptedException throwable) (kernel/interrupted? throwable))
         (interrupt! connection effect-id)
         (settle-value! connection dials effect-id opened-at threshold
                        (handler-failure owner-sym throwable) nil))
@@ -949,6 +953,11 @@
                                       (:seon.sci.admit/value projected-request)
                                       effective)]
                                  (cond
+                                   ;; an interpreted handler cut by its arm was
+                                   ;; interrupted, not failed
+                                   (kernel/interrupted? (::thrown handler-value))
+                                   (interrupt! connection effect-id)
+
                                    (::thrown handler-value)
                                    (settle-value!
                                     connection dials effect-id opened-at

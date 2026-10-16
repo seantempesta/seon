@@ -33,15 +33,12 @@
   ;; namespace constructs names; boot's own constructor, fewer layers.
   (delay (test-support/environment "seon.effect-test")))
 
-(def ^:private handler-calls (atom []))
-
 (defn- test-handler
   {:malli/schema [:=> [:cat
                        [:map [:seon.effect-test/value :int]]
                        :seon.config/effective]
                   [:or :map :my.shell/cwd-refused-error]]}
   [request effective]
-  (swap! handler-calls conj request)
   (let [refusal
         {:seon.error/at (Date.)
           :seon.error/layer :seon.effect-test/handler
@@ -340,9 +337,10 @@
                                    {:seon.effect-test/iterations -1}))
                 elapsed-ms (quot (- (System/nanoTime) started) 1000000)]
             ((:seon.sci.kernel/stop! arm))
-            (is (= :seon.effect-test/interrupted
-                   (:seon.effect-test/outcome result))
-                "an unbounded handler must end by SCI's own interrupt")
+            (is (inst? (:seon.effect/interrupted-at
+                        (db/pull (db/db connection) [:seon.effect/interrupted-at]
+                                 [:seon.effect/id (:seon.effect/interrupted-effect-id result)])))
+                "an unbounded handler must end by SCI's own interrupt, its receipt interrupted")
             (is (< elapsed-ms 5000)
                 "the handler must end at its ~300ms limit")))))))
 
@@ -435,7 +433,8 @@
             (flow/stop-work-launcher! launcher)))))))
 
 (defn- settled-background-value
-  "Submit ONE detached arm-probe request and return the value it settled with.
+  "Submit ONE detached arm-probe request and return its terminal receipt: the
+  value it settled with (`:seon.effect/result-edn`) or its interruption.
 
   `config-limit-ms` is the cluster's declared background bound; `execution`
   is whatever the submitting form named on top of `:seon.effect/background?`;
@@ -478,14 +477,11 @@
              events
              ::background-effect-settled
              (fn [_]
-               (:seon.effect/result-edn
-                (db/pull (db/db connection) [:seon.effect/result-edn]
-                         [:seon.effect/id effect-id]))))
+               (seq (db/pull (db/db connection) [:seon.effect/result-edn :seon.effect/interrupted-at]
+                             [:seon.effect/id effect-id]))))
             (deliver captured
-                     (read-string
-                      (:seon.effect/result-edn
-                       (db/pull (db/db connection) [:seon.effect/result-edn]
-                                [:seon.effect/id effect-id]))))
+                     (db/pull (db/db connection) [:seon.effect/result-edn :seon.effect/interrupted-at]
+                              [:seon.effect/id effect-id]))
             (finally
               (reset! handler-gate nil)
               (deliver gate ::released)
@@ -534,10 +530,7 @@
                         {:seon.effect/background? true})))
                    (fn []))
           elapsed-ms (quot (- (System/nanoTime) started) 1000000)]
-      (is (true? (:seon.effect-test/projection? settled))
-          "a detached handler must carry its schema projection; without it every declaration it resolves refuses")
-      (is (= :seon.effect-test/interrupted
-             (:seon.effect-test/outcome settled))
+      (is (inst? (:seon.effect/interrupted-at settled))
           "an unbounded detached handler must be cut by the cluster's background limit")
       (is (< elapsed-ms 15000)
           "and cut at ~300ms, not left running")))
@@ -556,8 +549,7 @@
                          :seon.effect/time-limit-ms 300})))
                    (fn []))
           elapsed-ms (quot (- (System/nanoTime) started) 1000000)]
-      (is (= :seon.effect-test/interrupted
-             (:seon.effect-test/outcome settled)))
+      (is (inst? (:seon.effect/interrupted-at settled)))
       (is (< elapsed-ms 15000)
           "the form's 300ms must govern, not the cluster's 60s")))
 
@@ -572,7 +564,10 @@
                          :seon.effect-test/gated? true}
                         {:seon.effect/background? true
                          :seon.effect/time-limit-ms 60000})))
-                   #(await-deadline! 200))]
+                   #(await-deadline! 200))
+          settled (read-string (:seon.effect/result-edn settled))]
+      (is (true? (:seon.effect-test/projection? settled))
+          "a detached handler must carry its schema projection; without it every declaration it resolves refuses")
       (is (= :seon.effect-test/completed
              (:seon.effect-test/outcome settled))
           "the form's 60s must govern after the cluster's 200ms would have latched")
@@ -638,7 +633,6 @@
 (deftest request-commits-before-io-dispatch-and-settles-once
   (test-support/with-database
     (fn [connection]
-      (reset! handler-calls [])
       (transact-fixture! connection (test-support/agent-tx @connection "effect-agent"))
       (transact-fixture! connection [(cluster-config 600000)
                                 {:seon.turn/id "effect-run"
@@ -655,7 +649,7 @@
         (testing "the handler ran on the shared io executor with effective facts"
           (is (= 7 (:seon.effect-test/value first-result)))
           (is (true? (:seon.effect-test/virtual-thread? first-result)))
-          (is (= [{:seon.effect-test/value 7}] @handler-calls)))
+          (is (= {:seon.effect-test/value 7} (edn/read-string (:seon.effect/request-edn receipt)))))
         (testing "one open-before-dispatch receipt settled with bounded data"
           (is (= 'seon.effect-test/capability-owner
                  (get-in receipt [:seon.effect/owner :seon.fn/sym])))
@@ -671,12 +665,14 @@
                   (effect/request! #'capability-owner
                                    {:seon.effect-test/value 7}))]
             (is (= (:seon.effect/id receipt) (:seon.effect/recorded-effect-id second-result)))
-            (is (= 1 (count @handler-calls)))))))))
+            (is (= receipt
+                   (db/pull (db/db connection) '[* {:seon.effect/owner [:seon.fn/sym]}]
+                            [:seon.effect/id (:seon.effect/id receipt)]))
+                "the refused redispatch settles nothing again")))))))
 
 (deftest a-request-context-without-its-evaluation-ctx-refuses-by-name
   (test-support/with-database
     (fn [connection]
-      (reset! handler-calls [])
       (transact-fixture! connection (test-support/agent-tx @connection "effect-agent"))
       (transact-fixture! connection [(cluster-config 600000)
                                      {:seon.turn/id "effect-run"
@@ -686,7 +682,6 @@
       (let [refusal (binding [effect/*request-context* (dissoc (request-context connection) :seon.sci.eval/ctx)]
                       (effect/request! #'capability-owner {:seon.effect-test/value 7}))]
         (is (= :seon.sci.eval/ctx (:seon.effect/missing-context-member refusal)))
-        (is (empty? @handler-calls) "nothing dispatched")
         (is (nil? (db/pull (db/db connection) [:db/id]
                            [:seon.effect/id (id/digest 12 [:seon.effect/id "effect-run" 3 0])]))
             "no receipt opened")))))

@@ -983,7 +983,7 @@
                           {:ns (context-namespace ctx (symbol (namespace target)))})))
     ctx))
 
-(declare install-declared-classes! install-jvm-root! overridden-row? source-namespace?)
+(declare install-declared-classes! install-jvm-root! overridden-row? source-namespace? enter-namespace!)
 
 (defn- install-function-from-database!
   "Install one selected function from the acquired database snapshot. A definition
@@ -996,6 +996,10 @@
         (kernel/program-function ctx function-symbol)
         {interpreted ::interpreted} @(::kernel/program-snapshot ctx)
         loaded (loaded-database ctx db)]
+    ;; A source namespace's definition is read in its namespace as loading
+    ;; it reads it: entered first, its sibling definitions are bound.
+    (when (and source (source-namespace? ctx namespace-name))
+      (enter-namespace! ctx namespace-name db))
     (when-not source
       (throw
        (ex-info "Selected function is missing from the acquired SCI program snapshot."

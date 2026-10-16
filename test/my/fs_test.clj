@@ -33,13 +33,16 @@
                  :example/extra :ignored}))))
 
 (deftest public-entries-declare-resolvable-io-capabilities
+  ;; The capability entries: my.fs also holds public value defs (its request
+  ;; generators) and my.fs/section, which reads a doc through seon.ref.
   (support/with-database
     (fn [connection]
       (let [entries (db/q '[:find [(pull ?function [:seon.fn/sym :seon.fn/workload
                                                    :seon.effect/capability]) ...]
                             :where [?namespace :seon.ns/name my.fs]
                                    [?function :seon.fn/ns ?namespace]
-                                   [?function :seon.fn/private? false]] @connection)]
+                                   [?function :seon.fn/private? false]
+                                   [?function :seon.effect/capability]] @connection)]
         (is (seq entries))
         (doseq [entry entries]
           (is (= :io (:seon.fn/workload entry)))
