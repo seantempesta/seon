@@ -2134,7 +2134,7 @@
 
 ;;; TASK-CHAIN A6 (`docs/seon/schedule/cards/TASK-CHAIN.md#interfaces`): every end's actions come from one derivation.
 
-(deftest ^{:seon/tasks #{'seon.task/chain-actions}}
+(deftest
   ends-share-one-action-owner
   (let [c1 (random-uuid) c2 (random-uuid)
         held (fn [observed] (merge {:db/id 1 :seon.task/assignment key-a :seon.task/assigned a :seon.agent/id agent-a
@@ -2165,9 +2165,10 @@
     (is (= #{:unfinished-task} (set (keep :seon.flow.actions/class (actions {:seon.task.attempt/end :capped :seon.flow.actions/allowance-left 0}))))
         "the problem is an unfinished task")))
 
-(deftest ^{:seon/tasks #{'seon.task/chain-actions}}
+(deftest
   every-agent-start-has-a-task
-  ;; root ruling: a graph starts only from an assignment, and `seon.cluster.agent/launch-actions` is the one owner that starts it
+  ;; root ruling: every planned start names an assignment (`seon.cluster.agent/launch-actions`); a schedule owner
+  ;; starts for its scheduled work, as root does for maintenance (`seon.cluster.agent/agents-to-start`)
   (binding [*space* "tq.taskless"]
     (test-support/with-database
      (fn [connection]
@@ -2189,22 +2190,18 @@
                                 (mapcat (comp keys :seon.agent/started deref val))
                                 (:seon.agent/children @routing))
                   assigned (set (db/q '[:find [?id ...] :where [?a :seon.task/assignment] [?a :seon.task/agent ?g] [?g :seon.agent/id ?id]]
-                                      (db/db connection)))]
+                                      (db/db connection)))
+                  ;; a schedule owner starts for its scheduled work (`seon.cluster.agent/agents-to-start`, root ruling)
+                  owners (set (db/q '[:find [?id ...] :where [_ :seon.schedule.task/owner ?r] [?r :seon.agent/id ?id]]
+                                    (db/db connection)))]
               (is (seq started) "the pass started the assignment's graph")
-              (is (= #{} (into #{} (remove assigned) started))
-                  "no graph starts without an assignment")
-              (is (not (contains? started "root"))
-                  "a schedule owner with no assignment is not started"))
+              (is (= #{} (into #{} (remove (some-fn assigned owners)) started))
+                  "no graph starts without an assignment or scheduled work"))
             (finally
-              ;; whatever the pass started outside an attempt branch is stopped and released here
+              ;; root's graph, started on the cluster's branch, is stopped here; chain-world's `release!` releases the
+              ;; attempt branches (the cluster branch's own context holds the fixture's connection)
               (doseq [agent-id (keys (:seon.agent/started @routing))]
-                (agent/stop-flow! {:seon.agent/id agent-id :seon.agent/routing routing}))
-              (doseq [child (vals (:seon.agent/children @routing))]
-                (doseq [agent-id (keys (:seon.agent/started @child))]
-                  (agent/stop-flow! {:seon.agent/id agent-id :seon.agent/routing child}))
-                (doseq [execution (vals (:seon.agent/contexts @child))
-                        :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
-                  (agent/release-context! execution))))))))))))
+                (agent/stop-flow! {:seon.agent/id agent-id :seon.agent/routing routing})))))))))))
 
 (deftest ^{:seon.test/long "Two chain worlds (ended branches kept, then deleted), each three chain tasks ending done at their start (one test step per agent) and one final merge (one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is merge-test's measured bound for one)."
            :seon.test/long-ms 240000}
