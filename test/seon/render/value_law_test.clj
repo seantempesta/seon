@@ -66,6 +66,11 @@
   (is (lawful? [(list 0 [(apply str "aaaaaa" (repeat 82 "a"))])
                 {:A (apply str (repeat 66 "\"a")) :B {:A nil :B 0}}]
                70))
+  ;; Multi-line strings and nested maps laid out broken stay inside it too.
+  (doseq [budget [40 120 400]]
+    (is (lawful? {:a {:b (str/join "\n" (repeat 30 "a line of text")) :c [1 2 {:d "x\ny" :e {:f (vec (range 40))}}]}
+                  :g (str/join "\n" (repeat 5 "zz")) :h {:i {:j {:k "deep"}}}}
+                 budget)))
   (support/assert-check!
    (tc/quick-check 150 (prop/for-all [raw value-gen budget (gen/elements [60 200 800 1500])] (lawful? raw budget))
                    :seed 202610071 :max-size 40)

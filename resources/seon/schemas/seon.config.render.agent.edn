@@ -4,6 +4,14 @@
                            [:int {:min 0, :seon.config/dial true}],
                            :max-children
                            [:int {:min 0, :seon.config/dial true}],
+                           :whole-width
+                           [:int {:min 1, :seon.config/dial true}],
+                           :max-name
+                           [:int {:min 1, :seon.config/dial true}],
+                           :max-number-digits
+                           [:int {:min 1, :seon.config/dial true}],
+                           :sort-bound
+                           [:int {:min 0, :seon.config/dial true}],
                            :composition
                            [:enum
                             {:seon.config/dial true}

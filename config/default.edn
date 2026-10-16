@@ -138,6 +138,18 @@
  :seon.config.render.agent/max-children 32
  ; Composition is a presentation decision, not another size limit.
  :seon.config.render.agent/composition :multiline
+ ; Unit: characters. A value whose laid-out text is at most this wide is
+ ; never cut: its cut would say less than the value.
+ :seon.config.render.agent/whole-width 24
+ ; Unit: characters. A keyword or symbol is one name, whole up to this length.
+ :seon.config.render.agent/max-name 256
+ ; Unit: decimal digits. A BigInt, Ratio or BigDecimal past this prints as its
+ ; digit count, never its digits.
+ :seon.config.render.agent/max-number-digits 32
+ ; Unit: keys. A keyword-keyed map or set of at most this many shows identity
+ ; attributes and short members first, then alphabetically; a larger one
+ ; shows its own seq order, so its cut continues with drop.
+ :seon.config.render.agent/sort-bound 64
 
  ; Unit: retained entries in one routed `/data` window; the navigation
  ; elision marker rides beside them, never inside the count (the

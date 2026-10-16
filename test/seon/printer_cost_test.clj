@@ -22,7 +22,8 @@
    :function-entity 1.5
    :function-entity-small 1.5
    :function-entity-pair 1.5
-   :documented-functions 1.5})
+   ;; P1b's water-fill: the 4,956-tuple relation shows whole tuples then one cut, work proportional to what shows
+   :documented-functions 0.25})
 
 (def ^:private transcript-bound
   "The most the entry may allocate over the direct pair, as a multiple of the recorded entry's multiple of it."

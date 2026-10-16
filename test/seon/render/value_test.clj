@@ -500,7 +500,23 @@
     (is (= (- (count large) shown) (:seon.print/omitted cut)))
     (is (= (list 'drop shown 'result/e0123456789ab) (:seon.print/continuation cut)))
     (is (= :seon.render.profile/token-budget (:seon.print/bound-by cut)))
-    (is (< elapsed-ms 1000) "a million-entry map renders within its bound")))
+    (is (< elapsed-ms 1000) "a million-entry map renders within its bound"))
+  ;; Structure first: a 24-attribute map at 512 tokens shows every key, its
+  ;; long values cut, and a map whose keys alone exceed the budget shows the
+  ;; keys that fit, then exactly one cut.
+  (let [profile (render/agent-render-profile (support/effective-config))
+        at (fn [raw tokens] (value/prepare (assoc (unit raw) :seon.repl/handle 'result/e0123456789ab
+                                                  :seon.render/profile (assoc profile :seon.render.profile/token-budget tokens))))
+        shown-keys (fn [projection] (set (keep #(when (vector? %) (:seon.print/value (first %)))
+                                               (:seon.print/entries (:seon.render.value/tree projection)))))
+        attributes (into {} (for [i (range 24)]
+                              [(keyword "seon.error" (str "attribute-" i))
+                               (case (int (mod i 4)) 0 (.repeat "m" (int (* 60 (inc i)))) 1 i 2 {:nested (vec (range 40))} 3 (str "short " i))]))
+        wide (into {} (for [i (range 400)] [(keyword "seon.render.value-test" (str "an-attribute-whose-name-alone-is-long-" i)) i]))
+        wide-projection (at wide 256)]
+    (is (= (set (keys attributes)) (shown-keys (at attributes 512))))
+    (is (< 0 (count (shown-keys wide-projection)) (count wide)))
+    (is (= [[]] (map :seon.render.data/path (tree-cuts wide-projection))) "exactly one cut, over the keys")))
 
 (deftest references-stay-opaque
   ;; A reference is never entered: it contributes its class and nothing
@@ -628,7 +644,18 @@
          (is (= (- (count body) 24) (:seon.print/omitted cut)))
          (is (= (count body) (:seon.render.data/total cut)))
          (is (= [:body] (:seon.render.data/path cut)))
-         (is (= body (sci/eval-form ctx (:seon.print/requery-form cut)))))))))
+         (is (= body (sci/eval-form ctx (:seon.print/requery-form cut)))))
+       ;; Of a map's cut strings the smaller grows whole first: a pulled
+       ;; function entity at 1,024 tokens shows its 1,050-character docstring
+       ;; whole and cuts its longer source (P0 parent: the docstring cut to 259).
+       (let [entity (db/pull (db/db connection) '[*] [:seon.fn/sym 'seon.sci.eval/shown-result])
+             cuts (tree-cuts (value/prepare (assoc (unit entity) :seon.repl/handle handle
+                                                   :seon.render/profile
+                                                   (assoc (render/agent-render-profile (support/effective-config))
+                                                          :seon.render.profile/token-budget 1024))))]
+         (is (< 1000 (count (:seon.fn/doc entity)) (count (:seon.fn/source entity))))
+         (is (not-any? #(= [:seon.fn/doc] (:seon.render.data/path %)) cuts) "the docstring shows whole")
+         (is (some #(= [:seon.fn/source] (:seon.render.data/path %)) cuts) "the longer source is the string cut"))))))
 
 (deftest ai-realizes-only-the-members-it-prints
   ;; An endless lazy result prints its first members (3 under the probe's
@@ -637,7 +664,26 @@
         raw (map (fn [i] (swap! visits conj i) i) (iterate inc 0))
         text (value/render-ai (probe-unit raw))]
     (is (str/starts-with? text "(0 1 2 …? (drop 3 result/e0123456789ab))"))
-    (is (= [0 1 2] @visits) "no member past the printed ones is realized")))
+    (is (= [0 1 2] @visits) "no member past the printed ones is realized"))
+  ;; A relation of 4,956 [symbol docstring] tuples at 6,144 tokens shows whole
+  ;; tuples, the first that does not fit with what is left, then exactly one
+  ;; cut at its root with its drop form (P0 parent: 424 cuts, 196 collapsed
+  ;; [...2] tuples).
+  (let [relation (set (for [i (range 4956)]
+                        [(symbol "seon.relation" (str "f" i)) (.repeat "d" (int (+ 40 (mod (* i 37) 700))))]))
+        projection (value/prepare (assoc (unit relation) :seon.repl/handle 'result/e0123456789ab
+                                         :seon.render/profile (assoc (render/agent-render-profile (support/effective-config))
+                                                                     :seon.render.profile/token-budget 6144)))
+        {[cut] true inner false} (group-by #(= [] (:seon.render.data/path %)) (tree-cuts projection))
+        shown (:seon.render.data/next-offset cut)
+        tuples (filter #(= :seon.print/vector (:seon.print/face %)) (:seon.print/items (:seon.render.value/tree projection)))]
+    (is (pos? shown))
+    (is (= (list 'drop shown 'result/e0123456789ab) (:seon.print/continuation cut)) "one cut over the members")
+    (is (= (- (count relation) shown) (:seon.print/omitted cut)))
+    (is (= shown (count tuples)))
+    (is (every? #(= 2 (count (:seon.print/items %))) tuples) "no tuple is collapsed")
+    (is (every? #(= (dec shown) (second (first (:seon.render.data/path %)))) inner)
+        "only the last shown tuple is cut")))
 
 (deftest strings-are-quoted-and-their-cut-path-is-associative
   (let [raw "a\n\"b\\c\t"
@@ -1346,7 +1392,8 @@
                                                  :seon.render.data/offset (:seon.render.data/next-offset key-cut)}})]
        (is (= (vec (range 50)) (print/value-at value (:seon.render.data/path key-cut))))
        (is (= 50 (:seon.render.data/total key-cut)))
-       (is (str/starts-with? (value/render-ai-data next-page) "[3 4 5"))
+       (is (str/starts-with? (value/render-ai-data next-page) (str "[" (:seon.render.data/next-offset key-cut) " "))
+           "the next page continues the key from its cut")
        (is (= 50 (count (print/value-at value (:seon.render.data/path set-cut)))))
        (is (= :zero (print/value-at value [0])) "a plain step keeps get-in's meaning")))))
 
@@ -1359,9 +1406,9 @@
         valid? (schema/projection-validator (schema/handed-projection)
                                             :seon.render.value/insufficient-floor-budget-error)
         root (at-budget 1 "abcdefghijklmnop")
-        ;; 8 tokens (25 chars) holds the root with its cut and continuation
-        ;; (25) but not its first member too (31): the member refusal.
-        member (at-budget 8 {:a 1 :b 2})]
+        ;; 8 tokens (25 chars) holds the root collapsed with its continuation
+        ;; (25) but not its first member at its least too: the member refusal.
+        member (at-budget 8 {:a (.repeat "x" 100)})]
     (is (valid? root))
     (is (= [(tokens/estimate-chars 1) 18] ((juxt :seon.render.value/budget :seon.render.value/needed) root)))
     (is (valid? member))
