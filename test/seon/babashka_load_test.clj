@@ -7,8 +7,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
-            [edamame.core :as edamame]
-            [seon.test :as seon.test]))
+            [edamame.core :as edamame]))
 
 (def hook-roots
   "The roots `bin/seon-hook` adds to Babashka's classpath, in its order."
@@ -37,42 +36,34 @@
 
 (defn bb-failures
   "A map of namespace to the message `bb` printed, for each of `namespaces` that
-  does not load alone on the classpath of `extra` then `roots` (`hook-roots`, in that order)."
-  [roots extra namespaces]
+  does not load alone on the classpath of `extra` then `hook-roots`."
+  [extra namespaces]
   (into (sorted-map)
         (keep (fn [ns-sym]
                 (let [{:keys [exit err]} @(process/process
                                            {:out :string :err :string}
-                                           "bb" "--classpath" (classpath extra roots)
+                                           "bb" "--classpath" (classpath extra hook-roots)
                                            "-e" (str "(require '" ns-sym ")"))]
                   (when-not (zero? exit) [ns-sym (str/trim err)]))))
         namespaces))
 
 (defn undeclared-closure
   "The Seon namespaces `bb` loads when it requires all of `namespaces` that are
-  not themselves in `namespaces`, on the classpath of `extra` then `roots`."
-  [roots extra namespaces]
+  not themselves in `namespaces`."
+  [extra namespaces]
   (let [code (str "(def before (set (loaded-libs))) (run! require '" (vec namespaces) ")"
                   " (prn (into (sorted-set) (filter #(str/starts-with? (str %) \"seon.\"))"
                   " (remove before (loaded-libs))))")
         {:keys [out]} @(process/process {:out :string :err :string}
-                                        "bb" "--classpath" (classpath extra roots)
+                                        "bb" "--classpath" (classpath extra hook-roots)
                                         "-e" (str "(require '[clojure.string :as str]) " code))]
     (apply disj (edn/read-string out) namespaces)))
 
-(defn program-roots
-  "`hook-roots` under the program the checked-out branch's tests read (`seon.test/program-root`): a merge gate's
-  candidate, else the JVM's working directory."
-  []
-  (let [root (seon.test/program-root)]
-    (mapv #(str (io/file root ^String %)) hook-roots)))
-
 (deftest ^{:seon.test/reads #{:seon/babashka}} declared-namespaces-load-in-babashka
-  (let [roots (program-roots)
-        namespaces (declared roots)]
+  (let [namespaces (declared hook-roots)]
     (is (contains? namespaces 'seon.edit))
-    (is (= {} (bb-failures roots [] namespaces)))
-    (is (= #{} (undeclared-closure roots [] namespaces)))))
+    (is (= {} (bb-failures [] namespaces)))
+    (is (= #{} (undeclared-closure [] namespaces)))))
 
 (deftest a-declared-namespace-requiring-a-jvm-only-library-fails-to-load
   (let [dir (java.nio.file.Files/createTempDirectory "bb-load" (make-array java.nio.file.attribute.FileAttribute 0))
@@ -81,4 +72,4 @@
     (spit file "(ns ^{:seon/babashka true} seon.fixture-jvm-only (:require [clojure.core.specs.alpha]))")
     (let [extra [(str (.toFile dir))]]
       (is (= #{'seon.fixture-jvm-only} (declared extra)))
-      (is (= #{'seon.fixture-jvm-only} (set (keys (bb-failures hook-roots extra ['seon.fixture-jvm-only]))))))))
+      (is (= #{'seon.fixture-jvm-only} (set (keys (bb-failures extra ['seon.fixture-jvm-only]))))))))

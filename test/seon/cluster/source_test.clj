@@ -345,7 +345,8 @@
                     (let [c (:seon.db/connection execution)
                           written (db/transact! c [(entity c '[:seon.fn/sym scratch.gate-class/f] "(defn f {:malli/schema [:=> [:cat] :int]} [] 2)")])]
                       (is (:db-after written))
-                      #{[:seon.fn/sym 'scratch.gate-class/f]})))]
+                      #{[:seon.fn/sym 'scratch.gate-class/f]}))
+                  nil)]
         (is (true? (:seon.test/passed? gate)))
         (is (str/includes? (:seon.source/tally gate) "executed 1 ")))
       (finally (registry/retire-branch! {:seon.store/store held-store :seon.store/branch s})))))

@@ -1423,63 +1423,8 @@
            (seon.error.refusal/error? input) input
            :else (zipmap readers (repeat input))))))
 
-(defn- read-namespace-content
-  "The content of the namespaces `database` holds whose stored `ns` form declares a key of `read-keys`
-  (`seon.fn/declared-namespace-metadata`): each one's definition digest and those of its declarations (its functions,
-  and every declaration of its file), the bytes a test reading it as a file reads. Derived once per commit."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :qualified-keyword]] :seon.program/definition-digest]}
-  [database read-keys]
-  (let [content
-        #(let [declared (requiring-resolve 'seon.fn/declared-namespace-metadata)
-               namespaces (into (sorted-set)
-                                (keep (fn [[n source]] (when (some read-keys (keys (declared n source))) n)))
-                                (reach-read! (db/q '[:find ?n ?s :where [?e :seon.ns/name ?n] [?e :seon.ns/source ?s]]
-                                                   database)))
-               own (reach-read! (db/q '[:find ?name ?d :in $ [?name ...]
-                                        :where [?n :seon.ns/name ?name] [?n :seon.program/definition-digest ?d]]
-                                      database (vec namespaces)))
-               members (reach-read! (db/q '[:find ?name ?s ?d :in $ [?name ...]
-                                            :where [?n :seon.ns/name ?name]
-                                            (or-join [?f ?n] [?f :seon.fn/ns ?n] (and [?n :seon.fn/file ?file] [?f :seon.fn/file ?file]))
-                                            (or [?f :seon.fn/sym ?s] [?f :seon.test/sym ?s])
-                                            [?f :seon.program/definition-digest ?d]]
-                                          database (vec namespaces)))]
-           (id/id [(into (sorted-map) own)
-                   (reduce (fn [m [n s d]] (update m n (fnil conj (sorted-map)) [s d])) (sorted-map) members)]
-                  64))]
-    (if-let [commit (:datahike.value/commit-id (db/committed-value-identity database))]
-      (cache/lookup ::read-namespace-content [commit read-keys] (constantly 128) content)
-      (content))))
-
-(defn written-program-root
-  "The candidate root `database`'s merge gate wrote for the tests that read the program as files
-  (`:seon.branch/program-root`, `seon.cluster.source/candidate-root!`), else nil: they read the JVM's working
-  directory, the loaded archive."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:maybe :seon.branch/program-root]]}
-  [database]
-  (reach-read! (db/q '[:find ?root . :where [_ :seon.branch/program-root ?root]] database)))
-
-(defn read-inputs
-  "Each of `test-symbols` declaring `:seon.test/reads` (the namespaces it reads as files), mapped to the content of
-  those namespaces on `database` (`read-namespace-content`) when they are read from its candidate root
-  (`written-program-root`), so a change in a read namespace is a new result identity there even where the test calls
-  none of it. Empty without a candidate root: the test reads the loaded archive, which the loaded commit already
-  keys. The unknown-error when a read is refused."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
-                  [:or [:map-of :seon.test/sym :seon.program/definition-digest] :seon.test/unknown-error]]}
-  [database test-symbols]
-  (try
-    (let [declared (reach-read! (db/q '[:find ?s ?k :in $ [?s ...] :where [?t :seon.test/sym ?s] [?t :seon.test/reads ?k]]
-                                      database (vec test-symbols)))]
-      (if (and (seq declared) (written-program-root database))
-        (into {} (map (fn [[s pairs]] [s (read-namespace-content database (into #{} (map second) pairs))]))
-              (group-by first declared))
-        {}))
-    (catch Exception failure (reach-unavailable `read-inputs failure test-symbols))))
-
 (defn- task-reach-digests
-  "`closure-digests`, each test of `inputs` (`task-inputs`) keyed too by its input's `task-identity`, each test
-  declaring `:seon.test/reads` by the content of the namespaces it reads (`read-inputs`), and every test
+  "`closure-digests`, each test of `inputs` (`task-inputs`) keyed too by its input's `task-identity`, and every test
   by `loaded`, the loaded commit L whose compiled platform (evaluator, runner, host-bound callees) runs it."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]
                        [:map-of :seon.test/sym :seon.test.member/dynamic-calls]
@@ -1500,13 +1445,7 @@
                                      digests inputs))]
     (if (seon.error.refusal/error? keyed)
       keyed
-      (let [reads (read-inputs database (vec (keys keyed)))]
-        (if (seon.error.refusal/error? reads)
-          reads
-          (reduce-kv (fn [result test-symbol digest]
-                       (assoc result test-symbol
-                              (id/id (if-let [content (get reads test-symbol)] [digest content loaded] [digest loaded]) 64)))
-                     {} keyed))))))
+      (update-vals keyed #(id/id [% loaded] 64)))))
 
 (def ^:private loaded-identity
   "The JVM's loaded identity, `seon.sci.eval/loaded-identity` (which requires this namespace)."

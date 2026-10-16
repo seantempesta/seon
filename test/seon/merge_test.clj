@@ -725,11 +725,13 @@
        (is (contains? (seeds [[:seon.ns/name 'tq.bb-read]]) 'tq.bb-reader/reads-bb)
            "a deleted namespace selects the tests that read what it declared, and never fails selection")))))
 
-(deftest ^{:seon.test/long "One prepare-merge! under a checkout root: a copied program tree committed to git, the candidate root written from it, and a nested seon.test/run whose bb-load test starts one bb per declared namespace."
-           :seon.test/long-ms 120000}
+(deftest ^{:seon.test/long "One prepare-merge! under a checkout root (a copied program tree committed to git) whose bb-load test, an isolated member, runs in a throwaway JVM booted from the candidate commit (bin/seon check --at)."
+           :seon.test/long-ms 300000}
   the-gate-runs-a-file-reading-test-against-the-candidate-and-refuses
   ;; a9e4e9904 merged green while breaking the bb-load test: the gate neither selected it nor gave it the candidate's
-  ;; files. A branch making a `^{:seon/babashka true}` namespace unloadable in bb now refuses at the gate.
+  ;; files. The test reads the program as files (`:seon.test/reads`), so it is an isolated member, and the gate runs it
+  ;; on the candidate's own platform host (`seon.test.platform/check-files!`): a branch making a
+  ;; `^{:seon/babashka true}` namespace unloadable in bb refuses there.
   (let [target (support/execution-handle nil)
         store (:seon.store/store target)
         main-conn (:seon.db/connection target)
@@ -765,11 +767,9 @@
                                                                          "(defn format-findings\n  [request]\n  (java.awt.Point. 0 0))" {})))
       (let [prepared (source/prepare-merge! target store branch task-sym {:root root})]
         (some->> (:seon.source/candidate prepared) (vswap! made conj))
+        (is (string? (:seon.source/platform-run prepared)) "the gate ran its isolated member on the candidate's platform host")
         (is (some #{reader} (:seon.source/red prepared))
-            "the gate selected the bb-load test and ran it red against the candidate's files")
-        (is (not (.exists (io/file root "data" "candidate"
-                                                (name (or (:seon.source/candidate prepared) :absent)))))
-            "the candidate root is gone once the gate has judged it"))
+            "the gate selected the bb-load test and ran it red against the candidate's files"))
       (finally
         (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
         (support/delete-root! root)))))

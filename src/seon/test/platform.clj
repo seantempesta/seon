@@ -178,7 +178,12 @@
       (:seon.error/at provenance) provenance
       (:seon.error/at selection) selection
       :else
-      (let [admitted (db/transact! connection [[:db.fn/call test/admit-run selection]])]
+      (let [head (db/db connection)
+            ;; as `seon.test/run` admits: the program unchanged since the tested value holds its digest at the writer
+            selection (cond-> selection
+                        (some-> (:seon.test.run/program-revisions provenance) (= (runner/program-revisions-digest head)))
+                        (assoc :seon.test.run/unchanged-through-t (db/basis-t head)))
+            admitted (db/transact! connection [[:db.fn/call test/admit-run selection]])]
         (if (:seon.error/at admitted)
           admitted
           (let [recorded (runner/commit-results!
@@ -195,3 +200,39 @@
               (db/transact! connection [[:db/add [:seon.test.run/id (get-in selection [:seon.test.run/provenance :seon.test.run/id])]
                                          :seon.test.run/stopped :recording-refused]]))
             recorded))))))
+
+(defn check-files!
+  "Run `tests` over the published commit with `proofs`' candidate bytes at their paths (the files a write-back
+  installs, `seon.cluster.source/proven-files`), in a throwaway JVM booted from that candidate commit
+  (`candidate-commit!`, `run-check!`), and record them on `connection`'s branch of the cluster `cluster-name`
+  (`record!`): the merge gate's isolated members, judged in the candidate's own working directory."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.cluster/name [:vector :seon.source/proof] [:set :seon.test/sym]]
+                  [:or :seon.test.platform/answer :seon.error/base]]}
+  [connection cluster-name proofs tests]
+  (let [began (System/nanoTime)
+        published (published-source)]
+    (if (:seon.error/at published)
+      published
+      (let [directory (str (fs/create-dirs (io/file (:seon.test.platform/checkout published) "tmp"
+                                                    (str "check-files-" (id/id)))))
+            paths (mapv :seon.source/path proofs)]
+        (try
+          (doseq [{path :seon.source/path candidate :seon.source/candidate-bytes} proofs]
+            (let [file (io/file directory ^String path)]
+              (io/make-parents file)
+              (fs/write-bytes file candidate)))
+          (let [candidate (candidate-commit! published directory paths)
+                checked (run-check! (db/db connection) published candidate directory tests)
+                ;; keyed by the branch as it stands when the results arrive
+                recorded (if (:seon.error/at checked) checked (record! connection (db/db connection) cluster-name checked))]
+            (if (:seon.error/at recorded)
+              recorded
+              (cond-> {:seon.test.run/git-sha candidate
+                       :seon.source/changed-paths paths
+                       :seon.test/passed? (:seon.test/passed? checked)
+                       :seon.test/results recorded
+                       :seon.test.platform/check-ms (:seon.test.platform/check-ms checked)
+                       :seon.test.platform/ms (long (/ (- (System/nanoTime) began) 1e6))}
+                (seq (:seon.test.platform/excluded checked))
+                (assoc :seon.test.platform/excluded (:seon.test.platform/excluded checked)))))
+          (finally (fs/delete-tree directory)))))))

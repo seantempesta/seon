@@ -798,16 +798,6 @@
                                     database (vec (filter qualified-keyword? declared)))]
                   (if (map? readers) readers (set readers))))))
 
-(defn program-root
-  "The directory the checked-out branch's tests read the program from as files: the candidate root its merge gate
-  wrote (`:seon.branch/program-root`, `seon.cluster.source/candidate-root!`), else the JVM's working directory."
-  {:malli/schema [:=> [:cat] :string]}
-  []
-  (let [database (db/db)
-        written (when-not (db/read-refusal? database)
-                  (db/q '[:find ?root . :where [_ :seon.branch/program-root ?root]] database))]
-    (if (string? written) written (System/getProperty "user.dir"))))
-
 (defn- selection-seeds
   "Resolve supplied definition, namespace and schema identities in this database;
   a schema seeds the functions whose contracts name it (`schema-consumers`), and a change in a namespace seeds
@@ -2390,14 +2380,17 @@
 
   A member reaching a `:seon.fn/destroys` owner deletes a filesystem path it
   did not create; a member declaring `:seon.test/fixture-observation` needs a
-  file-backed root. Both run on the platform host, whose command is named.
-  Any other JVM (a scratch or platform root) excludes nothing."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:or :nil :string] [:vector :seon.test/sym]]
+  file-backed root; a member declaring `:seon.test/reads` reads the program
+  as files from the working directory of the JVM running it. All run on the
+  platform host, whose command is named. Any other JVM (a scratch or platform
+  root) excludes nothing, unless `isolate?`: a merge gate judging a candidate
+  this JVM did not load runs them on that candidate's own platform host."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:or :nil :string] :boolean [:vector :seon.test/sym]]
                   [:or [:map [:seon.test/destructive-excluded :seon.test/destructive-excluded]
                         [:seon.test/deferred :seon.test/deferred]]
                    :seon.error/value]]}
-  [database declared-root symbols]
-  (if-not (development-root declared-root)
+  [database declared-root isolate? symbols]
+  (if-not (or isolate? (development-root declared-root))
     {:seon.test/destructive-excluded [] :seon.test/deferred []}
     (let [owners (destroyers database)
           reach (if (:seon.error/at owners) owners (destructive-reach database))]
@@ -2407,19 +2400,23 @@
                           (distinct (keep reach symbols)))
               destructive (into [] (keep #(destructive-exclusion owners reach paths %)) symbols)
               excluded (set (map :seon.test/sym destructive))
-              observations (into {} (selection-read!
-                                     (db/q '[:find ?symbol ?reason
-                                             :in $ [?symbol ...]
-                                             :where [?test :seon.test/sym ?symbol]
-                                                    [?test :seon.test/fixture-observation ?reason]]
-                                           database symbols)))
+              declared (fn [attribute]
+                         (reduce (fn [m [test-symbol value]] (update m test-symbol (fnil conj #{}) value)) {}
+                                 (selection-read!
+                                  (db/q '[:find ?symbol ?value :in $ ?attribute [?symbol ...]
+                                          :where [?test :seon.test/sym ?symbol] [?test ?attribute ?value]]
+                                        database attribute symbols))))
+              observations (declared :seon.test/fixture-observation)
+              reads (declared :seon.test/reads)
               deferred (into []
                              (keep (fn [test-symbol]
-                                     (when-let [reason (and (not (excluded test-symbol))
-                                                            (get observations test-symbol))]
-                                       {:seon.test/sym test-symbol
-                                        :seon.test/fixture-observation reason
-                                        :seon.test/command ["bin/test" "--platform" "--" (str test-symbol)]})))
+                                     (when (and (not (excluded test-symbol))
+                                                (or (observations test-symbol) (reads test-symbol)))
+                                       (cond-> {:seon.test/sym test-symbol
+                                                :seon.test/command ["bin/test" "--platform" "--" (str test-symbol)]}
+                                         (observations test-symbol)
+                                         (assoc :seon.test/fixture-observation (first (observations test-symbol)))
+                                         (reads test-symbol) (assoc :seon.test/reads (reads test-symbol))))))
                              symbols)]
           {:seon.test/destructive-excluded
            (mapv #(assoc % :seon.test/command ["bin/test" "--platform" "--" (str (:seon.test/sym %))])
@@ -2548,8 +2545,10 @@
 (defn isolated-members
   "The tests a development-root JVM never runs, which the platform host does:
   the declared `:seon.test/platform` rows, members reaching a
-  `:seon.fn/destroys` owner, and members declaring a
-  `:seon.test/fixture-observation`. Fixture material is never a member. An
+  `:seon.fn/destroys` owner, members declaring a
+  `:seon.test/fixture-observation`, and members reading the program as files
+  (`:seon.test/reads`), which read the working directory of the JVM that runs
+  them. Fixture material is never a member. An
   unanswerable destroyer declaration is the typed unknown."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:or [:set :seon.test/sym] :seon.error/value]]}
@@ -2560,7 +2559,8 @@
       (let [declared (selection-read!
                       (db/q '[:find [?symbol ...]
                               :where (or [?test :seon.test/platform]
-                                         [?test :seon.test/fixture-observation])
+                                         [?test :seon.test/fixture-observation]
+                                         [?test :seon.test/reads])
                                      [?test :seon.test/sym ?symbol]
                                      (not [?test :seon.test/fixture])]
                             database))
@@ -2888,7 +2888,7 @@
             selected (when-not (:seon.error/at selection)
                        (mapv :seon.test.member/symbol (:seon.test.run/members selection)))
             exclusions (when selected
-                         (host-exclusions database (store/declared-operator-root) selected))
+                         (host-exclusions database (store/declared-operator-root) (true? (:seon.test/isolate? request)) selected))
             runnable (when (and selected (not (:seon.error/at exclusions)))
                        (let [excluded (set (map :seon.test/sym
                                                 (concat (:seon.test/destructive-excluded exclusions)

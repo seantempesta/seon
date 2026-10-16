@@ -2691,17 +2691,35 @@
        :seon.source/arming-identities arming-identities}))
     (finally (d/release-materialized-db published-database)))))))
 
+(defn- isolated-run
+  "The `deferred` isolated members of a gate run (`seon.test/isolated-members`: `:seon.test/deferred` and
+  `:seon.test/destructive-excluded`), run on the candidate's own platform host over `files` (`proofs`,
+  `seon.test.platform/check-files!`) and recorded on `execution`'s branch; nil when none was deferred or the gate
+  wrote no file (its members then stay unrun, which the merge verdict refuses as unknown)."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.test/run-result [:maybe [:vector :seon.source/proof]]]
+                  [:maybe [:or :seon.test.platform/answer :seon.error/value]]]}
+  [execution run files]
+  (let [deferred (into (sorted-set) (map :seon.test/sym)
+                       (concat (:seon.test/deferred run) (:seon.test/destructive-excluded run)))]
+    (when (and (seq deferred) (seq files))
+      ((requiring-resolve 'seon.test.platform/check-files!)
+       (:seon.db/connection execution) (:seon.cluster/name execution) files deferred))))
+
 (defn- reaching-run
   "The tests reaching `identities`, answered on `execution` and recorded on its
   connection. Every changed function, test and namespace is passed, deleted ones
   included: `seon.test/run` resolves a deleted symbol through history and its
   surviving incoming edges, and a namespace selects its members and the tests
-  that read it as a file. No changed function, test or namespace, no request."
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.reconcile/adopt-identities]
+  that read it as a file. The isolated members it selects run on the candidate's
+  own platform host over `files` (`isolated-run`), their run as
+  `:seon.source/platform-run`. No changed function, test or namespace, no request."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.reconcile/adopt-identities [:maybe [:vector :seon.source/proof]]]
                   [:map [:seon.test/passed? :boolean] [:seon.source/tally :string]
                    [:seon.source/gate-run {:optional true}
-                    [:or :seon.test/run-result :seon.error/value]]]]}
-  [execution identities]
+                    [:or :seon.test/run-result :seon.error/value]]
+                   [:seon.source/platform-run {:optional true}
+                    [:or :seon.test.platform/answer :seon.error/value]]]]}
+  [execution identities files]
   (let [changed (into [] (keep (fn [[a v :as identity]] (cond (#{:seon.fn/sym :seon.test/sym} a) v
                                                                (= :seon.ns/name a) identity)))
                       identities)
@@ -2709,11 +2727,23 @@
               ((requiring-resolve 'seon.test/run)
                {:seon.test/policy :named :seon.test/execution execution
                 :seon.test/recording-connection (:seon.db/connection execution)
-                :seon.test/changed changed}))]
-    (cond-> {:seon.test/passed? (if run (true? (:seon.test/passed? run)) true)
-             :seon.source/tally (if run ((requiring-resolve 'seon.test/tally) run)
-                                    "no changed function or test: no test selected")}
-      run (assoc :seon.source/gate-run run))))
+                :seon.test/changed changed :seon.test/isolate? true}))
+        platform (when (and run (not (:seon.error/at run))) (isolated-run execution run files))
+        green? #(and (pos? (:seon.test/pass-count % 0)) (zero? (:seon.test/fail-count % 0)) (zero? (:seon.test/error-count % 0)))
+        ;; the in-process run's verdict with its isolated members answered by the platform run instead
+        passed? (cond (nil? run) true
+                      (nil? platform) (true? (:seon.test/passed? run))
+                      :else (and (true? (:seon.test/passed? platform))
+                                 (every? green? (:seon.test/results run))
+                                 (every? empty? (map run [:seon.test/long-excluded :seon.test/pending :seon.test/unfinished]))))]
+    (cond-> {:seon.test/passed? passed?
+             :seon.source/tally (cond-> (if run ((requiring-resolve 'seon.test/tally) run)
+                                          "no changed function or test: no test selected")
+                                  (:seon.test.platform/ms platform)
+                                  (str " / platform " (count (:seon.test/results platform)) " in "
+                                       (:seon.test.platform/ms platform) " ms"))}
+      run (assoc :seon.source/gate-run run)
+      platform (assoc :seon.source/platform-run platform))))
 
 (defn candidate-gate!
   "Answer the tests reaching one change on `branch`, the source's candidate.
@@ -2721,16 +2751,19 @@
   `branch` is reset to the head of `source`'s connection unless it already
   names it, `write!` puts the change onto the candidate's execution handle and
   answers its identities, and `reaching-run` answers the tests reaching them
-  there through the agent acquisition entrance. `source` is never written
+  there through the agent acquisition entrance, its isolated members on the
+  platform host over `files`, the candidate's proven write-back. `source` is never written
   here: root's merge (`seon.cluster.source/prepare-merge!`) reads the verdict."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch
-                       :seon.instrument/callable]
+                       :seon.instrument/callable [:maybe [:vector :seon.source/proof]]]
                   [:map [:seon.test/passed? :boolean] [:seon.source/tally :string]
                    [:seon.source/candidate :seon.store/branch]
                    [:seon.source/phase-ms [:map-of :keyword :double]]
                    [:seon.source/gate-run {:optional true}
-                    [:or :seon.test/run-result :seon.error/value]]]]}
-  [source held-store branch write!]
+                    [:or :seon.test/run-result :seon.error/value]]
+                   [:seon.source/platform-run {:optional true}
+                    [:or :seon.test.platform/answer :seon.error/value]]]]}
+  [source held-store branch write! files]
   (let [started (System/nanoTime)
         ms #(/ (- (System/nanoTime) %) 1000000.0)
         target {:seon.store/store held-store :seon.store/branch branch}
@@ -2753,11 +2786,15 @@
         (db/with-branch
          {:seon.db/connection (:seon.db/connection execution)}
          #(let [identities (write! execution)
-                candidate-ms (ms started)]
-            (assoc (reaching-run execution identities)
+                candidate-ms (ms started)
+                gate (reaching-run execution identities files)]
+            (assoc gate
                    :seon.source/candidate branch
-                   :seon.source/phase-ms {:seon.source/candidate-ms candidate-ms
-                                          :seon.source/tests-ms (- (ms started) candidate-ms)})))
+                   :seon.source/phase-ms (cond-> {:seon.source/candidate-ms candidate-ms
+                                                  :seon.source/tests-ms (- (ms started) candidate-ms)}
+                                           (:seon.test.platform/ms (:seon.source/platform-run gate))
+                                           (assoc :seon.source/platform-ms
+                                                  (double (:seon.test.platform/ms (:seon.source/platform-run gate))))))))
         (finally (cluster.agent/release-context! execution))))))
 
 (defn- publication-paths

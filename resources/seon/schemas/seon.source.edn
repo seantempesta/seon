@@ -121,7 +121,9 @@
                [:seon.source/expected-digests :seon.source/expected-digests]
                [:seon.source/tested-task-basis :seon.source/tested-task-basis]
                [:seon.source/red-on-target {:optional true} :seon.source/red-on-target]
+               [:seon.source/platform-run {:optional true} :seon.source/platform-run]
                [:parents [:set :seon.source/commit-id]]],
+              :platform-run [:and {:description "The run of a merge gate's isolated members on the candidate's platform host (seon.cluster/reaching-run, seon.test.platform/check-files!), recorded on the merge branch beside the gate run; merge-verdict judges its results with the gate run's."} :seon.test.run/id],
               :tested-task-basis
               [:map {:description "What selected a merge's run: the task, its seon.task/obligations over main, the candidate and their merge base, and the declarations main held for it and its ancestors, with the run it selected. Producer: seon.cluster.source/tested-task-basis; the merge's writer recomputes it (seon.cluster.source/task-basis-held-tx)."}
                [:seon.task/sym :seon.task/sym] [:seon.task/obligations :seon.task/obligations] [:seon.task/basis :seon.task/basis]

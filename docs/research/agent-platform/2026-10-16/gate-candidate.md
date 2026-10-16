@@ -42,15 +42,19 @@ general, not a bb special case.
 
 ## Choice
 
-**Input: materialize the candidate root, as `bin/seon check` does (HEAD plus the slice).** The gate already holds
-the candidate's file bytes (`proven-files` under `:root`); write them over a copy of main's tree into a disposable
-directory keyed by the merge branch's commit id, and let program-reading tests resolve their root from the
-checked-out branch (`seon.test/program-root`: the candidate directory of the checked-out commit when the gate made
-one, else the JVM's `user.dir`). This is git CI's model whole: the tests run in a checkout of the merge result.
-The alternative, giving tests the program text from namespace rows and file facts, fails on the count: the database
-holds each file's digest (`:seon.fn.file/digest`) and each declaration's source, not the file bytes (comments,
-order, reader conditionals), so every reading test would need a second write-back to reconstruct them, and a `bb`
-subprocess needs real files on a classpath anyway.
+**Input: the candidate's own platform host (root ruling, 2026-10-16).** A test that reads the program as files is
+host-bound: it reads the working directory of the JVM that runs it. So a test declaring `:seon.test/reads` is an
+isolated member (`seon.test/isolated-members`), which a development JVM never runs, and the merge gate runs the
+isolated members its selection reaches on the candidate's own platform host: `seon.cluster/reaching-run` asks
+`seon.test/run` with `:seon.test/isolate? true` (every isolated member deferred, whatever JVM asks), then
+`seon.test.platform/check-files!` writes the `proven-files` candidate bytes (the files write-back would install) over
+the published commit (`seon.test.platform/candidate-commit!`), runs the deferred members with `bin/seon check --at`
+in a throwaway JVM booted from that commit (`seon.test.platform/run-check!`), and records their results on the merge
+branch (`seon.test.platform/record!`). The prepared merge names that run (`:seon.source/platform-run`), and
+`seon.cluster.source/merge-verdict` judges its results beside the gate run's, with every deferred member required:
+one never run is unknown, never green. This is git CI's model whole: the tests run in a checkout of the merge
+result. Earlier phases threaded a candidate root through test worlds (`candidate-root!`, `:seon.branch/program-root`,
+`seon.test/program-root`, a reach digest keyed by read content); each step found another layer, and they are deleted.
 
 **Selection: declared reads, as a selector over namespace metadata.** Recording per-test reads in
 `seon.test.runner` cannot see this class at all: the bb test's reads happen in a child process. So the test declares
@@ -63,15 +67,12 @@ declaration in it, since bb loads the whole file) whose metadata holds `k` to th
 ## Phases
 
 1. Selection: `:seon.test/reads` attribute (`seon.test.edn`, `:seon.test/test`), lifted marker, `selection-seeds`
-   join, `reaching-run` passing `:seon.ns/name`. Proof: a changed `^{:seon/babashka true}` namespace selects the
-   bb-load test.
-2. Input: gate writes the candidate root from `proven-files`; `seon.test/program-root`; the bb-load test reads its
-   roots from it. Proof: a fixture branch that breaks a bb namespace refuses at the gate.
-3. Sweep: convert the remaining program-reading tests to `seon.test/program-root` (scripted, one commit).
+   join, `reaching-run` passing `:seon.ns/name`. Committed 5588d1329.
+2. Input: a `:seon.test/reads` test is an isolated member; the gate runs its isolated members on the candidate's
+   platform host. Proof: `seon.merge-test/the-gate-runs-a-file-reading-test-against-the-candidate-and-refuses`
+   (a fixture branch that breaks a bb namespace refuses at the gate; a merge selecting no isolated member boots no
+   JVM).
 
-Status (2026-10-16): phase 1 committed (5588d1329). Phase 2 committed with its proof red: selection now also reaches
-`merge-seeds` and `merge-list` (a reading seed carries every change in the namespace it reads), and the candidate root
-is written and read, but the gate reuses the bb-load test's green from main, because a reach digest covers the call
-graph and not the files a test reads. Remaining in `seon.merge/the-merge-gate-judges-main-s-files-not-the-candidate`:
-fold the read namespaces' definition digests into a `:seon.test/reads` test's reach digest. Phase 3 is
-`seon.merge/program-reading-tests-read-the-candidate-root`.
+Status (2026-10-16): phase 1 committed (5588d1329); phase 2 by lane gate-platform (see its commit). No sweep of the
+other program-reading tests is needed: a test reading the program tree declares `:seon.test/reads` when it should
+judge a merge.
