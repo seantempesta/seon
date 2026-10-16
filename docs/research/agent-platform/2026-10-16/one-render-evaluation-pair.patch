@@ -1,0 +1,314 @@
+diff --git a/resources/seon/schemas/seon.context.edn b/resources/seon/schemas/seon.context.edn
+index 6a68fbfd4..43ac96530 100644
+--- a/resources/seon/schemas/seon.context.edn
++++ b/resources/seon/schemas/seon.context.edn
+@@ -133,31 +133,31 @@
+                :cost [:vector {:description "The branch's stored function costs whose digest differs from main's beside main's value, most self time spent first, at most :seon.config.test.cost/top. Producer: seon.context/current-state."} :seon.cost/comparison]
+                :exchanges :seon.ai/exchanges
+                :age [:enum {:description "A history unit's age among the agent's model exchanges: the newest, or older. Producer: seon.context/exchange-age."} :newest :older]
+-               :emission :seon.repl/emission
+                :newest-run :seon.turn/id
+-               :exchange [:map {:description "One evaluation as the agent's model sees it: its emission, its age among the agent's model exchanges and the reference dial in force. Its AI face is what a model pass sends, its HTML face what the transcript and the debug view show. Producer: seon.context/exchange."
+-                                :seon.render/ai seon.context/exchange-ai
+-                                :seon.render/html seon.context/exchange-html}
+-                          [:seon.context/emission :seon.context/emission]
+-                          [:seon.context/age :seon.context/age]
+-                          [:seon.config.context/reference-tokens :seon.config.context/reference-tokens]]
+-               :exchange-basis [:map {:description "What ages an agent's evaluations as exchanges: its newest run carrying a model attempt, absent when none, and the reference dial. Producer: seon.context/exchange-basis."}
++               :evaluations [:vector {:description "An agent's model exchanges as pulled for the value printer, one vector per call row carrying a model attempt, its evaluations in order (seon.context/exchange-selector). Producer: seon.context/model-exchanges."} [:vector :map]]
++               :model-exchanges [:map {:description "An agent's model exchanges and the basis that ages them. Producer: seon.context/model-exchanges."}
++                                 [:seon.context/evaluations :seon.context/evaluations]
++                                 [:seon.context/exchange-basis :seon.context/exchange-basis]]
++               :exchange-basis [:map {:description "What ages an agent's evaluations as exchanges: its newest run carrying a model attempt, absent when none, and the reference dial. The evaluation render's position option (in :seon.render/options): absent, an evaluation renders as the REPL answered it. Producer: seon.context/exchange-basis, seon.context/model-exchanges."}
+                                 [:seon.context/newest-run {:optional true} :seon.context/newest-run]
+                                 [:seon.config.context/reference-tokens :seon.config.context/reference-tokens]]
+                :reply-tokens [:int {:min 0 :description "The estimated tokens of the reply an older history unit shows by reference (seon.ai.tokens/estimate)."}]
+-               :reference [:map {:description "An older history unit's reply shown by reference: the evaluation's result handle, its reply's size in estimated tokens and the form that reads the value whole. Producer: seon.context/exchange-ai."}
++               :reference [:map {:description "An older history unit's reply shown by reference: the evaluation's result handle, its reply's size in estimated tokens and the form that reads the value whole. Producer: seon.context/evaluation-unit."}
+                            [:seon.repl/handle :seon.repl/handle]
+                            [:seon.context/reply-tokens :seon.context/reply-tokens]
+                            [:seon.render/operations :seon.render/operations]]
+-               :exchange-unit [:map {:description "One evaluation of a model exchange as a model pass shows it: its form, and its reply whole or by reference. Producer: seon.context/exchange-ai, the AI face of :seon.context/exchange."}
++               :exchange-unit [:map {:description "One evaluation as the REPL session shows it at its position: its form, its age, and its reply whole or by reference; what both faces of :seon.cluster.eval/receipt show. Producer: seon.context/evaluation-unit."}
+                                [:seon.ai/form :seon.ai/form]
++                               [:seon.context/age :seon.context/age]
+                                [:seon.ai/reply {:optional true} :seon.ai/reply]
+                                [:seon.context/reference {:optional true} :seon.context/reference]]
+                :model-context
+                [:map {:description "What one model pass sends: (help)'s shown text then the block's attempt sections as the system message, the agent's own model exchanges, then the block's turn sections' shown text."}
+                 [:seon.ai/system :seon.ai/system]
+                 [:seon.context/exchanges :seon.context/exchanges]
+-                [:seon.ai/prompt :seon.ai/prompt]]
++                [:seon.ai/prompt :seon.ai/prompt]
++                [:seon.context/evaluations {:optional true} :seon.context/evaluations]
++                [:seon.context/exchange-basis {:optional true} :seon.context/exchange-basis]]
+                :attempt-view
+                [:map {:description "The block's sections that hold for the whole attempt as the AI face shows them, laid before the history so they join the cached prefix. Producer: seon.context/block-views."}
+                 [:seon.context/task {:optional true}
+diff --git a/resources/seon/schemas/seon.render.edn b/resources/seon/schemas/seon.render.edn
+index ce8ac2af8..bcf5a829f 100644
+--- a/resources/seon/schemas/seon.render.edn
++++ b/resources/seon/schemas/seon.render.edn
+@@ -209,6 +209,7 @@
+                 "A rendered value is any admitted Clojure value; the value floor bounds what prints, not this schema."
+                 :gen/elements [nil true 0 "" :k [] {} #{}]}],
+               :rendering [:set :qualified-symbol],
++              :options [:map {:description "What a viewer asks of the render the value printer selects for its value: options passed whole in the render's unit, each member declared and read by the render that takes it (an evaluation's position among its agent's model exchanges, `:seon.context/exchange-basis`; whether it shows the agent's input, `:seon.repl/input?`). A render ignores members it does not declare."}],
+               :would-fall-to-floor? :boolean,
+ 
+               :ambiguous-error [:merge :seon.error/base [:map {:seon.db/attributes true} [:seon.render/candidates :seon.render/candidates]]]
+diff --git a/src/seon/context.clj b/src/seon/context.clj
+index 675fa604e..0f48ecc04 100644
+--- a/src/seon/context.clj
++++ b/src/seon/context.clj
+@@ -862,41 +862,79 @@
+ ;;; What a model pass sends
+ ;;; ---------------------------------------------------------------------------
+ 
+-(def ^:private exchange-selector
+-  "An evaluation as `seon.repl/entity-emission` reads it, with its call row's attempts."
++(def exchange-selector
++  "An evaluation as the value printer selects its declared pair for (`:seon.cluster.eval/receipt`: each ref pulled
++  with its entity id) and `seon.repl/entity-emission` reads it, with its call row's attempts, which age it."
+   '[* {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
+-    {:seon.cluster.eval/run [:seon.turn/id {:seon.turn/attempts [:db/id]}]}])
++    {:seon.cluster.eval/run [:db/id :seon.turn/id {:seon.turn/attempts [:db/id]}]}])
+ 
+ (defn exchange-age
+-  "An evaluation's age among its agent's model exchanges: `:older` when its run `run` carried a model attempt
+-  (`model-run?`) and is not `newest`, the agent's newest such run; else `:newest`, as the REPL answered it."
+-  {:malli/schema [:=> [:cat [:maybe :seon.turn/id] :boolean [:maybe :seon.turn/id]] :seon.context/age]}
+-  [run model-run? newest]
+-  (if (and model-run? (not= run newest)) :older :newest))
+-
+-(defn exchange-ai
+-  "`:seon.render/ai` of :seon.context/exchange: the evaluation as a model pass sends it, the form as sent and what the
+-  REPL answered, by its `age`. The `:newest` exchange answers whole with the turn's meta; an `:older` one without it
+-  (`seon.repl/reply-text`), and when its reply is over `limit` (`:seon.config.context/reference-tokens`) and it holds a
+-  result handle, by reference: its handle, its reply's size in estimated tokens and the form that reads the value
+-  whole, never its reply text. After eviction or restart the handle answers that the value is gone."
+-  {:malli/schema [:=> [:cat :seon.context/exchange] :seon.context/exchange-unit]}
+-  [{emission :seon.context/emission age :seon.context/age limit :seon.config.context/reference-tokens}]
+-  (let [reply (repl/reply-text emission (= :newest age))
++  "Evaluation `evaluation`'s age among its agent's model exchanges under `basis` (`exchange-basis`): `:older` when its
++  run carried a model attempt and is not the basis's newest such run; else, and with no basis, `:newest`, as the REPL
++  answered it."
++  {:malli/schema [:=> [:cat :map [:maybe :seon.context/exchange-basis]] :seon.context/age]}
++  [evaluation basis]
++  (let [{run :seon.turn/id attempts :seon.turn/attempts} (:seon.cluster.eval/run evaluation)]
++    (if (and basis (seq attempts) (not= run (:seon.context/newest-run basis))) :older :newest)))
++
++(defn- evaluation-errors
++  "The errors evaluation `evaluation`'s settlement saved on it (`:seon.cluster.eval/faults`), each as its agent reads
++  it (`seon.error/value` of its latest fact, its occurrence count and origin branch, its resolution when resolved),
++  printed once by the value printer rooted at the evaluation; nil when it saved none. A refused read is thrown whole."
++  {:malli/schema [:=> [:cat :seon.render/unit :map] [:maybe :string]]}
++  [{database :seon.db/db :as unit} evaluation]
++  (when-let [faults (seq (:seon.cluster.eval/faults evaluation))]
++    (let [selector (error/observation-selector (db/carried-projection database))
++          read! #(if (:seon.error/at %) (throw (ex-info (str (:seon.error/message % "An evaluation's error read refused.")) %)) %)
++          errors (mapv (fn [fault]
++                         (let [pulled (read! (db/pull database selector (if (map? fault) (:db/id fault) fault)))
++                               resolved (read! (error/resolution database (:seon.error/signature pulled)))
++                               fact (error/latest-fact pulled)]
++                           (cond-> (merge (error/value fact)
++                                          (select-keys fact [:seon.error.occurrence/count :seon.error.occurrence/branch]))
++                             resolved (assoc :seon.error/resolution resolved))))
++                       faults)
++          text (value/render-ai (assoc (dissoc unit :seon.render/options) :seon.render/value errors
++                                       :seon.render.value/root [:seon.cluster.eval/id (:seon.cluster.eval/id evaluation)]
++                                       :seon.render.call/id [::errors errors]))]
++      (if (string? text) text (throw (ex-info (str (:seon.error/message text)) text))))))
++
++(defn- evaluation-unit
++  "The one derivation both faces of an evaluation read: render unit `unit`'s evaluation as the REPL shows it at its
++  position, by its `:seon.render/options`. With no `:seon.context/exchange-basis` it is the REPL's answer as given;
++  under one it is aged (`exchange-age`): the `:newest` exchange answers whole with the turn's meta, an `:older` one
++  without it (`seon.repl/reply-text`), and when its reply is over the basis's reference dial
++  (`:seon.config.context/reference-tokens`) and it holds a result handle, by reference: its handle, its reply's size in
++  estimated tokens and the form that reads the value whole. Its saved errors are part of its reply
++  (`evaluation-errors`)."
++  {:malli/schema [:=> [:cat :seon.render/unit] :seon.context/exchange-unit]}
++  [unit]
++  (let [evaluation (if (map? (:seon.render/value unit)) (:seon.render/value unit) unit)
++        basis (get-in unit [:seon.render/options :seon.context/exchange-basis])
++        age (exchange-age evaluation basis)
++        errors (evaluation-errors unit evaluation)
++        emission (cond-> (repl/entity-emission unit) errors (assoc :seon.repl/errors errors))
++        reply (repl/reply-text emission (= :newest age))
+         handle (:seon.repl/handle emission)
+         tokens (some-> reply tokens/estimate)
+-        reference (when (and (= :older age) handle tokens (> tokens limit))
++        reference (when (and (= :older age) handle tokens (> tokens (:seon.config.context/reference-tokens basis)))
+                     {:seon.repl/handle handle :seon.context/reply-tokens tokens
+                      :seon.render/operations [(list 'get-in handle [])]})]
+-    (cond-> {:seon.ai/form (repl/input-text emission)}
++    (cond-> {:seon.ai/form (repl/input-text emission) :seon.context/age age}
+       reference (assoc :seon.ai/reply (value/core-text reference) :seon.context/reference reference)
+       (and reply (not reference)) (assoc :seon.ai/reply reply))))
+ 
+-(defn exchange-text
+-  "One exchange unit as the REPL printed it: its form, then its reply when it has one."
+-  {:malli/schema [:=> [:cat :seon.context/exchange-unit] :string]}
+-  [{form :seon.ai/form reply :seon.ai/reply}]
+-  (cond-> form reply (str "\n" reply)))
++(defn evaluation-ai
++  "`:seon.render/ai` of :seon.cluster.eval/receipt: one evaluation as the REPL session shows it at its position
++  (`evaluation-unit`), its form then its reply; with the option `:seon.repl/input?` false its reply alone, empty when
++  it settled nothing, as a model pass sends the agent's own forms apart. Nil for a unit that is not an evaluation."
++  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
++  [unit]
++  (when (seq (:seon.cluster.eval/source (if (map? (:seon.render/value unit)) (:seon.render/value unit) unit)))
++    (let [{form :seon.ai/form reply :seon.ai/reply} (evaluation-unit unit)]
++      (if (false? (get-in unit [:seon.render/options :seon.repl/input?]))
++        (or reply "")
++        (cond-> form reply (str "\n" reply))))))
+ 
+ (defn code-html
+   "`text` as `[:code ...]`, its tokens colored by the REPL's lossless lexer (`seon.repl/syntax-spans`)."
+@@ -912,7 +950,7 @@
+ 
+ (defn- cost-badge
+   "The evaluation's stored cost, its wall milliseconds, allocated megabytes and calls; nil when none was stored."
+-  {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :seon.render/hiccup]]}
++  {:malli/schema [:=> [:cat :map] [:maybe :seon.render/hiccup]]}
+   [{ms :seon.eval/duration-ms allocated :seon.eval/allocated-bytes calls :seon.cluster.eval/call-count}]
+   (when (or ms allocated calls)
+     [:span {:class "seon-sent-tokens seon-sent-cost"}
+@@ -930,7 +968,7 @@
+ (defn- reply-html
+   "The reply of exchange unit `sent`: whole, with a count of the value printer's cuts in it, or by reference when it
+   was over `limit` tokens: its handle, its size and the form that reads it whole."
+-  {:malli/schema [:=> [:cat :seon.context/exchange-unit :seon.config.context/reference-tokens] :seon.render/hiccup]}
++  {:malli/schema [:=> [:cat :seon.context/exchange-unit [:maybe :seon.config.context/reference-tokens]] :seon.render/hiccup]}
+   [{reply :seon.ai/reply reference :seon.context/reference} limit]
+   (let [shown (code-html (or reply ""))
+         cuts (cut-count shown)]
+@@ -948,17 +986,21 @@
+               (:seon.render/operations reference))])
+      (when reply [:pre {:class "seon-sent-text"} shown])]))
+ 
+-(defn exchange-html
+-  "`:seon.render/html` of :seon.context/exchange: its AI face (`exchange-ai`) as the page shows it, the form as sent
+-  with its stored cost beside the REPL's reply, every cut named."
+-  {:malli/schema [:=> [:cat :seon.context/exchange] :seon.render/hiccup]}
+-  [{emission :seon.context/emission age :seon.context/age limit :seon.config.context/reference-tokens :as exchange}]
+-  (let [{form :seon.ai/form :as sent} (exchange-ai exchange)]
+-    [:div {:class "seon-sent-pair" :data-age (name age)}
+-     [:div {:class "seon-sent-form"}
+-      [:div {:class "seon-sent-label"} [:span "form"] (token-badge form) (cost-badge emission)]
+-      [:pre {:class "seon-sent-text"} (code-html form)]]
+-     (reply-html sent limit)]))
++(defn evaluation-html
++  "`:seon.render/html` of :seon.cluster.eval/receipt: the evaluation as the REPL session shows it at its position
++  (`evaluation-unit`, what `evaluation-ai` prints), the form as sent with its stored cost beside the REPL's reply,
++  every cut named. Nil for a unit that is not an evaluation."
++  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/hiccup]]}
++  [unit]
++  (let [evaluation (if (map? (:seon.render/value unit)) (:seon.render/value unit) unit)]
++    (when (seq (:seon.cluster.eval/source evaluation))
++      (let [{form :seon.ai/form age :seon.context/age :as sent} (evaluation-unit unit)]
++        [:div {:class "seon-sent-pair" :data-age (name age)}
++         [:div {:class "seon-sent-form"}
++          [:div {:class "seon-sent-label"} [:span "form"] (token-badge form) (cost-badge evaluation)]
++          [:pre {:class "seon-sent-text"} (code-html form)]]
++         (reply-html sent (get-in unit [:seon.render/options :seon.context/exchange-basis
++                                        :seon.config.context/reference-tokens]))]))))
+ 
+ (defn- dials
+   "The effective configuration of the cluster `database` belongs to (`seon.config/effective`)."
+@@ -981,23 +1023,13 @@
+         (cond-> {:seon.config.context/reference-tokens (:seon.config.context/reference-tokens effective)}
+           (seq runs) (assoc :seon.context/newest-run (first (apply max-key second runs)))))))
+ 
+-(defn exchange
+-  "Evaluation `emission` of run `run` as :seon.context/exchange under `basis` (`exchange-basis`): its age
+-  (`exchange-age`, `model-run?` when the run carried a model attempt) and the reference dial."
+-  {:malli/schema [:=> [:cat :seon.context/exchange-basis :seon.repl/emission [:maybe :seon.turn/id] :boolean]
+-                  :seon.context/exchange]}
+-  [basis emission run model-run?]
+-  {:seon.context/emission emission
+-   :seon.context/age (exchange-age run model-run? (:seon.context/newest-run basis))
+-   :seon.config.context/reference-tokens (:seon.config.context/reference-tokens basis)})
+-
+-(defn exchange-values
+-  "The agent's own model exchanges in agent order, one vector per call row carrying a model attempt, each evaluation
+-  as :seon.context/exchange: the newest exchange, and the older ones (`exchange-age`). An exchange's form is decided
+-  once, when it stops being the newest, so every request of an attempt starts with the previous one but its last
+-  message (the provider's cached prefix)."
++(defn model-exchanges
++  "The agent's own model exchanges in agent order under their basis: `:seon.context/evaluations`, one vector per call
++  row carrying a model attempt of its evaluations as pulled (`exchange-selector`), and the `:seon.context/exchange-basis`
++  that ages them. An exchange's form is decided once, when it stops being the newest, so every request of an attempt
++  starts with the previous one but its last message (the provider's cached prefix)."
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.config/effective]
+-                  [:or [:vector [:vector :seon.context/exchange]] :seon.error/value]]}
++                  [:or :seon.context/model-exchanges :seon.error/value]]}
+   [database agent-id effective]
+   (let [evaluations (seon.eval/of-agent database agent-id exchange-selector)]
+     (if (:seon.error/at evaluations)
+@@ -1005,13 +1037,25 @@
+       (let [runs (->> evaluations
+                       (filter #(seq (get-in % [:seon.cluster.eval/run :seon.turn/attempts])))
+                       (partition-by #(get-in % [:seon.cluster.eval/run :seon.turn/id]))
+-                      vec)
+-            run-id #(get-in % [:seon.cluster.eval/run :seon.turn/id])
+-            basis (cond-> {:seon.config.context/reference-tokens (:seon.config.context/reference-tokens effective)}
+-                    (seq runs) (assoc :seon.context/newest-run (run-id (first (peek runs)))))]
+-        (mapv (fn [run]
+-                (mapv #(exchange basis (repl/entity-emission (assoc % :seon.db/db database)) (run-id %) true) run))
+-              runs)))))
++                      (mapv vec))]
++        {:seon.context/evaluations runs
++         :seon.context/exchange-basis
++         (cond-> {:seon.config.context/reference-tokens (:seon.config.context/reference-tokens effective)}
++           (seq runs) (assoc :seon.context/newest-run (get-in (peek runs) [0 :seon.cluster.eval/run :seon.turn/id])))}))))
++
++(defn- sent-unit
++  "Evaluation `evaluation` as a model pass sends it: the form the agent wrote (`seon.repl/input-text`), and its reply as
++  the value printer prints it (`seon.sci.eval/shown-result`) under `request` and its exchange `basis`, absent when it
++  settled nothing."
++  {:malli/schema [:=> [:cat :seon.sci.eval/shown-request :seon.context/exchange-basis :map]
++                  [:map [:seon.ai/form :seon.ai/form] [:seon.ai/reply {:optional true} :seon.ai/reply]]]}
++  [request basis evaluation]
++  (let [reply (:seon.eval/shown (sci.eval/shown-result
++                                 evaluation
++                                 (assoc request :seon.render/options {:seon.context/exchange-basis basis :seon.repl/input? false})
++                                 nil))]
++    (cond-> {:seon.ai/form (repl/input-text (repl/entity-emission (assoc evaluation :seon.db/db (:seon.db/db request))))}
++      (seq reply) (assoc :seon.ai/reply reply))))
+ 
+ (defn model-context
+   "What one model pass sends, as shown text.
+@@ -1024,7 +1068,7 @@
+   [database request agent-id]
+   (let [request (assoc request :seon.db/db database :seon.agent/id agent-id)
+         effective (dials database)
+-        history (if (:seon.error/at effective) effective (exchange-values database agent-id effective))
++        history (if (:seon.error/at effective) effective (model-exchanges database agent-id effective))
+         block (current-state database agent-id)
+         profile (seon.render/request-profile request)
+         shown #(sci.eval/shown-result %1 %2 nil)
+@@ -1048,5 +1092,8 @@
+              (assoc :seon.cluster.eval/diagnostics (:seon.cluster.eval/diagnostics system)))))
+         {:seon.ai/system (cond-> (:seon.eval/shown system)
+                            (seq head) (str "\n\n" (:seon.eval/shown (shown head request))))
+-         :seon.context/exchanges (mapv #(mapv exchange-ai %) history)
++         :seon.context/exchanges (let [{runs :seon.context/evaluations basis :seon.context/exchange-basis} history]
++                                   (mapv (fn [run] (mapv #(sent-unit request basis %) run)) runs))
++         :seon.context/evaluations (:seon.context/evaluations history)
++         :seon.context/exchange-basis (:seon.context/exchange-basis history)
+          :seon.ai/prompt (:seon.eval/shown (shown tail request))})))
+diff --git a/src/seon/render.clj b/src/seon/render.clj
+index 41882d00f..3450cc951 100644
+--- a/src/seon/render.clj
++++ b/src/seon/render.clj
+@@ -205,6 +205,8 @@
+                               :seon.render.value/root
+                               :seon.render.data/cursor
+                               :seon.render.walk/attribute
++                              ;; the viewer's render options, each read by the render that declares it
++                              :seon.render/options
+                               :seon.ai/partial
+                               ;; the symbols the form being shown defines (the Var render's)
+                               :seon.render.var/defining
