@@ -1,7 +1,7 @@
 ---
 title: "Context self-improvement loop: fewer model turns per task, measured on a benchmark that cannot be gamed"
 type: research
-status: proposal for the owner, 2026-10-16
+status: owning plan, 2026-10-16 (recursive goal set by the owner)
 ---
 
 # Context self-improvement loop
@@ -43,8 +43,12 @@ enforce that? Lets try self audits from gemini flash so we get an outside perspe
 1. **Measure.** Run the train set at the current HEAD, n = 5 per task, plus 5 more where a cell is near the
    threshold. The grade per run is calls to green (a capped run counts as cap + 1), green share, tokens, and wasted
    forms by class.
-2. **Mine.** Classify every model form of the run from the kept branches, using the `context-patterns` classifier
-   promoted to code. Rank the waste classes by turns lost.
+2. **Mine.** Read every evaluation of the run from the kept branches as of its time: the value, the selected render,
+   the printed tokens and cuts, and the agent's next form. Charge a wasted turn to a render or a printer cut when the
+   next form follows the elision form or reads the same handle, or when the agent calls `doc`, `source` or a requery
+   on what it was just shown. Add render errors and text-returning renders (the render bench's signals), and classify
+   the rest with the `context-patterns` classifier promoted to code. Rank causes by wasted turns × frequency. The
+   values agents actually saw become the render bench's pinned samples (`render-bench/`), weighted by frequency.
 3. **Hypothesise.** Root writes one change at the producer of the top class, plus its predicted turns saved.
    - The producer is help, a render function, a docstring, a contract message, a dial default or a template.
    - The change must be general: it states the class of situation it helps, never a task.
@@ -61,6 +65,34 @@ enforce that? Lets try self audits from gemini flash so we get an outside perspe
 
 Every K = 5 accepted changes, a **separate lane** runs the held-out test set and reports only aggregates. Root never
 sees per-task output from it (below).
+
+## Recursive: Seon improves Seon
+
+Owner, 2026-10-16: "I want recursive self improvement. That's the goal." The loop above is the first stage: root
+optimises and lanes build. It becomes recursive in three steps. Each step happens only when the previous one beats its
+predecessor on the held-out set.
+
+1. **The fixes are Seon tasks.** Each ranked cause becomes a task through `seon.task/chain!`, one per render or
+   producer, so the lanes are file-disjoint. Its proofs are the render bench row on the pinned real samples (no cut,
+   cost within its budget) plus a test of the information the agent needed. DeepSeek chains work them, and root's
+   ordinary merge accepts them. General printer changes stay with our lanes. The agents fixing the context work
+   inside the context they are fixing, and their own runs are mined in the next round.
+2. **The loop's machinery is in scope.** The miner, the ranker, the task template that turns a cause into a task, help
+   and the step templates are ordinary Seon code and data. A change to them is measured exactly like a context change:
+   turns per task on the held-out set at the next round.
+3. **Seon agents optimise.** A Seon chain takes over the hypothesise step: read the ranked causes, write the change
+   and its predicted saving. Root keeps only acceptance, which is the measured rule, and the owner-gated items under
+   "Separation of duties".
+
+Fixed points, which no optimiser changes:
+- the grader;
+- the held-out set and its hash;
+- the leak test;
+- the call cap and the model;
+- the CLAUDE.md laws.
+
+A gain counts only on chains the change was not tuned on, split by chain, never by step. A render that shows nothing
+gets no cuts, so the dig rate on the next round's replays is the counter-metric that catches it.
 
 ## The benchmark
 
@@ -153,8 +185,9 @@ iteration 1 with a real before/after number.
    simpler train/test 50/50 with root seeing test aggregates only.
 2. **Audit rationing.** One Flash-high audit per accepted change (recommended, about 1-2% weekly each; quota is 22% now),
    or batch audits every 5 changes to stretch the quota.
-3. **Who optimises.** Root (me) between runs, with lanes building (recommended to start), or a dedicated optimiser lane
-   with root accepting. Either way, acceptance stays a measured rule, not a judgement.
+3. **Who optimises.** Decided (owner, 2026-10-16: recursive self-improvement is the goal): root optimises first, with
+   lanes and DeepSeek chains building, and a Seon chain takes over the hypothesise step once it beats root on held-out
+   (see "Recursive: Seon improves Seon"). Acceptance is always the measured rule, never a judgement.
 4. **Budget.** Proposed: up to US$2 of DeepSeek per day of loop work (about 1,300 runs), and stop if a day's changes
    show no held-out gain.
 
