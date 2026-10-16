@@ -556,11 +556,14 @@
       rows
       (let [shown (into [] (comp (remove #(= agent-id (get-in % [:seon.task/agent :seon.agent/id])))
                                  (map (fn [row]
+                                        ;; an earlier attempt's agent lived on its own branch; once that branch is
+                                        ;; gone its row names no agent this value holds, and its calls are unknown here
                                         (let [earlier (get-in row [:seon.task/agent :seon.agent/id])
-                                              usage (model-usage database earlier)
-                                              step (last-step database earlier)]
+                                              usage (when earlier (model-usage database earlier))
+                                              step (when earlier (last-step database earlier))]
                                           (or (some #(when (:seon.error/at %) %) [usage step])
-                                              (cond-> (assoc (dissoc row :seon.task/agent :db/id) :seon.task/calls (:seon.task/calls usage))
+                                              (cond-> (dissoc row :seon.task/agent :db/id)
+                                                usage (assoc :seon.task/calls (:seon.task/calls usage))
                                                 step (assoc :seon.context/last-step step)))))))
                         (sort-by :seon.task.attempt/number rows))]
         (or (some #(when (:seon.error/at %) %) shown) shown)))))

@@ -404,3 +404,11 @@
     (is (= (:source (my.program/source database 'seon.ref/locate))
            (:source (my.program/source database {:seon.ref/name 'seon.ref/locate :seon.ref/at commit})))
         "my.program/source reads a versioned subject at its commit")))
+
+(deftest a-test-var-cited-at-its-doc-answers-a-map
+  ;; seon.ref/a-test-citation-at-doc-level-answers-nil: a deftest Var the branch holds no row for, cited at its doc,
+  ;; has no docstring and no arglists; it answers its read form, never nil
+  (let [found (#'ref/at-level (db/db) 'seon.ref-test/a-citation-ending-in-a-wildcard-is-prose :doc)]
+    (is (map? found))
+    (is (= [(list 'clojure.repl/source 'seon.ref-test/a-citation-ending-in-a-wildcard-is-prose)]
+           (:seon.render/operations found)))))

@@ -237,7 +237,7 @@
                              "root's pass merges the merge step's branch")
                          (is (= (shared-source 3) (source-of main)) "main holds the resolution: its own version")
                          (is (:db/id (db/pull main [:db/id] [:seon.test/sym (symbol (str proofs-ns) "proves-new")]))
-                             "and the chain's covered change"))))
+                             "the merge step's merge carries the chain's own declaration (S5, 2026-10-15: never :merged without it)"))))
                    (finally
                      (doseq [kept (remove before (#'seon.cluster.db-flow-test/merge-branches store))]
                        (#'seon.cluster.db-flow-test/release-chain! routing store kept))

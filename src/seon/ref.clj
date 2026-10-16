@@ -584,7 +584,9 @@
       (if (= :doc level) ((requiring-resolve 'seon.sci.lookup/function-documentation) database reference) (source))
       :else
       (if-let [{:keys [doc arglists] pin :seon.ref/pin} (library-definition reference)]
-        (cond-> (merge (when doc (docstring doc)) (when arglists {:arglists arglists}))
+        ;; a Var with neither docstring nor arglists (a deftest's) is still its read form, never nothing
+        (cond-> (or (merge (when doc (docstring doc)) (when arglists {:arglists arglists}))
+                    {:seon.render/operations [(list 'clojure.repl/source reference)]})
           pin (assoc :seon.ref/pin pin)
           (= :code level) (assoc :seon.render/operations [(list 'clojure.repl/source reference)]))
         unresolved))))

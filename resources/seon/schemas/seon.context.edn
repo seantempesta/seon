@@ -34,7 +34,7 @@
                          [:seon.task.attempt/end {:optional true} :seon.task.attempt/end]
                          [:seon.task/outcome {:optional true} :seon.task/outcome]
                          [:seon.task/reason {:optional true} :seon.task/reason]
-                         [:seon.task/calls :seon.task/calls]
+                         [:seon.task/calls {:optional true :description "Absent when the attempt's agent is on a branch the store no longer holds."} :seon.task/calls]
                          [:seon.context/last-step {:optional true} :seon.context/last-step]]
                :last-step [:string {:min 1 :description "The last step an earlier attempt's agent took: its last my.turn/wait note, else the prose it wrote with its last form, else that form's source. Producer: seon.context/last-step."}]
                :attempts [:vector {:description "The held task's attempts by other agents, by number; absent when none. Producer: seon.context/earlier-attempts."} :seon.context/attempt]
