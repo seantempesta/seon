@@ -92,6 +92,10 @@ nothing beyond the work we were doing anyway, and the signal accumulates with ev
   does not fall.
 - A render that hides everything gets no cuts, but the dig rate on later runs catches it.
 
+**Experiments that should not land.** A chain started with `{:seon.chain/merge? false}` (017a250e0, TASK-CHAIN §2.1)
+ends at its last task's done with its branch kept and nothing merged. It is for a risky idea, or exploration a chat
+spins off: its steps are mined like any other, and main and the repository stay unchanged.
+
 ## Recursive: Seon improves Seon
 
 Owner, 2026-10-16: "I want recursive self improvement. That's the goal." The loop above is the first stage: root
