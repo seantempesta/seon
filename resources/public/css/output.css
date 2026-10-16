@@ -2057,6 +2057,100 @@
     gap: 0.35rem;
   }
 }
+.seon-turn {
+  display: grid;
+  gap: 0.4rem;
+}
+.seon-turn > p {
+  margin: 0;
+  color: var(--color-text-400);
+  font-size: 0.66rem;
+}
+.seon-turn-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 1rem;
+}
+.seon-turn-header h3 {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-50);
+}
+.seon-turn-header dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.9rem;
+  margin: 0;
+  font-size: 0.66rem;
+}
+.seon-turn-header dt {
+  color: var(--color-text-500);
+}
+.seon-turn-header dt::after {
+  content: ":";
+}
+.seon-turn-header dd {
+  margin: 0 0 0 -0.6rem;
+  color: var(--color-text-200);
+}
+.seon-turn .seon-transcript-entry {
+  max-width: 100%;
+  padding: 0.3rem 0.5rem;
+  border-left: 2px solid var(--color-base-700);
+  border-bottom: 0;
+  background: var(--color-base-900);
+}
+.seon-turn .seon-transcript-entry pre {
+  margin: 0;
+  font-size: 0.7rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.seon-emission-bytes .seon-syntax-plain, .seon-emission-bytes .seon-syntax-space {
+  color: var(--color-text-200);
+}
+.seon-eval-step {
+  display: grid;
+  gap: 0.2rem;
+}
+.seon-eval-costs, ul.seon-test-step {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.9rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.64rem;
+}
+.seon-eval-cost {
+  color: var(--color-text-400);
+  font-variant-numeric: tabular-nums;
+}
+p.seon-test-step {
+  margin: 0;
+  font-size: 0.64rem;
+  color: var(--color-text-500);
+}
+.seon-test-green {
+  color: var(--color-success);
+}
+.seon-test-red {
+  color: var(--color-error);
+}
+.seon-test-pending, .seon-test-running {
+  color: var(--color-warning);
+}
+.seon-test-step code {
+  color: inherit;
+}
+.seon-test-failure {
+  flex-basis: 100%;
+  color: var(--color-error);
+  white-space: pre-wrap;
+}
 .seon-print-root, .seon-print-node {
   color: var(--color-text-200);
   font-family: var(--font-mono);

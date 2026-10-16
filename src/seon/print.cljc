@@ -738,12 +738,19 @@
   (let [options (effective-options options)]
     (ops-text (node-ops node options) (::width options))))
 
+(defn- open-root
+  "`hiccup` with its root collection's disclosure open: a value shows its first level, not only its summary;
+  nested collections stay collapsed."
+  {:malli/schema [:=> [:cat :seon.render/hiccup] :seon.render/hiccup]}
+  [hiccup]
+  (cond-> hiccup (and (vector? hiccup) (= :details (first hiccup))) (assoc-in [1 :open] true)))
+
 (defn emit-hiccup
   "Emit one admitted node as structural hiccup."
   {:malli/schema
    [:=> [:cat :seon.print/node :seon.print/options] :seon.render/hiccup]}
   [node options]
-  (ops-hiccup (node-ops node (effective-options options))))
+  (open-root (ops-hiccup (node-ops node (effective-options options)))))
 
 (defn emit-both
   "Emit text and hiccup from one operation stream."
@@ -753,7 +760,7 @@
   (let [options (effective-options options)
         ops (node-ops node options)]
     {::text (ops-text ops (::width options))
-     ::hiccup (ops-hiccup ops)}))
+     ::hiccup (open-root (ops-hiccup ops))}))
 
 (defn- scalar-node-value
   [node]

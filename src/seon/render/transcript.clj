@@ -459,6 +459,9 @@
   (str/join "\n\n" (map ::text entries)))
 
 (defn- html-entries
+  "The transcript's entries as an ordered list: an evaluation or message as its exact REPL text, colored by the
+  REPL's lossless lexer (`seon.repl/syntax-spans`), an attempt as its reasoning disclosure."
+  {:malli/schema [:=> [:cat [:sequential :map]] :seon.render/hiccup]}
   [entries]
   (into
    [:ol {:class "seon-transcript-list"}]
@@ -474,7 +477,7 @@
                  (assoc :data-transcript-error "true"))
            (if (= :attempt (::kind entry))
              (reasoning-disclosure (::reasoning entry))
-             [:pre [:code (::text entry)]])]))
+             [:pre [:code {:class "seon-emission-bytes"} (repl/syntax-spans (::text entry))]])]))
    entries))
 
 (defn- html-output

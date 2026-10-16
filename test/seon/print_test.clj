@@ -273,7 +273,9 @@
     (is (every? (fn [[_ _ & children]]
                   (some #(and (string? %) (not (str/blank? %))) children))
                 summaries)
-        "every print summary owns a visible label without CSS")))
+        "every print summary owns a visible label without CSS")
+    (is (= [true nil nil] (mapv #(get-in % [1 :open]) (filter #(and (vector? %) (= :details (first %))) (tree-seq sequential? seq hiccup))))
+        "the root collection opens and its children stay collapsed")))
 
 (defn- emitted-both
   "Emit one value through the operation stream WITHOUT the public node contract.
