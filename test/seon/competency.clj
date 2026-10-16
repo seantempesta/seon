@@ -7,11 +7,10 @@
   `table` folds grades per task and variant; `compare-tables` applies the noise rule between two tables."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.string :as str]
             [datahike.api :as d]
-            [edamame.core :as edamame]
             [seon.db :as db]
             [seon.id :as id]
+            [seon.mine :as mine]
             [seon.task :as task]))
 
 (def setups
@@ -67,72 +66,6 @@
   {:malli/schema [:function [:=> [:cat] [:vector :map]] [:=> [:cat :string] [:vector :map]]]}
   ([] (bench-set "seon/competency/bench-v1.edn"))
   ([resource] (edn/read-string (slurp (io/resource resource)))))
-
-;;; CLASSES: what each model form of a run did, read from its stored source and error (context-patterns.md §3).
-
-(def ^:private read-heads
-  '#{source doc find-doc clojure.repl/source clojure.repl/doc my.program/source my.program/doc my.task/current
-     seon.context/current-state})
-
-(def ^:private search-heads
-  '#{dir apropos clojure.repl/dir clojure.repl/apropos my.program/search my.program/callers my.program/ns-decls
-     ns-publics ns-interns all-ns seon.db/q seon.db/pull})
-
-(def ^:private progress-heads
-  '#{def defn defn- defmacro defmulti defmethod deftest clojure.test/deftest seon.schema/register!
-     my.program/ns-unmap! my.program/remove-ns! my.program/write-branch! my.task/update! my.edit/text})
-
-(def ^:private wait-heads '#{my.turn/wait my.task/send-back! my.message/send})
-
-(def productive
-  "The form classes that move a run forward; a model call holding none of them is a wasted call."
-  #{:read :probe :progress :wait})
-
-(defn- form-head
-  "The operator symbol of the one form `source` holds and whether it is a bare `(ns x)`, read with edamame; nil when
-  it reads as no list."
-  {:malli/schema [:=> [:cat :string] [:maybe [:tuple :symbol :boolean]]]}
-  [source]
-  (let [form (try (edamame/parse-string source {:all true :auto-resolve (fn [ns-alias] (if (= :current ns-alias) 'user ns-alias))
-                                                :readers (fn [_tag] identity)})
-                  (catch Exception _ nil))]
-    (when (and (seq? form) (symbol? (first form)))
-      [(first form) (= 2 (count form))])))
-
-(defn- error-class
-  "The class of a form's stored error text: an unresolved name, a contract refusal of its call shape, or another
-  error. The evaluation stores its error as text only, so the text is all there is to read."
-  {:malli/schema [:=> [:cat :string] [:enum :unresolved :contract-refusal :error]]}
-  [error]
-  (cond (some #(str/includes? error %) ["Unable to resolve symbol" "Could not find namespace" "No such namespace"
-                                        "No such var"]) :unresolved
-        (str/includes? error " refused ") :contract-refusal
-        :else :error))
-
-(defn classify
-  "Each of `evaluations` (stored model forms in writer order, `:seon.cluster.eval/source` and maybe `/error`) with its
-  `:seon.competency/class`: an error's class; `in-ns` or a bare `ns` is navigation; a read of source or doc is a read,
-  or a re-read when the same form ran before; a search (a hand query of the database included); a definition is
-  progress; a wait or send-back ends the turn;
-  any other form repeated exactly is a repeat, else a probe."
-  {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
-  [evaluations]
-  (first
-   (reduce (fn [[out seen] {source :seon.cluster.eval/source error :seon.cluster.eval/error :as evaluation}]
-             (let [text (str/trim (or source ""))
-                   [head bare?] (form-head text)
-                   again? (contains? seen text)
-                   form-class (cond (string? error) (error-class error)
-                               (or (= 'in-ns head) (and (= 'ns head) bare?)) :navigation
-                               (read-heads head) (if again? :re-read :read)
-                               (search-heads head) (if again? :repeat :search)
-                               (or (progress-heads head) (= 'ns head)) :progress
-                               (wait-heads head) :wait
-                               again? :repeat
-                               :else :probe)]
-               [(conj out (assoc evaluation :seon.competency/class form-class)) (conj seen text)]))
-           [[] #{}]
-           evaluations)))
 
 ;;; GRADE: one attempt, read on the branch it worked on, from its end facts.
 
@@ -195,7 +128,7 @@
         ended (read! (db/pull database [:seon.agent/end-green :seon.agent/end-red :seon.agent/end-pending]
                               [:seon.agent/id agent-id]))
         calls (model-calls database agent-id)
-        evaluations (classify (model-evaluations database agent-id))
+        evaluations (mine/classify (model-evaluations database agent-id))
         by-call (group-by #(get-in % [:seon.cluster.eval/run :db/id]) evaluations)
         end (:seon.task.attempt/end row)
         green? (= :done end)
@@ -212,8 +145,8 @@
                                             :seon.agent/end-pending :pending})
              :seon.competency/model-calls (count calls)
              :seon.competency/forms (count evaluations)
-             :seon.competency/classes (frequencies (map :seon.competency/class evaluations))
-             :seon.competency/wasted-calls (count (remove #(some (comp productive :seon.competency/class) (by-call (:db/id %)))
+             :seon.competency/classes (frequencies (map :seon.mine/class evaluations))
+             :seon.competency/wasted-calls (count (remove #(some (comp mine/productive :seon.mine/class) (by-call (:db/id %)))
                                                           calls))
              :seon.competency/no-form-calls (count (remove #(by-call (:db/id %)) calls))
              :seon.competency/agent-errors (count (filter :seon.cluster.eval/error evaluations))

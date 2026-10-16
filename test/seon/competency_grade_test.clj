@@ -10,6 +10,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.flow :as flow]
+            [seon.mine :as mine]
             [seon.batch]
             [seon.sci.eval :as sci.eval]
             [seon.turn.world :as world]
@@ -23,7 +24,7 @@
                    :seon.flow/plan :seon.agent/test-wake)
   nil)
 
-(defn- release-chain!
+(defn release-chain!
   "Stop the graphs db<->flow started on chain `branch` under `routing`, release their executions, retire the branch."
   {:malli/schema [:=> [:cat :seon.agent/routing :seon.store/store :seon.chain/branch] :nil]}
   [routing store branch]
@@ -37,7 +38,7 @@
   (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
   nil)
 
-(defn- with-root
+(defn with-root
   "Call `body` with a cluster handle over `connection`, the executing member's own cluster with root homed on it,
   as boot arms root's."
   {:malli/schema [:=> [:cat :seon.db/connection [:=> [:cat :seon.agent/context-source] :seon.schema/value]] :seon.schema/value]}
@@ -68,41 +69,44 @@
                           :seon.task/proofs #{'bench.fixture-proofs/proves-it}}
    :seon.competency/oracle "(in-ns 'bench.fixture-proofs)\n(clojure.test/deftest proves-it (clojure.test/is (= 1 1)))"})
 
-(defn- launched
+(defn launched
   "The grades of `runs` fixture-model runs of `fixture-task` launched on `handle`'s cluster, its proof defined red
-  first, the model answering its oracle, while a thread runs db<->flow passes as root's proc would on each wake."
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection pos-int?] [:vector :map]]}
-  [handle connection runs]
-  (support/transacted! connection (support/agent-tx (db/db connection) "bench-author" 'user))
-  (support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name (:seon.cluster/name handle)
-                                 :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
-                                                                               (db/db connection) connection)
-                                 :seon.batch/sink (seon.batch/sink)
-                                 :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
-                                 :seon.agent/id "bench-author"})
-                   'bench.fixture-proofs
-                   "(clojure.test/deftest proves-it (clojure.test/is (= 1 2)))\n")
-  (support/with-provider
-   (atom []) (constantly (:seon.competency/oracle fixture-task))
-   (fn [server]
-     (let [done (async/promise-chan)
-           ;; root's proc, woken by each chain's writes in a running cluster; a fixture cluster runs none
-           root (async/thread (loop [] (when-not (async/poll! done) (pass! handle) (Thread/sleep 100) (recur)))
-                              ::root-stopped)]
-       (try
-         (competency/launch!
-          {:seon.db/connection connection :seon.store/store (agent/handle-store handle)
-           :seon.competency/tasks [fixture-task]
-           :seon.competency/variants
-           [{:seon.competency/variant :fixture
-             :seon.chain/config (assoc (support/provider-config server)
-                                       :seon.config.ai/no-provider config/absent
-                                       :seon.config.run/max-episode-runs 3)}]
-           :seon.competency/runs runs :seon.competency/poll-ms 100
-           :seon.competency/deadline-ms 50000})
-         (finally
-           (async/put! done true)
-           (support/await-event! root ::root-stopped)))))))
+  first, the model answering each request with `answer` (default: its oracle), while a thread runs db<->flow passes
+  as root's proc would on each wake."
+  {:malli/schema [:function [:=> [:cat :seon.agent/context-source :seon.db/connection pos-int?] [:vector :map]]
+                  [:=> [:cat :seon.agent/context-source :seon.db/connection pos-int? [:fn ifn?]] [:vector :map]]]}
+  ([handle connection runs] (launched handle connection runs (constantly (:seon.competency/oracle fixture-task))))
+  ([handle connection runs answer]
+   (support/transacted! connection (support/agent-tx (db/db connection) "bench-author" 'user))
+   (support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name (:seon.cluster/name handle)
+                                  :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
+                                                                                (db/db connection) connection)
+                                  :seon.batch/sink (seon.batch/sink)
+                                  :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                  :seon.agent/id "bench-author"})
+                    'bench.fixture-proofs
+                    "(clojure.test/deftest proves-it (clojure.test/is (= 1 2)))\n")
+   (support/with-provider
+    (atom []) answer
+    (fn [server]
+      (let [done (async/promise-chan)
+            ;; root's proc, woken by each chain's writes in a running cluster; a fixture cluster runs none
+            root (async/thread (loop [] (when-not (async/poll! done) (pass! handle) (Thread/sleep 100) (recur)))
+                               ::root-stopped)]
+        (try
+          (competency/launch!
+           {:seon.db/connection connection :seon.store/store (agent/handle-store handle)
+            :seon.competency/tasks [fixture-task]
+            :seon.competency/variants
+            [{:seon.competency/variant :fixture
+              :seon.chain/config (assoc (support/provider-config server)
+                                        :seon.config.ai/no-provider config/absent
+                                        :seon.config.run/max-episode-runs 3)}]
+            :seon.competency/runs runs :seon.competency/poll-ms 100
+            :seon.competency/deadline-ms 50000})
+          (finally
+            (async/put! done true)
+            (support/await-event! root ::root-stopped))))))))
 
 (deftest ^{:seon.test/long "Two fixture-model chain runs of one task, each a chain fork, its prove pass, one model call and its proof step over db<->flow passes; measured 5.6 s."
            :seon.test/long-ms 20000}
@@ -158,8 +162,8 @@
 
 (deftest forms-are-classed-by-what-they-did
   (is (= [:navigation :read :re-read :probe :repeat :progress :unresolved :contract-refusal :search :wait :progress]
-         (mapv :seon.competency/class
-               (competency/classify
+         (mapv :seon.mine/class
+               (mine/classify
                 (mapv #(hash-map :seon.cluster.eval/source (first %) :seon.cluster.eval/error (second %))
                       [["(in-ns 'comp.geo)"]
                        ["(my.program/source 'comp.geo/area)"]
