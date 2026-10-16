@@ -5,7 +5,8 @@
   loading, or JVM-handler dependency so the edit hook can load it while Seon
   is down."
   (:require [rewrite-clj.zip :as z]
-            [seon.error.refusal :as error]))
+            [seon.error.refusal :as error]
+            [seon.sci.reader :as reader]))
 
 (defn- utf8-bytes
   [text]
@@ -152,19 +153,33 @@
     (if (:my.edit/parse-byte-count parsed)
       (assoc parsed
              :seon.error/message message)
-      (let [locations (top-level-locations (:seon.edit/root parsed))
-            location (first locations)
-            semantic (some-> location location-sexpr)]
-        (if (and (= 1 (count locations)) semantic)
-          {:seon.edit/location location
-           :seon.edit/node (z/node location)
-           :seon.edit/sexpr (:seon.edit/sexpr semantic)}
+      (let [events (reader/read
+                    {:seon.sci.reader/text source
+                     :seon.sci.reader/ns 'user
+                     :seon.config.eval.result/max-source (count source)})
+            unreadable? (if (vector? events)
+                          (boolean (some :seon.sci.reader/error events))
+                          true)]
+        (if unreadable?
           (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/single-form
            {:seon.error/message message
-        :seon.error/offending source
-        :seon.error/data {:seon.edit/form-count (count locations)}
-        :my.edit/parse-byte-count (utf8-bytes source)
-        :seon.error/expected "readable source with the required form count"}))))))
+            :seon.error/offending source
+            :seon.error/data {:seon.edit/form-count 0}
+            :my.edit/parse-byte-count (utf8-bytes source)
+            :seon.error/expected "readable source with the required form count"})
+          (let [locations (top-level-locations (:seon.edit/root parsed))
+                location (first locations)
+                semantic (some-> location location-sexpr)]
+            (if (and (= 1 (count locations)) semantic)
+              {:seon.edit/location location
+               :seon.edit/node (z/node location)
+               :seon.edit/sexpr (:seon.edit/sexpr semantic)}
+              (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/single-form
+               {:seon.error/message message
+                :seon.error/offending source
+                :seon.error/data {:seon.edit/form-count (count locations)}
+                :my.edit/parse-byte-count (utf8-bytes source)
+                :seon.error/expected "readable source with the required form count"}))))))))
 
 (defn single-form?
   "True when `source` is exactly one readable semantic form."
