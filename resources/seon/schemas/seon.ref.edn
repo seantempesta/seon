@@ -61,6 +61,7 @@
                     [:seon.ref/text :string]
                     [:seon.ref/names {:optional true} [:set [:or :seon.ref/name :seon.ref/versioned]]]
                     [:seon.ref/paths {:optional true :description "Held based paths with optional #anchors, each read as a code span is."} [:set [:string {:min 1}]]]
+                    [:seon.ref/code {:optional true :description "Names read at their code level wherever the text cites them, as three backticks ask (the caller's budget decided it)."} [:set :seon.ref/name]]
                     [:seon.ref/document-path {:optional true} :seon.ref/path]
                     [:seon.ref/subject {:optional true} :seon.ref/subject]]
            :problem [:map {:description "A reference that does not resolve, and why."}

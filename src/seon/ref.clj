@@ -695,16 +695,17 @@
 
   Held names come first, sorted, each read where its `:seon.ref/at` names when it is a versioned map (a branch or a
   commit, as a `[name at]` code span asks), then the held paths (each read as a code span is), then the text's in first-seen
-  order: code spans and links, and the prose words that name an entity."
+  order: code spans and links, and the prose words that name an entity. A name in `:seon.ref/code` cited at doc level is read at its code level."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/source]
                   [:vector [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]]}
-  [database {:seon.ref/keys [text names paths document-path subject]}]
+  [database {:seon.ref/keys [text names paths document-path subject code]}]
   (let [roots (set (.list (io/file (fs/source-directory))))
         held (concat (map (fn [reference] (if (map? reference) reference {:seon.ref/name reference})) (sort-by str names))
                      (keep #(span-candidate roots %) (sort paths)))
         found (keep #(candidate roots document-path %) (:seon.ref/spans (document text)))]
     (->> (candidates (concat held (remove #(and subject (= subject (:seon.ref/name %))) found)))
-         (into [] (keep #(answer-at database %)))
+         (into [] (comp (map #(cond-> % (and (= :doc (:seon.ref/level %)) (contains? code (:seon.ref/name %))) (assoc :seon.ref/level :code)))
+                        (keep #(answer-at database %))))
          cite-once)))
 
 (defn names

@@ -186,13 +186,14 @@
 
 (defn- task-references
   "Every reference the held task makes, resolved once on `database` by the one rule (`seon.ref/references`): the
-  names and paths its effective plan and instructions cite and its `proofs`. The tasks it needs are its chain's
+  names and paths its effective plan and instructions cite and its `proofs`, the program functions `code` at their code level. The tasks it needs are its chain's
   steps before it (`chain`)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.context/task [:set :seon.test/sym]]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.context/task [:set :seon.test/sym] [:set :seon.fn/sym]]
                   [:vector [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]]}
-  [database {:seon.task/keys [plan instructions]} proofs]
+  [database {:seon.task/keys [plan instructions]} proofs code]
   (ref/references database {:seon.ref/text (cond-> plan instructions (str "\n\n" instructions))
-                            :seon.ref/names proofs}))
+                            :seon.ref/names proofs
+                            :seon.ref/code code}))
 
 (def ^:private merged-families
   "The key each declaration family a merge moved is shown under, by its identity attribute."
@@ -750,10 +751,31 @@
               (qualified-keyword? reference) (seq (db/datoms database :avet :db/ident reference))
               :else false))))
 
+(defn- dials
+  "The effective configuration of the cluster `database` belongs to (`seon.config/effective`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :seon.config/effective :seon.error/value]]}
+  [database]
+  (config/effective database (db/q '[:find ?n . :where [_ :seon.config/cluster ?n]] database)))
+
+(defn- plan-owners
+  "The program functions the held task's plan cites (`seon.ref/names`) whose stored source is within the reference dial
+  (`:seon.config.context/reference-tokens`): they are read at their code level (`seon.ref/references`,
+  `:seon.ref/code`), so the agent starts from the code it must change. A larger one stays at the level its citation
+  asked for, whose operations read its source."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.context/task] [:set :seon.fn/sym]]}
+  [start {:seon.task/keys [plan]}]
+  (let [owners (when plan (filterv #(seq (db/datoms start :avet :seon.fn/sym %)) (ref/names plan)))
+        limit (when (seq owners) (:seon.config.context/reference-tokens (dials start)))]
+    (if-not (nat-int? limit)
+      #{}
+      (into #{} (filter #(let [source (:seon.fn/source (db/pull start [:seon.fn/source] [:seon.fn/sym %]))]
+                           (and (string? source) (<= (tokens/estimate source) limit))))
+            owners))))
+
 (defn- must-reads
   "The held task's references other than its proofs, read on the attempt's starting value `start`
   (`attempt-start`), each library or namespace-level one at its summary (`seon.ref/brief`, `summary-level?`), a library Var with its pinned
-  revision."
+  revision; a program function its plan cites at doc level at its code level when it is small enough to read at once (`plan-owners`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.context/task [:set :seon.test/sym]]
                   [:vector [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]]}
   [start held proof-names]
@@ -761,7 +783,7 @@
                  (map #(if (summary-level? start %)
                          (merge (ref/brief start (:seon.ref/name %)) (select-keys % [:seon.ref/pin]) {:seon.ref/level :summary})
                          %)))
-        (task-references start held #{})))
+        (task-references start held #{} (plan-owners start held))))
 
 (defn task-sections
   "The held task's sections for `agent-id` on `database`, its branch: the effective task (`seon.task/effective`) by
@@ -993,12 +1015,6 @@
       [:div {:class "seon-sent-label"} [:span "form"] (token-badge form) (cost-badge emission)]
       [:pre {:class "seon-sent-text"} (code-html form)]]
      (reply-html sent limit)]))
-
-(defn- dials
-  "The effective configuration of the cluster `database` belongs to (`seon.config/effective`)."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :seon.config/effective :seon.error/value]]}
-  [database]
-  (config/effective database (db/q '[:find ?n . :where [_ :seon.config/cluster ?n]] database)))
 
 (defn exchange-basis
   "What ages agent `agent-id`'s evaluations on `database` as exchanges: its newest run carrying a model attempt

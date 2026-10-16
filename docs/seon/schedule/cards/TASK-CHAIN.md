@@ -407,6 +407,12 @@ acquires anything. In one shown unit a name appears once, at the strongest level
 later mentions are the name; a nested citation never promotes. A referent's nested references are only the schemas
 its contract names.
 
+**The owner rule.** The block starts the agent from the code, not from a search for it: a program function the task's
+*plan* cites at doc level is shown at code level when its stored source is within `:seon.config.context/reference-tokens`
+(`seon.context/plan-owners`); over the dial it stays its doc, whose operations read the source. Instructions' citations
+(the tools every task names) are not promoted. Live run 7: source reads were 47% of the agents' forms and three chains
+wrote first at form 49 to 90.
+
 **The lead rule.** A section cited for its summary or doc opens with a lead: one CommonMark `Paragraph` that is the
 heading's own next block (tables parse as `TableBlock`, `commonmark-ext-gfm-tables`). With no lead, the structure is the
 fallback, never a line count (owner 2026-10-14 asked for a fallback): the summary is the heading text and the section's

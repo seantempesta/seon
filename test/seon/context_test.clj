@@ -171,9 +171,9 @@
        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
        (let [[names operations] (shown running agent-id
-                                       "(let [reads (:seon.context/must-reads (seon.context/current-state))] [(mapv :seon.ref/name reads) (= :doc (:seon.ref/level (second reads)))])")]
+                                       "(let [reads (:seon.context/must-reads (seon.context/current-state))] [(mapv :seon.ref/name reads) (= :code (:seon.ref/level (second reads)))])")]
          (is (= ['seon.task/agent-task 'seon.task/agent-attempt :seon.task/plan] names))
-         (is (true? operations) "a function cited with one backtick shows its doc"))))))
+         (is (true? operations) "a small function the plan cites shows its source"))))))
 
 (deftest every-reference-a-task-makes-is-in-the-block
   (test-support/with-running-agent
@@ -375,9 +375,29 @@
          (is (= 6 (count reads)) "one must-read per cited name and path")
          (is (not-any? #(and (map? %) (or (contains? % :seon.render/ai) (contains? % :seon.render/html))) (tree-seq coll? seq state))
              "no must-read or proof shows the render keys it is rendered by")
-         (is (= :doc (:seon.ref/level function)) "a function cited with one backtick shows its doc")
-         (is (seq (:arglists function)) "its doc carries its arglists")
+         (is (= :code (:seon.ref/level function)) "a program function the plan cites, within the reference dial, shows its source")
+         (is (string? (:source function)) "its entry carries the source the agent would otherwise read")
          (is (= :summary (:seon.ref/level library)) "a library Var is read at its summary"))))))
+
+(deftest a-plans-small-program-function-shows-its-source-and-a-large-one-its-doc
+  ;; the agent starts writing from the block: the red proof (source, failure) and the owners the plan cites
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (let [_ (test-support/declare-proof! connection 'tq.cs-test 'owners 'tq.cs/owners)
+           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
+                                            :seon.task/name "owners"
+                                            :seon.task/plan "Change `seon.ref/locate`; it is called by `seon.render/render-call`."}))]
+       (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                      :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
+       (let [reads (:seon.context/must-reads (block running agent-id))
+             entry (fn [n] (some #(when (= n (:seon.ref/name %)) %) reads))
+             database (db/db connection)]
+         (is (= (:seon.fn/source (db/pull database [:seon.fn/source] [:seon.fn/sym 'seon.ref/locate])) (:source (entry 'seon.ref/locate)))
+             "the small function the plan cites is its stored source")
+         (is (= :code (:seon.ref/level (entry 'seon.ref/locate))))
+         (is (= :doc (:seon.ref/level (entry 'seon.render/render-call)))
+             "a function over the reference dial stays its doc, whose operations read the rest")
+         (is (nil? (:source (entry 'seon.render/render-call)))))))))
 
 (deftest a-referenced-function-shows-its-doc-view
   ;; TASK-CHAIN §3a: bare is the summary, one backtick `(doc x)`, three or more `(source x)`
@@ -386,7 +406,7 @@
      (let [_ (test-support/declare-proof! connection 'tq.cs-test 'levels 'tq.cs/levels)
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
                                             :seon.task/name "levels"
-                                            :seon.task/plan (str "Start at seon.ref/section. Call `seon.ref/locate`. Read ```seon.ref/docstring``` whole. "
+                                            :seon.task/plan (str "Start at seon.ref/section. Call `seon.render/render-call`. Read ```seon.ref/docstring``` whole. "
                                                                  "Mind `seon.ref/brief`, then ```seon.ref/brief```.\n\n"
                                                                  "```clojure\n(seon.ref/names \"x\")\n```\n")}))]
        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
@@ -400,9 +420,9 @@
              "a bare name is its summary: name, first sentence and the form that reads it")
          (is (= :summary (:seon.ref/level summary)))
          (is (true? (shown running agent-id
-                           (str "(= (doc seon.ref/locate) (dissoc (some #(when (= 'seon.ref/locate (:seon.ref/name %)) %) "
+                           (str "(= (doc seon.render/render-call) (dissoc (some #(when (= 'seon.render/render-call (:seon.ref/name %)) %) "
                                 "(:seon.context/must-reads (seon.context/current-state))) :seon.ref/name :seon.ref/level))")))
-             "a one-backtick name's entry is (doc x)'s value")
+             "a one-backtick name over the reference dial is (doc x)'s value")
          (is (= (:seon.fn/source (db/pull database [:seon.fn/source] [:seon.fn/sym 'seon.ref/docstring])) (:source code))
              "a three-backtick name's entry holds its whole source")
          (is (= [:code] (mapv :seon.ref/level (entries 'seon.ref/brief))) "a name at two levels appears once, at the deeper")

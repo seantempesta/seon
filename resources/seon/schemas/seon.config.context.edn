@@ -1,4 +1,4 @@
 #:seon.config.context{:reference-tokens
                       [:int
                        {:min 0, :seon.config/dial true, :seon.config/default 1500,
-                        :description "Estimated tokens past which a history unit's reply, once it is not the newest, is shown by reference: its result handle, its size and the form that reads it (seon.context/exchange-ai)."}]}
+                        :description "Estimated tokens past which a history unit's reply, once it is not the newest, is shown by reference: its result handle, its size and the form that reads it (seon.context/exchange-ai); also the size within which a program function a task's plan cites is shown by its source (seon.context/plan-owners)."}]}
