@@ -12,7 +12,8 @@
 #                                        live root instead of a throwaway JVM (falls back to the check)
 #   bin/lane commit  LANE -m MSG --test NS... --accept-red-before NS/VAR... PATH...
 #                                        a red bin/seon check still commits when every red var is accepted AND red on HEAD
-#                                        too (`bin/seon check --at HEAD` on those vars); trailer Check-red-before-accepted:
+#                                        too (`bin/seon check --at HEAD` on those vars; trailer Check-red-before-accepted:),
+#                                        or absent on HEAD (a new proof, red by design; trailer Check-new-red-proof:)
 #   bin/lane commit  LANE -m MSG --restart-batch ... PATH...
 #                                        root only, when it has opened a restart batch: without it a commit of deps.edn
 #                                        or a reference-code/ gitlink (dependency or fork bump) is refused
@@ -487,14 +488,19 @@ accepted_reds_gate() {
   for red in $reds; do args+=(--test "$red"); done
   echo "== the accepted reds must be red on HEAD: bin/seon check --at HEAD ${args[*]}"
   SEON_TEST_RESULT_FILE="$head_result" bin/seon check --at HEAD "${args[@]}" > /dev/null 2>&1 && { echo "== the accepted tests pass on HEAD: nothing to accept"; return 2; }
+  # A red test HEAD does not define is a new proof, red by design (proofs are written before the body): accepted.
   bb -e '
-(let [[file & reds] *command-line-args*
-      run (clojure.edn/read-string (slurp file))
-      head-red (set (->> (:seon.test/results run) (filter #(pos? (+ (or (:seon.test/fail-count %) 0) (or (:seon.test/error-count %) 0)))) (map (comp str :seon.test/sym))))
-      green (remove head-red reds)]
-  (binding [*out* *err*] (println "== HEAD run" (:seon.test.run/id run) "red:" (pr-str (sort head-red))))
-  (when (seq green) (binding [*out* *err*] (println "== not red on HEAD:" (pr-str green))) (System/exit 2)))' "$head_result" $reds || return 2
-  printf 'Check-red-before-accepted: %s\n' "$reds" > "$trailer"
+(let [[file trailer & reds] *command-line-args*
+      run (if (.exists (java.io.File. file)) (or (clojure.edn/read-string (slurp file)) {}) {})
+      results (:seon.test/results run)
+      head-run (set (map (comp str :seon.test/sym) results))
+      head-red (set (->> results (filter #(pos? (+ (or (:seon.test/fail-count %) 0) (or (:seon.test/error-count %) 0)))) (map (comp str :seon.test/sym))))
+      new-proofs (remove head-run reds)
+      green (filter #(and (head-run %) (not (head-red %))) reds)]
+  (binding [*out* *err*] (println "== HEAD run" (:seon.test.run/id run) "red:" (pr-str (sort head-red)) "new proofs absent on HEAD:" (pr-str new-proofs)))
+  (when (seq green) (binding [*out* *err*] (println "== not red on HEAD:" (pr-str green))) (System/exit 2))
+  (spit trailer (str (when-let [old (seq (remove (set new-proofs) reds))] (str "Check-red-before-accepted: " (clojure.string/join " " old) "\n"))
+                     (when (seq new-proofs) (str "Check-new-red-proof: " (clojure.string/join " " new-proofs) "\n")))))' "$head_result" "$trailer" $reds || return 2
 }
 
 commit() {
