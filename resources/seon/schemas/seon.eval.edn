@@ -51,7 +51,7 @@
             :value-class [:string {:min 1 :seon.wake/context-inert true :description "The class name of an evaluation's value, which its handle's marker names in a fresh context (after a restart)."}],
             :unstored-note [:string {:min 1 :description "The marker's sentence for a handle bound in a fresh context, which holds no value; never stored."}],
             :full [:boolean {:seon.wake/context-inert true :description "The evaluation opted into printing its value whole (seon.print/full)."}],
-            :outcome [:enum {:seon.wake/context-inert true} :ok :time :error],
+            :outcome [:enum {:seon.wake/context-inert true :description "How the evaluation ended: :ok, :error, or cut by a bound: :time (seon.config.eval/time-limit-ms) or :alloc (seon.config.eval/alloc-limit-bytes)."} :ok :time :alloc :error],
             :shown
             [:string
              {:description

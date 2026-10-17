@@ -68,6 +68,9 @@
 (defn- new-guard
   []
   (let [thread-arm (ThreadLocal.)
+        ;; the adoption extent this thread is in: the adopted arm's entrance
+        ;; counter (its identity) and this thread's allocation at entry
+        thread-adoption (ThreadLocal.)
         interrupt-fn
         (fn []
           (when-let [armed (.get ^ThreadLocal thread-arm)]
@@ -78,19 +81,36 @@
                   ^long allocated-at-start (::allocated-at-start armed)
                   entrance-count (.incrementAndGet entries)]
               (when (.get reached)
-                (vreset! outcome :time)
-                (sci.interrupt/interrupt! "time-limit"))
+                ;; the bound that latched it names the outcome: the
+                ;; allocation bound's own, else the deadline's
+                (when-not @outcome (vreset! outcome :time))
+                (sci.interrupt/interrupt! (if (= :alloc @outcome) "alloc-limit" "time-limit")))
               (when (and (::measurable armed)
-                         (zero? (bit-and entrance-count 1023))
-                         ;; Allocation is a per-thread JVM counter, so only
-                         ;; the owning thread's sample is comparable with
-                         ;; `allocated-at-start`. An adopting thread's
-                         ;; allocation is accumulated by `adopt-arm` instead.
-                         (= (::owner-thread-id armed)
-                            (.threadId (Thread/currentThread))))
-                (aset sampled 0
-                      (long (- (allocated-bytes)
-                               allocated-at-start)))))))
+                         (zero? (bit-and entrance-count 1023)))
+                ;; Allocation is a per-thread JVM counter, so only the owning
+                ;; thread's sample is comparable with `allocated-at-start`.
+                ;; An adopting thread's finished extents are accumulated by
+                ;; `adopt-arm`; its extent in flight is read here, from the
+                ;; entry `adopt-arm` noted for this thread.
+                (let [thread-id (.threadId (Thread/currentThread))
+                      adoption (.get ^ThreadLocal thread-adoption)
+                      in-flight (if (identical? entries (::entries adoption))
+                                  (- (allocated-bytes) (long (::adopted-at adoption)))
+                                  0)]
+                  (when (= (::owner-thread-id armed) thread-id)
+                    (aset sampled 0
+                          (long (- (allocated-bytes)
+                                   allocated-at-start))))
+                  (when-let [limit (::alloc-limit armed)]
+                    (when (>= (+ (aget sampled 0)
+                                 (.get ^AtomicLong (::adopted-allocated-bytes armed))
+                                 in-flight)
+                              (long limit))
+                      ;; one latch for every thread serving the arm: each is
+                      ;; cut at its next entrance, the outcome naming the bound
+                      (when-not @outcome (vreset! outcome :alloc))
+                      (.set reached true)
+                      (sci.interrupt/interrupt! "alloc-limit"))))))))
         host-interop-observer
         (fn []
           (when-let [armed (.get ^ThreadLocal thread-arm)]
@@ -100,6 +120,7 @@
           (when-let [armed (.get ^ThreadLocal thread-arm)]
             (swap! (::built-in-calls armed) conj qualified-symbol)))]
     {::thread-arm thread-arm
+     ::thread-adoption thread-adoption
      ::interrupt-fn interrupt-fn
      ::host-interop-observer host-interop-observer
      ::built-in-call-observer built-in-call-observer}))
@@ -483,14 +504,17 @@
         (throw failure)))))
 
 (defn- own-arm
-  [guard ctx time-limit-ms]
+  [guard ctx time-limit-ms alloc-limit-bytes]
   ;; THE ONE ADMISSION: only an outer execution owns an arm (nested work
   ;; inherits it), so pressure refuses new work and cuts none admitted. The
   ;; unpressured path is one volatile read, before any contracted call.
   (when-let [pressure (and @memory-pressure-state (memory-pressure))]
     (let [refusal (memory-pressure-error pressure)]
       (throw (ex-info (:seon.error/message refusal) refusal))))
-  (deadline-arm guard (assoc (new-armed) ::ctx ctx) time-limit-ms nil))
+  (deadline-arm guard
+                (cond-> (assoc (new-armed) ::ctx ctx)
+                  alloc-limit-bytes (assoc ::alloc-limit alloc-limit-bytes))
+                time-limit-ms nil))
 
 (defn- current-thread-arm
   "The arm installed on this thread, never an arm from a sibling thread."
@@ -498,7 +522,7 @@
   (.get ^ThreadLocal (::thread-arm guard)))
 
 (defn- acquire-arm
-  [ctx time-limit-ms]
+  [ctx time-limit-ms alloc-limit-bytes]
   (let [guard (::guard ctx)]
     (when-not guard
       (throw
@@ -514,7 +538,8 @@
       ;; the smaller of its own and the governing arm's remainder: a smaller
       ;; one gets its own latch and outcome, so it is cut at its own bound
       ;; and the governing arm keeps running; the governing one is never
-      ;; extended.
+      ;; extended. Its allocation counts into the governing arm's total and
+      ;; is bounded by the governing arm's allocation bound.
       (let [^ThreadLocal thread-arm (::thread-arm guard)
             now (System/nanoTime)
             remaining-ns (some-> (::deadline-nanos armed) (- now))]
@@ -533,7 +558,7 @@
                                ::started-at now)
                         time-limit-ms
                         armed)))
-      (own-arm guard ctx time-limit-ms))))
+      (own-arm guard ctx time-limit-ms alloc-limit-bytes))))
 
 (defn arm
   "Arm `ctx` on this thread and return its stop, record, and observers.
@@ -553,12 +578,18 @@
   a value (`current-arm`) and the receiving thread installs it for the extent
   of that work (`adopt-arm`), so a crossing neither escapes the deadline nor
   starts a second one: there is exactly one latch, one entrance total, and
-  one reachable `interrupt!` per armed evaluation, on however many threads."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx
-                       :seon.sci.eval/time-limit-ms]
-                  :map]}
-  [ctx time-limit-ms]
-  (acquire-arm ctx time-limit-ms))
+  one reachable `interrupt!` per armed evaluation, on however many threads.
+
+  An owned arm given `alloc-limit-bytes` is also cut, outcome `:alloc`, once
+  its threads' allocation reaches that many bytes (read every 1,024
+  entrances); nested work counts into it and is bounded by it."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.sci.eval/ctx :seon.sci.eval/time-limit-ms] :map]
+                  [:=> [:cat :seon.sci.eval/ctx :seon.sci.eval/time-limit-ms
+                        [:maybe :seon.config.eval/alloc-limit-bytes]]
+                   :map]]}
+  ([ctx time-limit-ms] (acquire-arm ctx time-limit-ms nil))
+  ([ctx time-limit-ms alloc-limit-bytes] (acquire-arm ctx time-limit-ms alloc-limit-bytes)))
 
 (defn- on-platform-worker
   "`(f)`'s value, or its throw, run on a platform worker of core.async's mixed
@@ -601,17 +632,28 @@
   validating its returned map, before the caller had received `stop!`.
   `work` receives the acquired arm so it can read the diagnostic record and
   built-in observations. Nested work in any context is governed by the
-  smaller of its own limit and the governing arm's remainder (`arm`)."
+  smaller of its own limit and the governing arm's remainder (`arm`), and
+  an owned arm given `alloc-limit-bytes` is cut past that allocation."
   {:malli/schema
-   [:=> [:cat :seon.sci.eval/ctx
-         :seon.sci.eval/time-limit-ms
-         [:fn clojure.core/ifn?]]
-    [:any {:seon.schema.admission/exemption
-           :seon.schema.admission/polymorphic-boundary
-           :seon.schema.admission/reason
-           "The caller's body determines its return type; with-arm preserves that exact result."}]]}
-  [ctx time-limit-ms work]
-  (let [governed #(let [armed (acquire-arm ctx time-limit-ms)]
+   [:function
+    [:=> [:cat :seon.sci.eval/ctx
+          :seon.sci.eval/time-limit-ms
+          [:fn clojure.core/ifn?]]
+     [:any {:seon.schema.admission/exemption
+            :seon.schema.admission/polymorphic-boundary
+            :seon.schema.admission/reason
+            "The caller's body determines its return type; with-arm preserves that exact result."}]]
+    [:=> [:cat :seon.sci.eval/ctx
+          :seon.sci.eval/time-limit-ms
+          [:maybe :seon.config.eval/alloc-limit-bytes]
+          [:fn clojure.core/ifn?]]
+     [:any {:seon.schema.admission/exemption
+            :seon.schema.admission/polymorphic-boundary
+            :seon.schema.admission/reason
+            "The caller's body determines its return type; with-arm preserves that exact result."}]]]}
+  ([ctx time-limit-ms work] (with-arm ctx time-limit-ms nil work))
+  ([ctx time-limit-ms alloc-limit-bytes work]
+  (let [governed #(let [armed (acquire-arm ctx time-limit-ms alloc-limit-bytes)]
                     (try
                       (work armed)
                       (finally
@@ -622,7 +664,7 @@
     (if (and (.isVirtual (Thread/currentThread))
              (nil? (some-> (::guard ctx) current-thread-arm)))
       (on-platform-worker governed)
-      (governed))))
+      (governed)))))
 
 (def ^:dynamic *host-world*
   "The context a host body runs as when no evaluation arms its thread: a JVM
@@ -790,10 +832,19 @@
   (if-not carried-arm
     (work)
     (let [^ThreadLocal thread-arm (::thread-arm @process-guard)
+          ^ThreadLocal thread-adoption (::thread-adoption @process-guard)
           displaced (.get thread-arm)
+          displaced-adoption (.get thread-adoption)
           allocated-at-entry (allocated-bytes)
           cpu-at-entry (cpu-ns)]
       (.set thread-arm carried-arm)
+      ;; Where this thread's extent started, so the interrupt function reads
+      ;; the extent in flight against the arm's allocation bound. The owning
+      ;; thread's own sample already holds its allocation.
+      (.set thread-adoption
+            (when-not (or (neg? allocated-at-entry)
+                          (= (::owner-thread-id carried-arm) (.threadId (Thread/currentThread))))
+              {::entries (::entries carried-arm) ::adopted-at allocated-at-entry}))
       (try
         (work)
         (finally
@@ -806,6 +857,7 @@
             (when (and (not (neg? cpu-at-entry)) (not (neg? cpu-at-exit)))
               (.addAndGet ^AtomicLong (::adopted-cpu-ns carried-arm)
                           (- cpu-at-exit cpu-at-entry))))
+          (.set thread-adoption displaced-adoption)
           (if displaced
             (.set thread-arm displaced)
             (.remove thread-arm)))))))
@@ -987,7 +1039,10 @@
   is shown is the schema pair's selection (`render-ai`), never a trim here.
   The evaluation's duration, allocation and outcome stay on its record.
   The value is a `:seon.sci.kernel/execution-error`; a fired deadline also
-  names its guard observation (`:seon.sci.kernel/error`). An existing
+  names its guard observation (`:seon.sci.kernel/error`); an evaluation cut
+  by its allocation bound (outcome `:alloc`) is a
+  `:seon.sci.kernel/alloc-limit-error` naming the bound the request carried,
+  the measured allocation and the form. An existing
   structural refusal is preserved with the chain around it and the author's
   class, which every alternative carries.
   A core fault already recorded by this propagation (its receipt anywhere in
@@ -995,11 +1050,25 @@
   into an ordinary evaluation value: its panic reaches the caller."
   {:malli/schema
    [:=> [:cat :seon.sci.kernel/failure-request [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A kernel failure can carry any thrown or returned value; normalization must preserve evidence of an unrecognized failure.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.sci.admit/record]
-    [:or :seon.sci.kernel/execution-error :seon.sci.kernel/error]]}
-  [{subject :seon.fn/sym}
+    [:or :seon.sci.kernel/execution-error :seon.sci.kernel/error :seon.sci.kernel/alloc-limit-error]]}
+  [{subject :seon.fn/sym form :seon.sci.eval/form limit :seon.config.eval/alloc-limit-bytes}
    throwable
    diagnostic-record]
   (when (fault/carried-receipt throwable) (throw throwable))
+  (if (= :alloc (:seon.eval/outcome diagnostic-record))
+    (let [allocated (:seon.eval/allocated-bytes diagnostic-record)]
+      (error.refusal/error
+       :seon.sci.kernel/alloc-limit-error
+       (cond-> {:seon.error/operation 'seon.sci.kernel/failure-value
+                :seon.error/message (str "Allocated " allocated " bytes, past this evaluation's bound of "
+                                         limit " bytes; it was interrupted.")
+                :seon.error/fix "Realize only what you need: an unbounded lazy sequence, a whole-store read or work over every schema allocates without bound. (seon.profile/measure (fn [] ...)) breaks a smaller run down."
+                :seon.sci.kernel/guard-observation {:seon.error.evidence/attribute :seon.eval/allocated-bytes
+                                                    :seon.error.evidence/value allocated}
+                :seon.eval/allocated-bytes allocated
+                :seon.config.eval/alloc-limit-bytes limit}
+         (some? form) (assoc :seon.error/offending form)
+         (and (nil? form) subject) (assoc :seon.error/offending subject))))
   (let [timed-out? (= :time (:seon.eval/outcome diagnostic-record))
         author (author-throwable throwable)
         ;; The whole cause chain, read once, without SCI's location copies.
@@ -1072,7 +1141,7 @@
          ;; Absent, never stored nil: a failure without a failing symbol or
          ;; subject (a reader error) names no offending value.
          (or failing-symbol subject)
-         (assoc :seon.error/offending (or failing-symbol subject))))))))
+         (assoc :seon.error/offending (or failing-symbol subject)))))))))
 
 (defn unarmed-record
   "The diagnostic record for a failure that never reached an arm."

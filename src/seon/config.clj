@@ -97,7 +97,11 @@
   ;; outside that seam — the inbound message length limit, the namespace
   ;; page's query-work bounds, and fault/contract evidence profiles — each of
   ;; which needs its own declared key before they can go.
+  ;; `:seon.config.eval/alloc-limit-bytes` bounds the evaluation itself
+  ;; (`seon.sci.eval/evaluate` arms with it), riding the caps every eval
+  ;; request already carries.
   [:seon.config.eval.result/max-bytes
+   :seon.config.eval/alloc-limit-bytes
    :seon.config.eval.result/max-source
    :seon.config.eval.result/max-depth
    :seon.config.eval.result/max-collection

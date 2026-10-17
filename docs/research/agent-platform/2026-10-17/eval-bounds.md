@@ -1,14 +1,14 @@
 ---
 title: "Eval bounds: a declared memory bound per eval request"
 type: research
-status: "phase 1 committed (lane eval-bounds-1b, 2026-10-17); phase 2 a design with priced options, nothing implemented"
+status: "phase 1 committed (lane eval-bounds-1b, 2026-10-17); phase 2 option 1 committed (lane eval-bounds-2, 2026-10-17); options 2 and 3 not implemented"
 ---
 
 # Eval bounds: a declared memory bound per eval request
 
 Lane eval-bounds (Opus), 2026-10-17, after default's 17:23 OOM (commit 825d7638b). Phase 1 (await actual exit in
-`seon.test/run`) is committed with root's option 1 (next section). Phase 2 is a design with priced options; nothing
-of it is implemented.
+`seon.test/run`) is committed with root's option 1 (next section). Phase 2's option 1, the allocation bound on the
+arm, is committed (lane eval-bounds-2, after the 18:14 OOM); options 2 and 3 are not implemented.
 
 ## Phase 1 status: committed (option 1, lane eval-bounds-1b)
 
@@ -37,6 +37,44 @@ fail), with the world, bounded-result and request-view tests and `seon.guard-cen
 **Limit.** In this fixture the member's own write after the view's release still committed on HEAD. The incident's
 Datahike NPE came from a nested run inside a member body, and it is not reproduced. What is proven is the
 ordering: nothing the request acquired is released under a live body.
+
+## Phase 2 status: option 1 committed (lane eval-bounds-2)
+
+**Why.** At 18:14 one SCI eval request generated example inputs from all 3,591 `seon.*` contracts, after earlier
+requests that each churned 12–24 GB, and the shared JVM died of OOM.
+
+**Mechanism.**
+- The dial `:seon.config.eval/alloc-limit-bytes` (per agent) is shipped at 2 GB (2,147,483,648 bytes). That is half
+  the 4 GB heap cap, so an evaluation that keeps every byte it allocates still leaves the JVM room. It is also five
+  times the `:large-allocation` finding (400 MB), which is ten times an ordinary evaluation's 40–120 MB.
+- It rides `:seon.sci.admit/caps`. `seon.config/result-caps` derives it with the other caps, so every eval request
+  already carries it, and turn, MCP and test paths need no new member. `seon.sci.eval/evaluate` arms with it through
+  `seon.sci.kernel/with-arm`'s new 4-arity. Other entrances (renders, named invocations, test bodies) arm without it.
+- The interrupt function's existing 1,024-entrance sample sums three counts: the owner's sample, the finished
+  adopted extents, and the calling adopter's extent in flight. `adopt-arm` notes that extent's start on the
+  adopter's copy of the arm. Before this change an adopter's allocation counted only at its extent's end.
+- Past the bound it records outcome `:alloc` and closes the arm's one latch (`::reached`), so every thread serving the
+  arm is cut at its next entrance. It then calls `interrupt!`.
+- `seon.sci.kernel/failure-value` answers `:seon.sci.kernel/alloc-limit-error` with the bound, the measured
+  `:seon.eval/allocated-bytes`, a guard observation and the form (`:seon.error/offending`). The kernel is the producer,
+  so the variant is named there rather than `seon.sci.eval/...`.
+- `:seon.eval/outcome` gains `:alloc`. `:seon.cluster.eval/interrupted-at` is present for both bounds.
+- **Terminal event.** The bound's missing terminal event is the evaluation's return to interpreted code past the
+  bound. The arm is released by `with-arm`'s `finally` only when the interrupted body actually unwinds, so resources
+  are held until the actual exit, exactly as for `:time`.
+
+**Proof.** `seon.sci.eval-test/an-evaluation-past-its-allocation-bound-is-cut-and-the-next-one-runs` (64 MB bound;
+the next evaluation in the same context answers 3) and
+`seon.sci.eval-test/generating-from-many-schemas-in-one-request-stops-at-the-allocation-bound` (the 18:14 shape at a
+small scale: `mg/generate` over 100,000 schemas in one request under a 32 MB bound). Both were red on 056b43883 with
+outcome `:time` and no variant. Both are green on the change.
+
+**Limits that remain.**
+- A host call that allocates without re-entering interpreted code (a `pr` of a huge value, as at 16:38 and 17:23)
+  finishes or OOMs first.
+- The sample runs every 1,024 entrances. Host-heavy loops overshoot by that many iterations' allocation: about 200 MB
+  for the generate shape.
+- Test bodies (`seon.sci.eval/run-tests`) and renders arm without the bound.
 
 ## What exists
 

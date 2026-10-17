@@ -4770,7 +4770,8 @@
      that same custody when run and form identities are present;
   2. use the SUPPLIED live cluster ctx, or make a fresh guarded base for
      an isolated one-off when none was given;
-  3. arm through `kernel/with-arm` with `::time-limit-ms`, the ONLY limit —
+  3. arm through `kernel/with-arm` with `::time-limit-ms` and the caps'
+     `:seon.config.eval/alloc-limit-bytes` —
      or INHERIT this context's active arm when one already governs this
      thread, so nested work never restarts the clock;
   4. evaluate the held form, keeping its value the moment SCI returns;
@@ -4784,9 +4785,11 @@
   THE STATE (owner ruling 2026-07-28): `:seon.cluster.eval/error` is
   present exactly when the form failed, and
   `:seon.cluster.eval/interrupted-at` — the instant the interrupt was
-  observed — is present exactly when the time limit fired. The record
+  observed — is present exactly when a bound cut it: the time limit, or the
+  allocation bound `:seon.config.eval/alloc-limit-bytes` its caps carry. The record
   rides through with `fn-entries` and `allocated-bytes` intact."
-  {:malli/schema [:=> [:cat :seon.sci.eval/request]
+  {:seon/entrant true
+   :malli/schema [:=> [:cat :seon.sci.eval/request]
                   :seon.sci.eval/evaluation]}
   [{:keys [:seon.sci.admit/caps]
     ctx :seon.sci.eval/ctx
@@ -4996,8 +4999,11 @@
                                  :time :error))
                 arity-message (interpreted-arity-message throwable)
                 failure (kernel/failure-value
-                         {::kernel/time-limit-kind ::time-limit
-                          ::kernel/failure-kind ::evaluation-failed}
+                         (cond-> {::kernel/time-limit-kind ::time-limit
+                                  ::kernel/failure-kind ::evaluation-failed
+                                  ::form (::form request)}
+                           (:seon.config.eval/alloc-limit-bytes caps)
+                           (assoc :seon.config.eval/alloc-limit-bytes (:seon.config.eval/alloc-limit-bytes caps)))
                          throwable record)
                 {:keys [line column]} (ex-data throwable)
                 ;; a guessed name: the locals in scope where SCI failed to
@@ -5023,13 +5029,14 @@
                     :seon.sci.admit/value value}
              ;; the instant the interrupt was OBSERVED — the one
              ;; genuinely new fact a cut evaluation leaves. Its
-             ;; presence IS the interrupted state; there is no label.
-             (= :time (:seon.eval/outcome record))
+             ;; presence IS the interrupted state; the record's outcome
+             ;; names the bound that cut it (:time or :alloc).
+             (#{:time :alloc} (:seon.eval/outcome record))
              (assoc :seon.cluster.eval/interrupted-at
                     (java.util.Date.)))))))]
        (try
         (kernel/with-arm
-       evaluation-ctx time-limit-ms
+       evaluation-ctx time-limit-ms (:seon.config.eval/alloc-limit-bytes caps)
        (fn [armed]
         (vreset! arm-state armed)
         (try

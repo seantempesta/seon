@@ -3,6 +3,12 @@
                     {:seon.config/display-label "Evaluation deadline" :seon.config/display-divisor 1000 :seon.config/display-unit "s" :min 1,
                      :seon.config/per-agent true,
                      :seon.config/dial true}],
+                   :alloc-limit-bytes
+                   [:int
+                    {:seon.config/display-label "Evaluation allocation bound" :seon.config/display-divisor 1048576 :seon.config/display-unit "MB" :min 1,
+                     :seon.config/per-agent true,
+                     :seon.config/dial true,
+                     :description "Heap bytes one evaluation's arm may allocate (its owning thread and the threads that adopted it, seon.sci.kernel) before it is interrupted with outcome :alloc and a :seon.sci.kernel/alloc-limit-error. Read every 1,024 interpreted entrances, so a host call that allocates without returning to interpreted code finishes first."}],
                    :bounds
                    [:map
                     {:description "The declared misuse bounds over one evaluation's measures (seon.repl/cost). Each m/explain error against this schema is one finding under :seon.repl/findings in the reply map: its :seon.repl/finding kind, the measure and the observed value, the other recorded measures named by :seon.repl/with, and :seon.repl/fix. Within every bound the reply carries no :findings key. A new rule is a new entry; each measure is recorded by its producer."}

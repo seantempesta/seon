@@ -1295,6 +1295,60 @@
       (is (re-find #"(?i)time"
                    (:seon.cluster.eval/error evaluation))))))
 
+;;; The allocation bound: `:seon.config.eval/alloc-limit-bytes`, lowered here
+;;; so a runaway is cut after megabytes, never gigabytes.
+
+(defn- alloc-bounded
+  "Evaluate `source` in `ctx` under an allocation bound of `bound` bytes, on
+  another thread so a runaway fails the suite rather than hanging it."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :string :int] [:or :map [:= ::hung]]]}
+  [ctx source bound]
+  (let [task (future (test-support/evaluate
+                      {:seon.sci.eval/ctx ctx
+                       :seon.cluster.eval/source source
+                       :seon.sci.admit/caps (assoc caps :seon.config.eval/alloc-limit-bytes bound)
+                       :seon.sci.eval/time-limit-ms 4000}))]
+    (or (deref task 10000 nil)
+        (do (future-cancel task) ::hung))))
+
+(deftest an-evaluation-past-its-allocation-bound-is-cut-and-the-next-one-runs
+  (let [bound (* 64 1024 1024)
+        ctx (eval/build-base-ctx (schema/handed-projection))
+        source "(loop [i 0] (if (< i 1000000000) (recur (do (object-array 1024) (inc i))) i))"
+        evaluation (alloc-bounded ctx source bound)
+        record (:seon.sci.admit/record evaluation)
+        value (:seon.sci.admit/value evaluation)]
+    (is (not= ::hung evaluation))
+    (is (= :alloc (:seon.eval/outcome record)) "the allocation bound cut it, not the deadline")
+    (is (<= bound (:seon.eval/allocated-bytes record)))
+    (is (cut? evaluation) "a cut evaluation carries its cut instant")
+    (testing "the agent is handed the bound, the measured allocation and the form, as data"
+      (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/alloc-limit-error) value))
+      (is (= :seon.sci.kernel/alloc-limit-error (:seon.error/type value)))
+      (is (= bound (:seon.config.eval/alloc-limit-bytes value)))
+      (is (<= bound (:seon.eval/allocated-bytes value)))
+      (is (= (read-string source) (:seon.error/offending value))))
+    (testing "the context and the next evaluation are unharmed"
+      (let [next-evaluation (alloc-bounded ctx "(+ 1 2)" bound)]
+        (is (ok? next-evaluation))
+        (is (= 3 (:seon.sci.admit/value next-evaluation)))))))
+
+(deftest generating-from-many-schemas-in-one-request-stops-at-the-allocation-bound
+  ;; The 18:14 shape at small scale: one request generating example inputs
+  ;; from schema after schema, the allocation in host code (malli) between
+  ;; few interpreted entrances.
+  (let [bound (* 32 1024 1024)
+        evaluation (alloc-bounded
+                    (eval/build-base-ctx (schema/handed-projection))
+                    (str "(require '[malli.generator :as mg]) "
+                         "(count (doall (for [i (range 100000)] "
+                         "(mg/generate [:map [:a :string] [:b [:vector :int]] [:c [:set :keyword]]] {:seed i :size 30}))))")
+                    bound)
+        record (:seon.sci.admit/record evaluation)]
+    (is (not= ::hung evaluation))
+    (is (= :alloc (:seon.eval/outcome record)))
+    (is (= :seon.sci.kernel/alloc-limit-error (:seon.error/type (:seon.sci.admit/value evaluation))))))
+
 (deftest an-agent-cannot-catch-the-interrupt
   ;; sci's try refuses to hand the interrupt to a user catch clause, and
   ;; sandboxed code cannot forge the marker

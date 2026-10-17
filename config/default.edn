@@ -181,6 +181,16 @@
  ; backstop and the process boundary, never by this.
  :seon.config.eval/time-limit-ms 30000
 
+ ; Unit: heap bytes one agent evaluation may allocate before it is cut
+ ; (outcome :alloc, seon.sci.kernel/alloc-limit-error).
+ ; Provenance: half the 4 GB heap cap, so an evaluation that kept every byte
+ ; it allocated still leaves the shared JVM room; five times the
+ ; :large-allocation finding (400 MB, ten times an ordinary evaluation's
+ ; 40-120 MB). Allocation is a rate, not retention: the bound names work
+ ; out of proportion to its form, as the requests that churned 12-24 GB
+ ; before default's 18:14 OOM (2026-10-17) did.
+ :seon.config.eval/alloc-limit-bytes 2147483648
+
  ; Pure durable functions with generatable inputs run this many seeded
  ; contract cases in their candidate context before installation. The seed
  ; rides the terminal receipt, so every failure is exactly reproducible.

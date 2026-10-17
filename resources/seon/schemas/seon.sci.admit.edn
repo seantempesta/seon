@@ -27,7 +27,10 @@
                   [:seon.config.eval.result/max-bytes
                    :seon.config.eval.result/max-bytes]
                   [:seon.config.eval.result/max-source
-                   :seon.config.eval.result/max-source]],
+                   :seon.config.eval.result/max-source]
+                  [:seon.config.eval/alloc-limit-bytes
+                   {:optional true}
+                   :seon.config.eval/alloc-limit-bytes]],
                  :interrupt-fn
                  [:fn
                   {:error/message

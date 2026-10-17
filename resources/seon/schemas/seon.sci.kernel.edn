@@ -8,7 +8,9 @@
                   [:map
                    [:seon.fn/sym {:optional true} :seon.fn/sym]
                    [:seon.sci.kernel/time-limit-kind :qualified-keyword]
-                   [:seon.sci.kernel/failure-kind :qualified-keyword]],
+                   [:seon.sci.kernel/failure-kind :qualified-keyword]
+                   [:seon.sci.eval/form {:optional true :description "The form the failing evaluation ran, which an allocation-bound error names."} :seon.batch/form]
+                   [:seon.config.eval/alloc-limit-bytes {:optional true} :seon.config.eval/alloc-limit-bytes]],
 
  ; A kernel guard's refusal: it names the guard's observation (a deadline
  ; that fired, a symbol with no installed Var, an unadmittable failure).
@@ -20,6 +22,20 @@
   {:seon.db/attributes true}
   [:seon.sci.kernel/guard-observation
    :seon.sci.kernel/guard-observation]]]
+
+ ; An evaluation cut by its allocation bound (seon.sci.kernel/failure-value,
+ ; outcome :alloc): the bound the request carried, the allocation its arm
+ ; measured past it, and the form that ran.
+ :seon.sci.kernel/alloc-limit-error
+ [:merge
+ {:seon.db/attributes true}
+ :seon.error/base
+ [:map
+  {:seon.db/attributes true}
+  [:seon.sci.kernel/guard-observation :seon.sci.kernel/guard-observation]
+  [:seon.eval/allocated-bytes :seon.eval/allocated-bytes]
+  [:seon.config.eval/alloc-limit-bytes :seon.config.eval/alloc-limit-bytes]
+  [:seon.error/offending {:optional true} :seon.batch/form]]]
 
  ; An agent's own exception, as seon.sci.kernel/failure-value reports it the
  ; way clojure.main does: the class the author's code threw, its message, the
