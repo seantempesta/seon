@@ -122,15 +122,13 @@ root.
     instrumented contract. A function never receives or returns a malformed value, so no caller re-checks a shape
     (`(when (map? x))`, `(if (seq ...))` on a declared non-empty value, a defensive `try`) and no body re-validates
     its own arguments.
-  - **What can throw is caught at an edge.** Exceptions are caught only by the three catches "Nothing crashes" allows:
-    - the entrant boundary;
-    - a returning tool's one top catch of its own declared variants;
-    - a deliberate translation that names its own type.
-
-    The error is delivered as data in the reply of the agent whose work raised it. Nothing else catches.
-  - **What can fail is handled explicitly where it is called.** A function that can fail declares its error variants
-    in its contract and returns them as data. Every caller handles those declared variants as an ordinary branch on
-    data, because the contract names them. No call site is unaware of what its callee can return.
+  - **Failures are typed at the edge, defects go to the boundary.** An interop edge catches its own exception and
+    returns its one specific declared error schema. A defect throws to the entrant boundary. These are the two
+    catches "Nothing crashes" allows, and nothing else catches.
+  - **What can fail is handled explicitly where it is called.** A caller of a function with declared variants
+    handles them as an ordinary branch on data, or declares them in its own contract, because the contract names
+    them. No call site is unaware of what its callee can return. Fallible calls happen at an operation's start, so
+    the functions in the middle are pure.
 
   Inside, we know what we are doing: no code runs "just in case". When a failure is possible, find the design that
   makes it impossible, at its owner, and change that: hold a basis instead of a value, one evaluator instead of two
@@ -497,15 +495,29 @@ definition with the same input is computed once for every branch and agent that 
 
 ## Failure and execution
 
-- **Nothing crashes.** No evaluation, reply, eval request, page, tool call, test run or boot step ever ends in an uncaught
-  exception. A function whose job is to answer (`my.*` tools, validators, merge checks, entry policy) RETURNS its error map
-  and lists exactly those variants (target: one `:multi` on `:seon.error/type`); every other function throws the same
-  map inside `ex-info` and declares only its success value, except reads, which return refusals until the errors
-  spec's S-reads converts each read family with its callers. There are three catches: a returning tool's one top catch
-  of its own declared variants, a deliberate translation that names its own type and keeps the cause, and the entrant
-  boundary (the one-path fold, MCP, the web handler, Flow procs, schedule handlers, boot, the test runner), which takes
-  a thrown map back once with `ex-data`, turns any other exception into an error map, records it and delivers it as
-  data beside whatever value exists. No other layer catches; an unclassifiable exception is its producer's defect.
+- **Nothing crashes.** No evaluation, reply, eval request, page, tool call, test run or boot step ever ends in an
+  uncaught exception. Failures come in two kinds (owner, 2026-10-17):
+  - **Expected failures are declared variants.** These are failures a caller can act on, and they only arise at an
+    interop edge, where Seon calls the platform or a library: a missing file, a provider timeout, a merge conflict, a
+    refused write.
+    - That edge function catches its own exception and returns its ONE specific error schema, never the general one.
+      Its contract lists exactly those variants (`[:or success :seon.db/read-error]`, target: one `:multi` on
+      `:seon.error/type`).
+    - Every caller either handles the variant as an ordinary branch on data, or declares the same variant in its own
+      contract. Each caller is updated when the variant is introduced.
+    - Do fallible calls at the start of an operation and pass the resulting values down. The functions in the middle
+      are then pure and never see an error.
+  - **Defects are thrown, never declared.** A failure that only a bug can cause, such as a malformed query on an
+    immutable value or a broken invariant, is not a variant for every caller to handle. It throws, and only the entrant
+    boundary catches it. The entrant boundary is the one-path fold, MCP, the web handler, Flow procs, schedule handlers,
+    boot and the test runner. It turns the exception into an error map, records it as Seon's own error, and delivers it
+    as data beside whatever value exists. The producer's defect is then fixed.
+
+  There are exactly two kinds of catch:
+  - an interop edge's catch of its own exception, translated to its declared variant with the cause kept;
+  - the entrant boundary.
+
+  No other layer catches.
 - **Errors are ordinary values of one shape.** An error is one flat map: `:seon.error/type` (its variant's schema
   key, extending `:seon.error/base`), `:seon.error/operation`, `:seon.error/message`, optional fix, Malli problems and
   the variant's members; the boundary adds the cause chain. One constructor builds it where the failure is detected
