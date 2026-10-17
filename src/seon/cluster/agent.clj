@@ -1296,6 +1296,21 @@
                   (acquire-in (child-registry! parent-registry branch))
                   (throw refusal)))))))))
 
+(defn- graph-observed!
+  "Write on `connection`, the database the agent's graph reads and writes, what its registry observed of agent
+  `agent-id`: `tx` over `:seon.agent/graph-process`. A store that has not installed the attribute yet (a graph
+  db<->flow's boot prime starts before the store adopts the checkout's declarations) records nothing, as
+  `seon.db/attribute-installed?` decides; boot recovery clears what a previous process left. Throws the writer's
+  refusal."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id :seon.db/tx-data] :nil]}
+  [connection agent-id tx]
+  (when (db/attribute-installed? (db/db connection) :seon.agent/graph-process)
+    (let [report (db/with-branch {:seon.db/connection connection} #(db/transact! connection tx))]
+      (when-not (:db-after report)
+        (throw (ex-info (:seon.error/message report "The agent's graph observation was refused.")
+                        (assoc report :seon.agent/id agent-id))))))
+  nil)
+
 (defn start-flow!
   "Start one agent's graph: stamp → start → resume → route → prime.
   Idempotent per agent (an started agent is left alone — db<->flow's
@@ -1304,7 +1319,9 @@
   (`close? false`, so this agent's stop never closes the committer's
   inbox). The routing entry is registered BEFORE the prime, and the
   prime is last: its pass derives from facts, so a message committed
-  before this graph existed is answered by construction. Orphans of a
+  before this graph existed is answered by construction. Before the prime the
+  agent's `:seon.agent/graph-process` names this process and its
+  `:seon.agent/environment` digests the config the graph read. Orphans of a
   previously dead process are settled by that same first pass — step 1
   of the turn transform — so the wedge cannot return through the
   starting gap. Returns the started entry.
@@ -1448,6 +1465,12 @@
                    (assoc-in [:seon.agent/started agent-id] entry)
                    (assoc-in [:seon.agent/channels eid] wake-ch)
                    (update ::starting dissoc agent-id))))
+      ;; the started entry is published: the graph runs in this process, and the config it read is its environment
+      (graph-observed! connection agent-id
+                       [{:db/id "process" :seon.db.process/id (:seon.db.process/id handle)}
+                        {:seon.agent/id agent-id
+                         :seon.agent/graph-process "process"
+                         :seon.agent/environment (id/digest 64 [settings])}])
       ;; the start prime — every mailbox start primes exactly once
       (async/offer! wake-ch :seon.agent/wake)
       entry)
@@ -1557,7 +1580,8 @@
   Request stop, INTERRUPT the in-flight turn transform (`:seon.agent/finish?` lets
   it finish instead: an ended attempt's own pass wrote its end), and join the graph's
   executor (every proc loop exited) before dropping its routing entry or
-  closing channels. Interrupted execution never resumes: an in-flight provider call,
+  closing channels; that observed exit, never the request, retracts the agent's
+  `:seon.agent/graph-process`. Interrupted execution never resumes: an in-flight provider call,
   evaluation wait or transaction wait unwinds instead of running to its end,
   and the open turn is then closed with its unfinished evaluations stamped
   interrupted by the writer function boot recovery uses. An idle completion
@@ -1627,6 +1651,9 @@
           (turn-completion-failure! entry (open-turn! connection agent-id) timeout-ms)))
       (cancel-turn-backstop! entry)
       (record-interruption! entry)
+      ;; every proc thread has exited: the graph no longer runs in any process
+      (graph-observed! (:seon.db/connection (:seon.turn.loop/cluster entry)) agent-id
+                       [[:db.fn/retractAttribute [:seon.agent/id agent-id] :seon.agent/graph-process]])
       (swap! routing
              (fn [current]
                (-> current

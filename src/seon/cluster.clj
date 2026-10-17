@@ -3063,8 +3063,9 @@
   (cluster.process/id advertisement))
 
 (defn recover-runs!
-  "Close all prior open turns before arming agents. The writer decides
-  which evaluations and effects remain unfinished; nothing is replayed."
+  "Close all prior open turns and retract every `:seon.agent/graph-process` before arming agents: no graph of
+  this cluster runs yet, so each value names a previous execution's graph, whose end boot observes. The writer
+  decides which evaluations and effects remain unfinished; nothing is replayed."
   {:malli/schema
    [:=> [:cat :seon.db/connection]
     [:or
@@ -3080,25 +3081,34 @@
                          [?run :seon.turn/id ?run-id]
                          (not [?run :seon.turn/closed-tx _])]
                        db)
+        ;; a store that has not installed the attribute yet (the boot before adoption) holds no value of it
+        graphs (if (db/attribute-installed? db :seon.agent/graph-process)
+                 (db/q '[:find [?agent ...] :where [?agent :seon.agent/graph-process _]] db)
+                 [])
+        refused (some #(when (and (map? %)
+                                  (contains? % :seon.error/at)
+                                  (contains? % :seon.error/layer)
+                                  (contains? % :seon.error/operation))
+                         %)
+                      [open-runs graphs])
         result
-        (if (and (map? open-runs)
-                 (contains? open-runs :seon.error/at)
-                 (contains? open-runs :seon.error/layer)
-                 (contains? open-runs :seon.error/operation))
-          open-runs
+        (if refused
+          refused
           (let [;; the decision moved INSIDE the transaction (custody revision,
                 ;; Revision 4): `recover-call` reads each run's receipts at
                 ;; transaction time, so this caller only names the open runs —
                 ;; a stale-basis recovery stamping a settled receipt is
                 ;; unrepresentable
                 operations
-                (into (schedule/recover-tx db now)
-                      (mapcat
-                       (fn [run-id]
-                         (turn/recover-tx
-                          {:seon.turn/id run-id
-                           :seon.turn/now now})))
-                      open-runs)]
+                (-> (schedule/recover-tx db now)
+                    (into (mapcat
+                           (fn [run-id]
+                             (turn/recover-tx
+                              {:seon.turn/id run-id
+                               :seon.turn/now now})))
+                          open-runs)
+                    (into (map (fn [agent] [:db.fn/retractAttribute agent :seon.agent/graph-process]))
+                          graphs))]
             (when (seq operations)
               (require-committed!
                (db/transact! connection operations)

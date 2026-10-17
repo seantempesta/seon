@@ -761,6 +761,35 @@
         (is (= {:routed? false :armed? false} @observed)
             "the route is already absent when orderly teardown closes")))))
 
+(deftest a-started-graph-is-observed-until-it-exits
+  ;; T2 (task-model §3.2): whether an agent's graph runs is a fact its registry writes when it starts the graph
+  ;; and retracts when the graph has exited, never at the stop request; boot retracts a previous process's values.
+  (with-connection
+    (fn [connection ctx]
+      (let [routing (armory connection)
+            _ (test-support/transacted! connection [(config-entity "agent-a" {})
+                                                    {:seon.agent/id "agent-a" :seon.agent/branch (live-branch connection)}])
+            observed #(db/pull @connection [{:seon.agent/graph-process [:seon.db.process/id]} :seon.agent/environment]
+                               [:seon.agent/id "agent-a"])
+            entry (start-one! connection ctx routing "agent-a" "agent-a")]
+        (is (= process (get-in (observed) [:seon.agent/graph-process :seon.db.process/id]))
+            "starting the graph asserts the process whose registry runs it")
+        (is (= 64 (count (:seon.agent/environment (observed))))
+            "the agent records the digest of the config its graph read")
+        (flow/stop (:seon.flow/graph entry))
+        (is (some? (:seon.agent/graph-process (observed)))
+            "a stop request is not termination: the fact stays until the graph has exited")
+        (agent/stop-flow! {:seon.agent/id "agent-a" :seon.agent/routing routing})
+        (is (.isTerminated ^java.util.concurrent.ExecutorService (:seon.flow/executor entry)))
+        (is (nil? (:seon.agent/graph-process (observed)))
+            "the observed exit retracts it")
+        (test-support/transacted! connection [{:db/id "previous" :seon.db.process/id "a-previous-process"}
+                                              {:seon.agent/id "agent-a" :seon.agent/graph-process "previous"}])
+        (is (some? (:seon.agent/graph-process (observed))))
+        (is (map? (#'cluster/recover-runs! connection)))
+        (is (nil? (:seon.agent/graph-process (observed)))
+            "boot's recovery observes the previous process's end: no value names a graph that cannot run")))))
+
 (defn- provider-backstop-config
   [cluster-name turn-completion-backstop-ms]
   (config-entity

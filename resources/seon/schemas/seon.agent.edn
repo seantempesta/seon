@@ -40,6 +40,8 @@
  :end-refusals [:string {:min 1 :description "The done rule's refusals (seon.cluster.source/done-refusals, as seon.context/step-section shows them) the task's step met when it ended, as canonical EDN of their vector (seon.context/refusal-data: each with its :seon.source/red-tests; seon.id/printed; clojure.edn reads it back); absent when it refused nothing. Producer: seon.context/end-summary-tx; reader: seon.cluster.agent/chain-bails."}]
  :admission-closed-tx [:and {:description "The transaction that closed this agent's admission: the run writer refuses every later run for it by name (seon.turn/system-run-call and plan-call). A hosted agent's retirement is this one assertion; the runs committed before it are the ones retirement awaits."} :seon.db/ref]
 :cluster [:string {:min 1 :description "The name of the cluster this agent was created in: its config row ([:seon.config/cluster name]) is the agent's config (seon.config/agent-cluster). Several clusters' config rows may share a branch. A name, as config rows are keyed, so an agent is created before or without its cluster's entity."}]
+:graph-process [:and {:description "The process whose registry runs this agent's graph: asserted by seon.cluster.agent/start-flow! once the graph started, retracted by seon.cluster.agent/stop-flow! once every proc thread exited, never at the stop request; boot's seon.cluster/recover-runs! retracts the values a previous process left. Absent: no graph runs. Read by the reconciler's graph dimension (task-model §5.1, T3b)."} :seon.db/ref]
+:environment [:string {:min 64 :max 64 :description "The digest (seon.id/digest 64) of the config the agent's running graph read when seon.cluster.agent/start-flow! started it: the cluster's effective config with the agent's AI overlay. The observed environment the restart compares with the task's desired one (task-model §6.1, T4)."}]
 :runtime [:and {:seon.db/component true :seon.db/component-schema :seon.runtime/entity :description "The agent owns its runtime: latest trigger and listens. Its turns name it (:seon.turn/agent)."} :seon.db/ref]
 :agent
                      [:map
@@ -76,7 +78,9 @@
                        {:optional true}
                        :seon.agent/namespace]
                       [:seon.agent/settings {:optional true} :seon.agent/settings]
-                      [:seon.agent/runtime {:optional true} :seon.agent/runtime]],
+                      [:seon.agent/runtime {:optional true} :seon.agent/runtime]
+                      [:seon.agent/graph-process {:optional true} :seon.agent/graph-process]
+                      [:seon.agent/environment {:optional true} :seon.agent/environment]],
                      :db-request
                      [:map {:description "A call from an agent's world: the database value and the agent, both supplied by call preparation."}
                       [:seon.db/db :seon.db/database-value]
