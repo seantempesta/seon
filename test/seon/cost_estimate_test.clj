@@ -208,12 +208,15 @@
 
 (defn- unaccepted
   "The rows of `estimates` over their estimate in `seen` that no open task accepts, or that grew past `ratchet`
-  times their recorded overrun (a measure the overrun does not record keeps its estimate)."
+  times their recorded overrun (a measure the overrun does not record keeps its estimate). Judged on the exact counts
+  only (allocation, calls, reads): this runs on every commit beside concurrent checks, where wall time moves with
+  load, so wall time is judged by the table test alone."
   {:malli/schema [:=> [:cat [:map-of :keyword :map]] [:vector :map]]}
   [seen]
   (into [] (keep (fn [{:keys [op estimate overrun]}]
-                   (let [o (over (seen op) estimate wall-slack)
-                         accepted (merge estimate (into {} (map (fn [[k v]] [k (* ratchet v)])) (dissoc overrun :task)))]
+                   (let [estimate (dissoc estimate :ms)
+                         o (over (seen op) estimate wall-slack)
+                         accepted (merge estimate (into {} (map (fn [[k v]] [k (* ratchet v)])) (dissoc overrun :task :ms)))]
                      (cond (empty? o) nil
                            (nil? overrun) {:op op :over o}
                            (not (task-open? (:task overrun))) {:op op :over o :closed (:task overrun)}
