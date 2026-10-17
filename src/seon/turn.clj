@@ -78,10 +78,6 @@
   (delay (requiring-resolve 'seon.test/reaching)))
 (defonce ^:private test-branch-tests
   (delay (requiring-resolve 'seon.test/branch-tests)))
-(defonce ^:private test-fork-point-red
-  (delay (requiring-resolve 'seon.test/fork-point-red)))
-(defonce ^:private source-branch-merge-base
-  (delay (requiring-resolve 'seon.cluster.source/branch-merge-base)))
 (defn stage-reply!
   "Stage exact submitted source using the run reply storage contract."
   {:malli/schema
@@ -5353,21 +5349,6 @@
                         :seon.test/check-time-limit-ms limit-ms}
                  task (assoc :seon.test/task task)))))
 
-(defn- run-merge-base
-  "Ask the merge base what the merge asks of each test `reaching` (the reaching request's run) left red: its result
-  at the branch's merge base (`seon.test/fork-point-red`), run there once when no result is held and recorded on the
-  agent's branch, where the done rule reads it (`seon.cluster.source/red-at-merge-base`), bounded by `limit-ms`.
-  Nil when no test is red or the branch has no merge base (main)."
-  {:malli/schema [:=> [:cat :seon.agent/execution-handle pos-int? [:maybe [:or :seon.test/run-result :seon.error/value]]]
-                  [:or :nil [:map-of :seon.test/sym :boolean] :seon.error/value]]}
-  [execution limit-ms reaching]
-  (let [reds (into [] (comp (filter #(pos? (+ (:seon.test/fail-count % 0) (:seon.test/error-count % 0))))
-                            (map :seon.test/sym) (filter symbol?))
-                   (:seon.test/results reaching))
-        commit (when (seq reds) (@source-branch-merge-base (db/db (:seon.db/connection execution))))]
-    (cond (:seon.error/at commit) commit
-          (uuid? commit) (@test-fork-point-red execution commit reds limit-ms))))
-
 (defn- pending-syms
   "The tests a run left unrun: never started, or started and still live at its bound."
   {:malli/schema [:=> [:cat :seon.test/run-result] [:vector :seon.test/sym]]}
@@ -5541,8 +5522,6 @@
             platform (platform-proof (db/db connection) changed)
             due (into [] (remove (set (:seon.turn.loop/pending platform))) stale)
             ran (run-reaching execution (left) due task)
-            ;; a red is the change's unless red at the merge base: the done rule reads that result
-            based (when (and ran (nil? (:seon.error/at ran))) (run-merge-base execution (left) ran))
             ;; the one judgment, read once after the run
             verdict (when (seq due) (@context-step-verdict (db/db connection) agent-id))
             red (cond (nil? verdict) nil
@@ -5551,8 +5530,7 @@
                                   (sort-by (comp str :seon.test/sym) (mapcat :seon.source/red-tests (:seon.source/refusals verdict)))))]
         (some-> (summary ran due roles platform)
                 (merge (when (and ran (nil? (:seon.error/at ran))) (test-costs (db/db connection) [ran])))
-                (cond-> (or (:seon.error/at red) (seq red)) (assoc :seon.turn.loop/broken red))
-                (cond-> (:seon.error/at based) (assoc-in [:seon.turn.loop/reaching :seon.turn.loop/test-error] based)))))))
+                (cond-> (or (:seon.error/at red) (seq red)) (assoc :seon.turn.loop/broken red)))))))
 
 (defn- prove-turn
   "A fresh attempt's first pass: the test step (`test-step`) with no evaluated form, in the agent's world, recorded on

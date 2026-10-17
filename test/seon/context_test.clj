@@ -718,7 +718,7 @@
   (let [database (db/db *connection*)
         green #(result % 1 0 0)
         red #(result % 0 1 0 [{:type :fail}])
-        judged (fn [proofs next-proofs members results on-target defined]
+        judged (fn [proofs next-proofs members results defined]
                  (let [{status :seon.task/status refusals :seon.source/refusals}
                        (context/step-status
                         {:seon.task/proofs proofs :seon.task/product next-proofs :seon.context/head {}
@@ -727,27 +727,24 @@
                                                       :seon.task/proofs proofs
                                                       :seon.program/identities (into #{} (map #(vector :seon.test/sym %)) defined)
                                                       :seon.test.run/id "a1b2c3d4e5f6" :seon.test.run/branch :tq-branch}
-                                               (seq next-proofs) (assoc :seon.source/next-proofs next-proofs)
-                                               (seq on-target) (assoc :seon.source/red-on-target on-target))})]
+                                               (seq next-proofs) (assoc :seon.source/next-proofs next-proofs))})]
                    [status (mapv :seon.error/type refusals)]))]
-    (doseq [[proofs next-proofs members results on-target defined expected why]
-            [[#{'tq.rule/p} #{} #{'tq.rule/p} [(green 'tq.rule/p)] nil #{} [:done []] "its proof green"]
-             [#{'tq.rule/p} #{} #{'tq.rule/p 'tq.rule/r} [(green 'tq.rule/p) (red 'tq.rule/r)] nil #{}
-              [:working [:seon.source/red-test-error]] "a reaching test red here and not at the merge base is the change's"]
-             [#{'tq.rule/p} #{} #{'tq.rule/p 'tq.rule/r} [(green 'tq.rule/p) (red 'tq.rule/r)] #{'tq.rule/r} #{}
-              [:done []] "a reaching test red at the merge base too is not the change's"]
-             [#{'tq.rule/p} #{} #{'tq.rule/p} [] nil #{} [:working [:seon.source/test-evidence-error]] "its proof unrun at its reach is unknown, never green"]
-             [#{'tq.rule/p} #{} #{'tq.rule/p} [(red 'tq.rule/p)] nil #{} [:working [:seon.source/red-test-error]] "its proof red"]
-             [#{} #{} #{} [] nil #{} [:working [:seon.source/test-evidence-error]] "no proof proves nothing"]
-             [#{'tq.rule/q} #{'tq.rule/s} #{'tq.rule/q 'tq.rule/s} [(green 'tq.rule/q) (red 'tq.rule/s)] nil #{'tq.rule/s}
+    (doseq [[proofs next-proofs members results defined expected why]
+            [[#{'tq.rule/p} #{} #{'tq.rule/p} [(green 'tq.rule/p)] #{} [:done []] "its proof green"]
+             [#{'tq.rule/p} #{} #{'tq.rule/p 'tq.rule/r} [(green 'tq.rule/p) (red 'tq.rule/r)] #{}
+              [:working [:seon.source/red-test-error]] "a reaching test red here, whatever main or the merge base holds"]
+             [#{'tq.rule/p} #{} #{'tq.rule/p} [] #{} [:working [:seon.source/test-evidence-error]] "its proof unrun at its reach is unknown, never green"]
+             [#{'tq.rule/p} #{} #{'tq.rule/p} [(red 'tq.rule/p)] #{} [:working [:seon.source/red-test-error]] "its proof red"]
+             [#{} #{} #{} [] #{} [:working [:seon.source/test-evidence-error]] "no proof proves nothing"]
+             [#{'tq.rule/q} #{'tq.rule/s} #{'tq.rule/q 'tq.rule/s} [(green 'tq.rule/q) (red 'tq.rule/s)] #{'tq.rule/s}
               [:done []] "the next task's proof it wrote red is its product"]
-             [#{'tq.rule/q} #{} #{'tq.rule/q 'tq.rule/s} [(green 'tq.rule/q) (red 'tq.rule/s)] nil #{'tq.rule/s}
-              [:working [:seon.source/stray-red-error]] "a red test it defined that no next task proves"]
-             [#{'tq.rule/q} #{'tq.rule/s} #{'tq.rule/q 'tq.rule/s} [(red 'tq.rule/q) (red 'tq.rule/s)] nil #{'tq.rule/s}
+             [#{'tq.rule/q} #{} #{'tq.rule/q 'tq.rule/s} [(green 'tq.rule/q) (red 'tq.rule/s)] #{'tq.rule/s}
+              [:working [:seon.source/red-test-error]] "a red test it defined that no next task proves"]
+             [#{'tq.rule/q} #{'tq.rule/s} #{'tq.rule/q 'tq.rule/s} [(red 'tq.rule/q) (red 'tq.rule/s)] #{'tq.rule/s}
               [:working [:seon.source/red-test-error]] "its own proof red"]]]
-      (is (= expected (judged proofs next-proofs members results on-target defined)) why))))
+      (is (= expected (judged proofs next-proofs members results defined)) why))))
 
-(deftest ^{:seon.test/long "An own-branch agent's setup, one change through its eval request with its test step and one fork-point run, and two reads of its branch."
+(deftest ^{:seon.test/long "An own-branch agent's setup, one change through its eval request with its test step, and two reads of its branch."
            :seon.test/long-ms 30000}
   the-test-step-runs-the-member-list-the-done-rule-judges
   ;; live run 4: four chains capped on reaching tests no run of theirs selected, and 42e0 was done on 2 members while
@@ -788,7 +785,7 @@
   (update step :seon.context/refusals (partial mapv #(dissoc % :seon.error/at :seon.error/world))))
 
 (deftest ^{:seon/tasks #{'seon.context/reached-reds-are-invisible-to-the-agent}
-           :seon.test/long "An own-branch agent's setup, one change through its eval request with its test step and one fork-point run, and two reads of its block."
+           :seon.test/long "An own-branch agent's setup, one change through its eval request with its test step, and two reads of its block."
            :seon.test/long-ms 30000}
   broken-tests-show-with-their-failures
   ;; the change turns the proof green and breaks `identity-test`: the block and my.task/current show it with its
@@ -824,7 +821,7 @@
              "the step is not done, and the block's status says so")
          (is (false? (context/task-done? (db/db target) agent-id)) "as the end reads it"))))))
 
-(deftest ^{:seon.test/long "An own-branch agent's setup, one change through its eval request with its test step and one fork-point run, and one read of its block."
+(deftest ^{:seon.test/long "An own-branch agent's setup, one change through its eval request with its test step, and one read of its block."
            :seon.test/long-ms 30000}
   an-uncontracted-change-keeps-an-implement-step-working
   ;; the change turns the proof green through a private helper with no contract: the merge would refuse it, so
@@ -852,7 +849,7 @@
              "the uncontracted helper keeps the step working, named by its merge's refusal")
          (is (false? (context/task-done? (db/db target) agent-id)) "as the end reads it"))))))
 
-(deftest ^{:seon.test/long "An own-branch agent's setup, one change through its eval request with its test step and one fork-point run, and one read of its block."
+(deftest ^{:seon.test/long "An own-branch agent's setup, one change through its eval request with its test step, and one read of its block."
            :seon.test/long-ms 30000}
   an-any-slot-contract-keeps-an-implement-step-working-and-names-the-slot
   (test-support/with-running-agent

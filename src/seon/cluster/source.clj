@@ -1284,7 +1284,7 @@
 (defn- red-test-refusal
   "The `:seon.source/red-test-error` of a candidate whose judged results left `red-tests` not green, with the run
   and branch `evidence` names (its layer, operation and message, when it names them, over the merge's). A red the
-  merge base holds red is not judged here: neither judge counts it (`red-at-merge-base`)."
+  merge base holds red is still red."
   {:malli/schema [:=> [:cat [:map [:seon.test.run/branch :seon.store/branch] [:seon.source/refused-test-run :seon.test.run/id]]
                        :seon.source/red-tests]
                   :seon.source/red-test-error]}
@@ -1420,34 +1420,15 @@
           :seon.program/conflict (into #{} (map :seon.unmerged/name) entries)
           :seon.unmerged/entries (mapv #(assoc % :seon.unmerged/versions (versions database %)) entries))))
 
-(defn red-at-merge-base
-  "Of the red results among `results` other than `exempt`'s, the tests red at `branch`'s merge base `base-commit`,
-  as recorded at their reach there, on the base or on `branch` (`seon.test/held-red`, the question
-  `seon.test/fork-point-red` answers for the merge, which the attempt's test step runs when no result is held): the
-  done rule's `:seon.source/red-on-target`. A red with no result at the base is the change's. Reads only."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.source/commit-id] :seon.source/results [:set :seon.test/sym]]
-                  [:or [:set :seon.test/sym] :seon.error/value]]}
-  [branch base-commit results exempt]
-  (let [red? (requiring-resolve 'seon.test.runner/red-result?)
-        reds (into [] (comp (filter red?) (map :seon.test/sym) (remove exempt)) results)
-        base (when (and (seq reds) (uuid? base-commit)) (db/commit-database branch base-commit))]
-    (if-not base
-      #{}
-      (try (let [held ((requiring-resolve 'seon.test/held-red) base branch reds)]
-             (if (:seon.error/at held) held (into #{} (keep (fn [[k red]] (when red k))) held)))
-           (finally (release! [base]))))))
-
 (defn done-refusals
   "Every refusal the done rule gives a task over the recorded results in `judged`, the same for every task: each
   of its `:seon.task/proofs` and other `:seon.source/members` (the next task's proofs aside) without an executed
   current result (absent, or a result that never started: unknown evidence, never red or green, as the merge judges
   it; a task with neither proofs nor next proofs never finishes; a task with no proof of its own, a Prove step, has
   its next proofs, its product, as its work, so each of them needs an executed result too, red or green), each
-  proof whose executed result is not green; each other member red here that is not red at the merge base (`:seon.source/red-on-target`, `seon.test/fork-point-red`'s
-  question, as the merge asks it: a red with no result there is the change's), and each red test defined or changed
-  on the branch (in `:seon.program/identities`, `:seon.source/stray-red-error`), unless it is one of the
-  `:seon.source/next-proofs` (none on the last task); and every function of the identities `branch` holds with a
-  contract gap (`contract-gaps`); and what the branch alone decides of its merge (`publication`): its
+  proof whose executed result is not green, and each other member red here unless it is one of the
+  `:seon.source/next-proofs` (none on the last task): red is red, whatever main or the merge base holds; and every
+  function of the identities `branch` holds with a contract gap (`contract-gaps`); and what the branch alone decides of its merge (`publication`): its
   `:seon.source/lint-refusal` (a file its merge writes holds a clj-kondo error) and, on the last task (no next
   proofs), each function of its `:seon.source/merge-identities` no green test reaches (`uncovered-functions`), as
   the merge refuses them, and every unresolved unmerged entry the branch holds (`unmerged-refusal`), as git refuses a
@@ -1461,14 +1442,13 @@
   ```"
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/judged] :seon.source/refusals]}
   [branch {members :seon.source/members results :seon.source/results proofs :seon.task/proofs
-           next-proofs :seon.source/next-proofs on-base :seon.source/red-on-target delta :seon.program/identities
+           next-proofs :seon.source/next-proofs delta :seon.program/identities
            lint :seon.source/lint-refusal merging :seon.source/merge-identities deferred :seon.source/deferred
            run-id :seon.test.run/id s :seon.test.run/branch}]
   (let [evidence {:seon.test.run/branch s :seon.source/refused-test-run run-id
                   :seon.error/layer :seon.source/done :seon.error/operation 'seon.cluster.source/done-refusals}
         red? (requiring-resolve 'seon.test.runner/red-result?)
         by-sym (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity)) results)
-        on-base (set on-base)
         executed (fn [test-symbol] (let [result (by-sym test-symbol)] (and result (not (:seon.error/at result)))))
         ;; every member needs a current executed result: none is unknown, never green
         ;; a deferred member runs only on the merge's platform host, which answers it there (`merge-members`)
@@ -1476,9 +1456,7 @@
         work (if (seq proofs) (set proofs) (set next-proofs))
         unknown (vec (sort (remove executed (into work (remove (into (set next-proofs) deferred)) members))))
         red-proofs (filterv #(and (executed %) (not (green-result? (by-sym %)))) proofs)
-        others (into #{} (filter #(some-> (by-sym %) red?)) (remove (into (set proofs) next-proofs) members))
-        stray (filterv #(delta [:seon.test/sym %]) others)
-        regressed (filterv #(not (or (on-base %) (delta [:seon.test/sym %]))) others)
+        others (into [] (filter #(some-> (by-sym %) red?)) (sort (remove (into (set proofs) next-proofs) members)))
         verdicts (fn [tests] (red-test-verdicts run-id results tests))
         gaps (contract-gaps branch delta)
         green (into #{} (filter #(some-> (by-sym %) green-result?)) members)
@@ -1491,13 +1469,9 @@
              (assoc evidence :seon.error/message (str "Every proof and every other member needs a current executed result; a test with none"
                                                         " is unknown, not green, and a task with neither proofs nor next proofs never finishes.")
                     :seon.error/offending unknown)))
-      (seq (into red-proofs regressed))
-      (conj (red-test-refusal (assoc evidence :seon.error/message "A proof, or a test not red at the merge base, is not green here.")
-                              (verdicts (into red-proofs regressed))))
-      (seq stray)
-      (conj (seon.error.refusal/error :seon.source/stray-red-error
-             (assoc evidence :seon.error/message "A test defined or changed on the branch is red and is not one of the next task's proofs."
-                    :seon.source/red-tests (verdicts stray))))
+      (seq (into red-proofs others))
+      (conj (red-test-refusal (assoc evidence :seon.error/message "A proof, or a member that is not one of the next task's proofs, is not green here.")
+                              (verdicts (into red-proofs others))))
       (seq gaps) (conj (uncontracted-refusal evidence gaps))
       lint (conj lint)
       (:seon.error/at uncovered) (conj uncovered)

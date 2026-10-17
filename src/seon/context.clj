@@ -417,9 +417,8 @@
   `seon.cluster.source/merge-members`) with its proofs and product, its deferred members,
   their results at their current reach on the branch (`current-results`) and the newest run they came from. Every
   task passes its product as `:seon.source/next-proofs` (`seon.cluster.source/done-refusals`); a chain's task passes
-  the reds held red at its merge base as `:seon.source/red-on-target` (`seon.cluster.source/red-at-merge-base`) and
-  what its merge would publish (`seon.cluster.source/publication`), any other the reds main holds as
-  `:seon.source/red-on-target`. A branch that recorded no run has nothing to judge, so it carries no judgment input.
+  what its merge would publish (`seon.cluster.source/publication`). A red is red whatever main or the merge base
+  holds, so neither is read for it. A branch that recorded no run has nothing to judge, so it carries no judgment input.
   The head shows each judged test's status."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.task/sym
                        [:or :nil :seon.cluster/name :seon.error/value]]
@@ -444,15 +443,6 @@
         members (when (and listed (not (:seon.error/at listed))) (:seon.source/members listed))
         deferred (:seon.source/deferred listed)
         results (when members (current-results database members sym))
-        ;; a chain's task asks what the merge asks of a red: is it red at the merge base (`red-at-merge-base`)
-        held (when (and (vector? results) (not chained?))
-               (if (identical? main database) results (current-results main members nil)))
-        on-target (cond (not (vector? results)) nil
-                        chained? (source/red-at-merge-base database (let [c (source/branch-merge-base database)] (when (uuid? c) c)) results
-                                                           (into proofs product))
-                        (vector? held)
-                        (let [reds (into #{} (comp (filter runner/red-result?) (map :seon.test/sym)) results)]
-                          (into #{} (comp (filter runner/red-result?) (map :seon.test/sym) (filter reds)) held)))
         head (when members
                (head-entries database members sym (if (vector? results) (into {} (map (juxt :seon.test/sym identity)) results) results)))
         ;; the run the refusals name: the newest its results came from, else the newest the branch holds
@@ -469,9 +459,8 @@
                  (cond-> (merge {:seon.source/members members :seon.source/results results :seon.task/proofs proofs}
                                 (when-not (:seon.error/at published) published))
                    (seq product) (assoc :seon.source/next-proofs product)
-                   (seq deferred) (assoc :seon.source/deferred deferred)
-                   (seq on-target) (assoc :seon.source/red-on-target on-target)))]
-    (or (some #(when (:seon.error/at %) %) [owed following previous first-of delta listed results held on-target head published])
+                   (seq deferred) (assoc :seon.source/deferred deferred)))]
+    (or (some #(when (:seon.error/at %) %) [owed following previous first-of delta listed results head published])
         (cond-> (assoc owed :seon.task/product product
                        :seon.context/head head :seon.context/candidate database :seon.context/main main)
           (set? delta) (assoc :seon.program/identities delta)

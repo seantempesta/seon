@@ -75,7 +75,7 @@
               before (digest h-conn "merge-callee")]
           (is (false? (:seon.test/passed? red)))
           (is (= :seon.source/red-test-error (:seon.error/type (source/accept-merge! target store red))))
-          ;; main may record its own side of the red (seon.test/fork-point-red); its program is unchanged
+          ;; main's program is unchanged
           (is (= before (digest h-conn "merge-callee")))))
       (testing "green: accept merges exactly the judged entities with lineage H C E; C's later edit is never carried"
         (let [_ (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] (* 1 1))")])
@@ -325,7 +325,6 @@
              (is (= #{['tq.land/side-identity-test :red]}
                     (set (map (juxt :seon.test/sym :seon.source/verdict) (:seon.source/red-tests refused)))))
              (is (nil? (:seon.task/outcome (assignment-row connection request))) "the assignment stays open")
-             ;; main may record root's own run of the red at its head (seon.test/fork-point-red, hybrid-test-results Q2, R8)
              (is (= #{} written) "main holds no program or cluster fact the refused merge wrote")
              (is (= text (slurp file)) "the file is unchanged")
              (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))

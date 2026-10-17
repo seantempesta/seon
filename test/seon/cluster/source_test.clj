@@ -434,18 +434,16 @@
                  (red (assoc base :seon.task/proofs #{} :seon.source/members #{} :seon.source/results [])
                       'tq.done-test/next :seon.source/next-proofs #{'tq.done-test/next 'tq.done-test/unwritten})
                  [:seon.source/test-evidence-error]]
-                ["a branch-new red outside the next proofs: stray"
-                 (assoc (new-red base) :seon.source/next-proofs #{'tq.done-test/other}) [:seon.source/stray-red-error]]
+                ["a branch-new red outside the next proofs: refused"
+                 (assoc (new-red base) :seon.source/next-proofs #{'tq.done-test/other}) [:seon.source/red-test-error]]
                 ["the same red among the next proofs: done"
                  (assoc (new-red base) :seon.source/next-proofs #{'tq.done-test/new}) []]
-                ["the terminal task with a branch-new red: refused" (new-red base) [:seon.source/stray-red-error]]
-                ["a reaching test red here with no result at the merge base is the change's: refused"
+                ["the terminal task with a branch-new red: refused" (new-red base) [:seon.source/red-test-error]]
+                ["a reaching test red here: refused, whatever main or the merge base holds"
                  (red base 'tq.done-test/existing) [:seon.source/red-test-error]]
                 ["the same red as a next proof, a row added to an existing table: done"
                  (red base 'tq.done-test/existing :seon.source/next-proofs #{'tq.done-test/existing})
                  []]
-                ["a test red at the merge base too is not the change's"
-                 (red base 'tq.done-test/existing :seon.source/red-on-target #{'tq.done-test/existing}) []]
                 ["a new function with an :any slot: refused"
                  (update base :seon.program/identities conj [:seon.fn/sym 'tq.done/loose]) [:seon.source/uncontracted-error]]
                 ["a contracted stub no test reaches: done"
@@ -467,12 +465,12 @@
            "an own-branch assignment's step, in no chain, is judged by the same done rule")
        (is (= [['tq.done-test/new]]
               (mapv #(mapv :seon.test/sym (:seon.source/red-tests %)) (source/done-refusals branch (new-red base))))
-           "the stray refusal names the red test")))))
+           "the red-test refusal names the red test")))))
 
 (deftest done-and-merge-judge-a-red-reaching-test-the-same-way
   ;; live run 2, chain ce9d: a reaching test red after the change with no result on main; the done rule counted it
-  ;; no regression and the merge counted it the change's. One question for both: red unless red at the merge base
-  ;; (`seon.cluster.source/red-at-merge-base` for done, `seon.test/fork-point-red` for the merge)
+  ;; no regression and the merge counted it the change's. Owner 2026-10-17 (merge-rulings.md): red is red, whether
+  ;; or not main holds it red, and the merge judges with the done rule, so neither reads main for it
   (test-support/with-database
    (fn [connection]
      (test-support/declare-source!
@@ -486,12 +484,10 @@
                    :seon.task/proofs #{'tq.same-test/proof} :seon.source/results results
                    :seon.program/identities #{} :seon.test.run/id "run-1" :seon.test.run/branch :tq-same}
            shape (fn [refusals] (mapv (juxt :seon.error/type #(mapv (juxt :seon.test/sym :seon.source/verdict) (:seon.source/red-tests %)))
-                                      refusals))
-           on-base (source/red-at-merge-base branch (db/commit-id branch) results #{'tq.same-test/proof})]
-       (is (= #{} on-base) "a red with no result held at the merge base is not red there")
+                                      refusals))]
        (is (= [[:seon.source/red-test-error [['tq.same-test/reaching :red]]]]
-              (shape (source/done-refusals branch (cond-> judged (seq on-base) (assoc :seon.source/red-on-target on-base)))))
-           "the done rule, the merge's one judge too, refuses it as the change's, naming the test")))))
+              (shape (source/done-refusals branch judged)))
+           "the done rule, the merge's one judge too, refuses it, naming the test")))))
 
 (deftest done-and-merge-judge-one-member-list
   ;; live run 4, chain 42e0: done judged its proof and one changed test while the merge's run selected 64 tests
@@ -527,13 +523,9 @@
              shape (fn [refusals] (mapv (juxt :seon.error/type #(mapv :seon.test/sym (:seon.source/red-tests %))) refusals))]
          (is (= [[:seon.source/red-test-error ['tq.one-test/reaches-f]]] (shape (source/done-refusals database judged)))
              "done, the merge's one judge too, refuses the reaching member turned red")
-         (let [at-base (assoc judged :seon.source/red-on-target #{'tq.one-test/reaches-f})]
-           (is (= [] (source/done-refusals database at-base))
-               "a member red at the merge base is not refused"))
-         (let [proof-at-base (assoc judged :seon.source/results [(recorded 'tq.one-test/proof false) (recorded 'tq.one-test/reaches-f true)]
-                                    :seon.source/red-on-target #{'tq.one-test/proof})]
-           (is (= [[:seon.source/red-test-error ['tq.one-test/proof]]] (shape (source/done-refusals database proof-at-base)))
-               "a red proof is never excused"))
+         (let [red-proof (assoc judged :seon.source/results [(recorded 'tq.one-test/proof false) (recorded 'tq.one-test/reaches-f true)])]
+           (is (= [[:seon.source/red-test-error ['tq.one-test/proof]]] (shape (source/done-refusals database red-proof)))
+               "a red proof refuses"))
          (let [deferred (assoc judged :seon.source/results [(recorded 'tq.one-test/proof true)]
                                :seon.source/deferred #{'tq.one-test/reaches-f})]
            (is (= [] (source/done-refusals database deferred))

@@ -144,7 +144,7 @@ qualified deftest symbols; the deftests in it are its success tests (TASK-CHAIN 
 evaluated a form, the tests the branch changed, the tests reaching the change and then the task's proofs run on the
 agent's branch, and all green completes the task; proofs already green at the start end it with no model call (§2.3).
 The next task's proofs are red by design: Prove writes them and `:not-designed-red` refuses a green one (§4), and
-`:stray-red` refuses any other red the branch added (§2.4). A new behavior or bug regression fails before the work and
+every other red member refuses as `:seon.source/red-test-error`, whatever main holds (§2.4). A new behavior or bug regression fails before the work and
 passes after it. A behavior-preserving refactor names existing green tests (§1); green alone cannot establish that the
 refactor has been done, so its Prove task writes one proof that fails before it (TASK-CHAIN §4).
 Installed until S2c-2: the field is derived from `^{:seon/tasks #{'ns/task-name}}` metadata on the deftest (metadata

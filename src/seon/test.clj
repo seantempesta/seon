@@ -2974,7 +2974,7 @@
                                     (map (comp symbol namespace)))
                           runnable))
             loaded (when (seq fresh) (loaded-program (:seon.sci.eval/ctx execution)))
-            ;; A request may name namespaces to interpret whoever asks (`fork-point-red`).
+            ;; A request may name namespaces to interpret whoever asks.
             interpreted (into (set (:seon.test/interpreted-namespaces request))
                               (when (and (seq fresh) (not (:seon.error/at loaded)))
                                 (interpreted-namespaces database loaded fresh)))
@@ -3382,8 +3382,8 @@
   changed reach and outstanding obligations from recorded evidence; `:platform`
   the declared rows; `:all` every eligible row). Selection and admission read
   and write the explicit `:seon.test/recording-connection`, the execution's
-  branch or, for a run of another commit (`fork-point-red`'s base), the branch
-  that keeps it, named its destination beside the tested branch; `:seon.db/writer` (default `seon.db/transact!`)
+  branch or, for a run of another commit, the branch that keeps it, named its
+  destination beside the tested branch; `:seon.db/writer` (default `seon.db/transact!`)
   writes admission and stop there. A member whose recorded green still holds,
   or whose recorded red ran on this same program, is answered from the record
   with `:seon.test/unchanged` and no execution, unless the request asks
@@ -3406,7 +3406,8 @@
   are excluded in a JVM operating the development checkout, with the platform
   command. `:seon.test/passed?` is true only when every obligation has green
   evidence: exclusions, pending and unfinished members are unfulfilled."
-  {:malli/schema [:=> [:cat :seon.test/request]
+  {:seon/entrant true
+   :malli/schema [:=> [:cat :seon.test/request]
                   [:or :seon.test/run-result :seon.test/selection-error :seon.test/unknown-error
                    :seon.test/admission-error :seon.test.run/unavailable-error
                    :seon.config/error :seon.db.write/error :seon.db/transaction-refused-error
@@ -3500,45 +3501,3 @@
                              (:seon.test/sym entry) ": " (:seon.test/long entry))))
            (when-let [refusal (:seon.test/recording-refusal result)]
              (str "\nrecording refused: " (:seon.error/message refusal)))))))
-
-(defn held-red
-  "Of `tests`, those `base` (a commit's database value) holds that hold a result at their reach there, on `base` or
-  on `recorded` (the database a run of that commit recorded on, `fork-point-red`), each true when it is red there.
-  Reads only: a test holding no result is absent."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:sequential :seon.test/sym]]
-                  [:or [:map-of :seon.test/sym :boolean] :seon.error/value]]}
-  [base recorded tests]
-  (let [present (into [] (comp (distinct) (filter #(seq (db/datoms base :avet :seon.test/sym %)))) (sort tests))
-        reach (when (seq present) (runner/reach-digests base present))
-        held (when (and (seq present) (not (:seon.error/at reach)))
-               [(runner/result-at-reach base reach) (runner/result-at-reach recorded reach)])]
-    (or (some #(when (:seon.error/at %) %) (cons reach held))
-        (update-vals (apply merge {} held) runner/red-result?))))
-
-(defn fork-point-red
-  "Of `tests`, those the commit `commit` holds, each true when it is red there: the result held at its reach in
-  that commit, on the commit or on `execution`'s branch (`held-red`), else one run on a branch forked at that commit
-  from `execution`, recorded on `execution`'s connection, where the next call reads it at the same key, bounded by
-  `limit-ms` (else the cluster's check dial). A test with no result even then is not red there."
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.source/commit-id [:sequential :seon.test/sym] [:maybe pos-int?]]
-                  [:or [:map-of :seon.test/sym :boolean] :seon.error/value]]}
-  [execution commit tests limit-ms]
-  (let [store (or (:seon.store/store execution) (:seon.store/store (env/of execution)))
-        fork (source/database store commit)
-        recording (:seon.db/connection execution)
-        present (into [] (comp (distinct) (filter #(seq (db/datoms fork :avet :seon.test/sym %)))) (sort tests))
-        inherited (held-red fork (db/db recording) present)
-        due (when-not (:seon.error/at inherited) (into #{} (remove #(contains? inherited %)) present))
-        ran (when (seq due)
-              (let [child (@acquire-context! execution nil {:seon.agent/isolate? true :seon.cluster.registry/from commit})]
-                (try (db/with-branch
-                      {:seon.db/connection recording}
-                      #(run (cond-> {:seon.test/policy :named :seon.test/execution child :seon.test/recording-connection recording
-                                     :seon.test/identities due :seon.test/rerun? true :seon.test/include-long? true}
-                              limit-ms (assoc :seon.test/check-time-limit-ms limit-ms))))
-                     (finally (@release-context! child)))))]
-    (or (some #(when (:seon.error/at %) %) [inherited ran])
-        (merge (zipmap present (repeat false))
-               (into {} (keep #(when-let [test-symbol (:seon.test/sym %)] [test-symbol (runner/red-result? %)]))
-                     (:seon.test/results ran))
-               inherited))))

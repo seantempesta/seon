@@ -344,7 +344,7 @@
   [:seon.test/since-previous-run? {:optional true :description "Narrow :seon.test/changed to what changed since this request shape's previous completed run on the branch: tests reached only by changes that run answered are not selected. The automatic test step's reaching request; without an earlier run, the whole change."} :boolean]
   [:seon.test/check-time-limit-ms {:optional true} :seon.test/check-time-limit-ms]
   [:seon.test/batch-limit {:optional true} :seon.test/batch-limit]
-  [:seon.test/interpreted-namespaces {:optional true :description "Test namespaces this request runs interpreted whoever asks: main's side of a branch's interpreted red (`seon.test/fork-point-red`)."} :seon.test/interpreted-namespaces]]
+  [:seon.test/interpreted-namespaces {:optional true :description "Test namespaces this request runs interpreted whoever asks."} :seon.test/interpreted-namespaces]]
  :seon.test/loaded-source [:and {:description "The source commit this JVM loaded (its store's published head), supplied to selection."} :seon.source/commit-id]
  :seon.test/loaded-source-drift
  [:map {:description "The loaded source differs from the program entities the cluster records: recorded evidence cannot vouch for what executes, so nothing was reused."}
