@@ -29,10 +29,11 @@
  :registry [:map {:description "What db<->flow reads of the registry before it plans: the live graphs by agent."}
           [:seon.flow.actions/started :seon.flow.actions/started]
           [:seon.flow.actions/paused :seon.flow.actions/paused]]
- :op [:enum {:description "One effect db<->flow applies: write an attempt, start its flow, write a problem task, make a graph follow its intent; or, for an ended assignment (seon.cluster.agent/next-actions), squash-merge its branch, publish its merged declarations into the checkout, write its non-merged end on main, stop its graph, delete its branch. The transition table's ops (seon.cluster.reconcile/transitions) follow: build or rebuild a task's branch, converge its config, its start step, a problem hold, judge, its done step, start or stop its graph, close an attempt cancelled or for a changed environment, bail to root, merge main forward, publish; and per branch, listen, release its route, end it."}
+ :op [:enum {:description "One effect db<->flow applies: write an attempt, start its flow, write a problem task, make a graph follow its intent; or, for an ended assignment (seon.cluster.agent/next-actions), squash-merge its branch, publish its merged declarations into the checkout, write its non-merged end on main, stop its graph, delete its branch. The transition table's ops (seon.cluster.reconcile/transitions) follow: build or rebuild a task's branch, converge its config, its start step, a problem hold, judge, its done step, start or stop its graph, close an attempt cancelled or for a changed environment, bail to root, merge main forward, publish; and per branch, listen, release its route, end it. The agent's phase table's ops (seon.cluster.reconcile/agent-transitions), which its own proc applies, follow: derive its next work, open a turn and call the model, evaluate the forms, run the test step, judge the task's end, release its listeners at stop, refuse a submission."}
       :attempt :start-flow :problem :pause :resume :stop :cancel :merge :publish :close :delete-branch
       :build :rebuild :converge-config :start-step :problem-hold :judge :done-step :start-graph
-      :close-cancelled :close-environment :bail :merge-main :listen :release-route :end-branch]
+      :close-cancelled :close-environment :bail :merge-main :listen :release-route :end-branch
+      :derive :call-model :evaluate :test-step :judge :release :refuse-submission]
  :class [:enum {:description "Which problem a :problem action records: a :running leaf that does not validate, or an ended assignment whose work is unfinished."} :invalid-task :unfinished-task]
  :action [:map {:description "One planned effect. :attempt carries the next attempt's number and fork point; :start-flow the intent its graph starts under and the fork point; a chain task's :attempt and :start-flow carry its chain branch instead, where both happen; a taskless agent's :stop and :delete-branch name no task."}
           [:seon.flow.actions/op :seon.flow.actions/op]
@@ -179,8 +180,9 @@
  :row [:string {:min 1 :description "A transition row's name, e.g. G1 or N6."}]
  :steady [:string {:min 1 :description "A steady row's name for the state it holds."}]
  :start? [:boolean {:description "The row is in the start group, which admit caps by max-running, oldest first and one per branch."}]
- :transition [:map {:description "One row of a transition table: its name, its condition and its actions, or its steady name."}
+ :transition [:map {:description "One row of a transition table: its name, its condition and its actions, or its steady name; an agent's row also names the phase it moves to."}
               :seon.flow.actions/row :seon.flow.actions/when :seon.flow.actions/then
+              [:seon.flow.actions/next {:optional true} :seon.flow.actions/next]
               [:seon.flow.actions/steady {:optional true} :seon.flow.actions/steady]
               [:seon.flow.actions/start? {:optional true} :seon.flow.actions/start?]]
  :task-action [:map :seon.flow.actions/op :seon.task/handle :seon.task/branch]
@@ -207,4 +209,49 @@
                     [:release-route :seon.flow.actions/branch-action]
                     [:end-branch :seon.flow.actions/branch-action]]
  :reconcile-actions [:vector {:description "The minimal actions reconcile answers for one observed value: every task's row's actions, the start group admitted, then each branch's."}
-                     :seon.flow.actions/reconcile-action]}
+                     :seon.flow.actions/reconcile-action]
+ ;;; The agent's phase table (seon.cluster.reconcile/agent-transitions): its proc's phase and the event that arrives in
+ ;;; it, each impossible pair a named schema.
+ :phase [:enum {:description "Where an agent's proc stands: paused, idle, parked or ended between transforms (waiting for flow), stopped once it exited, or inside one transform calling the model, evaluating forms, testing or judging the task's end."}
+         :paused :idle :calling :evaluating :testing :judging :parked :ended :stopped]
+ :next [:and {:description "The phase an agent's transition row moves its proc to."} :seon.flow.actions/phase]
+ :input [:enum {:description "What flow delivers between transforms: its control transitions (::flow/resume, ::flow/pause, ::flow/stop), a mailbox wake, or a submission (an outside eval request) on the request port."}
+         :resume :pause :stop :wake :submission]
+ :answer [:enum {:description "What an op answers inside a transform: derive finds a fresh attempt, work, nothing or its admission closed; the model replies or fails; the forms are evaluated; the tests report; the judge finds the task ended or continuing; a write refused, or refused to the bound; interrupted by a stop."}
+          :attempt :work :nothing :admission-closed :model-reply :model-error :evaluated :tests-reported
+          :task-ended :continues :write-refused :refusal-bound :interrupted]
+ :event [:or {:description "What arrives in an agent's phase: an input from flow or an answer of the op the last row ran."}
+         :seon.flow.actions/input :seon.flow.actions/answer]
+ :message-mid-pass [:not {:description "Flow reads control and inputs only between transforms, and a transform runs to a phase that waits."}
+                    [:map [:seon.flow.actions/phase [:enum :calling :evaluating :testing :judging]] [:seon.flow.actions/event [:enum :resume :pause :stop :wake :submission]]]]
+ :input-while-paused [:not {:description "A paused proc reads only its control channel."}
+                      [:map [:seon.flow.actions/phase [:enum :paused]] [:seon.flow.actions/event [:enum :wake :submission]]]]
+ :resume-while-running [:not {:description "Flow calls the transition only on a status change, and a proc starts paused."}
+                        [:map [:seon.flow.actions/phase [:enum :idle :parked :ended]] [:seon.flow.actions/event [:enum :resume]]]]
+ :pause-while-paused [:not {:description "Flow calls the transition only on a status change."}
+                      [:map [:seon.flow.actions/phase [:enum :paused]] [:seon.flow.actions/event [:enum :pause]]]]
+ :after-exit [:not {:description "A stopped proc has exited: nothing arrives."}
+              [:map [:seon.flow.actions/phase [:enum :stopped]]]]
+ :derived-outside-idle [:not {:description "Only derive answers what the next work is, and it runs in idle."}
+                        [:map [:seon.flow.actions/phase [:enum :paused :calling :evaluating :testing :judging :parked :ended :stopped]] [:seon.flow.actions/event [:enum :attempt :work :nothing :admission-closed]]]]
+ :reply-outside-calling [:not {:description "Only the model call answers a reply or a provider failure."}
+                         [:map [:seon.flow.actions/phase [:enum :paused :idle :evaluating :testing :judging :parked :ended :stopped]] [:seon.flow.actions/event [:enum :model-reply :model-error]]]]
+ :evaluated-outside-evaluating [:not {:description "Only the evaluation of the forms answers evaluated."}
+                                [:map [:seon.flow.actions/phase [:enum :paused :idle :calling :testing :judging :parked :ended :stopped]] [:seon.flow.actions/event [:enum :evaluated]]]]
+ :tests-outside-testing [:not {:description "Only the test step reports tests."}
+                         [:map [:seon.flow.actions/phase [:enum :paused :idle :calling :evaluating :judging :parked :ended :stopped]] [:seon.flow.actions/event [:enum :tests-reported]]]]
+ :judgment-outside-judging [:not {:description "Only the judge observes the task's end."}
+                            [:map [:seon.flow.actions/phase [:enum :paused :idle :calling :evaluating :testing :parked :ended :stopped]] [:seon.flow.actions/event [:enum :task-ended :continues]]]]
+ :answer-outside-a-long-op [:not {:description "Only the model call, the evaluation and the test step write what the proc's write-refusal bound counts, and only they run long enough for a stop to interrupt."}
+                           [:map [:seon.flow.actions/phase [:enum :paused :idle :judging :parked :ended :stopped]] [:seon.flow.actions/event [:enum :write-refused :refusal-bound :interrupted]]]]
+ :agent-state [:and {:description "An agent's proc's phase and the event that arrived in it, then each impossible pair by name, so a refusal names the constraint it breaks."}
+               [:map :seon.flow.actions/phase :seon.flow.actions/event]
+               :seon.flow.actions/message-mid-pass :seon.flow.actions/input-while-paused
+               :seon.flow.actions/resume-while-running :seon.flow.actions/pause-while-paused
+               :seon.flow.actions/after-exit :seon.flow.actions/derived-outside-idle
+               :seon.flow.actions/reply-outside-calling :seon.flow.actions/evaluated-outside-evaluating
+               :seon.flow.actions/tests-outside-testing :seon.flow.actions/judgment-outside-judging
+               :seon.flow.actions/answer-outside-a-long-op]
+ :answers [:map {:description "Each answer an op can give: closed, those of its own work; external, those only another actor causes (the writer refusing, a stop interrupting, the model choosing to continue), left out of the convergence walk."}
+           [:closed [:vector :seon.flow.actions/answer]]
+           [:external {:optional true} [:vector :seon.flow.actions/answer]]]}

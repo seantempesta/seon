@@ -1,7 +1,8 @@
 (ns seon.cluster.reconcile
   "The pure reconciler: each task's state matched to its one row of `transitions`, the start group admitted by
   `admit`, and each branch matched to its one row of `branch-transitions`. Desired and observed state in, the minimal
-  actions out; each action's actor writes the fact that closes its row."
+  actions out; each action's actor writes the fact that closes its row. An agent's own proc steps by its one row of
+  `agent-transitions` for its phase and the event that arrived."
   (:require [seon.agent :as-alias agent]
             [seon.flow.actions :as-alias fa]
             [seon.task :as-alias task]))
@@ -59,6 +60,54 @@
      {::fa/row "B5" ::fa/when (assoc idle ::fa/finished? true ::fa/ended? true) ::fa/then [] ::fa/steady "kept"}
      {::fa/row "B6" ::fa/when (assoc idle ::fa/finished? false) ::fa/then [] ::fa/steady "held work waits"}]))
 
+(def agent-transitions
+  "The agent's phase table: disjoint rows over `:seon.flow.actions/agent-state`, one per possible phase and event. Each
+  row moves the proc to its next phase and runs at most one op there, whose answer is the next event; a row that runs
+  no op names the steady phase it waits in for flow."
+  (let [long-op #{:calling :evaluating :testing}]
+    [{::fa/row "F1" ::fa/when {::fa/phase :paused ::fa/event :resume} ::fa/next :idle ::fa/then [:derive]}
+     {::fa/row "F2" ::fa/when {::fa/phase #{:idle :parked :ended} ::fa/event :pause} ::fa/next :paused ::fa/then []
+      ::fa/steady "paused"}
+     {::fa/row "F3" ::fa/when {::fa/phase #{:paused :idle :parked :ended} ::fa/event :stop} ::fa/next :stopped
+      ::fa/then [:release]}
+     {::fa/row "I1" ::fa/when {::fa/phase :idle ::fa/event :wake} ::fa/next :idle ::fa/then [:derive]}
+     {::fa/row "I2" ::fa/when {::fa/phase #{:idle :parked} ::fa/event :submission} ::fa/next :evaluating
+      ::fa/then [:evaluate]}
+     {::fa/row "I3" ::fa/when {::fa/phase :parked ::fa/event :wake} ::fa/next :parked ::fa/then []
+      ::fa/steady "parked: a wake never repeats a refused write"}
+     {::fa/row "I4" ::fa/when {::fa/phase :ended ::fa/event :wake} ::fa/next :ended ::fa/then [] ::fa/steady "ended"}
+     {::fa/row "I5" ::fa/when {::fa/phase :ended ::fa/event :submission} ::fa/next :ended ::fa/then [:refuse-submission]}
+     {::fa/row "D1" ::fa/when {::fa/phase :idle ::fa/event :attempt} ::fa/next :testing ::fa/then [:test-step]}
+     {::fa/row "D2" ::fa/when {::fa/phase :idle ::fa/event :work} ::fa/next :calling ::fa/then [:call-model]}
+     {::fa/row "D3" ::fa/when {::fa/phase :idle ::fa/event :nothing} ::fa/next :idle ::fa/then [] ::fa/steady "idle"}
+     {::fa/row "D4" ::fa/when {::fa/phase :idle ::fa/event :admission-closed} ::fa/next :ended ::fa/then []
+      ::fa/steady "ended"}
+     {::fa/row "M1" ::fa/when {::fa/phase :calling ::fa/event :model-reply} ::fa/next :evaluating ::fa/then [:evaluate]}
+     {::fa/row "M2" ::fa/when {::fa/phase :calling ::fa/event :model-error} ::fa/next :judging ::fa/then [:judge]}
+     {::fa/row "E1" ::fa/when {::fa/phase :evaluating ::fa/event :evaluated} ::fa/next :testing ::fa/then [:test-step]}
+     {::fa/row "T1" ::fa/when {::fa/phase :testing ::fa/event :tests-reported} ::fa/next :judging ::fa/then [:judge]}
+     {::fa/row "J1" ::fa/when {::fa/phase :judging ::fa/event :task-ended} ::fa/next :ended ::fa/then []
+      ::fa/steady "ended"}
+     {::fa/row "J2" ::fa/when {::fa/phase :judging ::fa/event :continues} ::fa/next :idle ::fa/then [:derive]}
+     {::fa/row "W1" ::fa/when {::fa/phase long-op ::fa/event :write-refused} ::fa/next :idle ::fa/then [:derive]}
+     {::fa/row "W2" ::fa/when {::fa/phase long-op ::fa/event :refusal-bound} ::fa/next :parked ::fa/then []
+      ::fa/steady "parked"}
+     {::fa/row "X1" ::fa/when {::fa/phase long-op ::fa/event :interrupted} ::fa/next :idle ::fa/then []
+      ::fa/steady "interrupted, its stop queued"}]))
+
+(def agent-answers
+  "Each op of `agent-transitions` and the answers it can give, as `:seon.flow.actions/answers`: its own work's, and
+  those only another actor causes (the writer refusing, a stop interrupting, the model choosing to continue, which the
+  attempt's turn cap `seon.turn/turns-left` bounds)."
+  (let [long-op {:closed [:refusal-bound] :external [:write-refused :interrupted]}]
+    {:derive {:closed [:attempt :work :nothing :admission-closed]}
+     :call-model (update long-op :closed into [:model-reply :model-error])
+     :evaluate (update long-op :closed conj :evaluated)
+     :test-step (update long-op :closed conj :tests-reported)
+     :judge {:closed [:task-ended] :external [:continues]}
+     :release {:closed []}
+     :refuse-submission {:closed []}}))
+
 (def ^:private start-ops
   (into #{} (comp (filter ::fa/start?) (mapcat ::fa/then)) transitions))
 
@@ -79,11 +128,19 @@
   "The row of `table` whose condition `state` meets: per key, a value or
   a set of values."
   {:malli/schema [:=> [:cat [:vector :seon.flow.actions/transition]
-                       [:or :seon.flow.actions/matched-state :seon.flow.actions/branch-state]]
+                       [:or :seon.flow.actions/matched-state :seon.flow.actions/branch-state
+                        :seon.flow.actions/agent-state]]
                   :seon.flow.actions/transition]}
   [table state]
   (let [meets? (fn [[k allowed]] (if (set? allowed) (contains? allowed (get state k)) (= allowed (get state k))))]
     (some #(when (every? meets? (::fa/when %)) %) table)))
+
+(defn agent-transition
+  "The row of `agent-transitions` for `state`, a phase and the event that arrived in it: the phase the agent's proc
+  moves to and the op it runs there."
+  {:malli/schema [:=> [:cat :seon.flow.actions/agent-state] :seon.flow.actions/transition]}
+  [state]
+  (row agent-transitions state))
 
 (defn effects
   "The states `op`'s actor can leave `state` in: `:closed`, its own write

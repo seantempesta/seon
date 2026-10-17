@@ -23,6 +23,54 @@
           observed
           actions))
 
+(defn- enum-values
+  "The values the registered schema `k` admits, read from its enums."
+  {:malli/schema [:=> [:cat :qualified-keyword] [:vector :keyword]]}
+  [k]
+  (let [s (m/schema k {:registry (:seon.schema.projection/registry (schema/handed-projection))})
+        leaves (fn leaves [s] (case (m/type s)
+                                :enum (m/children s)
+                                (:or :and) (mapcat leaves (m/children s))
+                                ::m/schema (leaves (m/deref s))
+                                []))]
+    (filterv (m/validator s) (distinct (leaves (m/deref s))))))
+
+(defn- state-space
+  "The registered state schema `k`'s dimensions in order and its named constraints, each as the values it forbids per
+  dimension."
+  {:malli/schema [:=> [:cat :qualified-keyword]
+                  [:map [:dimensions [:vector :qualified-keyword]]
+                   [:constraints [:vector [:map [:id :qualified-keyword]
+                                           [:when [:map-of :qualified-keyword [:set [:or :keyword :boolean]]]]]]]]]}
+  [k]
+  (let [[shape & constraints] (m/children (m/deref (m/schema k {:registry (:seon.schema.projection/registry
+                                                                           (schema/handed-projection))})))]
+    {:dimensions (mapv first (m/entries shape))
+     :constraints (mapv (fn [c] (let [[_ _ [_ & entries]] (m/form (m/deref c))]
+                                  {:id (m/form c) :when (into {} (for [[d v] entries] [d (set (rest v))]))}))
+                        constraints)}))
+
+(defn- enumerate
+  "Every state of `space` over `values` per dimension that no constraint forbids: backtracking over the dimensions,
+  pruning a partial state once a constraint whose dimensions are all assigned matches it."
+  {:malli/schema [:=> [:cat [:map [:dimensions [:vector :qualified-keyword]]
+                             [:constraints [:vector [:map [:id :qualified-keyword]
+                                                     [:when [:map-of :qualified-keyword [:set [:or :keyword :boolean]]]]]]]]
+                       [:map-of :qualified-keyword [:vector [:or :keyword :boolean]]]]
+                  [:vector [:map-of :qualified-keyword [:or :keyword :boolean]]]]}
+  [{:keys [dimensions constraints]} values]
+  (let [position (zipmap dimensions (range))
+        by-last (group-by (fn [c] (apply max-key position (keys (:when c)))) constraints)
+        forbids? (fn [s {condition :when}] (every? (fn [[d vs]] (contains? vs (get s d))) condition))]
+    (reduce (fn [states d]
+              (into [] (for [s states
+                             v (values d)
+                             :let [s' (assoc s d v)]
+                             :when (not-any? #(forbids? s' %) (by-last d))]
+                         s')))
+            [{}]
+            dimensions)))
+
 (def ^:private nothing-yet
   {::fa/execution :held ::fa/needs :none ::fa/target :none ::fa/environment :complete ::fa/branch :absent
    ::fa/config :none ::fa/attempt :none ::fa/outcome :none ::fa/step :none ::fa/agent-env :none ::fa/graph :absent
@@ -52,33 +100,8 @@
 (deftest ^{:seon.test/long "Enumerates the 13,968 possible task states from the registry, matches each against every row, walks every state's closure and reconciles the whole observed value of 13,968 tasks to its fixpoint: 3,805 ms in a check JVM, 0.6 s of it the work itself and the rest the instrumented contracts of about 40,000 calls and each round's whole observed value."
            :seon.test/long-ms 10000}
   the-transition-table-is-exhaustive-deterministic-and-convergent
-  (let [opts {:registry (:seon.schema.projection/registry (schema/handed-projection))}
-        leaves (fn leaves [s] (case (m/type s)
-                                :enum (m/children s)
-                                (:or :and) (mapcat leaves (m/children s))
-                                ::m/schema (leaves (m/deref s))
-                                []))
-        values (fn [k] (let [s (m/schema k opts)] (filterv (m/validator s) (distinct (leaves (m/deref s))))))
-        ;; a state schema's dimensions in order and its named constraints, read from the registry
-        space (fn [k] (let [[shape & constraints] (m/children (m/deref (m/schema k opts)))]
-                        {:dimensions (mapv first (m/entries shape))
-                         :constraints (mapv (fn [c] (let [[_ _ [_ & entries]] (m/form (m/deref c))]
-                                                      {:id (m/form c) :when (into {} (for [[d v] entries] [d (set (rest v))]))}))
-                                            constraints)}))
-        violated (fn [constraints state]
+  (let [violated (fn [constraints state]
                    (filterv (fn [{condition :when}] (every? (fn [[d vs]] (contains? vs (get state d))) condition)) constraints))
-        ;; backtracking over the dimensions, pruning a partial state once a constraint whose dimensions are all assigned matches it
-        enumerate (fn [{:keys [dimensions constraints]} value-of]
-                    (let [position (zipmap dimensions (range))
-                          by-last (group-by (fn [c] (apply max-key position (keys (:when c)))) constraints)]
-                      (reduce (fn [states d]
-                                (into [] (for [s states
-                                               v (value-of d)
-                                               :let [s' (assoc s d v)]
-                                               :when (empty? (violated (by-last d) s'))]
-                                           s')))
-                              [{}]
-                              dimensions)))
         matching (fn [table state]
                    (mapv ::fa/row (filter (fn [r] (every? (fn [[k allowed]] (if (set? allowed)
                                                                               (contains? allowed (get state k))
@@ -106,12 +129,12 @@
                                              :when (seq ids)]
                                          {:state s :op op :successor s' :violates ids}))
                      :cycles (reduce (fn [cs s] (walk cs s #{})) [] states)}))
-        task-space (space :seon.flow.actions/task-state)
-        branch-space (space :seon.flow.actions/branch-state)
-        states (enumerate task-space values)
-        branch-states (enumerate branch-space (constantly [false true]))]
+        task-space (state-space :seon.flow.actions/task-state)
+        branch-space (state-space :seon.flow.actions/branch-state)
+        states (enumerate task-space (into {} (map (juxt identity enum-values)) (:dimensions task-space)))
+        branch-states (enumerate branch-space (zipmap (:dimensions branch-space) (repeat [false true])))]
     (testing "the state space is the twelve enums less the seventeen named constraints"
-      (is (= 839808 (reduce * (map (comp count values) (:dimensions task-space)))))
+      (is (= 839808 (reduce * (map (comp count enum-values) (:dimensions task-space)))))
       (is (= 17 (count (:constraints task-space))))
       (is (= 13968 (count states)))
       (is (= 8 (count branch-states))))
@@ -195,3 +218,57 @@
                      (catch clojure.lang.ExceptionInfo e (ex-data e)))]
     (is (= :seon.instrument/contract-error (:seon.error/type refusal)))
     (is (= [:seon.flow.actions/config-without-branch] (mapv :seon.error/expected (:seon.error/problems refusal))))))
+
+(deftest every-agent-phase-and-event-has-exactly-one-row
+  (let [space (state-space :seon.flow.actions/agent-state)
+        values (into {} (map (juxt identity enum-values)) (:dimensions space))
+        pairs (enumerate space values)
+        possible? (set pairs)
+        input? (set (enum-values :seon.flow.actions/input))
+        matching (fn [pair] (mapv ::fa/row (filter (fn [r] (every? (fn [[k allowed]] (if (set? allowed)
+                                                                                         (contains? allowed (get pair k))
+                                                                                         (= allowed (get pair k))))
+                                                                     (::fa/when r)))
+                                                   reconcile/agent-transitions)))
+        ;; each op the pair's row runs, with each answer it can give, arrives in the row's next phase
+        successors (fn [pair external?]
+                     (let [{phase ::fa/next run ::fa/then} (reconcile/agent-transition pair)]
+                       (for [op run
+                             :let [{own :closed outside :external} (reconcile/agent-answers op)]
+                             answer (if external? (concat own outside) own)]
+                         [op {::fa/phase phase ::fa/event answer}])))
+        ;; where a walk with no further answer rests: the last row's next phase
+        rests (fn rests [pair on-path]
+                (let [after (successors pair false)]
+                  (cond (contains? on-path pair) [{:cycle pair}]
+                        (empty? after) [(::fa/next (reconcile/agent-transition pair))]
+                        :else (mapcat (fn [[_ p]] (rests p (conj on-path pair))) after))))
+        waits? (fn [phase] (let [arriving (filter #(= phase (::fa/phase %)) pairs)]
+                             (or (empty? arriving) (some (comp input? ::fa/event) arriving))))]
+    (testing "the state space is the phase and event enums less the named constraints"
+      (is (= [9 18] (mapv (comp count values) (:dimensions space))))
+      (is (= 11 (count (:constraints space))))
+      (is (= 33 (count pairs))))
+    (testing "1. every possible (phase, event) matches exactly one row, and agent-transition answers it"
+      (is (= [] (into [] (comp (map (juxt identity matching)) (remove (comp #{1} count second))) pairs)))
+      (is (= [] (into [] (remove #(= (matching %) [(::fa/row (reconcile/agent-transition %))])) pairs)))
+      (is (= [] (into [] (comp (map reconcile/agent-transition)
+                               (remove #(= (empty? (::fa/then %)) (some? (::fa/steady %))))
+                               (map ::fa/row))
+                      pairs))
+          "a row runs no op exactly when it names the steady phase it rests in"))
+    (testing "2. every op, with every answer it can give, arrives as a possible (phase, event)"
+      (is (= [] (into [] (comp (mapcat ::fa/then) (remove reconcile/agent-answers)) reconcile/agent-transitions))
+          "every op the table runs declares its answers")
+      (is (= [] (into [] (for [pair pairs [op s'] (successors pair true) :when (not (possible? s'))]
+                           {:pair pair :op op :successor s'})))))
+    (testing "3. every pair reaches a resting phase, one that waits for flow, without a cycle"
+      (is (= [] (into [] (for [pair pairs
+                               resting (rests pair #{})
+                               :when (or (map? resting) (not (waits? resting)))]
+                           {:pair pair :rest resting})))))
+    (testing "an impossible pair is refused naming its constraint"
+      (let [refusal (try (reconcile/agent-transition {::fa/phase :paused ::fa/event :wake})
+                         (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+        (is (= [:seon.flow.actions/input-while-paused]
+               (mapv :seon.error/expected (:seon.error/problems refusal))))))))
