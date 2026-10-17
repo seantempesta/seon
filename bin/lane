@@ -472,6 +472,16 @@ branch_evidence() {
 # AND red on HEAD too (the same tests run by `bin/seon check --at HEAD`: git CI semantics, a parent that is already red
 # may be committed on); writes the trailer. Exit 2 otherwise: a red outside the accepted set, a failure that is no test
 # red, or an accepted test that is green on HEAD.
+# Whether the test var named by the string `sym` is a deftest in HEAD's source of its namespace file (from git, not a run).
+defined_on_head='(fn [sym]
+  (let [[ns-name var-name] (clojure.string/split sym #"/")
+        path (str "test/" (-> ns-name (clojure.string/replace "." "/") (clojure.string/replace "-" "_")) ".clj")
+        src (:out (clojure.java.shell/sh "git" "show" (str "HEAD:" path)))
+        forms (try (edamame.core/parse-string-all (or src "") {:all true :read-cond :allow :features #{:clj}
+                                                                :auto-resolve name :readers (constantly identity)})
+                   (catch Exception _ []))]
+    (boolean (some #(and (seq? %) (= (symbol "deftest") (first %)) (= var-name (str (second %)))) forms))))'
+
 accepted_reds_gate() {
   local result="$1" trailer="$2"; shift 2
   local reds="" red args=() head_result="${result%.edn}-head.edn"
@@ -485,21 +495,19 @@ accepted_reds_gate() {
   (cond (empty? red) (System/exit 2)
         (seq outside) (do (binding [*out* *err*] (println "== red but not accepted:" (pr-str outside))) (System/exit 2))
         :else (println (clojure.string/join " " red))))' "$result" "$@")" || return 2
-  for red in $reds; do args+=(--test "$red"); done
-  echo "== the accepted reds must be red on HEAD: bin/seon check --at HEAD ${args[*]}"
-  SEON_TEST_RESULT_FILE="$head_result" bin/seon check --at HEAD "${args[@]}" > /dev/null 2>&1 && { echo "== the accepted tests pass on HEAD: nothing to accept"; return 2; }
+  # Only the reds HEAD defines run on HEAD: a new proof there names no test, and would leave the HEAD check no run.
+  for red in $(bb -e "(let [defined-on-head? $defined_on_head] (run! println (filter defined-on-head? *command-line-args*)))" $reds); do
+    args+=(--test "$red")
+  done
+  if (( ${#args[@]} )); then
+    echo "== the accepted reds must be red on HEAD: bin/seon check --at HEAD ${args[*]}"
+    SEON_TEST_RESULT_FILE="$head_result" bin/seon check --at HEAD "${args[@]}" > /dev/null 2>&1 && { echo "== the accepted tests pass on HEAD: nothing to accept"; return 2; }
+  fi
   # A red test HEAD does not define is a new proof, red by design (proofs are written before the body): accepted.
   bb -e '
 (let [[file trailer & reds] *command-line-args*
       ;; new on HEAD = the HEAD source of the test namespace file defines no such deftest (decided from git, not the run)
-      defined-on-head? (fn [sym]
-                         (let [[ns-name var-name] (clojure.string/split sym #"/")
-                               path (str "test/" (-> ns-name (clojure.string/replace "." "/") (clojure.string/replace "-" "_")) ".clj")
-                               src (:out (clojure.java.shell/sh "git" "show" (str "HEAD:" path)))
-                               forms (try (edamame.core/parse-string-all (or src "") {:all true :read-cond :allow :features #{:clj}
-                                                                                       :auto-resolve name :readers (constantly identity)})
-                                          (catch Exception _ []))]
-                           (boolean (some #(and (seq? %) (= (symbol "deftest") (first %)) (= var-name (str (second %)))) forms))))
+      defined-on-head? '"$defined_on_head"'
       new-proofs (remove defined-on-head? reds)
       old (filter defined-on-head? reds)
       run (when (.exists (java.io.File. file)) (clojure.edn/read-string (slurp file)))
