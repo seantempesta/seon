@@ -1576,20 +1576,22 @@
   "A replaced function reaches no green test of the named run.")
 
 (defn- uncovered-functions
-  "The functions among `identities` that `database` holds which no test of `covering` reaches (`seon.fn/gate-sets`),
-  each with the tests that do reach it: what a merge refuses as uncovered, and what would cover it once green. A
-  refused reach read (`seon.fn/gate-sets`) answers that refusal, never an uncovered function."
+  "The functions among `identities` that `database` holds which no test of `covering` reaches, each with the tests that
+  do reach it (its seed's contribution to the member fold, `member-contributions`): what a merge refuses as
+  uncovered, and what would cover it once green. The fold leaves out the tests declared long. A refused fold answers
+  that refusal, never an uncovered function."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set [:set :seon.test/sym]]
-                  [:or [:map-of :seon.fn/sym [:vector :seon.test/sym]] :seon.db/invalid-read-error]]}
+                  [:or [:map-of :seon.fn/sym [:vector :seon.test/sym]] :seon.error/value]]}
   [database identities covering]
-  (reduce (fn [uncovered [a f]]
-            (if (and (= :seon.fn/sym a) (:db/id (db/pull database [:db/id] [a f])))
-              (let [reaching (fn/gate-sets {:seon.db/db database :seon.fn/seeds #{f}})]
-                (cond (db/read-refusal? reaching) (reduced reaching)
-                      (not-any? covering reaching) (assoc uncovered f reaching)
-                      :else uncovered))
-              uncovered))
-          {} identities))
+  (let [seeds (into #{} (filter (fn [[a]] (#{:seon.fn/sym :seon.test/sym :seon.ns/name :seon.schema/key} a))) identities)
+        folded (member-contributions database seeds ((requiring-resolve 'seon.test/selection-revisions) database))]
+    (if (:seon.error/at folded) folded
+      (reduce (fn [uncovered [a f :as identity]]
+                (let [tests (get-in folded [::contributions identity :seon.fn/tests])]
+                  (if (and (= :seon.fn/sym a) (:db/id (db/pull database [:db/id] identity)) (not-any? covering tests))
+                    (assoc uncovered f (vec (sort tests)))
+                    uncovered)))
+              {} identities))))
 
 (defn- uncovered-refusal
   "The `:seon.source/test-evidence-error` refusing `uncovered` (`uncovered-functions`) with `evidence`'s members: the
@@ -1707,8 +1709,8 @@
                     :seon.source/red-tests (verdicts stray))))
       (seq gaps) (conj (uncontracted-refusal evidence gaps))
       lint (conj lint)
-      (db/read-refusal? uncovered) (conj uncovered)
-      (and (seq uncovered) (not (db/read-refusal? uncovered))) (conj (uncovered-refusal evidence uncovered results)))))
+      (:seon.error/at uncovered) (conj uncovered)
+      (and (seq uncovered) (not (:seon.error/at uncovered))) (conj (uncovered-refusal evidence uncovered results)))))
 
 (defn merge-verdict
   "Every refusal of the candidate `prepared` (`prepare-merge!`'s value) names, judged from what `main`, the

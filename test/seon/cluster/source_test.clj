@@ -585,10 +585,12 @@
                    :seon.program/identities #{[:seon.fn/sym 'tq.reach/stub]}
                    :seon.source/merge-identities #{[:seon.fn/sym 'tq.reach/stub]}
                    :seon.test.run/id "run-1" :seon.test.run/branch :tq-reach}
-           uncovered (filterv #(= ['tq.reach/stub] (:seon.error/offending %))
-                              (source/done-refusals (db/db connection) judged))]
+           measured (profile/measure #(source/done-refusals (db/db connection) judged))
+           uncovered (filterv #(= ['tq.reach/stub] (:seon.error/offending %)) (:seon.profile/value measured))]
        (is (= [['tq.reach-test/reaches]] (mapv #(mapv :seon.test/sym (:seon.source/red-tests %)) uncovered))
-           "the refusal names the red test that would cover the function once green")))))
+           "the refusal names the red test that would cover the function once green")
+       (is (zero? (profile/calls-of measured 'seon.fn/gate-sets))
+           "coverage reads the member fold's seed to tests, not a reach walk per function")))))
 
 (deftest done-refusals-judges-a-never-started-member-as-evidence
   ;; a member whose recorded result never started is unknown evidence; only an executed failure is a red test
