@@ -21,19 +21,24 @@
   "sentinel.scratch")
 
 (defn- eval-probe
-  "One measured MCP eval request as `id` in `mode`: the measure window and the reply's request cost."
+  "One measured MCP eval request as `id` in `mode`: the measure window and the
+  reply's whole request cost. The reply's AI face shows only the headline, so the
+  whole cost (stages, reads, transactions) is read from the handle the reply
+  names (`:seon.repl/cost-result`) by a second request, outside the window."
   {:malli/schema [:=> [:cat :string :string :string] :map]}
   [id mode code]
-  (let [m (profile/measure
-           #(#'mcp/eval-clj {:seon.mcp/code code :seon.mcp/agent id
-                             :seon.mcp/namespace probe-namespace
-                             :seon.mcp/cluster "default" :seon.mcp/mode mode}))
-        [texts failed?] (:seon.profile/value m)]
+  (let [request (fn [form] (#'mcp/eval-clj {:seon.mcp/code form :seon.mcp/agent id
+                                                :seon.mcp/namespace probe-namespace
+                                                :seon.mcp/cluster "default" :seon.mcp/mode mode}))
+        m (profile/measure #(request code))
+        [texts failed?] (:seon.profile/value m)
+        reply (some #(when (:seon.repl/cost-result %) %) (map edn/read-string texts))
+        [cost-texts] (request (str (:seon.repl/cost-result reply)))]
     {:agent id
      :failed? failed?
      :window-ms (:seon.profile/ms m)
      :window-alloc-mb (/ (:seon.profile/alloc-bytes m) 1048576.0)
-     :request (some :seon.repl/request (map edn/read-string texts))}))
+     :request (some :seon.repl/value (map edn/read-string cost-texts))}))
 
 (defn- median
   "The lower middle of `xs` after sorting."
