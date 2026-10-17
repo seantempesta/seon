@@ -24,7 +24,7 @@ marked *(unconfirmed)*.
 3. None of the Clojure options checks completeness for you. The techniques that do (DMN gap/overlap, Erlang's
    "every state x event pair" discipline, Kubernetes' level-triggering, XState path generation) are small, and all of
    them reduce to **enumerate the product of the axes and assert each cell has exactly one answer**.
-4. `core.async.flow` is the wrong place for the reconciler and the right place for what the reconciler *starts*.
+4. `core.async.flow` should stay the runtime and the on/off switch (§8.1); the decision logic is a pure table that its `db<->flow` proc evaluates, not a flow-internal machine and not a second FSM runtime.
 
 ## 2. Comparison
 
@@ -64,7 +64,7 @@ Judgement:
 - **Good for** what the reconciler's actions *do*: a graph per agent, the `transition` arity to tear down an agent's
   resources at `::flow/stop`, `ping` for the observed fact "this graph is running". That is exactly how
   `seon-flow-architecture` already uses it.
-- **Bad for** the reconciler itself. A flow proc is an event consumer holding private state in a channel network. The
+- **Bad for** holding the reconciler's *logic inside a proc's channel network* (calling a pure function from the `db<->flow` pass is what §8 recommends). A flow proc is an event consumer holding private state in a channel network. The
   reconciler must be a pure function over database values that can be called from a test with two EDN maps. Putting
   it in a proc makes it unreachable without a running graph, hides its inputs in channel history (the opposite of
   level-triggered), and adds a second place where "which tasks should run" lives. Flow's own lifecycle also has no
@@ -132,8 +132,11 @@ decision structure (silent at compile time), TLA+/Alloy (the space is small enou
 Judged against the owner's goals (states in data and validated by schemas; every permutation accounted for and loud
 when one is not; as simple as possible):
 
-**Use a plain decision table over Malli-enum axes, with the cross-product completeness test, and do not adopt an FSM or
-statechart library or put the reconciler in a flow.**
+**Keep core.async.flow as the runtime and `db<->flow` as the only evaluator; put the transitions in a plain decision
+table over Malli-enum axes, with the cross-product completeness test; adopt no FSM or statechart library (at most
+tilakone's data shape, §8).** The reconciler is a pure function that the `db<->flow` pass calls; flow's pause and
+resume, with the proc's prime at `::flow/resume`, are the reactive on/off switch (§8.1). Flow runs the pass; it does
+not hold the decision logic.
 
 - *States in data, validated by schemas:* each axis is a registered `[:enum ...]`; the table is EDN; every action has a
   registered schema. Nothing is a macro or a closure.
@@ -142,7 +145,7 @@ statechart library or put the reconciler in a flow.**
   branch. Both sides fail on the first change that adds an enum value.
 - *As simple as possible:* no dependency, no second state holder, one `map` over tasks gives the parallelism the
   statechart libraries sell, and the plan-as-data return makes idempotence a one-line property.
-- *Flow stays where it is:* the reconciler's actions start, stop and ping graphs; the `transition` arity cleans up the
+- *Flow is the runtime, not the logic:* the reconciler's actions start, stop and ping graphs; the `transition` arity cleans up the
   graph's resources.
 
 Open point for the Opus lane to settle with its prototype: whether 5 to 7 axes, once classified, still give a table the
@@ -150,7 +153,86 @@ owner can read, or whether the axes must be grouped into two tables joined by on
 ready" and "what is its attempt doing"). That is the only place a hierarchy would reappear, and it is a nesting of
 tables, not a statechart.
 
-## 8. Sources
+## 8. Owner follow-ups (2026-10-17): keep flow as the runtime
+
+Two directions came in while this note was being written: reuse flow's lifecycle as the reactive on/off switch, and
+consider a flow step-fn whose state map holds an FSM described by a library. Both change the recommendation's
+framing, not its core: the **table stays data, the runtime stays flow**.
+
+### 8.1 What flow's pause, resume and stop guarantee (read at `reference-code/core.async`, `flow/impl.clj`, `doc/flow-guide.md`)
+
+- **Procs start paused.** The `start` docstring says "The processes start paused. Call `resume` or `resume-proc`".
+  Each proc's loop begins at `status :paused` and, while paused, blocks on its control channel only
+  (`(async/<!! control)`): it reads no input, so a paused proc consumes no wake and runs no pass.
+- **Commands are broadcast, asynchronous and unacknowledged.** `pause`, `resume`, `pause-proc`, `resume-proc` and `stop`
+  each `send-command` a map onto one control channel; a `mult` fans it to every proc's tap (buffer 10). The call returns
+  without waiting for any proc. The way to observe the result is `ping` or `ping-proc`, which reply with
+  `::flow/status` (`:paused`, `:running`) and `::flow/state` (from the proc's `:ping-map-fn`) for procs that answer
+  within `timeout-ms` (default 1000).
+- **Commands take effect between messages, never inside one.** A running proc reads `[control casts input...]` with
+  `alts!! ... :priority true`, so a pending command wins the next read, but an in-progress `transform` runs to
+  completion first; `send-outputs` also checks for commands between outputs. Pause is "after the current step", not
+  an interrupt.
+- **`transition` is called exactly when status changes.** `handle-transition` calls the step-fn's transition arity
+  only if the old and new status differ, mapping `:exit`, `:running` and `:paused` to `::flow/stop`, `::flow/resume`
+  and `::flow/pause`. A repeated `resume` on a running proc calls nothing. A proc that throws in `transition` has the
+  exception put on `:error-chan` and keeps its previous status and state, so the command is lost with a report.
+- **Stop ends procs and closes the report and error channels; the flow can be started again** (docstring).
+- **What is not guaranteed:** no ordering between procs, no synchronous "all paused" barrier, no statuses beyond
+  `:paused`, `:running` and `:exit`, and no first-class "pausing" in-flight status (the Clojurians question in §3).
+
+Seon already uses this: `db<->flow` primes itself at `::flow/resume` (an `offer!` of `:seon.flow/plan-prime` into its own
+sliding in-port), unregisters its listener at `::flow/stop`, and its pass derives from facts, so a pause/resume cycle
+re-primes exactly as the source comment in `seon.cluster.agent` says. That is the owner's reactive switch with no new
+mechanism: **pause the `db<->flow` proc and nothing reconciles; resume it and the prime makes the first pass read all
+current facts.** It works only because the pass is level-triggered (§4); an event-sourced pass would lose whatever
+arrived while paused. (Wakes during a pause coalesce in the sliding-1 in-port, which is safe for the same reason.)
+
+### 8.2 Description without runtime: which libraries can supply only the table?
+
+The test is whether the library lets us (a) write states, events and transitions as data, (b) validate or check
+them, (c) evaluate one transition as a pure function of `(machine-state, event)` with no store, queue or session.
+
+| Library | Data format worth adopting | Evaluation without its runtime | Validation / exhaustiveness | Verdict |
+|---|---|---|---|---|
+| tilakone | Yes, the cleanest: each state a map `{::tk/name ... ::tk/transitions [{::tk/on ... ::tk/to ... ::tk/actions [...]}]}`, actions as keywords, the interpreter function supplied separately | `tilakone.core/apply-signal` takes an FSM map and a signal and returns the FSM (pure; the FSM value is the proc state) | "Undeclared state transfers are errors"; no coverage check | Deprecated, 145 lines: adopt the *shape*, not the dependency. It is exactly the owner's picture |
+| fulcrologic/statecharts | Chart as nested map (compound, parallel, history) | `start!` and `process-event!` return the next working memory (plain EDN, serializable), but take an `env` carrying data model, execution model, event queue and working-memory store; purity needs in-memory components, which the guide does not document as a supported pure mode | `configuration-problems` (checks an active configuration against the machine), used by `testing/goto-configuration!`; element constructors validate their parameters | Right only if one proc needs real hierarchy or parallel regions. `testing/new-testing-env`, `run-events!`, `in?` are a model for our own sequence test, not a coverage generator |
+| clj-statecharts | Yes (XState-style maps) | Own service/scheduler runtime; whether it exposes a pure transition function was not confirmed | None documented | No gain over tilakone's shape; EPL, 2020-21 |
+| reduce-fsm | No: macros | Machines are generated functions, not values | None | Not usable as a description |
+| Malli | Yes: `[:enum ...]` axes and a schema for the table and for each action | Not an interpreter, by design | `m/validator`, `m/explain`, `m/children`, `malli.generator` | The validation layer for whichever shape is chosen |
+
+None of them supplies the exhaustiveness check; every one leaves it to the user. The exhaustiveness value is
+**ours to add in a deftest** (§5). The only transferable value from the libraries is the data shape.
+
+### 8.3 Statecharts and FSMs inside core.async processes: prior art
+
+- The classic pattern is a `go-loop` whose loop variable is the state, with `case` on it
+  ([Zorched, "Using A Core.Async Routine As A State Machine"](https://www.zorched.net/2014/05/18/using-a-core-async-routine-as-a-state-machine/)).
+  Flow generalizes it: the loop is flow's, the loop variable is the step-fn's state map, and `transition` replaces
+  ad hoc control messages.
+- fulcrologic/statecharts ships `event-queue.core-async-event-loop/run-event-loop!` (its guide): a core.async loop that
+  *drives* a chart. That is the chart as runtime with core.async as its pump, the reverse of what we want.
+- No published example of a statechart inside a `core.async.flow` step-fn turned up. The pairing below is therefore
+  untried outside Seon and should be proved by the Opus lane's prototype before adoption.
+
+### 8.4 Cleanest pairing
+
+For a proc whose own state is an FSM (a graph's start/stop sequence, an agent's turn loop):
+
+1. The **state map holds `{:fsm/state <enum>, ...data}`**; the machine is a separate constant (EDN in tilakone's shape,
+   `{state {event {:to state :actions [...]}}}`) registered under a Malli schema over the enums.
+2. `transform` does `(get-in machine [(:fsm/state s) event])`; a missing entry returns the typed error map, never a
+   default. `transition` maps `::flow/pause`, `::flow/resume` and `::flow/stop` onto events of the same machine where the
+   proc's own lifecycle matters.
+3. `:ping-map-fn` returns `{:fsm/state ...}`, so the state is visible through `flow/ping`: that is how the reconciler's
+   observed "graph running" is read.
+4. The completeness deftest is the cross product of the machine's states and events (§5.1), plus path generation if
+   lifecycle sequences matter (§6.3).
+
+For the cluster reconciler (many tasks, one pass) there is **no per-task FSM state**: the table keys on the classified
+tuple and the `db<->flow` pass is its only evaluator (§7). Both uses share the table shape and the test.
+
+## 9. Sources
 
 - fulcrologic/statecharts: https://github.com/fulcrologic/statecharts/blob/main/README.adoc , https://cljdoc.org/d/com.fulcrologic/statecharts/1.0.0
 - clj-statecharts: https://github.com/lucywang000/clj-statecharts , https://clojars.org/clj-statecharts/versions/0.1.2
