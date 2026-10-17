@@ -12,6 +12,7 @@
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
+            [seon.context :as context]
             [seon.cluster.store :as store]
             [seon.db :as db]
             [seon.error.refusal]
@@ -357,60 +358,6 @@
         (is (str/includes? (:seon.source/tally gate) "executed 1 ")))
       (finally (registry/retire-branch! {:seon.store/store held-store :seon.store/branch s})))))
 
-(deftest ^{:seon.test/long "Two prepares, each one nested seon.test/run on a new candidate commit (the save gate's cost, lane-nsa-slice4-2026-09-23.md)."
-           :seon.test/long-ms 120000}
-  a-merge-naming-a-task-the-destination-lacks-refuses-and-an-admitted-task-survives-a-refused-merge
-  ;; P1-3 (review 5fb38b91f, spec 7.13): task entities never ride the merge, so the
-  ;; destination's admitted tasks decide the merged program's task edges.
-  (let [target (test-support/execution-handle nil)
-        held-store (:seon.store/store target)
-        h-conn (:seon.db/connection target)
-        ;; A namespace this test writes itself: test-support/program-entity digests with the
-        ;; fixture namespace entity, which must be the one stored (67580898d).
-        sym #(symbol "scratch.merge-tasks" %)
-        entity #(test-support/program-entity (db/db %1) [%2 (sym %3)] %4)
-        write! #(test-support/transacted! %1 (vec %2))
-        handle (task/task-handle 'scratch.merge-tasks "merge-task")
-        tag 'scratch.merge-tasks/merge-task
-        proved 'tq.merge-tasks-proof/fix
-        _ (task/index-tasks! {:seon.db/connection h-conn
-                              :seon.task/files {"resources/seon/tasks/tq.merge-tasks-proof.edn"
-                                                "[#:seon.task{:name \"fix\" :plan \"Merge the tested change.\"}]"}})
-        c (keyword (str "merge-task-test-c-" (id/id)))
-        _ (write! h-conn [(test-support/namespace-entity (db/db h-conn) 'scratch.merge-tasks)
-                          (entity h-conn :seon.fn/sym "merge-tasked" "(defn merge-tasked {:malli/schema [:=> [:cat] :int]} [] 1)")])
-        _ (write! h-conn [(entity h-conn :seon.test/sym "merge-tasked-check" "(clojure.test/deftest ^{:seon/tasks #{'tq.merge-tasks-proof/fix}} merge-tasked-check (clojure.test/is (pos? (scratch.merge-tasks/merge-tasked))))")])
-        _ (registry/fork! {:seon.store/store held-store :seon.store/branch c
-                             :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
-        candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
-        c-conn (:seon.db/connection candidate)
-        made (volatile! [])
-        prepare #(let [p (source/prepare-merge! target held-store c proved)]
-                   (some->> (:seon.source/candidate p) (vswap! made conj)) p)
-        intent #(:seon.task/plan (db/pull (db/db h-conn) [:seon.task/plan] [:seon.task/id handle]))]
-    (try
-      ;; A stored identity is replaced exactly (its dropped contract retracted),
-      ;; so the writer's final value carries its definition's digest.
-      (write! c-conn (test-support/replacement-tx (db/db c-conn) [:seon.fn/sym (sym "merge-tasked")]
-                                                  "(defn merge-tasked {:seon/tasks #{'scratch.merge-tasks/merge-task} :malli/schema [:=> [:cat] :int]} [] 2)" {}))
-      (let [prepared (prepare)
-            before (db/commit-id (db/db h-conn))
-            refused (source/accept-merge! target held-store prepared)]
-        (is (true? (:seon.test/passed? prepared)))
-        (is (= {tag #{(sym "merge-tasked")}} (:seon.error/offending refused)))
-        (is (= before (db/commit-id (db/db h-conn))) "the refused merge writes nothing")
-        (testing "a task admitted on the destination survives a refused merge, then the merge lands"
-          (is (:seon.task/changed? (task/index-tasks! {:seon.db/connection h-conn :seon.task/basis {}
-                                                         :seon.task/files {"resources/seon/tasks/scratch.merge-tasks.edn"
-                                                                           "[#:seon.task{:name \"merge-task\" :plan \"Merge.\"}]"}})))
-          ;; The task write touches no merged entity, so the same prepared now merges.
-          (is (:seon.source/commit-id (source/accept-merge! target held-store prepared)))
-          (is (= #{tag} (task/open-tasks (db/db h-conn) [:seon.fn/sym (sym "merge-tasked")])))
-          (is (= "Merge." (intent)))))
-      (finally
-        (cluster.agent/release-context! candidate)
-        (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store held-store :seon.store/branch b}))))))
-
 (deftest an-undefined-slot-is-not-a-complete-contract
   ;; a merge's changed functions are judged by the one function-contract rule: no contract and an unjustified
   ;; :any or :some slot are both incomplete, each position named; a justified boundary and a full contract pass
@@ -504,6 +451,12 @@
                         :seon.source/next-proofs #{'tq.done-test/other})
                  []]]]
          (is (= expected (mapv :seon.error/type (source/done-refusals branch judged))) row))
+       (is (= [:working [:seon.source/lint-error]]
+              ((juxt :seon.task/status #(mapv :seon.error/type (:seon.source/refusals %)))
+               (context/step-status {:seon.task/proofs #{'tq.done-test/proof} :seon.task/product #{} :seon.context/head {}
+                                     :seon.context/candidate branch :seon.context/main branch
+                                     :seon.source/judged (assoc base :seon.source/lint-refusal lint-refused)})))
+           "an own-branch assignment's step, in no chain, is judged by the same done rule")
        (is (= [['tq.done-test/new]]
               (mapv #(mapv :seon.test/sym (:seon.source/red-tests %)) (source/done-refusals branch (new-red base))))
            "the stray refusal names the red test")))))
@@ -530,10 +483,7 @@
        (is (= #{} on-base) "a red with no result held at the merge base is not red there")
        (is (= [[:seon.source/red-test-error [['tq.same-test/reaching :red]]]]
               (shape (source/done-refusals branch (cond-> judged (seq on-base) (assoc :seon.source/red-on-target on-base)))))
-           "the done rule refuses it as the change's, naming the test")
-       (is (= (shape (source/results-verdict branch branch judged))
-              (shape (source/done-refusals branch judged)))
-           "the merge's judgment refuses it the same way")))))
+           "the done rule, the merge's one judge too, refuses it as the change's, naming the test")))))
 
 (deftest done-and-merge-judge-one-member-list
   ;; live run 4, chain 42e0: done judged its proof and one changed test while the merge's run selected 64 tests
@@ -568,18 +518,14 @@
                      :seon.program/identities #{} :seon.test.run/id "run-1" :seon.test.run/branch :tq-one}
              shape (fn [refusals] (mapv (juxt :seon.error/type #(mapv :seon.test/sym (:seon.source/red-tests %))) refusals))]
          (is (= [[:seon.source/red-test-error ['tq.one-test/reaches-f]]] (shape (source/done-refusals database judged)))
-             "done refuses the reaching member turned red")
-         (is (= (shape (source/done-refusals database judged)) (shape (source/results-verdict database database judged)))
-             "and the merge's judgment of the same list refuses it the same way")
+             "done, the merge's one judge too, refuses the reaching member turned red")
          (let [at-base (assoc judged :seon.source/red-on-target #{'tq.one-test/reaches-f})]
-           (is (= [] (source/done-refusals database at-base) (source/results-verdict database database at-base))
-               "a member red at the merge base refuses neither"))
+           (is (= [] (source/done-refusals database at-base))
+               "a member red at the merge base is not refused"))
          (let [proof-at-base (assoc judged :seon.source/results [(recorded 'tq.one-test/proof false) (recorded 'tq.one-test/reaches-f true)]
                                     :seon.source/red-on-target #{'tq.one-test/proof})]
-           (is (= (shape (source/done-refusals database proof-at-base))
-                  (shape (source/results-verdict database database proof-at-base))
-                  [[:seon.source/red-test-error ['tq.one-test/proof]]])
-               "a red proof is never excused, by either"))
+           (is (= [[:seon.source/red-test-error ['tq.one-test/proof]]] (shape (source/done-refusals database proof-at-base)))
+               "a red proof is never excused"))
          (let [deferred (assoc judged :seon.source/results [(recorded 'tq.one-test/proof true)]
                                :seon.source/deferred #{'tq.one-test/reaches-f})]
            (is (= [] (source/done-refusals database deferred))
@@ -617,10 +563,7 @@
            shape (fn [refusals] (mapv (juxt :seon.error/type :seon.error/offending) refusals))]
        (is (= [[:seon.source/test-evidence-error ['tq.unknown-test/reaching]]]
               (shape (source/done-refusals branch judged)))
-           "the done rule refuses the reaching member with no current result, naming it")
-       (is (= (shape (source/results-verdict branch branch judged))
-              (shape (source/done-refusals branch judged)))
-           "the merge's judgment refuses it the same way")))))
+           "the done rule, the merge's one judge too, refuses the reaching member with no current result, naming it")))))
 
 (deftest an-uncovered-refusal-names-the-red-tests-reaching-it
   ;; live run 2, chain ce9d: its proof was green, but the one test the call graph walks to seon.effect/render-ai
@@ -647,7 +590,7 @@
        (is (= [['tq.reach-test/reaches]] (mapv #(mapv :seon.test/sym (:seon.source/red-tests %)) uncovered))
            "the refusal names the red test that would cover the function once green")))))
 
-(deftest results-verdict-judges-a-never-started-member-as-evidence
+(deftest done-refusals-judges-a-never-started-member-as-evidence
   ;; a member whose recorded result never started is unknown evidence; only an executed failure is a red test
   (test-support/with-database
    (fn [connection]
@@ -665,7 +608,7 @@
        (doseq [[row results expected]
                [["never started: test evidence" [never-started] [:seon.source/test-evidence-error]]
                 ["executed red: a red test" [(recorded 'tq.rv-test/proof false)] [:seon.source/red-test-error]]]]
-         (is (= expected (mapv :seon.error/type (source/results-verdict branch branch (assoc judged :seon.source/results results)))) row))))))
+         (is (= expected (mapv :seon.error/type (source/done-refusals branch (assoc judged :seon.source/results results)))) row))))))
 
 (deftest member-fold-equals-the-full-merge-list
   (test-support/with-database

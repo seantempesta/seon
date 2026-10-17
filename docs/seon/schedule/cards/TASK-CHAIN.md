@@ -244,8 +244,11 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    existing variants where their meanings match; the one new variant, `:seon.source/stray-red-error`, is registered in
    `seon.source.edn`.
    The agent's turn proposes `:done` (`seon.turn/task-end`); root re-judges `done-refusals` over the branch value at the
-   attempt's end commit (`:seon.task.attempt/commit`). `seon.cluster.source/results-verdict` stays the judge of the
-   final merge only, its product clause deleted. The block shows the task's own done refusals; mid-chain it never shows
+   attempt's end commit (`:seon.task.attempt/commit`). Done and merge are one function: the final merge judges its
+   merge branch with `done-refusals` too (`seon.cluster.source/merge-verdict`, a Prove step's product as its
+   `:seon.source/next-proofs`, the merge's changed identities as its `:seon.source/merge-identities`;
+   `seon.cluster.source-test/done-refusals-judges-every-task-alike`), and a task outside a chain is judged by it
+   alike (`seon.context/step-status`). The block shows the task's own done refusals; mid-chain it never shows
    merge refusals (there is no merge; the Design prototype's first block showed a merge refusal before any work).
 5. **Advance** — root, in the lifecycle phase of `seon.cluster.agent/run-pass!`, one transaction on the chain branch
    through the task writer (`seon.task/advance-tx`, new: database and attempt key → transaction data, the next task read
@@ -262,7 +265,7 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    `seon.cluster.source/tested-task-basis` read the held source branch, main only as the destination. The candidate
    test world carries the branch's task entities as well as its program (the Design prototype's merge refused because
    today's candidate carries program declarations only, so a task-reading proof is red there). The merge judges the
-   whole fork-to-head delta with `results-verdict`, its members being the last task's proofs, every test the branch
+   whole fork-to-head delta with `done-refusals`, its members being the last task's proofs, every test the branch
    defines or changes (with members = proofs alone, a red test left on the branch merged, measured) and every reaching
    test, all green, contracts complete, replaced functions covered. In its one transaction it admits all the chain's
    tasks and attempts, closes every intermediate attempt (`:done` stays its outcome) and marks the terminal one

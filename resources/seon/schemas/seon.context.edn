@@ -80,11 +80,10 @@
                                   [:seon.task/step {:optional true} :seon.task/step] [:seon.task/proofs :seon.task/proofs]
                                   [:seon.task/product :seon.task/product]
                                   [:seon.context/head :seon.context/head]
-                                  [:seon.context/chained {:optional true :description "True when :seon.task/next links the task into a chain: seon.context/step-status judges it by seon.cluster.source/done-refusals, any other by seon.cluster.source/results-verdict."} :boolean]
                                   [:seon.context/candidate :seon.db/database-value] [:seon.context/main :seon.db/database-value]
                                   [:seon.source/judged {:optional true :description "Absent while the branch has recorded no run to judge."} :seon.source/judged]
                                   [:seon.program/identities {:optional true :description "The declarations the branch changed since the task's merge base (seon.context/change)."} :seon.program/identity-set]]
-               :step-status [:map {:description "A step judged by the done rule (seon.cluster.source/done-refusals) for a chain's task, else by its merge's preview (seon.cluster.source/results-verdict): done exactly when it refuses nothing. Producer: seon.context/step-status."}
+               :step-status [:map {:description "A step judged by the done rule (seon.cluster.source/done-refusals), the one judge of every task and of the merge: done exactly when it refuses nothing. Producer: seon.context/step-status."}
                              [:seon.task/status [:enum :done :working]]
                              [:seon.source/refusals :seon.source/refusals]]
                :step-verdict [:and {:description "A step's observation with its status. Producer: seon.context/step-verdict."}

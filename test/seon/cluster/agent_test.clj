@@ -1962,10 +1962,10 @@
          (finally (agent/release-context! handle)))))))
 
 (deftest a-merge-steps-refusal-names-the-declarations-its-refusal-offends
-  ;; MERGE-STEP 3: a coverage refusal (`seon.cluster.source/results-verdict`) names its uncovered functions only in
+  ;; MERGE-STEP 3: a coverage refusal (`seon.cluster.source/done-refusals`) names its uncovered functions only in
   ;; `:seon.error/offending`; the held step's instructions cite each, so its agent and root see which
   (let [refusal {:seon.error/type :seon.source/test-evidence-error :seon.error/at (java.util.Date.)
-                 :seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/results-verdict
+                 :seon.error/layer :seon.source/done :seon.error/operation 'seon.cluster.source/done-refusals
                  :seon.error/message "A replaced function reaches no green test of the named run."
                  :seon.error/offending ['seon.ref/names 'seon.ref/references]
                  :seon.source/candidate :merge-test}]

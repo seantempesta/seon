@@ -1606,62 +1606,6 @@
        (seq reaching) (assoc :seon.source/red-tests
                              (red-test-verdicts (:seon.source/refused-test-run evidence) results reaching))))))
 
-(defn results-verdict
-  "Every refusal the recorded results in `judged` give the candidate: each of its `:seon.task/proofs` among its
-  `:seon.source/members`, every member green except the `:seon.task/product` red by design
-  (`seon.test.runner/designed-red?`), a member with no result unknown and a red one the change's
-  (`red-test-refusal`) unless `:seon.source/red-on-target` holds it red at the merge base and it is no proof, every function of its `:seon.program/identities` that
-  `candidate` holds contracted (`contract-gaps`) and every added or replaced one reached by a green member or a
-  designed red, and every task handle they name admitted on `main`. Empty only for acceptance. The one judge:
-  `merge-verdict` calls it over the merge's run, `seon.context/step-status` over the branch's own recorded results.
-  Reads only.
-
-  ## Example
-
-  ```clojure
-  (seon.cluster.source/results-verdict candidate main judged)
-  ```"
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.source/judged] :seon.source/refusals]}
-  [candidate main {members :seon.source/members results :seon.source/results proofs :seon.task/proofs
-                   product :seon.task/product on-target :seon.source/red-on-target delta :seon.program/identities
-                   run-id :seon.test.run/id s :seon.test.run/branch}]
-  (let [evidence {:seon.test.run/branch s :seon.source/refused-test-run run-id}
-        refuse (fn [message offending]
-                 (seon.error.refusal/error :seon.source/test-evidence-error
-                  (assoc evidence :seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/results-verdict
-                         :seon.error/message message :seon.error/offending offending)))
-        by-sym (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity)) results)
-        green (into #{} (filter #(some-> (by-sym %) green-result?)) members)
-        designed (into #{} (filter #(some-> (by-sym %) ((requiring-resolve 'seon.test.runner/designed-red?)))) (filter (set product) members))
-        unproven (vec (sort (remove members proofs)))
-        executed (fn [test-symbol] (let [result (by-sym test-symbol)] (and result (not (:seon.error/at result)))))
-        not-run (vec (sort (remove executed members)))
-        ;; a red the merge base holds red is not the change's (`red-at-merge-base`, as `done-refusals` asks it)
-        not-green (vec (filter executed (remove (into (into green designed) (remove (set proofs)) on-target) members)))
-        red-tests (red-test-verdicts run-id results not-green)
-        ;; A retracted function has nothing to cover: its surviving callers are the writer's refs and the
-        ;; run's reaching tests. The REPL admits an uncontracted sketch with a warning; merge is where the
-        ;; contract becomes required. Macros and host-bound declarations carry no arity contract.
-        gaps (contract-gaps candidate delta)
-        uncovered (uncovered-functions candidate delta (into green designed))
-        dangling ((requiring-resolve 'seon.task/candidate-dangling) candidate main delta)]
-    (cond-> []
-      (or (empty? proofs) (seq unproven)) (conj (refuse "Every proof must be a member of the named run." unproven))
-      (seq not-run) (conj (refuse "Every member needs an executed result; a test that never started is unknown, not red." not-run))
-      (seq red-tests) (conj (red-test-refusal evidence red-tests))
-      (seq gaps)
-      (conj (uncontracted-refusal (assoc evidence :seon.error/layer :seon.source/merge
-                                         :seon.error/operation 'seon.cluster.source/results-verdict)
-                                  gaps))
-      (db/read-refusal? uncovered) (conj uncovered)
-      (and (seq uncovered) (not (db/read-refusal? uncovered)))
-      (conj (uncovered-refusal (assoc evidence :seon.error/layer :seon.source/merge
-                                      :seon.error/operation 'seon.cluster.source/results-verdict)
-                               uncovered results))
-      (:seon.error/at dangling) (conj dangling)
-      (and (not (:seon.error/at dangling)) (seq dangling))
-      (conj (refuse "The merged program names tasks the destination has not admitted." dangling)))))
-
 (defn- versions
   "`entry`'s base, ours and theirs, each a reference read where it lives (`:seon.ref/at`: the merge base commit,
   branch `database`'s head, the source commit) and resolved at its code (`seon.ref/references`)."
@@ -1735,7 +1679,7 @@
         by-sym (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity)) results)
         on-base (set on-base)
         executed (fn [test-symbol] (let [result (by-sym test-symbol)] (and result (not (:seon.error/at result)))))
-        ;; every member the merge judges needs a current executed result (`results-verdict`): none is unknown, never green
+        ;; every member needs a current executed result: none is unknown, never green
         ;; a deferred member runs only on the merge's platform host, which answers it there (`merge-members`)
         unknown (vec (sort (remove executed (into (set proofs) (remove (into (set next-proofs) deferred)) members))))
         red-proofs (filterv #(and (executed %) (not (green-result? (by-sym %)))) proofs)
@@ -1770,8 +1714,9 @@
   "Every refusal of the candidate `prepared` (`prepare-merge!`'s value) names, judged from what `main`, the
   `candidate` and their merge `base` hold and the tested branch's stored run: the run's basis (complete on the
   tested branch, the program unwritten since it, its tested task basis unmoved on `main`, `task-basis-refusal`),
-  then the one results judgment (`results-verdict`) over its members' results. Empty only for acceptance; the
-  judgment `prepare-merge!`'s gate and `accept-merge!` share. Reads only.
+  then the done rule (`done-refusals`) over its members' results, the merge's changed identities as its
+  `:seon.source/merge-identities` and a Prove step's product as its `:seon.source/next-proofs`: done and merge are one
+  judgment. Empty only for acceptance; the judgment `prepare-merge!`'s gate and `accept-merge!` share. Reads only.
 
   ## Example
 
@@ -1806,15 +1751,13 @@
                                     [?r :seon.test.run/exclusions ?x] [?x :seon.test.selection/disposition ?d]
                                     [(contains? #{:deferred :destructive} ?d)] [?x :seon.test.member/symbol ?sym]]
                                   tested run-id))
-              ;; a Prove step's product is judged on its recorded reports (the run's totals carry none)
-              product-results (when-let [named (seq (filter (set product) members))]
-                                ((requiring-resolve 'seon.test.runner/latest-results) tested (vec named)))
-              judged (when (and (vector? results) (not (:seon.error/at product-results)))
-                       (cond-> {:seon.source/members members :seon.task/proofs proofs :seon.program/identities (set (keys expected))
-                                :seon.source/results (into (vec (remove (comp (set product) :seon.test/sym) results))
-                                                           (filter map?) product-results)
-                                :seon.test.run/id run-id :seon.test.run/branch s}
-                         (seq product) (assoc :seon.task/product product)
+              ;; a Prove step's product is its next task's proofs, as the done rule judges any step's
+              changed (set (keys expected))
+              judged (when (vector? results)
+                       (cond-> {:seon.source/members members :seon.task/proofs (into #{} (remove (set product)) proofs)
+                                :seon.program/identities changed :seon.source/merge-identities changed
+                                :seon.source/results results :seon.test.run/id run-id :seon.test.run/branch s}
+                         (seq product) (assoc :seon.source/next-proofs (set product))
                          (seq on-target) (assoc :seon.source/red-on-target on-target)))
               moved (task-basis-refusal main candidate base basis)]
           (cond-> []
@@ -1823,8 +1766,7 @@
             (:seon.error/at results) (conj results)
             (not (false? ((requiring-resolve 'seon.test.runner/program-written-since?) tested (:seon.test.run/basis-t run))))
             (conj (refuse "The tested program changed after the named run." (:seon.test.run/basis-t run)))
-            (:seon.error/at product-results) (conj product-results)
-            judged (into (results-verdict tested main judged))
+            judged (into (done-refusals tested judged))
             moved (conj moved)))
         (finally (d/release-materialized-db tested))))))
 

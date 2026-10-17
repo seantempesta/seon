@@ -5330,7 +5330,7 @@
 (defn step-proved?
   "True when every test the step of the task `agent-id` holds is judged by (`step-tests`, a Prove step's held
   product included) has a recorded result at its current reach on `database`, the agent's branch
-  (`seon.context/current-results`, what `seon.cluster.source/results-verdict` judges), red or green, reused or
+  (`seon.context/current-results`, what `seon.cluster.source/done-refusals` judges), red or green, reused or
   run by this attempt, whoever recorded it: an unchanged test is never run again, and a result at another
   program's reach does not count. A proof no deftest on `database` defines yet is proved too: it is red by its
   absence, work its model must do (it writes the proof), so it opens the first turn as a red one does. A task naming

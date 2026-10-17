@@ -712,39 +712,6 @@
             :seon.test/run-basis-t 1 :seon.test/run-at #inst "2026-10-13T00:00:00Z" :seon.test/run [:seon.test.run/id "a1b2c3d4e5f6"]}
      reports (assoc :seon.test.failure/reports reports))))
 
-(deftest a-step-is-done-only-when-its-merge-would-accept
-  ;; the step's status is the one results judgment the merge makes over its run, here over the branch's own
-  ;; recorded results: done exactly when it refuses nothing, and a working step names each refusal's type;
-  ;; a member with no executed result is unknown evidence, never red (73734df97, 4765c5ceb)
-  (let [database (db/db *connection*)
-        green #(result % 1 0 0)
-        red #(result % 0 1 0 [{:type :fail}])
-        judged (fn [step proofs product members results on-target]
-                 (let [{status :seon.task/status refusals :seon.source/refusals}
-                       (context/step-status
-                        {:seon.task/step step :seon.task/proofs proofs :seon.task/product product :seon.context/head {}
-                         :seon.context/candidate database :seon.context/main database
-                         :seon.source/judged (cond-> {:seon.source/members members :seon.source/results results
-                                                      :seon.task/proofs (into proofs product) :seon.program/identities #{}
-                                                      :seon.test.run/id "a1b2c3d4e5f6" :seon.test.run/branch :tq-branch}
-                                               (seq product) (assoc :seon.task/product product)
-                                               (seq on-target) (assoc :seon.source/red-on-target on-target))})]
-                   [status (mapv :seon.error/type refusals)]))]
-    (doseq [[step proofs product members results on-target expected why]
-            [[:implement #{'tq.rule/p} #{} #{'tq.rule/p} [(green 'tq.rule/p)] nil [:done []] "its proof green"]
-             [:implement #{'tq.rule/p} #{} #{'tq.rule/p 'tq.rule/r} [(green 'tq.rule/p) (red 'tq.rule/r)] #{'tq.rule/r}
-              [:done []] "a reaching test already red at the target is not the change's red"]
-             [:implement #{'tq.rule/p} #{} #{'tq.rule/p 'tq.rule/r} [(green 'tq.rule/p) (red 'tq.rule/r)] nil
-              [:working [:seon.source/red-test-error]] "a reaching test the change turned red"]
-             [:implement #{'tq.rule/p} #{} #{'tq.rule/p} [] nil [:working [:seon.source/test-evidence-error]] "its proof unrun at its reach is unknown, never green"]
-             [:implement #{'tq.rule/p} #{} #{'tq.rule/p} [(red 'tq.rule/p)] nil [:working [:seon.source/red-test-error]] "its proof red"]
-             [:implement #{} #{} #{} [] nil [:working [:seon.source/test-evidence-error]] "no proof proves nothing"]
-             [:prove #{} #{'tq.rule/s} #{'tq.rule/s} [(red 'tq.rule/s)] nil [:done []] "its product red by a failing assertion"]
-             [:prove #{} #{'tq.rule/s} #{'tq.rule/s} [(result 'tq.rule/s 0 1 0)] nil [:working [:seon.source/red-test-error]] "a red with no failing report ran nothing"]
-             [:prove #{} #{'tq.rule/s 'tq.rule/l} #{'tq.rule/s 'tq.rule/l} [(red 'tq.rule/s)] nil [:working [:seon.source/test-evidence-error]] "a declared product test nobody wrote"]
-             [:prove #{'tq.rule/q} #{'tq.rule/s} #{'tq.rule/q 'tq.rule/s} [(red 'tq.rule/q) (red 'tq.rule/s)] nil [:working [:seon.source/red-test-error]] "its own proof red"]]]
-      (is (= expected (judged step proofs product members results on-target)) why))))
-
 (deftest a-chains-step-is-done-only-when-the-done-rule-refuses-nothing
   ;; a chain task's status is the done rule (`seon.cluster.source/done-refusals`) over the branch's own recorded
   ;; results: done exactly when it refuses nothing, and a working step names each refusal's type
@@ -754,7 +721,7 @@
         judged (fn [proofs next-proofs members results on-target defined]
                  (let [{status :seon.task/status refusals :seon.source/refusals}
                        (context/step-status
-                        {:seon.task/proofs proofs :seon.task/product next-proofs :seon.context/head {} :seon.context/chained true
+                        {:seon.task/proofs proofs :seon.task/product next-proofs :seon.context/head {}
                          :seon.context/candidate database :seon.context/main database
                          :seon.source/judged (cond-> {:seon.source/members members :seon.source/results results
                                                       :seon.task/proofs proofs
@@ -917,23 +884,25 @@
 (deftest ^{:seon.test/long "An own-branch agent's setup, two eval requests with their test steps, and two reads of its block."
            :seon.test/long-ms 30000}
   an-uncontracted-helper-keeps-a-prove-step-working
-  ;; done means the merge would accept, for a Prove step too: a scratch helper defined beside the red product
-  ;; would be merged with it and refused for lacking a contract, so the step is working and its section names it
+  ;; done means the merge would accept, for a Prove step too: its product is its next proofs, red by design, while
+  ;; a scratch helper defined beside it would be merged with it and refused for lacking a contract, so the step is
+  ;; working and its section names it
   (test-support/with-running-agent
    (fn [running _ connection]
      (let [agent-id (str "prove-uncontracted-" (seon.id/id))
            _ (db/transact! connection [[:db.fn/call #'host/home-call "root" (get-in (db/db connection) [:config :branch]) 'user
                                         (:seon.cluster/name (test-support/execution-handle nil))]])
-           ;; the Prove step declares the one test it writes, so it is assigned before that test exists
+           ;; the Prove step declares its proof and the product it writes, so it is assigned before either exists
            _ (task/index-tasks! {:seon.db/connection connection
                                  :seon.task/files {"resources/seon/tasks/tq.pvu.edn"
-                                                   (str "[#:seon.task{:name \"prove\" :plan \"Prove it.\" :step :prove :product #{tq.pvu-test/rows}}\n"
+                                                   (str "[#:seon.task{:name \"prove\" :plan \"Prove it.\" :step :prove :proofs #{tq.pvu-test/written} :product #{tq.pvu-test/rows}}\n"
                                                         " #:seon.task{:name \"implement\" :plan \"Implement it.\" :needs #{[:seon.task/sym tq.pvu/prove]}}]")}})
            id (:seon.task/id (db/pull (db/db connection) [:seon.task/id] [:seon.task/sym 'tq.pvu/prove]))
            {branch :seon.store/branch target :seon.db/connection} (test-support/own-branch-agent! running agent-id "(ns tq.pvu-test)")]
        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
                       :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})
        (evaluate running agent-id (str "(ns tq.pvu-test (:require [clojure.test :refer [deftest is]]))\n"
+                                       "(deftest written (is (= 1 1)))\n"
                                        "(deftest ^{:seon/tasks #{'tq.pvu/implement}} rows (is (= 1 2)))"))
        (is (= :done (:seon.task/status (:seon.context/step (block running agent-id)))) "the red product alone is done")
        (evaluate running agent-id "(in-ns 'tq.pvu-test)\n(defn rv [s] s)")

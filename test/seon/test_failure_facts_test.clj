@@ -1,5 +1,5 @@
 (ns seon.test-failure-facts-test
-  (:require [seon.schema] [seon.context :as context] [clojure.test :refer [deftest is testing]]
+  (:require [seon.schema] [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [sci.core :as sci]
             [seon.blob :as blob]
@@ -178,17 +178,11 @@
           (redeclare-probe!
            connection s "(clojure.test/deftest probe (stub))"
            "(defn stub {:malli/schema [:=> [:cat] :int]} [] (throw (ex-info \"Not implemented.\" (seon.error.refusal/error :seon.error/unimplemented {:seon.error/operation 'tq.stub/stub :seon.error/message \"Not implemented.\" :seon.error/unimplemented-function 'tq.stub/stub}))))")
-          (let [result (run-probe connection s)
-                head (#'context/head-entries (db/db connection) #{s} nil)]
+          (let [result (run-probe connection s)]
             (is (= 1 (:seon.test/error-count result)))
             (is (= :seon.error/unimplemented (:seon.error/type (first (reports result)))))
-            (is (= :done (:seon.task/status
-                          (context/step-status {:seon.task/step :prove :seon.task/proofs #{} :seon.task/product #{s} :seon.context/head head
-                                                :seon.context/candidate (db/db connection) :seon.context/main (db/db connection)
-                                                :seon.source/judged {:seon.source/members #{s} :seon.task/proofs #{s} :seon.task/product #{s}
-                                                                     :seon.source/results (runner/latest-results (db/db connection) [s])
-                                                                     :seon.program/identities #{} :seon.test.run/branch :tq-branch
-                                                                     :seon.test.run/id (second (:seon.test/run (first (runner/latest-results (db/db connection) [s]))))}}))))))))))
+            (is (true? (runner/designed-red? (first (runner/latest-results (db/db connection) [s]))))
+                "a Prove step's handoff counts it")))))))
 
 (deftest an-error-its-subject-throws-is-a-prove-steps-designed-red
   ;; the gap a Prove step's product shows may be a throw: its test is red by error, and that red is its product
@@ -199,17 +193,9 @@
           (redeclare-probe!
            connection s "(clojure.test/deftest probe (clojure.test/is (false? (stub))))"
            "(defn stub {:malli/schema [:=> [:cat] :boolean]} [] (throw (IllegalArgumentException. \"odd map\")))")
-          (let [result (run-probe connection s)
-                head (#'context/head-entries (db/db connection) #{s} nil)]
+          (let [result (run-probe connection s)]
             (is (= 1 (:seon.test/error-count result)) "the thrown exception is the test's one error")
-            (is (true? (runner/designed-red? (first (runner/latest-results (db/db connection) [s])))) "the merge gate's predicate counts it")
-            (is (= :done (:seon.task/status
-                          (context/step-status {:seon.task/step :prove :seon.task/proofs #{} :seon.task/product #{s} :seon.context/head head
-                                                :seon.context/candidate (db/db connection) :seon.context/main (db/db connection)
-                                                :seon.source/judged {:seon.source/members #{s} :seon.task/proofs #{s} :seon.task/product #{s}
-                                                                     :seon.source/results (runner/latest-results (db/db connection) [s])
-                                                                     :seon.program/identities #{} :seon.test.run/branch :tq-branch
-                                                                     :seon.test.run/id (second (:seon.test/run (first (runner/latest-results (db/db connection) [s]))))}}))))))))))
+            (is (true? (runner/designed-red? (first (runner/latest-results (db/db connection) [s])))) "a Prove step's handoff counts it")))))))
 
 (deftest a-green-run-is-the-latest-result-and-keeps-red-history
   (support/with-database
