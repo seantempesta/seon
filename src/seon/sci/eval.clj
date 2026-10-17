@@ -3067,8 +3067,9 @@
   of the functions it adds; the reverse closure of Δ (functions, and the tests
   reaching them as interpreted tests) is bound again lazily
   (`bind-lazy-members!`), its value definitions and macros interpreted now,
-  but for its host-bound members, which keep the compiled Vars `ctx` binds;
-  from `::closure` and `::closure-tests` when the plan carries them, else
+  but for its host-bound members, which keep the compiled Vars `ctx` binds,
+  and the members of a test namespace `ctx` has not entered, which its entry
+  interprets; from `::closure` and `::closure-tests` when the plan carries them, else
   walked from Δ. Each Var installed again is unbound first. The acquisition
   advanced from the predecessor's, carrying this plan. A plan without
   `::held` (an evaluation's `::evaluated` definitions, which `ctx` holds as
@@ -3101,7 +3102,16 @@
                                                    (comp (remove prior-tests) (map first)) tests)))
         interpreted (into overridden affected)
         tests (into [] (remove (comp already-tests first)) tests)
-        callers (into [] (remove #(or (already %) (contains? overridden %))) (sort reached))
+        entered (::entered-namespaces snapshot #{})
+        ;; a test namespace not yet entered interprets all its rows from the
+        ;; branch when it is entered (`enter-namespace!`), against the Vars
+        ;; `ctx` holds then: none of its members is bound or run before
+        unentered-test? (fn [namespace-name]
+                          (and (contains? (::test-namespaces snapshot) namespace-name)
+                               (not (entered namespace-name))))
+        callers (into [] (remove #(or (already %) (contains? overridden %)
+                                      (unentered-test? (symbol (namespace %)))))
+                      (sort reached))
         ;; A host-bound caller keeps the compiled Var the context binds; only
         ;; the macros and value definitions among the rest are interpreted now.
         macros (bind-lazy-members! ctx database
@@ -3109,14 +3119,12 @@
         added-rows (function-rows-in database (remove #(or (contains? reached %) (contains? overridden %)
                                                            (and held (not (contains? delta %))))
                                                       added))
-        entered (::entered-namespaces snapshot #{})
         ;; an added function with no compiled Var (of a source namespace, or
         ;; one the loaded JVM lacks, as a callee main deleted) interprets now,
         ;; a test namespace's once that namespace is entered
         sourced (into [] (keep (fn [[sym _ namespace-name]]
                                  (when (if (source-namespace? ctx namespace-name)
-                                         (or (entered namespace-name)
-                                             (not (contains? (::test-namespaces snapshot) namespace-name)))
+                                         (not (unentered-test? namespace-name))
                                          (nil? (get (ns-interns namespace-name) (symbol (name sym)))))
                                    sym)))
                       added-rows)

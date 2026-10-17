@@ -678,6 +678,33 @@
        (is (eval/interpreted-test? ctx proof)
            "the file test three calls from the change runs interpreted on the branch")))))
 
+(deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program and one interpretation of the reverse closure of seon.db/as-of-key (2,339 functions on default)."
+           :seon.test/long-ms 12000}
+  a-redefinition-leaves-an-unentered-test-namespace-to-its-entry
+  ;; One defn of seon.db/as-of-key on a fresh agent branch allocated 1.08 GB:
+  ;; its closure reaches value definitions of a dozen test namespaces
+  ;; (seon.flow-test/test-environment among them), and interpreting each one
+  ;; then entered and interpreted its whole test namespace.
+  (support/with-database
+   (fn [connection]
+     (db/with-branch {:seon.db/connection connection}
+      (fn []
+       (let [changed 'seon.db/as-of-key
+             before (db/db connection)
+             ctx (eval/cluster-ctx before connection
+                                   (eval/projection-state before (db/carried-projection before))
+                                   {:seon.sci.eval/loaded-connection connection})
+             _ (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db before})
+             closure (functions/reverse-closure {:seon.db/db before :seon.fn/seeds #{changed}})
+             measured (profile/measure #(eval/interpret-affected! ctx (db/db connection) [changed]))
+             entered (:seon.sci.eval/entered-namespaces @(:seon.sci.kernel/program-snapshot ctx) #{})]
+         (is (contains? (set (:seon.fn/affected closure)) 'seon.flow-test/test-environment)
+             "the closure reaches a value definition of a test namespace")
+         (is (not (contains? entered 'seon.flow-test))
+             "the redefinition leaves that test namespace to its entry")
+         (is (zero? (profile/calls-of measured 'seon.sci.eval/interpret-source-namespaces!))
+             "no test namespace is interpreted by the redefinition")))))))
+
 (deftest ^{:seon/tasks #{'seon.cluster.source/a-docstring-only-change-lands-without-interpreting-its-namespace}
            :seon.test/long "One complete SCI acquisition of the canonical fixture program after one docstring-only agent change."
            :seon.test/long-ms 8000}
