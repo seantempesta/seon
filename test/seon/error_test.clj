@@ -1589,8 +1589,11 @@
                   :seon.error/message "The bounded walk omitted content."}
           prose (error/elision-prose value)
           html (error/elision-html value)]
-      (is (str/includes? prose "content was elided"))
-      (is (not (str/includes? prose "error")))
+      (is (str/includes? (:seon.error/message prose) "content was elided"))
+      (is (not (str/includes? (:seon.error/message prose) "error")))
+      (is (not (contains? prose :seon.error/evidence)) "no evidence, no member")
+      (is (= {:k 1} (:seon.error/evidence (error/elision-prose (assoc value :seon.error/data {:k 1}))))
+          "the evidence is the error's own data, never printed text")
       (is (= :aside (first html)))
       (is (= "seon-family-entry seon-render-elision"
              (get-in html [1 :class])))))

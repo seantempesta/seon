@@ -380,11 +380,9 @@
   ;; keys), not a render unit: declared as a unit, an armed JVM refused it
   ;; on every call (issue: the-database-identity-face-cannot-satisfy-its-
   ;; own-declared-input, 2026-09-08).
-  {:malli/schema [:=> [:cat :seon.db/database-value-identity] :string]}
+  {:malli/schema [:=> [:cat :seon.db/database-value-identity] :seon.db/database-value-identity]}
   [unit]
-  (str "database " (pr-str (:db-name unit))
-       " at basis transaction " (:t unit)
-       " commit " (:datahike/commit-id unit)))
+  (select-keys unit [:db-name :t :datahike/commit-id]))
 
 (defn keyword-lookup?
   "May `value` be asked for a keyword key?

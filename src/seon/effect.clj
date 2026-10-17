@@ -51,10 +51,6 @@
     (contains? unit :seon.effect/result-edn) :returned
     :else :pending))
 
-(defn- payload-face
-  [label payload]
-  (str label " (~" (tokens/estimate payload) " tokens): " payload))
-
 (defn- receipt-identities
   [unit]
   (let [database (:seon.db/db unit)]
@@ -66,34 +62,19 @@
                          :seon.turn/id)}))
 
 (defn render-ai
-  "`:seon.render/ai` — one effect receipt, derived from terminal attributes."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  "`:seon.render/ai` — one effect receipt as data: its identity (the owner's
+  `:seon.fn/sym`, the run's `:seon.turn/id`), ordinals and the terminal
+  attributes it holds, so its state is which of them are present."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :map]]}
   [unit]
-  (when-let [id (:seon.effect/id unit)]
-    (let [{:keys [owner run]} (receipt-identities unit)
-          state (receipt-state unit)
-          request (:seon.effect/request-edn unit)
-          result (:seon.effect/result-edn unit)
-          identity-line
-          (str "Effect " (or owner id) " · run " (or run "unknown")
-               ", form " (:seon.effect/form-ordinal unit)
-               ", effect " (:seon.effect/ordinal unit) " · "
-               (case state
-                 :returned (if-some [duration
-                                     (:seon.effect/duration-ms unit)]
-                             (str "returned in " duration " ms.")
-                             "returned.")
-                 :interrupted (str "interrupted at "
-                                   (pr-str (:seon.effect/interrupted-at unit))
-                                   ".")
-                 :pending (str "pending since "
-                               (pr-str (:seon.effect/opened-at unit)) ".")))]
-      (str identity-line
-           (when request (str "\n" (payload-face "Request" request)))
-           (when result
-             (str "\n" (payload-face "Result" result)
-                  (when-let [digest (:seon.effect/result-blob unit)]
-                    (str " · blob digest " digest))))))))
+  (when (:seon.effect/id unit)
+    (let [{:keys [owner run]} (receipt-identities unit)]
+      (cond-> (select-keys unit [:seon.effect/id :seon.effect/form-ordinal :seon.effect/ordinal
+                                 :seon.effect/duration-ms :seon.effect/interrupted-at
+                                 :seon.effect/opened-at :seon.effect/request-edn
+                                 :seon.effect/result-edn :seon.effect/result-blob])
+        owner (assoc :seon.fn/sym owner)
+        run (assoc :seon.turn/id run)))))
 
 (defn render-html
   "`:seon.render/html` — one readable effect-receipt card."

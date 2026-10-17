@@ -187,7 +187,7 @@
                     (get (db/pull database '[{:seon.agent/settings [*]}]
                                   [:seon.agent/id (:seon.agent/id unit)])
                          :seon.agent/settings {})
-                    (or (:seon.render/value unit) unit))
+                    (:seon.render/value unit))
         attributes (if database (ai/agent-setting-attributes database)
                        (set (keys (dissoc component :db/id))))
         cluster-name (when (and database (:seon.agent/id unit))

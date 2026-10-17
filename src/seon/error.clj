@@ -2804,13 +2804,12 @@
 
 (defn elision-prose
   "`:seon.render/ai` — a neutral account of bounded render-walk elision."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:string {:min 1}]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.error/ai-render]}
   [unit]
-  (let [value (rendered-error-value unit)
-        evidence (:seon.error/data value)]
-    (prose " " ["Additional render-walk content was elided by the active render profile."
-           (evidence-text evidence)
-           "Request the next offset when more detail is needed."])))
+  (let [evidence (:seon.error/data (rendered-error-value unit))]
+    (cond-> {:seon.error/message "Additional render-walk content was elided by the active render profile."
+             :seon.error/instruction "Request the next offset when more detail is needed."}
+      (seq evidence) (assoc :seon.error/evidence evidence))))
 
 (defn elision-html
   "`:seon.render/html` — a neutral elision notice, never an error card."

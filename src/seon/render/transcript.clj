@@ -737,7 +737,7 @@
       [:article {:class "seon-turn-header"}
        [:h3 (str "Turn " turn-id)]
        [:dl
-        [:dt "Opened"] [:dd (pr-str (get-in entity [:seon.turn/opened-tx :db/txInstant]))]
+        [:dt "Opened"] [:dd (some-> (get-in entity [:seon.turn/opened-tx :db/txInstant]) .toInstant str)]
         [:dt "Trigger"] [:dd (or (get-in entity [:seon.turn/trigger :seon.message/id]) "None")]
         [:dt "Evaluations"] [:dd (if (db/read-refusal? evaluations)
                                    (:seon.error/message evaluations)

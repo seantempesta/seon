@@ -2,7 +2,6 @@
   "Focused coverage for important root-runtime and effect receipt faces."
   (:require [seon.schema.internal] [clojure.edn :as edn] [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [seon.ai.tokens :as tokens]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.config :as config]
@@ -237,8 +236,7 @@
            (is (nil? (walk-output-by-attribute units :seon.agent/cluster))
                "the branch is not a stored connection on the agent")))))))
 
-(deftest ^{:seon.test/golden "effect/render-ai answers prose lines; its AI face is asserted as the text it is (the HTML face is asserted on its hiccup)."}
-  effect-receipts-render-state-from-attribute-presence
+(deftest effect-receipts-render-state-from-attribute-presence
   (is (= {:seon.render/ai `effect/render-ai
           :seon.render/html `effect/render-html}
          (select-keys (family-properties :seon.effect/receipt)
@@ -263,11 +261,10 @@
                   :returned returned
                   :interrupted interrupted})]
        (doseq [[_ {:keys [ai html]}] faces]
-         (is (one-to-three-lines? ai))
          (is (card? "seon-family-entry seon-effect-receipt-entry" html))
-         (is (str/includes? ai (str owner-symbol)))
-         (is (str/includes? ai run-id))
-         (is (not (str/includes? ai ":db/id"))))
+         (is (= owner-symbol (:seon.fn/sym ai)))
+         (is (= run-id (:seon.turn/id ai)))
+         (is (not (contains? ai :db/id))))
        (let [pending-ai (get-in faces [:pending :ai])
              pending-html (get-in faces [:pending :html])
              returned-ai (get-in faces [:returned :ai])
@@ -278,25 +275,20 @@
              terminal (fn [html] {:result? (contains? (support/hiccup-classes html) "seon-effect-result")
                                   :duration? (boolean (some #{"Duration"} (support/hiccup-leaves html)))})]
          (testing "pending shows its request and omits terminal fields"
-           (is (str/includes? pending-ai "Request"))
-           (is (str/includes? pending-ai
-                              (str "~" (tokens/estimate request-edn)
-                                   " tokens")))
-           (is (not (str/includes? pending-ai "Result")))
+           (is (= request-edn (:seon.effect/request-edn pending-ai)))
+           (is (some? (:seon.effect/opened-at pending-ai)))
+           (is (not (contains? pending-ai :seon.effect/result-edn)))
            (is (= {:result? false :duration? false} (terminal pending-html))))
          (testing "returned shows result, duration, and blob handle"
-           (is (str/includes? returned-ai "Result"))
-           (is (str/includes? returned-ai
-                              (str "~" (tokens/estimate result-edn)
-                                   " tokens")))
+           (is (= result-edn (:seon.effect/result-edn returned-ai)))
+           (is (contains? returned-ai :seon.effect/duration-ms))
            (is (:duration? (terminal returned-html)))
            (is (some #(str/includes? (str %) blob-digest) (support/hiccup-leaves returned-html))
                "the result names its blob")
-           (is (not (str/includes? returned-ai "bytes")))
-           (is (not (str/includes? returned-ai "chars"))))
+           (is (= blob-digest (:seon.effect/result-blob returned-ai))))
          (testing "interrupted shows the interruption and no result"
-           (is (str/includes? interrupted-ai "interrupted"))
-           (is (not (str/includes? interrupted-ai "Result")))
+           (is (some? (:seon.effect/interrupted-at interrupted-ai)))
+           (is (not (contains? interrupted-ai :seon.effect/result-edn)))
            (is (= {:result? false :duration? false} (terminal interrupted-html)))))
        ;; THE WALK SELECTS THE SAME PAIR. Rooted at the receipt, because the
        ;; agent's declared `:seon.render/units`
@@ -321,8 +313,8 @@
                face (:seon.render/output (first units))]
            (is (some? face))
            (is (str/includes? (str face) (str owner-symbol)))
-           ;; AI render functions return text, HTML ones hiccup.
-           (is (if (= :seon.render/ai output) (string? face) (vector? face))
+           ;; AI render functions return data, HTML ones hiccup.
+           (is (if (= :seon.render/ai output) (map? face) (vector? face))
                "the walk's own request shape reaches a total render")))))))
 
 ;;; ---------------------------------------------------------------------------

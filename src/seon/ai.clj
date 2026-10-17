@@ -81,7 +81,7 @@
 (defn- attempt-without-private-provider-data
   [unit]
   (let [attempt (into (sorted-map-by #(compare (str %1) (str %2)))
-                      (dissoc (:seon.render/value unit unit)
+                      (dissoc (:seon.render/value unit)
                               :seon.ai.attempt/reasoning
                               :seon.ai.attempt/reasoning-blob
                               :seon.ai.attempt/reasoning-size))]

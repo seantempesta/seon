@@ -880,7 +880,7 @@
   names its text cites, one level."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.ref/doc-view]}
   [unit]
-  (let [{:seon.ref/keys [path anchor] :as entry} (or (:seon.render/value unit) unit)]
+  (let [{:seon.ref/keys [path anchor] :as entry} (:seon.render/value unit)]
     (-> entry
         (dissoc :seon.render/ai :seon.render/html)
         (assoc :seon.render/operations [(list 'my.fs/section (cond-> path anchor (str "#" anchor)))]))))
