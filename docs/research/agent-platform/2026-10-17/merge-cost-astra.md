@@ -127,13 +127,13 @@ Only candidate and consequently some K values differ.
 An intermediate Prove task may prove that a regression is red: the red is
 input to a passing proof about the regression, not an exemption that makes a
 failing required test green. Installed next-proof and red-at-base rules differ
-from the requested target. Implementation must amend TASK-CHAIN `2.4 and
+from the requested target. Implementation must amend TASK-CHAIN section 2.4 and
 supply red regressions before changing those semantics.
 
 ### Merge operation
 
 1. Hold H, S, B; read C and do the small three-way comparison.
-2. Branch from H through `seon.db/branch!`. Transact source delta plus unmerged
+2. Branch from H through `seon.cluster.registry/branch!`. Transact source delta plus unmerged
    entries; acquire/fork the context at that immutable candidate.
 3. Let the same reactive write mechanism observe/test U. Reuse source/main
    evidence for identical K. New work is missing K, normally where main's
@@ -464,7 +464,7 @@ explicit var under their declared bounds. None is claimed green here.
 Datahike pin ee3f8ec817e5310b3a0ea5adb8904214183568c0:
 
 - `datahike.versioning/branch!` shares immutable indexes, writes metadata;
-  `seon.db/branch!` is Seon's boundary.
+  `seon.cluster.registry/branch!` is Seon's boundary.
 - `datahike.versioning/merge-base` walks ancestry. Recompute for held commit
   pairs on a cache miss; cost G, not C.
 - `datahike.versioning/merge!` accepts transaction data, parents and
@@ -472,7 +472,7 @@ Datahike pin ee3f8ec817e5310b3a0ea5adb8904214183568c0:
   three-way merge. Keep `seon.program/three-way`.
 - `datahike.versioning/force-branch!` supports expected-current-commit, but
   pointer replacement is not the required fact transaction. Prefer the already
-  exposed `seon.db/merge!` entrance with native basis.
+  exposed `seon.db/transact!` entrance with `:parents` and native expected basis.
 
 Malli pin dd13ff81139159778edb0a67b491eccc0baa991d:
 `malli.core/validator` and `malli.core/-instrument` own compiled contracts.
@@ -492,9 +492,15 @@ No implementation changed. Full working-tree lint:
 completed in 6,123 ms: **0 errors, 1,833 warnings**, exit 2 for warnings.
 This is not a zero-finding run.
 
-The report commit uses bin/lane commit merge-cost-astra2 with D1, D3, M4 and
-F1 as exact named tests. Their result is the commit gate output/trailer;
-the phase list is not a substitute for running its proofs during implementation.
+The first report commit, 44219e306, ran bin/lane commit merge-cost-astra2 with
+D1, D3, M4 and F1. Run ce629ef3caf9 executed all four: **13 passes, zero
+failures, zero errors**, 2,733 ms. The full candidate gate took 47,408 ms;
+its throwaway boot took 31,924 ms and publication rehearsal 12,108 ms.
+These are tooling costs, not an ordinary merge timing. The gate's candidate
+archive was 52add6e619a15d35f49da017a82ddf5193f6ab32; default remained at its
+original PID/start instant. The phase list is not a substitute for running
+its proofs during implementation. This final documentation correction uses
+the same required lane gate.
 
 Foreign boundary: reference-code/konserve had tracked work,
 reference-code/http-kit nested untracked work, and
