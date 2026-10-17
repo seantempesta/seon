@@ -1992,9 +1992,9 @@
                     #(derive-gate-edges database) #(not (:seon.db/invalid-read %)))
       (derive-gate-edges database))))
 
-(defn- gate-sets-in
-  "Select tests through surviving named edges in one immutable database.
-   Acquire identity and genuine declaration-ref joins once per operation."
+(defn gate-sets-in
+  "Per seed, its reverse closure through surviving named edges in one immutable database: the affected names and
+  the tests reaching it. Acquire identity and genuine declaration-ref joins once per operation."
   {:seon/tasks #{'seon.fn/mention-closure-survives-beside-call-reach}
    :malli/schema [:=> [:cat :seon.db/database-value
                        [:sequential :qualified-symbol]]

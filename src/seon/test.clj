@@ -483,29 +483,100 @@
         (merge revisions (db/content-revisions database edge-attributes)))
       (or (db/as-of-key database) []))))
 
-(defn- destructive-reach
-  "Every test symbol whose reach includes a destructive owner, mapped to it.
+(defn- reach-walk
+  "Every test symbol whose reach includes a destructive owner, mapped to it (`::reach`), and every name the owners'
+  reverse closures walked (`::closure`): the owners, their affected names and their tests. Membership is
+  `seon.fn/gate-sets-in` walked from each owner `destroyers` names."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or [:map [::reach [:map-of :seon.test/sym :seon.fn/sym]] [::closure [:set :qualified-symbol]]]
+                   :seon.error/value]]}
+  [database]
+  (let [owners (destroyers database)]
+    (if (:seon.error/at owners)
+      owners
+      (let [by-owner (functions/gate-sets-in database (sort (keys owners)))]
+        (if (:seon.db/invalid-read by-owner)
+          by-owner
+          {::reach (reduce (fn [reached [owner {tests :seon.fn/tests}]] (reduce #(assoc %1 %2 owner) reached tests))
+                           {} (sort by-owner))
+           ::closure (into (set (keys owners))
+                           (mapcat (fn [[_ {affected :seon.fn/affected tests :seon.fn/tests}]] (concat affected tests)))
+                           by-owner)})))))
 
-  Membership is the shared `:seon.fn/calls` derivation `seon.fn/tests-reaching`,
-  walked from each owner `destroyers` names; kept in `seon.cache` by
-  `selection-revisions`."
+(def ^:private reach-head-attributes
+  "The selection attributes a held destructive reach cannot fold: the owners' declarations and the declared-edge
+  attribute set."
+  [:seon.fn/destroys :seon.fn/invokes :seon.fn/reference-to :seon.schema/key])
+
+(defn- reach-touched?
+  "Whether the datoms of `attributes` that differ between `before` and `after` name a member of `closure`: an edge
+  whose target is in it, an entity named in it on either side, or an entity newly named or filed whose own edges
+  reach it. Only such a change can move a reverse walk from the owners."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:sequential :qualified-keyword]
+                       [:set :qualified-symbol]]
+                  :boolean]}
+  [before after attributes closure]
+  (let [datoms (fn [database & components]
+                 (let [found (apply db/datoms database :eavt components)]
+                   (if (:seon.db/invalid-read found) (throw (ex-info "Destructive reach unavailable." found)) found)))
+        named? (fn [database entity]
+                 (some #(some (comp closure :v) (datoms database entity %)) [:seon.fn/sym :seon.test/sym]))
+        target? (fn [v] (cond (symbol? v) (closure v)
+                              (int? v) (or (named? before v) (named? after v))))
+        reaches? (fn [entity]
+                   (some (fn [{a :a v :v}]
+                           (or (target? v)
+                               (and (= :seon.fn/file a)
+                                    (some (comp closure :v) (datoms after v :seon.fn/unresolved-references)))))
+                         (datoms after entity)))]
+    (boolean
+     (some (fn [attribute]
+             (some (fn [[e a v]]
+                     (or (target? v) (named? before e) (named? after e)
+                         (and (#{:seon.fn/sym :seon.test/sym :seon.fn/file} a) (reaches? e))))
+                   (apply concat (db/datoms-diff before after :aevt [attribute]))))
+           attributes))))
+
+(defn- destructive-reach
+  "Every test symbol whose reach includes a destructive owner, mapped to it (`reach-walk`), kept in `seon.cache` by
+  `selection-revisions`. A value whose owners and declared-edge attributes equal a held one's
+  (`reach-head-attributes`) keeps its reach when the datoms between them touch none of its closure
+  (`reach-touched?`), so a change the walk cannot see costs its diff, not a walk from every owner."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:or [:map-of :seon.test/sym :seon.fn/sym] :seon.error/value]]}
   [database]
-  (let [walk (fn []
-               (let [owners (destroyers database)]
-                 (if (:seon.error/at owners)
-                   owners
-                   (let [by-owner (functions/gate-sets database (sort (keys owners)))]
-                     (if (:seon.db/invalid-read by-owner)
-                       by-owner
-                       (reduce (fn [reached [owner tests]] (reduce #(assoc %1 %2 owner) reached tests))
-                               {} (sort by-owner)))))))]
-    (let [memo-key (selection-revisions database)]
-      (if (seq memo-key)
-        (seon.cache/lookup ::destructive-reach memo-key #(+ 256 (* 128 (count %))) walk
-                           #(not (:seon.error/at %)))
-        (walk)))))
+  (let [revisions (selection-revisions database)
+        head (when (map? revisions) (select-keys revisions reach-head-attributes))
+        derive-reach (fn []
+                       (let [prior-key (when head (seon.cache/present ::reach-head head))
+                             prior (when prior-key (seon.cache/present ::destructive-reach prior-key))
+                             ;; the attributes the walk reads (`seon.fn/gate-sets-in`) whose revision moved
+                             changed (when prior
+                                       (filterv #(not= (get prior-key %) (get revisions %))
+                                                (into [:seon.fn/sym :seon.test/sym :seon.fn/calls :seon.fn/references
+                                                       :seon.test/subject :seon.fn/unresolved-references :seon.fn/file
+                                                       :seon.effect/capability]
+                                                      (functions/declared-edge-attributes database))))
+                             kept (when prior
+                                    (db/read-at database (::commit prior)
+                                                #(when (and % (not (reach-touched? % database changed (::closure prior))))
+                                                   prior)))
+                             held (or kept (reach-walk database))]
+                         ;; the next fold diffs from this value, so its work follows one change
+                         (if (:seon.error/at held) held (assoc held ::commit (db/commit-id database)))))]
+    (if (map? revisions)
+      (let [held (seon.cache/lookup ::destructive-reach revisions
+                                    #(+ 256 (* 128 (+ (count (::reach %)) (count (::closure %)))))
+                                    derive-reach #(not (:seon.error/at %)))]
+        (when-not (:seon.error/at held)
+          (seon.cache/evict! ::reach-head head)
+          (seon.cache/lookup ::reach-head head (constantly (+ 256 (* 96 (count head)))) (constantly revisions)))
+        (if (:seon.error/at held) held (::reach held)))
+      (let [walked (if (seq revisions)
+                     (seon.cache/lookup ::destructive-reach revisions #(+ 256 (* 128 (count (::reach %))))
+                                        #(reach-walk database) #(not (:seon.error/at %)))
+                     (reach-walk database))]
+        (if (:seon.error/at walked) walked (::reach walked))))))
 
 (defn- destructive-paths
   "Shortest named call path from every name reaching `owner-symbol` down to it.

@@ -452,6 +452,7 @@
                       (#'sut/host-exclusions
                        after
                        (.getCanonicalPath (clojure.java.io/file (System/getProperty "user.dir")))
+                       false
                        ['seon.id-test/does-not-matter])))
             "an unanswerable reach refuses the request instead of admitting it")))))
 
@@ -506,6 +507,30 @@
             (is (= :seon.test.host/in-process
                    (:seon.test/host (sut/host (db/db connection) test-symbol)))
                 "a changed call edge changes the answer")))))))
+
+(deftest a-new-identity-off-the-destructive-closure-keeps-the-reach-without-a-walk
+  (support/with-database
+    (fn [connection]
+      (with-destructive-test connection
+        (fn [test-symbol _ _]
+          (let [reach #(#'sut/destructive-reach %)
+                walk #(::sut/reach (#'sut/reach-walk %))
+                fresh 'reach.fresh/fresh-test]
+            (is (= destructive-owner (get (reach (db/db connection)) test-symbol)))
+            (support/transacted! connection [(support/namespace-entity (db/db connection) 'reach.fresh)])
+            (define! connection [:seon.test/sym fresh] "(deftest fresh-test (is true))")
+            (let [database (db/db connection)
+                  kept (seon.profile/measure #(reach database))
+                  walked (seon.profile/measure #(walk database))]
+              (is (= (:seon.profile/value walked) (:seon.profile/value kept)))
+              (is (zero? (seon.profile/calls-of kept 'seon.fn/gate-sets-in))
+                  "an identity no edge joins to the owners' closure folds without walking")
+              (is (< (:seon.profile/reads kept) (:seon.profile/reads walked))))
+            (support/transacted! connection [{:seon.test/sym fresh :seon.fn/calls [destructive-owner]}])
+            (let [database (db/db connection)]
+              (is (= destructive-owner (get (reach database) fresh))
+                  "an edge into the closure walks again")
+              (is (= (walk database) (reach database))))))))))
 
 (deftest a-host-answer-on-an-as-of-view-is-derived-once
   (support/with-database

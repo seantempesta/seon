@@ -116,8 +116,8 @@
   (let [database (db/db (:seon.db/connection (support/execution-handle nil)))
         reach (#'sut/destructive-reach database)
         [test-symbol owner] (first (sort reach))
-        excluded (#'sut/host-exclusions database (System/getProperty "user.dir") [test-symbol])
-        isolated (#'sut/host-exclusions database "/nonexistent-isolated-root" [test-symbol])]
+        excluded (#'sut/host-exclusions database (System/getProperty "user.dir") false [test-symbol])
+        isolated (#'sut/host-exclusions database "/nonexistent-isolated-root" false [test-symbol])]
     (is (qualified-symbol? test-symbol) "the program declares a destructive owner some test reaches")
     (is (= [test-symbol] (map :seon.test/sym (:seon.test/destructive-excluded excluded))))
     (is (= owner (:seon.fn/sym (first (:seon.test/destructive-excluded excluded)))))
