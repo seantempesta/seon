@@ -52,5 +52,5 @@
         (doseq [measured (rest measurements)]
           (is (< (:seon.profile/alloc-bytes measured) 3800000000)))
         (is (not ((schema/projection-validator (schema/handed-projection) :seon.cache/discipline-warning)
-                  (get-in (cache/status) [:seon.cache/kinds :seon.program/source-resolver-names])))))
+                  (get-in (cache/status) [:seon.cache/kinds :seon.program/source-reading])))))
       (finally (support/delete-recursively! root)))))

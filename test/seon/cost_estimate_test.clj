@@ -28,6 +28,7 @@
             [seon.profile :as profile]
             [seon.program :as program]
             [seon.task :as task]
+            [seon.test :as seon-test]
             [seon.test-support :as support]))
 
 (def estimates
@@ -67,6 +68,10 @@
     :why "One redefinition of the hub `seon.db/as-of-key` that changes only its docstring: read, analyze and digest one form; its behavior digest equals the merge base's, so no caller is re-armed and no test is selected: an unchanged form's cost, proportional to 1 form."
     :estimate {:alloc-mb 30.0 :calls 4000 :reads 60 :ms 150.0}
     :overrun '{:task seon.repl/a-docstring-only-change-to-a-hub-function-costs-hundreds-of-megabytes :alloc-mb 221.6 :calls 56529 :reads 305}}
+   {:op :cold-stale-merge-members
+    :why "The first `seon.test/stale` after boot over the tests reaching the hub `seon.db/as-of-key` (~140 members, a merge's members): one reach digest per member over the union of their reach (~3,500 definitions), each definition's behavior digest computed once from its stored row and one read of its source (~50 KB, ~10 calls), then one indexed result read per member: proportional to the reached definitions."
+    :estimate {:alloc-mb 175.0 :calls 35000 :reads 150 :ms 350.0}
+    :overrun '{:task seon.db/a-cold-behavior-digest-allocates-a-third-of-a-megabyte :alloc-mb 371.4 :calls 107809 :reads 121}}
    {:op :merge-one-function
     :why "Root merges a branch changing one function: a three-way diff of ~30 datoms from the merge base, its proof and one reaching test run on the merge branch, one merge transaction: proportional to the delta."
     :estimate {:alloc-mb 48.0 :calls 8000 :reads 200 :ms 400.0}
@@ -158,13 +163,25 @@
          :reads (:seon.profile/reads measured) :ms (:seon.profile/ms measured)})
       (finally (support/delete-root! root)))))
 
+(defn- cold-stale-cost
+  "The first `seon.test/stale` of the JVM over the tests reaching `seon.db/as-of-key`, measured on the calling thread."
+  {:malli/schema [:=> [:cat :seon.db/connection] :map]}
+  [connection]
+  (let [database (db/db connection)
+        members (seon-test/reaching {:seon.db/db database :seon.test/changed ['seon.db/as-of-key]})
+        measured (profile/measure #(seon-test/stale database members))]
+    (is (< 100 (count members)) "the hub's members are the merge's members")
+    {:alloc-mb (/ (:seon.profile/alloc-bytes measured 0) 1048576.0) :calls (:seon.profile/calls measured)
+     :reads (:seon.profile/reads measured) :ms (:seon.profile/ms measured) :members (count members)}))
+
 (defn- measured
   "Each operation of `estimates` measured once, warm, on a running agent: op -> measures."
   {:malli/schema [:=> [:cat] [:map-of :keyword :map]]}
   []
   (support/with-running-agent
    (fn [running agent-id connection]
-     (let [request (partial answer running agent-id)
+     (let [cold-stale (cold-stale-cost connection)
+           request (partial answer running agent-id)
            cost (partial request-cost running agent-id)
            _warm (dotimes [_ 2] (request "nil"))
            unchanged (cost "nil")
@@ -197,7 +214,7 @@
            hub-docstring (cost (str "(in-ns 'seon.db)\n" (hub-docstring-change)))]
        {:unchanged-request unchanged :fresh-agent-first-request fresh :new-def new-def :redefine-one-form redefine
         :reuse-one-unchanged-test reuse :current-state-with-task current-state :seon-db-nine-forms nine
-        :hub-docstring-change hub-docstring
+        :hub-docstring-change hub-docstring :cold-stale-merge-members cold-stale
         :merge-one-function (merge-cost running connection)}))))
 
 (defn- over

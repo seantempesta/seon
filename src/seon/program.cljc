@@ -15,8 +15,7 @@
             ;; below already sit inside a `#?(:clj …)` branch.
             #?(:clj [seon.schema.edn :as schema.edn])
             #?(:clj [seon.cache])
-            [rewrite-clj.node :as node]
-            [rewrite-clj.parser :as parser]))
+            [edamame.core :as edamame]))
 
 (defn- source-family?
   "Does this identity attribute's property map declare a source declaration
@@ -488,35 +487,66 @@
     :seon.program/definition-digest
     :seon.schema.admission/source})
 
-(defn- source-resolver-names
-  "The candidate alias and refer names spelled by `source`."
-  {:malli/schema [:=> [:cat :string [:set :symbol] [:set :symbol]]
-                  [:map [:qualifiers [:set :symbol]] [:symbols [:set :symbol]]]]}
-  [source qualifiers symbols]
-  (let [derive
-        (fn []
-          (reduce (fn [names n]
-                    (let [{:keys [value k auto-resolved? prefix]} n
-                          qualifier (cond
-                                      (symbol? value) (some-> value namespace symbol)
-                                      (and auto-resolved? (keyword? k)) (some-> k namespace symbol)
-                                      (and auto-resolved? prefix) (symbol prefix))]
-                      (cond-> names
-                        (contains? qualifiers qualifier) (update :qualifiers conj qualifier)
-                        (and (symbol? value) (nil? (namespace value)) (contains? symbols value))
-                        (update :symbols conj value))))
-                  {:qualifiers #{} :symbols #{}}
-                  (remove node/inner? (tree-seq node/inner? node/children (parser/parse-string-all source)))))]
-    #?(:clj
-       (if (and (empty? qualifiers) (empty? symbols))
-         {:qualifiers #{} :symbols #{}}
-         (seon.cache/lookup
-          ::source-resolver-names (id/id [source qualifiers symbols] 64)
-          (fn [names]
-            (+ 256 (reduce (fn [bytes sym] (+ bytes 128 (* 2 (count (name sym)))))
-                           0 (concat (:qualifiers names) (:symbols names)))))
-          derive))
-       :cljs (derive))))
+(defn- source-offset
+  "The character offset of 1-based `row` and `col`, the reader's position, in `source`."
+  {:malli/schema [:=> [:cat :string pos-int? pos-int?] nat-int?]}
+  [source row col]
+  (loop [i 0 line 1]
+    (if (= line row)
+      (+ i (dec col))
+      (recur (inc (.indexOf ^String source "\n" (int i))) (inc line)))))
+
+(defn- read-source
+  "What `source` spells, read once by edamame: `:qualifiers`, the namespaces
+  of its qualified symbols and the aliases its auto-resolved keywords and maps
+  name; `:symbols`, its bare symbols; and `:docstring`, the first form's third
+  form when it is a string another form follows, with its `[start end)`
+  character span. Every reader conditional branch counts."
+  {:malli/schema [:=> [:cat :string]
+                  [:map [:qualifiers [:set :symbol]] [:symbols [:set :symbol]]
+                   [:docstring {:optional true} [:map [:text :string] [:span [:tuple nat-int? nat-int?]]]]]]}
+  [source]
+  (let [aliases (volatile! #{})
+        strings (volatile! [])
+        forms (edamame/parse-string-all
+               source
+               {:all true :read-cond :preserve :readers (fn [_] identity)
+                :auto-resolve (fn [prefix]
+                                (if (= :current prefix) 'current (do (vswap! aliases conj prefix) prefix)))
+                :postprocess (fn [{:keys [obj loc]}]
+                               (when (string? obj) (vswap! strings conj [obj loc]))
+                               obj)})
+        spell (fn spell [names x]
+                (let [names (if-some [m (meta x)] (spell names m) names)]
+                  (cond (symbol? x) (if-some [qualifier (namespace x)]
+                                      (update names :qualifiers conj (symbol qualifier))
+                                      (update names :symbols conj x))
+                        (map? x) (reduce spell (reduce spell names (keys x)) (vals x))
+                        (coll? x) (reduce spell names x)
+                        #?(:clj (reader-conditional? x) :cljs false) (spell names (:form x))
+                        :else names)))
+        form (first forms)
+        docstring (when (and (seq? form) (< 3 (count form)) (string? (nth form 2)))
+                    (let [text (nth form 2)
+                          {:keys [row col end-row end-col]} (some (fn [[s loc]] (when (identical? s text) loc)) @strings)]
+                      {:text text :span [(source-offset source row col) (source-offset source end-row end-col)]}))]
+    (cond-> (update (reduce spell {:qualifiers #{} :symbols #{}} forms) :qualifiers into @aliases)
+      docstring (assoc :docstring docstring))))
+
+(defn- source-reading
+  "[[read-source]] of `source`, read once per source text."
+  {:malli/schema [:=> [:cat :string]
+                  [:map [:qualifiers [:set :symbol]] [:symbols [:set :symbol]]
+                   [:docstring {:optional true} [:map [:text :string] [:span [:tuple nat-int? nat-int?]]]]]]}
+  [source]
+  #?(:clj (seon.cache/lookup
+           ::source-reading source
+           (fn [reading]
+             (+ 256 (* 2 (count source))
+                (reduce (fn [bytes sym] (+ bytes 128 (* 2 (count (name sym)))))
+                        0 (concat (:qualifiers reading) (:symbols reading)))))
+           #(read-source source))
+     :cljs (read-source source)))
 
 (defn- used-resolver-context
   "The part of a namespace's resolver context `row`'s own usages resolve
@@ -538,9 +568,8 @@
                                     (concat used (:seon.fn/keywords entity)))
                               own)
         source (some->> row-id first shape :seon.program/source-attribute (get entity))
-        {:keys [qualifiers symbols]}
-        (when (string? source)
-          (source-resolver-names source (set (keys aliases)) (set (keys refers))))]
+        {:keys [qualifiers symbols]} (when (and (string? source) (or (seq aliases) (seq refers)))
+                                       (source-reading source))]
     {:requires (into #{} (filter used-namespaces) requires)
      :aliases (into {} (filter (if qualifiers (comp qualifiers key) (comp used-namespaces val))) aliases)
      :refers (into {} (filter (if symbols (comp symbols key) (comp used val))) refers)
@@ -577,17 +606,13 @@
 
 (defn- without-docstring
   "`source` without its def form's docstring literal `doc`: the form's third
-  child when it reads as exactly `doc` and another form follows it; `source`
+  form when it reads as exactly `doc` and another form follows it; `source`
   itself otherwise."
   {:malli/schema [:=> [:cat :string :string] :string]}
   [source doc]
-  (let [form (parser/parse-string source)
-        children (vec (node/children form))
-        forms (into [] (remove #(node/whitespace-or-comment? (nth children %))) (range (count children)))
-        at (get forms 2)
-        candidate (some->> at (nth children))]
-    (if (and candidate (< 3 (count forms)) (node/sexpr-able? candidate) (= doc (node/sexpr candidate)))
-      (node/string (node/replace-children form (into (subvec children 0 at) (subvec children (inc at)))))
+  (let [{:keys [text span]} (:docstring (source-reading source))]
+    (if (= doc text)
+      (str (subs source 0 (first span)) (subs source (second span)))
       source)))
 
 (defn behavior-digest
