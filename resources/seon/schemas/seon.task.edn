@@ -43,7 +43,8 @@
         [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/model {:optional true} :seon.task/model]
         [:seon.task/execution {:optional true} :seon.task/execution]
         [:seon.task/next {:optional true} :seon.task/next]
-        [:seon.task/branch {:optional true :description "On a chain task: the branch its attempts check out, else its chain's (TASK-CHAIN 2.2; a merge step names its kept merge branch)."} :seon.task/branch]
+        [:seon.task/branch {:optional true :description "The branch the task's attempts check out: resolved once by the writer (seon.task/create-all!), else on a chain task its chain's (TASK-CHAIN 2.2; a merge step names its kept merge branch)."} :seon.task/branch]
+        [:seon.task/target {:optional true} :seon.task/target] [:seon.task/config {:optional true} :seon.task/config]
         [:seon.task/attempts-made {:optional true} :seon.task/attempts-made]
         [:seon.task/cron {:optional true} :seon.task/cron] [:seon.task/zone {:optional true} :seon.task/zone]
         [:seon.task/function {:optional true} :seon.task/function]]
@@ -120,7 +121,10 @@
                        :description "seon.id/id over [task attempt-number]: one attempt of a task by an agent on its branch (seon.task/attempt-tx), written on the cluster; rows written before attempts were numbered derive from [task agent branch]."}]
  :assigned [:and {:seon.db/index true :description "The assigned task's handle, a value, never a ref (7.2)."} :seon.task/handle]
  :agent [:and {:seon.db/index true :description "The agent an assignment names."} :seon.db/ref]
- :branch [:and {:description "The branch the work is on: an attempt's, and on a chain task the branch its attempts check out (MERGE-STEP)."} :seon.store/branch]
+ :branch [:and {:description "The branch the work is on: an attempt's, and on a task the branch its attempts check out, resolved once at the write (seon.task/create-all!: a linear run shares its first task's branch, any other task gets task-<handle>)."} :seon.store/branch]
+ :target [:and {:description "The branch a task's done step writes, and that its own branch is built against (git's merge request target; not :seon.task.attempt/target, the task a send-back names). Set only by a merge task's builder (seon.task/from-filed), to main's branch; absent, the done step writes only the task's own branch."} :seon.store/branch]
+ :config [:or {:description "A task's own config decisions over main's (seon.task/create-all!): dial to value, or seon.config/absent to decide it absent. Only the dials of :seon.task/desired-config are a task's; the runnable view refuses any other. Stored as one EDN value."}
+          [:map-of :qualified-keyword :seon.schema/value]]
  :merge-base [:and {:description "Retired: the stored copy of an assignment's base, kept only as the attribute of values written before the commit graph answered it; nothing writes or reads it. A merge's base is the branch's fork point (seon.cluster.registry/fork-point) and whether it merged is main's ancestry (seon.merge/merge!). Phase 4 of the one-merge-base plan deletes it with the stored values."} :seon.source/commit-id]
  :merged-declarations [:int {:min 1 :description "How many declarations, program and task, root's merge of an assignment moved onto main (its change Δ), written in the merge's one transaction (seon.merge/merge!); absent when the merge moved none: a merge holding it is due for publication until its :seon.task/git-commit (seon.cluster.agent/next-actions)."}]
  :git-commit [:and {:seon.wake/starts true :description "The git commit publishing an assignment's merged declarations made in the checkout (seon.merge/publish!), written after it: it wakes db<->flow, whose next pass deletes the published assignment's branch; while a merge that moved declarations (:seon.task/merged-declarations) lacks it, its publication is due (seon.cluster.agent/next-actions)."} :seon.git/commit]
@@ -167,17 +171,23 @@
                [:seon.task/product :seon.task/product]]
  :subjects [:set :symbol] :referrers [:set :symbol]
  :proofs [:set {:seon.task/owned true :description "The deftests that must be green for this task to be done, by symbol: set from its template when its chain is created (seon.task/chain!), changed by an agent (Prove writes the next task's), joined with the task's own tagged tests until tags go; owned, never flowing."} :symbol]
- :task-map [:map {:description "One task of a chain as seon.task/chain! takes it: ordinary task members, a template's owned members merged with a plan. Only the first map's ns and name are read; identity, tempid and next are derived by position; an omitted execution is :running for the first and :held for the rest."}
+ :task-map [:map {:description "One task as a writer takes it: ordinary task members, a template's owned members merged with a plan, its needs as lookup refs [:seon.task/sym ns/name] and its environment. seon.task/chain! reads only the first map's ns and name, derives identity, tempid and next by position, and runs the first when execution is omitted; seon.task/create-all! reads each map's own ns and name and writes every task :held."}
             [:seon.task/ns {:optional true} :seon.task/ns] [:seon.task/name {:optional true} :seon.task/name]
             [:seon.task/plan {:optional true} :seon.task/plan] [:seon.task/instructions {:optional true} :seon.task/instructions]
             [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/model {:optional true} :seon.task/model]
-            [:seon.task/execution {:optional true} :seon.task/execution]]
+            [:seon.task/execution {:optional true} :seon.task/execution]
+            [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/branch {:optional true} :seon.task/branch]
+            [:seon.task/target {:optional true} :seon.task/target] [:seon.task/config {:optional true} :seon.task/config]]
+ :create-context [:map {:description "What seon.task/create-all! writes through: main's connection, and the declarations the caller read for tasks the write revises (an absent handle was read as absent)."}
+                  [:seon.db/connection :seon.db/connection] [:seon.task/basis {:optional true} :seon.task/basis]]
+ :created [:map {:description "A write of tasks as seon.task/create-all! answers it: every task's handle in write order, and whether the write committed."}
+           [:seon.task/handles :seon.task/handles] [:seon.task/changed? :seon.task/changed?]]
  :chain-context [:map {:description "What creating a chain writes through: main's connection, which holds the chain fact, and the store whose branches hold the chain's branch."}
                  [:seon.db/connection :seon.db/connection] [:seon.store/store :seon.store/store]]
  :chain-options [:map {:description "How a chain starts: :seon.chain/from names the branch whose head it forks from instead of main's; :seon.chain/config the chain's own config decisions over main's; :seon.chain/merge? false ends it at its last task's done with no merge."}
                  [:seon.chain/from {:optional true} :seon.chain/from] [:seon.chain/config {:optional true} :seon.chain/config]
                  [:seon.chain/merge? {:optional true} :seon.chain/merge?]]
- :handles [:vector {:min 1 :description "Task handles in chain order, along :seon.task/next."} :seon.task/handle]
+ :handles [:vector {:min 1 :description "Task handles in order: a chain's along :seon.task/next, or a write's as given (seon.task/create-all!)."} :seon.task/handle]
  :chain [:map {:description "A chain as seon.task/chain! answers it: its branch, its first task and every task in order."}
          [:seon.chain/branch :seon.chain/branch] [:seon.chain/first :seon.chain/first] [:seon.task/handles :seon.task/handles]]
  :edges [:map [:seon.task/subjects :seon.task/subjects] [:seon.task/referrers :seon.task/referrers]]
@@ -222,7 +232,7 @@
             [:seon.task/plan :seon.task/plan] [:seon.task/instructions {:optional true} :seon.task/instructions]
             [:seon.task/proofs [:set {:min 1} :symbol]] [:seon.task/execution :seon.task/execution]
             [:seon.chain/branch :seon.chain/branch] [:seon.task/branch {:optional true} :seon.task/branch]
-            [:seon.task/model {:optional true} :seon.task/model] [:seon.task/config :seon.task/desired-config]]
+            [:seon.task/model {:optional true} :seon.task/model] [:seon.task/desired-config :seon.task/desired-config]]
  :view [:map {:description "A task as its AI face shows it: named, and beyond distance zero its intent and references. Its subjects and proofs are its related data."}
         [:seon.task/id :seon.task/id] [:seon.task/sym {:optional true} :seon.task/sym] [:seon.task/name {:optional true} :seon.task/name]
         [:seon.task/ns {:optional true} :seon.task/ns]

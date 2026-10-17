@@ -827,7 +827,7 @@
   chain `branch`, under `config` (`desired-config`)."
   {:malli/schema [:=> [:cat :seon.schema/projection :map :seon.chain/branch :map] :map]}
   [projection task branch config]
-  (assoc (select-keys task (schema-keys projection :seon.task/runnable)) :seon.chain/branch branch :seon.task/config config))
+  (assoc (select-keys task (schema-keys projection :seon.task/runnable)) :seon.chain/branch branch :seon.task/desired-config config))
 
 (defn unrunnable
   "The `:unrunnable` refusal of the runnable view `view` under `projection`, Malli's explanation humanized as its
@@ -1071,32 +1071,148 @@
                          :seon.error/member :seon.task/assigned :seon.error/offending handle})))
 
 (defn from-filed
-  "A filed task's chain: `filed` (a task-file entry) as the Design task, with its identity and plan, its proofs left
-  out, then the Prove template, then the Implement template carrying the entry's proofs; the entry's
-  `:seon.task/model`, when set, on all three. A plan with no `## Problem` section is wrapped as one, so Design has
-  the request to keep.
+  "A filed task's work as four tasks linked by `:seon.task/needs`, for `seon.task/create-all!`: `filed` (a task-file
+  entry) as the Design task, with its identity and plan, its proofs left out; then `<name>-prove` from the Prove
+  template needing it; `<name>-implement` from the Implement template, carrying the entry's proofs, needing Prove; and
+  `<name>-merge` from the merge template, needing Implement and Design, with main's branch (`database`'s) as its
+  `:seon.task/target` and no proofs (a merge task's members are derived). The entry's `:seon.task/model`, when set, is
+  on all four. A plan with no `## Problem` section is wrapped as one, so Design has the request to keep.
 
   ## Example
 
   ```clojure
-  (seon.task/chain! context (seon.task/from-filed database (seon.task/task-declaration database handle)))
+  (seon.task/create-all! {:seon.db/connection connection :seon.task/basis {handle filed}}
+                         (seon.task/from-filed database filed))
   ```"
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/task-map]
-                  [:or [:vector {:min 3 :max 3} :seon.task/task-map] :seon.task/refused-error :seon.db/invalid-read-error
+                  [:or [:vector {:min 4 :max 4} :seon.task/task-map] :seon.task/refused-error :seon.db/invalid-read-error
                    :seon.db/pull-budget-error]]}
   [database filed]
-  (let [[design prove implement :as templates] (map #(template database %) ['seon.step.design/template 'seon.step.prove/template 'seon.step.implement/template])
+  (let [[design prove implement merge-template :as templates]
+        (map #(template database %) ['seon.step.design/template 'seon.step.prove/template 'seon.step.implement/template
+                                     'seon.step.merge/template])
         failure (first (filter :seon.error/at templates))
-        plan (:seon.task/plan filed)
+        {ns :seon.task/ns task-name :seon.task/name plan :seon.task/plan} filed
         problem? (some #(= "problem" (:seon.ref/anchor %)) (:seon.ref/headings (ref/document (or plan ""))))
-        ;; the entry's model is who works the whole chain: owned, it never flows, so each stage carries it
+        named #(str task-name "-" %)
+        needs #(into #{} (map (fn [n] [:seon.task/sym (task-sym ns n)])) %&)
+        ;; the entry's model is who works the whole work: owned, it never flows, so each task carries it
         worked-by #(cond-> % (:seon.task/model filed) (assoc :seon.task/model (:seon.task/model filed)))]
     (or failure
         (mapv worked-by
               [(cond-> (merge design (dissoc filed :seon.task/proofs))
                  (and plan (not problem?)) (assoc :seon.task/plan (str "## Problem\n\n" plan)))
-               prove
-               (cond-> implement (:seon.task/proofs filed) (assoc :seon.task/proofs (:seon.task/proofs filed)))]))))
+               (assoc prove :seon.task/ns ns :seon.task/name (named "prove") :seon.task/needs (needs task-name))
+               (cond-> (assoc implement :seon.task/ns ns :seon.task/name (named "implement")
+                              :seon.task/needs (needs (named "prove")))
+                 (:seon.task/proofs filed) (assoc :seon.task/proofs (:seon.task/proofs filed)))
+               (assoc (dissoc merge-template :seon.task/proofs) :seon.task/ns ns :seon.task/name (named "merge")
+                      :seon.task/needs (needs (named "implement") task-name)
+                      :seon.task/target (get-in database [:config :branch]))]))))
+
+(def ^:private environment-members
+  "The members of a task's environment its writer stores beside its declaration (task-model §6.1): branch, target, config."
+  [:seon.task/branch :seon.task/target :seon.task/config])
+
+(defn- written-needs
+  "Each of `tasks`' needs that name another task of the same write, by position: `[:seon.task/sym ns/name]` lookups only."
+  {:malli/schema [:=> [:cat [:vector :seon.task/task-map]] [:map-of :int [:set :int]]]}
+  [tasks]
+  (let [position (into {} (map-indexed (fn [i {:seon.task/keys [ns name]}] [[:seon.task/sym (task-sym ns name)] i])) tasks)]
+    (into {} (map-indexed (fn [i task] [i (into #{} (keep position) (:seon.task/needs task))])) tasks)))
+
+(defn- written-branches
+  "Each of `tasks`' branch, resolved once over the write (task-model §4), given `needs` (`written-needs`, acyclic): a
+  given branch wins; a task with no target that needs exactly one task, one of the write, and is its only dependent
+  without a target continues its branch (a linear run); every other task gets `task-<handle>`."
+  {:malli/schema [:=> [:cat [:vector :seon.task/task-map] [:map-of :int [:set :int]]] [:vector :seon.task/branch]]}
+  [tasks needs]
+  (let [untargeted-dependents (reduce-kv (fn [acc i js] (if (:seon.task/target (tasks i)) acc (reduce #(update %1 %2 (fnil conj #{}) i) acc js)))
+                                         {} needs)
+        continued (fn [i] (let [task (tasks i) [j] (seq (needs i))]
+                            (when (and (not (:seon.task/target task)) (= 1 (count (:seon.task/needs task))) j
+                                       (= #{i} (untargeted-dependents j)))
+                              j)))
+        branch (fn branch [i] (let [{:seon.task/keys [ns name] given :seon.task/branch} (tasks i)]
+                                (or given (some-> (continued i) branch) (keyword (str "task-" (task-handle ns name))))))]
+    (mapv branch (range (count tasks)))))
+
+(defn environment-tx
+  "The transaction data storing each of `entities`' environment members (`environment-members`) on the task `database`
+  already holds under its handle, where its stored value differs; a new task takes them from the task writer. Invoke as
+  `[:db.fn/call seon.task/environment-tx entities]`, decided over the value the writer holds."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map]] :seon.db/tx-data]}
+  [database entities]
+  (into [] (mapcat (fn [{handle :seon.task/id :as entity}]
+                     (let [stored (db/pull database (into [:db/id] environment-members) [:seon.task/id handle])]
+                       (when-let [failure (read-error stored)] (throw (ex-info (:seon.error/message failure) failure)))
+                       (when (:db/id stored)
+                         (for [k environment-members :let [v (get entity k)] :when (and (some? v) (not= v (get stored k)))]
+                           [:db/add (:db/id stored) k v])))))
+        entities))
+
+(defn create-all!
+  "Write `tasks`, a vector of task maps each naming its own ns and name, on main in ONE transaction through the task
+  writer (task-model T1). Each task is a runtime task created by root and written `:held`: nothing runs until root
+  releases it (`my.root/run!`). Its `:seon.task/needs` name tasks as lookup refs `[:seon.task/sym ns/name]`, of this
+  write or already on main; its `:seon.task/branch` is resolved once, here (`written-branches`: a linear run shares
+  its first task's branch, any other task gets `task-<handle>`, a given branch wins); its `:seon.task/target` and
+  `:seon.task/config` are stored as given. Refused before anything is written: a need that names no task
+  (`:unknown-task`), needs that wait on themselves (`:needs-cycle`), and a task with no needs whose runnable view
+  under main's config with its own decided over it does not validate (`:unrunnable`); a task with needs takes its
+  plan and proofs from them when it is released, so its view is judged then. A task main already holds is revised
+  only against `:seon.task/basis`, as `create!` revises (`:revision-conflict` otherwise), and keeps its execution; the
+  same write again commits nothing. Answers every handle in write order and whether the write committed.
+
+  ## Example
+
+  ```clojure
+  (seon.task/create-all! {:seon.db/connection connection}
+                         [(merge (seon.task/template database 'seon.step.design/template)
+                                 {:seon.task/ns 'seon.ref :seon.task/name \"fix-pathless-section\" :seon.task/plan plan})])
+  ```"
+  {:malli/schema [:=> [:cat :seon.task/create-context [:vector {:min 1} :seon.task/task-map]]
+                  [:or :seon.task/created :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
+  [{connection :seon.db/connection basis :seon.task/basis} tasks]
+  (let [main (db/db connection)
+        projection (db/carried-projection main)
+        syms (mapv (fn [{:seon.task/keys [ns name]}] (task-sym ns name)) tasks)
+        holder (fn [i] (:seon.task/ns (tasks i)))
+        lookups (into (sorted-set) (comp (mapcat :seon.task/needs) (filter #(and (vector? %) (= :seon.task/sym (first %))))
+                                         (map second) (remove (set syms)))
+                      tasks)
+        held (if (seq lookups) (db/q '[:find [?s ...] :in $ [?s ...] :where [_ :seon.task/sym ?s]] main (vec lookups)) [])
+        unknown (when-not (read-error held) (first (remove (set held) lookups)))
+        needs (written-needs tasks)
+        looped (cycle-in needs)
+        branches (when-not (or unknown looped) (written-branches tasks needs))
+        entities (mapv (fn [task branch]
+                         (-> (select-keys task (into (mapv first (declaration-members projection)) environment-members))
+                             (assoc :seon.task/branch branch :seon.task/execution :held
+                                    :seon.task/created-by [:seon.agent/id "root"])
+                             identified))
+                       tasks branches)
+        cluster-name (config/agent-cluster main "root")
+        unrunnable-task (fn [entity]
+                          (let [config (if (string? cluster-name) (desired-config main cluster-name (:seon.task/config entity)) cluster-name)]
+                            (if (refusal/error? config)
+                              config
+                              (unrunnable projection `create-all! (runnable projection entity (:seon.task/branch entity) config)))))
+        handles (into #{} (map :seon.task/id) entities)
+        basis (or basis {})
+        answer #(hash-map :seon.task/handles (mapv :seon.task/id entities) :seon.task/changed? %)]
+    (cond
+      (read-error held) held
+      unknown (refused `create-all! :unknown-task (symbol (namespace unknown)) unknown)
+      looped (refused `create-all! :needs-cycle (holder (first looped)) (mapv syms looped))
+      :else
+      (or (some #(when (empty? (:seon.task/needs %)) (unrunnable-task %)) entities)
+          (let [tx (refusal-data #(into (adopt-tasks-tx main entities handles basis) (environment-tx main entities)))]
+            (cond (map? tx) tx
+                  (empty? tx) (answer false)
+                  :else (let [report (refusal-data #(written connection [[:db.fn/call #'adopt-tasks-tx entities handles basis]
+                                                                         [:db.fn/call #'environment-tx entities]]))]
+                          (if (:db-after report) (answer true) report))))))))
 
 (defn- config-tx
   "The transaction data deciding `overlay` (dial to value, or `seon.config/absent`) on cluster `cluster-name`'s config

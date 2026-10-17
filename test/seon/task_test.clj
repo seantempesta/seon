@@ -4,7 +4,6 @@
   (:require [clj-kondo.core :as clj-kondo]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [seon.step.design :as design]
             [clojure.test :refer [deftest is are testing]]
             [malli.core :as m]
             [malli.registry :as mr]
@@ -607,9 +606,9 @@
            task {:seon.task/ns 'tq.unrun :seon.task/name "fix" :seon.task/plan "Fix it." :seon.task/proofs '#{tq.unrun/proof}}]
        (doseq [[label tasks options explained]
                [["a dial value its schema rejects" [task] {:seon.chain/config {:seon.config.ai/max-tokens 0}}
-                 [:seon.task/config :seon.config.ai/max-tokens]]
+                 [:seon.task/desired-config :seon.config.ai/max-tokens]]
                 ["a dial no chain branch reads" [task] {:seon.chain/config {:seon.config.agent/max-running 2}}
-                 [:seon.task/config :seon.config.agent/max-running]]
+                 [:seon.task/desired-config :seon.config.agent/max-running]]
                 ["a running task with no proofs" [(dissoc task :seon.task/proofs)] {} [:seon.task/proofs]]]]
          (let [before [(db/commit-id (db/db connection)) (registry/branches store)]
                refusal (task/chain! context tasks options)]
@@ -730,55 +729,99 @@
        (is (= (task/task-revision database handle) (task/task-revision (db/as-of database (db/basis-t database)) handle))
            "an as-of view of the same basis answers the same revision")))))
 
-(deftest a-filed-task-becomes-a-full-chain
-  ;; TASK-CHAIN S3f-1 (`docs/seon/schedule/cards/TASK-CHAIN.md#21-create`, From a filed task)
+(deftest a-task-write-resolves-every-tasks-branch
+  ;; task-model T1 (`docs/research/agent-platform/2026-10-17/task-model.md#4-attributes`): one write of linked tasks,
+  ;; every task :held, each `:seon.task/branch` resolved once at the write
   (test-support/with-database
    (fn [connection]
-     (let [store (:seon.store/store (test-support/execution-handle connection))
-           context {:seon.db/connection connection :seon.store/store store}
-           ;; chain tasks are root's runtime tasks (`:seon.task/created-by`): a cluster's root agent
-           _ (test-support/transacted! connection (test-support/agent-tx (db/db connection) "root"))
+     (let [_ (test-support/transacted! connection (test-support/agent-tx (db/db connection) "root"))
+           main-branch (get-in (db/db connection) [:config :branch])
+           handle #(task/task-handle 'tq.write %)
+           sym #(vector :seon.task/sym (symbol "tq.write" %))
+           own #(keyword (str "task-" (handle %)))
+           work {:seon.task/plan "Fix `seon.task/create-all!`." :seon.task/proofs '#{tq.write/proof}}
+           tasks [(assoc work :seon.task/ns 'tq.write :seon.task/name "a" :seon.task/config {:seon.config.ai/max-tokens 512})
+                  {:seon.task/ns 'tq.write :seon.task/name "b" :seon.task/needs #{(sym "a")}}
+                  {:seon.task/ns 'tq.write :seon.task/name "c" :seon.task/needs #{(sym "b")}}
+                  {:seon.task/ns 'tq.write :seon.task/name "d" :seon.task/needs #{(sym "b")}}
+                  {:seon.task/ns 'tq.write :seon.task/name "m" :seon.task/needs #{(sym "c") (sym "d")} :seon.task/target main-branch}]
+           answer (task/create-all! {:seon.db/connection connection} tasks)
+           database (db/db connection)
+           pulled (fn [database task-name] (db/pull database [:seon.task/execution :seon.task/branch :seon.task/target :seon.task/config
+                                                              {:seon.task/needs [:seon.task/name]}]
+                                                    [:seon.task/id (handle task-name)]))
+           names ["a" "b" "c" "d" "m"]]
+       (is (= {:seon.task/handles (mapv handle names) :seon.task/changed? true} answer)
+           "the answer names every task in write order")
+       (is (= 1 (count (db/q '[:find [?tx ...] :in $ [?h ...] :where [?e :seon.task/id ?h ?tx]] database (mapv handle names))))
+           "every task is asserted in one transaction")
+       (is (= (repeat 5 :held) (mapv (comp :seon.task/execution #(pulled database %)) names)) "every task is written :held")
+       (is (= [(own "a") (own "a") (own "c") (own "d") (own "m")] (mapv (comp :seon.task/branch #(pulled database %)) names))
+           "a linear run shares its first task's branch; a fan-out and a task with a target each get their own")
+       (is (= main-branch (:seon.task/target (pulled database "m"))) "the target is stored")
+       (is (= {:seon.config.ai/max-tokens 512} (:seon.task/config (pulled database "a"))) "the config is stored as data")
+       (is (= #{"c" "d"} (set (map :seon.task/name (:seon.task/needs (pulled database "m"))))) "needs link the written tasks")
+       (let [before (db/commit-id (db/db connection))]
+         (is (= {:seon.task/handles (mapv handle names) :seon.task/changed? false}
+                (task/create-all! {:seon.db/connection connection} tasks))
+             "a repeat write answers the same tasks")
+         (is (= before (db/commit-id (db/db connection))) "a repeat write commits nothing"))
+       (task/create-all! {:seon.db/connection connection}
+                         [(assoc work :seon.task/ns 'tq.write :seon.task/name "e" :seon.task/branch :given)
+                          {:seon.task/ns 'tq.write :seon.task/name "f" :seon.task/needs #{(sym "e")}}])
+       (is (= [:given :given] (mapv (comp :seon.task/branch #(pulled (db/db connection) %)) ["e" "f"]))
+           "a given branch wins, and a linear run continues it")
+       (let [before (db/commit-id (db/db connection))
+             refusal (task/create-all! {:seon.db/connection connection}
+                                       [{:seon.task/ns 'tq.write :seon.task/name "g" :seon.task/needs #{(sym "absent")}}])]
+         (is (= :unknown-task (:seon.task/refused refusal)) "a need that resolves to no task is refused")
+         (is (= 'tq.write/absent (:seon.error/offending refusal)) "the refusal names the need")
+         (is (= before (db/commit-id (db/db connection))) "a refused write commits nothing"))
+       (let [refusal (task/create-all! {:seon.db/connection connection}
+                                       [{:seon.task/ns 'tq.write :seon.task/name "h" :seon.task/plan "No proofs."}])]
+         (is (= :unrunnable (:seon.task/refused refusal)) "a task with no needs is refused when its runnable view is incomplete")
+         (is (some? (get-in (:seon.task/explanation refusal) [:seon.task/proofs])) "the explanation names the missing member"))))))
+
+(deftest a-filed-task-becomes-four-linked-tasks-ending-in-a-merge-task
+  ;; task-model T1 (`docs/research/agent-platform/2026-10-17/task-model.md#62-the-merge-task-reuses-p4a`)
+  (test-support/with-database
+   (fn [connection]
+     (let [_ (test-support/transacted! connection (test-support/agent-tx (db/db connection) "root"))
+           main-branch (get-in (db/db connection) [:config :branch])
            handle (task/task-handle 'tq.filed "bug")
            _ (test-support/transacted! connection
                                        (task/adopt-tasks-tx (db/db connection)
                                                             [{:seon.task/ns 'tq.filed :seon.task/name "bug"
-                                                              :seon.task/plan "Fix the bug in `seon.task/chain!`."
+                                                              :seon.task/plan "Fix the bug in `seon.task/create-all!`."
                                                               :seon.task/proofs '#{tq.filed/proof} :seon.task/model :outside}]
                                                             #{handle} {}))
            database (db/db connection)
            filed (task/task-declaration database handle)
            maps (task/from-filed database filed)
-           pulled #(db/pull % [:seon.task/plan :seon.task/proofs :seon.task/execution] [:seon.task/id handle])
-           before (pulled database)]
-       (is (= 3 (count maps)) "a filed task is a Design, a Prove and an Implement")
-       (is (= ['tq.filed "bug"] ((juxt :seon.task/ns :seon.task/name) (first maps))) "the first map has the entry's identity")
-       (is (= "## Problem\n\nFix the bug in `seon.task/chain!`." (:seon.task/plan (first maps)))
+           [design _ implement merge-task] maps]
+       (is (= 4 (count maps)) "a filed task is a Design, a Prove, an Implement and a merge task")
+       (is (= ['tq.filed "bug"] ((juxt :seon.task/ns :seon.task/name) design)) "the first map has the entry's identity")
+       (is (= "## Problem\n\nFix the bug in `seon.task/create-all!`." (:seon.task/plan design))
            "a plan with no Problem section is wrapped as one")
-       (is (not (contains? (:seon.task/proofs (first maps)) 'tq.filed/proof)) "the entry's proofs are not Design's")
-       (is (= '#{tq.filed/proof} (:seon.task/proofs (last maps))) "the entry's proofs are Implement's")
-       (is (= [:outside :outside :outside] (mapv :seon.task/model maps)) "the entry's model works every stage")
-       (let [answer (task/chain! context maps)
-             on-branch (db/branch-database (db/db connection) (:seon.chain/branch answer))]
-         (is (= [:outside :outside :outside]
-                (mapv #(:seon.task/model (db/pull on-branch [:seon.task/model] [:seon.task/id %])) (:seon.task/handles answer)))
-             "each chain task holds its model on the branch, a native keyword")
-         (is (= handle (:seon.chain/first answer)) "the chain's first task is the filed task's identity")
-         (is (= (:seon.task/plan (first maps)) (:seon.task/plan (pulled on-branch))) "the branch's first task carries the chain's content")
-         (is (= 3 (count (:seon.task/handles answer))) "the chain answers its three tasks, linked by next")
-         (is (= {:seon.task/execution :running
-                 :seon.task/next {:seon.task/id (second (:seon.task/handles answer))}
-                 :seon.task/created-by {:seon.agent/id "root"}}
-                (db/pull on-branch [:seon.task/execution {:seon.task/next [:seon.task/id]} {:seon.task/created-by [:seon.agent/id]}]
-                         [:seon.task/id handle]))
-             "the filed task's chain runs its first task, linked by next and created by root, as any chain's")
-         (is (= before (pulled (db/db connection))) "main's entry is unchanged until the merge")
-         (let [task (db/stored-entity on-branch (:e (first (db/datoms on-branch :avet :seon.task/id handle))))
-               refused (fn [plan] (into [] (comp (map :seon.step.design/check) (filter #{:problem-changed}))
-                                        (design/handoff on-branch (assoc task :seon.task/plan plan))))]
-           (is (= "Fix the bug in `seon.task/chain!`." (design/created-problem on-branch task))
-               "Design's Problem basis is the plan chain! wrote, not the filed entry's heading-less ingestion")
-           (is (= [] (refused (:seon.task/plan (first maps)))) "a Problem left as chain! wrote it is not refused")
-           (is (= [:problem-changed] (refused "## Problem\n\nSomething else.")) "a changed Problem is refused")))))))
+       (is (not (contains? (:seon.task/proofs design) 'tq.filed/proof)) "the entry's proofs are not Design's")
+       (is (= '#{tq.filed/proof} (:seon.task/proofs implement)) "the entry's proofs are Implement's")
+       (is (= #{[:seon.task/sym (task/task-sym 'tq.filed (:seon.task/name implement))] [:seon.task/sym 'tq.filed/bug]}
+              (:seon.task/needs merge-task))
+           "the merge task needs the implement and design tasks")
+       (is (= main-branch (:seon.task/target merge-task)) "the merge task targets main's branch")
+       (is (not (contains? merge-task :seon.task/proofs)) "the merge task carries no proofs: its members are derived")
+       (is (= (repeat 4 :outside) (mapv :seon.task/model maps)) "the entry's model works every stage")
+       (let [{handles :seon.task/handles} (task/create-all! {:seon.db/connection connection :seon.task/basis {handle filed}} maps)
+             on-main (db/db connection)
+             pulled (mapv #(db/pull on-main [:seon.task/execution :seon.task/branch :seon.task/target :seon.task/plan] [:seon.task/id %])
+                          handles)]
+         (is (= handle (first handles)) "the design task is the filed task's identity")
+         (is (= (repeat 4 :held) (mapv :seon.task/execution pulled)) "all four are written :held on main")
+         (is (= (repeat 3 (keyword (str "task-" handle))) (mapv :seon.task/branch (take 3 pulled)))
+             "design, prove and implement share one branch")
+         (is (= (keyword (str "task-" (last handles))) (:seon.task/branch (last pulled))) "the merge task gets its own branch")
+         (is (= main-branch (:seon.task/target (last pulled))) "the merge task's target is stored")
+         (is (= (:seon.task/plan design) (:seon.task/plan (first pulled))) "the filed task carries the design plan"))))))
 
 (deftest a-tasks-proof-is-recorded-and-read-under-its-task
   (test-support/with-database
