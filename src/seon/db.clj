@@ -1745,14 +1745,15 @@
 
 (defn as-of-key
   "An as-of view's exact identity: its committed origin's commit and its time
-  point, which fix every datom it holds. Absent for an uncommitted origin."
+  point, which fix every datom it holds. Absent for every other value (a raw,
+  `with`, since, history or filtered value) and for an uncommitted origin, as
+  Datahike's own query-cache key (`datahike.query/db-cache-key`) answers."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:or :nil [:tuple :qualified-keyword :uuid [:or :int :inst]]]]}
   [database]
-  (let [time-point (dbi/-time-point database)]
+  (when (instance? AsOfDB database)
     (when-let [identity (datahike.db/committed-value-identity (dbi/-origin database))]
-      (when (or (integer? time-point) (inst? time-point))
-        [::as-of (:datahike.value/commit-id identity) time-point]))))
+      [::as-of (:datahike.value/commit-id identity) (dbi/-time-point database)])))
 
 (defn- declares-program?
   "True when this value holds declaration entities its projection can derive from."

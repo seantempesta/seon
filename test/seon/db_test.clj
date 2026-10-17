@@ -1505,6 +1505,18 @@
                              database (db/read-evidence @captured {:seon.db/retain-read-results? true})))
                      "the very value that produced the evidence is current"))))))))))
 
+(deftest only-an-as-of-view-has-an-as-of-key
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "as-of-key")
+     (let [database @connection
+           views (assoc (four-view-table database) :with (db/with database []))
+           point (dec (long (db/basis-t database)))]
+       (is (= {:current nil :as-of [::db/as-of (:datahike/commit-id (:meta database)) point]
+               :since nil :history nil :with nil}
+              (update-vals views db/as-of-key))
+           "a since view at the as-of view's point, and a `with` value, have no as-of identity")))))
+
 (deftest an-as-of-view-is-keyed-on-its-own-fixed-point
   (test-support/with-database
    (fn [connection]
