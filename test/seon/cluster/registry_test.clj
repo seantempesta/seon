@@ -945,7 +945,7 @@
                                                    (:seon.task/assignment (db/pull (db/db connection) [:seon.task/assignment] a))))
              with-copy (clean-key-count store)]
          (is (= "Refined 9." (:seon.task/plan (db/pull (db/db connection) [:seon.task/plan] [:seon.task/id handle]))))
-         (is (uuid? (:seon.task/merge-commit copied)))
+         (is (uuid? (:seon.source/commit-id copied)))
          (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
          (let [collected (registry/collect! store registry/plain-cutoff {})]
            (is (pos? (:seon.cluster.registry/swept collected)) "the next collection sweeps the deleted branch")

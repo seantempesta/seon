@@ -137,14 +137,13 @@
            (let [commit (db/commit-id (db/db fork))
                  open (my.root/merge-requests {:seon.db/db (db/db connection)})
                  merged (my.root/merge! {:my.program/context (root-context connection) :seon.task/assignment assignment})
-                 row (db/pull (db/db connection) [:seon.task/outcome :seon.task/merge-commit
-                                                  :seon.task.attempt/end]
+                 row (db/pull (db/db connection) [:db/id :seon.task/outcome :seon.task.attempt/end]
                               [:seon.task/assignment assignment])]
              (is (some #{assignment} (map :seon.task/assignment open)) "the open assignment is a merge request")
              (is (nil? (:seon.error/message merged)) "the merge answers no refusal")
              (is (= :merged (:seon.task/outcome row)) "the done assignment closes merged")
              (is ((requiring-resolve 'seon.merge/merged?) (db/db connection) commit) "main records the merge of the commit")
-             (is (uuid? (:seon.task/merge-commit row)) "main records the merge commit")
+             (is (uuid? ((requiring-resolve 'seon.merge/merge-commit) (db/db connection) (:db/id row))) "main derives the merge commit")
              (is (= :done (:seon.task.attempt/end row)) "the end reached main in the merge")
              (is (= "Done." (:seon.task/plan (db/pull (db/db connection) [:seon.task/plan] [:seon.task/id handle]))))
              (is (not-any? #{assignment} (map :seon.task/assignment (my.root/merge-requests {:seon.db/db (db/db connection)})))

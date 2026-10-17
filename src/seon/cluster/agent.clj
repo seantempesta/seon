@@ -2545,14 +2545,13 @@
     (and (string? cluster) (config/keeps-ended-branches? database cluster))))
 
 (defn- publication-due?
-  "Whether an assignment's publication is due, from its `row` on main: its merge commit recorded, its merge
-  moved declarations or tasks (`:seon.task/merged-declarations`, which `seon.merge/merge!` writes beside its merge
-  commit), and no git commit and no publication refusal recorded, whether or not the merge completed its task (a refinement
-  merged before its agent ends publishes too). A merge moving no declaration is never due."
+  "Whether an assignment's publication is due, from its `row` on main: its merge moved declarations or tasks
+  (`:seon.task/merged-declarations`, which `seon.merge/merge!` writes in its one transaction), and no git commit and
+  no publication refusal recorded, whether or not the merge completed its task (a refinement merged before its agent
+  ends publishes too). A merge moving no declaration is never due."
   {:malli/schema [:=> [:cat :map] :boolean]}
-  [{commit :seon.task/merge-commit moved :seon.task/merged-declarations
-    git :seon.task/git-commit refused :seon.task/publication-refusal}]
-  (boolean (and commit moved (not git) (not refused))))
+  [{moved :seon.task/merged-declarations git :seon.task/git-commit refused :seon.task/publication-refusal}]
+  (boolean (and moved (not git) (not refused))))
 
 (defn- branch-admission-end
   "The `:seon.agent/admission-closed-tx` agent `agent-id`'s row holds on branch commit `commit`, read from main
@@ -2619,7 +2618,7 @@
                        (let [{main-end :seon.task.attempt/end :as row}
                              ;; an assignment holding none of these yet pulls as nil
                              (or (db/pull database [:seon.task.attempt/end :seon.task/outcome
-                                                    :seon.task/merge-commit :seon.task/merged-declarations
+                                                    :seon.task/merged-declarations
                                                     :seon.task/git-commit :seon.task/refusal :seon.task/publication-refusal] a)
                                  {})
                              head (registry/branch-commit-id {:seon.store/store store :seon.store/branch b

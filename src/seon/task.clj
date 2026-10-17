@@ -1708,11 +1708,15 @@
   [database handles]
   (let [attempts (db/q '[:find [?a ...] :in $ [?h ...] :where [?a :seon.task/assigned ?h]] database handles)
         _ (when-let [failure (read-error attempts)] (throw (ex-info (:seon.error/message failure) failure)))
-        rows (mapv #(db/pull database [:seon.task/assignment :seon.task/assigned :seon.task.attempt/number
+        ;; the merge commit is the commit of the transaction that closed the attempt :merged (`seon.db/commit-at-t`)
+        rows (mapv #(let [row (db/pull database [:seon.task/assignment :seon.task/assigned :seon.task.attempt/number
                                        :seon.task.attempt/end :seon.task.attempt/reason :seon.task/branch
-                                       :seon.task/outcome :seon.task/reason :seon.task/merge-commit
+                                       :seon.task/outcome :seon.task/reason
                                        :seon.task/merged-declarations :seon.task/git-commit
                                        {:seon.task/agent agent-summary}] %)
+                       closed (first (filter (fn [datom] (= :merged (:v datom))) (d/datoms database :eavt % :seon.task/outcome)))
+                       commit (when closed (db/commit-at-t database (:tx closed)))]
+                   (cond-> row commit (assoc :seon.source/commit-id commit)))
                    attempts)]
     (when-let [failure (some read-error rows)] (throw (ex-info (:seon.error/message failure) failure)))
     (group-by :seon.task/assigned rows)))
@@ -1837,9 +1841,9 @@
       (when (or prompt completion) (fact "tokens" (str (or prompt 0) " in / " (or completion 0) " out")))
       (fact "branch" (some-> (:seon.task/branch attempt) name))
       (when agent-id (agent-links agent-id))]
-     (when (or (:seon.task/merge-commit attempt) (:seon.task/git-commit attempt))
+     (when (or (:seon.source/commit-id attempt) (:seon.task/git-commit attempt))
        [:div {:class "seon-chain-merge"}
-        (fact "merged" (:seon.task/merge-commit attempt))
+        (fact "merged" (:seon.source/commit-id attempt))
         (fact "declarations" (:seon.task/merged-declarations attempt))
         (fact "git" (:seon.task/git-commit attempt))])
      (when-let [reason (:seon.task.attempt/reason attempt)] [:p {:class "seon-chain-attempt-reason"} reason])

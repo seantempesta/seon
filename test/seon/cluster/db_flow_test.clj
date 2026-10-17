@@ -1433,10 +1433,10 @@
                 (let [merge! #(db/with-branch {:seon.db/connection connection}
                                               (fn [] (merge/merge! {:seon.db/connection connection :seon.store/store store} key)))
                       merged (merge!)]
-                  (is (uuid? (:seon.task/merge-commit merged)))
+                  (is (uuid? (:seon.source/commit-id merged)))
                   (is (= "Refined on the branch." (intent)))
                   (let [main (db/commit-id (db/db connection))]
-                    (is (nil? (:seon.task/merge-commit (merge!))) "and a second merge transacts nothing")
+                    (is (nil? (:seon.source/commit-id (merge!))) "and a second merge transacts nothing")
                     (is (= main (db/commit-id (db/db connection)))))))))))))))
 
 (deftest

@@ -5,7 +5,7 @@
  :fork-point [:and {:description "The base of the cluster facts an assignment's merge carries (seon.merge/merge-tx), derived from the commit graph, never stored: the newest commit of its branch head's first-parent history main already merged (seon.merge/merged?), else the commit its branch forked from main at (seon.cluster.registry/fork-point)."} :seon.source/commit-id]
  :merged [:map {:description "What root's merge of an assignment did (seon.merge/merge!): when it transacted, main's merge commit, the outcome it closed the assignment with and the conflicts it met; a merge of requested declarations adds the acceptance, whose publication is due work (seon.merge/publish!)."}
           [:seon.task/assignment :seon.task/assignment]
-          [:seon.task/merge-commit {:optional true} :seon.task/merge-commit]
+          [:seon.source/commit-id {:optional true} :seon.source/commit-id]
           [:seon.task/outcome {:optional true} :seon.task/outcome]
           [:seon.merge/conflicts :seon.merge/conflicts]
           [:seon.source/accepted {:optional true} :seon.source/accepted]]

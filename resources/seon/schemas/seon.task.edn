@@ -122,8 +122,7 @@
  :agent [:and {:seon.db/index true :description "The agent an assignment names."} :seon.db/ref]
  :branch [:and {:description "The branch the work is on: an attempt's, and on a chain task the branch its attempts check out (MERGE-STEP)."} :seon.store/branch]
  :merge-base [:and {:description "Retired: the stored copy of an assignment's base, kept only as the attribute of values written before the commit graph answered it; nothing writes or reads it. A merge's base is the branch's fork point (seon.cluster.registry/fork-point) and whether it merged is main's ancestry (seon.merge/merge!). Phase 4 of the one-merge-base plan deletes it with the stored values."} :seon.source/commit-id]
- :merge-commit [:uuid {:description "The main commit root's merge of an assignment made (seon.merge/merge!), recorded once it committed: what publication of the merged declarations reads."}]
- :merged-declarations [:int {:min 1 :description "How many declarations, program and task, root's merge of an assignment moved onto main (seon.cluster.source/merge-accepted of its merge commit), written once beside :seon.task/merge-commit (seon.merge/merge!); absent when the merge moved none: a merge holding it is due for publication until its :seon.task/git-commit (seon.cluster.agent/next-actions)."}]
+ :merged-declarations [:int {:min 1 :description "How many declarations, program and task, root's merge of an assignment moved onto main (its change Δ), written in the merge's one transaction (seon.merge/merge!); absent when the merge moved none: a merge holding it is due for publication until its :seon.task/git-commit (seon.cluster.agent/next-actions)."}]
  :git-commit [:and {:seon.wake/starts true :description "The git commit publishing an assignment's merged declarations made in the checkout (seon.merge/publish!), written after it: it wakes db<->flow, whose next pass deletes the published assignment's branch; while a merge that moved declarations (:seon.task/merged-declarations) lacks it, its publication is due (seon.cluster.agent/next-actions)."} :seon.git/commit]
  :assignment-row [:map {:seon.db/attributes true :seon.program/partition :seon.cluster}
                   [:seon.task/assignment :seon.task/assignment] [:seon.task/assigned :seon.task/assigned]
@@ -133,7 +132,6 @@
                   [:seon.task.attempt/reason {:optional true} :seon.task.attempt/reason] [:seon.task.attempt/commit {:optional true} :seon.task.attempt/commit]
                   [:seon.task/merge-base {:optional true} :seon.task/merge-base]
                   [:seon.task/outcome {:optional true} :seon.task/outcome] [:seon.task/reason {:optional true} :seon.task/reason]
-                  [:seon.task/merge-commit {:optional true} :seon.task/merge-commit]
                   [:seon.task/merged-declarations {:optional true} :seon.task/merged-declarations]
                   [:seon.task/git-commit {:optional true} :seon.task/git-commit] [:seon.task/refusal {:optional true} :seon.task/refusal]
                   [:seon.task/publication-refusal {:optional true} :seon.task/publication-refusal]]

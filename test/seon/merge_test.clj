@@ -459,12 +459,12 @@
           (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/plan "b"}])
           (let [commit (db/commit-id (db/db fork))
                 first-merge (merged! connection a)]
-            (is (uuid? (:seon.task/merge-commit first-merge)) "the merge transacted")
+            (is (uuid? (:seon.source/commit-id first-merge)) "the merge transacted")
             (is (= "b" (plan-on connection handle)))
             (is (merge/merged? (db/db connection) commit) "main's history records the merge of the source commit")
             (let [main (db/commit-id (db/db connection))
                   second-merge (merged! connection a)]
-              (is (nil? (:seon.task/merge-commit second-merge)) "a repeat transacts nothing")
+              (is (nil? (:seon.source/commit-id second-merge)) "a repeat transacts nothing")
               (is (= main (db/commit-id (db/db connection))) "main is unchanged")))))))))
 
 (deftest a-facts-only-merge-is-never-due-for-publication
@@ -481,7 +481,7 @@
                           (cluster.agent/lifecycle-facts main (:seon.store/store (support/execution-handle connection))
                                                          (registry/branches (:seon.store/store (support/execution-handle connection)))
                                                          {:seon.flow.actions/started #{} :seon.flow.actions/paused #{}}))]
-            (is (uuid? (:seon.task/merge-commit merged)) "the facts merged")
+            (is (uuid? (:seon.source/commit-id merged)) "the facts merged")
             (is (nil? (:seon.task/outcome (db/pull main [:seon.task/outcome] a)))
                 "a source not yet ended merges its facts and completes nothing")
             (is (nil? (:seon.task/merged-declarations (db/pull main [:seon.task/merged-declarations] a)))

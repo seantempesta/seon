@@ -264,8 +264,8 @@
         merges (db/q '[:find ?a ?tx :in $ ?s :where [?t :seon.task/sym ?s] [?a :seon.task/attempt-of ?t]
                        [?a :seon.task/outcome :merged ?tx]]
                      database sym)
-        latest (when (and (seq merges) (not (:seon.error/at merges))) (first (apply max-key second merges)))
-        commit (when latest (:seon.task/merge-commit (db/pull database [:seon.task/merge-commit] latest)))
+        [latest merged-tx] (when (and (seq merges) (not (:seon.error/at merges))) (apply max-key second merges))
+        commit (when latest (db/commit-at-t database merged-tx))
         moved (when commit (merged database commit))]
     (or (some #(when (:seon.error/at %) %) [task merges moved])
         (cond-> {:seon.task/sym sym}

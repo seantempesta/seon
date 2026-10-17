@@ -243,7 +243,7 @@
 (defn- assignment-row
   "Assignment `key`'s merge and publication facts on main."
   [connection key]
-  (db/pull (db/db connection) [:seon.task/outcome :seon.task/merge-commit :seon.task/merged-declarations
+  (db/pull (db/db connection) [:db/id :seon.task/outcome :seon.task/merged-declarations
                                 :seon.task/git-commit :seon.task/publication-refusal]
            [:seon.task/assignment key]))
 
@@ -279,7 +279,7 @@
                  "main holds the agent's definition")
              (is (nil? (:seon.task/outcome (assignment-row connection request)))
                  "its agent has not ended: the declarations merge without completing the task")
-             (is (uuid? (:seon.task/merge-commit (assignment-row connection request))) "main records the merge commit")
+             (is (uuid? (seon.merge/merge-commit (db/db connection) (:db/id (assignment-row connection request)))) "main derives the merge commit")
              (is (= 1 (:seon.task/merged-declarations (assignment-row connection request)))
                  "the merge records, in its own transaction, the one declaration it moved")
              (is (nil? (:seon.task/git-commit (assignment-row connection request))) "and no git commit yet")
@@ -786,7 +786,7 @@
                merged (merge! execution request)]
            (is (= {} (select-keys merged [:seon.error/type :seon.source/write-back-refused]))
                "the merge is judged against the file at git HEAD, not the working tree")
-           (is (uuid? (:seon.task/merge-commit (assignment-row connection request))) "main records the merge")
+           (is (uuid? (seon.merge/merge-commit (db/db connection) (:db/id (assignment-row connection request)))) "main derives the merge commit")
            (pass! running)
            (is (= [dirty head nil] [(slurp file) (git! root "rev-parse" "HEAD") (:seon.task/git-commit (assignment-row connection request))])
                "its publication waits while the path is dirty, writing nothing")
@@ -916,12 +916,11 @@
                   (:seon.test/sym (db/pull main [:seon.test/sym] [:seon.test/sym (sym "chain-check")]))])
               "main holds the first task's code change and the last task's proof")
           (is (= #{[:seon.fn/sym (sym "chain-value")] [:seon.test/sym (sym "chain-check")]}
-                 (:seon.program/identities (source/merge-accepted h-conn (:seon.task/merge-commit merged))))
+                 (:seon.program/identities (source/merge-accepted h-conn (:seon.source/commit-id merged))))
               "publication writes the chain's program and no chain task: chain tasks are runtime data, never in a task file")
           (let [a (:db/id (db/pull main [:db/id] [:seon.task/assignment (last attempts)]))]
-            (is (= (:seon.task/merge-commit merged)
-                   (seon.merge/merge-commit (db/with main {:tx-data [[:db/retract a :seon.task/merge-commit (:seon.task/merge-commit merged)]]}) a))
-                "a restart between acceptance and its record still finds the merge commit, from the merge's own transaction"))
+            (is (= (:seon.source/commit-id merged) (seon.merge/merge-commit main a))
+                "the merge commit derives from the merge's own transaction"))
           (is (= [:done :done :merged] (mapv #(:seon.task/outcome (db/pull main [:seon.task/outcome] [:seon.task/assignment %])) attempts))
               "the earlier attempts keep :done and the terminal one is :merged")
           (is (= [] (filterv (set attempts) (map :seon.task/assignment ((requiring-resolve 'my.root/merge-requests) {:seon.db/db main}))))
@@ -934,3 +933,36 @@
         (cluster.agent/release-context! on-clash)
         (doseq [b [branch (:seon.chain/branch clash)]]
           (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
+
+(deftest ^{:seon.test/long "One chain, one prepare-merge! (a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one) and its merge."
+           :seon.test/long-ms 120000}
+  a-merge-writes-one-transaction-on-main
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        _ (write! h-conn [(entity (db/db h-conn) :fn "once-value" "(defn once-value {:malli/schema [:=> [:cat] :int]} [] 1)")])
+        _ (support/transacted! h-conn (support/agent-tx (db/db h-conn) "root"))
+        chain (task/chain! {:seon.db/connection h-conn :seon.store/store store}
+                           [{:seon.task/ns 'tq.oncemerge :seon.task/name "fix" :seon.task/plan "Merge once."
+                             :seon.task/proofs #{(sym "once-check")}}])
+        branch (:seon.chain/branch chain)
+        on-chain (cluster.agent/acquire-context! target nil {:seon.agent/branch branch})
+        c-conn (:seon.db/connection on-chain)]
+    (try
+      (write! c-conn [(entity (db/db c-conn) :fn "once-value" "(defn once-value {:malli/schema [:=> [:cat] :int]} [] 2)")])
+      (write! c-conn [(entity (db/db c-conn) :test "once-check" "(clojure.test/deftest once-check (clojure.test/is (= 2 (seon.cluster.merge-test/once-value))))")])
+      (let [[key] (chain-attempts! c-conn branch (:seon.task/handles chain))
+            before (:max-tx (db/db h-conn))
+            merged (seon.merge/merge! target key)
+            main (db/db h-conn)
+            a (:db/id (db/pull main [:db/id] [:seon.task/assignment key]))
+            row (db/pull main [:seon.task/outcome :seon.task/merged-declarations] a)]
+        (is (= {} (select-keys merged [:seon.error/type :seon.error/offending])) "the merge answers no refusal")
+        (is (= (- (:max-tx main) before) 1) "main takes the merge as one transaction")
+        (is (= (:seon.source/commit-id (:seon.source/accepted merged)) (seon.merge/merge-commit main a) (db/commit-id main))
+            "the merge commit derives from the :merged outcome's transaction")
+        (is (= :merged (:seon.task/outcome row)) "the same transaction closes the assignment")
+        (is (= 2 (:seon.task/merged-declarations row)) "the one transaction counts the two declarations it moved"))
+      (finally
+        (cluster.agent/release-context! on-chain)
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))

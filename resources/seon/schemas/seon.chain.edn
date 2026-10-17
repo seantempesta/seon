@@ -28,7 +28,7 @@
                 [:seon.agent/end-prompt-tokens {:optional true} :seon.agent/end-prompt-tokens]
                 [:seon.agent/end-completion-tokens {:optional true} :seon.agent/end-completion-tokens]
                 [:seon.task/branch {:optional true} :seon.task/branch]
-                [:seon.task/merge-commit {:optional true} :seon.task/merge-commit]
+                [:seon.source/commit-id {:optional true} :seon.source/commit-id]
                 [:seon.task/merged-declarations {:optional true} :seon.task/merged-declarations]
                 [:seon.task/git-commit {:optional true} :seon.task/git-commit]]
  :attempts [:vector :seon.chain/attempt-view]
