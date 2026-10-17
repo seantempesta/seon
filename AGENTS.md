@@ -480,7 +480,7 @@ definition with the same input is computed once for every branch and agent that 
   its environment (`:seon.task/branch`, `:seon.task/target`, `:seon.task/config`, `:seon.task/model`) and
   `:seon.task/execution`. A declared task lives in `resources/seon/tasks/<ns>.edn`; runtime tasks are never written into
   task files. Target: tasks are desired state on main, the observed state is facts written by their observers, and one
-  reconciler (`seon.cluster.agent/reconcile`) closes the gap; there is no chain entity. `seon.task/create-all!` writes a
+  reconciler (`seon.cluster.reconcile/reconcile`) closes the gap; there is no chain entity. `seon.task/create-all!` writes a
   vector of plain task maps (a template merged with a plan, `seon.task/template`) in one transaction on main, every task
   `:held`; nothing autoruns, root's `my.root/run!` is the one release, and `:seon.config.agent/max-running` caps parallel
   attempts. A single task is a task with no needs, followed by a merge task when it should reach main. Installed until

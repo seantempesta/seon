@@ -6,7 +6,7 @@ status: "design plan by lane task-model-plan (Opus), 2026-10-17, revised in plac
 
 # Task model: desired state, observed state, one reconciler (2026-10-17)
 
-**Phase status** (each implementing commit updates this line): T0 done (TASK-CHAIN amended in place to the final plan and `task-t0-task-chain.patch` deleted, lane task-t0-finish) · T1 done c9f2a98a7 (`seon.task/create-all!`; `from-filed` answers four needs-linked tasks ending in a merge task) · T2 done cb8274c69 (`:seon.agent/graph-process` asserted by `start-flow!`, retracted at the observed exit in `stop-flow!` and by `recover-runs!`; `:seon.agent/environment` at start; both on the agent's own database, not always main) · T3a pending (the exhaustive transition table, §5) · T3a-agent pending ·
+**Phase status** (each implementing commit updates this line): T0 done (TASK-CHAIN amended in place to the final plan and `task-t0-task-chain.patch` deleted, lane task-t0-finish) · T1 done c9f2a98a7 (`seon.task/create-all!`; `from-filed` answers four needs-linked tasks ending in a merge task) · T2 done cb8274c69 (`:seon.agent/graph-process` asserted by `start-flow!`, retracted at the observed exit in `stop-flow!` and by `recover-runs!`; `:seon.agent/environment` at start; both on the agent's own database, not always main) · T3a done ba0a0961c (`seon.cluster.reconcile`: 13,968 states, one row each, 0 invalid successors, 0 cycles, plan empties; constraints as named [:not] schemas; actions `:seon.flow.actions/reconcile-action`) · T3a-agent pending ·
 T3b pending · T3c pending (no norm; updates `seon.mine`) · T4 pending (clean restart) · P10 (merge-hybrid's phase, with
 §6.3's conflicts section) done 8f39ed642
 
@@ -30,7 +30,7 @@ of tasks. Each of those belongs on a task. Once they do, the chain has nothing l
    - branch heads, written by Datahike.
 
    Nothing is inferred from history.
-3. **One reconciler.** `seon.cluster.agent/reconcile` is a pure function of (desired, observed) that answers the
+3. **One reconciler.** `seon.cluster.reconcile/reconcile` is a pure function of (desired, observed) that answers the
    minimal actions. Each action's actor writes the observed fact that closes its gap, and that commit wakes the next
    pass. Reconciling the same state twice answers nothing the second time.
 4. **Scheduling and merge are not mechanisms of their own. They are rows of the reconciler's transition table (§5), checked for exhaustiveness.**
@@ -158,7 +158,7 @@ branch.
 
 Words recorded in `docs/seon/architecture/vocabulary.md` before code uses them (T0):
 - **desired state** and **observed state** (Kubernetes spec and status);
-- **reconcile** (`seon.cluster.agent/reconcile`);
+- **reconcile** (`seon.cluster.reconcile/reconcile`);
 - **needs** (un-retired; GitHub Actions);
 - **target** (git's target branch, as a task's environment member);
 - **environment**: a task's branch, target and config;
@@ -181,7 +181,7 @@ written together and linked".
   branch exists is read; a held task with no branch costs nothing;
 - the graph processes on main, and the store's branches.
 
-`seon.cluster.agent/reconcile` is `[:=> [:cat :seon.flow.actions/observed :seon.config.agent/max-running]
+`seon.cluster.reconcile/reconcile` is `[:=> [:cat :seon.flow.actions/observed :seon.config.agent/max-running]
 :seon.flow.actions/actions]`. It is pure: the plan is data and each action's actor executes it (Terraform's plan and
 apply). `apply-actions!` hands each action to its actor. No pass re-derives inside itself: an action's closing commit
 wakes the next pass through the route. The pass is the one `db<->flow` already runs, and Flow stays the runtime

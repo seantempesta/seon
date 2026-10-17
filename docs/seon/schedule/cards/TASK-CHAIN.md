@@ -12,7 +12,7 @@ revised: 2026-10-17
 (`:seon.task/needs`, a set), its environment (`:seon.task/branch`, `:seon.task/target`, `:seon.task/config`,
 `:seon.task/model`) and whether it should run (`:seon.task/execution`). Observed state is facts written by their
 observer when the event happens: a graph process, an attempt and its end, a judged done, a merge, a test result, a branch
-head. One reconciler, `seon.cluster.agent/reconcile`, a pure function of (desired, observed), answers the minimal actions;
+head. One reconciler, `seon.cluster.reconcile/reconcile`, a pure function of (desired, observed), answers the minimal actions;
 each action's actor writes the observed fact that closes its gap, and that commit wakes the next pass. There is no chain
 entity and no chain fact: discovery, order, branch, config and merge each live on a task. Every written task is `:held`
 and nothing autoruns; root's `my.root/run!` is the one release, and `:seon.config.agent/max-running` caps the open
@@ -180,7 +180,7 @@ check goes.
 
 ## 2. Flow
 
-**Target (task-model T3a/T3b).** Steps 1, 2, 5, 6, 7 and 8 below are one function of the facts, `seon.cluster.agent/reconcile`,
+**Target (task-model T3a/T3b).** Steps 1, 2, 5, 6, 7 and 8 below are one function of the facts, `seon.cluster.reconcile/reconcile`,
 over `seon.cluster.agent/observe`'s value (main's tasks and their needs, the attempt rows of each branch with a ready task
 or an open attempt, the graph processes, the store's branches); `apply-actions!` hands each action to its actor, and no
 pass re-derives inside itself. Each gap has an action, an actor and the fact that closes it. The full contract is the
@@ -839,7 +839,7 @@ lifecycle, runner and restart cuts until their red proofs and contracts exist; S
 | T0 | Words and cards: vocabulary, this card, MERGE-STEP, AGENTS.md | none (docs); `seon.bootstrap-test` help references and `seon.task-ingestion-test` stay green | Sonnet | done |
 | T1 | The writer: `seon.task/create-all!`, `from-filed` answering `[design prove implement merge]`, `:seon.task/target` and `:seon.task/config` in `seon.task.edn` | `seon.task-test/a-task-write-resolves-every-tasks-branch`; `seon.task-test/a-filed-task-becomes-four-linked-tasks-ending-in-a-merge-task` | Sonnet | — |
 | T2 | Graph process as a fact: `:seon.agent/graph-process` asserted by `start-flow!`, retracted by `stop-flow!`, boot retracts another process's | `seon.cluster.agent-test/a-started-graph-is-observed-until-it-exits` | Opus | — |
-| T3a | The pure reconciler `seon.cluster.agent/reconcile`, `:seon.flow.actions/observed`, `/actions`, `:seon.task/environment` (additive, not wired) | `seon.cluster.agent-test/reconcile-closes-each-gap-once` | Opus | — |
+| T3a | The pure reconciler `seon.cluster.reconcile/reconcile`, `:seon.flow.actions/observed`, `/actions`, `:seon.task/environment` (additive, not wired) | `seon.cluster.agent-test/reconcile-closes-each-gap-once` | Opus | — |
 | T3b | One path: `run-pass!` = observe, reconcile, apply; `chain!` to `create-all!`; every reader of `next` to `needs`; the build rule, the done step, held semantics and the `max-running` cap; the chain and per-assignment functions deleted (§6); after P4b and P7 | the eight `seon.cluster.db-flow-test` proofs of the plan's T3b row, among them `a-merge-task-with-no-conflict-is-done-at-start-with-no-model-call`, `a-held-task-starts-nothing-until-root-releases-it` and `the-scheduler-never-starts-more-than-max-running` | Opus | — |
 | T3c | Views, claims, schema, miner: the task-graph page, `cluster-claims` through `:seon.task/branch`, `seon.chain.edn` and `:seon.task/next` deleted, `seon.mine` reads the task model, no norm | `seon.cluster.registry-test/a-task-branch-survives-retirement`; `seon.mine-test/kept-branches-lists-a-held-tasks-branch-with-no-chain-fact` | Sonnet | — |
 | T4 | Environment restart: an agent starts only once its task's desired environment is complete; a difference stops the graph, closes the attempt and starts a fresh agent | `seon.cluster.db-flow-test/an-environment-change-on-a-running-task-restarts-its-agent-on-the-new-environment`; `seon.cluster.db-flow-test/a-task-with-an-incomplete-environment-starts-no-agent-and-reports-the-gap` | Opus | — |
