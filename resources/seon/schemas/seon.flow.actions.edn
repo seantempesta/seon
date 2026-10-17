@@ -29,8 +29,10 @@
  :registry [:map {:description "What db<->flow reads of the registry before it plans: the live graphs by agent."}
           [:seon.flow.actions/started :seon.flow.actions/started]
           [:seon.flow.actions/paused :seon.flow.actions/paused]]
- :op [:enum {:description "One effect db<->flow applies: write an attempt, start its flow, write a problem task, make a graph follow its intent; or, for an ended assignment (seon.cluster.agent/next-actions), squash-merge its branch, publish its merged declarations into the checkout, write its non-merged end on main, stop its graph, delete its branch."}
-      :attempt :start-flow :problem :pause :resume :stop :cancel :merge :publish :close :delete-branch]
+ :op [:enum {:description "One effect db<->flow applies: write an attempt, start its flow, write a problem task, make a graph follow its intent; or, for an ended assignment (seon.cluster.agent/next-actions), squash-merge its branch, publish its merged declarations into the checkout, write its non-merged end on main, stop its graph, delete its branch. The transition table's ops (seon.cluster.reconcile/transitions) follow: build or rebuild a task's branch, converge its config, its start step, a problem hold, judge, its done step, start or stop its graph, close an attempt cancelled or for a changed environment, bail to root, merge main forward, publish; and per branch, listen, release its route, end it."}
+      :attempt :start-flow :problem :pause :resume :stop :cancel :merge :publish :close :delete-branch
+      :build :rebuild :converge-config :start-step :problem-hold :judge :done-step :start-graph
+      :close-cancelled :close-environment :bail :merge-main :listen :release-route :end-branch]
  :class [:enum {:description "Which problem a :problem action records: a :running leaf that does not validate, or an ended assignment whose work is unfinished."} :invalid-task :unfinished-task]
  :action [:map {:description "One planned effect. :attempt carries the next attempt's number and fork point; :start-flow the intent its graph starts under and the fork point; a chain task's :attempt and :start-flow carry its chain branch instead, where both happen; a taskless agent's :stop and :delete-branch name no task."}
           [:seon.flow.actions/op :seon.flow.actions/op]
@@ -83,4 +85,126 @@
               [:seon.flow.actions/started? :seon.flow.actions/started?]
               [:seon.flow.actions/unmerged {:optional true} :seon.flow.actions/unmerged]]
  :held [:vector {:description "Every assignment whose branch the store holds, by key, then every taskless agent's, by id."}
-        [:or :seon.flow.actions/held-assignment :seon.flow.actions/held-agent]]}
+        [:or :seon.flow.actions/held-assignment :seon.flow.actions/held-agent]]
+ ;;; The transition table's state space (seon.cluster.reconcile): one task's desired and observed state as twelve
+ ;;; enums, each impossible combination a named schema, and the per-branch state as four booleans.
+ :execution [:and {:description "Whether the task should run, :seon.task/execution after the owner's fold of :paused and :stopped into :held."}
+             :seon.task/execution [:enum :held :running :cancelled]]
+ :needs [:enum {:description "Its needs: none, one not yet done where its attempts live, or every one done there."} :none :pending :done]
+ :target [:enum {:description "Whether its done step writes a target branch (:seon.task/target): none, or main."} :none :main]
+ :environment [:enum {:description "Whether its desired environment (branch, target, config, model) is complete enough to start an agent."} :complete :incomplete]
+ :branch [:enum {:description "Its branch: absent, current (its recorded base is its target's head) or stale (it is not)."} :absent :current :stale]
+ :config [:enum {:description "Its branch's config row against its decided config: none, converged or differing."} :none :converged :differs]
+ :attempt [:or {:description "Its latest attempt on its branch: none, unended, or its :seon.task.attempt/end."} [:enum :none :unended] :seon.task.attempt/end]
+ :outcome [:or {:description "Its latest attempt's :seon.task/outcome, or none."} [:enum :none] :seon.task/outcome]
+ :step [:enum {:description "The latest done-refusals judgment at its branch head: none, unjudged, empty, or work left."} :none :unjudged :empty :work-left]
+ :agent-env [:enum {:description "Its agent's observed environment against its desired one: no agent, the same, or differing."} :none :same :differs]
+ :graph [:enum {:description "Whether a graph process runs its agent (:seon.agent/graph-process)."} :absent :running]
+ :publication [:enum {:description "After :merged, whether its publication into the checkout is due or done (:seon.task/git-commit or :seon.task/publication-refusal); none before."} :none :due :done]
+ :config-without-branch [:not {:description "The branch holds the config row."}
+                         [:map [:seon.flow.actions/branch [:enum :absent]] [:seon.flow.actions/config [:enum :converged :differs]]]]
+ :branch-without-config [:not {:description "A built branch has a decided config."}
+                         [:map [:seon.flow.actions/branch [:enum :current :stale]] [:seon.flow.actions/config [:enum :none]]]]
+ :stale-without-target [:not {:description "Stale is measured against the target's head."}
+                        [:map [:seon.flow.actions/target [:enum :none]] [:seon.flow.actions/branch [:enum :stale]]]]
+ :attempt-without-branch [:not {:description "Attempt rows live on the task's branch."}
+                          [:map [:seon.flow.actions/branch [:enum :absent]] [:seon.flow.actions/attempt [:enum :unended :done :given-back :capped :stalled :sent-back :cancelled :error]]]]
+ :outcome-without-attempt [:not {:description "An outcome is written on an attempt."}
+                           [:map [:seon.flow.actions/attempt [:enum :none]] [:seon.flow.actions/outcome [:enum :done :merged :closed]]]]
+ :step-without-attempt [:not {:description "The start step writes the attempt row first."}
+                        [:map [:seon.flow.actions/attempt [:enum :none]] [:seon.flow.actions/step [:enum :unjudged :empty :work-left]]]]
+ :attempt-without-step [:not {:description "An attempt row carries its step's state, unjudged until judged."}
+                        [:map [:seon.flow.actions/attempt [:enum :unended :done :given-back :capped :stalled :sent-back :cancelled :error]] [:seon.flow.actions/step [:enum :none]]]]
+ :merged-without-target [:not {:description "Only a done step against a target writes :merged."}
+                         [:map [:seon.flow.actions/target [:enum :none]] [:seon.flow.actions/outcome [:enum :merged]]]]
+ :done-with-target [:not {:description "A done step against a target writes :merged, never :done."}
+                    [:map [:seon.flow.actions/target [:enum :main]] [:seon.flow.actions/outcome [:enum :done]]]]
+ :settled-not-green [:not {:description "The done step runs only on an empty judgment."}
+                     [:map [:seon.flow.actions/outcome [:enum :done :merged]] [:seon.flow.actions/step [:enum :unjudged :work-left]]]]
+ :agent-without-attempt [:not {:description "An agent row exists only for an attempt."}
+                         [:map [:seon.flow.actions/attempt [:enum :none]] [:seon.flow.actions/agent-env [:enum :same :differs]]]]
+ :attempt-without-agent [:not {:description "The start step acquires the attempt's context, which records its environment."}
+                         [:map [:seon.flow.actions/attempt [:enum :unended :done :given-back :capped :stalled :sent-back :cancelled :error]] [:seon.flow.actions/agent-env [:enum :none]]]]
+ :graph-without-agent [:not {:description "The context, and its observed environment, is acquired before the graph starts."}
+                       [:map [:seon.flow.actions/agent-env [:enum :none]] [:seon.flow.actions/graph [:enum :running]]]]
+ :graph-after-outcome [:not {:description "Invariant: every outcome writer requires the graph absent; the closure check proves the transition table keeps it."}
+                       [:map [:seon.flow.actions/outcome [:enum :done :merged :closed]] [:seon.flow.actions/graph [:enum :running]]]]
+ :incomplete-but-same [:not {:description "An agent starts only on a complete environment, so the same environment means complete."}
+                       [:map [:seon.flow.actions/environment [:enum :incomplete]] [:seon.flow.actions/agent-env [:enum :same]]]]
+ :publication-without-merge [:not {:description "Publication follows a merge."}
+                             [:map [:seon.flow.actions/outcome [:enum :none :done :closed]] [:seon.flow.actions/publication [:enum :due :done]]]]
+ :merge-without-publication-state [:not {:description "A merge is either due for publication or published."}
+                                   [:map [:seon.flow.actions/outcome [:enum :merged]] [:seon.flow.actions/publication [:enum :none]]]]
+ :task-state [:and {:description "One task's desired and observed state, as observe reads it from main and the task's branch: the twelve dimensions, then each impossible combination by name, so a refusal names the constraint it breaks."}
+              [:map :seon.flow.actions/execution :seon.flow.actions/needs :seon.flow.actions/target
+               :seon.flow.actions/environment :seon.flow.actions/branch :seon.flow.actions/config
+               :seon.flow.actions/attempt :seon.flow.actions/outcome :seon.flow.actions/step
+               :seon.flow.actions/agent-env :seon.flow.actions/graph :seon.flow.actions/publication]
+              :seon.flow.actions/config-without-branch :seon.flow.actions/branch-without-config
+              :seon.flow.actions/stale-without-target :seon.flow.actions/attempt-without-branch
+              :seon.flow.actions/outcome-without-attempt :seon.flow.actions/step-without-attempt
+              :seon.flow.actions/attempt-without-step :seon.flow.actions/merged-without-target
+              :seon.flow.actions/done-with-target :seon.flow.actions/settled-not-green
+              :seon.flow.actions/agent-without-attempt :seon.flow.actions/attempt-without-agent
+              :seon.flow.actions/graph-without-agent :seon.flow.actions/graph-after-outcome
+              :seon.flow.actions/incomplete-but-same :seon.flow.actions/publication-without-merge
+              :seon.flow.actions/merge-without-publication-state]
+ :latest [:enum {:description "Derived, never stored: the latest attempt's phase, from attempt and outcome (awaiting is ended with no outcome, settled is :done or :merged)."} :none :open :awaiting :closed :settled]
+ :wanted? [:boolean {:description "Derived, never stored: execution :running and no need pending."}]
+ :matched-state [:map {:description "A task state with its derived values, the value transition rows match."}
+                 :seon.flow.actions/latest :seon.flow.actions/wanted?]
+ :created-t [:int {:min 0 :description "The transaction of the task's identity datom: the oldest starts first."}]
+ :task [:map {:description "One task as reconcile reads it: its state, its branch, its age, and the agent of its latest attempt when one exists."}
+        [:seon.flow.actions/task-state :seon.flow.actions/task-state]
+        [:seon.task/branch :seon.task/branch]
+        [:seon.flow.actions/created-t :seon.flow.actions/created-t]
+        [:seon.agent/id {:optional true} :seon.agent/id]]
+ :active? [:boolean {:description "A task on the branch is wanted, or has an open attempt there."}]
+ :route? [:boolean {:description "db<->flow holds a wake route (a listener) on the branch."}]
+ :finished? [:boolean {:description "Every task on the branch is settled, or closed and not wanted."}]
+ :ended? [:boolean {:description "The branch's end was written (seon.task/end-branch!): graphs joined, routes released, the branch kept by default."}]
+ :ended-unfinished [:not {:description "A branch ends only once its work is finished."}
+                    [:map [:seon.flow.actions/finished? [:= false]] [:seon.flow.actions/ended? [:= true]]]]
+ :active-finished [:not {:description "Finished means no task on the branch is wanted or open, so a finished branch is not active."}
+                   [:map [:seon.flow.actions/active? [:= true]] [:seon.flow.actions/finished? [:= true]]]]
+ :branch-state [:and {:description "One branch's state for the branch table: four booleans and the combinations that cannot occur, by name."}
+                [:map :seon.flow.actions/active? :seon.flow.actions/route? :seon.flow.actions/finished? :seon.flow.actions/ended?]
+                :seon.flow.actions/ended-unfinished :seon.flow.actions/active-finished]
+ :observed [:map {:description "What reconcile reads: every task on main by handle, and every branch a task names."}
+            [:seon.flow.actions/tasks [:map-of :seon.task/handle :seon.flow.actions/task]]
+            [:seon.flow.actions/branch-states [:map-of :seon.task/branch :seon.flow.actions/branch-state]]]
+ :when [:map-of {:description "A transition row's condition: per dimension, or derived value, the value or the set of values it admits."}
+        :qualified-keyword [:or :keyword :boolean [:set [:or :keyword :boolean]]]]
+ :then [:vector {:description "A transition row's actions, in order; empty for a steady row."} :seon.flow.actions/op]
+ :row [:string {:min 1 :description "A transition row's name, e.g. G1 or N6."}]
+ :steady [:string {:min 1 :description "A steady row's name for the state it holds."}]
+ :start? [:boolean {:description "The row is in the start group, which admit caps by max-running, oldest first and one per branch."}]
+ :transition [:map {:description "One row of a transition table: its name, its condition and its actions, or its steady name."}
+              :seon.flow.actions/row :seon.flow.actions/when :seon.flow.actions/then
+              [:seon.flow.actions/steady {:optional true} :seon.flow.actions/steady]
+              [:seon.flow.actions/start? {:optional true} :seon.flow.actions/start?]]
+ :task-action [:map :seon.flow.actions/op :seon.task/handle :seon.task/branch]
+ :task-only-action [:map :seon.flow.actions/op :seon.task/handle]
+ :agent-action [:map :seon.flow.actions/op :seon.task/handle :seon.task/branch :seon.agent/id]
+ :branch-action [:map :seon.flow.actions/op :seon.task/branch]
+ :reconcile-action [:multi {:dispatch :seon.flow.actions/op
+                            :description "One action reconcile answers, with the members its actor needs; an op outside the transition table is an invalid dispatch value, never run."}
+                    [:build :seon.flow.actions/task-action]
+                    [:rebuild :seon.flow.actions/task-action]
+                    [:converge-config :seon.flow.actions/task-action]
+                    [:start-step :seon.flow.actions/task-action]
+                    [:judge :seon.flow.actions/task-action]
+                    [:done-step :seon.flow.actions/task-action]
+                    [:merge-main :seon.flow.actions/task-action]
+                    [:problem-hold :seon.flow.actions/task-only-action]
+                    [:close-cancelled :seon.flow.actions/task-only-action]
+                    [:close-environment :seon.flow.actions/task-only-action]
+                    [:bail :seon.flow.actions/task-only-action]
+                    [:publish :seon.flow.actions/task-only-action]
+                    [:start-graph :seon.flow.actions/agent-action]
+                    [:stop :seon.flow.actions/agent-action]
+                    [:listen :seon.flow.actions/branch-action]
+                    [:release-route :seon.flow.actions/branch-action]
+                    [:end-branch :seon.flow.actions/branch-action]]
+ :reconcile-actions [:vector {:description "The minimal actions reconcile answers for one observed value: every task's row's actions, the start group admitted, then each branch's."}
+                     :seon.flow.actions/reconcile-action]}

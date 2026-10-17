@@ -339,18 +339,21 @@
 
   Malli's explanation dereferences a named schema before it reports the
   problem, so the problem's own `:schema` is the definition (a `[:fn ...]`
-  predicate), never the name the contract was written with.
-  `malli.util/get-in` (`reference-code/malli/src/malli/util.cljc:342`) walks
-  the same child keys `m/explain` reports as `:path`, and a named child's form
-  is its registry keyword."
+  predicate), never the name the contract was written with. The walk takes
+  the child keys `m/explain` reports as `:path` with `malli.util/get`, and
+  steps through a named reference whose explanation added no key of its
+  own; a named child's form is its registry keyword."
   {:malli/schema [:=> [:cat :seon.instrument/compiled-schema
                        [:vector :seon.schema/value]]
                   [:or :nil :qualified-keyword]]}
   [offended schema-path]
-  (some (fn [depth]
-          (let [form (some-> (mu/get-in offended (subvec schema-path 0 depth)) m/form)]
-            (when (qualified-keyword? form) form)))
-        (range (count schema-path) -1 -1)))
+  (let [step (fn [schema k]
+               (or (mu/get schema k)
+                   (when (#{::m/schema :ref} (m/type schema)) (mu/get (m/deref schema) k))))]
+    (->> (reductions (fn [schema k] (some-> schema (step k))) offended schema-path)
+         (take-while some?)
+         (keep (fn [schema] (let [form (m/form schema)] (when (qualified-keyword? form) form))))
+         last)))
 
 (defn- attributed-problem
   "Name the expectation by the contract's own schema name and give the fix
