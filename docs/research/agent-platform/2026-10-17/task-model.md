@@ -663,3 +663,23 @@ Parallel lanes, by file collisions:
 - **Tests that never went green.** `seon.cluster.merge-test/a-requested-green-end-merges-and-publishes-with-no-hand-act`
   and `a-done-branch-merges-with-no-merge-request-written-by-the-agent` were never green. T3b retires them with the
   per-assignment path (§9) and does not repair them.
+
+## Owner decisions (2026-10-17)
+
+These answer §12, and they bind the narrow check and every T phase.
+
+1. **`:seon.task/needs` replaces `:seon.task/next`.** It is a set of prerequisites, so a merge task needs both the coding task and the design task. The owner: "we can do more than one dependency (refs are sets right?) Yeah that does seem better."
+2. **Nothing autoruns until the owner flips it on.** Filed and ingested tasks are `:held`. In the owner's words: "I want to keep testing agents until they can solve real problems before we just flip the system on."
+   - The scheduler reads concurrency from config. `:seon.config.agent/max-running` is the cap, and the reconciler never starts more than that many tasks at once.
+   - The configuration is cluster facts, sized for a 16 GB machine, and the scheduler is built on them.
+3. **The environment swap is a clean restart, not an in-place advance.** The owner said a clean restart is more reliable even if it loses data. When the environment differs, stop the agent's graph and start a fresh one.
+   - An agent is never started until its configuration, and every other fact it needs, is written on its task. Start is a reconciler action whose precondition is a complete desired environment; an incomplete one is a gap the reconciler reports, not a start.
+   - T4 is rewritten this way, and the cross-branch in-place advance it depended on is dropped.
+4. **No norm for the old chains.** Default may reset. The four kept chain branches are not converted; the miner (`seon.mine`) is updated to read the new task model and re-mines what exists. Delete the T3c norm.
+5. **Root takes §12's recommendations** on the rest, unless the owner objects:
+   - tasks live on main before their work merges;
+   - the name `:seon.task/target`;
+   - abandon cancels dependents;
+   - approval waits until the owner wants it;
+   - a plan flows along `needs`;
+   - `my.root/run!` only resumes a held task.
