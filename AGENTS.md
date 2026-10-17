@@ -114,13 +114,30 @@ root.
   and new names for changed semantics.
 - **Make failure local and loud.** Each part fails without corrupting its neighbours or blinding diagnosis. Health is
   a positive observation: silence, a missing subject or a stale observation reads as unknown.
-- **NO GUARDS OR FENCES.** A guard or fence is always the wrong solution, with no exceptions. That covers a check,
-  lock, refusal class, retry, verdict tier, exemption, filter or recovery path added beside a mechanism to catch it
-  doing the wrong thing. The system itself handles everything correctly. When a failure is possible, find the design
-  that makes it impossible, at its owner, and change that: hold a basis instead of a value, one evaluator instead of
-  two compared, a compare-and-swap that git or the writer already provides instead of a lock. Never build protection
-  against a failure that has not been observed; when one is observed, fix its root cause, add its regression and
-  delete any fence standing in for it. A fence found in the code is a defect: file a task naming its root cause.
+- **NO GUARDS OR FENCES. Agents never add one.** A guard or fence is a check, catch, lock, refusal class, retry,
+  verdict tier, exemption, filter, fallback or recovery path placed beside a mechanism to catch it doing the wrong
+  thing, or any re-check of what a contract already guarantees. It is always the wrong solution, with no exceptions,
+  because the system is designed so none is needed:
+  - **Contracts check every boundary.** Every function's inputs are validated on entry and its output on exit by its
+    instrumented contract. A function never receives or returns a malformed value, so no caller re-checks a shape
+    (`(when (map? x))`, `(if (seq ...))` on a declared non-empty value, a defensive `try`) and no body re-validates
+    its own arguments.
+  - **What can throw is caught at an edge.** Exceptions are caught only by the three catches "Nothing crashes" allows:
+    - the entrant boundary;
+    - a returning tool's one top catch of its own declared variants;
+    - a deliberate translation that names its own type.
+
+    The error is delivered as data in the reply of the agent whose work raised it. Nothing else catches.
+  - **What can fail is handled explicitly where it is called.** A function that can fail declares its error variants
+    in its contract and returns them as data. Every caller handles those declared variants as an ordinary branch on
+    data, because the contract names them. No call site is unaware of what its callee can return.
+
+  Inside, we know what we are doing: no code runs "just in case". When a failure is possible, find the design that
+  makes it impossible, at its owner, and change that: hold a basis instead of a value, one evaluator instead of two
+  compared, a compare-and-swap that git or the writer already provides instead of a lock. Never build protection
+  against a failure that has not been observed. When one is observed, fix its root cause, add its regression, and
+  delete any fence standing in for it in the same commit. A fence found in the code is a defect: delete it with its
+  cause's fix, or file a task naming the root cause.
 
 ## Choosing the design
 
