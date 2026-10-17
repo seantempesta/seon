@@ -1,0 +1,57 @@
+{:seon.cost.growth/calls [:int {:min 0 :description "Armed calls one or several counted calls made (seon.profile/measure)."}]
+ :seon.cost.growth/reads [:int {:min 0 :description "The calls among :seon.cost.growth/calls to a seon.db read entrance (seon.profile/read-entrances)."}]
+ :seon.cost.growth/alloc-bytes [:int {:min 0 :description "Bytes the calling platform thread allocated over the counted calls (HotSpot's per-thread counter)."}]
+ :seon.cost.growth/n [:int {:min 1 :description "Elements of the counted values (seon.cost.growth/elements): the N a default cost contract bounds."}]
+ :seon.cost.growth/measure
+ [:map {:description "Counted cost of one call, or the sum over several. Producer: seon.cost.growth/counted."}
+  [:seon.cost.growth/calls :seon.cost.growth/calls]
+  [:seon.cost.growth/reads :seon.cost.growth/reads]
+  [:seon.cost.growth/alloc-bytes :seon.cost.growth/alloc-bytes]
+  [:seon.cost.growth/n :seon.cost.growth/n]]
+ :seon.cost.growth/measures [:vector :seon.cost.growth/measure]
+ :seon.cost.growth/class [:enum {:description "What a measure grows with, by the exponent of its ratio over the size ratio (seon.cost.growth/growth-class)."} :constant :sublinear :linear :superlinear :quadratic]
+ :seon.cost.growth/exponent [:double {:description "ln(measure ratio) / ln(size ratio): 0 flat, 1 proportional, 2 quadratic."}]
+ :seon.cost.growth/small number?
+ :seon.cost.growth/large number?
+ :seon.cost.growth/per-unit [:double {:description "Added measure per added unit of size: the constant k of k × N + c at the measured N."}]
+ :seon.cost.growth/size-ratio [:double {:min 1.0 :description "The larger size over the smaller."}]
+ :seon.cost.growth/growth
+ [:map {:description "One measure's growth along one dimension."}
+  [:seon.cost.growth/small :seon.cost.growth/small]
+  [:seon.cost.growth/large :seon.cost.growth/large]
+  [:seon.cost.growth/exponent :seon.cost.growth/exponent]
+  [:seon.cost.growth/class :seon.cost.growth/class]
+  [:seon.cost.growth/per-unit :seon.cost.growth/per-unit]]
+ :seon.cost.growth/dimension
+ [:map {:description "Every measure's growth along one dimension of size. Producer: seon.cost.growth/dimension."}
+  [:seon.cost.growth/size-ratio :seon.cost.growth/size-ratio]
+  [:seon.cost.growth/calls :seon.cost.growth/growth]
+  [:seon.cost.growth/reads :seon.cost.growth/growth]
+  [:seon.cost.growth/alloc-bytes :seon.cost.growth/growth]]
+ :seon.cost.growth/attributes [:set {:description "Attributes a call's reads depend on."} :qualified-keyword]
+ :seon.cost.growth/widened [:int {:min 0 :description "Reads whose dependency plan widened to every attribute."}]
+ :seon.cost.growth/read-attributes
+ [:map {:description "What a call's database reads depend on. Producer: seon.cost.growth/touched-attributes."}
+  [:seon.cost.growth/attributes :seon.cost.growth/attributes]
+  [:seon.cost.growth/widened :seon.cost.growth/widened]]
+ :seon.cost.growth/touched-datoms [:int {:min 0 :description "Datoms on the touched attributes of the unpadded value."}]
+ :seon.cost.growth/total-datoms [:int {:min 0 :description "Datoms in the unpadded value's EAVT index."}]
+ :seon.cost.growth/database :seon.db/database-value
+ :seon.cost.growth/padded
+ [:map {:description "A value padded on touched attributes and how many touched datoms each copy adds. Producer: seon.cost.growth/pad-touched."}
+  [:seon.cost.growth/database :seon.cost.growth/database]
+  [:seon.cost.growth/touched-datoms :seon.cost.growth/touched-datoms]]
+ :seon.cost.growth/untouched :seon.cost.growth/dimension
+ :seon.cost.growth/touched :seon.cost.growth/dimension
+ :seon.cost.growth/input :seon.cost.growth/dimension
+ :seon.cost.growth/profile
+ [:map {:description "A function's growth profile per dimension of size (untouched datoms, touched datoms, generated input) with the counted measures. Producers: seon.cost.growth/database-growth, seon.cost.growth/input-growth."}
+  [:seon.cost.growth/attributes {:optional true} :seon.cost.growth/attributes]
+  [:seon.cost.growth/widened {:optional true} :seon.cost.growth/widened]
+  [:seon.cost.growth/total-datoms {:optional true} :seon.cost.growth/total-datoms]
+  [:seon.cost.growth/touched-datoms {:optional true} :seon.cost.growth/touched-datoms]
+  [:seon.cost.growth/untouched {:optional true} :seon.cost.growth/untouched]
+  [:seon.cost.growth/touched {:optional true} :seon.cost.growth/touched]
+  [:seon.cost.growth/input {:optional true} :seon.cost.growth/input]
+  [:seon.cost.growth/measures :seon.cost.growth/measures]]
+ :seon.cost.growth/generatable [:enum {:description "How a contract's inputs can be generated (seon.cost.growth/generatable)."} :generated :database :connection :none :no-arguments :invalid]}
