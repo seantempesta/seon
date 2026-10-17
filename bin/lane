@@ -600,10 +600,17 @@ commit() {
     echo "== no gate input among the paths (seon.test.cache/gate-input?); bin/seon check not run"
   else
     [[ ${#tests[@]} -gt 0 ]] || refuse "the throwaway check names no test: pass each reaching test as --test NS/VAR (a check that runs no test proves nothing); nothing committed"
-    # the error law's ratchet judges every changed src function, so a commit of src code always runs it
-    local census="seon.guard-census-test/a-changed-function-holds-no-guard" path
+    # the error law's ratchet judges every changed src function, and the cost ratchet holds every ordinary
+    # operation within its estimate or its open task's recorded overrun, so a commit of src code always runs both
+    local ratchets=("seon.guard-census-test/a-changed-function-holds-no-guard"
+                    "seon.cost-estimate-test/no-ordinary-operation-grows-past-its-accepted-overrun") ratchet path
     for path in "${paths[@]}"; do
-      if [[ "$path" == src/*.clj && " ${tests[*]} " != *" $census "* ]]; then tests+=("--test" "$census"); break; fi
+      if [[ "$path" == src/*.clj ]]; then
+        for ratchet in "${ratchets[@]}"; do
+          [[ " ${tests[*]} " == *" $ratchet "* ]] || tests+=("--test" "$ratchet")
+        done
+        break
+      fi
     done
     local check_args=("${paths[@]}")
     if [[ -n "$at_candidate" ]]; then
