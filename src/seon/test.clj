@@ -32,7 +32,7 @@
             [seon.task :as task]
             [seon.render.value :as render.value]
             [seon.test.runner :as runner])
-  (:import [java.util.concurrent FutureTask]))
+  (:import [java.util.concurrent CompletableFuture FutureTask]))
 
 
 (defn- unknown
@@ -2425,10 +2425,13 @@
   to exit. Every cleanup is attempted even when setup or another cleanup
   fails, and each failure's cause chain reaches the member's recorded result.
   A body still live at the bound keeps its branch; once the watcher observes
-  its exit and releases the branch, `exited!` gets any cleanup failure."
+  its exit and releases the branch, `exited!` gets any cleanup failure. The
+  answer's `:seon.test/exit` completes once the member is released: the request's
+  world outlives it."
   {:malli/schema [:=> [:cat :seon.agent/execution-handle :map :seon.test/sym [:int {:min 1}]
                        [:=> [:cat [:maybe :seon.error/throwable]] :nil] :boolean :seon.config.test.cost/top]
                   [:map [:seon.test/result :seon.test.runner/captured-result]
+                   [:seon.test/exit :seon.flow/future]
                    [:seon.test/timings
                     [:map [:seon.agent/branch :seon.agent/branch]
                      [:seon.test.timing/acquire-ms :seon.test.timing/acquire-ms]
@@ -2445,6 +2448,7 @@
         acquired (elapsed started)
         release-ms (volatile! 0.0)
         cleanup-failure (volatile! nil)
+        exit (CompletableFuture.)
         with-cleanup-failure
         (fn [result]
           (if-let [failure @cleanup-failure]
@@ -2462,6 +2466,7 @@
                      (try (@release-context! child)
                           (catch Throwable failure (vreset! cleanup-failure failure)))
                      (vreset! release-ms (elapsed started)))
+                   (.complete exit nil)
                    nil)
         handed? (volatile! false)
         timing (fn [resolved executed]
@@ -2529,7 +2534,8 @@
                              (not (:seon.test.run/terminated? result))
                              (assoc :seon.agent/branch (:seon.agent/branch child))
                              @evaluator (assoc :seon.test.member/evaluator @evaluator))
-         :seon.test/timings (timing @resolved executed)})
+         :seon.test/timings (timing @resolved executed)
+         :seon.test/exit exit})
       (catch Throwable failure
         (when-not @handed? (release! false))
         (when-let [cleanup @cleanup-failure] (.addSuppressed failure cleanup))
@@ -3044,6 +3050,8 @@
                 ;; differing program entities, never from its operational data. It is
                 ;; built by the first admitted batch: a refused admission builds none.
                 held-handle (volatile! nil)
+                ;; Each started member's release: the request's world is theirs until the last one.
+                member-exits (volatile! [])
                 request-handle! #(or @held-handle
                                      (vreset! held-handle
                                               (cond-> (assoc (clean-request-handle execution recording cluster effective)
@@ -3098,12 +3106,13 @@
                               left (remaining-ms)]
                         (if-not (pos? left)
                           (assoc outcome ::stopped (vec remaining) ::stop-cause :deadline)
-                          (let [{result :seon.test/result timings :seon.test/timings}
+                          (let [{result :seon.test/result timings :seon.test/timings exit :seon.test/exit}
                                 (member-result handle since test-symbol left
                                                #(record-exit! test-symbol %)
                                (contains? effect-reach test-symbol)
                                (or (:seon.config.test.cost/top effective)
                                    (:seon.config.test.cost/top config/defaults)))]
+                          (vswap! member-exits conj exit)
                           ;; An unknown loaded program started nothing: this
                           ;; member and the rest keep no outcome, so read unknown.
                           (if-let [cause (:seon.test.run/stopped result)]
@@ -3185,8 +3194,16 @@
                     (when-let [request-handle @held-handle]
                       ;; The request's branches live in its overlay: releasing
                       ;; the handle, then the overlay, leaves nothing to collect.
-                      (try (@release-context! request-handle)
-                           (finally (store/release-store! (:seon.store/store request-handle)))))))
+                      ;; A member still live at its bound runs in that world: it
+                      ;; is released at that member's actual exit, never under it.
+                      (let [release-world! #(try (@release-context! request-handle)
+                                                 (finally (store/release-store! (:seon.store/store request-handle))))
+                            live (into-array CompletableFuture (remove #(.isDone ^CompletableFuture %) @member-exits))]
+                        (if (zero? (alength live))
+                          (release-world!)
+                          (.thenRun (CompletableFuture/allOf live)
+                                    #(try (release-world!)
+                                          (catch Throwable failure (core-fault! `release-context! failure)))))))))
                 held-elsewhere (::held outcome)
                 reused (into (vec (:seon.test.selection/unchanged selection))
                              (map (fn [[test-symbol {run-id :seon.test.run/id pass :seon.test/pass-count

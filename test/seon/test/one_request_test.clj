@@ -3,6 +3,7 @@
   member's branch through the agent entrance and unlinks it after the body."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [datahike.connections :as connections]
             [seon.cluster.registry :as registry]
             [seon.config :as config]
             [seon.db :as db]
@@ -171,6 +172,44 @@
         (is (true? (support/await-event! (future (deref released)) ::released))
             "the watcher released after observing exit")
         (finally (.countDown gate) (remove-ns (ns-name owned))))))
+
+(def ^:dynamic ^:private *member-gate*
+  "The latch a gated member's body awaits, bound only by the request that gates it."
+  nil)
+
+(deftest a-gated-member-passes
+  ;; Run alone it passes at once; a request that binds `*member-gate*` keeps it live past its bound.
+  (is (or (nil? *member-gate*)
+          (.await ^java.util.concurrent.CountDownLatch *member-gate* 30 java.util.concurrent.TimeUnit/SECONDS))))
+
+(deftest ^{:seon.test/long "One request on a fixture branch whose one member stays live past the request's 8 s bound, then its exit and the world's release; the request's admission and recording dominate."
+           :seon.test/long-ms 45000}
+  a-member-outliving-its-bound-keeps-its-world-until-it-exits
+  ;; The request released its world (its handle, then its overlay, every
+  ;; connection in it) at its answer, under a member still live at the bound;
+  ;; that member's later release retired its branch through the released overlay:
+  ;; "Connection has been released." (`seon.cluster.registry/retire-branch!`,
+  ;; :agent-ac0f49e47760, 2026-10-17). A timeout is not termination.
+  (support/with-database
+   (fn [connection]
+     (let [gate (java.util.concurrent.CountDownLatch. 1)
+           member 'seon.test.one-request-test/a-gated-member-passes
+           result (binding [*member-gate* gate]
+                    (sut/run {:seon.test/execution (support/execution-handle connection)
+                              :seon.test/recording-connection connection
+                              :seon.test/policy :named
+                              :seon.test/check-time-limit-ms 8000
+                              :seon.test/identities #{member}}))
+           branch (:seon.agent/branch (first (:seon.test/unfinished result)))
+           held? (fn [connections] (some (fn [[conn-id {n :count}]] (and (= branch (second conn-id)) (pos? (or n 0))))
+                                         connections))]
+       (try
+         (is (= [member] (map :seon.test/sym (:seon.test/unfinished result))) "the member is live at the request's bound")
+         (is (held? @connections/*connections*) "its branch connection outlives the request's answer while its body runs")
+         (.countDown gate)
+         (is (some? (support/await-event! connections/*connections* ::world-released (complement held?)))
+             "its exit releases its branch and then the request's world")
+         (finally (.countDown gate)))))))
 
 (deftest ^{:seon.test/long "An admission, two recordings and two requests on one fixture branch: 37.7 s measured at 0e53eb8b1 on a scratch cluster, dominated by the routed per-request acquisition and per-connection projection costs."
            :seon.test/long-ms 45000}
