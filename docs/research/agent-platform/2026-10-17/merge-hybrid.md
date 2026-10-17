@@ -7,7 +7,7 @@ status: "owning plan for the merge and testing redesign, written 2026-10-17 by F
 # Merge hybrid (2026-10-17)
 
 **Phase status** (each implementing commit updates this line):
-P0 done (53fc1da51) · P1 done (5f5eb1855) · P2 pending · P3 pending · P4a pending · P4b pending · P5 pending · P6 pending · P7 pending ·
+P0 done (53fc1da51) · P1 done (5f5eb1855) · P2 stopped (the row contradicts the code, §8.3; root rules) · P3 pending · P4a pending · P4b pending · P5 pending · P6 pending · P7 pending ·
 P8 pending · P9a pending · P9b pending · P10 pending · P11a pending · P11b pending · P11c pending · P11d pending ·
 P12 pending (after `seon.cluster.agent/agent-creation-writes-no-program-namespace`)
 
@@ -412,7 +412,7 @@ the named tests (two runs, 61 s and about 25 s). Scripts are in `tmp/merge-check
 |---|---|---|
 | P0 | the two salvaged deftests | `same-evaluator-red.patch` exists; the two task files exist and hold neither task; red by design |
 | P1 | flipped rows of `seon.cluster.source-test/done-refusals-judges-every-task-alike` and `results-verdict-judges-a-never-started-member-as-evidence` | tests exist (`source_test.clj:444, 650`) and are green as written (check run), so the flipped rows are red once written |
-| P2 | `seon.cluster.db-flow-test/roots-done-judgment-derives-nothing-the-step-did-not` | new; red for the right reason by reading (`done-judged` calls `merge-base` and `own-changed-identities`, verified) |
+| P2 | `seon.cluster.db-flow-test/roots-done-judgment-derives-nothing-the-step-did-not` | new; red on HEAD 8412428aa plus the test (lane merge-p2, `bin/seon check`): root's done pass (`seon.cluster.agent/advance-chains!` over a two-task chain whose first task ends done at its start) calls `seon.program/own-changed-identities` once and `seon.cluster.source/merge-base` once, 15.4 ms, 2.25 MB thread allocation, and calls `seon.program/fold-changes` **zero** times: the step's delta is already reused, by content revision, inside `own-changed-identities` (its `seon.cache` kind). The row cannot turn it green: `judged-input` reaches Δ through `seon.context/change`, which calls `own-changed-identities`, so the extracted builder makes the same one call and the same one merge base. Root chooses: (a) the proof asserts no `seon.program/fold-changes` (green on HEAD, so P2 is a deletion with no cost claim, proven by the reaching done and merge tests), or (b) a Δ the step records for root to read (a new stored fact; not in the rulings) |
 | P3 | assertion in `an-uncovered-refusal-names-the-red-tests-reaching-it` | exists (`source_test.clj:625`, green); `uncovered-functions` calls `gate-sets` per function (read; 3–20 ms each); the equality premise reproduced |
 | P4a | two rewrites and one new test | `a-merge-carries-only-what-its-tests-reach` (`merge_test.clj:664`) and `a-prepared-merge-carries-its-merge-list-...` (`:779`) exist and are green (check run), so the rewrites are red; the new test is specified; the fence's own test is green |
 | P4b | `a-merge-writes-one-transaction-on-main` | new; red: the attribute is recorded by a second transaction (`merge-onto`'s `answer`) |

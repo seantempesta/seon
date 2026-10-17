@@ -2592,8 +2592,8 @@
                   ;; this world's cluster names no checkout that holds the repaired proof's file, so the merge refuses at
                   ;; the write-back root (`seon.cluster.source/root-refusal`), after the done rule passed on the merge
                   ;; branch: the merge itself is shown with a checkout in `seon.cluster.merge-test`
-                  (is (str/starts-with? (str (:seon.task/reason (db/pull (db/db on-branch) [:seon.task/reason] [:seon.task/assignment step-key])))
-                                        "The final merge refused it, :seon.source/write-back-error")
+                  (is (= :seon.source/write-back-error
+                         (:seon.task/refusal (db/pull (db/db on-branch) [:seon.task/refusal] [:seon.task/assignment step-key])))
                       "root's pass judges the step done on its merge branch and merges that attempt")))
               (finally
                 (doseq [kept (remove before (merge-branches store))]
