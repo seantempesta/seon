@@ -440,7 +440,7 @@
                           :seon.cluster.eval/at now}))
                 ;; the definition's facts are the fold's (`seon.turn.batch`),
                 ;; the receipt only its terminal facts
-                (support/transacted! connection (#'turn.batch/entity-facts @connection entity))
+                (support/transacted! connection (#'turn.batch/entity-facts @connection [entity]))
                 (support/transacted!
                         connection
                         (turn/receipt-settle-tx
@@ -720,7 +720,7 @@
             result (db/transact!
                     connection
                     ;; the definition's facts, as the fold writes them
-                    (#'turn.batch/entity-facts @connection entity))
+                    (#'turn.batch/entity-facts @connection [entity]))
             report (seon.fn/unresolved-callers @connection)]
         (is (some? (:db-after result)))
         (is (not-any? #(= 'missing.target/nope (:seon.fn/callee %))
