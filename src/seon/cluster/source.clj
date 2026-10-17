@@ -1441,7 +1441,8 @@
   "Every refusal the done rule gives a task over the recorded results in `judged`, the same for every task: each
   of its `:seon.task/proofs` and other `:seon.source/members` (the next task's proofs aside) without an executed
   current result (absent, or a result that never started: unknown evidence, never red or green, as the merge judges
-  it; a task with neither proofs nor next proofs never finishes: a Prove step's work may be its product alone), each
+  it; a task with neither proofs nor next proofs never finishes; a task with no proof of its own, a Prove step, has
+  its next proofs, its product, as its work, so each of them needs an executed result too, red or green), each
   proof whose executed result is not green; each other member red here that is not red at the merge base (`:seon.source/red-on-target`, `seon.test/fork-point-red`'s
   question, as the merge asks it: a red with no result there is the change's), and each red test defined or changed
   on the branch (in `:seon.program/identities`, `:seon.source/stray-red-error`), unless it is one of the
@@ -1471,7 +1472,9 @@
         executed (fn [test-symbol] (let [result (by-sym test-symbol)] (and result (not (:seon.error/at result)))))
         ;; every member needs a current executed result: none is unknown, never green
         ;; a deferred member runs only on the merge's platform host, which answers it there (`merge-members`)
-        unknown (vec (sort (remove executed (into (set proofs) (remove (into (set next-proofs) deferred)) members))))
+        ;; a task with no proof of its own has its next proofs as its work: each must exist and have run
+        work (if (seq proofs) (set proofs) (set next-proofs))
+        unknown (vec (sort (remove executed (into work (remove (into (set next-proofs) deferred)) members))))
         red-proofs (filterv #(and (executed %) (not (green-result? (by-sym %)))) proofs)
         others (into #{} (filter #(some-> (by-sym %) red?)) (remove (into (set proofs) next-proofs) members))
         stray (filterv #(delta [:seon.test/sym %]) others)

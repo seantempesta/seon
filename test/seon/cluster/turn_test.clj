@@ -2874,10 +2874,6 @@
        (is (not-any? #(contains? tests %) [:seon.turn/id :seon.source/commit-id]) "no pass or commit id")
        (is (nil? (:seon.turn.loop/tests again)) "an unchanged red is answered from its record and not shown again")))))
 
-(deftest a-throwing-test-step-answers-its-error-beside-the-pass
-  (let [summary (#'seon.turn/test-step {} "agent-x" nil)]
-    (is (:seon.error/message (get-in summary [:seon.turn.loop/proofs :seon.turn.loop/test-error])))))
-
 (defn- step-dial!
   "Set the cluster's test step bound to `ms`."
   {:malli/schema [:=> [:cat :seon.db/connection pos-int?] :nil]}

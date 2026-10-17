@@ -564,19 +564,16 @@
                              held (or kept (reach-walk database))]
                          ;; the next fold diffs from this value, so its work follows one change
                          (if (:seon.error/at held) held (assoc held ::commit (db/commit-id database)))))]
-    (if (map? revisions)
-      (let [held (seon.cache/lookup ::destructive-reach revisions
+    ;; one derivation for every value: an as-of value's revisions hold no head, so it walks; no authority is not kept
+    (let [held (if (seq revisions)
+                 (seon.cache/lookup ::destructive-reach revisions
                                     #(+ 256 (* 128 (+ (count (::reach %)) (count (::closure %)))))
-                                    derive-reach #(not (:seon.error/at %)))]
-        (when-not (:seon.error/at held)
-          (seon.cache/evict! ::reach-head head)
-          (seon.cache/lookup ::reach-head head (constantly (+ 256 (* 96 (count head)))) (constantly revisions)))
-        (if (:seon.error/at held) held (::reach held)))
-      (let [walked (if (seq revisions)
-                     (seon.cache/lookup ::destructive-reach revisions #(+ 256 (* 128 (count (::reach %))))
-                                        #(reach-walk database) #(not (:seon.error/at %)))
-                     (reach-walk database))]
-        (if (:seon.error/at walked) walked (::reach walked))))))
+                                    derive-reach #(not (:seon.error/at %)))
+                 (derive-reach))]
+      (when (and head (not (:seon.error/at held)))
+        (seon.cache/evict! ::reach-head head)
+        (seon.cache/lookup ::reach-head head (constantly (+ 256 (* 96 (count head)))) (constantly revisions)))
+      (if (:seon.error/at held) held (::reach held)))))
 
 (defn- destructive-paths
   "Shortest named call path from every name reaching `owner-symbol` down to it.

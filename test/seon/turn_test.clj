@@ -2114,8 +2114,6 @@
        (doseq [id ["root" agent-id]] (support/transacted! connection (support/agent-tx (db/db connection) id)))
        (support/transacted! connection [[:db/add [:seon.task/id (task/task-handle 'tq.noproof "a")] :seon.task/execution :running]])
        (support/transacted! connection (task/attempt-tx (db/db connection) (task/task-handle 'tq.noproof "a") agent-id :tq-noproof))
-       (is (true? (turn/step-proved? (db/db connection) agent-id))
-           "a task naming no proof has proved first once its attempt is written")
        (is (= {:seon.turn.work/situation :open :seon.agent/id agent-id}
               (turn/next-agent-work (db/db connection) {:seon.agent/id agent-id}))
            "the attempt itself is the work whose product the model turn writes")))))
@@ -2197,10 +2195,9 @@
        ;; the agent's eval request defines the table, and its test step runs what that change reaches
        (support/declare-proof! connection 'tq.prodloop-test 'table 'tq.prodloop/body)
        (run-proof! connection 'tq.prodloop-test/table)
-       (is (true? (turn/step-proved? (db/db connection) agent-id))
-           "the run after the eval request ran the product test the step is judged by")
        (is (= :open (:seon.turn.work/situation (turn/next-agent-work (db/db connection) {:seon.agent/id agent-id})))
-           "its red run is the attempt's work, answered by a model turn")))))
+           "the run after the eval request ran the product test the step is judged by: its red run is the attempt's
+            work, answered by a model turn")))))
 
 (deftest ^{:seon/tasks #{'seon.turn/the-test-step-writes-nothing-on-main}
            :seon.test/long "An own-branch agent's setup, one change through its eval request with its test step and one fork-point run."

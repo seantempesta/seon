@@ -784,7 +784,7 @@
 
 (defn assign-task!
   "Assign `agent-id` a task of its own under execution :running and run its red proof on `connection`, as the
-  agent's first pass proves (`seon.turn/run-proofs`): a model turn needs an assignment of a :running task, and the
+  agent's first pass proves (`seon.turn/prove-turn`): a model turn needs an assignment of a :running task, and the
   first wake's turn answers both the red proof and the wake."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id] :nil]}
   [connection agent-id]

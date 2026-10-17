@@ -430,6 +430,10 @@
                  (red (assoc base :seon.task/proofs #{} :seon.source/members #{} :seon.source/results [])
                       'tq.done-test/next :seon.source/next-proofs #{'tq.done-test/next})
                  []]
+                ["a Prove step with no proof of its own, one product test not yet written: refused"
+                 (red (assoc base :seon.task/proofs #{} :seon.source/members #{} :seon.source/results [])
+                      'tq.done-test/next :seon.source/next-proofs #{'tq.done-test/next 'tq.done-test/unwritten})
+                 [:seon.source/test-evidence-error]]
                 ["a branch-new red outside the next proofs: stray"
                  (assoc (new-red base) :seon.source/next-proofs #{'tq.done-test/other}) [:seon.source/stray-red-error]]
                 ["the same red among the next proofs: done"
