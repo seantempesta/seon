@@ -330,8 +330,8 @@
   "The declaration identities the agent's branch `database` changed since its merge base with its target
   (`seon.cluster.source/branch-merge-base`, Datahike's commit graph): git's diff of that base and the branch
   (`seon.program/own-changed-identities`); empty on main."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :seon.program/identity-set :seon.error/value]]}
-  [database _agent-id]
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :seon.program/identity-set :seon.error/value]]}
+  [database]
   (let [commit (source/branch-merge-base database)
         base (when (uuid? commit) (db/commit-database database commit))]
     (cond (:seon.error/at commit) commit
@@ -345,8 +345,8 @@
   the attempt's test step runs after each eval request (`seon.turn`), the list `step-observation` judges."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:set :seon.test/sym]]
                   [:or :seon.source/member-list :seon.error/value]]}
-  [database agent-id proofs]
-  (let [delta (change database agent-id)
+  [database _agent-id proofs]
+  (let [delta (change database)
         main (or (task/main-head database) database)]
     (if (:seon.error/at delta)
       delta
@@ -369,8 +369,10 @@
       current
       (into [] (comp (map current) (filter #(and % (not (:seon.error/at %)) (:seon.test/sym %)))) names))))
 
-(defn step-observation
-  "The observation the held task `sym`'s step is judged by on `database`, the agent's branch: its obligations
+(defn judged-input
+  "The observation the held task `sym`'s step is judged by on `database`, a branch value (the agent's branch, or a
+  chain branch at an attempt's end commit), against `main`, the target's head, `cluster` the cluster whose checkout its
+  merge would publish into: its obligations
   over its assigned basis (`seon.task/assigned-obligations`), whether it is a chain's (linked by `:seon.task/next`,
   or the first a chain fact on main names, `:seon.chain/first`), its
   product (the proofs of the task after it and, for a Prove step, the tests its successors are tagged with), the
@@ -383,11 +385,10 @@
   what its merge would publish (`seon.cluster.source/publication`), any other the reds main holds as
   `:seon.source/red-on-target`. A branch that recorded no run has nothing to judge, so it carries no judgment input.
   The head shows each judged test's status."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/sym]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.task/sym [:or :seon.cluster/name :seon.error/value]]
                   [:or :seon.context/step-observation :seon.error/value]]}
-  [database agent-id sym]
+  [main database sym cluster]
   (let [owed (task/assigned-obligations database sym)
-        main (or (task/main-head database) database)
         following (when-not (:seon.error/at owed)
                     (db/pull database [:seon.task/id :seon.task/branch {:seon.task/next [:seon.task/proofs]}] [:seon.task/sym sym]))
         ;; a chain's task (linked by next, a chain's first: a chain of one links nothing, or one naming its own
@@ -399,7 +400,7 @@
                      (some? (:seon.task/branch following)))
         product (cond-> (set (get-in following [:seon.task/next :seon.task/proofs]))
                   (= :prove (:seon.task/step owed)) (into (:seon.task/product owed)))
-        delta (when-not (:seon.error/at owed) (change database agent-id))
+        delta (when-not (:seon.error/at owed) (change database))
         proofs (set (:seon.task/proofs owed))
         ;; the merge's own member list (`source/merge-members`): what the test step runs and the merge runs
         listed (when (set? delta) (source/merge-members database (source/merge-changes database main delta) (into proofs product)))
@@ -424,8 +425,7 @@
                      (newest (db/q '[:find ?id ?t :where [?r :seon.test.run/id ?id] [?r :seon.test.run/basis-t ?t]] database))))
         ;; what the branch alone decides of its merge, judged by the merge gate's own check under the agent's
         ;; cluster checkout (`seon.merge/checkout`)
-        cluster (when (and run-id chained?) (config/agent-cluster database agent-id))
-        root (when (string? cluster) ((requiring-resolve 'seon.merge/checkout) main cluster))
+        root (when (and run-id chained? (string? cluster)) ((requiring-resolve 'seon.merge/checkout) main cluster))
         published (when (and run-id chained? (set? delta))
                     (source/publication main database delta proofs sym (when (string? root) root)))
         judged (when run-id
@@ -440,6 +440,15 @@
           (set? delta) (assoc :seon.program/identities delta)
           judged (assoc :seon.source/judged (assoc judged :seon.program/identities delta :seon.test.run/id run-id
                                                    :seon.test.run/branch (get-in database [:config :branch])))))))
+
+(defn step-observation
+  "The observation the held task `sym`'s step is judged by on `database`, the agent's branch: `judged-input` against
+  main's head (`seon.task/main-head`; the branch itself on main) and the agent's own cluster
+  (`seon.config/agent-cluster`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/sym]
+                  [:or :seon.context/step-observation :seon.error/value]]}
+  [database agent-id sym]
+  (judged-input (or (task/main-head database) database) database sym (config/agent-cluster database agent-id)))
 
 (defn step-verdict
   "The held task's step on `database`, the agent's branch, judged by `step-status` over `step-observation`: the

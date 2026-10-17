@@ -1846,50 +1846,19 @@
 
 (defn- done-judged
   "What the done rule (`seon.cluster.source/done-refusals`) judges for chain task `handle` at `at-end`, its chain
-  `branch` at the attempt's end commit: the merge's member list (`seon.cluster.source/merge-members`) of what it
-  changed since its merge base with main (`seon.cluster.source/merge-base`, `seon.program/own-changed-identities`,
-  `seon.cluster.source/merge-changes`) with its proofs field and the next task's, its deferred members, their current results there
-  (`seon.context/current-results`), the reds among them held red at that merge base
-  (`seon.cluster.source/red-at-merge-base`, the merge's question), and the newest run they
-  came from, else the newest the branch holds (an attempt's start runs its tests, so a done end always has one), and
-  what its merge would publish under the checkout `root` (`seon.cluster.source/publication`)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.chain/branch :seon.task/handle
-                       [:maybe :seon.fn/root]]
+  branch's attempt-end commit: the judgment input of `seon.context/judged-input` over main `database` and the
+  cluster `cluster-name`; thrown as its own error map when it could not be built or the branch recorded no run."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.chain/branch :seon.task/handle :seon.cluster/name]
                   :seon.source/judged]}
-  [database at-end branch handle root]
-  (let [task (db/pull at-end [:seon.task/sym :seon.task/proofs {:seon.task/next [:seon.task/proofs]}] [:seon.task/id handle])
-        proofs (set (:seon.task/proofs task))
-        next-proofs (set (get-in task [:seon.task/next :seon.task/proofs]))
-        base-commit (source/merge-base database (db/commit-id at-end) (db/commit-id database))
-        base (when (uuid? base-commit) (db/commit-database at-end base-commit))
-        delta (cond (:seon.error/at base-commit) base-commit
-                    base (try (program/own-changed-identities base at-end source/merge-bound)
-                              (finally (source/release! [base])))
-                    :else #{})
-        ;; the merge's own member list (`seon.cluster.source/merge-members`), the one the attempt's test step ran
-        listed (when (set? delta) (source/merge-members at-end (source/merge-changes at-end database delta) (into proofs next-proofs)))
-        members (when-not (:seon.error/at listed) (:seon.source/members listed))
-        results (when members (context/current-results at-end members (:seon.task/sym task)))
-        held (when (and (vector? results) (uuid? base-commit))
-               (source/red-at-merge-base at-end base-commit results (into proofs next-proofs)))
-        published (when (and (vector? results) (set? delta))
-                    (source/publication database at-end delta proofs (:seon.task/sym task) root))
-        failure (some #(when (and (map? %) (:seon.error/at %)) %) [task delta listed results held published])
-        newest (fn [runs] (some->> (seq runs) (apply max-key second) first))
-        run-id (when (vector? results)
-                 (or (newest (keep #(when-let [[_ id] (:seon.test/run %)] [id (:seon.test/run-basis-t %)]) results))
-                     (newest (db/q '[:find ?id ?t :where [?r :seon.test.run/id ?id] [?r :seon.test.run/basis-t ?t]] at-end))))]
-    (when failure (throw (ex-info (:seon.error/message failure "db<->flow could not build a chain task's judgment.") failure)))
-    (when-not (string? run-id)
-      (throw (ex-info "A chain task ended done on a branch that recorded no test run."
+  [database at-end branch handle cluster-name]
+  (let [sym (:seon.task/sym (db/pull at-end [:seon.task/sym] [:seon.task/id handle]))
+        observed (context/judged-input database at-end sym cluster-name)
+        failure (or (when (:seon.error/at observed) observed)
+                    (when-not (:seon.source/judged observed)
                       {:seon.error/message "A chain task ended done on a branch that recorded no test run."
-                       :seon.task/assigned handle :seon.chain/branch branch})))
-    (cond-> (merge {:seon.source/members members :seon.source/results results :seon.task/proofs proofs
-                    :seon.program/identities delta :seon.test.run/id run-id :seon.test.run/branch branch}
-                   published)
-        (seq next-proofs) (assoc :seon.source/next-proofs next-proofs)
-        (seq (:seon.source/deferred listed)) (assoc :seon.source/deferred (:seon.source/deferred listed))
-        (seq held) (assoc :seon.source/red-on-target held))))
+                       :seon.task/assigned handle :seon.chain/branch branch}))]
+    (when failure (throw (ex-info (:seon.error/message failure "db<->flow could not build a chain task's judgment.") failure)))
+    (:seon.source/judged observed)))
 
 (defn launch-facts
   "What db<->flow reads on main `database` before it plans.
@@ -2295,9 +2264,7 @@
   {:malli/schema [:=> [:cat :seon.agent/context-source] :nil]}
   [handle]
   (let [store (handle-store handle)
-        database @(:seon.db/connection handle)
-        ;; the checkout a merge publishes into: the done rule judges what the branch's merge would write there
-        root (let [checkout (merge/checkout database (:seon.cluster/name handle))] (when (string? checkout) checkout))]
+        database @(:seon.db/connection handle)]
     (doseq [{branch :seon.chain/branch key :seon.task/assignment h :seon.task/assigned commit :seon.task.attempt/commit}
             (chain-ends database (registry/branches store))]
       (let [refusals (registry/on-branch store branch
@@ -2307,7 +2274,7 @@
                                       (throw (ex-info "The chain branch retains no end commit of its finished attempt."
                                                       {:seon.error/message "The chain branch retains no end commit of its finished attempt."
                                                        :seon.task/assignment key :seon.chain/branch branch})))
-                                    (let [refusals (try (source/done-refusals at-end (done-judged database at-end branch h root))
+                                    (let [refusals (try (source/done-refusals at-end (done-judged database at-end branch h (:seon.cluster/name handle)))
                                                         (finally (source/release! [at-end])))]
                                       (when (empty? refusals) (write! on-chain [[:db.fn/call #'task/advance-tx key]]))
                                       refusals))))]
@@ -2408,7 +2375,7 @@
               (let [refusals (registry/on-branch store works-on
                                         (fn [on-chain]
                                           (let [at-end (db/commit-database (db/db on-chain) commit)]
-                                            (try (source/done-refusals at-end (done-judged database at-end works-on h root))
+                                            (try (source/done-refusals at-end (done-judged database at-end works-on h (:seon.cluster/name handle)))
                                                  (finally (source/release! [at-end]))))))]
                 (if (seq refusals)
                   (do (bail-chain! handle branch key h "The done rule refused its done." (refusals-verdict refusals) []) false)
