@@ -252,6 +252,14 @@
              (xmx {:seon.operator/managed-root "/root"
                    :seon.config/manifest {:seon.config.operator/heap-max-bytes 1073741824}}))))))
 
+(deftest a-launched-jvm-writes-its-crash-forensics-beside-its-heap-dump
+  (let [argv (operator/launch-argv {:seon.operator/managed-root "/root"} "/src" nil "/heap" "nil")]
+    (is (= #{"-J-XX:HeapDumpPath=/heap" "-J-XX:FlightRecorderOptions=dumppath=/heap"
+             "-J-XX:ErrorFile=/heap/hs_err_pid%p.log"}
+           (into #{} (filter #(or (str/includes? % "HeapDumpPath") (str/includes? % "dumppath")
+                                  (str/includes? % "ErrorFile")))
+                 argv)))))
+
 (deftest a-launched-jvm-binds-the-agents-working-root-to-the-checkout
   (let [root (fn [request] (get-in (operator/boot-request request "/checkout")
                                    [:seon.config/environment :seon.config.fs/working-root]))]

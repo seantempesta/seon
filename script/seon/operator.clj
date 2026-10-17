@@ -781,7 +781,8 @@
 
 (defn launch-argv
   "The `clojure` argv that starts one JVM over `source`: its heap capped at the
-  configured `:seon.config.operator/heap-max-bytes`, evaluating `form`."
+  configured `:seon.config.operator/heap-max-bytes`, its heap dump, JFR
+  emergency dump and crash log written to `heap-dump-path`, evaluating `form`."
   {:malli/schema [:=> [:cat :map :string [:maybe :string] :string :string] [:vector :string]]}
   [request source classpath heap-dump-path form]
   (cond-> ["clojure"]
@@ -790,6 +791,9 @@
                 (str "-J-Dseon.operator.root=" (:seon.operator/managed-root request))
                 (str "-J-Dseon.repository.root=" source)
                 (str "-J-XX:HeapDumpPath=" heap-dump-path)
+                ;; the crash on OOM's JFR emergency dump and error log, beside the heap dump
+                (str "-J-XX:FlightRecorderOptions=dumppath=" heap-dump-path)
+                (str "-J-XX:ErrorFile=" heap-dump-path "/hs_err_pid%p.log")
                 "-M:dev:test" "-e" form])))
 
 (defn boot-request
