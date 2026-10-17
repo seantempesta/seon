@@ -42,3 +42,46 @@ status: owner rulings 2026-10-17, input to the merge hybrid (Fable) after merge-
 - A failure is produced once, where it is detected, as the one error map, and returned as data to the agent.
 - Nothing downstream re-checks shapes, catches defensively or adds a refusal tier.
 - The roughly 175 guard sites the Opus audit counted on the merge/done path (`merge-audit-opus.md`) get removed in this redesign, as their own final phase after P11. They are not deferred to a later conversion.
+
+## The task model (owner, 2026-10-17, later): input to `task-model.md`
+
+**What starts work: desired vs observed state.** Desired state is facts written by root, the task writer and config:
+- the tasks;
+- their dependency edges;
+- each task's branch and environment.
+
+Observed state is facts written only by their observer, at the event:
+- whether a flow is running for a task;
+- an attempt's end;
+- test results;
+- branch heads;
+- that a merge happened.
+
+One pure, idempotent reconciler reads both and does the minimum to resolve the difference. Run twice on the same state, it does nothing the second time. This replaces the chain entity, `run!` as a starter, relaunch, the per-assignment merge path, and every piece of code that keeps two copies of state in sync.
+
+**The task graph is the scheduler.**
+- A task is ready when every task it depends on is done and its own proofs are not yet green. Independent ready tasks run in parallel.
+- Writing the tasks is the only start signal, and the reconciler reacts to it.
+- There are still no automatic re-runs: a task that bails is held for root.
+
+**No chain entity. One task schema.**
+- `next` (or a dependency edge) links tasks, and a sequence is written all at once as linked tasks.
+- Each task carries its branch and environment (config, model, cap) as desired state.
+- When a running agent's environment differs from its task's, the reconciler swaps it at the agent's next idle boundary.
+
+**Merge is an ordinary task, with no merge-specific attribute.**
+- Its environment is a merge branch: main's head, plus whatever merged cleanly from its predecessor, plus each conflict resolved to main's version and recorded as an unmerged entry. This reuses the one merge (P4a).
+- No conflict and green proofs: it is done at start, with no agent and no model call, and main is written once through the fenced transaction.
+- Otherwise the agent fixes it on the merge branch, or uses `my.task/send-back!` to tell root to restart because too much has changed.
+
+**Done and approval.**
+- Every task is done automatically when the one done rule passes.
+- Approval, when wanted, is another task in the graph. Its done condition is a fact a person writes.
+
+**Conflicts are live in the agent's context.**
+- The current-state block has a section, derived each request from the merge's stored unmerged entries. Each entry shows both versions as source references and the form that resolves it.
+- A resolved conflict drops out of the block.
+- Cost is proportional to the number of conflicts, and the section is cached by the branch's value, so it is computed at most once per turn.
+- The "what will merge" summary carries each item's test status.
+
+**Error law, applied as code is touched.** AGENTS.md's error law applies to code a change touches or writes. Code scheduled for deletion is never converted, and untouched code is never swept all at once. A ratchet census checks only functions changed since the law landed.
