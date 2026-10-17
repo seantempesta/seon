@@ -5,12 +5,13 @@
   [:seon.ns/requires [:vector :symbol]]
   [:seon.render.ns/definition-count [:int {:min 0}]]]
  :seon.render.ns/namespace-view
- [:map {:description "A namespace node as its AI face shows it: named, and beyond distance zero its requires and its public functions as name, arglists and doc summary rows."}
+ [:map {:description "A namespace node as its AI face shows it: named, and beyond distance zero its requires, its public declarations by name, the functions among them without a contract, and the forms that read their arglists, docs and sources."}
   [:seon.ns/name :seon.ns/name]
   [:seon.ns/doc {:optional true} :seon.ns/doc]
   [:seon.ns/requires {:optional true} [:vector :symbol]]
-  [:seon.repl/columns {:optional true} [:vector :keyword]]
-  [:seon.repl/rows {:optional true} [:vector [:vector :seon.schema/value]]]]
+  [:seon.render.ns/functions {:optional true} [:vector :seon.fn/sym]]
+  [:seon.render.ns/uncontracted {:optional true} [:vector :seon.fn/sym]]
+  [:seon.render/operations {:optional true} :seon.render/operations]]
  :seon.render.ns/function-view
  [:map {:description "A function node as its AI face shows it: its name and doc line, a library Var's arglists, and the forms that read its doc, its source, its callers and the tests reaching it. What it calls and what calls it are its related data."}
   [:seon.fn/sym :seon.fn/sym]

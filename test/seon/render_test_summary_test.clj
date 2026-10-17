@@ -1,7 +1,6 @@
 (ns seon.render-test-summary-test
   "A finished test run renders as a short data summary."
-  (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
             [seon.render.test :as render.test]
             [seon.test-runner-failure-fixture]
@@ -41,8 +40,11 @@
         cited (render.test/render-ai (assoc unit :seon.render/distance 1))
         listed (render.test/render-ai (assoc unit :seon.render/distance 0))]
     (is (= "pass" (:seon.render.test/state cited)))
-    (is (some #(str/includes? % "(is (= 4 (+ 2 2)))") (:seon.render.ns/source-lines cited))
-        "a cited test shows what it asserts, as its source lines")
+    (is (= [(list 'my.program/source (list 'quote (:seon.test/sym passed)))
+            (list 'my.test/check {:seon.test/identities #{(:seon.test/sym passed)}})]
+           (:seon.render/operations cited))
+        "a cited test offers the reads of what it asserts and of its run, one evaluation away")
+    (is (not (contains? cited :seon.test/source)) "its source is read on request, never shown whole")
     (is (= #{:seon.test/sym :seon.render.test/state} (set (keys listed)))
         "a test among many is its name and state only")
-    (is (not-any? :seon.render.ns/source-lines (:seon.render.test/failures (render.test/render-run-result-ai {:seon.render/value run}))))))
+    (is (not-any? :seon.test/source (:seon.render.test/failures (render.test/render-run-result-ai {:seon.render/value run}))))))

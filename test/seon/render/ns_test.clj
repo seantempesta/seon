@@ -59,9 +59,9 @@
 
 (deftest a-namespace-renders-as-one-graph-node
   ;; Class regression (the namespace page dump): the node is its declaration,
-  ;; doc and public functions with their contracts, as data; never member
-  ;; sources or schemas. The value printer bounds a large namespace (root
-  ;; ruling 2026-09-26), so the render reads it whole.
+  ;; doc and public functions by name, as data; never member sources, schemas
+  ;; or doc rows, which `dir` and `my.program/source` read on request, so the
+  ;; value printer never cuts a large namespace's render.
   (support/with-database
     (fn [connection]
       (support/transacted! connection (support/agent-tx @connection "fresh" 'my.agents.fresh))
@@ -69,26 +69,27 @@
             flow (sut/render-ai (namespace-unit db 'seon.flow 1 100000))
             html (hiccup/->string (sut/render-html (namespace-unit db 'seon.flow 1 100000)))
             fresh (sut/render-ai (namespace-unit db 'my.agents.fresh 1 256))
-            names (set (map first (:seon.repl/rows flow)))]
+            names (set (:seon.render.ns/functions flow))]
         (testing "distance zero is its name and doc line"
           (is (= #{:seon.ns/name :seon.ns/doc} (set (keys (sut/render-ai (namespace-unit db 'seon.flow 0 100000))))))
           (is (= 'seon.flow (:seon.ns/name flow))))
-        (testing "distance one is its requires and dir's columns and rows"
+        (testing "distance one is its requires, its public functions by name and the reads of their detail"
           (is (= (sort (:seon.ns/requires (namespace-unit db 'seon.flow 1 100000))) (:seon.ns/requires flow)))
-          (is (= [:sym :arglists :summary] (:seon.repl/columns flow)))
           (is (contains? names 'seon.flow/start-work-launcher!))
           (is (not-any? #(= "work-launcher-step" (name %)) names) "private functions are not listed")
-          (is (every? #(= 3 (count %)) (:seon.repl/rows flow)) "one row per function, no member source"))
+          (is (every? qualified-symbol? (:seon.render.ns/functions flow)) "one name per function, no member source")
+          (is (= ['(dir seon.flow) '(my.program/source 'seon.flow)] (:seon.render/operations flow))
+              "arglists, docs and sources are one evaluation away"))
         (testing "HTML is the same node: a namespace link, requires and function names"
           (is (str/includes? html "href=\"/ns/seon.flow\""))
           (is (str/includes? html "<code>start-work-launcher!</code>"))
           (is (not (str/includes? html "seon-namespace-source"))))
         (testing "an empty agent namespace lists no functions and is no error"
-          (is (= [] (:seon.repl/rows fresh)))
+          (is (= [] (:seon.render.ns/functions fresh)))
           (is (= '(dir (quote my.agents.fresh)) (sut/namespace-form {:seon.ns/name 'my.agents.fresh}))
               "the form face is the dir that reads it again"))))))
 
-(deftest a-namespace-directory-resolves-aliased-keywords-and-omits-private-functions
+(deftest a-namespace-names-its-public-functions-and-those-without-a-contract
   (support/with-database
     (fn [connection]
       (let [database @connection
@@ -97,10 +98,14 @@
             _ (support/transacted! connection [ns-entity])
             database @connection
             functions [(support/program-fn-entity database 'my.dir.sample/shown "(defn shown \"Shown.\" [{id ::str/id}] id)")
+                       (support/program-fn-entity database 'my.dir.sample/covered
+                                                  "(defn covered \"Covered.\" {:malli/schema [:=> [:cat :int] :int]} [x] x)")
                        (support/program-fn-entity database 'my.dir.sample/hidden "(defn- hidden [x] x)")]
             _ (support/transacted! connection functions)
-            rows (:seon.repl/rows (sut/render-ai (namespace-unit @connection 'my.dir.sample 1 100000)))]
-        (is (= [['my.dir.sample/shown '([{id :clojure.string/id}]) "Shown."]] rows))))))
+            shown (sut/render-ai (namespace-unit @connection 'my.dir.sample 1 100000))]
+        (is (= ['my.dir.sample/covered 'my.dir.sample/shown] (:seon.render.ns/functions shown))
+            "public functions by name; the private one is omitted")
+        (is (= ['my.dir.sample/shown] (:seon.render.ns/uncontracted shown)) "the function without a contract")))))
 
 (deftest namespace-bindings-render-in-clojures-own-words
   (testing "an alias names its target namespace, a refer names its Var"

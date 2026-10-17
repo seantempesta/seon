@@ -8,8 +8,7 @@
             [clojure.string :as str]
             [seon.error.refusal]
             [seon.db :as db]
-            [seon.ref :as ref]
-            [seon.sci.reader :as reader]
+            [seon.fn :as fn]
             [seon.task :as task]
             [seon.render.route :as route]))
 
@@ -206,14 +205,11 @@
      (when (and source (pos? (node-distance unit))) [:pre [:code source]])]))
 
 (def ^:private directory-selector
-  [:seon.ns/name
-   {:seon.ns/aliases [:seon.ns.alias/local :seon.ns.alias/target-ns]}
-   {[:seon.fn/_ns :limit nil] [:seon.fn/sym :seon.fn/private? :seon.fn/doc :seon.fn/arglists]}])
+  [:seon.ns/name {[:seon.fn/_ns :limit nil] [:seon.fn/sym :seon.fn/private? :seon.fn/macro? :seon.fn/arglists :seon.fn/spec]}])
 
 (defn- public-functions
   "The namespace row pulled once, unlimited, with each function's name,
-  visibility, doc and arglists and the namespace's aliases; a refused read
-  returns its refusal."
+  visibility, kind and contract; a refused read returns its refusal."
   {:malli/schema [:=> [:cat :seon.render/unit :symbol] [:or :map :seon.db/invalid-read-error]]}
   [unit namespace-name]
   (let [found (db/pull (:seon.db/db unit) directory-selector [:seon.ns/name namespace-name])]
@@ -228,31 +224,31 @@
        (sort-by :seon.fn/sym)
        vec))
 
-(defn- read-arglists
-  "One arglists text read in the namespace's own aliases; a failed read stays its returned data."
-  {:malli/schema [:=> [:cat :symbol :map :string] :any]}
-  [namespace-name aliases text]
-  (let [read (reader/read {::reader/text text ::reader/ns namespace-name ::reader/aliases aliases
-                           :seon.config.eval.result/max-source (count text)})]
-    (if (vector? read) (::reader/form (first read)) read)))
+(defn- uncontracted?
+  "Whether a pulled declaration is a function without a contract: neither a value definition
+  (`seon.fn/value-definition?`) nor a macro, as `seon.contracts/report` counts them."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [{arglists :seon.fn/arglists macro? :seon.fn/macro? spec :seon.fn/spec}]
+  (boolean (and arglists (not (fn/value-definition? arglists)) (not macro?) (nil? spec))))
 
-(defn- directory
-  "The held pull's public functions as columns and rows: name, arglists and
-  doc summary."
+(defn- declarations
+  "The held pull's public declarations by name, the functions among them without a contract, and the forms that
+  read each one's arglists and doc (`dir`) and the namespace's declarations (`my.program/source`)."
   {:malli/schema [:=> [:cat :map :symbol]
-                  [:map [:seon.repl/columns [:vector :keyword]] [:seon.repl/rows [:vector [:vector :seon.schema/value]]]]]}
+                  [:map [:seon.render.ns/functions [:vector :seon.fn/sym]]
+                   [:seon.render.ns/uncontracted {:optional true} [:vector :seon.fn/sym]]
+                   [:seon.render/operations :seon.render/operations]]]}
   [pulled namespace-name]
-  (let [aliases (into {} (map (juxt :seon.ns.alias/local :seon.ns.alias/target-ns)) (:seon.ns/aliases pulled))]
-    {:seon.repl/columns [:sym :arglists :summary]
-     :seon.repl/rows (mapv (fn [{function-name :seon.fn/sym arglists :seon.fn/arglists doc :seon.fn/doc}]
-                             [function-name
-                              (when arglists (read-arglists namespace-name aliases arglists))
-                              (when doc (:summary (ref/docstring doc)))])
-                           (public-rows pulled))}))
+  (let [rows (public-rows pulled)
+        uncontracted (into [] (comp (filter uncontracted?) (map :seon.fn/sym)) rows)]
+    (cond-> {:seon.render.ns/functions (mapv :seon.fn/sym rows)
+             :seon.render/operations [(list 'dir namespace-name) (list 'my.program/source (list 'quote namespace-name))]}
+      (seq uncontracted) (assoc :seon.render.ns/uncontracted uncontracted))))
 
 (defn render-ai
-  "A namespace node as data: its name and doc line; beyond distance zero its
-  requires and its public functions as name, arglists and doc summary rows."
+  "A namespace node as data: its name and doc line; beyond distance zero its requires, its public declarations by
+  name, the functions among them without a contract, and the forms that read their arglists and docs (`dir`) and
+  their sources."
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :seon.render.ns/namespace-view :seon.db/error-result
                    :seon.sci.eval/documentation-unavailable-error]]}
@@ -261,12 +257,11 @@
         (or (:seon.render/value unit) unit)
         named (cond-> {:seon.ns/name namespace-name}
                 (first-doc-line doc) (assoc :seon.ns/doc (first-doc-line doc)))
-        pulled (when (pos? (node-distance unit)) (public-functions unit namespace-name))
-        listed (when pulled (if (db/read-refusal? pulled) pulled (directory pulled namespace-name)))]
+        pulled (when (pos? (node-distance unit)) (public-functions unit namespace-name))]
     (cond
-      (nil? listed) named
-      (db/read-refusal? listed) listed
-      :else (merge named (when requires {:seon.ns/requires (vec (sort requires))}) listed))))
+      (nil? pulled) named
+      (db/read-refusal? pulled) pulled
+      :else (merge named (when requires {:seon.ns/requires (vec (sort requires))}) (declarations pulled namespace-name)))))
 
 (defn- agent-namespace-ref
   "The namespace an agent-namespace unit names: the walked namespace itself,

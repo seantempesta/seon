@@ -1,7 +1,6 @@
 (ns seon.render.test
   "Entity projections for tests; execution remains in seon.test."
-  (:require [clojure.string :as str]
-            [seon.db :as db]
+  (:require [seon.db :as db]
             [seon.error :as error]
             [seon.id :as id]
             [seon.test :as test]
@@ -55,19 +54,13 @@
   "A read the view shows: its value, or a refused read through the error's AI face (`seon.error/reply-value`), so
   the view holds what the agent acts on and stays the same while the read's answer does."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/value] :seon.schema/value]}
-  [database read]
-  (if (and (map? read) (:seon.error/at read)) (error/reply-value database read) read))
+  [database answer]
+  (if (and (map? answer) (:seon.error/at answer)) (error/reply-value database answer) answer))
 
 (defn render-ai
-  "A test as data: its name and, once it has run, its state; beyond distance zero also
-  its source as its lines (what it asserts), where it runs, its failed assertions and, when red, the definitions
-  changed since it last passed. A refused read shows as its error's AI face.
-
-  ## Costs
-
-  At distance 0 one pull and one recorded-result read (about 3 ms); the host
-  report walks the call closure (14-73 ms), so only a nearer view reads it
-  (unarmed, default, 2026-09-28)."
+  "A test as data: its name and, once it has run, its state; beyond distance zero also where it runs, its failed
+  assertions with their values, when red the definitions changed since it last passed, and the forms that read its
+  source and run it. A refused read shows as its error's AI face."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render.test/view]}
   [unit]
   (let [entity (evidence unit) test-name (:seon.test/sym entity) database (:seon.db/db unit)
@@ -80,7 +73,9 @@
       (cond-> (merge named
                      (select-keys entity [:seon.test/unchanged :seon.test/recorded-basis-t :seon.test/run-basis-t
                                           :seon.test/failure-message :seon.test/reach-unknown]))
-        (:seon.test/source entity) (assoc :seon.render.ns/source-lines (str/split-lines (:seon.test/source entity)))
+        (qualified-symbol? test-name)
+        (assoc :seon.render/operations [(list 'my.program/source (list 'quote test-name))
+                                        (list 'my.test/check {:seon.test/identities #{test-name}})])
         ;; the host report without the symbol the view already names
         read? (assoc :seon.render.test/host (let [host (shown-read database (test/host database test-name))]
                                               (cond-> host (map? host) (dissoc :seon.test/sym))))
