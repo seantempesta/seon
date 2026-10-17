@@ -2202,24 +2202,31 @@
   [world candidate ns-name]
   (boolean (seq (remove (bindings candidate ns-name) (bindings world ns-name)))))
 
+(defn observable-changes
+  "Of `changed`, the identities `candidate` changed since `base`, those a test can observe: all but a function or
+  test both hold at one behavior digest (a docstring-only change is none) and a namespace that lost no binding
+  (`binding-lost?`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set]
+                  :seon.program/identity-set]}
+  [base candidate changed]
+  (into #{} (remove (fn [[a v :as declaration]]
+                      (if (= :seon.ns/name a)
+                        (not (binding-lost? base candidate v))
+                        (when-let [behavior (behavior-of base declaration)]
+                          (= behavior (behavior-of candidate declaration))))))
+        changed))
+
 (defn branch-delta
   "The pure branch delta: the declarations `candidate` holds at another digest than `base` (its merge base, or the
   published commit on the cluster's own branch), among those its own lineage changed
-  (`seon.program/own-changed-identities`, the derivation the done rule reads), less a
-  function or test both hold at one behavior digest (a docstring-only change is none) and a namespace that lost no
-  binding (`binding-lost?`), in print order; empty when nothing changed, a refused read its refusal."
+  (`seon.program/own-changed-identities`, the derivation the done rule reads), that a test can observe
+  (`observable-changes`), in print order; empty when nothing changed, a refused read its refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] [:or :seon.test/changed :seon.error/value]]}
   [base candidate]
   (let [changed (program/own-changed-identities base candidate source/merge-bound)]
     (if (:seon.error/at changed)
       changed
-      (vec (sort print/compare-values
-                 (remove (fn [[a v :as declaration]]
-                           (if (= :seon.ns/name a)
-                             (not (binding-lost? base candidate v))
-                             (when-let [behavior (behavior-of base declaration)]
-                               (= behavior (behavior-of candidate declaration)))))
-                         changed))))))
+      (vec (sort print/compare-values (observable-changes base candidate changed))))))
 
 (defn branch-changes
   "Every declaration `execution`'s program changed since its base (`change-base`: the published commit on the

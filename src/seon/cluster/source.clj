@@ -924,17 +924,8 @@
         held)
       (derive))))
 
-(defn merge-members
-  "The member list of a merge of `changed` (declaration identities) on `database`, with `proofs`: the one list the
-  attempt's test step runs after each eval request (`seon.turn`), the done rule judges (`done-refusals`) and the merge
-  gate runs (`seon.cluster/reaching-run`). `:seon.source/members` holds the proofs, every test `changed` names that
-  `database` defines, and every other test reaching a changed function, test, namespace or schema as the gate's named
-  selection walks it (`seon.test/reaching`: a namespace seeds its members and the tests reading it as a file, a
-  schema the functions whose contracts name it) but those declared long; `:seon.source/reaching` holds each changed
-  declaration's own reaching tests, the fold's contribution of it. `:seon.source/deferred` holds the members
-  that run only on a platform host (`seon.test/host-exclusions` of an isolated run): the merge's platform run answers
-  them. Held by selection's content revisions (`seon.test/selection-revisions`), changed identities and proofs.
-  Call-edge changes fold only the contributions whose walks read those targets; result and evaluation writes reuse the list. Reads only."
+(defn- members-of
+  "`merge-members` of `changed`, the identities whose behavior changed, on `database` with `proofs`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set [:set :seon.test/sym]]
                   [:or :seon.source/member-list :seon.error/value]]}
   [database changed proofs]
@@ -963,6 +954,35 @@
                                                                (count (:seon.source/members %)))))
                          derive #(not (:seon.error/at %)))
       (derive))))
+
+(defn merge-members
+  "The member list of a merge of `changed` (declaration identities) on `database`, with `proofs`: the one list the
+  attempt's test step runs after each eval request (`seon.turn`), the done rule judges (`done-refusals`) and the merge
+  gate runs (`seon.cluster/reaching-run`). `:seon.source/members` holds the proofs, every test `changed` names that
+  `database` defines, and every other test reaching a changed function, test, namespace or schema as the gate's named
+  selection walks it (`seon.test/reaching`: a namespace seeds its members and the tests reading it as a file, a
+  schema the functions whose contracts name it) but those declared long; `:seon.source/reaching` holds each changed
+  declaration's own reaching tests, the fold's contribution of it. `:seon.source/deferred` holds the members
+  that run only on a platform host (`seon.test/host-exclusions` of an isolated run): the merge's platform run answers
+  them. Held by selection's content revisions (`seon.test/selection-revisions`), changed identities and proofs.
+  Call-edge changes fold only the contributions whose walks read those targets; result and evaluation writes reuse the list.
+  Of `changed`, only what a test can observe since `database`'s merge base (`branch-merge-base`,
+  `seon.test/observable-changes`) seeds the walk: a docstring-only change selects no member; a value with no merge
+  base (main) seeds all of `changed`. Reads only."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set [:set :seon.test/sym]]
+                  [:or :seon.source/member-list :seon.error/value]]}
+  [database changed proofs]
+  (let [;; seeds are what changed behavior since the merge base (`seon.test/observable-changes`): a docstring-only
+        ;; change reaches no test, as reach and recorded results key on the behavior digest
+        commit (branch-merge-base database)
+        base (when (uuid? commit) (db/commit-database database commit))
+        observed (cond (:seon.error/at commit) commit
+                       base (try ((requiring-resolve 'seon.test/observable-changes) base database changed)
+                                 (finally (release! [base])))
+                       :else changed)]
+    (if (:seon.error/at observed)
+      observed
+      (members-of database observed proofs))))
 
 (defn merge-changes
   "Of `changed`, the identities branch `database` changed, those a merge onto `head` carries: all but an agent's

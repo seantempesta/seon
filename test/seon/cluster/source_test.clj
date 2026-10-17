@@ -510,8 +510,8 @@
            listed (fn [changed] (:seon.source/members (source/merge-members database changed #{'tq.one-test/proof})))]
        (is (= #{'tq.one-test/proof 'tq.one-test/reaches-f} (listed #{[:seon.fn/sym 'tq.one-test/f]}))
            "a changed function: the proof and the tests reaching it, a declared-long one aside")
-       (is (= #{'tq.one-test/proof 'tq.one-test/reaches-f 'tq.one-test/reaches-g} (listed #{[:seon.ns/name 'tq.one-test]}))
-           "a changed namespace row: the tests reaching every member of it, as the merge gate selects them")
+       (is (= #{'tq.one-test/proof} (listed #{[:seon.ns/name 'tq.one-test]}))
+           "a namespace row that lost no binding since the merge base seeds no walk: no test observes it")
        (is (= #{'tq.one-test/proof 'tq.one-test/long-reaches-f} (listed #{[:seon.test/sym 'tq.one-test/long-reaches-f]}))
            "a changed test is a member even when declared long")
        (is (= #{} (:seon.source/deferred (source/merge-members database #{[:seon.fn/sym 'tq.one-test/f]} #{'tq.one-test/proof})))
@@ -548,6 +548,41 @@
          (is (zero? (profile/calls-of repeated 'seon.test/reaching))))
        (declare! "1")
        (is (= #{} (:seon.source/members (source/merge-members (db/db connection) changed #{}))))))))
+
+(deftest a-docstring-only-change-selects-no-member
+  ;; eval-trace (2026-10-17): a redefinition of a hub function selected 140 reaching tests, because the member walk
+  ;; was seeded by the identity diff since the merge base (definition digest) while reach keys on the behavior digest.
+  ;; A change no test can observe seeds no walk; a behavior change on the same branch still selects its tests
+  (test-support/with-database
+   (fn [connection]
+     (let [source (fn [doc body & [requires]]
+                    (str "(ns tq.doc-only-test (:require [clojure.test :refer [deftest is]]"
+                         (or requires " [clojure.string :as str]") "))\n"
+                         "(defn f " doc " {:malli/schema [:=> [:cat :int] :int]} [x] " body ")\n"
+                         "(deftest reaches-f (is (= 2 (f 2))))\n"))
+           _ (test-support/declare-source! connection 'tq.doc-only-test (source "\"One.\"" "x") "test")
+           parent (db/db connection)
+           store (:seon.store/store (test-support/execution-handle nil))
+           child (keyword (str "doc-only-" (id/id)))
+           changed #{[:seon.fn/sym 'tq.doc-only-test/f]}
+           on-child (fn [f] (registry/on-branch store child (fn [c] (db/with-branch {:seon.db/connection c} #(f c)))))
+           members (fn [] (on-child #(:seon.source/members (source/merge-members (db/db %) changed #{}))))]
+       (is (:seon.cluster/created? (registry/fork! {:seon.store/store store :seon.store/branch child
+                                                   :seon.cluster.registry/from (db/commit-id parent) :seon.db/db parent})))
+       (try
+         (on-child #(test-support/declare-source! % 'tq.doc-only-test (source "\"One, documented again.\"" "x") "test"))
+         (is (= #{} (members)) "a docstring-only change since the merge base selects no member")
+         (is (= #{} (on-child #(:seon.source/members (context/step-members (db/db %) "doc-only" #{}))))
+             "so the attempt's test step, which runs the member list, runs no test")
+         (on-child #(test-support/declare-source! % 'tq.doc-only-test (source "\"One.\"" "(+ x 0)") "test"))
+         (is (= #{'tq.doc-only-test/reaches-f} (members)) "a behavior change still selects the tests reaching it")
+         (let [namespace-members #(on-child (fn [c] (:seon.source/members
+                                                      (source/merge-members (db/db c) #{[:seon.ns/name 'tq.doc-only-test]} #{}))))]
+           (is (= #{} (namespace-members)) "a namespace row that lost no binding seeds no walk")
+           (on-child #(test-support/declare-source! % 'tq.doc-only-test (source "\"One.\"" "(+ x 0)" "") "test"))
+           (is (= #{'tq.doc-only-test/reaches-f} (namespace-members))
+               "a namespace that lost a binding seeds the tests reaching its members"))
+         (finally (registry/retire-branch! {:seon.store/store store :seon.store/branch child})))))))
 
 (deftest done-and-merge-judge-a-reaching-test-with-no-current-result-the-same-way
   ;; live run 3, chain fddd: the agent restored main's text of an existing test its change turned red, and the
