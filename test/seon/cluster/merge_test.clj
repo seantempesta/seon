@@ -966,3 +966,44 @@
       (finally
         (cluster.agent/release-context! on-chain)
         (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))
+
+(deftest ^{:seon.test/long "One chain, one prepare-merge! (a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one) and its merge."
+           :seon.test/long-ms 120000}
+  the-merge-count-and-the-merged-view-read-one-derivation
+  ;; A chain made from a filed task: its facts squash turns the filed entry into runtime data, so the merge moves that
+  ;; task beside its code. The count the merge's transaction writes and what main's merge moved
+  ;; (`seon.cluster.source/merge-accepted`, the context's merged view and publication) are one derivation.
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        task-ns "tq.onederivation"
+        _ (write! h-conn [(entity (db/db h-conn) :fn "derived-value" "(defn derived-value {:malli/schema [:=> [:cat] :int]} [] 1)")])
+        _ (support/transacted! h-conn (support/agent-tx (db/db h-conn) "root"))
+        _ (task/index-tasks! {:seon.db/connection h-conn
+                              :seon.task/files {(str "resources/seon/tasks/" task-ns ".edn") "[#:seon.task{:name \"fix\" :plan \"Filed.\"}]"}})
+        chain (task/chain! {:seon.db/connection h-conn :seon.store/store store}
+                           [{:seon.task/ns (symbol task-ns) :seon.task/name "fix" :seon.task/plan "Merge once, chained."
+                             :seon.task/proofs #{(sym "derived-check")}}])
+        branch (:seon.chain/branch chain)
+        on-chain (cluster.agent/acquire-context! target nil {:seon.agent/branch branch})
+        c-conn (:seon.db/connection on-chain)]
+    (try
+      (write! c-conn [(entity (db/db c-conn) :fn "derived-value" "(defn derived-value {:malli/schema [:=> [:cat] :int]} [] 2)")])
+      (write! c-conn [(entity (db/db c-conn) :test "derived-check" "(clojure.test/deftest derived-check (clojure.test/is (= 2 (seon.cluster.merge-test/derived-value))))")])
+      (let [[key] (chain-attempts! c-conn branch (:seon.task/handles chain))
+            merged (seon.merge/merge! target key)
+            main (db/db h-conn)
+            a (:db/id (db/pull main [:db/id] [:seon.task/assignment key]))
+            moved (:seon.program/identities (source/merge-accepted h-conn (seon.merge/merge-commit main a)))]
+        (is (= {} (select-keys merged [:seon.error/type :seon.error/offending])) "the merge answers no refusal")
+        (is (= #{[:seon.fn/sym (sym "derived-value")] [:seon.test/sym (sym "derived-check")]
+                 [:seon.task/sym (symbol task-ns "fix")]}
+               moved)
+            "main's merge moved the code, its proof and the filed task its facts made runtime")
+        (is (= (count moved) (:seon.task/merged-declarations (db/pull main [:seon.task/merged-declarations] a)))
+            "the merge's own count is the size of what main's merge moved")
+        (is (= moved (:seon.program/identities (:seon.source/accepted merged)))
+            "the merge answers what main's merge moved"))
+      (finally
+        (cluster.agent/release-context! on-chain)
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))

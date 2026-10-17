@@ -7,7 +7,7 @@ status: "owning plan for the merge and testing redesign, written 2026-10-17 by F
 # Merge hybrid (2026-10-17)
 
 **Phase status** (each implementing commit updates this line):
-P0 done (53fc1da51) · P1 done (5f5eb1855) · P2 done (14448514a) · P3 done (510b8023e) · P4a done (this commit; census landed beside it) · P4b done (this commit: the merge writes `:seon.task/merged-declarations` in its one transaction from Δ and the filed tasks its facts revise; `:seon.task/merge-commit` is gone, `seon.merge/merge-commit` derives the commit from the transaction that wrote the count, else the `:merged` outcome's) · P5 pending · P6 pending · P7 pending ·
+P0 done (53fc1da51) · P1 done (5f5eb1855) · P2 done (14448514a) · P3 done (510b8023e) · P4a done (this commit; census landed beside it) · P4b done (a3ed65f73: the merge writes `:seon.task/merged-declarations` in its one transaction; its count and what main's merge moved are one derivation, `seon.cluster.source/moved`, over the value the transaction leaves (`seon.cluster.source/moving`) and over the merge commit (`seon.cluster.source/merge-accepted`); `:seon.task/merge-commit` is gone, `seon.merge/merge-commit` derives the commit from the transaction that wrote the count, else the `:merged` outcome's) · P5 pending · P6 pending · P7 pending ·
 P8 pending · P9a pending · P9b pending · P10 done 8f39ed642 · P11a pending · P11b pending · P11c pending · P11d pending ·
 P12 pending (after `seon.cluster.agent/agent-creation-writes-no-program-namespace`) · P13 (per phase) census `seon.guard-census-test/a-changed-function-holds-no-guard` landed with P4a
 

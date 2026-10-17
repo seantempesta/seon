@@ -297,22 +297,6 @@
   [refused]
   (= :transaction/stale-basis (get-in refused [:seon.error/data :error])))
 
-(defn- tasks-moved
-  "The identities (`[:seon.task/sym ns/name]`) of the filed tasks (declared by a task file, never runtime data) whose
-  revision (`seon.task/task-revision`) the transaction data `tx-data` changes on main `database`."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/transaction-data] [:set :seon.program/declaration-identity]]}
-  [database tx-data]
-  (let [after (db/with database {:tx-data tx-data})
-        handle (fn [sym] (task/task-handle (symbol (namespace sym)) (name sym)))]
-    (into #{}
-          (comp (filter #(and (vector? %) (#{:db/add :db/retract} (first %)) (number? (second %))))
-                (map second) (distinct)
-                (keep (fn [e] (when-let [sym (:v (first (d/datoms after :eavt e :seon.task/sym)))]
-                                (when (and (empty? (d/datoms after :eavt e :seon.task/created-by))
-                                           (not= (task/task-revision database (handle sym)) (task/task-revision after (handle sym))))
-                                  [:seon.task/sym sym])))))
-          tx-data)))
-
 (defn- merge-onto
   "`merge!`'s work: assignment `key`'s merge through `execution`, the checkout `:root` (when given) proving the files."
   {:malli/schema [:=> [:cat :seon.merge/execution :seon.task/assignment [:map [:root {:optional true} :seon.fn/root]]]
@@ -351,10 +335,6 @@
             facts (when squashed (facts-tx target a squashed))
             meta {:seon.squash/source-branch branch :seon.squash/source-commit commit}
             basis (:max-tx target)
-            ;; the merge's one transaction also names how many declarations and tasks it moved, Δ and the filed tasks its
-            ;; facts revised: what publication reads
-            counted (fn [delta] (let [moved (into (set delta) (tasks-moved target facts))]
-                                  (cond-> (vec facts) (seq moved) (conj [:db/add a :seon.task/merged-declarations (count moved)]))))
             answer (fn [after]
                      (let [outcome (:seon.task/outcome (db/pull after [:seon.task/outcome] a))]
                        (run! #(conflict-task! connection branch %) (:conflicts squashed))
@@ -365,8 +345,14 @@
           (not (uuid? commit)) commit
           merged? {:seon.task/assignment key :seon.merge/conflicts []}
           (not accepted?)
-          (let [report (db/transact! connection {:tx-data (counted nil) :tx-meta meta :datahike/expected-basis-t basis})]
-            (if (:db-after report) (answer (:db-after report)) report))
+          ;; the merge's one transaction also names how many declarations and tasks it moved
+          ;; (`seon.cluster.source/moving`): what publication reads
+          (let [written (source/moving target (vec facts) a)
+                report (when (:tx-data written)
+                         (db/transact! connection {:tx-data (:tx-data written) :tx-meta meta :datahike/expected-basis-t basis}))]
+            (cond (not (:tx-data written)) written
+                  (:db-after report) (answer (:db-after report))
+                  :else report))
           :else
           (let [prepared (source/prepare-merge! context store branch (on-head #(assigned-task % a))
                                                  (cond-> {:merging facts} root (assoc :root root)))
@@ -374,7 +360,7 @@
                 ;; the judgment read H's facts squash; its fence is H's basis
                 accepted (when (and kept (not (:seon.error/at prepared)) (empty? (:seon.program/conflict prepared)))
                            (source/accept-merge! context store (assoc prepared :seon.db/basis-t basis)
-                                                 {:tx-data (counted (:seon.program/identities prepared)) :tx-meta meta}))
+                                                 {:tx-data (vec facts) :tx-meta meta :counted a}))
                 ;; main moved since H: nothing was written, and the next pass merges again from the new head
                 moved? (and (:seon.error/at accepted) (main-moved? accepted))]
             ;; an accepted merge branch has served, and so has one main moved past; a refused one stays, the
@@ -414,7 +400,7 @@
   on (MERGE-STEP). When main moved since H the writer refuses (`:seon.db/transaction-refused-error`), nothing is
   written, the merge branch is deleted and the next pass merges again. The files the checkout `root` would hold are
   proven before any test runs. The one transaction also records `:seon.task/merged-declarations`, how many
-  declarations and tasks Δ moved, when any; the merge commit is derived from the `:merged` outcome
+  declarations and tasks it moves, when any (`seon.cluster.source/moving`, the derivation `merge-accepted` reads back); the merge commit is derived from the `:merged` outcome
   (`merge-commit`); publishing the merged declarations into the checkout is the next
   pass's due work (`publish!`), never a step of the merge. A C main already merged (`merged?`) or a branch that
   wrote nothing merges nothing and transacts nothing. Answers the merge, or the first refusal as data with nothing

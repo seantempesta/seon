@@ -126,8 +126,9 @@
               :platform-run [:and {:description "The run of a merge gate's isolated members on the candidate's platform host (seon.cluster/reaching-run, seon.test.platform/check-files!), recorded on the merge branch beside the gate run."} :seon.test.run/id],
               :red-on-target [:set {:description "The judged reds already red at the target: the merge base, asked by the merge (seon.test/fork-point-red at the merge base commit) and the done rule (seon.cluster.source/red-at-merge-base) alike; neither counts one as the change's red, and a proof is never excused."} :seon.test/sym],
               :refusals [:vector {:description "Every refusal the done rule (seon.cluster.source/done-refusals) gives a judged branch, a merge branch included; empty only for done and acceptance."} :seon.error/value],
-              :merging [:map {:description "Transaction data and metadata accept-merge! carries in its transaction: root's merge of the assignment's facts (seon.merge/merge!)."}
-                        [:tx-data :seon.store/transaction-data] [:tx-meta {:optional true} :map]],
+              :merging [:map {:description "Transaction data and metadata accept-merge! carries in its transaction: root's merge of the assignment's facts (seon.merge/merge!), and the assignment whose :seon.task/merged-declarations the same transaction writes (seon.cluster.source/moving)."}
+                        [:tx-data :seon.store/transaction-data] [:tx-meta {:optional true} :map]
+                        [:counted {:optional true} :seon.db/entity-id]],
               :next-proofs [:set {:description "The proofs of the task that follows the judged one (its :seon.task/next): seon.cluster.source/done-refusals leaves them red, the next task's work. Absent on the chain's last task."} :seon.test/sym],
               :verdict [:enum {:description "Why a test of a merge's run is not green: an executed failure, or no executed outcome."} :red :unknown],
               :red-test [:map {:description "A judged test that is not green, the run that recorded its result (the judged run when none did) and its verdict."} :seon.test/sym :seon.test.run/id :seon.source/verdict],

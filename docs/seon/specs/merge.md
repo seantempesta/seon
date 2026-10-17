@@ -171,7 +171,9 @@ One verb, as `git merge`: `(my.root/merge! {:seon.task/assignment a})` (`seon.me
    (TASK-CHAIN §2.6: a chain branch is retired after publication).
 6. **Publication.** A merge commit that moved declarations is due work for the next pass
    (`seon.cluster.agent/publication-due?`): `:seon.task/merged-declarations`, written in the merge's one transaction
-   (gated paths only; a merge of facts alone moves no declaration), counts Δ's identities, program declarations and tasks alike. The merge commit is no attribute: `seon.merge/merge-commit` derives it from
+   counts what the merge moves, program declarations and filed tasks alike (a merge of facts alone moves only the filed
+   tasks its facts revise): `seon.cluster.source/moved` over the value the transaction leaves (`seon.cluster.source/moving`),
+   the same derivation `seon.cluster.source/merge-accepted` reads back from the merge commit for publication and context. The merge commit is no attribute: `seon.merge/merge-commit` derives it from
    the `:merged` outcome's transaction (`seon.db/commit-at-t`). A task entry is a declaration
    whose task file is its write-back: `seon.merge/publish!` writes a merged task (`[:seon.task/sym ns/name]`) into
    `resources/seon/tasks/<ns>.edn` by rewrite-clj (`seon.cluster.source/proven-task-file`), every other entry

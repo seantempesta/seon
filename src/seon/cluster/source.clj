@@ -821,7 +821,7 @@
   [expected held]
   (vec (sort-by str (filter #(not= (expected %) (held %)) (keys expected)))))
 
-(declare proven-files lint-errors root-refusal identity-namespace new-path done-refusals)
+(declare proven-files lint-errors root-refusal identity-namespace new-path done-refusals moving)
 
 (defn release!
   "Release materialized database values (the result of `compare-branch`, `commit-database`); refusals and nils are skipped."
@@ -1508,7 +1508,9 @@
   commit, so Datahike's commit graph makes the value merged the next comparison's merge base (`merge-base`). It
   carries Datahike's basis fence (`:datahike/expected-basis-t`, the head the judgment read): when main moved since,
   the writer refuses with nothing written (`:seon.db/transaction-refused-error`) and the next pass prepares again.
-  Answers the accepted merge `write-back!` takes: its identities, the commit before it, its merge commit and the run.
+  With `counted`, the merge's assignment, the same transaction writes how many declarations and tasks it moves
+  (`moving`). Answers the accepted merge `write-back!` takes: what it moved (`moved`, as `merge-accepted` derives it
+  from the commit), the commit before it, its merge commit and the run.
 
   ## Example
 
@@ -1523,21 +1525,24 @@
   ([source held-store prepared] (accept-merge! source held-store prepared {:tx-data []}))
   ([source held-store {e-id :seon.source/judged-commit run-id :seon.test.run/id delta :seon.program/identities
                        refusals :seon.source/refusals basis :seon.db/basis-t merged :parents}
-    {merging :tx-data meta :tx-meta}]
+    {merging :tx-data meta :tx-meta counted :counted}]
    (if (seq refusals)
      (first refusals)
      (let [connection (:seon.db/connection source)
+           head (db/db connection)
            tested (commit-database held-store e-id)]
        (try
-         (let [tx (if (seq delta) (replacement tested (db/db connection) delta) [])
-               report (when (vector? tx)
-                        (db/transact! connection (cond-> {:tx-data (into (vec merging) tx) :parents (conj merged e-id)
+         (let [tx (if (seq delta) (replacement tested head delta) [])
+               written (when (vector? tx) (moving head (into (vec merging) tx) counted))
+               report (when (:tx-data written)
+                        (db/transact! connection (cond-> {:tx-data (:tx-data written) :parents (conj merged e-id)
                                                           :datahike/expected-basis-t basis}
                                                    meta (assoc :tx-meta meta))))]
            (cond
              (not (vector? tx)) tx
+             (not (:tx-data written)) written
              (:db-after report)
-             (cond-> {:seon.program/identities delta
+             (cond-> {:seon.program/identities (:seon.program/identities written)
                       ;; the head this commit merged into is its parent other than the merged ones: Datahike's own
                       ;; lineage, never the report's uncommitted `:db-before`
                       :seon.source/base-commit-id (first (remove (conj merged e-id) (d/parent-commit-ids (:db-after report))))
@@ -2242,13 +2247,53 @@
         (write-back-refusal :commit-absent "The merge commit names no parent on its own branch."
                             {:seon.error/offending (db/commit-id after)}))))
 
+(defn moved
+  "What a merge moves from `before` to `after`, two values of one store (a commit and the merge commit on it, or a head
+  and the value a merge's transaction data leaves on it): the declarations whose definition digest differs and the filed
+  tasks whose filed declaration differs (`[:seon.task/sym ns/name]`; a runtime task, `:seon.task/created-by`, is never a
+  file's, so a filed task made runtime reads as removed). The one derivation of what a merge moved: the count the
+  merge's transaction writes (`moving`) and what main's merge moved (`merge-accepted`). Throws a refused read."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] :seon.program/identity-set]}
+  [before after]
+  (let [datoms (changed-datoms before after)
+        declared (fn/report-identities before after datoms (vec program/identity-attributes))
+        ;; a task is a declaration too: each entity whose task facts moved, by its symbol, when either side holds it filed
+        filed-sym (fn [database e] (when-not (seq (d/datoms database :eavt e :seon.task/created-by))
+                                     (:v (first (d/datoms database :eavt e :seon.task/sym)))))
+        sym-of (fn [e] (some #(filed-sym % e) [after before]))
+        tasks (into #{} (comp (filter #(= "seon.task" (namespace (:a %)))) (map :e) (distinct) (keep sym-of)
+                              (map #(vector :seon.task/sym %)))
+                    datoms)
+        filed-digests (fn [database identities]
+                        (into (held-digests database identities)
+                              (keep (fn [[attribute sym :as identity]]
+                                      (when (and (= :seon.task/sym attribute) (nil? (filed-declaration database sym)))
+                                        [identity :seon.program/absent])))
+                              identities))]
+    (when (:seon.db/invalid-read declared) (throw (ex-info (:seon.error/message declared) declared)))
+    (let [touched (into (set declared) tasks)
+          [was now] (map #(filed-digests % touched) [before after])]
+      (into #{} (filter #(not= (was %) (now %))) touched))))
+
+(defn moving
+  "Transaction data `tx-data` on `database` with what it moves (`moved` over the value it leaves) and, when it moves
+  any and `counted` names the merge's assignment, that assignment's `:seon.task/merged-declarations`, written in the
+  same transaction; else the writer's refusal of `tx-data`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/transaction-data [:maybe :seon.db/entity-id]]
+                  [:or [:map [:tx-data :seon.store/transaction-data] [:seon.program/identities :seon.program/identity-set]]
+                   :seon.db/error-result]]}
+  [database tx-data counted]
+  (let [after (db/with database {:tx-data tx-data})]
+    (if (:seon.error/at after)
+      after
+      (let [identities (moved database after)]
+        {:tx-data (cond-> (vec tx-data)
+                    (and counted (seq identities)) (conj [:db/add counted :seon.task/merged-declarations (count identities)]))
+         :seon.program/identities identities}))))
+
 (defn merge-accepted
-  "The accepted merge main's merge `commit` made, as `write-back!` takes it.
-  Derived from the commits on `connection`'s store alone: the declarations whose
-  definition digest the merge changed and the filed tasks whose filed declaration it changed
-  (`[:seon.task/sym ns/name]`; a runtime task, `:seon.task/created-by`, is never a file's, so a filed task a chain
-  made runtime reads as removed), the main commit it was transacted onto and
-  the merge commit; else the `:commit-absent` refusal."
+  "The accepted merge main's merge `commit` made, as `write-back!` takes it: what it moved from the main commit it was
+  transacted onto (`moved`), that commit and the merge commit; else the `:commit-absent` refusal."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.source/commit-id]
                   [:or :seon.source/accepted :seon.source/write-back-error]]}
   [connection commit]
@@ -2261,28 +2306,8 @@
     (try
       (if-not before
         parent
-        (let [datoms (changed-datoms before after)
-              declared (fn/report-identities before after datoms (vec program/identity-attributes))
-              ;; a task is a declaration too: each entity whose task facts moved, by its symbol, when either side
-              ;; holds it filed; a runtime task (`:seon.task/created-by`, a chain's among them) is no file's, so a
-              ;; filed task a chain made runtime is filed before and absent after: its entry is deleted
-              filed-sym (fn [database e] (when-not (seq (d/datoms database :eavt e :seon.task/created-by))
-                                           (:v (first (d/datoms database :eavt e :seon.task/sym)))))
-              sym-of (fn [e] (some #(filed-sym % e) [after before]))
-              tasks (into #{} (comp (filter #(= "seon.task" (namespace (:a %)))) (map :e) (distinct) (keep sym-of)
-                                    (map #(vector :seon.task/sym %)))
-                          datoms)
-              filed-digests (fn [database identities]
-                              (into (held-digests database identities)
-                                    (keep (fn [[attribute sym :as identity]]
-                                            (when (and (= :seon.task/sym attribute) (nil? (filed-declaration database sym)))
-                                              [identity :seon.program/absent])))
-                                    identities))]
-          (when (:seon.db/invalid-read declared) (throw (ex-info (:seon.error/message declared) declared)))
-          (let [touched (into (set declared) tasks)
-                [was now] (map #(filed-digests % touched) [before after])]
-            {:seon.program/identities (into #{} (filter #(not= (was %) (now %))) touched)
-             :seon.source/base-commit-id parent :seon.source/commit-id commit})))
+        {:seon.program/identities (moved before after)
+         :seon.source/base-commit-id parent :seon.source/commit-id commit})
       (finally (run! #(some-> % d/release-materialized-db) [before after])))))
 
 (defn merge-paths
