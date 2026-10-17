@@ -1,11 +1,19 @@
 ---
 title: "MERGE-STEP: a refused final merge keeps its merge branch and holds a merge step for root"
 type: card
-status: in implementation (owner rulings 2026-10-15); amends TASK-CHAIN §1, §2.2, §2.6, §2.7, §4
+status: installed through phase F (owner rulings 2026-10-15/16); retired into the merge task by the task model (owner 2026-10-17, task-model T3b): items 3 to 4 and 7 to 9 and phases B to E describe the installed append, which T3b deletes, and phases B to E are moot; items 1, 2, 5, 5a and 6 describe behavior the merge task keeps (TASK-CHAIN §2.6, [task model](../../../research/agent-platform/2026-10-17/task-model.md) §6.2)
 created: 2026-10-15
 ---
 
 # MERGE-STEP
+
+**Target (task-model T3b).** A merge is an ordinary task, `seon.step.merge/template`, written with the work it merges and
+carrying `:seon.task/needs` and a `:seon.task/target` (main). Its environment is the merge branch (main's head plus the
+work's change, conflicts as unmerged entries, main winning), built when the task is ready; its done step is P4a's accept.
+Nothing is appended after a refusal: a conflict or a red leaves work at the task's start step and its agent starts
+there, and the block's `:seon.context/conflicts` section lists each conflict (task model §6.3). The append
+(`seon.task/next-tx`, `merge-step`, `:seon.task/refusal`, `:seon.task/refused-tests`), `my.root/merge-steps` and the
+per-chain `merge-chains!` path are deleted with the chain. What follows describes the installed path until then.
 
 What exists: root's pass merges a chain whose last task is done (`seon.cluster.agent/merge-chains!` →
 `seon.merge/merge!` → `seon.cluster.source/prepare-merge!` → `seon.cluster/candidate-gate!` →

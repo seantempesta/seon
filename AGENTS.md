@@ -347,8 +347,8 @@ definition with the same input is computed once for every branch and agent that 
   the platform: compiled (host-bound) code, the evaluator, printer and test runner included, keeps running as
   compiled and working on every branch, and sees a change only after merge and reload; what the branch evaluates
   from source sees its definitions. Compute host-bound status per declaration, never from a hand list of namespaces.
-- **An agent's context** is its SCI context; its task selects the branch it checks out: its chain's branch (a new agent
-  per task, in turn), or for root the live cluster head. Every agent, filesystem agents on their own named branches
+- **An agent's context** is its SCI context; its task selects the branch it checks out: its task's `:seon.task/branch`
+  (installed: its chain's branch; a new agent per task, in turn), or for root the live cluster head. Every agent, filesystem agents on their own named branches
   included, uses the one REPL entrance. Private defs, atoms and objects survive program changes advanced in place at
   idle boundaries; each eval request reacquires from the branch head, reusing content-valid derivations.
 - **Reload.** A reload is `require :reload` for changed namespaces and their dependents. It goes entities → load →
@@ -356,9 +356,11 @@ definition with the same input is computed once for every branch and agent that 
   compares the loaded program identity at start and end and pushes back, never takes a lock. Failure leaves affected
   execution unavailable until exact bytes, behavior and instrumentation converge; never call an unchanged entity healthy.
   Ordinary clusters keep their program; selected development clusters reload explicitly.
-- **Merge is a root task.** An agent writes no merge request. When a chain's last task is done
-  (`seon.cluster.source/done-refusals`, the one done rule), root's `db<->flow` merges the chain branch to main once, the
-  terminal attempt as its source (installed until S3b-1: one merge request per assignment). Root's tools live in
+- **Merge is a root task.** An agent writes no merge request. Target (task-model T3b, owner 2026-10-17): a merge is an
+  ordinary task after the work it merges, its `:seon.task/target` main; when it is done (`seon.cluster.source/done-refusals`,
+  the one done rule; green at its start ends it with no model call), the done step accepts onto main once, in one
+  fenced transaction. Installed until T3b: when a chain's last task is done, root's `db<->flow` merges the chain branch
+  to main once, the terminal attempt as its source (and until S3b-1, one merge request per assignment). Root's tools live in
   `my.root` (`instructions`, `merge-requests`, `merge!`, `close!`, `ended`; the reconciler launches agents) and use
   git's words: a merge request is merged (`:merged`) or closed with a reason (`:closed`). `merge!` takes the whole delta
   since the merge base and commits only when it is green: the last task's proofs, every test the branch defines or
@@ -369,7 +371,7 @@ definition with the same input is computed once for every branch and agent that 
   order. The writer checks the touched entities' digests; only root's merge advances main. Local green never implies
   shared acceptance.
 - **Write-back** uses the same checks, checks file bases, stages exact-span changes and reindexes to prove equivalent
-  declarations before installation. Chain tasks are runtime data, never written into task files; the merge of a chain that worked a filed task deletes that entry (TASK-CHAIN §2.6, installed until S3f-1).
+  declarations before installation. Chain tasks are runtime data, never written into task files; the merge of the tasks that worked a filed task deletes that entry (TASK-CHAIN §2.6, installed until S3f-1).
 
 ## Data and contracts
 
@@ -381,15 +383,15 @@ definition with the same input is computed once for every branch and agent that 
   missing render is not a fix. Choose each relationship deliberately: component, optional or required peer ref, identity
   value, or an edge the recording transaction moves; a statement about a living entity is a ref, an observed name is a value; a component
   is validated as its whole owning value on each write, so size trees by what each write owns.
-- **Agents are compartments; root acts cluster-wide** (owner, 2026-10-12). A non-root agent holds its chain's branch and
+- **Agents are compartments; root acts cluster-wide** (owner, 2026-10-12). A non-root agent holds its task's branch (installed: its chain's) and
   its own SCI context, and nothing else: it writes only that branch, never main or another branch, and never loads code
   into the platform JVM. That is what lets many agents run at once safely. Its tracked facts (task updates, its end,
-  sent messages) and its code reach main only through its chain's one merge, whose contents are the derived diff since
+  sent messages) and its code reach main only through the one merge of its branch (installed: its chain's), whose contents are the derived diff since
   the merge base (git's untrusted-contributor model: an agent never pushes). Only root acts cluster-wide: it holds main,
   and it merges, starts and stops agents and loads code. Root and an agent differ only by the branch they hold. **Agents
   transact facts; root reacts.** An agent never performs an effect that reaches main or another agent: it writes its
   end, task updates and outgoing messages as facts on its branch, and root's `db<->flow`, woken by that branch's listen
-  route, executes everything that affects main or other agents (advancing the chain, the final merge, message delivery,
+  route, executes everything that affects main or other agents (advancing the work along `needs`, the merge, message delivery,
   stopping it, starting the next agent, problem tasks). Effects local to its compartment (model calls, its own
   evaluation, its own tests in a fork of its SCI context) stay its own. Within its compartment an agent may make serious
   changes, first-party code included: the immutable database and rollback are the safety net. What each kind of entrant
@@ -474,10 +476,17 @@ definition with the same input is computed once for every branch and agent that 
 - **Write tasks as data an agent can be handed.** A task is one entity
   ([TASK-CHAIN](docs/seon/schedule/cards/TASK-CHAIN.md) §1): `:seon.task/ns` and `:seon.task/name` (the task is
   `ns/name`), `:seon.task/plan` (Markdown: what must become true, with its references inline), `:seon.task/instructions` (its own work), `:seon.task/proofs` (the deftests that must be green for it to be
-  done) and `:seon.task/next`. A declared task lives in `resources/seon/tasks/<ns>.edn`; chain tasks are runtime data. A
-  chain is a vector of plain task maps (a template merged with a plan, `seon.task/template`) that `seon.task/chain!`
-  writes in one transaction on its own branch, linked by `next`; a single task is a chain of one. The plan flows to the
-  next task at each advance; `instructions` and `proofs` never flow. The one task writer derives
+  done) and, in the target model (task-model T1–T4, owner 2026-10-17), `:seon.task/needs` (the set of prerequisites),
+  its environment (`:seon.task/branch`, `:seon.task/target`, `:seon.task/config`, `:seon.task/model`) and
+  `:seon.task/execution`. A declared task lives in `resources/seon/tasks/<ns>.edn`; runtime tasks are never written into
+  task files. Target: tasks are desired state on main, the observed state is facts written by their observers, and one
+  reconciler (`seon.cluster.agent/reconcile`) closes the gap; there is no chain entity. `seon.task/create-all!` writes a
+  vector of plain task maps (a template merged with a plan, `seon.task/template`) in one transaction on main, every task
+  `:held`; nothing autoruns, root's `my.root/run!` is the one release, and `:seon.config.agent/max-running` caps parallel
+  attempts. A single task is a task with no needs, followed by a merge task when it should reach main. Installed until
+  then: `seon.task/chain!` writes a chain of task maps on its own branch linked by `:seon.task/next`, a single task being
+  a chain of one. The plan flows to the next task at each advance (target: along `needs`); `instructions` and `proofs`
+  never flow. The one task writer derives
   `:seon.task/references`; it is never authored. Proofs are deftests, never prose: prefer an existing failing test or a
   new row in an existing table test; write a new deftest only for a behavior no test covers; a task already green proves
   nothing; at merge root keeps a new test only if it guards a new behavior class. References are typed by plain EDN and
@@ -562,9 +571,11 @@ definition with the same input is computed once for every branch and agent that 
   start and after any eval request that evaluated a form, the branch's changed tests, the tests reaching the change and
   then the task's proofs run on the chain branch (reused by reach digest); all green at the start ends the task with no
   model call. One rule judges every task done, `seon.cluster.source/done-refusals` (TASK-CHAIN §2.4: proofs green, no
-  regression of main, no stray red, no contract gap), and root advances the chain. Every other end bails to root with a
-  problem task, the task held and the branch kept; nothing relaunches by itself: root changes the held task and runs it
-  again (`my.root/run!`), abandons the chain or builds a new one. Proofs guide the agent and the fix is code or data
+  regression of main, no stray red, no contract gap), and root advances the work. Every other end bails to root with a
+  problem task, the task held and the branch kept; nothing relaunches by itself: root changes the held task and releases
+  it again (`my.root/run!`), abandons the chain (target: cancels the tasks and every task that needs them) or builds a
+  new one. A task whose desired environment differs from the observed one is restarted clean, never advanced in place
+  (target, task-model T4). Proofs guide the agent and the fix is code or data
   updates; there are no question tasks or answer verb (owner, 2026-10-16). `my.task/send-back!`,
   with a required reason and a counterexample, bails a broken or impossible task to root; an agent's other task verbs
   are `my.task/current` and `my.task/update!` (`clojure.core/update` on a member), and

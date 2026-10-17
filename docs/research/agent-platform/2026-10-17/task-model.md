@@ -6,7 +6,7 @@ status: "design plan by lane task-model-plan (Opus), 2026-10-17, from the owner'
 
 # Task model: desired state, observed state, one reconciler (2026-10-17)
 
-**Phase status** (each implementing commit updates this line): T0 pending · T1 pending · T2 pending · T3a pending ·
+**Phase status** (each implementing commit updates this line): T0 done except TASK-CHAIN, which lane merge-p4b holds (its edit is `task-t0-task-chain.patch` beside this file: `git apply` it once that claim is released, then T0 is complete) · T1 pending · T2 pending · T3a pending ·
 T3b pending · T3c pending (no norm; updates `seon.mine`) · T4 pending (clean restart) · P10 (merge-hybrid's phase, with
 §6.3's conflicts section) pending
 
