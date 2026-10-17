@@ -1,12 +1,12 @@
 ---
 title: "Task model: desired state, observed state, one reconciler"
 type: plan
-status: "design plan by lane task-model-plan (Opus), 2026-10-17, from the owner's directions of 2026-10-17 (tasks carry branch and environment; the task graph is the scheduler; desired vs observed state; merge is an ordinary task, no merge attribute), folding in every ruling of merge-rulings.md \"The task model (owner, 2026-10-17, later)\", which binds. The owner decisions of 2026-10-17 (last section before the narrow check) bind and are applied in place; the narrow check (lane task-model-check, last section) corrected the claims and phases it names. Read-only probes on default (JVM mode). Not yet amended into TASK-CHAIN: phase T0 does that."
+status: "design plan by lane task-model-plan (Opus), 2026-10-17, revised in place by lane task-model-rev (Sonnet) to fold in transitions.md's completed transition table, its 15 gaps and owner decisions 6 to 8, from the owner's directions of 2026-10-17 (tasks carry branch and environment; the task graph is the scheduler; desired vs observed state; merge is an ordinary task, no merge attribute), folding in every ruling of merge-rulings.md \"The task model (owner, 2026-10-17, later)\", which binds. The owner decisions of 2026-10-17 (last section before the narrow check) bind and are applied in place; the narrow check (lane task-model-check, last section) corrected the claims and phases it names. Read-only probes on default (JVM mode). Not yet amended into TASK-CHAIN: phase T0 does that."
 ---
 
 # Task model: desired state, observed state, one reconciler (2026-10-17)
 
-**Phase status** (each implementing commit updates this line): T0 done except TASK-CHAIN, which lane merge-p4b holds (its edit is `task-t0-task-chain.patch` beside this file: `git apply` it once that claim is released, then T0 is complete) · T1 pending · T2 pending · T3a pending ·
+**Phase status** (each implementing commit updates this line): T0 done except TASK-CHAIN, which lane merge-p4b holds (its edit is `task-t0-task-chain.patch` beside this file: `git apply` it once that claim is released, then T0 is complete) · T1 pending · T2 pending · T3a pending (the exhaustive transition table, §5) · T3a-agent pending ·
 T3b pending · T3c pending (no norm; updates `seon.mine`) · T4 pending (clean restart) · P10 (merge-hybrid's phase, with
 §6.3's conflicts section) pending
 
@@ -18,7 +18,7 @@ of tasks. Each of those belongs on a task. Once they do, the chain has nothing l
 1. **Desired state is task facts on main.** One task schema, nothing merge-specific. A task names:
    - its prerequisites, `:seon.task/needs`;
    - its environment: its branch, its target and its config and model;
-   - whether it should run, `:seon.task/execution`. Every written task is `:held`: nothing autoruns until the owner
+   - whether it should run, `:seon.task/execution` (`:held`, `:running` or `:cancelled`). Every written task is `:held`: nothing autoruns until the owner
      flips it on, by root writing `:running` (`my.root/run!`).
 
    The tasks on main are the schedule. Root, the task writer and config apply are the only writers.
@@ -33,8 +33,8 @@ of tasks. Each of those belongs on a task. Once they do, the chain has nothing l
 3. **One reconciler.** `seon.cluster.agent/reconcile` is a pure function of (desired, observed) that answers the
    minimal actions. Each action's actor writes the observed fact that closes its gap, and that commit wakes the next
    pass. Reconciling the same state twice answers nothing the second time.
-4. **Scheduling and merge are not mechanisms of their own. They are rows of the reconciler's gap table (§5).**
-   - A task is ready when every task it needs is done where that task's attempts live.
+4. **Scheduling and merge are not mechanisms of their own. They are rows of the reconciler's transition table (§5), checked for exhaustiveness.**
+   - A task is ready when it is `:running`, every task it needs is done where that task's attempts live, and its latest attempt is absent or `:closed`.
    - The minimal action for a ready task is "build its environment, then start". The build rule is one rule, P4a's
      prepare generalized: a task continues its need's branch, or gets a new branch holding main's head plus the
      unmerged change of each need on another branch.
@@ -80,7 +80,7 @@ facts, one by main's one attempt row); 972 task entities on main, 962 of them wi
 | 4 | Identity, and an idempotent create (the first task's handle) | `seon.task/chain!`, `chain-branch` | Each task's own identity (`seon.task/task-handle`). `seon.task/create-all!` is idempotent per task. |
 | 5 | Order, along `next` from `first` | `chain-read`, `chain-handles`, `chain-ends`, `chain-finishes`, `chain-view` | The `needs` graph |
 | 6 | Fork point (`:seon.chain/from`) | `chain!`, `bail-chain!` (its problem text) | Deleted as a separate meaning. To continue another branch's work, a task names that branch, or needs a task on it: the build rule then carries its change (§5). |
-| 7 | Config overlay (`:seon.chain/config`) | `chain!`, `chain-refusal`, `config-tx`, `desired-config` | `:seon.task/config`, converged onto the branch when the task starts (§5, row 2) |
+| 7 | Config overlay (`:seon.chain/config`) | `chain!`, `chain-refusal`, `config-tx`, `desired-config` | `:seon.task/config`, converged onto the branch when the task starts (§5, N4) |
 | 8 | Whether the work merges (`:seon.chain/merge?`) | `chain!`, `chain-finishes` | Whether a merge task follows the work. A bench run writes no merge task. |
 | 9 | Scoping: the branch inherits main's tasks, and the chain's work is only its `next` path | `chain-read`, `chain-ends` | Nothing to scope. The schedule is main's tasks, and a branch holds only its attempts and its agents' edits. |
 | 10 | A wake route per chain branch | `route-chain!`, `route-chains!`, `release-chain-route(s)!` | A route per branch with a ready task or an open attempt, derived each pass |
@@ -99,7 +99,7 @@ facts, one by main's one attempt row); 972 task entities on main, 962 of them wi
 | `:seon.task/branch` | task writer, resolved at the write (§4) | the branch the task's attempts check out |
 | `:seon.task/target` | task writer (the merge template's builder) | the branch the task's done step writes. Absent: the done step writes only its own branch. Environment, not merge logic (§6). |
 | `:seon.task/config` | task writer | the task's config decisions over main's (the old `:seon.chain/config` value) |
-| `:seon.task/execution` | task writer (`:held` at create and at ingestion); root (`:running` to release, `:held` at a bail, `:cancelled` at abandon, `:paused`) | whether it should run. Nothing autoruns. |
+| `:seon.task/execution` | task writer (`:held` at create and at ingestion); root (`:running` to release, `:held` at a bail, `:cancelled` at abandon) | whether it should run. Nothing autoruns. `:paused` and `:stopped` are folded into `:held` (owner decision 7). |
 | config dials | `bin/seon config apply`, root | the cluster's desired config. `:seon.config.agent/max-running` bounds parallel attempts. |
 
 ### 3.2 Observed-state facts (each written only by its observer)
@@ -115,7 +115,7 @@ facts, one by main's one attempt row); 972 task entities on main, 962 of them wi
 | `:seon.task/outcome :done` | root's done judgment (`seon.cluster.source/done-refusals` empty at the end commit) | the task's branch | after the end |
 | `:seon.task/outcome :closed`, `:seon.task/reason` | root, at a bail or abandon | the task's branch | after the end |
 | the merge (`:seon.task/outcome :merged`, `:seon.squash/source-commit`, `:seon.task/merged-declarations`) | the done step of a task whose branch targets main: P4a's accept, one transaction with the basis fence (P4b) | main | when main accepts |
-| `:seon.db/transaction-refused-error` (main moved) | Datahike's writer | nothing written | the gap stays: rebuild the branch (§5, row 1b) |
+| `:seon.db/transaction-refused-error` (main moved) | Datahike's writer | nothing written | the gap stays: merge main forward (§5, A3, O4), or rebuild an idle branch (N3) |
 | test results, keyed by reach digest | the runner | the branch tested | at each run |
 | `:seon.task/git-commit`, `:seon.task/publication-refusal` | `seon.merge/publish!` | main | after publication |
 
@@ -127,6 +127,20 @@ The registry still holds the graph object and the in-flight transitions of the r
 merge-main). A crash empties the registry. Boot then retracts the stale `graph-process` values, so the next pass reads
 "not running" from the data and never from silence.
 
+**Where a task's progress lives** (owner decision 6). A task's progress, its done included, is observed state on the
+task's own branch, because agents write only their branch. The reconciler reads desired state from main and observed
+state from each task's branch (`seon.db/branch-database`, cached by commit, one read per task), so nothing is copied
+to main to be read there. Branches are never deleted by default (`:seon.config.agent/keep-ended-branches?` ships true
+and stays the default): an ended branch stays as history and as the record of its task. Compaction is an explicit act,
+built when first wanted, and the dial's `false` arm is not the way to compact. Before the branch goes, it records on main what the reconciler still needs from it for that task (the
+outcome its dependents' "done where its attempts live" reads), and then deletes. This resolves gap 11 (deleting a
+branch erased a no-target task's only `:done`, so the task would run again) without moving data. Until compaction is
+built, no branch is deleted and the state cannot arise; the compacted task's representation (a branch `:absent` with
+an outcome) is a new constraint the compaction phase adds to §5.1's table with its row, not something T3a decides.
+
+The bail is the one writer of two databases, and its order is fixed (§5.2): `:held` on main first, then `:closed` on the
+branch.
+
 ## 4. Attributes
 
 | Attribute | Status | Type | Replaces | Rule |
@@ -136,9 +150,9 @@ merge-main). A crash empties the registry. Boot then retracts the stale `graph-p
 | `:seon.task/target` | new (git's word: a merge request's target branch) | branch keyword | `:seon.chain/merge?`, `chain-finishes`' "the last task merges", the merge step's append | The branch the task's done step writes, and that its own branch is built against. Only the merge template's builder sets it, to main's branch. Why a datum is needed at all is in §6. |
 | `:seon.task/config` | new as a stored attribute (today the name of the runnable view's decided key) | `[:map-of :qualified-keyword :seon.schema/value]` | `:seon.chain/config` | The task's decisions. The runnable view's decided value keeps its schema name `:seon.task/desired-config` as its key. The turn cap is a dial in it: no separate attribute. |
 | `:seon.task/model` | exists | | | unchanged. `:outside` is how root repairs at the REPL (§6). |
-| `:seon.task/execution` | exists | enum | `:seon.chain/state` (derived), `my.root/run!` as a starter | The writer (`create-all!`) and ingestion both write `:held` (owner decision 2). Root releases a task by writing `:running`; nothing else starts work. |
+| `:seon.task/execution` | exists | enum `:held :running :cancelled` after owner decision 7 (`:paused` and `:stopped` leave the enum in T3c, after T3b converts their readers) | `:seon.chain/state` (derived), `my.root/run!` as a starter | The writer (`create-all!`) and ingestion both write `:held` (owner decision 2). Root releases a task by writing `:running`; nothing else starts work. |
 | `:seon.agent/graph-process` | new | ref to `:seon.db.process/process` | `:seon.flow.actions/started` read from the registry | §3.2 |
-| `:seon.agent/environment` | new | digest of the decided config the agent's turn loop read | — | observed environment, closes gap row 13 |
+| `:seon.agent/environment` | new | digest of the decided config the agent's turn loop read | — | observed environment, closes the restart (G5, O3) |
 | `:seon.task/next` | **deleted in T3c** (T3b converts every reader but the chains page's, which T3c deletes with the attribute) | | | replaced by `needs` |
 | `:seon.chain/*` (13 keys and the views) | **deleted** | | | §2 |
 
@@ -161,32 +175,163 @@ written together and linked".
 `seon.cluster.agent/observe` reads desired and observed state into one value:
 - main's tasks and their needs (one query, measured 1.2–1.5 ms on default over 962 tasks: `seon.task/ready` 1.33 ms
   warm, the needs query 1.16 ms);
-- the attempt rows of each branch with a ready task or an open attempt, its head read once with
-  `seon.db/branch-database` and released (0.45–0.7 ms per branch, TASK-CHAIN §2.2's measure);
+- **each task's progress from the task's own branch** (owner decision 6): its attempt rows, their ends, the outcome and
+  the step results, read once per task with `seon.db/branch-database` and cached by the branch's commit, so a branch
+  that has not moved costs a lookup (0.45–0.7 ms per branch uncached, TASK-CHAIN §2.2's measure). Only a task whose
+  branch exists is read; a held task with no branch costs nothing;
 - the graph processes on main, and the store's branches.
 
 `seon.cluster.agent/reconcile` is `[:=> [:cat :seon.flow.actions/observed :seon.config.agent/max-running]
-:seon.flow.actions/actions]`. It is pure. `apply-actions!` hands each action to its actor. No pass re-derives inside
-itself: an action's closing commit wakes the next pass through the route.
+:seon.flow.actions/actions]`. It is pure: the plan is data and each action's actor executes it (Terraform's plan and
+apply). `apply-actions!` hands each action to its actor. No pass re-derives inside itself: an action's closing commit
+wakes the next pass through the route. The pass is the one `db<->flow` already runs, and Flow stays the runtime
+(`transitions-web.md` §7, `transitions.md` §7.1):
 
-**Readiness.** T is ready when all of these hold:
-- `execution(T) = :running`;
-- T is not done (no latest attempt with outcome `:done` or `:merged`);
-- no attempt of T is open;
-- every N in `needs(T)` is **done where N's attempts live**:
-  - N's branch head for a task with no target;
-  - main for a task whose done step wrote main, because its accept transaction carries N's attempt;
-- no other task on `branch(T)` has an open attempt (one checkout per branch).
+```
+wake (seon.cluster.wake/route!) → observe → task-state per task → transitions → admit → actions → owners
+```
 
-Ready tasks start oldest first, while the open attempts (`:running`, `:paused` or `:held` execution, as `launch-actions`
-counts them today) are fewer than `:seon.config.agent/max-running`, read from the cluster's configuration at every pass
-(`seon.config/effective`; the shipped value is 4 and the live cluster answers 4). The cap is the only bound on parallel
-starts. A task becomes ready only by root writing `:running`: every written task is `:held`.
+### 5.1 The state of one task, as Malli enums
 
-The ruling's "and its own proofs are not yet green" is honored by the start step (row 3), not by a precondition. The
+Desired and observed state per task, after `observe`, is one value of `:seon.flow.actions/task-state`: twelve
+dimensions, each a registered Malli enum. Three reuse a schema that exists (`:seon.task/execution`,
+`:seon.task/outcome`, `:seon.task.attempt/end`). The execution enum is `:held :running :cancelled` after owner decision
+7 (below); `transitions.md` proved `:stopped` behaves exactly as `:held`, and `:paused` is folded by the owner.
+
+| Dimension | Values | Source fact (§3) |
+|---|---|---|
+| `execution` | `:held :running :cancelled` | `:seon.task/execution` on main |
+| `needs` | `:none :pending :done` | each need done where its attempts live (readiness below) |
+| `target` | `:none :main` | `:seon.task/target` |
+| `environment` | `:complete :incomplete` | `:seon.task/environment` validates the desired environment (§6.1) |
+| `branch` | `:absent :current :stale` | the branch exists; its recorded base H is, or is not, the target's head |
+| `config` | `:none :converged :differs` | the branch's config row against `:seon.task/desired-config` |
+| `attempt` | `:none :unended` and the seven ends | the latest attempt row and `:seon.task.attempt/end`, on the task's branch |
+| `outcome` | `:none :done :merged :closed` | `:seon.task/outcome` of the latest attempt, on the task's branch |
+| `step` | `:none :unjudged :empty :work-left` | the latest `done-refusals` judgment at the head |
+| `agent-env` | `:none :same :differs` | `:seon.agent/environment` and `:seon.agent/branch` against the desired environment |
+| `graph` | `:absent :running` | `:seon.agent/graph-process` (T2) |
+| `publication` | `:none :due :done` | `:seon.task/git-commit` or `publication-refusal` after `:merged` |
+
+Rows may also read two values derived from these, never stored:
+- `latest`: `:none :open :awaiting :closed :settled`. It folds `attempt` and `outcome` into the attempt's phase:
+  `:awaiting` is ended with no outcome, `:settled` is `:done` or `:merged`.
+- `wanted`: true when `execution` is `:running` and `needs` is not `:pending`.
+
+Three things are deliberately not dimensions, because no decision depends on them:
+- unmerged entries (`seon.cluster.source/done-refusals` includes `unmerged-refusal`, so they are `step :work-left`);
+- proofs green, red or unknown (they are `step`);
+- the cluster's intent, `:seon.flow.actions/cluster`: `launch-facts` hardcodes it to `:running`, a dead dial deleted in
+  T3b/T3c (§9). On and off is Flow's pause of `db<->flow` (§7).
+
+**The impossible combinations are data**, each with its reason: `{:id :why :when {dimension #{values}}}`, held in one
+registered named predicate. `transitions.md` §1 names 17: 16 by construction and one invariant.
+`config-without-branch` and `branch-without-config` (the branch holds the config row); `stale-without-target`;
+`attempt-without-branch`; `outcome-without-attempt`, `step-without-attempt`, `attempt-without-step` (the start step
+writes the attempt row, unjudged until it judges); `attempt-without-agent`, `graph-without-agent`,
+`agent-without-attempt` (the start step acquires the context, which records its environment, before any graph);
+`merged-without-target`, `done-with-target`; `settled-not-green`; `incomplete-but-same`;
+`publication-without-merge`, `merge-without-publication-state`; and the invariant `graph-after-outcome` (every outcome
+writer requires the graph absent: the closure check proves the table keeps it).
+
+Counts, over the folded enums (re-run by this lane with `transitions.md`'s prototype, enums reduced, in a throwaway
+JVM; the unfolded figures of `transitions.md` are 29,760 of 2,099,520):
+
+| | States |
+|---|---|
+| Product of the twelve enums | 839,808 |
+| Impossible by construction | 819,792 |
+| Impossible by the invariant | 6,048 |
+| Possible | 13,968 |
+
+Enumeration backtracks over the dimensions and prunes a partial state as soon as a constraint whose dimensions are all
+assigned matches it (54 ms).
+
+### 5.2 The transition table
+
+`seon.cluster.agent/transitions` is a vector of `{:row :when :then}` maps, a Var, so `source` shows it to agents.
+`:when` maps a dimension (or `latest`, `wanted`) to a value or a set; `:then` is a vector of action ops, or `[]` with
+`:steady "name"`; `:start? true` marks the start group. Rows are **disjoint**: no priority order, no `:else`, no default
+row. A steady state is a row with no actions, so an unmatched state is a red test and never a silent no-op. This
+replaces the old gap table row for row (the old numbers are in the last column).
+
+| Row | When (besides the group's condition) | Then | Replaces |
+|---|---|---|---|
+| **A hosted graph** (only an open or awaiting attempt has one) | | | |
+| G1 | graph running, latest `:awaiting` | `:stop` | 6 |
+| G2 | graph running, open, execution `:held` or `:cancelled` | `:stop` | 6 |
+| G5 | graph running, open, `:running`, agent-env `:differs` | `:stop` (restart, first half) | 13 |
+| G6 | graph running, open, `:running`, agent-env `:same`, branch `:current` | steady "working" | — |
+| G7 | graph running, open, `:running`, agent-env `:same`, branch `:stale` | `:merge-main` | 1b, open half |
+| **No graph, an open attempt** | | | |
+| O1 | execution `:cancelled` | `:close-cancelled` | 11 |
+| O2 | execution `:held` | steady "held with its attempt open" | — |
+| O3 | `:running`, agent-env `:differs` | `:close-environment` (restart, second half) | 13 |
+| O4 | `:running`, agent-env `:none` or `:same`, branch `:stale` | `:merge-main` | 1b, open half |
+| O5 | as O4, branch `:current`, step `:unjudged` | `:judge` | none (a crash between the attempt row and its judgment) |
+| O6 | as O5, step `:empty` | `:done-step` | 3a |
+| O7 | as O5, step `:work-left` | `:start-graph` | 3b and 5, one row |
+| **No graph, the attempt ended, no outcome** | | | |
+| A1 | execution `:cancelled` | `:close-cancelled` | none (a bail would write `:held` over `:cancelled`) |
+| A2 | execution `:held` or `:running`, end other than `:done` | `:bail` | 8 |
+| A3 | not cancelled, end `:done`, branch `:stale` | `:merge-main` | none (1b would rebuild over the work) |
+| A4 | not cancelled, end `:done`, `:current`, step `:unjudged` | `:judge` | 7 |
+| A5 | … step `:empty` | `:done-step` | 7 |
+| A6 | … step `:work-left` | `:bail` | 7, refused |
+| **Settled** (outcome `:done` or `:merged`) | | | |
+| S1 | publication `:none` or `:done` | steady "done" | — |
+| S2 | publication `:due` | `:publish` | 9 |
+| **Nothing open** (latest `:none` or `:closed`): the start group, admitted by the fold below | | | |
+| N1 | not wanted (not `:running`, or a need pending) | steady "not released, or waiting on needs" | — |
+| N2 | wanted, branch `:absent` | `:build` (start group) | 1 |
+| N3 | wanted, branch `:stale` | `:rebuild` (start group) | 1b, idle half |
+| N4 | wanted, `:current`, config `:differs` | `:converge-config` (start group) | 2 |
+| N5 | wanted, `:current`, converged, environment `:incomplete` | `:problem-hold` | 3c |
+| N6 | wanted, `:current`, converged, environment `:complete` | `:start-step` (start group) | 3 |
+
+The branch-level table (a second table of four booleans: active, route held, finished, ended; 16 combinations, 8
+possible) replaces old rows 10 and 12:
+
+| Row | When | Then | Replaces |
+|---|---|---|---|
+| B1 | active, route absent | `:listen` | 12 |
+| B2 | active, route held | steady | — |
+| B3 | not active, route held | `:release-route` | today's `release-chain-route!` |
+| B4 | not active, route absent, finished, not ended | `:end-branch` (`seon.task/end-branch!`: graphs joined, routes released, the branch kept by default) | 10 |
+| B5 | not active, route absent, finished, ended | steady (kept) | — |
+| B6 | not active, route absent, unfinished | steady (held work waits) | — |
+
+**Actions are validated data.** `:seon.flow.actions/op` is a `:multi` on `:op`, each variant declaring its members
+(task, branch or agent): `:build :rebuild :converge-config :start-step :problem-hold :judge :done-step :start-graph
+:stop :close-cancelled :close-environment :bail :merge-main :publish`, and the branch ops `:listen :release-route
+:end-branch`. An unknown op is refused by the `::m/default` variant, never run. Each effect owner applies its op and
+writes the fact that closes its row.
+
+**The scheduler is a fold, not rows.** The coupling between tasks is not a fact about one task, so
+`seon.cluster.agent/admit` folds the start-group answers: oldest first, one per branch (git checks a branch out in one
+worktree), while the open attempts are fewer than `:seon.config.agent/max-running`, read from the cluster's
+configuration at every pass (`seon.config/effective`; shipped 4, live 4). Open attempts are counted on facts, as
+`launch-actions` counts them today, so the cap holds across a restart. The prototype answers `["t0"]` for five ready
+tasks, `max-running` 2 and one open attempt, and `["a"]` for two ready tasks on one branch. A cap of 0 admits nothing
+(owner decision 8). Only the start group is capped: stopping, judging, merging forward, bailing and publishing always
+run.
+
+**Readiness** is the `wanted` rows N2 to N6, and its pieces are:
+- `execution(T) = :running`, and no need is `:pending`: every N in `needs(T)` is **done where N's attempts live**, which
+  is N's branch head for a task with no target, and main for a task whose done step wrote main, because its accept
+  transaction carries N's attempt;
+- the **latest attempt is absent or `:closed`** (gap 1). An open attempt is not ready (G, O rows), and an ended
+  attempt awaiting its judgment is not ready either (A rows), so a task is never started again while its previous
+  attempt is judged or bailed. `:closed` is the only ended state that restarts, and only because the restart
+  (row O3, G5) leaves `execution :running` on purpose;
+- the branch has no open attempt of another task (one checkout per branch, in `admit`).
+
+A task becomes wanted only by root writing `:running`: every written task is `:held`.
+
+The ruling's "and its own proofs are not yet green" is honored by the start step (N6), not by a precondition. The
 proofs' state exists only on the task's built branch (do the work when its data exists). A task whose proofs are green
-there is done at once, with no graph and no model call (row 3a). So a ready task never gets an agent while its proofs
-are green, and the reconciler never computes a test result.
+there is done at once (O6), with no graph and no model call. So a ready task never gets an agent while its proofs are
+green, and the reconciler never computes a test result.
 
 **The environment build rule** (one rule, P4a's prepare generalized from one source to the needs):
 - T's branch exists: continue it. This is a linear run sharing a branch.
@@ -205,38 +350,47 @@ Two consequences:
 
 No separate fork-point attribute is needed.
 
-**Gap table.** Each row is: desired, observed, the gap, the action, its actor, and the fact that closes the gap.
+**A stale branch is never rebuilt over work** (gap 2). Stale means the recorded base H is no longer the target's head.
+- Idle and wanted (N3): nothing is on the branch to lose, so rebuild: retire the stale branch and build again from the
+  new head. A `:held` task is never rebuilt.
+- With a graph, an open attempt or an ended attempt awaiting its judgment (G7, O4, A3): the branch holds the work,
+  including a merge agent's conflict resolutions, so main is merged forward into it (`seon.merge/merge-main!`, the
+  reactive plan's R-P3), conflicts as unmerged entries the agent's next block shows. The attempt's end commit moves, and
+  the next judgment is made on the merged head.
 
-| # | Gap | Action | Actor | Closing observation |
-|---|---|---|---|---|
-| 1 | T ready, `branch(T)` absent | build the environment by the rule above | `registry/fork!` + one transaction (P4a's prepare, generalized) | the branch, its base H and target recorded; unmerged entries if any |
-| 1b | T has a target, is not done, and its branch's base H is no longer the target's head | no open attempt: rebuild (retire the stale branch, build again from the new head); an open attempt: merge main forward into its branch (`seon.merge/merge-main!`, R-P3), conflicts as unmerged entries the agent's next block shows | as row 1; root | a branch based on the current head |
-| 2 | T ready, branch config differs from `desired-config(T)` | converge config (`seon.task/converge-config!`) | root, one transaction with its basis | the config row |
-| 3 | T ready, environment built and **complete**, no open attempt | **start step**: write the attempt row; acquire a context on the branch; run the step's stale members by reach digest (`seon.test/run`); judge `done-refusals` over `seon.context/judged-input` | root (no graph, no model) | the attempt row and the step's recorded results |
-| 3c | T ready, branch built and config converged, the desired environment still **incomplete** (`:seon.task/environment` refuses it: a member the launch or the turn loop reads is absent) | report the gap: a problem task on main naming the missing members, and `execution :held`; no attempt, no context, no graph | root | the problem task and `:held` (the task is no longer ready) |
-| 3a | the start step judged empty | the **done step** (row 7's write) at once: no graph starts, no model is called | root | outcome `:done`, or main written |
-| 3b | the start step left work (a red, an unmerged entry, a contract gap) | start the graph: the agent works with T's instructions | registry | `graph-process` asserted |
-| 5 | open attempt, no end, no `graph-process`, and work left | acquire the context, start the graph (after a crash, the same) | registry | `graph-process` asserted |
-| 6 | `graph-process` present and (attempt ended, execution not `:running`, or the environment differs, row 13) | stop the graph and join it; release the context | registry | `graph-process` retracted |
-| 7 | attempt ended `:done`, no outcome, no graph | judge `done-refusals` at the end commit. Empty: the **done step**. Refused: row 8. | root | the done step's write, or row 8's facts |
-| 8 | attempt ended any other way (or refused at 7), no outcome, no graph | **bail**: a problem task on main (identity from the attempt), `execution :held` on main, outcome `:closed` with its reason on the branch | root | `:held`, and `:closed` |
-| 9 | merged, `git-commit` and `publication-refusal` absent, declarations moved | `seon.merge/publish!` | root | `git-commit` or a refusal |
-| 10 | a branch none of whose tasks is runnable or open, its change on main or never meant to merge | end it (`seon.task/end-branch!`): kept or deleted by `keeps-ended-branches?` | root | the branch gone, or kept and named by main's rows |
-| 11 | execution `:cancelled`, an open attempt | after row 6: outcome `:closed` "cancelled" | root | `:closed` |
-| 12 | a branch with a ready task or an open attempt, no route | listen | registry | route held (in memory, idempotent by key) |
-| 13 | `graph-process` present, and the task's desired environment (read from the database its attempt checks out) differs from the agent row's observed one (`:seon.agent/branch`, `:seon.agent/environment`) | **restart** (§6.1): row 6 stops the graph; then close the attempt `:closed` with the reason "environment changed", leaving `execution :running`; release the context. The next pass finds the task ready and starts a fresh attempt, a new agent identity and a new graph by rows 1, 2, 3 | registry, then root | `graph-process` retracted and `:closed`; the new attempt's agent row names the new branch and environment digest |
+**The start rows check execution and the observed environment** (gaps 3 and 4). `:start-graph` has exactly one row
+(O7), and it requires execution `:running`, agent-env `:none` or `:same`, the branch `:current` and `step :work-left`.
+A held, cancelled or restarting task therefore never starts a graph, and after the restart's stop (G5) the old agent
+is closed first (O3) and never started again on its old environment.
 
-**The done step** (rows 3a and 7) is one function of the environment:
+**The done step** (O6 and A5) is one function of the environment:
 - When the task's branch was built against a target (the registry's recorded target, observed), it is P4a's accept:
   one transaction on the target with parents #{the branch's source commits, the branch's judged commit} under
   Datahike's basis fence on H, writing the attempt `:merged` and the carried tasks.
 - Otherwise it writes outcome `:done` on the task's own branch.
-- Main moved (`:seon.db/transaction-refused-error`): nothing is written, and row 1b rebuilds the environment. This is a
-  new environment, not a retry of failed work.
+- Main moved (`:seon.db/transaction-refused-error`): nothing is written. The branch is now `:stale` with an open or
+  awaiting attempt, so the next pass merges main forward (O4, A3) and judges again. This is a new environment, not a
+  retry of failed work, and it never rebuilds over the attempt.
 
-**No automatic re-runs.** Row 8 sets the desired state to `:held`, and readiness requires `:running`, so nothing in the
-table restarts a bailed task. Only root's write of `:running` does. Row 1b rebuilds an environment that went stale. It
-never reruns an attempt that ended.
+**No automatic re-runs.** The bail (A2, A6) writes `execution :held`, and readiness requires `:running`, so nothing in
+the table restarts a bailed task. Only root's write of `:running` does.
+
+**A bail never un-cancels** (gap 5). A cancelled task whose attempt ended is closed as cancelled (A1), with no problem
+task and no `:held`; the bail rows exclude `:cancelled`.
+
+**The bail writes two databases, in a fixed order** (gap 12): `:held` on main first, then `:closed` on the task's
+branch. A crash between them leaves (`:held`, latest `:awaiting`), which A2 bails again idempotently. The opposite
+order would leave (`:running`, latest `:closed`), a start row, and the task would run again. The bail's applier is the
+one writer that must keep this order (T3b's proof, §10).
+
+**A crash between the start step's attempt row and its judgment** (gap 7) is a row: an open attempt with no graph and
+`step :unjudged` is O5, which judges.
+
+**Livelock under a moving main needs no guard** (gap 13). With the done step's "main moved" answer included, the
+closure has 42 cycles, each passing through the done step's refused answer (A3, A4, A5 or O4, O5, O6: merge forward, judge, refused by the fence, again).
+They are livelock only under continuous writes to main; progress is bounded by main's write rate, which is
+Kubernetes-style convergence. It is not a table defect, and no retry count, backoff or lock is added (AGENTS.md "NO
+GUARDS OR FENCES").
 
 **Idempotence.** Every action writes the fact its gap is absent from:
 - the branch and its base;
@@ -246,13 +400,78 @@ never reruns an attempt that ended.
 
 A second reconcile over the same state therefore plans nothing.
 
+### 5.3 The proof: one exhaustiveness deftest
+
+The completeness is checked, never assumed. The decision table over Malli enums beats the alternatives in
+`transitions.md` §2 and `transitions-web.md` §2: core.match has no compile-time exhaustiveness (a missing clause is a
+run-time `IllegalArgumentException`, and an `:else` silences even that, which is a fence), core.logic needs negation
+over finite domains, and statecharts discard an unmatched event by SCXML specification, hold a second copy of observed
+state and settle overlaps by document order. No library beyond Malli is added.
+
+T3a's one red proof, `seon.cluster.agent-test/the-transition-table-is-exhaustive-deterministic-and-convergent`,
+enumerates the 13,968 possible states and asserts four properties, reporting any failure as the offending states
+(data):
+1. **Exactly one row.** Every possible state matches exactly one row: no gap, no overlap (0.1 s).
+2. **Successors are possible.** Every action leads only to possible states: each op's `effects` names the facts its
+   actor writes and every answer the world can give (a judgment of `:empty` or `:work-left`; a refused basis fence),
+   and none violates a constraint.
+3. **Convergence.** Every state reaches a steady row without a cycle, with no external event (0.2 s).
+4. **Plan, apply, re-plan.** Applying a plan's closing facts to the observed value and planning again answers `[]`
+   (idempotence), through the whole-value `reconcile`, with the test-local `closed` helper.
+
+An impossible observed state is refused by `reconcile`'s input contract, which names the constraint: data in the
+one error map delivered at db<->flow's boundary, not a guard. The whole check runs in about 0.7 s; matching costs
+1.6 ms per 1,000 tasks, naive and warm.
+
+`transitions.md` §5 encoded the old gap table as written: 10,424 of 29,760 states matched one row, 9,960 matched none
+(6,240 unnamed steady states and 3,720 needing an action), 9,376 matched two or more, 7,650 led to an impossible state
+and 72 cycled. The completed table matches 29,760 of 29,760 once (13,968 of 13,968 after the fold), with 0 invalid
+successors and 0 cycles. The fifteen gaps it found are resolved in the owning sections, indexed here:
+
+| Gap | Resolved in |
+|---|---|
+| 1 readiness admits an ended attempt | readiness above: latest absent or `:closed` |
+| 2 rebuild destroys work | a stale branch above: merge main forward over work (G7, O4, A3), rebuild only idle (N3) |
+| 3, 4 the start rows ignore execution and the observed environment | one row O7; O3 closes first |
+| 5 a bail un-cancels | A1; the bail rows exclude `:cancelled` |
+| 6 `:paused`, `:stopped` have no rows | owner decision 7: folded into `:held` |
+| 7 the crash between attempt row and judgment | O5 |
+| 8 rows 6a, 6b, 6c overlap | G1, G2, G5 |
+| 9 unnamed steady states | the steady rows |
+| 10 routes never released | B3 |
+| 11 deleting a branch erases a `:done` | owner decision 6: progress is observed state on the task's branch; branches are not deleted by default (§3.2) |
+| 12 the two-database bail | the bail's order above |
+| 13 livelock under a moving main | noted above, no guard |
+| 14 `:sent-back` changes meaning | §9 and T3b: `end-kinds` goes in the same commit |
+| 15 the dead `cluster` dial | §9 and T3b/T3c: deleted |
+
+### 5.4 Processes are flow procs: no new lifecycle types
+
+Owner, 2026-10-17: flows have explicit start, stop and run states, so no process invents its own lifecycle types.
+Root verified in `clojure.core.async.flow`: a proc has an init (the `(args)` arity) and the transitions
+`::flow/resume`, `::flow/pause` and `::flow/stop`, with statuses `:paused`, `:running` and `:stopped`.
+1. **Every long-lived process is a flow proc** that maps its own states onto flow's: the reconciler (`db<->flow`),
+   each agent's graph, render and the schedules. A state a process needs beyond flow's three is a dimension of its
+   decision table (§5.1 for the task, T3a-agent for the agent), never a new lifecycle type.
+2. **A proc's listeners are registered at init or start, used while it runs, and unlistened at stop.** `db<->flow`
+   already does this: it registers its listener at init, runs passes while running, and unlistens at stop (the prime at
+   `::flow/resume` is the only thing the transition adds).
+3. **The reconciler holds a listener on main plus one per watched task branch.** Datahike listeners live on each
+   connection's meta (`datahike.writer/notify-listeners!`); there is no global tx-log, and a branch is its own
+   connection, so a proc listens to N branches by holding N listeners, as `db<->flow` already holds a main route plus
+   chain routes keyed per branch. Adding or releasing a branch listener is a reconciler action derived from the task
+   facts: `:listen` (B1) when a branch is active, `:release-route` (B3) when it is not (gap 10). The listener set is
+   never kept as separate state: the registry holds the live listener objects in its one registry (AGENTS.md), keyed by
+   branch, and each pass re-derives which should exist from the facts.
+4. The reconciler's own on and off is Flow's pause of the proc (§7); the table has no state for it.
+
 **Today's pieces and what they shrink to** (function spans on HEAD 2ee1db4a5):
 
 | Today | Lines | After |
 |---|---|---|
 | `launch-facts` 36, `chain-read` 50, `chain-facts` 26, `chain-ends` 28, `chain-finishes` 35, `chain-bails` 26, `lifecycle-facts` 58, `taskless-agents` 27, `branch-admission-end` 16, `basis-valid?` 18, `registry-facts` 10, `seon.task/ready` + `ready-rules` + `done?` + `execution` 62 | 392 | `observe` ≈ 70 |
-| `launch-actions` 45, `follow` 17, `assignment-actions` 37, `taskless-actions` 11, `next-actions` 11, `unfinished-intent` 12, `publication-due?` 10 | 143 | `reconcile` ≈ 90 (the gap table; the taskless-agent rule kept as two rows) |
-| `advance-chains!` 25, `merge-chains!` 56, `finish-chains!` 37, `bail-chains!` 10, `bail-chain!` 30, `done-judged` 16, `close!` 22, `apply-lifecycle!` 33, `fork-attempt!` 14, `seed-attempt!` 18, `start-attempt!` 14, `write-attempt!` 16, `write-chain-attempt!` 22, `start-chain-attempt!` 29, `failed-pass!` 27, `merge-step` 18, `refusal-section` 19 | 406 | appliers ≈ 160: build (1, 1b) 30, start step (3) 35, done step (3a, 7) 30, bail (8) 25, publish and end (9, 10) 25, close (11) 15 |
+| `launch-actions` 45, `follow` 17, `assignment-actions` 37, `taskless-actions` 11, `next-actions` 11, `unfinished-intent` 12, `publication-due?` 10 | 143 | `reconcile` ≈ 90 plus the rows as data (the transition table; the taskless-agent rule kept as two rows) |
+| `advance-chains!` 25, `merge-chains!` 56, `finish-chains!` 37, `bail-chains!` 10, `bail-chain!` 30, `done-judged` 16, `close!` 22, `apply-lifecycle!` 33, `fork-attempt!` 14, `seed-attempt!` 18, `start-attempt!` 14, `write-attempt!` 16, `write-chain-attempt!` 22, `start-chain-attempt!` 29, `failed-pass!` 27, `merge-step` 18, `refusal-section` 19 | 406 | appliers ≈ 160: build and rebuild (N2, N3) 30, start step (N6) 35, done step (O6, A5) 30, bail (A2, A6) 25, publish and end (S2, B4) 25, close (O1, O3, A1) 15 |
 | `run-pass!` 50, its thrice re-derivation of the lifecycle included | 50 | ≈ 15: observe, reconcile, apply |
 | **total** | **991** | **≈ 335**: about 655 lines go from `seon.cluster.agent` |
 
@@ -284,7 +503,9 @@ unmerged entries, lint) in its block as any task's step does. `route-chain!` is 
   - `run-pass!`'s "derive again after a stop, again after a merge";
   - `basis-valid?`'s commit-keyed cache;
   - `blocked`, which negates over recursive needs of children;
-  - `chain-finishes`' "main does not hold the attempt yet" check. The accept on main is the observation.
+  - `chain-finishes`' "main does not hold the attempt yet" check. The accept on main is the observation;
+  - `seon.cluster.agent/follow`, the `:paused` and `:stopped` arms of `launch-actions`, and the dead
+    `:seon.flow.actions/cluster` dial: the table has `:stop` and no `:pause` (owner decision 7).
 
 ## 6. Environment, merge and done
 
@@ -301,10 +522,10 @@ carries the change to main's task. Nothing syncs the two. `my.task/update!` stay
 agent that needs a different environment calls `my.task/send-back!`.
 
 **Complete before start** (owner decision 3). An agent is never started until its task's desired environment is
-complete. Start is a reconciler action (row 3) whose precondition is that `:seon.task/environment`, a closed schema
-over the members above, validates the environment as the built branch holds it (the branch is built by row 1, the
-config converged by row 2; the decided config has every dial the launch and the turn loop read). An incomplete
-environment is not a start: it is gap row 3c, reported once as a problem task naming the missing members and the task
+complete. Start is a reconciler action (N6) whose precondition is that `:seon.task/environment`, a closed schema
+over the members above, validates the environment as the built branch holds it (the branch is built by N2, the
+config converged by N4; the decided config has every dial the launch and the turn loop read). An incomplete
+environment is not a start: it is row N5, reported once as a problem task naming the missing members and the task
 held. Nothing starts with a default standing in for a missing member.
 
 **The observed environment** is recorded on the agent row when its context is acquired:
@@ -312,21 +533,21 @@ held. Nothing starts with a default standing in for a missing member.
 - the config digest its turn loop read (`:seon.agent/environment`, new: `seon.config/effective`'s decided map, by
   digest).
 
-**The restart** (gap row 13). desired differs from observed while `graph-process` is present: the reconciler stops
-the graph and joins it (row 6), closes the attempt `:closed` with the reason "environment changed", and releases the
+**The restart** (G5, then O3). desired differs from observed while `graph-process` is present: the reconciler stops
+the graph and joins it (G5), closes the attempt `:closed` with the reason "environment changed", and releases the
 context. The task stays `:running`, so the next pass starts a fresh attempt, with a new agent identity, a new graph
-and a new SCI context, on the desired environment (rows 1 to 3). Private SCI state is lost; the owner accepts that for
+and a new SCI context, on the desired environment (N2 to N6). Private SCI state is lost; the owner accepts that for
 reliability ("a clean restart is more reliable even if it loses data"). The cross-branch in-place advance is dropped,
 and with it the risk it carried.
 
 One mechanism covers:
 - root editing a held task's config: no graph, so the next start reads it;
-- root editing a running task's config or model: row 2 converges the branch's config row, and row 13 restarts onto it;
-- root moving a running task to another branch: row 13 restarts onto the new branch, whose attempt row starts there;
-- a task whose environment is incomplete: nothing starts (row 3c).
+- root editing a running task's config or model: N4 converges the branch's config row, and G5 then O3 restart onto it;
+- root moving a running task to another branch: G5 then O3 restart onto the new branch, whose attempt row starts there;
+- a task whose environment is incomplete: nothing starts (N5).
 
-A **moved base is not an environment change.** A merge task whose main moved is gap row 1b: rebuild before the start
-step; while an agent works, `seon.merge/merge-main!` (the reactive plan's R-P3) merges main forward into its branch and
+A **moved base is not an environment change.** A merge task whose main moved is stale: N3 rebuilds it before the start
+step while it is idle; while an agent works or its attempt awaits judgment, `seon.merge/merge-main!` (the reactive plan's R-P3, rows G7, O4, A3) merges main forward into its branch and
 the agent's next eval request reacquires the new head. Conflicts arrive as unmerged entries in its block (§6.3). The
 graph is not restarted.
 
@@ -342,7 +563,7 @@ carries:
 
 There is no merge attribute, no merge function and no chain entity. A bench run writes no merge task.
 
-**Its environment is P4a's merge branch S** (gap row 1, built when the task is ready). S holds:
+**Its environment is P4a's merge branch S** (row N2, built when the task is ready). S holds:
 - main's head H;
 - whatever of b's change since the merge base merged cleanly;
 - for each declaration both sides changed, main's version on S plus an unmerged entry recording base, ours and
@@ -380,8 +601,9 @@ nor next proofs never finishes" reads the derived members.
   main's versions in place and its conflicts section in the block (§6.3). It either fixes the code there, or, when
   too much has changed, calls `my.task/send-back!` with its reason. That bail tells root to restart the process: root
   writes a new set of tasks, or resumes the work task.
-- **Main moved:** before the start step, row 1b rebuilds S from the new head. While an agent works, row 1b merges main
-  forward into S, and the agent's next eval request sees it. Unchanged reach is a lookup.
+- **Main moved:** before the start step, while S is idle, N3 rebuilds S from the new head. While an agent works or the
+  attempt awaits judgment, `:merge-main` (G7, O4, A3) merges main forward into S, and the agent's next eval request sees
+  it; S is never rebuilt over work. Unchanged reach is a lookup.
 
 **What of P4a is reused, and how** (`seon.cluster.source`, `seon.merge` on HEAD 2ee1db4a5):
 
@@ -392,12 +614,12 @@ nor next proofs never finishes" reads the derived members.
 | `unmerged-tx`, `entry-identity`, `unmerged`, `with-unmerged`, `unmerged-sets`, `unmerged-count`, `unmerged-refusal` | the conflicts on S, the done rule's refusal | unchanged |
 | `versions` | each entry's base, ours and theirs as resolved code references | unchanged; made public for §6.3 |
 | `replacement` | Δ's replacement transaction on S | unchanged |
-| `merge-members`, its fold, `contract-gaps`, `uncovered-functions`, `publication`, `lint-refusal`, `done-refusals` | S's members and the one judgment (start step, row 7) | unchanged |
-| `prepare-merge!` | split along what it already does: the build (fork H, one write of Δ + unmerged entries + the facts squash) becomes row 1's applier; its judgment (`judged-merge!`) is the start step's ordinary `done-refusals` over `judged-input` on S | body kept, ≈ 40 lines move to the start step |
+| `merge-members`, its fold, `contract-gaps`, `uncovered-functions`, `publication`, `lint-refusal`, `done-refusals` | S's members and the one judgment (start step N6, judgment O5, A4) | unchanged |
+| `prepare-merge!` | split along what it already does: the build (fork H, one write of Δ + unmerged entries + the facts squash) becomes the applier of N2 and N3; its judgment (`judged-merge!`) is the start step's ordinary `done-refusals` over `judged-input` on S | body kept, ≈ 40 lines move to the start step |
 | `accept-merge!` | the done step for a task with a target: one `seon.db/transact!` with `:parents` and `:datahike/expected-basis-t` H | unchanged body; called with the task's S |
 | `seon.merge/merge-tx`, `squash-merge`, `collision-remap`, `member-merge`, `cluster-entity?`, `attribute-tx` | the facts squash in the build | unchanged, minus the `:running` → `:stopped` rule (§5) |
-| `seon.merge/merge-main!` | row 1b while the merge agent works | unchanged |
-| `seon.merge/publish!`, `indexed!`, the write-back (`proven-files`, `write-back!`, `commit!`) | row 9 | unchanged (P7 makes one proof per content) |
+| `seon.merge/merge-main!` | G7, O4 and A3: while the merge agent works or awaits judgment | unchanged |
+| `seon.merge/publish!`, `indexed!`, the write-back (`proven-files`, `write-back!`, `commit!`) | S2 | unchanged (P7 makes one proof per content) |
 | `my.program/resolve!` | the agent's (or root's) resolve verb | unchanged |
 | `seon.merge/merge!`, `merge-onto`, `assignment-row`, `assigned-task`, `chain-row`, `acceptance` | the entrance by attempt key: the chain path and the per-assignment path | **deleted** in T3b; the reconciler calls the build, the start step and `accept-merge!` directly |
 | `seon.cluster.agent/merge-chains!`, `advance-chains!`, `chain-finishes`, `chain-ends`, `merge-step`, `refusal-section`, `finish-chains!` | the chain merge path | **deleted** in T3b (§5) |
@@ -464,7 +686,7 @@ versions and the forms that resolve it, and its step lists the red members. Reso
 
 ### 6.4 Done is automatic
 
-- `done-refusals` empty means done (rows 3a and 7).
+- `done-refusals` empty means done (rows O6 and A5).
 - A task with no target writes `:done` on its branch and nothing to main.
 - There is no manual approval today, and none is added.
 
@@ -490,25 +712,43 @@ Either way main stays the one integration point, and every write to main is a ju
 The task graph is the scheduler:
 - Writing tasks never starts work: every written task is `:held`, and the owner flips the system on by root writing
   `:running` (`my.root/run!`). `:seon.task/execution` and `:seon.task/needs` wake root.
-- Readiness is §5's rule.
-- Parallelism is "every ready task, one per branch, while open attempts are fewer than
-  `:seon.config.agent/max-running`" (the cluster configuration; the live cluster answers 4). The reconciler never
+- Readiness is §5's rule (rows N1 to N6).
+- Parallelism is `admit` (§5.2): every ready task, oldest first, one per branch, while open attempts are fewer than
+  `:seon.config.agent/max-running` (the cluster configuration; the live cluster answers 4). The reconciler never
   starts a task past the cap.
 - Dependency order is the needs graph.
 
-Config before agent (the reactive start ruling of 2026-10-15) is rows 1 and 2 before row 3. Nothing is ordered by call
+Config before agent (the reactive start ruling of 2026-10-15) is rows N2 and N4 before N6. Nothing is ordered by call
 sequence.
+
+**Three controls, each at its own scope** (owner decision 8):
+
+| Control | Scope | Durable? |
+|---|---|---|
+| Flow's pause of the `db<->flow` proc | everything, at once: no starts, stops, judging, merging or publishing; agent graphs are separate graphs and keep working, their ends wait as `:awaiting` | no (boot resumes the graph) |
+| `:seon.config.agent/max-running` | the cap on new starts while on | yes, cluster facts |
+| `:held` per task | one task | yes |
+
+`(flow/pause-proc cluster-graph :seon.flow/db<->flow)` is the instant off. Flow starts every proc paused, and a paused
+proc blocks on its control channel and reads nothing; the listener's wakes coalesce in the sliding-1 in-port, and
+`::flow/resume` primes one pass that reads every fact, so catching up is free because the reconciler is level-triggered
+(`transitions.md` §7.2, read from `clojure.core.async.flow.impl`). The proc's own lifecycle (paused, resuming, running)
+stays out of the table: Flow owns it.
+
+`max-running` may be 0 (its schema becomes `:min 0` in T3a): running work finishes and nothing new starts, and that
+holds across restarts because the open attempts are counted on facts and the cap is a cluster fact. `admit`'s
+`(max 0 (- max-running open))` already admits nothing.
 
 ## 8. Root's tools on task identity
 
 | Tool | Becomes |
 |---|---|
 | `my.root/run!` | Release `{:seon.task/assigned h}` (or a vector of handles): validate the runnable view, write `:running` on main. It is the one start signal and a resume after a bail alike, and no branch transaction (today `seon.task/run-held!`, 29 lines, becomes about 8). Nothing else writes `:running`. |
-| `my.root/abandon!` | `{:seon.task/assigned h}` or `{:seon.task/branch b}`: write `:cancelled` on the named tasks and every task that needs them, transitively. The reconciler stops, closes and ends the branch (rows 6, 11, 10). 30 + 26 lines become about 20. |
+| `my.root/abandon!` | `{:seon.task/assigned h}` or `{:seon.task/branch b}`: write `:cancelled` on the named tasks and every task that needs them, transitively. The reconciler stops, closes and ends the branch (G2, O1, A1, B4). 30 + 26 lines become about 20. |
 | `my.root/merge-requests` | The tasks with a target, their latest attempts read on their branches |
 | `ended`, `close!` | Read attempts through each task's `:seon.task/branch` |
 | `merge-steps`, `chain-requests` | Deleted |
-| `seon.task/chain!` | Deleted. `seon.task/create-all!` (new; `seon.task/create!`, one task from a request map with an agent id, has 73 callers in 27 files and is unchanged) takes a vector of task maps and writes them on main in ONE transaction through the one task writer. It resolves each `:seon.task/branch` (§4), fills defaults (`:held`), and validates each task's runnable view and that every needs edge resolves within the write or to an existing task. It is idempotent per task identity. No fork at the write: the build is gap row 1, when the task is ready, so a dependent builds after its needs are done. |
+| `seon.task/chain!` | Deleted. `seon.task/create-all!` (new; `seon.task/create!`, one task from a request map with an agent id, has 73 callers in 27 files and is unchanged) takes a vector of task maps and writes them on main in ONE transaction through the one task writer. It resolves each `:seon.task/branch` (§4), fills defaults (`:held`), and validates each task's runnable view and that every needs edge resolves within the write or to an existing task. It is idempotent per task identity. No fork at the write: the build is row N2, when the task is ready, so a dependent builds after its needs are done. |
 | `seon.task/from-filed` | Answers `[design prove implement merge]` with `needs` links, the entry's identity on the first map, and the merge task's target. |
 
 ## 8a. The error law, as touched
@@ -518,7 +758,7 @@ AGENTS.md's error law applies, ratcheted by P13's census (`seon.guard-census-tes
   section, the restart) follows the law:
   - a reader returns its declared variants;
   - an applier throws the one error map to the entrant boundary, here db<->flow's one catch, `failed-pass!`,
-    rewritten to a bail (row 8);
+    rewritten to a bail (A2, A6);
   - nothing downstream re-checks what contracts or the writer guarantee.
 - The deleted functions (§9) are deleted, never converted. Untouched code waits for its toucher.
 - The reconciler adds no guard. A case it cannot plan is a desired state that does not validate, refused at the
@@ -531,15 +771,18 @@ AGENTS.md's error law applies, ratcheted by P13's census (`seon.guard-census-tes
 | `seon.cluster.agent`: §5's 991 lines of pieces (`merge-step` and `refusal-section` included) | 991 → ≈ 335 | T3b | `observe`, `reconcile`, the appliers |
 | `seon.task/chain!` 66, `chain-entities` 22, `chain-handles` 8, `chain-attempts` 31, `chain-branch` 14, `chain-branches` 8, `chain-refusal` 16, `hold!` 20, `end-chain!` 16, `abandon!` 26 | 221 | T3b, except what the chains page still calls (`chain-handles`, `chain-attempts`, `chain-branches`, checked by `rg` at the phase): those go with the page in T3c | `create-all!` (≈ 25), `end-branch!` (exists), abandon as a desired write (≈ 12) |
 | `seon.task/run-held!` 29 | 29 → 8 | T3b | resume |
-| `seon.task/advance-tx` 24, `next-tx`, `next-refusal` | ≈ 45 | T3b | the flow at the start step (gap row 3); no merge-step append |
+| `seon.task/advance-tx` 24, `next-tx`, `next-refusal` | ≈ 45 | T3b | the flow at the start step (N6); no merge-step append |
 | `seon.task/ready` 22 and the readiness rules `blocked` and `needs*` | ≈ 30 | T3b | readiness inside `reconcile`. The `ready-rules` var stays with `execution`, `under`, `self-or-under`, `leaf-done` and `open-attempt` for `done?` 14, `resolution`, `effective` and `seon.cluster.message/undeliverable` until S3e deletes the task tree. Their readers outside T3b's first list (message.clj, `seon.cluster.agent` lines 1876 and 1879) convert in T3b. |
 | `seon.task/effective` 23, `goal-owner` 15, `children` | 38 | **not in the task model** (S3e) | live readers: `seon.context`, `ref_test`, `task_test`, `script/seon/rename_task_intent.clj`, four filed task files, and 10 `:seon.task/children` datoms on default. T3b does not delete them. |
 | `seon.task` chains page: `chain-view` 27, `chain-views` 15, `chain-state` 12, `chain-html` 16, `chain-task-html` 18, `attempt-view` 7, `attempt-html` 27, `bailed?` 10, `finished?` 8 | 140 → ≈ 70 | T3c | one task-graph view grouped by branch |
 | `seon.render.web/chain-fragment`, `chains-page-result`, `chain-database`, `chain-state-rank`, `agent-branch` and `missing-agent` chain reads | ≈ 74 → ≈ 45 | T3c | the task-graph page |
 | `seon.merge/merge!`'s assignment entrance, `assigned-task`, `chain-row` 22, `assignment-row`'s chain fallback and first-parent walk | ≈ 60 | T3b | the done step reads the task's built branch (its base H and target, recorded by the registry); the facts' base is the branch's recorded base |
-| `seon.merge/merge-tx`'s `:running` → `:stopped` rule | ≈ 8 | T3b | control members never written on a branch |
+| `seon.merge/merge-tx`'s `:running` → `:stopped` rule and its `:stopped` write on a merged task (`seon.merge` lines 193 and 196) | ≈ 8 | T3b | control members never written on a branch; a merged task reads as `:settled` (S1) and needs no execution change |
 | `seon.cluster.registry/cluster-claims`' chain clause, `task-branch-claims` | ≈ 12 | T3c | the existing `:seon.task/branch` clause |
 | `seon.mine/kept-branches`' chain query | 3 | T3c | `:seon.task/branch` rows |
+| `:paused` and `:stopped` (owner decision 7): the `:paused` and `:stopped` arms of `seon.cluster.agent/follow` and `launch-actions` (lines 1659 to 1696); `merge-tx`'s `:stopped` write (above); fixtures that write `:stopped` (`test/seon/task_test.clj` line 235, `test/seon/merge_test.clj` lines 911 and 913, `test/seon/cluster/db_flow_test.clj` line 1789, `test/seon/cluster/write_back_test.clj` line 722); the enum values in `seon.task.edn`'s `:seon.task/execution` and its description; `resources/seon/tasks/seon.cluster.agent.edn`, `seon.cluster.boot.edn` and `seon.turn.edn` (checked by `rg` at the phase) | ≈ 30 + tests | readers T3b (`follow`, `launch-actions`, `merge-tx` and the fixtures); the enum values T3c, after T3b converted the last reader. The one live `:stopped` task on default reads as `:held`. | `:held`; the table's `:stop` and no `:pause`. `transitions.md` §4.3: swapping `:stopped` for `:held` changes 0 answers. |
+| `:seon.flow.actions/cluster` (the dead dial: `launch-facts` hardcodes `:running`, line 1896) | schema member + 3 sites | reader `launch-facts` T3b, the schema member and `test/seon/cluster/db_flow_test.clj` lines 46 and 143 T3c | on and off is Flow's pause (§7) |
+| `seon.task/end-kinds` (line 1551) and `end-kind` (`:sent-back` maps to `:merge`) | ≈ 15 | T3b, in the same commit as the bail rows (A2, A6) | a send-back bails to root (CLAUDE.md "`my.task/send-back!` ... bails a broken or impossible task to root"); the table replaces `end-kinds`' mapping. A line 1564 caller (`remove (comp #{:merge} end-kind)`) converts in the same commit. |
 | `seon.context/judged-input`'s four chain reads | ≈ 8 | T3b | a task's needs-dependents on its branch give `:seon.source/next-proofs`; a task with a target is judged as the last task |
 | `my.root/run!` 20, `abandon!` 30, `chain-requests` 13, `merge-steps` 36, `merge-main!` 20 (chain reads) | 119 → ≈ 45 | T3b | §8 |
 | `resources/seon/schemas/seon.chain.edn` (all), `:seon.task/chain-options`, `:seon.task/chain`, `:seon.task/chain-context`, `:seon.task/refusal` and `:seon.task/refused-tests` on tasks (the merge step's), `:seon.flow.actions/chains`, `/branches`, `/startable`, `/invalid`, the `:seon.chain/branch` members of `seon.flow.actions.edn` and `my.root.edn` | schema | T3c | `:seon.flow.actions/observed`; `:seon.task/runnable` reads `:seon.task/branch` and `:seon.task/target` |
@@ -575,13 +818,14 @@ helpers and the `:seon.task/next` attribute, which T3c deletes together.
 
 | Phase | Files | Change | Red proof (red on HEAD, green after) |
 |---|---|---|---|
-| **T0** Words and the cards (docs, 20 min) | `docs/seon/architecture/vocabulary.md`, `docs/seon/schedule/cards/TASK-CHAIN.md`, `docs/seon/schedule/cards/MERGE-STEP.md` | Record the words of §4, with a note that `:seon.task/target` (a branch, this plan) is not `:seon.task.attempt/target` (the task a send-back names). TASK-CHAIN §1 and §2 rewritten in place to this model: `needs` leaves §1's deleted list, S3e narrows to `children`, `product` and `effective`, and the 17 filed entries carrying `needs` keep them; §6 and §7 get these phases. MERGE-STEP retired into §6. | none (docs). Each later phase's proof is the card's. |
+| **T0** Words and the cards (docs, 20 min) | `docs/seon/architecture/vocabulary.md`, `docs/seon/schedule/cards/TASK-CHAIN.md`, `docs/seon/schedule/cards/MERGE-STEP.md` | Record the words of §4, with a note that `:seon.task/target` (a branch, this plan) is not `:seon.task.attempt/target` (the task a send-back names). TASK-CHAIN §1 and §2 rewritten in place to this model: `needs` leaves §1's deleted list, S3e narrows to `children`, `product` and `effective`, and the 17 filed entries carrying `needs` keep them; §6 and §7 get these phases. MERGE-STEP retired into §6. The transition table of §5 and the words transition table, row and steady row enter TASK-CHAIN §2 in the same patch (`task-t0-task-chain.patch` predates the table and must be refreshed when the claim is released). | none (docs). Each later phase's proof is the card's. |
 | **T1** The writer (45 min, Sonnet) | `src/seon/task.clj` (`create-all!` new, `from-filed`), `resources/seon/schemas/seon.task.edn` (`:seon.task/target`, `:seon.task/config`), `test/seon/task_test.clj` | `seon.task/create-all!` over a vector of task maps: one transaction on main, every task `:held`, branches resolved, `:seon.task/target` and `:seon.task/config` stored, the runnable view and the needs edges validated. `seon.task/create!` is not changed (73 callers). Not yet called by the launch: additive. | `seon.task-test/a-task-write-resolves-every-tasks-branch`: in one write of `[a b c d m]` (b needs a; c and d need b; m, with a target, needs c and d), every task is `:held`, a and b share a branch, and c, d and m each get their own; a given branch wins; a repeat write commits nothing. `seon.task-test/a-filed-task-becomes-four-linked-tasks-ending-in-a-merge-task` (`from-filed`: the last map needs the implement and design tasks, carries main's branch as its target and no proofs; design, prove and implement share one branch; all four `:held`). Red on HEAD because `create-all!` does not exist. |
 | **T2** Graph process as a fact (45 min, Opus: boot-critical) | `src/seon/cluster/agent.clj` (`start-flow!`, `stop-flow!`), `src/seon/cluster.clj` (`recover-runs!`), `resources/seon/schemas/seon.agent.edn`, `test/seon/cluster/agent_test.clj` | The registry asserts and retracts `:seon.agent/graph-process`. Boot retracts values naming another process. | `seon.cluster.agent-test/a-started-graph-is-observed-until-it-exits`: after `start-flow!` main holds the agent's `graph-process` naming this process; after `stop-flow!` returns with every thread exited it is absent; a value naming another process id is absent after boot's recovery. Red on HEAD because the attribute does not exist. |
-| **T3a** The pure reconciler (60 min, Opus) | `src/seon/cluster/agent.clj` (`reconcile` new, not wired), `resources/seon/schemas/seon.flow.actions.edn` (`:seon.flow.actions/observed`, `/actions`, the gap action), `resources/seon/schemas/seon.task.edn` (`:seon.task/environment`), `test/seon/cluster/agent_test.clj` | `reconcile` over hand-written observed values (data, no JVM effects). Additive. | One table deftest, `seon.cluster.agent-test/reconcile-closes-each-gap-once`. Its rows: **idempotence** (a test-local `closed` helper applies each answered action's closing fact to the observed value; reconcile again → `[]`); **parallel start** (two ready `:running` tasks with no needs, `max-running` 4 → two builds and two start steps in one answer); **cap** (five ready tasks, `max-running` 2, one open attempt → one build and one start step; two open → nothing); **held** (everything else ready, `:held` → nothing); **dependency wait** (C needs A and B: no action for C while either is not done where its attempts live; both done → C's build and start step); **done step on a target** (a start step judged empty on a branch built against main → one accept, no graph start); **work left** (a start step with an unmerged entry → one graph start); **incomplete environment** (a ready task whose environment `:seon.task/environment` refuses → one gap action naming the missing members, no start step, no graph); **stale environment** (a target task whose base is no longer main's head → one rebuild); **restart** (`graph-process` present, environment digest differs → `:stop` then `:close` once; then, with `graph-process` absent, `:running` and no open attempt → a fresh build and start); **stop on undesired** (`graph-process` present, execution `:held` → `:stop`); **no re-run** (a bailed task `:held` with a `:closed` attempt → nothing); one branch, two ready tasks → one start. Red on HEAD because `reconcile` does not exist. |
-| **T3b** One path (120 min, Opus; restart batch; after P4b and P7) | `src/seon/cluster/agent.clj`, `src/seon/cluster/message.clj` (`undeliverable` reads the agent's task execution directly, no `ready-rules`), `src/seon/cluster/boot.clj` (the branch route's release), `src/seon/task.clj`, `src/seon/merge.clj`, `src/seon/cluster/source.clj` (prepare over several needs; the target judged as the last task), `src/seon/context.clj`, `src/my/root.clj`, `src/seon/step/prove.clj`, `src/seon/step/design.clj` (docstring), `src/seon/test/runner.clj` (line 1398 reads next proofs; collides with P6 and P11, so a patch if they hold it), `src/my/program.clj` (its `next` reads), `script/seon/agent_cost.clj`, `script/seon/vocabulary.edn` (the `seon.task/ready` row), `resources/seon/tasks/seon.step.merge.edn` and the 13 other filed task files naming a deleted symbol (38 references, found by `rg` over the deleted names; a reference to a deleted symbol is converted or the task retired in the same commit), `test/seon/cluster/db_flow_test.clj`, `test/seon/cluster/merge_test.clj`, `test/seon/merge_test.clj`, `test/seon/task_test.clj`, `test/my/root_test.clj`, `test/my/task_test.clj`, `test/seon/context_test.clj`, `test/seon/merge_forward_test.clj`, `test/seon/cluster/merge_scenarios_test.clj`, `test/seon/cluster/write_back_test.clj`, `test/seon/proof_reuse_test.clj`, `test/seon/render/agent_world_test.clj`, `test/seon/test_support.clj`, `test/seon/step_test.clj`, `test/seon/step/prove_test.clj` | `run-pass!` = observe, reconcile, apply. `chain!` → `create-all!`. Every reader of `next` converts to `needs`: a task's next proofs are the proofs of the tasks that need it and share its branch. The build rule and the done step. The per-assignment path, the chain functions, `ready` and the merge-step append are deleted (§9). Kept until T3c: the chains page and its helpers, the `next` attribute. Kept until S3e: `children`, `effective`, the `execution` rule. | `seon.cluster.db-flow-test/a-merge-task-with-no-conflict-is-done-at-start-with-no-model-call` (the merge task's attempt is `:merged` on main; main holds the change by digest; exactly one transaction was written on main for it; zero model calls; no `graph-process` was ever asserted for it); `seon.cluster.db-flow-test/a-conflicting-merge-task-starts-an-agent-on-its-merge-branch` (main and the work both changed one function: the merge branch holds main's version of it by digest and one unmerged entry naming it; exactly one graph starts there with the merge template's instructions; main is unchanged); `seon.cluster.db-flow-test/a-task-with-no-target-is-done-on-green-proofs-and-writes-nothing-to-main` (outcome `:done` on its branch; main gains no declaration and no merge commit); `seon.cluster.db-flow-test/a-held-task-starts-nothing-until-root-releases-it` (a task written by `create-all!` is `:held` and a pass starts nothing; `my.root/run!` then one pass opens its attempt); `seon.cluster.db-flow-test/the-scheduler-never-starts-more-than-max-running` (three released independent tasks, `max-running` 2 applied through config: two attempts open after the pass, the third after one ends); `seon.cluster.db-flow-test/two-independent-tasks-start-in-one-pass` (two tasks released together; one pass: two attempts on two branches); `seon.cluster.db-flow-test/a-task-needing-two-parallel-tasks-starts-after-both-and-sees-their-work` (C's attempt exists only after A and B are done; C's branch head holds A's and B's definitions by digest); `seon.cluster.db-flow-test/a-task-and-its-merge-task-end-merged-and-published-with-no-hand-act` (replaces the three red tests). The existing `a-three-task-chain-ends-merged-with-no-hand-act` (green on HEAD) is rewritten over `needs` with a fourth, merge task. Every T3b test releases its tasks with `my.root/run!`, since nothing autoruns. Red on HEAD because none of these tasks, `create-all!` or the held semantics exist. |
-| **T3c** Views, claims, schema, miner (60 min, Sonnet; same restart batch) | `src/seon/task.clj` (views, `next` schema users), `src/seon/render/web.clj`, `src/seon/cluster/registry.clj`, `src/seon/cluster/boot.clj` (`task/chain-branches` for the operator's `--chains`, now the branches of tasks), `src/seon/mine.clj`, `resources/seon/schemas/seon.chain.edn` (deleted), `seon.task.edn` (`next` deleted), `seon.flow.actions.edn`, `my.root.edn`, and the schema descriptions naming deleted symbols (`seon.context.edn`, `seon.merge.edn`, `seon.source.edn`, `seon.squash.edn`, `seon.config.agent.edn`), `docs/seon/plan.md`, `docs/seon/specs/task-steps.md`, `docs/seon/specs/agent-loop.md`, `docs/seon/specs/merge.md`, `docs/seon/schedule/cards/KEEP-BRANCHES.md`, `.agents/skills/repl/SKILL.md`, `.agents/skills/seon-context-config/SKILL.md`, `test/seon/render/web_test.clj`, `test/seon/cluster/registry_test.clj`, `test/seon/mine_test.clj`, `test/seon/competency.clj`, `test/seon/competency_grade_test.clj` | The task-graph page; the claims clause; the schema deleted; **no norm** (owner decision 4); `seon.mine` reads the task model: `kept-branches` lists the branches of tasks (`:seon.task/branch` on main's tasks) and of attempt rows, its docstrings say task branch, and its long test runs a task graph instead of a chain; after the restart root re-mines whatever branches exist (`seon.mine/kept-situations`). | `seon.cluster.registry-test/a-task-branch-survives-retirement` (renamed from `a-chain-fact-keeps-its-branch-and-base-through-retirement`: a branch named only by a held task's `:seon.task/branch` survives `retire-unclaimed!`; green on HEAD as the chain-fact test, so the rename's proof is the changed fixture); `seon.mine-test/kept-branches-lists-a-held-tasks-branch-with-no-chain-fact` (main holds a task naming branch b and no chain fact, the store holds b, `kept-branches` lists b; red on HEAD because `kept-branches` reads only `:seon.chain/branch` and attempt rows). |
-| **T4** Environment restart (60 min, Opus; after T3b) | `src/seon/cluster/agent.clj` (the restart applier, the completeness gap), `resources/seon/schemas/seon.agent.edn` (`:seon.agent/environment`), `resources/seon/schemas/seon.task.edn` (`:seon.task/environment`, if T3a left it), `test/seon/cluster/db_flow_test.clj` | Gap rows 3c and 13: an agent starts only when its task's desired environment is complete; an environment difference stops the graph, closes the attempt and starts a fresh agent. The agent row records its observed environment at acquisition. `my.task/update!` stays closed to `config` and `model`. | `seon.cluster.db-flow-test/an-environment-change-on-a-running-task-restarts-its-agent-on-the-new-environment`: a running task's agent on branch b; root writes the task's branch b2; one pass later `graph-process` for the old agent is absent, attempt 1 is `:closed` "environment changed", and a second pass opens attempt 2 under a new agent id on b2 with the agent row naming b2; a second row: a config change (the turn cap) restarts the same way and the new agent reads it. `seon.cluster.db-flow-test/a-task-with-an-incomplete-environment-starts-no-agent-and-reports-the-gap` (a released task whose decided config lacks a dial the turn loop reads: no attempt, no context, no graph; a problem task names the missing member and the task is `:held`). Red on HEAD because neither the restart nor the gap row exists. |
+| **T3a** The pure reconciler and its exhaustive table (90 min, Opus) | `src/seon/cluster/agent.clj` (`transitions`, `impossible`, `effects`, `task-state`, `row`, `admit`, `reconcile`: new, not wired), `resources/seon/schemas/seon.flow.actions.edn` (the twelve dimension enums, `:seon.flow.actions/task-state` with its constraints as one registered named predicate, `/observed`, `/actions`, the `:seon.flow.actions/op` `:multi`), `resources/seon/schemas/seon.task.edn` (`:seon.task/environment`), `resources/seon/schemas/seon.config.agent.edn` (`:max-running` `:min 0` and its description, owner decision 8), `docs/seon/architecture/vocabulary.md` (transition table, row, steady row, recorded first), `test/seon/cluster/agent_test.clj` | `reconcile` over hand-written observed values (data, no JVM effects): each task's `task-state`, its one row of `transitions` (§5.2), then `admit`'s fold over the start group. The pass is the one `db<->flow` already runs; Flow stays the runtime and no library beyond Malli is added. Additive: `observe` and the wiring are T3b's. T3b's `observe` reads `:paused` and `:stopped` as `:held` while those values stay in the enum (T3b to T3c); that is the owner's fold (decision 7), not a fallback row. | **One exhaustiveness deftest**, `seon.cluster.agent-test/the-transition-table-is-exhaustive-deterministic-and-convergent`, over the 13,968 possible task states (§5.3), four assertions, each failing as the offending states in data: (1) every state matches exactly one row (no gap, no overlap); (2) every row's actions, with each answer the world can give (`effects`), lead only to possible states; (3) every state reaches a steady row without a cycle; (4) plan, apply (the test-local `closed` helper applies each action's closing fact to the observed value), re-plan answers `[]`. The branch table (16 combinations, 8 possible, 6 rows) is checked by the same deftest. Supporting examples, not the proof, in the existing table test `seon.cluster.agent-test/reconcile-closes-each-gap-once`: **parallel start** (two ready tasks, `max-running` 4 → two builds); **cap** (five ready, `max-running` 2, one open → one start; `max-running` 0 → nothing, running work untouched); **one branch** (two ready tasks on one branch → one start); **held** (`:held` → nothing); **dependency wait** (C needs A and B: nothing for C while either is not done where its attempts live); **no re-run** (an ended attempt awaiting its judgment starts no second attempt; a bailed task `:held` with a `:closed` attempt → nothing); **stale with work** (a stale branch with an ended `:done` attempt merges main forward, never rebuilds); **cancel after end** (closes as cancelled, no `:held`); **crash** (an open, unjudged attempt with no graph judges); **restart** (G5 `:stop`, then O3 `:close-environment`, then N2 to N6 fresh); and `seon.cluster.agent-test/an-impossible-task-state-is-refused-naming-its-constraint` (`reconcile` given a branch-less state with a config returns the input refusal naming `config-without-branch`). Red on HEAD because `transitions` and `reconcile` do not exist. |
+| **T3a-agent** The agent's phase table (60 min, Opus; after T3a, beside T3b) | the agent's turn proc in `src/seon/turn.clj` and its schema `resources/seon/schemas/seon.turn.work.edn` (the one existing phase enum is `:seon.turn.work/situation`: `:resume :call :open :close :prove`); the narrow check names the final file list | The agent's attempt phases as a phase × event table in its Flow proc's state map, `{:fsm/phase …}` (AGENTS.md "An agent's state lives in its Flow proc and SCI context"; the cluster level holds no machine state, `transitions.md` §7.4). Its transitions are edge-triggered (a model reply, an eval done, tests reported, a wake, and the proc's `::flow/pause`, `::flow/resume`, `::flow/stop`), so the dimensions are phase and event as Malli enums, and each row is `{:when {:phase … :event …} :then [ops] :next phase}`. `transform` looks the row up; a missing pair is the typed error map, never a default. The proc's own `::flow/pause`, `::flow/resume` and `::flow/stop` are flow's states, mapped onto events of the same table, and its listeners are registered at start and unlistened at stop (§5.4); no lifecycle type is added. `:ping-map-fn` returns the phase, so `flow/ping` is how the reconciler's observed "graph running" can be read. The same enumeration check as T3a: every (phase, event) pair has exactly one row, and every row's `:next` is a phase. The phases and events are read from the turn loop at the start of the phase, not guessed here. | `seon.turn-test/every-phase-and-event-has-exactly-one-row` (names to be confirmed by the phase): red on HEAD because the table does not exist. |
+| **T3b** One path (120 min, Opus; restart batch; after P4b and P7) | `src/seon/cluster/agent.clj`, `src/seon/cluster/message.clj` (`undeliverable` reads the agent's task execution directly, no `ready-rules`), `src/seon/cluster/boot.clj` (the branch route's release), `src/seon/task.clj`, `src/seon/merge.clj`, `src/seon/cluster/source.clj` (prepare over several needs; the target judged as the last task), `src/seon/context.clj`, `src/my/root.clj`, `src/seon/step/prove.clj`, `src/seon/step/design.clj` (docstring), `src/seon/test/runner.clj` (line 1398 reads next proofs; collides with P6 and P11, so a patch if they hold it), `src/my/program.clj` (its `next` reads), `script/seon/agent_cost.clj`, `script/seon/vocabulary.edn` (the `seon.task/ready` row), `resources/seon/tasks/seon.step.merge.edn` and the 13 other filed task files naming a deleted symbol (38 references, found by `rg` over the deleted names; a reference to a deleted symbol is converted or the task retired in the same commit), `test/seon/cluster/db_flow_test.clj`, `test/seon/cluster/merge_test.clj`, `test/seon/merge_test.clj`, `test/seon/task_test.clj`, `test/my/root_test.clj`, `test/my/task_test.clj`, `test/seon/context_test.clj`, `test/seon/merge_forward_test.clj`, `test/seon/cluster/merge_scenarios_test.clj`, `test/seon/cluster/write_back_test.clj`, `test/seon/proof_reuse_test.clj`, `test/seon/render/agent_world_test.clj`, `test/seon/test_support.clj`, `test/seon/step_test.clj`, `test/seon/step/prove_test.clj` | `run-pass!` = observe, reconcile, apply. `chain!` → `create-all!`. Every reader of `next` converts to `needs`: a task's next proofs are the proofs of the tasks that need it and share its branch. The build rule and the done step. The per-assignment path, the chain functions, `ready` and the merge-step append are deleted (§9). Kept until T3c: the chains page and its helpers, the `next` attribute. Kept until S3e: `children`, `effective`, the `execution` rule. | `seon.cluster.db-flow-test/a-merge-task-with-no-conflict-is-done-at-start-with-no-model-call` (the merge task's attempt is `:merged` on main; main holds the change by digest; exactly one transaction was written on main for it; zero model calls; no `graph-process` was ever asserted for it); `seon.cluster.db-flow-test/a-conflicting-merge-task-starts-an-agent-on-its-merge-branch` (main and the work both changed one function: the merge branch holds main's version of it by digest and one unmerged entry naming it; exactly one graph starts there with the merge template's instructions; main is unchanged); `seon.cluster.db-flow-test/a-task-with-no-target-is-done-on-green-proofs-and-writes-nothing-to-main` (outcome `:done` on its branch; main gains no declaration and no merge commit); `seon.cluster.db-flow-test/a-held-task-starts-nothing-until-root-releases-it` (a task written by `create-all!` is `:held` and a pass starts nothing; `my.root/run!` then one pass opens its attempt); `seon.cluster.db-flow-test/the-scheduler-never-starts-more-than-max-running` (three released independent tasks, `max-running` 2 applied through config: two attempts open after the pass, the third after one ends); `seon.cluster.db-flow-test/two-independent-tasks-start-in-one-pass` (two tasks released together; one pass: two attempts on two branches); `seon.cluster.db-flow-test/a-task-needing-two-parallel-tasks-starts-after-both-and-sees-their-work` (C's attempt exists only after A and B are done; C's branch head holds A's and B's definitions by digest); `seon.cluster.db-flow-test/a-task-and-its-merge-task-end-merged-and-published-with-no-hand-act` (replaces the three red tests). The existing `a-three-task-chain-ends-merged-with-no-hand-act` (green on HEAD) is rewritten over `needs` with a fourth, merge task. Every T3b test releases its tasks with `my.root/run!`, since nothing autoruns. Red on HEAD because none of these tasks, `create-all!` or the held semantics exist. **Also in T3b (the transition table's gaps):** the bail commits `:held` on main before it closes the branch (gap 12); `:sent-back` bails to root and `seon.task/end-kinds` goes in the same commit (gap 14); `launch-facts` and its `:seon.flow.actions/cluster` reader go (gap 15); `follow`, `launch-actions`' `:paused` and `:stopped` arms, `merge-tx`'s `:stopped` writes and the `:stopped` fixtures convert to `:held` (owner decision 7); `observe` reads progress from each task's branch (decision 6). Further red proofs: `seon.cluster.db-flow-test/a-bail-commits-held-on-main-before-closing-the-branch` (the closing commit is absent and the state reconciles to a second bail, never to a start); `seon.cluster.db-flow-test/a-sent-back-attempt-bails-to-root-and-never-merges`; `seon.cluster.db-flow-test/a-stale-branch-with-an-ended-attempt-merges-main-forward-and-keeps-its-work`. |
+| **T3c** Views, claims, schema, miner (60 min, Sonnet; same restart batch) | `src/seon/task.clj` (views, `next` schema users), `src/seon/render/web.clj`, `src/seon/cluster/registry.clj`, `src/seon/cluster/boot.clj` (`task/chain-branches` for the operator's `--chains`, now the branches of tasks), `src/seon/mine.clj`, `resources/seon/schemas/seon.chain.edn` (deleted), `seon.task.edn` (`next` deleted), `seon.flow.actions.edn`, `my.root.edn`, and the schema descriptions naming deleted symbols (`seon.context.edn`, `seon.merge.edn`, `seon.source.edn`, `seon.squash.edn`, `seon.config.agent.edn`), `docs/seon/plan.md`, `docs/seon/specs/task-steps.md`, `docs/seon/specs/agent-loop.md`, `docs/seon/specs/merge.md`, `docs/seon/schedule/cards/KEEP-BRANCHES.md`, `.agents/skills/repl/SKILL.md`, `.agents/skills/seon-context-config/SKILL.md`, `test/seon/render/web_test.clj`, `test/seon/cluster/registry_test.clj`, `test/seon/mine_test.clj`, `test/seon/competency.clj`, `test/seon/competency_grade_test.clj` | The task-graph page; the claims clause; the schema deleted; **no norm** (owner decision 4); `seon.mine` reads the task model: `kept-branches` lists the branches of tasks (`:seon.task/branch` on main's tasks) and of attempt rows, its docstrings say task branch, and its long test runs a task graph instead of a chain; after the restart root re-mines whatever branches exist (`seon.mine/kept-situations`). | `seon.cluster.registry-test/a-task-branch-survives-retirement` (renamed from `a-chain-fact-keeps-its-branch-and-base-through-retirement`: a branch named only by a held task's `:seon.task/branch` survives `retire-unclaimed!`; green on HEAD as the chain-fact test, so the rename's proof is the changed fixture); `seon.mine-test/kept-branches-lists-a-held-tasks-branch-with-no-chain-fact` (main holds a task naming branch b and no chain fact, the store holds b, `kept-branches` lists b; red on HEAD because `kept-branches` reads only `:seon.chain/branch` and attempt rows). **Also in T3c:** `:paused` and `:stopped` leave the `:seon.task/execution` enum in `seon.task.edn` and its description (owner decision 7), and the `:seon.flow.actions/cluster` member leaves `seon.flow.actions.edn` with its two test sites (gap 15); the `seon.config.agent.edn` `max-running` description drops "or paused". |
+| **T4** Environment restart (60 min, Opus; after T3b) | `src/seon/cluster/agent.clj` (the restart applier, the completeness gap), `resources/seon/schemas/seon.agent.edn` (`:seon.agent/environment`), `resources/seon/schemas/seon.task.edn` (`:seon.task/environment`, if T3a left it), `test/seon/cluster/db_flow_test.clj` | Rows N5, G5 and O3: an agent starts only when its task's desired environment is complete; an environment difference stops the graph, closes the attempt and starts a fresh agent. The agent row records its observed environment at acquisition. `my.task/update!` stays closed to `config` and `model`. | `seon.cluster.db-flow-test/an-environment-change-on-a-running-task-restarts-its-agent-on-the-new-environment`: a running task's agent on branch b; root writes the task's branch b2; one pass later `graph-process` for the old agent is absent, attempt 1 is `:closed` "environment changed", and a second pass opens attempt 2 under a new agent id on b2 with the agent row naming b2; a second row: a config change (the turn cap) restarts the same way and the new agent reads it. `seon.cluster.db-flow-test/a-task-with-an-incomplete-environment-starts-no-agent-and-reports-the-gap` (a released task whose decided config lacks a dial the turn loop reads: no attempt, no context, no graph; a problem task names the missing member and the task is `:held`). Red on HEAD because neither the restart nor the gap row exists. |
 
 Census: P13's `seon.guard-census-test/a-changed-function-holds-no-guard` applies to every T phase's kept code.
 
@@ -612,15 +856,16 @@ The status line of each plan stays in its own file. Root works from this list.
 | 2 | **P10** what will merge | **changed** | Absorbs §6.3: the live conflicts section derived from the stored unmerged entries, cached per branch value; `shown-refusal` stops repeating entries; the merge template points at the section. Its own proof stays, plus `seon.context-test/a-merge-branchs-unmerged-entry-shows-in-the-block-until-resolved`. Moved earlier: agents need it for today's merge steps. | `context.clj`, `seon.step.merge.edn`, `context_test.clj` |
 | 3 | **T0** words and cards | task model | the owner has answered (owner decisions) | docs |
 | 4 | **P5** red is red | kept | Required by the merge task: "green at start" must mean every member green on S, with no red-at-base excuse. | `source.clj`, `context.clj`, `turn.clj`, `test.clj` |
-| 5 | **P6** one test request per step | **changed** | Its one request is also the start step (row 3): `test-step` with no evaluated form, run by root before any graph. T3b calls it from the reconciler's applier. | `turn.clj` |
+| 5 | **P6** one test request per step | **changed** | Its one request is also the start step (N6): `test-step` with no evaluated form, run by root before any graph. T3b calls it from the reconciler's applier. | `turn.clj` |
 | 6 | **T1** the writer | task model | beside P5 and P6 (`task.clj`, task schema) | `task.clj` |
 | 7 | **T2** graph process as a fact | task model | beside (`start-flow!`, `stop-flow!`, boot recovery) | `agent.clj` (flow functions only), `cluster.clj` |
-| 8 | **T3a** the pure reconciler | task model | additive, beside | `agent.clj` (new function), `agent_test.clj` |
+| 8 | **T3a** the pure reconciler and its exhaustive table | task model | additive, beside | `agent.clj` (new functions), `seon.flow.actions.edn`, `seon.config.agent.edn`, `agent_test.clj` |
+| 8a | **T3a-agent** the agent's phase table | task model | after T3a, beside T3b; its files are named by its narrow check | `turn.clj`, `seon.turn.work.edn` |
 | 9 | **P7** one file proof, consumed thrice | kept | Before T3b, which moves `prepare-merge!`'s build and calls `accept-merge!` directly (`source.clj`, `merge.clj` collide). | `source.clj`, `merge.clj` |
 | 10 | **T3b** one path | task model; **absorbs** TASK-CHAIN R-P3–R-P6, S3c-2 (with T2), S3e's `children` deletion, and P4a's `seon.merge/merge!` entrance | restart batch with T3c | §10 |
 | 11 | **T3c** views, claims, schema, miner | task model | same restart batch; updates `seon.mine`, no norm (owner decision 4) | §10 |
 | 12 | **T4** environment restart | task model | after T3b | `agent.clj`, schemas |
-| 13 | **P8** no automatic JVM boots | **changed** | A host-bound change or a member the one JVM must not run is work left at the start step, or a done-rule refusal at row 7. The task bails to root by row 8. There is no `:seon.source/deferred` branch in any path. After T3c, because `agent.clj` collides. | `turn.clj`, `cluster.clj`, `source.clj`, `context.clj`, `agent.clj`, `test.clj`, `test/platform.clj` |
+| 13 | **P8** no automatic JVM boots | **changed** | A host-bound change or a member the one JVM must not run is work left at the start step, or a done-rule refusal at A4 to A6. The task bails to root by A2 or A6. There is no `:seon.source/deferred` branch in any path. After T3c, because `agent.clj` collides. | `turn.clj`, `cluster.clj`, `source.clj`, `context.clj`, `agent.clj`, `test.clj`, `test/platform.clj` |
 | 14 | **P9a** convert the callers of the retired verbs | kept | | `bin/seon-hook`, tests, scripts |
 | 15 | **P9b** one verb, help, skill, offers | kept | help also gains §6.3's section and §6.1's restart in one sentence each | `my/test.clj`, help, skill |
 | 16 | **P11a–d** runner | kept | independent of the task model | `seon.test`, `seon.test.runner` |
@@ -689,6 +934,24 @@ These answer §12, and they bind the narrow check and every T phase.
    - a plan flows along `needs`;
    - `my.root/run!` only resumes a held task.
 
+### Later the same day (2026-10-17), after `transitions.md`
+
+6. **A task's progress, its done included, is observed state on the task's own branch,** because agents write only
+   their branch. The reconciler reads desired state from main and observed state from each task's branch
+   (`seon.db/branch-database`, cached by commit, one read per task). Branches are never deleted by default; compaction is
+   an explicit act that records what the reconciler still needs before the branch goes. This resolves gap 11 without
+   moving data (§3.2).
+7. **`:paused` and `:stopped` fold into `:held`.** Their rows and enum values are removed in the phase that converts
+   their readers (readers T3b, enum values T3c; §9). `transitions.md` §4.3 proved `:stopped` answers exactly as `:held`;
+   `:paused` is the owner's fold, so a flow-paused graph under `:held` is stopped (G2) and graph state is binary.
+   This resolves gap 6.
+8. **`:seon.config.agent/max-running` may be 0:** running work finishes and nothing new starts, and that holds across
+   restarts. Flow's pause of `db<->flow` stays the instant off (§7).
+9. **Every long-lived process is a flow proc, with no new lifecycle types.** Listeners are registered at init or start
+   and unlistened at stop; the reconciler holds one on main plus one per watched task branch, derived from the task
+   facts (§5.4).
+
+
 ## Narrow check (lane task-model-check, 2026-10-17)
 
 Method. Live claims are read-only forms in JVM mode on default (`seon.cluster.boot/connection "default"`, state
@@ -749,16 +1012,17 @@ clean restart that starts an agent only once its desired environment is complete
 | T0 | none (docs) | docs only; the two cards and vocabulary exist |
 | T1 | `seon.task-test/a-task-write-resolves-every-tasks-branch`, `.../a-filed-task-becomes-four-linked-tasks-ending-in-a-merge-task` | new; red because `create-all!` is absent. The branch rule is clear for a linear run, a fan-out and a merge task (fix: a task with a target never counts as a dependent, so design, prove and implement keep one branch when the merge task needs two of them) |
 | T2 | `seon.cluster.agent-test/a-started-graph-is-observed-until-it-exits` | new; red because `:seon.agent/graph-process` is absent; `start-flow!` (agent.clj:1299), `stop-flow!` (1555) and `recover-runs!` (cluster.clj:3065) exist |
-| T3a | `seon.cluster.agent-test/reconcile-closes-each-gap-once` | new; red because `reconcile` is absent. Fixed: the idempotence row needs a test-local `closed` helper, and the rows gained cap, held, incomplete environment and restart |
+| T3a | `seon.cluster.agent-test/the-transition-table-is-exhaustive-deterministic-and-convergent` (supersedes `reconcile-closes-each-gap-once` as the proof; that table test stays as examples) | new; red because `transitions` and `reconcile` are absent. The completed table matches 13,968 of 13,968 folded states once (29,760 of 29,760 unfolded) with 0 invalid successors and 0 cycles in the prototype |
 | T3b | `db-flow-test/a-merge-task-with-no-conflict-is-done-at-start-with-no-model-call`, `.../a-conflicting-merge-task-starts-an-agent-on-its-merge-branch`, `.../a-task-with-no-target-is-done-on-green-proofs-and-writes-nothing-to-main`, `.../a-held-task-starts-nothing-until-root-releases-it` (new), `.../the-scheduler-never-starts-more-than-max-running` (new), `.../two-independent-tasks-start-in-one-pass`, `.../a-task-needing-two-parallel-tasks-starts-after-both-and-sees-their-work`, `.../a-task-and-its-merge-task-end-merged-and-published-with-no-hand-act`; `a-three-task-chain-ends-merged-with-no-hand-act` rewritten | new except the last; red because `create-all!`, held semantics and the task-keyed path are absent. The old three reds (claim 21) are retired, not repaired. `a-three-task-chain...` is green on HEAD, so its proof is the rewritten fixture |
 | T3c | `registry-test/a-task-branch-survives-retirement` (renamed), `mine-test/kept-branches-lists-a-held-tasks-branch-with-no-chain-fact` (new, replaces the dropped norm test) | the rename is green on HEAD as the chain-fact test, so the changed fixture is its red; the miner test is red because `kept-branches` reads only the chain fact and attempt rows |
+| T3a-agent | `seon.turn-test/every-phase-and-event-has-exactly-one-row` | new; red because the table is absent |
 | T4 | `db-flow-test/an-environment-change-on-a-running-task-restarts-its-agent-on-the-new-environment`, `.../a-task-with-an-incomplete-environment-starts-no-agent-and-reports-the-gap` | new; red because neither the restart nor the gap row exists |
 | P10 | `seon.context-test/a-merge-branchs-unmerged-entry-shows-in-the-block-until-resolved` | new; red because `seon.context` never names `unmerged` (claim 15) |
 
 ### Fixes applied in the sections above
 
 - **Owner decisions.** §1, §3.1, §4, §5, §7, §8 and §12 now say tasks are written `:held`, `my.root/run!` is the one
-  release, and `max-running` caps starts; §6.1, gap rows 3, 3c, 6 and 13, and T4 describe the clean restart with the
+  release, and `max-running` caps starts; §6.1, rows N5, N6, G5 and O3, and T4 describe the clean restart with the
   completeness precondition; T3c drops the norm and updates `seon.mine`; §11 rows follow.
 - **T1.** The vector writer is `seon.task/create-all!`; `create!` (73 callers) is untouched; the branch rule ignores
   targeted dependents.
