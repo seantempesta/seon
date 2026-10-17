@@ -115,6 +115,27 @@
        (is (false? (get reply "isError")))
        (is (= [[] []] (db/datoms-diff before after :aevt [:seon.fn/ns])))))))
 
+(deftest one-request-replacing-two-stored-definitions-stores-both
+  ;; each replaced row was reconciled alone, and two reconciliations' transaction-local identities
+  ;; collided in the one recording transaction ("Conflicting upsert: seon.fn.index/0"), so nothing was stored
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running _ _]
+     (let [agent-id (str "replace-two-" (id/id))
+           {connection :seon.db/connection}
+           ((requiring-resolve 'seon.test-support/own-branch-agent!)
+            running agent-id (str "(ns batch.replace-two)\n"
+                                  "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
+                                  "(defn g {:malli/schema [:=> [:cat :int] :int]} [x] x)"))]
+       (eval! (str "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))\n"
+                   "(defn g {:malli/schema [:=> [:cat :int] :string]} [x] (str x))") agent-id running)
+       (is (= {'batch.replace-two/f "[:=> [:cat :int] :int]" 'batch.replace-two/g "[:=> [:cat :int] :string]"}
+              (into {} (map #(vector % (:seon.fn/spec (db/pull (db/db connection) [:seon.fn/spec] [:seon.fn/sym %]))))
+                    ['batch.replace-two/f 'batch.replace-two/g]))
+           "both replacements are stored")
+       (is (str/includes? (:seon.fn/source (db/pull (db/db connection) [:seon.fn/source] [:seon.fn/sym 'batch.replace-two/f]))
+                          "(* x x)")
+           "with the new body")))))
+
 (deftest a-later-request-redefining-a-contracted-defn-is-admitted-as-written
   ;; each row: request 1 defines, request 2 redefines the same name; the
   ;; second definition is read as the agent's context binds it, never as

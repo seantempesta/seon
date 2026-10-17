@@ -413,27 +413,37 @@
           (into (mapcat identity) entities)))))
 
 (defn- entity-facts
-  "A row's facts on `db`: none when its stored identity already holds this
-  definition digest, else the source owner's reconciliation (retaining equal refs and components), else the new entity
-  (and its namespace, when `db` holds none)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/row] :seon.store/transaction-data]}
-  [db row]
-  (let [[ident v] (program/row-identity row)
-        existing (when-let [e (dbu/entid db [ident v])] (db/pull db '[*] e))
-        ns-attr (if (:seon.fn/ns row) :seon.fn/ns :seon.test/ns)
-        ns-ref (get row ns-attr)
-        missing-ns (when (and (vector? ns-ref) (not (dbu/entid db ns-ref))) (second ns-ref))
-        row (cond-> row missing-ns (assoc ns-attr (str "namespace:" missing-ns)))
-        digest (:seon.program/definition-digest row)]
-    (cond-> (cond
-              ;; the stored definition already is this one: the file link, spans, admission and
-              ;; analysis the stored row owns stay, as redefining a Var never edits its file
-              (and digest (= digest (:seon.program/definition-digest existing))) []
-              (:db/id existing)
-              (let [tx (sfn/reconcile-tx db [(merge (select-keys existing file-attributes) row)] [])]
-                (if (:seon.error/at tx) (throw (ex-info (:seon.error/message tx) tx)) tx))
-              :else [(assoc row :db/id (str (name ident) ":" v))])
-      missing-ns (conj {:db/id (str "namespace:" missing-ns) :seon.ns/name missing-ns}))))
+  "`rows`' facts on `db`: none for a row whose stored identity already holds its definition digest; one
+  reconciliation by the source owner (`seon.fn/reconcile-tx`, retaining equal refs and components) of every stored
+  row replaced, so their transaction-local identities are one population; else the new entity (and its namespace,
+  when `db` holds none)."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.program/row]] :seon.store/transaction-data]}
+  [db rows]
+  (let [stored (fn [row] (let [[ident v] (program/row-identity row)]
+                           (when-let [e (dbu/entid db [ident v])] (db/pull db '[*] e))))
+        [replaced added]
+        (reduce (fn [[replaced added] row]
+                  (let [existing (stored row)
+                        digest (:seon.program/definition-digest row)]
+                    (cond
+                      ;; the stored definition already is this one: the file link, spans, admission and
+                      ;; analysis the stored row owns stay, as redefining a Var never edits its file
+                      (and digest (= digest (:seon.program/definition-digest existing))) [replaced added]
+                      (:db/id existing) [(conj replaced (merge (select-keys existing file-attributes) row)) added]
+                      :else [replaced (conj added row)])))
+                [[] []] rows)
+        reconciled (if (seq replaced) (sfn/reconcile-tx db replaced []) [])]
+    (when (:seon.error/at reconciled) (throw (ex-info (:seon.error/message reconciled) reconciled)))
+    (into reconciled
+          (mapcat (fn [row]
+                    (let [[ident v] (program/row-identity row)
+                          ns-attr (if (:seon.fn/ns row) :seon.fn/ns :seon.test/ns)
+                          ns-ref (get row ns-attr)
+                          missing-ns (when (and (vector? ns-ref) (not (dbu/entid db ns-ref))) (second ns-ref))]
+                      (cond-> [(cond-> (assoc row :db/id (str (name ident) ":" v))
+                                 missing-ns (assoc ns-attr (str "namespace:" missing-ns)))]
+                        missing-ns (conj {:db/id (str "namespace:" missing-ns) :seon.ns/name missing-ns})))))
+          added)))
 
 (defn- declared-bindings
   "The bindings the stored namespace's row `stored` leaves declared given `live`, the bindings SCI
@@ -483,7 +493,7 @@
                 (let [row (dissoc row :seon.schema.admission/source)
                       row (assoc row :seon.program/definition-digest (db/namespace-digest-of db stored-id row))]
                   (program/exact-replacement-tx (select-keys (db/pull db '[*] stored-id) (cons :db/id (keys row))) row))
-                (entity-facts db row))))))
+                (entity-facts db [row]))))))
       []))
 
 (defn- removal-report
@@ -587,7 +597,7 @@
         (-> stx
             (into (mapcat #(namespace-facts request db' entities % (not (contains? namespaces %))))
                   (sort (into (set namespaces) (keep #(let [r (or (:seon.fn/ns %) (:seon.test/ns %))] (when (vector? r) (second r)))) entities)))
-            (into (mapcat #(entity-facts db' %)) entities)
+            (into (entity-facts db' entities))
             (into removed)))))
 
 (defn apply-facts
