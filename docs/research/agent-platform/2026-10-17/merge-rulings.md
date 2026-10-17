@@ -30,3 +30,9 @@ status: owner rulings 2026-10-17, input to the merge hybrid (Fable) after merge-
 - all functions are instrumented, so data is validated in and out and agents need not validate;
 - tests run automatically as things change, and the agent always gets those updates and can see which tests fail and dig into the results;
 - agents may run a test by hand, but it is almost never necessary.
+
+**No automatic JVM boots (owner, 2026-10-17, later):** "Can we do this on the JVM inside the JVM for most tests? We might just restrict platform work to JVM agents (root agents). I think automatic testing firing up an entire JVM is a recipe for disaster."
+- Automatic testing never boots a JVM. Every reactive and merge test runs inside the one JVM.
+- A file-reading test (for example `seon.babashka-load-test/declared-namespaces-load-in-babashka`) reads the candidate's files, written cheaply from the branch to a disposable directory. It may launch the external tool it tests (`bb`), never a JVM.
+- Platform work, meaning changes to host-bound declarations SCI cannot interpret, belongs to root, which works in JVM mode and proves it deliberately with `bin/seon check`.
+- When a chain's change reaches a host-bound declaration, the done rule says so as data and the chain bails to root. Nothing boots automatically.

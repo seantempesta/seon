@@ -237,6 +237,14 @@ any other run" (it routes through `my.test/run`). `.agents/skills/clojure-testin
 
 ## 4. Phases
 
+> **Owner ruling, later on 2026-10-17 (supersedes P8 as written, and the §7 question on the platform boot):**
+> automatic testing never boots a JVM; see `merge-rulings.md`, section "No automatic JVM boots".
+> - P8 becomes: file-reading members run in the one JVM over the candidate's files, written to a disposable directory.
+> - A chain whose change reaches a host-bound declaration bails to root as data.
+> - Delete `check-files!`, the per-merge `isolated-run` boot and `check-platform`'s automatic use. Root's deliberate `bin/seon check` stays.
+> - The narrow check rewrites P8's row in place.
+
+
 HEAD boots after every phase. Live chains keep working between phases because `done-refusals` stays the judge and
 `seon.merge/merge!` stays the entrance throughout; each phase changes what feeds them. These stay green through all
 phases: `seon.cluster.merge-test/a-requested-green-end-merges-and-publishes-with-no-hand-act`,
