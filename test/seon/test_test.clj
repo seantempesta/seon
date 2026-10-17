@@ -759,3 +759,33 @@
        (is (not-any? #(get-in tests [% :seon.turn.loop/test-error]) [:seon.turn.loop/branch :seon.turn.loop/reaching :seon.turn.loop/proofs])
            "the step makes no selection error")
        (is (= [1] (mapv :seon.test/pass-count results)) "the task's proof ran and is recorded")))))
+
+(defn- interpreted-outcome
+  "Run the loaded test `test-symbol` once with its namespace interpreted from its rows, as an agent branch runs it:
+  its evaluator, fail and error counts, or the run's error message."
+  {:malli/schema [:=> [:cat :seon.test/sym] [:or [:tuple :keyword :int :int] :string]]}
+  [test-symbol]
+  (let [execution (test-support/execution-handle nil)
+        result (binding [sut/*member* nil]
+                 (sut/run {:seon.test/policy :named :seon.test/execution execution
+                           :seon.test/recording-connection (:seon.db/connection execution)
+                           :seon.test/identities #{test-symbol} :seon.test/rerun? true
+                           :seon.test/interpreted-namespaces #{(symbol (namespace test-symbol))}}))]
+    (or (:seon.error/message result)
+        ((juxt :seon.test.member/evaluator :seon.test/fail-count :seon.test/error-count) (first (:seon.test/results result))))))
+
+(deftest ^{:seon.test/long "One nested run interpreting the whole loaded seon.error-test namespace from its rows."
+           :seon.test/long-ms 30000}
+  ns-interns-answers-only-a-namespaces-own-vars-interpreted
+  ;; live run 7: green compiled on HEAD, red interpreted on an agent branch that changed nothing it reads: in SCI
+  ;; (ns-interns 'seon.error) also lists the clojure.core names SCI lacks (ensure, ref, agent ...), interned there
+  (is (= [:interpreted 0 0] (interpreted-outcome 'seon.error-test/every-error-owner-function-declares-its-input-and-output))
+      "an interpreted run of a test green compiled is green"))
+
+(deftest ^{:seon.test/long "One nested run interpreting the whole loaded seon.turn-test namespace from its rows."
+           :seon.test/long-ms 30000}
+  an-inst-tag-reads-as-an-inst-while-a-default-data-reader-fn-is-bound-interpreted
+  ;; live run 7: green compiled on HEAD, red interpreted on an agent branch that changed nothing it reads: SCI's
+  ;; read-string hands #inst to a bound *default-data-reader-fn* where Clojure applies its default data readers first
+  (is (= [:interpreted 0 0] (interpreted-outcome 'seon.turn-test/evaluation-ai-is-only-the-repl-session))
+      "an interpreted run of a test green compiled is green"))
