@@ -6,7 +6,7 @@ status: "design plan by lane task-model-plan (Opus), 2026-10-17, revised in plac
 
 # Task model: desired state, observed state, one reconciler (2026-10-17)
 
-**Phase status** (each implementing commit updates this line): T0 done (TASK-CHAIN amended in place to the final plan and `task-t0-task-chain.patch` deleted, lane task-t0-finish) · T1 done c9f2a98a7 (`seon.task/create-all!`; `from-filed` answers four needs-linked tasks ending in a merge task) · T2 pending · T3a pending (the exhaustive transition table, §5) · T3a-agent pending ·
+**Phase status** (each implementing commit updates this line): T0 done (TASK-CHAIN amended in place to the final plan and `task-t0-task-chain.patch` deleted, lane task-t0-finish) · T1 done c9f2a98a7 (`seon.task/create-all!`; `from-filed` answers four needs-linked tasks ending in a merge task) · T2 done cb8274c69 (`:seon.agent/graph-process` asserted by `start-flow!`, retracted at the observed exit in `stop-flow!` and by `recover-runs!`; `:seon.agent/environment` at start; both on the agent's own database, not always main) · T3a pending (the exhaustive transition table, §5) · T3a-agent pending ·
 T3b pending · T3c pending (no norm; updates `seon.mine`) · T4 pending (clean restart) · P10 (merge-hybrid's phase, with
 §6.3's conflicts section) done 8f39ed642
 
