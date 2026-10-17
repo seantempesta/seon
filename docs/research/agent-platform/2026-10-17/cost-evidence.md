@@ -7,7 +7,7 @@ status: wave 1 and wave 2 prototype in flight (2026-10-17)
 # Cost evidence
 
 **Phase status** (each implementing commit updates this line): A (operation table) done c6777da6b · wave 1 (live
-per-function cost) in flight, lane cost-wave1 · wave 2 (generative profile prototype) in flight, lane cost-wave2 ·
+per-function cost) done ed12f110a (pain ranks self overrun; health's live ranking is the pain ranking) · wave 2 (generative profile prototype) in flight, lane cost-wave2 ·
 wave 3 (refuse at `defn`) pending · task estimates (`task-estimates.md`) pending owner
 
 ## Owner rulings, 2026-10-17
@@ -86,3 +86,46 @@ first seen as the crash. Three layers, each its own lane:
   weight, the top pain functions) shown in health and in the reply of every in-flight request at critical.
 - **Explain** (lane heap-watch): JFR continuous recording as a bounded ring dumped on exit and on OOM, so a death still
   leaves the last minutes of allocation by stack.
+
+## Wave 1 evidence (2026-10-17, after ed12f110a)
+
+Check JVM booted from HEAD ed12f110a plus a disposable probe, after boot and the workload of `seon.sci.documentation-test`,
+`seon.sci.branch-execution-test` (long tests included), `seon.profile-test`, `seon.cost-estimate-test` and
+`seon.health-test` (345 pass; the 4 reds are the same at ca69b7fed: the estimate table's open overruns and
+`docs/seon/issues/affected-callers-fail-to-interpret-against-uninstalled-bindings.md`). The database value counts as
+one in N. 759 of 3,544 cells had sampled sizes (size period 64).
+
+Per unit of N, across the sampled cells:
+
+| figure | p50 | p90 | p99 | max |
+|---|---|---|---|---|
+| mean touched size N | 10.0 | 49.8 | 4,123 | 22,820 |
+| steps / N (inclusive) | 0.27 | 30.0 | 319 | 4,693 |
+| self steps / N | 0.09 | 1.0 | 5.0 | 36.2 |
+| reads / N (inclusive) | 0.0 | 0.27 | 6.0 | 51.2 |
+| self reads / N | 0.0 | 0.0 | 0.5 | 2.0 |
+| bytes / N (inclusive) | 392 | 79,032 | 4.8 M | 27.3 M |
+| self bytes / N | 108 | 1,246 | 44,841 | 490,017 |
+
+Self figures sit well inside the shipped dials (steps 8 × N + 32, reads 2 × N + 4, bytes 4,096 × N + 65,536) except
+allocation; inclusive figures exceed them only at entrances, which carry their callees' work.
+
+Self-pain top 10 (`seon.profile/pain`, by summed self share; overrun is self spent over allowed):
+
+| # | definition | calls | share | self overrun | self per N | inclusive overrun |
+|---|---|---|---|---|---|---|
+| 1 | `seon.db/vector-query-call` | 4,759 | bytes 0.491 | bytes 5.32 | 43,485 B | bytes 5.73 |
+| 2 | `seon.turn.batch/record-form` | 32 | steps 0.371 | steps 3.13, bytes 10.63 | 36.2 steps, 120,907 B | steps 27.6, bytes 587 |
+| 3 | `seon.sci.admit/semantic-value` | 72 | steps 0.319 | steps 2.12, bytes 2.8 | 29.3 steps | steps 7.14 |
+| 4 | `seon.db/transact!` | 134 | steps 0.304 | steps 1.42 | 16.4 steps | steps 8.17 |
+| 5 | `seon.program/without-docstring` | 3,483 | bytes 0.296 | bytes 7.01 | 181,727 B | bytes 7.01 |
+| 6 | `seon.program/source-resolver-names` | 3,731 | bytes 0.101 | bytes 1.92 | 13,173 B | bytes 2.03 |
+| 7 | `seon.fn.analyzer/invoke-kondo` | 40 | bytes 0.024 | bytes 36.4 | 490,017 B | bytes 36.4 |
+| 8 | `seon.db/write-owned-values-error` | 160 | bytes 0.023 | bytes 3.08 | 15,269 B | bytes 3.96 |
+| 9 | `seon.fn/runtime-analysis-batch` | 32 | bytes 0.019 | bytes 35.9 | 483,213 B | steps 26.6, bytes 644 |
+| 10 | `seon.profile/transaction-observation` | 116 | bytes 0.013 | bytes 5.47 | 43,465 B | bytes 13.4 |
+
+No definition overran the self reads contract in this workload: the lazy rescan shows as inclusive reads at entrances,
+not as a producer's own reads. The bytes dial (4,096 × N) ranks allocation-heavy text producers (`without-docstring`,
+`invoke-kondo`) whose N counts a string as one; sizing a string's extent by its length is the next step before the
+bytes figure can be trusted.
