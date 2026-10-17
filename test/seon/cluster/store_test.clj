@@ -17,6 +17,7 @@
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [datahike.connections :as connections]
+            [datahike.connector]
             [datahike.store]
             [konserve.core :as k]
             [konserve.filestore :as filestore]
@@ -545,6 +546,56 @@
             (is (= #{:db} (set (d/branches (:seon.store/connection-object held))))))
           (finally (store/release-store! held))))
       (finally
+        (test-support/delete-recursively! (str (io/file dir) "/.."))))))
+
+(defn- on-thread
+  "`f` run on a thread of its own, as a CompletableFuture."
+  [f]
+  (CompletableFuture/supplyAsync (reify java.util.function.Supplier (get [_] (f)))))
+
+(deftest an-acquire-during-the-last-release-of-its-branch-gets-a-fresh-connection
+  ;; Each holder of a branch takes and drops its own counted reference
+  ;; (`store/acquire-branch!`). An acquire arriving while the last holder's
+  ;; release drained the writer refused "Connection is being released." (root's
+  ;; chain starts, 2026-10-16, branches :chain-ce9d664c1be0 and :chain-fddd9dcbfe66).
+  ;; The holder's write waits on a latch inside the writer, so its release
+  ;; stays draining while the acquire arrives.
+  (let [dir (fresh-dir)
+        entered (java.util.concurrent.CountDownLatch. 1)
+        proceed (java.util.concurrent.CountDownLatch. 1)]
+    (try
+      (let [held (store/open-store! {:seon.store/dir dir})]
+        (try
+          (d/transact (:seon.store/connection-object held) {:tx-data probe-schema})
+          (d/branch! (:seon.store/connection-object held) :db :raced)
+          (let [holder (store/acquire-branch! held :raced)
+                conn-id (datahike.store/connection-id (:config @holder))
+                written (on-thread #(d/transact holder {:tx-data [[:db.fn/call (fn [_]
+                                                                                 (.countDown entered)
+                                                                                 (.await proceed 10 TimeUnit/SECONDS)
+                                                                                 [{:seon.store.test/marker "drained"}])]]}))
+                _ (is (.await entered 10 TimeUnit/SECONDS) "the holder's write is inside the writer")
+                released (on-thread #(store/release-branch! holder))
+                ;; the release dropped the last reference and now drains the writer
+                _ (while (not= 0 (get-in @connections/*connections* [conn-id :count])) (Thread/onSpinWait))
+                acquired (on-thread #(try (store/acquire-branch! held :raced)
+                                          (catch clojure.lang.ExceptionInfo refused (:type (ex-data refused)))))]
+            (try
+              (is (not (.isDone acquired)) "the acquire awaits the draining release, never refusing it")
+              (.countDown proceed)
+              (is (map? (.get written 10 TimeUnit/SECONDS)))
+              (is (nil? (.get released 10 TimeUnit/SECONDS)))
+              (let [connection (.get acquired 10 TimeUnit/SECONDS)]
+                (is (datahike.connector/connection? connection) "the acquire answers a connection")
+                (when (datahike.connector/connection? connection)
+                  (try (is (not (identical? holder connection)) "a fresh one: the released connection is never resurrected")
+                       (is (= #{"drained"} (markers {:seon.store/connection-object connection}))
+                           "it reads the write the release drained")
+                       (finally (store/release-branch! connection)))))
+              (finally (.countDown proceed))))
+          (finally (store/release-store! held))))
+      (finally
+        (.countDown proceed)
         (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
 ;;; ---------------------------------------------------------------------------
