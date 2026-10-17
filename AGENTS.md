@@ -685,6 +685,14 @@ definition with the same input is computed once for every branch and agent that 
   agent fixes the cost before continuing, or justifies beside the number its proportionality and why it cannot be
   sub-second. Over ten seconds needs explicit owner authorization and an issue even when justified. "Cold",
   "expected" and "known cost" are not reasons; reject reports lacking these numbers.
+- **Estimate first; exceeding the estimate is a failing test** (owner, 2026-10-17, after two out-of-memory deaths of
+  default in one afternoon that no test saw). Every ordinary operation and every task states its expected cost up
+  front (ms, allocated MB, and calls or reads where they apply), derived from what the work must do and what it is
+  proportional to, never from today's measurement. One table test measures each operation end to end through the path
+  agents use and is red when any measurement exceeds its estimate; it runs on every commit of `src`, like the guard
+  census. A regression is always red. An overrun that predates its estimate stays red in the table, carried by its
+  task, until its producer is fixed. Allocation and call counts are the primary bounds because they hold under
+  concurrent work; wall clock is compared parent against change.
 - **Make cost follow changed inputs.** Eliminate whole-program work per change and per-call work that belongs once
   per evaluation. Branch creation is not full context construction. Hash admitted source inputs; compare commit
   identities for an unchanged reload. A performance commit is proven by the cost it targets: a
