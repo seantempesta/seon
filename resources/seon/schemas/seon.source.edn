@@ -112,24 +112,20 @@
                [:seon.source/models {:optional true} :seon.source/models]],
               :models [:vector {:min 1 :description "The distinct models a merge's agent called on its source branch (seon.ai/model of its turns' attempts), sorted: what wrote the change."} :seon.ai/model],
               :prepared
-              [:map {:description "A prepared merge accept-merge! takes: the tested intermediate branch, its run and verdict, a Prove step's product (its tests that may stay red by design), the digest each merged declaration held on the destination, and the candidate's commit."}
-               [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
+              [:map {:description "A prepared merge accept-merge! takes (seon.cluster.source/prepare-merge!): the merge branch S of main's head H holding the candidate's whole change, the commit of S that was judged, the change, the judgment's refusals (empty only for acceptance) and their red tests, the run its results came from, H's basis (Datahike's basis fence) and the candidate's commit."}
+               [:seon.source/candidate :seon.store/branch] [:seon.source/judged-commit :seon.source/judged-commit]
+               [:seon.test.run/id {:optional true} :seon.test.run/id]
                [:seon.test/passed? :boolean] [:seon.source/tally :string]
-               [:seon.task/proofs :seon.task/proofs]
-               [:seon.task/product {:optional true} :seon.task/product]
+               [:seon.program/identities :seon.program/identity-set]
+               [:seon.source/refusals :seon.source/refusals]
                [:seon.source/red-tests {:optional true} :seon.source/red-tests]
-               [:seon.source/expected-digests :seon.source/expected-digests]
-               [:seon.source/tested-task-basis :seon.source/tested-task-basis]
-               [:seon.source/red-on-target {:optional true} :seon.source/red-on-target]
                [:seon.source/platform-run {:optional true} :seon.source/platform-run]
+               [:seon.db/basis-t :seon.db/basis-t]
                [:parents [:set :seon.source/commit-id]]],
-              :platform-run [:and {:description "The run of a merge gate's isolated members on the candidate's platform host (seon.cluster/reaching-run, seon.test.platform/check-files!), recorded on the merge branch beside the gate run; merge-verdict judges its results with the gate run's."} :seon.test.run/id],
-              :tested-task-basis
-              [:map {:description "What selected a merge's run: the task, its seon.task/obligations over main, the candidate and their merge base, and the declarations main held for it and its ancestors, with the run it selected. Producer: seon.cluster.source/tested-task-basis; the merge's writer recomputes it (seon.cluster.source/task-basis-held-tx)."}
-               [:seon.task/sym :seon.task/sym] [:seon.task/obligations :seon.task/obligations] [:seon.task/basis :seon.task/basis]
-               [:seon.test.run/id {:optional true} :seon.test.run/id]],
+              :judged-commit [:uuid {:description "The commit of a merge branch its judgment read (seon.cluster.source/prepare-merge!): accept-merge! carries exactly that value, never the branch's later head."}],
+              :platform-run [:and {:description "The run of a merge gate's isolated members on the candidate's platform host (seon.cluster/reaching-run, seon.test.platform/check-files!), recorded on the merge branch beside the gate run."} :seon.test.run/id],
               :red-on-target [:set {:description "The judged reds already red at the target: the merge base, asked by the merge (seon.test/fork-point-red at the merge base commit) and the done rule (seon.cluster.source/red-at-merge-base) alike; neither counts one as the change's red, and a proof is never excused."} :seon.test/sym],
-              :refusals [:vector {:description "Every refusal of a merge's candidate (seon.cluster.source/merge-verdict, its judgment seon.cluster.source/done-refusals); empty only for acceptance."} :seon.error/value],
+              :refusals [:vector {:description "Every refusal the done rule (seon.cluster.source/done-refusals) gives a judged branch, a merge branch included; empty only for done and acceptance."} :seon.error/value],
               :merging [:map {:description "Transaction data and metadata accept-merge! carries in its transaction: root's merge of the assignment's facts (seon.merge/merge!)."}
                         [:tx-data :seon.store/transaction-data] [:tx-meta {:optional true} :map]],
               :next-proofs [:set {:description "The proofs of the task that follows the judged one (its :seon.task/next): seon.cluster.source/done-refusals leaves them red, the next task's work. Absent on the chain's last task."} :seon.test/sym],
@@ -158,7 +154,7 @@
               :uncontracted-error [:and {:description "accept-merge! refused: a function the merge carries declares no complete :malli/schema, or one with an unjustified :any or :some slot; the agent contracts it on its branch."} :seon.source/test-evidence-error [:map [:seon.source/uncontracted {:optional true :description "Always present; optional because a stored error keeps only storable members."} :seon.source/uncontracted] [:seon.source/contract-gaps {:optional true :description "Always present; optional because a stored error keeps only storable members, and this vector of maps has no attribute."} :seon.source/contract-gaps]]],
               :lint-finding [:map {:description "One clj-kondo error, under the checkout's .clj-kondo configuration, in a file a merge would publish. Producer: seon.cluster.source/lint-errors."} [:seon.source/path :seon.source/path] [:seon.lint/row :seon.lint/row] [:seon.lint/col :seon.lint/col] [:seon.lint/type :seon.lint/type] [:seon.lint/message :seon.lint/message]],
               :lint-findings [:vector {:min 1 :description "The clj-kondo errors in the files a merge would publish, in file and position order."} :seon.source/lint-finding],
-              :merge-identities [:and {:description "The declarations a merge of the judged branch would carry: its merge list (seon.cluster.source/merge-list) with each carried declaration's namespace. Producer: seon.cluster.source/publication; seon.cluster.source/done-refusals refuses, on the last task, each function of it no green test reaches."} :seon.program/identity-set],
+              :merge-identities [:and {:description "The declarations a merge of the judged branch would carry: its whole change since its merge base but an agent's own namespace (seon.cluster.source/merge-changes). Producer: seon.cluster.source/publication; seon.cluster.source/done-refusals refuses, on the last task, each function of it no green test reaches."} :seon.program/identity-set],
               :lint-refusal [:and {:description "The clj-kondo errors in the files a merge of the judged branch would write, refused as the merge gate refuses them. Producer: seon.cluster.source/publication; seon.cluster.source/done-refusals refuses it."} :seon.source/lint-error],
               :publication [:map {:description "What a merge of a branch would publish, judged from the branch alone (seon.cluster.source/publication): the done rule's input."} [:seon.source/merge-identities :seon.source/merge-identities] [:seon.source/lint-refusal {:optional true} :seon.source/lint-refusal]],
               :lint-error [:merge {:description "prepare-merge! or the done rule refused (seon.cluster.source/lint-refusal): clj-kondo reports an error in a file the merge would publish, the bar a lane commit holds; the agent fixes it on its branch."} :seon.error/base [:map [:seon.source/path {:description "The first file with an error."} :seon.source/path] [:seon.source/lint-findings {:optional true :description "Always present; optional because a stored error keeps only storable members, and this vector of maps has no attribute."} :seon.source/lint-findings]]],

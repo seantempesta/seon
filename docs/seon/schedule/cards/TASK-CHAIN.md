@@ -246,8 +246,9 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    `seon.source.edn`.
    The agent's turn proposes `:done` (`seon.turn/task-end`); root re-judges `done-refusals` over the branch value at the
    attempt's end commit (`:seon.task.attempt/commit`). Done and merge are one function: the final merge judges its
-   merge branch with `done-refusals` too (`seon.cluster.source/merge-verdict`, a Prove step's product as its
-   `:seon.source/next-proofs`, the merge's changed identities as its `:seon.source/merge-identities`;
+   merge branch with `done-refusals` too, over the same judged input (`seon.context/judged-input` on the merge
+   branch, `seon.cluster.source/prepare-merge!`; a Prove step's product as its `:seon.source/next-proofs`, its whole
+   change as its `:seon.source/merge-identities`;
    `seon.cluster.source-test/done-refusals-judges-every-task-alike`), and a task outside a chain is judged by it
    alike (`seon.context/step-status`). The block shows the task's own done refusals; mid-chain it never shows
    merge refusals (there is no merge; the Design prototype's first block showed a merge refusal before any work).
@@ -262,8 +263,13 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    history.
 6. **Finish** — a done task with no `next`: root merges the chain branch to main once. A chain whose fact says `:seon.chain/merge? false` is the exception: `seon.cluster.agent/chain-finishes` reads no terminal attempt of it, so the done attempt stays on the kept chain branch, readable by name (`seon.task/chain-views` shows the chain `:done`), main gets no merge request, no row of it and no git commit; its intermediate tasks still advance. The merge owner
    (`seon.merge/merge!` → `seon.cluster.source/prepare-merge!` → `seon.cluster.source/accept-merge!`) takes the chain
-   branch and the terminal attempt as its source; `seon.merge/assignment-row`, `seon.merge/assigned-task` and
-   `seon.cluster.source/tested-task-basis` read the held source branch, main only as the destination. The candidate
+   branch and the terminal attempt as its source; `seon.merge/assignment-row` and `seon.merge/assigned-task` read the
+   held source branch, main only as the destination. The merge carries the chain's whole change since its merge base
+   (merge P4a, owner 2026-10-17): there is no merge list and no test-selected subset, so everything the block shows
+   under `:seon.context/changes` merges. Root forks main's head H into a merge branch S holding that change and the
+   facts squash in one write, judges S with the step's own judge, and writes main in ONE transaction whose parents are
+   the chain's commit and S's judged commit, under Datahike's basis fence on H (`:datahike/expected-basis-t`); when main
+   moved since, the writer refuses, nothing is written and the next pass merges again. The candidate
    test world carries the branch's task entities as well as its program (the Design prototype's merge refused because
    today's candidate carries program declarations only, so a task-reading proof is red there). The merge judges the
    whole fork-to-head delta with `done-refusals`, its members being the last task's proofs, every test the branch
@@ -598,8 +604,8 @@ one named commit. No compatibility copy.
 
 - Task data: `seon.task/effective` (with its last task-input/context caller, S2a/S3a), `seon.task/goal-owner` (with
   `refine!` and `obligations`, S1d/S2c), today's `chain!` and `chain-copy` (S1c), `children` and `needs` with their
-  admission, readiness (`seon.task/ready-rules`' needs clauses, `seon.task/execution`'s inheritance) and merge readers
-  (`seon.cluster.source/tested-task-basis`) and `seon.context/chain`'s (S3e), `step`, `product`, `intent` (S1a renames).
+  admission, readiness (`seon.task/ready-rules`' needs clauses, `seon.task/execution`'s inheritance) and
+  `seon.context/chain`'s (S3e), `step`, `product`, `intent` (S1a renames).
 - Proof selection: `seon.task/obligations` and `assigned-obligations` (a task's proofs are its field),
   `seon.test.runner/single-tags` and the run input's extra names (`:seon.test/task` stays the one request key,
   `seon.test/task` the one reader), `seon.turn/task-obligations`, `task-proofs`, `step-tests`,

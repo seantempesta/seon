@@ -661,39 +661,55 @@
       (finally
         (registry/retire-branch! {:seon.store/store store :seon.store/branch chain})))))
 
-(deftest a-merge-carries-only-what-its-tests-reach
-  ;; ruling 5a: a tested change and its closure merge; a scratch def, a probe schema and a `user` namespace stay
-  (support/with-database
-   (fn [connection]
-     (let [sym #(symbol "seon.merge-test" %)
-           base (db/db connection)
-           _ (support/transacted! connection (support/schema-entities base [[:fixture.reach/value :int] [:tmp/probe :string]]))
-           program (fn [identity source] (support/program-entity (db/db connection) identity source))
-           _ (support/transacted! connection [(program [:seon.fn/sym (sym "reach-f")]
-                                                       "(defn reach-f {:malli/schema [:=> [:cat] :fixture.reach/value]} [] 1)")])
-           _ (support/transacted! connection [(program [:seon.fn/sym (sym "reach-scratch")]
-                                                       "(defn reach-scratch {:malli/schema [:=> [:cat] :int]} [] 2)")])
-           _ (support/transacted! connection [(program [:seon.test/sym (sym "reach-check")]
-                                                       "(clojure.test/deftest reach-check (clojure.test/is (= 1 (seon.merge-test/reach-f))))")])
-           _ (support/transacted! connection [(support/namespace-entity (db/db connection) 'user)])
-           after (db/db connection)
-           changed (program/changed-identities (db/basis-t base) after source/merge-bound)
-           listed (source/merge-list after changed #{(sym "reach-check")})
-           will (:seon.merge/will-merge listed)
-           stays (:seon.merge/stays listed)]
-       (is (every? changed [[:seon.fn/sym (sym "reach-f")] [:seon.fn/sym (sym "reach-scratch")]
-                            [:seon.schema/key :tmp/probe] [:seon.ns/name 'user]])
-           "the fixture changed each of them")
-       (is (= #{} (set (remove will [[:seon.fn/sym (sym "reach-f")] [:seon.test/sym (sym "reach-check")]
-                                     [:seon.schema/key :fixture.reach/value]])))
-           "the tested change, its test and the schema its contract names merge")
-       (is (= #{} (set (remove stays [[:seon.fn/sym (sym "reach-scratch")] [:seon.schema/key :tmp/probe]
-                                      [:seon.ns/name 'user]])))
-           "the scratch def, the probe schema and the user namespace stay")
-       (is (= changed (into will stays)) "every change is listed once")
-       (is (= #{} (set (remove (:seon.merge/stays (source/merge-list after changed #{}))
-                               [[:seon.fn/sym (sym "reach-f")] [:seon.fn/sym (sym "reach-scratch")]])))
-           "with no seed every change that is not a removal stays: an empty closure, never a refusal")))))
+(defn- merge-fixture!
+  "A fresh namespace `reach<suffix>.core` on main holding `scratch` (body 1), its task `tq.reach<suffix>/fix` indexed
+  there, and a branch forked from main: what the one-merge tests share."
+  [main-conn store suffix]
+  (let [ns-sym (symbol (str "reach" suffix ".core"))
+        task-ns (str "tq.reach" suffix)
+        branch (keyword (str "reach-" suffix))]
+    (task/index-tasks! {:seon.db/connection main-conn
+                        :seon.task/files {(str "resources/seon/tasks/" task-ns ".edn")
+                                          "[#:seon.task{:name \"fix\" :plan \"Merge the tested change.\"}]"}})
+    (support/transacted! main-conn [(support/namespace-entity (db/db main-conn) ns-sym)])
+    (support/transacted! main-conn [(support/program-entity (db/db main-conn) [:seon.fn/sym (symbol (str ns-sym) "scratch")]
+                                                            "(defn scratch {:malli/schema [:=> [:cat] :int]} [] 1)")])
+    (registry/fork! {:seon.store/store store :seon.store/branch branch
+                     :seon.cluster.registry/from (db/commit-id (db/db main-conn)) :seon.db/db (db/db main-conn)})
+    {:branch branch :task-sym (symbol task-ns "fix") :sym #(symbol (str ns-sym) %)}))
+
+(defn- tested-change!
+  "On `branch`, `tested` (body 7), its deftest tagged with `task-sym`, and `scratch` replaced by `scratch-body`."
+  [store branch task-sym sym scratch-body]
+  (registry/on-branch store branch
+                      #(do (support/transacted! % [(support/program-entity (db/db %) [:seon.fn/sym (sym "tested")]
+                                                                           "(defn tested {:malli/schema [:=> [:cat] :int]} [] 7)")])
+                           (support/transacted! % [(support/program-entity (db/db %) [:seon.fn/sym (sym "scratch")]
+                                                                           (str "(defn scratch {:malli/schema [:=> [:cat] :int]} [] " scratch-body ")"))])
+                           (support/transacted! % [(support/program-entity (db/db %) [:seon.test/sym (sym "tested-check")]
+                                                                           (str "(clojure.test/deftest ^{:seon/tasks #{'" task-sym "}} tested-check (clojure.test/is (= 7 (" (sym "tested") "))))"))]))))
+
+(deftest ^{:seon.test/long "One prepare-merge! (a nested seon.test/run on a fresh merge branch of main) and one accept-merge!."
+           :seon.test/long-ms 60000}
+  a-merge-carries-the-whole-delta
+  ;; owner 2026-10-17: the whole chain merges, no test-selected merge list; a change no test reaches merges too
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        main-conn (:seon.db/connection target)
+        {:keys [branch task-sym sym]} (merge-fixture! main-conn store (id/id))
+        made (volatile! [branch])
+        source-of #(:seon.fn/source (db/pull (db/db main-conn) [:seon.fn/source] [:seon.fn/sym (sym %)]))]
+    (try
+      (tested-change! store branch task-sym sym 2)
+      (let [prepared (source/prepare-merge! target store branch task-sym)
+            _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
+            accepted (source/accept-merge! target store prepared)]
+        (is (uuid? (:seon.source/commit-id accepted)) "the merge commits")
+        (is (= "(defn scratch {:malli/schema [:=> [:cat] :int]} [] 2)" (source-of "scratch"))
+            "the change no test reaches merges with the rest")
+        (is (= "(defn tested {:malli/schema [:=> [:cat] :int]} [] 7)" (source-of "tested")) "beside the tested change"))
+      (finally
+        (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
 
 (deftest a-change-in-a-namespace-selects-the-tests-that-read-it-as-a-file
   ;; a9e4e9904: the bb-load test reads `seon.edit`'s file and calls none of it, so the gate never ran it. A test
@@ -776,41 +792,22 @@
 
 (deftest ^{:seon.test/long "One prepare-merge!: a nested seon.test/run on a fresh merge branch of main."
            :seon.test/long-ms 60000}
-  a-prepared-merge-carries-its-merge-list-and-a-staying-conflict-refuses
-  ;; ruling 5a/5b: the tested change and its proof merge; the scratch def stays. Owner, 2026-10-16: a conflict refuses
-  ;; whether or not its seeds reach it, so a change no test covers is never dropped unseen; main wins it on the merge
-  ;; branch, recorded unmerged
+  a-conflict-keeps-the-merge-branch-with-mains-version-and-an-unmerged-entry
+  ;; owner 2026-10-16: a conflict refuses whether or not a test reaches it, so a change no test covers is never
+  ;; dropped unseen; main wins it on the merge branch, recorded unmerged, beside the rest of the whole change
   (let [target (support/execution-handle nil)
         store (:seon.store/store target)
         main-conn (:seon.db/connection target)
-        suffix (id/id)
-        sym #(symbol (str "reachmerge" suffix ".core") %)
-        fn-entity (fn [connection n body]
-                    (support/program-entity (db/db connection) [:seon.fn/sym (sym n)]
-                                            (str "(defn " n " {:malli/schema [:=> [:cat] :int]} [] " body ")")))
-        task-ns (str "tq.reachmerge" suffix)
-        _ (task/index-tasks! {:seon.db/connection main-conn
-                              :seon.task/files {(str "resources/seon/tasks/" task-ns ".edn")
-                                                "[#:seon.task{:name \"fix\" :plan \"Merge the tested change.\"}]"}})
-        task-sym (symbol task-ns "fix")
-        _ (support/transacted! main-conn [(support/namespace-entity (db/db main-conn) (symbol (str "reachmerge" suffix ".core")))])
-        _ (support/transacted! main-conn [(fn-entity main-conn "scratch" 1)])
-        branch (keyword (str "reachmerge-" suffix))
-        _ (registry/fork! {:seon.store/store store :seon.store/branch branch
-                           :seon.cluster.registry/from (db/commit-id (db/db main-conn)) :seon.db/db (db/db main-conn)})
+        {:keys [branch task-sym sym]} (merge-fixture! main-conn store (id/id))
         made (volatile! [branch])]
     (try
-      (registry/on-branch store branch
-                          #(do (support/transacted! % [(fn-entity % "tested" 7)])
-                               (support/transacted! % [(fn-entity % "scratch" 2)])
-                               (support/transacted! % [(support/program-entity (db/db %) [:seon.test/sym (sym "tested-check")]
-                                                                               (str "(clojure.test/deftest ^{:seon/tasks #{'" task-sym "}} tested-check (clojure.test/is (= 7 (" (sym "tested") "))))"))])))
-      (support/transacted! main-conn [(fn-entity main-conn "scratch" 3)])
+      (tested-change! store branch task-sym sym 2)
+      (support/transacted! main-conn [(support/program-entity (db/db main-conn) [:seon.fn/sym (sym "scratch")]
+                                                              "(defn scratch {:malli/schema [:=> [:cat] :int]} [] 3)")])
       (let [prepared (source/prepare-merge! target store branch task-sym)
-            _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
-            carried (set (keys (:seon.source/expected-digests prepared)))]
+            _ (some->> (:seon.source/candidate prepared) (vswap! made conj))]
         (is (= #{[:seon.fn/sym (sym "scratch")]} (:seon.program/conflict prepared))
-            "a conflict in a change no seed reaches refuses the merge")
+            "a conflict in a change no test reaches refuses the merge")
         (let [kept (db/branch-database (db/db main-conn) (:seon.source/candidate prepared))]
           (try
             (is (= [(sym "scratch")] (mapv :seon.unmerged/name (source/unmerged kept)))
@@ -820,7 +817,7 @@
                 "main wins it there")
             (is (= "(defn tested {:malli/schema [:=> [:cat] :int]} [] 7)"
                    (:seon.fn/source (db/pull kept [:seon.fn/source] [:seon.fn/sym (sym "tested")])))
-                "beside the tested change")
+                "beside the rest of the change")
             (finally (source/release! [kept])))))
       (finally
         (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))

@@ -996,17 +996,17 @@
          ;; source is an analysed reference of it, which would refuse the removal and use the key
          (is (= [{:seon.ref/name (symbol "tq.ra" "spare")}] (:seon.context/removed changes))
              "a declaration the branch removed is named as removed, never as an unresolved problem")
-         (is (= {:seon.ref/name 'tq.ra/squared :seon.context/stays true
+         (is (= {:seon.ref/name 'tq.ra/squared
                  :seon.render/operations ['(my.program/source 'tq.ra/squared) '(my.program/ns-unmap! 'tq.ra/squared)]}
                 squared)
-             "a function no test reaches stays on the branch, with the form that removes it, and no doc echo")
-         (is (= [{:seon.ref/name 'tq.ra/area :seon.render/operations ['(my.program/source 'tq.ra/area)]}]
+             "a function no test reaches merges like every change, shown with the form that removes it, and no doc echo")
+         (is (= [{:seon.ref/name 'tq.ra/area :seon.render/operations ['(my.program/source 'tq.ra/area) '(my.program/ns-unmap! 'tq.ra/area)]}]
                 (filterv #(= 'tq.ra/area (:seon.ref/name %)) (:seon.context/functions changes)))
-             "a changed function the recorded run of a branch test tested carries no flag")
-         (is (= [{:seon.ref/name (keyword "tq.ra" "probe") :seon.context/stays true
+             "a changed function a branch test tested shows the same forms")
+         (is (= [{:seon.ref/name (keyword "tq.ra" "probe")
                   :seon.render/operations [(list 'my.program/source (keyword "tq.ra" "probe"))]}]
                 (:seon.context/schemas changes))
-             "a schema key no seed reaches stays too, with no removal form (none exists)"))
+             "a schema key shows its read form and no removal form (none exists)"))
        ;; a later attempt's block shows this one's last step: the note of the wait it ended its turn with
        (evaluate running agent-id "(my.turn/wait {:my.turn/note \"Stopped at the cycle probe.\"})")
        (is (= "Stopped at the cycle probe." (#'context/last-step (db/db target) agent-id))

@@ -229,33 +229,21 @@
 
 (defn- branch-changes
   "The declaration `identities` the branch changed since its merge base, shown on `database` by family in name order,
-  each by its name and the form that reads it, split as its merge would carry it (`seon.cluster.source/merge-list`
-  over the seeds `seon.cluster.source/merge-seeds` gives for the held task `task`'s `proofs`, the one derivation the
-  merge uses): a change no seed reaches is `:seon.context/stays`, with the form that removes it when one exists
-  (`my.program/ns-unmap!`; none for a schema key); a test that reaches it merges it. A declaration the branch removed
-  is named under `:seon.context/removed`. Families are absent when empty."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set [:set :seon.test/sym] :seon.task/sym]
-                  [:or :seon.context/changes :seon.error/value]]}
-  [database identities proofs task]
-  (let [seeds (source/merge-seeds database identities proofs task)
-        listed (if (:seon.error/at seeds) seeds (source/merge-list database identities seeds))
-        stays (:seon.merge/stays listed)
-        entry (fn [[_ value :as identity]]
-                (let [read-form (list 'my.program/source (if (keyword? value) value (list 'quote value)))]
-                  (if (contains? stays identity)
-                    {:seon.ref/name value :seon.context/stays true
-                     :seon.render/operations (cond-> [read-form]
-                                               (symbol? value) (conj (list 'my.program/ns-unmap! (list 'quote value))))}
-                    {:seon.ref/name value :seon.render/operations [read-form]})))
-        shown (when-not (:seon.error/at listed)
-                (reduce (fn [shown [attribute value :as identity]]
-                          (if-let [family (merged-families attribute)]
-                            (if (seq (db/datoms database :avet attribute value))
-                              (update shown family (fnil conj []) (entry identity))
-                              (update shown :seon.context/removed (fnil conj []) {:seon.ref/name value}))
-                            shown))
-                        {} (sort-by (comp str second) identities)))]
-    (if (:seon.error/at listed) listed shown)))
+  each by its name and the forms that read and remove it (`my.program/ns-unmap!`; none for a schema key): its merge
+  carries every one of them (`seon.cluster.source/prepare-merge!`, the whole change), so scratch is removed before
+  done. A declaration the branch removed is named under `:seon.context/removed`. Families are absent when empty."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set] :seon.context/changes]}
+  [database identities]
+  (reduce (fn [shown [attribute value]]
+            (if-let [family (merged-families attribute)]
+              (if (seq (db/datoms database :avet attribute value))
+                (update shown family (fnil conj [])
+                        {:seon.ref/name value
+                         :seon.render/operations (cond-> [(list 'my.program/source (if (keyword? value) value (list 'quote value)))]
+                                                   (symbol? value) (conj (list 'my.program/ns-unmap! (list 'quote value))))})
+                (update shown :seon.context/removed (fnil conj []) {:seon.ref/name value}))
+              shown))
+          {} (sort-by (comp str second) identities)))
 
 (defn- merged
   "What main's merge `commit` moved (`seon.cluster.source/merge-accepted`), shown on `database` by family
@@ -371,8 +359,9 @@
 
 (defn judged-input
   "The observation the held task `sym`'s step is judged by on `database`, a branch value (the agent's branch, or a
-  chain branch at an attempt's end commit), against `main`, the target's head, `cluster` the cluster whose checkout its
-  merge would publish into: its obligations
+  chain branch at an attempt's end commit, or root's merge branch), against `main`, the target's head, `cluster` the
+  cluster whose checkout its merge would publish into (nil: none, as on a merge branch, whose files the merge proves
+  itself): its obligations
   over its assigned basis (`seon.task/assigned-obligations`), whether it is a chain's (linked by `:seon.task/next`,
   or the first a chain fact on main names, `:seon.chain/first`), its
   product (the proofs of the task after it and, for a Prove step, the tests its successors are tagged with), the
@@ -385,7 +374,8 @@
   what its merge would publish (`seon.cluster.source/publication`), any other the reds main holds as
   `:seon.source/red-on-target`. A branch that recorded no run has nothing to judge, so it carries no judgment input.
   The head shows each judged test's status."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.task/sym [:or :seon.cluster/name :seon.error/value]]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.task/sym
+                       [:or :nil :seon.cluster/name :seon.error/value]]
                   [:or :seon.context/step-observation :seon.error/value]]}
   [main database sym cluster]
   (let [owed (task/assigned-obligations database sym)
@@ -427,7 +417,7 @@
         ;; cluster checkout (`seon.merge/checkout`)
         root (when (and run-id chained? (string? cluster)) ((requiring-resolve 'seon.merge/checkout) main cluster))
         published (when (and run-id chained? (set? delta))
-                    (source/publication main database delta proofs sym (when (string? root) root)))
+                    (source/publication main database delta (when (string? root) root)))
         judged (when run-id
                  (cond-> (merge {:seon.source/members members :seon.source/results results :seon.task/proofs proofs}
                                 (when-not (:seon.error/at published) published))
@@ -831,7 +821,7 @@
             earlier (earlier-attempts database (:seon.task/id held) agent-id)
             proof-names (into #{} (map :seon.test/sym) (:seon.context/proof-list proven))
             changes (when (and verdict (not (:seon.error/at verdict)) (seq (:seon.program/identities verdict)))
-                      (branch-changes database (:seon.program/identities verdict) proof-names (:seon.task/sym held)))
+                      (branch-changes database (:seon.program/identities verdict)))
             reads (when-not (:seon.error/at proven) (ref/references database {:seon.ref/text "" :seon.ref/names proof-names}))
             resolution (into {} (keep #(when (proof-names (:seon.ref/name %)) [(:seon.ref/name %) %])) reads)
             start (attempt-start database agent-id)

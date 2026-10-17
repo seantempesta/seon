@@ -454,9 +454,9 @@
   (support/with-database
    (fn [connection]
      (let [arglists #(:arglists (lookup/function-documentation (db/db connection) %))]
-       (is (= '([main candidate base sym]) (arglists 'seon.cluster.source/tested-task-basis))
-           "three databases the caller tells apart all stay in the arglist")
-       (is (= '([tested candidate-commit base-commit]) (arglists 'seon.cluster.source/task-basis-held-tx))
+       (is (= '([main database sym cluster]) (arglists 'seon.context/judged-input))
+           "two databases the caller tells apart both stay in the arglist")
+       (is (= '([a commit projection fork]) (arglists 'seon.merge/merge-tx))
            "a lone database argument is still filled by schema name and left out")))))
 
 (deftest doc-cites-a-request-schema-once

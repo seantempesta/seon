@@ -67,7 +67,7 @@
       (testing "an equal revert is unchanged: its proofs run, and it carries nothing to merge"
         (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] (+ 0 1))")])
         (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] 1)")])
-        (is (= {} (:seon.source/expected-digests (prepare)))))
+        (is (= #{} (:seon.program/identities (prepare)))))
       (testing "a red replacement is tested but its evidence refuses acceptance"
         (let [_ (write! h-conn [(fn-entity h-conn "merge-extra" "(defn merge-extra {:malli/schema [:=> [:cat] :int]} [] 0)")])
               _ (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] 2)")])
@@ -77,11 +77,10 @@
           (is (= :seon.source/red-test-error (:seon.error/type (source/accept-merge! target store red))))
           ;; main may record its own side of the red (seon.test/fork-point-red); its program is unchanged
           (is (= before (digest h-conn "merge-callee")))))
-      (testing "green: accept merges exactly the tested entities with lineage H C E; another entity's write never stales it"
+      (testing "green: accept merges exactly the judged entities with lineage H C E; C's later edit is never carried"
         (let [_ (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] (* 1 1))")])
               green (prepare)
-              ;; Before, any head write (a turn, an evaluation, this agent) refused as a stale basis-t.
-              h (write! h-conn (support/agents-tx (db/db h-conn) [(str "merge-test-" (id/id))]))
+              h (db/commit-id (db/db h-conn))
               tested (digest c-conn "merge-callee")
               _ (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] 3)")])
               e (registry/branch-commit-id {:seon.store/store store :seon.store/branch (:seon.source/candidate green)})
@@ -93,18 +92,15 @@
               "a plain value naming what merged, never a transaction report")
           (is (= tested (digest h-conn "merge-callee")) "the tested replacement, not C's later edit")
           (is (= #{h (first (:parents green)) e} (set (:datahike/parents (:meta (db/db h-conn))))))
-          (is (= :seon.source/merge (:seon.error/layer (source/accept-merge! target store green)))
-              "the merged change has nothing left to merge")))
-      (testing "a head change to a merged entity refuses by name with both digests; then it is a conflict"
+          (is (seon.merge/main-moved? (source/accept-merge! target store green))
+              "the merged judgment's basis is gone: accepting it again writes nothing")))
+      (testing "a head change to a merged entity refuses by the basis fence; then it is a conflict"
         (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] (- 3 2))")])
         (let [prepared (prepare)
-              callee [:seon.fn/sym (sym "merge-callee")]
-              expected (digest h-conn "merge-callee")
               moved (write! h-conn [(fn-entity h-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] (- 2 1))")])
               refused (source/accept-merge! target store prepared)]
           (is (true? (:seon.test/passed? prepared)))
-          (is (= [:seon.source/expected-digests {callee expected} {callee (digest h-conn "merge-callee")}]
-                 ((juxt :seon.error/member :seon.error/expected :seon.error/offending) refused)))
+          (is (seon.merge/main-moved? refused) "Datahike's basis fence refuses it")
           (is (= moved (db/commit-id (db/db h-conn))) "the refused merge takes zero datoms"))
         (is (seq (:seon.program/conflict (prepare)))))
       (finally
@@ -114,7 +110,7 @@
 (deftest ^{:seon/tasks #{'seon.cluster.source/a-landing-refusal-carries-its-variant}
            :seon.test/long "One prepare: one nested seon.test/run on a new candidate commit."
            :seon.test/long-ms 60000}
-  a-replaced-function-no-test-reaches-stays-and-a-later-program-write-refuses
+  a-replaced-function-no-test-reaches-merges-and-a-later-merge-branch-write-is-not-carried
   (let [target (support/execution-handle nil)
         store (:seon.store/store target)
         h-conn (:seon.db/connection target)
@@ -125,127 +121,25 @@
         _ (registry/fork! {:seon.store/store store :seon.store/branch c
                              :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
         candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
-        c-conn (:seon.db/connection candidate)]
+        c-conn (:seon.db/connection candidate)
+        source-of #(:seon.fn/source (db/pull (db/db h-conn) [:seon.fn/source] [:seon.fn/sym (sym "merge-alone")]))]
     (try
       (write! c-conn [(entity (db/db c-conn) :fn "merge-alone" "(defn merge-alone {:malli/schema [:=> [:cat] :int]} [] (inc 0))")])
       (let [prepared (source/prepare-merge! target store c proved)]
         (is (true? (:seon.test/passed? prepared)) "the test owner selects no test and refuses nothing")
-        (is (contains? (:seon.merge/stays prepared) [:seon.fn/sym (sym "merge-alone")])
-            "a replaced function no test reaches stays on the branch (ruling 5a)")
-        (is (not (contains? (:seon.source/expected-digests prepared) [:seon.fn/sym (sym "merge-alone")]))
-            "and the merge does not carry it")
-        (testing "a program write on S after the run refuses the named run"
-          (let [s (cluster.agent/acquire-context! target nil {:seon.agent/branch (:seon.source/candidate prepared)})
-                before (db/commit-id (db/db h-conn))]
+        (is (contains? (:seon.program/identities prepared) [:seon.fn/sym (sym "merge-alone")])
+            "a replaced function no test reaches merges with the whole change")
+        (testing "a program write on S after the judgment is never carried: the merge carries the judged commit"
+          (let [s (cluster.agent/acquire-context! target nil {:seon.agent/branch (:seon.source/candidate prepared)})]
             (try (write! (:seon.db/connection s) [(entity (db/db (:seon.db/connection s)) :fn "merge-alone" "(defn merge-alone {:malli/schema [:=> [:cat] :int]} [] 2)")])
                  (finally (cluster.agent/release-context! s)))
-            (let [refusal (source/accept-merge! target store prepared)]
-              (is (= "The tested program changed after the named run." (:seon.error/message refusal)))
-              (is (= :seon.source/test-evidence-error (:seon.error/type refusal)) "the refusal carries its variant")
-              (is (= before (db/commit-id (db/db h-conn))) "and nothing reaches main"))))
+            (is (uuid? (:seon.source/commit-id (source/accept-merge! target store prepared))) "the merge commits")
+            (is (= "(defn merge-alone {:malli/schema [:=> [:cat] :int]} [] (inc 0))" (source-of))
+                "main holds the judged definition, not the later write")))
         (registry/retire-branch! {:seon.store/store store :seon.store/branch (:seon.source/candidate prepared)}))
       (finally
         (cluster.agent/release-context! candidate)
         (registry/retire-branch! {:seon.store/store store :seon.store/branch c})))))
-
-(deftest ^{:seon/tasks #{'seon.cluster.source/merge-base-survives-collection}}
-  a-fork-of-a-work-branch-compares-with-the-target-through-its-parents-changes
-  ;; A forks H and replaces nest-mod and deletes nest-del; B forks A and adds
-  ;; nest-new. B toward H carries A's inherited change and deletion too: B's
-  ;; fork entity inherits A's base toward H, never A's t at B's fork.
-  (let [target (support/execution-handle nil)
-        store (:seon.store/store target)
-        h-conn (:seon.db/connection target)
-        fn-entity #(entity (db/db %1) :fn %2 %3)
-        a (keyword (str "merge-test-a-" (id/id)))
-        b (keyword (str "merge-test-b-" (id/id)))
-        _ (write! h-conn [(fn-entity h-conn "nest-mod" "(defn nest-mod {:malli/schema [:=> [:cat] :int]} [] 1)")
-                          (fn-entity h-conn "nest-del" "(defn nest-del {:malli/schema [:=> [:cat] :int]} [] 2)")])
-        _ (registry/fork! {:seon.store/store store :seon.store/branch a
-                           :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
-        a-context (cluster.agent/acquire-context! target nil {:seon.agent/branch a})
-        a-conn (:seon.db/connection a-context)]
-    (try
-      (write! a-conn [(fn-entity a-conn "nest-mod" "(defn nest-mod {:malli/schema [:=> [:cat] :int]} [] 3)")])
-      (support/transacted! a-conn [[:db/retractEntity [:seon.fn/sym (sym "nest-del")]]])
-      (registry/fork! {:seon.store/store store :seon.store/branch b
-                       :seon.cluster.registry/from (db/commit-id (db/db a-conn)) :seon.db/db (db/db a-conn)
-                       :seon.branch/target (get-in (db/db h-conn) [:config :branch])})
-      (let [b-context (cluster.agent/acquire-context! target nil {:seon.agent/branch b})
-            b-conn (:seon.db/connection b-context)]
-        (try
-          (write! b-conn [(fn-entity b-conn "nest-new" "(defn nest-new {:malli/schema [:=> [:cat] :int]} [] 4)")])
-          (let [{:keys [base branch three]} (source/compare-branch store b (db/db h-conn) (get-in (db/db h-conn) [:config :branch]))]
-            (try
-              (is (contains? (set (:seon.program/changed-on-branch three)) [:seon.fn/sym (sym "nest-mod")])
-                  "A's inherited replacement")
-              (is (contains? (set (:seon.program/retracted three)) [:seon.fn/sym (sym "nest-del")])
-                  "A's inherited deletion")
-              (is (contains? (set (:seon.program/added three)) [:seon.fn/sym (sym "nest-new")])
-                  "B's own addition")
-              (finally (source/release! [base branch]))))
-          (finally
-            (cluster.agent/release-context! b-context)
-            (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))
-      (finally
-        (cluster.agent/release-context! a-context)
-        (registry/retire-branch! {:seon.store/store store :seon.store/branch a})))))
-
-(deftest ^{:seon/tasks #{'seon.cluster.source/a-red-reaching-test-refuses-acceptance}
-           :seon.test/long "Two prepares and one nested seon.test/run on the target, each one nested seon.test/run (60 s is this namespace's measured bound for one)."
-           :seon.test/long-ms 180000}
-  a-red-reaching-test-refuses-acceptance
-  ;; Before, accept-merge! gated only the proofs: a green proof merged a change
-  ;; that turned another reaching test red.
-  (let [target (support/execution-handle nil)
-        store (:seon.store/store target)
-        h-conn (:seon.db/connection target)
-        fn-entity #(entity (db/db %1) :fn %2 %3)
-        test-entity #(entity (db/db %1) :test %2 %3)
-        callee #(str "(defn gate-callee {:malli/schema [:=> [:cat] :int]} [] " % ")")
-        c (keyword (str "merge-test-c-" (id/id)))
-        proved (proved-task! h-conn "tq.merge-gate")
-        _ (write! h-conn [(fn-entity h-conn "gate-callee" (callee 1))])
-        _ (write! h-conn [(test-entity h-conn "gate-proof" "(clojure.test/deftest ^{:seon/tasks #{'tq.merge-gate/fix}} gate-proof (clojure.test/is (pos? (seon.cluster.merge-test/gate-callee))))")
-                          (test-entity h-conn "gate-exact" "(clojure.test/deftest gate-exact (clojure.test/is (= 1 (seon.cluster.merge-test/gate-callee))))")])
-        _ (registry/fork! {:seon.store/store store :seon.store/branch c
-                           :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
-        candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
-        c-conn (:seon.db/connection candidate)
-        made (volatile! [])
-        prepare #(let [p (source/prepare-merge! target store c proved)]
-                   (some->> (:seon.source/candidate p) (vswap! made conj)) p)
-        refused-tests #(set (map (juxt :seon.test/sym :seon.source/verdict) (:seon.source/red-tests %)))
-        ;; main may record its own side of a red (seon.test/fork-point-red); its program stays as it was
-        callee-digest #(:seon.program/definition-digest (db/pull (db/db h-conn) [:seon.program/definition-digest]
-                                                                 [:seon.fn/sym (sym "gate-callee")]))]
-    (try
-      (testing "a green proof with another reaching test red on the merge refuses, naming that test"
-        (write! c-conn [(fn-entity c-conn "gate-callee" (callee 2))])
-        (let [prepared (prepare)
-              before (callee-digest)
-              refusal (source/accept-merge! target store prepared)]
-          (is (= [(sym "gate-exact")] (mapv :seon.test/sym (:seon.source/red-tests prepared))) "the gate ran it red")
-          (is (= :seon.source/red-test-error (:seon.error/type refusal)))
-          (is (= #{[(sym "gate-exact") :red]} (refused-tests refusal)))
-          (is (= #{(:seon.test.run/id prepared)} (set (map :seon.test.run/id (:seon.source/red-tests refusal))))
-              "each red test names the run that recorded it")
-          (is (= before (callee-digest)) "main's program is unchanged")))
-      (testing "a test main broke after the merge base is judged at the merge base, as done judges it: the change's red"
-        (write! h-conn [(test-entity h-conn "gate-broken" "(clojure.test/deftest gate-broken (clojure.test/is (= 0 (seon.cluster.merge-test/gate-callee))))")])
-        (seon.test/run {:seon.test/policy :named :seon.test/execution target :seon.test/recording-connection h-conn
-                        :seon.test/changed [(sym "gate-broken")]})
-        (write! c-conn [(fn-entity c-conn "gate-callee" (callee "(* 1 1)"))])
-        (let [prepared (prepare)
-              before (callee-digest)
-              refusal (source/accept-merge! target store prepared)]
-          (is (= [(sym "gate-broken")] (mapv :seon.test/sym (:seon.source/red-tests prepared))))
-          (is (= :seon.source/red-test-error (:seon.error/type refusal)))
-          (is (= #{[(sym "gate-broken") :red]} (refused-tests refusal)))
-          (is (= before (callee-digest)) "main's program is unchanged")))
-      (finally
-        (cluster.agent/release-context! candidate)
-        (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
 
 (defn- git!
   "Run git with `args` in `root`; its trimmed standard output, throwing on a non-zero exit."
@@ -805,10 +699,10 @@
 (deftest ^{:seon/tasks #{'seon.cluster.source/a-test-never-run-on-the-target-is-not-blamed-on-the-merge}
            :seon.test/long "One prepare (one nested seon.test/run on the candidate) and the gate's judgment of its red test against the target (60 s is this namespace's measured bound for one)."
            :seon.test/long-ms 120000}
-  a-test-never-run-on-the-target-is-not-blamed-on-the-merge
-  ;; A test red on the candidate that fails at the merge base too is not the change's, though the target never ran
-  ;; it at its current reach: the merge asks the done rule's question (`seon.cluster.source/red-at-merge-base`) and
-  ;; refuses nothing for it.
+  a-red-reaching-test-the-target-never-ran-refuses-the-merge
+  ;; owner 2026-10-17 (merge-rulings.md): a red test on the merged result refuses the merge; the merge judges its
+  ;; merge branch with the step's own judge (merge P4a), which asks main's recorded result at the test's reach, and
+  ;; main never ran it, so the red is the merge's. P5 removes the merge-base excuse for every task.
   (let [target (support/execution-handle nil)
         store (:seon.store/store target)
         h-conn (:seon.db/connection target)
@@ -830,9 +724,9 @@
       (let [prepared (source/prepare-merge! target store c proved)
             _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
             refusal (source/accept-merge! target store prepared)]
-        (is (= #{(sym "unrun-broken")} (:seon.source/red-on-target prepared)) "the gate ran it red, and red at the merge base")
-        (is (empty? (:seon.source/red-tests prepared)) "it is not the change's red")
-        (is (uuid? (:seon.source/commit-id refusal)) "so it refuses nothing: the merge commits"))
+        (is (= [(sym "unrun-broken")] (mapv :seon.test/sym (:seon.source/red-tests prepared))) "the red reaching test is named")
+        (is (= :seon.source/red-test-error (:seon.error/type refusal)) "and refuses the merge")
+        (is (nil? (:seon.source/commit-id refusal)) "which writes nothing"))
       (finally
         (cluster.agent/release-context! candidate)
         (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
@@ -903,48 +797,59 @@
            (is (str/includes? (slurp file) fix) "the file holds the merged definition"))
          (finally (support/delete-root! root)))))))
 
-;;; TASK-CHAIN A2 (`docs/seon/schedule/cards/TASK-CHAIN.md#interfaces`): one verdict, and the writer compares the tested task basis.
+;;; Merge P4a (`docs/research/agent-platform/2026-10-17/merge-hybrid.md`): one judgment, one transaction, Datahike's basis fence.
 
-(deftest ^{:seon.test/long "One prepare: one nested seon.test/run on a new candidate commit."
-           :seon.test/long-ms 60000}
-  only-an-accepted-candidate-completes-a-task
+(defn- executed-members
+  "The members run `run-id` on `branch` executed rather than answered from a record at an unchanged reach digest."
+  [store branch run-id]
+  (registry/on-branch store branch
+                      #(into #{} (comp (remove :seon.test.member/reused-run) (map :seon.test.member/symbol))
+                             (:seon.test.run/members (db/pull (db/db %) [{:seon.test.run/members [:seon.test.member/symbol :seon.test.member/reused-run]}]
+                                                              [:seon.test.run/id run-id])))))
+
+(deftest ^{:seon.test/long "Two prepares (each one nested seon.test/run on a fresh merge branch of main) and two accepts."
+           :seon.test/long-ms 120000}
+  main-moved-since-the-judgment-refuses-by-basis-and-the-next-pass-reruns-only-the-reached
+  ;; owner 2026-10-17: main is written in ONE transaction with Datahike's basis fence on the head the judgment read;
+  ;; when main moved since, the writer refuses with nothing written and the next pass merges again, every test whose
+  ;; reach the move left unchanged answered from its record
   (let [target (support/execution-handle nil)
         store (:seon.store/store target)
         h-conn (:seon.db/connection target)
-        merge-verdict (requiring-resolve 'seon.cluster.source/merge-verdict)
         c (keyword (str "merge-test-c-" (id/id)))
         _ (task/index-tasks! {:seon.db/connection h-conn
                               :seon.task/files {"resources/seon/tasks/tq.accept.edn"
                                                 "[#:seon.task{:name \"fix\" :plan \"Make accept-value one.\"}]"}})
         _ (write! h-conn [(entity (db/db h-conn) :fn "accept-value" "(defn accept-value {:malli/schema [:=> [:cat] :int]} [] 0)")
+                          (entity (db/db h-conn) :fn "accept-other" "(defn accept-other {:malli/schema [:=> [:cat] :int]} [] 0)")
                           (entity (db/db h-conn) :test "accept-check"
                                   "(clojure.test/deftest ^{:seon/tasks #{'tq.accept/fix}} accept-check (clojure.test/is (int? (seon.cluster.merge-test/accept-value))))")])
         _ (registry/fork! {:seon.store/store store :seon.store/branch c
                            :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
         candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
         c-conn (:seon.db/connection candidate)
-        made (volatile! [])]
+        made (volatile! [])
+        prepare #(let [p (source/prepare-merge! target store c 'tq.accept/fix)]
+                   (some->> (:seon.source/candidate p) (vswap! made conj)) p)
+        value #(:seon.fn/source (db/pull (db/db h-conn) [:seon.fn/source] [:seon.fn/sym (sym "accept-value")]))]
     (try
       (write! c-conn [(entity (db/db c-conn) :fn "accept-value" "(defn accept-value {:malli/schema [:=> [:cat] :int]} [] 1)")])
-      (let [prepared (source/prepare-merge! target store c 'tq.accept/fix)
-            _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
-            main (db/db h-conn)
-            base (db/commit-database main (source/merge-base main (db/commit-id (db/db c-conn)) (db/commit-id main)))]
-        (is (true? (:seon.test/passed? prepared)) "the candidate's tested program is green")
-        (is (= {:seon.task/sym 'tq.accept/fix}
-               (select-keys (:seon.source/tested-task-basis prepared) [:seon.task/sym]))
-            "the prepared merge carries the task basis its run selected")
-        (is (= [] (merge-verdict main (db/db c-conn) base prepared)) "current green evidence is accepted")
-        ;; the target moves one proof input: a new deftest tagged with the task, written through the program owner
-        (write! h-conn [(entity (db/db h-conn) :test "accept-later"
-                                "(clojure.test/deftest ^{:seon/tasks #{'tq.accept/fix}} accept-later (clojure.test/is (= 1 (seon.cluster.merge-test/accept-value))))")])
-        (let [before (db/commit-id (db/db h-conn))
-              refused (source/accept-merge! target store prepared)]
-          (is (= :seon.source/test-evidence-error (:seon.error/type refused))
-              "the writer recomputes the task's obligations and refuses the moved proof input")
-          (is (= before (db/commit-id (db/db h-conn))) "no candidate datom is installed")
-          (is (not= :merged (:seon.task/outcome (db/pull (db/db h-conn) [:seon.task/outcome] [:seon.task/sym 'tq.accept/fix])))
-              "no merged outcome completes the task")))
+      (let [judged (prepare)
+            _ (is (= [] (:seon.source/refusals judged)) "the candidate's tested program is green")
+            ;; main moves outside the change's reach between the judgment and the transaction
+            moved (write! h-conn [(entity (db/db h-conn) :fn "accept-other" "(defn accept-other {:malli/schema [:=> [:cat] :int]} [] 2)")])
+            refused (source/accept-merge! target store judged)]
+        (is (= :transaction/stale-basis (get-in refused [:seon.error/data :error]))
+            "the writer refuses by its basis fence")
+        (is (seon.merge/main-moved? refused) "which the merge reads as main moved")
+        (is (= moved (db/commit-id (db/db h-conn))) "nothing is written")
+        (is (= "(defn accept-value {:malli/schema [:=> [:cat] :int]} [] 0)" (value)) "main keeps its value")
+        (let [again (prepare)
+              merged (source/accept-merge! target store again)]
+          (is (= #{} (executed-members store (:seon.source/candidate again) (:seon.test.run/id again)))
+              "the next pass executes no test: the move is outside every member's reach")
+          (is (uuid? (:seon.source/commit-id merged)) "and merges")
+          (is (= "(defn accept-value {:malli/schema [:=> [:cat] :int]} [] 1)" (value)) "main holds the change")))
       (finally
         (cluster.agent/release-context! candidate)
         (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))

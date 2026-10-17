@@ -121,9 +121,9 @@ The installed three-way keys (`changed-on-branch`, `retracted`, `changed-on-head
   conflict markers into files; Seon writes none, so never look for `<<<<<<<` in source.
 - **Checkout** (TARGET) `(my.program/checkout! {:seon.merge/request m :seon.merge/side :theirs :seon.program/identities #{id}})`
   copies the source branch's rows for those identities onto the merge branch; `:ours` restores the target's row (or
-  retracts an added one). It works on any identity, conflicted or not, like `git checkout <branch> -- <path>`. The installed
-  `seon.cluster.source/unselected-reach` refusal is deleted: a dangling caller is a finding in the diff value and `merge!`
-  checks it.
+  retracts an added one). It works on any identity, conflicted or not, like `git checkout <branch> -- <path>`. The selection
+  refusal is deleted with the merge list (merge P4a): the whole change merges, and a dangling caller is a finding in
+  the diff value.
 - **Edit.** The holder of a merge request evaluates with the merge branch checked out, as a work task checks out the
   agent's own branch, so resolution is ordinary REPL forms (`in-ns`, `defn`, `my.program/ns-unmap!`). A conflict is
   resolved by writing the combined definition.
@@ -163,7 +163,8 @@ One verb, as `git merge`: `(my.root/merge! {:seon.task/assignment a})` (`seon.me
    (`seon.cluster.registry/head-guard-tx`), carrying the program rows the merge tested, each
    norm's transaction data and the closed request. Each norm's transaction data is computed outside the writer from
    the target's value at that tip (no agent code on the writer thread); if the tip moved, `merge!` goes back to step 1
-   once, then stops. The writer also refuses a carried row whose digest on the target moved (`seon.cluster.source/declarations-held-tx`). Program rows carry no pointer to the evaluation that made them: an agent definition's
+   once, then stops. Installed (merge P4a): the one transaction carries Datahike's basis fence (`:datahike/expected-basis-t`, the head the
+   judgment read), so a moved target refuses the whole write and the next pass merges again; no per-row digest recheck. Program rows carry no pointer to the evaluation that made them: an agent definition's
    `:seon.program/defined-in` is dropped here, and write-back supplies the file. Parents: the target's tip, the merge
    branch and the source commit. Afterwards the merge branch is deleted. The source branch is deleted once its task
    is merged or closed with a reason and its agent has actually exited, so its history and blobs can be collected

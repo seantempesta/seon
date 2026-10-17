@@ -176,31 +176,36 @@
                task (assoc :task task)))
            (finally (source/release! [base source]))))))
 
+(defn- facts-tx
+  "Assignment `a`'s squash merge `squashed` (`merged`) as transaction data on main `database`: its cluster facts, and
+  an assignment with no outcome closed by its source's end: `:closed` when it ended `:sent-back` (its work goes back
+  to its target), `:merged` when it ended `:done`, which `merge!` carries only inside an accepted candidate's
+  transaction (`seon.cluster.source/accept-merge!`); any other source, one not yet ended among them, merges its facts
+  and stays open. Closed `:merged`, the merge ends its work: the task it assigns and every task its facts carry in
+  `:running` read `:stopped`, so no later pass starts a merged task again (TASK-CHAIN 2.6)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id
+                       [:map [:tx-data :seon.store/transaction-data] [:end {:optional true} :seon.task.attempt/end]
+                        [:task {:optional true} :seon.db/entity-id]]]
+                  :seon.store/transaction-data]}
+  [database a {:keys [tx-data end task]}]
+  (let [outcome (when (empty? (d/datoms database :eavt a :seon.task/outcome)) ({:sent-back :closed :done :merged} end))
+        ended (fn [[op e attribute v :as datom]]
+                (if (and (= :db/add op) (= :seon.task/execution attribute) (= :running v)) [op e attribute :stopped] datom))]
+    (cond-> tx-data
+      (= :merged outcome) (->> (mapv ended))
+      (and (= :merged outcome) task) (conj [:db/add task :seon.task/execution :stopped])
+      outcome (conj [:db/add a :seon.task/outcome outcome]))))
+
 (defn merge-tx
-  "Assignment `a`'s squash merge of the source commit `commit` onto main, computed inside main's writer on its own
-  `database` under main's `projection`: the three-way of its cluster facts from `fork`, the commit its branch forked
-  at (`seon.cluster.registry/fork-point`; a forward merge never moves these facts, so main's changes to them since
-  are kept), to `commit` against `database`; [] when `fork` is `commit`. An assignment with no outcome is
-  closed in the same transaction by its source's end: `:closed` when it ended `:sent-back` (its work goes back to
-  its target), `:merged` when it ended `:done`, which `merge!` carries only inside an accepted candidate's
-  transaction (`seon.cluster.source/accept-merge!`); any other source, one not yet ended among them, merges its
-  facts and stays open. Closed `:merged`, the merge ends its work: the task it assigns and every task its facts carry
-  in `:running` read `:stopped`, so no later pass starts a merged task again (TASK-CHAIN 2.6). A `:root` conflict
-  keeps main's value (`merge!` answers it)."
+  "Assignment `a`'s squash merge of the source commit `commit` onto main `database` under main's `projection`
+  (`facts-tx`): the three-way of its cluster facts from `fork`, the commit its branch forked at
+  (`seon.cluster.registry/fork-point`; a forward merge never moves these facts, so main's changes to them since are
+  kept), to `commit`; [] when `fork` is `commit`. A `:root` conflict keeps main's value (`merge!` answers it)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id :seon.source/commit-id :seon.schema/projection
                        :seon.merge/fork-point]
                   :seon.store/transaction-data]}
   [database a commit projection fork]
-  (if (= fork commit)
-    []
-    (let [{:keys [tx-data end task]} (merged database a commit projection fork)
-          outcome (when (empty? (d/datoms database :eavt a :seon.task/outcome)) ({:sent-back :closed :done :merged} end))
-          ended (fn [[op e attribute v :as datom]]
-                  (if (and (= :db/add op) (= :seon.task/execution attribute) (= :running v)) [op e attribute :stopped] datom))]
-      (cond-> tx-data
-        (= :merged outcome) (->> (mapv ended))
-        (and (= :merged outcome) task) (conj [:db/add task :seon.task/execution :stopped])
-        outcome (conj [:db/add a :seon.task/outcome outcome])))))
+  (if (= fork commit) [] (facts-tx database a (merged database a commit projection fork))))
 
 (defn- assigned-task
   "The symbol of the task assignment `a` assigns, read on the source head `database`."
@@ -285,6 +290,13 @@
           (seq models) (assoc :seon.source/models (vec (sort models)))))
       (finally (source/release! [source])))))
 
+(defn main-moved?
+  "Whether `refused`, a merge's refusal, is the writer's refusal of a main that moved since the merge read it (Datahike's basis
+  fence, `:transaction/stale-basis`): nothing was written, and the next pass merges again."
+  {:malli/schema [:=> [:cat :seon.error/value] :boolean]}
+  [refused]
+  (= :transaction/stale-basis (get-in refused [:seon.error/data :error])))
+
 (defn- merge-onto
   "`merge!`'s work: assignment `key`'s merge through `execution`, the checkout `:root` (when given) proving the files."
   {:malli/schema [:=> [:cat :seon.merge/execution :seon.task/assignment [:map [:root {:optional true} :seon.fn/root]]]
@@ -297,23 +309,19 @@
         store (or (:seon.store/store execution) (:seon.store/store environment))
         context (cond-> (assoc execution :seon.store/store store) environment (assoc :seon.env/environment environment))
         connection (:seon.db/connection context)
-        row (assignment-row (db/db connection) key)]
+        ;; main's head H: the facts squash, the judgment and the one transaction all read it (the basis fence)
+        target (db/db connection)
+        row (assignment-row target key)]
     (if (:seon.error/at row)
       row
       (let [{a :db/id branch :seon.task/branch base :seon.merge/fork-point} row
-            ;; one read of the store's branches: the head and the comparison below read the same basis
-            branches (registry/branches store)
-            commit (registry/branch-commit-id {:seon.store/store store :seon.store/branch branch
-                                               :seon.cluster.registry/branches branches})
-            target (db/db connection)
+            commit (registry/branch-commit-id {:seon.store/store store :seon.store/branch branch})
             ;; main's history records the merge of this commit, or the branch wrote nothing since its fork point
             merged? (and (uuid? commit) (or (= base commit) (merged? target commit)))
-            ;; the source head holds the attempt's end and its task (a chain's live only there):
-            ;; prepare-merge! selects the proofs of that task over its assigned basis (main, the
-            ;; branch head, the merge base), a Prove step's product beside them;
-            ;; a source that ended :done is accepted through a candidate, a task-only or empty change included,
-            ;; and only so completes its task; a sent-back one merges its facts only; any other source merges
-            ;; its facts alone, or its declarations through an accepted candidate when it changed any
+            ;; the source head holds the attempt's end and its task (a chain's live only there): a source that
+            ;; ended :done is accepted through the one merge, a task-only or empty change included, and only so
+            ;; completes its task; a sent-back one merges its facts only; any other source merges its facts alone,
+            ;; or everything through the one merge when it changed declarations main lacks
             on-head (fn [f] (let [head (db/commit-database target commit)]
                               (try (f head) (finally (source/release! [head])))))
             end (when (and (uuid? commit) (not merged?))
@@ -323,10 +331,12 @@
                         :sent-back false
                         (and (uuid? commit) (not merged?) (pos? (source/unmerged-count target store commit))))
             projection (or (db/carried-projection target) (schema/handed-projection))
+            squashed (when (and (uuid? commit) (not merged?)) (merged target a commit projection base))
+            facts (when squashed (facts-tx target a squashed))
             meta {:seon.squash/source-branch branch :seon.squash/source-commit commit}
-            merge-call [[:db.fn/call merge-tx a commit projection base]]
+            basis (:max-tx target)
             ;; one producer counts what publication reads: the declarations and tasks the merge commit moved
-            answer (fn [before after]
+            answer (fn [after]
                      (let [accepted (source/merge-accepted connection (db/commit-id after))
                            moved (count (:seon.program/identities accepted))
                            recorded (when-not (:seon.error/at accepted)
@@ -337,37 +347,31 @@
                          (not (:db-after recorded)) recorded
                          :else
                          (let [outcome (:seon.task/outcome (db/pull after [:seon.task/outcome] a))]
-                           (cond-> {:seon.task/assignment key
-                                    :seon.task/merge-commit (db/commit-id after)
-                                    :seon.merge/conflicts (:conflicts (merged before a commit projection base))}
+                           (run! #(conflict-task! connection branch %) (:conflicts squashed))
+                           (cond-> {:seon.task/assignment key :seon.task/merge-commit (db/commit-id after)
+                                    :seon.merge/conflicts (:conflicts squashed)}
                              outcome (assoc :seon.task/outcome outcome))))))]
         (cond
           (not (uuid? commit)) commit
           merged? {:seon.task/assignment key :seon.merge/conflicts []}
           (not accepted?)
-          (let [report (db/transact! connection {:tx-data merge-call :tx-meta meta})]
-            (if (:db-after report)
-              (let [result (answer (:db-before report) (:db-after report))]
-                (when-not (:seon.error/at result) (run! #(conflict-task! connection branch %) (:seon.merge/conflicts result)))
-                result)
-              report))
+          (let [report (db/transact! connection {:tx-data facts :tx-meta meta :datahike/expected-basis-t basis})]
+            (if (:db-after report) (answer (:db-after report)) report))
           :else
           (let [prepared (source/prepare-merge! context store branch (on-head #(assigned-task % a))
-                                                 (cond-> {:merging merge-call} root (assoc :root root)))
-                ;; only a gate that refused nothing is judged for acceptance
-                accepted (when (and (:seon.source/candidate prepared) (not (:seon.error/at prepared))
-                                    (empty? (:seon.program/conflict prepared)))
-                           (source/accept-merge! context store prepared
-                                                 {:tx-data merge-call :tx-meta meta}))
-                ;; an accepted candidate has served; a refused one stays, the merge branch its refusal names
-                ;; (MERGE-STEP): whoever holds the refusal retires it, or root's merge step works on it
-                _ (when (:seon.source/commit-id accepted)
-                    (registry/retire-branch! {:seon.store/store store :seon.store/branch (:seon.source/candidate prepared)}))
-                result (when (:seon.source/commit-id accepted)
-                         (let [after (db/db connection)
-                               before (db/commit-database after (:seon.source/base-commit-id accepted))
-                               done (db/commit-database after (:seon.source/commit-id accepted))]
-                           (try (answer before done) (finally (source/release! [before done])))))]
+                                                 (cond-> {:merging facts} root (assoc :root root)))
+                kept (:seon.source/candidate prepared)
+                ;; the judgment read H's facts squash; its fence is H's basis
+                accepted (when (and kept (not (:seon.error/at prepared)) (empty? (:seon.program/conflict prepared)))
+                           (source/accept-merge! context store (assoc prepared :seon.db/basis-t basis)
+                                                 {:tx-data facts :tx-meta meta}))
+                ;; main moved since H: nothing was written, and the next pass merges again from the new head
+                moved? (and (:seon.error/at accepted) (main-moved? accepted))]
+            ;; an accepted merge branch has served, and so has one main moved past; a refused one stays, the
+            ;; merge branch its refusal names (MERGE-STEP): whoever holds the refusal retires it, or root's merge
+            ;; step works on it
+            (when (or (:seon.source/commit-id accepted) moved?)
+              (registry/retire-branch! {:seon.store/store store :seon.store/branch kept}))
             (cond
               (seq (:seon.program/conflict prepared))
               (cond-> (refusal/error :seon.source/conflict-error
@@ -375,37 +379,36 @@
                                       :seon.error/message "The source branch and main changed the same declarations since the merge base; resolve on the branch and merge again."
                                       :seon.program/conflict (into #{} (map second) (:seon.program/conflict prepared))
                                       :seon.program/conflict-digests (:seon.program/conflict-digests prepared)})
-                (:seon.source/candidate prepared) (merge (select-keys prepared [:seon.source/candidate :seon.source/red-tests])))
-              (:seon.error/at prepared) prepared
-              (not (:seon.source/candidate prepared)) prepared
-              (not (:seon.source/commit-id accepted))
-              ;; the refusal as its judge gave it: a red test names itself under `:seon.source/red-tests` on its
-              ;; own refusal, never grafted onto another cause's
-              (assoc accepted :seon.source/candidate (:seon.source/candidate prepared))
-              (:seon.error/at result) (assoc result :seon.source/accepted accepted)
-              :else (do (run! #(conflict-task! connection branch %) (:seon.merge/conflicts result))
-                        (assoc result :seon.source/accepted accepted)))))))))
+                kept (merge (select-keys prepared [:seon.source/candidate :seon.source/red-tests])))
+              (or (:seon.error/at prepared) (not kept)) prepared
+              moved? accepted
+              ;; the refusal as its judge gave it: a red test names itself under `:seon.source/red-tests`
+              (not (:seon.source/commit-id accepted)) (assoc accepted :seon.source/candidate kept)
+              :else (let [after (db/db connection)
+                          done (db/commit-database after (:seon.source/commit-id accepted))
+                          result (try (answer done) (finally (source/release! [done])))]
+                      (if (:seon.error/at result) result (assoc result :seon.source/accepted accepted))))))))))
 
 (defn merge!
-  "Merge assignment `key`'s branch head C onto main through `execution` (root's world: main's connection, and
-  the store it holds or its SCI context's environment holds) as ONE
-  transaction whose metadata names C (`merged?`): the cluster facts by `merge-tx`, inside the writer, three-way from the commit its
-  branch forked from main at (`seon.cluster.registry/fork-point`), so main's changes to them since are kept, and
-  the assignment closed by its end; and,
-  when its source ended `:done`, or did not end `:sent-back` and changed declarations main lacks
-  (`seon.cluster.source/unmerged-count`), whatever declarations it changed, none included, gated first: `seon.cluster.source/prepare-merge!` tests them with the proofs of the assignment's task
-  over main, C and the merge base (`seon.cluster.source/tested-task-basis`), a Prove step's product beside them,
-  and the tests reaching them on a fresh merge branch of main; `seon.cluster.source/accept-merge!` judges them by
-  `seon.cluster.source/merge-verdict` and carries `merge-tx` in its transaction, so only an accepted candidate
-  completes the task, then the merge branch is deleted; a refused one is kept and named on the refusal
-  (`:seon.source/candidate`; a conflict carries the gate's red tests as `:seon.source/red-tests`) for its caller to retire or hold a merge step
-  on (MERGE-STEP); the files the checkout `root` would hold are proven
-  before any test runs. Main's commit is recorded as `:seon.task/merge-commit`, beside
+  "Merge assignment `key`'s branch head C onto main H through `execution` (root's world: main's connection, and
+  the store it holds or its SCI context's environment holds) as ONE transaction whose metadata names C (`merged?`):
+  the cluster facts squashed three-way from the commit its branch forked from main at
+  (`seon.cluster.registry/fork-point`, `merge-tx`), so main's changes to them since are kept, and the assignment
+  closed by its end; and, when its source ended `:done`, or did not end `:sent-back` and changed declarations main
+  lacks (`seon.cluster.source/unmerged-count`), its whole change since the merge base, through the one merge:
+  `seon.cluster.source/prepare-merge!` forks H into a merge branch holding the change and the facts, runs the tests
+  reaching it there and judges it as the task's step is judged (`seon.cluster.source/done-refusals`), and
+  `seon.cluster.source/accept-merge!` writes main once, with Datahike's basis fence on H, so only an accepted change
+  completes the task; the merge branch is then deleted. A conflict or a refusal keeps the merge branch and names it
+  (`:seon.source/candidate`, its red tests as `:seon.source/red-tests`) for its caller to retire or hold a merge step
+  on (MERGE-STEP). When main moved since H the writer refuses (`:seon.db/transaction-refused-error`), nothing is
+  written, the merge branch is deleted and the next pass merges again. The files the checkout `root` would hold are
+  proven before any test runs. Main's commit is recorded as `:seon.task/merge-commit`, beside
   `:seon.task/merged-declarations`, how many declarations and tasks it moved
-  (`seon.cluster.source/merge-accepted`) when any, on either path; publishing the
-  merged declarations into the checkout is the next pass's due work (`publish!`), never a step of the merge.
-  A C main already merged (`merged?`) or a branch that wrote nothing merges nothing and transacts nothing. Answers the merge, or the first refusal as data
-  with nothing merged. A `:root` conflict of the facts keeps main's value and is answered beside them.
+  (`seon.cluster.source/merge-accepted`) when any; publishing the merged declarations into the checkout is the next
+  pass's due work (`publish!`), never a step of the merge. A C main already merged (`merged?`) or a branch that
+  wrote nothing merges nothing and transacts nothing. Answers the merge, or the first refusal as data with nothing
+  merged. A `:root` conflict of the facts keeps main's value and is answered beside them.
 
   ## Example
 

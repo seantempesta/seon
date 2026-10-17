@@ -243,12 +243,7 @@
             (fn [request] (submit! request function-source) (submit! request test-source)))
           (testing "the head lacks both additions before the merge"
             (is (every? #(nil? (:db/id (db/pull (db/db h-conn) [:db/id] %))) [added-fn added-test])))
-          (testing "a selection merges only named changes; a selected test reaching an unselected addition refuses by name"
-            (is (= #{added-test} (get-in (source/prepare-merge! target store c proofs {:selection #{added-test}})
-                                         [:seon.error/offending :seon.program/identities])))
-            (is (= [[:seon.fn/sym 'absent/declaration]]
-                   (:seon.error/offending (source/prepare-merge! target store c proofs {:selection #{[:seon.fn/sym 'absent/declaration]}})))))
-          (let [prepared (source/prepare-merge! target store c proofs {:selection #{added-fn added-test}})
+          (let [prepared (source/prepare-merge! target store c proofs)
                 _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
                 _ (is (true? (:seon.test/passed? prepared)))
                 accepted (when (:seon.test/passed? prepared) (source/accept-merge! target store prepared))
@@ -322,7 +317,7 @@
                   (let [h-conn (:seon.db/connection target)
                         check [:seon.test/sym (symbol (str fixture-ns) "set-check")]
                         namespace-entity [:seon.ns/name fixture-ns]
-                        prepared (do (committed! {:seon.fn/root root}) (source/prepare-merge! target store c proofs {:selection #{check} :root root}))
+                        prepared (do (committed! {:seon.fn/root root}) (source/prepare-merge! target store c proofs {:root root}))
                         _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
                         _ (is (true? (:seon.test/passed? prepared)))
                         accepted (when (:seon.test/passed? prepared) (source/accept-merge! target store prepared))]
@@ -349,7 +344,7 @@
                         ;; the done rule's input: what the branch alone decides of the merge (TASK-CHAIN §2.4)
                         published (do (committed! {:seon.fn/root root})
                                       (let [main (db/db h-conn) branch (db/branch-database main c)]
-                                        (try (source/publication main branch #{[:seon.test/sym check]} #{check} proofs root)
+                                        (try (source/publication main branch #{[:seon.test/sym check]} root)
                                              (finally (source/release! [branch])))))
                         refused (source/prepare-merge! target store c proofs {:root root})
                         finding (first (:seon.source/lint-findings refused))]
@@ -384,7 +379,7 @@
        (let [h-conn (:seon.db/connection target)
              check [:seon.test/sym (symbol (str fixture-ns) "set-check")]
              namespace-entity [:seon.ns/name fixture-ns]
-             prepared (do (committed! {:seon.fn/root root}) (source/prepare-merge! target store c proofs {:selection #{check} :root root}))
+             prepared (do (committed! {:seon.fn/root root}) (source/prepare-merge! target store c proofs {:root root}))
              _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
              _ (is (true? (:seon.test/passed? prepared)))
              accepted (when (:seon.test/passed? prepared) (source/accept-merge! target store prepared))]

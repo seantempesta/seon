@@ -2382,7 +2382,10 @@
                   (let [merged (db/with-branch {:seon.db/connection connection}
                                                #(apply merge/merge! (assoc handle :seon.store/store store) key
                                                        (when root [root])))]
-                    (if (:seon.error/at merged)
+                    (cond
+                      ;; main moved since the merge read it: nothing was written, and the next pass merges again
+                      (and (:seon.error/at merged) (merge/main-moved? merged)) false
+                      (:seon.error/at merged)
                       (let [first-handle (db/q '[:find ?h . :in $ ?b :where [?c :seon.chain/branch ?b] [?c :seon.chain/first ?h]]
                                                database branch)
                             proposed (merge-step database merged
@@ -2404,7 +2407,7 @@
                                      (cond-> [[:db/add [:seon.task/assignment key] :seon.task/refusal (:seon.error/type merged)]]
                                        step (conj [:db.fn/call #'task/next-tx first-handle step])))
                         false)
-                      true))))))))))
+                      :else true))))))))))
 
 (defn- finish-chains!
   "Publish, then retire, every chain main `handle`'s connection holds merged (TASK-CHAIN §2.6): its terminal
@@ -2795,7 +2798,7 @@
                                           #(apply merge/merge! (assoc handle :seon.store/store (handle-store handle))
                                                           (:seon.task/assignment action)
                                                           (when (string? root) [root])))]
-               (when (:seon.error/at merged)
+               (when (and (:seon.error/at merged) (not (merge/main-moved? merged)))
                  ;; an assignment holds no merge step: the merge branch its refusal kept is retired here
                  (when-let [kept (:seon.source/candidate merged)]
                    (registry/retire-branch! {:seon.store/store (handle-store handle) :seon.store/branch kept}))
