@@ -8,7 +8,7 @@ status: "design plan by lane task-model-plan (Opus), 2026-10-17, revised in plac
 
 **Phase status** (each implementing commit updates this line): T0 done (TASK-CHAIN amended in place to the final plan and `task-t0-task-chain.patch` deleted, lane task-t0-finish) · T1 pending · T2 pending · T3a pending (the exhaustive transition table, §5) · T3a-agent pending ·
 T3b pending · T3c pending (no norm; updates `seon.mine`) · T4 pending (clean restart) · P10 (merge-hybrid's phase, with
-§6.3's conflicts section) pending
+§6.3's conflicts section) done 8f39ed642
 
 ## 1. The design in a few lines
 
