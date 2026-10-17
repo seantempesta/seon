@@ -67,15 +67,31 @@
                                [ns-name name form]))))))
           files)))
 
+(defn- schema-definition
+  "The form the schema resource `resources/seon/schemas/<ns>.edn` declares for the named schema `k`, if any."
+  {:malli/schema [:=> [:cat :keyword] [:maybe :seon.batch/form]]}
+  [k]
+  (let [file (io/file "resources/seon/schemas" (str (namespace k) ".edn"))]
+    (when (.exists file)
+      (get (edamame/parse-string (slurp file) {:readers (fn [_] identity) :auto-resolve name}) k))))
+
 (defn- error-variant?
   "Whether the output schema form `schema` names an error variant: a key of `seon.error`, or one whose name says
-  error or refusal."
+  error or refusal, found in the form or through a named schema whose definition is a union holding one."
   {:malli/schema [:=> [:cat :seon.batch/form] :boolean]}
   [schema]
-  (boolean (some #(and (qualified-keyword? %)
-                       (or (str/starts-with? (namespace %) "seon.error")
-                           (some (fn [word] (str/includes? (name %) word)) ["error" "refusal"])))
-                 (tree-seq coll? seq schema))))
+  (letfn [(variant-name? [k] (and (qualified-keyword? k)
+                                  (or (str/starts-with? (namespace k) "seon.error")
+                                      (some (fn [word] (str/includes? (name k) word)) ["error" "refusal"]))))
+          ;; a named schema is followed only where it stands as the whole value or a union member
+          (union-members [form seen]
+            (cond (and (qualified-keyword? form) (not (seen form)))
+                  (if-let [definition (schema-definition form)] (cons form (union-members definition (conj seen form))) [form])
+                  (and (vector? form) (#{:or :and :multi} (first form)))
+                  (mapcat #(union-members % seen) (rest form))
+                  :else []))]
+    (boolean (or (some variant-name? (tree-seq coll? seq schema))
+                 (some variant-name? (union-members schema #{}))))))
 
 (defn- outputs
   "The output schema forms of a `:malli/schema` function schema form."
