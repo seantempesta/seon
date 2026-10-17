@@ -6,6 +6,7 @@
             [sci.ctx-store]
             [seon.db :as db]
             [seon.instrument :as instrument]
+            [seon.program :as program]
             [seon.schema :as schema]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]))
@@ -85,6 +86,22 @@
                         dependent))))
             (disj @(::kernel/installed-functions ctx) predicate)))))
 
+(defn- behavior-held?
+  "Whether `source`, the form that wrote `function-symbol` with docstring
+  `doc`, is the definition `working` holds for it, but for its docstring: then
+  every caller already reaches its behavior (a compiled caller the loaded or
+  overlaid definition the branch holds, an interpreted one this context's Var),
+  and the write changes no caller."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol [:maybe :string] [:maybe :string]] :boolean]}
+  [working function-symbol source doc]
+  (let [{held :seon.fn/source held-doc :seon.fn/doc}
+        (db/q '[:find (pull ?f [:seon.fn/source :seon.fn/doc]) . :in $ ?sym :where [?f :seon.fn/sym ?sym]]
+              working function-symbol)
+        behavior (fn [text d] (if d (#'program/without-docstring text d) text))]
+    (boolean (and source held
+                  (or (= source held)
+                      (= (behavior source doc) (behavior held held-doc)))))))
+
 (defn arm!
   "Arm the observed Var's contract at its write, under the batch's arming
   projection, and mark it the installed definition of its name in this
@@ -99,7 +116,8 @@
   so the forms after the write call the definition through them. When the
   write is a predicate `ctx` now holds apart, the installed functions whose
   contract reaches it re-arm on it (`rearm-dependents!`); a failure there is
-  the write's `:seon.batch/arm-error` too."
+  the write's `:seon.batch/arm-error` too. A write of the definition the
+  branch already holds (`behavior-held?`) changes no caller: none of this runs."
   {:malli/schema [:=> [:cat :map :seon.db/database-value :map] :map]}
   [{{ctx :seon.sci.eval/ctx} :seon.batch/world :as request} working {v :var :as write}]
   (sci.ctx-store/with-ctx ctx
@@ -116,16 +134,22 @@
                   ;; predicates the callables its symbols named
                   (#'eval/arm-contract! ctx sym contract nil @projection working)
                   (assoc write :seon.batch/armed true)
-                  (catch Throwable t
+                  ;; a contract Malli cannot compile, or a context without the
+                  ;; Var, refuses as ex-info; any other throw is a defect
+                  (catch clojure.lang.ExceptionInfo t
                     (assoc write :seon.batch/arm-error (ex-message t)))))
-        (and sym function?)
+        (and sym function?
+             ;; the form's source as read (`seon.batch/evaluate-form`)
+             (not (behavior-held? working sym (get-in request [:seon.batch/world :seon.batch/source])
+                                  (:doc (meta v)))))
         (as-> armed
               (try
                 (eval/reinterpret-inherited-callers! ctx working sym v)
                 (eval/interpret-affected! ctx working [sym])
                 (rearm-dependents! ctx sym @projection working)
                 armed
-                (catch Throwable t
+                ;; a refused read of the closure or a refused interpretation
+                (catch clojure.lang.ExceptionInfo t
                   (update armed :seon.batch/arm-error #(or % (ex-message t))))))))))
 
 (defn write-event

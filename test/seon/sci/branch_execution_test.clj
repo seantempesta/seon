@@ -5,6 +5,7 @@
             [datahike.api :as d]
             [sci.core :as sci]
             [sci.ctx-store]
+            [seon.batch]
             [seon.cache]
             [seon.profile :as profile]
             [seon.config :as config]
@@ -13,8 +14,10 @@
             [seon.schema :as schema]
             [seon.sci.eval :as eval]
             [seon.sci.eval-test]
+            [seon.sci.observe :as observe]
             [seon.test-support :as support]
-            [seon.turn :as turn]))
+            [seon.turn :as turn]
+            [seon.turn.world :as world]))
 
 (defn- evaluate!
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/connection :symbol :string] :seon.sci.eval/evaluation]}
@@ -704,6 +707,40 @@
              "the redefinition leaves that test namespace to its entry")
          (is (zero? (profile/calls-of measured 'seon.sci.eval/interpret-source-namespaces!))
              "no test namespace is interpreted by the redefinition")))))))
+
+(deftest ^{:seon/tasks #{'seon.repl/re-evaluating-nine-seon-db-forms-allocates-nine-gigabytes}
+           :seon.test/long "One complete SCI acquisition of the canonical fixture program and one interpretation of the reverse closure of seon.db/as-of-key (2,339 functions on default)."
+           :seon.test/long-ms 12000}
+  re-evaluating-the-definition-the-branch-holds-walks-no-closure
+  ;; Nine unchanged seon.db forms evaluated on an agent branch allocated 5.9 GB:
+  ;; arming each hub defn walked its whole reverse closure, though a definition
+  ;; the branch already holds changes no caller.
+  (support/with-database
+   (fn [connection]
+     (db/with-branch {:seon.db/connection connection}
+      (fn []
+       (let [held 'seon.db/as-of-key
+             before (db/db connection)
+             ctx (eval/cluster-ctx before connection
+                                   (eval/projection-state before (db/carried-projection before))
+                                   {:seon.sci.eval/loaded-connection connection})
+             _ (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db before})
+             source (:seon.fn/source (db/pull before [:seon.fn/source] [:seon.fn/sym held]))
+             world (world/world {:seon.boot/cluster-name "default" :seon.db/connection connection :seon.sci.eval/ctx ctx
+                                 :seon.sci.eval/time-limit-ms 5000 :seon.batch/sink (seon.batch/sink)})
+             walks (fn [text]
+                     (profile/calls-of
+                      (profile/measure
+                       #(seon.batch/evaluate-batch
+                         (dissoc (support/code-request {:seon.batch/world world :seon.batch/observe observe/observe
+                                                        :seon.batch/start-ns 'seon.db :seon.batch/text text})
+                                 :seon.batch/settle)))
+                      'seon.fn/reverse-closure))]
+         (is (zero? (walks source)) "the definition the branch holds walks no closure")
+         (is (zero? (walks (str/replace-first source "An as-of view's" "The as-of view's")))
+             "nor does it with its docstring revised")
+         (is (pos? (walks (str/replace-first source "[database]" "[database]\n  (identity nil)")))
+             "a changed body walks its callers")))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.source/a-docstring-only-change-lands-without-interpreting-its-namespace}
            :seon.test/long "One complete SCI acquisition of the canonical fixture program after one docstring-only agent change."

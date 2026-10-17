@@ -12,6 +12,7 @@
          [:seon.batch/reads {:optional true :description "One form's read sink: the atom seon.turn.world/with-world binds as seon.db/*read-evidence-sink*, so the form's reads and those of work it starts land in it."} :seon.db/read-evidence-sink]
          [:seon.batch/in-flight {:optional true} :seon.batch/owned]
          [:seon.batch/ordinal {:optional true :description "The ordinal of the form this world is running."} :seon.cluster.eval/ordinal]
+         [:seon.batch/source {:optional true :description "The running form's source text as read (seon.batch/evaluate-form): arming compares it with the definition the branch holds (seon.sci.arm/arm!)."} :string]
          [:seon.batch/form-sink {:optional true :description "The running form's own call sink: the evaluator binds it as the world's sink around the form's code (seon.sci.eval/evaluate), so the definitions the form executed are its code evidence."} :seon.batch/sink]
          [:seon.agent/id {:optional true} :seon.agent/id]
          [:seon.task/id {:optional true} :seon.task/id]

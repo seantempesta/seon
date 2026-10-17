@@ -1,0 +1,22 @@
+--- a/src/seon/batch.clj	2026-10-17 18:15:25.205852762 +0700
++++ b/src/seon/batch.clj	2026-10-17 18:15:25.231419428 +0700
+@@ -636,6 +636,8 @@
+         t0 (System/nanoTime)
+         base (merge {:seon.batch/ordinal n :seon.batch/form (:seon.batch/form r)} (source-of r (:seon.batch/line-cursor batch)))
+         world (cond-> (form-world request n)
++                ;; the form as read: arming knows a definition the branch already holds (`seon.sci.arm/arm!`)
++                (:seon.batch/source base) (assoc :seon.batch/source (:seon.batch/source base))
+                 (seq (:seon.batch/defined batch)) (assoc :seon.batch/defined (:seon.batch/defined batch))
+                 ;; the earlier forms' facts: this form's reads of its connection answer the request view
+                 (seq (:seon.batch/request-facts batch)) (assoc :seon.batch/request-facts (:seon.batch/request-facts batch)))
+--- a/test/seon/cost_estimate_test.clj	2026-10-17 18:20:24.567887142 +0700
++++ b/test/seon/cost_estimate_test.clj	2026-10-17 18:20:24.570565493 +0700
+@@ -62,7 +62,7 @@
+    {:op :seon-db-nine-forms
+     :why "Nine unchanged forms of a 6,500-line namespace: read, analyze and digest each form, all digests equal, nothing written, no test: proportional to 9 forms, never to the namespace."
+     :estimate {:alloc-mb 80.0 :calls 12000 :reads 150 :ms 400.0}
+-    :overrun '{:task seon.repl/re-evaluating-nine-seon-db-forms-allocates-nine-gigabytes :alloc-mb 5856.9 :calls 587548 :reads 22905 :ms 2072.9}}
++    :overrun '{:task seon.repl/re-evaluating-nine-seon-db-forms-allocates-nine-gigabytes :alloc-mb 871.4 :calls 93090 :reads 1358}}
+    {:op :merge-one-function
+     :why "Root merges a branch changing one function: a three-way diff of ~30 datoms from the merge base, its proof and one reaching test run on the merge branch, one merge transaction: proportional to the delta."
+     :estimate {:alloc-mb 48.0 :calls 8000 :reads 200 :ms 400.0}
