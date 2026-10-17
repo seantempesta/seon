@@ -1,7 +1,7 @@
 ---
 title: "Task model: desired state, observed state, one reconciler"
 type: plan
-status: "design plan by lane task-model-plan (Opus), 2026-10-17, from the owner's directions of 2026-10-17 (tasks carry branch and environment; the task graph is the scheduler; desired vs observed state; merge is an ordinary task, no merge attribute). Read-only probes on default (JVM mode). Not yet amended into TASK-CHAIN: phase T0 does that, after the owner answers section 12."
+status: "design plan by lane task-model-plan (Opus), 2026-10-17, from the owner's directions of 2026-10-17 (tasks carry branch and environment; the task graph is the scheduler; desired vs observed state; merge is an ordinary task, no merge attribute), folding in every ruling of merge-rulings.md \"The task model (owner, 2026-10-17, later)\", which binds. Read-only probes on default (JVM mode). Not yet amended into TASK-CHAIN: phase T0 does that, after the owner answers section 12."
 ---
 
 # Task model: desired state, observed state, one reconciler (2026-10-17)
@@ -168,9 +168,12 @@ itself: an action's closing commit wakes the next pass through the route.
   - main for a task whose done step wrote main, because its accept transaction carries N's attempt;
 - no other task on `branch(T)` has an open attempt (one checkout per branch).
 
-Ready tasks start oldest first, up to `max-running` minus the open attempts. Whether T's proofs are already green is
-not a precondition the reconciler computes. It is answered by T's start step on its built environment (row 3), because
-that answer needs the branch value.
+Ready tasks start oldest first, up to `max-running` minus the open attempts.
+
+The ruling's "and its own proofs are not yet green" is honored by the start step (row 3), not by a precondition. The
+proofs' state exists only on the task's built branch (do the work when its data exists). A task whose proofs are green
+there is done at once, with no graph and no model call (row 3a). So a ready task never gets an agent while its proofs
+are green, and the reconciler never computes a test result.
 
 **The environment build rule** (one rule, P4a's prepare generalized from one source to the needs):
 - T's branch exists: continue it. This is a linear run sharing a branch.
@@ -423,9 +426,13 @@ already drops `:seon.source/red-tests`, which the proofs show once. Each entry h
   - `(my.program/resolve! 'ns/name)` keeps ours;
   - an `in-ns` + `defn` of theirs or a combination resolves by writing the declaration.
 
-Cost: `unmerged` is one `:aevt` scan of `:seon.unmerged/id` plus `held-digests` over the entries (zero entries on an
-ordinary branch, so zero work). `versions` reads three references per entry, cached by content
-(`seon.render/render-call`).
+Cost, proportional to the number of conflicts (ruling: "computed at most once per turn"):
+- `unmerged` is one `:aevt` scan of `:seon.unmerged/id` plus `held-digests` over the entries. An ordinary branch has
+  no entries, so the work is zero.
+- `versions` reads three references per entry.
+- The whole section is one `seon.cache` kind keyed by the branch value's commit id, so a turn's repeated block
+  renders compute it once, and a resolving write (a new commit) recomputes it.
+- Each version reference is also cached by content (`seon.render/render-call`).
 
 **"What will merge" carries test status (P10).** P10 stays a phase, and it absorbs the conflicts section: both are
 `seon.context` block sections derived from the same Δ and the same judged head entries on the same branch, in the same
@@ -482,6 +489,19 @@ sequence.
 | `merge-steps`, `chain-requests` | Deleted |
 | `seon.task/chain!` | Deleted. `seon.task/create!` takes a vector of task maps and writes them on main in ONE transaction through the one task writer. It resolves each `:seon.task/branch` (§4), fills defaults, and validates each task's runnable view and that every needs edge resolves within the write or to an existing task. It is idempotent per task identity. No fork at the write: the build is gap row 1, when the task is ready, so a dependent builds after its needs are done. |
 | `seon.task/from-filed` | Answers `[design prove implement merge]` with `needs` links, the entry's identity on the first map, and the merge task's target. |
+
+## 8a. The error law, as touched
+
+AGENTS.md's error law applies, ratcheted by P13's census (`seon.guard-census-test/a-changed-function-holds-no-guard`):
+- Every function a T phase writes or keeps (`observe`, `reconcile`, the appliers, `create!`, the build, the conflicts
+  section, the swap) follows the law:
+  - a reader returns its declared variants;
+  - an applier throws the one error map to the entrant boundary, here db<->flow's one catch, `failed-pass!`,
+    rewritten to a bail (row 8);
+  - nothing downstream re-checks what contracts or the writer guarantee.
+- The deleted functions (§9) are deleted, never converted. Untouched code waits for its toucher.
+- The reconciler adds no guard. A case it cannot plan is a desired state that does not validate, refused at the
+  write by `:seon.task/runnable`. A failed effect is its actor's error, and the attempt it names bails.
 
 ## 9. Deletion table (function spans on HEAD 2ee1db4a5)
 
@@ -557,26 +577,46 @@ It writes no merge task. Root appends one when it wants a converted chain merged
 branch, and it is the shape every later task has. Default can still be reset. The norm exists only so that the corpus
 survives a non-reset restart (open question 5).
 
-## 11. Interaction with the merge redesign
+## 11. One ordered list: merge-hybrid's remaining phases and the task-model phases
 
-| Merge phase | Touches | Effect | Order |
-|---|---|---|---|
-| P4b one transaction | `merge.clj`, `task.clj`, `agent.clj` (`publication-due?`, `lifecycle-facts`), schemas | Its `merge-commit` readers in `lifecycle-facts` and `publication-due?` are deleted by T3b anyway. Its core (one transaction, `merged-declarations` written by it) is the done step's accept. | **Before T1** (it is next, small, and narrows what T3b converts) |
-| P5 red is red | `source.clj`, `context.clj`, `turn.clj`, `test.clj` | Independent, and needed: the merge task's start step must refuse any red member (no red-at-base excuse) for "green at start" to mean main stays green. `context.clj` collides with T3b. | Beside T1–T3a; before T3b |
-| P6 one test request per step | `turn.clj` | The start step (row 3) is P6's one request with no evaluated form. | Beside; before T3b if possible |
-| P7 one file proof | `source.clj`, `merge.clj` | `merge.clj` and `source.clj` collide with T3b (the build, the done step's accept) | **Before T3b** |
-| P8 no automatic JVM boots | `agent.clj`, `turn.clj`, `source.clj`, `context.clj` | `agent.clj` collides. Its host-bound refusal is work left at the start step, and the task bails to root. | **After T3c** |
-| P9a, P9b test verbs | `my/test.clj`, `turn.clj`, help, skill | Independent | Any time after P8 as planned |
-| P10 what will merge | `context.clj` `branch-changes`, `current-state`; `resources/seon/tasks/seon.step.merge.edn` | **Absorbs the conflicts section (§6.3)** and the template's pointer. Both derive from the same Δ and head entries. Needs only P4a. Red proofs: P10's own `seon.context-test/the-block-shows-every-change-that-will-merge-with-its-test-status`, plus `seon.context-test/a-merge-branchs-unmerged-entry-shows-in-the-block-until-resolved` (a merge branch holding one unmerged entry: `(seon.context/current-state db agent)` has `:seon.context/conflicts` with that name, ours and theirs as code-level references holding their source, and the `my.program/resolve!` form; after `my.program/resolve!`, the next `current-state` has no such entry and no `:seon.context/conflicts`). | **Now**, beside T1 and T2 (`context.clj` collides only with P5 and T3b: serialize with them) |
-| P11a–d runner | `seon.test`, `seon.test.runner` | Independent | As planned |
-| P12 agent-owned | `source.clj`, `context.clj` | Independent | As planned |
-| MERGE-STEP S6 B–E | the merge-step append (`next-tx`) | **Moot.** The merge task is written with the work, and its conflict case is its own agent (§6). | Retire with T0 |
-| TASK-CHAIN R-P3–R-P6 (reactive start) | `agent.clj`, `task.clj` | **Absorbed.** Its ordered steps are §5's rows 1, 1b, 2, 3, 5, 12. The forward merge (R-P3) is the build rule for a target task (rebuild on a new head). Its in-memory transitions stay in the registry beside `graph-process`. | Retire with T0 |
-| TASK-CHAIN S3c-2 (restart), S3e (task tree), S3f-1's second half | `task.clj`, `cluster.clj` | S3c-2 becomes T2's boot retraction plus gap rows. S3e's `children` deletion lands in T3b. S3f-1's filed-entry deletion stays in the merge task's write-back. | Fold into T2 and T3b |
+Each remaining phase of `merge-hybrid.md` maps to one disposition:
+- **kept** as is;
+- **changed** (kept, with a different scope stated here);
+- **absorbed** into a task-model phase;
+- **moot**.
 
-**Recommended order.** P4b → P10 with the conflicts section (agents see conflicts now) → T0 (after the owner answers
-§12) → T1, T2, T3a beside P5 and P6 → P7 → T3b + T3c (one restart batch) → T4 → P8 → P9a → P9b → P11a–d → P12.
-P13 applies throughout.
+The status line of each plan stays in its own file. Root works from this list.
+
+| # | Phase | Disposition | Why, and what changes | Files that order it |
+|---|---|---|---|---|
+| 1 | **P4b** one transaction | kept | The accept writes main once and `:seon.task/merged-declarations` itself; `:seon.task/merge-commit` is derived. That is the done step's write. Its conversions of `publication-due?` and `lifecycle-facts` are short-lived (T3b deletes both), but they keep HEAD booting until then. | `merge.clj`, `task.clj`, `agent.clj` |
+| 2 | **P10** what will merge | **changed** | Absorbs §6.3: the live conflicts section derived from the stored unmerged entries, cached per branch value; `shown-refusal` stops repeating entries; the merge template points at the section. Its own proof stays, plus `seon.context-test/a-merge-branchs-unmerged-entry-shows-in-the-block-until-resolved`. Moved earlier: agents need it for today's merge steps. | `context.clj`, `seon.step.merge.edn`, `context_test.clj` |
+| 3 | **T0** words and cards | task model | after the owner answers §12 | docs |
+| 4 | **P5** red is red | kept | Required by the merge task: "green at start" must mean every member green on S, with no red-at-base excuse. | `source.clj`, `context.clj`, `turn.clj`, `test.clj` |
+| 5 | **P6** one test request per step | **changed** | Its one request is also the start step (row 3): `test-step` with no evaluated form, run by root before any graph. T3b calls it from the reconciler's applier. | `turn.clj` |
+| 6 | **T1** the writer | task model | beside P5 and P6 (`task.clj`, task schema) | `task.clj` |
+| 7 | **T2** graph process as a fact | task model | beside (`start-flow!`, `stop-flow!`, boot recovery) | `agent.clj` (flow functions only), `cluster.clj` |
+| 8 | **T3a** the pure reconciler | task model | additive, beside | `agent.clj` (new function), `agent_test.clj` |
+| 9 | **P7** one file proof, consumed thrice | kept | Before T3b, which moves `prepare-merge!`'s build and calls `accept-merge!` directly (`source.clj`, `merge.clj` collide). | `source.clj`, `merge.clj` |
+| 10 | **T3b** one path | task model; **absorbs** TASK-CHAIN R-P3–R-P6, S3c-2 (with T2), S3e's `children` deletion, and P4a's `seon.merge/merge!` entrance | restart batch with T3c | §10 |
+| 11 | **T3c** views, claims, schema, norm | task model | same restart batch | §10 |
+| 12 | **T4** environment swap | task model | after T3b | `agent.clj`, `my/task.clj`, maybe `sci/eval.clj` |
+| 13 | **P8** no automatic JVM boots | **changed** | A host-bound change or a member the one JVM must not run is work left at the start step, or a done-rule refusal at row 7. The task bails to root by row 8. There is no `:seon.source/deferred` branch in any path. After T3c, because `agent.clj` collides. | `turn.clj`, `cluster.clj`, `source.clj`, `context.clj`, `agent.clj`, `test.clj`, `test/platform.clj` |
+| 14 | **P9a** convert the callers of the retired verbs | kept | | `bin/seon-hook`, tests, scripts |
+| 15 | **P9b** one verb, help, skill, offers | kept | help also gains §6.3's section and §6.1's swap in one sentence each | `my/test.clj`, help, skill |
+| 16 | **P11a–d** runner | kept | independent of the task model | `seon.test`, `seon.test.runner` |
+| 17 | **P12** `merge-changes`, `agent-owned` | kept | after its producer task, independent | `source.clj`, `context.clj` |
+| — | **P13** the error law per phase | kept, and applied to every T phase (§8a) | the census already landed with P4a | every phase's files |
+| — | **MERGE-STEP S6 B–E** | **moot** | The merge task is written with the work, and its conflict case is its own agent (§6.2). There is no append. | — |
+| — | merge-hybrid §3.1 rows naming `seon.cluster.agent/merge-chains!`, `refusals-verdict`, `merge-step` as "stays" | **moot** | deleted by T3b (§5, §9) | — |
+| — | the merge test list that "stays green through all phases" | **changed** | Their chain fixtures convert to `create!` with a merge task in T3b. `a-refused-final-merge-keeps-its-merge-branch-and-holds-a-merge-step`, `a-done-merge-step-merges-its-branch-onto-main` and `a-merge-step-green-at-its-start-ends-done-with-no-model-call` become T3b's two merge-task proofs. `a-requested-green-end-merges-and-publishes-with-no-hand-act` is retired (§9). | tests |
+
+Parallel lanes, by file collisions:
+- P10 runs now.
+- T1, T2 and T3a run beside P5 and P6. `context.clj` belongs to P10 then P5. `turn.clj` belongs to P6.
+- P7 runs before T3b.
+- T3b and T3c land in one restart batch, then T4, then P8.
+- P9a, P9b, P11 and P12 follow as `merge-hybrid.md` orders them.
 
 ## 12. Open questions for the owner
 
