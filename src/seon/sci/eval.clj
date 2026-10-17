@@ -1940,32 +1940,20 @@
   remaining interns (private helpers, `def`/`defonce` Vars); each alias and
   refer target its namespace row declares receives that loaded namespace's
   interns, so `var` reaches a private one as Clojure's does. Existing SCI bindings win: first-party copies, interpreted
-  definitions and SCI's own `clojure.*` namespaces are never replaced, and
-  `clojure.core` is left to SCI: the core names SCI lacks (`ref`, `agent`)
-  bind in each caller's own namespace, a source namespace's included. A
-  target this JVM has not loaded stays absent, so its caller refuses by
-  name."
+  definitions and SCI's own `clojure.*` namespaces are never replaced. The
+  core names SCI lacks (`ref`, `agent`) join the context's `clojure.core`,
+  which every namespace refers as Clojure's does, so `ns-interns` answers
+  only a namespace's own Vars and `:refer-clojure :exclude` holds; the names
+  SCI's analyzer owns (`sci.impl.utils/ana-macros`) stay SCI's. A target this
+  JVM has not loaded stays absent, so its caller refuses by name."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:sequential :map]] :nil]}
   [ctx namespace-rows]
   (let [sci-core (get-in @(:env ctx) [:namespaces 'clojure.core])
-        ;; clojure.core names SCI does not carry (spit, ref) bind in the
-        ;; caller's own namespace; SCI's interrupt-aware core is never
-        ;; replaced. A source namespace interprets its interns from its rows,
-        ;; so it receives only these, all of them when this JVM has not
-        ;; loaded it (a test namespace).
-        core-gap
-        (fn [referred]
-          (into {} (filter (fn [[local-name host-var]]
-                             (and (var? host-var)
-                                  (= 'clojure.core (ns-name (.ns ^clojure.lang.Var host-var)))
-                                  (not (contains? sci-core local-name)))))
-                referred))
+        ;; A source namespace interprets its interns from its rows.
         own-bindings
         (fn [namespace-name]
-          (let [host (find-ns namespace-name)]
-            (if (source-namespace? ctx namespace-name)
-              (core-gap (if host (ns-map host) (ns-publics 'clojure.core)))
-              (when host (merge (core-gap (ns-map host)) (ns-interns host))))))
+          (when-not (source-namespace? ctx namespace-name)
+            (some-> (find-ns namespace-name) ns-interns)))
         own (set (map :seon.ns/name namespace-rows))
         test-namespaces (::test-namespaces @(::kernel/program-snapshot ctx))
         targets (distinct
@@ -1976,6 +1964,12 @@
                                            (concat (vals aliases)
                                                    (map (comp symbol namespace) (vals refers)))))))
                          namespace-rows))]
+    ;; clojure.core names SCI does not carry (spit, ref) join its core once;
+    ;; SCI's interrupt-aware core and its analyzer's own names are never replaced
+    (install-host-namespace! ctx 'clojure.core
+                             (remove (fn [[local-name]] (or (contains? sci-core local-name)
+                                                            (contains? sci.utils/ana-macros local-name)))
+                                     (ns-publics 'clojure.core)))
     (doseq [target targets
             :let [interns (if (own target) (own-bindings target) (some-> (find-ns target) ns-interns))
                   present (get-in @(:env ctx) [:namespaces target])]
