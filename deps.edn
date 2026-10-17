@@ -188,8 +188,14 @@
               ;; A heap failure ends the JVM instead of limping into the store.
               ;; The operator names the dump directory (<root>/data/heap) at
               ;; launch; this JVM's working directory may be a pruned archive.
-              "-XX:+ExitOnOutOfMemoryError"
-              "-XX:+HeapDumpOnOutOfMemoryError"]}
+              ;; Crash, not Exit: an exit skips JFR's dump, a crash writes its
+              ;; emergency dump (hs_err_pid<pid>.jfr) and hs_err log there too.
+              "-XX:+CrashOnOutOfMemoryError" "-XX:-CreateCoredumpOnCrash"
+              "-XX:+HeapDumpOnOutOfMemoryError"
+              ;; Forensics: JFR's default (low-overhead) profile, continuously,
+              ;; as a ring of the last 10 minutes or 256 MB on disk. A crash
+              ;; dumps it; a live JVM dumps it with `jcmd <pid> JFR.dump name=seon`.
+              "-XX:StartFlightRecording=name=seon,settings=default,maxage=10m,maxsize=256m"]}
 
   ;; Offline retained-size measurement of the contract table (contracts-out
   ;; design §10, root ruling 2026-09-27): its own JVM, never on default.
