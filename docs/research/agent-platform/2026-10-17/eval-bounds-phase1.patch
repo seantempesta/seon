@@ -1,0 +1,252 @@
+diff --git a/resources/seon/tasks/seon.test.edn b/resources/seon/tasks/seon.test.edn
+index a2fd415df..1262460f8 100644
+--- a/resources/seon/tasks/seon.test.edn
++++ b/resources/seon/tasks/seon.test.edn
+@@ -134,6 +134,4 @@
+              :plan "On the cluster's own branch `seon.test/branch-changes` takes the adopted `:seon.source/commit-id` as the base of `seon.test/branch-delta`, and `seon.program/own-changed-identities` (no fork entity there) walks `seon.program/changed-identities` from that commit's t. The adopted commit is on the `:current-src` branch, a separate lineage: on default after the restart onto 56038bbb1 its basis-t is 536871566 (written 2026-10-14) while main is at 536874664, so the walk covers every digest main rewrote since then, 11,478 identities (7,517 functions, 3,356 tests, 475 schemas, 130 namespaces) against `seon.cluster.source/merge-bound`'s 10,000, and every root eval request's test step answers the `:seon.program/read-bound` refusal beside its value (before fix `seon.merge-forward-test/a-change-past-its-read-bound-answers-the-refusal` it crashed as a contract error of `seon.program/digest-map`). Compare a t only on its own lineage (CLAUDE.md, merge base from the commit graph): derive root's base as a position on main's lineage, or the adopted commit's diff by content, at `seon.test/branch-changes`. Write its red proof first: a root eval request after a publication that changed more than the bound answers its branch delta, not a refusal."}
+  #:seon.task{:name "a-namespace-check-run-hangs-a-member-for-600-seconds"
+              :plan "Lane merge-p1-repair (2026-10-17): in whole-namespace `bin/seon check` runs, `seon.context-test/a-plans-small-program-function-shows-its-source-and-a-large-one-its-doc` (run 2dbdb4e56ce3) and `seon.cluster.db-flow-test/a-chain-agent-makes-its-first-model-call-with-no-wake` (run 450ec2513339) each hung 600 s, then passed when rerun. Flake-hunt first (Haiku: run each alone and in its namespace several times at HEAD); then find what the hung member waited on (a thread dump of the check JVM while hung) and fix the owner. Bound admission and await actual exit: a hang must name its missing terminal event, never just time out. Proof: the namespace run completes within its declared bounds on N consecutive runs."}
+- #:seon.task{:name "an-interrupted-check-leaves-its-test-bodies-writing"
+-             :plan "Default (pid 45243) died with OutOfMemoryError at 2026-10-17 17:23 (lane oom-1723, heap dump java_pid45243). The edit hook sent `(my.test/check {:seon.test/changed [seon.db/with ...]})` on lane as-of-key's branch; that evaluation was interrupted at 30,047 ms (\"Ran out of time\", 15.26 M calls), yet two `seon-test-body` threads kept running under `seon.test/run` afterwards. Each derefed a Datahike write that failed with the writer's NullPointerException wrapper (\"Connection may have been invalidated\") while writing a `:seon.branch/fork-id` fact through `seon.db/with-branch` from `seon.cluster.agent/acquire-once!`, and reading that failure printed the wrapper's ex-data, the live connection included: 1.34 GB and 0.34 GB strings, 71% of the 4 GB heap. The printing is fixed in the Datahike fork (`datahike.tools/throwable-promise`, fork commit bcad4dd9a, branch oom-1723-throwable-promise; root bumps reference-code/datahike in the next restart batch). Remaining: timeout is not termination. Find whether the interrupted check released the test branch's connection while its bodies still ran (the likely NPE cause) and make the check hold its test resources until each body has exited, naming the missing terminal event. Proof first: a check interrupted by its time limit leaves no test body writing after the reply."}
+ ]
+diff --git a/src/seon/test.clj b/src/seon/test.clj
+index 8b2d22077..4dfd5a4c5 100644
+--- a/src/seon/test.clj
++++ b/src/seon/test.clj
+@@ -2899,9 +2899,34 @@
+              (:seon.flow/commit-fault! snapshot)
+              (assoc :seon.flow/commit-fault! (:seon.flow/commit-fault! snapshot))))))))))
+ 
++(defn- release-at-exit!
++  "Release what one request acquired once every member it started has exited: its world (the handle,
++  then its overlay), then the request view that world stands on. At once when no member is live, else
++  on the last member's release, where a failure goes to `failed!`."
++  {:malli/schema [:=> [:cat [:maybe :seon.agent/execution-handle] [:sequential :seon.flow/future]
++                       [:maybe [:map [:seon.db/connection :seon.db/connection] [:seon.store/store :seon.store/store]]] [:=> [:cat :seon.error/throwable] :any]]
++                  :nil]}
++  [request-handle exits view failed!]
++  (let [release! (fn []
++                   (try (when request-handle
++                          (try (@release-context! request-handle)
++                               (finally (store/release-store! (:seon.store/store request-handle)))))
++                        (finally
++                          (when view
++                            (try (store/release-branch! (:seon.db/connection view))
++                                 (finally (store/release-store! (:seon.store/store view))))))))
++        live (into-array CompletableFuture (remove #(.isDone ^CompletableFuture %) exits))]
++    (if (zero? (alength live))
++      (release!)
++      ;; The release's own failure arrives on its stage's completion, as data.
++      (.whenComplete (.thenRun (CompletableFuture/allOf live) ^Runnable release!)
++                     (reify java.util.function.BiConsumer
++                       (accept [_ _ failure] (when failure (failed! (or (ex-cause failure) failure)))))))
++    nil))
++
+ (defn- run-request
+   "The body of `run`: select, admit and execute the request, throwing what it cannot answer."
+-  {:malli/schema [:=> [:cat :seon.test/request]
++  {:malli/schema [:=> [:cat :seon.test/request [:maybe [:map [:seon.db/connection :seon.db/connection] [:seon.store/store :seon.store/store]]]]
+                   [:or :seon.test/run-result :seon.test/selection-error :seon.test/unknown-error
+                    :seon.test/admission-error :seon.test.run/unavailable-error
+                    :seon.config/error :seon.db.write/error :seon.db/transaction-refused-error
+@@ -2912,7 +2937,8 @@
+   [{execution :seon.test/execution recording :seon.test/recording-connection
+     policy :seon.test/policy identities :seon.test/identities
+     namespaces :seon.test/namespaces write! :seon.db/writer
+-    :or {write! db/transact!} :as request}]
++    :or {write! db/transact!} :as request}
++   view]
+   (let [started (System/nanoTime)
+         elapsed #(/ (- (System/nanoTime) started) 1000000.0)
+         cluster (:seon.cluster/name execution)
+@@ -2925,7 +2951,26 @@
+         ;; interpreted (`resolve-test`): what its results prove.
+         evaluator (if (root-agent? execution) :compiled :interpreted)
+         ;; The arms' own admission, asked before a world is built for them.
+-        pressure (kernel/memory-pressure)]
++        pressure (kernel/memory-pressure)
++        ;; One policy for the runner's own admission, completion, stop and
++        ;; exit writes, on this thread and the exit watcher's: a declared
++        ;; caller mistake (admission evidence disagreed, or a recording
++        ;; connection outside the caller's custody) is returned; any other
++        ;; refusal is a stored, delivered core fault, which leaves the
++        ;; request unsuccessful (it throws only when it cannot be stored).
++        core-fault! #(fault/fault!
++                      (env/environment {:seon.boot/cluster-name cluster :seon.db/connection recording
++                                        :seon.sci.admit/caps (config/result-caps effective)})
++                      %2 {:seon.error/layer :seon.test/recording :seon.error/operation %1
++                          :seon.db.process/id (cluster.process/id (cluster.process/current-identity))})
++        ;; Every request, a cluster's or an isolated attempt's, branches
++        ;; from its loaded program with boot's facts and its execution's
++        ;; differing program entities, never from its operational data. It is
++        ;; built by the first admitted batch: a refused admission builds none.
++        held-handle (volatile! nil)
++        ;; Each started member's release: the request's world is theirs until the last one.
++        member-exits (volatile! [])]
++    (try
+     (cond
+       pressure (kernel/memory-pressure-error pressure)
+       (:seon.error/at effective) effective
+@@ -3052,17 +3097,6 @@
+                           (and (empty? ordered) (empty? readers) (seq carried-members)) (conj []))
+                 deadline (+ started (* 1000000 bound))
+                 remaining-ms #(quot (- deadline (System/nanoTime)) 1000000)
+-                ;; One policy for the runner's own admission, completion, stop and
+-                ;; exit writes, on this thread and the exit watcher's: a declared
+-                ;; caller mistake (admission evidence disagreed, or a recording
+-                ;; connection outside the caller's custody) is returned; any other
+-                ;; refusal is a stored, delivered core fault, which leaves the
+-                ;; request unsuccessful (it throws only when it cannot be stored).
+-                core-fault! #(fault/fault!
+-                              (env/environment {:seon.boot/cluster-name cluster :seon.db/connection recording
+-                                                :seon.sci.admit/caps (config/result-caps effective)})
+-                              %2 {:seon.error/layer :seon.test/recording :seon.error/operation %1
+-                                  :seon.db.process/id (cluster.process/id (cluster.process/current-identity))})
+                 own-write! (fn [operation written]
+                              (when (and (:seon.error/at written) (not (:seon.test/admission-refusal written))
+                                         (not (get-in written [:seon.error/data :seon.db/ambient-branch])))
+@@ -3113,13 +3147,6 @@
+                                                              [?member :seon.test.member/symbol ?symbol]]
+                                                     (:db-after report)
+                                                     (:seon.test.run/id batch-provenance)))})))
+-                ;; Every request, a cluster's or an isolated attempt's, branches
+-                ;; from its loaded program with boot's facts and its execution's
+-                ;; differing program entities, never from its operational data. It is
+-                ;; built by the first admitted batch: a refused admission builds none.
+-                held-handle (volatile! nil)
+-                ;; Each started member's release: the request's world is theirs until the last one.
+-                member-exits (volatile! [])
+                 request-handle! #(or @held-handle
+                                      (vreset! held-handle
+                                               (cond-> (assoc (clean-request-handle execution recording cluster effective)
+@@ -3231,8 +3258,7 @@
+                               (write! recording [[:db/add [:seon.test.run/id (:seon.test.run/id batch-provenance)]
+                                                   :seon.test.run/stopped cause]])))
+                 outcome
+-                (try
+-                  (loop [index 0
++                (loop [index 0
+                          outcome {:seon.test/results [] :seon.test/timings []
+                                   ::held [] :seon.test/pending []}]
+                     (if-let [members (get batches index)]
+@@ -3258,20 +3284,6 @@
+                                         (concat stopped (mapcat identity (subvec batches (inc index)))))
+                                 (recur (inc index) outcome))))))
+                       outcome))
+-                  (finally
+-                    (when-let [request-handle @held-handle]
+-                      ;; The request's branches live in its overlay: releasing
+-                      ;; the handle, then the overlay, leaves nothing to collect.
+-                      ;; A member still live at its bound runs in that world: it
+-                      ;; is released at that member's actual exit, never under it.
+-                      (let [release-world! #(try (@release-context! request-handle)
+-                                                 (finally (store/release-store! (:seon.store/store request-handle))))
+-                            live (into-array CompletableFuture (remove #(.isDone ^CompletableFuture %) @member-exits))]
+-                        (if (zero? (alength live))
+-                          (release-world!)
+-                          (.thenRun (CompletableFuture/allOf live)
+-                                    #(try (release-world!)
+-                                          (catch Throwable failure (core-fault! `release-context! failure)))))))))
+                 held-elsewhere (::held outcome)
+                 reused (into (vec (:seon.test.selection/unchanged selection))
+                              (map (fn [[test-symbol {run-id :seon.test.run/id pass :seon.test/pass-count
+@@ -3324,7 +3336,10 @@
+               (:seon.test/recording-refusal outcome)
+               (assoc :seon.test/recording-refusal (:seon.test/recording-refusal outcome))
+               (::admission-refusal outcome)
+-              (assoc :seon.test/recording-refusal (::admission-refusal outcome))))))))))
++              (assoc :seon.test/recording-refusal (::admission-refusal outcome))))))))
++      ;; A member still live at its bound runs in the request's world and the view under it:
++      ;; both are released at that member's actual exit, never under it.
++      (finally (release-at-exit! @held-handle @member-exits view #(core-fault! `release-context! %))))))
+ 
+ (defn- request-view!
+   "The running eval request's view of `execution`'s branch, when `seon.db/*request-facts*` names its connection:
+@@ -3418,15 +3433,15 @@
+   [request]
+   (try (let [view (request-view! (:seon.test/execution request))]
+          (if-not view
+-           (run-request request)
+-           ;; The run reads the view through its own connection and writes only there.
+-           (try (binding [db/*request-facts* nil]
+-                  (db/with-branch view
+-                    #(run-request (assoc request
+-                                         :seon.test/execution (merge (:seon.test/execution request) view)
+-                                         :seon.test/recording-connection (:seon.db/connection view)))))
+-                (finally (store/release-branch! (:seon.db/connection view))
+-                         (store/release-store! (:seon.store/store view))))))
++           (run-request request nil)
++           ;; The run reads the view through its own connection and writes only there;
++           ;; `run-request` releases it after its world, at its members' actual exit.
++           (binding [db/*request-facts* nil]
++             (db/with-branch view
++               #(run-request (assoc request
++                                    :seon.test/execution (merge (:seon.test/execution request) view)
++                                    :seon.test/recording-connection (:seon.db/connection view))
++                             view)))))
+        ;; The entrant answers its declared variants: an exception no part of the
+        ;; request translated is the unknown outcome of this request, its cause kept.
+        (catch Throwable failure
+diff --git a/test/seon/test/one_request_test.clj b/test/seon/test/one_request_test.clj
+index d4f0f98a9..5d53abc51 100644
+--- a/test/seon/test/one_request_test.clj
++++ b/test/seon/test/one_request_test.clj
+@@ -211,6 +211,58 @@
+              "its exit releases its branch and then the request's world")
+          (finally (.countDown gate)))))))
+ 
++(def ^:dynamic ^:private *member-written*
++  "The promise a gated member delivers its write's report to, bound only by the request that gates it."
++  nil)
++
++(deftest a-gated-member-writes-on-its-branch
++  ;; Run alone it passes at once; a request that binds `*member-written*` keeps
++  ;; it live past its bound, then it writes on its own branch and delivers the report.
++  (is (or (nil? *member-written*)
++          (and (.await ^java.util.concurrent.CountDownLatch *member-gate* 30 java.util.concurrent.TimeUnit/SECONDS)
++               (:db-after (deref (deliver *member-written* (db/transact! [{::marker "after-the-bound"}]))))))))
++
++(deftest ^{:seon.test/long "One request under an eval request's facts on a fixture branch whose one member stays live past the request's 8 s bound, then writes, exits and the view is released; the request's admission and recording dominate."
++           :seon.test/long-ms 45000}
++  a-member-outliving-its-bound-keeps-the-request-view-until-it-exits
++  ;; A `my.test/check` inside an eval request runs under the request's facts, so
++  ;; `run` opens the request view, an overlay the request's world stands on. A
++  ;; member live at the bound still runs in that world: the view is released at
++  ;; its actual exit, never at the answer. A timeout is not termination.
++  (support/with-database
++   {:seon.test-support/extra-schema marker}
++   (fn [connection]
++     (let [gate (java.util.concurrent.CountDownLatch. 1)
++           written (promise)
++           member 'seon.test.one-request-test/a-gated-member-writes-on-its-branch
++           branch (get-in (db/db connection) [:config :branch])
++           ;; The request view: an overlay connection to the fixture's own branch, beside the fixture's own.
++           open (fn [connections] (into #{} (keep (fn [[conn-id {n :count}]]
++                                                    (when (and (= branch (second conn-id)) (pos? (or n 0))) conn-id)))
++                                        connections))
++           fixture (open @connections/*connections*)
++           view? (fn [connections] (seq (remove fixture (open connections))))
++           result (binding [*member-gate* gate
++                            *member-written* written
++                            db/*request-facts* {:seon.db/connection connection
++                                                :seon.batch/request-facts [{::marker "request-fact"}]
++                                                :seon.batch/facts-digest "request-view-probe"}]
++                    (sut/run {:seon.test/execution (support/execution-handle connection)
++                              :seon.test/recording-connection connection
++                              :seon.test/policy :named
++                              :seon.test/check-time-limit-ms 8000
++                              :seon.test/identities #{member}}))]
++       (try
++         (is (= [member] (map :seon.test/sym (:seon.test/unfinished result))) "the member is live at the request's bound")
++         (is (view? @connections/*connections*) "the request view outlives the answer while its member runs")
++         (.countDown gate)
++         (is (= {} (select-keys (support/await-event! (future (deref written)) ::member-wrote)
++                                [:seon.error/type :seon.error/message :seon.error/operation]))
++             "the member's write after the bound commits on its branch")
++         (is (some? (support/await-event! connections/*connections* ::view-released (complement view?)))
++             "its exit releases the world and then the request view")
++         (finally (.countDown gate)))))))
++
+ (deftest ^{:seon.test/long "An admission, two recordings and two requests on one fixture branch: 37.7 s measured at 0e53eb8b1 on a scratch cluster, dominated by the routed per-request acquisition and per-connection projection costs."
+            :seon.test/long-ms 45000}
+   a-member-that-never-exits-holds-only-its-own-test-and-the-next-request-runs
