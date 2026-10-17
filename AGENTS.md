@@ -513,6 +513,10 @@ definition with the same input is computed once for every branch and agent that 
     boot and the test runner. It turns the exception into an error map, records it as Seon's own error, and delivers it
     as data beside whatever value exists. The producer's defect is then fixed.
 
+  Apply the law to the code you touch or write, as part of that change. Never convert code that is about to be
+  deleted, and never sweep untouched code all at once. A census checks every function changed since the law was
+  introduced, so new guards cannot enter while the old ones leave with their code.
+
   There are exactly two kinds of catch:
   - an interop edge's catch of its own exception, translated to its declared variant with the cause kept;
   - the entrant boundary.
