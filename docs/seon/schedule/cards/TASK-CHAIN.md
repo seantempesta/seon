@@ -214,7 +214,8 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    step runs a reaching red at the merge base when no result is held there (`seon.test/fork-point-red`, recorded on
    the branch, reused by reach digest), so done and merge judge a red reaching test the same way. It refuses:
    - a proof with no current result (`:seon.source/test-evidence-error`), or one not green
-     (`:seon.source/red-test-error`); an empty proof set never finishes;
+     (`:seon.source/red-test-error`); a task with neither proofs nor next proofs never finishes (a Prove step admitted
+     by its successor's declaration has no proof of its own: its next proofs, its product, are its work);
    - a test the branch holds red that is not red at the merge base (no result there is the change's), unless it is
      one of the next task's proofs (Prove adding a red row to an existing table test is its job)
      (`:seon.source/red-test-error`, verdict `:red`, as the merge names it;

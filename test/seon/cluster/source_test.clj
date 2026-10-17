@@ -426,6 +426,10 @@
                            :seon.test/run-at #inst "2026-10-14"})])
                  [:seon.source/test-evidence-error]]
                 ["an empty proof set never finishes" (assoc base :seon.task/proofs #{}) [:seon.source/test-evidence-error]]
+                ["a Prove step with no proof of its own, its product the next task's red proof: done"
+                 (red (assoc base :seon.task/proofs #{} :seon.source/members #{} :seon.source/results [])
+                      'tq.done-test/next :seon.source/next-proofs #{'tq.done-test/next})
+                 []]
                 ["a branch-new red outside the next proofs: stray"
                  (assoc (new-red base) :seon.source/next-proofs #{'tq.done-test/other}) [:seon.source/stray-red-error]]
                 ["the same red among the next proofs: done"

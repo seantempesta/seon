@@ -1653,8 +1653,8 @@
   "Every refusal the done rule gives a task over the recorded results in `judged`, the same for every task: each
   of its `:seon.task/proofs` and other `:seon.source/members` (the next task's proofs aside) without an executed
   current result (absent, or a result that never started: unknown evidence, never red or green, as the merge judges
-  it; an empty proof set never finishes), each proof whose executed result is not green; each other
-  member red here that is not red at the merge base (`:seon.source/red-on-target`, `seon.test/fork-point-red`'s
+  it; a task with neither proofs nor next proofs never finishes: a Prove step's work may be its product alone), each
+  proof whose executed result is not green; each other member red here that is not red at the merge base (`:seon.source/red-on-target`, `seon.test/fork-point-red`'s
   question, as the merge asks it: a red with no result there is the change's), and each red test defined or changed
   on the branch (in `:seon.program/identities`, `:seon.source/stray-red-error`), unless it is one of the
   `:seon.source/next-proofs` (none on the last task); and every function of the identities `branch` holds with a
@@ -1695,10 +1695,10 @@
         open (unmerged branch)]
     (cond-> []
       (seq open) (conj (unmerged-refusal branch open evidence))
-      (or (empty? proofs) (seq unknown))
+      (or (empty? (into (set proofs) next-proofs)) (seq unknown))
       (conj (seon.error.refusal/error :seon.source/test-evidence-error
              (assoc evidence :seon.error/message (str "Every proof and every other member needs a current executed result; a test with none"
-                                                        " is unknown, not green, and an empty proof set never finishes.")
+                                                        " is unknown, not green, and a task with neither proofs nor next proofs never finishes.")
                     :seon.error/offending unknown)))
       (seq (into red-proofs regressed))
       (conj (red-test-refusal (assoc evidence :seon.error/message "A proof, or a test not red at the merge base, is not green here.")
