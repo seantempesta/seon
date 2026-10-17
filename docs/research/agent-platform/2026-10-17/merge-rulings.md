@@ -1,0 +1,32 @@
+---
+title: "Owner rulings for the merge and testing redesign"
+type: input
+status: owner rulings 2026-10-17, input to the merge hybrid (Fable) after merge-audit-opus.md and merge-cost-astra.md
+---
+
+# Merge and testing: the owner's rulings (2026-10-17)
+
+**Merge.**
+- One simple merge. Seon is not building git. Every component is judged by the work it must do, in reads and writes.
+- **The whole chain merges.** There is no test-selected merge list.
+- Make the merge branch (main plus the change). Look up existing results by reach digest, and run only the tests whose digest is new on the merged result.
+- No conflict and green: merge in one transaction. A conflict goes to the merge agent (`seon.step.merge/template`).
+- **A red test on the merged result refuses the merge, even if main had it red before.** Main must be green, and keeping it green is root's job. No "red at the merge base" excuse machinery.
+
+**Testing.**
+- **Reactive testing is core.** Writing a definition runs its reaching tests, and results are keyed by reach digest. An unchanged definition never reruns.
+- **Agents never need to run tests.** Results arrive in the agent's next context: what is failing, with the failure data to dig into. Agents *can* run tests by hand through one simple verb, but help says that is almost never necessary.
+- **The runner is stock clojure.test plus evidence.** Tests run through clojure.test's own run and report maps. Seon adds only two things: results keyed by reach digest, and storing them. `seon.test.runner` is rewritten toward that, and anything the reactive path makes unnecessary is deleted.
+- **Tests run in the environment** (the agent's SCI fork on its branch). Only when a change reaches a platform-bound or file-reading test does it run in a separate JVM instance cloned from HEAD plus the changed files. That instance is not booted on every merge.
+
+**Validation.** Every function is instrumented: inputs are validated before entry and outputs on return. A function that depends on `seon.widget/a` cannot run on invalid input. So the merge and done path never re-validates what contracts or the writer guarantee. The merge checks only:
+1. conflicts;
+2. tests whose digests are new;
+3. contract completeness of new definitions, if the write does not already enforce it.
+
+**The agent's context.** It always shows a running summary of what will merge: every function, test, schema and data entity the chain added, changed or deleted since its merge base, each with its test status. The agent uses it to delete scratch data and functions, and to tune its work before done.
+
+**Help.** It says plainly that:
+- all functions are instrumented, so data is validated in and out and agents need not validate;
+- tests run automatically as things change, and the agent always gets those updates and can see which tests fail and dig into the results;
+- agents may run a test by hand, but it is almost never necessary.
