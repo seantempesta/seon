@@ -234,3 +234,54 @@
        (is (= {:seon.error/type :seon.db/transaction-refused-error :seon.error/operation 'seon.db/transact!
                :seon.error/message "The test world's program overlay was refused"}
               (edn/read-string stored)))))))
+
+(def ^:dynamic ^:private *held*
+  "The latch a held member awaits, bound only by the request that holds it."
+  nil)
+
+(deftest a-member-held-by-its-request
+  ;; Run alone it passes at once; a request that binds `*held*` keeps it live past its bound.
+  (is (or (nil? *held*)
+          (.await ^java.util.concurrent.CountDownLatch *held* 30 java.util.concurrent.TimeUnit/SECONDS))))
+
+(deftest ^{:seon.test/long "One request on a fixture branch whose one member stays live past the request's 3 s bound, then the stop write throws and the member exits; the request's admission and recording dominate."
+           :seon.test/long-ms 45000}
+  a-request-that-throws-mid-batch-still-stops-its-run
+  ;; The entrant `seon.test/run` records the in-flight batch's interruption: a
+  ;; request that throws while its batch is in flight still stops its run with
+  ;; :request-threw, before its world is released.
+  (support/with-database
+   (fn [connection]
+     (let [gate (java.util.concurrent.CountDownLatch. 1)
+           member `a-member-held-by-its-request
+           ;; The request's writer: its admission commits, its stop write throws.
+           writer (fn [conn tx-data]
+                    (if (some #(and (vector? %) (= :seon.test.run/stopped (nth % 2 nil))) tx-data)
+                      (throw (ex-info "The stop write failed." {::probe true}))
+                      (db/transact! conn tx-data)))
+           result (binding [*held* gate]
+                    (sut/run {:seon.test/execution (support/execution-handle connection)
+                              :seon.test/recording-connection connection
+                              :seon.test/policy :named
+                              :seon.test/check-time-limit-ms 3000
+                              :seon.test/identities #{member}
+                              :seon.db/writer writer}))
+           run-of (fn [database]
+                    (db/q '[:find (pull ?run [:seon.test.run/id :seon.test.run/stopped]) .
+                            :in $ ?s
+                            :where [?run :seon.test.run/members ?m] [?m :seon.test.member/symbol ?s]]
+                          database member))]
+       (try
+         (is (= "The stop write failed." (:seon.error/message result)) "the request answers its throw")
+         (is (= :request-threw (:seon.test.run/stopped (run-of (db/db connection))))
+             "its run is stopped by the throw")
+         (finally
+           (.countDown gate)
+           ;; the member's exit is recorded before the fixture branch goes
+           (support/await-event!
+            (future (loop []
+                      (or (db/q '[:find ?tx . :in $ ?s
+                                  :where [?m :seon.test.member/symbol ?s] [?m :seon.test.member/terminated-tx ?tx]]
+                                (db/db connection) member)
+                          (do (Thread/sleep 50) (recur)))))
+            ::member-exited)))))))

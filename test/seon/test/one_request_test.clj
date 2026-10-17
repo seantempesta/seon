@@ -211,6 +211,58 @@
              "its exit releases its branch and then the request's world")
          (finally (.countDown gate)))))))
 
+(def ^:dynamic ^:private *member-written*
+  "The promise a gated member delivers its write's report to, bound only by the request that gates it."
+  nil)
+
+(deftest a-gated-member-writes-on-its-branch
+  ;; Run alone it passes at once; a request that binds `*member-written*` keeps
+  ;; it live past its bound, then it writes on its own branch and delivers the report.
+  (is (or (nil? *member-written*)
+          (and (.await ^java.util.concurrent.CountDownLatch *member-gate* 30 java.util.concurrent.TimeUnit/SECONDS)
+               (:db-after (deref (deliver *member-written* (db/transact! [{::marker "after-the-bound"}]))))))))
+
+(deftest ^{:seon.test/long "One request under an eval request's facts on a fixture branch whose one member stays live past the request's 8 s bound, then writes, exits and the view is released; the request's admission and recording dominate."
+           :seon.test/long-ms 45000}
+  a-member-outliving-its-bound-keeps-the-request-view-until-it-exits
+  ;; A `my.test/check` inside an eval request runs under the request's facts, so
+  ;; `run` opens the request view, an overlay the request's world stands on. A
+  ;; member live at the bound still runs in that world: the view is released at
+  ;; its actual exit, never at the answer. A timeout is not termination.
+  (support/with-database
+   {:seon.test-support/extra-schema marker}
+   (fn [connection]
+     (let [gate (java.util.concurrent.CountDownLatch. 1)
+           written (promise)
+           member 'seon.test.one-request-test/a-gated-member-writes-on-its-branch
+           branch (get-in (db/db connection) [:config :branch])
+           ;; The request view: an overlay connection to the fixture's own branch, beside the fixture's own.
+           open (fn [connections] (into #{} (keep (fn [[conn-id {n :count}]]
+                                                    (when (and (= branch (second conn-id)) (pos? (or n 0))) conn-id)))
+                                        connections))
+           fixture (open @connections/*connections*)
+           view? (fn [connections] (seq (remove fixture (open connections))))
+           result (binding [*member-gate* gate
+                            *member-written* written
+                            db/*request-facts* {:seon.db/connection connection
+                                                :seon.batch/request-facts [{::marker "request-fact"}]
+                                                :seon.batch/facts-digest "request-view-probe"}]
+                    (sut/run {:seon.test/execution (support/execution-handle connection)
+                              :seon.test/recording-connection connection
+                              :seon.test/policy :named
+                              :seon.test/check-time-limit-ms 8000
+                              :seon.test/identities #{member}}))]
+       (try
+         (is (= [member] (map :seon.test/sym (:seon.test/unfinished result))) "the member is live at the request's bound")
+         (is (view? @connections/*connections*) "the request view outlives the answer while its member runs")
+         (.countDown gate)
+         (is (= {} (select-keys (support/await-event! (future (deref written)) ::member-wrote)
+                                [:seon.error/type :seon.error/message :seon.error/operation]))
+             "the member's write after the bound commits on its branch")
+         (is (some? (support/await-event! connections/*connections* ::view-released (complement view?)))
+             "its exit releases the world and then the request view")
+         (finally (.countDown gate)))))))
+
 (deftest ^{:seon.test/long "An admission, two recordings and two requests on one fixture branch: 37.7 s measured at 0e53eb8b1 on a scratch cluster, dominated by the routed per-request acquisition and per-connection projection costs."
            :seon.test/long-ms 45000}
   a-member-that-never-exits-holds-only-its-own-test-and-the-next-request-runs

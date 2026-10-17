@@ -2899,9 +2899,40 @@
              (:seon.flow/commit-fault! snapshot)
              (assoc :seon.flow/commit-fault! (:seon.flow/commit-fault! snapshot))))))))))
 
+(defn- release-at-exit!
+  "Release what one request acquired, from `run`'s custody of it, once every member it started has exited:
+  its world (the handle, then its overlay), then the request view that world stands on. At once when no
+  member is live, else on the last member's release, where a failure goes to the custody's `::fault!`."
+  {:malli/schema [:=> [:cat [:map [::exits [:sequential :seon.flow/future]]
+                             [::fault! [:=> [:cat :seon.error/throwable] :any]]
+                             [::world {:optional true} :seon.agent/execution-handle]
+                             [::view {:optional true} [:map [:seon.db/connection :seon.db/connection]
+                                                       [:seon.store/store :seon.store/store]]]
+                             [::interrupted! {:optional true} [:=> [:cat :seon.error/throwable] :any]]]]
+                  :nil]}
+  [{::keys [world exits view fault!]}]
+  (let [release! (fn []
+                   (try (when world
+                          (try (@release-context! world)
+                               (finally (store/release-store! (:seon.store/store world)))))
+                        (finally
+                          (when view
+                            (try (store/release-branch! (:seon.db/connection view))
+                                 (finally (store/release-store! (:seon.store/store view))))))))
+        live (into-array CompletableFuture (remove #(.isDone ^CompletableFuture %) exits))]
+    (if (zero? (alength live))
+      (release!)
+      ;; The release's own failure arrives on its stage's completion, as data.
+      (.whenComplete (.thenRun (CompletableFuture/allOf live) ^Runnable release!)
+                     (reify java.util.function.BiConsumer
+                       (accept [_ _ failure] (when failure (fault! (or (ex-cause failure) failure)))))))
+    nil))
+
 (defn- run-request
-  "The body of `run`: select, admit and execute the request, throwing what it cannot answer."
-  {:malli/schema [:=> [:cat :seon.test/request]
+  "The body of `run`: select, admit and execute the request, throwing what it cannot answer. What it
+  acquires is held in `custody`, `run`'s: the world, each started member's exit, and while a batch runs,
+  the recording of its interruption (`::interrupted!`)."
+  {:malli/schema [:=> [:cat :seon.test/request [:fn clojure.core/volatile?]]
                   [:or :seon.test/run-result :seon.test/selection-error :seon.test/unknown-error
                    :seon.test/admission-error :seon.test.run/unavailable-error
                    :seon.config/error :seon.db.write/error :seon.db/transaction-refused-error
@@ -2912,7 +2943,8 @@
   [{execution :seon.test/execution recording :seon.test/recording-connection
     policy :seon.test/policy identities :seon.test/identities
     namespaces :seon.test/namespaces write! :seon.db/writer
-    :or {write! db/transact!} :as request}]
+    :or {write! db/transact!} :as request}
+   custody]
   (let [started (System/nanoTime)
         elapsed #(/ (- (System/nanoTime) started) 1000000.0)
         cluster (:seon.cluster/name execution)
@@ -2925,7 +2957,19 @@
         ;; interpreted (`resolve-test`): what its results prove.
         evaluator (if (root-agent? execution) :compiled :interpreted)
         ;; The arms' own admission, asked before a world is built for them.
-        pressure (kernel/memory-pressure)]
+        pressure (kernel/memory-pressure)
+        ;; One policy for the runner's own admission, completion, stop and
+        ;; exit writes, on this thread and the exit watcher's: a declared
+        ;; caller mistake (admission evidence disagreed, or a recording
+        ;; connection outside the caller's custody) is returned; any other
+        ;; refusal is a stored, delivered core fault, which leaves the
+        ;; request unsuccessful (it throws only when it cannot be stored).
+        core-fault! #(fault/fault!
+                      (env/environment {:seon.boot/cluster-name cluster :seon.db/connection recording
+                                        :seon.sci.admit/caps (config/result-caps effective)})
+                      %2 {:seon.error/layer :seon.test/recording :seon.error/operation %1
+                          :seon.db.process/id (cluster.process/id (cluster.process/current-identity))})
+        _ (vswap! custody assoc ::fault! #(core-fault! `release-context! %))]
     (cond
       pressure (kernel/memory-pressure-error pressure)
       (:seon.error/at effective) effective
@@ -3052,17 +3096,6 @@
                           (and (empty? ordered) (empty? readers) (seq carried-members)) (conj []))
                 deadline (+ started (* 1000000 bound))
                 remaining-ms #(quot (- deadline (System/nanoTime)) 1000000)
-                ;; One policy for the runner's own admission, completion, stop and
-                ;; exit writes, on this thread and the exit watcher's: a declared
-                ;; caller mistake (admission evidence disagreed, or a recording
-                ;; connection outside the caller's custody) is returned; any other
-                ;; refusal is a stored, delivered core fault, which leaves the
-                ;; request unsuccessful (it throws only when it cannot be stored).
-                core-fault! #(fault/fault!
-                              (env/environment {:seon.boot/cluster-name cluster :seon.db/connection recording
-                                                :seon.sci.admit/caps (config/result-caps effective)})
-                              %2 {:seon.error/layer :seon.test/recording :seon.error/operation %1
-                                  :seon.db.process/id (cluster.process/id (cluster.process/current-identity))})
                 own-write! (fn [operation written]
                              (when (and (:seon.error/at written) (not (:seon.test/admission-refusal written))
                                         (not (get-in written [:seon.error/data :seon.db/ambient-branch])))
@@ -3117,15 +3150,13 @@
                 ;; from its loaded program with boot's facts and its execution's
                 ;; differing program entities, never from its operational data. It is
                 ;; built by the first admitted batch: a refused admission builds none.
-                held-handle (volatile! nil)
-                ;; Each started member's release: the request's world is theirs until the last one.
-                member-exits (volatile! [])
-                request-handle! #(or @held-handle
-                                     (vreset! held-handle
+                request-handle! #(or (::world @custody)
+                                     (::world
+                                      (vswap! custody assoc ::world
                                               (cond-> (assoc (clean-request-handle execution recording cluster effective)
                                                              :seon.test/interpreted-files? (= :interpreted evaluator))
                                                 (seq interpreted) (assoc :seon.test/interpreted-namespaces interpreted)
-                                                (seq task-inputs) (assoc :seon.test/task-inputs task-inputs))))
+                                                (seq task-inputs) (assoc :seon.test/task-inputs task-inputs)))))
                 ;; Once per request: the members an attempt evaluation serves,
                 ;; those whose closure names the effect owner, from one reverse
                 ;; walk of the reached graph (all 2,365 tests 18 ms, where every
@@ -3159,10 +3190,19 @@
                                      ;; Exits racing capture are separate; later exits belong to the callback.
                                      (doseq [sym (remove folded (::exited before))]
                                        (own-write! `runner/record-exit! (runner/record-exit! recording run-id sym)))))]
-                    ;; A throw is the request's: its run stops with :request-threw,
-                    ;; unfinished members keep no result (each reads unknown) and
-                    ;; the throwable is rethrown to the entrant.
-                    (try
+                    ;; A throw is the request's: the entrant `run` records it through
+                    ;; `::interrupted!` while this batch is in flight, until its results and
+                    ;; stop are written, so its run stops with :request-threw and unfinished
+                    ;; members keep no result (each reads unknown). It runs under this
+                    ;; request's bindings (the view's custody).
+                    (vswap! custody assoc ::interrupted!
+                            (bound-fn* (fn [failure]
+                                         (let [results (captured @observed)
+                                               recorded (runner/record-interrupted!
+                                                         recording (recording-completion batch-provenance results true) failure)]
+                                           (if (:seon.error/at recorded)
+                                             (.addSuppressed ^Throwable failure (ex-info (:seon.error/message recorded) recorded))
+                                             (handoff! results))))))
                     (let [outcome
                     (loop [remaining members outcome outcome]
                       (if-let [test-symbol (first remaining)]
@@ -3180,7 +3220,7 @@
                                (contains? effect-reach test-symbol)
                                (or (:seon.config.test.cost/top effective)
                                    (:seon.config.test.cost/top config/defaults)))]
-                          (vswap! member-exits conj exit)
+                          (vswap! custody update ::exits conj exit)
                           ;; An unknown loaded program started nothing: this
                           ;; member and the rest keep no outcome, so read unknown.
                           (if-let [cause (:seon.test.run/stopped result)]
@@ -3210,18 +3250,7 @@
                         (let [by-symbol (into {} (map (juxt :seon.test/sym identity)) committed)]
                           (handoff! results)
                           (update outcome :seon.test/results
-                                  #(mapv (fn [result] (merge result (by-symbol (:seon.test/sym result)))) %)))))
-                    (catch Throwable failure
-                      (try
-                        (let [results (captured @observed)
-                              recorded (runner/record-interrupted!
-                                        recording (recording-completion batch-provenance results true) failure)]
-                          (if (:seon.error/at recorded)
-                            (.addSuppressed failure (ex-info (:seon.error/message recorded) recorded))
-                            (handoff! results)))
-                        (catch Throwable recording-failure
-                          (.addSuppressed failure recording-failure)))
-                      (throw failure)))))
+                                  #(mapv (fn [result] (merge result (by-symbol (:seon.test/sym result)))) %)))))))
                 release-not-started!
                 ;; A stopped run records why; the members it never started keep
                 ;; no outcome, so each reads as an unknown (never green) and,
@@ -3231,8 +3260,7 @@
                               (write! recording [[:db/add [:seon.test.run/id (:seon.test.run/id batch-provenance)]
                                                   :seon.test.run/stopped cause]])))
                 outcome
-                (try
-                  (loop [index 0
+                (loop [index 0
                          outcome {:seon.test/results [] :seon.test/timings []
                                   ::held [] :seon.test/pending []}]
                     (if-let [members (get batches index)]
@@ -3250,6 +3278,8 @@
                                   stopped (::stopped outcome)
                                   released (when stopped
                                              (release-not-started! (::provenance admitted) (::stop-cause outcome)))
+                                  ;; recorded, its stop included: a later throw no longer interrupts this batch
+                                  _ (vswap! custody dissoc ::interrupted!)
                                   outcome (cond-> (dissoc outcome ::stopped ::stop-cause)
                                             (:seon.error/at released)
                                             (update :seon.test/recording-refusal #(or % released)))]
@@ -3258,20 +3288,6 @@
                                         (concat stopped (mapcat identity (subvec batches (inc index)))))
                                 (recur (inc index) outcome))))))
                       outcome))
-                  (finally
-                    (when-let [request-handle @held-handle]
-                      ;; The request's branches live in its overlay: releasing
-                      ;; the handle, then the overlay, leaves nothing to collect.
-                      ;; A member still live at its bound runs in that world: it
-                      ;; is released at that member's actual exit, never under it.
-                      (let [release-world! #(try (@release-context! request-handle)
-                                                 (finally (store/release-store! (:seon.store/store request-handle))))
-                            live (into-array CompletableFuture (remove #(.isDone ^CompletableFuture %) @member-exits))]
-                        (if (zero? (alength live))
-                          (release-world!)
-                          (.thenRun (CompletableFuture/allOf live)
-                                    #(try (release-world!)
-                                          (catch Throwable failure (core-fault! `release-context! failure)))))))))
                 held-elsewhere (::held outcome)
                 reused (into (vec (:seon.test.selection/unchanged selection))
                              (map (fn [[test-symbol {run-id :seon.test.run/id pass :seon.test/pass-count
@@ -3416,30 +3432,43 @@
                    :seon.sci.eval/interpretation-error :seon.test/not-runnable-error
                    :seon.sci.kernel/memory-pressure-error]]}
   [request]
-  (try (let [view (request-view! (:seon.test/execution request))]
-         (if-not view
-           (run-request request)
-           ;; The run reads the view through its own connection and writes only there.
-           (try (binding [db/*request-facts* nil]
-                  (db/with-branch view
-                    #(run-request (assoc request
-                                         :seon.test/execution (merge (:seon.test/execution request) view)
-                                         :seon.test/recording-connection (:seon.db/connection view)))))
-                (finally (store/release-branch! (:seon.db/connection view))
-                         (store/release-store! (:seon.store/store view))))))
-       ;; The entrant answers its declared variants: an exception no part of the
-       ;; request translated is the unknown outcome of this request, its cause kept.
-       (catch Throwable failure
-         ;; a message-less exception states none: the diagnostic takes its cause chain's
-         (let [recorded (record-thrown! request failure)]
-          (cond-> (assoc (seon.error.refusal/diagnostic
-                         (cond-> {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/execution
-                                  :seon.error/operation 'seon.test/run :seon.error/throwable failure}
-                           (ex-message failure) (assoc :seon.error/message (ex-message failure))))
-                        :seon.test/unknown "The request ended in an exception."
-                        :seon.test/next-tier :none)
-           ;; recorded once, here at the entrant: its receipt names the occurrence
-           recorded (assoc :seon.fault/recorded recorded))))))
+  ;; `run` holds what the request acquires (`run-request`'s custody): it records an
+  ;; in-flight batch's interruption before it releases, and releases the world and
+  ;; the view only at the actual exit of every member started in them.
+  (let [custody (volatile! {::exits [] ::fault! #(record-thrown! request %)})
+        ;; The entrant answers its declared variants: an exception no part of the
+        ;; request translated is the unknown outcome of this request, its cause kept.
+        thrown (fn [^Throwable failure]
+                 ;; a message-less exception states none: the diagnostic takes its cause chain's
+                 (let [recorded (record-thrown! request failure)]
+                   (cond-> (assoc (seon.error.refusal/diagnostic
+                                   (cond-> {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/execution
+                                            :seon.error/operation 'seon.test/run :seon.error/throwable failure}
+                                     (ex-message failure) (assoc :seon.error/message (ex-message failure))))
+                                  :seon.test/unknown "The request ended in an exception."
+                                  :seon.test/next-tier :none)
+                     ;; recorded once, here at the entrant: its receipt names the occurrence
+                     recorded (assoc :seon.fault/recorded recorded))))
+        answer (try (let [view (request-view! (:seon.test/execution request))]
+                      (if-not view
+                        (run-request request custody)
+                        ;; The run reads the view through its own connection and writes only there.
+                        (do (vswap! custody assoc ::view view)
+                            (binding [db/*request-facts* nil]
+                              (db/with-branch view
+                                #(run-request (assoc request
+                                                     :seon.test/execution (merge (:seon.test/execution request) view)
+                                                     :seon.test/recording-connection (:seon.db/connection view))
+                                              custody))))))
+                    (catch Throwable failure
+                      ;; A batch in flight stops its run with :request-threw, recorded before its world is released.
+                      (when-let [interrupted! (::interrupted! @custody)]
+                        (try (interrupted! failure)
+                             (catch Throwable refused (.addSuppressed failure refused))))
+                      (thrown failure)))]
+    (try (release-at-exit! @custody)
+         answer
+         (catch Throwable failure (thrown failure)))))
 
 (defn- unfulfilled
   "Why a run that did not pass did not, counted per kind of unfulfilled

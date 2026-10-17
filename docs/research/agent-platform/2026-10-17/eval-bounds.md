@@ -1,16 +1,16 @@
 ---
 title: "Eval bounds: a declared memory bound per eval request"
 type: research
-status: "design with priced options, lane eval-bounds 2026-10-17; nothing implemented"
+status: "phase 1 committed (lane eval-bounds-1b, 2026-10-17); phase 2 a design with priced options, nothing implemented"
 ---
 
 # Eval bounds: a declared memory bound per eval request
 
 Lane eval-bounds (Opus), 2026-10-17, after default's 17:23 OOM (commit 825d7638b). Phase 1 (await actual exit in
-`seon.test/run`) is fixed and proven as a patch, blocked from commit by the guard census (next section). Phase 2 is a
-design with priced options; nothing of it is implemented.
+`seon.test/run`) is committed with root's option 1 (next section). Phase 2 is a design with priced options; nothing
+of it is implemented.
 
-## Phase 1 status: fixed and proven, not committed (blocked by the guard census)
+## Phase 1 status: committed (option 1, lane eval-bounds-1b)
 
 **Cause.** `seon.test/run` opens the request view (`request-view!`) when an eval request's facts name the
 execution's connection, as in an edit hook's `my.test/check`. The view is an overlay of the branch, and it is
@@ -18,42 +18,25 @@ used as the recording connection. The request's world (checkpoint, request branc
 overlays over it. e71917c85 made `run-request` release its world only at its live members' actual exit. But
 `run`'s own `finally` released the view at the answer, under any member still live past the bound.
 
-**Fix** (`eval-bounds-phase1.patch`, against 2df7abac2):
-- `run-request` takes the view, and one function, `release-at-exit!`, releases the world and then the view. It
-  runs at once when no member is live, else on the last member's release; a failure reaches the core fault through
-  the stage's `whenComplete`, so there is no catch. A finally around the whole request covers early returns.
-- `run` no longer releases the view.
-- New proofs: `seon.test.one-request-test/a-member-outliving-its-bound-keeps-the-request-view-until-it-exits`
-  and its gated member `a-gated-member-writes-on-its-branch`.
+**Fix.** `run`, the entrant, holds the request's custody (one volatile map `run-request` fills): the world, each
+started member's exit, the view, and while a batch is in flight (until its results and stop are written) the
+recording of its interruption.
+- `run`'s catch records an in-flight batch as stopped (`seon.test.runner/record-interrupted!`, `:request-threw`)
+  before it answers the throw; `run-request` holds no catch.
+- `run` then calls `seon.test/release-at-exit!`, which releases the world and then the view: at once when no
+  member is live, else on the last member's release, its failure reaching the core fault through the stage's
+  `whenComplete`.
+- The batch's stop write is inside the in-flight scope: before, a throw from it left the run with no stop cause.
 
-**Proof.** The proof is red on HEAD in a check JVM at the right assertion: the view is gone at the answer. It is
-green with the patch: run 641f16a34a42, 6 executed, 18 pass, together with the world, bounded-result and
-request-view tests. The whole `seon.test.one-request-test` namespace with include-long has 8 red with the patch
-(run f7801d13efca) and the same 8 red members on HEAD (run fb8c75ef0715), so none of them is this change's.
+**Proof.** `seon.test.one-request-test/a-member-outliving-its-bound-keeps-the-request-view-until-it-exits` (red on
+2df7abac2 at "the request view outlives the answer"), and
+`seon.test.interrupted-request-test/a-request-that-throws-mid-batch-still-stops-its-run` (red on 0468b27f5 at "its
+run is stopped by the throw", run a9873ab48ee5). Both green in check run d920de39e1da (11 executed, 45 pass, 0
+fail), with the world, bounded-result and request-view tests and `seon.guard-census-test/a-changed-function-holds-no-guard`.
 
 **Limit.** In this fixture the member's own write after the view's release still committed on HEAD. The incident's
 Datahike NPE came from a nested run inside a member body, and it is not reproduced. What is proven is the
 ordering: nothing the request acquired is released under a live body.
-
-**Blocker.** `bin/lane commit` refused the patch: `seon.guard-census-test/a-changed-function-holds-no-guard`
-judges every changed function. Touching `run-request` exposes its pre-existing batch catch. That catch is
-`(catch Throwable failure ...)` around each batch: it calls `seon.test.runner/record-interrupted!` (the run stops
-with `:request-threw`, keeping its captured results), then rethrows. Every other route to the view also touches a
-function with a legacy general catch (`seon.test/clean-request-handle`, `seon.cluster.agent/release-context!`).
-
-**Options for root:**
-1. **Move the batch's interrupted recording to the entrant (recommended).** About 30 lines in `seon.test` only.
-   - `run` owns the request's custody: the held world, the member exits and the in-flight batch (its provenance and
-     observed results).
-   - `run`'s entrant catch calls `record-interrupted!` from that custody before `record-thrown!`. Its finally calls
-     `release-at-exit!`, so recording precedes release on the view's connection.
-   - Proof: the patch's tests, plus a new row in `seon.test.interrupted-request-test` that throws mid-batch through
-     `run` and reads `:request-threw` on the run.
-2. **Delete the batch recording.** A throw then leaves the run admitted with unfinished members, which admission
-   already reads as interrupted work. `record-interrupted!` and `:request-threw` lose their only production caller,
-   and `seon.context`'s display of them goes with it. This is a cross-file cut, with the context lane's consent.
-3. **Commit the patch as is with root's census override.** This is not offered by the law ("no exemptions"),
-   so it is listed only to be refused.
 
 ## What exists
 
