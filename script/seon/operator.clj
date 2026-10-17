@@ -1537,19 +1537,6 @@
             :seon.operator/phases (:seon.operator/phases source)}
            (program-source (:seon.boot/advertisement outcome)))))
 
-(defn- adopted!
-  "`default`'s adoption of the publication the ready JVM of `root` booted with:
-  a resumed store's boot publishes the changed files onto `current-src` but an
-  existing cluster keeps its program until it adopts. The adoption, or its
-  failure as a diagnostic."
-  {:malli/schema [:=> [:cat :string] :map]}
-  [root]
-  (try (connected! {:seon.operator/managed-root root
-                    :seon.operator/command :init
-                    :seon.operator/development-cluster "default"})
-       (catch Exception cause
-         (diagnostic (ex-message cause) (or (ex-data cause) {}) :client-failed cause))))
-
 (declare linked-pins! disposable-root-boot!)
 
 (defn- warmed-program-classes!
@@ -1586,9 +1573,9 @@
   The archive is built and its caches linked before anything stops. Then the
   root's JVMs stop within their bound, the replacement resumes on the same
   store (publishing only the files that differ from the published program)
-  and `default` adopts that publication. A replacement that does not reach
-  readiness, or whose adoption refuses, is terminated by exact identity and
-  the full cause returned: a broken program never keeps running."
+  and its boot adopts that publication onto `default` before any layer reads
+  it. A replacement that does not reach readiness is terminated by exact
+  identity and the full cause returned: a broken program never keeps running."
   {:malli/schema [:=> [:cat :map] :map]}
   [request]
   (let [began (System/nanoTime)
@@ -1623,23 +1610,18 @@
         value (:seon.operator/value outcome)
         missing (get-in value [:seon.boot/readiness :seon.boot/missing-layers])
         ready? (and (not (:seon.error/message value)) (vector? missing) (empty? missing))
-        began-adopt (System/nanoTime)
-        adoption (when ready? (adopted! root))
-        adopt-ms (elapsed-ms began-adopt)
-        adopted? (and ready? (not (:seon.error/message adoption)))
-        pruned (when adopted? (prune-archives! root source-root))
+        pruned (when ready? (prune-archives! root source-root))
         phases (merge (:seon.operator/phases source)
                       {:seon.operator/down-ms down-ms
                        :seon.operator/launch-ms launch-ms
                        :seon.boot/ready-ms (get-in value [:seon.boot/readiness :seon.boot/ready-ms])
-                       :seon.operator/adopt-ms adopt-ms
                        :seon.operator/total-ms (elapsed-ms began)})
         report {:seon.operator/source (dissoc source :seon.operator/phases)
                 :seon.operator/stopped-processes (:seon.operator/stopped-processes stopped)
                 :seon.operator/phases phases}]
-    (if adopted?
+    (if ready?
       (merge value report
-             {:seon.operator/adoption adoption :seon.operator/archives pruned
+             {:seon.operator/archives pruned
               :seon.operator/captured-heads (:seon.operator/captured-heads outcome)}
              (program-source (:seon.boot/advertisement outcome)))
       (let [began-restore (System/nanoTime)
@@ -1671,7 +1653,7 @@
             report (assoc-in report [:seon.operator/phases :seon.operator/resume-previous-ms]
                              (elapsed-ms began-resume))]
         (assoc (diagnostic (str "The JVM from " (:seon.source/git-sha source)
-                                (if ready? " refused to adopt its publication" " did not reach readiness")
+                                " did not reach readiness"
                                 (case (:seon.operator/rollback restored)
                                   :restored "; its branch heads were put back"
                                   nil "; it wrote to no existing store"
@@ -1683,7 +1665,6 @@
                                 ". The store and caches are kept.")
                            (merge report {:seon.operator/value value
                                           :seon.operator/heads restored
-                                          :seon.operator/adoption adoption
                                           :seon.boot/advertisement (:seon.boot/advertisement outcome)
                                           :seon.operator/terminated terminated
                                           :seon.operator/resumed resumed})
@@ -2116,29 +2097,20 @@
             seeded-ms (elapsed-ms began)
             boot (launched-throwaway! root disposable sha)
             booted-ms (elapsed-ms began)
-            ;; The template's `default` runs the base's program: it adopts the
-            ;; candidate's publication before its tests are selected, or a test
-            ;; the candidate adds is not one of its tests.
-            adoption (when (:seon.operator/ready? boot) (adopted! disposable))
-            adopted-ms (elapsed-ms began)
-            adopted? (and (:seon.operator/ready? boot) (not (:seon.error/message adoption)))
-            run (when adopted?
+            ;; The template's `default` ran the base's program: its boot adopts
+            ;; the candidate's publication before readiness, so a test the
+            ;; candidate adds is one of its tests.
+            ready? (:seon.operator/ready? boot)
+            run (when ready?
                   (run-candidate-tests! (:seon.operator/source-root boot) disposable tests include-long?))
             phases (merge (:seon.operator/phases boot)
                           {:seon.operator/slot-wait-ms waited-ms
                            :seon.operator/seed-ms (- seeded-ms waited-ms)
-                           :seon.operator/adopt-ms (- adopted-ms booted-ms)
-                           :seon.operator/tests-ms (- (elapsed-ms began) adopted-ms)})
+                           :seon.operator/tests-ms (- (elapsed-ms began) booted-ms)})
             evidence {:seon.operator/test-phases phases :seon.operator/seed seed
                       :seon.operator/swept swept}]
-        (cond
-          adopted?
+        (if ready?
           (merge run evidence)
-          (:seon.operator/ready? boot)
-          (diagnostic (str "The throwaway JVM from " sha " refused to adopt its publication; its tests did not run.")
-                      (assoc evidence :seon.operator/adoption adoption)
-                      :client-failed)
-          :else
           (diagnostic (str "The throwaway JVM from " sha " did not reach readiness; its tests did not run.")
                       (assoc evidence :seon.operator/value (:seon.operator/value boot)
                              :seon.operator/log-tail (log-tail (str (io/file disposable "data/clusters/default/logs/seon.log")) 40))
@@ -2405,7 +2377,7 @@
 
 (defn failure-cause
   "The first message beneath a failed result's own: the failed child's root
-  cause (`Throwable->map`'s `:cause`), its message, its adoption's, then the last link of the result's own cause chain."
+  cause (`Throwable->map`'s `:cause`), its message, then the last link of the result's own cause chain."
   {:malli/schema [:=> [:cat :map] [:maybe :string]]}
   [result]
   (let [evidence (:seon.error/offending result)
@@ -2413,7 +2385,6 @@
     (some #(when (and (string? %) (not= % (:seon.error/message result))) %)
           [(get-in child [:seon.error/cause :cause])
            (:seon.error/message child)
-           (get-in evidence [:seon.operator/adoption :seon.error/message])
            ;; the primary chain's root: suppressed links (flat, naming their
            ;; relation) follow it
            (:seon.error/message (last (remove #(or (:seon.error/suppressed-by %) (:seon.error/cause-of %))
@@ -2475,7 +2446,7 @@
 
 (defn- start-summary
   "What root acts on after a successful `start`: sha, pid, timings, the stopped
-  processes, that adoption converged, counts of captured heads and pruned
+  processes, counts of captured heads and pruned
   archives, and the file holding the whole result."
   {:malli/schema [:=> [:cat :map :string] :map]}
   [result detail-path]
@@ -2485,7 +2456,6 @@
      :seon.boot/ready-ms (get-in result [:seon.boot/readiness :seon.boot/ready-ms])
      :seon.operator/total-ms (:seon.operator/total-ms phases)
      :seon.operator/stopped-processes (:seon.operator/stopped-processes result)
-     :seon.operator/adopted? (contains? result :seon.operator/adoption)
      :seon.operator/captured-heads-count (count (get-in result [:seon.operator/captured-heads :seon.operator/heads]))
      :seon.operator/pruned-archives-count (count (get-in result [:seon.operator/archives :seon.operator/pruned]))
      :seon.operator/detail detail-path}))

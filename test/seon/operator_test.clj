@@ -233,13 +233,12 @@
                 :seon.operator/phases {:seon.operator/total-ms 7000}
                 :seon.boot/readiness {:seon.boot/pid 42 :seon.boot/ready-ms 5000}
                 :seon.operator/stopped-processes [{:seon.boot/pid 41}]
-                :seon.operator/adoption {:converged true}
                 :seon.operator/archives {:seon.operator/pruned ["a" "b"]}
                 :seon.operator/captured-heads {:seon.operator/heads heads}}
         summary (#'operator/start-summary result "/logs/operator-start.edn")]
     (is (= 110 (:seon.operator/captured-heads-count summary)))
     (is (= 2 (:seon.operator/pruned-archives-count summary)))
-    (is (= [42 "abc123" true] ((juxt :seon.boot/pid :seon.source/git-sha :seon.operator/adopted?) summary)))
+    (is (= [42 "abc123"] ((juxt :seon.boot/pid :seon.source/git-sha) summary)))
     (is (not (contains? summary :seon.operator/captured-heads)))))
 
 (deftest a-launched-jvm-carries-the-configured-heap-cap
@@ -339,20 +338,6 @@
         (run! #(.delete ^java.io.File %) (reverse (file-seq (java.io.File. root))))
         (.delete link)
         (.delete outside)))))
-
-(deftest a-checks-adoption-answers-its-failure-as-data
-  ;; A check's throwaway JVM resumes the base's template store, whose `default`
-  ;; keeps the base's program until it adopts the candidate's publication; a
-  ;; test the candidate adds is eligible only after that adoption. This test is
-  ;; itself new to its commit: the check runs it by name only because of it.
-  ;; With no JVM at the root, the adoption answers a diagnostic, never throws.
-  (let [root (str (.getCanonicalFile (java.io.File. (str "tmp/operator-adopt-test-" (random-uuid)))))]
-    (try
-      (.mkdirs (java.io.File. root))
-      (let [adoption (#'operator/adopted! root)]
-        (is (string? (:seon.error/message adoption)))
-        (is (= :client-failed (:seon.operator/disposition adoption))))
-      (finally (run! #(.delete ^java.io.File %) (reverse (file-seq (java.io.File. root))))))))
 
 (deftest check-templates-beyond-the-dial-are-pruned-least-recently-cloned-first
   ;; Retention keeps the `kept` most recently cloned templates; one whose lock

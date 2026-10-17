@@ -106,7 +106,8 @@
             [seon.sci.reader :as reader]
             [seon.schema.edn :as schema.edn])
   (:import [java.util Date LinkedList]
-           [java.util.concurrent ExecutorService]
+           [java.util.concurrent CompletableFuture CompletionException ExecutorService Executor]
+           [java.util.function BiFunction Supplier]
            [java.util.concurrent.atomic AtomicReference]))
 
 ;;; ---------------------------------------------------------------------------
@@ -1298,18 +1299,24 @@
 
 (defn- graph-observed!
   "Write on `connection`, the database the agent's graph reads and writes, what its registry observed of agent
-  `agent-id`: `tx` over `:seon.agent/graph-process`. A store that has not installed the attribute yet (a graph
-  db<->flow's boot prime starts before the store adopts the checkout's declarations) records nothing, as
-  `seon.db/attribute-installed?` decides; boot recovery clears what a previous process left. Throws the writer's
-  refusal."
+  `agent-id`: `tx` over `:seon.agent/graph-process`. Boot recovery clears what a previous process left. Throws
+  the writer's refusal."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id :seon.db/tx-data] :nil]}
   [connection agent-id tx]
-  (when (db/attribute-installed? (db/db connection) :seon.agent/graph-process)
-    (let [report (db/with-branch {:seon.db/connection connection} #(db/transact! connection tx))]
-      (when-not (:db-after report)
-        (throw (ex-info (:seon.error/message report "The agent's graph observation was refused.")
-                        (assoc report :seon.agent/id agent-id))))))
+  (let [report (db/with-branch {:seon.db/connection connection} #(db/transact! connection tx))]
+    (when-not (:db-after report)
+      (throw (ex-info (:seon.error/message report "The agent's graph observation was refused.")
+                      (assoc report :seon.agent/id agent-id)))))
   nil)
+
+(defn- settled
+  "The settlement of a starting `claim`, awaited without throwing: the started entry, or the Throwable its start
+  threw."
+  {:malli/schema [:=> [:cat :seon.flow/future] [:or :seon.agent/started :seon.error/throwable]]}
+  [^CompletableFuture claim]
+  (.join (.handle claim (reify BiFunction
+                          (apply [_ entry failure]
+                            (if (instance? CompletionException failure) (.getCause ^Throwable failure) (or failure entry)))))))
 
 (defn start-flow!
   "Start one agent's graph: stamp → start → resume → route → prime.
@@ -1327,22 +1334,31 @@
   starting gap. Returns the started entry.
 
   No monitor: `swap-vals!` claims the agent in the routing value with a
-  delay of `start-claimed-flow!`, so concurrent callers (db<->flow proc, direct
-  source installers) deref one starting and acquire one graph. A released
+  `CompletableFuture` the winning caller completes by running `start-claimed-flow!` on its own thread, so concurrent
+  callers (db<->flow proc, direct source installers) await one starting and acquire one graph; a failed start
+  clears its claim and throws to every caller awaiting it. A released
   routing or a stop in flight refuses by name rather than waiting. Refuses an agent id with
   no committed entity — db<->flow derives its set from facts, so a
   missing entity is a caller bug, never a nil routing key."
   {:malli/schema [:=> [:cat :seon.agent/start-request]
                   :seon.agent/started]}
   [{agent-id :seon.agent/id routing :seon.agent/routing :as request}]
-  (let [reserve (fn [current]
+  (let [claim (CompletableFuture.)
+        reserve (fn [current]
                   (if (or (:seon.agent/released? current)
                           (get-in current [::stopping agent-id])
                           (get-in current [::starting agent-id])
                           (get-in current [:seon.agent/started agent-id]))
                     current
-                    (assoc-in current [::starting agent-id] (delay (start-claimed-flow! request)))))
+                    (assoc-in current [::starting agent-id] claim)))
         current (second (swap-vals! routing reserve))
+        starting (get-in current [::starting agent-id])
+        ;; the winner runs the start on this thread; a failure clears only its own claim
+        _ (when (identical? claim starting)
+            (.completeAsync claim (reify Supplier (get [_] (start-claimed-flow! request)))
+                            (reify Executor (execute [_ runnable] (.run ^Runnable runnable))))
+            (when (instance? Throwable (settled claim))
+              (swap! routing update ::starting #(cond-> % (identical? claim (get % agent-id)) (dissoc agent-id)))))
         refuse (fn [message expected]
                  (throw (ex-info message {:seon.error/message message
                                           :seon.agent/id agent-id
@@ -1354,7 +1370,8 @@
       (refuse "start-flow! refused: the owning execution has released this routing." :seon.agent/routing)
       (get-in current [::stopping agent-id])
       (refuse "start-flow! refused: the agent's graph is stopping." :seon.agent/graph-exited)
-      (get-in current [::starting agent-id]) @(get-in current [::starting agent-id])
+      starting (let [outcome (settled starting)]
+                 (if (instance? Throwable outcome) (throw outcome) outcome))
       (not (.isShutdown executor)) previous
       ;; A previous graph whose stop missed its deadline keeps its entry: its
       ;; executor's termination is the exit fact, so no new graph overlaps it.
@@ -1366,13 +1383,12 @@
 
 (defn- start-claimed-flow!
   "Start, publish and prime one agent's graph under the starting claim `start-flow!` reserved.
-  Publication clears the claim; a failure clears it and rethrows whole."
+  Publication clears the claim; `start-flow!` clears it after a failure."
   {:malli/schema [:=> [:cat :seon.agent/start-request] :seon.agent/started]}
   [{handle :seon.turn.loop/cluster
     agent-id :seon.agent/id
     routing :seon.agent/routing
     intent :seon.task/execution}]
-  (try
     (let [connection (:seon.db/connection handle)
           eid (db/q '[:find ?agent .
                      :in $ ?id
@@ -1473,10 +1489,7 @@
                          :seon.agent/environment (id/digest 64 [settings])}])
       ;; the start prime — every mailbox start primes exactly once
       (async/offer! wake-ch :seon.agent/wake)
-      entry)
-    (catch Throwable failure
-      (swap! routing update ::starting dissoc agent-id)
-      (throw failure))))
+      entry))
 
 (defn- interrupt-turn!
   "Interrupt the stopping agent's in-flight turn transform, if one runs.
@@ -1613,9 +1626,9 @@
                     (assoc-in current [::stopping agent-id] (delay (stop-graph! request)))))
         current (second (swap-vals! routing reserve))]
     (if-let [starting (get-in current [::starting agent-id])]
-      ;; An start in flight settles first so its graph is the one stopped; its
-      ;; failure reaches its own caller through the same delay.
-      (do (try @starting (catch Throwable _ nil))
+      ;; A start in flight settles first so its graph is the one stopped; its
+      ;; failure reaches the callers awaiting that start.
+      (do (settled starting)
           (stop-flow! request))
       (some-> (get-in current [::stopping agent-id]) deref)))
   nil)

@@ -64,9 +64,7 @@
                                       connection cluster-name compiled-config process)))]
                 (cluster/seed-root-agent! connection cluster-name process)
                 [instance process])))
-           ;; Boot's dials are the compiled config it just applied: the store's
-           ;; own program adopts the checkout's declarations only after boot,
-           ;; so a dial the checkout added is absent from its effective config.
+           ;; Boot's dials are the compiled config it just applied.
            boot-dials (:seon.config/effective compiled-config)
            _ (cache/configure! (:seon.config.cache/max-bytes boot-dials))
            arm-request {:seon.flow/commit-fault!
@@ -190,10 +188,10 @@
         ;; publication refuses the boot: stale program entities never run silently.
         ;; Its cost is proportional to the changed inputs, so it stands as its
         ;; own layer: the published head boot proceeds from.
+        changed (if (source/current store) (changed-source-paths store) [])
         instance (let [published (if (source/current store)
-                                   (let [changed (changed-source-paths store)]
-                                     (when (seq changed)
-                                       (cluster/refresh-source! (:seon.boot/root config) changed)))
+                                   (when (seq changed)
+                                     (cluster/refresh-source! (:seon.boot/root config) changed))
                                    (cluster/refresh-source! (:seon.boot/root config)))]
                    (when (:seon.error/at published)
                      (throw (ex-info (:seon.error/message published) published)))
@@ -248,14 +246,19 @@
         (sci.eval/projection-state initial-database initial-projection cluster-name)
         _ (schema/call-with-projection-state
            initial-projection-state
-           ;; The provisional connection's own schema accretion.
+           ;; The provisional connection's own schema accretion, then the
+           ;; cluster adopts the publication this JVM runs: every attribute
+           ;; the loaded program names is installed before recovery,
+           ;; configuration and flows read or write it.
            #(db/with-branch
              {:seon.db/connection provisional-connection}
              (fn []
                (cluster/require-coherent-program!
                 provisional-connection cluster-name)
                (cluster/accrete-schema-population!
-                provisional-connection cluster-name))))
+                provisional-connection cluster-name)
+               (cluster/adopt-publication!
+                provisional-connection store cluster-name changed))))
         database @provisional-connection
         projection
         (if (= (db/basis-t initial-database) (db/basis-t database))

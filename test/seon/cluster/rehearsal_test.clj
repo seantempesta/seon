@@ -25,7 +25,12 @@
         candidate (str (io/file parent "candidate"))]
     (try
       (#'support/clone-directory! (fs/source-directory) candidate)
-      (doseq [[path content] edits] (spit (io/file candidate path) content))
+      ;; a clone of a committed archive keeps its read-only modes
+      (doseq [[path content] edits]
+        (let [file (io/file candidate path)]
+          (.setWritable (.getParentFile file) true)
+          (.setWritable file true)
+          (spit file content)))
       (let [since (System/currentTimeMillis)
             answer (cluster/rehearse-source! root candidate "default")]
         {::answer answer

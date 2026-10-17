@@ -2563,6 +2563,46 @@
    :seon.test/adoption-cluster cluster-ref
    :seon.test/adoption-inputs (set changed-paths)})
 
+(defn- record-adoption!
+  "Record that `cluster-ref`'s branch on `connection` adopted `published`, guarded by `adoption-guard-tx`."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.store/store
+                       [:tuple [:= :seon.cluster/name] :seon.boot/cluster-name]
+                       [:maybe :seon.source/commit-id] :seon.source/published [:seqable :string]]
+                  :seon.db/transaction-report]}
+  [connection held-store cluster-ref prior-commit published changed-paths]
+  (require-committed!
+   (db/transact! connection
+                 {:tx-data [[:db.fn/call adoption-guard-tx held-store cluster-ref
+                             prior-commit (:seon.source/commit-id published)]
+                            {:db/id cluster-ref
+                             :seon.source/commit-id (:seon.source/commit-id published)}
+                            (adoption-record cluster-ref changed-paths)]})
+   {:seon.boot/population :seon.source/commit-id}))
+
+(defn adopt-publication!
+  "Adopt `store`'s current publication onto `cluster-name`'s branch.
+
+  Boot runs it before it reads or writes the branch: the entities and record `development-source-refresh!` writes for a JVM already running that commit, so every
+  attribute the loaded program names is installed before recovery, configuration and flows. Nothing when the
+  cluster adopted it. `changed-paths` are the inputs this boot published."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.store/store :seon.boot/cluster-name [:vector :string]] :nil]}
+  [connection store cluster-name changed-paths]
+  (let [published (current-publication store nil)
+        cluster-ref [:seon.cluster/name cluster-name]
+        prior-commit (:seon.source/commit-id (db/pull (db/db connection) [:seon.source/commit-id] cluster-ref))]
+    (when-not (= prior-commit (:seon.source/commit-id published))
+      (let [published-database (source/database store (:seon.source/commit-id published))
+            prior-database (when prior-commit (source/database store prior-commit))]
+        (try
+          (adopt-entities! connection published
+                           (published-changes store published prior-commit published-database)
+                           published-database prior-database)
+          (record-adoption! connection store cluster-ref prior-commit published changed-paths)
+          (finally
+            (d/release-materialized-db published-database)
+            (some-> prior-database d/release-materialized-db)))))
+    nil))
+
 (defn- development-source-refresh!
   {:malli/schema
    [:=> [:cat :seon.store/store :seon.boot/instance :seon.source/published
@@ -2627,14 +2667,7 @@
           record!
           (fn [reloaded arming-identities]
             (report-source-progress! "development adoption record")
-            (require-committed!
-             (db/transact! connection
-                           {:tx-data [[:db.fn/call adoption-guard-tx held-store cluster-ref
-                                       prior-commit (:seon.source/commit-id published)]
-                                      {:db/id cluster-ref
-                                       :seon.source/commit-id (:seon.source/commit-id published)}
-                                      (adoption-record cluster-ref changed-paths)]})
-             {:seon.boot/population :seon.source/commit-id})
+            (record-adoption! connection held-store cluster-ref prior-commit published changed-paths)
             {:seon.source/reloaded-namespaces reloaded
              :seon.source/arming-identities arming-identities})
           {reloaded :seon.source/reloaded-namespaces arming-identities :seon.source/arming-identities}
@@ -2982,8 +3015,7 @@
   ## Known issues
 
   host code does not reload, so a candidate's changed boot or
-  publication code is not exercised (a boot write naming an attribute the
-  cluster adopts only after boot passes here and refuses at boot).
+  publication code is not exercised.
 
   ## Costs
 
@@ -3003,48 +3035,48 @@
   (let [began (System/nanoTime)
         ms #(quot (- (System/nanoTime) began) 1000000)
         store-dir (:seon.boot/store-dir (resolve-bootstrap {:seon.boot/root root}))
-        held (let [root-store (acquire-root-store! store-dir)]
-               (try (store/open-overlay! root-store)
-                    (catch Throwable failure (release-root-store! store-dir) (throw failure))))
-        token (random-uuid)
-        published-branch (keyword (str "rehearsal-" token))
-        fork (keyword (str "rehearsal-" token "-" cluster-name))
-        ;; The committed archive is immutable input a concurrent start reads:
-        ;; scratch lives in its own temporary directory, never under it.
-        cache-root (str (babashka.fs/create-temp-dir {:prefix (str "seon-rehearsal-" token "-")}))
-        loader (.getClassLoader (class candidate-resources))]
+        root-store (acquire-root-store! store-dir)]
     (try
-      (babashka.fs/copy-tree analyzer/cache-directory cache-root)
-      ;; A binding, never the thread's context loader: the core.async threads
-      ;; a rehearsal spawns inherit a context loader for their lifetime, and
-      ;; once this candidate's archive was gone every settlement on them
-      ;; refused (fault 7b2cf983e1a4, 2026-09-29).
-      (binding [schema.edn/*resource-loader* (candidate-resources directory loader)]
-        (schema/call-with-projection
-         (schema/declaration-projection (schema.edn/packaged-forms))
-         (fn []
-           (let [published (full-source-refresh!
-                            root held (assoc (publication-roots)
-                                             :seon.fn/root directory
-                                             :seon.source/changed-paths []
-                                             ::loaded-files (loaded-files held)
-                                             :seon.source/branch published-branch
-                                             :seon.fn.analyzer/cache-root cache-root))]
-             (if (:seon.error/at published)
-               published
-               (let [published-ms (ms)
-                     adopted (rehearsal-adoption! held published cluster-name fork)]
-                 (assoc (select-keys published [:seon.source/commit-id :seon.source/built?])
-                        ::adopted-identities adopted
-                        ::phase-ms {::published-ms published-ms
-                                    ::adopted-ms (- (ms) published-ms)})))))))
-      (catch Exception failure (rehearsal-refusal failure))
-      (finally
+      (let [held (store/open-overlay! root-store)
+            token (random-uuid)
+            published-branch (keyword (str "rehearsal-" token))
+            fork (keyword (str "rehearsal-" token "-" cluster-name))
+            ;; The committed archive is immutable input a concurrent start reads:
+            ;; scratch lives in its own temporary directory, never under it.
+            cache-root (str (babashka.fs/create-temp-dir {:prefix (str "seon-rehearsal-" token "-")}))
+            loader (.getClassLoader (class candidate-resources))]
         (try
-          ;; Drops the overlay's branches and writes; never the store's flock.
-          (store/release-store! held)
-          (fs/delete-recursively! (str (babashka.fs/parent cache-root)) cache-root)
-          (finally (release-root-store! store-dir)))))))
+          (babashka.fs/copy-tree analyzer/cache-directory cache-root)
+          ;; A binding, never the thread's context loader: the core.async threads
+          ;; a rehearsal spawns inherit a context loader for their lifetime, and
+          ;; once this candidate's archive was gone every settlement on them
+          ;; refused (fault 7b2cf983e1a4, 2026-09-29).
+          (binding [schema.edn/*resource-loader* (candidate-resources directory loader)]
+            (schema/call-with-projection
+             (schema/declaration-projection (schema.edn/packaged-forms))
+             (fn []
+               (let [published (full-source-refresh!
+                                root held (assoc (publication-roots)
+                                                 :seon.fn/root directory
+                                                 :seon.source/changed-paths []
+                                                 ::loaded-files (loaded-files held)
+                                                 :seon.source/branch published-branch
+                                                 :seon.fn.analyzer/cache-root cache-root))]
+                 (if (:seon.error/at published)
+                   published
+                   (let [published-ms (ms)
+                         adopted (rehearsal-adoption! held published cluster-name fork)]
+                     (assoc (select-keys published [:seon.source/commit-id :seon.source/built?])
+                            ::adopted-identities adopted
+                            ::phase-ms {::published-ms published-ms
+                                        ::adopted-ms (- (ms) published-ms)})))))))
+          ;; a refusal is the error value boot would stop on; any other failure is a defect for the entrant
+          (catch clojure.lang.ExceptionInfo failure (rehearsal-refusal failure))
+          (finally
+            ;; Drops the overlay's branches and writes; never the store's flock.
+            (store/release-store! held)
+            (fs/delete-recursively! (str (babashka.fs/parent cache-root)) cache-root))))
+      (finally (release-root-store! store-dir)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Recovery — the pass that runs before anything resumes
@@ -3081,10 +3113,7 @@
                          [?run :seon.turn/id ?run-id]
                          (not [?run :seon.turn/closed-tx _])]
                        db)
-        ;; a store that has not installed the attribute yet (the boot before adoption) holds no value of it
-        graphs (if (db/attribute-installed? db :seon.agent/graph-process)
-                 (db/q '[:find [?agent ...] :where [?agent :seon.agent/graph-process _]] db)
-                 [])
+        graphs (db/q '[:find [?agent ...] :where [?agent :seon.agent/graph-process _]] db)
         refused (some #(when (and (map? %)
                                   (contains? % :seon.error/at)
                                   (contains? % :seon.error/layer)

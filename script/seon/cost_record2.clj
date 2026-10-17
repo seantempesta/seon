@@ -25,7 +25,6 @@
       (let [boot (#'operator/launched-throwaway! root disposable sha)]
         (when-not (:seon.operator/ready? boot)
           (throw (ex-info "Candidate did not become ready." boot)))
-        (#'operator/adopted! disposable)
         (let [endpoint (operator/advertisement disposable "default")]
           (doseq [code (concat (repeat 8 request-code) [revisions-code])]
             (let [form (str "(#'seon.mcp/eval-clj {:seon.mcp/code " (json/generate-string code)
