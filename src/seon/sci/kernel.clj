@@ -25,13 +25,13 @@
             [seon.batch]
             [sci.interrupt :as sci.interrupt]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.error.refusal :as error.refusal]
             [seon.fault :as fault]
             [seon.schema :as schema]
             [seon.sci.admit :as admit])
-  (:import [java.lang.management GarbageCollectorMXBean ManagementFactory MemoryNotificationInfo MemoryPoolMXBean MemoryType]
-           [javax.management Notification NotificationEmitter NotificationListener]
-           [java.util.concurrent CountDownLatch ExecutionException Future ScheduledThreadPoolExecutor TimeUnit]
+  (:import [java.lang.management GarbageCollectorMXBean ManagementFactory MemoryPoolMXBean MemoryType]
+           [java.util.concurrent ConcurrentHashMap CountDownLatch ExecutionException Future ScheduledThreadPoolExecutor TimeUnit]
            [java.util.concurrent.atomic AtomicBoolean AtomicLong AtomicReference]))
 
 (defn interrupted?
@@ -128,14 +128,8 @@
 (defonce ^:private process-guard (delay (new-guard)))
 
 ;;; ---------------------------------------------------------------------------
-;;; Memory pressure: the JVM's own crossing notice closes arming
+;;; Memory pressure: a critical heap crossing (seon.heap) closes arming
 ;;; ---------------------------------------------------------------------------
-
-(def memory-bounds
-  "Tenured occupancy after a collection, as fractions of the pool's maximum:
-  new arms refuse from `::enter`, admit again below `::resume` (the gap stops
-  flapping). The JVM's heap bounds, shared by its clusters, not their config."
-  {::enter 0.70 ::resume 0.55})
 
 ;;; Beside the guard (a `defonce` a reload never rebuilds). The JVM keeps no
 ;;; state a volatile read could answer: `isCollectionUsageThresholdExceeded`
@@ -185,28 +179,26 @@
           :seon.error/expected ::resume-bytes)))
 
 (defn enter-memory-pressure!
-  "Close new arms when the tenured pool's live bytes cross `::enter`.
-  Answers the pressure entered, or nil when already under pressure or when
-  the crossing was garbage.
+  "Close new arms at a critical heap crossing, naming the evaluations
+  `in-flight`. Answers the pressure entered, or nil when already under
+  pressure.
 
-  The crossing notice alone is not live occupancy: G1 updates the old pool's
-  collection usage after every young pause (`G1 Young Generation` manages
-  `G1 Old Gen`), so it counts promoted garbage no marking has reclaimed yet.
-  Measured on default 2026-09-27: 8.53 GB read after a round whose forced
-  collections held 1.5-2.4 GB live. One full collection per crossing measures
-  the live bytes (0.1-0.5 s at 1.5-2.4 GB live), and only they close arms."
-  {:malli/schema [:=> [:cat ::in-flight] [:maybe ::memory-pressure]]}
-  [in-flight]
+  Called by `seon.heap` only after a forced full collection confirmed the
+  live heap past `:seon.config.heap/critical-fraction`, so the tenured pool's
+  collection usage read here is live bytes, never promoted garbage. Arms
+  admit again once a later collection's live bytes fall below
+  `:seon.config.heap/warn-fraction` ([[memory-pressure]])."
+  {:malli/schema [:=> [:cat :seon.heap/dials ::in-flight] [:maybe ::memory-pressure]]}
+  [dials in-flight]
   (when-not @memory-pressure-state
-    (let [usage (measure-tenured true)
-          bound #(long (* (% memory-bounds) (::max-bytes usage)))]
-      (when (>= (::used-bytes usage) (bound ::enter))
-        (vreset! memory-pressure-state
-                 (assoc usage
-                        ::enter-bytes (bound ::enter)
-                        ::resume-bytes (bound ::resume)
-                        ::entered-at (java.util.Date.)
-                        ::in-flight in-flight))))))
+    (let [usage (measure-tenured false)
+          bound #(long (* (double (get dials %)) (::max-bytes usage)))]
+      (vreset! memory-pressure-state
+               (assoc usage
+                      ::enter-bytes (bound :seon.config.heap/critical-fraction)
+                      ::resume-bytes (bound :seon.config.heap/warn-fraction)
+                      ::entered-at (java.util.Date.)
+                      ::in-flight in-flight)))))
 
 (defn memory-pressure
   "The memory pressure `state` holds (this process's by default), or nil while
@@ -231,28 +223,6 @@
            (vreset! state (assoc pressure
                                  ::used-bytes (::used-bytes usage)
                                  ::collections (::collections usage)))))))))
-
-(defn watch-memory!
-  "Set the tenured pool's collection usage threshold at `::enter` and call
-  `on-crossing` for each `MEMORY_COLLECTION_THRESHOLD_EXCEEDED` the
-  `MemoryMXBean` emits (after a collection at or above it; again only after
-  falling below). Nothing polls. Once per process; answers the threshold."
-  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?]] [:maybe :int]]}
-  [on-crossing]
-  (let [pool (tenured-pool)
-        maximum (.getMax (.getUsage pool))]
-    (when (pos? maximum)
-      (let [threshold (long (* (::enter memory-bounds) maximum))]
-        (.setCollectionUsageThreshold pool threshold)
-        (.addNotificationListener
-         ^NotificationEmitter (ManagementFactory/getMemoryMXBean)
-         (reify NotificationListener
-           (handleNotification [_ notification _]
-             (when (= MemoryNotificationInfo/MEMORY_COLLECTION_THRESHOLD_EXCEEDED
-                      (.getType ^Notification notification))
-               (on-crossing))))
-         nil nil)
-        threshold))))
 
 (defn context-options
   "SCI initialization options backed by the one process guard."
@@ -438,6 +408,9 @@
           (.get adopted-allocated))
        -1)
      :seon.eval/outcome (or @(::outcome armed) final-outcome)}
+      ;; a critical heap crossing while it ran rides its reply
+      (.get ^AtomicReference (::crossing armed))
+      (assoc :seon.heap/crossing (.get ^AtomicReference (::crossing armed)))
       ;; the CPU time of the same threads, read on the owning platform thread
       (and owning-thread? (::measurable armed) (not (neg? (::cpu-at-start armed))))
       (assoc :seon.cost/cpu-ns (+ (- (cpu-ns) (::cpu-at-start armed))
@@ -461,6 +434,11 @@
      ::outcome (volatile! nil)
      ::started-at (System/nanoTime)
      ::owner-thread-id (.threadId (Thread/currentThread))
+     ::owner-thread-name (.getName (Thread/currentThread))
+     ;; the form the evaluation is on (`evaluating!`) and a critical heap
+     ;; crossing seen while it ran (`mark-running!`), read by `record`
+     ::form-head (volatile! nil)
+     ::crossing (AtomicReference.)
      ::allocated-at-start allocated-at-start
      ::measurable (not (neg? allocated-at-start))}))
 
@@ -503,6 +481,60 @@
         (restore!)
         (throw failure)))))
 
+;;; The evaluations running in this process, each under its owned arm: the one
+;;; registry `running-evaluations` reads and a critical crossing marks.
+(defonce ^:private running-arms (ConcurrentHashMap.))
+
+(defn- running-evaluation
+  "One running arm as data: its owning thread, the agent, cluster and branch
+  its context serves, the form it is on, and its wall time and allocation so
+  far (the owning thread's count read from any thread, plus finished adopted
+  extents; -1 when the owner is virtual)."
+  {:malli/schema [:=> [:cat :seon.sci.kernel/arm] ::running]}
+  [armed]
+  (let [world (env/of (::ctx armed))
+        owner (.getThreadAllocatedBytes ^com.sun.management.ThreadMXBean thread-mx
+                                        (long (::owner-thread-id armed)))
+        connection (:seon.db/connection world)]
+    (cond-> {::thread (::owner-thread-name armed)
+             :seon.eval/duration-ms (quot (- (System/nanoTime) (::started-at armed)) 1000000)
+             :seon.eval/allocated-bytes (if (and (::measurable armed) (not (neg? owner)))
+                                          (+ (- owner (::allocated-at-start armed))
+                                             (.get ^AtomicLong (::adopted-allocated-bytes armed)))
+                                          -1)}
+      (:seon.agent/id world) (assoc :seon.agent/id (:seon.agent/id world))
+      (:seon.boot/cluster-name world) (assoc :seon.boot/cluster-name (:seon.boot/cluster-name world))
+      connection (assoc :seon.store/branch (db/connection-branch connection))
+      @(::form-head armed) (assoc ::form-head @(::form-head armed)))))
+
+(defn running-evaluations
+  "Every evaluation running in this process under its own arm, most
+  allocation first."
+  {:malli/schema [:=> [:cat] ::in-flight]}
+  []
+  (into [] (sort-by #(- (:seon.eval/allocated-bytes %))
+                    (map running-evaluation (.values ^ConcurrentHashMap running-arms)))))
+
+(defn mark-running!
+  "Mark every running evaluation with `crossing`, which its record, and so its
+  reply, then carries. Answers how many were marked."
+  {:malli/schema [:=> [:cat :seon.heap/crossing-error] [:int {:min 0}]]}
+  [crossing]
+  (reduce (fn [marked armed] (.set ^AtomicReference (::crossing armed) crossing) (inc marked))
+          0 (.values ^ConcurrentHashMap running-arms)))
+
+(defn evaluating!
+  "Name `form` as the form the arm governing this thread is on: the head
+  symbol of a call, the symbol itself, else nothing. Unarmed work names
+  nothing."
+  {:malli/schema [:=> [:cat :seon.batch/form] :nil]}
+  [form]
+  (when-let [armed (.get ^ThreadLocal (::thread-arm @process-guard))]
+    (vreset! (::form-head armed)
+             (cond (and (seq? form) (symbol? (first form))) (first form)
+                   (symbol? form) form)))
+  nil)
+
 (defn- own-arm
   [guard ctx time-limit-ms alloc-limit-bytes]
   ;; THE ONE ADMISSION: only an outer execution owns an arm (nested work
@@ -511,10 +543,14 @@
   (when-let [pressure (and @memory-pressure-state (memory-pressure))]
     (let [refusal (memory-pressure-error pressure)]
       (throw (ex-info (:seon.error/message refusal) refusal))))
-  (deadline-arm guard
-                (cond-> (assoc (new-armed) ::ctx ctx)
-                  alloc-limit-bytes (assoc ::alloc-limit alloc-limit-bytes))
-                time-limit-ms nil))
+  (let [armed (cond-> (assoc (new-armed) ::ctx ctx)
+                alloc-limit-bytes (assoc ::alloc-limit alloc-limit-bytes))
+        ^AtomicLong id (::entries armed)
+        acquired (deadline-arm guard armed time-limit-ms nil)]
+    ;; the process's one registry of running evaluations, keyed by the arm's
+    ;; identity (its entrance counter): in at install, out at release
+    (.put ^ConcurrentHashMap running-arms id armed)
+    (update acquired ::stop! (fn [stop!] #(try (stop!) (finally (.remove ^ConcurrentHashMap running-arms id)))))))
 
 (defn- current-thread-arm
   "The arm installed on this thread, never an arm from a sibling thread."

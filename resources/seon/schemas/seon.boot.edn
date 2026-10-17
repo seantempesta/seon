@@ -71,6 +71,7 @@
               {:optional true}
               :seon.turn.loop/cluster]
              [:seon.flow/graph {:optional true} :seon.flow/graph]
+             [:seon.heap/watch {:optional true} :seon.heap/watch]
              [:seon.render.web/view
               {:optional true}
               :seon.render.web/view]

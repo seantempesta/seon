@@ -586,7 +586,9 @@
     database
     (long (dbi/-max-tx database))))
 
-(defn- connection-branch
+(defn connection-branch
+  "The branch `connection` has checked out."
+  {:malli/schema [:=> [:cat :seon.db/connection] :seon.store/branch]}
   [connection]
   (:branch (:config @connection)))
 

@@ -191,6 +191,19 @@
  ; before default's 18:14 OOM (2026-10-17) did.
  :seon.config.eval/alloc-limit-bytes 2147483648
 
+ ; Unit: fractions of the heap cap, read on the live heap after a collection
+ ; (seon.heap). Warn records one observation at 60% (1.6 GB of headroom under
+ ; the 4 GB cap); critical at 80% also marks every evaluation in flight and
+ ; closes new arms until the live heap is back under the warning bound.
+ ; Provenance: the old tenured-pool gate entered at 70% and gave no lead time
+ ; before default's three OOMs of 2026-10-17; warning earlier is the point.
+ :seon.config.heap/warn-fraction 0.6
+ :seon.config.heap/critical-fraction 0.8
+
+ ; Unit: consecutive major collections whose live heap each rose above the
+ ; last: one growth observation per run, the slope before either bound.
+ :seon.config.heap/growth-collections 4
+
  ; Pure durable functions with generatable inputs run this many seeded
  ; contract cases in their candidate context before installation. The seed
  ; rides the terminal receipt, so every failure is exactly reproducible.

@@ -24,6 +24,7 @@
             [seon.flow :as flow]
             [seon.fs :as fs]
             [seon.health :as health]
+            [seon.heap :as heap]
             [seon.maintenance :as maintenance]
             [seon.operator.runtime :refer [running-instances]]
             [seon.render.value :as render.value]
@@ -31,6 +32,9 @@
             [seon.task :as task]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as kernel]))
+
+;;; Defined beside the uncaught handler, whose hand-off context they share.
+(declare heap-crossed! heap-dials)
 
 (defn- stand-cluster-runtime!
   {:malli/schema
@@ -113,6 +117,9 @@
              (assoc pre-graph-environment
                     :seon.flow/work-launcher work-launcher)))
            _ (env/replace-environment! projection-state environment)
+           ;; this cluster's heap watch, recording in its world; removed at stop
+           instance (publish! (assoc instance :seon.heap/watch
+                                     (heap/watch! (heap-dials boot-dials) #(heap-crossed! environment %))))
            ;; a failed listener hand-off is one stored fault on THIS world (N3)
            _ (store/listen-failures!
               environment (cluster/process-identity (process/current-identity)))
@@ -388,38 +395,24 @@
 ;;; twice, and the handler calls `record-uncaught!` through its Var.
 (defonce ^:private uncaught-handler (delay (install-uncaught-handler!)))
 
-(defn- open-runs
-  "Every open run on `connection`'s branch, as `[agent-id run-id]` pairs."
-  {:malli/schema [:=> [:cat :seon.db/connection] :seon.sci.kernel/in-flight]}
-  [connection]
-  (vec (db/q '[:find ?agent-id ?run-id
-               :where [?run :seon.turn/agent ?agent] (not [?run :seon.turn/closed-tx])
-               [?run :seon.turn/id ?run-id] [?agent :seon.agent/id ?agent-id]]
-             (db/db connection))))
-
-(defn memory-pressure-crossed!
-  "Close new arms once per crossing, naming each running cluster's open runs,
-  and hand it as one core fault to every running cluster's work launcher
-  (`seon.flow/hand-off-fault!`). Called on the JVM's notification thread
-  (`kernel/watch-memory!`), which only closes arms and submits: it never
-  writes, prints what it cannot hand off and never throws."
-  {:malli/schema [:=> [:cat] :nil]}
-  []
-  (try
-    (let [worlds (keep #(env/of (:seon.sci.eval/ctx %)) (vals @running-instances))]
-      (when-let [pressure (kernel/enter-memory-pressure!
-                           (into [] (mapcat #(open-runs (:seon.db/connection %))) worlds))]
-        (let [refusal (kernel/memory-pressure-error pressure)
-              failure (ex-info (:seon.error/message refusal) refusal)]
-          (binding [*out* *err*] (println "SEON MEMORY PRESSURE:" (:seon.error/message refusal)) (flush))
-          (doseq [world worlds]
-            (flow/hand-off-fault! world failure (handed-off-context world `memory-pressure-crossed!))))))
-    (catch Throwable failure
-      (uncaught-emergency! "memory-pressure" failure {:operation `memory-pressure-crossed!})))
+(defn heap-crossed!
+  "Hand one heap crossing (`seon.heap/observation`) to `environment`'s work
+  launcher as one core fault (`seon.flow/hand-off-fault!`), so it is recorded
+  on its cluster and shown in health. Called on the JVM's notification thread,
+  which only submits: it never writes."
+  {:malli/schema [:=> [:cat :seon.env/environment :seon.heap/crossing-error] :nil]}
+  [environment crossing]
+  (binding [*out* *err*] (println "SEON HEAP" (name (:seon.heap/level crossing)) "-" (:seon.error/message crossing)) (flush))
+  (flow/hand-off-fault! environment (ex-info (:seon.error/message crossing) crossing)
+                        (handed-off-context environment `heap-crossed!))
   nil)
 
-;;; Once per JVM, beside the uncaught handler; the JVM calls through the Var.
-(defonce ^:private memory-watch (delay (kernel/watch-memory! #(memory-pressure-crossed!))))
+(defn- heap-dials
+  "The heap watch's dials from the configuration boot applied."
+  {:malli/schema [:=> [:cat :map] :seon.heap/dials]}
+  [dials]
+  (select-keys dials [:seon.config.heap/warn-fraction :seon.config.heap/critical-fraction
+                      :seon.config.heap/growth-collections]))
 
 (defn listening-instance
   "One instance's structural members: its bootstrap config, the listener it
@@ -464,11 +457,11 @@
   A supplied listener was opened by the launcher's minimal core-only entry form.
   The instance holds the manifest and environment it applied, so a reset
   re-applies the same configuration."
-  {:malli/schema [:=> [:cat :seon.boot/start-request] :seon.boot/instance]}
+  {:seon/entrant true
+   :malli/schema [:=> [:cat :seon.boot/start-request] :seon.boot/instance]}
   [request]
   (let [began (System/nanoTime)
         _ @uncaught-handler
-        _ @memory-watch
         config (cluster/resolve-bootstrap
                 (dissoc request :seon.config/manifest :seon.config/environment :seon.boot/prepl-server))
         name (:seon.boot/cluster-name config)
@@ -574,7 +567,8 @@
   - A join `seon.cluster.host/release-children!` or `seon.cluster/stop-flows!` misses is answered (the await
     owner's timeout naming the missing exit) with the instance restored in
     the registry: nothing after the join is released."
-  {:malli/schema [:=> [:cat :seon.boot/instance] [:or :nil :seon.await/timeout-error]]}
+  {:seon/entrant true
+   :malli/schema [:=> [:cat :seon.boot/instance] [:or :nil :seon.await/timeout-error]]}
   [instance]
   (let [name (get-in instance [:seon.boot/config :seon.boot/cluster-name])
         ;; The claim marks the instance itself, so the table's readers keep
@@ -597,6 +591,7 @@
             missed)
         (try
           ;; db<->flow has joined, so no pass routes a chain branch again
+          (some-> (:seon.heap/watch instance) heap/unwatch!)
           (some-> (:seon.agent/routing instance) cluster.agent/release-chain-routes!)
           (some-> (:seon.flow/work-launcher instance) flow/stop-work-launcher!)
           (some-> (:seon.boot/cluster-connection instance) store/release-branch!)

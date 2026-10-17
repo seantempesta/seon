@@ -146,6 +146,11 @@
     (testing "the outer arm is neither reached nor stopped by the inner deadline"
       (is (= [false 3] after)))))
 
+(def ^:private in-flight
+  "One running evaluation, as `kernel/running-evaluations` names it."
+  [{::kernel/thread "seon-turn-1" :seon.eval/duration-ms 12 :seon.eval/allocated-bytes 4096
+    :seon.agent/id "root" ::kernel/form-head 'my.task/current}])
+
 (deftest memory-pressure-holds-until-usage-falls-below-its-resume-bound
   ;; Both OOMs of 2026-09-26 admitted new work into a JVM already past most of
   ;; its heap. A held pressure refuses by name, naming the work in flight when
@@ -155,7 +160,7 @@
   (let [pressure {::kernel/pool "G1 Old Gen" ::kernel/used-bytes 1 ::kernel/max-bytes 10
                   ::kernel/enter-bytes 7 ::kernel/resume-bytes 0
                   ::kernel/entered-at (java.util.Date.)
-                  ::kernel/in-flight [["root" "run-1"]]}
+                  ::kernel/in-flight in-flight}
         held (volatile! pressure)]
     (testing "at or above its resume bound it holds"
       (is (= "G1 Old Gen" (::kernel/pool (kernel/memory-pressure held))))
@@ -163,7 +168,7 @@
     (testing "the refusal names the bound and the work in flight"
       (let [refusal (kernel/memory-pressure-error (kernel/memory-pressure held))]
         (is (= :seon.sci.kernel/arming (:seon.error/layer refusal)))
-        (is (= [["root" "run-1"]] (::kernel/in-flight refusal)))
+        (is (= in-flight (::kernel/in-flight refusal)))
         (is (re-find #"memory pressure" (:seon.error/message refusal)))))
     (testing "below its resume bound it clears and admits"
       (vreset! held (assoc pressure ::kernel/resume-bytes Long/MAX_VALUE))
@@ -178,7 +183,7 @@
                   ::kernel/collections 5
                   ::kernel/enter-bytes 7 ::kernel/resume-bytes 5
                   ::kernel/entered-at (java.util.Date.)
-                  ::kernel/in-flight [["root" "run-1"]]}
+                  ::kernel/in-flight in-flight}
         forced (atom 0)
         pool (fn [live-bytes collections]
                (fn [force?]

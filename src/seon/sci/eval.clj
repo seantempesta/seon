@@ -27,9 +27,9 @@
   call never enters an interpreted body
   (`interrupt.md:56`, and its own closing warning that unbounded host
   work stays possible). The honest ceiling is stated rather than
-  papered over: for hard guarantees the process boundary is the fence,
-  and O4's heap watermark plus the caller's submission backstop cover
-  what this cannot.
+  papered over: only the process boundary stops such work. The heap watch
+  (`seon.heap`) names it while it runs and, at its critical bound, refuses
+  new arms; it neither stops nor cuts work already running.
 
   ADMISSION HAPPENS INSIDE THE BOUNDARY, BEFORE DISARM. The value is
   realized and bounded by `seon.sci.admit/admit` while the interrupt-fn
@@ -4454,7 +4454,8 @@
   print (profile) or a renderer failure the floor survived is a flat
   diagnostic beside the value, `:seon.cluster.eval/diagnostics`, printed by
   the floor."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+  {:seon/entrant true
+   :malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                                   :seon.schema.admission/reason "Any evaluated or replacing value is printed here."
                                   :gen/elements [nil false 0 "" :k [] {}]}]
                        :seon.sci.eval/shown-request [:maybe :seon.sci.admit/record]]
@@ -4505,6 +4506,8 @@
             [{:seon.render.value/diagnostics [{:seon.render.data/path [] :seon.render.value/failure failure}]}
              (render.value/core-text value)]))
         failures (into failures (map :seon.render.value/failure) (:seon.render.value/diagnostics projection))
+        ;; a critical heap crossing seen while the evaluation ran rides its reply
+        failures (cond-> failures (:seon.heap/crossing record) (conj (:seon.heap/crossing record)))
         ;; a refusal of the root's description is data: the value printer bounds it
         shown (if (string? shown) shown (render.value/core-text shown))]
     ;; THE VALUE'S SIZE IS RECORDED BESIDE ITS SHOWN TEXT: the whole value's
@@ -5039,6 +5042,8 @@
        evaluation-ctx time-limit-ms (:seon.config.eval/alloc-limit-bytes caps)
        (fn [armed]
         (vreset! arm-state armed)
+        ;; the running-evaluation registry names the form in flight
+        (kernel/evaluating! (::form request))
         (try
          (trusted-evaluation
           (:seon.sci.eval/loaded-identity request loaded-identity)

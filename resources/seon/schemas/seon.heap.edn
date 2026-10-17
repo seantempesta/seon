@@ -1,0 +1,53 @@
+;; The heap watch (seon.heap). Values only: a crossing is recorded as its cluster's error, nothing here is stored.
+#:seon.heap{:level [:enum {:description "A bound the live heap reached."} :warn :critical]
+            :kind [:enum {:description "What a crossing observed: a bound reached, or the heap after major collections rising across a run of them."} :warn :critical :growth]
+            :asked [:enum {:description "What one reading asks of the watch: a forced full collection to measure live bytes, or a crossing to record."} :measure :warn :critical :growth]
+            :used-bytes [:int {:min 0 :description "Heap bytes in use after a collection, summed over its heap pools."}]
+            :max-bytes [:int {:min 1 :description "The heap cap in bytes."}]
+            :threshold-bytes [:int {:min 0 :description "The crossed bound in bytes; for :growth, the warning bound."}]
+            :major? [:boolean {:description "The collection was full, or a concurrent cycle's pause: its reading counts toward a growth run."}]
+            :live? [:boolean {:description "The reading followed a forced full collection (cause System.gc()): its bytes are live."}]
+            :armed [:maybe :seon.heap/level]
+            :rising [:vector :seon.heap/used-bytes]
+            :dials [:map
+                    [:seon.config.heap/warn-fraction :seon.config.heap/warn-fraction]
+                    [:seon.config.heap/critical-fraction :seon.config.heap/critical-fraction]
+                    [:seon.config.heap/growth-collections :seon.config.heap/growth-collections]]
+            :reading [:map {:description "The heap after one collection."}
+                      [:seon.heap/used-bytes :seon.heap/used-bytes]
+                      [:seon.heap/max-bytes :seon.heap/max-bytes]
+                      [:seon.heap/major? :seon.heap/major?]
+                      [:seon.heap/live? :seon.heap/live?]]
+            :state [:map {:description "A watch's fold over its readings: the level armed and the run of rising major readings."}
+                    [:seon.heap/armed :seon.heap/armed]
+                    [:seon.heap/rising :seon.heap/rising]]
+            :step [:tuple :seon.heap/state [:maybe :seon.heap/asked]]
+            :thread :string
+            :thread-state :keyword
+            :allocated-bytes [:int {:description "Bytes a thread allocated over its lifetime (ThreadMXBean)."}]
+            :suspect [:map
+                      [:seon.heap/thread :seon.heap/thread]
+                      [:seon.heap/thread-state :seon.heap/thread-state]
+                      [:seon.heap/allocated-bytes :seon.heap/allocated-bytes]]
+            :threads [:vector :seon.heap/suspect]
+            :crossing
+            [:map
+             [:seon.heap/level :seon.heap/kind]
+             [:seon.heap/used-bytes :seon.heap/used-bytes]
+             [:seon.heap/max-bytes :seon.heap/max-bytes]
+             [:seon.heap/threshold-bytes :seon.heap/threshold-bytes]
+             [:seon.sci.kernel/in-flight {:optional true} :seon.sci.kernel/in-flight]
+             [:seon.heap/threads {:optional true} :seon.heap/threads]
+             [:seon.cache/weighted-bytes {:optional true} :seon.cache/weighted-bytes]
+             [:seon.profile/by-self {:optional true} :seon.profile/by-self]]
+            :crossing-error [:merge :seon.error/base :seon.heap/crossing]
+            :on-crossing [:fn {:error/message "must be a function of one :seon.heap/crossing-error"} clojure.core/ifn?]
+            :fold [:map {:description "What a watch folds each reading with: its dials, its fold state and where a crossing goes."}
+                   [:seon.heap/dials :seon.heap/dials]
+                   [:seon.heap/state [:fn {:error/message "must be the watch's volatile fold state"} clojure.core/volatile?]]
+                   [:seon.heap/on-crossing :seon.heap/on-crossing]]
+            :watch [:merge {:description "One cluster's live heap watch: its fold and its listener on each collector."}
+                    :seon.heap/fold
+                    [:map
+                     [:seon.heap/listener [:some {:description "The javax.management.NotificationListener registered on each collector."}]]
+                     [:seon.heap/emitters [:vector {:description "Each GarbageCollectorMXBean the listener is registered on (a NotificationEmitter)."} :some]]]]}

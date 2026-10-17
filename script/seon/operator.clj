@@ -770,12 +770,17 @@
   nil)
 
 (defn- heap-dumps
-  "The heap dumps under the managed root's `data/heap`, newest first. The JVM
-  writes `java_pid<pid>.hprof` inside an existing directory named by
-  `-XX:HeapDumpPath` (a missing one is taken as the file name)."
+  "A crashed JVM's forensics under the managed root's `data/heap`, newest
+  first: the heap dump `java_pid<pid>.hprof` the JVM writes inside the
+  existing directory `-XX:HeapDumpPath` names (a missing one is taken as the
+  file name), the JFR emergency dump `hs_err_pid<pid>.jfr` and the crash log
+  `hs_err_pid<pid>.log` written beside it."
   {:malli/schema [:=> [:cat :string] [:vector :string]]}
   [root]
-  (into [] (comp (filter #(str/ends-with? (.getName ^java.io.File %) ".hprof"))
+  (into [] (comp (filter #(let [file-name (.getName ^java.io.File %)]
+                            (or (str/ends-with? file-name ".hprof")
+                                (str/ends-with? file-name ".jfr")
+                                (str/starts-with? file-name "hs_err"))))
                  (map #(.getCanonicalPath ^java.io.File %)))
         (sort-by #(- (.lastModified ^java.io.File %)) (.listFiles (io/file root "data/heap")))))
 

@@ -58,7 +58,18 @@
  :seon.sci.kernel/enter-bytes :int
  :seon.sci.kernel/resume-bytes :int
  :seon.sci.kernel/entered-at inst?
- :seon.sci.kernel/in-flight [:vector [:tuple :seon.agent/id :seon.turn/id]]
+ :seon.sci.kernel/thread [:string {:description "The name of the thread that owns an evaluation's arm."}]
+ :seon.sci.kernel/form-head [:symbol {:description "The head symbol of the form an evaluation is on (seon.sci.kernel/evaluating!)."}]
+ :seon.sci.kernel/running
+ [:map {:description "One evaluation running under its own arm (seon.sci.kernel/running-evaluations): its thread, whose work it is, the form it is on, and its wall time and allocation so far."}
+  [:seon.sci.kernel/thread :seon.sci.kernel/thread]
+  [:seon.eval/duration-ms :seon.eval/duration-ms]
+  [:seon.eval/allocated-bytes :seon.eval/allocated-bytes]
+  [:seon.agent/id {:optional true} :seon.agent/id]
+  [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]
+  [:seon.store/branch {:optional true} :seon.store/branch]
+  [:seon.sci.kernel/form-head {:optional true} :seon.sci.kernel/form-head]]
+ :seon.sci.kernel/in-flight [:vector {:description "The evaluations running in this process, most allocation first."} :seon.sci.kernel/running]
  :seon.sci.kernel/memory-pressure
  [:map
   [:seon.sci.kernel/pool :seon.sci.kernel/pool]
@@ -68,7 +79,7 @@
   [:seon.sci.kernel/enter-bytes :seon.sci.kernel/enter-bytes]
   [:seon.sci.kernel/resume-bytes :seon.sci.kernel/resume-bytes]
   [:seon.sci.kernel/entered-at :seon.sci.kernel/entered-at]
-  [:seon.sci.kernel/in-flight :seon.sci.kernel/in-flight]]
+  [:seon.sci.kernel/in-flight {:optional true} :seon.sci.kernel/in-flight]]
  :seon.sci.kernel/memory-pressure-error
  [:merge :seon.error/base :seon.sci.kernel/memory-pressure]
 

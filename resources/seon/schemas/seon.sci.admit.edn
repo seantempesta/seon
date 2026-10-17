@@ -46,7 +46,8 @@
                   [:seon.eval/duration-ms :seon.eval/duration-ms]
                   [:seon.eval/allocated-bytes
                    :seon.eval/allocated-bytes]
-                  [:seon.eval/outcome :seon.eval/outcome]],
+                  [:seon.eval/outcome :seon.eval/outcome]
+                  [:seon.heap/crossing {:optional true :description "A critical heap crossing observed while the evaluation ran (seon.sci.kernel/mark-running!): its reply carries it as a diagnostic."} :seon.heap/crossing-error]],
                  :request
                  [:and
                   [:map

@@ -1,0 +1,13 @@
+;; The heap watch's bounds (seon.heap), applied by each cluster's boot to its own watch.
+#:seon.config.heap{:warn-fraction
+                   [:double {:min 0.0 :max 1.0 :seon.config/dial true
+                             :seon.config/display-label "Heap warning bound"
+                             :description "Live heap after a collection, as a fraction of the heap cap, at which the heap watch records a :warn crossing (seon.heap/observation). The memory gate opened by a critical crossing reopens below it."}]
+                   :critical-fraction
+                   [:double {:min 0.0 :max 1.0 :seon.config/dial true
+                             :seon.config/display-label "Heap critical bound"
+                             :description "Live heap after a collection, as a fraction of the heap cap, at which the heap watch records a :critical crossing, marks every evaluation in flight (seon.sci.kernel/mark-running!) and closes new arms (seon.sci.kernel/enter-memory-pressure!)."}]
+                   :growth-collections
+                   [:int {:min 2 :seon.config/dial true
+                          :seon.config/display-label "Heap growth run"
+                          :description "Consecutive major collections (full, or a concurrent cycle's pause) whose heap after each rose above the last, that the heap watch records as one :growth crossing."}]}
