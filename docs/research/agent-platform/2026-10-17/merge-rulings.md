@@ -36,3 +36,9 @@ status: owner rulings 2026-10-17, input to the merge hybrid (Fable) after merge-
 - A file-reading test (for example `seon.babashka-load-test/declared-namespaces-load-in-babashka`) reads the candidate's files, written cheaply from the branch to a disposable directory. It may launch the external tool it tests (`bb`), never a JVM.
 - Platform work, meaning changes to host-bound declarations SCI cannot interpret, belongs to root, which works in JVM mode and proves it deliberately with `bin/seon check`.
 - When a chain's change reaches a host-bound declaration, the done rule says so as data and the chain bails to root. Nothing boots automatically.
+
+**No guards; errors as data (owner, 2026-10-17):** "guards shouldn't be necessary with the system we are building. We check things at the entrance and exit of all functions and we should be explicitly handling anything that can throw an error and returning it as data so the agents can respond."
+- Contracts check every function's input and output.
+- A failure is produced once, where it is detected, as the one error map, and returned as data to the agent.
+- Nothing downstream re-checks shapes, catches defensively or adds a refusal tier.
+- The roughly 175 guard sites the Opus audit counted on the merge/done path (`merge-audit-opus.md`) get removed in this redesign, as their own final phase after P11. They are not deferred to a later conversion.
