@@ -74,7 +74,7 @@
               red (prepare)
               before (digest h-conn "merge-callee")]
           (is (false? (:seon.test/passed? red)))
-          (is (= :seon.source/merge (:seon.error/layer (source/accept-merge! target store red))))
+          (is (= :seon.source/red-test-error (:seon.error/type (source/accept-merge! target store red))))
           ;; main may record its own side of the red (seon.test/fork-point-red); its program is unchanged
           (is (= before (digest h-conn "merge-callee")))))
       (testing "green: accept merges exactly the tested entities with lineage H C E; another entity's write never stales it"
