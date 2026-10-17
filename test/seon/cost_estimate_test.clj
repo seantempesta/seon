@@ -63,6 +63,10 @@
     :why "Nine unchanged forms of a 6,500-line namespace: read, analyze and digest each form, all digests equal, nothing written, no test: proportional to 9 forms, never to the namespace."
     :estimate {:alloc-mb 80.0 :calls 12000 :reads 150 :ms 400.0}
     :overrun '{:task seon.repl/re-evaluating-nine-seon-db-forms-allocates-nine-gigabytes :alloc-mb 871.4 :calls 93090 :reads 1358}}
+   {:op :hub-docstring-change
+    :why "One redefinition of the hub `seon.db/as-of-key` that changes only its docstring: read, analyze and digest one form; its behavior digest equals the merge base's, so no caller is re-armed and no test is selected: an unchanged form's cost, proportional to 1 form."
+    :estimate {:alloc-mb 30.0 :calls 4000 :reads 60 :ms 150.0}
+    :overrun '{:task seon.repl/a-docstring-only-change-to-a-hub-function-costs-hundreds-of-megabytes :alloc-mb 221.6 :calls 56529 :reads 305}}
    {:op :merge-one-function
     :why "Root merges a branch changing one function: a three-way diff of ~30 datoms from the merge base, its proof and one reaching test run on the merge branch, one merge transaction: proportional to the delta."
     :estimate {:alloc-mb 48.0 :calls 8000 :reads 200 :ms 400.0}
@@ -106,6 +110,13 @@
                          :let [{:keys [row end-row]} (meta form)]
                          line (subvec lines (dec row) end-row)]
                      line))))
+
+(defn- hub-docstring-change
+  "`seon.db/as-of-key` as the checkout holds it with one more sentence in its docstring: a change no test observes."
+  {:malli/schema [:=> [:cat] :string]}
+  []
+  (let [forms (seon-db-forms)]
+    (str/replace-first (subs forms 0 (str/index-of forms "\n(" 1)) "\"An as-of view" "\"Documented again. An as-of view")))
 
 (def ^:private merged-source
   "The checkout's one file the merged branch changes: a function, a test reaching it and the red proof of the task."
@@ -182,9 +193,11 @@
                  "the agent holds a task")
            _ (request "(seon.context/current-state)")
            current-state (cost "(seon.context/current-state)")
-           nine (cost (str "(in-ns 'seon.db)\n" (seon-db-forms)))]
+           nine (cost (str "(in-ns 'seon.db)\n" (seon-db-forms)))
+           hub-docstring (cost (str "(in-ns 'seon.db)\n" (hub-docstring-change)))]
        {:unchanged-request unchanged :fresh-agent-first-request fresh :new-def new-def :redefine-one-form redefine
         :reuse-one-unchanged-test reuse :current-state-with-task current-state :seon-db-nine-forms nine
+        :hub-docstring-change hub-docstring
         :merge-one-function (merge-cost running connection)}))))
 
 (defn- over
@@ -224,7 +237,7 @@
                                    (when (seq grown) {:op op :grown grown :task (:task overrun)}))))))
         estimates))
 
-(deftest ^{:seon.test/long "Eight ordinary operations through one running agent, each measured warm once."
+(deftest ^{:seon.test/long "Nine ordinary operations through one running agent, each measured warm once."
            :seon.test/long-ms 60000}
   ordinary-operations-cost-no-more-than-their-estimates
   (let [seen (measured)]
@@ -232,7 +245,7 @@
                                (let [o (over (seen op) estimate wall-slack)] (when (seq o) {:op op :over o}))))
                     estimates)))))
 
-(deftest ^{:seon.test/long "Eight ordinary operations through one running agent, each measured warm once."
+(deftest ^{:seon.test/long "Nine ordinary operations through one running agent, each measured warm once."
            :seon.test/long-ms 60000}
   no-ordinary-operation-grows-past-its-accepted-overrun
   (is (= [] (unaccepted (measured)))))
