@@ -52,9 +52,13 @@
             (db/pull (:db-after report) '[*] (:seon.error/ref recording))))))))
 
 (deftest entity-acquisition-observations-have-no-program-digest-promise
-  (test-support/with-database
-   (fn [connection]
-     (doseq [lookup [[:seon.fn/sym 'seon.id/id] [:seon.ns/name 'seon.id]]]
+  ;; Each lookup records into its own database. Both observations share one
+  ;; signature (it excludes the row symbol), and `commit-request` fixes one
+  ;; instant, so in one database they were two occurrences with equal
+  ;; `last-at` and `latest-fact` read whichever the pull returned last.
+  (doseq [lookup [[:seon.fn/sym 'seon.id/id] [:seon.ns/name 'seon.id]]]
+   (test-support/with-database
+    (fn [connection]
       (let [database (db/db connection)
            projection (schema/handed-projection)
            entity (db/pull database '[*] lookup)
