@@ -82,7 +82,7 @@
 
 (defn unreadable
   "The schema keys of `projection`'s registry that cannot be constructed, with the Malli failure type."
-  {:malli/schema [:=> [:cat :seon.schema/projection] [:vector :vector]]}
+  {:malli/schema [:=> [:cat :seon.schema/projection] [:vector [:tuple :qualified-keyword :keyword]]]}
   [projection]
   (let [registry (:seon.schema.projection/registry projection)]
     (->> (keys (mr/schemas registry))
@@ -299,7 +299,7 @@
 
 (defn- cut-data
   "The cuts of an answer as `[path omitted total bound-by]` in answer order."
-  {:malli/schema [:=> [:cat :map] [:vector :vector]]}
+  {:malli/schema [:=> [:cat :map] [:vector [:tuple [:maybe :seon.render.data/path] [:maybe :seon.print/omitted] :any [:maybe :seon.print/bound-by]]]]}
   [answer]
   (mapv (juxt :seon.render.data/path :seon.print/omitted :seon.render.data/total :seon.print/bound-by)
         (:seon.render.value/cuts answer)))

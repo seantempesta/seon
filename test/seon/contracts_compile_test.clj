@@ -16,7 +16,7 @@
   Clojure's reader, against the projection built from `seon.schema.edn/packaged-forms`
   (the resources on disk now). It loads no namespace it reads. `bin/seon-hook`
   calls it in the live root for the files a hook event changes; the deftests
-  run it over all of `src/` and `test/` and over the three historical forms.
+  run it over all of `src/`, `test/` and `script/`, which boot arms once loaded, and over the three historical forms.
 
   Given the file as it was (`::baselines`), [[check]] also refuses every
   `defn`/`defn-` the edit adds or changes without a complete contract: no
@@ -927,7 +927,7 @@
 
 (deftest every-declared-contract-compiles-against-the-packaged-projection
   (let [texts (read-texts (into {} (map (fn [path] [path (read-file path)]))
-                               (source-files ["src" "test"])))
+                               (source-files ["src" "test" "script"])))
         contexts (namespace-contexts texts)
         contracts (into []
                         (mapcat (fn [[path {::keys [forms]}]]
