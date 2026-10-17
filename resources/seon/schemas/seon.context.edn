@@ -44,9 +44,22 @@
                          [:seon.context/tests {:optional true} [:vector :seon.context/changed]]
                          [:seon.context/tasks {:optional true} [:vector :seon.context/changed]]
                          [:seon.context/removed {:optional true} :seon.context/removed]]
-               :changed [:map {:description "One declaration the branch changed: its name, the form that reads it and the form that removes it when one exists. Producer: seon.context/branch-changes."}
+               :changed [:map {:description "One declaration the branch changed: its name, its test status from the step's held results, the form that reads it and the form that removes it when one exists. Producer: seon.context/branch-changes."}
                          [:seon.ref/name :seon.ref/name]
+                         [:seon.context/test-status {:optional true :description "Absent on a branch whose step has judged nothing yet."} :seon.context/test-status]
+                         [:seon.context/counts {:optional true :description "The reaching tests by status; absent for a test and for a declaration no test reaches."} [:map-of :seon.context/proof-status [:int {:min 1}]]]
                          [:seon.render/operations [:vector {:min 1} :seon.render/read-form]]]
+               :test-status [:enum {:description "A changed declaration's test status, read from the step's held results, never run: a test's own status, else :red when a test reaching it is red, :pending when one has no result at its current reach, :green when all are green, :untested when none reaches it. Producer: seon.context/test-status."} :green :red :pending :untested]
+               :tested [:map {:description "One changed declaration's test status and its reaching tests by status. Producer: seon.context/test-status."}
+                        [:seon.context/test-status :seon.context/test-status]
+                        [:seon.context/counts {:optional true} [:map-of :seon.context/proof-status [:int {:min 1}]]]]
+               :conflict [:map {:description "One unresolved unmerged entry as the block shows it: the declaration, the commits its base and theirs are read at, its versions (ours: the branch's, main's on a merge branch; theirs: the merge source's; base) each a reference at its code, and the form that keeps ours. Defining the declaration resolves it too. Producer: seon.context/conflicts."}
+                          [:seon.unmerged/name :seon.unmerged/name]
+                          [:seon.unmerged/base-commit {:optional true} :seon.unmerged/base-commit]
+                          [:seon.unmerged/theirs-commit :seon.unmerged/theirs-commit]
+                          [:seon.unmerged/versions :seon.unmerged/versions]
+                          [:seon.render/operations [:vector {:min 1} :seon.render/read-form]]]
+               :conflicts [:vector {:min 1 :description "The branch's unresolved unmerged entries (seon.cluster.source/unmerged), each once with both versions and the form that resolves it; absent when none. Derived from the branch value each request and held by its commit. Producer: seon.context/conflicts."} :seon.context/conflict]
                               :removed [:vector {:description "The declarations the branch removed since its merge base, by name."} [:map [:seon.ref/name :seon.ref/name]]]
                :turns
                [:map {:description "Model calls left against the current wake and the held task's status."}
@@ -80,7 +93,8 @@
                                   [:seon.context/head :seon.context/head]
                                   [:seon.context/candidate :seon.db/database-value] [:seon.context/main :seon.db/database-value]
                                   [:seon.source/judged {:optional true :description "Absent while the branch has recorded no run to judge."} :seon.source/judged]
-                                  [:seon.program/identities {:optional true :description "The declarations the branch changed since the task's merge base (seon.context/change)."} :seon.program/identity-set]]
+                                  [:seon.program/identities {:optional true :description "The declarations the branch changed since the task's merge base (seon.context/change)."} :seon.program/identity-set]
+                                  [:seon.source/reaching {:optional true :description "Each changed declaration's reaching tests, from the member list (seon.cluster.source/merge-members)."} :seon.source/reaching]]
                :step-status [:map {:description "A step judged by the done rule (seon.cluster.source/done-refusals), the one judge of every task and of the merge: done exactly when it refuses nothing. Producer: seon.context/step-status."}
                              [:seon.task/status [:enum :done :working]]
                              [:seon.source/refusals :seon.source/refusals]]
@@ -123,6 +137,7 @@
                 [:seon.context/send-backs {:optional true} :seon.context/send-backs]
                 [:seon.context/attempts {:optional true} :seon.context/attempts]
                 [:seon.context/changes {:optional true} :seon.context/changes]
+                [:seon.context/conflicts {:optional true} :seon.context/conflicts]
                 [:seon.context/must-reads {:optional true} :seon.context/must-reads]
                 [:seon.context/cost {:optional true} :seon.context/cost]
                 [:seon.context/unread {:optional true} :seon.context/unread]
@@ -175,6 +190,7 @@
                 [:seon.context/send-backs {:optional true} :seon.context/send-backs]
                 [:seon.context/attempts {:optional true} :seon.context/attempts]
                 [:seon.context/changes {:optional true} :seon.context/changes]
+                [:seon.context/conflicts {:optional true} :seon.context/conflicts]
                 [:seon.context/must-reads {:optional true} [:vector :seon.context/must-read-view]]
                 [:seon.context/cost {:optional true} :seon.context/cost]
                 [:seon.context/unread {:optional true} :seon.context/unread]

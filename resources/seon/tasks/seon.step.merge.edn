@@ -2,17 +2,14 @@
              :instructions "## Work
 
 Root's final merge of your chain refused, and you hold the merge branch it built: main's latest head plus the chain's
-merge list. Your task's `:seon.task/refusal` names why and `:seon.task/refused-tests` the tests the gate found red;
-your proofs are the tests the gate found red (or, for a refusal with none, your chain's proofs) and show what is
-still refused after each evaluation: a red test with its failure, a file that does not
-analyze cleanly (for example an unresolved symbol: a namespace form lacking the require a declaration uses), a
-declaration main and the chain both changed. Fix each here with ordinary REPL work: read the owner with
-`my.program/source`, `in-ns` and `defn` the repaired declaration, or `my.program/ns-unmap!` what must not merge.
-Everything on this branch merges to main when you are done, so change only what the refusal needs.
-A refusal you cannot fix here (a test that is wrong, a change that must not merge) is root's: send it back with
-`my.task/send-back!` and why.
+whole change. Your block's `:seon.context/conflicts` lists each declaration main and your chain both changed, with
+both versions and the form that resolves it, and its step lists the red members; your task's `:seon.task/refusal`
+names why the merge refused. Resolve each with ordinary REPL work: keep main's version with the form shown, or
+`in-ns` and `defn` the chain's version or a combination. Everything in `:seon.context/changes` merges, each shown with
+its test status, so change only what the refusal needs. A refusal you cannot fix here (a test that is wrong, a change
+that must not merge) is root's: send it back with `my.task/send-back!` and why.
 
 ## Done
 
-Every refused test is green on this branch, every changed file analyzes cleanly, no conflicted declaration is left as
-the refusal found it, and no test that is green on main is red here."}]
+Your block shows no conflicts, every refused test is green on this branch, every changed file analyzes cleanly, and no
+test that is green on main is red here."}]

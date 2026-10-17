@@ -998,14 +998,16 @@
              "a declaration the branch removed is named as removed, never as an unresolved problem")
          (is (= {:seon.ref/name 'tq.ra/squared
                  :seon.render/operations ['(my.program/source 'tq.ra/squared) '(my.program/ns-unmap! 'tq.ra/squared)]}
-                squared)
+                (dissoc squared :seon.context/test-status))
              "a function no test reaches merges like every change, shown with the form that removes it, and no doc echo")
+         (is (= :untested (:seon.context/test-status squared)) "no test reaches it")
          (is (= [{:seon.ref/name 'tq.ra/area :seon.render/operations ['(my.program/source 'tq.ra/area) '(my.program/ns-unmap! 'tq.ra/area)]}]
-                (filterv #(= 'tq.ra/area (:seon.ref/name %)) (:seon.context/functions changes)))
+                (mapv #(select-keys % [:seon.ref/name :seon.render/operations])
+                      (filterv #(= 'tq.ra/area (:seon.ref/name %)) (:seon.context/functions changes))))
              "a changed function a branch test tested shows the same forms")
          (is (= [{:seon.ref/name (keyword "tq.ra" "probe")
                   :seon.render/operations [(list 'my.program/source (keyword "tq.ra" "probe"))]}]
-                (:seon.context/schemas changes))
+                (mapv #(dissoc % :seon.context/test-status) (:seon.context/schemas changes)))
              "a schema key shows its read form and no removal form (none exists)"))
        ;; a later attempt's block shows this one's last step: the note of the wait it ended its turn with
        (evaluate running agent-id "(my.turn/wait {:my.turn/note \"Stopped at the cycle probe.\"})")
@@ -1029,3 +1031,76 @@
          (is (= error (:seon.task/test-error (#'agent/attempt-verdict summary)))
              "so the attempt's verdict names it as data")
          (is (not (contains? (#'agent/attempt-verdict (dissoc summary :seon.agent/end-test-error)) :seon.task/test-error))))))))
+
+(deftest ^{:seon.test/long "An own-branch agent's setup, one eval request with its test step, and one read of its block."
+           :seon.test/long-ms 30000}
+  the-block-shows-every-change-that-will-merge-with-its-test-status
+  ;; P10: "what will merge" lists every change with its test status, read from the step's held results, so the agent
+  ;; removes scratch and tunes a red change before done
+  (test-support/with-running-agent
+   (fn [running _ connection]
+     (let [agent-id (str "tested-" (seon.id/id))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" (get-in (db/db connection) [:config :branch]) 'user
+                                        (:seon.cluster/name (test-support/execution-handle nil))]])
+           _ (test-support/declare-source! connection 'tq.wm
+                                           (str "(ns tq.wm (:require [clojure.test :refer [deftest is]]))\n"
+                                                "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                                "(deftest ^{:seon/tasks #{'tq.wm/area}} area-test (is (= 25 (area 5))))\n")
+                                           "test")
+           {branch :seon.store/branch} (test-support/own-branch-agent! running agent-id "(ns tq.wm)")
+           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
+                                            :seon.task/ns 'tq.wm :seon.task/name "area" :seon.task/plan "Square."}))]
+       (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
+                      :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})
+       (evaluate running agent-id (str "(in-ns 'tq.wm)\n(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))\n"
+                                       "(deftest edge-test (is (= 1 2)))\n(seon.schema/register! :tq.wm/side :int)"))
+       (let [changes (:seon.context/changes (block running agent-id))
+             status (fn [family] (into {} (map (juxt :seon.ref/name #(select-keys % [:seon.context/test-status :seon.context/counts])))
+                                       (family changes)))]
+         (is (= {'tq.wm/area {:seon.context/test-status :green :seon.context/counts {:green 1}}}
+                (status :seon.context/functions))
+             "the changed function a green test reaches is green, its reaching tests counted")
+         (is (= {:seon.context/test-status :red} (get (status :seon.context/tests) 'tq.wm/edge-test))
+             "the new red test shows red")
+         (is (= {(keyword "tq.wm" "side") {:seon.context/test-status :untested}} (status :seon.context/schemas))
+             "a schema no test reaches shows untested")
+         (is (every? #(seq (:seon.render/operations %)) (mapcat val (dissoc changes :seon.context/removed)))
+             "each keeps the form that reads it"))))))
+
+(deftest ^{:seon.test/long "An own-branch agent's setup, one eval request with its test step, main merged forward, and three reads of its block."
+           :seon.test/long-ms 30000}
+  a-merge-branchs-unmerged-entry-shows-in-the-block-until-resolved
+  ;; task-model §6.3: the block's conflicts section lists each unresolved unmerged entry with both versions as code
+  ;; references and the form that resolves it, derived from the branch value each request; resolved, it is gone
+  (test-support/with-running-agent
+   (fn [running _ connection]
+     (let [agent-id (str "conflicted-" (seon.id/id))
+           source (fn [n] (str "(ns tq.um (:require [clojure.test :refer [deftest is]]))\n"
+                               "(defn shared {:malli/schema [:=> [:cat] :int]} [] " n ")\n"))
+           shared (symbol "tq.um" "shared")
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" (get-in (db/db connection) [:config :branch]) 'user
+                                        (:seon.cluster/name (test-support/execution-handle nil))]])
+           _ (test-support/declare-source! connection 'tq.um (source 1) "test")
+           {branch :seon.store/branch target :seon.db/connection} (test-support/own-branch-agent! running agent-id "(ns tq.um)")
+           execution {:seon.db/connection connection :seon.store/store (agent/handle-store (test-support/running-cluster running))}]
+       (evaluate running agent-id (str "(in-ns 'tq.um)\n(defn shared {:malli/schema [:=> [:cat] :int]} [] 2)"))
+       ;; main changes the same function, then merges forward into the branch: git's conflict, recorded unmerged
+       (test-support/declare-source! connection 'tq.um (source 3) "test")
+       (let [merged ((requiring-resolve 'seon.merge/merge-main!) execution branch)]
+         (is (= #{shared} (:seon.program/conflict merged)) "main and the branch both changed `shared`"))
+       (let [[entry :as conflicts] (:seon.context/conflicts (block running agent-id))
+             {:keys [ours theirs]} (:seon.unmerged/versions entry)]
+         (is (= [shared] (mapv :seon.unmerged/name conflicts)) "the block shows the one conflict")
+         (is (str/includes? (:source ours) "[] 2") "ours, the branch's version, shows its source")
+         (is (str/includes? (:source theirs) "[] 3") "theirs, main's version, shows its source")
+         (is (uuid? (:seon.unmerged/theirs-commit entry)) "the commit theirs is read at is on the entry")
+         (is (= [(list 'my.program/resolve! (list 'quote shared))] (:seon.render/operations entry))
+             "with the form that resolves it")
+         (let [database (db/db target)
+               first-read (profile/measure #(context/conflicts database))
+               second-read (profile/measure #(context/conflicts database))]
+           (is (= (:seon.profile/value first-read) (:seon.profile/value second-read)) "one branch value, one section")
+           (is (zero? (profile/calls-of second-read 'seon.cluster.source/versions))
+               "held by the branch value's commit: a second read of one value resolves no version again")))
+       (evaluate running agent-id (str "(my.program/resolve! '" shared ")"))
+       (is (not (contains? (block running agent-id) :seon.context/conflicts)) "a resolved conflict leaves the block")))))

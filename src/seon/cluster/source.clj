@@ -930,7 +930,8 @@
   gate runs (`seon.cluster/reaching-run`). `:seon.source/members` holds the proofs, every test `changed` names that
   `database` defines, and every other test reaching a changed function, test, namespace or schema as the gate's named
   selection walks it (`seon.test/reaching`: a namespace seeds its members and the tests reading it as a file, a
-  schema the functions whose contracts name it) but those declared long. `:seon.source/deferred` holds the members
+  schema the functions whose contracts name it) but those declared long; `:seon.source/reaching` holds each changed
+  declaration's own reaching tests, the fold's contribution of it. `:seon.source/deferred` holds the members
   that run only on a platform host (`seon.test/host-exclusions` of an isolated run): the merge's platform run answers
   them. Held by selection's content revisions (`seon.test/selection-revisions`), changed identities and proofs.
   Call-edge changes fold only the contributions whose walks read those targets; result and evaluation writes reuse the list. Reads only."
@@ -953,7 +954,9 @@
                         (:seon.error/at isolated) isolated
                         :else {:seon.source/members members
                                :seon.source/deferred (into #{} (map :seon.test/sym)
-                                                           (concat (:seon.test/destructive-excluded isolated) (:seon.test/deferred isolated)))})))]
+                                                           (concat (:seon.test/destructive-excluded isolated) (:seon.test/deferred isolated)))
+                               :seon.source/reaching (into {} (map (fn [[identity {tests :seon.fn/tests}]] [identity (set tests)]))
+                                                           (::contributions folded))})))]
     (if (seq revisions)
       (seon.cache/lookup ::members [revisions changed proofs]
                          #(+ (* 96 (count revisions)) (* 160 (+ (count changed) (count proofs)
@@ -1393,7 +1396,7 @@
        (seq reaching) (assoc :seon.source/red-tests
                              (red-test-verdicts (:seon.source/refused-test-run evidence) results reaching))))))
 
-(defn- versions
+(defn versions
   "`entry`'s base, ours and theirs, each a reference read where it lives (`:seon.ref/at`: the merge base commit,
   branch `database`'s head, the source commit) and resolved at its code (`seon.ref/references`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.unmerged/shown] [:map-of :keyword :map]]}

@@ -227,23 +227,70 @@
                       {} (sort-by (comp str second) identities))]
     (or (some #(when (:seon.error/at %) %) (mapcat val shown)) shown)))
 
+(defn- test-status
+  "The test status of the changed declaration `identity` from the step's held results, read, never run: a test's own
+  status in `head` (`head-entries`), else the statuses of the tests `reaching` names for it
+  (`seon.cluster.source/merge-members`) counted, `:red` when any is red, then `:pending` when any has no result at
+  its current reach, else `:green`; `:untested` when no test reaches it."
+  {:malli/schema [:=> [:cat :seon.program/declaration-identity :seon.source/reaching :seon.context/head] :seon.context/tested]}
+  [[attribute value :as identity] reaching head]
+  (let [status #(get-in head [% :seon.context/proof-status] :pending)]
+    (if (= :seon.test/sym attribute)
+      {:seon.context/test-status (status value)}
+      (let [counts (frequencies (map status (get reaching identity)))]
+        (cond-> {:seon.context/test-status (cond (empty? counts) :untested (:red counts) :red (:pending counts) :pending :else :green)}
+          (seq counts) (assoc :seon.context/counts counts))))))
+
 (defn- branch-changes
   "The declaration `identities` the branch changed since its merge base, shown on `database` by family in name order,
-  each by its name and the forms that read and remove it (`my.program/ns-unmap!`; none for a schema key): its merge
-  carries every one of them (`seon.cluster.source/prepare-merge!`, the whole change), so scratch is removed before
-  done. A declaration the branch removed is named under `:seon.context/removed`. Families are absent when empty."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set] :seon.context/changes]}
-  [database identities]
-  (reduce (fn [shown [attribute value]]
+  each by its name, its test status (`test-status`, from `reaching` and the step's `head`) and the forms that read and
+  remove it (`my.program/ns-unmap!`; none for a schema key): its merge carries every one of them
+  (`seon.cluster.source/prepare-merge!`, the whole change), so scratch is removed and a red change tuned before done.
+  A declaration the branch removed is named under `:seon.context/removed`. Families are absent when empty."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set :seon.source/reaching :seon.context/head]
+                  :seon.context/changes]}
+  [database identities reaching head]
+  (reduce (fn [shown [attribute value :as identity]]
             (if-let [family (merged-families attribute)]
               (if (seq (db/datoms database :avet attribute value))
                 (update shown family (fnil conj [])
-                        {:seon.ref/name value
-                         :seon.render/operations (cond-> [(list 'my.program/source (if (keyword? value) value (list 'quote value)))]
-                                                   (symbol? value) (conj (list 'my.program/ns-unmap! (list 'quote value))))})
+                        (merge {:seon.ref/name value}
+                               (test-status identity reaching head)
+                               {:seon.render/operations (cond-> [(list 'my.program/source (if (keyword? value) value (list 'quote value)))]
+                                                          (symbol? value) (conj (list 'my.program/ns-unmap! (list 'quote value))))}))
                 (update shown :seon.context/removed (fnil conj []) {:seon.ref/name value}))
               shown))
           {} (sort-by (comp str second) identities)))
+
+(defn- shown-name
+  "`value`, a declaration's symbol or schema key, as a form names it: a symbol quoted."
+  {:malli/schema [:=> [:cat :seon.unmerged/name] :seon.schema/value]}
+  [value]
+  (if (symbol? value) (list 'quote value) value))
+
+(defn conflicts
+  "The conflicts section of branch `database`: each unresolved unmerged entry it holds (`seon.cluster.source/unmerged`,
+  git's unmerged index entries) by its declaration's name, the commits its versions are read at, main's version
+  (ours on a merge branch) and the source's (theirs) and base, each a reference at its code
+  (`seon.cluster.source/versions`) so its source shows, and the form that keeps ours (`my.program/resolve!`); defining
+  the declaration resolves it too. A resolved entry is gone from the next value's section. Held by the value's commit
+  (`seon.cache`), so a turn's block reads derive it once; nil when it holds none.
+
+  ## Costs
+
+  One `:aevt` scan of the entries and one digest read each, then, once per commit, three resolved references each."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :seon.context/conflicts]]}
+  [database]
+  (when (and (get-in database [:schema :seon.unmerged/id]) (seq (db/datoms database :aevt :seon.unmerged/id)))
+    (let [derive #(not-empty
+                   (mapv (fn [{n :seon.unmerged/name :as entry}]
+                           (merge (select-keys entry [:seon.unmerged/name :seon.unmerged/base-commit :seon.unmerged/theirs-commit])
+                                  {:seon.unmerged/versions (source/versions database entry)
+                                   :seon.render/operations [(list 'my.program/resolve! (shown-name n))]}))
+                         (source/unmerged database)))]
+      (cache/lookup ::conflicts (db/commit-id database)
+                    #(+ 256 (transduce (comp (mapcat (comp vals :seon.unmerged/versions)) (map (comp count str :source))) + 0 %))
+                    derive vector?))))
 
 (defn- merged
   "What main's merge `commit` moved (`seon.cluster.source/merge-accepted`), shown on `database` by family
@@ -428,6 +475,7 @@
         (cond-> (assoc owed :seon.task/product product
                        :seon.context/head head :seon.context/candidate database :seon.context/main main)
           (set? delta) (assoc :seon.program/identities delta)
+          (seq (:seon.source/reaching listed)) (assoc :seon.source/reaching (:seon.source/reaching listed))
           judged (assoc :seon.source/judged (assoc judged :seon.program/identities delta :seon.test.run/id run-id
                                                    :seon.test.run/branch (get-in database [:config :branch])))))))
 
@@ -461,10 +509,11 @@
 
 (defn- shown-refusal
   "`refusal` as the step section shows it: `refusal-data` without the tests it names, each of which the proofs or
-  the step's entries show once with its state."
+  the step's entries show once with its state, and without the unmerged entries a conflict names, which the block's
+  conflicts section shows once (`conflicts`)."
   {:malli/schema [:=> [:cat :seon.error/value] :seon.context/refusal]}
   [refusal]
-  (dissoc (refusal-data refusal) :seon.source/red-tests))
+  (dissoc (refusal-data refusal) :seon.source/red-tests :seon.unmerged/entries))
 
 (defn step-section
   "The step section of `verdict` (`step-verdict`), as the agent reads it: the step's kind and status, a working
@@ -821,7 +870,8 @@
             earlier (earlier-attempts database (:seon.task/id held) agent-id)
             proof-names (into #{} (map :seon.test/sym) (:seon.context/proof-list proven))
             changes (when (and verdict (not (:seon.error/at verdict)) (seq (:seon.program/identities verdict)))
-                      (branch-changes database (:seon.program/identities verdict)))
+                      (branch-changes database (:seon.program/identities verdict) (:seon.source/reaching verdict {})
+                                      (or (:seon.context/head verdict) {})))
             reads (when-not (:seon.error/at proven) (ref/references database {:seon.ref/text "" :seon.ref/names proof-names}))
             resolution (into {} (keep #(when (proof-names (:seon.ref/name %)) [(:seon.ref/name %) %])) reads)
             start (attempt-start database agent-id)
@@ -849,11 +899,12 @@
   absent when empty. `:seon.context/unread` holds the agent's undelivered messages
   no model turn of it was shown yet, oldest first, each once with its id, sender,
   instant and content. `:seon.context/cost` holds the branch's stored function costs
-  that differ from main's (`branch-cost`).
+  that differ from main's (`branch-cost`). `:seon.context/conflicts` holds the branch's unresolved unmerged entries,
+  each with both versions and the form that resolves it (`conflicts`).
 
   ## Costs
 
-  The held task's sections (`task-sections`), the turn count, one pull per unread message,
+  The held task's sections (`task-sections`), the conflicts (`conflicts`), the turn count, one pull per unread message,
   one query of the agent's handled messages, one scan of the branch's cost entities
   and one query of main's for them."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
@@ -872,6 +923,7 @@
                        ;; a task's end message is shown with the value its references stand for, derived now
                        (mapv #(if (:seon.task/end %) (assoc % :seon.task/ended (ended database %)) %) items)))))
         cost (branch-cost database)
+        conflicted (conflicts database)
         namespace (agent-namespace database agent-id held)
         status (get-in sections [:seon.context/step :seon.task/status])]
     (or (some #(when (:seon.error/at %) %) [found sections left unread])
@@ -882,6 +934,7 @@
                                                                                   :else :working))
                                               namespace (assoc :seon.context/namespace namespace))})
           cost (assoc :seon.context/cost cost)
+          conflicted (assoc :seon.context/conflicts conflicted)
           (seq unread) (assoc :seon.context/unread {:seon.context/items unread
                                                     :seon.render/operations ['(my.message/inbox)]})))))
 
@@ -905,7 +958,7 @@
   The render argument carries the evaluation's world beside the block; only the sections are returned."
   {:malli/schema [:=> [:cat :seon.context/current-state] :seon.context/current-state-view]}
   [block]
-  (cond-> (select-keys block [:seon.context/task :seon.context/chain :seon.context/proofs :seon.context/step :seon.context/send-backs :seon.context/attempts :seon.context/changes :seon.context/must-reads :seon.context/cost :seon.context/unread :seon.context/turns])
+  (cond-> (select-keys block [:seon.context/task :seon.context/chain :seon.context/proofs :seon.context/step :seon.context/send-backs :seon.context/attempts :seon.context/changes :seon.context/conflicts :seon.context/must-reads :seon.context/cost :seon.context/unread :seon.context/turns])
     (:seon.context/task block) (update :seon.context/task dissoc :seon.task/id)
     (:seon.context/must-reads block) (update :seon.context/must-reads (partial mapv #(must-read-ai block %)))))
 
@@ -917,7 +970,7 @@
 (defn block-views
   "The block's AI view (`current-state-ai`) in two parts: the attempt's sections (`attempt-sections`), rendered on the
   attempt's starting value `start` (`attempt-start`) so they are the same at every turn of the attempt, and the
-  sections each turn changes (proofs, step, changes, cost, unread, turns), rendered on the unit's own database."
+  sections each turn changes (proofs, step, changes, conflicts, cost, unread, turns), rendered on the unit's own database."
   {:malli/schema [:=> [:cat :seon.context/current-state [:maybe :seon.db/database-value]]
                   [:tuple :seon.context/attempt-view :seon.context/current-state-view]]}
   [unit start]
