@@ -5,7 +5,7 @@
                       :cold-calls
                       [:int
                        {:min 0, :seon.config/optional true, :seon.config/dial true, :seon.config/default 1,
-                        :description "How many of a definition's first calls in a process are cold (its profile cell's call order, `seon.profile/timed`): they form the cold sample, never averaged with or compared against the warm one. Read when the cell is made, at arming."}]
+                        :description "How many of a definition's first calls in a process are cold (its profile cell's call order, `seon.profile/bracket`): they form the cold sample, never averaged with or compared against the warm one. Read when the cell is made, at arming."}]
                       :min-total-us
                       [:int
                        {:min 0, :seon.config/optional true, :seon.config/dial true, :seon.config/default 1000,
@@ -13,4 +13,32 @@
                       :hysteresis
                       [:double
                        {:min 1.0, :seon.config/optional true, :seon.config/dial true, :seon.config/default 1.41,
-                        :description "The factor a definition's per-call self time must move by, either way, before its stored sample of the same kind is replaced (`seon.profile/moved?`): half a log2 bucket, so timing noise rewrites nothing."}]}
+                        :description "The factor a definition's per-call self time must move by, either way, before its stored sample of the same kind is replaced (`seon.profile/moved?`): half a log2 bucket, so timing noise rewrites nothing."}]
+                      :size-period
+                      [:int
+                       {:min 0, :seon.config/optional true, :seon.config/dial true, :seon.config/default 64,
+                        :description "One outermost call in this many, at random, also records its touched size N (its arguments' and value's extents, `seon.profile/size-of`) beside its steps, reads and allocation in its profile cell (`seon.profile/sized!`): the evidence the default cost contract's k is sized from. 0 records none. Read when the cell is made, at arming."}]
+                      :steps-k
+                      [:double
+                       {:min 0.0, :seon.config/optional true, :seon.config/dial true, :seon.config/default 8.0,
+                        :description "Steps (armed calls inside one call) the default cost contract allows per unit of the call's touched size N: k in k × N + c (`seon.profile/pain`). Sized from the live sampled evidence (`seon.profile/volumes`)."}]
+                      :steps-c
+                      [:double
+                       {:min 0.0, :seon.config/optional true, :seon.config/dial true, :seon.config/default 32.0,
+                        :description "Steps the default cost contract allows any call regardless of N: c in k × N + c. Sized from the live sampled evidence (`seon.profile/volumes`)."}]
+                      :reads-k
+                      [:double
+                       {:min 0.0, :seon.config/optional true, :seon.config/dial true, :seon.config/default 2.0,
+                        :description "Reads (seon.db read entrances inside one call) the default cost contract allows per unit of touched size N: a function reads each thing it consumes or returns a bounded number of times. Sized from the live sampled evidence (`seon.profile/volumes`)."}]
+                      :reads-c
+                      [:double
+                       {:min 0.0, :seon.config/optional true, :seon.config/dial true, :seon.config/default 4.0,
+                        :description "Reads the default cost contract allows any call regardless of N. Sized from the live sampled evidence (`seon.profile/volumes`)."}]
+                      :bytes-k
+                      [:double
+                       {:min 0.0, :seon.config/optional true, :seon.config/dial true, :seon.config/default 4096.0,
+                        :description "Allocated bytes the default cost contract allows per unit of touched size N. Sized from the live sampled evidence (`seon.profile/volumes`)."}]
+                      :bytes-c
+                      [:double
+                       {:min 0.0, :seon.config/optional true, :seon.config/dial true, :seon.config/default 65536.0,
+                        :description "Allocated bytes the default cost contract allows any call regardless of N. Sized from the live sampled evidence (`seon.profile/volumes`)."}]}

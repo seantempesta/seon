@@ -1,0 +1,24 @@
+;; The default cost contract's live overrun (seon.profile/pain). Values only: nothing here is stored.
+{:seon.profile.pain/contract-term [:tuple {:description "[k c]: a call may spend k × N + c."} [:double {:min 0.0}] [:double {:min 0.0}]]
+ :seon.profile.pain/contract
+ [:map {:description "A cost contract per dimension, [k c] each (the default from the :seon.config.fn.cost/*-k and *-c dials)."}
+  [:steps :seon.profile.pain/contract-term] [:reads :seon.profile.pain/contract-term] [:bytes :seon.profile.pain/contract-term]]
+ :seon.profile.pain/dimension-values [:map-of {:description "A value per default-contract dimension."} [:enum :steps :reads :bytes] :double]
+ :seon.profile.pain/overrun [:and {:description "Per dimension, the sampled calls' own (self) spending over what the default contract allowed them: above 1.0 is over."} :seon.profile.pain/dimension-values]
+ :seon.profile.pain/per-n [:and {:description "Per dimension, the sampled calls' own (self) spending per unit of touched size N."} :seon.profile.pain/dimension-values]
+ :seon.profile.pain/share [:and {:description "Per dimension, the definition's part of the whole system's self overrun, 0.0 to 1.0: what the ranking sums."} :seon.profile.pain/dimension-values]
+ :seon.profile.pain/inclusive-overrun [:and {:description "Per dimension, the sampled calls' spending with their callees' over what the default contract allowed: data beside the self ranking, never ranked by (an entrance carries its callees' work)."} :seon.profile.pain/dimension-values]
+ :seon.profile.pain/inclusive-per-n [:and {:description "Per dimension, the sampled calls' spending with their callees' per unit of touched size N."} :seon.profile.pain/dimension-values]
+ :seon.profile.pain/entry
+ [:map {:description "One definition's pain: its overrun of the default cost contract (seon.profile/pain)."}
+  [:seon.profile/sym :seon.profile/sym]
+  [:seon.profile/digest {:optional true} :seon.profile/digest]
+  [:seon.profile/calls :seon.profile/calls]
+  [:seon.profile/samples :seon.profile/samples]
+  [:seon.profile.pain/overrun :seon.profile.pain/overrun]
+  [:seon.profile.pain/per-n :seon.profile.pain/per-n]
+  [:seon.profile.pain/share :seon.profile.pain/share]
+  [:seon.profile.pain/inclusive-overrun :seon.profile.pain/inclusive-overrun]
+  [:seon.profile.pain/inclusive-per-n :seon.profile.pain/inclusive-per-n]
+  [:seon.health/tested? {:optional true} :seon.health/tested?]
+  [:seon.render/operations [:vector :seon.schema/value]]]}

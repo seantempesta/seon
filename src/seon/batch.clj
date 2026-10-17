@@ -153,13 +153,13 @@
        (into #{} (comp (take limit) (map (fn [[sym [n self]]] [sym n (quot self 1000000)]))))))
 
 (def ^:private ^java.util.function.Function new-adder
-  "A sink's counter for a key it has not seen, the same twelve slots as
+  "A sink's counter for a key it has not seen, the same eighteen slots as
   `seon.profile/new-adder` makes: calls, nanos, self nanos and the three marks
   `seon.profile/transaction-observation` keeps, then the same for the cold
-  calls (seon.profile requires this namespace, so the constructor is repeated
-  here)."
+  calls, then the six volumes (seon.profile requires this namespace, so the
+  constructor is repeated here)."
   (reify java.util.function.Function
-    (apply [_ _] (java.util.concurrent.atomic.AtomicLongArray. 12))))
+    (apply [_ _] (java.util.concurrent.atomic.AtomicLongArray. 18))))
 
 (defn- ms-since
   {:malli/schema [:=> [:cat :int] :double]}
@@ -167,14 +167,14 @@
   (/ (- (System/nanoTime) t0) 1e6))
 
 (defn merge-sink!
-  "Add a completed child's calls and times, all and cold, to its parent,
+  "Add a completed child's calls, times and volumes, all and cold, to its parent,
   leaving the child intact."
   {:malli/schema [:=> [:cat :seon.batch/sink :seon.batch/sink] :nil]}
   [^java.util.concurrent.ConcurrentHashMap parent child]
   (when-not (identical? parent child)
     (doseq [[k ^java.util.concurrent.atomic.AtomicLongArray from] child
             :let [^java.util.concurrent.atomic.AtomicLongArray to (.computeIfAbsent parent k new-adder)]]
-      (doseq [i [0 1 2 6 7 8]] (.addAndGet to i (.get from i)))))
+      (doseq [i [0 1 2 6 7 8 12 13 14 15 16 17]] (.addAndGet to i (.get from i)))))
   nil)
 
 (defn jvm-counters
@@ -628,14 +628,18 @@
   definition made while realizing a lazy value is observed. A write offered
   after completion is refused to its writer. A write that is not a map is a
   diagnostic. The form's world stays on the batch until its evidence is
-  frozen (`freeze-step`)."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/folding] :seon.batch/folding]}
+  frozen (`freeze-step`). It is the one-path fold's entrant boundary for one
+  form: a throw of the agent's form is that form's error value in the reply."
+  {:seon/entrant true
+   :malli/schema [:=> [:cat :seon.batch/request :seon.batch/folding] :seon.batch/folding]}
   [request batch]
   (let [r (:seon.batch/step batch)
         n (:seon.batch/ordinal batch)
         t0 (System/nanoTime)
         base (merge {:seon.batch/ordinal n :seon.batch/form (:seon.batch/form r)} (source-of r (:seon.batch/line-cursor batch)))
         world (cond-> (form-world request n)
+                ;; the form as read: arming knows a definition the branch already holds (`seon.sci.arm/arm!`)
+                (:seon.batch/source base) (assoc :seon.batch/source (:seon.batch/source base))
                 (seq (:seon.batch/defined batch)) (assoc :seon.batch/defined (:seon.batch/defined batch))
                 ;; the earlier forms' facts: this form's reads of its connection answer the request view
                 (seq (:seon.batch/request-facts batch)) (assoc :seon.batch/request-facts (:seon.batch/request-facts batch)))

@@ -90,7 +90,8 @@
        (is (= :seon.config/agent-overlay (second (:in entity))))
        (doseq [target ["my.message/send" "my.task/current"]
                :let [doc (:seon.sci.admit/value (run (str "(doc " target ")")))]]
-         (is (= #{:summary :body :example :arglists :in :out :supplied :schemas} (set (keys doc))))
+         ;; :cost is the function's live per-call figures, present once it has been called
+         (is (= #{:summary :body :example :arglists :in :out :supplied :schemas} (disj (set (keys doc)) :cost)))
          (is (not (str/blank? (:summary doc))))
          (is (not (str/blank? (:body doc))))
          (is (seq (read-string (:example doc)))))

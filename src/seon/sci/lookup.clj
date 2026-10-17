@@ -14,6 +14,7 @@
             [seon.db :as db]
             [seon.error.refusal]
             [seon.fn.analyzer :as analyzer]
+            [seon.profile :as profile]
             [seon.program :as program]
             [seon.render.schema :as render.schema]
             [seon.ref :as ref]
@@ -164,7 +165,7 @@
 
 (def ^:private program-documentation-selector
   [:seon.fn/sym :seon.fn/doc :seon.fn/doc-order :seon.fn/arglists :seon.fn/spec
-   :seon.schema.admission/source
+   :seon.schema.admission/source :seon.program/definition-digest
    {:seon.fn/arities
     [:seon.fn.arity/arity
      '(limit :seon.fn.arity/input-refs nil)
@@ -363,8 +364,9 @@
 
 (defn- function-doc-map
   "The documentation of one program row: its doc and arglists, the stored
-  contract with the schemas it names and, for an accepted override, its
-  JVM-boundary note."
+  contract with the schemas it names, its live per-call figures
+  (`seon.profile/figures`, keyed by its definition digest) once called and,
+  for an accepted override, its JVM-boundary note."
   {:malli/schema [:=> [:cat :seon.db/database-value :map :boolean] [:or :map :seon.db/error-result]]}
   [database row overridden?]
   (let [arglists (when-let [text (:seon.fn/arglists row)]
@@ -377,6 +379,9 @@
            (agent-documentation-contract database row)
            (when-let [schemas (not-empty (schema-descriptions database row))]
              {:schemas schemas})
+           ;; the live per-call figures of this definition: a changed body has its own digest, so starts fresh
+           (when-let [figures (profile/figures [(:seon.fn/sym row) (:seon.program/definition-digest row)])]
+             {:cost figures})
            (when overridden?
              {:seon.schema.admission/note
               "Accepted database override for SCI; JVM callers retain the compiled definition until write-back and reload."}))))

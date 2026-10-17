@@ -62,7 +62,7 @@
    {:op :seon-db-nine-forms
     :why "Nine unchanged forms of a 6,500-line namespace: read, analyze and digest each form, all digests equal, nothing written, no test: proportional to 9 forms, never to the namespace."
     :estimate {:alloc-mb 80.0 :calls 12000 :reads 150 :ms 400.0}
-    :overrun '{:task seon.repl/re-evaluating-nine-seon-db-forms-allocates-nine-gigabytes :alloc-mb 5856.9 :calls 587548 :reads 22905 :ms 2072.9}}
+    :overrun '{:task seon.repl/re-evaluating-nine-seon-db-forms-allocates-nine-gigabytes :alloc-mb 871.4 :calls 93090 :reads 1358}}
    {:op :merge-one-function
     :why "Root merges a branch changing one function: a three-way diff of ~30 datoms from the merge base, its proof and one reaching test run on the merge branch, one merge transaction: proportional to the delta."
     :estimate {:alloc-mb 48.0 :calls 8000 :reads 200 :ms 400.0}

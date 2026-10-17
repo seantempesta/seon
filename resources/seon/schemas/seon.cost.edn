@@ -37,6 +37,7 @@
   [:seon.cost/writer {:optional true} :seon.cost/writer]
   [:seon.cost/commit {:optional true} :seon.cost/commit]
   [:seon.cost/live {:optional true} :seon.cost/live]
+  [:seon.cost/functions {:optional true} :seon.cost/functions]
   [:seon.cost/tests {:optional true} :seon.cost/tests]
   [:seon.cost/live-tests {:optional true} :seon.cost/live-tests]]
  :seon.cost/step
@@ -69,6 +70,22 @@
  :seon.cost/diff
  [:vector {:description "The request's comparisons against main, at most :seon.config.test.cost/top. Producer: seon.batch/cost-diff. Consumer: the reply."}
   :seon.cost/comparison]
+ :seon.cost/function
+ [:map {:description "One function's volumes in one request (seon.profile/top-functions)."}
+  [:seon.cost.function/sym :seon.cost.function/sym]
+  [:seon.cost.function/calls :seon.cost.function/calls]
+  [:seon.cost.function/ms :seon.cost.function/ms]
+  [:seon.cost.function/alloc-mb :seon.cost.function/alloc-mb]
+  [:seon.cost.function/self-alloc-mb :seon.cost.function/self-alloc-mb]
+  [:seon.cost.function/reads :seon.cost.function/reads]
+  [:seon.cost.function/self-reads :seon.cost.function/self-reads]
+  [:seon.cost.function/steps :seon.cost.function/steps]
+  [:seon.cost.function/kb-per-call :seon.cost.function/kb-per-call]
+  [:seon.cost.function/reads-per-call :seon.cost.function/reads-per-call]]
+ :seon.cost/functions
+ [:map {:description "The request's top functions from its call sink, by their own allocation and by the reads they issued, at most :seon.config.test.cost/top each. Producer: seon.profile/top-functions. Consumer: the reply's cost result."}
+  [:seon.cost.functions/by-alloc [:vector :seon.cost/function]]
+  [:seon.cost.functions/by-reads [:vector :seon.cost/function]]]
  :seon.cost/live
  [:vector {:description "The request's own per-definition values from its sink: what the reply compares. Producer: seon.profile/live-costs."}
   :seon.fn.cost/entity]
@@ -123,6 +140,7 @@
   [:seon.cost/shared {:optional true} :seon.cost/shared]
   [:seon.cost/tests {:optional true} :seon.cost/tests]
   [:seon.cost/diff {:optional true} :seon.cost/diff]
+  [:seon.cost/functions {:optional true} :seon.cost/functions]
   [:seon.cost/stages {:optional true} :seon.cost/stages]
   [:seon.cost/calls {:optional true} :seon.cost/calls]
   [:seon.cost/reads {:optional true} :seon.cost/reads]

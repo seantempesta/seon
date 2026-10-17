@@ -666,7 +666,8 @@
   (let [original (original-interpreted f)
         callable-identity (merge {:seon.profile/sym function-symbol
                                   :seon.profile/scope :seon.profile/context
-                                  :seon.profile/cold-calls (:seon.config.fn.cost/cold-calls config/defaults)}
+                                  :seon.profile/cold-calls (:seon.config.fn.cost/cold-calls config/defaults)
+                                  :seon.profile/size-period (:seon.config.fn.cost/size-period config/defaults)}
                                  (when-let [digest (:seon.program/definition-digest arm-request)]
                                    {:seon.profile/digest digest})
                                  (select-keys arm-request [:seon.profile/context]))
@@ -707,8 +708,8 @@
         ;; installation alone; the projection never retains the callable.
         ;; The predicate bindings it compiled with are kept as data, so a
         ;; context that later holds one apart re-arms it (`seon.sci.arm/arm!`).
-        (profile/with-cell cell
-          (with-meta (fn [& arguments] (profile/timed (apply wrapped arguments)))
+        (let [^seon.profile.Bracket counting (profile/bracket cell)]
+          (with-meta (fn [& arguments] (.counted counting wrapped arguments))
             (assoc (meta wrapped) interpreted-original original ::cell cell
                    ::predicate-functions (schema/predicate-functions-in projection))))))))
 
@@ -1044,7 +1045,8 @@
              function-symbol (var-symbol candidate)
              callable-identity (cond-> {:seon.profile/sym function-symbol
                                         :seon.profile/scope :seon.profile/host
-                                        :seon.profile/cold-calls (:seon.config.fn.cost/cold-calls config/defaults)}
+                                        :seon.profile/cold-calls (:seon.config.fn.cost/cold-calls config/defaults)
+                                        :seon.profile/size-period (:seon.config.fn.cost/size-period config/defaults)}
                                  digest (assoc :seon.profile/digest digest))
              prior (::cell (meta current))
              cell (if (profile/reusable? prior callable-identity
@@ -1054,7 +1056,7 @@
              contract (get (:seon.schema.projection/function-contracts projection)
                            function-symbol authored)
              definitions (contract-definitions projection contract)]
-         (profile/with-cell cell
+         (let [^seon.profile.Bracket counting (profile/bracket cell)]
           (with-meta
            ;; One wrapper per adoption: a call never picks another projection,
            ;; so it never compiles. Other branches' differing entities interpret
@@ -1062,7 +1064,7 @@
            (fn [& arguments]
              (if *compiling-contract*
                (apply original arguments)
-               (profile/timed (apply boot-wrapper arguments))))
+               (.counted counting boot-wrapper arguments)))
            {:malli.instrument/original original
             ::cell cell
             ::policy policy

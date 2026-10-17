@@ -47,7 +47,7 @@ transaction; main's values change only when a merge lands, so the comparison is 
 1. **Step** (Flow proc thread, platform after stage 1): `seon.flow/var-process` brackets the step with
    `getCurrentThreadAllocatedBytes`/`getCurrentThreadCpuTime` → `:seon.cost/step` → in the reply
    (`:seon.repl/request`). Cost: two counter pairs, ~1 µs.
-2. **Functions** (every armed call, `seon.profile/timed`): calls, inclusive ns, self ns into the world's sink, and
+2. **Functions** (every armed call, `seon.profile/bracket`): calls, inclusive ns, self ns into the world's sink, and
    again into the counter's cold half when the call is one of the definition's first `:seon.config.fn.cost/cold-calls`
    (1) calls in this process, by its profile cell's call order (`:seon.profile/ordinal`; no clock, no restart stamp;
    once past them the ordinal is only read). The reply reads the sink directly for the request's live per-function

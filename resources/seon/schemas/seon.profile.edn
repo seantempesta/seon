@@ -10,6 +10,17 @@
                       :seon.profile/host :seon.profile/context]
  :seon.profile/context [:string {:min 1 :description "The installer's name for the SCI context, when it supplied one."}]
  :seon.profile/cold-calls [:int {:min 0 :description "How many of the callable's first calls in this process are cold (:seon.config.fn.cost/cold-calls at arming); absent: none."}]
+ :seon.profile/size-period [:int {:min 0 :description "One outermost call in this many, at random, records its touched size (:seon.config.fn.cost/size-period at arming); 0 or absent: none."}]
+ :seon.profile/read? [:boolean {:description "The callable is a seon.db read entrance (seon.profile/read-entrances): its calls count as reads in its callers."}]
+ :seon.profile/volume-histogram [:fn {:error/message "must be a java.util.concurrent.atomic.AtomicLongArray of 40 buckets"
+                                       :description "A log2 histogram of a per-call volume: bucket b counts outermost calls of [2^(b-1), 2^b) bytes or reads, bucket 0 the zero call."}
+                                 seon.profile/world-counter?]
+ :seon.profile/bracket [:fn {:error/message "must be a seon.profile.Bracket"
+                             :description "A cell's one counting entry (seon.profile/bracket), made once at installation: a seon.profile.Bracket, which only seon.profile/bracket makes."}
+                         clojure.core/some?]
+ :seon.profile/sizes [:fn {:error/message "must be a java.util.concurrent.atomic.AtomicLongArray"
+                           :description "A cell's sampled-size counters (seon.profile/size-slots): sampled calls, summed touched size N, steps, reads, allocated bytes, the largest reads and steps per N of one sample, in thousandths, then self steps, self reads and self allocated bytes."}
+                      seon.profile/world-counter?]
  :seon.profile/ordinal [:fn {:error/message "must be a java.util.concurrent.atomic.AtomicLong"
                              :description "The cell's counted entries in this process, up to its cold calls: the call order that makes a call cold."}
                         seon.batch/stamped-clock?]
@@ -29,9 +40,7 @@
  :seon.profile/self-counter :seon.profile/adder
  :seon.profile/max-counter :seon.profile/accumulator
  :seon.profile/entry-counter [:and {:description "Outermost entries; in flight is entries minus calls."} :seon.profile/adder]
- :seon.profile/throw-counts [:fn {:error/message "must be a java.util.concurrent.ConcurrentHashMap of Class to LongAdder"
-                                  :description "Outermost calls that threw, by the thrown class."}
-                            seon.profile/throw-counts?]
+ :seon.profile/throw-counter [:and {:description "Outermost calls that threw: the bracket's exit found the entry short of its return marker (seon.profile/returned-entry)."} :seon.profile/adder]
  :seon.profile/entered [:fn {:error/message "must be a java.lang.ThreadLocal"
                              :description "Set on a thread while it is inside this cell's outermost call; a re-entry on that thread is not counted again."}
                         seon.profile/thread-local?]
@@ -46,10 +55,23 @@
   [:seon.profile/self-counter :seon.profile/self-counter]
   [:seon.profile/max-counter :seon.profile/max-counter]
   [:seon.profile/entry-counter :seon.profile/entry-counter]
-  [:seon.profile/throw-counts :seon.profile/throw-counts]
+  [:seon.profile/throw-counter :seon.profile/throw-counter]
   [:seon.profile/entered :seon.profile/entered]
   [:seon.profile/ordinal :seon.profile/ordinal]
-  [:seon.profile/cold-calls {:optional true} :seon.profile/cold-calls]]
+  [:seon.profile/cold-calls {:optional true} :seon.profile/cold-calls]
+  [:seon.profile/size-period {:optional true} :seon.profile/size-period]
+  [:seon.profile/alloc-counter {:description "Inclusive bytes the outermost calls allocated on their own thread."} :seon.profile/adder]
+  [:seon.profile/self-alloc-counter {:description "Bytes allocated in the body itself: inclusive less the counted callees'."} :seon.profile/adder]
+  [:seon.profile/alloc-max-counter :seon.profile/accumulator]
+  [:seon.profile/alloc-histogram :seon.profile/volume-histogram]
+  [:seon.profile/alloc-unmeasured-counter {:description "Outermost calls whose thread keeps no allocation count (a virtual thread)."} :seon.profile/adder]
+  [:seon.profile/reads-counter {:description "Inclusive reads: counted seon.db read entrances inside the outermost calls."} :seon.profile/adder]
+  [:seon.profile/self-reads-counter {:description "Reads the body issued itself: inclusive less its counted callees'."} :seon.profile/adder]
+  [:seon.profile/reads-max-counter :seon.profile/accumulator]
+  [:seon.profile/reads-histogram :seon.profile/volume-histogram]
+  [:seon.profile/steps-counter {:description "Steps: counted armed entries inside the outermost calls."} :seon.profile/adder]
+  [:seon.profile/sizes :seon.profile/sizes]
+  [:seon.profile/read? :seon.profile/read?]]
  :seon.profile/held-cell
  [:map {:description "A live registry member as a read answers it. seon.profile/cell, the registry's only writer, checked its counters when it made the cell, so a read checks the cell's identity only."}
   [:seon.profile/sym :seon.profile/sym]
@@ -65,8 +87,69 @@
  :seon.profile/throws [:int {:min 0}]
  :seon.profile/in-flight [:int {:min 0 :description "Outermost calls entered and not yet returned, approximately (two counters read apart)."}]
  :seon.profile/p50-us [:int {:min 0 :description "The median's histogram bucket upper edge, in microseconds: within a factor of two."}]
+ :seon.profile/p95-us [:int {:min 0 :description "The 95th percentile's histogram bucket upper edge, in microseconds: within a factor of two."}]
+ :seon.profile/max-us [:int {:min 0 :description "Lifetime maximum of one call, inclusive, in whole milliseconds as microseconds."}]
+ :seon.profile/alloc-mb [:double {:min 0.0 :description "Megabytes the outermost calls allocated on their own threads, inclusive of callees: the measured calls' scaled to all calls (seon.profile/bracket samples it)."}]
+ :seon.profile/self-alloc-mb [:double {:min 0.0 :description "Megabytes allocated in the bodies themselves: inclusive less the counted callees'."}]
+ :seon.profile/alloc-p50-bytes [:int {:min 0 :description "Median bytes one call allocated: the largest value of its log2 bucket."}]
+ :seon.profile/alloc-p95-bytes [:int {:min 0 :description "95th-percentile bytes one call allocated: the largest value of its log2 bucket."}]
+ :seon.profile/alloc-max-bytes [:int {:min 0 :description "The most bytes one call allocated, exact."}]
+ :seon.profile/alloc-measured [:int {:min 0 :description "Outermost calls that measured their allocation (sampled, seon.profile/bracket); the allocation figures are theirs, totals scaled to all calls."}]
+ :seon.profile/self-reads [:int {:min 0 :description "Reads the bodies issued themselves: the function issuing the reads."}]
+ :seon.profile/reads-p50 [:int {:min 0 :description "Median reads of one call: the largest value of its log2 bucket."}]
+ :seon.profile/reads-p95 [:int {:min 0 :description "95th-percentile reads of one call: the largest value of its log2 bucket."}]
+ :seon.profile/reads-max [:int {:min 0 :description "The most reads one call made, exact."}]
+ :seon.profile/steps [:int {:min 0 :description "Armed calls made inside the outermost calls."}]
+ :seon.profile/alloc-unmeasured [:int {:min 1 :description "Calls whose allocation was not measured (a virtual thread keeps no count)."}]
+ :seon.profile/samples [:int {:min 0 :description "Sampled calls that recorded their touched size."}]
+ :seon.profile/size-mean [:double {:min 0.0 :description "Mean touched size N of the sampled calls."}]
+ :seon.profile/reads-per-n [:double {:min 0.0 :description "The sampled calls' reads over their summed touched size."}]
+ :seon.profile/steps-per-n [:double {:min 0.0 :description "The sampled calls' steps over their summed touched size."}]
+ :seon.profile/bytes-per-n [:double {:min 0.0 :description "The sampled calls' allocated bytes over their summed touched size."}]
+ :seon.profile/max-reads-per-n [:double {:min 0.0 :description "The largest reads per unit of N of one sampled call."}]
+ :seon.profile/max-steps-per-n [:double {:min 0.0 :description "The largest steps per unit of N of one sampled call."}]
+ :seon.profile/sampled
+ [:map {:description "A cell's sampled sizes: the evidence the default cost contract is sized from."}
+  [:seon.profile/samples :seon.profile/samples]
+  [:seon.profile/size-mean :seon.profile/size-mean]
+  [:seon.profile/reads-per-n :seon.profile/reads-per-n]
+  [:seon.profile/steps-per-n :seon.profile/steps-per-n]
+  [:seon.profile/bytes-per-n :seon.profile/bytes-per-n]
+  [:seon.profile/max-reads-per-n :seon.profile/max-reads-per-n]
+  [:seon.profile/max-steps-per-n :seon.profile/max-steps-per-n]]
+ :seon.profile/volumes
+ [:map {:description "A cell's allocation, reads and steps (seon.profile/volumes)."}
+  [:seon.profile/alloc-mb :seon.profile/alloc-mb]
+  [:seon.profile/self-alloc-mb :seon.profile/self-alloc-mb]
+  [:seon.profile/alloc-measured :seon.profile/alloc-measured]
+  [:seon.profile/alloc-p50-bytes :seon.profile/alloc-p50-bytes]
+  [:seon.profile/alloc-p95-bytes :seon.profile/alloc-p95-bytes]
+  [:seon.profile/alloc-max-bytes :seon.profile/alloc-max-bytes]
+  [:seon.profile/reads :seon.profile/reads]
+  [:seon.profile/self-reads :seon.profile/self-reads]
+  [:seon.profile/reads-p50 :seon.profile/reads-p50]
+  [:seon.profile/reads-p95 :seon.profile/reads-p95]
+  [:seon.profile/reads-max :seon.profile/reads-max]
+  [:seon.profile/steps :seon.profile/steps]
+  [:seon.profile/alloc-unmeasured {:optional true} :seon.profile/alloc-unmeasured]
+  [:seon.profile/sampled {:optional true} :seon.profile/sampled]]
+ :seon.profile/figures
+ [:map {:description "One definition's live per-call figures as doc shows them (seon.profile/figures)."}
+  [:seon.profile/calls :seon.profile/calls]
+  [:seon.profile/scope :seon.profile/scope]
+  [:seon.profile/p50-us {:optional true} :seon.profile/p50-us]
+  [:seon.profile/p95-us {:optional true} :seon.profile/p95-us]
+  [:seon.profile/max-us :seon.profile/max-us]
+  [:seon.profile/alloc-p50-bytes {:optional true} :seon.profile/alloc-p50-bytes]
+  [:seon.profile/alloc-p95-bytes {:optional true} :seon.profile/alloc-p95-bytes]
+  [:seon.profile/alloc-max-bytes {:optional true} :seon.profile/alloc-max-bytes]
+  [:seon.profile/reads-p50 {:optional true} :seon.profile/reads-p50]
+  [:seon.profile/reads-p95 {:optional true} :seon.profile/reads-p95]
+  [:seon.profile/reads-max {:optional true} :seon.profile/reads-max]
+  [:seon.profile/alloc-unmeasured {:optional true} :seon.profile/alloc-unmeasured]
+  [:seon.profile/sampled {:optional true} :seon.profile/sampled]]
+ :seon.profile/pain [:vector {:description "The system's pain, most first: definitions over their default cost contract (seon.profile/pain)."} :seon.profile.pain/entry]
  :seon.profile/p99-us [:int {:min 0 :description "The 99th percentile's histogram bucket upper edge, in microseconds: within a factor of two."}]
- :seon.profile/throws-by-class [:map-of {:description "Outermost calls that threw, by the thrown class's name: throws used as control flow show here."} :string [:int {:min 1}]]
  :seon.profile/observation
  [:map
   [:seon.profile/sym :seon.profile/sym]
@@ -82,13 +165,27 @@
   [:seon.profile/throws {:optional true} :seon.profile/throws]
   [:seon.profile/in-flight {:optional true} :seon.profile/in-flight]
   [:seon.profile/p50-us {:optional true} :seon.profile/p50-us]
+  [:seon.profile/p95-us {:optional true} :seon.profile/p95-us]
   [:seon.profile/p99-us {:optional true} :seon.profile/p99-us]
-  [:seon.profile/throws-by-class {:optional true} :seon.profile/throws-by-class]]
+  [:seon.profile/alloc-mb {:optional true} :seon.profile/alloc-mb]
+  [:seon.profile/self-alloc-mb {:optional true} :seon.profile/self-alloc-mb]
+  [:seon.profile/alloc-measured {:optional true} :seon.profile/alloc-measured]
+  [:seon.profile/alloc-p50-bytes {:optional true} :seon.profile/alloc-p50-bytes]
+  [:seon.profile/alloc-p95-bytes {:optional true} :seon.profile/alloc-p95-bytes]
+  [:seon.profile/alloc-max-bytes {:optional true} :seon.profile/alloc-max-bytes]
+  [:seon.profile/reads {:optional true} :seon.profile/reads]
+  [:seon.profile/self-reads {:optional true} :seon.profile/self-reads]
+  [:seon.profile/reads-p50 {:optional true} :seon.profile/reads-p50]
+  [:seon.profile/reads-p95 {:optional true} :seon.profile/reads-p95]
+  [:seon.profile/reads-max {:optional true} :seon.profile/reads-max]
+  [:seon.profile/steps {:optional true} :seon.profile/steps]
+  [:seon.profile/alloc-unmeasured {:optional true} :seon.profile/alloc-unmeasured]
+  [:seon.profile/sampled {:optional true} :seon.profile/sampled]]
  :seon.profile/counts [:fn {:error/message "must be a long array of 40 histogram counts and the throws"
                             :description "A cell's histogram counts followed by its throws, [b0 ... b39 throws]."}
                        seon.profile/counts?]
  :seon.profile/world-counter [:fn {:error/message "must be a java.util.concurrent.atomic.AtomicLongArray"
-                                   :description "A world's counter array: one executed definition's counter in its call sink, [calls nanos self-nanos calls-at-last-transaction self-at-last-transaction nanos-at-last-transaction] for all its calls, then the same six for its cold calls alone (twelve slots, seon.profile/new-adder), or its writer meter (six slots, seon.db/writer-meter)."}
+                                   :description "A world's counter array: one executed definition's counter in its call sink, [calls nanos self-nanos calls-at-last-transaction self-at-last-transaction nanos-at-last-transaction] for all its calls, then the same six for its cold calls alone, then allocated bytes, self allocated bytes, reads, self reads and steps (seventeen slots, seon.profile/new-adder), or its writer meter (six slots, seon.db/writer-meter)."}
                               seon.profile/world-counter?]
  :seon.profile/observed [:int {:min 0}]
  :seon.profile/over-second-count [:int {:min 0 :description "Definitions with a call over one second (inclusive)."}]
@@ -128,7 +225,7 @@
   [:seon.profile/self-ms :seon.profile/self-ms]]
  :seon.profile/ranked-by-self [:vector {:description "The armed definitions entered over the measured call, most self time first (at most seon.profile/hot-limit): where the time went, wrappers below the work they wrap."} :seon.profile/entered-row]
  :seon.profile/called [:map-of {:description "Every armed definition entered over the measured call to its outermost entries (JVM-wide), uncut: seon.profile/calls-of reads one."} :seon.profile/sym [:int {:min 1}]]
- :seon.profile/reads [:int {:min 0 :description "The entries of seon.profile/read-entrances among the measured call's armed entries: database reads through seon.db."}]
+ :seon.profile/reads [:int {:min 0 :description "Database reads through seon.db: entries of seon.profile/read-entrances among the measured call's armed entries, or inside a cell's outermost calls."}]
  :seon.profile/measured-call
  [:map {:description "One measured call (seon.profile/measure): its value and what it cost, from JVM counters."}
   [:seon.profile/value :seon.profile/value]

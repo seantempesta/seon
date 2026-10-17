@@ -50,7 +50,7 @@
  :cache :seon.cache/status
  :tested? [:boolean {:description "Whether any test reaches a function (seon.fn/functions-without-tests)."}]
  :refused [:or [:vector {:description "A refusal for each stored finding schema that constrains only identity attributes; its matches are never derived."} :seon.error/value] :seon.error/value]
- :profile [:or [:vector {:description "The observations of the definitions worth a finding, each saying whether a test reaches it: those whose stored cost entity (`:seon.fn.cost/entity`) has a mean self time per call over one second, and those the live cells show called ten thousand times or thrown a thousand times."} :seon.profile/observation] :seon.error/value]
+ :profile [:or [:vector {:description "The definitions worth a finding, each saying whether a test reaches it: the observations of those whose stored cost entity (`:seon.fn.cost/entity`) has a mean self time per call over one second or whose live cell threw a thousand times, and the pain entries of those spending beyond their default cost contract in their own bodies (seon.profile/pain)."} [:or :seon.profile/observation :seon.profile.pain/entry]] :seon.error/value]
  :replaced-roots [:vector {:description "Loaded first-party Vars whose root is not their namespace's own compile: a redefinition outside a reload, each as seon.instrument/replaced-roots reports it."} :seon.instrument/replaced-root]
  :program :seon.error/value
 
@@ -102,13 +102,13 @@
         :description "An armed definition (a profile observation) that threw at least a thousand times: throws used as control flow."}
   [:seon.profile/sym :seon.profile/sym]
   [:seon.profile/throws [:int {:min 1000}]]]
- :untested-hot-warning
+ :untested-pain-warning
  [:map {:seon.health/severity 3 :seon.health/impact :seon.profile/calls :seon.health/subject :seon.profile/sym
-        :seon.health/in [:seon.health/profile] :seon.health/inclusive true
-        :seon.health/clues [[:seon.profile/calls] [:seon.profile/total-ms]]
-        :description "An armed definition (a profile observation) called at least ten thousand times that no test reaches: hot in production, proven by nothing."}
+        :seon.health/in [:seon.health/profile]
+        :seon.health/clues [[:seon.profile/calls] [:seon.profile.pain/share] [:seon.profile.pain/overrun] [:seon.profile.pain/per-n]]
+        :description "A definition in pain (seon.profile/pain: live cost spent in its own body beyond its default cost contract) that no test reaches: costly in production, proven by nothing."}
   [:seon.profile/sym :seon.profile/sym]
-  [:seon.profile/calls [:int {:min 10000}]]
+  [:seon.profile.pain/share :seon.profile.pain/share]
   [:seon.health/tested? [:= false]]]
  :missing-layers-warning
  [:map {:seon.health/severity 9 :seon.health/in [:seon.health/readiness] :seon.health/clues [[:seon.boot/missing-layers]]

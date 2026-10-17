@@ -5614,8 +5614,10 @@
   closes the run before any throw leaves it (`close-escaped-run!`), so an
   escaped pass is one closed run plus its one fault. Disarm awaits the stop
   transition or joins that same active bound; a ready permit never
-  substitutes for proc exit."
-  {:malli/schema [:function
+  substitutes for proc exit. As the turn Flow proc's step it is an entrant
+  boundary: an escaping throw becomes the pass's one fault here."
+  {:seon/entrant true
+   :malli/schema [:function
                   [:=> [:cat] [:map]]
                   [:=> [:cat :map] :map]
                   [:=> [:cat :map :keyword] :map]
@@ -5815,7 +5817,8 @@
                                                             (when (and (int? top) (int? floor))
                                                               (let [sink (:seon.batch/sink seon.batch/*world*)]
                                                                 {:seon.cost/live (profile/live-costs sink (db/sink-digests (db/db connection) sink)
-                                                                                                     floor top)})))
+                                                                                                     floor top)
+                                                                 :seon.cost/functions (profile/top-functions sink top)})))
                                                     (and (:seon.cost/tests tests) (:seon.cost/counts report))
                                                     (update :seon.cost/counts merge (select-keys tests [:seon.cost/tests :seon.cost/live-tests]))
                                                     (and step-cost (:seon.cost/counts report))

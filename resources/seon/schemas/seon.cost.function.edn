@@ -1,0 +1,12 @@
+;; One function's volumes in one request (seon.profile/top-functions).
+{:seon.cost.function/sym :qualified-symbol
+ :seon.cost.function/alloc-measured [:int {:min 0 :description "The calls that measured their allocation (sampled, seon.profile/bracket): the megabytes are theirs scaled to all calls."}]
+ :seon.cost.function/calls [:int {:min 0 :description "The function's armed calls in the request."}]
+ :seon.cost.function/ms [:double {:min 0.0 :description "Inclusive wall milliseconds of those calls, to 0.1."}]
+ :seon.cost.function/alloc-mb [:double {:min 0.0 :description "Megabytes those calls allocated on their own threads, inclusive of callees."}]
+ :seon.cost.function/self-alloc-mb [:double {:min 0.0 :description "Megabytes allocated in the function's own body."}]
+ :seon.cost.function/reads [:int {:min 0 :description "seon.db read entrances inside those calls."}]
+ :seon.cost.function/self-reads [:int {:min 0 :description "Reads the function's own body issued."}]
+ :seon.cost.function/steps [:int {:min 0 :description "Armed calls inside those calls."}]
+ :seon.cost.function/kb-per-call [:double {:min 0.0 :description "Inclusive kilobytes allocated per call."}]
+ :seon.cost.function/reads-per-call [:double {:min 0.0 :description "Inclusive reads per call."}]}

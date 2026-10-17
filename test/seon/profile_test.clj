@@ -284,3 +284,67 @@
         (is (= [3 1] [(.get counter 0) (.get counter profile/cold-slot)])
             "three calls, the cell's first of them cold"))
       (finally (ns-unmap 'seon.profile-test var-name)))))
+
+(deftest a-call-shows-its-reads-allocation-and-steps-in-its-cell-and-its-request
+  ;; one call reading three times through a seon.db read entrance and allocating a
+  ;; one-megabyte array: its cell and the request's top functions both show it
+  (let [var-name (symbol (str "volume-" (random-uuid)))
+        sym (symbol "seon.profile-test" (name var-name))
+        database (db/db db/*conn*)]
+    (try
+      (let [candidate (arm-probe! var-name
+                                  (fn [n]
+                                    (dotimes [_ n] (db/datoms database :eavt :db/ident))
+                                    (alength (byte-array 1000000)))
+                                  digest-a)
+            sink (batch/sink)
+            ;; inside a measured call every armed call reads its allocation (it is sampled otherwise)
+            _ (profile/measure #(binding [batch/*world* {:seon.batch/sink sink}] (candidate 3)))
+            observed (profile/observation (cell-of @candidate))
+            top (profile/top-functions sink 1000)
+            row-of (fn [rows] (first (filter #(= sym (:seon.cost.function/sym %)) rows)))
+            row (row-of (:seon.cost.functions/by-alloc top))]
+        (is (= {:seon.profile/calls 1 :seon.profile/reads 3 :seon.profile/self-reads 3 :seon.profile/reads-max 3
+                :seon.profile/alloc-measured 1}
+               (select-keys observed [:seon.profile/calls :seon.profile/reads :seon.profile/self-reads
+                                      :seon.profile/reads-max :seon.profile/alloc-measured])))
+        (is (<= 1000000 (:seon.profile/alloc-max-bytes observed)) "the array is in the call's allocation")
+        (is (<= 1.0 (:seon.profile/self-alloc-mb observed)) "allocated in its own body")
+        (is (<= 3 (:seon.profile/steps observed)) "the three reads are steps inside it")
+        (is (= [1 3 3] (mapv row [:seon.cost.function/calls :seon.cost.function/reads :seon.cost.function/self-reads])))
+        (is (<= 1.0 (:seon.cost.function/self-alloc-mb row)))
+        (is (= row (row-of (:seon.cost.functions/by-reads top))) "it issued the reads, so it ranks by them too")
+        (is (= {:seon.profile/calls 1 :seon.profile/reads-p50 3 :seon.profile/reads-max 3}
+               (select-keys (profile/figures [sym digest-a])
+                            [:seon.profile/calls :seon.profile/reads-p50 :seon.profile/reads-max]))
+            "doc's figures are its definition's, keyed by digest")
+        (is (nil? (profile/figures [sym digest-b])) "a changed body starts fresh"))
+      (finally (ns-unmap 'seon.profile-test var-name)))))
+
+(deftest pain-is-the-self-overrun-of-the-default-contract-and-none-inside-it
+  (let [contract {:steps [8.0 32.0] :reads [2.0 4.0] :bytes [4096.0 65536.0]}
+        made (fn [suffix reads self-reads]
+               (let [held (profile/cell {:seon.profile/sym (symbol "seon.profile-test.pain" (str suffix "-" (random-uuid)))
+                                         :seon.profile/digest digest-a :seon.profile/scope :seon.profile/host})
+                     ^java.util.concurrent.atomic.AtomicLongArray sizes (:seon.profile/sizes held)]
+                 (.add ^java.util.concurrent.atomic.LongAdder (:seon.profile/entry-counter held) 10)
+                 ;; one sampled call of N 10 with `reads` reads, `self-reads` of them its own body's
+                 (.set sizes 0 1) (.set sizes 1 10) (.set sizes 3 reads) (.set sizes 8 self-reads)
+                 held))
+        inside (made "inside" 24 24)
+        over (made "over" 240 240)
+        ;; an entrance whose callees issue the reads: inclusively over, no pain of its own
+        entrance (made "entrance" 240 0)
+        ranked (profile/pain contract)
+        entry-of (fn [held] (first (filter #(= (:seon.profile/sym held) (:seon.profile/sym %)) ranked)))]
+    (is (= {:steps 0.0 :reads 0.0 :bytes 0.0} (:seon.profile.pain/share (entry-of inside)))
+        "at k × N + c exactly: no pain, however hot")
+    (is (= 10.0 (get-in (entry-of over) [:seon.profile.pain/overrun :reads])))
+    (is (= 24.0 (get-in (entry-of over) [:seon.profile.pain/per-n :reads])))
+    (is (pos? (get-in (entry-of over) [:seon.profile.pain/share :reads])))
+    (is (= {:steps 0.0 :reads 0.0 :bytes 0.0} (:seon.profile.pain/share (entry-of entrance)))
+        "the inclusive overrun of an entrance is its callees' work, not its pain")
+    (is (= 10.0 (get-in (entry-of entrance) [:seon.profile.pain/inclusive-overrun :reads]))
+        "the inclusive figure stays beside, as data")
+    (is (< (.indexOf ^java.util.List ranked (entry-of over)) (.indexOf ^java.util.List ranked (entry-of entrance))))
+    (is (< (.indexOf ^java.util.List ranked (entry-of over)) (.indexOf ^java.util.List ranked (entry-of inside))))))

@@ -401,17 +401,19 @@
    :seon.profile/self-mean-us (long self-us)})
 
 (defn- profile-unit
-  "Observations of the armed definitions worth a finding, each saying whether
-  a test reaches it once that set is derived: the set is read within the
-  deadline, and while it is still deriving an observation says nothing about
-  tests (unknown, never untested) and the completion runs `wake`.
+  "The armed definitions worth a finding, each saying whether a test reaches
+  it once that set is derived: the set is read within the deadline, and while
+  it is still deriving an entry says nothing about tests (unknown, never
+  untested) and the completion runs `wake`.
   The definitions whose stored mean self time per call is over the bound are the
   stored cost entities (they survive a restart; one indexed scan); the live
-  cells add the definitions that threw a thousand times or were called ten
-  thousand times, which a cost entity does not keep, a cell's one counter read
-  first so only candidates pay for an observation."
+  cells add the definitions that threw a thousand times, which a cost entity
+  does not keep, a cell's one counter read first so only candidates pay for an
+  observation, and the definitions in pain, live cost spent in their own
+  bodies beyond the default cost contract (`seon.profile/pain`, its one
+  ranking)."
   {:malli/schema [:=> [:cat :seon.db/database-value [:int {:min 0}] [:maybe [:fn clojure.core/ifn?]]]
-                  [:or [:vector :seon.profile/observation] :seon.error/value]]}
+                  [:or [:vector [:or :seon.profile/observation :seon.profile.pain/entry]] :seon.error/value]]}
   [database deadline-ms wake]
   (let [stored (db/q stored-slow-query database 1000000.0)]
     (if-not (set? stored)
@@ -421,13 +423,14 @@
                         (cache/lookup-within ::untested committed weight #(untested database) deadline-ms wake)
                         (untested database))
             known? (set? unreached)
-            live (into {} (comp (filter #(<= 1000 (.sum ^java.util.concurrent.atomic.LongAdder (:seon.profile/entry-counter %))))
-                                (map profile/observation)
-                                (filter #(or (<= 10000 (:seon.profile/calls %)) (<= 1000 (:seon.profile/throws %))))
-                                (map (juxt :seon.profile/sym identity)))
-                       (profile/cells))]
+            throwing (into {} (comp (filter #(<= 1000 (.sum ^java.util.concurrent.atomic.LongAdder (:seon.profile/throw-counter %))))
+                                    (map profile/observation)
+                                    (map (juxt :seon.profile/sym identity)))
+                           (profile/cells))
+            in-pain (filterv #(pos? (reduce + (vals (:seon.profile.pain/share %)))) (profile/pain))]
         (into [] (map #(cond-> % known? (assoc :seon.health/tested? (not (contains? unreached (:seon.profile/sym %))))))
-              (vals (into live (map (juxt :seon.profile/sym identity)) (map stored-observation stored))))))))
+              (concat (vals (into throwing (map (juxt :seon.profile/sym identity)) (map stored-observation stored)))
+                      in-pain))))))
 
 (defn- problems-unit
   "The problems value at `database`, each family retained by what it read;

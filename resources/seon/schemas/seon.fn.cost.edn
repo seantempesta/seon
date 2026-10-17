@@ -5,7 +5,7 @@
 ;; call order: startup cost, first-class) and the WARM sample (its later calls).
 ;; Each sample is the definition digest it was measured under, its calls and its
 ;; per-call self and inclusive microseconds, from a world's call sink
-;; (`seon.batch/sink`, the `seon.profile/timed` counters): self time excludes
+;; (`seon.batch/sink`, the `seon.profile/bracket` counters): self time excludes
 ;; counted callees (FEEDBACK-LOOP card §2–3).
 ;; Producer: `seon.profile/transaction-observation`, called by the transaction
 ;; function `seon.db/cost-upserts` that `seon.db/stamp-transaction` appends to a

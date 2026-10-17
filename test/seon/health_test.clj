@@ -9,6 +9,7 @@
             [seon.fault :as fault]
             [seon.health :as health]
             [seon.operator.runtime :refer [running-instances]]
+            [seon.profile :as profile]
             [seon.schema :as schema]
             [seon.test-support :as support])
   (:import [java.util.concurrent.atomic AtomicLong]))
@@ -195,6 +196,30 @@
            "the wrapper with one millisecond of its own time is not over the bound; the callee outranks the smaller one")
        (is (= 8000 (get-in (first found) [:seon.health/value :seon.profile/total-ms]))
            "the inclusive total stays beside self time")))))
+
+(deftest the-live-ranking-is-the-pain-ranking-with-its-untested-flag
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           ;; a live cell whose one sampled call of N 10 issued 240 reads in its own body: in pain
+           held (profile/cell {:seon.profile/sym (symbol "probe.health" (str "pained-" (random-uuid)))
+                               :seon.profile/digest (apply str (repeat 64 "b")) :seon.profile/scope :seon.profile/host})
+           ^java.util.concurrent.atomic.AtomicLongArray sizes (:seon.profile/sizes held)
+           _ (do (.add ^java.util.concurrent.atomic.LongAdder (:seon.profile/entry-counter held) 10)
+                 (.set sizes 0 1) (.set sizes 1 10) (.set sizes 3 240) (.set sizes 8 240))
+           sym (:seon.profile/sym held)
+           unit (#'health/profile-unit database 900 nil)
+           pained (some #(when (= sym (:seon.profile/sym %)) %) unit)
+           untested (assoc pained :seon.health/tested? false)
+           found (filterv #(= :seon.health/untested-pain-warning (:seon.health/schema %))
+                          (health/findings database {:seon.health/profile [untested (assoc pained :seon.health/tested? true)]}))]
+       (is (= (dissoc (some #(when (= sym (:seon.profile/sym %)) %) (profile/pain)) :seon.health/tested?)
+              (dissoc pained :seon.health/tested?))
+           "the unit's live entry is the pain ranking's entry")
+       (is (pos? (get-in pained [:seon.profile.pain/share :reads])))
+       (is (= [sym] (mapv :seon.health/subject found)) "only the untested one in pain is a finding")
+       ;; the cell is held weakly by the registry: keep it reachable until the reads are done
+       (java.lang.ref.Reference/reachabilityFence held)))))
 
 (deftest the-slowest-definitions-come-from-the-cost-entities
   (support/with-database

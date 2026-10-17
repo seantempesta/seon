@@ -436,7 +436,8 @@
                     database (db/db connection)]
                 {:seon.cost/live (profile/live-costs sink (db/sink-digests database sink)
                                                      (dial database cluster-name :seon.config.fn.cost/min-total-us)
-                                                     (dial database cluster-name :seon.config.test.cost/top))}))])))
+                                                     (dial database cluster-name :seon.config.test.cost/top))
+                 :seon.cost/functions (profile/top-functions sink (dial database cluster-name :seon.config.test.cost/top))}))])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The entrance
