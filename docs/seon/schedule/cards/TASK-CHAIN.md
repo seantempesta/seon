@@ -606,7 +606,7 @@ one named commit. No compatibility copy.
   `seon.cluster.agent/basis-valid?`'s `:prove` successor branch and its commit-keyed cache. `seon.turn/step-proved?`
   and `proved-unanswered?` stay, reading the proofs field (§2.3).
 - Tags: tag ingestion in `seon.fn` and `seon.fn.analyzer`, `seon.fn/task-links`; the tag queries in
-  `seon.task/task-edges`, `open-tasks`, `task-findings`, `candidate-dangling`; `seon.cluster.agent/render-identity-html`'s
+  `seon.task/task-edges`, `open-tasks`, `task-findings`; `seon.cluster.agent/render-identity-html`'s
   namespace tags; the `:seon.task/tasks` members of the fn, test and ns schemas; `:seon.task/annotation` and its links;
   the help and `:seon.task/assignment-view` text naming tags; the tag output of `seon.contracts/task` (the generator survives and writes the `proofs` field instead). The
   sweep is one committed rewrite-clj script (aliases resolved as ingestion does): each deftest's symbol joins the

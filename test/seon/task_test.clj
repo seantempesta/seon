@@ -393,7 +393,7 @@
        (is (= (task/obligations candidate 'tq.tree/fix) (obligations candidate candidate candidate 'tq.tree/fix))
            "the two-argument arity is the three-basis one over one value"))))
   (testing "census: only the selector reads tags to select proofs"
-    (let [allowed '#{seon.task/obligations seon.fn/task-links seon.task/candidate-dangling seon.task/open-tasks
+    (let [allowed '#{seon.task/obligations seon.fn/task-links seon.task/open-tasks
                      seon.task/task-findings seon.task/task-edges seon.cluster.agent/render-identity-html}
           readers (db/q '[:find [?s ...] :where [?e :seon.fn/keywords :seon.task/tasks] [?e :seon.fn/sym ?s]] (db/db))]
       (is (= #{} (into #{} (remove #(or (allowed %) (str/ends-with? (namespace %) "-test"))) readers))
