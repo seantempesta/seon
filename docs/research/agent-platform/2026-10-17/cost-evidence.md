@@ -20,6 +20,29 @@ wave 3 (refuse at `defn`) pending · task estimates (`task-estimates.md`) pendin
 - "We basically have the runtime: we can measure things as they are running, and the generative testing for profiling
   functions we haven't run with real inputs."
 - "Get it working, then make it fast"; harder problems are iterated in waves.
+- "Give estimates algorithmic cost (number of passes over data and number of steps). I think very few functions in
+  the system are open ended (scale like a batch function) but if we can detect that then sure we can enforce those
+  kinds of growth and test. I want a general solution that we can put in sane defaults and agents need to override
+  them if something is truly painful for the system."
+
+## The default cost contract
+
+Every function has a cost contract without writing one: the default. Cost is algorithmic, counted, never timed:
+
+- **N** is the size of what the call touches: its inputs plus its output (elements, datoms), counted where it is
+  measured (the generative profile and sampled live calls), never on every call.
+- **Steps**: instrumented calls (and interpreted steps under SCI) at most `k_steps × N + c`.
+- **Passes**: datoms read at most `k_reads × N + c`, so a function reads each thing it returns or consumes a bounded
+  number of times. A read count that grows while N does not (the index rescanned for one answer) is the defect class
+  this exists for.
+- **Allocation**: at most `k_bytes × N + c`.
+
+`k` and `c` are config dials with sane defaults (a few passes, a small constant), sized from the live evidence of
+wave 1, not guessed. A function that is truly open ended (a batch over the program, a whole-store walk) overrides the
+default in its metadata, naming what it grows with and why, and that override is shown in its `doc` and counted, so
+open-ended functions stay few and visible. A call over its contract (default or override) is a finding in its reply;
+a test that drives it over is red; at `defn`, the generative profile refuses a definition whose growth breaks its
+contract (wave 3).
 
 ## The model
 
