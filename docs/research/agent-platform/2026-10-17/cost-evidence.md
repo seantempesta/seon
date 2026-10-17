@@ -72,3 +72,17 @@ is the declared growth evaluated at each call's actual N, with the measured cons
 | T | Tasks carry their estimate up front (`task-estimates.md`, owner decision) | after wave 3 |
 
 The eval path's current overruns are fixed in parallel by lane eval-trace (`eval-proportionality.md`).
+
+## Before a crash (owner, 2026-10-17: "find a way to instrument and make us aware of things before we crash")
+
+Default died of `OutOfMemoryError` three times on 2026-10-17 (16:38 a render printing a database value; 17:23 an
+interrupted check's bodies printing a Datahike error; 18:14 one request generating inputs from 3,591 contracts), each
+first seen as the crash. Three layers, each its own lane:
+
+- **Contain** (lane eval-bounds-2): a per-request allocation dial; past it the evaluation is interrupted and its reply
+  is an error naming the bound, the bytes and the form; every other agent keeps running.
+- **Warn** (lane heap-watch): live heap after each GC observed by JVM notification (no polling); crossing a dial
+  (warn, critical) or sustained growth records one observation (the in-flight requests by allocated bytes, the cache's
+  weight, the top pain functions) shown in health and in the reply of every in-flight request at critical.
+- **Explain** (lane heap-watch): JFR continuous recording as a bounded ring dumped on exit and on OOM, so a death still
+  leaves the last minutes of allocation by stack.
