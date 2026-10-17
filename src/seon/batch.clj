@@ -237,23 +237,30 @@
       total (assoc :seon.cost/alloc-mb total))))
 
 (defn- cost-cell
-  "One member's value as a table cell: a map is a nested table."
+  "One cost member's value as hiccup: a map is a nested table, a collection a
+  list of cells, a scalar its own text. Every value reaches the page as data."
   {:malli/schema [:=> [:cat :seon.schema/value] :seon.render/hiccup]}
   [value]
-  (if (map? value)
+  (cond
+    (map? value)
     [:table (into [:tbody]
                   (map (fn [[k v]] [:tr [:th (str k)
-                                       (when (#{:seon.cost/jvm-window :seon.cost/shared} k)
-                                         [:small " whole-JVM activity during the request, including other sessions"])]
+                                         (when (#{:seon.cost/jvm-window :seon.cost/shared} k)
+                                           [:small " whole-JVM activity during the request, including other sessions"])]
                                     [:td (cost-cell v)]]))
                   (sort-by (comp str key) value))]
-    [:span (pr-str value)]))
+    (coll? value) (into [:ul] (map (fn [x] [:li (cost-cell x)])) value)
+    :else [:span value]))
 
 (defn render-request-cost-html
-  "A request's whole cost as a table, every member and nested member a row."
+  "A request's whole cost as a table, every member and nested member a row.
+  The members are the cost's own `seon.cost` attributes: a render pair's
+  argument also carries the render unit's custody (its database, profile and
+  value, `seon.render/producer-argument`), which is no part of the cost."
   {:malli/schema [:=> [:cat :seon.cost/request] :seon.render/hiccup]}
   [cost]
-  [:div {:class "seon-request-cost"} (cost-cell cost)])
+  [:div {:class "seon-request-cost"}
+   (cost-cell (into {} (filter #(= "seon.cost" (namespace (key %)))) cost))])
 
 (defn jvm-shared-counters
   "JVM-wide garbage-collection CPU nanoseconds and JIT compilation

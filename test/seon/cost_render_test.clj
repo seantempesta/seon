@@ -5,7 +5,10 @@
             [clojure.test :refer [deftest is]]
             [seon.batch :as batch]
             [seon.cost-support :as cost-support]
+            [seon.config :as config]
             [seon.mcp :as mcp]
+            [seon.profile :as profile]
+            [seon.render :as render]
             [seon.test-support :as support]))
 
 (def ^:private cost
@@ -27,7 +30,34 @@
   (let [text (set (filter string? (tree-seq coll? seq (batch/render-request-cost-html cost))))
         keys-of (fn keys-of [m] (mapcat (fn [[k v]] (cons k (when (map? v) (keys-of v)))) m))]
     (is (every? #(contains? text (str %)) (keys-of cost)))
-    (is (contains? text "184.6"))))
+    (is (contains? (set (support/hiccup-leaves (batch/render-request-cost-html cost))) 184.6))))
+
+(def ^:private compared
+  "A generated-shape cost: a comparison vector with a flag set, and stages under unqualified keys."
+  (assoc cost :seon.cost/diff [{:seon.cost.comparison/subject 'a/b :seon.cost.comparison/measure :self-us
+                                 :seon.cost.comparison/live 0.96 :seon.cost.comparison/unknown :single-run
+                                 :seon.cost.comparison/flags #{:new :changed}}]))
+
+(deftest a-cost-rendered-through-its-pair-shows-its-members-as-data
+  ;; The pair's argument is the cost merged with the render unit's custody,
+  ;; its database value included.
+  (support/with-database
+   (fn [connection]
+     (let [request {:seon.db/db @connection
+                    :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+                    :seon.render/value compared
+                    :seon.render/schema :seon.cost/request
+                    :seon.sci.admit/caps (config/result-caps config/defaults)
+                    :seon.sci.eval/time-limit-ms 2000}
+           measured (profile/measure #(render/render-html request))
+           html (:seon.profile/value measured)
+           rows (set (keep #(when (= :th (first %)) (second %)) (support/hiccup-elements html)))
+           members (->> (tree-seq coll? #(if (map? %) (vals %) (seq %)) compared) (filter map?) (mapcat keys))]
+       (is (= (set (map str members)) rows) "a row for each cost member and none for the custody")
+       (is (every? #(not (string? %)) (map second (filter #(= :span (first %)) (support/hiccup-elements html))))
+           "a member's value is data on the page, never a printed string")
+       (is (contains? (set (support/hiccup-leaves html)) :changed) "a flag set is listed")
+       (is (< (:seon.profile/alloc-bytes measured) 20000000) "one cost render allocates under 20 MB")))))
 
 (defn- answer
   "The parsed MCP result of `code` evaluated in SCI as `agent-id` on `running`."
