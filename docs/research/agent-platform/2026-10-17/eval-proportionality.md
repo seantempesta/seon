@@ -1,0 +1,129 @@
+---
+type: research
+status: owning document for the eval-request cost work; revised in place as stages are fixed
+basis: default's JVM at 553c9d5d5 (pid 56939), 2026-10-17, own-branch agents eval-trace-1 to -6 through MCP eval_clj; throwaway check JVMs for parent-vs-change
+---
+
+# What one eval request costs, stage by stage
+
+The owner asked why simple operations can take the system down. One eval request runs
+read → evaluate → record (settle: commit, writer) → test step → print, plus custody and
+fork before and context render after. For each stage: what a one-form change must do,
+what that is proportional to, what it costs today, the gap and its producer.
+
+Figures are the request's own cost map (`:seon.repl/cost-result`, `:seon.cost/stages` in
+ms, `:seon.cost/step`, `:seon.cost/commit`, `:seon.cost/writer`) and `seon.profile/measure`.
+Allocation is the calling thread's unless marked JVM-wide.
+
+## End-to-end measure: `seon.cost-estimate-test/estimates`
+
+Each fix is judged on these rows (`seon.cost-estimate-test/ordinary-operations-cost-no-more-than-their-estimates`,
+one throwaway check JVM each, measured requests through MCP `eval_clj`). Parent is HEAD c6777da6b with
+`src/seon/sci/eval.clj` from before 36c192be9; change is HEAD c6777da6b.
+
+| row | estimate MB / calls / reads / ms | parent | change (36c192be9) | stages it lands in | task |
+|---|---|---|---|---|---|
+| `:seon-db-nine-forms` (9 unchanged `seon.db` forms) | 80 / 12,000 / 150 / 400 | 8,851 / 929,662 / 23,740 / 3,797 | **5,857 / 587,548 / 22,905 / 2,073** | evaluate (arming each defn re-interprets its hub closure), test step | `seon.repl/re-evaluating-nine-seon-db-forms-allocates-nine-gigabytes` |
+| `:redefine-one-form` | 24 / 4,000 / 60 | 289.5 / 41,028 / 316 | 289.8 (unchanged) | settle, test step, unattributed | `seon.repl/redefining-one-form-costs-three-hundred-megabytes` |
+| `:current-state-with-task` | 24 / 3,000 / 100 | 193.9 / 37,832 / 211 | 193.4 | context | `seon.context/one-agents-current-state-costs-hundreds-of-megabytes` |
+| `:new-def` | 16 / 2,500 / 40 | 145.8 / 17,245 / 225 | 143.8 | test step, settle, derive | `seon.repl/a-new-def-costs-a-hundred-forty-megabytes` |
+| `:merge-one-function` | 48 / 8,000 / 200 | 104.4 / 28,305 | 117.0 | merge | `seon.cluster.source/accepting-a-one-function-merge-allocates-hundreds-of-megabytes` |
+| `:fresh-agent-first-request` | 12 / 1,500 / 30 | 106.3 / 8,112 / 63 | 104.3 | custody (fork), settle | `seon.cluster.agent/a-fresh-agents-environment-costs-one-fork` |
+| `:reuse-one-unchanged-test` | 8 / 1,500 / 25 | 26.4 / 9,083 / 72 | 27.6 | test step | `my.test/reusing-one-unchanged-test-costs-nine-thousand-calls` |
+| `:unchanged-request` (`nil`) | 4 / 500 / 10 | 17.0 / 6,704 / 44 | 17.1 | settle, unattributed | `seon.repl/an-unchanged-request-costs-seventeen-megabytes-and-six-thousand-calls` |
+
+The nine-forms row's recorded overrun is lowered to the change's measure in the same commit as this
+table, so the ratchet (1.5x) now refuses a return to the parent's 8.9 GB.
+
+What remains of the nine-forms row: every unchanged `defn` is still a redefinition to arming, so
+`seon.sci.arm/arm!` calls `seon.sci.eval/interpret-affected!` on each of nine hub functions and walks
+nine reverse closures of about 2,300 members each (about 200 MB each, measured above for one). A
+definition whose evaluated digest equals the one the context runs compiled changes no caller's
+behavior; skipping the closure there is the next slice (owner: `seon.sci.arm/arm!`).
+
+## Reference requests (default 553c9d5d5, warm, own agent branch, no task)
+
+| request | ms | MB | calls | reads | settle | test-step | unattributed | derive | evaluate |
+|---|---|---|---|---|---|---|---|---|---|
+| `nil` (3rd) | 44 | 25 | 6,828 | 40 | 29.4 | 2.9 | 8.6 | 0.0 | 1.1 |
+| first new `(def d1 {:a 1})` | 136-403 | 139-424 | 14,658-16,027 | 159 | 61.3 | 299.9 | 21.0 | 15.4 | 2.9 |
+| second new `def` | 154 | 165 | 16,499 | 183 | 68.9 | 51.9 | 18.4 | 9.8 | 2.6 |
+| redefining a `def` | 88 | 82 | 15,395 | 144 | 35.3 | 24.1 | 13.9 | 9.6 | 2.4 |
+| new contracted 1-line `defn` | 237 | 270 | 61,219 | 291 | 89.7 | 56.0 | 50.8 | 15.0 | 21.0 |
+| redefining it | 157 | 172 | 41,449 | 211 | 57.8 | 31.0 | 39.0 | 12.0 | 14.0 |
+| `(defn seon.db/as-of-key ...)`, fresh branch, before 36c192be9 | 16,251 | 21,261 | 4,851,867 | 22,429 | 522.6 | 13,479.2 | 685.6 | 79.4 | 1,388.6 |
+
+Settle's recording transaction for `nil`: commit 9.5 CPU ms / 6.2 MB, writer 5.4 CPU ms /
+6.7 MB. For the new `defn`: commit 33.2 / 23.3 MB, writer 32.4 / 36.5 MB. For the hub `defn`
+the writer ran 72 transactions (1,067 MB), the test runs' writes.
+
+## Stage table
+
+| stage | must do for a 1-form change | proportional to | measured | gap | producer | status |
+|---|---|---|---|---|---|---|
+| custody, fork | take the branch head, fork the SCI context | constant (pointer) | 0.5 ms, 0.3 ms | none | — | ok |
+| read | read the form once | the text | 0.0-0.1 ms | none | — | ok |
+| derive | clj-kondo analysis of the changed definition | the form | 10-15 ms on a def/defn (kondo itself 7 ms), 79 ms on the hub defn | about 2x on a def | `seon.fn/runtime-analysis-batch` | open, small |
+| evaluate: hub defn | bind the changed Var; its compiled callers interpret on first call | the callers bound (lazy), never whole test namespaces | 930 MB, 1,208 ms, 239,492 calls (`seon.sci.eval/interpret-affected!` alone, check JVM); 1.08-1.20 GB in the request | 13 test namespaces entered and interpreted whole, 427 rows, 8 transactions, 15 refusals recorded | `seon.sci.eval/interpret-overlay!` interpreted value definitions of unentered test namespaces eagerly | **fixed 36c192be9**: 197 MB, 137 ms, 85,073 calls, 0 test namespaces; end to end the nine-forms row 8,851 to 5,857 MB, 3,797 to 2,073 ms |
+| evaluate: hub defn, remainder | as above | the callers bound | 197 MB / 137 ms for the 2,338-member closure; a second defn of the same name re-walks it: 87 ms / 211 MB | the walk and 2,308 lazy-root binds are proportional to the whole closure, not the callers called | `seon.fn/reverse-closure`, `seon.sci.eval/bind-lazy-members!` | task `seon.sci.eval/promoting-a-hubs-closure-is-sub-second` |
+| evaluate: ordinary defn | compile, arm the contract | the form and its contract | 14-21 ms | modest | contract arming | open, small |
+| settle (record) | one transaction of the request's facts (evaluation, call, answered t; a definition's entity) | datoms written (tens) | `nil` 29 ms (commit+writer 15 CPU ms, 13 MB); defn 58-90 ms, writer 14-37 MB | about half of `nil`'s settle is outside commit and writer; a defn's writer allocates 30+ MB for tens of datoms | not isolated: `seon.turn/settle-evaluated!`, `seon.db/commit-database`; the sentinel's settle regression (+10 ms since e9bcf36d2) | open: bisect per `sentinel-1cb582f0d.md` |
+| test step, nothing reached | find that no test reaches the change | the change's reverse edges | 24-56 ms warm, 300 ms on a branch's first new def (step allocation up to 376 MB) | 10-100x | reach derivation over the program (`seon.test.runner/tests-reaching`, `seon.test/host-exclusions`; bebd51673 cut the destructive reach) | tasks `seon.turn/a-new-definition-request-costs-hundreds-of-megabytes`, `seon.test.runner/reach-on-an-uncommitted-value-costs-the-change-not-the-program` |
+| test step, hub defn | run the tests the change reaches | the selected tests' own cost | 13,479 ms, step 12.6 GB (26.7 GB JVM-wide) for 63 tests, every one errored before its body ("Isolation requires a fresh owned branch.", admission `:seon.test/program-mismatch`: "the tested value has no commit"), 77 pending; the change was a docstring | selection of a behavior-neutral change, and a harness that refuses agent-branch test worlds | `seon.turn/run-reaching`, `seon.test.runner/run-selected-tests`, `seon.test.runner/program-digest` | task `seon.test.runner/an-agents-reaching-tests-error-on-the-harness-after-a-hub-defn` |
+| print | print the shown value | the shown value | 1-3 ms (61 ms with the hub's test report) | none | — | ok |
+| unattributed | nothing: every ms belongs to a stage | — | 8.6 ms (`nil`) to 51 ms (defn), 686 ms (hub) | all of it | includes the context re-acquisition after the branch's program moved (`seon.cluster.agent/acquire-context!` → `seon.sci.eval/program-context` → `seon.sci.eval/base-ctx`, 18-20 ms) | open: attribute it to a stage first |
+| per-request growth | none | constant per request | calls grow by 16 per warm request | grows with the agent's history | `seon.cluster.registry/fork-point` walks first-parent history | task `seon.cluster.registry/the-fork-point-is-walked-for-on-every-request` |
+| context (`seon.context/current-state`) | render the agent's attachments | what is shown | 19 ms / 28 MB, 19 reads, agent without a task | none without a task; 1.1 s / 1 GB reported with a task, not reproduced here | — | open: measure with a task |
+
+## The gigabyte defn (fixed in 36c192be9)
+
+`(defn seon.db/as-of-key ...)` on a fresh agent branch: the evaluation alone took 664-1,273
+ms and allocated 1.08-1.20 GB (three fresh agents). It does not reproduce on the same branch
+a second time (87 ms / 211 MB), and entering `seon.db` costs 8 MB, so the cost is the first
+redefinition of a hub on a branch.
+
+`seon.sci.batch` arming calls `seon.sci.eval/interpret-affected!` with the changed symbol.
+Its reverse closure (`seon.fn/reverse-closure`) on default: 2,339 functions in 300
+namespaces, 2,479 tests. 2,308 are interpretable functions and get lazy roots; 23 are value
+definitions or macros, interpreted at once; 17 of those sit in test namespaces
+(`seon.flow-test/test-environment`, `seon.effect-test/test-environment`, ...). Interpreting
+a test namespace's value definition entered that namespace, and entering a test namespace
+interprets every row it holds: 13 `seon.sci.eval/interpret-source-namespaces!` calls, 427
+`seon.sci.eval/install-row!`, 430 reads of stored source, 8 transactions inside the
+evaluation and 15 acquisition refusals recorded (`seon.flow-test`'s go-loop and
+`flow-monitor` tests cannot interpret). JFR allocation sampling of the eval thread agreed:
+`seon.db/with-declarations`, `seon.db/q`, `seon.db/pull-logical` under
+`seon.sci.eval/enter-namespace!` and `seon.sci.eval/install-caller-host-bindings!`.
+
+Clojure does not re-run a namespace on a redefinition, and Seon already interprets a test
+namespace from its rows when it is entered, against the Vars the context then holds. So the
+closure's members in an unentered test namespace are left to that entry; one predicate
+(`unentered-test?` in `seon.sci.eval/interpret-overlay!`) now serves this and the
+added-function rule that already deferred them.
+
+`seon.profile/measure` around `interpret-affected!` of `seon.db/as-of-key` on the canonical
+fixture, same test body, parent and change each in a throwaway check JVM:
+
+| | bytes | ms | calls | reads | test namespaces interpreted |
+|---|---|---|---|---|---|
+| parent | 930,239,272 | 1,208 | 239,492 | 3,281 | 13 |
+| change | 197,294,816 | 137 | 85,073 | 2,395 | 0 |
+
+Proof: `seon.sci.branch-execution-test/a-redefinition-leaves-an-unentered-test-namespace-to-its-entry`.
+
+## Other findings
+
+- An agent that entered `seon.fn-test` (after `seon.flow-test`) in one request refuses every
+  later form, `(+ 1 2)` included, with "SCI program acquisition refused a declaration.":
+  task `seon.sci.eval/entering-a-test-namespace-with-a-refused-row-refuses-every-later-form`.
+- `bin/seon check` once failed building the classpath with a `HashMap$Node` cast in
+  tools.deps' parallel resolution; the retry passed. Not filed: one occurrence.
+
+## Order of the remaining gaps
+
+1. Re-evaluating unchanged hub definitions (nine-forms row, 5.9 GB): skip the closure when the evaluated digest equals the compiled one.
+2. Test step of a hub change (13.5 s, 12.6 GB): selection of behavior-neutral changes and the
+   harness errors. Largest and it can exhaust the 4 GB heap with concurrent work.
+3. Test step with nothing reached (24-300 ms): reach from the change's reverse edges.
+4. Settle (29 ms for `nil`, half outside commit and writer) and unattributed time.
+5. Closure walk and lazy binds proportional to the whole closure (137 ms / 197 MB per hub defn).
