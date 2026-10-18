@@ -671,21 +671,37 @@
             :seon.error/member :seon.program/definition-digest
             :seon.error/expected :seon.program/definition-digest}))))))
 
+(defn removal-facts-call
+  "The retractions of `removals` on `db`, the writer's value after the same settlement's definitions (`program-facts`
+  orders this call after them): a removal is judged as its request's forms ran, so a caller the request redefined
+  off the removed helper no longer holds it back. A refusal is the writer's refusal of the settlement."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :symbol]] :seon.store/transaction-data]}
+  [db removals]
+  ;; a transaction function's throw is the writer's refusal of this settlement
+  (let [facts (removal-facts db (into [] (keep #(removal-report db %)) removals))]
+    (if (:seon.error/at facts)
+      (throw (ex-info (:seon.error/message facts) facts))
+      facts)))
+
 (defn program-facts
   "The folded program as transaction data on `head`, or the refusal of a
-  definition changed since the batch's basis, or a removal's refusal."
+  definition changed since the batch's basis; its removals follow its
+  definitions as one `removal-facts-call`, judged by the writer on the value
+  those definitions leave."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value :map]
                   [:or :seon.store/transaction-data :seon.program/mutation-refused-error :seon.error/value]]}
   [request head {:keys [entities schema-keys namespaces removed-namespaces]}]
-  (let [rows (vec (keep (fn [[_ r]] (when (map? r) r)) entities))]
+  (let [rows (vec (keep (fn [[_ r]] (when (map? r) r)) entities))
+        removals (into (vec (keep (fn [[s r]] (when (= :removed r) s)) entities)) removed-namespaces)]
     ;; decided at the writer: a definition changed underneath the run refuses
     (or (changed-since-basis request head rows (or schema-keys #{}))
-        (form-facts request head
-                    {:seon.batch/entities rows
-                     :seon.batch/removals (into (vec (keep (fn [[s r]] (when (= :removed r) s)) entities))
-                                                removed-namespaces)
-                     :seon.batch/schema-keys (or schema-keys #{})
-                     :seon.batch/namespaces (or namespaces #{})}))))
+        (let [facts (form-facts request head
+                                {:seon.batch/entities rows
+                                 :seon.batch/removals []
+                                 :seon.batch/schema-keys (or schema-keys #{})
+                                 :seon.batch/namespaces (or namespaces #{})})]
+          (cond-> facts
+            (and (vector? facts) (seq removals)) (conj [:db.fn/call #'removal-facts-call removals]))))))
 
 (defn program-facts-call
   "The folded program's facts, derived at the writer on its head: a turn's one
