@@ -1,0 +1,37 @@
+diff -ru a/src/seon/sci/eval.clj b/src/seon/sci/eval.clj
+--- a/src/seon/sci/eval.clj	2026-10-18 11:38:42.371398143 +0700
++++ b/src/seon/sci/eval.clj	2026-10-18 11:38:50.588731093 +0700
+@@ -2103,7 +2103,8 @@
+   resolves (`ctx` holds it or the platform loaded it): SCI resolves any such
+   namespace, the file's `ns` form only what it requires, so the namespace's
+   resolver state, and with it the merged `ns` form, holds what its definitions
+-  use. Answers the namespaces required."
++  use. A quoted form is data, never a use: `'my.program/source` requires nothing.
++  Answers the namespaces required."
+   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :symbol :seon.batch/form] [:set :symbol]]}
+   [ctx namespace-name form]
+   (let [{:keys [aliases requires]} (sci/namespace-bindings ctx namespace-name)
+@@ -2113,7 +2114,7 @@
+                           (remove (into #{namespace-name 'clojure.core} requires))
+                           (remove #(contains? aliases %))
+                           (filter #(or (sci/find-ns ctx %) (find-ns %))))
+-                    (tree-seq coll? seq form))]
++                    (tree-seq #(and (coll? %) (not (and (seq? %) (= 'quote (first %))))) seq form))]
+     (when (seq named)
+       (sci/binding [sci/ns (sci/find-ns ctx namespace-name)]
+         (sci/eval-form ctx (apply list 'clojure.core/require (map #(list 'quote %) named)))))
+diff -ru a/test/seon/unrequired_namespace_test.clj b/test/seon/unrequired_namespace_test.clj
+--- a/test/seon/unrequired_namespace_test.clj	2026-10-18 11:38:42.384113687 +0700
++++ b/test/seon/unrequired_namespace_test.clj	2026-10-18 11:38:53.715249132 +0700
+@@ -17,6 +17,9 @@
+                    (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                              "arguments" {"cluster" running "agent" agent-id "code" code}})))))
+            unrequired (call "(ns my.urn) (defn f {:malli/schema [:=> [:cat :string] :string]} [s] (clojure.string/upper-case s))")
+-           required (call "(ns my.urr (:require [clojure.string])) (defn f {:malli/schema [:=> [:cat :string] :string]} [s] (clojure.string/upper-case s))")]
++           required (call "(ns my.urr (:require [clojure.string])) (defn f {:malli/schema [:=> [:cat :string] :string]} [s] (clojure.string/upper-case s))")
++           ;; seon.ref offers (my.program/source 'x) as data; my.program requires seon.ref, so requiring it was a refused cycle
++           quoted (call "(ns my.urq) (defn f {:malli/schema [:=> [:cat :string] :seon.schema/value]} [s] (list 'clojure.string/upper-case s))")]
+        (is (= #{'clojure.string} (set (:seon.eval/auto-required (finding-of unrequired)))))
+-       (is (nil? (finding-of required)))))))
++       (is (nil? (finding-of required)))
++       (is (nil? (finding-of quoted)) "a quoted symbol is data: its namespace is not required")))))

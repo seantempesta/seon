@@ -1,0 +1,86 @@
+diff -ru a/resources/seon/schemas/seon.ref.edn b/resources/seon/schemas/seon.ref.edn
+--- a/resources/seon/schemas/seon.ref.edn	2026-10-18 11:38:28.799608889 +0700
++++ b/resources/seon/schemas/seon.ref.edn	2026-10-18 11:38:35.513301887 +0700
+@@ -71,7 +71,8 @@
+                      [:seon.ref/name {:optional true} :seon.ref/name]
+                      [:seon.ref/at {:optional true} :seon.ref/at]
+                      [:seon.ref/path {:optional true} :seon.ref/path]
+-                     [:seon.ref/anchor {:optional true} :seon.ref/anchor]]
++                     [:seon.ref/anchor {:optional true} :seon.ref/anchor]
++                     [:seon.ref/nearest {:optional true} :seon.ref/nearest]]
+            :message [:string {:min 1 :description "What a problem kind means and what the agent does about it: short fixed text per kind."}]
+            :project [:string {:min 1}]
+            :revision [:string {:min 40 :max 40}]
+@@ -139,7 +140,7 @@
+                      [:seon.ref/lead {:optional true} :seon.ref/lead] [:seon.ref/opening {:optional true} :seon.ref/opening]
+                      [:seon.ref/below :seon.ref/below] [:seon.ref/pin {:optional true} :seon.ref/pin]]
+            :section-missing [:enum :file :heading]
+-           :nearest [:vector [:or :string [:map [:seon.ref/anchor :seon.ref/anchor] [:seon.ref/heading :seon.ref/heading]]]]
++           :nearest [:vector {:description "What a reference that resolves to nothing may mean: the nearest file paths or headings, or the nearest names its namespace declares."} [:or :string :qualified-symbol [:map [:seon.ref/anchor :seon.ref/anchor] [:seon.ref/heading :seon.ref/heading]]]]
+            :section-error [:merge :seon.error/base
+                            [:map [:seon.ref/section-missing :seon.ref/section-missing] [:seon.ref/path {:optional true} :seon.ref/path]
+                             [:seon.ref/anchor {:optional true} :seon.ref/anchor] [:seon.ref/nearest :seon.ref/nearest]]]}
+diff -ru a/src/seon/ref.clj b/src/seon/ref.clj
+--- a/src/seon/ref.clj	2026-10-18 11:38:11.008523148 +0700
++++ b/src/seon/ref.clj	2026-10-18 11:38:28.782558942 +0700
+@@ -12,6 +12,7 @@
+             [seon.ai.tokens :as tokens]
+             [seon.cache :as cache]
+             [seon.db :as db]
++            [seon.error :as error]
+             [seon.error.refusal :as refusal]
+             [seon.fn.analyzer :as analyzer]
+             [seon.fs :as fs]
+@@ -541,11 +542,24 @@
+     (str/join "\n\n" (keep identity (conj (mapv entity [:seon.fn/doc :seon.ns/doc :seon.task/plan :seon.task/instructions])
+                                           description)))))
+ 
++(defn- nearest-declared
++  "At most three functions or tests the namespace of `reference` declares on `database`, nearest it by their words and
++  spelling (`seon.error/nearest-names`): what a renamed name may be called now. Empty when the namespace declares none."
++  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] [:vector :qualified-symbol]]}
++  [database reference]
++  (let [owner (symbol (namespace reference))
++        functions (db/q '[:find [?sym ...] :in $ ?ns :where [?n :seon.ns/name ?ns] [?f :seon.fn/ns ?n] [?f :seon.fn/sym ?sym]]
++                        database owner)
++        tests (db/q '[:find [?sym ...] :in $ ?ns :where [?n :seon.ns/name ?ns] [?t :seon.test/ns ?n] [?t :seon.test/sym ?sym]]
++                    database owner)]
++    (error/nearest-names reference (distinct (concat functions tests)) 3)))
++
+ (defn- resolve-name
+   "One referenced deftest, task or namespace identified on `database`: the entity its identity attribute's index
+   holds, pulled as that identity declares (`declarations`), with its row's declared render pair as its own render keys
+   and the names its own content cites, one level (`inner`); a namespace loaded only on the host as the same kind of
+-  entity; or a problem."
++  entity; or a problem, which for a qualified symbol carries the names its namespace declares nearest it
++  (`nearest-declared`)."
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/name]
+                   [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
+   [database reference]
+@@ -561,7 +575,8 @@
+           (with-inner (merge (select-keys found pull) {:seon.ref/name reference} (render attribute))
+             (inner database #{reference} (own-prose found)))))
+       (find-ns reference) (merge {:seon.ref/name reference :seon.ns/name reference} (render :seon.ns/name))
+-      :else (unresolved reference))))
++      :else (let [nearest (when (qualified-symbol? reference) (nearest-declared database reference))]
++              (cond-> (unresolved reference) (seq nearest) (assoc :seon.ref/nearest nearest))))))
+ 
+ (defn- at-level
+   "A function or schema key at the `level` its citation asks for, each the value of one REPL function (TASK-CHAIN
+diff -ru a/test/seon/ref_test.clj b/test/seon/ref_test.clj
+--- a/test/seon/ref_test.clj	2026-10-18 11:38:11.020889023 +0700
++++ b/test/seon/ref_test.clj	2026-10-18 11:38:23.320677085 +0700
+@@ -258,6 +258,13 @@
+     (is (not (re-find #"(?i)create" (:seon.ref/message problem))) "it never tells the agent to create the name: the plan says that")
+     (is (= '[(my.program/search "missing-key")] (:seon.render/operations problem)) "it offers the search form that finds what exists")))
+ 
++(deftest an-unresolved-name-carries-the-names-its-namespace-declares-nearest-it
++  ;; a proof renamed in its own namespace: the problem names the rename, so no turn searches for it by hand
++  (let [[renamed absent] (ref/references (db/db) {:seon.ref/text "`seon.ref/references-of-a-retired-name` and `seon.nope/missing`"})]
++    (is (= :unresolved (:seon.ref/problem-kind renamed)))
++    (is (= 'seon.ref/references (first (:seon.ref/nearest renamed))) "the nearest name its namespace declares comes first")
++    (is (not (contains? absent :seon.ref/nearest)) "a namespace that declares nothing offers no name")))
++
+ (deftest a-reference-with-no-path-is-a-missing-file
+   ;; section declares [:or :seon.ref/section :seon.ref/section-error]; an anchor with no path threw from locate's contract.
+   (are [reference] (= :file (:seon.ref/section-missing (try (ref/section reference) (catch Exception e (ex-message e)))))
