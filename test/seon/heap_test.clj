@@ -152,3 +152,36 @@
     (is (= #{nil} asked) "no reading asks for a forced collection or records a crossing")
     (is (zero? @crossings))
     (is (< per-reading-us 200.0) "a reading costs micro-seconds of CPU, not a collection's milliseconds")))
+
+(deftest a-reading-counts-only-the-heap-its-collector-manages
+  ;; Live run 10 (default 577091e04): the 8 recorded growth crossings read 1,139 to 1,405 MB while the live old
+  ;; generation was about 600 MB. `reading` summed every pool of the collection's after-usage: the non-heap pools
+  ;; (Metaspace, CodeHeap, Compressed Class Space, ~290 MB) and, after a G1 concurrent cycle, which collects only
+  ;; the old generation, the eden it never collected. The heap after a collection is the after-usage of the pools
+  ;; its collector manages.
+  (let [reading #'heap/reading
+        seen (java.util.concurrent.LinkedBlockingQueue.)
+        listener (reify javax.management.NotificationListener
+                   (handleNotification [_ notification _]
+                     (when (= com.sun.management.GarbageCollectionNotificationInfo/GARBAGE_COLLECTION_NOTIFICATION
+                              (.getType notification))
+                       (.offer seen (com.sun.management.GarbageCollectionNotificationInfo/from
+                                      ^javax.management.openmbean.CompositeData (.getUserData notification))))))
+        emitters (vec (ManagementFactory/getGarbageCollectorMXBeans))]
+    (try
+      (doseq [emitter emitters] (.addNotificationListener ^javax.management.NotificationEmitter emitter listener nil nil))
+      (System/gc)
+      (let [^com.sun.management.GarbageCollectionNotificationInfo info (.poll seen 5 java.util.concurrent.TimeUnit/SECONDS)
+            managed (set (some #(when (= (.getGcName info) (.getName ^java.lang.management.GarbageCollectorMXBean %))
+                                  (.getMemoryPoolNames ^java.lang.management.GarbageCollectorMXBean %))
+                               emitters))
+            after (.getMemoryUsageAfterGc (.getGcInfo info))
+            used (fn [names] (reduce + 0 (map #(.getUsed ^java.lang.management.MemoryUsage (get after %)) names)))]
+        (is (some? info) "a collection was observed")
+        (is (= (used managed) (:seon.heap/used-bytes (reading info)))
+            "the heap after a collection is what its collector's pools hold")
+        (is (< (:seon.heap/used-bytes (reading info)) (used (keys after)))
+            "the non-heap pools are not heap"))
+      (finally
+        (doseq [emitter emitters]
+          (.removeNotificationListener ^javax.management.NotificationEmitter emitter listener))))))
