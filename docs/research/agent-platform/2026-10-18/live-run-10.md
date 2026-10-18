@@ -156,8 +156,8 @@ Classes:
    evictions. Not filed: there was no time for a red proof. `errored-receipts` rose from 4 to 6 over the run.
 6. **The start request itself cost 1,048 ms and 575 MB** for four single-task chains (request: 1,175 ms, 1,210 MB,
    70,721 calls). I wrote a proof on a fixture, `seon.task-test/a-one-task-chain-costs-what-it-writes` (under 24
-   MB), and it came out **green**. The fixture does not reproduce this cost: the thread measure misses the writer's
-   thread. bfee2315b committed that test as a red proof by mistake, and this commit removes it. Unfiled.
+   MB), and it came out **green**. The fixture does not reproduce this cost, probably because the calling
+   thread's measure misses the writer's thread (unverified). bfee2315b committed that test as a red proof by mistake, and this commit removes it. Unfiled.
 
 ## Done and merge
 
