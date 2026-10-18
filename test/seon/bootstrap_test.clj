@@ -76,3 +76,12 @@
     (is (str/includes? text "(seon.test-support/with-database (fn [connection]") "help names the fixture a probe replays")
     (is (str/includes? text "(:seon.store/store (seon.test-support/execution-handle connection))")
         "help names where the fixture's store is")))
+
+(deftest help-teaches-removing-what-a-branch-does-not-keep
+  ;; Live run 10 (docs/research/agent-platform/2026-10-18/live-run-10.md): two chains sent
+  ;; (my.program/ns-unmap! :a/registered-schema) three times, refused for its keyword, and two chains unmapped helpers
+  ;; their own caller still called (six forms, each refused naming that caller): help named neither the schema's verb
+  ;; nor the order.
+  (let [text (slurp (io/resource "seon/help.md"))]
+    (is (str/includes? text "(seon.schema/unregister! :the.owner/key)") "help names how a registered schema is removed")
+    (is (str/includes? text "redefine its callers first") "help names the order ns-unmap! needs")))
