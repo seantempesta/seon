@@ -144,7 +144,7 @@
                        [:seon.source/next-proofs {:optional true} :seon.source/next-proofs]
                        [:seon.source/deferred {:optional true} :seon.source/deferred]
                        [:seon.source/merge-identities {:optional true} :seon.source/merge-identities]
-                       [:seon.source/lint-refusal {:optional true} :seon.source/lint-refusal]
+                       [:seon.source/file-refusal {:optional true} :seon.source/file-refusal]
                        [:seon.program/identities :seon.program/identity-set]
                        [:seon.test.run/id :seon.test.run/id] [:seon.test.run/branch :seon.store/branch]],
               :red-tests [:vector {:min 1} :seon.source/red-test],
@@ -155,8 +155,8 @@
               :lint-finding [:map {:description "One clj-kondo error, under the checkout's .clj-kondo configuration, in a file a merge would publish. Producer: seon.cluster.source/lint-errors."} [:seon.source/path :seon.source/path] [:seon.lint/row :seon.lint/row] [:seon.lint/col :seon.lint/col] [:seon.lint/type :seon.lint/type] [:seon.lint/message :seon.lint/message]],
               :lint-findings [:vector {:min 1 :description "The clj-kondo errors in the files a merge would publish, in file and position order."} :seon.source/lint-finding],
               :merge-identities [:and {:description "The declarations a merge of the judged branch would carry: its whole change since its merge base but an agent's own namespace (seon.cluster.source/merge-changes). Producer: seon.cluster.source/publication; seon.cluster.source/done-refusals refuses, on the last task, each function of it no green test reaches."} :seon.program/identity-set],
-              :lint-refusal [:and {:description "The clj-kondo errors in the files a merge of the judged branch would write, refused as the merge gate refuses them. Producer: seon.cluster.source/publication; seon.cluster.source/done-refusals refuses it."} :seon.source/lint-error],
-              :publication [:map {:description "What a merge of a branch would publish, judged from the branch alone (seon.cluster.source/publication): the done rule's input."} [:seon.source/merge-identities :seon.source/merge-identities] [:seon.source/lint-refusal {:optional true} :seon.source/lint-refusal]],
+              :file-refusal [:or {:description "Why the files a merge of the judged branch would write cannot publish, refused as the merge gate refuses them: the file proof's own refusal (a change with no file, a conflict, a candidate that does not analyze), else their clj-kondo errors. Producer: seon.cluster.source/file-refusal, through seon.cluster.source/publication; seon.cluster.source/done-refusals refuses it."} :seon.source/lint-error :seon.source/write-back-error :seon.error/value],
+              :publication [:map {:description "What a merge of a branch would publish, judged from the branch alone (seon.cluster.source/publication): the done rule's input."} [:seon.source/merge-identities :seon.source/merge-identities] [:seon.source/file-refusal {:optional true} :seon.source/file-refusal]],
               :lint-error [:merge {:description "prepare-merge! or the done rule refused (seon.cluster.source/lint-refusal): clj-kondo reports an error in a file the merge would publish, the bar a lane commit holds; the agent fixes it on its branch."} :seon.error/base [:map [:seon.source/path {:description "The first file with an error."} :seon.source/path] [:seon.source/lint-findings {:optional true :description "Always present; optional because a stored error keeps only storable members, and this vector of maps has no attribute."} :seon.source/lint-findings]]],
               :candidate-bytes [:and {:description "The proven file bytes a write-back installs."} :seon.source/file-bytes],
               :proof-rows [:sequential {:description "Each written declaration with its entity before and after the merge (absent: nil)."}

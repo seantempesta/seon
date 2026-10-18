@@ -449,7 +449,13 @@
                 ["a contracted stub no test reaches: done"
                  (update base :seon.program/identities conj [:seon.fn/sym 'tq.done/stub]) []]
                 ["green proofs, a clj-kondo error in a file the merge would publish: refused"
-                 (assoc base :seon.source/lint-refusal lint-refused) [:seon.source/lint-error]]
+                 (assoc base :seon.source/file-refusal lint-refused) [:seon.source/lint-error]]
+                ["green proofs, a change its merge cannot write into one file: refused, as the merge refuses it"
+                 (assoc base :seon.source/file-refusal
+                        (seon.error.refusal/error :seon.source/write-back-error
+                         {:seon.error/layer :seon.source/write-back :seon.error/operation 'seon.cluster.source/write-back!
+                          :seon.error/message "Each change needs its source and one file." :seon.source/write-back-refused :one-file}))
+                 [:seon.source/write-back-error]]
                 ["the last task: a function its merge carries that no green test reaches: refused"
                  (assoc base :seon.source/merge-identities #{[:seon.fn/sym 'tq.done/stub]}) [:seon.source/test-evidence-error]]
                 ["a middle task: the same function waits for the next task's proofs: done"
@@ -461,7 +467,7 @@
               ((juxt :seon.task/status #(mapv :seon.error/type (:seon.source/refusals %)))
                (context/step-status {:seon.task/proofs #{'tq.done-test/proof} :seon.task/product #{} :seon.context/head {}
                                      :seon.context/candidate branch :seon.context/main branch
-                                     :seon.source/judged (assoc base :seon.source/lint-refusal lint-refused)})))
+                                     :seon.source/judged (assoc base :seon.source/file-refusal lint-refused)})))
            "an own-branch assignment's step, in no chain, is judged by the same done rule")
        (is (= [['tq.done-test/new]]
               (mapv #(mapv :seon.test/sym (:seon.source/red-tests %)) (source/done-refusals branch (new-red base))))

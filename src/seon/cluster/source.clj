@@ -1166,20 +1166,33 @@
                              ". Fix it on the branch.")
     :seon.source/path (:seon.source/path (first findings)) :seon.source/lint-findings findings}))
 
+(defn- file-proof
+  "The files a merge writing `tx`, the change `delta`, over `main` would write under the checkout `root`
+  (`proven-files` over the merged value), or why the merged value or a file does not prove."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/transaction-data :seon.program/identity-set :seon.fn/root]
+                  [:or [:vector :seon.source/proof] :seon.source/write-back-error :seon.error/value]]}
+  [main tx delta root]
+  (let [merged (db/with main {:tx-data tx})]
+    (if (:seon.error/at merged) merged (proven-files main merged delta root))))
+
 (defn- file-refusal
-  "Why the files a merge writes, `proofs` (`proven-files`) under the checkout `root`, cannot publish: their clj-kondo
-  errors (`lint-refusal`); nil when they publish clean."
-  {:malli/schema [:=> [:cat [:vector :seon.source/proof] :seon.fn/root] [:or :nil :seon.source/lint-error]]}
-  [proofs root]
-  (let [lint (lint-errors root proofs)] (when (seq lint) (lint-refusal lint))))
+  "Why the files a merge writes cannot publish, from their `proof` (`file-proof`) under the checkout `root`: the
+  file proof's own refusal, else their clj-kondo errors (`lint-refusal`); nil when they publish clean. The one file
+  check the merge gate (`prepare-merge!`) and the done rule (`publication`) both read."
+  {:malli/schema [:=> [:cat [:or [:vector :seon.source/proof] :seon.source/write-back-error :seon.error/value] :seon.fn/root]
+                  [:or :nil :seon.source/lint-error :seon.source/write-back-error :seon.error/value]]}
+  [proof root]
+  (if (vector? proof)
+    (let [lint (lint-errors root proof)] (when (seq lint) (lint-refusal lint)))
+    proof))
 
 (defn publication
   "What a merge of `branch`, whose own changes since its merge base are `changed`, onto `main` would publish, judged
   from what the branch alone decides: `:seon.source/merge-identities`, its whole change but an agent's own namespace
-  (`merge-changes`), and under a checkout `root` `:seon.source/lint-refusal` when the files it writes over `main`
-  (`replacement`, `proven-files`) hold a clj-kondo error (`lint-errors`, `lint-refusal`). Files that do not prove
-  leave nothing to lint: whether they write is the merge's, judged against the checkout as root's merge sees it.
-  The done rule's input (`done-refusals`). Cached by main's commit and the digests `branch` holds for `changed`."
+  (`merge-changes`), and under a checkout `root` `:seon.source/file-refusal` when the files it writes over `main`
+  (`replacement`, `file-proof`) do not prove or hold a clj-kondo error: the refusal the merge gives
+  (`file-refusal`). The done rule's input (`done-refusals`). Cached by main's commit and the digests `branch` holds
+  for `changed`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set [:maybe :seon.fn/root]]
                   [:or :seon.source/publication :seon.error/value]]}
   [main branch changed root]
@@ -1187,11 +1200,10 @@
     (fn []
      (let [delta (merge-changes branch main changed)
            tx (when (and (seq delta) (string? root) (nil? (root-refusal root))) (replacement branch main delta))
-           merged (when (vector? tx) (db/with main {:tx-data tx}))
-           proof (when (and merged (not (:seon.error/at merged))) (proven-files main merged delta root))
-           lint (when (vector? proof) (lint-errors root proof))]
-       (or (some #(when (:seon.error/at %) %) [tx merged])
-           (cond-> {:seon.source/merge-identities delta} (seq lint) (assoc :seon.source/lint-refusal (lint-refusal lint))))))))
+           refusal (when (vector? tx) (file-refusal (file-proof main tx delta root) root))]
+       (if (:seon.error/at tx)
+         tx
+         (cond-> {:seon.source/merge-identities delta} refusal (assoc :seon.source/file-refusal refusal)))))))
 
 (defn- judged-merge!
   "The merge branch S of `source`'s head `head` holding `tx` (the candidate commit `c-id`'s whole change `delta`, root's
@@ -1286,10 +1298,8 @@
                tx (when delta (if (seq delta) (replacement branch head delta) []))
                root-error (when (and root (seq tx)) (root-refusal root))
                ;; the files write-back would produce over the merged value: the bar a lane commit holds (bin/lane)
-               proof (when (and root (nil? root-error) (vector? tx) (seq tx))
-                       (let [merged (db/with head {:tx-data tx})]
-                         (if (:seon.error/at merged) merged (proven-files head merged delta root))))
-               published (if (vector? proof) (file-refusal proof root) proof)]
+               proof (when (and root (nil? root-error) (vector? tx) (seq tx)) (file-proof head tx delta root))
+               published (when proof (file-refusal proof root))]
            (cond
              root-error root-error
              (not (set? changed)) changed
@@ -1463,7 +1473,8 @@
   proof whose executed result is not green, and each other member red here unless it is one of the
   `:seon.source/next-proofs` (none on the last task): red is red, whatever main or the merge base holds; and every
   function of the identities `branch` holds with a contract gap (`contract-gaps`); and what the branch alone decides of its merge (`publication`): its
-  `:seon.source/lint-refusal` (a file its merge writes holds a clj-kondo error) and, on the last task (no next
+  `:seon.source/file-refusal` (a file its merge writes does not prove or holds a clj-kondo error, as the merge
+  refuses it) and, on the last task (no next
   proofs), each function of its `:seon.source/merge-identities` no green test reaches (`uncovered-functions`), as
   the merge refuses them, and every unresolved unmerged entry the branch holds (`unmerged-refusal`), as git refuses a
   commit while a path is unmerged. Mid-chain a function no test reaches is not refused: the next task's proofs cover
@@ -1477,7 +1488,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/judged] :seon.source/refusals]}
   [branch {members :seon.source/members results :seon.source/results proofs :seon.task/proofs
            next-proofs :seon.source/next-proofs delta :seon.program/identities
-           lint :seon.source/lint-refusal merging :seon.source/merge-identities deferred :seon.source/deferred
+           file :seon.source/file-refusal merging :seon.source/merge-identities deferred :seon.source/deferred
            run-id :seon.test.run/id s :seon.test.run/branch}]
   (let [evidence {:seon.test.run/branch s :seon.source/refused-test-run run-id
                   :seon.error/layer :seon.source/done :seon.error/operation 'seon.cluster.source/done-refusals}
@@ -1507,7 +1518,7 @@
       (conj (red-test-refusal (assoc evidence :seon.error/message "A proof, or a member that is not one of the next task's proofs, is not green here.")
                               (verdicts (into red-proofs others))))
       (seq gaps) (conj (uncontracted-refusal evidence gaps))
-      lint (conj lint)
+      file (conj file)
       (:seon.error/at uncovered) (conj uncovered)
       (and (seq uncovered) (not (:seon.error/at uncovered))) (conj (uncovered-refusal evidence uncovered results)))))
 

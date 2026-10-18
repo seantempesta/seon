@@ -351,7 +351,7 @@
                     (some->> (:seon.source/candidate refused) (vswap! made conj))
                     (is (= :seon.source/lint-error (:seon.error/type refused)))
                     (is (= (:seon.source/lint-findings refused)
-                           (:seon.source/lint-findings (:seon.source/lint-refusal published)))
+                           (:seon.source/lint-findings (:seon.source/file-refusal published)))
                         "the branch's done judgment reads the finding the merge gate refuses, from the same derivation")
                     (is (= #{[:seon.test/sym check]} (:seon.source/merge-identities published)))
                     (is (= [(subs (.getPath ^java.io.File file) (inc (count root))) :seon/unbounded-assertion-message]
@@ -367,6 +367,9 @@
   ;; Live run 11 (docs/research/agent-platform/2026-10-18/live-run-11.md): the fork-point chain required
   ;; seon.test-support from `user`; the done rule passed it and root's final merge refused :one-file, because
   ;; `publication` drops the write-back refusal its file proof answers. One derivation for both consumers.
+  ;; Main holds `user` with no file, as every cluster where an agent evaluated in `user` does.
+  (let [h-conn (:seon.db/connection (support/execution-handle nil))]
+    (support/transacted! h-conn [(support/namespace-entity (db/db h-conn) 'user)]))
   (merge-world! "wbuser" "user-check"
                 [(fn [fixture-ns]
                    (str "(in-ns 'user) (require 'clojure.set) (in-ns '" fixture-ns ") "

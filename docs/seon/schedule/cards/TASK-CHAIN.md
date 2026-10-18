@@ -334,14 +334,14 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
      merge completeness rule: missing spec, `:any`, `:some`; value `def`s are not functions, de1f48c23);
    - what the branch alone decides of its merge, judged by the merge gate's own functions
      (`seon.cluster.source/publication`, data in `judged`, cached by main's commit and the branch's changed
-     digests): its `:seon.source/lint-refusal`, when the files its merge list writes under the cluster's
-     checkout (`seon.merge/checkout`; none, nothing to write) hold a clj-kondo error
+     digests): its `:seon.source/file-refusal`, the one file check the merge gate reads too
+     (`seon.cluster.source/file-refusal`), when the files its merge list writes under the cluster's checkout
+     (`seon.merge/checkout`; none, nothing to write) do not prove (`:seon.source/write-back-error`: a change with no
+     file, a conflict with the checkout, a candidate that does not analyze) or hold a clj-kondo error
      (`seon.cluster.source/lint-refusal`, `:seon.source/lint-error` with each finding's file, row, column and type);
      and on the last task (no next proofs) each function of its `:seon.source/merge-identities` no green test
      reaches (`:seon.source/test-evidence-error`, the merge's coverage clause, naming the red tests that reach each
-     as `:seon.source/red-tests`; a refused reach read is its own refusal, never "uncovered"). Files that do not prove at all (no
-     file for a namespace, a conflict with the checkout, a namespace form missing a require) leave nothing to lint and
-     stay the gate's refusals (MERGE-STEP 2). Done and merge are one judgment: a
+     as `:seon.source/red-tests`; a refused reach read is its own refusal, never "uncovered"). Done and merge are one judgment: a
      task the merge would refuse for what its branch holds is not done, so its agent gets a turn with the refusal as
      data (owner 2026-10-15: chain b7ab51e090d5's merge refused a lint error its done rule never saw, and the merge
      step, green at its start, ended with no turn and re-merged into the same refusal). Measured on that branch:
