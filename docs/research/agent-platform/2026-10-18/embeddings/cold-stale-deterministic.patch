@@ -1,0 +1,21 @@
+--- a/test/seon/cost_estimate_test.clj
++++ b/test/seon/cost_estimate_test.clj
+@@ -18,6 +18,7 @@
+             [edamame.core :as edamame]
+             [my.root]
+             [seon.batch :as batch]
++            [seon.cache]
+             [seon.cluster.host :as host]
+             [seon.context]
+             [seon.cost-support :as cost-support]
+@@ -187,6 +188,10 @@
+         ;; the merge's members: what the branch observes and the platform run's
+         selected (seon-test/reaching-selection {:seon.db/db database :seon.test/changed ['seon.db/as-of-key]})
+         members (into (vec (:seon.fn/tests selected)) (:seon.fn/platform-tests selected))
++        ;; cold means cold: what boot and earlier tests left in the process cache moved this row 121 -> 244 -> 610
++        ;; reads between JVMs of one candidate; every derived kind but the SCI contexts is evicted first
++        _ (seon.cache/evict-kinds! (into #{} (remove #(str/starts-with? (namespace %) "seon.sci"))
++                                         (keys (:seon.cache/kinds (seon.cache/status)))))
+         measured (profile/measure #(seon-test/stale database members))]
+     (is (< 100 (count members)) "the hub's members are the merge's members")
+     {:alloc-mb (/ (:seon.profile/alloc-bytes measured 0) 1048576.0) :calls (:seon.profile/calls measured)
