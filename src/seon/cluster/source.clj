@@ -747,8 +747,10 @@
 (defn merge-base
   "The merge base of the commits `a` and `b` of `database`'s store, git's `merge-base`: their best common ancestor
   in Datahike's commit graph (`datahike.api/merge-base`), a commit id. A pure function of two immutable ids, so it
-  is cached by them (`seon.cache`) and never invalidated. Two commits with no common ancestor, a criss-cross with
-  several best ones, or an unknown commit refuse by name."
+  is cached by them (`seon.cache`) and never invalidated, and folded forward: a commit with one parent and a
+  higher generation than the other side is no ancestor of it, so the pair shares its parent's common ancestors and
+  merge base, and a branch's next commit reads two graph records instead of walking down to the base again. Two
+  commits with no common ancestor, a criss-cross with several best ones, or an unknown commit refuse by name."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/commit-id :seon.source/commit-id]
                   [:or :seon.source/commit-id :seon.program/digest-map-refusal]]}
   [database a b]
@@ -757,8 +759,14 @@
         ;; its id and a collection's merge bases of every work branch read main's history once
         record (fn [cid] (seon.cache/lookup ::commit-graph-record cid (constantly 128)
                                             #(d/commit-graph-record schema-db cid)))
+        folded (fn [] (some (fn [[x y]]
+                              (let [rx (record x) ry (record y)]
+                                (when (and rx ry (= 1 (count (:datahike/parents rx)))
+                                           (> (:datahike/generation rx) (:datahike/generation ry)))
+                                  (seon.cache/present ::merge-base (vec (sort [(first (:datahike/parents rx)) y]))))))
+                            [[a b] [b a]]))
         found (try (seon.cache/lookup ::merge-base (vec (sort [a b])) (constantly 64)
-                                      #(d/merge-base schema-db a b record))
+                                      #(or (folded) (d/merge-base schema-db a b record)))
                    (catch clojure.lang.ExceptionInfo failure
                      ;; a deliberate translation: Datahike's named refusal, answered as this reader's
                      (if (merge-base-refusals (:type (ex-data failure)))

@@ -1750,19 +1750,18 @@
                    :seon.error/value]]}
   [database test-symbols task]
   (let [inputs (db/q '[:find [?digest ...] :where [_ :seon.source/test-input-digest ?digest]] database)
-        current (runner/current-results database test-symbols task)]
-    (or (first (filter :seon.error/at [inputs current]))
-        (reduce-kv
-         (fn [results test-symbol result]
-           (let [present (db/pull database [:seon.test/source :seon.test/fixture-observation]
-                                  [:seon.test/sym test-symbol])]
-             (cond (:seon.error/at present) (reduced present)
-                   (and (:seon.test/source present)
-                        (not (:seon.test/fixture-observation present))
-                        (= #{(:seon.test.run/input-digest result)} (set inputs)))
-                   (assoc results test-symbol result)
-                   :else results)))
-         {} current))))
+        current (runner/current-results database test-symbols task)
+        ;; one read of every resulted test's source facts, never one per test
+        present (when-not (some :seon.error/at [inputs current])
+                  (db/pull-many database [:seon.test/sym :seon.test/source :seon.test/fixture-observation]
+                                (mapv #(vector :seon.test/sym %) (keys current))))]
+    (or (first (filter :seon.error/at [inputs current present]))
+        (let [sourced (into #{} (keep #(when (and (:seon.test/source %) (not (:seon.test/fixture-observation %)))
+                                         (:seon.test/sym %)))
+                            present)]
+          (into {} (filter (fn [[test-symbol result]]
+                             (and (sourced test-symbol) (= #{(:seon.test.run/input-digest result)} (set inputs)))))
+                current)))))
 
 (defn- stale-in
   "The requested tests absent from the one current-result lookup."
@@ -2205,16 +2204,24 @@
 (defn observable-changes
   "Of `changed`, the identities `candidate` changed since `base`, those a test can observe: all but a function or
   test both hold at one behavior digest (a docstring-only change is none) and a namespace that lost no binding
-  (`binding-lost?`)."
+  (`binding-lost?`). Held by the content revisions of both values' definition digests, which determine every
+  behavior digest and namespace binding it reads (as `seon.program/own-changed-identities` holds `changed`), so a
+  request that wrote no definition reads none of them again."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set]
                   :seon.program/identity-set]}
   [base candidate changed]
-  (into #{} (remove (fn [[a v :as declaration]]
-                      (if (= :seon.ns/name a)
-                        (not (binding-lost? base candidate v))
-                        (when-let [behavior (behavior-of base declaration)]
-                          (= behavior (behavior-of candidate declaration))))))
-        changed))
+  (let [revision #(get (db/content-revisions % [:seon.program/definition-digest]) :seon.program/definition-digest)
+        base-key (revision base)
+        candidate-key (revision candidate)
+        derive #(into #{} (remove (fn [[a v :as declaration]]
+                                    (if (= :seon.ns/name a)
+                                      (not (binding-lost? base candidate v))
+                                      (when-let [behavior (behavior-of base declaration)]
+                                        (= behavior (behavior-of candidate declaration))))))
+                      changed)]
+    (if (and base-key candidate-key)
+      (seon.cache/lookup ::observable-changes [base-key candidate-key changed] #(* 160 (inc (count %))) derive)
+      (derive))))
 
 (defn branch-delta
   "The pure branch delta: the declarations `candidate` holds at another digest than `base` (its merge base, or the
@@ -2260,7 +2267,12 @@
     (if (:seon.error/at changed)
       changed
       ;; a removed test is in the delta as a change; it is no test to run
-      (into [] (keep (fn [[a v]] (when (and (= :seon.test/sym a) (seq (db/datoms database :avet :seon.test/sym v))) v))) changed))))
+      (let [tests (into [] (keep (fn [[a v]] (when (= :seon.test/sym a) v))) changed)
+            present (if (seq tests)
+                      (set (selection-read! (db/q '[:find [?symbol ...] :in $ [?symbol ...] :where [_ :seon.test/sym ?symbol]]
+                                                  database tests)))
+                      #{})]
+        (filterv present tests)))))
 
 (defn request-changes
   "What one eval request changed, in print order; empty when it defined nothing.

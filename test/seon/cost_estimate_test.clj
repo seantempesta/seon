@@ -47,43 +47,43 @@
   [{:op :unchanged-request
     :why "Read one form, evaluate `nil`, one recording transaction of ~10 datoms, print one value: proportional to 1 form."
     :estimate {:alloc-mb 4.0 :calls 500 :reads 10 :ms 25.0}
-    :overrun '{:task seon.repl/an-unchanged-request-costs-seventeen-megabytes-and-six-thousand-calls :alloc-mb 22.4 :calls 8499 :reads 94}}
+    :overrun '{:task seon.repl/an-unchanged-request-costs-seventeen-megabytes-and-six-thousand-calls :alloc-mb 18.5 :calls 6357 :reads 46}}
    {:op :fresh-agent-first-request
     :why "The unchanged request plus one agent entity, one `d/branch!` pointer and one `sci/fork`: constant, about 3x the unchanged request."
     :estimate {:alloc-mb 12.0 :calls 1500 :reads 30 :ms 75.0}
-    :overrun '{:task seon.cluster.agent/a-fresh-agents-environment-costs-one-fork :alloc-mb 58.7 :calls 8767 :reads 93}}
+    :overrun '{:task seon.cluster.agent/a-fresh-agents-environment-costs-one-fork :alloc-mb 54.3 :calls 7401 :reads 45}}
    {:op :new-def
     :why "The unchanged request plus one form's analysis, digest and entity (~30 datoms); no test reaches a new name: proportional to 1 form."
     :estimate {:alloc-mb 16.0 :calls 2500 :reads 40 :ms 60.0}
-    :overrun '{:task seon.repl/a-new-def-costs-a-hundred-forty-megabytes :alloc-mb 95.3 :calls 20206 :reads 379}}
+    :overrun '{:task seon.repl/a-new-def-costs-a-hundred-forty-megabytes :alloc-mb 92.9 :calls 18676 :reads 348}}
    {:op :unmap-one-def
     :why "The unchanged request plus one `my.program/ns-unmap!` of a def nothing calls: the def's referrers as indexed reads of its edges (none), read once at the form and once where the writer re-derives the retraction, and the retraction of its ~30 datoms; no test reaches it: proportional to the definition's edges, never to the program. Its overrun is the program-change request's own, which a new def shares."
     :estimate {:alloc-mb 12.0 :calls 2500 :reads 60 :ms 80.0}
-    :overrun '{:task seon.repl/a-new-def-costs-a-hundred-forty-megabytes :alloc-mb 105.8 :calls 19539 :reads 352}}
+    :overrun '{:task seon.repl/a-new-def-costs-a-hundred-forty-megabytes :alloc-mb 102.6 :calls 17960 :reads 321}}
    {:op :redefine-one-form
     :why "A new def plus finding the one test reaching the changed digest and running it: proportional to 1 form and 1 reaching test."
     :estimate {:alloc-mb 24.0 :calls 4000 :reads 60 :ms 100.0}
-    :overrun '{:task seon.repl/redefining-one-form-costs-three-hundred-megabytes :alloc-mb 336.5 :calls 49901 :reads 392}}
+    :overrun '{:task seon.repl/redefining-one-form-costs-three-hundred-megabytes :alloc-mb 333.2 :calls 47993 :reads 355}}
    {:op :reuse-one-unchanged-test
     :why "The unchanged request plus one reach digest over the test's closure (~5 definitions) and one indexed read of its record: no run."
     :estimate {:alloc-mb 8.0 :calls 1500 :reads 25 :ms 40.0}
-    :overrun '{:task my.test/reusing-one-unchanged-test-costs-nine-thousand-calls :alloc-mb 34.9 :calls 10734 :reads 128}}
+    :overrun '{:task my.test/reusing-one-unchanged-test-costs-nine-thousand-calls :alloc-mb 29.9 :calls 7727 :reads 58}}
    {:op :current-state-with-task
     :why "The unchanged request plus the agent's one-hop attachments: its task, 7 references, 1 proof: proportional to ~10 attachments."
     :estimate {:alloc-mb 24.0 :calls 3000 :reads 100 :ms 100.0}
-    :overrun '{:task seon.context/one-agents-current-state-costs-hundreds-of-megabytes :alloc-mb 225.3 :calls 47383 :reads 346}}
+    :overrun '{:task seon.context/one-agents-current-state-costs-hundreds-of-megabytes :alloc-mb 210.2 :calls 41373 :reads 208}}
    {:op :seon-db-nine-forms
     :why "Nine unchanged forms of a 6,500-line namespace: read, analyze and digest each form, all digests equal, nothing written, no test: proportional to 9 forms, never to the namespace."
     :estimate {:alloc-mb 80.0 :calls 12000 :reads 150 :ms 400.0}
-    :overrun '{:task seon.repl/re-evaluating-nine-seon-db-forms-allocates-nine-gigabytes :alloc-mb 955.0 :calls 98573 :reads 1654}}
+    :overrun '{:task seon.repl/re-evaluating-nine-seon-db-forms-allocates-nine-gigabytes :alloc-mb 955.0 :calls 98573 :reads 1558}}
    {:op :hub-docstring-change
     :why "One redefinition of the hub `seon.db/as-of-key` that changes only its docstring: read, analyze and digest one form; its behavior digest equals the merge base's, so no caller is re-armed and no test is selected: an unchanged form's cost, proportional to 1 form."
     :estimate {:alloc-mb 30.0 :calls 4000 :reads 60 :ms 150.0}
-    :overrun '{:task seon.repl/a-docstring-only-change-to-a-hub-function-costs-hundreds-of-megabytes :alloc-mb 253.1 :calls 60929 :reads 433}}
+    :overrun '{:task seon.repl/a-docstring-only-change-to-a-hub-function-costs-hundreds-of-megabytes :alloc-mb 251.4 :calls 57994 :reads 377}}
    {:op :hub-behavior-change
     :why "One redefinition of the hub `seon.db/as-of-key` that changes its behavior digest (`AsOfDB` spelled fully qualified): read, analyze, digest and record one form, interpret that one definition (its src callers stay compiled), and run its one direct test on the branch (the ~160 tests above its src callers are the merge's platform run): the redefined form's cost plus one small test, proportional to 1 form and 1 test."
     :estimate {:alloc-mb 40.0 :calls 6000 :reads 100 :ms 300.0}
-    :overrun '{:task seon.repl/a-hub-behavior-change-costs-hundreds-of-megabytes :alloc-mb 914.1 :calls 199074 :reads 1376}}
+    :overrun '{:task seon.repl/a-hub-behavior-change-costs-hundreds-of-megabytes :alloc-mb 905.8 :calls 191752 :reads 1276}}
    {:op :cold-stale-merge-members
     :why "`seon.test/stale` with every derived value cold over the tests reaching the hub `seon.db/as-of-key` (~140 members, a merge's members): one reach digest per member over the union of their reach (~3,500 definitions), each definition's behavior digest computed once from its stored row and one read of its source (~50 KB, ~10 calls), then one indexed result read per member: proportional to the reached definitions."
     :estimate {:alloc-mb 175.0 :calls 35000 :reads 150 :ms 350.0}
@@ -91,7 +91,15 @@
    {:op :merge-one-function
     :why "Root merges a branch changing one function: a three-way diff of ~30 datoms from the merge base, its proof and one reaching test run on the merge branch, one merge transaction: proportional to the delta."
     :estimate {:alloc-mb 48.0 :calls 8000 :reads 200 :ms 400.0}
-    :overrun '{:task seon.cluster.source/accepting-a-one-function-merge-allocates-hundreds-of-megabytes :alloc-mb 117.3 :calls 18537 :reads 184}}])
+    :overrun '{:task seon.cluster.source/accepting-a-one-function-merge-allocates-hundreds-of-megabytes :alloc-mb 117.3 :calls 18537 :reads 184}}
+   {:op :similar-by-name-warm
+    :why "The unchanged request plus `(my.program/similar 'seon.db/transcat! 5)` with its index derived: the program's ~11,000 declared names read once, one content key over them, one hit on the index, one embed request for the query and one pass of 11,000 x 256 multiply-adds: proportional to the declared names, a few bytes each."
+    :estimate {:alloc-mb 5.0 :calls 800 :reads 10 :ms 40.0}
+    :overrun '{:task my.program/a-warm-similar-by-name-costs-seventy-megabytes :alloc-mb 73.6 :calls 19951 :reads 57}}
+   {:op :unresolved-symbol-request
+    :why "The unchanged request plus an unresolved `seon.db/transcat!`: the reader's refusal, the namespace's public names and the alias's library names read once, their warm index ranked against one query embedding, eight calling forms printed: proportional to the public names."
+    :estimate {:alloc-mb 10.0 :calls 1500 :reads 30 :ms 80.0}
+    :overrun '{:task seon.error/an-unresolved-symbol-request-costs-thirty-megabytes :alloc-mb 34.3 :calls 15563 :reads 66}}])
 
 (def ^:private wall-slack
   "Wall time is judged at this multiple of its estimate: concurrent checks and cold JIT move it, allocation and
@@ -280,8 +288,15 @@
            current-state (cost "(seon.context/current-state)")
            nine (cost (str "(in-ns 'seon.db)\n" (seon-db-forms)))
            hub-docstring (cost (str "(in-ns 'seon.db)\n" (hub-docstring-change)))
-           hub-behavior (cost (str "(in-ns 'seon.db)\n" (hub-behavior-change)))]
+           hub-behavior (cost (str "(in-ns 'seon.db)\n" (hub-behavior-change)))
+           ;; joins the background fill's derivation of this branch's corpora: the rows measure warm calls
+           _ (request "(in-ns 'user) (seon.embed/fill! (seon.db/db) seon.embed/request!) nil")
+           _ (request "(my.program/similar 'seon.db/transcat! 5)")
+           similar-by-name (cost "(my.program/similar 'seon.db/transcat! 5)")
+           _ (request "(seon.db/transcat! 1)")
+           unresolved (cost "(seon.db/transcat! 1)")]
        (assoc changes :current-state-with-task current-state :seon-db-nine-forms nine
+              :similar-by-name-warm similar-by-name :unresolved-symbol-request unresolved
               :hub-docstring-change hub-docstring :hub-behavior-change hub-behavior :cold-stale-merge-members cold-stale)))))
 
 (defn- over
