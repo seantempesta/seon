@@ -361,6 +361,28 @@
                         "the gate's refusal keeps the merge branch it built, for a merge step to repair (MERGE-STEP)")
                     (is (= before (slurp file)))))))
 
+(deftest ^{:seon.test/long "One agent turn on C and one publication (one replacement and one file proof of a one-file fixture)."
+           :seon.test/long-ms 30000}
+  a-change-to-a-namespace-with-no-file-is-refused-by-the-done-judgment
+  ;; Live run 11 (docs/research/agent-platform/2026-10-18/live-run-11.md): the fork-point chain required
+  ;; seon.test-support from `user`; the done rule passed it and root's final merge refused :one-file, because
+  ;; `publication` drops the write-back refusal its file proof answers. One derivation for both consumers.
+  (merge-world! "wbuser" "user-check"
+                [(fn [fixture-ns]
+                   (str "(in-ns 'user) (require 'clojure.set) (in-ns '" fixture-ns ") "
+                        "(clojure.test/deftest ^{:seon/tasks #{'tq.write-back/fix}} user-check (clojure.test/is (= 1 1)))"))]
+                (fn [{:keys [target c root fixture-ns]}]
+                  (let [h-conn (:seon.db/connection target)
+                        check [:seon.test/sym (symbol (str fixture-ns) "user-check")]
+                        published (do (committed! {:seon.fn/root root})
+                                      (let [main (db/db h-conn) branch (db/branch-database main c)]
+                                        (try (source/publication main branch #{check [:seon.ns/name 'user]} root)
+                                             (finally (source/release! [branch])))))]
+                    (is (contains? (:seon.source/merge-identities published) [:seon.ns/name 'user])
+                        "the user namespace's change is part of what the merge carries")
+                    (is (= :one-file (some #(when (map? %) (:seon.source/write-back-refused %)) (vals published)))
+                        "the done judgment reads the file refusal the final merge gives, from the same derivation")))))
+
 (deftest ^{:seon.test/long "Two agent turns on C, one prepare-merge! (file proof, then a nested seon.test/run; 60 s is merge-test's measured bound) and two analyses of a one-file fixture."
            :seon.test/long-ms 90000}
   a-require-added-at-the-repl-merges-and-writes-back-its-ns-form
