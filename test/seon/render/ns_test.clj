@@ -170,6 +170,13 @@
                       " :plan \"Render one node with `tn.a/f`.\\nThen stop.\"}]")
            indexed (task/index-tasks! {:seon.db/connection connection :seon.task/files {"resources/seon/tasks/tn.a.edn" entry}})
            database @connection
+           registered-form (fn [k]
+                             (clojure.edn/read-string
+                              (db/q '[:find ?form . :in $ ?k
+                                      :where [?s :seon.schema/key ?k] [?s :seon.schema/form ?form]]
+                                    database k)))
+           plan-form (registered-form :seon.task/plan)
+           ns-form (registered-form :seon.task/ns)
            unit (fn [lookup distance]
                   (let [value (db/pull database '[*] lookup)]
                     (assoc value :seon.db/db database :seon.render/value value :seon.render/distance distance)))]
@@ -189,17 +196,19 @@
                       (assoc (unit [:seon.schema/key :seon.task/plan] 1)
                              :seon.render/value {:seon.schema/key :seon.task/plan
                                                  :seon.schema/definition [:string {:min 400}]}))]
-           (is (= [:string {:min 1}] (:seon.schema.usage/previous usage)))
+           (is (= plan-form (:seon.schema.usage/previous usage)))
            (is (some #{:seon.task/task} (:seon.schema.usage/referenced-by usage)))
            (is (not (contains? usage :seon.schema.usage/check))
                "the render validates nothing: a check is only the registration's record")))
        (testing "listed among others, a schema is its key and doc line as data"
-         (is (= {:seon.schema/key :seon.task/plan}
-                (render.schema/render-ai (unit [:seon.schema/key :seon.task/plan] 0))))
+         (let [shown (render.schema/render-ai (unit [:seon.schema/key :seon.task/plan] 0))]
+           (is (= :seon.task/plan (:seon.schema/key shown)))
+           (is (not (contains? shown :seon.schema/definition))
+               "a listed schema is its key and doc line, no definition"))
          (is (str/starts-with? (:seon.schema.usage/doc (render.schema/render-ai (unit [:seon.schema/key :seon.task/ns] 0)))
                                "The owning namespace")))
        (testing "the form face is the usage read, shown and never run"
-         (is (= (list 'seon.render.schema/usage '(seon.db/db) :seon.task/plan (list 'quote [:string {:min 1}]))
+         (is (= (list 'seon.render.schema/usage '(seon.db/db) :seon.task/plan (list 'quote plan-form))
                 (render.schema/render-form (unit [:seon.schema/key :seon.task/plan] 1)))))
        (testing "a stored-data check judges each entity's reconstructed value, once, at registration"
          (let [check (db/stored-value-check database :seon.task/plan [:string {:max 0}])]
@@ -213,7 +222,7 @@
            (is (zero? (:seon.schema.usage/failing check))
                "a cardinality-many value is judged as its set, never datom by datom (Astra's 200/200)"))
          (is (nil? (binding [db/*read-database* database]
-                     (db/registration-check :seon.task/plan [:string {:min 1}])))
+                     (db/registration-check :seon.task/plan plan-form)))
              "an unchanged form reads nothing"))))))
 
 (deftest a-function-node-is-its-name-and-the-reads-of-its-doc-and-source
