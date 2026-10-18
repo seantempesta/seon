@@ -2103,7 +2103,8 @@
   resolves (`ctx` holds it or the platform loaded it): SCI resolves any such
   namespace, the file's `ns` form only what it requires, so the namespace's
   resolver state, and with it the merged `ns` form, holds what its definitions
-  use. Answers the namespaces required."
+  use. A quoted form is data, never a use: `'my.program/source` requires nothing.
+  Answers the namespaces required."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :symbol :seon.batch/form] [:set :symbol]]}
   [ctx namespace-name form]
   (let [{:keys [aliases requires]} (sci/namespace-bindings ctx namespace-name)
@@ -2113,7 +2114,7 @@
                           (remove (into #{namespace-name 'clojure.core} requires))
                           (remove #(contains? aliases %))
                           (filter #(or (sci/find-ns ctx %) (find-ns %))))
-                    (tree-seq coll? seq form))]
+                    (tree-seq #(and (coll? %) (not (and (seq? %) (= 'quote (first %))))) seq form))]
     (when (seq named)
       (sci/binding [sci/ns (sci/find-ns ctx namespace-name)]
         (sci/eval-form ctx (apply list 'clojure.core/require (map #(list 'quote %) named)))))

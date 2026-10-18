@@ -17,6 +17,9 @@
                    (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
                                                              "arguments" {"cluster" running "agent" agent-id "code" code}})))))
            unrequired (call "(ns my.urn) (defn f {:malli/schema [:=> [:cat :string] :string]} [s] (clojure.string/upper-case s))")
-           required (call "(ns my.urr (:require [clojure.string])) (defn f {:malli/schema [:=> [:cat :string] :string]} [s] (clojure.string/upper-case s))")]
+           required (call "(ns my.urr (:require [clojure.string])) (defn f {:malli/schema [:=> [:cat :string] :string]} [s] (clojure.string/upper-case s))")
+           ;; seon.ref offers (my.program/source 'x) as data; my.program requires seon.ref, so requiring it was a refused cycle
+           quoted (call "(ns my.urq) (defn f {:malli/schema [:=> [:cat :string] :seon.schema/value]} [s] (list 'clojure.string/upper-case s))")]
        (is (= #{'clojure.string} (set (:seon.eval/auto-required (finding-of unrequired)))))
-       (is (nil? (finding-of required)))))))
+       (is (nil? (finding-of required)))
+       (is (nil? (finding-of quoted)) "a quoted symbol is data: its namespace is not required")))))
