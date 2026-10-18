@@ -534,6 +534,46 @@
        (is (= :summary (get-in reads ['clojure.core/subs :seon.ref/level])) "a library Var is read at its summary")
        (is (not= :summary (get-in reads ['tq.stable/cited :seon.ref/level])) "a program function keeps its citation's level")))))
 
+(deftest a-warm-model-request-allocates-in-proportion-to-what-it-shows
+  ;; Live run 9 (docs/research/agent-platform/2026-10-18/live-run-9.md): every model call builds its context with
+  ;; `seon.context/model-context`; on default 80 calls spent 12.3 s in it, and one warm build for a 40-call agent cost
+  ;; 81-108 ms, 96-132 MB and 65k-102k armed calls (32,057 of them `seon.schema.datahike/query-variable?` for the
+  ;; 40-call agent) to show 71k-153k characters: 900-1,600 bytes allocated per character shown, about 85 MB of it a
+  ;; fixed cost per request. Printing what it shows needs tens of bytes per character.
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (let [handle (test-support/running-cluster running)
+           _ (evaluate running agent-id "(ns tq.warm) (defn cited \"One.\" {:malli/schema [:=> [:cat :int] :int]} [n] n)")
+           _ (test-support/declare-proof! connection 'tq.warm-test 'held 'tq.warm/held)
+           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.warm
+                                            :seon.task/name "held"
+                                            :seon.task/plan "Use `tq.warm/cited`."}))
+           _ (task/assign! {:seon.agent/context-source handle :seon.db/connection connection :seon.task/assigned id
+                            :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
+           ;; a model pass: its form evaluated and the model's attempt (the provider is the external effect) on its call row
+           pass! (fn [ordinal code]
+                   (evaluate running agent-id code)
+                   (let [run (-> (seon.eval/of-agent (db/db connection) agent-id '[{:seon.cluster.eval/run [:seon.turn/id]}])
+                                 peek (get-in [:seon.cluster.eval/run :seon.turn/id]))
+                         attempt (str "warm-attempt-" ordinal)]
+                     (test-support/transacted! connection
+                                               [{:db/id attempt :seon.ai.attempt/id attempt :seon.ai.attempt/ordinal 0
+                                                 :seon.ai.attempt/at #inst "2026-10-18" :seon.ai/endpoint "http://localhost/warm"
+                                                 :seon.ai/model "fixture" :seon.ai.attempt/settings-edn "{}"}
+                                                [:db/add [:seon.turn/id run] :seon.turn/attempts attempt]])))
+           _ (doall (map-indexed pass! ["(my.program/source 'tq.warm/cited)" "(+ 1 2)" "(tq.warm/cited 3)" "(+ 3 4)"]))
+           world {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.sci.admit/caps (:seon.sci.admit/caps handle)
+                  :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle)}
+           database (db/db connection)
+           build #(context/model-context database world agent-id)
+           _ (build)
+           measured (profile/measure build)
+           shown (count (str (get-in measured [:seon.profile/value :seon.ai/system])
+                             (get-in measured [:seon.profile/value :seon.ai/prompt])))]
+       (is (string? (get-in measured [:seon.profile/value :seon.ai/system])) "the context builds")
+       (is (< (:seon.profile/alloc-bytes measured 0) (* 200 shown))
+           "a warm build allocates under two hundred bytes per character it shows")))))
+
 (deftest ^{:seon.test/long "An agent's setup and seven eval requests with their test steps, each followed by one model context."
            :seon.test/long-ms 60000}
   each-model-request-of-an-attempt-starts-with-the-previous-one-but-its-last-message
