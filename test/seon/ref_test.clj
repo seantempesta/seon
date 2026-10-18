@@ -79,10 +79,11 @@
 
 (deftest a-section-opening-with-a-list-has-no-lead
   (let [path "docs/seon/schedule/cards/TASK-CHAIN.md"
-        listed (cited-section (str "`" path "#2-flow`"))
+        listed-path "docs/seon/schedule/cards/DH-4a.md"
+        listed (cited-section (str "`" listed-path "#fork-change`"))
         tree (cited-section (str "`" path "#1-data`"))]
-    (is (= [:no-lead path "2-flow"] ((juxt :seon.ref/problem-kind :seon.ref/path :seon.ref/anchor) listed)))
-    (is (str/starts-with? (:seon.ref/opening listed) "1. **Create**") "the structural fallback: the first block, whole")
+    (is (= [:no-lead listed-path "fork-change"] ((juxt :seon.ref/problem-kind :seon.ref/path :seon.ref/anchor) listed)))
+    (is (str/starts-with? (:seon.ref/opening listed) "1. Find every place") "the structural fallback: the first block, whole")
     (is (= :no-lead (:seon.ref/problem-kind tree)))
     (is (not (contains? tree :seon.ref/opening)) "a heading followed by a heading has the heading tree as its doc")
     (is (= "the-task" (:seon.ref/anchor (first (:seon.ref/below tree)))))

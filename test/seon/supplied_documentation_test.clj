@@ -48,7 +48,7 @@
                          (get-in directory [:seon.sci.admit/value :functions]))
                entries (filter vector? (rest (second (:in doc))))]
            (is (nil? (:seon.cluster.eval/error documented)))
-           (is (= #{:seon.db/connection :seon.agent/id} (set (:supplied doc))))
+           (is (= #{:seon.db/connection :seon.agent/id :seon.agent/routing} (set (:supplied doc))))
            (is (= (:supplied doc) (:supplied entity)))
            (is (= (:in doc) (:in entity)))
            (is (seq entries))
