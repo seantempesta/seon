@@ -81,3 +81,26 @@
                                  (str "(seon.schema/register! :rv.order/qty :int)\n"
                                       "(:key (my.program/source :rv.order/qty))")))]
        (is (= :rv.order/qty answer) "the later form's source finds the key the earlier form registered")))))
+
+(deftest ^{:seon.test/long "One eval request of an own-branch agent with its automatic test step: about 1 s measured on default's JVM (request-view, 2026-10-14)."
+           :seon.test/long-ms 15000}
+  a-later-form-reads-the-request-view-after-two-forms-replace-stored-definitions
+  ;; each replacing form's transaction names its own entities "seon.fn.index/0" onward; the request view
+  ;; applied the forms' transactions as one, so the second's tempids collided with the first's and every
+  ;; elided read of the request answered "Conflicting upsert" (embeddings-2b, 2026-10-18)
+  (support/with-running-agent
+   (fn [running _ _]
+     (let [agent-id (str "request-view-replace-two-" (random-uuid))
+           _ (support/own-branch-agent!
+              running agent-id
+              (str "(ns rv.replace-two)\n"
+                   "(defn f \"Returns x.\" {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
+                   "(defn g \"Returns x.\" {:malli/schema [:=> [:cat :int] :int]} [x] x)"))
+           answer (last-value
+                   (eval-request running agent-id
+                                 (str "(in-ns 'rv.replace-two)\n"
+                                      "(defn f \"Returns x squared.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))\n"
+                                      "(defn g \"Returns x doubled.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x x))\n"
+                                      "(seon.db/q '[:find [?d ...] :where [?e :seon.fn/sym ?s] [(contains? #{rv.replace-two/f rv.replace-two/g} ?s)] [?e :seon.fn/doc ?d]] (seon.db/db))")))]
+       (is (= #{"Returns x squared." "Returns x doubled."} (set answer))
+           "the later form reads both replaced definitions")))))

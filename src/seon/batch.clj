@@ -642,7 +642,7 @@
                 (:seon.batch/source base) (assoc :seon.batch/source (:seon.batch/source base))
                 (seq (:seon.batch/defined batch)) (assoc :seon.batch/defined (:seon.batch/defined batch))
                 ;; the earlier forms' facts: this form's reads of its connection answer the request view
-                (seq (:seon.batch/request-facts batch)) (assoc :seon.batch/request-facts (:seon.batch/request-facts batch)))
+                (seq (:seon.batch/request-transactions batch)) (assoc :seon.batch/request-transactions (:seon.batch/request-transactions batch)))
         ;; the stages read the batch's working value from their request
         request (assoc request :seon.batch/world world :seon.batch/working (:seon.batch/working batch))
         writes (java.util.concurrent.ConcurrentLinkedQueue.)
@@ -814,7 +814,7 @@
           (dissoc :seon.batch/pending)
           (cond-> (not refusal)
             (-> (assoc :seon.batch/working after)
-                (cond-> validate? (update :seon.batch/request-facts (fnil into []) tx))
+                (cond-> validate? (update :seon.batch/request-transactions (fnil conj []) tx))
                 (update :seon.batch/program #((:seon.batch/fold request) request % change))
                 (update :seon.batch/defined defined-by change)
                 (mark #(assoc % :seon.batch/change change)))

@@ -181,7 +181,7 @@
 
 (def ^:dynamic *request-facts*
   "The running eval request's own facts on its connection, as data: `:seon.db/connection`, the
-  `:seon.batch/request-facts` transaction data its earlier forms applied, and their `:seon.batch/facts-digest`.
+  `:seon.batch/request-transactions` its earlier forms applied, and their `:seon.batch/facts-digest`.
   Bound by `seon.turn.world/with-world`; a read of that connection answers its request view (`request-view`)."
   nil)
 
@@ -339,19 +339,25 @@
 (declare with)
 
 (defn- request-view
-  "`head` with the running eval request's facts applied when `*request-facts*` names `connection`: the request
-  view, derived once per head commit and facts digest in `seon.cache`, so a later form of the request reads what
-  its earlier forms defined while the request still records them in its one transaction. Otherwise `head`."
+  "`head` with the running eval request's transactions applied one after another, as its forms applied them,
+  when `*request-facts*` names `connection`: the request view, derived once per head commit and facts digest in
+  `seon.cache`, so a later form of the request reads what its earlier forms defined while the request still records
+  them in its one transaction. Otherwise `head`."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.db/database-value]
                   [:or :seon.db/database-value :seon.db/error-result]]}
   [connection head]
-  (let [{facts-connection :seon.db/connection facts :seon.batch/request-facts digest :seon.batch/facts-digest}
+  (let [{facts-connection :seon.db/connection transactions :seon.batch/request-transactions
+         digest :seon.batch/facts-digest}
         *request-facts*]
     (if (identical? facts-connection connection)
       (seon.cache/lookup ::request-view [(get-in head [:meta :datahike/commit-id]) (dbi/-max-tx head) digest]
-                         (constantly (* 1024 (count facts)))
+                         (constantly (* 1024 (transduce (map count) + 0 transactions)))
                          ;; derived from the head alone: the derivation's own reads are not the request's
-                         #(binding [*request-facts* nil] (with head facts))
+                         #(binding [*request-facts* nil]
+                            (reduce (fn [database transaction]
+                                      (let [after (with database transaction)]
+                                        (if (database-value? after) after (reduced after))))
+                                    head transactions))
                          database-value?)
       head)))
 

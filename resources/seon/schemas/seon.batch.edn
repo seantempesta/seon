@@ -25,10 +25,10 @@
          [:seon.agent/routing {:optional true :description "The execution's agent routing (its environment's): retiring a hosted agent reads it."} :seon.agent/routing]
          [:seon.agent/context-source {:optional true :description "The running cluster's own handle with its store, never a hosted agent's branch handle: my.message/send hosts a stopped recipient through it."} :seon.agent/context-source]
          [:seon.batch/defined {:optional true} :seon.batch/defined]
-         [:seon.batch/request-facts {:optional true} :seon.batch/request-facts]]
+         [:seon.batch/request-transactions {:optional true} :seon.batch/request-transactions]]
 
- :request-facts [:schema {:description "The transaction data an eval request's earlier forms applied on its working value, in order. seon.turn.world/with-world binds it as seon.db/*request-facts*, so a later form's read of the world's connection answers the request view: the head with these facts, while the request still records them in its one recording transaction."} :seon.store/transaction-data]
- :facts-digest [:string {:min 1 :max 64 :description "The structural digest (seon.id/digest) of a request's facts, the request view's cache key beside the head commit."}]
+ :request-transactions [:vector {:description "The transactions an eval request's earlier forms applied on its working value, one per form, in order: each names its own transaction-local identities, so they apply one after another, never as one. seon.turn.world/with-world binds them as seon.db/*request-facts*, so a later form's read of the world's connection answers the request view: the head with these transactions applied, while the request still records them in its one recording transaction."} :seon.store/transaction-data]
+ :facts-digest [:string {:min 1 :max 64 :description "The structural digest (seon.id/digest) of a request's transactions, the request view's cache key beside the head commit."}]
 
  :world-request [:map {:description "What seon.turn.world/world builds a world from: the cluster and connection, and whatever identity, custody and context the entrant holds. The SCI context is the caller's fork. Its world-member entries are declared under seon.batch/given-* names, so a world is built only from what its caller gives: an omitted one is never supplied from the calling evaluation's world."}
                  [:seon.boot/cluster-name :seon.boot/cluster-name]

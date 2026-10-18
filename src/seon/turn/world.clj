@@ -86,12 +86,14 @@
   (db/db conn))
 
 (defn- request-facts
-  "The data `seon.db/*request-facts*` binds for `world`: its connection, its request's facts and their digest."
+  "The data `seon.db/*request-facts*` binds for `world`: its connection, its request's transactions and their digest."
   {:malli/schema [:=> [:cat :seon.batch/world]
-                  [:map [:seon.db/connection :seon.db/connection] [:seon.batch/request-facts :seon.batch/request-facts]
+                  [:map [:seon.db/connection :seon.db/connection]
+                   [:seon.batch/request-transactions :seon.batch/request-transactions]
                    [:seon.batch/facts-digest :seon.batch/facts-digest]]]}
-  [{connection :seon.db/connection facts :seon.batch/request-facts}]
-  {:seon.db/connection connection :seon.batch/request-facts facts :seon.batch/facts-digest (id/digest 32 facts)})
+  [{connection :seon.db/connection transactions :seon.batch/request-transactions}]
+  {:seon.db/connection connection :seon.batch/request-transactions transactions
+   :seon.batch/facts-digest (id/digest 32 transactions)})
 
 (defn with-world
   "Run `f` with the world's bindings re-established on this thread: its
@@ -110,7 +112,7 @@
                                           (:seon.batch/reads world)
                                           (assoc #'db/*read-evidence-sink* (:seon.batch/reads world))
                                           ;; a later form reads the request view: its connection's head with the request's facts
-                                          (and (:seon.batch/request-facts world) (:seon.db/connection world))
+                                          (and (:seon.batch/request-transactions world) (:seon.db/connection world))
                                           (assoc #'db/*request-facts* (request-facts world)))
                            (f))))
 

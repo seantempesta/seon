@@ -3352,26 +3352,24 @@
 (defn- request-view!
   "The running eval request's view of `execution`'s branch, when `seon.db/*request-facts*` names its connection:
   that branch opened in an overlay of its store (`seon.cluster.store/open-overlay!`) with the request's facts
-  transacted there, a committed value a test run names, its connection and store. Its writes stay in the overlay,
+  transacted there one after another, a committed value a test run names, its connection and store. Its writes stay in the overlay,
   so nothing a run records on it outlives the run: the request's test step records the true results after its one
   transaction. Nil when no request view names the connection."
   {:malli/schema [:=> [:cat :seon.agent/context-source]
                   [:maybe [:map [:seon.db/connection :seon.db/connection] [:seon.store/store :seon.store/store]]]]}
   [execution]
-  (let [{connection :seon.db/connection facts :seon.batch/request-facts} db/*request-facts*]
-    (when (and (seq facts) (identical? connection (:seon.db/connection execution)))
+  (let [{connection :seon.db/connection transactions :seon.batch/request-transactions} db/*request-facts*]
+    (when (and (seq transactions) (identical? connection (:seon.db/connection execution)))
       (binding [db/*request-facts* nil]
         (let [store (store/open-overlay! (or (:seon.store/store execution) (:seon.store/store (env/of execution))))
               cluster (:seon.cluster/name execution)
-              view (try (open-world! store (get-in (db/db connection) [:config :branch]) cluster)
-                        (catch Throwable failure
-                          (try (store/release-store! store) (catch Throwable cleanup (.addSuppressed failure cleanup)))
-                          (throw failure)))
-              report (try (db/with-branch {:seon.db/connection view} #(db/transact! view facts))
-                          (catch Throwable failure
-                            (doseq [cleanup! [#(store/release-branch! view) #(store/release-store! store)]]
-                              (try (cleanup!) (catch Throwable cleanup (.addSuppressed failure cleanup))))
-                            (throw failure)))]
+              view (open-world! store (get-in (db/db connection) [:config :branch]) cluster)
+              ;; the writer answers a refusal as its report, so a refused form's transaction stops the replay
+              report (db/with-branch {:seon.db/connection view}
+                                     #(reduce (fn [_ transaction]
+                                                (let [report (db/transact! view transaction)]
+                                                  (if (:db-after report) report (reduced report))))
+                                              nil transactions))]
           (when-not (:db-after report)
             (store/release-branch! view)
             (store/release-store! store)

@@ -245,7 +245,7 @@
            result (binding [*member-gate* gate
                             *member-written* written
                             db/*request-facts* {:seon.db/connection connection
-                                                :seon.batch/request-facts [{::marker "request-fact"}]
+                                                :seon.batch/request-transactions [[{::marker "request-fact"}]]
                                                 :seon.batch/facts-digest "request-view-probe"}]
                     (sut/run {:seon.test/execution (support/execution-handle connection)
                               :seon.test/recording-connection connection
