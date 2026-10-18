@@ -30,6 +30,7 @@
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]
             [seon.db :as db]
+            [seon.profile]
             [seon.program :as program]))
 
 (declare commit-request with-db)
@@ -2007,3 +2008,17 @@
           "the AI face is data the value printer prints, not text")
       (is (text-render/carries? answer (:seon.error/message sample))
           "the data carries what the text carried"))))
+
+(deftest an-unresolved-symbol-reply-costs-under-twenty-milliseconds
+  ;; Request-cost lane 2026-10-17: an eval request with an unresolved symbol cost 97 ms and 84 MB, almost all of it
+  ;; `seon.error/nearest-names` tokenizing every public declaration on every such reply. The candidates' words depend
+  ;; only on the program's declared names, never on the guess, so a warm reply for a new guess tokenizes only the guess.
+  (let [database (seon.db/db)
+        reply (fn [guess] (error/reply-value database {:seon.error/message (str "Unable to resolve symbol: " guess)
+                                                       :seon.program/not-found guess}))
+        _ (reply 'qqq/frobnicate-thing)
+        measured (seon.profile/measure #(reply 'qqq/another-guessed-name))]
+    (is (< (seon.profile/calls-of measured 'seon.error/name-tokens) 64)
+        "a warm reply tokenizes the guess, not every declaration again")
+    (is (< (:seon.profile/alloc-bytes measured 0) (* 10 1024 1024))
+        "a warm unresolved-symbol reply allocates under 10 MB")))

@@ -36,6 +36,7 @@
             [seon.schema.datahike :as schema-datahike]
             [seon.sci.eval :as sci.eval]
             [seon.task :as task]
+            [seon.profile]
             [seon.test-support :as test-support])
   (:import [java.util.concurrent CountDownLatch]))
 
@@ -1036,3 +1037,35 @@
            "the re-fork answers its own new commit, not the deleted branch's")
        (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
        nil))))
+
+(deftest the-fork-point-is-not-walked-for-on-every-request
+  ;; Request-cost lane 2026-10-17: `commit-step` calls per `nil` request grew from 69 to 238 over 40 requests, because
+  ;; `fork-point` walks the branch's whole first-parent history each call. A branch's fork point never changes after
+  ;; it forks, so reading it costs the same after 40 commits as after one.
+  (test-support/with-database
+   (fn [connection]
+     (let [store (:seon.store/store (test-support/execution-handle connection))
+           main (db/db connection)
+           main-branch (get-in main [:config :branch])
+           branch :fork-point-walk
+           steps (fn []
+                   (let [database (db/db connection)
+                         head (registry/head-commit-id database branch)
+                         measured (seon.profile/measure #(registry/fork-point database head main-branch))]
+                     [(:seon.profile/value measured) (seon.profile/calls-of measured 'seon.cluster.registry/commit-step)]))
+           commit! (fn [n] (let [opened (store/open-branch! store branch)]
+                             (try (test-support/transacted! opened (test-support/agent-tx (db/db opened) (str "walker-" n)))
+                                  (finally (store/release-branch! opened)))))]
+       (try
+         (registry/fork! {:seon.store/store store :seon.store/branch branch :seon.db/db main
+                          :seon.branch/target main-branch :seon.cluster.registry/from main-branch})
+         (commit! 0)
+         (let [[fork-1 steps-1] (steps)]
+           (doseq [n (range 1 40)] (commit! n))
+           (let [[fork-40 steps-40] (steps)]
+             (is (some? fork-1) "the branch has a fork point")
+             (is (= fork-1 fork-40) "the fork point never moves")
+             (is (= steps-1 steps-40) "reading it after 40 commits walks no more commits than after one")))
+         (finally
+           (when (contains? (registry/branches store) branch)
+             (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))
