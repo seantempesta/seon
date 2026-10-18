@@ -26,7 +26,7 @@ one throwaway check JVM each, measured requests through MCP `eval_clj`). Parent 
 | `:seon-db-nine-forms` (9 unchanged `seon.db` forms) | 80 / 12,000 / 150 / 400 | 8,851 / 929,662 / 23,740 / 3,797 | 5,857 / 587,548 / 22,905 / 2,073; **871 / 93,090 / 1,358 / under 1,200** with the arm skip (below) | derive (now dominant), evaluate | `seon.repl/re-evaluating-nine-seon-db-forms-allocates-nine-gigabytes` |
 | `:redefine-one-form` | 24 / 4,000 / 60 | 289.5 / 41,028 / 316 | 289.8 (unchanged) | settle, test step, unattributed | `seon.repl/redefining-one-form-costs-three-hundred-megabytes` |
 | `:current-state-with-task` | 24 / 3,000 / 100 | 193.9 / 37,832 / 211 | 193.4 | context | `seon.context/one-agents-current-state-costs-hundreds-of-megabytes` |
-| `:new-def` | 16 / 2,500 / 40 | 145.8 / 17,245 / 225 | 143.8 | test step, settle, derive | `seon.repl/a-new-def-costs-a-hundred-forty-megabytes` |
+| `:new-def` | 16 / 2,500 / 40 | 145.8 / 17,245 / 225 | 143.8; **111.1 / 15,558 / 202** after 70ba7304b and d0a465cc7 (section below) | test step, settle, derive | `seon.repl/a-new-def-costs-a-hundred-forty-megabytes` |
 | `:merge-one-function` | 48 / 8,000 / 200 | 104.4 / 28,305 | 117.0 | merge | `seon.cluster.source/accepting-a-one-function-merge-allocates-hundreds-of-megabytes` |
 | `:fresh-agent-first-request` | 12 / 1,500 / 30 | 106.3 / 8,112 / 63 | 104.3 | custody (fork), settle | `seon.cluster.agent/a-fresh-agents-environment-costs-one-fork` |
 | `:reuse-one-unchanged-test` | 8 / 1,500 / 25 | 26.4 / 9,083 / 72 | 27.6 | test step | `my.test/reusing-one-unchanged-test-costs-nine-thousand-calls` |
@@ -94,6 +94,31 @@ the writer ran 72 transactions (1,067 MB), the test runs' writes.
 | unattributed | nothing: every ms belongs to a stage | — | 8.6 ms (`nil`) to 51 ms (defn), 686 ms (hub) | all of it | includes the context re-acquisition after the branch's program moved (`seon.cluster.agent/acquire-context!` → `seon.sci.eval/program-context` → `seon.sci.eval/base-ctx`, 18-20 ms) | open: attribute it to a stage first |
 | per-request growth | none | constant per request | calls grow by 16 per warm request | grows with the agent's history | `seon.cluster.registry/fork-point` walks first-parent history | task `seon.cluster.registry/the-fork-point-is-walked-for-on-every-request` |
 | context (`seon.context/current-state`) | render the agent's attachments | what is shown | 19 ms / 28 MB, 19 reads, agent without a task | none without a task; 1.1 s / 1 GB reported with a task, not reproduced here | — | open: measure with a task |
+
+## One new def, by stage (lane new-def-overhead, 2026-10-18)
+
+`(def x {:a 1})` in a fresh namespace on an own agent branch of default (HEAD d24ad58e7), the 13th such def:
+171 MB on the turn thread (thread allocation sampled every 0.2 ms with its stack, 743 samples), writer 32 MB,
+commit 16 MB; stages settle 75 ms, test step 70 ms, unattributed 23 ms, derive 12 ms, evaluate 5 ms. What one new
+form with no caller and no reaching test must cost: one analysis, one entity of about 13 datoms, one transaction,
+no test; about 16 MB.
+
+| stage (turn thread unless named) | must do | measured MB | producer | status |
+|---|---|---|---|---|
+| test step: re-acquire the program context | advance the held context by one row | 64 | `seon.cluster.agent/acquire-context!` → `seon.sci.eval/program-context` | part fixed, rest open |
+| — its lazy binds | nothing for a def with no callers | 30 (16 warm, 88 cold measured alone) | `seon.sci.eval/bind-lazy-members!` queried with an empty member list: Datahike runs `[?sym ...]` bound to `[]` as a scan of every function | **fixed 70ba7304b**: `:new-def` 136.5 → 117.6 MB, `:fresh-agent-first-request` 85.1 → 66.1 MB |
+| — its overlay plan | the rows that differ from the loaded commit | 18-22 | `seon.sci.eval/derive-overlay-plan` reads every function digest (`seon.sci.eval/function-digests`, 7,541) and every admission datom twice (`seon.sci.eval/authored-rows`, 18,495 for 18 agent rows) per program commit; a `seon.db/datoms-diff` against the loaded commit is no cheaper (6 MB) | open |
+| test step: step members | one contribution for one new name | 48 | `seon.cluster.source/merge-members` → `seon.test/reaching-selection` on the new commit: 22 MB cold, 1 MB warm | open |
+| pass: contract measures | nothing for a value definition | 21 | `seon.turn.batch/uncontracted-measures` built a judged `seon.db/with` value for a def `seon.cluster.source/contract-gaps` never judges | **fixed d0a465cc7** (`seon.fn/contract-carrier?`): `:new-def` 116.6 → 111.1 MB, 17,068 → 15,558 calls |
+| every new database value: projection | nothing: a row without `:seon.fn/spec` adds no contract | 12-22 per value (speculative report 12 MB / 7 ms; a carried value 20 MB / 20 ms) | a def writes `:seon.fn/sym` and `:seon.schema.admission/source`, both in `seon.schema/projection-attributes`, so `seon.db/declaration-content-key` passes over every function row and admission datom again | open |
+| writer | one transaction of the request's facts | 32 | not isolated | open |
+
+The empty-collection scan is general: 105 `src` queries take a `[?x ...]` input, and Datahike (raw `d/q`) scans their
+clauses when it is empty (9.3 MB / 11 ms on default); only some callers skip the call.
+
+`:unmap-one-def` rose from 102.8-109.9 MB (5099c7e16, d24ad58e7) to 178.6-197.3 MB at 50e879526 and later, back to
+back on throwaway check JVMs; `seon.error/nearest-names`, that commit's only `src` change, is not called by the
+request, so the mechanism is open; its overrun records the measured high.
 
 ## The gigabyte defn (fixed in 36c192be9)
 
