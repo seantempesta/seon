@@ -3064,11 +3064,12 @@
   "Interpret the overlay `plan` on `ctx`: its rows whose definition digest
   (`::held`) the plan `ctx` was derived with did not hold (Δ; on the loaded
   base, every row), their namespaces and tests now, and bind the compiled Vars
-  of the functions it adds; the reverse closure of Δ (functions, and the tests
-  reaching them as interpreted tests) is bound again lazily
+  of the functions it adds; the reverse closure of Δ, its callers the branch
+  interprets from source (`seon.fn/reverse-closure`: never loaded platform code,
+  which keeps the compiled Vars `ctx` binds and sees Δ only after merge and
+  reload) and the tests reaching them as interpreted tests, is bound again lazily
   (`bind-lazy-members!`), its value definitions and macros interpreted now,
-  but for its host-bound members, which keep the compiled Vars `ctx` binds,
-  and the members of a test namespace `ctx` has not entered, which its entry
+  but for the members of a test namespace `ctx` has not entered, which its entry
   interprets; from `::closure` and `::closure-tests` when the plan carries them, else
   walked from Δ. Each Var installed again is unbound first. The acquisition
   advanced from the predecessor's, carrying this plan. A plan without
@@ -3112,10 +3113,10 @@
         callers (into [] (remove #(or (already %) (contains? overridden %)
                                       (unentered-test? (symbol (namespace %)))))
                       (sort reached))
-        ;; A host-bound caller keeps the compiled Var the context binds; only
-        ;; the macros and value definitions among the rest are interpreted now.
-        macros (bind-lazy-members! ctx database
-                                   (filter (interpretable-functions database callers) callers))
+        ;; the closure holds only source callers (`seon.fn/reverse-closure`): a
+        ;; loaded platform or host-bound caller keeps the compiled Var the
+        ;; context binds; the macros and value definitions among them interpret now
+        macros (bind-lazy-members! ctx database callers)
         added-rows (function-rows-in database (remove #(or (contains? reached %) (contains? overridden %)
                                                            (and held (not (contains? delta %))))
                                                       added))
@@ -3183,12 +3184,13 @@
            held (assoc ::plan (select-keys plan [::held ::tests ::namespaces]))))))))
 
 (defn interpret-affected!
-  "Interpret in `ctx` the callers and tests reaching `changed` it runs compiled.
+  "Interpret in `ctx` the source callers and tests reaching `changed`.
   `changed` are functions `ctx` holds as evaluated; each caller of their
-  reverse closure that `ctx` still runs compiled is bound to interpret itself
-  from its stored source in `database` on its first call (`bind-lazy-members!`),
-  so it calls `ctx`'s definitions, and each test reaching them runs
-  interpreted. A host-bound caller keeps its compiled Var. Once interpreted, a
+  reverse closure (`seon.fn/reverse-closure`: the callers the branch interprets
+  from source) is bound to interpret itself from its stored source in `database`
+  on its first call (`bind-lazy-members!`), so it calls `ctx`'s definitions, and
+  each test reaching them runs interpreted. A loaded platform caller is never
+  re-rooted: it runs compiled and sees `changed` after merge and reload. Once interpreted, a
   caller sees every later redefinition through its context's binding, so a
   repeated change pays only the closure read. The acquisition after it."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value [:sequential :qualified-symbol]] :map]}

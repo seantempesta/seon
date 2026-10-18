@@ -172,8 +172,8 @@
            ctx (eval/base-ctx after)
            callers (filterv #(and (find-ns (symbol (namespace %)))
                                   (:seon.fn/host-bound? (db/pull after [:seon.fn/host-bound?] [:seon.fn/sym %])))
-                            (:seon.fn/affected (seon.fn/reverse-closure {:seon.db/db after
-                                                                         :seon.fn/seeds #{changed-sym}})))]
+                            (db/q '[:find [?caller ...] :in $ ?callee :where [?f :seon.fn/calls ?callee] [?f :seon.fn/sym ?caller]]
+                                  after changed-sym))]
        (is (= "Branch version." (sci/eval-string* ctx (str "(:doc (meta #'" changed-sym "))")))
            "what the branch evaluates from source sees its definition")
        (is (seq callers) "the change reaches host-bound callers in loaded namespaces")
@@ -269,7 +269,8 @@
            (is (empty? (filterv (fn [name]
                                  (let [left (sci/resolve initial (symbol name))
                                        right (sci/resolve regenerated (symbol name))]
-                                   (not (and left right (identical? @left @right)))))
+                                   ;; two contexts binding no Var (an interface method) agree
+                                   (not (or (= nil left right) (and left right (identical? @left @right))))))
                                core-symbols))
                "src core roots outside the affected closure agree between incremental installation and regeneration"))
          (doseq [ctx [initial b-next c private-regenerated]]

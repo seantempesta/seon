@@ -37,8 +37,16 @@ supply the facts each operation reads.
    functions that execute). Default's data can be dropped for a fresh default. It is the
    one reality that runs compiled: a JVM holds one set of Vars.
 2. **Every other reality interprets its differences.** A branch whose program entities
-   differ from the compiled head interprets the overridden entities and their affected
-   callers in its own context (B2 §2a); everything else binds the compiled Var.
+   differ from the compiled head interprets the overridden entities in its own context
+   (B2 §2a), and they are seen by what the branch evaluates from source: its own
+   definitions and the test namespaces it runs (`seon.fn/reverse-closure` walks only those
+   callers). The loaded `src` program is the platform: a compiled `src` caller is never
+   re-rooted and sees the change only after merge and reload (owner, 2026-10-18).
+   Everything else binds the compiled Var. Selection follows the same rule
+   (`seon.fn/selection-walk`): the branch runs the tests that observe the change through
+   source, and a test reaching it only through compiled `src` callers is a deferred member
+   of the merge (`seon.cluster.source/merge-members`), proven by the merge's platform run
+   in a JVM booted from the candidate (`seon.test.platform/check-files!`).
 3. **Host-bound entities change only through the files.** A declaration SCI cannot
    interpret (host-defining forms: `deftype`, `defrecord`, `defprotocol`,
    `definterface`, `gen-class`, `proxy`, `extend` onto host classes, and entities that

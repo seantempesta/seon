@@ -6,10 +6,7 @@
             [clojure.test :refer [deftest is testing]]
             [sci.core :as sci]
             [seon.db :as db]
-            [seon.fn :as fn]
             [seon.mcp :as mcp]
-            [seon.profile :as profile]
-            [seon.sci.eval :as eval]
             [seon.test-support :as support]))
 
 (def rows
@@ -210,15 +207,44 @@
        " (when-let [[member] (reduce (fn [_ member] (when-not (m/validate child member) (reduced [member]))) nil value)]"
        " {:schema child :value member ::collection-type schema-type}))))"))
 
-(deftest a-file-test-runs-the-branch-redefinition-of-a-file-function
+(deftest a-file-test-reaching-a-change-only-through-a-compiled-caller-is-not-the-branchs-to-run
+  ;; `seon.error-test/a-map-for-a-sequential-is-refused-as-the-map` reaches the
+  ;; helper only through the compiled `seon.error/explain-problem`: on the branch
+  ;; it would run the compiled behavior, so the merge's platform run proves it.
   (support/with-running-agent
    (fn [running agent-id _]
-     (let [{:keys [red errored]} (step-red descending-member-problem (str "branch-" agent-id) running)
-           test-sym 'seon.error-test/a-map-for-a-sequential-is-refused-as-the-map]
-       (is (contains? red test-sym)
-           "the file test, green on the loaded program, ran the branch's definition through the compiled caller")
-       (is (not (contains? errored test-sym))
-           "it failed an assertion against the branch's definition; an error (no executable Var) is not that red")))))
+     (let [{:keys [red errored]} (step-red descending-member-problem (str "branch-" agent-id) running)]
+       (is (not (contains? red 'seon.error-test/a-map-for-a-sequential-is-refused-as-the-map))
+           "the step leaves it to the platform run")
+       (is (= #{} errored) "no reaching test errors on the harness")))))
+
+(def ^:private hub-spelling-change
+  "`seon.db/as-of-key` with `AsOfDB` spelled fully qualified: equal behavior, another behavior digest."
+  (str "(in-ns 'seon.db)"
+       " (defn as-of-key {:malli/schema [:=> [:cat :seon.db/database-value]"
+       " [:or :nil [:tuple :qualified-keyword :uuid [:or :int :inst]]]]} [database]"
+       " (when (instance? datahike.db.AsOfDB database)"
+       " (when-let [identity (datahike.db/committed-value-identity (dbi/-origin database))]"
+       " [::as-of (:datahike.value/commit-id identity) (dbi/-time-point database)])))"))
+
+(deftest ^{:seon.test/long "the running-agent fixture and two hub redefinitions on fresh branches, each running the hub's direct test"
+           :seon.test/long-ms 20000}
+  a-hub-change-runs-its-direct-test-on-the-branch-with-no-harness-error
+  ;; A behavior change to `seon.db/as-of-key` bound its 2,345 src callers to
+  ;; interpreted roots and 130 of 137 reaching tests errored on the harness
+  ;; (`seon.test.runner/an-agents-reaching-tests-error-on-the-harness-after-a-hub-defn`).
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [direct 'seon.db-test/only-an-as-of-view-has-an-as-of-key]
+       (testing "an equal behavior in other source runs the direct test green, no harness error"
+         (let [{:keys [red errored passed?]} (step-red hub-spelling-change (str "spelling-" agent-id) running)]
+           (is (= #{} red errored))
+           (is (true? passed?))))
+       (testing "a changed behavior is seen by the test calling the hub directly"
+         (let [{:keys [red errored]} (step-red "(in-ns 'seon.db) (defn as-of-key {:malli/schema [:=> [:cat :seon.db/database-value] :nil]} [database] nil)"
+                                               (str "nil-" agent-id) running)]
+           (is (= #{direct} red) "the direct test fails its assertion against the branch's definition")
+           (is (= #{} errored))))))))
 
 (def ^:private equal-doc-line
   "A branch definition of the file function `seon.render.ns/first-doc-line`
@@ -240,37 +266,21 @@
    (fn [running agent-id _]
      (let [{:keys [red passed?]} (step-red equal-doc-line (str "branch-" agent-id) running)]
        (is (not (contains? red 'seon.render.ns-test/a-doc-line-is-the-docstrings-first-sentence))
-           "the file proof ran interpreted against the branch's definition and passed")
+           "the file proof reaching it through compiled `render-ai` is not red on the branch")
        (is (not (false? passed?)) "no test reaching the redefinition ran red; a partial verdict claims no pass")))))
 
-(deftest an-inherited-file-caller-sees-the-branch-redefinition-of-its-helper
+(deftest a-compiled-src-caller-runs-the-compiled-helper-on-a-branch
+  ;; The loaded src program is the platform (owner, 2026-10-18): a branch's
+  ;; change is seen by what the branch evaluates from source; the compiled
+  ;; caller `seon.render.ns/render-ai` sees it only after merge and reload.
   (support/with-running-agent
    (fn [running agent-id _]
      (let [brancher (str "branch-" agent-id)]
-       (testing "the forms after the redefinition call it through the compiled caller"
-         (is (= "branch" (answered (str branch-doc-line " " shown-doc-line) brancher running))))
-       (testing "and so does the next eval request"
-         (is (= "branch" (answered shown-doc-line brancher running))))))))
-
-(deftest promoting-a-closure-costs-its-walk-and-the-callers-called
-  ;; A first redefinition binds the compiled callers of its reverse closure in
-  ;; the context; a caller is interpreted only when it is called.
-  (support/with-running-agent
-   (fn [_ _ connection]
-     (let [db @connection
-           promoted (fn [seed]
-                      (let [ctx (eval/base-ctx db)
-                            measured (profile/measure #(eval/interpret-affected! ctx db [seed]))
-                            closure (fn/reverse-closure {:seon.db/db db :seon.fn/seeds #{seed}})]
-                        (assoc measured :callers (count (:seon.fn/affected closure)))))
-           widely (promoted 'seon.error/collection-member-problem)
-           hub (promoted 'seon.id/digest)]
-       ;; the walk stops at compiled callers (`seon.fn/closure-walk`)
-       (is (< 50 (:callers widely)) "the seed is widely called through interpreted callers")
-       (is (< (:seon.profile/alloc-bytes widely) (* (:callers widely) 512 1024))
-           "promoting allocates far less than interpreting each caller")
-       (is (< 2000 (:callers hub)) "the hub is called from most of the program")
-       (is (< (:seon.profile/ms hub) 1000) "promoting a hub's closure is sub-second")))))
+       (testing "the branch's own call sees its definition"
+         (is (= "branch" (answered (str branch-doc-line " (first-doc-line \"One. Two.\")") brancher running))))
+       (testing "the compiled caller runs the compiled helper, in that eval request and the next"
+         (is (= "One." (answered (str "(in-ns 'seon.render.ns) " shown-doc-line) brancher running)))
+         (is (= "One." (answered shown-doc-line brancher running))))))))
 
 (deftest a-require-closing-a-namespace-cycle-is-refused-and-the-agent-still-answers
   (support/with-running-agent

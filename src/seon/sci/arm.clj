@@ -111,9 +111,10 @@
   cause beside the write as `:seon.batch/arm-error`. Answers the write with what arming
   did. It reads the Var as `ctx` binds it. The base's callers of a function the
   write defines apart from the base's Var are re-interpreted onto it
-  (`seon.sci.eval/reinterpret-inherited-callers!`), and the callers and tests
-  `ctx` still runs compiled are bound to run interpreted (`seon.sci.eval/interpret-affected!`),
-  so the forms after the write call the definition through them. When the
+  (`seon.sci.eval/reinterpret-inherited-callers!`), and its source callers and
+  the tests reaching them are bound to run interpreted (`seon.sci.eval/interpret-affected!`),
+  so the forms after the write call the definition through them; a loaded
+  platform caller stays compiled and sees it after merge and reload. When the
   write is a predicate `ctx` now holds apart, the installed functions whose
   contract reaches it re-arm on it (`rearm-dependents!`); a failure there is
   the write's `:seon.batch/arm-error` too. A write of the definition the

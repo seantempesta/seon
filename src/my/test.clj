@@ -106,7 +106,11 @@
                       (seon.test/changes context connection)))
         tests (cond (seq tests) tests
                     (:seon.error/at changed) changed
-                    (seq changed) (seon.test/reaching {:seon.db/db tested :seon.test/changed (vec changed)}))]
+                    ;; a JVM loaded from my branch observes the change through platform callers too
+                    (seq changed) (let [selected (seon.test/reaching-selection {:seon.db/db tested :seon.test/changed (vec changed)})]
+                                    (if (:seon.error/at selected)
+                                      selected
+                                      (into (vec (:seon.fn/tests selected)) (:seon.fn/platform-tests selected)))))]
     (cond
       (:seon.error/at published) published
       (nil? (:seon.cluster/name context))

@@ -647,6 +647,21 @@
                 ["executed red: a red test" [(recorded 'tq.rv-test/proof false)] [:seon.source/red-test-error]]]]
          (is (= expected (mapv :seon.error/type (source/done-refusals branch (assoc judged :seon.source/results results)))) row))))))
 
+(deftest a-hub-change-defers-the-tests-above-its-src-callers-to-the-platform-run
+  ;; A branch runs `seon.db/as-of-key`'s src callers compiled (the loaded src
+  ;; program is the platform), so the step runs its direct test and the merge's
+  ;; platform run the tests above those callers.
+  (test-support/with-database
+   (fn [connection]
+     ;; the members of a behavior change (`merge-members` after its merge-base filter)
+     (let [listed (#'source/members-of (db/db connection) #{[:seon.fn/sym 'seon.db/as-of-key]} #{})
+           direct 'seon.db-test/only-an-as-of-view-has-an-as-of-key
+           deferred (:seon.source/deferred listed)]
+       (is (contains? (:seon.source/members listed) direct))
+       (is (not (contains? deferred direct)) "the step runs the direct test on the branch")
+       (is (< 100 (count deferred)) "the platform run takes the tests above the src callers")
+       (is (every? (:seon.source/members listed) deferred) "a deferred test is still a member the merge proves")))))
+
 (deftest member-fold-equals-the-full-merge-list
   (test-support/with-database
    (fn [connection]

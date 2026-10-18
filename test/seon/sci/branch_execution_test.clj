@@ -533,8 +533,9 @@
              "class usage alone never makes a declaration host-bound (task bd7cb669b45d)")
          (is (some? (find-ns (symbol (namespace caller)))) "the caller's namespace is loaded")
          (is unloaded-before? "this JVM had not loaded the measurement namespace")
-         (is (every? (:interpreted view) [changed caller unloaded-changed unloaded])
-             "each changed entity's closure reaches its host-bound caller")
+         (is (every? (:interpreted view) [changed unloaded-changed unloaded])
+             "each changed entity and its caller in a test namespace interpret")
+         (is (not (contains? (:interpreted view) caller)) "the host-bound caller is never re-rooted")
          (is (= #{} (:refused view)) "no host-bound declaration without a compiled Var to override refuses the acquisition")
          ;; A BRANCH NEVER CHANGES THE PLATFORM (`seon.sci.eval`, install of a
          ;; host-bound row): the unchanged host-bound caller of a branch-changed
@@ -544,7 +545,7 @@
 
 (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting the reverse closure (77 declarations) of one changed hiccup helper; measured 1,426 ms."
            :seon.test/long-ms 12000}
-  interpreted-callers-resolve-unchanged-names-to-compiled-vars
+  a-branch-change-leaves-its-loaded-src-callers-compiled
   (support/with-database
    (fn [connection]
      (db/with-branch {:seon.db/connection connection}
@@ -568,22 +569,13 @@
              ;; changes the platform, so unchanged host-bound callers keep
              ;; their compiled roots and are never an SCI definition.
              host-bound-callers '[seon.render.web/handler seon.cluster/serve!]]
-         (is (every? (:interpreted view) (concat callers host-bound-callers [changed]))
-             "the changed helper's closure reaches each caller")
-         ;; A caller interprets on its first call (`seon.sci.eval/interpret-affected!`).
-         (is (every? #(nil? (refusal-of ctx %)) callers)
-             "each caller is analyzed against its private def, referred defonce and dependency alias")
-         (is (not-any? #(identical? @(find-var %) (sci.ctx-store/with-ctx ctx @(sci/resolve ctx %))) callers)
-             "and runs as an SCI definition")
-         (is (every? #(identical? @(find-var %) (sci.ctx-store/with-ctx ctx @(sci/resolve ctx %))) host-bound-callers)
-             "each host-bound caller keeps its compiled root")
-         (is (nil? (refusal-of ctx 'seon.render.web/handler)) "a compiled root refuses nothing by name")
-         ;; A caller expanding a JVM macro that reads &env (async/go-loop in a
-         ;; loaded test namespace) still refuses: the host-bound classification
-         ;; gap recorded in the affected-callers issue, not an unbound name.
-         (is (= [] (filterv #(re-find #"Unable to resolve|does not name an installed SCI Var" %)
-                            (map :seon.error/message
-                                 (:seon.test/acquisition-refusals (eval/acquired-program ctx))))))))))))
+         ;; The loaded src program is the platform (owner, 2026-10-18): its
+         ;; callers see the branch's change only after merge and reload.
+         (is (= #{changed} (:interpreted view)) "only the changed helper interprets")
+         (is (every? #(identical? @(find-var %) (sci.ctx-store/with-ctx ctx @(sci/resolve ctx %)))
+                     (concat callers host-bound-callers))
+             "each loaded src caller keeps its compiled root")
+         (is (every? #(nil? (refusal-of ctx %)) callers) "a compiled root refuses nothing by name")))))))
 
 (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting two changed entities and their reverse closures; measured 1,090 ms on default."
            :seon.test/long-ms 12000}
@@ -660,11 +652,11 @@
 
 (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting one changed definition's reverse closure (24 functions on default)."
            :seon.test/long-ms 8000}
-  a-file-test-callers-away-from-a-branch-change-runs-interpreted
+  a-file-test-reaching-a-change-only-through-src-callers-is-left-to-the-platform-run
   ;; seon.ref-test/a-span-of-a-name-and-more-words-is-prose calls
-  ;; seon.ref/references -> seon.ref/candidate -> seon.ref/span-candidate: a
-  ;; branch change of span-candidate must run that file test interpreted, or
-  ;; its compiled body calls the compiled chain and never sees the change.
+  ;; seon.ref/references -> seon.ref/candidate -> seon.ref/span-candidate, all
+  ;; loaded src code: on the branch that chain runs compiled, so the test cannot
+  ;; observe the change there; the merge's platform run proves it.
   (support/with-database
    (fn [connection]
      (let [changed 'seon.ref/span-candidate
@@ -676,18 +668,21 @@
               (support/replacement-tx before [:seon.fn/sym changed] source
                                       {:seon.schema.admission/source :agent}))
            ctx (eval/base-ctx (db/db connection))]
-       (is (= [] (functions/gate-set before changed))
-           "selection stays at the change and its direct callers")
-       (is (eval/interpreted-test? ctx proof)
-           "the file test three calls from the change runs interpreted on the branch")))))
+       (is (= [] (:seon.fn/tests (functions/selection-walk before #{changed})))
+           "no test calls it directly or through source the branch interprets")
+       (is (not (eval/interpreted-test? ctx proof))
+           "the file test three src calls from the change is not the branch's to run")
+       (is (some #{proof} (:seon.fn/platform-tests (functions/selection-walk (db/db connection) #{changed})))
+           "it is selected for the platform run")))))
 
-(deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program and one interpretation of the reverse closure of seon.db/as-of-key (2,339 functions on default)."
+(deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program and one interpretation of the closure of seon.db/as-of-key."
            :seon.test/long-ms 12000}
-  a-redefinition-leaves-an-unentered-test-namespace-to-its-entry
-  ;; One defn of seon.db/as-of-key on a fresh agent branch allocated 1.08 GB:
-  ;; its closure reaches value definitions of a dozen test namespaces
-  ;; (seon.flow-test/test-environment among them), and interpreting each one
-  ;; then entered and interpreted its whole test namespace.
+  a-hub-change-interprets-only-itself-and-its-direct-test
+  ;; One behavior change to seon.db/as-of-key on an agent branch bound its
+  ;; 2,345 compiled callers (the evaluator, the runner, seon.cluster.agent) to
+  ;; lazy interpreted roots, and 130 of its 137 reaching tests errored on the
+  ;; harness (`seon.test.runner/an-agents-reaching-tests-error-on-the-harness-after-a-hub-defn`).
+  ;; The loaded src program is the platform: its callers stay compiled.
   (support/with-database
    (fn [connection]
      (db/with-branch {:seon.db/connection connection}
@@ -698,13 +693,15 @@
                                    (eval/projection-state before (db/carried-projection before))
                                    {:seon.sci.eval/loaded-connection connection})
              _ (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db before})
-             closure (functions/reverse-closure {:seon.db/db before :seon.fn/seeds #{changed}})
              measured (profile/measure #(eval/interpret-affected! ctx (db/db connection) [changed]))
-             entered (:seon.sci.eval/entered-namespaces @(:seon.sci.kernel/program-snapshot ctx) #{})]
-         (is (contains? (set (:seon.fn/affected closure)) 'seon.flow-test/test-environment)
-             "the closure reaches a value definition of a test namespace")
-         (is (not (contains? entered 'seon.flow-test))
-             "the redefinition leaves that test namespace to its entry")
+             snapshot @(:seon.sci.kernel/program-snapshot ctx)
+             caller 'seon.test/selection-revisions]
+         (is (= #{changed} (:seon.sci.eval/interpreted snapshot))
+             "only the changed definition interprets: no loaded platform caller is re-rooted")
+         (is (= #{'seon.db-test/only-an-as-of-view-has-an-as-of-key} (:seon.sci.eval/interpreted-tests snapshot))
+             "its one direct test runs interpreted")
+         (is (identical? @(find-var caller) (sci.ctx-store/with-ctx ctx @(sci/resolve ctx caller)))
+             "a compiled src caller keeps its compiled root")
          (is (zero? (profile/calls-of measured 'seon.sci.eval/interpret-source-namespaces!))
              "no test namespace is interpreted by the redefinition")))))))
 

@@ -2733,15 +2733,14 @@
     (finally (d/release-materialized-db published-database)))))))
 
 (defn- isolated-run
-  "The `deferred` isolated members of a gate run (`seon.test/isolated-members`: `:seon.test/deferred` and
-  `:seon.test/destructive-excluded`), run on the candidate's own platform host over `files` (`proofs`,
+  "The merge's `deferred` members (`seon.cluster.source/merge-members`: the isolated ones and those reaching the
+  change only through loaded platform callers), run on the candidate's own platform host over `files` (`proofs`,
   `seon.test.platform/check-files!`) and recorded on `execution`'s branch; nil when none was deferred or the gate
   wrote no file (its members then stay unrun, which the merge verdict refuses as unknown)."
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.test/run-result [:maybe [:vector :seon.source/proof]]]
+  {:malli/schema [:=> [:cat :seon.agent/context-source [:set :seon.test/sym] [:maybe [:vector :seon.source/proof]]]
                   [:maybe [:or :seon.test.platform/answer :seon.error/value]]]}
-  [execution run files]
-  (let [deferred (into (sorted-set) (map :seon.test/sym)
-                       (concat (:seon.test/deferred run) (:seon.test/destructive-excluded run)))]
+  [execution deferred files]
+  (let [deferred (into (sorted-set) deferred)]
     (when (and (seq deferred) (seq files))
       ((requiring-resolve 'seon.test.platform/check-files!)
        (:seon.db/connection execution) (:seon.cluster/name execution) files deferred))))
@@ -2749,8 +2748,9 @@
 (defn- reaching-run
   "The merge's member list of `identities` (`seon.cluster.source/merge-members` over the candidate: the one list the
   attempt's test step runs and the done rule judges), answered on `execution` and recorded on its connection, each
-  member reused by its reach digest. The isolated members it defers run on the candidate's own platform host over
-  `files` (`isolated-run`), their run as `:seon.source/platform-run`. No member, no request."
+  member reused by its reach digest. The members it defers (isolated, or observing the change only through loaded
+  platform callers) run on the candidate's own platform host over `files` (`isolated-run`), their run as
+  `:seon.source/platform-run`. No member, no request."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.reconcile/adopt-identities [:maybe [:vector :seon.source/proof]]]
                   [:map [:seon.test/passed? :boolean] [:seon.source/tally :string]
                    [:seon.source/gate-run {:optional true}
@@ -2762,7 +2762,8 @@
         declared (into #{} (filter (fn [[attribute]] (#{:seon.fn/sym :seon.test/sym :seon.ns/name :seon.schema/key} attribute)))
                        identities)
         listed (source/merge-members (db/db (:seon.db/connection execution)) declared #{})
-        members (:seon.source/members listed)
+        deferred (set (:seon.source/deferred listed))
+        members (into #{} (remove deferred) (:seon.source/members listed))
         run (if (:seon.error/at listed)
               listed
               (when (seq members)
@@ -2770,14 +2771,10 @@
                  {:seon.test/policy :named :seon.test/execution execution
                   :seon.test/recording-connection (:seon.db/connection execution)
                   :seon.test/identities members :seon.test/isolate? true})))
-        platform (when (and run (not (:seon.error/at run))) (isolated-run execution run files))
-        green? #(and (pos? (:seon.test/pass-count % 0)) (zero? (:seon.test/fail-count % 0)) (zero? (:seon.test/error-count % 0)))
-        ;; the in-process run's verdict with its isolated members answered by the platform run instead
-        passed? (cond (nil? run) true
-                      (nil? platform) (true? (:seon.test/passed? run))
-                      :else (and (true? (:seon.test/passed? platform))
-                                 (every? green? (:seon.test/results run))
-                                 (every? empty? (map run [:seon.test/long-excluded :seon.test/pending :seon.test/unfinished]))))]
+        platform (when-not (:seon.error/at run) (isolated-run execution deferred files))
+        ;; the in-process run's verdict and the platform run's; a deferred member with no platform run is unrun
+        passed? (and (or (nil? run) (true? (:seon.test/passed? run)))
+                     (if (seq deferred) (true? (:seon.test/passed? platform)) true))]
     (cond-> {:seon.test/passed? passed?
              :seon.source/tally (cond-> (if run ((requiring-resolve 'seon.test/tally) run)
                                           "no member: no test selected")

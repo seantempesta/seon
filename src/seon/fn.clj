@@ -2011,6 +2011,26 @@
                       (assoc result function-symbol selected))))
                 {} (distinct function-symbols))))))
 
+(defn- source-callers
+  "The function symbols among `entities` a walk goes on through. `:branch`: those a branch interprets from source,
+  so they call its definitions: not host-bound and not loaded platform code (a file-derived function of a `src`
+  namespace runs compiled on every branch and sees a change only after merge and reload). `:platform`: those a JVM
+  loaded from the candidate runs with the change, all but host-bound ones. Throws a read refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:enum :branch :platform] [:set :int]] [:set :qualified-symbol]]}
+  [database through entities]
+  (if (empty? entities)
+    #{}
+    (set (read-or-throw!
+          (if (= :branch through)
+            (db/q '[:find [?symbol ...] :in $ [?entity ...]
+                    :where [?entity :seon.fn/sym ?symbol] [?entity :seon.fn/host-bound? false]
+                    (not [?entity :seon.schema.admission/source :core] [?entity :seon.fn/file ?file]
+                         [?file :seon.fn.file/relative-root "src"])]
+                  database (vec entities))
+            (db/q '[:find [?symbol ...] :in $ [?entity ...]
+                    :where [?entity :seon.fn/sym ?symbol] [?entity :seon.fn/host-bound? false]]
+                  database (vec entities)))))))
+
 (defn- walk-callers
   "`closure-walk` over `seeds` together, with the `:seon.test/subject` datoms `subject-datoms` read once by its
   caller (one read for every seed); the complete closure's walk. Throws a read refusal."
@@ -2030,12 +2050,7 @@
                                        :where [?entity ?attribute ?symbol]]
                                      database attribute (vec entities))))))
         ;; the callers SCI interprets on a branch: the walk's next frontier
-        interpreted (fn [entities]
-                      (if (empty? entities)
-                        #{}
-                        (set (read! (db/q '[:find [?symbol ...] :in $ [?entity ...]
-                                            :where [?entity :seon.fn/sym ?symbol] [?entity :seon.fn/host-bound? false]]
-                                          database (vec entities))))))
+        interpreted (partial source-callers database :branch)
         present (when-not depth
                   (into #{} (keep :seon.fn/sym)
                         (read! (db/pull-many database [:seon.fn/sym]
@@ -2060,8 +2075,9 @@
             (let [callers (into #{} (remove entities)
                                 (concat (mapcat #(map :e (read! (db/datoms database :avet :seon.fn/calls %))) frontier)
                                         (mapcat (or declared (declared-callers read! database frontier)) frontier)))
-                  fresh (vec (remove seen (named :seon.fn/sym callers)))]
-              (recur (filterv (interpreted callers) fresh) (into seen fresh) (into entities callers) (when-not depth (into affected fresh))
+                  fresh (vec (remove seen (named :seon.fn/sym callers)))
+                  walked (filterv (interpreted callers) fresh)]
+              (recur walked (into seen fresh) (into entities callers) (when-not depth (into affected walked))
                      (conj levels [frontier callers])))))]
     (cond-> {::tests (tests-of levels)}
       (nil? depth) (assoc ::affected affected))))
@@ -2071,9 +2087,10 @@
   from, and a seed's lineage stops once it has walked `depth` levels and some level reached from it holds a test,
   so each seed selects its own nearest tests in one walk (one caller seek per walked function and level, as
   `walk-callers`). `subject-datoms` are the `:seon.test/subject` datoms. Throws a read refusal."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym] [:int {:min 1}] :seon.db/datoms]
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym] [:int {:min 1}] :seon.db/datoms
+                       [:enum :branch :platform]]
                   [:map [::tests :seon.fn/tests] [::walked [:set :qualified-symbol]]]]}
-  [database seeds depth subject-datoms]
+  [database seeds depth subject-datoms through]
   (let [read! read-or-throw!
         pairs (fn [attribute entities]
                 (if (empty? entities)
@@ -2081,12 +2098,7 @@
                   (read! (db/q '[:find ?entity ?symbol :in $ ?attribute [?entity ...]
                                  :where [?entity ?attribute ?symbol]]
                                database attribute (vec entities)))))
-        interpreted (fn [entities]
-                      (if (empty? entities)
-                        #{}
-                        (set (read! (db/q '[:find [?symbol ...] :in $ [?entity ...]
-                                            :where [?entity :seon.fn/sym ?symbol] [?entity :seon.fn/host-bound? false]]
-                                          database (vec entities))))))
+        interpreted (partial source-callers database through)
         subjects (reduce (fn [m {e :e v :v}] (update m v (fnil conj #{}) e)) {} subject-datoms)
         seed-tests (into #{} (keep :seon.test/sym)
                          (read! (db/pull-many database [:seon.test/sym] (mapv #(vector :seon.test/sym %) seeds))))
@@ -2113,7 +2125,7 @@
                             found (pairs :seon.test/sym (keys tests)))
               level (inc level)
               open? (fn [s] (or (< level depth) (empty? (found s))))
-              walk (interpreted (keys callers))
+              walk (interpreted (set (keys callers)))
               next-frontier (reduce (fn [m [entity f]]
                                       (let [fresh (into #{} (filter open?) (remove (get propagated f #{}) (callers entity)))]
                                         (if (and (walk f) (seq fresh)) (update m f (fnil into #{}) fresh) m)))
@@ -2128,22 +2140,24 @@
   it, whatever the other seeds reach: the selection is the union of each seed's,
   so adding a seed never drops a test another seed selects. A test reaches by
   calling a walked function, naming one as `:seon.test/subject` or being a seed.
-  Declared invocation edges count; symbol mentions do not. A host-bound caller
-  (`:seon.fn/host-bound?` not false, the rule of `seon.sci.eval/host-bound-row?`)
-  is reached but never walked: a branch keeps it compiled, so it and its callers
-  call the compiled seed and cannot see the change. Throws a read refusal."
+  Declared invocation edges count; symbol mentions do not. Only the callers a
+  branch interprets from source are walked and affected (`source-callers`): a
+  host-bound caller and loaded platform code run compiled on every branch, so
+  they and their callers call the compiled seed and cannot see the change there;
+  the merge's platform run proves the tests above them (`selection-walk`).
+  Throws a read refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym] [:maybe [:int {:min 1}]]]
                   [:map [::affected {:optional true} :seon.fn/affected] [::tests :seon.fn/tests]]]}
   [database seeds depth]
   (let [subject-datoms (read-or-throw! (db/datoms database :aevt :seon.test/subject))]
     (if depth
-      (nearest-tests database (set seeds) depth subject-datoms)
+      (nearest-tests database (set seeds) depth subject-datoms :branch)
       (walk-callers database seeds depth subject-datoms))))
 
 (defn reverse-closure
-  "The transitive callers of `seeds` up to their first compiled callers, and the
-  tests reaching them at any depth: the tests a branch runs interpreted for a
-  change to `seeds` (`seon.fn/closure-walk`)."
+  "The transitive callers of `seeds` a branch interprets from source (never a
+  loaded platform caller), and the tests reaching them at any depth: the tests a
+  branch runs interpreted for a change to `seeds` (`seon.fn/closure-walk`)."
   {:malli/schema [:=> [:cat :seon.fn/gate-request]
                   [:or :seon.fn/reverse-closure-result :seon.db/invalid-read-error]]}
   [{database :seon.db/db seeds :seon.fn/seeds}]
@@ -2154,24 +2168,40 @@
       (if (db/read-refusal? (ex-data failure)) (ex-data failure) (throw failure)))))
 
 (defn selection-walk
-  "The nearest tests of `seeds` and the target names whose incoming edges the walk read."
+  "The nearest tests of `seeds` a branch observes (`::tests`: through callers it interprets from source), those a JVM
+  loaded from the candidate observes besides (`::platform-tests`: through loaded platform callers too, proven by the
+  merge's platform run), and the target names whose incoming edges either walk read."
   {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym]]
-                  [:or [:map [::tests :seon.fn/tests] [::walked [:set :qualified-symbol]]]
+                  [:or [:map [::tests :seon.fn/tests] [::platform-tests :seon.fn/tests] [::walked [:set :qualified-symbol]]]
                    :seon.db/invalid-read-error]]}
   [database seeds]
   (try
-    (nearest-tests database seeds 2 (read-or-throw! (db/datoms database :aevt :seon.test/subject)))
+    (let [subjects (read-or-throw! (db/datoms database :aevt :seon.test/subject))
+          branch (nearest-tests database seeds 2 subjects :branch)
+          ;; only a `src` function has loaded platform callers: no walked one, no platform walk
+          platform (when (seq (read-or-throw! (db/q '[:find [?symbol ...] :in $ [?symbol ...]
+                                                     :where [?f :seon.fn/sym ?symbol] [?f :seon.fn/ns ?n]
+                                                     [?n :seon.fn/file ?file] [?file :seon.fn.file/relative-root "src"]]
+                                                   database (vec (::walked branch)))))
+                     (nearest-tests database seeds 2 subjects :platform))
+          observed (set (::tests branch))]
+      {::tests (::tests branch)
+       ::platform-tests (into [] (remove observed) (::tests platform))
+       ::walked (into (::walked branch) (::walked platform))})
     (catch clojure.lang.ExceptionInfo failure
       (if (db/read-refusal? (ex-data failure)) (ex-data failure) (throw failure)))))
 
 (defn- reaching-tests
   "The tests the walk of `seeds` selects: those calling a seed or a caller within
-  the nearest level holding a test (`seon.fn/closure-walk`)."
+  the nearest level holding a test (`seon.fn/closure-walk`), whether a branch or
+  only the platform run observes them (`selection-walk`)."
   {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym]]
                   [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
   [database seeds]
   (let [selected (selection-walk database seeds)]
-    (if (:seon.db/invalid-read selected) selected (::tests selected))))
+    (if (:seon.db/invalid-read selected)
+      selected
+      (vec (sort (into (::tests selected) (::platform-tests selected)))))))
 
 (defn gate-sets
   "Select the tests exercising changed definitions (`seon.fn/reverse-closure`).

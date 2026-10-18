@@ -1235,13 +1235,30 @@
         (is (false? (:seon.fn/host-bound? (db/pull @connection [:seon.fn/host-bound?]
                                                    [:seon.fn/sym 'sample.compiled/above])))
             "an ordinary defn is interpretable")
-        (is (= {:seon.fn/affected #{'sample.compiled/seed 'sample.compiled/interpreted 'sample.compiled/compiled}
+        (is (= {:seon.fn/affected #{'sample.compiled/seed 'sample.compiled/interpreted}
                 :seon.fn/tests ['sample.compiled/interpreted-test]}
                (seon.fn/reverse-closure {:seon.db/db @connection :seon.fn/seeds seeds}))
-            "the compiled caller is reached; nothing above it and none of its tests")
+            "the compiled caller is never re-rooted; nothing above it and none of its tests")
         (is (= ['sample.compiled/interpreted-test]
                (seon.fn/gate-sets {:seon.db/db @connection :seon.fn/seeds seeds}))
             "selection follows the same walk")))))
+
+(deftest a-hub-change-selects-its-direct-test-on-the-branch-and-the-rest-for-the-platform
+  ;; The loaded src program is the platform (owner, 2026-10-18): a branch runs
+  ;; `seon.db/as-of-key`'s src callers compiled, so only the test calling it
+  ;; directly observes a change there; the tests above its src callers are the
+  ;; merge's platform run.
+  (test-support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            seeds #{'seon.db/as-of-key}
+            selected (seon.fn/selection-walk database seeds)]
+        (is (= #{'seon.db/as-of-key} (:seon.fn/affected (seon.fn/reverse-closure {:seon.db/db database :seon.fn/seeds seeds})))
+            "no src caller is in the closure a branch interprets")
+        (is (= ['seon.db-test/only-an-as-of-view-has-an-as-of-key] (:seon.fn/tests selected))
+            "the branch observes the change through its direct test")
+        (is (< 100 (count (:seon.fn/platform-tests selected))) "the platform run takes the tests above its src callers")
+        (is (not-any? (set (:seon.fn/tests selected)) (:seon.fn/platform-tests selected)))))))
 
 ;; Class: a program attribute is a stored attribute. The contract-finding report
 ;; entity declared a program partition, so `program/program-attributes` named four

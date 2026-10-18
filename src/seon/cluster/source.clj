@@ -838,16 +838,18 @@
 (declare agent-owned)
 
 (defn- contribution
-  "The nearest-test contribution of one changed declaration."
+  "The nearest-test contribution of one changed declaration: the tests its branch observes and those only a JVM
+  loaded from the candidate observes (`seon.fn/selection-walk`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity]
-                  [:or [:map [:seon.fn/tests :seon.fn/tests] [:seon.fn/walked [:set :qualified-symbol]]]
+                  [:or [:map [:seon.fn/tests :seon.fn/tests] [:seon.fn/platform-tests :seon.fn/tests]
+                        [:seon.fn/walked [:set :qualified-symbol]]]
                    :seon.error/value]]}
   [database identity]
   (let [selected ((requiring-resolve 'seon.test/reaching-selection)
-                  {:seon.db/db database :seon.test/changed [identity]})]
+                  {:seon.db/db database :seon.test/changed [identity]})
+        short-tests #(into [] (remove (fn [test] (:seon.test/long (db/pull database [:seon.test/long] [:seon.test/sym test])))) %)]
     (if (:seon.error/at selected) selected
-      (update selected :seon.fn/tests
-              #(into [] (remove (fn [test] (:seon.test/long (db/pull database [:seon.test/long] [:seon.test/sym test])))) %)))))
+      (-> selected (update :seon.fn/tests short-tests) (update :seon.fn/platform-tests (fnil short-tests []))))))
 
 (defn- remove-contribution
   "Remove one declaration's contribution, retaining tests shared with other declarations."
@@ -937,14 +939,19 @@
                       folded (member-contributions database (set seeds) revisions)
                       reached (::reached folded)
                       named (into (set proofs) (keep (fn [[a v]] (when (= :seon.test/sym a) v))) changed)
-                      members (when (set? reached)
-                                (into reached (filter held?) named))
-                      isolated (when members
-                                 ((requiring-resolve 'seon.test/host-exclusions) database nil true (vec (sort members))))]
+                      observed (when (set? reached)
+                                 (into reached (filter held?) named))
+                      ;; reached only through loaded platform callers: the branch runs those compiled, so only a JVM
+                      ;; loaded from the candidate observes the change, the merge's platform run
+                      platform (into #{} (comp (mapcat (comp :seon.fn/platform-tests val)) (remove (set observed)))
+                                     (::contributions folded))
+                      members (when observed (into observed platform))
+                      isolated (when observed
+                                 ((requiring-resolve 'seon.test/host-exclusions) database nil true (vec (sort observed))))]
                   (cond (:seon.error/at folded) folded
                         (:seon.error/at isolated) isolated
                         :else {:seon.source/members members
-                               :seon.source/deferred (into #{} (map :seon.test/sym)
+                               :seon.source/deferred (into platform (map :seon.test/sym)
                                                            (concat (:seon.test/destructive-excluded isolated) (:seon.test/deferred isolated)))
                                :seon.source/reaching (into {} (map (fn [[identity {tests :seon.fn/tests}]] [identity (set tests)]))
                                                            (::contributions folded))})))]
@@ -963,8 +970,9 @@
   selection walks it (`seon.test/reaching`: a namespace seeds its members and the tests reading it as a file, a
   schema the functions whose contracts name it) but those declared long; `:seon.source/reaching` holds each changed
   declaration's own reaching tests, the fold's contribution of it. `:seon.source/deferred` holds the members
-  that run only on a platform host (`seon.test/host-exclusions` of an isolated run): the merge's platform run answers
-  them. Held by selection's content revisions (`seon.test/selection-revisions`), changed identities and proofs.
+  that run only on a platform host: those `seon.test/host-exclusions` isolates, and those reaching a change only
+  through loaded platform callers (`seon.fn/selection-walk`'s platform tests), which the branch runs compiled and
+  so cannot observe it. The merge's platform run answers them; the step and the done rule leave them to it. Held by selection's content revisions (`seon.test/selection-revisions`), changed identities and proofs.
   Call-edge changes fold only the contributions whose walks read those targets; result and evaluation writes reuse the list.
   Of `changed`, only what a test can observe since `database`'s merge base (`branch-merge-base`,
   `seon.test/observable-changes`) seeds the walk: a docstring-only change selects no member; a value with no merge

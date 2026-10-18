@@ -68,6 +68,10 @@
     :why "One redefinition of the hub `seon.db/as-of-key` that changes only its docstring: read, analyze and digest one form; its behavior digest equals the merge base's, so no caller is re-armed and no test is selected: an unchanged form's cost, proportional to 1 form."
     :estimate {:alloc-mb 30.0 :calls 4000 :reads 60 :ms 150.0}
     :overrun '{:task seon.repl/a-docstring-only-change-to-a-hub-function-costs-hundreds-of-megabytes :alloc-mb 221.6 :calls 56529 :reads 305}}
+   {:op :hub-behavior-change
+    :why "One redefinition of the hub `seon.db/as-of-key` that changes its behavior digest (`AsOfDB` spelled fully qualified): read, analyze, digest and record one form, interpret that one definition (its src callers stay compiled), and run its one direct test on the branch (the ~160 tests above its src callers are the merge's platform run): the redefined form's cost plus one small test, proportional to 1 form and 1 test."
+    :estimate {:alloc-mb 40.0 :calls 6000 :reads 100 :ms 300.0}
+    :overrun '{:task seon.repl/a-hub-behavior-change-costs-hundreds-of-megabytes :alloc-mb 852.2 :calls 188480 :reads 1255}}
    {:op :cold-stale-merge-members
     :why "The first `seon.test/stale` after boot over the tests reaching the hub `seon.db/as-of-key` (~140 members, a merge's members): one reach digest per member over the union of their reach (~3,500 definitions), each definition's behavior digest computed once from its stored row and one read of its source (~50 KB, ~10 calls), then one indexed result read per member: proportional to the reached definitions."
     :estimate {:alloc-mb 175.0 :calls 35000 :reads 150 :ms 350.0}
@@ -123,6 +127,14 @@
   (let [forms (seon-db-forms)]
     (str/replace-first (subs forms 0 (str/index-of forms "\n(" 1)) "\"An as-of view" "\"Documented again. An as-of view")))
 
+(defn- hub-behavior-change
+  "`seon.db/as-of-key` as the checkout holds it with `AsOfDB` spelled fully qualified: equal behavior, another
+  behavior digest, so a change its tests can observe."
+  {:malli/schema [:=> [:cat] :string]}
+  []
+  (let [forms (seon-db-forms)]
+    (str/replace-first (subs forms 0 (str/index-of forms "\n(" 1)) "(instance? AsOfDB" "(instance? datahike.db.AsOfDB")))
+
 (def ^:private merged-source
   "The checkout's one file the merged branch changes: a function, a test reaching it and the red proof of the task."
   (str "(ns tq.cost-merge\n  (:require [clojure.test :refer [deftest is]]))\n\n"
@@ -168,7 +180,9 @@
   {:malli/schema [:=> [:cat :seon.db/connection] :map]}
   [connection]
   (let [database (db/db connection)
-        members (seon-test/reaching {:seon.db/db database :seon.test/changed ['seon.db/as-of-key]})
+        ;; the merge's members: what the branch observes and the platform run's
+        selected (seon-test/reaching-selection {:seon.db/db database :seon.test/changed ['seon.db/as-of-key]})
+        members (into (vec (:seon.fn/tests selected)) (:seon.fn/platform-tests selected))
         measured (profile/measure #(seon-test/stale database members))]
     (is (< 100 (count members)) "the hub's members are the merge's members")
     {:alloc-mb (/ (:seon.profile/alloc-bytes measured 0) 1048576.0) :calls (:seon.profile/calls measured)
@@ -211,10 +225,11 @@
            _ (request "(seon.context/current-state)")
            current-state (cost "(seon.context/current-state)")
            nine (cost (str "(in-ns 'seon.db)\n" (seon-db-forms)))
-           hub-docstring (cost (str "(in-ns 'seon.db)\n" (hub-docstring-change)))]
+           hub-docstring (cost (str "(in-ns 'seon.db)\n" (hub-docstring-change)))
+           hub-behavior (cost (str "(in-ns 'seon.db)\n" (hub-behavior-change)))]
        {:unchanged-request unchanged :fresh-agent-first-request fresh :new-def new-def :redefine-one-form redefine
         :reuse-one-unchanged-test reuse :current-state-with-task current-state :seon-db-nine-forms nine
-        :hub-docstring-change hub-docstring :cold-stale-merge-members cold-stale
+        :hub-docstring-change hub-docstring :hub-behavior-change hub-behavior :cold-stale-merge-members cold-stale
         :merge-one-function (merge-cost running connection)}))))
 
 (defn- over
