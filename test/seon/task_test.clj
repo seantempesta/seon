@@ -966,3 +966,30 @@
     (is (some #(re-find #"seon-chain-loud" (:class %)) (filter :data-task (attributes :li)))
         "a bailed task is marked loud")
     (is (some #{"Design" "Implement"} nodes) "each task states its kind")))))
+
+(deftest a-one-task-chain-costs-what-it-writes
+  ;; Live run 10 (docs/research/agent-platform/2026-10-18/live-run-10.md): root's one request starting four
+  ;; single-task chains allocated 574.9 MB in 1,048 ms on default ab89888ef, about 144 MB per chain. A chain of one
+  ;; writes one task (about twenty datoms) through the task writer on a new branch (a `datahike.api/branch!` pointer)
+  ;; and one chain fact on main, and validates the first task's runnable view: work proportional to the task.
+  (test-support/with-database
+   (fn [connection]
+     (let [store (:seon.store/store (test-support/execution-handle connection))
+           context {:seon.db/connection connection :seon.store/store store}
+           _ (test-support/transacted! connection (test-support/agent-tx (db/db connection) "root"))
+           handle-of #(task/task-handle 'tq.cost %)
+           _ (test-support/transacted! connection
+                                       (task/adopt-tasks-tx (db/db connection)
+                                                            [{:seon.task/ns 'tq.cost :seon.task/name "template"
+                                                              :seon.task/instructions "Check with `seon.task/chain!`."
+                                                              :seon.task/proofs '#{tq.cost/proof}}]
+                                                            #{(handle-of "template")} {}))
+           owned (task/template (db/db connection) 'tq.cost/template)
+           one (fn [task-name] [(merge owned {:seon.task/ns 'tq.cost :seon.task/name task-name
+                                              :seon.task/plan "Cost one chain of `seon.task/chain!`."})])
+           ;; the first chain pays this fixture's first derivations; the second is the one measured
+           _ (task/chain! context (one "warm"))
+           measured (profile/measure #(task/chain! context (one "measured")))]
+       (is (= (keyword (str "chain-" (handle-of "measured"))) (:seon.chain/branch (:seon.profile/value measured))))
+       (is (< (:seon.profile/alloc-bytes measured) (* 24 1024 1024))
+           "a chain of one allocates in proportion to the task it writes")))))
