@@ -2671,6 +2671,22 @@
       (and (map? result) (contains? result :ret)) (update result :ret decode-result)
       :else (decode-result result))))
 
+(defn- lowered-where
+  "`(schema.datahike/lower-where projection bound clauses)`, derived once per projection
+   (`seon.schema/projection-cache-value`): the lowering reads the projection, the clauses
+   and which input values are keywords (an attribute position reads only keywords), so
+   every other input value keys as one scalar. Answers `clauses` itself when unchanged,
+   as `lower-where` does."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :symbol [:set :seon.schema/value]] [:sequential :seon.schema/value]]
+                  [:sequential :seon.schema/value]]}
+  [projection bound clauses]
+  (let [bound (update-vals bound (fn [values] (into #{} (map #(if (keyword? %) % 'scalar)) values)))
+        lowered (schema/projection-cache-value
+                 projection [`lowered-where bound clauses]
+                 #(let [lowered (schema.datahike/lower-where projection bound clauses)]
+                    (if (identical? lowered clauses) ::unchanged lowered)))]
+    (if (= ::unchanged lowered) clauses lowered)))
+
 (defn- lowered-query-request
   "`encoded` read through vector storage, from `parsed-query`, the parse of
    the logical query: every data pattern over a vector attribute is membership
@@ -2701,9 +2717,9 @@
           rules (first (keep-indexed #(when (instance? RulesVar (:variable %2)) %1) inputs))
           rule-set (when rules (nth arguments rules))
           lowered-rules (when rules
-                          (mapv (fn [[head & body]] (into [head] (schema.datahike/lower-where projection {} body)))
+                          (mapv (fn [[head & body]] (into [head] (lowered-where projection {} body)))
                                 rule-set))
-          where (some->> (:where query) (schema.datahike/lower-where projection (query-input-values parsed-query arguments)))]
+          where (some->> (:where query) (lowered-where projection (query-input-values parsed-query arguments)))]
       (if (and (empty? pulls) (identical? where (:where query)) (= lowered-rules rule-set))
         [encoded {}]
         [(assoc encoded
