@@ -2340,13 +2340,31 @@
                           (when (and (contains? public entity) (not (contains? reached entity))) sym))
                         functions)))))
 
+(defn- malli-refusal
+  "Malli's own refusal of the authored contract `malformed` (`:seon.fn/malformed-spec`) parsed as a schema form
+  (`seon.schema/structural-schema`): the type and data of the exception Malli throws, its data naming the schema
+  whose children it refused; nil when Malli parses its structure (a contract kept malformed for another reason)."
+  {:malli/schema [:=> [:cat :seon.fn/malformed-spec]
+                  [:maybe [:map [:seon.fn.contract/malli-type :seon.fn.contract/malli-type]
+                           [:seon.fn.contract/malli-data {:optional true} :seon.fn.contract/malli-data]]]]}
+  [malformed]
+  (try
+    (schema/structural-schema (edn/read-string malformed))
+    nil
+    (catch clojure.lang.ExceptionInfo failure
+      (let [{malli-type :type data :data} (ex-data failure)]
+        (if (and (qualified-keyword? malli-type) (= "malli.core" (namespace malli-type)))
+          (cond-> {:seon.fn.contract/malli-type malli-type} data (assoc :seon.fn.contract/malli-data data))
+          (throw failure))))))
+
 (defn contract-findings
   "Incomplete function contracts ranked by their number of current callers:
   every function row, private included, or only `:seon.fn.contract/selected`.
 
   The existing schema-admission checker owns permissive-position
   classification. This query adds graph-only evidence that admission cannot
-  supply: missing specs, current caller counts, and registered attributes the
+  supply: missing specs, authored contracts Malli refuses (with Malli's own
+  refusal, naming the schema whose children it refused), current caller counts, and registered attributes the
   Datahike bridge cannot store."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/database-value]
@@ -2367,6 +2385,10 @@
                                  '[:where [?function :seon.fn/sym ?symbol]
                                    [?function :seon.fn/spec ?spec]])
                       database inputs)
+         malformed (apply db/q (into (into [:find '?symbol '?spec] in-clause)
+                                     '[:where [?function :seon.fn/sym ?symbol]
+                                       [?function :seon.fn/malformed-spec ?spec]])
+                          database inputs)
          caller-counts (apply db/q (into (into [:find '?symbol '(count ?caller)] in-clause)
                                          '[:where [?caller :seon.fn/sym]
                                            [?caller :seon.fn/calls ?symbol]])
@@ -2376,6 +2398,7 @@
      (or
       (when (db/read-refusal? function-symbols) function-symbols)
       (when (db/read-refusal? specs) specs)
+      (when (db/read-refusal? malformed) malformed)
       (when (db/read-refusal? caller-counts) caller-counts)
       (let [stored-attributes (set (schema.datahike/database-attributes-core-in projection))
             ;; A compiled slot carries the callables its predicates were bound to
@@ -2391,6 +2414,7 @@
                                 :else value))
                         form))
             specs (into {} specs)
+            malformed (into {} malformed)
             caller-counts (into {} caller-counts)
             structural-findings
             (fn [slot]
@@ -2476,9 +2500,17 @@
               (fn [function-symbol]
                 (let [caller-count (long (get caller-counts function-symbol 0))
                       spec-string (get specs function-symbol)
+                      authored-spec (get malformed function-symbol)
                       findings
-                      (if spec-string
+                      (cond
+                        spec-string
                         (arity-findings (mr/schema (:seon.schema.projection/registry projection) function-symbol))
+                        authored-spec
+                        [(merge {:seon.fn.contract/position :seon.fn.contract.position/contract
+                                 :seon.fn.contract/form authored-spec
+                                 :seon.fn.contract/finding :seon.fn.contract.finding/malformed-spec}
+                                (malli-refusal authored-spec))]
+                        :else
                         [{:seon.fn.contract/position
                           :seon.fn.contract.position/contract
                           :seon.fn.contract/form :seon.fn.contract/missing

@@ -1348,7 +1348,10 @@
         (is (= :seon.fn.contract.finding/malformed-spec (:seon.fn.contract/finding finding))
             "a contract Malli refuses is named malformed, not missing")
         (is (= "[:=> [:cat :vector] :int]" (:seon.fn.contract/form finding))
-            "the finding carries the authored form the agent wrote")))))
+            "the finding carries the authored form the agent wrote")
+        (is (= [:malli.core/child-error :vector]
+               [(:seon.fn.contract/malli-type finding) (:type (:seon.fn.contract/malli-data finding))])
+            "the finding carries Malli's refusal, naming the schema whose children it refused")))))
 
 (deftest gate-selection-preserves-cycles-absent-seeds-and-held-values
   (test-support/with-database

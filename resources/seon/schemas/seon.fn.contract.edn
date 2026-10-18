@@ -1,8 +1,9 @@
 #:seon.fn.contract
 {:finding
  [:enum
-  {:description "The closed reasons a declared function contract cannot enforce a useful boundary: no contract, an undefined or structurally permissive slot, an unguarded variadic input, or a referenced stored attribute the Datahike bridge cannot map."}
+  {:description "The closed reasons a declared function contract cannot enforce a useful boundary: no contract, an authored contract Malli refuses, an undefined or structurally permissive slot, an unguarded variadic input, or a referenced stored attribute the Datahike bridge cannot map."}
   :seon.fn.contract.finding/missing-spec
+  :seon.fn.contract.finding/malformed-spec
   :seon.fn.contract.finding/any
   :seon.fn.contract.finding/some
   :seon.fn.contract.finding/bare-map
@@ -15,7 +16,9 @@
   [:= :seon.fn.contract.position/contract]
   [:= :seon.fn.contract.position/output]
   [:tuple [:= :seon.fn.contract.position/input] [:int {:min 0}]]]
- :form :seon.schema/definition
+ :form [:or {:description "The slot's form, or :seon.fn.contract/missing for no contract, or the authored contract Malli refuses (:seon.fn/malformed-spec)."} :seon.schema/definition :seon.fn/malformed-spec]
+ :malli-type [:qualified-keyword {:description "The :type of Malli's refusal of a malformed contract's form, e.g. :malli.core/child-error. Producer: seon.fn/contract-findings."}]
+ :malli-data [:map {:description "The :data of Malli's refusal of a malformed contract's form: the schema that refused its children and what it needs, e.g. {:type :vector :min 1}. Producer: seon.fn/contract-findings."}]
  :caller-count [:int {:min 0}]
  :finding-row
  [:map
@@ -23,5 +26,7 @@
   [:seon.fn.contract/position :seon.fn.contract/position]
   [:seon.fn.contract/form :seon.fn.contract/form]
   [:seon.fn.contract/finding :seon.fn.contract/finding]
-  [:seon.fn.contract/caller-count :seon.fn.contract/caller-count]]
+  [:seon.fn.contract/caller-count :seon.fn.contract/caller-count]
+  [:seon.fn.contract/malli-type {:optional true} :seon.fn.contract/malli-type]
+  [:seon.fn.contract/malli-data {:optional true} :seon.fn.contract/malli-data]]
  :report [:vector :seon.fn.contract/finding-row]}

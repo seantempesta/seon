@@ -1350,9 +1350,10 @@
                 (zero? (:seon.test/fail-count result 0)) (zero? (:seon.test/error-count result 0)))))
 
 (def ^:private incomplete-findings
-  "The `seon.fn/contract-findings` a merge refuses: no contract, or a slot accepting anything that records no
-  polymorphic-boundary justification."
-  #{:seon.fn.contract.finding/missing-spec :seon.fn.contract.finding/any :seon.fn.contract.finding/some})
+  "The `seon.fn/contract-findings` a merge refuses: no contract, an authored contract Malli refuses, or a slot
+  accepting anything that records no polymorphic-boundary justification."
+  #{:seon.fn.contract.finding/missing-spec :seon.fn.contract.finding/malformed-spec
+    :seon.fn.contract.finding/any :seon.fn.contract.finding/some})
 
 (defn contract-gaps
   "What keeps the functions among `identities` that `database` holds from a complete `:malli/schema`, private ones
@@ -1398,7 +1399,8 @@
      (assoc evidence
             :seon.error/message (str "Every function a merge carries declares a complete :malli/schema, private ones included, "
                                      "with no unjustified :any or :some slot: :seon.source/uncontracted names those that do not and "
-                                     ":seon.source/contract-gaps each gap's position. Declare their data shapes as registered "
+                                     ":seon.source/contract-gaps each gap's position (a malformed one with Malli's refusal: "
+                                     ":seon.fn.contract/malli-data names the schema whose children it refused). Declare their data shapes as registered "
                                      "schemas or named predicates, contract them on the candidate branch, run their tests and "
                                      "request the merge again.")
             :seon.error/offending uncontracted :seon.source/uncontracted uncontracted :seon.source/contract-gaps gaps))))
