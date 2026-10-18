@@ -509,8 +509,11 @@
                 database [:seon.fn/sym]
                 (if (map? renderer-ref) (:db/id renderer-ref) renderer-ref)))))
         evaluation-id (:seon.cluster.eval/id unit)
+        ;; a run that carried a model attempt is never changed-since: the query
+        ;; below requires a run with none, so a pull holding its attempts answers it
         changed? (or (:seon.repl/changed-since? unit)
-                     (when (and database evaluation-id)
+                     (when (and database evaluation-id
+                                (empty? (get-in unit [:seon.cluster.eval/run :seon.turn/attempts])))
                        (integer?
                         (db/q
                          '[:find ?earlier . :in $ ?evaluation-id :where
