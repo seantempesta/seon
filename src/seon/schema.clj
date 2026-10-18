@@ -3355,8 +3355,9 @@
 (defn advance-projection
   "The projection of `db`, which `written` (the declaration datoms of one
   report's `:tx-data`) separates from `before`, advanced from `base`, the
-  projection of `before`: only the written entities are read. Nil when `base`
-  cannot be advanced from."
+  projection of `before`: only the written entities are read. `base` itself
+  when no declaration row differs, so its holder's entry names `db` too; nil
+  when `base` cannot be advanced from."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value ::projection
                        [:sequential :seon.schema/value]]
                   [:maybe ::projection]]}
@@ -3368,8 +3369,10 @@
           ;; An identity an entity left is gone unless a written entity holds it now.
           gone (set/difference (into (::left schema-range) (::left contract-range))
                                (into (::held schema-range) (::held contract-range)))]
-      (projection-advanced-by base schema-range contract-range
-                              #(reduce dissoc % gone)))))
+      (if (and (empty? (::rows schema-range)) (empty? (::rows contract-range)) (empty? gone))
+        base
+        (projection-advanced-by base schema-range contract-range
+                                #(reduce dissoc % gone))))))
 
 (defn- refuse-projection-source
   "Typed refusal naming the value handed in place of a database.

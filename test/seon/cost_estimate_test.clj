@@ -43,19 +43,19 @@
    {:op :fresh-agent-first-request
     :why "The unchanged request plus one agent entity, one `d/branch!` pointer and one `sci/fork`: constant, about 3x the unchanged request."
     :estimate {:alloc-mb 12.0 :calls 1500 :reads 30 :ms 75.0}
-    :overrun '{:task seon.cluster.agent/a-fresh-agents-environment-costs-one-fork :alloc-mb 49.3 :calls 8033 :reads 62}}
+    :overrun '{:task seon.cluster.agent/a-fresh-agents-environment-costs-one-fork :alloc-mb 49.0 :calls 8033 :reads 62}}
    {:op :new-def
     :why "The unchanged request plus one form's analysis, digest and entity (~30 datoms); no test reaches a new name: proportional to 1 form."
     :estimate {:alloc-mb 16.0 :calls 2500 :reads 40 :ms 60.0}
-    :overrun '{:task seon.repl/a-new-def-costs-a-hundred-forty-megabytes :alloc-mb 92.9 :calls 15558 :reads 203}}
+    :overrun '{:task seon.repl/a-new-def-costs-a-hundred-forty-megabytes :alloc-mb 63.7 :calls 15558 :reads 203}}
    {:op :unmap-one-def
     :why "The unchanged request plus one `my.program/ns-unmap!` of a def nothing calls: the def's referrers as indexed reads of its edges (none), read once at the form and once where the writer re-derives the retraction, and the retraction of its ~30 datoms; no test reaches it: proportional to the definition's edges, never to the program. Its overrun is the program-change request's own, which a new def shares."
     :estimate {:alloc-mb 12.0 :calls 2500 :reads 60 :ms 80.0}
-    :overrun '{:task seon.repl/a-new-def-costs-a-hundred-forty-megabytes :alloc-mb 119.9 :calls 15184 :reads 178}}
+    :overrun '{:task seon.repl/a-new-def-costs-a-hundred-forty-megabytes :alloc-mb 74.8 :calls 15184 :reads 178}}
    {:op :redefine-one-form
     :why "A new def plus finding the one test reaching the changed digest and running it: proportional to 1 form and 1 reaching test."
     :estimate {:alloc-mb 24.0 :calls 4000 :reads 60 :ms 100.0}
-    :overrun '{:task seon.repl/redefining-one-form-costs-three-hundred-megabytes :alloc-mb 93.9 :calls 41125 :reads 316}}
+    :overrun '{:task seon.repl/redefining-one-form-costs-three-hundred-megabytes :alloc-mb 287.9 :calls 41125 :reads 334}}
    {:op :reuse-one-unchanged-test
     :why "The unchanged request plus one reach digest over the test's closure (~5 definitions) and one indexed read of its record: no run."
     :estimate {:alloc-mb 8.0 :calls 1500 :reads 25 :ms 40.0}

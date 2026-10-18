@@ -990,6 +990,33 @@
                   (select-keys projection members))
                "the advanced projection is the one a full derivation gives")))))))
 
+;; CLASS: a value definition writes `:seon.fn/sym` and `:seon.schema.admission/source` but no
+;; `:seon.fn/spec`, so it adds no declaration row; yet its writer report, every in-transaction value
+;; and its commit each keyed the projection by every declaration datom of the program
+;; (`declaration-content-key`, about 9 MB per value on default). A value whose writes leave every row
+;; as it was is its basis's projection, found by the datoms that separate it from that basis.
+(deftest a-write-that-changes-no-declaration-row-reads-no-program
+  (test-support/with-database
+   (fn [connection]
+     (is (some? (:db-after (db/transact! connection [(test-support/namespace-entity (db/db connection)
+                                                                                      'sample.value-def)]))))
+     (let [head (db/db connection)
+           held (db/carried-projection head)
+           tx-data (test-support/replacement-tx head [:seon.fn/sym 'sample.value-def/answer] "(def answer 42)"
+                                                {:seon.schema.admission/source :agent})
+           [[speculative committed] calls]
+           (test-support/armed-calls
+            '#{seon.db/declaration-content-key seon.schema/load-projection}
+            #(let [staged (db/carried-projection (:db-after (d/with head tx-data)))]
+               (when (:db-after (db/transact! connection tx-data))
+                 [staged (db/carried-projection (db/db connection))])))]
+       (is (some? (db/pull (db/db connection) [:db/id] [:seon.fn/sym 'sample.value-def/answer]))
+           "the definition commits")
+       (is (identical? held speculative) "a speculative value of the write reads its basis's projection")
+       (is (identical? held committed) "its commit reads the same projection")
+       (is (zero? (get calls 'seon.db/declaration-content-key)) "no value of the write reads every declaration datom")
+       (is (zero? (get calls 'seon.schema/load-projection)) "nothing is derived")))))
+
 ;; A projection is a function of the declaration rows' values and how they
 ;; join. The transaction that asserted a row and the entity id that carries it
 ;; are not among them, so equal declarations are one population: one

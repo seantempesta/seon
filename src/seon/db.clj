@@ -1724,6 +1724,81 @@
      (run! #(alias! % canonical) aliases)
      projection)))
 
+(defn- basis-bytes
+  "Nothing beyond the entry itself: a revision key and a commit id, which `seon.cache` weighs by its entry."
+  {:malli/schema [:=> [:cat [:tuple :seon.schema/value :uuid]] :int]}
+  [_basis]
+  0)
+
+(defn- hold-basis!
+  "Hold `[revision-key commit]` as the basis of the connection `revision-key`
+  names: the latest committed value whose projection it holds."
+  {:malli/schema [:=> [:cat :seon.schema/value :uuid] :nil]}
+  [revision-key commit]
+  (let [connection (:datahike.cache/connection-id revision-key)
+        held (seon.cache/present ::basis connection)]
+    (when-not (= held [revision-key commit])
+      (seon.cache/evict! ::basis connection)
+      (seon.cache/lookup ::basis connection basis-bytes (constantly [revision-key commit])))
+    nil))
+
+(defn- name-committed!
+  "Name the projection held under `canonical` by the committed value's
+  `revision-key` and its `commit`, which becomes its connection's basis: the
+  committed value a speculative value of that connection folds from
+  (`folded-projection`)."
+  {:malli/schema [:=> [:cat :seon.source/digest :seon.schema/value :uuid
+                       [:tuple :qualified-keyword :seon.schema/value]]
+                  :nil]}
+  [builder revision-key commit canonical]
+  (alias! revision-key canonical)
+  (alias! [::commit commit builder] canonical)
+  (hold-basis! revision-key commit))
+
+(defn- advanced-content-projection
+  "The projection of `after`, which the declaration datoms `written` separate
+  from `before`, advanced from `before`'s held `[canonical base]` and named by
+  each of `aliases`: the base's own entry when no declaration row changed
+  (`schema/advance-projection` answers the base), else held under `after`'s
+  declaration content (`content-projection`)."
+  {:malli/schema [:=> [:cat :seon.source/digest :seon.db/database-value :seon.db/database-value
+                       [:tuple [:tuple :qualified-keyword :seon.schema/value] :seon.schema/projection]
+                       [:sequential :seon.schema/value] [:sequential :seon.schema/value]]
+                  :seon.schema/projection]}
+  [builder before after [canonical base] written aliases]
+  (let [advanced (schema/advance-projection before after base written)]
+    (if (identical? advanced base)
+      (do (run! #(alias! % canonical) aliases) base)
+      (content-projection builder after ::value-projection aliases
+                          #(or advanced (schema/load-projection after base)) (delay base)))))
+
+(defn- separating-declarations
+  "The declaration datoms held by exactly one of `before` and `database`, two
+  values of one store (`datahike.api/datoms-diff`): work proportional to what
+  differs between them, never to the program."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] [:vector :seon.schema/value]]}
+  [before database]
+  (let [installed (dbi/-schema database)]
+    (into [] (comp (filter #(get installed %))
+                   (mapcat #(apply concat (d/datoms-diff before database :aevt [%]))))
+          schema/projection-attributes)))
+
+(defn- folded-projection
+  "The projection of the speculative value `database`, advanced from its
+  connection's basis (`hold-basis!`) by the declaration datoms that separate
+  them and named by each of `aliases`; nil when its connection holds none. A value whose writes left every declaration row as it was answers its
+  basis's projection without reading the program."
+  {:malli/schema [:=> [:cat :seon.source/digest :seon.db/database-value [:sequential :seon.schema/value]]
+                  [:maybe :seon.schema/projection]]}
+  [builder database aliases]
+  (when-let [[revision-key commit] (seon.cache/present ::basis (:datahike.cache/connection-id (:cache-context database)))]
+    (when-let [entry (resolved (assoc revision-key ::builder builder))]
+      (read-at database commit
+               (fn [before]
+                 (when before
+                   (advanced-content-projection builder before database entry
+                                                (separating-declarations before database) aliases)))))))
+
 (defn- speculative-projection
   "The projection of a speculative value (a `with` result, a report's
   `:db-after`, a `:db.fn/call` argument) that wrote a declaration attribute:
@@ -1743,6 +1818,7 @@
                   :seon.schema/projection]}
   [builder value-key database]
   (or (second (resolved [builder value-key]))
+      (folded-projection builder database [[builder value-key]])
       (content-projection builder database ::value-projection [[builder value-key]])))
 
 (defn as-of-key
@@ -1906,17 +1982,18 @@
     (or (when commit (seon.cache/present ::builder-digest commit))
         (loaded-builder origin loaded instances))))
 
-(defn- held-projection
-  "The projection already derived for the native value `database` under its
-  revision key (durable or value tier) or its commit; nil when none is held.
-  Derives and waits for nothing."
-  {:malli/schema [:=> [:cat :seon.source/digest :seon.db/database-value] [:maybe :seon.schema/projection]]}
+(defn- held-entry
+  "`[canonical projection]` already derived for the native value `database`
+  under its revision key (durable or value tier) or its commit; nil when none
+  is held. Derives and waits for nothing."
+  {:malli/schema [:=> [:cat :seon.source/digest :seon.db/database-value]
+                  [:maybe [:tuple [:tuple :qualified-keyword :seon.schema/value] :seon.schema/projection]]]}
   [builder database]
   (let [revision-key (assoc (projection-cache-key database) ::builder builder)
         commit (:datahike.value/commit-id (datahike.db/committed-value-identity database))]
-    (second (or (resolved revision-key)
-                (resolved [builder revision-key])
-                (when commit (resolved [::commit commit builder]))))))
+    (or (resolved revision-key)
+        (resolved [builder revision-key])
+        (when commit (resolved [::commit commit builder])))))
 
 (def ^:private declaration-attribute?
   (set schema/projection-attributes))
@@ -1954,12 +2031,9 @@
     (let [builder (projection-builder after)
           advanced (advanced-key builder before written)]
       (or (second (resolved advanced))
-          (when-let [base (held-projection builder before)]
-            (content-projection builder after ::value-projection
-                                [advanced [builder (assoc (projection-cache-key after) ::builder builder)]]
-                                #(or (schema/advance-projection before after base written)
-                                     (schema/load-projection after base))
-                                (delay base)))))))
+          (when-let [entry (held-entry builder before)]
+            (advanced-content-projection builder before after entry written
+                                         [advanced [builder (assoc (projection-cache-key after) ::builder builder)]]))))))
 
 (defn- hold-committed-projection!
   "Hold the committed value's already derived projection under its commit.
@@ -1976,8 +2050,7 @@
                           (when-let [written (written-declarations report)]
                             (first (resolved (advanced-key builder before written))))))]
       (when canonical
-        (alias! revision-key canonical)
-        (alias! [::commit (:datahike.value/commit-id committed) builder] canonical))))
+        (name-committed! builder revision-key (:datahike.value/commit-id committed) canonical))))
   report)
 
 (defn carried-projection
@@ -2032,7 +2105,10 @@
        ;; declaration datoms.
        (when-let [[canonical held] (resolved [::commit (:datahike.value/commit-id committed) @builder])]
          (when (:datahike.cache/connection-id (:cache-context source))
-           (alias! (assoc (projection-cache-key source) ::builder @builder) canonical))
+           (let [revision-key (assoc (projection-cache-key source) ::builder @builder)]
+             ;; once per connection and commit: every later read of the value finds its name held
+             (when-not (identical? canonical (seon.cache/present ::projection-alias revision-key))
+               (name-committed! @builder revision-key (:datahike.value/commit-id committed) canonical))))
          held))
      (cond
       (not (declares-program? source))
@@ -2051,10 +2127,13 @@
       ;; A revision hit also stores its cell under the commit, so a new branch
       ;; at an equal commit hits too; Datahike's query cache keys committed
       ;; values the same way (fork `684d3290`). Both key kinds share the bound.
-      (let [revision-key (assoc (projection-cache-key source) ::builder @builder)]
+      (let [revision-key (assoc (projection-cache-key source) ::builder @builder)
+            commit (:datahike.value/commit-id committed)]
         (or (second (resolved revision-key))
-            (content-projection @builder source ::projection
-                                [revision-key [::commit (:datahike.value/commit-id committed) @builder]])))
+            (let [projection (content-projection @builder source ::projection
+                                                 [revision-key [::commit commit @builder]])]
+              (hold-basis! revision-key commit)
+              projection)))
 
       ;; A speculative value (a report's db-after, a `:db.fn/call` argument,
       ;; a `with` result) carries Datahike's revision context derived from its
