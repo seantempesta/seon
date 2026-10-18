@@ -262,22 +262,26 @@
 
 (defn- refuse!
   "Abort the whole transaction, naming the rule the request violated."
-  {:malli/schema [:=> [:cat :qualified-symbol :qualified-keyword :map]
-                  :seon.turn/refused-error]}
-  [transition rule request]
-  (let [message (str "run transition refused: " (name rule))]
-    (throw (ex-info message
-                    (assoc (seon.error.refusal/diagnostic (java.util.Date.) ::transition transition
-                     {:seon.error/message message
-                     ::rule rule
-                     :seon.error/data {::request request}}) :seon.error/type :seon.turn/refused-error)))))
+  {:malli/schema [:function
+                  [:=> [:cat :qualified-symbol :qualified-keyword :map] :seon.turn/refused-error]
+                  [:=> [:cat :qualified-symbol :qualified-keyword :map :map] :seon.turn/refused-error]]}
+  ([transition rule request]
+   (refuse! transition rule request {}))
+  ([transition rule request members]
+   (let [message (str "run transition refused: " (name rule))]
+     (throw (ex-info message
+                     (assoc (seon.error.refusal/diagnostic (java.util.Date.) ::transition transition
+                              (assoc members :seon.error/message message
+                                              ::rule rule
+                                              :seon.error/data {::request request})) :seon.error/type :seon.turn/refused-error))))))
 
 (defn- refuse-closed-admission!
   "Refuse, inside the writer, a run for an agent whose admission is closed."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol :int :map] :nil]}
   [db transition agent-eid request]
   (when (:seon.agent/admission-closed-tx (db/pull db [:seon.agent/admission-closed-tx] agent-eid))
-    (refuse! transition ::admission-closed request)))
+    (refuse! transition ::admission-closed request
+             {:seon.error/fix "This agent's attempt has ended (its task is done or given back); its branch is merged or held for root. Nothing more is evaluated as this agent."})))
 
 (defn- current-run
   "The run's current facts on `db`, or nil when no such run exists.

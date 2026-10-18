@@ -539,6 +539,19 @@
        (is ((schema/projection-validator (schema/handed-projection) :seon.error/value) result)
            "classified transaction refusals satisfy the same error contract as their callers")))))
 
+(deftest a-closed-admission-refusal-tells-the-agent-its-attempt-has-ended
+  (test-support/with-database
+    (fn [connection]
+      (test-support/transacted! connection (test-support/agent-tx @connection "ended-agent"))
+      (test-support/transacted! connection [[:db/add [:seon.agent/id "ended-agent"] :seon.agent/admission-closed-tx "datomic.tx"]])
+      (let [result (db/transact! connection
+                                 (turn/system-run-tx @connection
+                                                     {:seon.agent/id "ended-agent" :seon.turn/id "after-the-end"
+                                                      :seon.turn/opened-tx "datomic.tx" :seon.turn/sources []}))]
+        (is (= :seon.turn/admission-closed (:seon.turn/rule result)))
+        (is (string? (:seon.error/fix result))
+            "the refusal names what happened and what to do, beside its rule")))))
+
 (defn- with-codec-database
   "The fixture attributes also land as schema rows: the writer encodes through
   the projection derived from the branch's rows (`db/carried-projection`)."
