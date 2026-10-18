@@ -2028,3 +2028,21 @@
        (is (= guess (:seon.error/offending reply)))
        (is (not (contains? reply :seon.error/nearest)) "no suggestions")
        (is (= :seon.embed/unreachable-error (:seon.error/type (:seon.error/nearest-error reply))))))))
+
+(deftest a-warm-unresolved-name-ranks-without-re-reading-the-program
+  ;; Live run 10 (default 577091e04): a warm `nearest-declared` for `seon.db/transcat!` allocated 6.0 MB, re-reading
+  ;; every public declaration, re-sorting their names and re-hashing them into the index key on every call, so an
+  ;; unresolved-symbol request cost 34 MB. After an unrelated write the program, and so the answer, is unchanged:
+  ;; ranking it is one pass over the held index and its eight names.
+  (test-support/with-database
+   (fn [connection]
+     (let [nearest @#'error/nearest-declared
+           guess 'seon.db/transcat!
+           first-answer (nearest (db/db connection) guess)
+           _ (test-support/transacted! connection (test-support/agent-tx (db/db connection) "unrelated-writer"))
+           database (db/db connection)
+           measured (seon.profile/measure #(nearest database guess))]
+       (is (= 'seon.db/transact! (first first-answer)) "the declaration the guess misspells is nearest")
+       (is (= first-answer (:seon.profile/value measured)) "an unrelated write changes no answer")
+       (is (< (:seon.profile/alloc-bytes measured) (* 2 1024 1024))
+           "a warm answer allocates in proportion to the names it shows, not to the program")))))

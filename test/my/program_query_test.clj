@@ -4,6 +4,7 @@
             [my.program]
             [seon.db :as db]
             [seon.embed :as embed]
+            [seon.profile]
             [seon.test-support :as test-support]))
 
 (deftest predicate-arguments-are-bindings-not-nested-clojure-evaluations
@@ -78,3 +79,26 @@
         found (my.program/similar database "pull an entity by its id" 8)]
     (is (= 'seon.db/pull (ffirst found)) "the function the intent names is first")
     (is (not-any? private (map first found)) "no private helper is offered")))
+
+(deftest ^{:seon.test/long "Joins the background fill's by-name index over every declared name before the measured call: 6.0 s in a fresh check JVM (live-run-10, 2026-10-18); warm on a running cluster it is milliseconds."
+           :seon.test/long-ms 30000}
+  a-warm-similar-by-name-allocates-in-proportion-to-its-answer
+  ;; Live run 10 (default 577091e04): a warm `(my.program/similar database 'seon.db/transcat! 5)` allocated 19.3 MB
+  ;; (73.6 MB per request on 0d9f8f847): every call re-reads every declared name (`seon.embed/name-texts`), pairs
+  ;; each with its symbol and re-hashes all of them into the index key. After an unrelated write the program is
+  ;; unchanged, so the answer is one pass over the held index and its five names.
+  (test-support/with-database
+   (fn [connection]
+     (let [ask #(my.program/similar % 'seon.db/transcat! 5)
+           before (db/db connection)
+           ;; waits for what a call waits for: the by-name index the background fill derives
+           _ (embed/index (embed/cluster-settings before) (embed/open-store (embed/directory before)) embed/request!
+                          "similarity" (embed/name-texts before))
+           first-answer (ask before)
+           _ (test-support/transacted! connection (test-support/agent-tx before "unrelated-writer"))
+           database (db/db connection)
+           measured (seon.profile/measure #(ask database))]
+       (is (= 'seon.db/transact! (ffirst first-answer)) "the name the guess misspells is nearest")
+       (is (= first-answer (:seon.profile/value measured)) "an unrelated write changes no answer")
+       (is (< (:seon.profile/alloc-bytes measured) (* 5 1024 1024))
+           "a warm answer allocates in proportion to the names it shows, not to the program")))))
