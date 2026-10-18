@@ -3013,11 +3013,15 @@
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value [:seqable :qualified-symbol]]
                   [:vector :qualified-symbol]]}
   [ctx database members]
-  (let [functions (set (db/q '[:find [?sym ...] :in $ [?sym ...]
-                               :where [?f :seon.fn/sym ?sym] [?f :seon.fn/arglists ?arglists]
-                                      [(not= "()" ?arglists)]
-                                      (not [?f :seon.fn/macro? true])]
-                             database (vec members)))]
+  ;; no members reads nothing: Datahike runs these clauses with an empty
+  ;; collection binding as a scan of every function
+  (let [functions (if (empty? members)
+                    #{}
+                    (set (db/q '[:find [?sym ...] :in $ [?sym ...]
+                                 :where [?f :seon.fn/sym ?sym] [?f :seon.fn/arglists ?arglists]
+                                        [(not= "()" ?arglists)]
+                                        (not [?f :seon.fn/macro? true])]
+                               database (vec members))))]
     (sci.ctx-store/with-ctx ctx
       (reduce
        (fn [eager sym]
