@@ -258,6 +258,14 @@
     (is (not (re-find #"(?i)create" (:seon.ref/message problem))) "it never tells the agent to create the name: the plan says that")
     (is (= '[(my.program/search "missing-key")] (:seon.render/operations problem)) "it offers the search form that finds what exists")))
 
+(deftest an-unresolved-name-carries-the-names-its-namespace-declares-nearest-it
+  ;; a misspelled name in its own namespace: the problem names what it misspells (kNN over the names' embeddings), so
+  ;; no turn searches for it by hand
+  (let [[renamed absent] (ref/references (db/db) {:seon.ref/text "`seon.ref/referencs` and `seon.nope/missing`"})]
+    (is (= :unresolved (:seon.ref/problem-kind renamed)))
+    (is (= 'seon.ref/references (first (:seon.ref/nearest renamed))) "the nearest name its namespace declares comes first")
+    (is (not (contains? absent :seon.ref/nearest)) "a namespace that declares nothing offers no name")))
+
 (deftest a-reference-with-no-path-is-a-missing-file
   ;; section declares [:or :seon.ref/section :seon.ref/section-error]; an anchor with no path threw from locate's contract.
   (are [reference] (= :file (:seon.ref/section-missing (try (ref/section reference) (catch Exception e (ex-message e)))))

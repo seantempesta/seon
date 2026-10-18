@@ -71,7 +71,8 @@
                      [:seon.ref/name {:optional true} :seon.ref/name]
                      [:seon.ref/at {:optional true} :seon.ref/at]
                      [:seon.ref/path {:optional true} :seon.ref/path]
-                     [:seon.ref/anchor {:optional true} :seon.ref/anchor]]
+                     [:seon.ref/anchor {:optional true} :seon.ref/anchor]
+                     [:seon.ref/nearest {:optional true} :seon.ref/nearest]]
            :message [:string {:min 1 :description "What a problem kind means and what the agent does about it: short fixed text per kind."}]
            :project [:string {:min 1}]
            :revision [:string {:min 40 :max 40}]
@@ -139,7 +140,7 @@
                      [:seon.ref/lead {:optional true} :seon.ref/lead] [:seon.ref/opening {:optional true} :seon.ref/opening]
                      [:seon.ref/below :seon.ref/below] [:seon.ref/pin {:optional true} :seon.ref/pin]]
            :section-missing [:enum :file :heading]
-           :nearest [:vector [:or :string [:map [:seon.ref/anchor :seon.ref/anchor] [:seon.ref/heading :seon.ref/heading]]]]
+           :nearest [:vector {:description "What a reference that resolves to nothing may mean: the nearest file paths or headings, or the nearest names its namespace declares."} [:or :string :qualified-symbol [:map [:seon.ref/anchor :seon.ref/anchor] [:seon.ref/heading :seon.ref/heading]]]]
            :section-error [:merge :seon.error/base
                            [:map [:seon.ref/section-missing :seon.ref/section-missing] [:seon.ref/path {:optional true} :seon.ref/path]
                             [:seon.ref/anchor {:optional true} :seon.ref/anchor] [:seon.ref/nearest :seon.ref/nearest]]]}

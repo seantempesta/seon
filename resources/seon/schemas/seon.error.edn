@@ -436,8 +436,11 @@
  [:map-of {:description "When a name was not found: its namespace and the names declared there nearest to it by spelling, at most eight (seon.error/reply-value). Shown, never stored."}
   :symbol [:or [:vector :symbol] :seon.db/error-result]]
  :seon.error/nearest
- [:vector {:description "When a name was not found: the locals in scope at the failing form nearest to it by spelling, then the calling form (symbol and shortest arglist) of each public declaration nearest to it across every namespace, by the words of the names, at most eight (seon.error/reply-value). Shown, never stored."}
+ [:vector {:description "When a name was not found: the locals in scope at the failing form nearest to it by spelling, then the calling form (symbol and shortest arglist) of each public declaration nearest to it across every namespace, by kNN over the embeddings of the qualified names (seon.embed/similar-in), at most eight (seon.error/reply-value). Shown, never stored."}
   :seon.schema/value]
+ :seon.error/nearest-error
+ [:or {:description "When a name was not found and its nearest declarations could not be looked up: the embed server's unreachable error, or the config refusal naming the missing dial (seon.error/reply-value). Shown, never stored."}
+  :seon.embed/unreachable-error :seon.config/error]
  :seon.error/sources
  [:map-of {:description "For each function a refusal names (at most three), the lines of its source that mention the blocked subject, numbered within the definition (seon.error/reply-value). Shown, never stored."}
   :qualified-symbol [:or [:vector :string] :seon.db/error-result]]
@@ -463,6 +466,7 @@
   [:seon.error/fix {:optional true} :seon.error/fix]
   [:seon.error/in-namespace {:optional true} :seon.error/in-namespace]
   [:seon.error/nearest {:optional true} :seon.error/nearest]
+  [:seon.error/nearest-error {:optional true} :seon.error/nearest-error]
   [:seon.error/sources {:optional true} :seon.error/sources]
   [:seon.error/chain {:optional true} :seon.error/chain]
   [:seon.sci.eval/stacktrace {:optional true} :seon.sci.eval/stacktrace]

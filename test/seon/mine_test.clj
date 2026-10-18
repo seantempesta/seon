@@ -124,12 +124,12 @@
                            [(evaluation "e1" 1 'seon.error "(clojure.repl/doc tokens-of)" {})
                             (evaluation "e2" 1 'seon.error "(tokens-of '[a/b])"
                                         {:seon.cluster.eval/error "Execution error (ExceptionInfo) at (REPL:16:43).\nUnable to resolve symbol: tokens-of"})
-                            (evaluation "e3" 1 'seon.error "(clojure.repl/doc seon.error/nearest-names)" {})])]
+                            (evaluation "e3" 1 'seon.error "(clojure.repl/doc seon.error/reply-value)" {})])]
     (is (= [[{:seon.mine/kind :printer :seon.mine/producer 'seon.render.value/show}]
             [{:seon.mine/kind :printer :seon.mine/producer 'seon.render.value/show}
              {:seon.mine/kind :error :seon.mine/producer :unresolved}]
             [{:seon.mine/kind :printer :seon.mine/producer 'seon.render.value/show}
-             {:seon.mine/kind :docstring :seon.mine/producer 'seon.error/nearest-names}]]
+             {:seon.mine/kind :docstring :seon.mine/producer 'seon.error/reply-value}]]
            (mapv :seon.mine/causes (:seon.mine/shown step)))
         "a bare name names no docstring the miner can charge; a qualified one does, and the guessed call's cause is its error")))
 

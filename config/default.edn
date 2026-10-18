@@ -33,6 +33,14 @@
  :seon.config.flow.io/concurrency 64
  :seon.config.flow.io/queue-depth 64
 
+ ; The embed server (EmbeddingGemma 2 text path, MLX bf16): 5.7 ms per 100-token text, about 1,000 per second batched.
+ ; Store 256 Matryoshka dimensions (1 MTEB point below 768, a third of the bytes).
+ :seon.config.embed/endpoint "http://127.0.0.1:8701/v1/embed"
+ :seon.config.embed/model "eg2-text-bf16"
+ :seon.config.embed/dimension 256
+ :seon.config.embed/batch-size 256
+ :seon.config.embed/timeout-ms 30000
+
  ; Unit: milliseconds a DETACHED capability request may run before its own
  ; interrupt arm cuts it. Background work deliberately does not inherit the
  ; submitting turn's deadline (that is what `my.background` is for), so this
@@ -220,7 +228,7 @@
 
  ; A definition becomes a cost entity past these thresholds and is rewritten only when its per-call
  ; self time moves by the hysteresis factor.
- :seon.config.context/reference-tokens 1500
+ :seon.config.context/reference-tokens 3000
  :seon.config.fn.cost/min-calls 20
  :seon.config.fn.cost/cold-calls 1
  :seon.config.fn.cost/min-total-us 1000

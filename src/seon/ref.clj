@@ -12,6 +12,7 @@
             [seon.ai.tokens :as tokens]
             [seon.cache :as cache]
             [seon.db :as db]
+            [seon.embed :as embed]
             [seon.error.refusal :as refusal]
             [seon.fn.analyzer :as analyzer]
             [seon.fs :as fs]
@@ -541,6 +542,22 @@
     (str/join "\n\n" (keep identity (conj (mapv entity [:seon.fn/doc :seon.ns/doc :seon.task/plan :seon.task/instructions])
                                           description)))))
 
+(defn- nearest-declared
+  "At most three functions or tests the namespace of `reference` declares on `database`, nearest it by kNN over the
+  embeddings of their qualified names (`seon.embed/similar-in`): what a renamed name may be called now. Empty when the
+  namespace declares none or the embed server does not answer."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] [:vector :qualified-symbol]]}
+  [database reference]
+  (let [owner (symbol (namespace reference))
+        functions (db/q '[:find [?sym ...] :in $ ?ns :where [?n :seon.ns/name ?ns] [?f :seon.fn/ns ?n] [?f :seon.fn/sym ?sym]]
+                        database owner)
+        tests (db/q '[:find [?sym ...] :in $ ?ns :where [?n :seon.ns/name ?ns] [?t :seon.test/ns ?n] [?t :seon.test/sym ?sym]]
+                    database owner)]
+    (if-let [names (seq (into [] (comp (map str) (distinct)) (sort (concat functions tests))))]
+      (let [near (embed/similar-in database "similarity" (vec names) "similarity" (str reference) 3)]
+        (if (:seon.error/operation near) [] (mapv (comp symbol :seon.embed/text) near)))
+      [])))
+
 (defn- resolve-name
   "One referenced deftest, task or namespace identified on `database`: the entity its identity attribute's index
   holds, pulled as that identity declares (`declarations`), with its row's declared render pair as its own render keys
@@ -624,7 +641,8 @@
                 (analyzer/cached-namespace space)))))))
 
 (defn- answer
-  "One candidate resolved on `database`, or its problem with what it means; nil for a directory, and for a
+  "One candidate resolved on `database`, or its problem with what it means (an unresolved qualified name with the
+  names its namespace declares nearest it, `nearest-declared`); nil for a directory, and for a
   resolve-only candidate that names nothing (it is prose)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/candidate]
                   [:or :nil :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
@@ -640,7 +658,10 @@
                    reference (resolve-name database reference)
                    problem-kind (assoc (dissoc found :seon.ref/resolve-only) :seon.ref/message (problem-messages problem-kind))
                    (directory? path) nil
-                   :else (resolve-path database found))]
+                   :else (resolve-path database found))
+        nearest (when (and (not resolve-only) (qualified-symbol? reference) (= :unresolved (:seon.ref/problem-kind resolved)))
+                  (nearest-declared database reference))
+        resolved (cond-> resolved (seq nearest) (assoc :seon.ref/nearest nearest))]
     (cond
       (and resolve-only (:seon.ref/problem-kind resolved) (not (#{:no-lead :no-summary} (:seon.ref/problem-kind resolved)))) nil
       (or (nil? resolved) (:seon.error/at resolved) (:seon.ref/problem-kind resolved)) resolved

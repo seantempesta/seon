@@ -56,4 +56,10 @@
    [:my.program/candidate-tokens :my.program/candidate-tokens]]]
  :my.program/search-result
  [:map [:count [:int {:min 0}]] [:matches [:vector :my.program/search-match]] [:more {:optional true} :seon.render/read-form]]
+ :my.program/similar-query
+ [:or {:description "What my.program/similar ranks the declarations against: a symbol by its name, a string by meaning."}
+  :symbol [:string {:min 1}]]
+ :my.program/similar-result
+ [:vector {:description "The declarations nearest a query, nearest first, each with its cosine similarity (my.program/similar)."}
+  [:tuple :qualified-symbol :seon.embed/score]]
 }

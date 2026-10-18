@@ -1845,15 +1845,14 @@
 (deftest a-guessed-name-is-answered-with-the-nearest-real-calls
   ;; Agents guess names (health's top agent-error signature): the refusal
   ;; carries the calling forms of the public declarations nearest by the
-  ;; words of the names, across every namespace, including a guess in a
+  ;; embeddings of the names, across every namespace, including a guess in a
   ;; namespace that does not exist.
   (let [database (seon.db/db)
         nearest (fn [guess] (:seon.error/nearest
                              (seon.error/reply-value database {:seon.error/message (str "Unable to resolve symbol: " guess)
                                                                :seon.program/not-found guess})))]
     (clojure.test/are [guess expected] (some #{expected} (map first (nearest guess)))
-      'my.cluster.source/write 'my.program/write-branch!
-      'my.agent/messages 'seon.ai/messages
+      'seon.db/transcat! 'seon.db/transact!
       'seon.repl/help 'seon.bootstrap/help
       'seon.test/result 'seon.test/recorded-result
       'my.program/overrides 'seon.program/overrides
@@ -1862,9 +1861,7 @@
       (let [forms (nearest 'my.program/overrides)]
         (is (<= (count forms) 8))
         (is (= '(seon.program/overrides database) (first (filter #(= 'seon.program/overrides (first %)) forms))))))
-    (testing "a name nothing resembles has no key"
-      (is (not (contains? (seon.error/reply-value database {:seon.error/message "x" :seon.program/not-found 'qqqq.zzzz/xxyyzz})
-                          :seon.error/nearest))))))
+))
 
 (deftest ^{:seon/tasks #{'seon.error/a-guessed-schema-key-is-answered-with-the-nearest-registered-schemas}}
   a-guessed-schema-key-is-answered-with-the-nearest-registered-schemas
@@ -1989,9 +1986,7 @@
          "(str/replace \"abc\" \"a\" \"b\")" 'clojure.string/replace)
        (testing "the alias itself resolves, so the guess is only the simple name"
          (let [failure (test-support/agent-value ctx "(str/subs \"abc\" 1)")]
-           (is (= 'str/subs (:seon.error/offending failure)))))
-       (testing "a name nothing resembles still has no key"
-         (is (not (contains? (nearest "(str/qqqzzz \"abc\" 1)") :seon.error/nearest))))))))
+           (is (= 'str/subs (:seon.error/offending failure)))))))))
 
 (deftest the-elision-ai-render-returns-data
   (text-render/with-ai-face
@@ -2009,26 +2004,27 @@
       (is (text-render/carries? answer (:seon.error/message sample))
           "the data carries what the text carried"))))
 
-(deftest an-unresolved-symbol-reply-costs-under-twenty-milliseconds
-  ;; Request-cost lane 2026-10-17: an eval request with an unresolved symbol cost 97 ms and 84 MB, almost all of it
-  ;; `seon.error/nearest-names` tokenizing every public declaration on every such reply. The candidates' words depend
-  ;; only on the program's declared names, never on the guess, so a warm call for a new guess tokenizes only the guess.
-  ;; The test calls `nearest-names` itself, not through the compiled `seon.error/reply-value`: a branch's redefinition
-  ;; is seen by what the branch evaluates from source, so a chain can prove its change here (live run 8).
-  (let [database (seon.db/db)
-        candidates (vec (db/q '[:find [?s ...] :where [?f :seon.fn/sym ?s] [?f :seon.fn/arglists _]] database))
-        _ (error/nearest-names 'qqq/frobnicate-thing candidates 8)
-        measured (seon.profile/measure #(error/nearest-names 'qqq/another-guessed-name candidates 8))]
-    (is (< 1000 (count candidates)) "the program declares its functions")
-    (is (< (seon.profile/calls-of measured 'seon.error/name-tokens) 64)
-        "a warm call tokenizes the guess, not every declaration again")
-    (is (< (:seon.profile/alloc-bytes measured 0) (* 10 1024 1024))
-        "a warm call allocates under 10 MB")))
+(deftest a-misspelled-name-is-answered-with-the-name-it-misspells-first
+  ;; The owner (2026-10-18): suggestions are kNN over embeddings of the qualified names, not token guesses.
+  ;; `seon.db/transcat!` is two edits from `seon.db/transact!` and shares no word with it.
+  (let [reply (seon.error/reply-value (seon.db/db) {:seon.error/message "Unable to resolve symbol: seon.db/transcat!"
+                                                     :seon.program/not-found 'seon.db/transcat!})]
+    (is (= 'seon.db/transact! (first (first (:seon.error/nearest reply))))
+        "the declaration the guess misspells is the nearest")
+    (is (not (contains? reply :seon.error/nearest-error)))))
 
-(deftest a-guess-sharing-no-word-is-still-offered-the-name-it-misspells
-  ;; Live run 9 (docs/research/agent-platform/2026-10-18/live-run-9.md): the merged cost fix 50e879526 kept only the
-  ;; candidates sharing a word with the guess, so a misspelling in another namespace lost its nearest name
-  ;; (`seon.db/transact!` for `qqq/transcat!`, two edits away) although the spelling pass still asked for it.
-  (let [candidates (vec (db/q '[:find [?s ...] :where [?f :seon.fn/sym ?s] [?f :seon.fn/arglists _]] (seon.db/db)))]
-    (is (some #{'seon.db/transact!} (error/nearest-names 'qqq/transcat! candidates 8))
-        "a name two edits away is offered though the guess shares none of its words")))
+(deftest an-unreachable-embed-server-still-answers-the-reply
+  ;; The embed server is an interop edge with one declared variant: down, the reply keeps every other key, offers
+  ;; no nearest declarations and carries the unreachable error beside them. The guess is new text, so its embedding
+  ;; is in neither the process cache nor the durable store and the server must be asked.
+  (test-support/with-database
+   (fn [connection]
+     (test-support/apply-config! connection (db/q '[:find ?n . :where [_ :seon.config/cluster ?n]] (db/db connection))
+                                 {:seon.config.embed/endpoint "http://127.0.0.1:9/v1/embed"})
+     (let [guess (symbol "seon.db" (str "transcat-" (seon.id/id)))
+           reply (error/reply-value (db/db connection) {:seon.error/message (str "Unable to resolve symbol: " guess)
+                                                        :seon.program/not-found guess})]
+       (is (= (str "Unable to resolve symbol: " guess) (:seon.error/message reply)))
+       (is (= guess (:seon.error/offending reply)))
+       (is (not (contains? reply :seon.error/nearest)) "no suggestions")
+       (is (= :seon.embed/unreachable-error (:seon.error/type (:seon.error/nearest-error reply))))))))

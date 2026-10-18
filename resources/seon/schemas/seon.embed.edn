@@ -1,0 +1,37 @@
+#:seon.embed{:task
+             [:enum {:description "The embed server's task prefix: similarity for names, code for a query by meaning, none for a text carrying its own `title: T | text: C` prefix."}
+              "similarity" "document" "code" "query" "none"],
+             :text [:string {:min 1}],
+             :key [:string {:min 64, :max 64, :description "SHA-256 of model, task, dimension and text: an embedding's content identity."}],
+             :octets [:fn {:error/message "must be the little-endian float32 bytes of one embedding"} clojure.core/bytes?],
+             :settings
+             [:map
+              [:seon.config.embed/endpoint :seon.config.embed/endpoint]
+              [:seon.config.embed/model :seon.config.embed/model]
+              [:seon.config.embed/dimension :seon.config.embed/dimension]
+              [:seon.config.embed/batch-size :seon.config.embed/batch-size]
+              [:seon.config.embed/timeout-ms :seon.config.embed/timeout-ms]],
+             :store [:map {:description "The durable konserve store of embeddings, keyed by :seon.embed/key."}],
+             :request [:fn {:error/message "must be a function of settings, task and texts, like seon.embed/request!"} clojure.core/ifn?],
+             :reason [:string {:min 1}],
+             :unreachable-error
+             [:merge :seon.error/base
+              [:map {:error/message "must name the endpoint it could not reach"}
+               [:seon.config.embed/endpoint :seon.config.embed/endpoint]
+               [:seon.embed/reason :seon.embed/reason]]],
+             :embedded
+             [:map
+              [:seon.embed/vectors [:vector :seon.embed/octets]]
+              [:seon.embed/hot nat-int?]
+              [:seon.embed/durable nat-int?]
+              [:seon.embed/requested nat-int?]],
+             :matrix [:fn {:error/message "must be the row-major little-endian float32 bytes of the embeddings"} clojure.core/bytes?],
+             :index
+             [:map {:description "The embeddings of texts as one matrix, row i the embedding of text i (seon.embed/index)."}
+              [:seon.embed/texts [:vector :seon.embed/text]]
+              [:seon.embed/matrix :seon.embed/matrix]],
+             :texts [:vector :seon.embed/text],
+             :score [:double {:description "Cosine similarity, rounded to thousandths: 1.0 the same direction."}],
+             :neighbours
+             [:vector {:description "Texts nearest a query, nearest first (seon.embed/nearest)."}
+              [:map [:seon.embed/text :seon.embed/text] [:seon.embed/score :seon.embed/score]]]}

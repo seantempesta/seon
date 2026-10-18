@@ -37,7 +37,8 @@
             [seon.schema.internal :as internal]
             [seon.sci.admit :as admit]
             [seon.config :as config]
-            [seon.cache]))
+            [seon.cache]
+            [seon.embed :as embed]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -1987,95 +1988,6 @@
            sort
            (into [] (comp (map (comp symbol second)) (take names-shown)))))))
 
-(defn- name-tokens
-  "The words of a symbol's namespace or name: the parts between `.` and `-`."
-  {:malli/schema [:=> [:cat [:maybe :string]] [:set :string]]}
-  [text]
-  (if text
-    (into #{} (remove empty?) (.split ^String (str/replace text \. \-) "-"))
-    #{}))
-
-(defn- entries-content-key
-  "A content key for the candidate entry table: the candidates' hash, in their order, and their count. The same
-  declarations read from the same database come in the same order; another order is another key, never a wrong one."
-  {:malli/schema [:=> [:cat [:sequential :qualified-symbol]] :string]}
-  [candidates]
-  (str (hash candidates) ":" (count candidates)))
-
-(defn- candidate-entries
-  "[[sym name-words ns-words joined-words]] for each candidate, and the word frequencies of the whole set."
-  {:malli/schema [:=> [:cat [:sequential :qualified-symbol]]
-                  [:map [:seon.error/entries [:vector :seon.schema/value]]
-                        [:seon.error/frequency :map]]]}
-  [candidates]
-  (let [entries (mapv (fn [sym]
-                        (let [name-words (name-tokens (name sym))
-                              ns-words (name-tokens (namespace sym))]
-                          [sym name-words ns-words (into name-words ns-words)]))
-                      candidates)]
-    {:seon.error/entries entries
-     :seon.error/frequency (frequencies (mapcat (fn [[_ _ _ joined]] joined) entries))}))
-
-(defn- cached-candidate-entries
-  "[[candidate-entries]] for `candidates`, derived once per content key."
-  {:malli/schema [:=> [:cat [:sequential :qualified-symbol]] :map]}
-  [candidates]
-  (seon.cache/lookup
-   ::candidate-entries
-   (entries-content-key candidates)
-   #(* 512 (count (:seon.error/entries %)))
-   #(candidate-entries candidates)))
-
-(defn- near-entries
-  "The cached entries for `candidates` that may be near `wanted-name`: those whose words include one of
-  `wanted-words`, and those whose name is within two characters of its length, the only ones that can be within two
-  edits of it; in candidate order, with the frozen word frequency over the whole set."
-  {:malli/schema [:=> [:cat [:sequential :qualified-symbol] :string [:set :string]]
-                  [:map [:seon.error/total :int]
-                        [:seon.error/frequency :map]
-                        [:seon.error/entries [:vector :seon.schema/value]]]]}
-  [candidates wanted-name wanted-words]
-  (let [{:seon.error/keys [entries frequency]} (cached-candidate-entries candidates)
-        length (count wanted-name)]
-    {:seon.error/total (count entries)
-     :seon.error/frequency frequency
-     :seon.error/entries (into [] (filter (fn [[sym _ _ joined]]
-                                            (or (some wanted-words joined)
-                                                (<= (abs (- length (count (name sym)))) 2))))
-                               entries)}))
-
-(defn nearest-names
-  "At most `limit` of the qualified symbols `candidates` that `wanted` may
-  have meant, nearest first: by the words they share with it, rare words
-  counting most and a word shared by both names more than one shared across
-  namespace and name, then by the spelling distance of the names. The
-  candidates are the caller's: the public declarations, tests included or not.
-
-  The candidates' words and frequencies are derived once per candidate set
-  (a `seon.cache` kind keyed by its content), so a warm call tokenizes only
-  `wanted`; only the candidates sharing a word with it, and those whose name
-  is within two edits of it, go through the spelling pass."
-  {:malli/schema [:=> [:cat :symbol [:sequential :qualified-symbol] pos-int?] [:vector :qualified-symbol]]}
-  [wanted candidates limit]
-  (let [wanted-name (name wanted)
-        wanted-name-words (name-tokens wanted-name)
-        wanted-words (into wanted-name-words (name-tokens (namespace wanted)))
-        {:seon.error/keys [total frequency entries]} (near-entries candidates wanted-name wanted-words)
-        score (fn [[_ name-words _ joined]]
-                (reduce (fn [sum word]
-                          (+ sum (* (Math/log (/ (inc total) (inc (get frequency word 0))))
-                                    (if (and (wanted-name-words word) (name-words word)) 1.0 0.5))))
-                        0.0
-                        (filter wanted-words joined)))
-        keyed (into []
-                    (keep (fn [[sym _ _ _ :as entry]]
-                            (let [shared (score entry)
-                                  distance (me/levenshtein wanted-name (name sym))]
-                              (when (or (pos? shared) (<= distance 2))
-                                [[(- shared) distance (str sym)] sym]))))
-                    entries)]
-    (into [] (comp (map second) (take limit)) (sort-by first keyed))))
-
 (defn- declared-by-test?
   "Whether `sym` is declared in a test or test-support namespace: a helper
   no program caller guesses."
@@ -2185,27 +2097,37 @@
         (when (resolve sym)
           (library-calling-form sym))))))
 
-(defn- nearest-calls
-  "The calling forms of the program declarations `missing` may mean, at most
-  eight: first the definitions of `namespace-name` that bind it as a local
-  (when it is a simple name), then the public declarations nearest to it
-  against the names of the alias's target and `core-namespace`
-  (`nearest-names`). Nothing when the read is refused: `names-in` shows that
-  refusal."
-  {:malli/schema [:=> [:cat :seon.db/database-value :symbol [:maybe :symbol]] [:vector :seon.schema/value]]}
-  [database missing namespace-name]
+(defn- nearest-declared
+  "The public program declarations and the alias's library names (`alias-candidates`) nearest `missing`, at most
+  eight, nearest first: kNN over the embeddings of their qualified names (`seon.embed/similar-in`). The embed
+  server's unreachable error when it does not answer; nothing when the read is refused (`names-in` shows that)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol]
+                  [:or [:vector :qualified-symbol] :seon.embed/unreachable-error :seon.config/error]]}
+  [database missing]
   (let [found (db/q '[:find ?sym :where [?f :seon.fn/sym ?sym] [?f :seon.fn/arglists ?arglists]
                       [(get-else $ ?f :seon.fn/private? false) ?private] [(not ?private)]]
                     database)]
     (if (db/read-refusal? found)
       []
-      (let [declared (remove declared-by-test? (map first found))
-            candidates (distinct (concat declared (alias-candidates database missing)))
-            owners (if (and namespace-name (simple-symbol? missing)) (local-owners database namespace-name missing) [])
-            near (nearest-names missing candidates names-shown)]
-        (->> (concat owners near)
-             (distinct)
-             (into [] (comp (keep #(candidate-calling-form database %)) (take names-shown))))))))
+      (let [candidates (into [] (comp (map str) (distinct))
+                             (concat (sort (remove declared-by-test? (map first found)))
+                                     (alias-candidates database missing)))
+            near (embed/similar-in database "similarity" candidates "similarity" (str missing) names-shown)]
+        (if (:seon.error/operation near)
+          near
+          (mapv (comp symbol :seon.embed/text) near))))))
+
+(defn- nearest-calls
+  "The calling forms of the program declarations `missing` may mean, at most
+  eight: first the definitions of `namespace-name` that bind it as a local
+  (when it is a simple name), then those of `near` (`nearest-declared`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol [:maybe :symbol] [:vector :qualified-symbol]]
+                  [:vector :seon.schema/value]]}
+  [database missing namespace-name near]
+  (let [owners (if (and namespace-name (simple-symbol? missing)) (local-owners database namespace-name missing) [])]
+    (->> (concat owners near)
+         (distinct)
+         (into [] (comp (keep #(candidate-calling-form database %)) (take names-shown))))))
 
 (defn- call-lines
   "For each program function named (at most three), the lines of its stored
@@ -2288,8 +2210,11 @@
   - `:seon.error/nearest`: when a name was not found, first the locals in
     scope at the failing form nearest to it by spelling
     (`:seon.sci.eval/locals` of the error's data), then the calling forms
-    of the public declarations nearest to it across every namespace, by the
-    words of their names (`nearest-names`), at most eight.
+    of the public declarations nearest to it across every namespace, by kNN
+    over the embeddings of their qualified names (`nearest-declared`), at
+    most eight.
+  - `:seon.error/nearest-error`: the embed server's unreachable error when
+    those declarations could not be looked up; the reply still answers.
   - `:seon.error/sources`: where each function the refusal names (a
     removal's callers, at most three) mentions the blocked subject.
   - `:seon.error/chain`: for a thrown failure that is no structural refusal
@@ -2372,7 +2297,10 @@
          in-namespace (when (and database namespace-name) (names-in database namespace-name missing))
          locals (when (and missing (simple-symbol? missing))
                   (nearest-locals missing (get-in error [:seon.error/data :seon.sci.eval/locals])))
-         calls (when (and database missing) (nearest-calls database missing namespace-name))
+         declared (when (and database missing) (nearest-declared database missing))
+         unreachable (when (:seon.error/operation declared) declared)
+         calls (when (and database missing)
+                 (nearest-calls database missing namespace-name (if unreachable [] declared)))
          schemas (when-let [guessed (guessed-schema error)] (nearest-schemas guessed options))
          nearest (-> (vec locals) (into calls) (into schemas))]
      (cond-> (if options (variant-members options error) {})
@@ -2397,6 +2325,7 @@
        (seq in-namespace)
        (assoc :seon.error/in-namespace {namespace-name in-namespace})
        (seq nearest) (assoc :seon.error/nearest nearest)
+       unreachable (assoc :seon.error/nearest-error unreachable)
        (and database (seq referenced) (qualified-symbol? (:seon.program/blocked-subject error)))
        (assoc :seon.error/sources (call-lines database referenced (:seon.program/blocked-subject error)))
        chain (assoc :seon.error/chain chain)

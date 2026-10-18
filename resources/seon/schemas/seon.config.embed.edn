@@ -1,0 +1,31 @@
+#:seon.config.embed{:endpoint
+                    [:string
+                     {:min 1,
+                      :description
+                      "The embed server's embedding URL: POST texts, task, dim and encoding.",
+                      :seon.config/dial true}],
+                    :model
+                    [:string
+                     {:min 1,
+                      :description
+                      "The model the embed server serves; part of every embedding key, so new weights never reuse old vectors.",
+                      :seon.config/dial true}],
+                    :dimension
+                    [:int
+                     {:min 1,
+                      :max 768,
+                      :description
+                      "The Matryoshka dimension stored per embedding.",
+                      :seon.config/dial true}],
+                    :batch-size
+                    [:int
+                     {:min 1,
+                      :description
+                      "Texts per embed-server request.",
+                      :seon.config/dial true}],
+                    :timeout-ms
+                    [:int
+                     {:min 1,
+                      :description
+                      "The deadline of one embed-server request.",
+                      :seon.config/dial true}]}
