@@ -1331,6 +1331,25 @@
                             (:seon.fn/sym %))
                         findings)))))))
 
+(deftest a-malformed-contract-is-a-finding-of-its-own-not-a-missing-one
+  ;; Live run 11 (docs/research/agent-platform/2026-10-18/live-run-11.md): chain-79389614d0d3 defined
+  ;; seon.program/storable-entry-attribute with [:or :nil :vector] in its contract (`:vector` needs a child, so Malli
+  ;; refuses the form) and was told for eleven turns that the function declares no :malli/schema (missing-spec).
+  (test-support/with-database
+    (fn [connection]
+      (transact-fixture!
+       connection
+       [(test-support/namespace-entity @connection 'sample.contract-malformed)
+        (test-support/program-fn-entity
+         (db/db connection) 'sample.contract-malformed/bare-vector
+         "(defn bare-vector {:malli/schema [:=> [:cat :vector] :int]} [x] 1)")])
+      (let [finding (some #(when (= 'sample.contract-malformed/bare-vector (:seon.fn/sym %)) %)
+                          (seon.fn/contract-findings (db/db connection)))]
+        (is (= :seon.fn.contract.finding/malformed-spec (:seon.fn.contract/finding finding))
+            "a contract Malli refuses is named malformed, not missing")
+        (is (= "[:=> [:cat :vector] :int]" (:seon.fn.contract/form finding))
+            "the finding carries the authored form the agent wrote")))))
+
 (deftest gate-selection-preserves-cycles-absent-seeds-and-held-values
   (test-support/with-database
     (fn [connection]
