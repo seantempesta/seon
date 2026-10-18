@@ -1,6 +1,7 @@
 (ns seon.test.reach-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [seon.cache :as cache]
             [seon.cluster.agent :as agent]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
@@ -356,3 +357,34 @@
         "the result answers under the loaded commit that ran it")
     (is (not (contains? (runner/result-at-reach database other) test-symbol))
         "a platform that never ran it has no result to reuse")))
+
+(deftest a-held-reach-index-counts-its-reuse-and-weighs-what-it-adds
+  ;; Live run 10: `::runner/reach-index-by-revision` read 159 MB, 35% of `seon.cache`, at 0 hits over 50 misses.
+  ;; A request on an unchanged program read the held index through `seon.cache/present`, which counts nothing;
+  ;; and each of the 31 held indexes was weighed as a whole program while they shared 36 times over the node
+  ;; values their predecessors held. A reuse is a hit, and an index derived from a held one is charged for what
+  ;; it adds. Each program here is this test's own (a doc no other test writes), so no other test's request
+  ;; replaces its index.
+  (support/with-database
+   (fn [connection]
+     (let [edit! (fn [doc] (support/transacted!
+                            connection
+                            [(support/revision (db/db connection) [:seon.fn/sym 'seon.id/valid?] {:seon.fn/doc doc})])
+                   (db/db connection))
+           names (vec (take 29 (sort (db/q '[:find [?s ...] :where [_ :seon.test/sym ?s]] (db/db connection)))))
+           kind-stat (fn [k] (get-in (cache/status) [:seon.cache/kinds ::runner/reach-index-by-revision k] 0))
+           held-index (fn [database] (cache/present ::runner/reach-index-by-revision (@#'runner/reach-revision-key database)))
+           database (edit! (str "This test's own program " (id/id)))
+           _ (runner/reach-digests database names)
+           hits (kind-stat :seon.cache/hits)
+           again (runner/reach-digests database names)]
+       (is (map? again))
+       (is (<= (inc hits) (kind-stat :seon.cache/hits)) "a second request on one program reads the held index as a hit")
+       (let [prior (held-index database)
+             changed (edit! (str "This test's changed program " (id/id)))
+             _ (runner/reach-digests changed names)
+             held (held-index changed)
+             whole (@#'runner/reach-entries-weight held nil)]
+         (is (some? held) "the changed program's index is held")
+         (is (< (@#'runner/reach-entries-weight held prior) (quot whole 4))
+             "an index derived from a held one is charged for what it adds, not the whole program it shares"))))))

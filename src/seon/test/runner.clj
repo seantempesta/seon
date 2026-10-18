@@ -1250,6 +1250,16 @@
                             (::rows held) (::schema-ids held)))]
     (set (keys (reach-fixed-point #(hash-map ::out (get (::reverse prior) %)) ::out names)))))
 
+(defn- reach-entries-weight
+  "The estimated bytes a reach index `entries` adds beyond `base`, the held
+  index it was derived from: only the node, schema and reverse entries whose
+  values are not `base`'s own. All of them when `base` is nil."
+  {:malli/schema [:=> [:cat :map [:maybe :map]] :int]}
+  [entries base]
+  (let [added (fn [k] (into [] (remove (fn [[n v]] (identical? v (get (get base k) n)))) (get entries k)))]
+    (+ (* 160 (+ (count (added ::nodes)) (count (added ::schemas))))
+       (* reach-set-element-bytes (transduce (map (comp count val)) + 0 (added ::reverse))))))
+
 (defn- reach-entries
   "The requested digests; only changed definitions and their reverse closure lose known components.
   A work branch's digests are a function of its own HEAD: main's later
@@ -1258,51 +1268,50 @@
   [database test-symbols]
   (if (empty? test-symbols)
     {::digests {} ::undigested []}
-    (try
-      (let [attribute-revisions (reach-revision-key database)
-            ;; equal programs share one index
-            revisions attribute-revisions
-            ;; the store's most recent derivation is the prior, whichever branch built it
-            store (reach-store database)
-            current (when revisions (cache/present ::reach-index-by-revision revisions))
-            covered (into (set (keys (::digests current))) (::undigested current))
-            entries
-            (if (every? covered test-symbols)
-              current
-              (let [prior (or current
-                                (some->> (when store (cache/present ::reach-head store))
-                                         (cache/present ::reach-index-by-revision)))
-                    declarations (reach-declarations database (::declarations prior {}))
-                    changed (if (and prior (not current)) (changed-reach declarations prior) #{})
-                    known (apply dissoc (::component-digests prior {}) changed)
-                    unknown (set/difference (set (::undigested prior)) changed)
-                    {::keys [nodes schemas] :as graph}
-                    (reached-graph database test-symbols declarations known unknown)
-                    index (cache/lookup ::reach-index [(set test-symbols) nodes (update-vals schemas ::leaf)]
-                                        (fn [_] (* (+ reach-index-entry-bytes 160) (+ (count nodes) (count schemas))))
-                                        #(reach-index graph test-symbols))
-                    concrete (into {} (remove (comp map? ::leaf val)) (concat nodes schemas))
-                    entries {::nodes (merge (::nodes prior) (select-keys concrete (keys nodes)))
-                             ::schemas (merge (::schemas prior) (select-keys concrete (keys schemas)))
-                             ::reverse (reach-reverse (::reverse prior {})
-                                                      (or prior {}) concrete)
-                             ::component-digests (merge known (::component-digests index))
-                             ::digests (merge (apply dissoc (::digests prior) changed) (::digests index))
-                             ::undigested (into unknown (::unknown-names index))
-                             ::revisions attribute-revisions ::declarations declarations}]
-                (when revisions
-                  (cache/evict! ::reach-index-by-revision revisions)
-                  (cache/lookup ::reach-index-by-revision revisions
-                                #(+ (* 160 (+ (count (::nodes %)) (count (::schemas %))))
-                                    (* reach-set-element-bytes (transduce (map count) + 0 (vals (::reverse %)))))
-                                (constantly entries)))
-                entries))]
-        (when (and store revisions)
-          (cache/evict! ::reach-head store)
-          (cache/lookup ::reach-head store (constantly 256) (constantly revisions)))
-        (assoc entries ::digests (select-keys (::digests entries) test-symbols)
-                       ::undigested (filterv (set (::undigested entries)) test-symbols)))
-      (catch Exception failure (reach-unavailable `reach-entries failure test-symbols)))))
+    (let [attribute-revisions (reach-revision-key database)
+          ;; equal programs share one index
+          revisions attribute-revisions
+          ;; the store's most recent derivation is the prior, whichever branch built it
+          store (reach-store database)
+          current (when revisions (cache/present ::reach-index-by-revision revisions))
+          covered (into (set (keys (::digests current))) (::undigested current))
+          entries
+          (if (every? covered test-symbols)
+            ;; the held index answers: one hit
+            (cache/lookup ::reach-index-by-revision revisions #(reach-entries-weight % nil) (constantly current))
+            (let [prior (or current
+                              (some->> (when store (cache/present ::reach-head store))
+                                       (cache/present ::reach-index-by-revision)))
+                  declarations (reach-declarations database (::declarations prior {}))
+                  changed (if (and prior (not current)) (changed-reach declarations prior) #{})
+                  known (apply dissoc (::component-digests prior {}) changed)
+                  unknown (set/difference (set (::undigested prior)) changed)
+                  {::keys [nodes schemas] :as graph}
+                  (reached-graph database test-symbols declarations known unknown)
+                  index (cache/lookup ::reach-index [(set test-symbols) nodes (update-vals schemas ::leaf)]
+                                      (fn [_] (* (+ reach-index-entry-bytes 160) (+ (count nodes) (count schemas))))
+                                      #(reach-index graph test-symbols))
+                  concrete (into {} (remove (comp map? ::leaf val)) (concat nodes schemas))
+                  entries {::nodes (merge (::nodes prior) (select-keys concrete (keys nodes)))
+                           ::schemas (merge (::schemas prior) (select-keys concrete (keys schemas)))
+                           ::reverse (reach-reverse (::reverse prior {})
+                                                    (or prior {}) concrete)
+                           ::component-digests (merge known (::component-digests index))
+                           ::digests (merge (apply dissoc (::digests prior) changed) (::digests index))
+                           ::undigested (into unknown (::unknown-names index))
+                           ::revisions attribute-revisions ::declarations declarations}]
+              (when revisions
+                (cache/evict! ::reach-index-by-revision revisions)
+                ;; charged for what it adds to a prior held under other revisions; a replaced one is all of it
+                (cache/lookup ::reach-index-by-revision revisions
+                              #(reach-entries-weight % (when-not (identical? prior current) prior))
+                              (constantly entries)))
+              entries))]
+      (when (and store revisions)
+        (cache/evict! ::reach-head store)
+        (cache/lookup ::reach-head store (constantly 256) (constantly revisions)))
+      (assoc entries ::digests (select-keys (::digests entries) test-symbols)
+                     ::undigested (filterv (set (::undigested entries)) test-symbols)))))
 
 (defn- static-reach-digests
   "Each symbol's static reach digest on `database` (`reach-digests` without extra roots)."
@@ -1311,12 +1320,6 @@
   [database test-symbols]
   (let [entries (reach-entries database test-symbols)]
     (cond
-      (:seon.test/unknown entries)
-      (seon.error.refusal/error
-       :seon.test/unknown-error
-       (assoc (select-keys entries [:seon.error/message :seon.test/unknown])
-              :seon.error/layer :seon.test/reach
-              :seon.error/operation 'seon.test.runner/reach-digests))
       ;; Unknown evidence never keys reuse: equal unknown leaves would match.
       (seq (::undigested entries))
       ;; One walk from every undigested test: a closure per test is tests
