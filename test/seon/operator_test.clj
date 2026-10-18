@@ -530,3 +530,15 @@
       (is (nil? (#'operator/prune-directory! (str base) (fs/file stale)))
           "a prune of a directory another prune already removed completes")
       (finally (fs/delete-tree base)))))
+
+(deftest the-embed-server-status-observes-and-stop-without-a-record-stops-nothing
+  ;; Health reports the embed server; it never launches one. A root that recorded no embed server stops none:
+  ;; stop and down terminate only the exact identity the root's own start recorded.
+  (let [root (str (fs/create-temp-dir {:prefix "seon-embed-sidecar-"}))]
+    (try
+      (let [status (operator/embed-server-status root)]
+        (is (#{:healthy :unreachable} (:seon.operator.embed/state status)))
+        (is (pos-int? (:seon.operator.embed/port status)))
+        (is (not (fs/exists? (fs/path root "data/embed-server.edn"))) "observing records nothing")
+        (is (nil? (operator/embed-server-stop! root)) "nothing recorded, nothing stopped"))
+      (finally (fs/delete-tree root)))))

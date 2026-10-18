@@ -1173,14 +1173,15 @@
   - .clj-kondo/.cache: the analyzer and lint cache (`seon.fn.analyzer`
     `cache-directory`, `seon.fn` analysis cache-root, `bin/seon-hook`
     `shared-kondo-cache-v1-directory`).
-  - .cpcache: tools.deps' computed classpaths."
+  - .cpcache: tools.deps' computed classpaths.
+  - data/embeddings: the durable embedding store (`seon.embed/directory`)."
   ["data/source"
    "target/dev-dependency-classes" "target/dev-dependency-classes.next"
    "target/dev-dependency-cache-result.edn" "target/dev-dependency-cache-current.edn"
    "target/dev-dependency-cache-processes" "target/dev-dependency-cache.lock"
    "target/dev-dependency-cache-references.lock"
    "target/test-published-bases" "target/test-classpaths"
-   ".clj-kondo/.cache" ".cpcache"])
+   ".clj-kondo/.cache" ".cpcache" "data/embeddings"])
 
 (defn- linked-component
   "The first component of `relative` under `root` that is a symbolic link, or nothing."
@@ -2226,23 +2227,92 @@
                    (not (contains? (held-sources) source-root)))
           (fs/delete-tree source-root))))))
 
+;;; The embed server (EmbeddingGemma 2, `script/embed/server.py`) runs beside the cluster: `start` launches it when
+;;; its health endpoint does not answer, `stop`/`down` stop the recorded process, `status` reports it, never
+;;; restarting it, and `nuke` deletes its durable store `data/embeddings`. Its interpreter and weights are named by
+;;; environment variables; its port is the one `:seon.config.embed/endpoint` names in the shipped config.
+
+(def ^:private embed-record "data/embed-server.edn")
+
+(defn- embed-port
+  "The embed server's port: the one the shipped config's endpoint names."
+  []
+  (let [endpoint (:seon.config.embed/endpoint (edn/read-string (slurp (io/file (program-root) "config/default.edn"))))]
+    (.getPort (java.net.URI/create endpoint))))
+
+(defn- embed-healthy?
+  "Whether the embed server's /healthz answers ok within a second."
+  [port]
+  (try
+    (let [client (-> (java.net.http.HttpClient/newBuilder) (.connectTimeout (java.time.Duration/ofSeconds 1)) .build)
+          request (-> (java.net.http.HttpRequest/newBuilder (java.net.URI/create (str "http://127.0.0.1:" port "/healthz")))
+                      (.timeout (java.time.Duration/ofSeconds 1)) .build)
+          reply (.send client request (java.net.http.HttpResponse$BodyHandlers/ofString))]
+      (and (= 200 (.statusCode reply)) (str/includes? (str (.body reply)) "\"ok\": true")))
+    (catch java.io.IOException _ false)))
+
+(defn- recorded-embed-server
+  "The recorded embed server's identity under `root`, or nothing."
+  [root]
+  (let [file (io/file root embed-record)]
+    (when (.isFile file) (edn/read-string (slurp file)))))
+
+(defn embed-server-status
+  "The embed server as observed: :healthy, or :unreachable with its port; never a restart."
+  [root]
+  (let [port (embed-port)]
+    (cond-> {:seon.operator.embed/state (if (embed-healthy? port) :healthy :unreachable)
+             :seon.operator.embed/port port}
+      (recorded-embed-server root) (assoc :seon.operator.embed/process (recorded-embed-server root)))))
+
+(defn embed-server-start!
+  "Launch the embed server under `root` when its health endpoint does not answer and no recorded one is still
+  loading, recording its exact identity; its log is data/clusters/default/logs/embed-server.log."
+  [root]
+  (let [port (embed-port)]
+    (if (or (embed-healthy? port) (some-> (recorded-embed-server root) (matching-handle true)))
+      (embed-server-status root)
+      (let [home (System/getProperty "user.home")
+            python (or (System/getenv "SEON_EMBED_PYTHON") (str home "/src/embed-models/embeddinggemma-2/.venv/bin/python"))
+            weights (or (System/getenv "SEON_EMBED_WEIGHTS") (str home "/src/embed-models/embeddinggemma-2/weights/eg2-text-bf16"))
+            log (doto (io/file root "data/clusters/default/logs/embed-server.log") io/make-parents)
+            process (.start (doto (ProcessBuilder. [python "-I" (str (io/file (program-root) "script/embed/server.py")) weights
+                                                    "--port" (str port)])
+                              (.redirectErrorStream true)
+                              (.redirectOutput (java.lang.ProcessBuilder$Redirect/appendTo log))))
+            identity (identity-of (.toHandle process))]
+        (spit (io/file root embed-record) (pr-str identity))
+        (assoc (embed-server-status root) :seon.operator.embed/started identity)))))
+
+(defn embed-server-stop!
+  "Stop the recorded embed server by its exact identity and forget it."
+  [root]
+  (when-let [identity (recorded-embed-server root)]
+    (when (matching-handle identity true) (terminate! identity (operator-silence-backstop-ms {})))
+    (fs/delete-if-exists (io/file root embed-record))
+    identity))
+
 (defn request! [request]
   (try
     (case (:seon.operator/command request)
-      :start (cond
-               (:seon.operator/head? request) (move-to-head! request)
-               (seq (selected-processes (:seon.operator/managed-root request))) (connected! request)
-               :else (launch! request))
+      :start (assoc (cond
+                      (:seon.operator/head? request) (move-to-head! request)
+                      (seq (selected-processes (:seon.operator/managed-root request))) (connected! request)
+                      :else (launch! request))
+                    :seon.operator/embed-server (embed-server-start! (:seon.operator/managed-root request)))
       :status (let [reaped (reaped-orphan-slots! (:seon.operator/managed-root request))
                     result (cond-> (connected! request)
                              (seq reaped) (assoc :seon.operator/reaped-check-jvms reaped))
                     failure (:seon.boot/failure result)]
-                (cond-> result
+                (cond-> (assoc result :seon.operator/embed-server
+                               (embed-server-status (:seon.operator/managed-root request)))
                   (:seon.boot/pid result) (merge (program-source result))
                   failure (assoc :seon.error/message
                                  (str "The running JVM's boot failed: " (:seon.error/message failure)))))
-      :stop (if (:seon.operator/force? request) (force-stop! request) (connected! request))
-      :down (down! request (selected-processes (:seon.operator/managed-root request)))
+      :stop (assoc (if (:seon.operator/force? request) (force-stop! request) (connected! request))
+                   :seon.operator/embed-server-stopped (embed-server-stop! (:seon.operator/managed-root request)))
+      :down (assoc (down! request (selected-processes (:seon.operator/managed-root request)))
+                   :seon.operator/embed-server-stopped (embed-server-stop! (:seon.operator/managed-root request)))
       ;; reset = the running JVM unlinks the branch and forks a fresh one,
       ;; keeping every cache; nuke = delete the store and every cache.
       :reset (do (when-not (:seon.operator/force? request)
