@@ -57,6 +57,7 @@
             [seon.program :as program]
             [seon.render.value :as render.value]
             [seon.schedule :as schedule]
+            [seon.embed :as embed]
             [seon.render.web :as web]
             [seon.sci.eval :as sci.eval]
             [taoensso.timbre :as log]
@@ -3494,8 +3495,8 @@
               #(.run ^Runnable command)))))))))
 
 (defn- cluster-graph-definition
-  "The cluster's OWN small graph (F1 R7, F2 §1): db<->flow, render, and the
-  render proc — a schedule proc later. One graph per cluster,
+  "The cluster's OWN small graph (F1 R7, F2 §1): db<->flow, the render proc
+  and the background embedding fill (`seon.embed/fill-step`) — a schedule proc later. One graph per cluster,
   so the components that start agents and derive pages have exactly the
   ping/error/pause uniformity every other proc has. The render proc's
   channels are external ports (created by `start-flows!`, carried on the
@@ -3528,6 +3529,13 @@
                      (env/carry (assoc view
                                        :seon.turn.loop/cluster handle
                                        :seon.agent/routing routing)
+                                environment))}
+             ;; the background fill: the boot's and every main write's embedding, never an agent's call
+             :seon.embed/fill
+             {:proc (flow/var-process
+                     #'embed/fill-step :io
+                     (env/carry {:seon.turn.loop/cluster handle
+                                 :seon.embed/channel (:seon.embed/channel handle)}
                                 environment))}}
      :conns []}))
 
@@ -3573,6 +3581,8 @@
          :seon.agent/routing routing
          :seon.render.web/render-channel render-channel
          :seon.render.web/interest render-interest
+         ;; the background fill's payload-free wake: its pass derives the work from the connection's value
+         :seon.embed/channel (async/chan (async/sliding-buffer 1))
          ;; The model call is the handle's external effect: the Var in
          ;; production, so a reload of `seon.ai` reaches the next turn; a
          ;; boot request may name its own function of the same contract.

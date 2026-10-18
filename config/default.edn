@@ -40,6 +40,9 @@
  :seon.config.embed/dimension 256
  :seon.config.embed/batch-size 256
  :seon.config.embed/timeout-ms 30000
+ ; Unit: milliseconds a by-meaning or by-name call waits for an index the background fill has not derived yet before
+ ; it answers in progress: a warm index answers in about 2 ms, a cold one costs seconds of embedding.
+ :seon.config.embed/wait-ms 50
 
  ; Unit: milliseconds a DETACHED capability request may run before its own
  ; interrupt arm cuts it. Background work deliberately does not inherit the

@@ -28,4 +28,10 @@
                      {:min 1,
                       :description
                       "The deadline of one embed-server request.",
+                      :seon.config/dial true}],
+                    :wait-ms
+                    [:int
+                     {:min 0,
+                      :description
+                      "How long a call ranking texts by embedding waits for an index still being derived before it answers in progress (seon.embed/similar).",
                       :seon.config/dial true}]}

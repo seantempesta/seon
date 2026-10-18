@@ -10,7 +10,8 @@
               [:seon.config.embed/model :seon.config.embed/model]
               [:seon.config.embed/dimension :seon.config.embed/dimension]
               [:seon.config.embed/batch-size :seon.config.embed/batch-size]
-              [:seon.config.embed/timeout-ms :seon.config.embed/timeout-ms]],
+              [:seon.config.embed/timeout-ms :seon.config.embed/timeout-ms]
+              [:seon.config.embed/wait-ms :seon.config.embed/wait-ms]],
              :store [:map {:description "The durable konserve store of embeddings, keyed by :seon.embed/key."}],
              :request [:fn {:error/message "must be a function of settings, task and texts, like seon.embed/request!"} clojure.core/ifn?],
              :reason [:string {:min 1}],
@@ -34,4 +35,9 @@
              :score [:double {:description "Cosine similarity, rounded to thousandths: 1.0 the same direction."}],
              :neighbours
              [:vector {:description "Texts nearest a query, nearest first (seon.embed/nearest)."}
-              [:map [:seon.embed/text :seon.embed/text] [:seon.embed/score :seon.embed/score]]]}
+              [:map [:seon.embed/text :seon.embed/text] [:seon.embed/score :seon.embed/score]]],
+             :pending [:int {:min 1 :description "How many texts the index still being derived ranks."}],
+             :in-progress
+             [:map {:description "Embedding in progress: the index of these texts is still being derived (by the background fill, seon.embed/fill-step, or this call's own miss), so the call answers now with nothing ranked; repeat it shortly."}
+              [:seon.embed/pending :seon.embed/pending]],
+             :answer [:or :seon.embed/neighbours :seon.embed/in-progress]}

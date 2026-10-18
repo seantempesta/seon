@@ -8,6 +8,7 @@
             [seon.id :as id])
   (:import [java.nio ByteBuffer ByteOrder]
            [java.nio.file Files]
+           [java.util.concurrent CountDownLatch TimeUnit]
            [java.nio.file.attribute FileAttribute]))
 
 (defn- settings
@@ -15,7 +16,7 @@
   {:malli/schema [:=> [:cat] :seon.embed/settings]}
   []
   #:seon.config.embed{:endpoint "http://127.0.0.1:8701/v1/embed" :model (str "test-model-" (id/id)) :dimension 4
-                      :batch-size 2 :timeout-ms 2000})
+                      :batch-size 2 :timeout-ms 2000 :wait-ms 2000})
 
 (defn- unit
   "The little-endian float32 octets of `xs` scaled to unit length."
@@ -83,5 +84,39 @@
                                   "similarity" ["seon.db/pull"] "similarity" "seon.db/pul" 3)]
         (is (= :seon.embed/unreachable-error (:seon.error/type answer)))
         (is (= "http://127.0.0.1:9/v1/embed" (:seon.config.embed/endpoint answer))))
+      (finally
+        (run! io/delete-file (reverse (file-seq (io/file dir))))))))
+
+(deftest a-call-whose-index-is-still-derived-answers-in-progress-and-never-waits-for-it
+  ;; The request is held until the test releases it: the cold embedding a call must not pay in its turn.
+  (let [dir (temp-dir)
+        release (CountDownLatch. 1)
+        request (fn [_settings _task texts] (.await release 5 TimeUnit/SECONDS) (mapv (comp unit axes) texts))
+        dials (assoc (settings) :seon.config.embed/wait-ms 10)
+        corpus ["seon.db/pull" "seon.db/transact!" "seon.cache/lookup" "seon.db/q"]
+        ask #(embed/similar-now dials (embed/open-store dir) request "similarity" corpus "similarity" "seon.db/transcat!" 2)]
+    (try
+      (is (= {:seon.embed/pending 4} (ask)) "the index still being derived answers embedding in progress")
+      (.countDown release)
+      ;; the derivation the first call started is the one the background fill waits for
+      (embed/index dials (embed/open-store dir) request "similarity" corpus)
+      (is (= ["seon.db/transact!" "seon.db/q"] (mapv :seon.embed/text (ask))) "once derived, the call ranks")
+      (finally
+        (.countDown release)
+        (run! io/delete-file (reverse (file-seq (io/file dir))))))))
+
+(deftest a-filled-index-leaves-a-call-only-its-query-to-embed
+  (let [dir (temp-dir)
+        requested (atom [])
+        request (fn [_settings _task texts] (swap! requested into texts) (mapv (comp unit axes) texts))
+        dials (settings)
+        corpus ["seon.db/pull" "seon.db/transact!" "seon.cache/lookup" "seon.db/q"]]
+    (try
+      (embed/index dials (embed/open-store dir) request "similarity" corpus)
+      (reset! requested [])
+      (is (= ["seon.db/transact!" "seon.db/q"]
+             (mapv :seon.embed/text (embed/similar-now dials (embed/open-store dir) request "similarity" corpus
+                                                   "similarity" "seon.db/transcat!" 2))))
+      (is (= ["seon.db/transcat!"] @requested) "the call embeds its query and nothing of the corpus")
       (finally
         (run! io/delete-file (reverse (file-seq (io/file dir))))))))

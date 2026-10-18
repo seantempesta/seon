@@ -1,7 +1,9 @@
 (ns my.program-query-test
   (:require [clojure.string]
             [clojure.test :refer [deftest is]]
+            [my.program]
             [seon.db :as db]
+            [seon.embed :as embed]
             [seon.test-support :as test-support]))
 
 (deftest predicate-arguments-are-bindings-not-nested-clojure-evaluations
@@ -62,3 +64,17 @@
                         :seon.program.probe/scalar scalar
                         :seon.program.probe/literal literal
                         :seon.program.probe/collection collection}))))))
+
+(deftest ^{:seon.test/long "Joins the background fill's derivation of the public functions' meaning index: in a fresh check JVM that embeds about 2,300 texts cold, 10.3 s measured (embeddings-3, 2026-10-18)."
+           :seon.test/long-ms 60000}
+  similar-by-meaning-ranks-the-public-functions-agents-call
+  ;; Over every function, private helpers outranked the verbs (my.program/search-match over my.program/search);
+  ;; over the public ones, 9 of 15 intent queries named their function first (embeddings-2, 2026-10-18).
+  (let [database (db/db)
+        private (set (db/q database '[:find [?s ...] :where [?e :seon.fn/sym ?s] [?e :seon.fn/private? true]]))
+        ;; waits for what a call waits for: the one derivation the background fill (seon.embed/fill-step) runs
+        _ (embed/index (embed/cluster-settings database) (embed/open-store (embed/directory database)) embed/request!
+                       "none" (mapv second (embed/meaning-texts database)))
+        found (my.program/similar database "pull an entity by its id" 8)]
+    (is (= 'seon.db/pull (ffirst found)) "the function the intent names is first")
+    (is (not-any? private (map first found)) "no private helper is offered")))

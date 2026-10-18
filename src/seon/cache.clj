@@ -206,24 +206,25 @@
   and later readers of the key join it rather than starting another. When the
   answer is pending, `on-complete` (no arguments) runs once the derivation
   completes, so the reader can offer itself a wake. A thrown derivation
-  rethrows as [[lookup]]'s does.
+  rethrows as [[lookup]]'s does; a value `retain?` refuses answers its
+  readers and is not retained, as [[lookup]]'s.
 
   ## Examples
 
-  `(seon.cache/lookup-within ::family key count #(derive db) 50 #(async/offer! wake {}))`"
+  `(seon.cache/lookup-within ::family key count #(derive db) some? 50 #(async/offer! wake {}))`"
   {:malli/schema [:function
                   [:=> [:cat :qualified-keyword :seon.schema/value [:fn clojure.core/ifn?] [:fn clojure.core/ifn?]
-                        [:int {:min 0}] [:maybe [:fn clojure.core/ifn?]]]
+                        [:fn clojure.core/ifn?] [:int {:min 0}] [:maybe [:fn clojure.core/ifn?]]]
                    [:or :seon.cache/pending :seon.schema/value]]
                   [:=> [:cat :seon.cache/cache :qualified-keyword :seon.schema/value [:fn clojure.core/ifn?] [:fn clojure.core/ifn?]
-                        [:int {:min 0}] [:maybe [:fn clojure.core/ifn?]]]
+                        [:fn clojure.core/ifn?] [:int {:min 0}] [:maybe [:fn clojure.core/ifn?]]]
                    [:or :seon.cache/pending :seon.schema/value]]]}
-  ([kind content-key weigh derive-fn deadline-ms on-complete]
-   (lookup-within @process kind content-key weigh derive-fn deadline-ms on-complete))
-  ([{::keys [cache] :as held} kind content-key weigh derive-fn deadline-ms on-complete]
+  ([kind content-key weigh derive-fn retain? deadline-ms on-complete]
+   (lookup-within @process kind content-key weigh derive-fn retain? deadline-ms on-complete))
+  ([{::keys [cache] :as held} kind content-key weigh derive-fn retain? deadline-ms on-complete]
    (let [[^CompletableFuture pending mine?] (claim cache [kind content-key])]
      (if mine?
-       (Thread/startVirtualThread #(settle! held kind content-key weigh derive-fn some? pending))
+       (Thread/startVirtualThread #(settle! held kind content-key weigh derive-fn retain? pending))
        (.increment ^LongAdder (::hits (kind-counters held kind))))
      (try
        (let [{::keys [value thrown]} (.get pending (long deadline-ms) TimeUnit/MILLISECONDS)]

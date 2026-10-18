@@ -118,13 +118,13 @@
         derivations (AtomicLong.)
         woke (CountDownLatch. 1)
         slow #(do (.incrementAndGet derivations) (.await release 5 TimeUnit/SECONDS) :derived)
-        first-read (cache/lookup-within held ::slow :k (constantly 10) slow 10 #(.countDown woke))
-        second-read (cache/lookup-within held ::slow :k (constantly 10) slow 10 nil)]
+        first-read (cache/lookup-within held ::slow :k (constantly 10) slow some? 10 #(.countDown woke))
+        second-read (cache/lookup-within held ::slow :k (constantly 10) slow some? 10 nil)]
     (is (= ::slow (:seon.cache/pending-kind first-read)) "past its deadline a reader gets pending, not a wait")
     (is (inst? (:seon.cache/since second-read)))
     (.countDown release)
     (is (.await woke 5 TimeUnit/SECONDS) "completion runs the reader's wake")
-    (is (= :derived (cache/lookup-within held ::slow :k (constantly 10) slow 10 nil)))
+    (is (= :derived (cache/lookup-within held ::slow :k (constantly 10) slow some? 10 nil)))
     (is (= 1 (.get derivations)) "readers join the one derivation; none is started twice or cancelled")))
 
 (deftest evicting-one-entry-lets-its-owner-replace-it

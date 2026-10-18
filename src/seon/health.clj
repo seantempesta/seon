@@ -420,7 +420,7 @@
       stored
       (let [committed (db/committed-value-identity database)
             unreached (if committed
-                        (cache/lookup-within ::untested committed weight #(untested database) deadline-ms wake)
+                        (cache/lookup-within ::untested committed weight #(untested database) some? deadline-ms wake)
                         (untested database))
             known? (set? unreached)
             throwing (into {} (comp (filter #(<= 1000 (.sum ^java.util.concurrent.atomic.LongAdder (:seon.profile/throw-counter %))))
@@ -441,7 +441,7 @@
   (let [assemble #(problems/problems database {} (fn [family derivation] (derived database family derivation)))
         committed (db/committed-value-identity database)
         value (if committed
-                (cache/lookup-within ::problems committed weight assemble deadline-ms wake)
+                (cache/lookup-within ::problems committed weight assemble some? deadline-ms wake)
                 (assemble))]
     (if-let [since (:seon.cache/since value)]
       {:seon.health/unit :seon.health/problems :seon.health/since since

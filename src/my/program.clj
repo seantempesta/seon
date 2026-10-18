@@ -769,20 +769,12 @@
           {}))
       {})))
 
-(defn- declared-names
-  "Every function and test the program declares on `database`, as qualified-name text, sorted."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :seon.embed/text]]}
-  [database]
-  (into [] (comp (map str) (distinct))
-        (sort (concat (db/q database '[:find [?s ...] :where [?e :seon.fn/sym ?s]])
-                      (db/q database '[:find [?s ...] :where [?e :seon.test/sym ?s]])))))
-
 (defn- nearest
   "Up to five declared symbols nearest `sym` by the embeddings of their qualified names (`seon.embed/similar-in`):
   none when the embed server does not answer."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] [:vector :qualified-symbol]]}
   [database sym]
-  (let [near (embed/similar-in database "similarity" (declared-names database) "similarity" (str sym) 5)]
+  (let [near (embed/similar-in database "similarity" (embed/name-texts database) "similarity" (str sym) 5)]
     (if (:seon.error/operation near) [] (mapv (comp symbol :seon.embed/text) near))))
 
 (defn- not-found
@@ -1097,20 +1089,10 @@
   [database query]
   (read-in database (if (map? query) query {}) #(search-in % query)))
 
-(defn- declaration-texts
-  "Each function's text as the embed server reads a titled document, `title: sym | text: arglists and docstring`,
-  beside its symbol, sorted by symbol."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector [:tuple :qualified-symbol :seon.embed/text]]]}
-  [database]
-  (->> (db/q database '[:find ?s ?arglists ?doc :where [?e :seon.fn/sym ?s]
-                        [(get-else $ ?e :seon.fn/arglists "") ?arglists] [(get-else $ ?e :seon.fn/doc "") ?doc]])
-       (sort-by first)
-       (mapv (fn [[sym arglists doc]] [sym (str "title: " sym " | text: " arglists "\n" doc)]))))
-
 (defn similar
   "The `k` declarations nearest `query`, nearest first, each with its cosine similarity: a symbol by the embedding
   of its qualified name (what a misspelled or guessed name means), a string by meaning (the embeddings of each
-  function's name, arglists and docstring).
+  public function's name, arglists and docstring).
 
   ## Example
 
@@ -1119,21 +1101,28 @@
   (my.program/similar \"write facts to the database\" 8)
   ```
 
+  ## Edge cases
+
+  While the background fill has not embedded the program yet (just after boot), or this branch's own changed
+  declarations are being embedded, the answer is embedding in progress, `{:seon.embed/pending n :retry form}`:
+  run the form again shortly.
+
   ## Errors
 
   The embed server's `:seon.embed/unreachable-error` when it does not answer (bin/seon start runs it)."
   {:malli/schema [:=> [:cat :seon.db/database-value :my.program/similar-query pos-int?]
-                  [:or :my.program/similar-result :seon.embed/unreachable-error :seon.config/error]]}
+                  [:or :my.program/similar-result :my.program/similar-in-progress :seon.embed/unreachable-error
+                   :seon.config/error]]}
   [database query k]
   (let [by-name? (symbol? query)
-        rows (if by-name? (mapv (juxt symbol identity) (declared-names database)) (declaration-texts database))
+        rows (if by-name? (mapv (juxt symbol identity) (embed/name-texts database)) (embed/meaning-texts database))
         near (if by-name?
-               (embed/similar-in database "similarity" (mapv second rows) "similarity" (str query) k)
-               (embed/similar-in database "none" (mapv second rows) "code" query k))]
-    (if (:seon.error/operation near)
-      near
-      (let [sym-of (into {} (map (fn [[sym text]] [text sym])) rows)]
-        (mapv (fn [{:seon.embed/keys [text score]}] [(sym-of text) score]) near)))))
+               (embed/similar-now-in database "similarity" (mapv second rows) "similarity" (str query) k)
+               (embed/similar-now-in database "none" (mapv second rows) "code" query k))]
+    (cond (:seon.error/operation near) near
+          (map? near) (assoc near :retry (list 'my.program/similar (if by-name? (list 'quote query) query) k))
+          :else (let [sym-of (into {} (map (fn [[sym text]] [text sym])) rows)]
+                  (mapv (fn [{:seon.embed/keys [text score]}] [(sym-of text) score]) near)))))
 
 (defn sizes
   "The functions and tests of a namespace with their line counts, largest first (top 20).

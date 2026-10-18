@@ -62,4 +62,7 @@
  :my.program/similar-result
  [:vector {:description "The declarations nearest a query, nearest first, each with its cosine similarity (my.program/similar)."}
   [:tuple :qualified-symbol :seon.embed/score]]
+ :my.program/similar-in-progress
+ [:merge {:description "my.program/similar while the declarations' embeddings are being derived: how many, and the form to run again."}
+  :seon.embed/in-progress [:map [:retry :seon.render/read-form]]]
 }
