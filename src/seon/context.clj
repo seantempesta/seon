@@ -496,30 +496,53 @@
   [refusal]
   (dissoc refusal :seon.error/at :seon.error/layer :seon.test.run/branch))
 
+(defn- refusal-operations
+  "The forms that act on what `refusal` names, read from the step's `head` (its judged tests) and `reaching` (each
+  changed declaration's reaching tests): one run (`my.test/check`) of every test it names and of every test reaching
+  a function it names; for a function no test reaches, its callers (`my.program/callers`) and its removal
+  (`my.program/ns-unmap!`), or else a test to write that reaches it; for an uncontracted function, its source to give
+  it a contract. Empty when it names none."
+  {:malli/schema [:=> [:cat :seon.error/value :seon.context/head :seon.source/reaching] [:vector :seon.render/read-form]]}
+  [{offending :seon.error/offending red :seon.source/red-tests uncontracted :seon.source/uncontracted} head reaching]
+  (let [named (when (sequential? offending) (filter symbol? offending))
+        functions (remove #(contains? head %) named)
+        reached (fn [f] (get reaching [:seon.fn/sym f]))
+        tests (-> (into (sorted-set) (map :seon.test/sym) red)
+                  (into (filter #(contains? head %)) named)
+                  (into (mapcat reached) functions))
+        quoted #(list 'quote %)]
+    (cond-> []
+      (seq tests) (conj (list 'my.test/check {:seon.test/identities (quoted tests)}))
+      true (into (mapcat #(vector (list 'my.program/callers (quoted %)) (list 'my.program/ns-unmap! (quoted %))))
+                 (remove (comp seq reached) functions))
+      true (into (map #(list 'my.program/source (quoted %))) (sort uncontracted)))))
+
 (defn- shown-refusal
   "`refusal` as the step section shows it: `refusal-data` without the tests it names, each of which the proofs or
   the step's entries show once with its state, and without the unmerged entries a conflict names, which the block's
-  conflicts section shows once (`conflicts`)."
-  {:malli/schema [:=> [:cat :seon.error/value] :seon.context/refusal]}
-  [refusal]
-  (dissoc (refusal-data refusal) :seon.source/red-tests :seon.unmerged/entries))
+  conflicts section shows once (`conflicts`); with the forms that act on what it names (`refusal-operations`)."
+  {:malli/schema [:=> [:cat :seon.error/value :seon.context/head :seon.source/reaching] :seon.context/refusal]}
+  [refusal head reaching]
+  (let [operations (refusal-operations refusal head reaching)]
+    (cond-> (dissoc (refusal-data refusal) :seon.source/red-tests :seon.unmerged/entries)
+      (seq operations) (assoc :seon.render/operations operations))))
 
 (defn step-section
   "The step section of `verdict` (`step-verdict`), as the agent reads it: the step's kind and status, a working
-  step's done refusals (`seon.cluster.source/done-refusals`) as data (`shown-refusal`) with the form that reads them
-  whole, then each other test they name red or unknown, and the product it owes the task after it (that task's
-  proofs), each with its status and, when red, its failing assertions. A proof is listed under the proofs section
-  only, so each test shows once. Lists are absent when empty."
+  step's done refusals (`seon.cluster.source/done-refusals`) as data, each with the forms that act on what it names
+  (`shown-refusal`), and the form that reads them whole, then each other test they name red or unknown, and the
+  product it owes the task after it (that task's proofs), each with its status and, when red, its failing
+  assertions. A proof is listed under the proofs section only, so each test shows once. Lists are absent when empty."
   {:malli/schema [:=> [:cat :seon.context/step-verdict] :seon.context/step]}
   [{step :seon.task/step own :seon.task/proofs product :seon.task/product head :seon.context/head status :seon.task/status
-    refusals :seon.source/refusals}]
+    refusals :seon.source/refusals reaching :seon.source/reaching}]
   (let [entries (fn [tests] (mapv #(merge {:seon.test/sym % :seon.context/proof-status :pending} (head %)) (sort tests)))
         shown-proofs (set own)
         owed (remove shown-proofs product)
         red (into #{} (comp (mapcat :seon.source/red-tests) (map :seon.test/sym) (remove (into shown-proofs product))) refusals)]
     (cond-> {:seon.task/status status}
       step (assoc :seon.task/step step)
-      (seq refusals) (assoc :seon.context/refusals (mapv shown-refusal refusals)
+      (seq refusals) (assoc :seon.context/refusals (mapv #(shown-refusal % (or head {}) (or reaching {})) refusals)
                             :seon.render/operations ['(:seon.source/refusals (seon.context/step-verdict))])
       (seq red) (assoc :seon.context/red-tests (entries red))
       (seq owed) (assoc :seon.context/product-tests (entries owed)))))
@@ -951,11 +974,14 @@
 
 (defn current-state-ai
   "The block's sections as the agent reads them: the task by symbol and declaration, without its handle, and each
-  must-read through its own declared render (`must-read-ai`).
+  must-read through its own declared render (`must-read-ai`). While the done rule refuses the step, its step section
+  comes first, so the turn's view opens with what keeps the task from done and the forms that act on it.
   The render argument carries the evaluation's world beside the block; only the sections are returned."
   {:malli/schema [:=> [:cat :seon.context/current-state] :seon.context/current-state-view]}
   [block]
-  (cond-> (select-keys block [:seon.context/task :seon.context/chain :seon.context/proofs :seon.context/step :seon.context/send-backs :seon.context/attempts :seon.context/changes :seon.context/conflicts :seon.context/must-reads :seon.context/cost :seon.context/unread :seon.context/turns])
+  (cond-> (select-keys block (cond->> [:seon.context/task :seon.context/chain :seon.context/proofs :seon.context/step :seon.context/send-backs :seon.context/attempts :seon.context/changes :seon.context/conflicts :seon.context/must-reads :seon.context/cost :seon.context/unread :seon.context/turns]
+                               (seq (get-in block [:seon.context/step :seon.context/refusals]))
+                               (sort-by #(not= :seon.context/step %))))
     (:seon.context/task block) (update :seon.context/task dissoc :seon.task/id)
     (:seon.context/must-reads block) (update :seon.context/must-reads (partial mapv #(must-read-ai block %)))))
 

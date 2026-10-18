@@ -873,6 +873,52 @@
              "the step is not done, and the block's status says so")
          (is (false? (context/task-done? (db/db target) agent-id)) "as the end reads it"))))))
 
+(deftest ^{:seon.test/long "An own-branch agent's setup, one change through its eval request with its test step, and one judgment of its chain's last task."
+           :seon.test/long-ms 30000}
+  a-done-refusal-leads-the-turn-with-the-forms-that-act-on-it
+  ;; live run 10: two chains turned their proof green and were refused by the done rule, one for a broken reaching
+  ;; test, one for a helper no green test reached; the turn's view leads with each refusal and the forms that act on
+  ;; it, from the same verdict the done step judges
+  (test-support/with-running-agent
+   (fn [running _ connection]
+     (let [agent-id (str "done-visible-" (seon.id/id))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" (get-in (db/db connection) [:config :branch]) 'user
+                                        (:seon.cluster/name (test-support/execution-handle nil))]])
+           _ (test-support/declare-source! connection 'tq.dv
+                                           (str "(ns tq.dv (:require [clojure.test :refer [deftest is]]))\n"
+                                                "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                                "(deftest ^{:seon/tasks #{'tq.dv/area}} area-test (is (= 25 (area 5))))\n"
+                                                "(deftest side-test (is (= 3 (area 3)) \"area keeps its side\"))\n")
+                                           "test")
+           {branch :seon.store/branch target :seon.db/connection} (test-support/own-branch-agent! running agent-id "(ns tq.dv)")
+           [only] (linked-chain! connection [{:seon.task/ns 'tq.dv :seon.task/name "area" :seon.task/plan "Square."
+                                              :seon.task/proofs #{'tq.dv/area-test}}])]
+       (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
+                      :seon.task/assigned only :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})
+       (evaluate running agent-id (str "(in-ns 'tq.dv)\n"
+                                       "(defn scratch {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                       "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))"))
+       (let [branch-db (db/db target)
+             ;; the chain fact root writes on main makes the task its chain's last, judged as its merge would be
+             main (db/with (db/db connection) [{:seon.chain/first only :seon.chain/branch branch}])
+             observed (context/judged-input main branch-db 'tq.dv/area nil)
+             step (context/step-section (merge observed (context/step-status observed)))
+             by-message (into {} (map (juxt :seon.error/type identity)) (:seon.context/refusals step))
+             red (by-message :seon.source/red-test-error)
+             uncovered (some #(when (= ['tq.dv/scratch] (:seon.error/offending %)) %) (:seon.context/refusals step))
+             view (context/current-state-ai (assoc (context/current-state branch-db agent-id)
+                                                   :seon.context/step step))]
+         (is (= '[(my.test/check {:seon.test/identities '#{tq.dv/side-test}})] (:seon.render/operations red))
+             "the broken reaching test is refused with the form that runs it again")
+         (is (= ["area keeps its side"]
+                (mapv :message (some #(when (= 'tq.dv/side-test (:seon.test/sym %)) (:seon.context/proof-failures %))
+                                     (:seon.context/red-tests step))))
+             "and its failing assertion")
+         (is (= '[(my.program/callers 'tq.dv/scratch) (my.program/ns-unmap! 'tq.dv/scratch)]
+                (:seon.render/operations uncovered))
+             "the helper no test reaches is refused with its callers and its removal")
+         (is (= :seon.context/step (first (keys view))) "the turn's view opens with the refused step"))))))
+
 (deftest ^{:seon.test/long "An own-branch agent's setup, one change through its eval request with its test step, and one read of its block."
            :seon.test/long-ms 30000}
   an-uncontracted-change-keeps-an-implement-step-working
