@@ -28,7 +28,7 @@
             :directory
             [:map {:seon.render/ai seon.repl/render-directory-ai
                    :seon.render/html seon.repl/render-directory-html
-                   :description "The existing dir API's function and schema data."}
+                   :description "The existing dir API's function data and the schemas the namespace declares and its functions cite, by name; (doc :schema/key) reads one's form."}
              [:functions [:vector [:map [:sym :qualified-symbol]
                                     [:arglists :seon.schema/value]
                                     [:doc {:optional true} :string]
@@ -37,7 +37,7 @@
                                     [:seon.sci.eval/missing-declaration {:optional true} :qualified-keyword]
                                     [:supplied {:optional true} [:vector :qualified-keyword]]]]]
              [:tests {:optional true} [:vector :seon.test/sym]]
-             [:schemas [:map-of :qualified-keyword :seon.schema/value]]]
+             [:schemas [:set :qualified-keyword]]]
             :columns [:vector :keyword]
             :rows [:vector [:vector :seon.schema/value]]
             :schemas [:map-of :qualified-keyword :seon.schema/value]

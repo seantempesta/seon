@@ -424,11 +424,11 @@
         (cond->
          {:seon.render/ai 'seon.repl/render-directory-ai
          :seon.render/html 'seon.repl/render-directory-html
-         :schemas (into (into (sorted-map) (mapcat #(documentation-schemas database %)) functions)
-                        (map (fn [row]
-                               [(:seon.schema/key row)
-                                (edn/read-string (:seon.schema/form row))]))
-                        (:seon.schema/_ns namespace-row))
+         ;; schemas by name: `(doc :schema/key)` or `(my.program/source :schema/key)` reads one's form
+         :schemas (into (sorted-set) cat [(for [row functions arity (:seon.fn/arities row)
+                                               key (concat (:seon.fn.arity/input-refs arity) (:seon.fn.arity/output-refs arity))]
+                                           key)
+                                         (map :seon.schema/key (:seon.schema/_ns namespace-row))])
          :functions (mapv (fn [row]
                             (merge {:sym (:seon.fn/sym row)
                                     :arglists (if-let [arglists (:seon.fn/arglists row)]
@@ -443,7 +443,7 @@
       :else (ref/documentation-unavailable namespace-name))))
 
 (defn directory-value
-  "Return current public function summaries and declared schemas for a namespace, read where `:seon.ref/at` names when the namespace is the map `{:seon.ref/name ns :seon.ref/at at}` (`seon.ref/read-where`)."
+  "Return current public function summaries and the schemas it declares and cites, by name, for a namespace, read where `:seon.ref/at` names when the namespace is the map `{:seon.ref/name ns :seon.ref/at at}` (`seon.ref/read-where`)."
   {:malli/schema [:=> [:cat :seon.db/db [:or :symbol :seon.ref/versioned] :boolean] [:or :seon.repl/directory :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
   [database namespace-name present?]
   (if (map? namespace-name)

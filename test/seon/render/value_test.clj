@@ -915,6 +915,29 @@
        (is (<= (tokens/estimate shown) (:seon.render.profile/token-budget profile)))
        (is (= 'seon.repl/render-directory-ai (:seon.eval/renderer result)))))))
 
+(deftest a-directory-names-its-schemas-by-key
+  ;; context-judge-1 friction 5: `[(dir my.task) (dir my.agent)]` was 4,797 tokens, every schema printed whole (only a
+  ;; root value is offered its render, so nested directories print as data). A directory names its schemas by key;
+  ;; `(doc :schema/key)` reads one.
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "dir-schemas")
+     (let [configuration (support/effective-config)
+           result (support/evaluate
+                    {:seon.cluster.eval/source "[(dir my.task) (dir my.agent)]"
+                     :seon.sci.eval/ctx (support/fork-cluster-ctx connection "dir-schemas") :seon.db/db (db/db connection)
+                     :seon.render/profile (render/agent-render-profile configuration)
+                     :seon.repl/handle 'result/e0123456789ac
+                     :seon.sci.admit/caps (config/result-caps configuration)
+                     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})
+           directories (:seon.sci.admit/value result)]
+       (is (nil? (:seon.cluster.eval/error result)))
+       (is (every? #(and (seq (:schemas %)) (every? qualified-keyword? (:schemas %))) directories)
+           "each directory holds its schemas by key, not their forms")
+       (is (contains? (:schemas (second directories)) :seon.config/agent-overlay))
+       (is (<= (or (:seon.eval/value-tokens result) (:seon.eval/shown-tokens result)) 2000)
+           "both directories fit in 2,000 tokens")))))
+
 (deftest transacted-preserves-error-entities-as-data
   ;; Both arities normalize entity maps without interpreting them as failures.
   (support/with-database
