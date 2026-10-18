@@ -84,4 +84,10 @@
   ;; nor the order.
   (let [text (slurp (io/resource "seon/help.md"))]
     (is (str/includes? text "(seon.schema/unregister! :the.owner/key)") "help names how a registered schema is removed")
-    (is (str/includes? text "redefine its callers first") "help names the order ns-unmap! needs")))
+    (is (str/includes? text "redefine its callers first") "help names the order ns-unmap! needs")
+    ;; Live run 11 (docs/research/agent-platform/2026-10-18/live-run-11.md): the fork-point chain followed help's
+    ;; fixture recipe, (in-ns 'user) then (require 'seon.test-support); its done step passed, and the final merge
+    ;; refused :one-file because the user namespace changed and has no file.
+    (is (not (str/includes? text "(in-ns 'user)")) "help never sends an agent to change the user namespace")
+    (is (str/includes? text "(in-ns 'my.attempt-<your attempt>) then (require 'seon.test-support)")
+        "help loads fixtures from the agent's own namespace, which never merges")))
