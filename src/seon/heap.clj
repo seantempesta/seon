@@ -20,7 +20,7 @@
             [seon.profile :as profile]
             [seon.sci.kernel :as kernel])
   (:import [com.sun.management GarbageCollectionNotificationInfo]
-           [java.lang.management ManagementFactory MemoryUsage]
+           [java.lang.management GarbageCollectorMXBean ManagementFactory MemoryUsage]
            [javax.management Notification NotificationEmitter NotificationListener]
            [javax.management.openmbean CompositeData]))
 
@@ -124,11 +124,17 @@
     asked))
 
 (defn- reading
-  "The heap after the collection `info` reports."
+  "The heap after the collection `info` reports: the after-usage of the pools
+  its collector manages (`GarbageCollectorMXBean/getMemoryPoolNames`), so
+  non-heap pools and the eden a concurrent cycle never collects are not read."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The JVM hands each collection as a GarbageCollectionNotificationInfo, a host object with no data form.", :gen/elements [nil]}]]
                   :seon.heap/reading]}
   [^GarbageCollectionNotificationInfo info]
-  {:seon.heap/used-bytes (reduce + 0 (map #(.getUsed ^MemoryUsage %) (vals (.getMemoryUsageAfterGc (.getGcInfo info)))))
+  {:seon.heap/used-bytes (let [after (.getMemoryUsageAfterGc (.getGcInfo info))
+                               collector (some #(when (= (.getGcName info) (.getName ^GarbageCollectorMXBean %)) %)
+                                               (ManagementFactory/getGarbageCollectorMXBeans))]
+                           (reduce + 0 (map #(.getUsed ^MemoryUsage (get after %))
+                                            (.getMemoryPoolNames ^GarbageCollectorMXBean collector))))
    :seon.heap/max-bytes (.getMax (.getHeapMemoryUsage (ManagementFactory/getMemoryMXBean)))
    :seon.heap/major? (or (= "end of major GC" (.getGcAction info))
                          (= "G1 Concurrent GC" (.getGcName info)))
