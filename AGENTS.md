@@ -342,11 +342,12 @@ definition with the same input is computed once for every branch and agent that 
 - **The program is entities**: functions, tests, schemas, namespaces, render pairs, contracts, analysis and test
   evidence keyed by exercised definition digests. Evaluations, calls, messages, errors, tasks and live results are
   data and never merge as program; declare that partition on entity schemas, not in a hand list. Default's program
-  entities and loaded namespaces derive from files. A JVM has one set of compiled Vars; other branches interpret
-  differing entities and their affected callers in SCI and bind compiled Vars for the rest. A branch never changes
-  the platform: compiled (host-bound) code, the evaluator, printer and test runner included, keeps running as
-  compiled and working on every branch, and sees a change only after merge and reload; what the branch evaluates
-  from source sees its definitions. Compute host-bound status per declaration, never from a hand list of namespaces.
+  entities and loaded namespaces derive from files. A JVM has one set of compiled Vars, and the loaded `src` program
+  is the platform (owner, 2026-10-18). A branch's definitions are seen by what the branch evaluates from source (its
+  own definitions and the test namespaces it runs), which bind compiled Vars for everything else; compiled `src`
+  callers keep running the compiled program and see a branch's change only after merge and reload. So a change to a
+  hub costs its direct source callers, never the 2,000-function closure behind it, and a reaching test that reaches
+  the change only through compiled callers proves it at merge, by the platform check.
 - **An agent's context** is its SCI context; its task selects the branch it checks out: its task's `:seon.task/branch`
   (installed: its chain's branch; a new agent per task, in turn), or for root the live cluster head. Every agent, filesystem agents on their own named branches
   included, uses the one REPL entrance. Private defs, atoms and objects survive program changes advanced in place at
