@@ -1041,7 +1041,8 @@
 (deftest the-fork-point-is-not-walked-for-on-every-request
   ;; Request-cost lane 2026-10-17: `commit-step` calls per `nil` request grew from 69 to 238 over 40 requests, because
   ;; `fork-point` walks the branch's whole first-parent history each call. A branch's fork point never changes after
-  ;; it forks, so reading it costs the same after 40 commits as after one.
+  ;; it forks, so reading it after 40 commits costs no more than after one (held at the fork or cached by the fork:
+  ;; either design passes; the walk does not).
   (test-support/with-database
    (fn [connection]
      (let [store (:seon.store/store (test-support/execution-handle connection))
@@ -1065,7 +1066,7 @@
            (let [[fork-40 steps-40] (steps)]
              (is (some? fork-1) "the branch has a fork point")
              (is (= fork-1 fork-40) "the fork point never moves")
-             (is (= steps-1 steps-40) "reading it after 40 commits walks no more commits than after one")))
+             (is (<= steps-40 steps-1) "reading it after 40 commits walks no more commits than after one")))
          (finally
            (when (contains? (registry/branches store) branch)
              (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))

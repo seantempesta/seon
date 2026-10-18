@@ -57,3 +57,12 @@
     (is (not (str/includes? text "2. Enter the namespace")) "entering a namespace is not a numbered step every definition repeats")
     (is (str/includes? text "stays in the namespace") "the REPL keeps the namespace the last form left")
     (is (str/includes? text "needs no in-ns") "a fully qualified name needs no in-ns")))
+
+(deftest help-teaches-callers-let-probes-and-no-nilable-return
+  ;; Live run 8 (docs/research/agent-platform/2026-10-18/live-run-8.md): 4 of 25 wasted calls searched text for a
+  ;; subject's callers, 19 forms unmapped scratch defs (about 2 GB allocated), and 2 definitions were refused for a
+  ;; bare nilable return the help never named.
+  (let [text (slurp (io/resource "seon/help.md"))]
+    (is (str/includes? text "(my.program/callers '") "help names the verb that reads a subject's callers")
+    (is (str/includes? text "probe in a let") "help teaches probing with a let, which leaves nothing to unmap")
+    (is (str/includes? text "returns no bare [:maybe") "help names the nilable-return refusal before the agent meets it")))

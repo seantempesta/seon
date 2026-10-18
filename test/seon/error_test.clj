@@ -2012,13 +2012,15 @@
 (deftest an-unresolved-symbol-reply-costs-under-twenty-milliseconds
   ;; Request-cost lane 2026-10-17: an eval request with an unresolved symbol cost 97 ms and 84 MB, almost all of it
   ;; `seon.error/nearest-names` tokenizing every public declaration on every such reply. The candidates' words depend
-  ;; only on the program's declared names, never on the guess, so a warm reply for a new guess tokenizes only the guess.
+  ;; only on the program's declared names, never on the guess, so a warm call for a new guess tokenizes only the guess.
+  ;; The test calls `nearest-names` itself, not through the compiled `seon.error/reply-value`: a branch's redefinition
+  ;; is seen by what the branch evaluates from source, so a chain can prove its change here (live run 8).
   (let [database (seon.db/db)
-        reply (fn [guess] (error/reply-value database {:seon.error/message (str "Unable to resolve symbol: " guess)
-                                                       :seon.program/not-found guess}))
-        _ (reply 'qqq/frobnicate-thing)
-        measured (seon.profile/measure #(reply 'qqq/another-guessed-name))]
+        candidates (vec (db/q '[:find [?s ...] :where [?f :seon.fn/sym ?s] [?f :seon.fn/arglists _]] database))
+        _ (error/nearest-names 'qqq/frobnicate-thing candidates 8)
+        measured (seon.profile/measure #(error/nearest-names 'qqq/another-guessed-name candidates 8))]
+    (is (< 1000 (count candidates)) "the program declares its functions")
     (is (< (seon.profile/calls-of measured 'seon.error/name-tokens) 64)
-        "a warm reply tokenizes the guess, not every declaration again")
+        "a warm call tokenizes the guess, not every declaration again")
     (is (< (:seon.profile/alloc-bytes measured 0) (* 10 1024 1024))
-        "a warm unresolved-symbol reply allocates under 10 MB")))
+        "a warm call allocates under 10 MB")))

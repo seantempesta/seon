@@ -20,13 +20,13 @@ Your current-state block is the last part of every request; (seon.context/curren
 
 ## How work proceeds
 
-1. Read the owner: (my.program/source 'seon.db/q), (doc seon.db/q), (my.program/search :seon.task/plan).
+1. Read the owner: (my.program/source 'seon.db/q), (doc seon.db/q), (my.program/search :seon.task/plan). Who calls a function is one read, (my.program/callers 'seon.db/q), never a text search.
 
 2. Your REPL stays in the namespace your last form left, across requests; :seon.context/namespace names it, and :seon.context/start appears only when you are not in the owner's. Send (in-ns 'the.owner.ns) once, when that namespace differs from yours, before a defn that must land in it. A fully qualified call, such as (my.program/source 'seon.db/q), needs no in-ns, and a repeated in-ns is a wasted form.
 
 3. Define the function in the namespace that owns it, its contract on the defn: (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (inc x)). It replaces the whole definition on your branch, comments included: keep the ;; comments you were shown unless you mean to delete them. A defn without a contract is admitted with a warning in `:seon.repl/findings`, and merge refuses it; that holds for defn- too, every function you define needs a complete contract. Prefer a plain Malli schema such as :string, :int, [:vector :int] or a registered keyword over [:fn] when one exists. A predicate in a contract is a named existing function, and [:fn] declares an :error/message and a bounded generator: {:malli/schema [:=> [:cat [:fn {:error/message "an even integer" :gen/elements [0 2 4]} clojure.core/even?]] :int]}. The predicate must already be a JVM function for now: one you define on your branch is refused when your step is written.
 
-4. Call it on real inputs and read the value. A body's locals exist only inside their binding: call the function, or redefine it with the probe inside. Every def and defn you evaluate is a program definition on your branch, and it merges: unmap each one you do not keep, a probe or scratch included, with (my.program/ns-unmap! 'the.owner.ns/scratch).
+4. Call it on real inputs and read the value. A body's locals exist only inside their binding: call the function, or redefine it with the probe inside. Every def and defn you evaluate is a program definition on your branch, and it merges: probe in a let, (let [database (seon.db/db)] (seon.db/pull database [:seon.fn/sym] [:seon.fn/sym 'seon.db/q])), which defines nothing; unmap each def you do not keep with (my.program/ns-unmap! 'the.owner.ns/scratch).
 
 Change code at the REPL, never in files: no slurp, spit, clojure.java.io or shell. Root writes your definitions to files when your step merges.
 
@@ -50,7 +50,7 @@ An error is a map (`:seon.error/value`): read its :seon.error/type, :seon.error/
 
 Every value has a named Malli schema: reuse the names on the data flow; (my.program/source :seon.task/plan) reads one; (seon.schema/register! :comp.order/qty [:int {:min 1}]) names a new concept. Keys are fully namespaced keywords; symbols stay symbols.
 
-Absence is no key: an optional input is [:map [:x {:optional true} :int]]; never [:maybe ...], :any or :some. For an existing function, read its actual contract and observed values before changing its inputs.
+Absence is no key: an optional input is [:map [:x {:optional true} :int]]; never [:maybe ...], :any or :some. A function returns no bare [:maybe x] either (the writer refuses it): return an empty collection, or a named sum such as [:or :seon.store/branch :seon.db/invalid-read-error]. For an existing function, read its actual contract and observed values before changing its inputs.
 
 Fix a bad value in the function that produces it; add no fallback, retry, catch or guard. Never with-redefs, alter-var-root, intern or load-file. Code you write holds no atom.
 
