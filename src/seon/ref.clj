@@ -791,7 +791,8 @@
 (defn section
   "The Markdown section `reference` names, with the headings below it and its size, or an error naming the nearest.
   It carries its lead (its heading's own next paragraph) or, when the heading opens with another block, that opening
-  block whole; a whole file starts after its front matter."
+  block whole; a whole file starts after its front matter, and when its one top heading follows other text (a
+  superseded note), it is that heading's section with that text's first block as its opening."
   {:malli/schema [:=> [:cat :seon.ref/reference-text] [:or :seon.ref/section :seon.ref/section-error]]}
   [reference]
   (let [hash-at (str/index-of reference "#")
@@ -816,13 +817,20 @@
                                (sort-by (comp #(me/levenshtein anchor %) :seon.ref/anchor) headings)))
           (let [from (if anchor (:seon.ref/line target) body-line)
                 stop (if anchor (:seon.ref/section-end target) (inc line-count))
-                children (if (seq target)
-                           (map by-line (:seon.ref/children target))
-                           (let [nested (into #{} (mapcat :seon.ref/children) headings)]
-                             (remove #(nested (:seon.ref/line %)) headings)))
-                {:seon.ref/keys [lead-lines opening-lines]} target]
+                top (when-not (seq target)
+                      (let [nested (into #{} (mapcat :seon.ref/children) headings)]
+                        (remove #(nested (:seon.ref/line %)) headings)))
+                ;; a whole file whose one top heading follows a preamble is that heading's section, the preamble its opening
+                only (when (= 1 (count top)) (first top))
+                preamble (when only
+                           (->> (subvec lines (dec body-line) (dec (:seon.ref/line only)))
+                                (drop-while str/blank?) (take-while (complement str/blank?)) (str/join "\n") not-empty))
+                children (cond (seq target) (map by-line (:seon.ref/children target))
+                               only (map by-line (:seon.ref/children only))
+                               :else top)
+                {:seon.ref/keys [lead-lines opening-lines]} (or only target)]
             (cond-> {:seon.ref/path path
-                     :seon.ref/heading (or (:seon.ref/heading target) path)
+                     :seon.ref/heading (or (:seon.ref/heading target) (:seon.ref/heading only) path)
                      :seon.ref/text (str/join "\n" (subvec lines (dec from) (dec stop)))
                      :seon.ref/tokens (span-tokens lines from stop)
                      :seon.ref/below (vec (for [child children]
@@ -831,6 +839,7 @@
               anchor (assoc :seon.ref/anchor anchor)
               lead-lines (assoc :seon.ref/lead (block-text lines lead-lines))
               opening-lines (assoc :seon.ref/opening (block-text lines opening-lines))
+              preamble (assoc :seon.ref/opening preamble)
               (:seon.ref/pin located) (assoc :seon.ref/pin (:seon.ref/pin located)))))))))
 
 (defn- lead-sentence

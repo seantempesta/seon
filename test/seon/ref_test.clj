@@ -88,6 +88,18 @@
     (is (= "the-task" (:seon.ref/anchor (first (:seon.ref/below tree)))))
     (is (nil? (:seon.ref/problem-kind (cited-section (str "```" path "#2-flow```")))) "a code-level citation needs no lead")))
 
+(deftest a-whole-file-after-a-note-is-its-one-heading-with-the-note-first
+  ;; context-judge-1 friction 2: a superseded note before the file's one H1 made the file its own root, so its doc was
+  ;; one 27,394-token heading and a :no-lead problem; the note, the H1's lead and the H2s with their sizes are the doc
+  (let [path "docs/research/agent-platform/2026-10-08/split/reconciled-plan.md"
+        doc (cited-section (str "`" path "`"))]
+    (is (= "Agent-loop split: reconciled plan" (:seon.ref/heading doc)))
+    (is (str/starts-with? (:seon.ref/opening doc) "> **Superseded 2026-10-08.**") "the note before the heading comes first")
+    (is (str/starts-with? (:seon.ref/lead doc) "This plan merges") "the heading's lead")
+    (is (not (:seon.ref/problem-kind doc)))
+    (is (< 1 (count (:seon.ref/below doc))) "the sections below the one heading, each with its size")
+    (is (every? #(< (:seon.ref/tokens %) (:seon.ref/tokens doc)) (:seon.ref/below doc)))))
+
 (deftest a-var-with-no-docstring-cited-for-its-summary-is-a-problem-on-the-var
   (test-support/with-running-agent
    (fn [running agent-id _]

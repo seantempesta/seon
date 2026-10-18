@@ -833,10 +833,18 @@
                          %)))
         (task-references start held #{} (plan-owners start held))))
 
+(defn- proof-entry
+  "A proof as the block shows it: its name, status and failing assertions, a resolution's problem when it resolves to
+  nothing, and the form that reads its source (`my.program/source`) in place of the source."
+  {:malli/schema [:=> [:cat [:maybe :map] :map] :seon.context/proof]}
+  [resolution {sym :seon.test/sym :as entry}]
+  (cond-> (merge (dissoc resolution :seon.ref/name :seon.render/ai :seon.render/html :seon.test/source) entry)
+    (:seon.test/source resolution) (assoc :seon.render/operations [(list 'my.program/source (list 'quote sym))])))
+
 (defn task-sections
   "The held task's sections for `agent-id` on `database`, its branch: the effective task (`seon.task/effective`) by
   handle, symbol, goal and its step's instructions; the chain it is a step of (`chain`); its
-  proofs, each placed once with its resolution (its source) beside its status; its step; the latest send-back;
+  proofs, each by name with its status and failures and the form that reads its source (`proof-entry`); its step; the latest send-back;
   the task's earlier attempts, one entry each (`earlier-attempts`); every declaration the branch changed since its
   merge base, by family, each name with the form that reads it (`branch-changes`), so a rerun sees its earlier work and
   its scratch; and every other reference it makes, resolved on the attempt's starting value (`must-reads`). Empty when
@@ -870,7 +878,7 @@
               steps (assoc :seon.context/chain steps)
               proven (assoc :seon.context/proofs
                             (update proven :seon.context/proof-list
-                                    (partial mapv #(merge (dissoc (resolution (:seon.test/sym %)) :seon.ref/name :seon.render/ai :seon.render/html) %))))
+                                    (partial mapv #(proof-entry (resolution (:seon.test/sym %)) %))))
               verdict (assoc :seon.context/step
                              (let [current (some->> (:db/id (db/pull database [:db/id] [:seon.agent/id agent-id]))
                                                       (turn/previous-ending-namespace database))

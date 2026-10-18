@@ -329,12 +329,16 @@
                   (:my.task/problems (shown running agent-id "(my.task/update! 'tq.cs/shape :seon.task/plan (constantly \"Fix `seon.ref/absent`.\"))"))))))))
 
 (deftest a-proof-the-intent-names-is-shown-once-beside-its-status
+  ;; context-judge-1 friction 2: a 90-line proof's whole source was about 1,100 of the first block's 3,500 tokens; the
+  ;; block names the proof with its status and failures, and its source is one evaluation away
   (test-support/with-running-agent
    (fn [running agent-id connection]
      (proof-task running connection agent-id "Make `tq.cs-test/shape` pass.")
      (let [state (block running agent-id)
            [proof] (get-in state [:seon.context/proofs :seon.context/proof-list])]
-       (is (string? (:seon.test/source proof)) "the proof's resolution, its source, sits with its status")
+       (is (not (contains? proof :seon.test/source)) "the proof's source is not in the block")
+       (is (= ['(my.program/source 'tq.cs-test/shape)] (:seon.render/operations proof))
+           "the form that reads it sits with its status")
        (is (not-any? #{'tq.cs-test/shape} (map :seon.ref/name (:seon.context/must-reads state)))
            "and nowhere else")))))
 

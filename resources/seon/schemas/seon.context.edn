@@ -76,8 +76,8 @@
                                [:file {:optional true} :string] [:line {:optional true} :seon.test.failure/line]
                                [:expected {:optional true} :seon.print/printed] [:actual {:optional true} :seon.print/printed]]
                :proof-failures [:vector {:description "Every failing assertion of a red proof, in a stable order (file, line, report)."} :seon.context/proof-failure]
-               :proof [:map {:description "One proof of the held task: its status, its failures when red, and, placed here once, its resolution as a reference (its source)."}
-                       [:seon.test/sym :seon.test/sym] [:seon.test/source {:optional true} :seon.test/source]
+               :proof [:map {:description "One proof of the held task: its status, its failures when red, and the form that reads its source (my.program/source); the source itself is one evaluation away. Producer: seon.context/proof-entry."}
+                       [:seon.test/sym :seon.test/sym] [:seon.render/operations {:optional true} :seon.render/operations]
                        [:seon.context/proof-status :seon.context/proof-status]
                        [:seon.context/proof-failures {:optional true} :seon.context/proof-failures]]
                :proofs [:map {:description "Counts by status, then each proof in symbol order."}
