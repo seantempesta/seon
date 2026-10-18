@@ -68,18 +68,22 @@
         :else :error))
 
 (defn classify
-  "Each of `evaluations` (stored model forms in writer order, `:seon.cluster.eval/source` and maybe `/error`) with its
-  `:seon.mine/class`: an error's class; `in-ns` or a bare `ns` is navigation; a read of source or doc is a read,
-  or a re-read when the same form ran before; a search (a hand query of the database included); a definition is
-  progress; a wait or send-back ends the turn; any other form repeated exactly is a repeat, else a probe."
+  "Each of `evaluations` (stored model forms in writer order, `:seon.cluster.eval/source` and maybe `/error` and
+  `:seon.eval/renderer`) with its `:seon.mine/class`: an error's class; a value shown by the error render
+  (`seon.error/render-ai`), a refusal answered as a value, is an error whatever its verb; `in-ns` or a bare `ns` is
+  navigation; a read of source or doc is a read, or a re-read when the same form ran before; a search (a hand query
+  of the database included); a definition is progress; a wait or send-back ends the turn; any other form repeated
+  exactly is a repeat, else a probe."
   {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
   [evaluations]
   (first
-   (reduce (fn [[out seen] {source :seon.cluster.eval/source error :seon.cluster.eval/error :as evaluation}]
+   (reduce (fn [[out seen] {source :seon.cluster.eval/source error :seon.cluster.eval/error
+                            renderer :seon.eval/renderer :as evaluation}]
              (let [text (str/trim (or source ""))
                    [head bare?] (form-head (read-first text))
                    again? (contains? seen text)
                    form-class (cond (string? error) (error-class error)
+                               (= 'seon.error/render-ai renderer) :error
                                (or (= 'in-ns head) (and (= 'ns head) bare?)) :navigation
                                (read-heads head) (if again? :re-read :read)
                                (search-heads head) (if again? :repeat :search)

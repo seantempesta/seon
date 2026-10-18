@@ -161,10 +161,15 @@
               (release-chain! (:seon.agent/routing handle) (agent/handle-store handle) branch)))))))))
 
 (deftest forms-are-classed-by-what-they-did
-  (is (= [:navigation :read :re-read :probe :repeat :progress :unresolved :contract-refusal :search :wait :progress]
+  ;; live run 10: 17 refused `ns-unmap!` forms were counted as progress; a refusal answered as a value is an error,
+  ;; whatever its verb
+  (is (= [:navigation :read :re-read :probe :repeat :progress :unresolved :contract-refusal :search :wait :progress
+          :error :progress]
          (mapv :seon.mine/class
                (mine/classify
-                (mapv #(hash-map :seon.cluster.eval/source (first %) :seon.cluster.eval/error (second %))
+                (mapv #(cond-> {:seon.cluster.eval/source (first %)}
+                         (second %) (assoc :seon.cluster.eval/error (second %))
+                         (get % 2) (assoc :seon.eval/renderer (get % 2)))
                       [["(in-ns 'comp.geo)"]
                        ["(my.program/source 'comp.geo/area)"]
                        ["(my.program/source 'comp.geo/area)"]
@@ -175,7 +180,9 @@
                        ["(my.program/source \"area\")" "my.program/source refused argument 1 `subject`: expected a symbol."]
                        ["(dir comp.geo)"]
                        ["(my.turn/wait {:my.turn/note \"Done.\"})"]
-                       ["(ns comp.app (:require [comp.util :as u]))"]]))))))
+                       ["(ns comp.app (:require [comp.util :as u]))"]
+                       ["(my.program/ns-unmap! 'comp.geo/side)" nil 'seon.error/render-ai]
+                       ["(my.program/ns-unmap! 'comp.geo/edge)" nil 'seon.render.value/show]]))))))
 
 (deftest a-difference-counts-only-beyond-the-noise-floor
   (let [row (fn [green [lo hi]] {:seon.competency/id :t :seon.competency/variant :v :seon.competency/green green
