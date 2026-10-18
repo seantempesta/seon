@@ -3,13 +3,19 @@
 #
 #   bin/lane claim   LANE PATH...        claim files (or dir/ prefixes) before editing them
 #   bin/lane add     LANE PATH...        claim more
-#   bin/lane commit  LANE -m MSG [--test NS]... [--include-long] PATH...
-#                                        lint and check the candidate, then commit exactly PATH...
+#   bin/lane commit  LANE -m MSG --branch-evidence AGENT [--test NS]... PATH...
+#                                        the default for ordinary src/ and test/ Clojure files: lint, census and
+#                                        prove PATH... by AGENT's branch evidence on the shared live root; tests
+#                                        the branch holds no current evidence for run there once (reused by reach
+#                                        digest); --test names the throwaway check's tests for the platform
+#                                        fallback (a changed host-bound declaration, no live root)
+#   bin/lane commit  LANE -m MSG --test NS... [--include-long] PATH...
+#                                        platform paths only (schema resources, config, deps, bin/, script/ and
+#                                        anything not a src/ or test/ Clojure file): lint and check the candidate
+#                                        in a throwaway JVM, then commit exactly PATH...; refused when every
+#                                        path is an ordinary src/test Clojure file
 #   bin/lane commit  LANE -m MSG --at-candidate --test NS... PATH...
 #                                        check the exact candidate archive in its own JVM (dependency changes).
-#   bin/lane commit  LANE -m MSG --branch-evidence AGENT [--accept-red-before TEST]... PATH...
-#                                        lint, and prove PATH... by AGENT's branch evidence on the
-#                                        live root instead of a throwaway JVM (falls back to the check)
 #   bin/lane commit  LANE -m MSG --test NS... --accept-red-before NS/VAR... PATH...
 #                                        a red bin/seon check still commits when every red var is accepted AND red on HEAD
 #                                        too (`bin/seon check --at HEAD` on those vars; trailer Check-red-before-accepted:),
@@ -62,7 +68,12 @@
 # file differing from the branch, an unproven or unreached change, or a test
 # red before the change that root did not accept (--accept-red-before) refuses.
 #
+# Every commit of src .clj files runs the error law's census (`seon.guard-census`) in
+# Babashka over the functions it changes against HEAD: no JVM, tens of ms.
+#
 # Refusals (exit 2) name the rule they enforce:
+#   - --test on a commit whose paths are all ordinary src/test Clojure files (prove by --branch-evidence);
+#   - a changed function holding a guard (the census);
 #   - a path claimed by another lane, or already dirty in the tree (someone else's work in progress);
 #   - a commit path the lane never claimed;
 #   - deps.edn or a reference-code/ gitlink without --restart-batch (a bump belongs to root's restart batch);
@@ -455,6 +466,11 @@ branch_evidence() {
         (cond
           (or (seq (:seon.source/host-bound answer)) (seq (:seon.source/unanalyzable answer)))
           (do (println "== a changed declaration is host-bound or a file does not analyze: throwaway check required") (System/exit 3))
+          (and (seq (:seon.source/unproven answer))
+               (every? empty? (map answer [:seon.source/differing :seon.source/unreached])))
+          ;; the change is on the branch and only evidence is missing: the caller runs those tests there and asks again
+          (do (spit (str trailer ".unproven") (clojure.string/join "\n" (:seon.source/unproven answer)))
+              (System/exit 4))
           (:seon.source/proven? answer)
           (do (spit trailer (str "Branch-evidence: agent " agent " commit " (:seon.source/branch-commit-id answer)
                                  " over head " (:seon.source/head-commit-id answer) "\n"
@@ -522,6 +538,36 @@ accepted_reds_gate() {
                      (when (seq new-proofs) (str "Check-new-red-proof: " (clojure.string/join " " new-proofs) "\n")))))' "$head_result" "$trailer" $reds || return 2
 }
 
+# Run TESTS... as AGENT on its branch in the live root (`my.test/check` with
+# `:seon.test/identities`): a test green at its current reach digest answers its
+# recorded result, so only tests whose reach changed run. Exit 3 when no root answers.
+run_branch_tests() {
+  local agent="$1"; shift
+  echo "== running ${#} test(s) the branch holds no current evidence for, as agent $agent on the live root"
+  bb -cp "$root/script:$root/src" -e '
+(require (quote [seon.operator :as operator]) (quote [cheshire.core :as json]))
+(let [[root agent & tests] *command-line-args*
+      code (str "(my.test/check {:seon.test/identities (quote " (pr-str (into (sorted-set) (map symbol) tests)) ")})")
+      began (System/nanoTime)
+      live (try (operator/live-root-value! root (pr-str (list (quote seon.mcp/call) (json/generate-string {:name "eval_clj" :arguments {:code code :agent agent}}))) {})
+                (catch Exception e {:seon.operator/live-process? false :lane/failure (ex-message e)}))]
+  (if-not (:seon.operator/live-process? live)
+    (do (println "== no live root answers" (or (:lane/failure live) "")) (System/exit 3))
+    (do (run! #(println (get % "text")) (get (json/parse-string (:seon.operator/value live)) "content"))
+        (println "== branch tests answered in" (long (/ (- (System/nanoTime) began) 1e6)) "ms"))))' "$root" "$agent" "$@"
+}
+
+# The error law's census (`seon.guard-census`, Babashka, no JVM) over the changed
+# src .clj functions of TREE against HEAD: refuses a commit adding or keeping a guard
+# in a function it changes.
+guard_census() {
+  local tree="$1" path judged=(); shift
+  for path in "$@"; do [[ "$path" == src/*.clj ]] && judged+=("$path"); done
+  [[ ${#judged[@]} -gt 0 ]] || return 0
+  bb -cp "$root/script:$root/src" -m seon.guard-census "$tree" HEAD "${judged[@]}" ||
+    refuse "a changed function holds a guard (the census above; AGENTS.md, Nothing crashes): delete it with its cause's fix; nothing committed"
+}
+
 commit() {
   local lane="$1"; shift
   valid_lane "$lane"
@@ -546,6 +592,11 @@ commit() {
         refuse "'$path' is not a path: each test needs its own --test (--test A --test B), not --test A B"
       fi
     done
+  fi
+  # Ordinary src/test functions prove by branch evidence on the shared JVM; a throwaway JVM is for platform slices
+  # (owner 2026-10-18). With --branch-evidence, --test names the fallback check's tests for a host-bound declaration.
+  if [[ ${#tests[@]} -gt 0 && -z "$evidence_agent" && -z "$at_candidate" ]] && evidence_paths "${paths[@]}" >/dev/null; then
+    refuse "${paths[*]} are ordinary src/test Clojure files: prove them by branch evidence on the shared JVM (bin/lane commit LANE -m MSG --branch-evidence AGENT PATH...), not a throwaway JVM; --test is for platform paths, or beside --branch-evidence for a host-bound declaration's fallback check; nothing committed"
   fi
   [[ -n "$message" ]] || refuse "commit needs -m MESSAGE"
   message_owned "$lane" "$message"
@@ -592,10 +643,18 @@ commit() {
     set +m
   fi
 
+  guard_census "$tree" "${paths[@]}"
   local proven_by_branch="" proven_by_reds=""
   if [[ -n "$evidence_agent" ]]; then
     local evidence_status=0
     branch_evidence "$evidence_agent" "$scratch/trailer" "${paths[@]}" -- ${accepted[@]+"${accepted[@]}"} || evidence_status=$?
+    if [[ "$evidence_status" == 4 ]]; then
+      evidence_status=0
+      run_branch_tests "$evidence_agent" $(cat "$scratch/trailer.unproven") || evidence_status=$?
+      [[ "$evidence_status" == 0 ]] &&
+        { branch_evidence "$evidence_agent" "$scratch/trailer" "${paths[@]}" -- ${accepted[@]+"${accepted[@]}"} || evidence_status=$?; }
+      [[ "$evidence_status" == 4 ]] && evidence_status=2
+    fi
     case "$evidence_status" in
       0) proven_by_branch=1 ;;
       2) refuse "branch evidence does not prove ${paths[*]}; nothing committed" ;;
@@ -607,7 +666,7 @@ commit() {
   elif [[ ${#tests[@]} -eq 0 ]] && gate_inputs_absent "${paths[@]}"; then
     echo "== no gate input among the paths (seon.test.cache/gate-input?); bin/seon check not run"
   else
-    [[ ${#tests[@]} -gt 0 ]] || refuse "the throwaway check names no test: pass each reaching test as --test NS/VAR (a check that runs no test proves nothing); nothing committed"
+    [[ ${#tests[@]} -gt 0 ]] || refuse "the throwaway check names no test: pass each reaching test as --test NS/VAR (a check that runs no test proves nothing); an ordinary src/test change proves by --branch-evidence AGENT instead; nothing committed"
     local check_args=("${paths[@]}")
     if [[ -n "$at_candidate" ]]; then
       local revision
@@ -778,7 +837,15 @@ case "$command" in
     evidence_agent="$1"; shift
     evidence_trailer="$(mktemp "${TMPDIR:-/tmp}/lane-evidence.XXXXXX")"
     trap 'rm -f -- "$evidence_trailer"' EXIT
-    branch_evidence "$evidence_agent" "$evidence_trailer" "$@" ;;
+    evidence_status=0
+    branch_evidence "$evidence_agent" "$evidence_trailer" "$@" || evidence_status=$?
+    if [[ "$evidence_status" == 4 ]]; then
+      run_branch_tests "$evidence_agent" $(cat "$evidence_trailer.unproven") && branch_evidence "$evidence_agent" "$evidence_trailer" "$@"
+      evidence_status=$?
+      rm -f -- "$evidence_trailer.unproven"
+      [[ "$evidence_status" == 4 ]] && exit 2
+    fi
+    exit "$evidence_status" ;;
   _lint-cache-sync) lint_cache_sync ;;
   _lint-candidate) lint_candidate "$@" ;;
   _evidence-paths) evidence_paths "$@" ;;

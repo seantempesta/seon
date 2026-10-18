@@ -164,3 +164,51 @@
                  ["src-clm/clm/core.py" "docs/seon/x.md" "AGENTS.md" "src/seon/lane.clj"
                   "test/seon/lane_test.clj" "deps.edn" "bin/test" "config/x.edn"
                   "reference-code/malli"])))))
+
+(defn- code-scratch
+  "A scratch repository with this checkout's src and script linked, a lint configuration and the claimed file PATH
+  committed as TEXT."
+  [path text]
+  (let [dir (doto (scratch) with-sources)
+        put (fn [p t] (io/make-parents (io/file dir p)) (spit (io/file dir p) t))]
+    (put ".clj-kondo/config.edn" "{}")
+    (put path text)
+    (sh dir "git" "add" "-f" ".clj-kondo" path)
+    (sh dir "git" "-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "code")
+    (lane dir "claim" "one" path)
+    dir))
+
+(deftest an-ordinary-change-proves-by-branch-evidence-and-a-platform-path-by-the-check
+  (let [dir (code-scratch "src/x/core.clj" "(ns x.core)\n(defn f [x] x)\n")
+        _ (spit (io/file dir "src/x/core.clj") "(ns x.core)\n(defn f [x] (inc x))\n")
+        ordinary (lane dir "commit" "one" "-m" "x" "--test" "x.core-test/f" "src/x/core.clj")]
+    (is (= 2 (:exit ordinary)))
+    (is (str/includes? (:err ordinary) "--branch-evidence AGENT") "the refusal names the shared path")
+    (spit (io/file dir "bin/tool") "#!/bin/sh\n")
+    (lane dir "claim" "one" "bin/tool")
+    (let [platform (lane dir "commit" "one" "-m" "y" "--test" "x.core-test/f" "bin/tool")]
+      (is (not (str/includes? (:err platform) "--branch-evidence AGENT")) "a platform path is not refused")
+      (is (str/includes? (:out platform) "== bin/seon check bin/tool --test x.core-test/f") "a platform path runs the check"))))
+
+(defn- java-descendants
+  "Run `command` in `dir` to its end, sampling its descendant processes: its exit, output and every descendant command
+  naming java."
+  [dir command]
+  (let [process (.start (doto (ProcessBuilder. ^java.util.List command) (.directory (io/file dir))))
+        seen (java.util.HashSet.)]
+    (future (slurp (.getInputStream process)))
+    (let [err (future (slurp (.getErrorStream process)))]
+      (while (.isAlive process)
+        (doseq [^java.lang.ProcessHandle handle (iterator-seq (.iterator (.descendants (.toHandle process))))]
+          (let [c (.command (.info handle))]
+            (when (and (.isPresent c) (str/includes? (str/lower-case (.get c)) "java")) (.add seen (.get c)))))
+        (Thread/sleep 5))
+      {:exit (.exitValue process) :err @err :java (set seen)})))
+
+(deftest the-guard-census-judges-an-ordinary-commit-with-no-jvm
+  (let [dir (code-scratch "src/x/core.clj" "(ns x.core)\n(defn f [x] x)\n")
+        _ (spit (io/file dir "src/x/core.clj") "(ns x.core)\n(defn f [x] (try (inc x) (catch Exception _ nil)))\n")
+        run (java-descendants dir ["bin/lane" "commit" "one" "-m" "x" "--branch-evidence" "nobody" "src/x/core.clj"])]
+    (is (= 2 (:exit run)))
+    (is (str/includes? (:err run) "a changed function holds a guard") "the census refuses the new general catch")
+    (is (= #{} (:java run)) "no JVM ran")))

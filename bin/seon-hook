@@ -1218,8 +1218,11 @@
   "The file's outermost var definitions as {:sym :text}, in file order."
   ([absolute-path] (top-level-definitions absolute-path (file-analysis absolute-path)))
   ([_ {:keys [analysis lines]}]
+   ;; a `declare` defines no value: its text never equals the defn's recorded
+   ;; source, so keeping it re-sent it, and re-ran its tests, on every edit
    (let [definitions (->> (:var-definitions analysis)
                           (filter :end-row)
+                          (remove #(= 'clojure.core/declare (:defined-by %)))
                           (sort-by (juxt :row :col)))
          within? (fn [inner outer]
                    (and (not (identical? inner outer))

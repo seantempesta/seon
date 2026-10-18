@@ -1811,6 +1811,28 @@
                   (recur true)))))
       (finally (fs/delete-if-exists ticket)))))
 
+(defn reaped-orphan-slots!
+  "Stop each check JVM under a slot of `root`'s `data/check` whose lock no
+  process holds: its check ended (killed, suspended and killed, crashed) and
+  left it running. Each free slot is taken for the sweep only, its JVMs
+  terminated by exact identity and its root deleted; the reaped identities."
+  {:malli/schema [:=> [:cat :string] [:vector :map]]}
+  [root]
+  (let [directory (io/file root "data/check")
+        slots (keep #(some->> (re-matches #"slot-(\d+)" (.getName ^java.io.File %)) second parse-long)
+                    (.listFiles directory))]
+    (into []
+          (mapcat (fn [n]
+                    (when-let [slot (try-slot! directory n (.pid (java.lang.ProcessHandle/current)))]
+                      (try
+                        (let [disposable (io/file directory (str "slot-" n))
+                              orphans (selected-processes (.getCanonicalPath disposable))]
+                          (doseq [process orphans] (terminate! process (operator-silence-backstop-ms {})))
+                          (when (seq orphans) (fs/delete-tree disposable))
+                          orphans)
+                        (finally (.close ^java.nio.channels.FileChannel (:seon.operator/channel slot)))))))
+          (sort (distinct slots)))))
+
 (defn- test-check-arguments
   "`bin/test-check` arguments for the check's `--test` values: `NS/NAME` names
   one test, `NS` a namespace; `include-long?` runs declared-long tests too."
@@ -1863,9 +1885,9 @@
 
 (defn- swept-check-roots!
   "Delete each disposable root under `root`'s `data/check` (`<sha>-<pid>`) and
-  `data/check/template` (`<name>.store-<pid>`) whose
-  owning check process is gone and of which no JVM lives (its advertised or
-  argument-named `(pid, start-instant)`); the deleted paths. A killed check
+  `data/check/template` (`<name>.store-<pid>`) whose owning check process is
+  gone, first stopping by exact identity each JVM still running there (an
+  orphan: its check was killed or suspended); the deleted paths. A killed check
   never reaches its own `finally`. `delete-tree` never follows a link."
   {:malli/schema [:=> [:cat :string] [:vector :string]]}
   [root]
@@ -1876,9 +1898,11 @@
                      at (str/last-index-of file-name "-")
                      pid (when at (parse-long (subs file-name (inc at))))]
                ;; A slot root belongs to its slot's lock holder (`candidate-tests!`).
-               :when (and pid (not (str/starts-with? file-name "slot-"))
-                          (not (process-alive? pid)) (empty? (selected-processes (str child))))]
-           (do (fs/delete-tree child) (str child))))))
+               :when (and pid (not (str/starts-with? file-name "slot-")) (not (process-alive? pid)))]
+           (do (doseq [process (selected-processes (str child))]
+                 (terminate! process (operator-silence-backstop-ms {})))
+               (fs/delete-tree child)
+               (str child))))))
 
 (defn- linked-pins!
   "Link the scratch root `disposable`'s pin directory to `root`'s, so its archive
@@ -2087,7 +2111,7 @@
   {:malli/schema [:=> [:cat :string :string [:vector :string] :boolean] :map]}
   [root sha tests include-long?]
   (let [began (System/nanoTime)
-        swept (swept-check-roots! root)
+        swept (into (swept-check-roots! root) (map str) (reaped-orphan-slots! root))
         slot (check-slot! root (operator-boot-bound-ms {}) (operator-check-slots {})
                            (.pid (java.lang.ProcessHandle/current)))
         waited-ms (elapsed-ms began)
@@ -2209,7 +2233,9 @@
                (:seon.operator/head? request) (move-to-head! request)
                (seq (selected-processes (:seon.operator/managed-root request))) (connected! request)
                :else (launch! request))
-      :status (let [result (connected! request)
+      :status (let [reaped (reaped-orphan-slots! (:seon.operator/managed-root request))
+                    result (cond-> (connected! request)
+                             (seq reaped) (assoc :seon.operator/reaped-check-jvms reaped))
                     failure (:seon.boot/failure result)]
                 (cond-> result
                   (:seon.boot/pid result) (merge (program-source result))
