@@ -1135,7 +1135,7 @@
             entity (program/declaration-row (db/carried-projection (db/db connection))
                                          event :contracted :agent)]
         (is (= false (:seon.db/attributes entity)))
-        (is (= 'seon.render.value/render-ai (:seon.render/ai entity)))
+        (is (= {:seon.fn/sym 'seon.render.value/render-ai} (:seon.render/ai entity)))
         (is (= :agent (:seon.schema.admission/source entity)))))))
 
 (deftest arbitrary-qualified-deftest-is-not-a-test-declaration
@@ -1615,7 +1615,7 @@
   (let [database (db/db)
         roles (fn [k] (select-keys (my.program/source database k) [:takes :returns :guards]))
         section (my.program/source database :seon.ref/section)]
-    (is (= {:takes '[seon.ref/candidate seon.ref/directory? seon.ref/link-candidate seon.ref/locate seon.ref/section-error]
+    (is (= {:takes '[seon.ref/candidate seon.ref/directory? seon.ref/link-candidate seon.ref/locate seon.ref/section-error seon.ref/unresolved]
             :returns [] :guards []}
            (roles :seon.ref/path)))
     (is (= {:takes '[seon.ref/section-view] :returns '[my.fs/section seon.ref/section] :guards []} (roles :seon.ref/section)))
