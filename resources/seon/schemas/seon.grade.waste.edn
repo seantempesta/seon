@@ -1,0 +1,4 @@
+{:seon.grade.waste/kind [:and {:description "The kind of producer a grade's wasted forms were charged to."} :seon.mine/producer-kind]
+ :seon.grade.waste/producer [:and {:description "The producer a grade's wasted forms were charged to, by name."} :seon.mine/producer]
+ :seon.grade.waste/turns [:int {:min 1 :description "The distinct steps whose next forms were charged to the cause."}]
+ :seon.grade.waste/forms [:int {:min 1 :description "The wasted next forms charged to the cause."}]}

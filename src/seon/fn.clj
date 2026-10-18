@@ -313,12 +313,13 @@
 
 (defn contract-carrier?
   "Whether a function row carries an arity contract: no macro, no host-bound
-  declaration and no value definition (`value-definition?`)."
+  declaration and no value definition (`value-definition?`). A row with no
+  arglists (a `deftest`'s) is no value definition."
   {:malli/schema [:=> [:cat [:map [:seon.fn/macro? {:optional true}] [:seon.fn/host-bound? {:optional true}]
                              [:seon.fn/arglists {:optional true}]]]
                   :boolean]}
   [{macro? :seon.fn/macro? host-bound? :seon.fn/host-bound? arglists :seon.fn/arglists}]
-  (not (or macro? host-bound? (value-definition? arglists))))
+  (not (or macro? host-bound? (and (some? arglists) (value-definition? arglists)))))
 
 (defn stored-namespace-context
   [{:seon.ns/keys [requires aliases refers imports]}]

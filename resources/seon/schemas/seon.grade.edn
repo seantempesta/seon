@@ -1,0 +1,73 @@
+{:seon.grade/assignment [:and {:seon.db/identity true :seon.program/row-schema :seon.grade/grade
+                                :description "The attempt a grade grades, by its :seon.task/assignment: one grade per attempt, written once at its end (seon.mine/grade-entity)."}
+                         :seon.task/assignment]
+ :seon.grade/task [:and {:seon.db/index true :description "The task the graded attempt worked, by its handle."} :seon.task/handle]
+ :seon.grade/branch [:and {:description "The kept branch the graded attempt's agent worked on, where its calls and evaluations are read."} :seon.store/branch]
+ :seon.grade/end [:and {:description "How the graded attempt ended."} :seon.task.attempt/end]
+ :seon.grade/at [:and {:description "When the graded attempt ended: the transaction instant of its end on its branch."} :inst]
+ :seon.grade/git-sha [:and {:seon.db/index true :description "The Git commit of the program the attempt ran under: the published archive the JVM that graded it at its end loaded, or the one root named for a backfill. Absent when unknown."} :seon.test.run/git-sha]
+ :seon.grade/turns [:int {:min 0 :description "The attempt's turns: every call its agent made, a model call or an outside agent's eval request."}]
+ :seon.grade/turns-to-green [:int {:min 0 :description "The turns an attempt that ended :done took: the metric. Absent when it did not end done."}]
+ :seon.grade/wasted-turns [:int {:min 0 :description "The turns holding no productive form (seon.mine/productive)."}]
+ :seon.grade/classes [:set {:description "Each form class the attempt's evaluations fell in (seon.mine/classify) with its count."}
+                      [:tuple :seon.mine/class [:int {:min 1}]]]
+ :seon.grade/rules [:set {:description "Each waste rule the miner charged the attempt's next forms under (seon.mine/situations) with its count of wasted forms."}
+                    [:tuple :seon.mine/rule [:int {:min 1}]]]
+ :seon.grade/waste [:set {:seon.db/component true :seon.db/component-schema :seon.grade/waste-row
+                          :description "The causes the miner charged the attempt's wasted forms to (seon.mine/rank)."}
+                    :seon.db/ref]
+ :seon.grade/prompt-tokens [:int {:min 0}]
+ :seon.grade/cached-tokens [:int {:min 0}]
+ :seon.grade/completion-tokens [:int {:min 0}]
+ :seon.grade/cached-share [:int {:min 0 :max 100 :description "The percent of prompt tokens the provider served from its cache; absent when no prompt token was counted."}]
+ :seon.grade/wall-ms [:int {:min 0 :description "Wall time from the first call's opening to the last call's close."}]
+ :seon.grade/grade [:map {:seon.db/attributes true :seon.program/partition :seon.data
+                          :description "One attempt's grade on main, written by root's db<->flow when the attempt ends (seon.mine/grade-ended!): its turns, turns to green, wasted turns by class, rule and cause, tokens, wall time, and the task, branch and commit it ran under. The series my.root/turns-report reads."}
+                    [:seon.grade/assignment :seon.grade/assignment]
+                    [:seon.grade/task {:optional true} :seon.grade/task]
+                    [:seon.grade/branch :seon.grade/branch]
+                    [:seon.grade/end :seon.grade/end]
+                    [:seon.grade/at :seon.grade/at]
+                    [:seon.grade/git-sha {:optional true} :seon.grade/git-sha]
+                    [:seon.grade/turns :seon.grade/turns]
+                    [:seon.grade/turns-to-green {:optional true} :seon.grade/turns-to-green]
+                    [:seon.grade/wasted-turns :seon.grade/wasted-turns]
+                    [:seon.grade/classes {:optional true} :seon.grade/classes]
+                    [:seon.grade/rules {:optional true} :seon.grade/rules]
+                    [:seon.grade/waste {:optional true} :seon.grade/waste]
+                    [:seon.grade/prompt-tokens :seon.grade/prompt-tokens]
+                    [:seon.grade/cached-tokens :seon.grade/cached-tokens]
+                    [:seon.grade/completion-tokens :seon.grade/completion-tokens]
+                    [:seon.grade/cached-share {:optional true} :seon.grade/cached-share]
+                    [:seon.grade/wall-ms {:optional true} :seon.grade/wall-ms]]
+ :seon.grade/waste-row [:map {:seon.db/attributes true :seon.program/partition :seon.data
+                              :description "One cause a grade's attempt wasted forms on, owned by its grade: the producer kind and name, and its wasted forms and turns."}
+                        [:seon.grade.waste/kind :seon.grade.waste/kind]
+                        [:seon.grade.waste/producer :seon.grade.waste/producer]
+                        [:seon.grade.waste/forms :seon.grade.waste/forms]
+                        [:seon.grade.waste/turns :seon.grade.waste/turns]]
+ :seon.grade/ended [:map {:description "An ended attempt no grade on main holds yet, and the branch its agent worked on (seon.mine/ungraded)."}
+                    [:seon.task/assignment :seon.task/assignment]
+                    [:seon.store/branch :seon.store/branch]]
+ :seon.grade/ungraded [:vector :seon.grade/ended]
+ :seon.grade/quantiles [:map {:description "The median and 90th percentile (nearest rank) of turns to green over graded attempts that ended done; absent members when none did."}
+                        [:seon.grade/median {:optional true} [:int {:min 0}]]
+                        [:seon.grade/p90 {:optional true} [:int {:min 0}]]]
+ :seon.grade/window [:map {:description "The grades of one program commit, ordered by when its first graded attempt ended."}
+                     [:seon.grade/commit [:or :seon.test.run/git-sha [:= :unknown]]]
+                     [:seon.grade/from :inst]
+                     [:seon.grade/attempts [:int {:min 1}]]
+                     [:seon.grade/green [:int {:min 0}]]
+                     [:seon.grade/quantiles :seon.grade/quantiles]
+                     [:seon.grade/median-turns [:int {:min 0}]]]
+ :seon.grade/top [:map {:description "One wasted-turn class: a waste rule or a cause's producer, with its wasted forms summed over the graded attempts."}
+                  [:seon.grade/name [:or :seon.mine/rule :seon.mine/producer]]
+                  [:seon.grade.waste/forms :seon.grade.waste/forms]]
+ :seon.grade/report [:map {:seon.render/html seon.mine/report-html
+                           :description "The turns metric over every graded attempt (my.root/turns-report): turns to green's median and p90, the same per commit window in order, and the waste rules and producers that cost most turns."}
+                     [:seon.grade/attempts [:int {:min 0}]]
+                     [:seon.grade/green [:int {:min 0}]]
+                     [:seon.grade/quantiles :seon.grade/quantiles]
+                     [:seon.grade/windows [:vector :seon.grade/window]]
+                     [:seon.grade/top-rules [:vector :seon.grade/top]]
+                     [:seon.grade/top-producers [:vector :seon.grade/top]]]}

@@ -228,7 +228,7 @@ done/capped once the agent's closed admission is the fact it polls.
 completed early) and I want to prompt root to identify problems with the task and to refine it." Checked against the
 code: the message path exists (`seon.cluster.message/send!` through `my.message/send`, durable in the agent's
 transaction, delivered into root's next context as `:seon.context/unread` and handled at the turn's close,
-`seon.turn/close-call`); the grade exists (`seon.competency/grade`: proofs, calls, errors, tokens); the error signature
+`seon.turn/close-call`); the grade exists (`seon.mine/grade`: proofs, calls, errors, tokens); the error signature
 exists (`seon.error/signature`, the grouping lane `agent-error-signatures` is building over `seon.problems`); the
 task upsert with history exists (`seon.task/create!` with `:seon.task/basis`); write-back of a task file does not
 (plan §8 Q2; root's ruling: by hand after the next hand-run round, then automated).
@@ -237,7 +237,7 @@ The stage: when the settlement closes the agent (above), it also writes one mess
 `:seon.task/ended`, holding references only: the task (`:seon.task/sym`, its handle), how it ended (`:done :capped
 :given-back` and the reason), the proofs' final state (`seon.context/proofs`'s counts and each red proof's symbol),
 the agent's errors grouped by signature with counts and the distinct error values' handles (the lane's grouping, reused,
-never duplicated), calls used and prompt, cached and completion tokens (the same reads `seon.competency/grade`
+never duplicated), calls used and prompt, cached and completion tokens (the same reads `seon.mine/grade`
 makes), and the agent and branch. Its AI render ends with the prompt and the offered operations: "What was wrong or
 missing in this task: plan, instructions, proofs or context?", the record read above, the reflection send, and
 `(my.task/update! task k f & args)` (TASK-CHAIN §3a). Every task end sends it;
@@ -256,7 +256,7 @@ The lifecycle stages are the first links; the whole loop is a follow-up card.
 1. **Work**: a fresh agent takes a task with red proofs from generated context (exists: `seon.task/assign!`,
    `seon.competency/start-run!`, this card's stages 1 and 4–6).
 2. **End**: one notification to root with errors by signature, final proofs and calls (stage E; reuses the message
-   path, `seon.competency/grade`'s reads, the lane's signature grouping).
+   path, `seon.mine/grade`'s reads, the lane's signature grouping).
 3. **Reflect**: root reads the record, then asks the snapshot (stage 7: a fork at the decision's `t`, one answer-only
    call; missing: the answer-only turn kind and its bound).
 4. **Diagnose**: each problem becomes a task with a red proof at its producer (context, tool, reader or the task
@@ -264,7 +264,7 @@ The lifecycle stages are the first links; the whole loop is a follow-up card.
    write-back, by hand first; a reviewer agent that drafts the diagnosis tasks for root to approve is the third
    automation step).
 5. **Fix**: new agents work those tasks and root merges (exists: the chain, `bin/lane commit`, root's merge).
-6. **Measure**: the same task set reruns and `seon.competency/grade` and `table` (green share, calls to green, errors by
+6. **Measure**: the same task set reruns and `seon.mine/grade` and `table` (green share, calls to green, errors by
    signature, tokens) are compared with the previous round; only a better grade counts (exists except the by-signature
    column and a stored previous round to compare against; `grade` gains `:seon.competency/replayed-tokens` and
    `:seon.competency/errors-by-signature`).
@@ -338,7 +338,7 @@ serve the later `scan` acceptance; the loop works crudely after 1–3.
 8. **One task per agent, at the writer.** `seon.task/assign!` refuses `:already-assigned` for an agent with an
    assignment. Proof `seon.task-ingestion-test/an-agent-holds-one-task-ever`. Files: `src/seon/task.clj`,
    `resources/seon/schemas/seon.task.edn`, `test/seon/task_ingestion_test.clj`.
-9. **The grade measures repetition and errors by signature.** `seon.competency/grade` gains `:seon.competency/replayed-tokens`
+9. **The grade measures repetition and errors by signature.** `seon.mine/grade` gains `:seon.competency/replayed-tokens`
    and `:seon.competency/errors-by-signature`; `table` folds them. Proof
    `seon.competency-grade-test/a-grade-counts-replayed-tokens-and-errors-by-signature`. Files: `test/seon/competency.clj`,
    `test/seon/competency_grade_test.clj`.

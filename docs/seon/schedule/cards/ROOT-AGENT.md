@@ -178,7 +178,7 @@ firing never costs a model call by itself). It is a function of the database and
 3. Retry pending write-backs (§2), request a restart when the rule holds (§4).
 
 Each firing is a **round**: the launched agents carry `:seon.agent/round` (a ref to the `seon.schedule.fire` entity),
-so a round's grade is derived, never stored. `seon.competency/grade` and `table` move to `seon.root` (the test
+so a round's grade is derived, never stored. `seon.mine/grade` lives in `src`, and `table` moves to `seon.root` (the test
 namespace requires them); `table` takes two rounds and shows each cell beside the previous round's (green share, calls
 to green, errors by signature, tokens), and only a better table counts. A tick that launches nothing is a healthy
 observation, recorded as the firing.
@@ -274,7 +274,7 @@ Each names its red proof (asserting on data, in the owning test namespace) and i
    and `seon.root-test/a-tick-launches-at-most-the-dial-on-red-unheld-tasks` (fixture provider; asserts the launched
    set as data, no provider call).
 8. **Rounds and the table** (lane D). `:seon.agent/round` (schema `seon.agent.edn`, a patch to its owner);
-   `seon.competency/grade` and `table` move to `seon.root`; `table` compares two rounds. Proof
+   `seon.mine/grade` and `table` move to `seon.root`; `table` compares two rounds. Proof
    `seon.competency-grade-test/a-round-table-compares-with-the-previous-round`.
 9. **The restart rule** (lane D). `seon.root/restart!` (detached `bin/seon start --head`), `:seon.root/restart-
    requested-tx`, `:seon.config.root/restart-after-ms`; tick step 3. Proof

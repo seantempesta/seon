@@ -89,6 +89,7 @@
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
             [seon.merge :as merge]
+            [seon.mine :as mine]
             [seon.cluster.store :as store]
             [seon.id :as id]
             [seon.env :as env]
@@ -2254,17 +2255,15 @@
       test-error (assoc :seon.task/test-error (edn/read-string test-error)))))
 
 (defn- chain-bails
-  "The ended chain attempts root bails, read through `store` on main `database` (`seon.task/chain-attempts`):
+  "The ended chain attempts root bails among `attempts` (`seon.task/chain-attempts`, read through `store`):
   every attempt holding no outcome whose end is neither :done (judged by the done rule and the final merge, which
   bail their own refusals) nor :cancelled, with its reason."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store]
+  {:malli/schema [:=> [:cat [:vector :map] :seon.store/store]
                   [:vector [:map [:seon.chain/branch :seon.chain/branch] [:seon.task/assignment :seon.task/assignment]
                             [:seon.task/assigned :seon.task/handle] [:seon.task/reason :seon.task/reason]
                             [:seon.task/last-verdict :seon.task/last-verdict]]]]}
-  [database store]
-  (let [attempts (task/chain-attempts database store)]
-    (when (:seon.error/at attempts) (throw (ex-info (:seon.error/message attempts "db<->flow could not read the chains.") attempts)))
-    (into [] (keep (fn [{branch :seon.chain/branch key :seon.task/assignment end :seon.task.attempt/end :as row}]
+  [attempts store]
+  (into [] (keep (fn [{branch :seon.chain/branch key :seon.task/assignment end :seon.task.attempt/end :as row}]
                      (when (and end (not (:seon.task/outcome row)) (not (#{:done :cancelled} end)))
                        (registry/on-branch store branch
                                   (fn [connection]
@@ -2277,16 +2276,42 @@
                                       (assoc (select-keys row [:seon.chain/branch :seon.task/assignment :seon.task/assigned])
                                              :seon.task/reason (str "The attempt ended " end (if why (str ": " why) "."))
                                              :seon.task/last-verdict (attempt-verdict agent))))))))
-          attempts)))
+        attempts))
+
+(defn- chain-attempts
+  "Every chain attempt main `database` names, read through `store` (`seon.task/chain-attempts`); a refused read is
+  the pass's failure."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store] [:vector :map]]}
+  [database store]
+  (let [attempts (task/chain-attempts database store)]
+    (when (:seon.error/at attempts) (throw (ex-info (:seon.error/message attempts "db<->flow could not read the chains.") attempts)))
+    attempts))
 
 (defn- bail-chains!
-  "Bail every ended chain attempt root does not advance or merge (`chain-bails`) through cluster `handle`."
-  {:malli/schema [:=> [:cat :seon.agent/context-source] :nil]}
-  [handle]
+  "Bail every ended chain attempt among `attempts` root does not advance or merge (`chain-bails`) through cluster
+  `handle`."
+  {:malli/schema [:=> [:cat :seon.agent/context-source [:vector :map]] :nil]}
+  [handle attempts]
   (doseq [{branch :seon.chain/branch key :seon.task/assignment h :seon.task/assigned reason :seon.task/reason
            verdict :seon.task/last-verdict}
-          (chain-bails @(:seon.db/connection handle) (handle-store handle))]
+          (chain-bails attempts (handle-store handle))]
     (bail-chain! handle branch key h reason verdict []))
+  nil)
+
+(defn- grade-ended!
+  "Write on main, through cluster `handle`, the grade of every ended attempt main holds none for (`seon.mine/ungraded`
+  over the chain `attempts` this pass read and main's ended attempts), each read on the branch its agent worked on
+  under the running program's commit (`seon.mine/grade-tx`): ONE transaction, upserted by the attempt, so a pass
+  after it finds nothing to grade and writes nothing."
+  {:malli/schema [:=> [:cat :seon.agent/context-source [:vector :map]] :nil]}
+  [handle attempts]
+  (let [connection (:seon.db/connection handle)
+        database @connection
+        ended (mine/ungraded database (registry/branches (handle-store handle)) attempts)
+        _ (when (:seon.error/at ended) (throw (ex-info (:seon.error/message ended "db<->flow could not read the ended attempts.") ended)))
+        tx (when (seq ended) (mine/grade-tx database ended (mine/running-sha)))]
+    (when (:seon.error/at tx) (throw (ex-info (:seon.error/message tx "db<->flow could not grade an ended attempt.") tx)))
+    (when (seq tx) (write! connection tx)))
   nil)
 
 (defn- refusals-verdict
@@ -2899,7 +2924,8 @@
     ;; a chain advances on its branch before the plan reads it, so the plan starts its next task in this pass;
     ;; every other end bails to root, so the plan never starts its task again until root runs it
     (advance-chains! handle)
-    (bail-chains! handle)
+    (let [attempts (chain-attempts @connection (handle-store handle))]
+      (bail-chains! handle attempts)
     (let [db @connection
           ;; the branches read after the lifecycle: a chain branch this pass deleted is never read
           facts (launch-facts db (registry/branches (handle-store handle)))
@@ -2921,6 +2947,9 @@
           unstarted (remove #(contains? (:seon.agent/started @routing) %) agents)]
       (doseq [agent-id (sort (agents-to-start db (set unstarted)))]
         (start-flow! {:seon.turn.loop/cluster handle :seon.agent/id agent-id :seon.agent/routing routing})))
+      ;; last, so nothing the pass starts waits on it: an ended attempt is graded once, on main, from the branch
+      ;; its agent worked on
+      (grade-ended! handle attempts))
     nil))
 
 (defn db<->flow

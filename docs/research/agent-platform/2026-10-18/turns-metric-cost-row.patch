@@ -1,0 +1,33 @@
+--- test/seon/cost_estimate_test.clj	2026-10-18 10:58:38.656870915 +0700
++++ test/seon/cost_estimate_test.clj	2026-10-18 11:23:45.482342088 +0700
+@@ -25,6 +25,7 @@
+             [seon.fn :as fn]
+             [seon.id :as id]
+             [seon.mcp :as mcp]
++            [seon.mine :as mine]
+             [seon.profile :as profile]
+             [seon.program :as program]
+             [seon.task :as task]
+@@ -80,6 +81,9 @@
+     :why "The first `seon.test/stale` after boot over the tests reaching the hub `seon.db/as-of-key` (~140 members, a merge's members): one reach digest per member over the union of their reach (~3,500 definitions), each definition's behavior digest computed once from its stored row and one read of its source (~50 KB, ~10 calls), then one indexed result read per member: proportional to the reached definitions."
+     :estimate {:alloc-mb 175.0 :calls 35000 :reads 150 :ms 350.0}
+     :overrun '{:task seon.db/a-cold-behavior-digest-allocates-a-third-of-a-megabyte :alloc-mb 371.4 :calls 107809 :reads 121}}
++   {:op :grade-pass-nothing-ended
++    :why "Root's grading step on a db<->flow pass with no attempt newly ended (`seon.mine/ungraded`): one query of the graded attempts and one of main's ended attempts, nothing read on a branch: proportional to the graded attempts, constant per pass."
++    :estimate {:alloc-mb 2.0 :calls 200 :reads 5 :ms 10.0}}
+    {:op :merge-one-function
+     :why "Root merges a branch changing one function: a three-way diff of ~30 datoms from the merge base, its proof and one reaching test run on the merge branch, one merge transaction: proportional to the delta."
+     :estimate {:alloc-mb 48.0 :calls 8000 :reads 200 :ms 400.0}
+@@ -236,7 +240,11 @@
+        {:unchanged-request unchanged :fresh-agent-first-request fresh :new-def new-def :unmap-one-def unmap :redefine-one-form redefine
+         :reuse-one-unchanged-test reuse :current-state-with-task current-state :seon-db-nine-forms nine
+         :hub-docstring-change hub-docstring :hub-behavior-change hub-behavior :cold-stale-merge-members cold-stale
+-        :merge-one-function (merge-cost running connection)}))))
++        :merge-one-function (merge-cost running connection)
++        :grade-pass-nothing-ended (let [measured (profile/measure #(mine/ungraded (db/db connection) #{} []))]
++                                    (is (= [] (:seon.profile/value measured)) "nothing is left to grade")
++                                    {:alloc-mb (/ (:seon.profile/alloc-bytes measured 0) 1048576.0) :calls (:seon.profile/calls measured)
++                                     :reads (:seon.profile/reads measured) :ms (:seon.profile/ms measured)})}))))
+ 
+ (defn- over
+   "The measures of `observed` above their `limit`, wall time at `slack` times its limit: measure -> [observed limit]."

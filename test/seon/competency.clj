@@ -3,7 +3,7 @@
 
   A run is one chain of one task (`seon.task/chain!`), its variant the chain's own config decisions
   (`:seon.chain/config`). `launch!` writes the runs and waits for each attempt's end, which root's db<->flow
-  drives with no hand act; `grade` reads one attempt's end, calls, tokens, evaluation cost and form classes;
+  drives with no hand act; `seon.mine/grade` reads one attempt's end, calls, tokens, evaluation cost and form classes;
   `table` folds grades per task and variant; `compare-tables` applies the noise rule between two tables."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -67,16 +67,7 @@
   ([] (bench-set "seon/competency/bench-v1.edn"))
   ([resource] (edn/read-string (slurp (io/resource resource)))))
 
-;;; GRADE: one attempt, read on the branch it worked on, from its end facts.
-
-(def ^:private call-selector
-  [:db/id {:seon.turn/opened-tx [:db/id :db/txInstant]} {:seon.turn/closed-tx [:db/id :db/txInstant]}
-   {:seon.turn/attempts [:seon.ai.usage/prompt-tokens :seon.ai.usage/completion-tokens :seon.ai.usage/cached-tokens
-                         :seon.ai.attempt/error]}])
-
-(def ^:private evaluation-selector
-  [:db/id :seon.cluster.eval/source :seon.cluster.eval/error :seon.eval/duration-ms :seon.eval/allocated-bytes
-   {:seon.cluster.eval/run [:db/id]}])
+;;; GRADE: `seon.mine/grade`, read on the kept branch the attempt worked on.
 
 (defn- read!
   "`value`, a read's answer, or a throw of its refusal."
@@ -85,89 +76,6 @@
   (if (and (map? value) (:seon.error/message value))
     (throw (ex-info (:seon.error/message value) value))
     value))
-
-(defn- model-calls
-  "The agent's call rows that carry a model attempt, in opening order."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:vector :map]]}
-  [database agent-id]
-  (->> (read! (db/q '[:find [(pull ?call selector) ...] :in $ ?agent-id selector
-                      :where [?agent :seon.agent/id ?agent-id] [?call :seon.turn/agent ?agent] [?call :seon.turn/attempts _]]
-                    database agent-id call-selector))
-       (sort-by #(get-in % [:seon.turn/opened-tx :db/id]))
-       vec))
-
-(defn- model-evaluations
-  "The forms the agent's model calls evaluated, in writer order."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:vector :map]]}
-  [database agent-id]
-  (->> (read! (db/q '[:find [(pull ?e selector) ...] :in $ ?agent-id selector
-                      :where [?agent :seon.agent/id ?agent-id] [?call :seon.turn/agent ?agent]
-                      [?e :seon.cluster.eval/run ?call] [?e :seon.cluster.eval/origin :model]]
-                    database agent-id evaluation-selector))
-       (sort-by :db/id)
-       vec))
-
-(defn- total
-  "The sum of `k` over `xs`, absent values and negative (unmeasured) ones counting zero."
-  {:malli/schema [:=> [:cat [:sequential :map] :keyword] :int]}
-  [xs k]
-  (transduce (keep #(let [x (get % k)] (when (and (int? x) (not (neg? x))) x))) + 0 xs))
-
-(defn cached-share
-  "The percent of `prompt` tokens the provider served from its prompt cache (`cached`), rounded; absent when no prompt
-  token was counted."
-  {:malli/schema [:=> [:cat nat-int? nat-int?] [:maybe nat-int?]]}
-  [prompt cached]
-  (when (pos? prompt) (Math/round (/ (* 100.0 cached) prompt))))
-
-(defn grade
-  "Attempt `key`'s grade, read on `database`, the branch its agent worked on (a kept chain branch): how it ended
-  (`:seon.task.attempt/end`, its agent's end facts for the proofs), green when it ended `:done` (the done rule passed:
-  proofs green, nothing else red, no contract gap), its model calls (calls to green when green), the forms they
-  evaluated by class, calls holding no productive form, errors, tokens, wall time from the first call's opening to
-  the last's close, the share of prompt tokens the provider's cache served (`cached-share`), and the evaluations'
-  summed time and allocation."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assignment] :map]}
-  [database assignment]
-  (let [row (read! (db/pull database [:db/id :seon.task.attempt/end :seon.task.attempt/number
-                                      {:seon.task/attempt-of [:seon.task/id :seon.task/name :seon.task/proofs]}]
-                            [:seon.task/assignment assignment]))
-        agent-id (str "attempt/" assignment)
-        ended (read! (db/pull database [:seon.agent/end-green :seon.agent/end-red :seon.agent/end-pending]
-                              [:seon.agent/id agent-id]))
-        calls (model-calls database agent-id)
-        evaluations (mine/classify (model-evaluations database agent-id))
-        by-call (group-by #(get-in % [:seon.cluster.eval/run :db/id]) evaluations)
-        end (:seon.task.attempt/end row)
-        green? (= :done end)
-        opened (get-in (first calls) [:seon.turn/opened-tx :db/txInstant])
-        closed (get-in (peek calls) [:seon.turn/closed-tx :db/txInstant])
-        usage #(total (mapcat :seon.turn/attempts calls) %)
-        share (cached-share (usage :seon.ai.usage/prompt-tokens) (usage :seon.ai.usage/cached-tokens))]
-    (cond-> {:seon.competency/assignment assignment
-             :seon.competency/agent agent-id
-             :seon.competency/task (get-in row [:seon.task/attempt-of :seon.task/id])
-             :seon.competency/end (or end :running)
-             :seon.competency/green? green?
-             :seon.competency/proofs (into {} (keep (fn [[k proof]] (when-let [n (get ended k)] [proof n])))
-                                           {:seon.agent/end-green :green :seon.agent/end-red :red
-                                            :seon.agent/end-pending :pending})
-             :seon.competency/model-calls (count calls)
-             :seon.competency/forms (count evaluations)
-             :seon.competency/classes (frequencies (map :seon.mine/class evaluations))
-             :seon.competency/wasted-calls (count (remove #(some (comp mine/productive :seon.mine/class) (by-call (:db/id %)))
-                                                          calls))
-             :seon.competency/no-form-calls (count (remove #(by-call (:db/id %)) calls))
-             :seon.competency/agent-errors (count (filter :seon.cluster.eval/error evaluations))
-             :seon.competency/platform-errors (count (keep :seon.ai.attempt/error (mapcat :seon.turn/attempts calls)))
-             :seon.competency/prompt-tokens (usage :seon.ai.usage/prompt-tokens)
-             :seon.competency/cached-tokens (usage :seon.ai.usage/cached-tokens)
-             :seon.competency/completion-tokens (usage :seon.ai.usage/completion-tokens)
-             :seon.competency/eval-ms (total evaluations :seon.eval/duration-ms)
-             :seon.competency/alloc-mb (/ (Math/round (/ (total evaluations :seon.eval/allocated-bytes) 1e5)) 10.0)}
-      green? (assoc :seon.competency/calls-to-green (count calls))
-      share (assoc :seon.competency/cached-share share)
-      (and opened closed) (assoc :seon.competency/wall-ms (- (inst-ms closed) (inst-ms opened))))))
 
 ;;; LAUNCH: each (task, variant, i) one chain of one, written by `seon.task/chain!` with the variant as the chain's
 ;;; config; root's db<->flow starts, runs and ends each attempt with no hand act; each is graded at its end.
@@ -212,7 +120,7 @@
   (let [head (db/branch-database database branch)
         outcome (:seon.task/outcome (read! (db/pull database [:seon.task/outcome] [:seon.task/assignment assignment])))]
     (try
-      (cond-> (merge (grade head assignment)
+      (cond-> (merge (read! (mine/grade head assignment))
                      (select-keys run [:seon.competency/id :seon.competency/split :seon.competency/variant
                                        :seon.competency/launch :seon.competency/terminal :seon.chain/branch]))
         (:seon.config.run/max-episode-runs config) (assoc :seon.competency/cap (:seon.config.run/max-episode-runs config))

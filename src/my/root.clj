@@ -15,6 +15,7 @@
             [seon.context :as context]
             [seon.db :as db]
             [seon.merge :as merge]
+            [seon.mine :as mine]
             [seon.error.refusal :as refusal]
             [seon.task :as task])
   (:refer-clojure :exclude [run!]))
@@ -289,3 +290,18 @@
       items
       (let [ends (mapv #(context/ended database %) (filter :seon.task/end items))]
         (or (some #(when (:seon.error/at %) %) ends) ends)))))
+
+(defn turns-report
+  "The turns metric over every grade main holds (`seon.mine/report`): how many graded attempts ended green, the median
+  and p90 of turns to green, the same per program commit in order, so a code or context change shows as a move in the
+  number, and the waste rules and producers that cost most. Each attempt is graded once, by db<->flow at its end.
+
+  ## Example
+
+  ```clojure
+  (my.root/turns-report)
+  ```"
+  {:malli/schema [:=> [:cat :my.root/merge-request-read] [:or :seon.grade/report :seon.error/value]]}
+  [{database :seon.db/db}]
+  (let [grades (mine/grades database)]
+    (if (refusal/error? grades) grades (mine/report grades))))

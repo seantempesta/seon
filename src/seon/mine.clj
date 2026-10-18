@@ -2,7 +2,7 @@
   "The miner: one situation per agent step of a kept attempt, read-only from its branch, and the wasted next forms
   charged to the producer of what the agent was shown (self-improvement-loop.md, phases M1 and M2).
 
-  A step is one model call, the eval request it answered; its evaluations are what the agent was shown, and the
+  A step is one call of the attempt's agent (a model call, or an outside agent's eval request); its evaluations are what the agent was shown, and the
   forms of the next call are what it did next. `situations` reads one branch, `kept-situations` every kept chain
   branch, and `rank` sums the charged waste per cause."
   (:require [clojure.string :as str]
@@ -30,7 +30,7 @@
 (def ^:private wait-heads '#{my.turn/wait my.task/send-back! my.message/send})
 
 (def productive
-  "The form classes that move a run forward; a model call holding none of them is a wasted call."
+  "The form classes that move a run forward; a call holding none of them is a wasted call."
   #{:read :probe :progress :wait})
 
 (def ^:private reader-options
@@ -187,7 +187,8 @@
                     :seon.mine/causes (cond-> [(producer evaluation)]
                                         (and cut? (:seon.eval/renderer evaluation)) (conj printer)
                                         typed (conj {:seon.mine/kind :error :seon.mine/producer typed})
-                                        (and (symbol? read-subject) (doc-heads (first form)))
+                                        ;; a bare name is the agent's guess, resolved nowhere the miner can read
+                                        (and (qualified-symbol? read-subject) (doc-heads (first form)))
                                         (conj {:seon.mine/kind :docstring :seon.mine/producer read-subject}))})
       cut? (assoc :seon.mine/cuts (cuts shown))
       typed (assoc :seon.mine/error-producer typed)
@@ -254,7 +255,13 @@
 (def ^:private evaluation-selector
   [:db/id :seon.cluster.eval/id :seon.cluster.eval/source :seon.cluster.eval/error :seon.eval/renderer
    :seon.eval/value-class :seon.eval/shown-tokens :seon.eval/value-tokens :seon.eval/elisions :seon.eval/shown
+   :seon.eval/duration-ms :seon.eval/allocated-bytes
    :seon.cluster.eval/diagnostics {:seon.cluster.eval/ns [:seon.ns/name]} {:seon.cluster.eval/run [:db/id]}])
+
+(def ^:private call-selector
+  [:db/id :seon.turn/id {:seon.turn/opened-tx [:db/id :db/txInstant]} {:seon.turn/closed-tx [:db/id :db/txInstant]}
+   {:seon.turn/attempts [:seon.ai.usage/prompt-tokens :seon.ai.usage/completion-tokens :seon.ai.usage/cached-tokens
+                         :seon.ai.attempt/error]}])
 
 (defn- attempts
   "The attempts `database` (a chain branch) holds: assignment, task symbol and references, and end."
@@ -266,27 +273,29 @@
                    database)]
     (if (refusal/error? rows) rows (vec (sort-by :seon.task/assignment rows)))))
 
-(defn- model-calls
-  "The model calls of agent `agent-id`, in opening order."
+(defn- agent-calls
+  "Every call of agent `agent-id`, in opening order: a model agent's model calls and an outside agent's eval requests
+  alike, each with its provider attempts' usage when it made any."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or [:vector :map] :seon.error/value]]}
   [database agent-id]
-  (let [rows (db/q '[:find [(pull ?call [:db/id :seon.turn/id {:seon.turn/opened-tx [:db/id]}]) ...] :in $ ?agent-id
-                     :where [?agent :seon.agent/id ?agent-id] [?call :seon.turn/agent ?agent] [?call :seon.turn/attempts _]]
-                   database agent-id)]
+  (let [rows (db/q '[:find [(pull ?call selector) ...] :in $ ?agent-id selector
+                     :where [?agent :seon.agent/id ?agent-id] [?call :seon.turn/agent ?agent]]
+                   database agent-id call-selector)]
     (if (refusal/error? rows) rows (vec (sort-by #(get-in % [:seon.turn/opened-tx :db/id]) rows)))))
 
-(defn- model-evaluations
-  "The forms the model calls of agent `agent-id` evaluated, in writer order."
+(defn- agent-evaluations
+  "The forms the calls of agent `agent-id` evaluated, whoever wrote them (the model or an outside agent), in writer
+  order."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or [:vector :map] :seon.error/value]]}
   [database agent-id]
   (let [rows (db/q '[:find [(pull ?e selector) ...] :in $ ?agent-id selector
                      :where [?agent :seon.agent/id ?agent-id] [?call :seon.turn/agent ?agent]
-                     [?e :seon.cluster.eval/run ?call] [?e :seon.cluster.eval/origin :model]]
+                     [?e :seon.cluster.eval/run ?call]]
                    database agent-id evaluation-selector)]
     (if (refusal/error? rows) rows (vec (sort-by :db/id rows)))))
 
 (defn steps
-  "One situation per model call of `calls` (pulled, in opening order: `:db/id`, `:seon.turn/id`) of `attempt` (its
+  "One situation per call of `calls` (pulled, in opening order: `:db/id`, `:seon.turn/id`) of `attempt` (its
   assignment, end and task with its references) on `branch`, from the model `evaluations` those calls made (pulled
   with their source, error, printed value and its facts, starting namespace and call, in writer order); `merged?`
   when main records the attempt merged."
@@ -315,14 +324,14 @@
           calls)))
 
 (defn- attempt-situations
-  "One situation per model call of `attempt` on `database`, its branch `branch`; `merged?` when main records it
+  "One situation per call of `attempt`'s agent on `database`, its branch `branch`; `merged?` when main records it
   merged."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch :map :boolean]
                   [:or :seon.mine/situations :seon.error/value]]}
   [database branch {assignment :seon.task/assignment :as attempt} merged?]
   (let [agent-id (str "attempt/" assignment)
-        calls (model-calls database agent-id)
-        evaluations (model-evaluations database agent-id)]
+        calls (agent-calls database agent-id)
+        evaluations (agent-evaluations database agent-id)]
     (cond (refusal/error? calls) calls
           (refusal/error? evaluations) evaluations
           :else (steps branch attempt merged? calls evaluations))))
@@ -400,3 +409,253 @@
                  :seon.mine/rules (frequencies (map ::rule rows))}))
          (sort-by (juxt (comp - :seon.mine/wasted-forms) (comp str :seon.mine/cause)))
          vec)))
+
+;;; GRADE: one ended attempt, read on the branch its agent worked on, written once on main as its grade.
+
+(defn- total
+  "The sum of `k` over `xs`, absent values and negative (unmeasured) ones counting zero."
+  {:malli/schema [:=> [:cat [:sequential :map] :keyword] :int]}
+  [xs k]
+  (transduce (keep #(let [x (get % k)] (when (and (int? x) (not (neg? x))) x))) + 0 xs))
+
+(defn cached-share
+  "The percent of `prompt` tokens the provider served from its prompt cache (`cached`), rounded; absent when no prompt
+  token was counted."
+  {:malli/schema [:=> [:cat nat-int? nat-int?] [:maybe nat-int?]]}
+  [prompt cached]
+  (when (pos? prompt) (Math/round (/ (* 100.0 cached) prompt))))
+
+(defn grade-of
+  "The grade of an attempt from its reads: `row` (its end, number and task), `ended` (its agent's end facts),
+  `calls` (every call of its agent, in opening order) and `evaluations` (their forms, in writer order): how it ended,
+  green when :done (the done rule passed), its calls (calls to green when green), its forms by class, calls holding no
+  productive form, errors, tokens, wall time from the first call's opening to the last's close, the share of prompt
+  tokens the provider's cache served, and the evaluations' summed time and allocation."
+  {:malli/schema [:=> [:cat :seon.task/assignment [:maybe :map] [:maybe :map] [:vector :map] [:vector :map]] :map]}
+  [assignment row ended calls evaluations]
+  (let [evaluations (classify evaluations)
+        by-call (group-by #(get-in % [:seon.cluster.eval/run :db/id]) evaluations)
+        end (:seon.task.attempt/end row)
+        green? (= :done end)
+        opened (get-in (first calls) [:seon.turn/opened-tx :db/txInstant])
+        closed (get-in (peek calls) [:seon.turn/closed-tx :db/txInstant])
+        usage #(total (mapcat :seon.turn/attempts calls) %)
+        share (cached-share (usage :seon.ai.usage/prompt-tokens) (usage :seon.ai.usage/cached-tokens))]
+    (cond-> {:seon.competency/assignment assignment
+             :seon.competency/agent (str "attempt/" assignment)
+             :seon.competency/task (get-in row [:seon.task/attempt-of :seon.task/id])
+             :seon.competency/end (or end :running)
+             :seon.competency/green? green?
+             :seon.competency/proofs (into {} (keep (fn [[k proof]] (when-let [n (get ended k)] [proof n])))
+                                           {:seon.agent/end-green :green :seon.agent/end-red :red
+                                            :seon.agent/end-pending :pending})
+             :seon.competency/model-calls (count calls)
+             :seon.competency/forms (count evaluations)
+             :seon.competency/classes (frequencies (map :seon.mine/class evaluations))
+             :seon.competency/wasted-calls (count (remove #(some (comp productive :seon.mine/class) (by-call (:db/id %)))
+                                                          calls))
+             :seon.competency/no-form-calls (count (remove #(by-call (:db/id %)) calls))
+             :seon.competency/agent-errors (count (filter :seon.cluster.eval/error evaluations))
+             :seon.competency/platform-errors (count (keep :seon.ai.attempt/error (mapcat :seon.turn/attempts calls)))
+             :seon.competency/prompt-tokens (usage :seon.ai.usage/prompt-tokens)
+             :seon.competency/cached-tokens (usage :seon.ai.usage/cached-tokens)
+             :seon.competency/completion-tokens (usage :seon.ai.usage/completion-tokens)
+             :seon.competency/eval-ms (total evaluations :seon.eval/duration-ms)
+             :seon.competency/alloc-mb (/ (Math/round (/ (total evaluations :seon.eval/allocated-bytes) 1e5)) 10.0)}
+      green? (assoc :seon.competency/calls-to-green (count calls))
+      share (assoc :seon.competency/cached-share share)
+      (and opened closed) (assoc :seon.competency/wall-ms (- (inst-ms closed) (inst-ms opened))))))
+
+(def ^:private attempt-selector
+  [:db/id :seon.task/assignment :seon.task.attempt/end :seon.task.attempt/number
+   {:seon.task/attempt-of [:seon.task/id :seon.task/sym :seon.task/references]}])
+
+(defn- attempt-reads
+  "What grading attempt `assignment` reads on `database`, the branch its agent worked on: its row, its agent's end
+  facts, its agent's calls and their evaluations, and when its end was written; or the first read's refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assignment] [:or :map :seon.error/value]]}
+  [database assignment]
+  (let [agent-id (str "attempt/" assignment)
+        row (db/pull database attempt-selector [:seon.task/assignment assignment])
+        ended (db/pull database [:seon.agent/end-green :seon.agent/end-red :seon.agent/end-pending] [:seon.agent/id agent-id])
+        at (db/q '[:find ?at . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end _ ?tx]
+                   [?tx :db/txInstant ?at]]
+                 database assignment)
+        calls (agent-calls database agent-id)
+        evaluations (agent-evaluations database agent-id)]
+    (or (some #(when (refusal/error? %) %) [row ended at calls evaluations])
+        {::row row ::ended ended ::at at ::calls calls ::evaluations evaluations})))
+
+(defn grade
+  "Attempt `assignment`'s grade (`grade-of`), read on `database`, the branch its agent worked on; or a read's refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assignment] [:or :map :seon.error/value]]}
+  [database assignment]
+  (let [reads (attempt-reads database assignment)]
+    (if (refusal/error? reads)
+      reads
+      (grade-of assignment (::row reads) (::ended reads) (::calls reads) (::evaluations reads)))))
+
+(defn grade-entity
+  "The grade fact of ended attempt `assignment`, read on `database`, the head of `branch` its agent worked on, with
+  the program's Git commit `git-sha` when known: its turns, turns to green when done, wasted turns, form classes,
+  waste by rule and by cause (`steps`, `rank`), tokens, cached share, wall time and when it ended; or a read's
+  refusal.
+
+  ## Costs
+
+  The attempt's four reads, then each form read once: proportional to the attempt's evaluations."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch :seon.task/assignment [:maybe :seon.test.run/git-sha]]
+                  [:or :seon.grade/grade :seon.error/value]]}
+  [database branch assignment git-sha]
+  (let [{row ::row calls ::calls evaluations ::evaluations at ::at :as reads} (attempt-reads database assignment)]
+    (if (refusal/error? reads)
+      reads
+      (let [graded (grade-of assignment row (::ended reads) calls evaluations)
+            mined (steps branch row false calls evaluations)
+            ranked (rank mined)
+            rules (frequencies (for [situation mined waste (:seon.mine/waste situation)] (:seon.mine/rule waste)))
+            classes (:seon.competency/classes graded)]
+        (cond-> {:seon.grade/assignment assignment :seon.grade/branch branch
+                 :seon.grade/end (:seon.task.attempt/end row) :seon.grade/at at
+                 :seon.grade/turns (:seon.competency/model-calls graded)
+                 :seon.grade/wasted-turns (:seon.competency/wasted-calls graded)
+                 :seon.grade/prompt-tokens (:seon.competency/prompt-tokens graded)
+                 :seon.grade/cached-tokens (:seon.competency/cached-tokens graded)
+                 :seon.grade/completion-tokens (:seon.competency/completion-tokens graded)}
+          (:seon.competency/task graded) (assoc :seon.grade/task (:seon.competency/task graded))
+          git-sha (assoc :seon.grade/git-sha git-sha)
+          (:seon.competency/calls-to-green graded) (assoc :seon.grade/turns-to-green (:seon.competency/calls-to-green graded))
+          (seq classes) (assoc :seon.grade/classes (set classes))
+          (seq rules) (assoc :seon.grade/rules (set rules))
+          (seq ranked) (assoc :seon.grade/waste (into #{} (map (fn [{cause :seon.mine/cause :as row}]
+                                                                 {:seon.grade.waste/kind (:seon.mine/kind cause)
+                                                                  :seon.grade.waste/producer (:seon.mine/producer cause)
+                                                                  :seon.grade.waste/forms (:seon.mine/wasted-forms row)
+                                                                  :seon.grade.waste/turns (:seon.mine/wasted-turns row)}))
+                                                      ranked))
+          (:seon.competency/cached-share graded) (assoc :seon.grade/cached-share (:seon.competency/cached-share graded))
+          (:seon.competency/wall-ms graded) (assoc :seon.grade/wall-ms (:seon.competency/wall-ms graded)))))))
+
+(defn ungraded
+  "Every ended attempt main `database` holds no grade for, with the branch its agent worked on that `branches` (the
+  store's) still holds: each of `chain-attempts` (`seon.task/chain-attempts`, the open chains' attempts) that has an
+  end, read where its row names it worked, and each attempt main records ended (a merged chain's, or one main ran),
+  on its `:seon.task/branch`; or a read's refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.registry/branches [:vector :map]]
+                  [:or :seon.grade/ungraded :seon.error/value]]}
+  [database branches chain-attempts]
+  (let [graded (db/q '[:find [?k ...] :where [_ :seon.grade/assignment ?k]] database)
+        on-main (db/q '[:find ?k ?b :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end _] [?a :seon.task/branch ?b]]
+                      database)]
+    (or (some #(when (refusal/error? %) %) [graded on-main])
+        (let [graded (set graded)
+              from-chains (for [{k :seon.task/assignment branch :seon.chain/branch end :seon.task.attempt/end} chain-attempts
+                                :when (and end (not (graded k)))]
+                            [k (or (db/read-at database branch
+                                               #(when % (:seon.task/branch (db/pull % [:seon.task/branch] [:seon.task/assignment k]))))
+                                   branch)])]
+          ;; a chain attempt's own row names where it worked, so it wins over main's copy
+          (into [] (keep (fn [[k b]] (when (and (not (graded k)) (contains? branches b))
+                                       {:seon.task/assignment k :seon.store/branch b})))
+                (into (sorted-map) (concat on-main from-chains)))))))
+
+(defn running-sha
+  "The Git commit of the published archive this JVM loaded (`data/source/<sha>`, the `seon.repository.root`
+  property), or nil when it was not launched from one."
+  {:malli/schema [:=> [:cat] [:maybe :seon.test.run/git-sha]]}
+  []
+  (let [sha (some-> (System/getProperty "seon.repository.root") java.io.File. .getName)]
+    (when (and sha (re-matches #"[0-9a-f]{40}" sha)) sha)))
+
+(defn grade-tx
+  "The transaction data grading each of `ended` (`ungraded`) on main `database` under `git-sha`: one grade entity per
+  attempt, read on its branch's head; or the first read's refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.grade/ungraded [:maybe :seon.test.run/git-sha]]
+                  [:or [:vector :seon.grade/grade] :seon.error/value]]}
+  [database ended git-sha]
+  (reduce (fn [out {k :seon.task/assignment branch :seon.store/branch}]
+            (let [entity (db/read-at database branch #(grade-entity % branch k git-sha))]
+              (if (refusal/error? entity) (reduced entity) (conj out entity))))
+          []
+          ended))
+
+;;; REPORT: the turns metric over every grade main holds.
+
+(defn- quantile
+  "The `q` quantile of `xs` by nearest rank, or nil when empty."
+  {:malli/schema [:=> [:cat [:sequential :int] :double] [:maybe :int]]}
+  [xs q]
+  (when (seq xs)
+    (let [sorted (vec (sort xs))]
+      (nth sorted (max 0 (dec (long (Math/ceil (* q (count sorted))))))))))
+
+(defn- quantiles
+  "The median and p90 of the turns to green of `grades`."
+  {:malli/schema [:=> [:cat [:sequential :map]] :seon.grade/quantiles]}
+  [grades]
+  (let [to-green (keep :seon.grade/turns-to-green grades)]
+    (cond-> {}
+      (seq to-green) (assoc :seon.grade/median (quantile to-green 0.5) :seon.grade/p90 (quantile to-green 0.9)))))
+
+(defn- top
+  "The `n` names of `pairs` ([name forms] ...) with the most forms summed, most first."
+  {:malli/schema [:=> [:cat [:sequential [:tuple :seon.schema/value :int]] pos-int?] [:vector :seon.grade/top]]}
+  [pairs n]
+  (->> (reduce (fn [m [k forms]] (update m k (fnil + 0) forms)) {} pairs)
+       (sort-by (juxt (comp - val) (comp str key)))
+       (take n)
+       (mapv (fn [[k forms]] {:seon.grade/name k :seon.grade.waste/forms forms}))))
+
+(defn report
+  "The turns metric over `grades` (pulled grade entities with their waste): the attempts and how many ended done, the
+  median and p90 of turns to green, the same per program commit in the order each commit's first graded attempt
+  ended (a grade naming no commit counts under :unknown), and the ten waste rules and producers that cost most wasted
+  forms."
+  {:malli/schema [:=> [:cat [:sequential :map]] :seon.grade/report]}
+  [grades]
+  (let [windows (->> (group-by #(:seon.grade/git-sha % :unknown) grades)
+                     (map (fn [[commit in]]
+                            {:seon.grade/commit commit
+                             :seon.grade/from (first (sort (map :seon.grade/at in)))
+                             :seon.grade/attempts (count in)
+                             :seon.grade/green (count (filter :seon.grade/turns-to-green in))
+                             :seon.grade/quantiles (quantiles in)
+                             :seon.grade/median-turns (quantile (map :seon.grade/turns in) 0.5)}))
+                     (sort-by (comp inst-ms :seon.grade/from))
+                     vec)]
+    {:seon.grade/attempts (count grades)
+     :seon.grade/green (count (filter :seon.grade/turns-to-green grades))
+     :seon.grade/quantiles (quantiles grades)
+     :seon.grade/windows windows
+     :seon.grade/top-rules (top (mapcat :seon.grade/rules grades) 10)
+     :seon.grade/top-producers (top (for [g grades w (:seon.grade/waste g)] [(:seon.grade.waste/producer w) (:seon.grade.waste/forms w)]) 10)}))
+
+(defn grades
+  "Every grade main `database` holds, pulled with its waste; or the read's refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or [:vector :map] :seon.error/value]]}
+  [database]
+  (let [rows (db/q '[:find [(pull ?g [* {:seon.grade/waste [*]}]) ...] :where [?g :seon.grade/assignment _]] database)]
+    (if (refusal/error? rows) rows (vec (sort-by :seon.grade/assignment rows)))))
+
+(defn report-html
+  "`:seon.render/html` of :seon.grade/report: the headline median and p90 of turns to green, a row per commit window,
+  and the costliest waste rules and producers."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [{value :seon.render/value}]
+  (let [q (:seon.grade/quantiles value)
+        commit #(let [c (:seon.grade/commit %)] (if (string? c) (subs c 0 9) (name c)))]
+    [:article {:class "seon-turns-report"}
+     [:header
+      [:h2 "Turns to green"]
+      [:span (str "median " (:seon.grade/median q "-") " · p90 " (:seon.grade/p90 q "-") " · "
+                  (:seon.grade/green value) " of " (:seon.grade/attempts value) " attempts green")]]
+     (into [:table {:class "seon-turns-windows"}
+            [:tr [:th "commit"] [:th "attempts"] [:th "green"] [:th "median to green"] [:th "p90"] [:th "median turns"]]]
+           (map (fn [w] [:tr [:td (commit w)] [:td (str (:seon.grade/attempts w))] [:td (str (:seon.grade/green w))]
+                         [:td (str (get-in w [:seon.grade/quantiles :seon.grade/median] "-"))]
+                         [:td (str (get-in w [:seon.grade/quantiles :seon.grade/p90] "-"))]
+                         [:td (str (:seon.grade/median-turns w))]]))
+           (:seon.grade/windows value))
+     (into [:ol {:class "seon-turns-waste"}]
+           (map (fn [{n :seon.grade/name forms :seon.grade.waste/forms}] [:li (str n " · " forms " wasted forms")]))
+           (concat (:seon.grade/top-rules value) (:seon.grade/top-producers value)))]))
