@@ -1,0 +1,300 @@
+diff --git a/config/default.edn b/config/default.edn
+index 30f794db4..39aa41ce3 100644
+--- a/config/default.edn
++++ b/config/default.edn
+@@ -33,6 +33,14 @@
+  :seon.config.flow.io/concurrency 64
+  :seon.config.flow.io/queue-depth 64
+ 
++ ; The embed server (EmbeddingGemma 2 text path, MLX bf16): 5.7 ms per 100-token text, about 1,000 per second batched.
++ ; Store 256 Matryoshka dimensions (1 MTEB point below 768, a third of the bytes).
++ :seon.config.embed/endpoint "http://127.0.0.1:8701/v1/embed"
++ :seon.config.embed/model "eg2-text-bf16"
++ :seon.config.embed/dimension 256
++ :seon.config.embed/batch-size 256
++ :seon.config.embed/timeout-ms 30000
++
+  ; Unit: milliseconds a DETACHED capability request may run before its own
+  ; interrupt arm cuts it. Background work deliberately does not inherit the
+  ; submitting turn's deadline (that is what `my.background` is for), so this
+diff --git a/src/seon/embed.clj b/src/seon/embed.clj
+new file mode 100644
+index 000000000..71e0257f5
+--- /dev/null
++++ b/src/seon/embed.clj
+@@ -0,0 +1,144 @@
++(ns seon.embed
++  "Embeddings of text, keyed by the content they embed: `seon.cache` is the hot
++  layer, a konserve store the durable one, and the embed server is reached only
++  for text neither holds."
++  (:require [clojure.data.json :as json]
++            [konserve.core :as k]
++            [konserve.filestore :as filestore]
++            [seon.cache]
++            [seon.error.refusal :as error]
++            [seon.schema :as schema])
++  (:import [java.net URI]
++           [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse
++            HttpResponse$BodyHandlers]
++           [java.nio ByteBuffer ByteOrder]
++           [java.nio.charset StandardCharsets]
++           [java.time Duration]
++           [java.util Base64]))
++
++(set! *warn-on-reflection* true)
++
++(defonce ^{:private true :tag HttpClient
++           :doc "The process's one client of the embed server: it owns the connection pool."}
++  client
++  (.build (HttpClient/newBuilder)))
++
++(defn embedding-key
++  "The content identity of `text` embedded by `settings`' model at its dimension for `task`."
++  {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/task :seon.embed/text] :seon.embed/key]}
++  [{:seon.config.embed/keys [model dimension]} task text]
++  (schema/sha-256 (mapv #(.getBytes (str %) StandardCharsets/UTF_8)
++                        [model "\u0000" task "\u0000" dimension "\u0000" text])))
++
++(defn- float-octets
++  "`embedding` as little-endian float32 bytes."
++  {:malli/schema [:=> [:cat :seon.embed/vector] bytes?]}
++  [embedding]
++  (let [buffer (.order (ByteBuffer/allocate (* 4 (count embedding))) ByteOrder/LITTLE_ENDIAN)]
++    (run! #(.putFloat buffer (float %)) embedding)
++    (.array buffer)))
++
++(defn- octet-floats
++  "The `dimension`-float vectors little-endian float32 `octets` hold, in order."
++  {:malli/schema [:=> [:cat bytes? :seon.config.embed/dimension] [:vector :seon.embed/vector]]}
++  [octets dimension]
++  (let [buffer (.asFloatBuffer (.order (ByteBuffer/wrap octets) ByteOrder/LITTLE_ENDIAN))
++        size (quot (.remaining buffer) dimension)]
++    (mapv (fn [row] (mapv #(.get buffer (int (+ (* row dimension) %))) (range dimension)))
++          (range size))))
++
++(defn request!
++  "The embed server's vectors for `texts`, in order, or the unreachable error
++  naming its endpoint: the one interop edge."
++  {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/task [:vector :seon.embed/text]]
++                  [:or [:vector :seon.embed/vector] :seon.embed/unreachable-error]]}
++  [{:seon.config.embed/keys [endpoint dimension timeout-ms]} task texts]
++  (let [unreachable (fn [reason cause]
++                      (error/error :seon.embed/unreachable-error
++                                   (cond-> {:seon.error/operation 'seon.embed/request!
++                                            :seon.error/message "The embed server did not answer with embeddings."
++                                            :seon.error/fix "Start the embed server (bin/seon start runs it beside the cluster)."
++                                            :seon.config.embed/endpoint endpoint
++                                            :seon.embed/reason reason}
++                                     cause (assoc :seon.error/throwable cause))))]
++    (try
++      (let [body (json/write-str {:texts texts :task task :dim dimension :encoding "f32"})
++            http (-> (HttpRequest/newBuilder (URI/create endpoint))
++                     (.timeout (Duration/ofMillis (long timeout-ms)))
++                     (.header "content-type" "application/json")
++                     (.POST (HttpRequest$BodyPublishers/ofString body))
++                     .build)
++            ^HttpResponse response (.send client http (HttpResponse$BodyHandlers/ofString))]
++        (if (= 200 (.statusCode response))
++          (octet-floats (.decode (Base64/getDecoder) ^String (get (json/read-str (.body response)) "vectors"))
++                        dimension)
++          (unreachable (str "HTTP " (.statusCode response)) nil)))
++      (catch java.io.IOException cause
++        (unreachable (or (ex-message cause) (.getName (class cause))) cause)))))
++
++(defn open-store
++  "The durable embedding store in directory `dir`, created when absent. Its
++  writes skip the fsync: a write a crash loses costs one re-embed of its text."
++  {:malli/schema [:=> [:cat [:string {:min 1}]] :seon.embed/store]}
++  [dir]
++  (filestore/connect-fs-store dir :opts {:sync? true} :config {:sync-blob? false}))
++
++(defn- stored
++  "The octets `store` holds for each of `content-keys` it has."
++  {:malli/schema [:=> [:cat :seon.embed/store [:vector :seon.embed/key]] [:map-of :seon.embed/key bytes?]]}
++  [store content-keys]
++  (into {} (keep (fn [content-key] (when-let [octets (k/get store content-key nil {:sync? true})] [content-key octets])))
++        content-keys))
++
++(defn- store!
++  "Write each `[content-key embedding]` of `pairs` to `store`."
++  {:malli/schema [:=> [:cat :seon.embed/store [:vector [:tuple :seon.embed/key :seon.embed/vector]]] :nil]}
++  [store pairs]
++  (run! (fn [[content-key embedding]] (k/assoc store content-key (float-octets embedding) {:sync? true})) pairs))
++
++(defn- hot!
++  "Retain `embedding` under `content-key` in `cache`, answering it."
++  {:malli/schema [:=> [:cat :seon.cache/cache :seon.embed/key :seon.embed/vector] :seon.embed/vector]}
++  [cache content-key embedding]
++  (seon.cache/lookup cache ::embedding content-key #(+ 64 (* 24 (count %))) (constantly embedding) some?))
++
++(defn embed!
++  "The embeddings of `texts` for `task`, in order, with how many came from each
++  layer: `cache` first, then `store`, then one `request` per `settings`'
++  batch-size of the rest, each written to `store` and `cache` once. Text
++  repeated within `texts` is requested once. The unreachable error when the
++  embed server is needed and does not answer."
++  {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/store :seon.cache/cache :seon.embed/request
++                       :seon.embed/task [:vector :seon.embed/text]]
++                  [:or :seon.embed/embedded :seon.embed/unreachable-error]]}
++  [settings store cache request task texts]
++  (let [content-keys (mapv #(embedding-key settings task %) texts)
++        hot (into {} (keep (fn [content-key]
++                             (when-let [embedding (seon.cache/present cache ::embedding content-key)]
++                               [content-key embedding])))
++                  (distinct content-keys))
++        durable (into {} (map (fn [[content-key octets]]
++                                [content-key (hot! cache content-key
++                                                   (first (octet-floats octets (:seon.config.embed/dimension settings))))]))
++                      (stored store (into [] (comp (distinct) (remove hot)) content-keys)))
++        missing (into [] (comp (map vector) (remove (fn [[content-key]] (or (hot content-key) (durable content-key))))
++                               (distinct))
++                      content-keys)
++        missing-text (into {} (map vector content-keys texts))
++        requested (reduce (fn [found batch]
++                            (let [answer (request settings task (mapv (comp missing-text first) batch))]
++                              (if (error/error? answer)
++                                (reduced answer)
++                                (let [pairs (mapv (fn [[content-key] embedding] [content-key embedding]) batch answer)]
++                                  (store! store pairs)
++                                  (into found (map (fn [[content-key embedding]] [content-key (hot! cache content-key embedding)]))
++                                        pairs)))))
++                          {}
++                          (partition-all (:seon.config.embed/batch-size settings) missing))]
++    (if (error/error? requested)
++      requested
++      (let [found (merge hot durable requested)]
++        {:seon.embed/vectors (mapv found content-keys)
++         :seon.embed/hot (count hot)
++         :seon.embed/durable (count durable)
++         :seon.embed/requested (count requested)}))))
+diff --git a/test/seon/embed_test.clj b/test/seon/embed_test.clj
+new file mode 100644
+index 000000000..d71a98aff
+--- /dev/null
++++ b/test/seon/embed_test.clj
+@@ -0,0 +1,55 @@
++(ns seon.embed-test
++  "Embeddings keyed by content: each text reaches the embed server once, across caches and restarts."
++  (:require [clojure.java.io :as io]
++            [clojure.test :refer [deftest is testing]]
++            [seon.cache]
++            [seon.embed :as embed])
++  (:import [java.nio.file Files]
++           [java.nio.file.attribute FileAttribute]))
++
++(def ^:private settings
++  #:seon.config.embed{:endpoint "http://127.0.0.1:8701/v1/embed" :model "test-model" :dimension 4
++                      :batch-size 2 :timeout-ms 2000})
++
++(deftest a-text-is-requested-once-across-a-restart
++  ;; The request is the external effect, passed as a value that counts its texts.
++  (let [dir (str (Files/createTempDirectory "seon-embed-" (make-array FileAttribute 0)))
++        requested (atom [])
++        request (fn [_settings _task texts]
++                  (swap! requested into texts)
++                  (mapv (fn [text] (mapv #(float (/ (+ % (count text)) 10.0)) (range 4))) texts))
++        texts ["seon.db/transact!" "seon.db/pull" "seon.db/transact!" "seon.cache/lookup"]]
++    (try
++      (let [store (embed/open-store dir)
++            first-run (embed/embed! settings store (seon.cache/create 1000000) request "similarity" texts)
++            restarted (embed/embed! settings (embed/open-store dir) (seon.cache/create 1000000) request "similarity" texts)
++            hot-cache (seon.cache/create 1000000)
++            _ (embed/embed! settings store hot-cache request "similarity" (subvec texts 0 2))
++            hot (embed/embed! settings store hot-cache request "similarity" (subvec texts 0 2))]
++        (testing "the first run requests each distinct text once, in batches of the dial"
++          (is (= ["seon.db/transact!" "seon.db/pull" "seon.cache/lookup"] @requested))
++          (is (= 3 (:seon.embed/requested first-run)))
++          (is (= (get-in first-run [:seon.embed/vectors 0]) (get-in first-run [:seon.embed/vectors 2]))))
++        (testing "a fresh cache over the same store (a restart) requests nothing"
++          (is (= 0 (:seon.embed/requested restarted)))
++          (is (= 3 (:seon.embed/durable restarted)))
++          (is (= (:seon.embed/vectors first-run) (:seon.embed/vectors restarted))))
++        (testing "a warm cache reads neither the store nor the server"
++          (is (= {:seon.embed/hot 2 :seon.embed/durable 0 :seon.embed/requested 0}
++                 (dissoc hot :seon.embed/vectors))))
++        (testing "another task is another content key"
++          (is (= 3 (:seon.embed/requested
++                    (embed/embed! settings store (seon.cache/create 1000000) request "document" texts))))))
++      (finally
++        (run! io/delete-file (reverse (file-seq (io/file dir))))))))
++
++(deftest an-unreachable-embed-server-is-the-declared-error
++  (let [dir (str (Files/createTempDirectory "seon-embed-" (make-array FileAttribute 0)))]
++    (try
++      (let [answer (embed/embed! (assoc settings :seon.config.embed/endpoint "http://127.0.0.1:9/v1/embed")
++                                 (embed/open-store dir) (seon.cache/create 1000000) embed/request!
++                                 "similarity" ["seon.db/pull"])]
++        (is (= :seon.embed/unreachable-error (:seon.error/type answer)))
++        (is (= "http://127.0.0.1:9/v1/embed" (:seon.config.embed/endpoint answer))))
++      (finally
++        (run! io/delete-file (reverse (file-seq (io/file dir))))))))
+diff --git a/resources/seon/schemas/seon.embed.edn b/resources/seon/schemas/seon.embed.edn
+new file mode 100644
+index 000000000..a85fcd80a
+--- /dev/null
++++ b/resources/seon/schemas/seon.embed.edn
+@@ -0,0 +1,27 @@
++#:seon.embed{:task
++             [:enum {:description "The embed server's task prefix: similarity for names, document for declaration text, code for a query."}
++              "similarity" "document" "code" "query"],
++             :text [:string {:min 1}],
++             :key [:string {:min 64, :max 64, :description "SHA-256 of model, task, dimension and text: an embedding's content identity."}],
++             :vector [:vector {:min 1} float?],
++             :settings
++             [:map
++              [:seon.config.embed/endpoint :seon.config.embed/endpoint]
++              [:seon.config.embed/model :seon.config.embed/model]
++              [:seon.config.embed/dimension :seon.config.embed/dimension]
++              [:seon.config.embed/batch-size :seon.config.embed/batch-size]
++              [:seon.config.embed/timeout-ms :seon.config.embed/timeout-ms]],
++             :store [:map {:description "The durable konserve store of embeddings, keyed by :seon.embed/key."}],
++             :request ifn?,
++             :reason [:string {:min 1}],
++             :unreachable-error
++             [:merge :seon.error/base
++              [:map {:error/message "must name the endpoint it could not reach"}
++               [:seon.config.embed/endpoint :seon.config.embed/endpoint]
++               [:seon.embed/reason :seon.embed/reason]]],
++             :embedded
++             [:map
++              [:seon.embed/vectors [:vector :seon.embed/vector]]
++              [:seon.embed/hot nat-int?]
++              [:seon.embed/durable nat-int?]
++              [:seon.embed/requested nat-int?]]}
+diff --git a/resources/seon/schemas/seon.config.embed.edn b/resources/seon/schemas/seon.config.embed.edn
+new file mode 100644
+index 000000000..65320b9f7
+--- /dev/null
++++ b/resources/seon/schemas/seon.config.embed.edn
+@@ -0,0 +1,31 @@
++#:seon.config.embed{:endpoint
++                    [:string
++                     {:min 1,
++                      :description
++                      "The embed server's embedding URL: POST texts, task, dim and encoding.",
++                      :seon.config/dial true}],
++                    :model
++                    [:string
++                     {:min 1,
++                      :description
++                      "The model the embed server serves; part of every embedding key, so new weights never reuse old vectors.",
++                      :seon.config/dial true}],
++                    :dimension
++                    [:int
++                     {:min 1,
++                      :max 768,
++                      :description
++                      "The Matryoshka dimension stored per embedding.",
++                      :seon.config/dial true}],
++                    :batch-size
++                    [:int
++                     {:min 1,
++                      :description
++                      "Texts per embed-server request.",
++                      :seon.config/dial true}],
++                    :timeout-ms
++                    [:int
++                     {:min 1,
++                      :description
++                      "The deadline of one embed-server request.",
++                      :seon.config/dial true}]}
