@@ -150,8 +150,8 @@
          roots)))
 
 (defn gate-input?
-  "True when a change to `path` is a gate input: under one of `roots`
-  (`input-roots`) or under a program-graph root."
+  "True when a change to `path` is a gate input.
+  It is one when under one of `roots` (`input-roots`) or a program-graph root."
   {:malli/schema [:=> [:cat [:set [:string {:min 1}]] [:string {:min 1}]] :boolean]}
   [roots path]
   (or (input-path? roots path)
