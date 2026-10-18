@@ -191,6 +191,41 @@
              (finally (store/release-branch! fork))))
          (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch]))))))))
 
+(deftest a-program-commit-folds-its-branchs-interpret-set
+  ;; A new program commit on a branch changes a few rows; its interpret set I(B, L) is the one its previous commit
+  ;; held, folded forward by the rows the commit changed. Before, every program commit (each new def) read every
+  ;; function digest and admission datom of the branch again.
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           store (:seon.store/store (support/execution-handle connection))
+           branch (keyword (str "interpret-fold-" (seon.id/id)))
+           request {:seon.store/store store :seon.store/branch branch
+                    :seon.cluster.registry/from (db/commit-id database) :seon.db/db database}
+           loaded (#'evaluation/loaded-program database)
+           plan #(#'evaluation/overlay-plan (db/db %) loaded)
+           define! (fn [fork sym source]
+                     (support/transacted! fork (support/replacement-tx (db/db fork) [:seon.fn/sym sym] source
+                                                                        {:seon.schema.admission/source :agent})))]
+       (is (:seon.cluster/created? (registry/fork! request)))
+       (try
+         (let [fork (store/open-branch! store branch)]
+           (try
+             (define! fork 'seon.sci.eval-test/folded-one "(defn folded-one [] 1)")
+             (let [first-plan (measured ::interpret-set-derived #(plan fork))
+                   _ (define! fork 'seon.sci.eval-test/folded-two "(defn folded-two [] 2)")
+                   folded (measured ::interpret-set-folded #(plan fork))
+                   derived (#'evaluation/derive-overlay-plan (db/db fork) loaded)]
+               (is (= 1 (profile/calls-of first-plan 'seon.sci.eval/derive-overlay-plan)))
+               (is (zero? (profile/calls-of folded 'seon.sci.eval/derive-overlay-plan))
+                   "the second program commit folds the first commit's plan")
+               (is (= derived (:seon.profile/value folded)) "the folded plan is the one a derivation gives")
+               (is (contains? (:seon.sci.eval/overridden (:seon.profile/value folded)) 'seon.sci.eval-test/folded-two))
+               (is (< (:seon.profile/alloc-bytes folded) (:seon.profile/alloc-bytes first-plan))
+                   "folding allocates less than deriving"))
+             (finally (store/release-branch! fork))))
+         (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch]))))))))
+
 (deftest ^{:seon/tasks #{'seon.sci.eval/install-row-is-twice-as-slow-after-the-stale-var-fix}}
   a-core-row-installs-without-opening-the-loaded-program
   (support/with-database

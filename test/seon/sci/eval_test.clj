@@ -2799,8 +2799,8 @@
            called (:seon.profile/called measured)
            plan (:seon.profile/value measured)]
        (is (contains? (into (::eval/overridden plan) (::eval/added plan)) 'my.program/planned))
-       (is (= 1 (get called 'seon.sci.eval/function-digests 0))
-           "the branch's digests are read once")
+       (is (zero? (get called 'seon.sci.eval/function-digests 0))
+           "the branch's digests are read where they differ from the loaded commit's, never whole")
        (is (< (get called 'seon.db/pull 0) 10)
            "no declaration is pulled one by one")))))
 
