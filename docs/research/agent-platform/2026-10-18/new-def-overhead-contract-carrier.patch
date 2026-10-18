@@ -1,0 +1,22 @@
+--- a/src/seon/cluster/source.clj	2026-10-18 10:36:23.769421238 +0700
++++ b/src/seon/cluster/source.clj	2026-10-18 10:51:30.522960456 +0700
+@@ -1339,16 +1339,14 @@
+ (defn contract-gaps
+   "What keeps the functions among `identities` that `database` holds from a complete `:malli/schema`, private ones
+   included, judged by the one function-contract rule (`seon.fn/contract-findings`): each missing contract and each
+-  unjustified `:any` or `:some` slot, with its position. Macros, host-bound declarations and value definitions
+-  (`seon.fn/value-definition?`) carry no arity contract. Throws a refused read."
++  unjustified `:any` or `:some` slot, with its position. Only a function that carries an arity contract is judged
++  (`seon.fn/contract-carrier?`). Throws a refused read."
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set] [:vector :seon.fn.contract/finding-row]]}
+   [database identities]
+   (let [judged (into #{} (keep (fn [[a f]]
+                                  (when (= :seon.fn/sym a)
+                                    (let [entity (db/pull database [:db/id :seon.fn/macro? :seon.fn/host-bound? :seon.fn/arglists] [a f])]
+-                                     (when (and (:db/id entity) (not (:seon.fn/macro? entity))
+-                                                (not (:seon.fn/host-bound? entity))
+-                                                (not (fn/value-definition? (:seon.fn/arglists entity))))
++                                     (when (and (:db/id entity) (fn/contract-carrier? entity))
+                                        f)))))
+                      identities)
+         findings (if (seq judged) (fn/contract-findings database {:seon.fn.contract/selected judged}) [])]

@@ -762,11 +762,13 @@
   (`seon.cluster.source/contract-gaps`, the one rule: missing, :any or :some): `:seon.eval/uncontracted` (those
   symbols), `:seon.eval/contract-gaps` (each gap's slot) and `:seon.eval/uncontracted-count`, the agent's
   functions still with a gap after that entry (earlier evaluations' still with one, less what the batch
-  redefined or removed, plus this form's). One read, and only when some entry defines a function."
+  redefined or removed, plus this form's). One read, and only when some entry defines a function that carries a
+  contract (`seon.fn/contract-carrier?`): a value definition, macro or host-bound declaration has none to miss."
   {:malli/schema [:=> [:cat :map [:maybe :seon.db/database-value] [:maybe :string] [:sequential :map]]
                   [:map-of :seon.cluster.eval/ordinal :map]]}
   [request working agent-id entries]
-  (let [own (fn [{change :seon.batch/change}] (into #{} (keep :seon.fn/sym) (:seon.batch/entities change)))]
+  (let [own (fn [{change :seon.batch/change}]
+              (into #{} (comp (filter sfn/contract-carrier?) (keep :seon.fn/sym)) (:seon.batch/entities change)))]
     (if-not (and working agent-id (some (comp seq own) entries))
       {}
       (let [judged (judged-database request working entries)

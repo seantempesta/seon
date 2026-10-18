@@ -47,11 +47,11 @@
    {:op :new-def
     :why "The unchanged request plus one form's analysis, digest and entity (~30 datoms); no test reaches a new name: proportional to 1 form."
     :estimate {:alloc-mb 16.0 :calls 2500 :reads 40 :ms 60.0}
-    :overrun '{:task seon.repl/a-new-def-costs-a-hundred-forty-megabytes :alloc-mb 117.6 :calls 16684 :reads 207}}
+    :overrun '{:task seon.repl/a-new-def-costs-a-hundred-forty-megabytes :alloc-mb 111.1 :calls 15558 :reads 202}}
    {:op :unmap-one-def
     :why "The unchanged request plus one `my.program/ns-unmap!` of a def nothing calls: the def's referrers as indexed reads of its edges (none), read once at the form and once where the writer re-derives the retraction, and the retraction of its ~30 datoms; no test reaches it: proportional to the definition's edges, never to the program. Its overrun is the program-change request's own, which a new def shares."
     :estimate {:alloc-mb 12.0 :calls 2500 :reads 60 :ms 80.0}
-    :overrun '{:task seon.repl/a-new-def-costs-a-hundred-forty-megabytes :alloc-mb 97.5 :calls 14643 :reads 178}}
+    :overrun '{:task seon.repl/a-new-def-costs-a-hundred-forty-megabytes :alloc-mb 197.3 :calls 15184 :reads 178}}
    {:op :redefine-one-form
     :why "A new def plus finding the one test reaching the changed digest and running it: proportional to 1 form and 1 reaching test."
     :estimate {:alloc-mb 24.0 :calls 4000 :reads 60 :ms 100.0}
