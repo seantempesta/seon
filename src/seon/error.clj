@@ -36,7 +36,8 @@
             [malli.registry :as mr]
             [seon.schema.internal :as internal]
             [seon.sci.admit :as admit]
-            [seon.config :as config]))
+            [seon.config :as config]
+            [seon.cache]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -1994,30 +1995,77 @@
     (into #{} (remove empty?) (.split ^String (str/replace text \. \-) "-"))
     #{}))
 
+(defn- entries-content-key
+  "A content key for the candidate entry table: the candidates' symbols, sorted and hashed."
+  {:malli/schema [:=> [:cat [:sequential :qualified-symbol]] :string]}
+  [candidates]
+  (str (hash (into (sorted-set) (map str) candidates))
+       ":" (count candidates)))
+
+(defn- candidate-entries
+  "[[sym name-words ns-words joined-words]] for each candidate, and the word frequencies of the whole set."
+  {:malli/schema [:=> [:cat [:sequential :qualified-symbol]]
+                  [:map [:seon.error/entries [:vector :seon.schema/value]]
+                        [:seon.error/frequency :map]]]}
+  [candidates]
+  (let [entries (mapv (fn [sym]
+                        (let [name-words (name-tokens (name sym))
+                              ns-words (name-tokens (namespace sym))]
+                          [sym name-words ns-words (into name-words ns-words)]))
+                      candidates)]
+    {:seon.error/entries entries
+     :seon.error/frequency (frequencies (mapcat (fn [[_ _ _ joined]] joined) entries))}))
+
+(defn- cached-candidate-entries
+  "[[candidate-entries]] for `candidates`, derived once per content key."
+  {:malli/schema [:=> [:cat [:sequential :qualified-symbol]] :map]}
+  [candidates]
+  (seon.cache/lookup
+   ::candidate-entries
+   (entries-content-key candidates)
+   #(* 512 (count (:seon.error/entries %)))
+   #(candidate-entries candidates)))
+
+(defn- shared-word-entries
+  "The cached entries for `candidates` whose words include one of `wanted-words`,
+  in candidate order, plus the frozen word frequency over the whole set."
+  {:malli/schema [:=> [:cat [:sequential :qualified-symbol] [:set :string]]
+                  [:map [:seon.error/total :int]
+                        [:seon.error/frequency :map]
+                        [:seon.error/entries [:vector :seon.schema/value]]]]}
+  [candidates wanted-words]
+  (let [{:seon.error/keys [entries frequency]} (cached-candidate-entries candidates)]
+    {:seon.error/total (count entries)
+     :seon.error/frequency frequency
+     :seon.error/entries (into [] (filter (fn [[_ _ _ joined]] (some wanted-words joined))) entries)}))
+
 (defn nearest-names
   "At most `limit` of the qualified symbols `candidates` that `wanted` may
   have meant, nearest first: by the words they share with it, rare words
   counting most and a word shared by both names more than one shared across
   namespace and name, then by the spelling distance of the names. The
-  candidates are the caller's: the public declarations, tests included or not."
+  candidates are the caller's: the public declarations, tests included or not.
+
+  The candidates' words and frequencies are derived once per candidate set
+  (a `seon.cache` kind keyed by its content), so a warm call tokenizes only
+  `wanted`; only the candidates sharing a word with it, and those whose name
+  is within two edits of it, go through the spelling pass."
   {:malli/schema [:=> [:cat :symbol [:sequential :qualified-symbol] pos-int?] [:vector :qualified-symbol]]}
   [wanted candidates limit]
   (let [wanted-name (name wanted)
         wanted-name-words (name-tokens wanted-name)
         wanted-words (into wanted-name-words (name-tokens (namespace wanted)))
-        entries (mapv (fn [sym] [sym (name-tokens (name sym)) (name-tokens (namespace sym))]) candidates)
-        frequency (frequencies (mapcat (fn [[_ name-words ns-words]] (into name-words ns-words)) entries))
-        total (count entries)
-        score (fn [[_ name-words ns-words]]
+        {:seon.error/keys [total frequency entries]} (shared-word-entries candidates wanted-words)
+        score (fn [[_ name-words _ joined]]
                 (reduce (fn [sum word]
                           (+ sum (* (Math/log (/ (inc total) (inc (get frequency word 0))))
                                     (if (and (wanted-name-words word) (name-words word)) 1.0 0.5))))
                         0.0
-                        (filter wanted-words (into name-words ns-words))))
+                        (filter wanted-words joined)))
         keyed (into []
-                    (keep (fn [[sym :as entry]]
-                            (let [distance (me/levenshtein wanted-name (name sym))
-                                  shared (score entry)]
+                    (keep (fn [[sym _ _ _ :as entry]]
+                            (let [shared (score entry)
+                                  distance (me/levenshtein wanted-name (name sym))]
                               (when (or (pos? shared) (<= distance 2))
                                 [[(- shared) distance (str sym)] sym]))))
                     entries)]
