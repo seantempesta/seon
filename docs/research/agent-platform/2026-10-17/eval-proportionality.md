@@ -26,7 +26,7 @@ one throwaway check JVM each, measured requests through MCP `eval_clj`). Parent 
 | `:seon-db-nine-forms` (9 unchanged `seon.db` forms) | 80 / 12,000 / 150 / 400 | 8,851 / 929,662 / 23,740 / 3,797 | 5,857 / 587,548 / 22,905 / 2,073; **871 / 93,090 / 1,358 / under 1,200** with the arm skip (below) | derive (now dominant), evaluate | `seon.repl/re-evaluating-nine-seon-db-forms-allocates-nine-gigabytes` |
 | `:redefine-one-form` | 24 / 4,000 / 60 | 289.5 / 41,028 / 316 | 289.8 (unchanged) | settle, test step, unattributed | `seon.repl/redefining-one-form-costs-three-hundred-megabytes` |
 | `:current-state-with-task` | 24 / 3,000 / 100 | 193.9 / 37,832 / 211 | 193.4 | context | `seon.context/one-agents-current-state-costs-hundreds-of-megabytes` |
-| `:new-def` | 16 / 2,500 / 40 | 145.8 / 17,245 / 225 | 143.8; 111.1 / 15,558 / 202 after 70ba7304b and d0a465cc7; **63.7 / 13,972 / 203** after the overlay fold and the projection fold (section below) | test step, settle, derive | `seon.repl/a-new-def-costs-a-hundred-forty-megabytes` |
+| `:new-def` | 16 / 2,500 / 40 | 145.8 / 17,245 / 225 | 143.8; 111.1 / 15,558 / 202 after 70ba7304b and d0a465cc7; **63.7 / 13,972 / 203** after the overlay fold and the projection fold (55.0 / 14,103 / 203 in a later run of the same commit; section below) | test step, settle, derive | `seon.repl/a-new-def-costs-a-hundred-forty-megabytes` |
 | `:merge-one-function` | 48 / 8,000 / 200 | 104.4 / 28,305 | 117.0 | merge | `seon.cluster.source/accepting-a-one-function-merge-allocates-hundreds-of-megabytes` |
 | `:fresh-agent-first-request` | 12 / 1,500 / 30 | 106.3 / 8,112 / 63 | 104.3 | custody (fork), settle | `seon.cluster.agent/a-fresh-agents-environment-costs-one-fork` |
 | `:reuse-one-unchanged-test` | 8 / 1,500 / 25 | 26.4 / 9,083 / 72 | 27.6 | test step | `my.test/reusing-one-unchanged-test-costs-nine-thousand-calls` |
@@ -115,6 +115,8 @@ no test; about 16 MB.
 
 The empty-collection scan is general: 105 `src` queries take a `[?x ...]` input, and Datahike (raw `d/q`) scans their
 clauses when it is empty (9.3 MB / 11 ms on default); only some callers skip the call.
+
+`:cold-stale-merge-members` reads rose from 168 (76d4f4a68) to 481 (6c79ad9c8), twice each on throwaway check JVMs seeded the same hour, allocation unchanged (506-513 MB); the same `seon.test/stale` on default at 6c79ad9c8 reads 24 and calls none of the projection fold's functions, so the mechanism is open; the every-commit ratchet is red on it.
 
 `:unmap-one-def` rose from 102.8-109.9 MB (5099c7e16, d24ad58e7) to 178.6-197.3 MB at 50e879526 and later, back to
 back on throwaway check JVMs; `seon.error/nearest-names`, that commit's only `src` change, is not called by the
