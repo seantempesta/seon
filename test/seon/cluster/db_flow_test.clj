@@ -1046,6 +1046,7 @@
                 agent-id (str "attempt/" key-one)
                 head #(db/branch-database (db/db connection) branch)
                 agent-branches (fn [] (set (filter #(str/starts-with? (name %) "agent-") (registry/branches store))))]
+            (is (= agent-id (:seon.agent/id chain)) "the chain answer names the agent its first task's attempt runs as")
             (try
               (pass! handle routing)
               (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]

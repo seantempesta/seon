@@ -551,9 +551,10 @@
            from-branch (keyword (str "chain-" (handle "again")))]
        (try
          (is (= {:seon.chain/branch (keyword (str "chain-" (handle "fix"))) :seon.chain/first (handle "fix")
-                 :seon.task/handles (mapv handle names)}
+                 :seon.task/handles (mapv handle names)
+                 :seon.agent/id (task/attempt-agent-id (id/id [(handle "fix") 1]))}
                 answer)
-             "the answer names the branch, the first task and every task in chain order")
+             "the answer names the branch, the first task, every task in chain order and its first attempt's agent")
          (is (contains? (registry/branches store) branch) "the chain's branch exists")
          (let [on-branch (chain-db)
                tasks (mapv #(pulled on-branch %) names)]

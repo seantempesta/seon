@@ -188,8 +188,9 @@
                  [:seon.chain/from {:optional true} :seon.chain/from] [:seon.chain/config {:optional true} :seon.chain/config]
                  [:seon.chain/merge? {:optional true} :seon.chain/merge?]]
  :handles [:vector {:min 1 :description "Task handles in order: a chain's along :seon.task/next, or a write's as given (seon.task/create-all!)."} :seon.task/handle]
- :chain [:map {:description "A chain as seon.task/chain! answers it: its branch, its first task and every task in order."}
-         [:seon.chain/branch :seon.chain/branch] [:seon.chain/first :seon.chain/first] [:seon.task/handles :seon.task/handles]]
+ :chain [:map {:description "A chain as seon.task/chain! answers it: its branch, its first task, every task in order and the agent id its first task's next attempt runs as (seon.task/attempt-agent-id), which an :outside agent enters by."}
+         [:seon.chain/branch :seon.chain/branch] [:seon.chain/first :seon.chain/first] [:seon.task/handles :seon.task/handles]
+         [:seon.agent/id :seon.agent/id]]
  :edges [:map [:seon.task/subjects :seon.task/subjects] [:seon.task/referrers :seon.task/referrers]]
  :desired-config [:map {:closed true :description "The config a chain task runs under: every dial the launch and the turn loop read on its chain branch, each decided (a value of its dial schema, or absent by the explicit decision seon.config/effective answers over the shipped config/default.edn), read from the branch's own config row. The cluster dials root reads from main (:seon.config.agent/max-running, :seon.config.agent/keep-ended-branches?) are not here. seon.task-test/the-runnable-schema-names-every-dial-the-launch-reads checks the list against the readers."}
                   [:seon.config.agent/inbox-size {:optional true} :seon.config.agent/inbox-size]

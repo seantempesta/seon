@@ -1269,6 +1269,27 @@
       (some #(unrunnable projection `chain! (runnable projection (identified %) branch config))
             (cons (first entities) (filter (comp #{:running} :seon.task/execution) (rest entities)))))))
 
+(defn- next-attempt
+  "The number and identity `seon.id/id [handle number]` of task `handle`'s next attempt at `database`: its
+  latest, `:seon.task/attempts-made`, while that attempt is open (`open-attempt?`), else one more, so a removed
+  attempt never re-mints its identity or branch."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
+                  [:or [:tuple [:int {:min 1}] :seon.task/assignment] :seon.db/invalid-read-error]]}
+  [database handle]
+  (let [made (db/q '[:find ?m . :in $ ?handle :where [?t :seon.task/id ?handle] [?t :seon.task/attempts-made ?m]]
+                   database handle)
+        latest (when (int? made) (db/pull database [:db/id :seon.task.attempt/end :seon.task/outcome]
+                                          [:seon.task/assignment (id/id [handle made])]))]
+    (or (read-error made) (read-error latest)
+        (let [number (if (and (:db/id latest) (open-attempt? latest)) made (inc (or made 0)))]
+          [number (id/id [handle number])]))))
+
+(defn attempt-agent-id
+  "The agent id an attempt `assignment` runs as."
+  {:malli/schema [:=> [:cat :seon.task/assignment] :seon.agent/id]}
+  [assignment]
+  (str "attempt/" assignment))
+
 (defn chain!
   "Write `tasks` as one linked chain on its own branch, forked from main (`:seon.chain/from` names another branch
   whose head it starts from; it still merges toward main): the first map names the chain and the branch
@@ -1277,7 +1298,8 @@
   chain fact on main (carrying `:seon.chain/merge?` when given: false ends the chain at its last done, unmerged). Before anything is written, the first and each running task's runnable view
   (`chain-refusal`: its members, its branch and main's config with `:seon.chain/config` decided over it) must validate,
   else its `:unrunnable` refusal answers and nothing is forked or written. A chain whose fact main holds is answered
-  as it stands and nothing is written. Answers the branch, the first task and every handle in order.
+  as it stands and nothing is written. Answers the branch, the first task, every handle in order and the agent id
+  the first task's next attempt runs as (`attempt-agent-id`), which an `:outside` agent enters by.
 
   ## Example
 
@@ -1299,8 +1321,13 @@
          first-handle (task-handle ns first-name)
          held (:seon.chain/branch (db/pull main [:seon.chain/branch] [:seon.chain/first first-handle]))
          branch (or held (keyword (str "chain-" first-handle)))
-         answer (fn [connection] {:seon.chain/branch branch :seon.chain/first first-handle
-                                  :seon.task/handles (chain-handles (db/db connection) first-handle)})]
+         answer (fn [connection]
+                  (let [database (db/db connection)
+                        [_ attempt :as next] (next-attempt database first-handle)]
+                    (or (read-error next)
+                        {:seon.chain/branch branch :seon.chain/first first-handle
+                         :seon.task/handles (chain-handles database first-handle)
+                         :seon.agent/id (attempt-agent-id attempt)})))]
      (if held
        (registry/on-branch store branch answer)
        (let [entities (chain-entities tasks)
@@ -1353,21 +1380,6 @@
           (:seon.error/at edges) edges
           (empty? (get edges (if (= :prove (:seon.task/step edges)) :seon.task/product :seon.task/proofs))) (refused 'seon.task/assign! :no-proofs 'seon.task handle)
           :else {:seon.task/revision revision :seon.agent/id agent-id :seon.task/proofs (:seon.task/proofs edges)})))
-
-(defn- next-attempt
-  "The number and identity `seon.id/id [handle number]` of task `handle`'s next attempt at `database`: its
-  latest, `:seon.task/attempts-made`, while that attempt is open (`open-attempt?`), else one more, so a removed
-  attempt never re-mints its identity or branch."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
-                  [:or [:tuple [:int {:min 1}] :seon.task/assignment] :seon.db/invalid-read-error]]}
-  [database handle]
-  (let [made (db/q '[:find ?m . :in $ ?handle :where [?t :seon.task/id ?handle] [?t :seon.task/attempts-made ?m]]
-                   database handle)
-        latest (when (int? made) (db/pull database [:db/id :seon.task.attempt/end :seon.task/outcome]
-                                          [:seon.task/assignment (id/id [handle made])]))]
-    (or (read-error made) (read-error latest)
-        (let [number (if (and (:db/id latest) (open-attempt? latest)) made (inc (or made 0)))]
-          [number (id/id [handle number])]))))
 
 (defn attempt-tx
   "The transaction data writing the next attempt of task `handle` by `agent-id` on `branch` at main

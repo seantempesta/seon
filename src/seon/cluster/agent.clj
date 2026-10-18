@@ -1742,7 +1742,7 @@
                                           key (id/id [handle number])
                                           chain (get chains handle)
                                           row (merge {:seon.task/assigned handle :seon.task/assignment key
-                                                      :seon.agent/id (str "attempt/" key)}
+                                                      :seon.agent/id (task/attempt-agent-id key)}
                                                      (if chain
                                                        ;; a task selects its branch by data, else its chain's
                                                        {:seon.task/branch (get branches handle chain) :seon.chain/branch chain}
