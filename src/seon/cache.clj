@@ -234,16 +234,19 @@
          {:seon.cache/pending-kind kind :seon.cache/since (java.util.Date.)})))))
 
 (defn present
-  "The completed value of `[kind content-key]`, or nil when it is absent, pending or
-  refused. Counts neither a hit nor a miss: a presence probe does no work."
+  "The completed value of `[kind content-key]`, or nil when it is absent,
+  pending or refused. A held value read is a hit of its kind, as [[lookup]]
+  counts one; an absent read counts nothing, since no derivation ran."
   {:malli/schema [:function
                   [:=> [:cat :qualified-keyword :seon.schema/value] :seon.schema/value]
                   [:=> [:cat :seon.cache/cache :qualified-keyword :seon.schema/value] :seon.schema/value]]}
   ([kind content-key] (present @process kind content-key))
-  ([{::keys [^AsyncCache cache]} kind content-key]
+  ([{::keys [^AsyncCache cache] :as held} kind content-key]
    (when-let [^CompletableFuture pending (.getIfPresent cache [kind content-key])]
      (when (and (.isDone pending) (not (.isCompletedExceptionally pending)))
-       (::value (.join pending))))))
+       (let [value (::value (.join pending))]
+         (when (some? value) (.increment ^LongAdder (::hits (kind-counters held kind))))
+         value)))))
 
 (defn evict!
   "Remove the one entry `[kind content-key]`: a value its owner has replaced
