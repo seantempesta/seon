@@ -490,7 +490,11 @@ definition with the same input is computed once for every branch and agent that 
   never flow. The one task writer derives
   `:seon.task/references`; it is never authored. Proofs are deftests, never prose: prefer an existing failing test or a
   new row in an existing table test; write a new deftest only for a behavior no test covers; a task already green proves
-  nothing; at merge root keeps a new test only if it guards a new behavior class. References are typed by plain EDN and
+  nothing; at merge root keeps a new test only if it guards a new behavior class. A task is filed with its proof
+  written and red in the same commit, never a named proof to write later (live run 8: 16 of 25 filed proofs did not
+  exist). A proof must observe the change on the agent's branch: it calls the definition the task changes directly
+  (compiled `src` callers see a branch's change only after merge), and it asserts the behavior the plan asks for, not
+  one implementation of it. References are typed by plain EDN and
   must resolve: code is a backticked fully qualified symbol (Seon or library, e.g. `` `malli.core/validator` ``), a
   schema a backticked fully qualified keyword, any other file a relative path whose first segment names its base (the
   checkout, or `reference-code/<project>` at its pinned revision) with `#heading` anchors. Never write a file or line
