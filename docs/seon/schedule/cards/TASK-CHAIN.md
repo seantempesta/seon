@@ -269,7 +269,13 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    **The model is per task** (owner 2026-10-14): owned `:seon.task/model`, a model name (absent: the cluster's
    `:seon.config.ai/model`) or `:outside`. With `:outside` root starts the agent exactly as for any task but its graph
    takes no model turns; an outside agent (a Claude Code agent through MCP `eval_clj`, as that agent id on the chain
-   branch) works the task, and the same block, test steps, done rule, advance and merge apply. Live runs use DeepSeek
+   branch) works the task, and the same block, test steps, done rule, advance and merge apply.
+   How an outside agent is given one (probed 2026-10-18): root files it at its REPL, `(seon.task/chain! {} [(merge
+   (seon.task/template (seon.db/db) 'ns/name) {:seon.task/plan plan :seon.task/model :outside :seon.task/proofs
+   #{'ns-test/proof}})])` (the template owns no plan, so the plan is passed; a proof must name a test that exists), and
+   the agent then enters as `attempt/` plus `(seon.id/id [handle 1])`, handle being the chain's `:seon.chain/first`
+   (attempt number 1; the id is computed under `eval_clj` mode `jvm`, root's). Its last evaluation answers
+   `admission-closed` once its task is done; the merge it leaves is `(my.root/merge-steps)`. Live runs use DeepSeek
    tasks for the measured run and `:outside` tasks to judge the context; no paid Claude API call is made. There is no
    human checkpoint inside a chain in the MVP (owner 2026-10-14): a chain to inspect first is created `:held` and run
    with `my.root/run!` (new in S3c-1).
