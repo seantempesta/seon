@@ -284,6 +284,42 @@
  (throw (ex-info (:seon.error/message result) result)) result)))))
         [:seon.render/ai :seon.render/html]))
 
+(defn- referrers
+  "The referrers a retraction of `subject` would strand on `database`, every
+  relation but the gating tests: indexed reads proportional to the subject's
+  edges. A subject `database` does not declare throws its not-found refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/subject] :seon.program/breakage]}
+  [database subject]
+  (let [{identity :seon.program/identity entities :seon.program/entities} (locate database subject)
+        [kind _] identity
+        entity (first entities)
+        calls (caller-data database subject entity)
+        owned (when (= :seon.ns/name kind)
+                (into (symbols (concat (names-through database :seon.fn/ns entity :seon.fn/sym)
+                                       (names-through database :seon.test/ns entity :seon.test/sym)))
+                      (names-through database :seon.schema/ns entity :seon.schema/key)))
+        report
+        (merge (observation database subject identity) calls
+               (present-groups
+                {:seon.program/references (symbols (names-through database :seon.fn/references subject :seon.fn/sym))
+                 :seon.program/subject-of (symbols (names-through database :seon.test/subject subject :seon.test/sym))
+                 :seon.program/stale-reach (symbols (names-through database :seon.test/reach subject :seon.test/sym))
+                 :seon.program/capability-of (symbols (names-through database :seon.effect/capability subject :seon.fn/sym))
+                 :seon.program/schedule-tasks (set (names-through database :seon.schedule.task/function entity :seon.schedule.task/id))
+                 :seon.program/render-declared-by (render-referrers database subject)
+                 :seon.program/owned-declarations owned
+                 :seon.program/requiring-namespaces
+                 (when (= :seon.ns/name kind)
+                   (set (names-through database :seon.ns/requires subject :seon.ns/name)))})
+               (when (= :seon.schema/key kind) (key-data database subject entity)))
+        unknown-arities (count (remove :seon.fn/call-arity (:seon.program/call-sites report)))]
+    (cond-> report
+      (pos? unknown-arities)
+      (update :seon.program/unknown conj
+              {:seon.program/gap :arity-unknown-sites
+               :seon.program/count unknown-arities
+               :seon.program/message "Calls without recorded argument counts, including apply, cannot be checked for arity."}))))
+
 (defn breaks
   "Read the referrers a retraction would strand.
 
@@ -305,45 +341,16 @@
   [{database :seon.db/db subject :seon.program/subject :as request}]
   (read-result
    request 'my.program/breaks
-   #(let [{identity :seon.program/identity entities :seon.program/entities} (locate database subject)
-          [kind _] identity
-          entity (first entities)
-          calls (caller-data database subject entity)
-          owned-functions (when (= :seon.ns/name kind)
-                            (concat (names-through database :seon.fn/ns entity :seon.fn/sym)
-                                    (names-through database :seon.test/ns entity :seon.test/sym)))
-          owned (when (= :seon.ns/name kind)
-                  (into (symbols owned-functions)
-                        (names-through database :seon.schema/ns entity :seon.schema/key)))
-          gate-names (if (= :seon.ns/name kind) owned-functions
-                         (when (qualified-symbol? subject)
-                           [subject]))
-          gating (let [result (function/gating-tests database (vec (symbols gate-names)))]
+   #(let [report (referrers database subject)
+          [kind _] (:seon.program/identity report)
+          gate-names (if (= :seon.ns/name kind)
+                       (filter qualified-symbol? (:seon.program/owned-declarations report))
+                       (when (qualified-symbol? subject) [subject]))
+          gating (let [result (function/gating-tests database (vec gate-names))]
                    (if (:seon.db/invalid-read result)
                      (throw (ex-info (:seon.error/message result) result))
-                     result))
-          report
-          (merge (observation database subject identity) calls
-                 (present-groups
-                  {:seon.program/references (symbols (names-through database :seon.fn/references subject :seon.fn/sym))
-                   :seon.program/subject-of (symbols (names-through database :seon.test/subject subject :seon.test/sym))
-                   :seon.program/stale-reach (symbols (names-through database :seon.test/reach subject :seon.test/sym))
-                   :seon.program/gating gating
-                   :seon.program/capability-of (symbols (names-through database :seon.effect/capability subject :seon.fn/sym))
-                   :seon.program/schedule-tasks (set (names-through database :seon.schedule.task/function entity :seon.schedule.task/id))
-                   :seon.program/render-declared-by (render-referrers database subject)
-                   :seon.program/owned-declarations owned
-                   :seon.program/requiring-namespaces
-                   (when (= :seon.ns/name kind)
-                     (set (names-through database :seon.ns/requires subject :seon.ns/name)))})
-                 (when (= :seon.schema/key kind) (key-data database subject entity)))
-          unknown-arities (count (remove :seon.fn/call-arity (:seon.program/call-sites report)))]
-      (cond-> report
-        (pos? unknown-arities)
-        (update :seon.program/unknown conj
-                {:seon.program/gap :arity-unknown-sites
-                 :seon.program/count unknown-arities
-                 :seon.program/message "Calls without recorded argument counts, including apply, cannot be checked for arity."})
+                     result))]
+      (cond-> (merge report (present-groups {:seon.program/gating gating}))
         (:seon.program/contract request)
         (update :seon.program/unknown conj
                 {:seon.program/gap :contract-shapes-unknown
@@ -508,16 +515,14 @@
 (defn- blocking? [report]
   (boolean (some seq (vals (select-keys report blocking-relations)))))
 
-(defn- deletion-report [database subject]
-  (let [root (let [result (breaks {:seon.db/db database :seon.program/subject subject})]
- (if (or (:seon.program/read-operation result) (:seon.program/not-found result))
- (throw (ex-info (:seon.error/message result) result)) result))
+(defn- deletion-report
+  "The joint breakage of retracting `subject` with every declaration it owns, beside that affected set: each
+  member's referrers (`referrers`), less those the same retraction removes."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/subject] [:tuple :seon.program/breakage :seon.program/affected]]}
+  [database subject]
+  (let [root (referrers database subject)
         affected (conj (set (:seon.program/owned-declarations root)) subject)
-        reports (into [root]
-                      (map #(let [result (breaks {:seon.db/db database :seon.program/subject %})]
- (if (or (:seon.program/read-operation result) (:seon.program/not-found result))
- (throw (ex-info (:seon.error/message result) result)) result)))
-                      (sort-by str (disj affected subject)))
+        reports (into [root] (map #(referrers database %)) (sort-by str (disj affected subject)))
         relations [:seon.program/callers :seon.program/references :seon.program/subject-of
                    :seon.program/capability-of :seon.program/schedule-tasks
                    :seon.program/contract-refs :seon.program/schema-references
@@ -580,7 +585,7 @@
 (defn unmap-subject!
   "Unmap a declaration's Var in the executing fork and base; the eval request records its removal.
 
-  Calls breaks first, on the database the call reads (the request view, so a
+  Reads the blocking referrers first (`my.program/breaks` less its gating tests), on the database the call reads (the request view, so a
   definition an earlier form of the same request made is found); a refusal
   changes nothing and names the surviving referrers. The unmap is the native
   `clojure.core/ns-unmap`, which the request observes and records in its one
@@ -617,7 +622,7 @@
   "Unmap a declaration's Var in the executing fork and base, as `clojure.core/ns-unmap` does.
 
   Takes a qualified symbol or a namespace and a name; the context comes from
-  the evaluation's world. Calls breaks first; a refusal changes nothing and
+  the evaluation's world. Reads the blocking referrers first (`my.program/breaks` less its gating tests); a refusal changes nothing and
   names the surviving referrers (`my.program/unmap-subject!`).
 
   ## Example
@@ -663,7 +668,7 @@
 (defn remove-ns!
   "Retract a namespace and its owned declarations, then remove it from SCI.
 
-  Calls breaks first and writes the entire affected set in one transaction; a
+  Reads the blocking referrers first (`my.program/breaks` less its gating tests) and writes the entire affected set in one transaction; a
   refusal names the surviving referrers; dispatch and macro callers are not
   modelled. A namespace owning
   schema declarations refuses: declaration-only deletion would leave its
@@ -683,7 +688,7 @@
 (defn ns-unalias!
   "Retract an alias component before removing the alias from fork and base.
 
-  Calls breaks first. Namespace referrers conservatively refuse removal:
+  Reads the blocking referrers first (`my.program/breaks` less its gating tests). Namespace referrers conservatively refuse removal:
   indexed calls do not retain which alias spelling resolved their targets.
   Until seam B lands this refusal comes from breaks alone; dispatch and macro
   callers are not modelled.

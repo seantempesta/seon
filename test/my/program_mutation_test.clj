@@ -136,9 +136,9 @@
        (let [measured (profile/measure #(program/unmap-subject! context target))
              removed (:seon.profile/value measured)]
          (is (= #{target} (:seon.program/affected removed)))
-         ;; One subject owns no other declaration: one breaks read, in the writer.
-         (is (= 1 (profile/calls-of measured 'my.program/breaks))
-             "ns-unmap! of a one-function namespace reads the subject's breakage once"))))))
+         ;; One subject owns no other declaration: one referrers read.
+         (is (= 1 (profile/calls-of measured 'my.program/referrers))
+             "ns-unmap! of a one-function namespace reads the subject's referrers once"))))))
 
 (deftest ns-unalias-of-an-empty-namespace-computes-the-deletion-report-once
   (support/with-database
@@ -159,6 +159,33 @@
        (let [measured (profile/measure #(program/ns-unalias! context 'my.unalias.once 'text))
              removed (:seon.profile/value measured)]
          (is (= #{'my.unalias.once} (:seon.program/affected removed)))
-         ;; The namespace owns no declaration: one breaks read, in the writer.
-         (is (= 1 (profile/calls-of measured 'my.program/breaks))
-             "ns-unalias! of a namespace reads its breakage once"))))))
+         ;; The namespace owns no declaration: one referrers read, in the writer.
+         (is (= 1 (profile/calls-of measured 'my.program/referrers))
+             "ns-unalias! of a namespace reads its referrers once"))))))
+
+(deftest ns-unmap-of-one-definition-costs-its-referrers-not-the-program
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "program-unmap-cost-fixture")
+     (let [target (symbol "my.unmap.cost" "lone")
+           ctx (support/fork-cluster-ctx connection)
+           fork (sci/fork ctx)
+           context {:seon.sci.eval/ctx fork :my.program/base-ctx ctx :seon.db/connection connection}]
+       (support/transacted!
+        connection
+        [(seon-program/declaration-row
+          (db/carried-projection @connection)
+          {:seon.ns/name 'my.unmap.cost :seon.ns/source "(ns my.unmap.cost)"}
+          :all :agent)])
+       (support/transacted! connection [(support/program-fn-entity (db/db connection) target "(defn lone [] 1)")])
+       (doseq [target-ctx [ctx fork]]
+         (sci/eval-string* target-ctx "(do (in-ns 'my.unmap.cost) (defn lone [] 1))"))
+       ;; warm: the first call of the JVM pays class loading and query compilation
+       (program/breaks {:seon.db/db (db/db connection) :seon.program/subject target})
+       (let [measured (profile/measure #(program/unmap-subject! context target))]
+         (is (= #{target} (:seon.program/affected (:seon.profile/value measured))))
+         ;; one definition's facts and its referrers' indexed reads, never the program's gate walk
+         (is (< (:seon.profile/alloc-bytes measured) (* 20 1024 1024))
+             "unmapping a definition no one calls allocates under 20 MB")
+         (is (zero? (profile/calls-of measured 'seon.fn/gating-tests))
+             "a retraction reads the referrers that block it, not the tests that gate it"))))))
