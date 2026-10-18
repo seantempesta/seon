@@ -66,3 +66,13 @@
     (is (str/includes? text "(my.program/callers '") "help names the verb that reads a subject's callers")
     (is (str/includes? text "probe in a let") "help teaches probing with a let, which leaves nothing to unmap")
     (is (str/includes? text "returns no bare [:maybe") "help names the nilable-return refusal before the agent meets it")))
+
+(deftest help-teaches-replaying-a-proofs-fixture
+  ;; Live run 9 (docs/research/agent-platform/2026-10-18/live-run-9.md): 10 of the fork-point chain's 11 wasted calls
+  ;; tried to rebuild its proof's fixture at the REPL (a store from `seon.db/schema-database`, an unrequired
+  ;; `seon.test-support/with-database`) and never ran it, so its cache's miss stayed unexplained until the cap.
+  (let [text (slurp (io/resource "seon/help.md"))]
+    (is (str/includes? text "(require 'seon.test-support)") "help names the require that loads the fixtures")
+    (is (str/includes? text "(seon.test-support/with-database (fn [connection]") "help names the fixture a probe replays")
+    (is (str/includes? text "(:seon.store/store (seon.test-support/execution-handle connection))")
+        "help names where the fixture's store is")))

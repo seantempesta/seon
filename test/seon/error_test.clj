@@ -2024,3 +2024,11 @@
         "a warm call tokenizes the guess, not every declaration again")
     (is (< (:seon.profile/alloc-bytes measured 0) (* 10 1024 1024))
         "a warm call allocates under 10 MB")))
+
+(deftest a-guess-sharing-no-word-is-still-offered-the-name-it-misspells
+  ;; Live run 9 (docs/research/agent-platform/2026-10-18/live-run-9.md): the merged cost fix 50e879526 kept only the
+  ;; candidates sharing a word with the guess, so a misspelling in another namespace lost its nearest name
+  ;; (`seon.db/transact!` for `qqq/transcat!`, two edits away) although the spelling pass still asked for it.
+  (let [candidates (vec (db/q '[:find [?s ...] :where [?f :seon.fn/sym ?s] [?f :seon.fn/arglists _]] (seon.db/db)))]
+    (is (some #{'seon.db/transact!} (error/nearest-names 'qqq/transcat! candidates 8))
+        "a name two edits away is offered though the guess shares none of its words")))

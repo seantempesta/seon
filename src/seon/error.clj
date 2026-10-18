@@ -1996,11 +1996,11 @@
     #{}))
 
 (defn- entries-content-key
-  "A content key for the candidate entry table: the candidates' symbols, sorted and hashed."
+  "A content key for the candidate entry table: the candidates' hash, in their order, and their count. The same
+  declarations read from the same database come in the same order; another order is another key, never a wrong one."
   {:malli/schema [:=> [:cat [:sequential :qualified-symbol]] :string]}
   [candidates]
-  (str (hash (into (sorted-set) (map str) candidates))
-       ":" (count candidates)))
+  (str (hash candidates) ":" (count candidates)))
 
 (defn- candidate-entries
   "[[sym name-words ns-words joined-words]] for each candidate, and the word frequencies of the whole set."
@@ -2026,18 +2026,23 @@
    #(* 512 (count (:seon.error/entries %)))
    #(candidate-entries candidates)))
 
-(defn- shared-word-entries
-  "The cached entries for `candidates` whose words include one of `wanted-words`,
-  in candidate order, plus the frozen word frequency over the whole set."
-  {:malli/schema [:=> [:cat [:sequential :qualified-symbol] [:set :string]]
+(defn- near-entries
+  "The cached entries for `candidates` that may be near `wanted-name`: those whose words include one of
+  `wanted-words`, and those whose name is within two characters of its length, the only ones that can be within two
+  edits of it; in candidate order, with the frozen word frequency over the whole set."
+  {:malli/schema [:=> [:cat [:sequential :qualified-symbol] :string [:set :string]]
                   [:map [:seon.error/total :int]
                         [:seon.error/frequency :map]
                         [:seon.error/entries [:vector :seon.schema/value]]]]}
-  [candidates wanted-words]
-  (let [{:seon.error/keys [entries frequency]} (cached-candidate-entries candidates)]
+  [candidates wanted-name wanted-words]
+  (let [{:seon.error/keys [entries frequency]} (cached-candidate-entries candidates)
+        length (count wanted-name)]
     {:seon.error/total (count entries)
      :seon.error/frequency frequency
-     :seon.error/entries (into [] (filter (fn [[_ _ _ joined]] (some wanted-words joined))) entries)}))
+     :seon.error/entries (into [] (filter (fn [[sym _ _ joined]]
+                                            (or (some wanted-words joined)
+                                                (<= (abs (- length (count (name sym)))) 2))))
+                               entries)}))
 
 (defn nearest-names
   "At most `limit` of the qualified symbols `candidates` that `wanted` may
@@ -2055,7 +2060,7 @@
   (let [wanted-name (name wanted)
         wanted-name-words (name-tokens wanted-name)
         wanted-words (into wanted-name-words (name-tokens (namespace wanted)))
-        {:seon.error/keys [total frequency entries]} (shared-word-entries candidates wanted-words)
+        {:seon.error/keys [total frequency entries]} (near-entries candidates wanted-name wanted-words)
         score (fn [[_ name-words _ joined]]
                 (reduce (fn [sum word]
                           (+ sum (* (Math/log (/ (inc total) (inc (get frequency word 0))))
