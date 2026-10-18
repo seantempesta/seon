@@ -2270,8 +2270,8 @@
   a-refused-final-merge-bails-to-root-once-with-its-refusal
   ;; TASK-CHAIN §2.7 (`docs/seon/schedule/cards/TASK-CHAIN.md#2-flow`, Bail or fail), S5 run 8: a done terminal
   ;; attempt whose final merge refuses bails once like every other end that is not done: one problem task on main
-  ;; naming the refusal, the attempt :closed with the refusal's message as its reason and its type kept, the task
-  ;; :held, branch and chain fact kept; `my.root/run!` then starts the next attempt
+  ;; whose verdict holds the refusal as data, the attempt :closed with the final merge's fixed reason and the
+  ;; refusal's type kept, the task :held, branch and chain fact kept; `my.root/run!` then starts the next attempt
   (binding [*space* "tq.mergebail"]
     (test-support/with-database
      (fn [connection]
@@ -2321,10 +2321,15 @@
                       found (problems)]
                   (is (= [(str "unfinished-task-" key-1)] (keys found)) "exactly one problem task on main, named by the attempt")
                   (is (keyword? (:seon.task/refusal row)) "the attempt keeps the refusal's type")
-                  (is (some-> (vals found) first (str/includes? (str (:seon.task/refusal row)))) "which the problem task names")
+                  (is (= [(:seon.task/refusal row)]
+                         (some->> (db/q '[:find ?v . :in $ ?n :where [?t :seon.task/name ?n] [?t :seon.task/verdict ?v]]
+                                        (db/db connection) (str "unfinished-task-" key-1))
+                                  (edn/read-string {:default tagged-literal})
+                                  :seon.source/refusals (mapv :seon.error/type)))
+                      "which the problem task's verdict holds as data")
                   (is (= :closed (:seon.task/outcome row)) "the attempt is :closed on the chain branch")
-                  (is (str/includes? (str (:seon.task/reason row)) (str (:seon.task/refusal row) ": "))
-                      "with the refusal's type and its own message as its reason")
+                  (is (str/starts-with? (str (:seon.task/reason row)) "The final merge refused it.")
+                      "with the final merge's fixed reason")
                   (is (= :held (:seon.task/execution (db/pull database [:seon.task/execution] [:seon.task/id first-task])))
                       "its task is :held"))
                 (is (nil? (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/assignment key-1]))) "nothing merged to main")

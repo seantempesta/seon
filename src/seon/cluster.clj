@@ -2748,7 +2748,8 @@
 (defn- reaching-run
   "The merge's member list of `identities` (`seon.cluster.source/merge-members` over the candidate: the one list the
   attempt's test step runs and the done rule judges), answered on `execution` and recorded on its connection, each
-  member reused by its reach digest. The members it defers (isolated, or observing the change only through loaded
+  member reused by its reach digest. Every test `identities` names is a proof of the list, so it runs even when it
+  did not change since the merge base. The members it defers (isolated, or observing the change only through loaded
   platform callers) run on the candidate's own platform host over `files` (`isolated-run`), their run as
   `:seon.source/platform-run`. No member, no request."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.reconcile/adopt-identities [:maybe [:vector :seon.source/proof]]]
@@ -2761,7 +2762,10 @@
   (let [;; the writer's report also names the facts it touched (an assignment, a task): only declarations seed tests
         declared (into #{} (filter (fn [[attribute]] (#{:seon.fn/sym :seon.test/sym :seon.ns/name :seon.schema/key} attribute)))
                        identities)
-        listed (source/merge-members (db/db (:seon.db/connection execution)) declared #{})
+        ;; a test the write names (the task's proofs, a merged namespace's re-derived tests) runs whether or not it
+        ;; changed since the merge base, as a proof does: an empty change still judges its proofs
+        listed (source/merge-members (db/db (:seon.db/connection execution)) declared
+                                     (into #{} (keep (fn [[attribute v]] (when (= :seon.test/sym attribute) v))) declared))
         deferred (set (:seon.source/deferred listed))
         members (into #{} (remove deferred) (:seon.source/members listed))
         run (if (:seon.error/at listed)
