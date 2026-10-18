@@ -61,7 +61,19 @@ A cold check must:
 - seed the store from the slot's template clone;
 - run the named tests.
 
-Boot dominates and is proportional to the loaded program, not to the change. A warm reuse would keep a booted JVM per
+Measured on this lane's own platform commit `787f51b23` (two test namespaces, 14 tests), the check took 96.9 s:
+
+| Phase | Time |
+|---|---|
+| archive | 2.4 s |
+| prepare | 3.8 s |
+| seed | 58.7 s |
+| boot | 23.7 s (12.5 s to readiness) |
+| tests | 6.0 s |
+
+The seed phase built the slot's template store for the root's new base after the 04:31 restart. It is
+whole-program publication, paid once per base commit per slot, and it was the largest single cost. Boot is the next
+largest. It is proportional to the loaded program, not to the change. A warm reuse would keep a booted JVM per
 slot and `require :reload` the changed namespaces. That would be proportional to the change, about 1 s plus the tests.
 Today every check boots cold, so the check path stays for platform slices only. A warm check-JVM pool is the next step,
 if platform commits remain frequent.
