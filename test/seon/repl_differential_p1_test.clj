@@ -41,3 +41,17 @@
        (call "(ns rmp5.callee) (defn g [] 1)")
        (call "(ns rmp5.caller (:require [rmp5.callee :as c])) (defn h [] (c/g))")
        (is (nil? (call "(in-ns 'user) (remove-ns 'rmp5.callee) (find-ns 'rmp5.callee)")))))))
+
+(deftest a-caller-redefined-then-its-helper-unmapped-in-one-request-stores-both
+  ;; Live run 11 (docs/research/agent-platform/2026-10-18/live-run-11.md): chain-cd8a339333ef redefined
+  ;; seon.error/nearest-declared off seon.error/candidate-names and unmapped candidate-names in one request, as help
+  ;; teaches (callers first); the removal judged referrers from before the request, named the old caller, and the
+  ;; request's whole settlement was refused, its three redefinitions with it (they were redone thirteen calls later).
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (let [call #(#'differential/answered % agent-id running)
+           stored (fn [s] (:seon.fn/source (db/pull (db/db connection) [:seon.fn/source] [:seon.fn/sym s])))]
+       (call "(ns rmp6.core) (defn helper [x] (inc x)) (defn caller [x] (helper x))")
+       (call "(defn caller [x] (+ x 2)) (my.program/ns-unmap! 'rmp6.core/helper)")
+       (is (nil? (stored 'rmp6.core/helper)) "the helper no caller names any more is removed")
+       (is (= "(defn caller [x] (+ x 2))" (stored 'rmp6.core/caller)) "the caller's redefinition is stored")))))
