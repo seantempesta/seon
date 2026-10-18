@@ -449,7 +449,9 @@
            schema (get-in in-sci [:schemas :seon.ref/section])]
        (is (string? (:description schema)) "a schema with a description shows that description")
        (is (not (contains? schema :source)) "a schema shows no source")
-       (is (= in-sci in-jvm) "the same value in JVM mode with no SCI context")))))
+       ;; `doc` adds the definition's live per-call figures; the documentation itself reads the database alone
+       (is (= (dissoc in-sci :cost) in-jvm) "the same documentation in JVM mode with no SCI context")
+       (is (not (contains? in-jvm :cost)) "the database's documentation carries no live figures")))))
 
 (deftest doc-shows-the-arglists-the-defn-declares
   (support/with-database

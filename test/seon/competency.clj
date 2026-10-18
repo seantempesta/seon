@@ -113,12 +113,20 @@
   [xs k]
   (transduce (keep #(let [x (get % k)] (when (and (int? x) (not (neg? x))) x))) + 0 xs))
 
+(defn cached-share
+  "The percent of `prompt` tokens the provider served from its prompt cache (`cached`), rounded; absent when no prompt
+  token was counted."
+  {:malli/schema [:=> [:cat nat-int? nat-int?] [:maybe nat-int?]]}
+  [prompt cached]
+  (when (pos? prompt) (Math/round (/ (* 100.0 cached) prompt))))
+
 (defn grade
   "Attempt `key`'s grade, read on `database`, the branch its agent worked on (a kept chain branch): how it ended
   (`:seon.task.attempt/end`, its agent's end facts for the proofs), green when it ended `:done` (the done rule passed:
   proofs green, nothing else red, no contract gap), its model calls (calls to green when green), the forms they
   evaluated by class, calls holding no productive form, errors, tokens, wall time from the first call's opening to
-  the last's close, and the evaluations' summed time and allocation."
+  the last's close, the share of prompt tokens the provider's cache served (`cached-share`), and the evaluations'
+  summed time and allocation."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assignment] :map]}
   [database assignment]
   (let [row (read! (db/pull database [:db/id :seon.task.attempt/end :seon.task.attempt/number
@@ -134,7 +142,8 @@
         green? (= :done end)
         opened (get-in (first calls) [:seon.turn/opened-tx :db/txInstant])
         closed (get-in (peek calls) [:seon.turn/closed-tx :db/txInstant])
-        usage #(total (mapcat :seon.turn/attempts calls) %)]
+        usage #(total (mapcat :seon.turn/attempts calls) %)
+        share (cached-share (usage :seon.ai.usage/prompt-tokens) (usage :seon.ai.usage/cached-tokens))]
     (cond-> {:seon.competency/assignment assignment
              :seon.competency/agent agent-id
              :seon.competency/task (get-in row [:seon.task/attempt-of :seon.task/id])
@@ -157,6 +166,7 @@
              :seon.competency/eval-ms (total evaluations :seon.eval/duration-ms)
              :seon.competency/alloc-mb (/ (Math/round (/ (total evaluations :seon.eval/allocated-bytes) 1e5)) 10.0)}
       green? (assoc :seon.competency/calls-to-green (count calls))
+      share (assoc :seon.competency/cached-share share)
       (and opened closed) (assoc :seon.competency/wall-ms (- (inst-ms closed) (inst-ms opened))))))
 
 ;;; LAUNCH: each (task, variant, i) one chain of one, written by `seon.task/chain!` with the variant as the chain's

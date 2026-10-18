@@ -363,10 +363,8 @@
           (documentation-schemas database row))))
 
 (defn- function-doc-map
-  "The documentation of one program row: its doc and arglists, the stored
-  contract with the schemas it names, its live per-call figures
-  (`seon.profile/figures`, keyed by its definition digest) once called and,
-  for an accepted override, its JVM-boundary note."
+  "The documentation of one program row, a function of `database` alone: its doc and arglists, the stored contract
+  with the schemas it names and, for an accepted override, its JVM-boundary note."
   {:malli/schema [:=> [:cat :seon.db/database-value :map :boolean] [:or :map :seon.db/error-result]]}
   [database row overridden?]
   (let [arglists (when-let [text (:seon.fn/arglists row)]
@@ -379,9 +377,6 @@
            (agent-documentation-contract database row)
            (when-let [schemas (not-empty (schema-descriptions database row))]
              {:schemas schemas})
-           ;; the live per-call figures of this definition: a changed body has its own digest, so starts fresh
-           (when-let [figures (profile/figures [(:seon.fn/sym row) (:seon.program/definition-digest row)])]
-             {:cost figures})
            (when overridden?
              {:seon.schema.admission/note
               "Accepted database override for SCI; JVM callers retain the compiled definition until write-back and reload."}))))
@@ -401,6 +396,18 @@
       (or (:seon.db/invalid-read overrides) (:seon.schema/expected-value overrides)) overrides
       (:seon.fn/sym row) (function-doc-map database row (boolean (some #{sym} overrides)))
       :else (ref/documentation-unavailable sym))))
+
+(defn- with-live-cost
+  "`doc`, the documentation of program function `sym`, with its definition's live per-call figures as `:cost` once
+  it has been called (`seon.profile/figures`, keyed by its definition digest, so a changed body starts fresh). Only
+  the REPL's `doc` adds them: they change with every call, so a must-read laid in the model's cached prefix
+  (`seon.ref/at-level`) reads the database alone."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol :map] :map]}
+  [database sym doc]
+  (let [digest (:seon.program/definition-digest (db/pull database [:seon.program/definition-digest] [:seon.fn/sym sym]))]
+    (if-let [figures (profile/figures [sym digest])]
+      (assoc doc :cost figures)
+      doc)))
 
 (defn- directory-in
   {:malli/schema [:=> [:cat :seon.db/db :symbol :boolean] [:or :seon.repl/directory :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
@@ -502,7 +509,7 @@
             (merge (when-let [doc (:doc metadata)] (ref/docstring doc))
                    (when-let [arglists (:arglists metadata)] {:arglists arglists}))
             (ref/documentation-unavailable authored)))
-        found))
+        (if (contains? found :arglists) (with-live-cost database resolved found) found)))
     :else (namespace-documentation ctx database resolved authored)))
 
 (defn documentation-value

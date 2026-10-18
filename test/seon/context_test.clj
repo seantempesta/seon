@@ -544,7 +544,8 @@
            _ (test-support/declare-proof! connection 'tq.pfx-test 'held 'tq.pfx/held)
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.pfx
                                             :seon.task/name "held"
-                                            :seon.task/plan "Green `tq.pfx-test/cited-red`."}))
+                                            :seon.task/plan "Green `tq.pfx-test/cited-red`."
+                                            :seon.task/instructions "Read it with `my.program/source`."}))
            _ (task/assign! {:seon.agent/context-source handle :seon.db/connection connection :seon.task/assigned id
                             :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
            world #(hash-map :seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.sci.admit/caps (:seon.sci.admit/caps handle)
@@ -564,12 +565,19 @@
                      (let [context (context/model-context (db/db connection) (world) agent-id)]
                        (ai/messages :chat (:seon.ai/system context) (:seon.context/exchanges context)
                                     (:seon.ai/prompt context)))))
-           ;; the first reply is over the reference dial and, by the last pass, older than any window of whole replies
-           sent (mapv pass! (range) ["(vec (range 600))" "(+ 1 2)" "(+ 3 4)" "(+ 5 6)" "(+ 7 8)" "(+ 9 10)"])]
+           ;; the first reply is over the reference dial and, by the last pass, older than any window of whole replies;
+           ;; the passes call the cited `my.program/source`, so its live per-call figures change between requests
+           sent (mapv pass! (range) ["(vec (range 600))" "(my.program/source 'tq.pfx-test/cited-red)" "(+ 3 4)"
+                                     "(my.program/source 'tq.pfx-test/cited-red)" "(+ 7 8)" "(+ 9 10)"])
+           ;; the provider caches the longest byte-identical prefix of the request's messages
+           wire #(json/write-str %)
+           common (fn [a b] (count (take-while true? (map = a b))))]
        (is (str/includes? (str (get (peek (first sent)) "content")) "599") "the newest exchange shows its reply whole")
        (doseq [[before after] (partition 2 1 sent)]
          (is (= (pop before) (subvec after 0 (dec (count before))))
-             "every message but the last is identical in the next request: the provider's prefix cache holds"))))))
+             "every message but the last is identical in the next request: the provider's prefix cache holds")
+         (is (= (dec (count (wire (pop before)))) (common (wire (pop before)) (wire after)))
+             "the next request's bytes start with every byte of this one's messages but its last"))))))
 
 (defn- sent-as
   "What a model pass sends of `emission` at `age` under the reference dial `limit`: the AI face of its exchange."

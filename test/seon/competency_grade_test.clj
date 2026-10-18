@@ -186,3 +186,7 @@
                   [(row 1 [4 11]) (row 4 [2 3])]
                   [(row 5 [2 3]) (row 5 [5 7])]
                   [(row 2 [8 11]) (row 2 [3 6])]])))))
+
+(deftest the-cached-share-is-the-percent-of-prompt-tokens-the-cache-served
+  ;; live run 7's `fddd9dcbfe66` and live run 8's three chains
+  (is (= [87 22 nil] (mapv #(apply competency/cached-share %) [[619000 540000] [2737800 605952] [0 0]]))))
