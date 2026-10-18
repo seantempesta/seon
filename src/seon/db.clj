@@ -4010,12 +4010,9 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.batch/sink]
                   [:map-of :qualified-symbol :seon.program/definition-digest]]}
   [database sink]
-  (let [undigested (profile/undigested sink)]
-    (if (seq undigested)
-      (into {} (d/q '[:find ?sym ?digest :in $ [?sym ...]
-                      :where [?f :seon.fn/sym ?sym] [?f :seon.program/definition-digest ?digest]]
-                    database undigested))
-      {})))
+  (into {} (d/q '[:find ?sym ?digest :in $ [?sym ...]
+                  :where [?f :seon.fn/sym ?sym] [?f :seon.program/definition-digest ?digest]]
+                database (vec (profile/undigested sink)))))
 
 (def ^:private cost-attributes
   "The attributes of a cost entity (`:seon.fn.cost/entity`)."

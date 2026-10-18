@@ -3016,14 +3016,12 @@
   host-bound (`host-bound-row?`): SCI may interpret them."
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]] [:set :qualified-symbol]]}
   [database symbols]
-  (if (empty? symbols)
-    #{}
-    (let [rows (db/q '[:find [?sym ...] :in $ [?sym ...]
-                       :where [?row :seon.fn/sym ?sym] [?row :seon.fn/host-bound? false]]
-                     database (vec symbols))]
-      (when (db/read-refusal? rows)
-        (throw (ex-info (:seon.error/message rows) rows)))
-      (set rows))))
+  (let [rows (db/q '[:find [?sym ...] :in $ [?sym ...]
+                     :where [?row :seon.fn/sym ?sym] [?row :seon.fn/host-bound? false]]
+                   database (vec symbols))]
+    (when (db/read-refusal? rows)
+      (throw (ex-info (:seon.error/message rows) rows)))
+    (set rows)))
 
 (defn- executing-ctx
   "The context the calling thread runs SCI under, else `ctx`. A context a
@@ -3128,15 +3126,11 @@
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value [:seqable :qualified-symbol]]
                   [:vector :qualified-symbol]]}
   [ctx database members]
-  ;; no members reads nothing: Datahike runs these clauses with an empty
-  ;; collection binding as a scan of every function
-  (let [functions (if (empty? members)
-                    #{}
-                    (set (db/q '[:find [?sym ...] :in $ [?sym ...]
-                                 :where [?f :seon.fn/sym ?sym] [?f :seon.fn/arglists ?arglists]
-                                        [(not= "()" ?arglists)]
-                                        (not [?f :seon.fn/macro? true])]
-                               database (vec members))))]
+  (let [functions (set (db/q '[:find [?sym ...] :in $ [?sym ...]
+                               :where [?f :seon.fn/sym ?sym] [?f :seon.fn/arglists ?arglists]
+                                      [(not= "()" ?arglists)]
+                                      (not [?f :seon.fn/macro? true])]
+                             database (vec members)))]
     (sci.ctx-store/with-ctx ctx
       (reduce
        (fn [eager sym]
