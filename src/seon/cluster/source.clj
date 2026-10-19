@@ -944,7 +944,7 @@
                       observed (when (set? reached)
                                  (into reached (filter held?) named))
                       ;; reached only through loaded platform callers: the branch runs those compiled, so only a JVM
-                      ;; loaded from the candidate observes the change, the merge's platform run
+                      ;; loaded from the candidate observes the change; root proves them (`done-refusals`)
                       platform (into #{} (comp (mapcat (comp :seon.fn/platform-tests val)) (remove (set observed)))
                                      (::contributions folded))
                       members (when observed (into observed platform))
@@ -974,7 +974,7 @@
   declaration's own reaching tests, the fold's contribution of it. `:seon.source/deferred` holds the members
   that run only on a platform host: those `seon.test/host-exclusions` isolates, and those reaching a change only
   through loaded platform callers (`seon.fn/selection-walk`'s platform tests), which the branch runs compiled and
-  so cannot observe it. The merge's platform run answers them; the step and the done rule leave them to it. Held by selection's content revisions (`seon.test/selection-revisions`), changed identities and proofs.
+  so cannot observe it. No automatic test runs them: the done rule names them and the chain bails to root. Held by selection's content revisions (`seon.test/selection-revisions`), changed identities and proofs.
   Call-edge changes fold only the contributions whose walks read those targets; result and evaluation writes reuse the list.
   Of `changed`, only what a test can observe since `database`'s merge base (`branch-merge-base`,
   `seon.test/observable-changes`) seeds the walk: a docstring-only change selects no member; a value with no merge
@@ -1195,16 +1195,14 @@
   "The merge branch S of `source`'s head `head` holding `tx` (the candidate commit `c-id`'s whole change `delta`, root's
   facts squash and the unmerged entries of its conflicts) in one write, judged: the tests reaching what S changed,
   with task `task-sym`'s proofs (`seon.task/assigned-obligations` on S; a Prove step's product beside them), run on S
-  (`seon.cluster/candidate-gate!`, each answered from its record at an unchanged reach digest; its isolated members
-  over `files`), and S judged as the task's step is (`seon.context/judged-input` against `head`, `done-refusals`).
+  (`seon.cluster/candidate-gate!`, each answered from its record at an unchanged reach digest), and S judged as the task's step is (`seon.context/judged-input` against `head`, `done-refusals`).
   The prepared merge `accept-merge!` takes; `refused`, a conflict or a file refusal, answered with S kept instead. A
   run that could not start retires S and is answered."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/store :seon.db/database-value :seon.source/commit-id
                        :seon.task/sym :seon.store/transaction-data :seon.program/identity-set
-                       [:maybe [:or :seon.program/three-way :seon.error/value]]
-                       [:maybe [:vector :seon.source/proof]]]
+                       [:maybe [:or :seon.program/three-way :seon.error/value]]]
                   [:or :seon.source/prepared :seon.program/three-way :seon.error/value]]}
-  [source held-store head c-id task-sym tx delta refused files]
+  [source held-store head c-id task-sym tx delta refused]
   (let [s (keyword (str "merge-" (id/id)))
         write! (fn [execution]
                  (let [connection (:seon.db/connection execution)
@@ -1216,8 +1214,8 @@
                    (into (into delta (fn/report-identities written))
                          (map #(vector :seon.test/sym %))
                          (into (set (:seon.task/proofs owed)) (when (= :prove (:seon.task/step owed)) (:seon.task/product owed))))))
-        gate ((requiring-resolve 'seon.cluster/candidate-gate!) source held-store s write! (when-not refused files))
-        failed (some #(when (:seon.error/at %) %) [(:seon.source/gate-run gate) (:seon.source/platform-run gate)])]
+        gate ((requiring-resolve 'seon.cluster/candidate-gate!) source held-store s write!)
+        failed (when (:seon.error/at (:seon.source/gate-run gate)) (:seon.source/gate-run gate))]
     (if failed
       (do (registry/retire-branch! {:seon.store/store held-store :seon.store/branch s}) failed)
       (let [judged-db (db/branch-database head s)
@@ -1230,9 +1228,7 @@
                                    {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/prepare-merge!
                                     :seon.error/message "The merge branch recorded no run to judge."
                                     :seon.error/offending s})])
-            red (into [] (comp (mapcat :seon.source/red-tests) (distinct)) refusals)
-            platform-run (some (fn [{run :seon.test/run}] (if (vector? run) (second run) (:seon.test.run/id run)))
-                               (:seon.test/results (:seon.source/platform-run gate)))]
+            red (into [] (comp (mapcat :seon.source/red-tests) (distinct)) refusals)]
         (if refused
           (cond-> (assoc refused :seon.source/candidate s) (seq red) (assoc :seon.source/red-tests red))
           (cond-> {:seon.source/candidate s :seon.source/judged-commit (db/commit-id judged-db)
@@ -1240,7 +1236,6 @@
                    :seon.program/identities delta :seon.source/refusals refusals
                    :seon.db/basis-t (:max-tx head) :parents #{c-id}}
             (:seon.test.run/id judged) (assoc :seon.test.run/id (:seon.test.run/id judged))
-            platform-run (assoc :seon.source/platform-run platform-run)
             (seq red) (assoc :seon.source/red-tests red)))))))
 
 (defn prepare-merge!
@@ -1295,8 +1290,7 @@
              (not three) (some #(when (:seon.error/at %) %) maps)
              (not (vector? tx)) tx
              :else (judged-merge! source held-store head c-id task-sym (-> (vec merging) (into tx) (into recorded)) delta
-                                  (cond (seq conflicts) three published published)
-                                  (:seon.source/file-proofs proof))))
+                                  (cond (seq conflicts) three published published))))
          (finally (release! [base branch])))))))
 
 (defn- red-test-verdicts
@@ -1463,13 +1457,16 @@
   its next proofs, its product, as its work, so each of them needs an executed result too, red or green), each
   proof whose executed result is not green, and each other member red here unless it is one of the
   `:seon.source/next-proofs` (none on the last task): red is red, whatever main or the merge base holds; and every
-  function of the identities `branch` holds with a contract gap (`contract-gaps`); and what the branch alone decides of its merge (`publication`): its
+  function of the identities `branch` holds with a contract gap (`contract-gaps`); what the one JVM cannot prove,
+  which bails the chain to root (automatic testing never boots a JVM): its `:seon.source/deferred` members and each
+  host-bound function of the identities (`:seon.fn/host-bound?`, which SCI does not interpret on a branch), as one
+  refusal each; and what the branch alone decides of its merge (`publication`): its
   `:seon.source/file-refusal` (a file its merge writes does not prove or holds a clj-kondo error, as the merge
   refuses it) and, on the last task (no next
   proofs), each function of its `:seon.source/merge-identities` no green test reaches (`uncovered-functions`), as
   the merge refuses them, and every unresolved unmerged entry the branch holds (`unmerged-refusal`), as git refuses a
   commit while a path is unmerged. Mid-chain a function no test reaches is not refused: the next task's proofs cover
-  it. Empty only for done. Runs no test; reads `branch` for contracts and coverage only.
+  it. Empty only for done. Runs no test; reads `branch` for contracts, host-bound status and coverage only.
 
   ## Example
 
@@ -1487,7 +1484,7 @@
         by-sym (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity)) results)
         executed (fn [test-symbol] (let [result (by-sym test-symbol)] (and result (not (:seon.error/at result)))))
         ;; every member needs a current executed result: none is unknown, never green
-        ;; a deferred member runs only on the merge's platform host, which answers it there (`merge-members`)
+        ;; a deferred member is the one JVM's to refuse by name below, never unknown beside it
         ;; a task with no proof of its own has its next proofs as its work: each must exist and have run
         work (if (seq proofs) (set proofs) (set next-proofs))
         unknown (vec (sort (remove executed (into work (remove (into (set next-proofs) deferred)) members))))
@@ -1495,6 +1492,12 @@
         others (into [] (filter #(some-> (by-sym %) red?)) (sort (remove (into (set proofs) next-proofs) members)))
         verdicts (fn [tests] (red-test-verdicts run-id results tests))
         gaps (contract-gaps branch delta)
+        host-bound (vec (sort (db/q '[:find [?f ...] :in $ [?f ...] :where [?e :seon.fn/sym ?f] [?e :seon.fn/host-bound? true]]
+                                   branch (into [] (keep (fn [[a f]] (when (= :seon.fn/sym a) f))) delta))))
+        root-proves (fn [offending message]
+                      (seon.error.refusal/error :seon.source/test-evidence-error
+                       (assoc evidence :seon.error/message message :seon.error/offending offending
+                              :seon.error/fix "Root proves it deliberately with bin/seon check, one --test per test.")))
         green (into #{} (filter #(some-> (by-sym %) green-result?)) members)
         uncovered (when (and merging (empty? next-proofs)) (uncovered-functions branch merging green))
         open (unmerged branch)]
@@ -1508,6 +1511,12 @@
       (seq (into red-proofs others))
       (conj (red-test-refusal (assoc evidence :seon.error/message "A proof, or a member that is not one of the next task's proofs, is not green here.")
                               (verdicts (into red-proofs others))))
+      (seq deferred) (conj (root-proves (vec (sort deferred))
+                                        (str "These members run on no platform host automatically: no automatic test boots a JVM,"
+                                             " so the chain bails to root.")))
+      (seq host-bound) (conj (root-proves host-bound
+                                          (str "These changed functions are host-bound: SCI does not interpret them on a branch,"
+                                               " so no automatic test proves them and the chain bails to root.")))
       (seq gaps) (conj (uncontracted-refusal evidence gaps))
       file (conj file)
       (:seon.error/at uncovered) (conj uncovered)

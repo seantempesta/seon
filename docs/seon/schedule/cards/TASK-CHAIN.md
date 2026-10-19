@@ -319,7 +319,7 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
 4. **Done** — the done rule, for every task: new `seon.cluster.source/done-refusals`
    `[:=> [:cat :seon.db/database-value :seon.source/judged] :seon.source/refusals]`,
    arguments `[branch judged]`, a function of recorded results that runs no test and reads `branch` only for
-   contracts. Everything else is data in `judged`, whose builder (S3a-3) reads main: `:seon.source/next-proofs` (the
+   contracts and host-bound status. Everything else is data in `judged`, whose builder (S3a-3) reads main: `:seon.source/next-proofs` (the
    next task's proofs, absent on the last task). Red is red (owner 2026-10-17, `merge-rulings.md`): no judge reads
    what main or the merge base holds for a red, so done and merge judge a red reaching test the same way. It refuses:
    - a proof with no current result (`:seon.source/test-evidence-error`), or one not green
@@ -332,6 +332,14 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
      every red refuses; `seon.cluster.source-test/done-and-merge-judge-a-red-reaching-test-the-same-way`);
    - a function new or changed on the branch with a contract gap (`seon.cluster.source/contract-gaps`, the installed
      merge completeness rule: missing spec, `:any`, `:some`; value `def`s are not functions, de1f48c23);
+   - what the one JVM cannot prove, because automatic testing never boots a JVM (owner 2026-10-17, "No automatic JVM
+     boots", P8): the `:seon.source/deferred` members of the member list (`seon.test/host-exclusions`' isolated
+     members, a `:seon.test/reads` file reader among them, and the tests reaching the change only through loaded
+     platform callers), and each function new or changed on the branch that is `:seon.fn/host-bound?` (SCI does not
+     interpret it on a branch); one `:seon.source/test-evidence-error` each, naming them under
+     `:seon.error/offending`. The chain bails to root, which proves them deliberately with `bin/seon check`
+     (`seon.cluster.source-test/done-refusals-judges-every-task-alike`,
+     `seon.merge-test/a-file-reading-test-bails-the-merge-to-root-and-boots-no-jvm`);
    - what the branch alone decides of its merge, judged by the merge gate's own functions
      (`seon.cluster.source/publication`, data in `judged`; its file proof, `seon.cluster.source/file-proof`, is held by
      the content it reads and taken again by the merge and its write-back): its `:seon.source/file-refusal`, the one file check the merge gate reads too
