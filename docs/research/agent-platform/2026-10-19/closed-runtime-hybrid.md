@@ -10,8 +10,8 @@ P2, P3b landed; P1 landed (lane closed-p1, the leaf design); P3a split: P3a-1 la
 digest move; the fallback deletion moves to P4b, option c); P4a landed (`ec87c559c`); P5 landed (`7df8dbb21`,
 corrections in its section); P4b landed (`66ca5108b`, lane closed-p4b; corrections in its section); P3a-2 landed (lane guards3, the smaller cut of the patch, after
 `393e52821` deleted the catch in `seon.instrument/compiled-wrapper` that the guard census refused; it closes
-`seon.cluster/branch-declaration-changes`, 49 -> 48 open derivers); P6a landed (lane closed-p6, corrections in its section);
-P6b, P7, P8 not started.
+`seon.cluster/branch-declaration-changes`, 49 -> 48 open derivers); P6a landed (`f1145501b`, lane closed-p6, corrections in its section);
+P6b stopped at its design gap (lane closed-p6: census measured, options in its section); P7, P8 not started.
 
 # Closed runtime: the hybrid
 
@@ -524,6 +524,51 @@ projection's bindings equal them. (2) 59 forms in 23 `src` and 4 test files (the
 - Red rows: none new; the reaching tests of every touched namespace run.
 
 ### P6b. Predicates as input (platform: projection derivation, publication)
+
+**Stopped before implementation (lane closed-p6), on HEAD `f1145501b`.** Measured in a check JVM over the candidate's
+own `:seon.fn/calls` (the fold of `seon.sci.eval/reach-index`, edited in memory): the four projection derivers reach
+exactly eight direct openers, all in `seon.schema`: `runtime-predicate` (`requiring-resolve`, `var?`; called by
+`predicate-bindings`, `declaration-projection` directly, `projection-registry`, `projection-with-declarations`,
+`assert-complete-contract!`, `unloaded-predicate-functions`, `core-predicate-registered?`), `loaded-predicate-var`
+(`find-ns`, `ns-resolve`; `compilable-form`, `unloaded-predicate-functions`), `unloaded-predicate-functions`
+(`find-ns`), `identity-only-descriptors-in` (`requiring-resolve`, `var-get`, `var?`), `predicate-callable`
+(`requiring-resolve`), `projection-bindings` and `projection-state-bindings` (`[:fn clojure.core/var?]` in their
+contracts; `seon.config/effective` reaches them through `seon.db/q` -> `ask-declarations` -> `call-with-projection`),
+and `core-predicate-registered?`. With only those eight stripped of their openers the open set falls **48 -> 17**
+(31 close, `seon.sci.eval/reach-index` among them; the 17 are the hybrid's 16 plus
+`seon.sci.runtime-test/shaped-main`). So the census claim holds and the edit set is exactly those eight.
+
+The gap is where the callables come from. Closing them means no function a projection deriver reaches asks the JVM
+for a Var, yet on main the JVM namespace table *is* the runtime, so the environment must be produced outside every
+deriver's reach and reach it as a value. The plan says "the caller that holds the runtime supplies the map"; counted,
+that caller is everyone: `build-projection` has 17 `src` and 129 test call sites, `declaration-projection` 17 and 53,
+`load-projection` 7 and 17, `advance-projection` 5; `seon.db/content-projection` derives from stored entities on the
+hub path, whose population may name a predicate loaded by adoption after boot; 25 test-local predicate symbols in 10
+test files (`seon.call-preparation-test`, `seon.cluster.boot-test` and its drill child, `seon.effect-test`,
+`seon.schema-test`, `seon.schema.edn-test`, `seon.sci.acquisition-cost-test`, `seon.sci.admit-test`,
+`seon.sci.branch-execution-test`, `seon.dev.fresh-operator-export-test`) are resolved today by the derivation itself. The stored population names 108
+predicates and 5 identity projections. Options, simplest first:
+
+1. **A handed predicate environment** (recommended if P6b goes before P7): `seon.schema.handed` gains the environment
+   (symbol -> callable, with each program predicate's `:seon.program/definition-digest`), produced only by entrants:
+   `seon.schema.edn`'s load beside `packaged` (the packaged population's 108), the eval request's projection state
+   (`seon.sci.eval/projection-state`: main's Vars plus the context's held-apart SCI Vars, as
+   `seon.sci.kernel/context-bound-projection` computes), adoption (`seon.cluster/load-development-definitions!`
+   rebinds it), and the test harness (the test namespace's predicates). The eight functions read it; an absent symbol
+   is the refusing callable; `projection-fingerprint-from-data` and the `::projection` key gain `{symbol digest}`;
+   `seon.schema.edn/predicate-registered?` (admission, where a name is written) keeps resolving and is outside every
+   deriver's reach. Cost: about 10 `src` files (`seon.schema`, `seon.schema.handed`, `seon.schema.edn`,
+   `seon.sci.eval`, `seon.sci.kernel`, `seon.cluster`, `seon.cluster.boot`, `seon.test`, `seon.test-support`), the 10
+   test files, a boot/evaluator/harness platform slice; risk: any derivation on a thread that conveys no binding sees
+   refusing callables (the class of `seon.schema/handed-projection`'s 29 absent-tolerant readers).
+2. **Fold P6b into P7 / runtime-wire**: the runtime is already to be an immutable name -> digest map (AGENTS, "A
+   branch's change is live in its whole runtime"); hand that runtime (map plus its resolver) to the deriver and key by
+   the digests it reads. One mechanism instead of a predicate-only one; waits for that lane.
+3. **Close only the census-visible part now**: `projection-bindings`/`projection-state-bindings` declare a named
+   `:seon.schema/handed-var` (class test, as P4a did for `referenced`) and `identity-only-descriptors-in` /
+   `predicate-callable` read the projection's bindings (`population-predicate-symbols` also collecting
+   `:seon.schema/identity-projection` symbols). Four `converted` rows go green; no deriver closes, because
+   `runtime-predicate` and `loaded-predicate-var` stay.
 
 - Files: `src/seon/schema.clj` (`predicate-bindings` takes the environment map; `runtime-predicate`,
   `loaded-predicate-var` deleted; `unloaded-predicate-functions` becomes a property of the map;
