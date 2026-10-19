@@ -230,6 +230,22 @@
          (is (= 3 (in-context (eval/base-ctx before) "(seon.profile/bucket 5)"))
              "main's analysis is not the branch's: its key holds the macro it expanded"))))))
 
+(deftest a-branch-changed-predicate-decides-its-branch-projection
+  ;; Closed-runtime P7, mechanism 2's recorded gap (`seon.schema/a-branch-changed-predicate-is-seen-only-after-merge`):
+  ;; the projection binds main's loaded Var of each predicate its schemas name, so a branch whose definition of
+  ;; `seon.task/symbol-name?` rejects every name still admits one through the projection its database carries.
+  (test-support/with-database
+   (fn [connection]
+     (let [before (db/db connection)
+           database (branch-replacing! connection 'seon.task/symbol-name? "(?s)\\[\\^String task-name\\].*$"
+                                       "[^String task-name]\n  false)")
+           admits? (fn [ctx db] (in-context ctx (str "(fn [db] ((seon.schema/projection-validator"
+                                                    " (seon.db/carried-projection db) :seon.task/name) \"a-task\"))")
+                                           db))]
+       (is (true? (admits? (eval/base-ctx before) before)) "main's predicate admits a task name")
+       (is (false? (admits? (eval/base-ctx database) database))
+           "the branch's predicate decides the projection its database carries")))))
+
 (deftest an-agent-change-is-live-through-its-macro-callers-and-keeps-namespace-rows
   ;; Runtime review F4, F4b and F3's agent row, through the real MCP path.
   (test-support/with-running-agent
