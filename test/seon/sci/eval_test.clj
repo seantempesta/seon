@@ -393,6 +393,26 @@
        (is (= [777 778 main] (in-order [#(answer-of fork a-db) #(answer-of c a-db) #(compiled a-db)]))
            "the parent's database read by the child's code answers the child's definition")))))
 
+(deftest a-method-written-in-an-acquired-fork-is-its-own
+  ;; Runtime review 3 (Astra) blocker 2: a method table is part of its Var's value, so a `defmethod` or a
+  ;; protocol extension in one fork (`seon.sci.eval/fork-cluster-ctx`) changes neither its sibling nor its parent.
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           answers (fn [define change query]
+                     (let [parent (eval/base-ctx database)
+                           _ (in-context parent define)
+                           a (eval/fork-cluster-ctx parent database connection)
+                           b (eval/fork-cluster-ctx parent database connection)]
+                       (in-context a change)
+                       (mapv #(in-context % query) [a b parent])))]
+       (is (= [2 1 1] (answers "(ns rt3.multi) (defmulti mm identity) (defmethod mm :a [_] 1)"
+                               "(in-ns 'rt3.multi) (defmethod mm :a [_] 2)" "(rt3.multi/mm :a)"))
+           "a defmethod")
+       (is (= [2 1 1] (answers "(ns rt3.protocol) (defprotocol P (m [this])) (defrecord R [] P (m [_] 1)) (def r (->R))"
+                               "(in-ns 'rt3.protocol) (extend-type R P (m [_] 2))" "(rt3.protocol/m rt3.protocol/r)"))
+           "a protocol extension of an inherited record")))))
+
 (deftest ^{:seon.test/long "Two agent requests through MCP: five definitions deriving through seon.cache, then one call of each."
            :seon.test/long-ms 120000}
   an-agent-derivation-is-keyed-by-its-runtime-wherever-it-runs
