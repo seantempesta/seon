@@ -347,7 +347,7 @@
 
 (def ^:private problem-messages
   "What each problem kind means and what the agent does about it."
-  {:unresolved "This resolves to nothing on your branch; its operations read what does exist. What the task intends for it is its plan's to say."
+  {:unresolved "This resolves to nothing on your branch; its operations read what does exist. What the task intends for it is its plan's to say. To mention a name that does not exist, as text and not a reference, wrap it in two backticks: ``ns/name`` or ``:ns/key``."
    :anchor-missing "The file has no heading with this anchor; (my.fs/section path) lists its headings. Tell root the task names it."
    :no-lead "This section opens with no paragraph, so its summary is only its heading and size; its doc shows its first block whole and the headings below. Give the section a lead paragraph, or cite it at code level."
    :no-summary "This function has no docstring, so it has no summary. Add one, or cite it at doc or code level."

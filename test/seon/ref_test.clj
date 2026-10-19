@@ -256,7 +256,11 @@
   (let [[problem] (ref/references (db/db) {:seon.ref/text "`:seon.nope/missing-key`"})]
     (is (= :unresolved (:seon.ref/problem-kind problem)))
     (is (not (re-find #"(?i)create" (:seon.ref/message problem))) "it never tells the agent to create the name: the plan says that")
-    (is (= '[(my.program/search "missing-key")] (:seon.render/operations problem)) "it offers the search form that finds what exists")))
+    (is (= '[(my.program/search "missing-key")] (:seon.render/operations problem)) "it offers the search form that finds what exists")
+    ;; live run 13: a Design capped citing keys its problem is about, unregistered on purpose; nothing said how to
+    ;; mention them, though a two-backtick span reads as a literal
+    (is (str/includes? (:seon.ref/message problem) "two backticks") "it says how to mention a missing name as text")
+    (is (= [] (ref/references (db/db) {:seon.ref/text "``:seon.nope/missing-key``"})) "and that form is no reference")))
 
 (deftest an-unresolved-name-carries-the-names-its-namespace-declares-nearest-it
   ;; a misspelled name in its own namespace: the problem names what it misspells (kNN over the names' embeddings), so
