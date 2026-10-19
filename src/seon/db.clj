@@ -270,20 +270,10 @@
             :seon.error/throwable error))))
 
 (defn- connection-projection-state
+  "The projection state `connection` carries (`carry-connection-projection-state!`), nil when it carries none."
+  {:malli/schema [:=> [:cat :seon.db/connection] [:maybe :seon.sci.eval/projection-state]]}
   [connection]
-  ;; The operator owns this table. Do not load the operator during database
-  ;; bootstrap, and match the actual connection rather than a branch name
-  ;; that another store could also use.
-  (or (:seon.sci.eval/projection-state (meta connection))
-      (when-let [instances (some-> (find-ns 'seon.operator.runtime)
-                              (ns-resolve 'running-instances)
-                              deref)]
-    (some (fn [instance]
-            (let [state (get-in instance [:seon.sci.eval/ctx env/state-carrier])]
-              (when (and state
-                         (identical? connection (:seon.db/connection @state)))
-                state)))
-          (vals @instances)))))
+  (:seon.sci.eval/projection-state (meta connection)))
 
 (defn carry-connection-projection-state!
   "Attach the owning projection state to a live connection at construction.
@@ -1702,13 +1692,30 @@
       (second (apply max-key #(revision-agreement (or context {}) (first %)) candidates))
       {})))
 
+(defn- based-derivation
+  "The projection of `database`'s declarations, loaded from `base`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection] :seon.schema/projection]}
+  [database base]
+  (schema/load-projection database base))
+
+(defn- advanced-derivation
+  "The projection of `after`, advanced from `before`'s `base` by the declaration datoms `written`
+  (`schema/advance-projection`), else loaded from `base`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.schema/projection
+                       [:sequential :seon.schema/value]]
+                  :seon.schema/projection]}
+  [before after base written]
+  (or (schema/advance-projection before after base written) (schema/load-projection after base)))
+
 (defn- content-projection
   "The projection of `database`'s declaration content, held once under that
   content and the loaded `builder` and named by each of `aliases`. A miss
   takes the projection a speculative value of the same content derived
-  (`speculative-projection`), else derives under `kind` by `derivation`, by
-  default from its `nearest-base`, and is charged the forms it does not share
-  with the projection the delay `base` holds, the one it derives from
+  (`speculative-projection`), else derives under `kind`: advanced from the
+  held `[before base written]` when `advance` names one (`advanced-derivation`),
+  else from its `nearest-base` (`based-derivation`). Both derivations are
+  written here, so the key's reach holds the code that derives under it. It is
+  charged the forms it does not share with the projection it derives from
   (`projection-bytes`)."
   {:malli/schema [:function
                   [:=> [:cat :seon.source/digest :seon.db/database-value] :seon.schema/projection]
@@ -1716,22 +1723,26 @@
                         [:sequential :seon.schema/value]]
                    :seon.schema/projection]
                   [:=> [:cat :seon.source/digest :seon.db/database-value :qualified-keyword
-                        [:sequential :seon.schema/value] :seon.instrument/callable
-                        [:fn clojure.core/delay?]]
+                        [:sequential :seon.schema/value]
+                        [:maybe [:tuple :seon.db/database-value :seon.schema/projection
+                                 [:sequential :seon.schema/value]]]]
                    :seon.schema/projection]]}
   ([builder database] (content-projection builder database ::projection []))
-  ([builder database kind aliases]
-   (let [base (delay (nearest-base builder database))]
-     (content-projection builder database kind aliases #(schema/load-projection database @base) base)))
-  ([builder database kind aliases derivation base]
-   (let [content-key [::declaration-content builder (declaration-content-key database)]
+  ([builder database kind aliases] (content-projection builder database kind aliases nil))
+  ([builder database kind aliases advance]
+   (let [[before held-base written] advance
+         base (if advance (delay held-base) (delay (nearest-base builder database)))
+         content-key [::declaration-content builder (declaration-content-key database)]
          held (some #(when (seon.cache/present % content-key) %) [::projection ::value-projection])
          ;; The content names itself in the alias kind, which answers the
          ;; canonical first named with it: every alias and every later read
          ;; then holds that one key object, compared by identity.
          [canonical-kind canonical-key :as canonical]
          (alias! content-key [(or held kind) content-key])
-         projection (seon.cache/lookup canonical-kind canonical-key #(projection-bytes @base %) derivation)]
+         projection (seon.cache/lookup canonical-kind canonical-key #(projection-bytes @base %)
+                                       #(if advance
+                                          (advanced-derivation before database held-base written)
+                                          (based-derivation database @base)))]
      (run! #(alias! % canonical) aliases)
      projection)))
 
@@ -1780,8 +1791,7 @@
   (let [advanced (schema/advance-projection before after base written)]
     (if (identical? advanced base)
       (do (run! #(alias! % canonical) aliases) base)
-      (content-projection builder after ::value-projection aliases
-                          #(or advanced (schema/load-projection after base)) (delay base)))))
+      (content-projection builder after ::value-projection aliases [before base written]))))
 
 (defn- separating-declarations
   "The declaration datoms held by exactly one of `before` and `database`, two
@@ -1914,36 +1924,39 @@
                        (stored-call-reach database 'seon.schema/load-projection))]))
 
 (defn- loaded-builder
-  "The builder digest of the program this JVM loaded, memoized by its commit.
+  "The builder digest of the program the executing `state` loaded, memoized by its commit.
 
-  The authority is the process, never the value read: `loaded` is
-  `seon.sci.eval/loaded-identity`, which development adoption names by commit
-  after its record commits; before any adoption it is empty and the JVM runs
-  its boot commit, which each running instance holds. A value's own adoption
-  record names its branch's historical program. While an adoption loads (an
-  unknown identity), the loaded code is mixed: an unchanged builder keeps its
-  digest, a changed one keys a projection to that adoption alone, so no mixed
-  construction is ever reused. Boot commits that disagree refuse by name. A JVM
-  with no running instance keys by the value's own commit or rows.
+  The authority is the process, never the value read, and `state` names it
+  (`seon.sci.eval/projection-state`): its `:seon.sci.eval/loaded-identity`, the
+  place development adoption names by commit after its record commits, else the
+  `:seon.source/commit-id` the cluster booted. A value's own adoption record
+  names its branch's historical program. While an adoption loads (an unknown
+  identity), the loaded code is mixed: an unchanged builder keeps its digest
+  when the state's own cluster record already names the target, and otherwise
+  keys a projection to that adoption alone, so no mixed construction is ever
+  reused. A value read with no state, or a state naming no program, keys by the
+  value's own commit or rows.
 
   A value whose store lacks the loaded commit (another store's value) keys by
   that commit and its own builder, and a miss that materializes nothing caches
   nothing: `delay` rethrows a stored failure on every deref, so one such read
   refused every later read of the commit (lane-fix-unknown-identity-blocks-reads)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :map [:maybe [:sequential :map]]]
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.sci.eval/projection-state]]
                   :seon.source/digest]}
-  [database loaded instances]
-  (let [memo (fn [commit]
+  [database state]
+  (let [environment (some-> state deref)
+        loaded (or (some-> environment :seon.sci.eval/loaded-identity deref) {})
+        boot (:seon.source/commit-id environment)
+        memo (fn [commit]
                (when commit
                  (seon.cache/lookup ::builder-digest commit digest-bytes
                                     #(when-let [program (d/commit-as-db database commit {:secondary-indices? false})]
                                        (builder-digest program)))))
         ;; An uncommitted value (a transaction function's argument, a report's
         ;; :db-after) is keyed by the revisions of the attributes
-        ;; `builder-digest` reads: during boot no instance names its commit yet,
-        ;; and deriving per read cost a whole reach query each time a
-        ;; transaction compared a stored collection (298 of 581 writer samples,
-        ;; one cold boot publication, 2026-09-27).
+        ;; `builder-digest` reads: deriving per read cost a whole reach query
+        ;; each time a transaction compared a stored collection (298 of 581
+        ;; writer samples, one cold boot publication, 2026-09-27).
         revisions (fn [] (let [context (:cache-context database)]
                            (when (:datahike.cache/connection-id context)
                              [::builder-revisions
@@ -1956,42 +1969,21 @@
                      (if-let [k (revisions)]
                        (seon.cache/lookup ::builder-digest k digest-bytes #(builder-digest database))
                        (builder-digest database))))
-        loaded-key (fn [commit] (or (memo commit) (id/digest 64 [::foreign-store commit (own)])))
-        boots (into #{} (keep :seon.source/commit-id) instances)]
+        loaded-key (fn [commit] (or (memo commit) (id/digest 64 [::foreign-store commit (own)])))]
     (cond
       (:seon.error/at loaded)
       (let [target (memo (:seon.source/commit-id loaded))
-            ;; Each adopting cluster's record still names the program before this adoption.
-            priors (into #{} (keep #(:seon.source/commit-id
-                                     (d/pull (d/db (:seon.boot/cluster-connection %)) [:seon.source/commit-id]
-                                             [:seon.cluster/name (get-in % [:seon.boot/advertisement
-                                                                            :seon.boot/cluster-name])])))
-                         instances)]
-        (if (and target (seq priors) (every? #(= target (memo %)) priors))
+            ;; The adopting cluster's record still names the program before this adoption.
+            prior (some-> (:seon.db/connection environment) d/db
+                          (d/pull [:seon.source/commit-id] [:seon.cluster/name (:seon.boot/cluster-name environment)])
+                          :seon.source/commit-id)]
+        (if (and target prior (= target (memo prior)))
           target
           (id/digest 64 [::mixed-program (str (:seon.error/at loaded)) (str (:seon.source/commit-id loaded))])))
 
       (:seon.source/commit-id loaded) (loaded-key (:seon.source/commit-id loaded))
-      (= 1 (count boots)) (loaded-key (first boots))
-      (seq boots) (throw (ex-info "The running instances booted different programs; the loaded projection builder is ambiguous."
-                                  {:seon.error/expected :seon.source/commit-id
-                                   :seon.error/offending boots}))
+      boot (loaded-key boot)
       :else (own))))
-
-(defn- projection-builder
-  "The loaded builder (`loaded-builder`) every projection key of `origin`
-  names; a converged identity's memo is read here, since one more armed call
-  per read doubled the hit cost."
-  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.source/digest]}
-  [origin]
-  (let [loaded (or (some-> (find-ns 'seon.sci.eval) (ns-resolve 'loaded-identity) deref deref) {})
-        instances (some-> (find-ns 'seon.operator.runtime) (ns-resolve 'running-instances)
-                          deref deref vals)
-        boots (into #{} (keep :seon.source/commit-id) instances)
-        commit (when-not (:seon.error/at loaded)
-                 (or (:seon.source/commit-id loaded) (when (= 1 (count boots)) (first boots))))]
-    (or (when commit (seon.cache/present ::builder-digest commit))
-        (loaded-builder origin loaded instances))))
 
 (defn- held-entry
   "`[canonical projection]` already derived for the native value `database`
@@ -2039,7 +2031,7 @@
   {:malli/schema [:=> [:cat :map] [:maybe :seon.schema/projection]]}
   [{before :db-before after :db-after :as report}]
   (when-let [written (written-declarations report)]
-    (let [builder (projection-builder after)
+    (let [builder (loaded-builder after (:seon.sci.eval/projection-state (meta after)))
           advanced (advanced-key builder before written)]
       (or (second (resolved advanced))
           (when-let [entry (held-entry builder before)]
@@ -2054,7 +2046,7 @@
   {:malli/schema [:=> [:cat :seon.db/transaction-report] :seon.db/transaction-report]}
   [{before :db-before after :db-after tx-data :tx-data :as report}]
   (when-let [committed (datahike.db/committed-value-identity after)]
-    (let [builder (projection-builder after)
+    (let [builder (loaded-builder after (:seon.sci.eval/projection-state (meta after)))
           revision-key (assoc (projection-cache-key after) ::builder builder)
           canonical (or (first (resolved revision-key))
                         (when (= (:max-tx after) (:tx (first tx-data)))
@@ -2086,9 +2078,8 @@
   (let [as-of? (instance? AsOfDB database)
         source (if as-of? database (schema-database database))
         origin (if as-of? (schema-database database) source)
-        ;; The JVM's loaded builder (`loaded-builder`); a converged identity's
-        ;; memo is read here, since one more armed call per read doubled the hit cost.
-        builder (delay (projection-builder origin))
+        ;; The executing state's loaded builder (`loaded-builder`).
+        builder (delay (loaded-builder origin (:seon.sci.eval/projection-state (meta origin))))
         ;; An as-of view keys by its own declaration datoms, never its origin's.
         ;; An uncommitted origin (the writer's in-transaction value) names them
         ;; by its revision key and the time point: within one connection an

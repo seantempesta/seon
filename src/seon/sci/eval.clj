@@ -208,25 +208,34 @@
 
 (schema.edn/load! {})
 
-(declare carried-cluster-name agent-require acquired-basis context-database loaded-database
+(declare loaded-identity carried-cluster-name agent-require acquired-basis context-database loaded-database
          program-revisions acquisition-attributes)
 
 (defn projection-state
   "Create `cluster-name`'s context environment replacement reference; the
   caller names the cluster whose world `db` is. Without a name, the cluster is
-  the one that world itself names (`carried-cluster-name`), never an invented one."
+  the one that world itself names (`carried-cluster-name`), never an invented one.
+  It holds the JVM's loaded-program place (`loaded-identity`) by reference and,
+  when the caller names it, the program `commit-id` the cluster booted: the
+  projection builder reads both from here (`seon.db/loaded-builder`)."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value :seon.schema/projection] :seon.sci.eval/projection-state]
     [:=> [:cat :seon.db/database-value :seon.schema/projection :seon.boot/cluster-name]
+     :seon.sci.eval/projection-state]
+    [:=> [:cat :seon.db/database-value :seon.schema/projection :seon.boot/cluster-name
+          [:maybe :seon.source/commit-id]]
      :seon.sci.eval/projection-state]]}
   ([db projection] (projection-state db projection (carried-cluster-name nil db)))
-  ([db projection cluster-name]
+  ([db projection cluster-name] (projection-state db projection cluster-name nil))
+  ([db projection cluster-name commit-id]
    (env/environment-state
     (env/refuse-incomplete-environment!
-     (env/environment {:seon.boot/cluster-name cluster-name
-                       :seon.db/basis-t (db/basis-t db)
-                       :seon.schema/projection projection})))))
+     (env/environment (cond-> {:seon.boot/cluster-name cluster-name
+                               :seon.db/basis-t (db/basis-t db)
+                               :seon.schema/projection projection
+                               :seon.sci.eval/loaded-identity loaded-identity}
+                        commit-id (assoc :seon.source/commit-id commit-id)))))))
 
 (defn- carried-cluster-name
   "The cluster the caller's world names: the environment its connection or
@@ -4680,7 +4689,8 @@
                                 :my.program/executing-ctx :seon.sci.kernel/arm)
                         :seon.db/connection connection
                         :seon.db/basis-t (db/basis-t db)
-                        :seon.schema/projection projection))))]
+                        :seon.schema/projection projection
+                        :seon.sci.eval/loaded-identity loaded-identity))))]
     (db/carry-connection-projection-state! connection state)
     state))
 

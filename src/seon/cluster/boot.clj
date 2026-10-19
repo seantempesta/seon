@@ -99,13 +99,15 @@
            pre-graph-environment
            (env/refuse-incomplete-environment!
             (env/environment
-             {:seon.boot/cluster-name cluster-name
+             (merge
+              {:seon.boot/cluster-name cluster-name
               :seon.store/store (:seon.store/store instance)
               :seon.db/connection connection
               :seon.schema/projection
               (:seon.schema/projection @projection-state)
               :seon.db/basis-t (:seon.db/basis-t @projection-state)
-              :seon.sci.admit/caps (config/result-caps boot-dials)}))
+              :seon.sci.admit/caps (config/result-caps boot-dials)}
+             (select-keys @projection-state [:seon.source/commit-id :seon.sci.eval/loaded-identity]))))
            work-launcher
            (flow/start-work-launcher!
             {:seon.env/environment pre-graph-environment
@@ -117,6 +119,8 @@
              (assoc pre-graph-environment
                     :seon.flow/work-launcher work-launcher)))
            _ (env/replace-environment! projection-state environment)
+           ;; the cluster connection's reads take their builder from this state (`seon.db/loaded-builder`)
+           _ (db/carry-connection-projection-state! connection projection-state)
            ;; this cluster's heap watch, recording in its world; removed at stop
            instance (publish! (assoc instance :seon.heap/watch
                                      (heap/watch! (heap-dials boot-dials) #(heap-crossed! environment %))))
@@ -250,7 +254,8 @@
         (or (:seon.schema/projection source-base)
             (schema/projection-from-database initial-database))
         initial-projection-state
-        (sci.eval/projection-state initial-database initial-projection cluster-name)
+        (sci.eval/projection-state initial-database initial-projection cluster-name
+                                    (:seon.source/commit-id instance))
         _ (schema/call-with-projection-state
            initial-projection-state
            ;; The provisional connection's own schema accretion, then the
@@ -271,7 +276,8 @@
         (if (= (db/basis-t initial-database) (db/basis-t database))
           initial-projection
           (schema/projection-from-database database))
-        projection-state (sci.eval/projection-state database projection cluster-name)
+        projection-state (sci.eval/projection-state database projection cluster-name
+                                                     (:seon.source/commit-id instance))
         _ (store/release-branch! provisional-connection)
         connection
         (schema/call-with-projection-state

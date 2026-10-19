@@ -1496,7 +1496,7 @@
       (let [database (db/db connection)
             projection (schema/projection-from-database database)
             ;; The cluster whose fork this base becomes names its environment.
-            projection-state (sci.eval/projection-state database projection cluster-name)
+            projection-state (sci.eval/projection-state database projection cluster-name commit-id)
             [source-digest base-ctx]
             (schema/call-with-projection-state
              projection-state

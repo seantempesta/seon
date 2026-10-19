@@ -29,6 +29,7 @@
             [seon.fn :as seon.fn]
             [seon.id :as id]
             [seon.instrument :as instrument]
+            [seon.operator.runtime :as operator.runtime]
             [seon.profile :as profile]
             [seon.program :as program]
             [seon.render :as render]
@@ -1106,11 +1107,53 @@
            reads 20
            [digests calls] (test-support/armed-calls
                             '#{seon.db/builder-digest}
-                            #(vec (repeatedly reads (fn [] (@#'db/loaded-builder value {} nil)))))]
+                            #(vec (repeatedly reads (fn [] (@#'db/loaded-builder value nil)))))]
        (is (not (:seon.error/at value)))
        (is (= 1 (count (set digests))))
        (is (< (get calls 'seon.db/builder-digest 0) reads)
            "the identity is derived once per revision set, not per read")))))
+
+;; The projection builder reads the loaded program from the projection state a
+;; connection carries (`:seon.sci.eval/loaded-identity`, `:seon.source/commit-id`),
+;; never by looking the process's names up, so every cluster connection carries one.
+(deftest every-connection-carries-its-projection-state
+  (let [carried #(some-> (:seon.sci.eval/projection-state (meta %)) deref)]
+    (doseq [[cluster instance] @operator.runtime/running-instances
+            :when (and (map? instance) (:seon.sci.eval/ctx instance))
+            :let [state (carried (:seon.boot/cluster-connection instance))]]
+      (is (identical? sci.eval/loaded-identity (:seon.sci.eval/loaded-identity state))
+          (str "the cluster connection of " cluster " carries the JVM's loaded identity place"))
+      (is (= (:seon.source/commit-id instance) (:seon.source/commit-id state))
+          (str "the cluster connection of " cluster " carries the commit it booted")))
+    (test-support/with-database
+     (fn [connection]
+       (is (identical? sci.eval/loaded-identity (:seon.sci.eval/loaded-identity (carried connection)))
+           "a harness connection carries the JVM's loaded identity place")))))
+
+;; Two states naming different booted programs key two projections of one
+;; value: the builder is the executing state's, and one state's repeated read
+;; derives once.
+(deftest projection-cache-uses-the-executing-builder
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           state (fn [] (atom (assoc @(sci.eval/projection-state
+                                       database (db/carried-projection database)
+                                       (:seon.cluster/name (test-support/execution-handle connection)))
+                                     :seon.source/commit-id (random-uuid)
+                                     :seon.sci.eval/loaded-identity (atom {}))))
+           a (db/carry-projection-state database (state))
+           b (db/carry-projection-state database (state))
+           derive (fn [value] (test-support/armed-calls '#{seon.schema/load-projection}
+                                                        #(db/carried-projection value)))
+           [projection-a calls-a] (derive a)
+           [projection-b calls-b] (derive b)
+           [again calls-again] (derive a)]
+       (is (= 1 (get calls-a 'seon.schema/load-projection 0)) "state A derives its projection")
+       (is (= 1 (get calls-b 'seon.schema/load-projection 0)) "state B's builder keys its own derivation")
+       (is (not (identical? projection-a projection-b)))
+       (is (= 0 (get calls-again 'seon.schema/load-projection 0)) "state A's second read derives nothing")
+       (is (identical? projection-a again))))))
 
 (deftest equal-reads-record-one-evidence-entry
   ;; An evaluation that read one thing 440,605 times stored 440,605 evidence

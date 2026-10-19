@@ -137,7 +137,8 @@
     (testing "a loaded commit this value's store lacks, known or unknown, still keys a projection"
       ;; A failed materialization cached as a thrown `delay` once refused every later read.
       (let [absent (random-uuid)
-            builder #(@#'db/loaded-builder database % nil)]
+            builder #(@#'db/loaded-builder database (atom (assoc @(sci.eval/projection-state database (db/carried-projection database))
+                                                                   :seon.sci.eval/loaded-identity (atom %))))]
         (doseq [program [{:seon.source/commit-id absent}
                          (let [failed (atom {})]
                            (adopt! failed absent #(throw (ex-info "arming refused" {})))

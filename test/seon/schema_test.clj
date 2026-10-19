@@ -414,6 +414,23 @@
                          (schema/projection-from-database before projection))
              "a newer database cannot change the old projection"))))))
 
+;; CLASS: a declaration range whose attributes the store never installed was
+;; read as an index, so a store declaring schema rows but no functions refused
+;; its projection from an empty base ("Bad entity attribute :seon.fn/spec").
+(deftest a-store-without-function-attributes-loads-its-schema-rows
+  (let [configuration {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write}
+        _ (d/create-database configuration)
+        connection (d/connect configuration)]
+    (try
+      (d/transact connection [{:db/ident :seon.schema/key :db/valueType :db.type/keyword
+                               :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+                              {:db/ident :seon.schema/form :db/valueType :db.type/string
+                               :db/cardinality :db.cardinality/one}])
+      (d/transact connection [{:seon.schema/key :seon.schema-test/only-row :seon.schema/form ":string"}])
+      (is (= :string (get (:seon.schema.projection/forms (schema/load-projection @connection {}))
+                          :seon.schema-test/only-row)))
+      (finally (d/release connection)))))
+
 (deftest function-input-fit-is-total-for-an-absent-contract
   (let [projection (schema/build-projection (schema/registered-schemas))]
     (is (false? (schema/function-accepts-in?

@@ -2947,21 +2947,24 @@
                 :seon.schema/validate-render-contracts? false))))))
 
 (defn- projection-entities
-  "Join attribute ranges, retaining historical values for duplicate refusal."
+  "Join attribute ranges, retaining historical values for duplicate refusal.
+  A range whose attributes the store has not installed declares nothing."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :qualified-keyword :qualified-keyword :boolean]
     [:vector [:tuple [:or :keyword :symbol :string] :string :int]]]}
   [database identity-attribute value-attribute identity-transaction?]
-  (let [values (group-by :e (d/datoms database :aevt value-attribute))]
-    (into []
-          (comp
-           (mapcat (fn [identity-datom]
-                     (map (fn [value-datom]
-                            [(:v identity-datom) (:v value-datom)
-                             (:tx (if identity-transaction? identity-datom value-datom))])
-                          (get values (:e identity-datom)))))
-           (distinct))
-          (d/datoms database :avet identity-attribute))))
+  (if-not (and (get (dbi/-schema database) identity-attribute) (get (dbi/-schema database) value-attribute))
+    []
+    (let [values (group-by :e (d/datoms database :aevt value-attribute))]
+      (into []
+            (comp
+             (mapcat (fn [identity-datom]
+                       (map (fn [value-datom]
+                              [(:v identity-datom) (:v value-datom)
+                               (:tx (if identity-transaction? identity-datom value-datom))])
+                            (get values (:e identity-datom)))))
+             (distinct))
+            (d/datoms database :avet identity-attribute)))))
 
 (defn- projection-admissions
   "Join declaration identities to admission datoms once, without per-entity reads."

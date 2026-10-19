@@ -45,7 +45,11 @@
     :functions (into #{} (map #(symbol "seon.db" %))
                      ["call-preparation-snapshot" "call-preparation-report-snapshot" "call-preparation-plan-for"])}
    {:phase :P3a-1
-    :functions (into #{} (map #(symbol "seon.schema" %)) ["canonical-schema-entities"])}])
+    :functions (into #{} (map #(symbol "seon.schema" %)) ["canonical-schema-entities"])}
+   ;; `projection-builder` is deleted, so it is built from its name.
+   {:phase :P5
+    :functions (into #{} (map #(symbol "seon.db" %))
+                     ["carried-projection" "content-projection" "connection-projection-state" "projection-builder"])}])
 
 (defn- open-cache-derivers
   "The cache derivers of `database`'s program that its reach index leaves open."
