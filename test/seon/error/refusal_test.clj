@@ -13,6 +13,7 @@
             [seon.error.refusal :as error.refusal]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
+            [seon.schema.handed :as schema.handed]
             [seon.test-support :as test-support]
             [sci.core]))
 
@@ -499,7 +500,9 @@
       (is (= :seon.error/base (:seon.error/type valid)))
       (is (= :seon.error/base (:seon.error/layer valid)))
       (is (= :seon.error.refusal/construction (:seon.error/layer undeclared)))
-      (is (= :no.such/error (:seon.error/member undeclared))))))
+      (is (= :no.such/error (:seon.error/member undeclared)))
+      (is (realized? (::schema.handed/projection schema.handed/packaged))
+          "the bare thread checked against the packaged projection seon.schema.edn bound at load, found by no name"))))
 
 (deftest error-constructor-builds-the-declared-alternative
   (let [operation 'seon.error.refusal-test/probe

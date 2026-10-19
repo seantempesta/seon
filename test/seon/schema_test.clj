@@ -18,6 +18,7 @@
             [seon.error.refusal :as refusal]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
+            [seon.schema.handed :as schema.handed]
             [seon.program :as program]
             [seon.schema.edn :as schema.edn]
             [seon.schema.datahike :as schema.datahike]
@@ -696,7 +697,7 @@
         builds (atom 0)
         original-build schema/build-projection
         project! (fn [population]
-                   (schema/call-with-forms
+                   (schema.handed/call-with-forms
                     population
                     #(schema/identity-only-projection ::not-an-identity)))]
     (is (not (identical? forms equal-copy))
@@ -1831,7 +1832,7 @@
                      (catch clojure.lang.ExceptionInfo e (ex-data e))))]
     ;; The runner hands every test body a projection; the bootstrap world
     ;; is the one with none, so the body is run in that world.
-    (with-bindings {#'schema/*projection* nil}
+    (with-bindings {#'schema.handed/*projection* nil}
       (is (nil? (schema/current-projection)) "the bootstrap path is the one exercised")
       (is (= :inst (get-in forms [:seon.error/at])) "the entity reaches :inst")
       (doseq [[population identity message]

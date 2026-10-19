@@ -19,6 +19,7 @@
    live in `seon.schema.internal`, outside agent context."
   {:seon/tasks #{'seon.schema/agents-can-validate}}
   (:require [malli.core :as m]
+            [malli.error :as me]
             [seon.id :as id]
             [malli.registry :as mr]
             [clojure.core.cache.wrapped :as cache]
@@ -31,16 +32,15 @@
             [datahike.db.interface :as dbi]
             [datahike.db.utils :as db-utils]
             [seon.schema.internal :as internal]
+            [seon.schema.handed :as handed]
             [seon.error.refusal :as refusal]
             [clojure.string :as str]
             [clojure.edn :as edn]))
 
-;;; LOAD-CYCLE BOUNDARIES. `seon.schema.edn`, `seon.error` and
-;;; `seon.schema.datahike` all require `seon.schema`, so this namespace
+;;; LOAD-CYCLE BOUNDARIES. `seon.error` and
+;;; `seon.schema.datahike` both require `seon.schema`, so this namespace
 ;;; cannot require them back. One resolution per var, realized at first use,
 ;;; instead of a `requiring-resolve` on every call (AGENTS §2.1).
-(defonce ^:private schema-edn-packaged-forms
-  (delay (requiring-resolve 'seon.schema.edn/packaged-forms)))
 (defonce ^:private schema-datahike-storable-attribute-in?
   (delay (requiring-resolve 'seon.schema.datahike/storable-attribute-in?)))
 (defonce ^:private schema-datahike-storable-properties-in
@@ -395,8 +395,13 @@
             [(m/validator input) (m/form output)]))
         (m/-function-schema-arities compiled)))
 
+(declare identity-only-projector explained-problems)
+
 (defn- with-compiled-cache
-  "Give a projection its own runtime holder, seeded with its compiled contract products.
+  "Give a projection its own runtime holder, seeded with its compiled contract products,
+   and the operations `seon.error.refusal` asks of it, handed as Vars (it cannot name
+   this namespace): `:seon.schema.projection/identity-projector`,
+   and `:seon.schema.projection/explain`.
    Plain validators and explainers remain on Malli's retained schemas."
   {:malli/schema
    [:function
@@ -415,7 +420,9 @@
           (some-> (mr/schema (:seon.schema.projection/registry projection)
                              :seon.config.db/validation-node-limit)
                   m/properties))
-         :seon.schema.projection/compiled (cache/basic-cache-factory {::contract-products products}))))
+         :seon.schema.projection/compiled (cache/basic-cache-factory {::contract-products products})
+         :seon.schema.projection/identity-projector #'identity-only-projector
+         :seon.schema.projection/explain #'explained-problems)))
 
 (defn- projection-cache
   "The holder [[with-compiled-cache]] installed, or nil.
@@ -970,9 +977,6 @@
 ;;; ---------------------------------------------------------------------------
 
 (def ^:dynamic ^:private *candidate-forms-overlay* nil)
-(def ^:dynamic ^:private *projection* nil)
-(def ^:dynamic ^:private *projection-state* nil)
-(def ^:dynamic ^:private *packaged-forms* nil)
 (def ^:dynamic ^:private *registration-admission-source* :core)
 
 (defn admission-from-asserting-transaction
@@ -1007,98 +1011,19 @@
                   "recorded admission source, so this entity is admitted as "
                   "agent-authored.")))))
 
-;;; ---------------------------------------------------------------------------
-;;; The classpath fallback, and why it is loud
-;;; ---------------------------------------------------------------------------
-
-;; Reached with no population in hand, resolution reads and merges every schema
-;; resource on the classpath. On 2026-08-07 one caller reached it 1,886 times —
-;; 286,672 file reads, twenty-six seconds — and logged NOTHING; both instances
-;; found that day were found by thread dump. R41 says development must be
-;; unable to miss it. The mechanism is the stderr line `seon.instrument/apply!`
-;; already uses (`instrument.clj:411-414`), which is the only one available
-;; here: this namespace sits below `seon.db`, so no fault can be recorded, and
-;; a throw would be wrong regardless — the fallback is the LEGITIMATE bootstrap
-;; path before any projection exists, so throwing would make boot impossible. Loud therefore
-;; means NAMED AND COUNTED, and production-bounded means one line per calling
-;; function per decade of occurrences: the 2026-08-07 loop would have printed
-;; six lines, not a quarter of a million.
-(defonce ^:private !fallback-counts (atom {}))
-
-(defn- frame-namespace
-  "The namespace part of a stack frame's demunged class name."
-  {:malli/schema [:=> [:cat :seon.error/frame] :string]}
-  [[class-name]]
-  (let [demunged (clojure.lang.Compiler/demunge (str class-name))
-        separator (.indexOf demunged "/")]
-    (if (neg? separator) demunged (subs demunged 0 separator))))
-
-;; The warning is only worth printing if its advice is ACTIONABLE, and the
-;; reader can only act on code we wrote. Which frames those are is the refusal
-;; owner's one classpath-derived rule (`seon.error.refusal/first-party-frame?`);
-;; the resolution owners themselves are the callee, never the caller.
-(def ^:private resolution-owner-namespaces #{"seon.schema" "seon.schema.edn" "seon.instrument"})
-
-(defn- fallback-caller
-  "The nearest first-party frame outside resolution, as `ns (file:line)`.
-   Stack introspection is a diagnostic and runs only on the fallback path."
-  {:malli/schema [:=> [:cat] :string]}
+(defn- candidate-forms
+  "The population this operation was handed, else the packaged one
+  (`seon.schema.handed/packaged`, bound when `seon.schema.edn` loads)."
   []
-  (or (some (fn [^StackTraceElement element]
-              (when-let [file (.getFileName element)]
-                (let [frame [(symbol (.getClassName element)) (symbol (.getMethodName element))
-                             file (long (.getLineNumber element))]
-                      frame-ns (frame-namespace frame)]
-                  (when (and (not (contains? resolution-owner-namespaces frame-ns))
-                             (refusal/first-party-frame? frame))
-                    (str frame-ns " (" file ":" (.getLineNumber element) ")")))))
-            (.getStackTrace (Thread/currentThread)))
-      "an unidentified caller"))
-
-(defn- decade?
-  [n]
-  (let [magnitude (Math/log10 (double n))]
-    (== magnitude (Math/floor magnitude))))
-
-;; The explanation is printed ONCE per process; each occurrence after it is one
-;; short line. Repeating a 300-character sentence per caller per decade made
-;; the signal its own wall — 45% of `seon.cluster.boot-test`'s wrapped
-;; transcript on 2026-08-07 — and a diagnostic that buries the reader is the
-;; defect the ethos names, not a louder version of the right one.
-(defn- warn-classpath-fallback!
-  []
-  (let [caller (fallback-caller)
-        counts (swap! !fallback-counts update caller (fnil inc 0))
-        occurrence (get counts caller)]
-    (when (decade? occurrence)
-      (binding [*out* *err*]
-        (when (= 1 (count counts) occurrence)
-          (println
-           (str "seon.schema: resolving the declaration population with none"
-                " in hand reads every schema resource on the classpath (152"
-                " reads, ~14 ms). ONE per operation is the current floor; the"
-                " SAME caller repeating within one operation is the defect —"
-                " resolve it once with schema/declaration-population and pass"
-                " it to every question that operation asks. Each occurrence"
-                " below names its caller and its count for this process.")))
-        (println (str "seon.schema: DECLARATION POPULATION FALLBACK ×"
-                      occurrence " — " caller))
-        (flush)))))
-
-(defn- packaged-forms []
-  (warn-classpath-fallback!)
-  (@schema-edn-packaged-forms))
-
-(defn- candidate-forms []
   (if *candidate-forms-overlay*
     @*candidate-forms-overlay*
-    (or *packaged-forms*
-        (some-> *projection-state*
+    (or handed/*packaged-forms*
+        (some-> handed/*projection-state*
                 deref
                 :seon.schema/projection
                 :seon.schema.projection/forms)
-        (:seon.schema.projection/forms *projection*)
-        (packaged-forms))))
+        (:seon.schema.projection/forms handed/*projection*)
+        (::handed/forms handed/packaged))))
 
 (defn declaration-population
   "THE declaration population in hand for this operation.
@@ -1114,25 +1039,16 @@
    immutable map of registry key -> schema form; read it with `get`."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (if (or *candidate-forms-overlay* *packaged-forms* *projection*
-          *projection-state*)
+  (if (or *candidate-forms-overlay* handed/*packaged-forms* handed/*projection*
+          handed/*projection-state*)
     (candidate-forms)
-    (let [caller (fallback-caller)
-          diagnostic
+    (let [diagnostic
           (assoc (seon.error.refusal/diagnostic (java.util.Date.) :seon.schema/derivation 'seon.schema/declaration-population
            {:seon.error/message "No declaration projection was handed to this schema operation."
             :seon.schema/missing-projection true
             :seon.schema/refused-value nil
-            :seon.schema/expected-value :seon.schema/projection
-            :seon.error/data {:seon.schema/caller caller}}) :seon.error/type :seon.schema/validation-refusal)]
+            :seon.schema/expected-value :seon.schema/projection}) :seon.error/type :seon.schema/validation-refusal)]
       (throw (ex-info (:seon.error/message diagnostic) diagnostic)))))
-
-(defn call-with-forms
-  "Call `f` with one immutable declaration population for this operation."
-  {:malli/schema [:=> [:cat :map [:fn clojure.core/ifn?]] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli declarations contain arbitrary literal values and predicates; schema inspection preserves that data, and body wrappers return the caller's result unchanged.", :gen/elements [nil false 0 "" :k [] {}]}]]}
-  [forms f]
-  (binding [*packaged-forms* forms]
-    (f)))
 
 (defn projection-bindings
   "The Var bindings that make `projection` this thread's declaration population.
@@ -1142,8 +1058,8 @@
   armed call (task `seon.profile/scope-wrappers-report-callback-time-as-work`)."
   {:malli/schema [:=> [:cat :map] [:map-of [:or [:fn clojure.core/var?] :seon.sci.eval/sci-var] [:or :nil :map]]]}
   [projection]
-  {#'*projection* projection
-   #'*projection-state* nil})
+  {#'handed/*projection* projection
+   #'handed/*projection-state* nil})
 
 (defn projection-state-bindings
   "The Var bindings that make `projection-state` this thread's advanceable projection.
@@ -1153,9 +1069,9 @@
   armed call (task `seon.profile/scope-wrappers-report-callback-time-as-work`)."
   {:malli/schema [:=> [:cat [:fn clojure.core/deref]] [:map-of [:or [:fn clojure.core/var?] :seon.sci.eval/sci-var] [:or :nil [:fn clojure.core/deref]]]]}
   [projection-state]
-  {#'*projection-state* projection-state
-   #'*projection* nil
-   #'*packaged-forms* nil})
+  {#'handed/*projection-state* projection-state
+   #'handed/*projection* nil
+   #'handed/*packaged-forms* nil})
 
 (defn call-with-projection
   "Call `f` with one immutable database-derived projection for this operation."
@@ -1172,7 +1088,7 @@
     (f)))
 
 (defn- active-projection []
-  *projection*)
+  handed/*projection*)
 
 (defn register-core-predicate!
   "Assert at load time that `predicate` names the callable `f`, and return it.
@@ -3818,8 +3734,7 @@
   "The immutable projection explicitly supplied for this operation, or nil."
   {:malli/schema [:=> [:cat] [:maybe :seon.schema/projection]]}
   []
-  (or *projection*
-      (some-> *projection-state* deref :seon.schema/projection)))
+  (handed/projection))
 
 (defn entity-catalog
   "Derived database-storable shape catalog for packaged schema facts."
@@ -3876,7 +3791,7 @@
   ([delta admission f]
    (binding [*candidate-forms-overlay*
              (:seon.schema.delta/candidate-forms delta)
-             *projection* (:seon.schema.delta/projection delta)
+             handed/*projection* (:seon.schema.delta/projection delta)
              *registration-admission-source*
              (:seon.schema.admission/source admission)]
      (f))))
@@ -4011,6 +3926,12 @@
                   [:maybe ::explanation]]}
   [projection schema-key value]
   ((projection-explainer projection schema-key) value))
+
+(defn- explained-problems
+  "The humanized problems of `value` against `schema-key` in `projection`, or nil when it is valid."
+  {:malli/schema [:=> [:cat ::projection ::registry-key ::value] [:maybe ::value]]}
+  [projection schema-key value]
+  (some-> (explain-candidate-value projection schema-key value) me/humanize))
 
 (def ^:const shape-candidate-limit
   "Maximum schema entities examined and returned for structural diagnostics."

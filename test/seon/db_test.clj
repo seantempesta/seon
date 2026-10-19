@@ -39,6 +39,7 @@
             [seon.sci.eval :as sci.eval]
             [seon.sci.lookup :as lookup]
             [seon.schema :as schema]
+            [seon.schema.handed :as schema.handed]
             [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as test-support]
             [taoensso.trove :as trove])
@@ -134,15 +135,13 @@
     [?schema :seon.db/attributes true]
     [?schema :seon.schema/key ?key]])
 
-(def ^:private projection-carrier-symbols
-  '[*candidate-forms-overlay* *projection* *projection-state* *packaged-forms*])
+(def ^:private projection-carriers
+  [#'schema/*candidate-forms-overlay* #'schema.handed/*projection* #'schema.handed/*projection-state*
+   #'schema.handed/*packaged-forms*])
 
 (defn- without-handed-projection
   [thunk]
-  (with-bindings
-    (into {}
-          (map (fn [sym] [(ns-resolve 'seon.schema sym) nil]))
-          projection-carrier-symbols)
+  (with-bindings (zipmap projection-carriers (repeat nil))
     (thunk)))
 
 (defn- elapsed-nanos

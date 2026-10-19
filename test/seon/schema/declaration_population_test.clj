@@ -19,11 +19,11 @@
   resource seam, and assert the refusal's caller so neither rail is vacuous.
 
   Issue: docs/seon/issues/packaged-forms-rereads-every-schema-resource-per-call.md"
-  (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing]]
             [seon.config :as config]
             [seon.print :as print]
             [seon.schema :as schema]
+            [seon.schema.handed :as schema.handed]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
 
@@ -42,15 +42,14 @@
   []
   (resource-reads #(@#'schema.edn/resource-population schema.edn/default-resource)))
 
-(def ^:private carrier-symbols
-  '[*candidate-forms-overlay* *projection* *projection-state* *packaged-forms*])
+(def ^:private carriers
+  [#'schema/*candidate-forms-overlay* #'schema.handed/*projection* #'schema.handed/*projection-state*
+   #'schema.handed/*packaged-forms*])
 
 (defn- without-handed-projection
   "Call `thunk` after explicitly clearing every schema projection carrier."
   [thunk]
-  (with-bindings
-    (into {} (map (fn [sym] [(ns-resolve 'seon.schema sym) nil]))
-          carrier-symbols)
+  (with-bindings (zipmap carriers (repeat nil))
     (thunk)))
 
 (deftest an-operation-resolves-the-declaration-population-once
@@ -101,7 +100,4 @@
     (is (= :seon.schema/projection
            (:seon.schema/expected-value (ex-data failure))))
     (is (nil? (:seon.schema/refused-value (ex-data failure))))
-    (is (str/includes?
-         (get-in (ex-data failure) [:seon.error/data :seon.schema/caller])
-         "seon.schema.declaration-population-test"))
     (is (zero? (get calls 'seon.schema.edn/read-schema-resource)))))

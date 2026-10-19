@@ -11,6 +11,7 @@
             [seon.fault :as fault]
             [seon.id :as id]
             [seon.schema :as schema]
+            [seon.schema.handed :as schema.handed]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
 
@@ -201,13 +202,13 @@
             "the canonical population installs the subject attribute")
         (is (not (contains? installed :db/unique))
             "which the bridge derives WITHOUT uniqueness")
-        (is (= [] (schema/call-with-forms
+        (is (= [] (schema.handed/call-with-forms
                    forms
                    #(changes database (schema/handed-projection))))
             "a converged branch reopens with no declaration change")
         (let [stale (assoc-in database [:schema attribute :db/unique]
                               :db.unique/identity)
-              tx-data (schema/call-with-forms
+              tx-data (schema.handed/call-with-forms
                        forms
                        (fn [] (changes stale (schema/handed-projection))))]
           (is (= [:db/retractEntity attribute] (last (butlast tx-data)))
@@ -261,7 +262,7 @@
         (let [older (update-in @connection [:schema attribute] dissoc :db/index)
               declarations (filterv
                             map?
-                            (schema/call-with-forms
+                            (schema.handed/call-with-forms
                              forms
                              #(changes older (schema/handed-projection))))]
           (is (= [attribute] (mapv :db/ident declarations))
@@ -317,7 +318,7 @@
             declared (:db/valueType (get (:schema database) attribute))
             stale (assoc-in database [:schema attribute :db/valueType]
                             :db.type/long)
-            tx-data (schema/call-with-forms
+            tx-data (schema.handed/call-with-forms
                      forms
                      (fn [] (changes stale (schema/handed-projection))))]
         (is (= :db.type/string declared)

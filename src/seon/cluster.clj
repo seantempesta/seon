@@ -62,6 +62,7 @@
             [seon.sci.eval :as sci.eval]
             [taoensso.timbre :as log]
             [seon.schema :as schema]
+            [seon.schema.handed :as schema.handed]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
             [malli.core :as m]
@@ -1237,7 +1238,7 @@
   ([connection cluster-name publish-schema-entities? retire?]
   (let [forms (schema.edn/packaged-forms)
         projection (or (schema/handed-projection) (schema/declaration-projection forms))]
-    (schema/call-with-forms
+    (schema.handed/call-with-forms
      forms
      (fn []
        (schema/call-with-projection
@@ -1308,7 +1309,7 @@
     inputs :seon.source/relative-file-digests
     cache-root :seon.fn.analyzer/cache-root}]
   (let [forms (schema.edn/packaged-forms)]
-    (schema/call-with-forms
+    (schema.handed/call-with-forms
      forms
      (fn []
        (schema/call-with-projection
@@ -2558,7 +2559,7 @@
     (when (next tx-data)
       (report-source-progress! "development entities")
       (require-committed!
-       (schema/call-with-forms
+       (schema.handed/call-with-forms
         (:seon.schema.projection/forms projection)
         #(schema/call-with-projection projection
                                       ;; Named here: its first named call is the task merge, a small part of it.

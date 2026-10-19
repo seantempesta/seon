@@ -7,7 +7,8 @@ created: 2026-10-19
 
 Phase status: P0 landed (`seon.sci.open-derivers-test`, `seon.cost-estimate-test/closed-runtime-rows-grow-past-no-accepted-overrun`);
 P2, P3b landed; P1 landed (lane closed-p1, the leaf design); P3a split: P3a-1 landed (lane closed-p3a1b: the order leaf and the
-digest move; the fallback deletion moves to P4b, option c), P3a-2 scheduled with P4b; P4a in flight (lane P4a); P4b, P5, P6a, P6b, P7, P8 not started.
+digest move; the fallback deletion moves to P4b, option c), P3a-2 scheduled with P4b; P4a landed (`ec87c559c`); P5 landed (`7df8dbb21`,
+corrections in its section); P4b in flight (lane closed-p4b); P6a, P6b, P7, P8 not started.
 
 # Closed runtime: the hybrid
 
@@ -441,6 +442,15 @@ Unchanged; the narrow check passed it. `seon.error.refusal` stays babashka-loada
   `cache-seam` (5). After P3a and P4a.
 
 ### P5. Builder (platform: writer, boot)
+
+**Landed (`7df8dbb21`), with three corrections to the text below.** (1) No `seon.loaded` leaf: the loaded-identity place
+is carried by reference in the projection state; the leaf (option 1) is deferred because its sweep reaches two functions
+that already hold guards, `seon.test/member-result` and `seon.test.runner/current-results`, which must lose them first.
+(2) `seon.schema/load-projection` from an empty base refused ("Bad entity attribute :seon.fn/spec") on a store with
+schema rows and no function attributes; `seon.schema/projection-entities` now declares nothing for a range whose
+attributes the store never installed (regression `seon.schema-test/a-store-without-function-attributes-loads-its-schema-rows`).
+(3) The ~20 test `d/connect` sites were not converted: the builder reads the executing state, so a bare connection reads
+the value's own builder; the open-derivers set is unchanged (P5 closes none) and 4 run-time resolutions went.
 
 - First step: census of `d/connect` and `d/create-database` sites in `src` and `test`.
 - Files: `src/seon/sci/eval.clj` (`projection-state` takes and stores `:seon.source/commit-id` and

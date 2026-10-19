@@ -57,6 +57,7 @@
             [seon.repl :as repl]
             [seon.render.value :as value]
             [seon.schema :as schema]
+            [seon.schema.handed :as schema.handed]
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.kernel :as kernel]
             [seon.sci.eval :as sci.eval]
@@ -1124,8 +1125,8 @@
                     :seon.instrument-test/value (candidate "juniper")}))]
        (is (map? (:seon.schema.projection/predicate-functions projection)))
        (let [bound (schema/call-with-projection projection arm)
-             cold (with-bindings {#'schema/*projection* nil
-                                  #'schema/*projection-state* nil}
+             cold (with-bindings {#'schema.handed/*projection* nil
+                                  #'schema.handed/*projection-state* nil}
                     (arm))]
          (is (= 1 (:seon.instrument/registered cold)))
          (is (= "juniper" (:seon.instrument-test/value cold)))
@@ -1133,8 +1134,8 @@
          (is (= bound cold))
          (is (contains? (instrument/instrumented) candidate))
          (is (thrown? Exception
-                      (with-bindings {#'schema/*projection* nil
-                                      #'schema/*projection-state* nil}
+                      (with-bindings {#'schema.handed/*projection* nil
+                                      #'schema.handed/*projection-state* nil}
                         (candidate 42)))))))))
 
 (deftest prefix-related-sibling-vars-keep-their-own-contracts
@@ -1359,8 +1360,8 @@
   ;; error before selecting any Var, so the named suite Var keeps its root.
   ;; The bindings are this thread's; no Var root is redefined.
   (let [before @#'doubled
-        result (with-bindings {#'schema/*projection* nil
-                               #'schema/*projection-state* nil}
+        result (with-bindings {#'schema.handed/*projection* nil
+                               #'schema.handed/*projection-state* nil}
                  (instrument/apply!
                   {:seon.instrument/changed-identities
                    #{[:seon.fn/sym 'seon.instrument-test/doubled]}}))]

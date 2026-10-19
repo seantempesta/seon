@@ -3,7 +3,11 @@
   error holds references, never copies: every world in it is referenced here."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [seon.id :as id])
+            ;; `sci.lang.Var`, which `referenced` names, is defined by SCI: a
+            ;; fresh JVM that loads this namespace first must load it too
+            [sci.core]
+            [seon.id :as id]
+            [seon.schema.handed :as handed])
   (:import [java.util IdentityHashMap]))
 
 (defn- machinery-namespace?
@@ -45,11 +49,6 @@
         (boolean (some #(.startsWith file (str % java.io.File/separator))
                        @library-roots)))))
 
-(defonce ^:private cache-seam
-  ;; `seon.cache` holds Caffeine, which the operator under babashka lacks: the
-  ;; one cache is reached only in a process with a basis.
-  (delay (when @basis (requiring-resolve 'seon.cache/lookup))))
-
 (declare classify-namespace)
 
 (defn- authored-namespace?
@@ -59,7 +58,9 @@
   microseconds; a 177-frame stack cost 35 ms unshared)."
   {:malli/schema [:=> [:cat :string :symbol] :boolean]}
   [frame-ns class-name]
-  (if-let [lookup @cache-seam]
+  ;; the packaged population hands the cache lookup; under babashka none is
+  ;; bound (no Caffeine), and the classification is read directly
+  (if-let [lookup (::handed/lookup handed/packaged)]
     (lookup ::authored-namespace frame-ns (constantly 64)
             #(classify-namespace frame-ns class-name))
     (classify-namespace frame-ns class-name)))
@@ -226,46 +227,27 @@
 ;;; `:seon.schema/identity-only` (a database value, a connection, a schema
 ;;; projection, an environment, an SCI context) names the projection of its
 ;;; value to identity data — exactly what value admission stores in its place
-;;; (`seon.sci.admit/open-node`, admit.clj:305-346). LOAD-CYCLE BOUNDARY:
-;;; `seon.schema` requires this namespace, so its two seams are resolved once,
-;;; at first use.
-(defonce ^:private schema-seam
-  (delay {:handed (requiring-resolve 'seon.schema/handed-projection)
-          :declared (requiring-resolve 'seon.schema/declaration-projection)
-          :packaged (requiring-resolve 'seon.schema.edn/packaged-forms)
-          :projector (requiring-resolve 'seon.schema/identity-only-projector)
-          :explain (requiring-resolve 'seon.schema/explain-candidate-value)
-          :humanize (requiring-resolve 'malli.error/humanize)}))
-
-(defn- operation-projection
-  "The projection handed to the operation running now, or nil.
-
-  Only `seon.schema` hands one, so where it is not loaded (the operator
-  under babashka, which has no Malli) no operation holds one: nil is the
-  answer, and resolving the seam there threw instead of the error it was
-  building."
-  []
-  (when (find-ns 'seon.schema)
-    ((:handed @schema-seam))))
+;;; (`seon.sci.admit/open-node`). The projection is handed
+;;; (`seon.schema.handed`), never found by name, and carries the operations
+;;; asked of it: `:seon.schema.projection/identity-projector` and
+;;; `:seon.schema.projection/explain`.
 
 (defn- checking-projection
   "The projection an error is checked against: the one handed to the operation
-  running now, else the declaration projection over the packaged population
-  (`seon.schema/declaration-projection` over `seon.schema.edn/packaged-forms`,
-  built once in the process cache: the registry boot arms every contract
-  against, `instrument.clj:1270-1271`), so an
+  running now, else the packaged declaration projection
+  (`seon.schema.handed/packaged`, bound when `seon.schema.edn` loads), so an
   error is buildable at boot, at namespace load and on a thread no operation
-  handed a projection. Nil only where `seon.schema` is not loaded."
+  handed a projection. Nil where `seon.schema.edn` is not loaded."
   {:malli/schema [:=> [:cat] [:maybe :map]]}
   []
-  (or (operation-projection)
-      (when (find-ns 'seon.schema)
-        (let [{:keys [declared packaged]} @schema-seam]
-          (when (and declared packaged) (declared (packaged)))))))
+  (or (handed/projection)
+      (some-> (::handed/projection handed/packaged) deref)))
 
 (defn- identity-projector
   [projection]
-  (if projection ((:projector @schema-seam) projection) (constantly nil)))
+  (if-let [projector (:seon.schema.projection/identity-projector projection)]
+    (projector projection)
+    (constantly nil)))
 
 (defn- object-name
   "How Clojure prints an object it does not enter, `#object[Class 0xhash]`,
@@ -445,7 +427,7 @@
   {:malli/schema [:function
                   [:=> [:cat :seon.error/throwable] :seon.error/chain]
                   [:=> [:cat :seon.error/throwable [:maybe :map]] :seon.error/chain]]}
-  ([throwable] (chain throwable (operation-projection)))
+  ([throwable] (chain throwable (handed/projection)))
   ([throwable projection]
    (let [project (identity-projector projection)]
      ;; each pending head carries the throwable enclosing it: nil for the
@@ -679,7 +661,7 @@
     [:=> [:cat :seon.error/at :seon.error/layer :seon.error/operation :map]
      :seon.error/base]]}
   ([{:seon.error/keys [throwable message] :as observation}]
-  (let [projection (operation-projection)
+  (let [projection (handed/projection)
         observation (references projection (dissoc observation :seon.error/throwable))]
   (if throwable
     (let [links (chain throwable projection)
@@ -762,16 +744,17 @@
   {:malli/schema [:=> [:cat :qualified-keyword :map] :seon.error/base]}
   [alternative members]
   (let [members (merge {:seon.error/at (java.util.Date.) :seon.error/layer alternative} members)
-        projection (checking-projection)]
+        projection (checking-projection)
+        explain (:seon.schema.projection/explain projection)]
     (if-not (qualified-symbol? (:seon.error/operation members))
       (construction-refusal alternative members "`:seon.error/operation` (a qualified symbol) is required" nil)
       (let [built (diagnostic members)
             refused (fn [reason problems] (construction-refusal alternative built reason problems))]
-        (if-not projection
+        (if-not explain
           (refused "no schema registry is loaded, so the alternative cannot be checked" nil)
           (try
-            (if-let [explanation ((:explain @schema-seam) projection alternative built)]
-              (refused "the built error does not satisfy it" ((:humanize @schema-seam) explanation))
+            (if-let [problems (explain projection alternative built)]
+              (refused "the built error does not satisfy it" problems)
               (assoc built :seon.error/type alternative))
             (catch clojure.lang.ExceptionInfo e
               (refused (str "it cannot be checked: " (ex-message e)) nil))))))))

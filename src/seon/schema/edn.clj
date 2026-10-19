@@ -20,7 +20,8 @@
             [clojure.string :as str]
             [malli.core :as m]
             [seon.error.refusal :as error.refusal]
-            [seon.schema :as schema])
+            [seon.schema :as schema]
+            [seon.schema.handed :as handed])
   (:import [java.net JarURLConnection]))
 
 (def default-resource
@@ -427,6 +428,17 @@
   {:malli/schema [:=> [:cat] :map]}
   []
   (::forms (packaged-population)))
+
+;; The packaged population is in hand from the moment this namespace loads:
+;; the shipped configuration compiles at namespace load (`seon.config/defaults`),
+;; before any operation is handed a projection. Its projection is built when a
+;; check first needs it; the cache lookup is handed with it for the refusal,
+;; which cannot require Caffeine (it loads under babashka).
+(alter-var-root #'handed/packaged
+                (constantly (let [forms (packaged-forms)]
+                              {::handed/forms forms
+                               ::handed/projection (delay (schema/declaration-projection forms))
+                               ::handed/lookup #'seon.cache/lookup})))
 
 (defn load!
   "Read one schema resource location as declaration facts.

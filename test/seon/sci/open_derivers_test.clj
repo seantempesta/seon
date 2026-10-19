@@ -13,10 +13,10 @@
 (def ^:private open-derivers
   "The open cache derivers of the program, exactly: a name joining it is a new open derivation, a name leaving it is
   a phase's progress, and both edit this set in the commit that causes them."
-  '#{seon.cluster/branch-declaration-changes seon.cluster/derivation-keys seon.cluster/stored-derivation-schema-keys
+  '#{seon.cluster/branch-declaration-changes seon.cluster/stored-derivation-schema-keys
      seon.cluster.agent/basis-valid? seon.cluster.agent/branch-admission-end seon.cluster.agent/branch-end
      seon.cluster.source/file-proof seon.cluster.source/member-contributions seon.cluster.source/members-of
-     seon.cluster.source/merge-base seon.cluster.source/publication seon.cluster.source/unmerged-count
+     seon.cluster.source/publication seon.cluster.source/unmerged-count
      seon.config/effective seon.context/conflicts seon.context/declared-tests seon.db/behavior-digest
      seon.db/content-projection seon.db/request-view seon.embed/corpus seon.fn/declared-edge-attributes
      seon.fn/gate-edges seon.health/problems-unit seon.health/profile-unit seon.health/replaced-roots
@@ -49,7 +49,15 @@
    ;; `projection-builder` is deleted, so it is built from its name.
    {:phase :P5
     :functions (into #{} (map #(symbol "seon.db" %))
-                     ["carried-projection" "content-projection" "connection-projection-state" "projection-builder"])}])
+                     ["carried-projection" "content-projection" "connection-projection-state" "projection-builder"])}
+   ;; P4b: the refusal reads the handed projection (`seon.schema.handed`); its seams and `seon.schema`'s
+   ;; packaged-forms fallback are deleted, so those are built from their names.
+   {:phase :P4b
+    :functions (into (into #{} (map #(symbol "seon.error.refusal" %))
+                           ["diagnostic" "references" "authored-namespace?" "error" "chain" "checking-projection"
+                            "identity-projector" "operation-projection"])
+                     (map #(symbol "seon.schema" %))
+                     ["candidate-forms" "declaration-population" "packaged-forms"])}])
 
 (defn- open-cache-derivers
   "The cache derivers of `database`'s program that its reach index leaves open."

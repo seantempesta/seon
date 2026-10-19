@@ -16,6 +16,7 @@
             [seon.profile :as profile]
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
+            [seon.schema.handed :as schema.handed]
             [seon.test-support :as test-support])
   (:import [java.io File]
            [java.net URI]
@@ -211,7 +212,7 @@
            executor (#'sut/graph-executor {::sut/projection-state state})
            seen (.submit ^java.util.concurrent.ExecutorService executor
                          ^java.util.concurrent.Callable
-                         (fn [] {:state @#'schema/*projection-state*
+                         (fn [] {:state @#'schema.handed/*projection-state*
                                  :entered (some-> ^ThreadLocal (:seon.profile/entered wrapper) .get)}))]
        (try
          (is (some? wrapper) "the wrapper is armed, so a counted call would show")

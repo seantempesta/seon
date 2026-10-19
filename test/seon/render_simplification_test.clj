@@ -20,6 +20,7 @@
             [seon.render.walk :as walk]
             [seon.program :as program]
             [seon.schema :as schema]
+            [seon.schema.handed :as schema.handed]
             [seon.schema.edn :as schema.edn]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]
@@ -231,7 +232,7 @@
                        :seon.render.profile/max-depth 4,
                        :seon.render.profile/max-children 10,
                        :seon.render.profile/composition :multiline})
-            projection-state-var (ns-resolve 'seon.schema '*projection-state*)]
+            projection-state-var #'schema.handed/*projection-state*]
         (with-bindings
           {projection-state-var nil}
           (let [decision (selection request)]

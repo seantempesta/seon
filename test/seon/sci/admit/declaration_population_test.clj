@@ -20,6 +20,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [seon.config :as config]
             [seon.schema :as schema]
+            [seon.schema.handed :as schema.handed]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]
             [seon.test-support :as test-support]))
@@ -54,15 +55,14 @@
   []
   (reads-of #(@#'schema.edn/resource-population schema.edn/default-resource)))
 
-(def ^:private carrier-symbols
-  '[*candidate-forms-overlay* *projection* *projection-state* *packaged-forms*])
+(def ^:private carriers
+  [#'schema/*candidate-forms-overlay* #'schema.handed/*projection* #'schema.handed/*projection-state*
+   #'schema.handed/*packaged-forms*])
 
 (defn- without-handed-projection
   "Call `thunk` after explicitly clearing every schema projection carrier."
   [thunk]
-  (with-bindings
-    (into {} (map (fn [sym] [(ns-resolve 'seon.schema sym) nil]))
-          carrier-symbols)
+  (with-bindings (zipmap carriers (repeat nil))
     (thunk)))
 
 (defn- entities

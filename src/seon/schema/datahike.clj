@@ -13,6 +13,7 @@
             [seon.cache]
             [seon.error.refusal]
             [seon.schema :as schema]
+            [seon.schema.handed :as schema.handed]
             [seon.id :as id]
             [seon.schema.internal :as internal]
             [datahike.db.interface :as dbi]
@@ -1122,7 +1123,7 @@
    ;; attribute. The fault committer runs on a Flow thread with no ambient
    ;; projection, so passing without supplying made valid scalar forms such as
    ;; `:boolean` fail instrumentation before a core fault could be recorded.
-   (schema/call-with-forms
+   (schema.handed/call-with-forms
     (:seon.schema.projection/forms projection)
     #(if (map? transaction)
        (update transaction :tx-data
@@ -1160,7 +1161,7 @@
   ;; `validate-logical-slot-in!` runs registered predicates such as
   ;; `malli-form?`, which Malli invokes with the candidate value alone. Supply
   ;; the projection's forms for the same reason `encode-transaction-in` does.
-  (schema/call-with-forms
+  (schema.handed/call-with-forms
    (:seon.schema.projection/forms projection)
    #(if (edn-encoded-attr-in? projection attr)
       (storage-string (validate-logical-slot-in! projection attr value))
