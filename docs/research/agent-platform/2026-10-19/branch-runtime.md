@@ -487,10 +487,21 @@ one predicate, `seon.sci.eval/leaves` (19 lines), consulted once in `runtime-row
 
 Ruled out by the owner's test ("doesn't really help ... cut it"): the rows stay far from HEAD. Not landed.
 
-- **What would make interpretation cheap:** in the SCI fork, a call site whose class resolved to exactly one
-  method keeps that `Method` (or an unreflected `MethodHandle` adapted to the hinted types) in its inline cache and
-  invokes it without `invokeMatchingMethod`'s per-call matching and array copies; primitive hints avoid the boxing.
-  This is a general gain for every interpreted interop call, measured by the dot-product probe above.
+- **Interop made cheap, tried (lane sci-interop, SCI pin 33039c6e, commit 34d64a09e):** a cached call site invokes
+  its resolved method through one invoker per method (an unreflected `MethodHandle` behind a
+  `MethodHandleProxies` instance of `sci.impl.reflector.Invoke0..8`), with no argument array; and every SCI
+  function, which carries metadata, now holds it itself instead of being wrapped by `with-meta` in a `RestFn`
+  that sent every call through `applyTo`. The dot product falls from 418 to 148 B per iteration (the same loop
+  without interop: 89); interpreted `seon.id/id` from 164 to 74 KB per call (compiled: 15). The rows with the wiring
+  patch, MB allocated: `:similar-by-name-warm` 2,455 -> 841 (HEAD 56), nine forms 1,442 -> 1,384 (HEAD 973),
+  hub behavior change 1,037 MB / 5.9 s -> 988 MB / 2.0 s (HEAD 871 MB / 1.0 s), current state with task
+  308 -> 289 (HEAD 235), one unchanged test 143 -> 55 (HEAD 29). What remains is interpretation, not interop:
+  `seon.embed/nearest`'s numeric loop boxes each long, double and float (about 426 MB for one call), and on a
+  changed branch the wire's arming (`seon.schema/contract-references`,
+  `seon.schema.internal/assert-compilable-schema!`), `seon.id/structural-digest` and
+  `seon.db/query-index-patterns` dominate. Each SCI function call still derefs the dynamic
+  `sci.ctx-store/*ctx*` (`sci.impl.fns/in-defining-ctx`), which allocates a `MapEntry` in `Var.getThreadBinding`:
+  about a tenth of interpreted `seon.id/id`'s allocation.
 - **What would make the rule work:** compile what does not reach the change, not what calls nothing: on a changed
   runtime, interpret only the reverse closure of the changed names (cached analyses, so O(closure) binding) and keep
   every other function compiled. That is a closure walk, which this round excluded.
