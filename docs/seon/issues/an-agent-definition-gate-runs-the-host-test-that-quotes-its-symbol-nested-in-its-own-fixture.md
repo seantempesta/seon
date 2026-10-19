@@ -65,7 +65,7 @@ dynamic caller loses coverage. Two things are wrong around it:
 
 1. **The executor, not the edge, is the defect.** The reached test is a `:core` test whose body is host-bound: it
    calls JVM-only `ns-resolve`/`requiring-resolve` over namespaces SCI does not hold. The law is that a branch
-   interprets differing rows and affected callers in SCI, and refuses unsupported overrides by name instead of
+   resolves differing rows by name in the branch's runtime, and refuses host-bound overrides by name instead of
    running other code. So the gate owed a named refusal ("this reached test is host-bound and cannot run against
    the branch's override"), or a host run. It ran the body in SCI and reported the resulting crash as the test's
    failure.

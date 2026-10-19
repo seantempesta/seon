@@ -59,10 +59,9 @@ the private `regenerate-agent-context!` in `seon.sci.eval` forks the new base an
 private Vars over it as actual objects; inherited program bindings are
 replaced. A base context (`seon.sci.eval/base-ctx`) forks the frozen program context
 `seon.sci.eval/program-context`, one `seon.cache` entry of kind
-`:seon.sci.eval/program-context` per program content, which interprets the
-branch's own program changes (overrides and their source callers; loaded `src`
-callers stay compiled) on a fork of the
-JVM's loaded program. The law is that a context
+`:seon.sci.eval/program-context` per program content, which resolves the branch's
+program by name to digests (`seon.sci.eval`) on a fork of the JVM's loaded program; analyses are shared by
+content, and host-bound declarations stay compiled. (Installed until lane runtime-wire lands: the 2026-10-18 rule.) The law is that a context
 is reacquired from its branch head and private defs, atoms and result objects
 stay in memory (CLAUDE.md, "An agent's context"). Do not restore `:seon.def`
 entities or rebuild a private layer from the database.

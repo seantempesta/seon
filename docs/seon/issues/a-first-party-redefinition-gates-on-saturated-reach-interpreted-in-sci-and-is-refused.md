@@ -68,9 +68,9 @@ Two models, compounded:
 2. **Execution.** The gate runs file-authored tests by *interpreting their bodies in the agent's
    SCI context*. Their `support/`, `test-support/`, `io/`, `tc/`, `sci/`, `d/` aliases, and host
    interop such as `System/nanoTime` and `future`, are not in that context, so the failures
-   measure the SCI world, not the change. An unchanged file test body is host code. It should
-   run as its compiled Var, with the branch's changed definition bound, the way ordinary tests
-   run as agents run. SCI interpretation belongs only to rows that differ.
+   measure the SCI world, not the change. An unchanged file test body is host code. It runs as
+   its compiled Var, and a test body SCI can run resolves the branch's changed definition by name, in the branch's
+   runtime, the way ordinary tests run as agents run.
 
 A third, smaller point: a docstring-only redefinition has no behavior change, yet it gated. If
 the definition digest includes the docstring, the gate needs a behavior identity that excludes
@@ -78,8 +78,8 @@ prose.
 
 ## Expected
 
-- The gate for a redefinition runs the tests that reach it through calls, as compiled Vars where
-  their bodies are unchanged. A test that cannot load is refused by name with its file, and it is
+- The gate for a redefinition runs the tests that reach it through calls, in the branch's runtime; a
+  host-bound test body runs compiled. A test that cannot load is refused by name with its file, and it is
   never counted as a failure of the change.
 - The install report is bounded and says which tests reach the change and why.
 

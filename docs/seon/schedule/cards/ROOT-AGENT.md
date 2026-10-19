@@ -139,10 +139,10 @@ lanes until none commits, then is deleted; `commit!` names it as what it replace
 
 ## 4. Restart and adoption
 
-**Ordinary (interpretable) code needs no restart.** A merged definition is an entity on main; every agent's SCI world
-reacquires from its branch head at each eval request and interprets the definitions that differ from the compiled
-program (`seon.sci.eval/interpret-affected!`, `:seon.fn/host-bound? false`). Compiled Vars catch up at the next
-restart. No reload path is added: `seon.cluster/development-source-refresh!` reloads from the sealed archive and is
+**Ordinary (interpretable) code needs no restart.** A merged definition is an entity on main; every agent's runtime
+is its branch's name-to-digest map, read at each eval request; a merged SCI-runnable definition is live on the next
+call, with no restart. Host-bound declarations change only through files and restart. (Installed until lane
+runtime-wire lands: the 2026-10-18 rule.) No reload path is added: `seon.cluster/development-source-refresh!` reloads from the sealed archive and is
 not a live-update mechanism (explorer finding, unproven as such).
 
 **Host-bound (platform) landings become live by one batched restart.** `seon.root/restart!` runs `bin/seon start

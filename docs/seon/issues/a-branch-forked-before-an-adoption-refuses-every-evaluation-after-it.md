@@ -58,7 +58,7 @@ program. It should never interpret stale core rows.
 ## Expected
 
 - A branch whose only differences from the loaded program come from the base moving evaluates
-  ordinary forms. Rows it has not changed run the loaded compiled Vars.
+  ordinary forms. Rows it has not changed resolve by name to their loaded digest; host-bound rows run compiled.
 - A row the branch did change that conflicts with a newer loaded row is refused **by name, when
   called**, as the per-declaration law requires. It never refuses unrelated forms like
   `(doc help)`.

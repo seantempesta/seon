@@ -16,7 +16,7 @@ not freeze indirect calls. Exact form and source grounding:
 [Astra feedback](../../prds/agent-platform/research/astra-feedback-on-fable-2026-09-21.md).
 The owner confirms loaded reuse for matching runtime functions and SCI
 redefinition for cluster/agent overrides. B2 §2a now requires matching
-executable dependencies too, and context-local installation of affected callers.
+executable dependencies too, and context-local resolution of names by digest.
 This is a plan correction; implementation and the composed isolation proof remain.
 
 The subsequent contract-only exemption also fails for indirect calls. A real
