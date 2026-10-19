@@ -322,9 +322,9 @@ Two shared proofs, landed in P0, carry every phase:
   parent (the functions resolve today) and green with the change, order-independent.
 
 Cost rows: `seon.cost-estimate-test/closed-runtime-rows-grow-past-no-accepted-overrun` measures
-`:seon-db-nine-forms`, `:hub-behavior-change` and `:similar-by-name-warm` through one running agent after two
-program-change passes and judges them by the table's own `estimates` and `unaccepted` (open overrun task, `ratchet`
-1.5x). Every phase names it with `--test` when it touches the writer, the projection path or the evaluator; P7 tightens
+`:seon-db-nine-forms`, `:hub-behavior-change` and `:similar-by-name-warm` in the table's own state (`measured`, then
+`select-keys`: a shorter sequence measured the nine forms at 149,492 calls against 147,860 accepted, a different state,
+not a regression) and judges them by the table's own `estimates` and `unaccepted` (open overrun task, `ratchet` 1.5x). Every phase names it with `--test` when it touches the writer, the projection path or the evaluator; P7 tightens
 it into its gate.
 
 ### P0. Ratchet, opener table, cost rows (landed)
@@ -333,7 +333,8 @@ it into its gate.
   deftest above; `unaccepted` judges only the rows measured, EQUIVALENT for the full table which measures all).
 - Proof: both green in a check JVM on the candidate. Kind: test only, platform-run (check JVM, `--test`).
 - Cost: census 3.4 s for both deftests in the check JVM, the reach index once per content of the calls facts (cached
-  by `seon.sci.eval/reach-index`); cost rows about two program-change passes plus three requests, declared long 120 s.
+  by `seon.sci.eval/reach-index`); the cost rows cost the table's one measurement, about 31 s in a check JVM, declared
+  long 60 s.
 - Deletes: nothing. `tmp/runtime-fix2/cost_test.clj` (gitignored) is superseded; it read `RR_LABEL` and wrote into `tmp`.
 
 ### P1. Cycle 7: prepared arities stored (platform: schema resource and writer)

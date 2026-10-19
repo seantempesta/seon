@@ -299,6 +299,13 @@
               :similar-by-name-warm similar-by-name :unresolved-symbol-request unresolved
               :hub-docstring-change hub-docstring :hub-behavior-change hub-behavior :cold-stale-merge-members cold-stale)))))
 
+(defn- closed-runtime-rows
+  "The three rows the closed-runtime plan gates its exact key on (the nine unchanged `seon.db` forms, the hub
+  behavior change and a warm similar-by-name), measured in the table's own state: op -> measures."
+  {:malli/schema [:=> [:cat] [:map-of :keyword :map]]}
+  []
+  (select-keys (measured) [:seon-db-nine-forms :hub-behavior-change :similar-by-name-warm]))
+
 (defn- over
   "The measures of `observed` above their `limit`, wall time at `slack` times its limit: measure -> [observed limit]."
   {:malli/schema [:=> [:cat :map :map number?] :map]}
@@ -334,7 +341,7 @@
                            (not (task-open? (:task overrun))) {:op op :over o :closed (:task overrun)}
                            :else (let [grown (over (seen op) accepted wall-slack)]
                                    (when (seq grown) {:op op :grown grown :task (:task overrun)}))))))
-        estimates))
+        (filter #(contains? seen (:op %)) estimates)))
 
 (deftest ^{:seon.test/long "Twelve ordinary operations through one running agent: a cold stale over ~160 tests (about 4 s), then the program-change rows twice, the second pass measured."
            :seon.test/long-ms 60000}
@@ -348,3 +355,8 @@
            :seon.test/long-ms 60000}
   no-ordinary-operation-grows-past-its-accepted-overrun
   (is (= [] (unaccepted (measured)))))
+
+(deftest ^{:seon.test/long "The closed-runtime gate rows, measured in the table's state: the twelve operations through one running agent (about 30 s in a check JVM), three judged."
+           :seon.test/long-ms 60000}
+  closed-runtime-rows-grow-past-no-accepted-overrun
+  (is (= [] (unaccepted (closed-runtime-rows)))))
