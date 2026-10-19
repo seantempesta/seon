@@ -1,7 +1,7 @@
 ---
 title: "Embeddings at scale: generation, space, search, and declarative embedding"
 type: research
-status: owner approved P1-P3 on 2026-10-19 (later phases need their own go-ahead); lane embed-p1-p3 implementing
+status: owner approved P1-P3 on 2026-10-19 (later phases need their own go-ahead); P1-P3 landed
 created: 2026-10-19
 ---
 
@@ -274,7 +274,7 @@ datoms.
 - The registry derives the set of embedded attributes. This replaces the `corpus-attributes` hand list and
   `meaning-texts` / `name-texts`.
 - A composed text, such as today's `title: sym | text: arglists + doc`, is declared as
-  `{:seon.embed/text my.ns/text-fn}`: a contracted function of the entity's pulled value, run by the fill.
+  `{:seon.embed/text-fn my.ns/text-fn :seon.embed/reads #{...}}`: a contracted function of the entity's values of the attribute and its reads, run by the fill.
 - `:seon.embed/when` takes `:write` (the default) or `:query` (§5).
 
 **No vector datom.** The entity keeps exactly what it has today, its text.
@@ -366,14 +366,29 @@ Each phase names its owner and the proof that is red until it lands. Root files 
   next open packed the 10,986 left into a second segment (11.6 MB of duplicates, until a P4 compaction). Lane
   embed-fix: a call now answers in progress while the store opens (`seon.embed/store-within`), and a cut conversion
   resumes without packing again, deleting the per-key values only after its synced segment.
-- P3: not started.
+- P3: landed (lane embed-p3). `:seon.fn/sym` and `:seon.test/sym` declare `{:seon.embed/task "similarity"}`;
+  `:seon.fn/arglists` declares `{:seon.embed/task "none" :seon.embed/text-fn seon.embed/declaration-text
+  :seon.embed/reads #{:seon.fn/sym :seon.fn/doc :seon.fn/private?}}`. `seon.embed/embedded-attributes` derives the set
+  from the projection as `seon.config/dial-attributes` does; `seon.embed/corpus` groups it by task and maps each text to
+  the entities holding it on the asking database value, held by `seon.db/attribute-revision-key` (Datahike's own
+  per-attribute change tracking), so a write to other attributes reuses it; `seon.embed/entities-now` answers entity
+  ids. `name-texts`, `meaning-texts`, `corpus-attributes`, `corpus-report?` and `similar-now-in` are deleted.
+  `:seon.embed/when :query` leaves a task out of the fill when none of its attributes is `:write`.
+  The text function's property is `:seon.embed/text-fn`, since `:seon.embed/text` already names the text schema; it
+  returns a vector of texts (empty leaves the entity out), since a bare nilable return is refused.
+  Measured on default (494ff6a42, read-only JVM probe): the derived corpora hold exactly the old hand lists' texts
+  (11,046 names, 2,350 meaning texts), so no text is embedded again; a cold derivation takes 8-16 ms (names) and
+  14-25 ms (meaning) against 13 and 28 ms for the hand lists; a warm one is a cache hit. The index key is now the
+  hash of the held corpus digest, so each index is stacked once again from the cache and segments after the restart.
+  `my.program-query-test/a-warm-similar-by-name-allocates-in-proportion-to-its-answer` (red at 19.9 MB against 5 MB)
+  is green in the check JVM. The query's scan is unchanged until P4.
 - P4-P6: awaiting the owner.
 
 | phase | change | owner | red proof |
 |---|---|---|---|
 | P1 | The embed server bounds MLX memory (`mx.set_cache_limit`, a dial sized for 16 GB) and buckets across queued requests. `seon.embed/embed!` batches by a byte budget (`:seon.config.embed/request-bytes`, about 3.2 UTF-8 bytes per token) instead of `:seon.config.embed/batch-size`. | `script/embed/server.py`, `seon.embed/embed!` | `seon.embed-test/a-fill-pass-sends-its-backlog-in-byte-budget-requests` (shortest first, cut at the budget, a longer text alone). Measured: ≥400/s, against 189-352/s today, and peak footprint under the dial. |
 | P2 | Packed segments replace the per-key store. The present-digest set is derived from segment headers. | `seon.embed/open-store`, `embed!` | `seon.embed-test/a-fill-pass-writes-one-segment`. `seon.embed-test/unchanged-text-costs-no-request-and-no-write-after-restart` (exists in spirit as probe6; make it a row). |
-| P3 | The `:seon.embed/task` attribute property, and the fill reads the derived attribute set. Deletes `corpus-attributes`, `meaning-texts` and `name-texts` as hand lists. | schema registry, `seon.embed/fill-step` | `seon.embed-test/an-attribute-declaring-an-embed-task-is-embedded-without-a-hand-list` |
+| P3 | The `:seon.embed/task` attribute property, and the fill reads the derived attribute set. Deletes `corpus-attributes`, `meaning-texts` and `name-texts` as hand lists. | schema registry, `seon.embed/fill-step` | `seon.embed-test/an-attribute-declaring-an-embed-task-is-embedded-without-a-hand-list`, `seon.embed-test/an-entity-only-another-branch-holds-is-not-returned` |
 | P4 | Index folded from transaction reports into base plus overlay, off-heap int8 SIMD scan with f16 rerank, partial answers with a pending count. | `seon.embed/index`, `nearest`, `similar-now` | `seon.embed-test/a-query-allocates-in-proportion-to-its-answer-not-the-corpus` (extends `my.program-query-test/a-warm-similar-by-name-allocates-in-proportion-to-its-answer` to 100k synthetic rows). `seon.embed-test/a-changed-text-re-embeds-only-that-text`. A measured row: 1M synthetic vectors in under 10 ms per query. |
 | P5 | Branch overlay from the branch's own delta. | `seon.embed`, `seon.ref` read-where | `seon.embed-test/a-branch-ranks-its-own-changed-texts-and-mains-rest` |
 | P6 | IVF centroids as a derived value. | – | Deferred until an attribute passes about 5M texts; no task now. |

@@ -10,6 +10,8 @@
             [datahike.api :as d]
             [konserve.core :as k]
             [konserve.filestore :as filestore]
+            [malli.core :as m]
+            [malli.registry :as mr]
             [seon.cache]
             [seon.config :as config]
             [seon.db :as db]
@@ -308,15 +310,20 @@
     (run! #(.write out ^bytes %) vectors)
     {:seon.embed/texts texts :seon.embed/matrix (.toByteArray out)}))
 
+(defn held-texts
+  "`texts` as an index ranks them, with the digest naming them: what an index is keyed by, hashed once."
+  {:malli/schema [:=> [:cat [:vector :seon.embed/text]] :seon.embed/held]}
+  [texts]
+  {:seon.embed/texts texts
+   :seon.embed/digest (schema/sha-256 (mapv #(.getBytes (str % "\u0000") StandardCharsets/UTF_8) texts))})
+
 (defn- index-key
-  "The content identity of the index of `texts` embedded for `task` by `settings`' model at its dimension."
-  {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/task [:vector :seon.embed/text]] :seon.embed/key]}
-  [settings task texts]
-  (schema/sha-256 (into [(.getBytes (str (:seon.config.embed/model settings) "\u0000" task "\u0000"
-                                         (:seon.config.embed/dimension settings) "\u0000")
-                                    StandardCharsets/UTF_8)]
-                        (map #(.getBytes (str % "\u0000") StandardCharsets/UTF_8))
-                        texts)))
+  "The content identity of the index of `held`'s texts embedded for `task` by `settings`' model at its dimension."
+  {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/task :seon.embed/held] :seon.embed/key]}
+  [settings task {:seon.embed/keys [digest]}]
+  (schema/sha-256 [(.getBytes (str (:seon.config.embed/model settings) "\u0000" task "\u0000"
+                                   (:seon.config.embed/dimension settings) "\u0000" digest)
+                              StandardCharsets/UTF_8)]))
 
 (defn- index-weight
   "The bytes an index of `texts` holds in the process cache."
@@ -324,18 +331,27 @@
   [held]
   (+ 256 (alength ^bytes (:seon.embed/matrix held)) (* 64 (count (:seon.embed/texts held)))))
 
-(defn index
-  "The embeddings of `texts` for `task` as one matrix ([[stacked]]), derived
-  once per content (model, dimension, task and texts) and held in the process
-  cache; the unreachable error when an embedding is missing and the server
-  does not answer. Waits for the derivation: the background fill's call."
-  {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/store :seon.embed/request
-                       :seon.embed/task [:vector :seon.embed/text]]
+(defn- derive-index
+  "[[stacked]] over the embeddings of `held`'s texts for `task` ([[embed!]]), or its unreachable error."
+  {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/store :seon.embed/request :seon.embed/task
+                       :seon.embed/held]
                   [:or :seon.embed/index :seon.embed/unreachable-error]]}
-  [settings store request task texts]
-  (seon.cache/lookup ::index (index-key settings task texts) index-weight
-                     (fn [] (let [embedded (embed! settings store request task texts)]
-                              (if (error/error? embedded) embedded (stacked texts embedded))))
+  [settings store request task {:seon.embed/keys [texts]}]
+  (let [embedded (embed! settings store request task texts)]
+    (if (error/error? embedded) embedded (stacked texts embedded))))
+
+(defn index
+  "The embeddings of `held`'s texts for `task` as one matrix ([[stacked]]),
+  derived once per content (model, dimension, task and the texts' digest) and
+  held in the process cache; the unreachable error when an embedding is
+  missing and the server does not answer. Waits for the derivation: the
+  background fill's call."
+  {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/store :seon.embed/request
+                       :seon.embed/task :seon.embed/held]
+                  [:or :seon.embed/index :seon.embed/unreachable-error]]}
+  [settings store request task held]
+  (seon.cache/lookup ::index (index-key settings task held) index-weight
+                     #(derive-index settings store request task held)
                      #(not (error/error? %))))
 
 (defn- float-view
@@ -370,13 +386,13 @@
                   :seon.embed/score (/ (Math/round (* 1000.0 (double score))) 1000.0)})))))
 
 (defn similar
-  "The `k` of `texts` nearest `query` when `texts` are embedded for `task` and
-  `query` for `query-task`, nearest first with their scores, or the
-  unreachable error. Waits for the index of `texts`: a reply that must rank
-  (an unresolved name's nearest calls), never an agent's own by-meaning call
-  ([[similar-now]])."
+  "The `k` of `texts`' (held, [[held-texts]]) nearest `query` when they are embedded
+  for `task` and `query` for `query-task`, nearest first with their scores, or
+  the unreachable error. Waits for the index of the texts: a reply that must
+  rank (an unresolved name's nearest calls), never an agent's own by-meaning
+  call ([[similar-now]])."
   {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/store :seon.embed/request :seon.embed/task
-                       [:vector :seon.embed/text] :seon.embed/task :seon.embed/text pos-int?]
+                       :seon.embed/held :seon.embed/task :seon.embed/text pos-int?]
                   [:or :seon.embed/neighbours :seon.embed/unreachable-error]]}
   [settings store request task texts query-task query k]
   (let [held (index settings store request task texts)
@@ -391,16 +407,15 @@
   (`seon.cache/lookup-within`) or by the background fill ([[fill-step]]), so a
   later call finds it. The query is the one text it embeds itself."
   {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/store :seon.embed/request :seon.embed/task
-                       [:vector :seon.embed/text] :seon.embed/task :seon.embed/text pos-int?]
+                       :seon.embed/held :seon.embed/task :seon.embed/text pos-int?]
                   [:or :seon.embed/answer :seon.embed/unreachable-error]]}
   [settings store request task texts query-task query k]
   (let [held (seon.cache/lookup-within ::index (index-key settings task texts) index-weight
-                                       (fn [] (let [embedded (embed! settings store request task texts)]
-                                                (if (error/error? embedded) embedded (stacked texts embedded))))
+                                       #(derive-index settings store request task texts)
                                        #(not (error/error? %)) (:seon.config.embed/wait-ms settings) nil)
         pending? (some? (:seon.cache/pending-kind held))
         asked (when-not (or pending? (error/error? held)) (embed-query! settings store request query-task query))]
-    (cond pending? {:seon.embed/pending (count texts)}
+    (cond pending? {:seon.embed/pending (count (:seon.embed/texts texts))}
           (error/error? held) held
           (error/error? asked) asked
           :else (nearest held (first (:seon.embed/vectors asked)) k))))
@@ -414,47 +429,143 @@
   (let [dials (cluster-settings database)]
     (if (:seon.error/operation dials)
       dials
-      (similar dials (open-store (directory database)) request! task texts query-task query k))))
+      (similar dials (open-store (directory database)) request! task (held-texts texts) query-task query k))))
 
-(defn similar-now-in
-  "[[similar-now]] with `database`'s cluster dials, its durable store and the embed server: in progress while
-  the store still opens ([[store-within]])."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.embed/task [:vector :seon.embed/text] :seon.embed/task
-                       :seon.embed/text pos-int?]
-                  [:or :seon.embed/answer :seon.embed/unreachable-error :seon.config/error]]}
-  [database task texts query-task query k]
+;;; The corpora agents rank, declared by `:seon.embed/task` on an attribute's schema, and their background fill.
+
+(defn embedded-attributes
+  "Each attribute whose schema declares `:seon.embed/task` in `projection`, with its declaration: `:seon.embed/when`
+  :write unless declared, and `:seon.embed/reads` holding the attribute itself. A function of the projection alone,
+  held by the projection's own holder (`seon.schema/projection-cache-value`)."
+  {:malli/schema [:=> [:cat :seon.schema/projection] :seon.embed/declarations]}
+  [projection]
+  (schema/projection-cache-value
+   projection ::embedded-attributes
+   #(into {}
+          (keep (fn [attribute]
+                  (let [properties (m/properties (mr/schema (:seon.schema.projection/registry projection) attribute))]
+                    (when (contains? properties :seon.embed/task)
+                      [attribute (cond-> {:seon.embed/task (:seon.embed/task properties)
+                                          :seon.embed/when (:seon.embed/when properties :write)
+                                          :seon.embed/reads (conj (set (:seon.embed/reads properties)) attribute)}
+                                   (:seon.embed/text-fn properties)
+                                   (assoc :seon.embed/text-fn (:seon.embed/text-fn properties)))]))))
+          (keys (:seon.schema.projection/forms projection)))))
+
+(defn- embedded-reads
+  "Every attribute an embedded text of `projection` reads ([[embedded-attributes]])."
+  {:malli/schema [:=> [:cat :seon.schema/projection] [:set :qualified-keyword]]}
+  [projection]
+  (schema/projection-cache-value
+   projection ::embedded-reads
+   #(into #{} (mapcat :seon.embed/reads) (vals (embedded-attributes projection)))))
+
+(defn declaration-text
+  "A public function's text as the embed server reads a titled document, `title: sym | text: arglists and
+  docstring`: what an agent calls, so a private helper has none and never outranks it."
+  {:malli/schema [:=> [:cat [:map [:seon.fn/sym :seon.fn/sym] [:seon.fn/arglists :seon.fn/arglists]
+                             [:seon.fn/doc {:optional true} :seon.fn/doc]
+                             [:seon.fn/private? {:optional true} :seon.fn/private?]]]
+                  [:vector :seon.embed/text]]}
+  [{:seon.fn/keys [sym arglists doc private?]}]
+  (if private? [] [(str "title: " sym " | text: " arglists "\n" (or doc ""))]))
+
+(defn- values-of
+  "Each entity's value of `attribute` on `database`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword] [:vector [:tuple :int :seon.schema/value]]]}
+  [database attribute]
+  (vec (db/q '[:find ?e ?v :in $ ?a :where [?e ?a ?v]] database attribute)))
+
+(defn- texts-of
+  "Each entity's texts of `attribute` on `database` by its `declaration`: its `:seon.embed/text-fn` of the
+  entity's values of the attribute and its reads, else the value as a string."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword :seon.embed/declaration]
+                  [:vector [:tuple :int :seon.embed/text]]]}
+  [database attribute {:seon.embed/keys [text-fn reads]}]
+  (let [own (values-of database attribute)]
+    (if text-fn
+      (let [build (requiring-resolve text-fn)
+            entities (reduce (fn [found attribute-read]
+                               (reduce (fn [found [e v]]
+                                         (cond-> found (contains? found e) (assoc-in [e attribute-read] v)))
+                                       found (values-of database attribute-read)))
+                             (into {} (map (fn [[e v]] [e {attribute v}])) own)
+                             (disj reads attribute))]
+        (into [] (mapcat (fn [[e values]] (map (fn [text] [e text]) (build values)))) entities))
+      (mapv (fn [[e v]] [e (str v)]) own))))
+
+(defn- derive-corpus
+  "The corpus of `task` on `database` from its `declarations`' texts ([[texts-of]])."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.embed/task :seon.embed/declarations] :seon.embed/corpus]}
+  [database task declarations]
+  (let [entities (update-vals (group-by second (into [] (mapcat (fn [[attribute declaration]]
+                                                                  (texts-of database attribute declaration)))
+                                                     declarations))
+                              #(vec (sort (map first %))))]
+    (assoc (held-texts (vec (sort (keys entities)))) :seon.embed/task task :seon.embed/entities entities)))
+
+(defn- corpus-weight
+  "The bytes a corpus holds in the process cache."
+  {:malli/schema [:=> [:cat :seon.embed/corpus] nat-int?]}
+  [{:seon.embed/keys [texts]}]
+  (+ 256 (* 128 (count texts)) (transduce (map #(* 2 (count %))) + 0 texts)))
+
+(defn corpus
+  "The texts of every attribute declaring `task` on `database`, sorted and distinct, with the entities holding
+  each: derived once per content of the attributes they read, by Datahike's change tracking
+  (`seon.db/attribute-revision-key`), so a write to other attributes reuses it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.embed/task] :seon.embed/corpus]}
+  [database task]
+  (let [declarations (into {} (filter #(= task (:seon.embed/task (val %))))
+                           (embedded-attributes (db/carried-projection database)))
+        revision (db/attribute-revision-key database (into #{} (mapcat :seon.embed/reads) (vals declarations)))]
+    (if (= :seon.db/uncommitted revision)
+      (derive-corpus database task declarations)
+      (seon.cache/lookup ::corpus [task declarations revision] corpus-weight
+                         #(derive-corpus database task declarations)))))
+
+(defn entities-now
+  "[[similar-now]] over `corpus`, each neighbour text as the entities holding it on the corpus's database value, at
+  most `k`, nearest first: entities usable in Datalog on the asking branch, never another branch's."
+  {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/store :seon.embed/request :seon.embed/corpus
+                       :seon.embed/task :seon.embed/text pos-int?]
+                  [:or :seon.embed/entity-answer :seon.embed/unreachable-error]]}
+  [settings store request {:seon.embed/keys [task entities] :as ranked} query-task query k]
+  (let [near (similar-now settings store request task ranked query-task query k)]
+    (if (or (error/error? near) (:seon.embed/pending near))
+      near
+      (into [] (comp (mapcat (fn [{:seon.embed/keys [text score]}]
+                               (map (fn [e] {:db/id e :seon.embed/text text :seon.embed/score score}) (entities text))))
+                     (take k))
+            near))))
+
+(defn entities-now-in
+  "[[entities-now]] over `database`'s corpus of `task` ([[corpus]]) with its cluster's dials, its durable store and
+  the embed server: in progress while the store still opens ([[store-within]])."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.embed/task :seon.embed/task :seon.embed/text pos-int?]
+                  [:or :seon.embed/entity-answer :seon.embed/unreachable-error :seon.config/error]]}
+  [database task query-task query k]
   (let [dials (cluster-settings database)
+        ranked (corpus database task)
         store (when-not (:seon.error/operation dials)
                 (store-within (directory database) (:seon.config.embed/wait-ms dials)))]
     (cond (:seon.error/operation dials) dials
-          (:seon.cache/pending-kind store) {:seon.embed/pending (count texts)}
-          :else (similar-now dials store request! task texts query-task query k))))
+          (:seon.cache/pending-kind store) {:seon.embed/pending (count (:seon.embed/texts ranked))}
+          :else (entities-now dials store request! ranked query-task query k))))
 
-;;; The corpora agents rank, and their background fill.
-
-(defn meaning-texts
-  "Each public function's text as the embed server reads a titled document, `title: sym | text: arglists and
-  docstring`, beside its symbol, sorted by symbol: what an agent calls, so private helpers never outrank it."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector [:tuple :qualified-symbol :seon.embed/text]]]}
-  [database]
-  (->> (db/q database '[:find ?s ?arglists ?doc :where [?e :seon.fn/sym ?s]
-                        [(get-else $ ?e :seon.fn/private? false) ?private] [(not ?private)]
-                        [(get-else $ ?e :seon.fn/arglists "") ?arglists] [(get-else $ ?e :seon.fn/doc "") ?doc]])
-       (sort-by first)
-       (mapv (fn [[sym arglists doc]] [sym (str "title: " sym " | text: " arglists "\n" doc)]))))
-
-(defn name-texts
-  "Every function and test the program declares on `database`, as qualified-name text, sorted."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :seon.embed/text]]}
-  [database]
-  (into [] (comp (map str) (distinct))
-        (sort (concat (db/q database '[:find [?s ...] :where [?e :seon.fn/sym ?s]])
-                      (db/q database '[:find [?s ...] :where [?e :seon.test/sym ?s]])))))
+(defn fill-with
+  "Derive the index of each corpus on `database` an attribute declares embedded on write, with `settings`, `store`
+  and `request`: the work a call ranking it would otherwise pay. What each derivation answered, by task."
+  {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/store :seon.embed/request :seon.db/database-value]
+                  [:map-of :seon.embed/task [:or :seon.embed/index :seon.embed/unreachable-error]]]}
+  [settings store request database]
+  (into {} (map (fn [task] [task (index settings store request task (corpus database task))]))
+        (into (sorted-set) (comp (filter (comp #{:write} :seon.embed/when)) (map :seon.embed/task))
+              (vals (embedded-attributes (db/carried-projection database))))))
 
 (defn fill!
-  "Derive the indexes of `database`'s two corpora (by meaning, `meaning-texts`; by name, `name-texts`) with its
-  cluster's dials, embedding what neither cache holds through `request`: the work a call ranking them would
-  otherwise pay. What each derivation answered, by task."
+  "[[fill-with]] with `database`'s cluster dials and its durable store, embedding what neither cache holds through
+  `request`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.embed/request]
                   [:or [:map-of :seon.embed/task [:or :seon.embed/index :seon.embed/unreachable-error]]
                    :seon.config/error]]}
@@ -462,27 +573,22 @@
   (let [dials (cluster-settings database)]
     (if (:seon.error/operation dials)
       dials
-      (let [store (open-store (directory database))]
-        {"none" (index dials store request "none" (mapv second (meaning-texts database)))
-         "similarity" (index dials store request "similarity" (name-texts database))}))))
+      (fill-with dials (open-store (directory database)) request database))))
 
-(def ^:private corpus-attributes
-  "The attributes whose change changes a corpus's text."
-  #{:seon.fn/sym :seon.fn/doc :seon.fn/arglists :seon.fn/private? :seon.test/sym})
-
-(defn- corpus-report?
-  "Whether the transaction `report` changed a corpus's text."
+(defn embedding-report?
+  "Whether the transaction `report` changed an attribute an embedded text reads ([[embedded-reads]])."
   {:malli/schema [:=> [:cat :map] :boolean]}
   [report]
-  (boolean (some #(contains? corpus-attributes (nth % 1)) (:tx-data report))))
+  (let [reads (embedded-reads (db/carried-projection (:db-after report)))]
+    (boolean (some #(contains? reads (nth % 1)) (:tx-data report)))))
 
 (defn fill-step
   "The background fill proc in Flow's four arities, `:io`: one payload-free wake
   (`:seon.embed/channel`, sliding-1) from its own listener on the cluster's
-  connection, offered when a transaction changes a corpus's text and once as
-  it resumes (boot), so the boot's and every later main write's embedding
-  happens here and never in an agent's call. Each pass derives the corpora
-  from the connection's current value ([[fill!]])."
+  connection, offered when a transaction changes an attribute an embedded text
+  reads and once as it resumes (boot), so the boot's and every later main
+  write's embedding happens here and never in an agent's call. Each pass
+  derives the corpora from the connection's current value ([[fill!]])."
   {:malli/schema
    [:function [:=> [:cat] [:map]] [:=> [:cat :map] :map] [:=> [:cat :map :keyword] :map]
     [:=> [:cat :map :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
@@ -505,7 +611,7 @@
      (case transition
        ::flow/resume
        (do (d/listen connection (::listener-key state)
-                     (fn [report] (when (corpus-report? report) (async/offer! channel ::wake))))
+                     (fn [report] (when (embedding-report? report) (async/offer! channel ::wake))))
            (async/offer! channel ::wake)
            state)
        ::flow/pause

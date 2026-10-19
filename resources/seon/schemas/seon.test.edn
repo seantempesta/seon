@@ -59,6 +59,7 @@
             :sym
             [:qualified-symbol
              { :seon.db/identity true,
+              :seon.embed/task "similarity",
               :seon.program/row-schema :seon.test/test,
               :seon.program/source-attribute :seon.test/source,
               :seon.ref/shown-by-source true}],

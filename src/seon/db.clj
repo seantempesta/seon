@@ -1629,6 +1629,28 @@
            (select-keys (:datahike.cache/attribute-revisions context)
                         schema/projection-attributes))))
 
+(defn attribute-revision-key
+  "What `database`'s datoms of `attributes` are, by Datahike's change tracking.
+
+  Within its connection: the connection, generation and conservative revision and those attributes' revisions,
+  which a commit advances only for the attributes it changes (`datahike.query/advance-query-cache-context`). A
+  value with no committed identity (speculative, as-of, since, history, filtered) is `:seon.db/uncommitted`: only
+  a read of its datoms names them."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :qualified-keyword]]
+                  [:or [:map [:datahike.cache/connection-id :seon.db/connection-id]
+                        [:datahike.cache/generation :uuid]
+                        [:datahike.cache/conservative-revision {:optional true} :uuid]
+                        [:datahike.cache/attribute-revisions [:map-of :qualified-keyword :uuid]]]
+                   [:enum :seon.db/uncommitted]]]}
+  [database attributes]
+  (if (and (instance? DB database) (some? (datahike.db/committed-value-identity database)))
+    (let [context (:cache-context database)]
+      (assoc (select-keys context [:datahike.cache/connection-id :datahike.cache/generation
+                                   :datahike.cache/conservative-revision])
+             :datahike.cache/attribute-revisions
+             (select-keys (:datahike.cache/attribute-revisions context) attributes)))
+    :seon.db/uncommitted))
+
 (defn- declaration-content-key
   "The declaration rows `schema/load-projection` joins, per range in
   `schema/projection-ranges`: each identity in value order with its values

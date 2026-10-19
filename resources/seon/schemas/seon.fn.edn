@@ -13,7 +13,9 @@
            [:seon.fn/seeds [:set :qualified-symbol]]],
           :root [:string {:min 1}],
           :source-path [:string {:min 1}],
-          :arglists :string,
+          :arglists [:string {:seon.embed/task "none"
+                              :seon.embed/text-fn seon.embed/declaration-text
+                              :seon.embed/reads #{:seon.fn/sym :seon.fn/doc :seon.fn/private?}}],
           :reference-to [:qualified-keyword {:description "Identity attribute of the function named by a declared reference value; enables call-graph joins from attribute consumers to the referenced identity."}]
           :invokes [:set {:description "Function-valued attributes this declaration actually invokes. Candidate targets derive from their declarations; merely reading or reporting a symbol does not assert invocation. Attribute names are values, so removing an attribute does not erase this dependency declaration."} :qualified-keyword]
           :file [:and {:description "Indexed source file shared by function and test declarations; absent on agent-admitted definitions."} :seon.db/ref],
@@ -210,6 +212,7 @@
           :sym
           [:qualified-symbol
            {:seon.db/identity true,
+            :seon.embed/task "similarity",
             :seon.program/row-schema :seon.fn/fn,
             :seon.program/source-attribute :seon.fn/source,
             :seon.ref/shown-by-source true}],

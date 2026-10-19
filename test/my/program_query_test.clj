@@ -75,7 +75,7 @@
         private (set (db/q database '[:find [?s ...] :where [?e :seon.fn/sym ?s] [?e :seon.fn/private? true]]))
         ;; waits for what a call waits for: the one derivation the background fill (seon.embed/fill-step) runs
         _ (embed/index (embed/cluster-settings database) (embed/open-store (embed/directory database)) embed/request!
-                       "none" (mapv second (embed/meaning-texts database)))
+                       "none" (embed/corpus database "none"))
         found (my.program/similar database "pull an entity by its id" 8)]
     (is (= 'seon.db/pull (ffirst found)) "the function the intent names is first")
     (is (not-any? private (map first found)) "no private helper is offered")))
@@ -84,16 +84,16 @@
            :seon.test/long-ms 30000}
   a-warm-similar-by-name-allocates-in-proportion-to-its-answer
   ;; Live run 10 (default 577091e04): a warm `(my.program/similar database 'seon.db/transcat! 5)` allocated 19.3 MB
-  ;; (73.6 MB per request on 0d9f8f847): every call re-reads every declared name (`seon.embed/name-texts`), pairs
-  ;; each with its symbol and re-hashes all of them into the index key. After an unrelated write the program is
-  ;; unchanged, so the answer is one pass over the held index and its five names.
+  ;; (73.6 MB per request on 0d9f8f847): every call re-read every declared name, paired each with its symbol and
+  ;; re-hashed all of them into the index key. The corpus is now held by what it reads (`seon.embed/corpus`), so after
+  ;; an unrelated write the answer is one pass over the held index and its five names.
   (test-support/with-database
    (fn [connection]
      (let [ask #(my.program/similar % 'seon.db/transcat! 5)
            before (db/db connection)
            ;; waits for what a call waits for: the by-name index the background fill derives
            _ (embed/index (embed/cluster-settings before) (embed/open-store (embed/directory before)) embed/request!
-                          "similarity" (embed/name-texts before))
+                          "similarity" (embed/corpus before "similarity"))
            first-answer (ask before)
            _ (test-support/transacted! connection (test-support/agent-tx before "unrelated-writer"))
            database (db/db connection)

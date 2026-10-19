@@ -774,7 +774,8 @@
   none when the embed server does not answer."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] [:vector :qualified-symbol]]}
   [database sym]
-  (let [near (embed/similar-in database "similarity" (embed/name-texts database) "similarity" (str sym) 5)]
+  (let [near (embed/similar-in database "similarity" (:seon.embed/texts (embed/corpus database "similarity"))
+                               "similarity" (str sym) 5)]
     (if (:seon.error/operation near) [] (mapv (comp symbol :seon.embed/text) near))))
 
 (defn- not-found
@@ -1115,14 +1116,16 @@
                    :seon.config/error]]}
   [database query k]
   (let [by-name? (symbol? query)
-        rows (if by-name? (mapv (juxt symbol identity) (embed/name-texts database)) (embed/meaning-texts database))
         near (if by-name?
-               (embed/similar-now-in database "similarity" (mapv second rows) "similarity" (str query) k)
-               (embed/similar-now-in database "none" (mapv second rows) "code" query k))]
+               (embed/entities-now-in database "similarity" "similarity" (str query) k)
+               (embed/entities-now-in database "none" "code" query k))]
     (cond (:seon.error/operation near) near
           (map? near) (assoc near :retry (list 'my.program/similar (if by-name? (list 'quote query) query) k))
-          :else (let [sym-of (into {} (map (fn [[sym text]] [text sym])) rows)]
-                  (mapv (fn [{:seon.embed/keys [text score]}] [(sym-of text) score]) near)))))
+          :else (mapv (fn [{entity :db/id score :seon.embed/score}]
+                        (let [{fn-sym :seon.fn/sym test-sym :seon.test/sym}
+                              (db/pull database [:seon.fn/sym :seon.test/sym] entity)]
+                          [(or fn-sym test-sym) score]))
+                      near))))
 
 (defn sizes
   "The functions and tests of a namespace with their line counts, largest first (top 20).

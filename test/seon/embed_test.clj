@@ -1,13 +1,17 @@
 (ns seon.embed-test
   "Embeddings keyed by content: each text reaches the embed server once, across caches and restarts; the nearest
   texts by them."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.core.async :as async]
+            [clojure.core.async.flow :as flow]
+            [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [konserve.core :as k]
             [konserve.filestore :as filestore]
             [seon.cache]
+            [seon.db :as db]
             [seon.embed :as embed]
-            [seon.id :as id])
+            [seon.id :as id]
+            [seon.test-support :as test-support])
   (:import [java.nio ByteBuffer ByteOrder]
            [java.nio.file Files]
            [java.util.concurrent CountDownLatch TimeUnit]
@@ -165,7 +169,7 @@
     (try
       (is (= ["seon.db/transact!" "seon.db/q"]
              (mapv :seon.embed/text (embed/similar (settings) (embed/open-store dir) request "similarity"
-                                                   ["seon.db/pull" "seon.db/transact!" "seon.cache/lookup" "seon.db/q"]
+                                                   (embed/held-texts ["seon.db/pull" "seon.db/transact!" "seon.cache/lookup" "seon.db/q"])
                                                    "similarity" "seon.db/transcat!" 2))))
       (finally
         (run! io/delete-file (reverse (file-seq (io/file dir))))))))
@@ -175,7 +179,7 @@
     (try
       (let [answer (embed/similar (assoc (settings) :seon.config.embed/endpoint "http://127.0.0.1:9/v1/embed")
                                   (embed/open-store dir) embed/request!
-                                  "similarity" ["seon.db/pull"] "similarity" "seon.db/pul" 3)]
+                                  "similarity" (embed/held-texts ["seon.db/pull"]) "similarity" "seon.db/pul" 3)]
         (is (= :seon.embed/unreachable-error (:seon.error/type answer)))
         (is (= "http://127.0.0.1:9/v1/embed" (:seon.config.embed/endpoint answer))))
       (finally
@@ -187,7 +191,7 @@
         release (CountDownLatch. 1)
         request (fn [_settings _task texts] (.await release 5 TimeUnit/SECONDS) (mapv (comp unit axes) texts))
         dials (assoc (settings) :seon.config.embed/wait-ms 10)
-        corpus ["seon.db/pull" "seon.db/transact!" "seon.cache/lookup" "seon.db/q"]
+        corpus (embed/held-texts ["seon.db/pull" "seon.db/transact!" "seon.cache/lookup" "seon.db/q"])
         ask #(embed/similar-now dials (embed/open-store dir) request "similarity" corpus "similarity" "seon.db/transcat!" 2)]
     (try
       (is (= {:seon.embed/pending 4} (ask)) "the index still being derived answers embedding in progress")
@@ -204,7 +208,7 @@
         requested (atom [])
         request (fn [_settings _task texts] (swap! requested into texts) (mapv (comp unit axes) texts))
         dials (settings)
-        corpus ["seon.db/pull" "seon.db/transact!" "seon.cache/lookup" "seon.db/q"]]
+        corpus (embed/held-texts ["seon.db/pull" "seon.db/transact!" "seon.cache/lookup" "seon.db/q"])]
     (try
       (embed/index dials (embed/open-store dir) request "similarity" corpus)
       (reset! requested [])
@@ -212,5 +216,122 @@
              (mapv :seon.embed/text (embed/similar-now dials (embed/open-store dir) request "similarity" corpus
                                                    "similarity" "seon.db/transcat!" 2))))
       (is (= ["seon.db/transcat!"] @requested) "the call embeds its query and nothing of the corpus")
+      (finally
+        (run! io/delete-file (reverse (file-seq (io/file dir))))))))
+
+(def ^:private documents
+  "Each synthetic document text's embedding direction, and the query nearest the first."
+  {"parse Clojure text into forms" [1 0 0 0] "a parser of Clojure source" [0.9 0.1 0 0]
+   "store bytes on disk" [0 1 0 0] "a note nobody embeds" [0 0 1 0] "a corpus only queried" [0 0 0 1]})
+
+(defn- direction
+  "A text's embedding direction: a synthetic document's own, any other text (the program's corpora on a test
+  branch) one shared direction away from them."
+  {:malli/schema [:=> [:cat :seon.embed/text] [:vector number?]]}
+  [text]
+  (get documents text [0 0 1 1]))
+
+(def ^:private document-attributes
+  "Synthetic attributes: an identity, one declaring its embedding, one declaring none, one embedded on first query."
+  [[:seon.embed-test/id [:string {:seon.db/identity true}]]
+   [:seon.embed-test/title [:string {:seon.embed/task "document"}]]
+   [:seon.embed-test/note :string]
+   [:seon.embed-test/topic [:string {:seon.embed/task "query" :seon.embed/when :query}]]])
+
+(def ^:private document-options
+  "A test database installing the synthetic attributes, and `:seon.embed/when`, which a schema row declaring it
+  stores as a property of that row: the attribute its first publication installs."
+  {:seon.test-support/extra-schema
+   (conj (mapv (fn [[ident]] (cond-> {:db/ident ident :db/valueType :db.type/string :db/cardinality :db.cardinality/one}
+                                 (= :seon.embed-test/id ident) (assoc :db/unique :db.unique/identity)))
+               document-attributes)
+         {:db/ident :seon.embed/when :db/valueType :db.type/keyword :db/cardinality :db.cardinality/one})})
+
+(defn- declare-documents!
+  "Declare the synthetic attributes' schemas on `connection`'s branch."
+  {:malli/schema [:=> [:cat :seon.db/connection] :map]}
+  [connection]
+  (test-support/transacted! connection (test-support/schema-entities (db/db connection) document-attributes)))
+
+(defn- titled!
+  "Write an entity titled `title` on `connection`'s branch; its entity id."
+  {:malli/schema [:=> [:cat :seon.db/connection :string] :int]}
+  [connection title]
+  (get-in (test-support/transacted! connection [{:db/id "doc" :seon.embed-test/id (str (random-uuid))
+                                                  :seon.embed-test/title title}])
+          [:tempids "doc"]))
+
+(deftest an-attribute-declaring-an-embed-task-is-embedded-without-a-hand-list
+  (test-support/with-database
+   document-options
+   (fn [connection]
+     (let [dir (temp-dir)
+           dials (settings)
+           requested (atom [])
+           request (fn [_settings _task texts] (swap! requested into texts) (mapv (comp unit direction) texts))
+           wake (async/chan (async/sliding-buffer 1))]
+       (try
+         (declare-documents! connection)
+         (let [state (embed/fill-step (embed/fill-step {:seon.turn.loop/cluster {:seon.db/connection connection}
+                                                        :seon.embed/channel wake})
+                                      ::flow/resume)]
+           (async/poll! wake)
+           (let [declared (test-support/transacted! connection [{:db/id "doc" :seon.embed-test/id (str (random-uuid))
+                                                                  :seon.embed-test/title "parse Clojure text into forms"
+                                                                  :seon.embed-test/note "a note nobody embeds"}])
+                 entity (get-in declared [:tempids "doc"])
+                 ;; the connection's listeners are called after the transaction answers
+                 declared-wake (first (async/alts!! [wake (async/timeout 5000)]))
+                 undeclared (test-support/transacted! connection [{:db/id entity :seon.embed-test/note "a changed note"}
+                                                                  {:seon.embed-test/id (str (random-uuid))
+                                                                   :seon.embed-test/note "store bytes on disk"}])
+                 _ (embed/fill-step state ::flow/stop)
+                 database (db/db connection)
+                 filled (embed/fill-with dials (embed/open-store dir) request database)
+                 found (embed/entities-now dials (embed/open-store dir) request (embed/corpus database "document")
+                                           "document" "a parser of Clojure source" 3)]
+             (testing "the background fill is woken by a write of the declared attribute, not of another"
+               (is (= :seon.embed/wake declared-wake))
+               (is (true? (embed/embedding-report? declared)))
+               (is (false? (embed/embedding-report? undeclared))))
+             (testing "the declared attribute's text is embedded, the undeclared one's never"
+               (is (= #{:seon.embed-test/title :seon.embed-test/topic}
+                      (set (filter #(= "seon.embed-test" (namespace %))
+                                   (keys (embed/embedded-attributes (db/carried-projection database)))))))
+               (is (some #{"parse Clojure text into forms"} @requested))
+               (is (not-any? #{"a note nobody embeds" "a changed note" "store bytes on disk"} @requested)))
+             (testing "a corpus embedded on query is not filled"
+               (is (contains? filled "document"))
+               (is (not (contains? filled "query"))))
+             (testing "kNN finds it as its entity, usable in Datalog"
+               (is (= [entity] (mapv :db/id found)))
+               (is (= "parse Clojure text into forms"
+                      (db/q '[:find ?t . :in $ ?e :where [?e :seon.embed-test/title ?t]] database (:db/id (first found))))))))
+         (finally
+           (run! io/delete-file (reverse (file-seq (io/file dir))))))))))
+
+(deftest an-entity-only-another-branch-holds-is-not-returned
+  (let [dir (temp-dir)
+        dials (settings)
+        request (fn [_settings _task texts] (mapv (comp unit direction) texts))
+        ask #(embed/entities-now dials (embed/open-store dir) request (embed/corpus % "document")
+                                 "document" "a parser of Clojure source" 3)]
+    (try
+      (test-support/with-database
+       document-options
+       (fn [ours]
+         (declare-documents! ours)
+         (let [kept (titled! ours "store bytes on disk")]
+           (test-support/with-database
+            document-options
+            (fn [theirs]
+              (declare-documents! theirs)
+              (titled! theirs "parse Clojure text into forms")
+              (embed/fill-with dials (embed/open-store dir) request (db/db theirs))
+              (is (= ["parse Clojure text into forms"] (mapv :seon.embed/text (ask (db/db theirs))))
+                  "their branch ranks its own entity")))
+           (is (= [{:db/id kept :seon.embed/text "store bytes on disk"}]
+                  (mapv #(dissoc % :seon.embed/score) (ask (db/db ours))))
+               "ours ranks only what ours holds, though their text is embedded and shared"))))
       (finally
         (run! io/delete-file (reverse (file-seq (io/file dir))))))))

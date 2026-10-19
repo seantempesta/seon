@@ -58,4 +58,29 @@
              :in-progress
              [:map {:description "Embedding in progress: the index of these texts is still being derived (by the background fill, seon.embed/fill-step, or this call's own miss), so the call answers now with nothing ranked; repeat it shortly."}
               [:seon.embed/pending :seon.embed/pending]],
-             :answer [:or :seon.embed/neighbours :seon.embed/in-progress]}
+             :answer [:or :seon.embed/neighbours :seon.embed/in-progress]
+             :when
+             [:enum {:description "When an embedded attribute's texts are embedded: :write by the background fill as they are written (seon.embed/fill-step), :query on the first query of their corpus."}
+              :write :query],
+             :reads [:set {:description "The attributes an embedded text is built from: a change to any of them changes the text (the attribute itself always)."} :qualified-keyword],
+             :text-fn [:qualified-symbol {:description "The function building an embedded attribute's texts from its entity's values of the attribute and its reads (a map), none leaving the entity out of the corpus; absent, the text is the attribute's value as a string."}],
+             :declaration
+             [:map {:description "An attribute's embedding, declared by `:seon.embed/task` in its schema's properties (seon.embed/embedded-attributes)."}
+              [:seon.embed/task :seon.embed/task]
+              [:seon.embed/when :seon.embed/when]
+              [:seon.embed/reads :seon.embed/reads]
+              [:seon.embed/text-fn {:optional true} :seon.embed/text-fn]],
+             :declarations [:map-of {:description "Each embedded attribute's declaration."} :qualified-keyword :seon.embed/declaration],
+             :held
+             [:map {:description "Texts an index ranks, sorted and distinct, with the digest naming them (seon.embed/held)."}
+              [:seon.embed/texts :seon.embed/texts]
+              [:seon.embed/digest :seon.embed/key]],
+             :entities [:map-of {:description "The entities holding each text of a corpus, by entity id."} :seon.embed/text [:vector :int]],
+             :corpus
+             [:merge {:description "One task's corpus on a database value: the texts of every attribute declaring that task, and the entities holding each (seon.embed/corpus)."}
+              :seon.embed/held
+              [:map [:seon.embed/task :seon.embed/task] [:seon.embed/entities :seon.embed/entities]]],
+             :entity-neighbours
+             [:vector {:description "The entities nearest a query on the asking database value, nearest first (seon.embed/entities-now)."}
+              [:map [:db/id :int] [:seon.embed/text :seon.embed/text] [:seon.embed/score :seon.embed/score]]],
+             :entity-answer [:or :seon.embed/entity-neighbours :seon.embed/in-progress]}
