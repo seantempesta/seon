@@ -6,6 +6,8 @@
             :seon.render/html seon.render.var/render-html}
        seon.render.var/var-value?]
  :contract [:enum {:description "A definition's contract when it is not present: :missing, or an authored contract Malli refuses, :malformed (its refusal under :seon.render.var/malli-refusal)."} :missing :malformed]
+ :malli-refusal [:map-of {:description "Malli's refusal of an authored contract, as :seon.fn.contract/malli-type to :seon.fn.contract/malli-data. Producer: seon.render.var/malformed-refusal."} :qualified-keyword :seon.schema/value]
+ :findings-error [:or {:description "The refusal of seon.fn/contract-findings when the contract's refusal could not be read. Producer: seon.render.var/malformed-refusal."} :seon.error/value :seon.db/invalid-read-error :seon.schema/validation-refusal]
  :example [:any {:description "A contract form to start from, as data: the defn with an example :malli/schema." :gen/elements [(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)]}]
  :symbol [:qualified-symbol {:description "The symbol the rendered Var names."}]
  :pending [:vector {:description "Reaching tests with no result recorded against a program holding the current definition (the first five)."} :qualified-symbol]
@@ -16,6 +18,8 @@
  :status [:map {:description "What a definition has to say; empty when nothing changed."}
           [:seon.render.var/contract {:optional true} :seon.render.var/contract]
           [:seon.render.var/example {:optional true} :seon.render.var/example]
+          [:seon.render.var/malli-refusal {:optional true} :seon.render.var/malli-refusal]
+          [:seon.render.var/findings-error {:optional true} :seon.render.var/findings-error]
           [:seon.render.var/pending {:optional true} :seon.render.var/pending]
           [:seon.render.var/newly-red {:optional true} :seon.render.var/newly-red]
           [:seon.render.var/newly-green {:optional true} :seon.render.var/newly-green]
@@ -24,6 +28,8 @@
         [:seon.render.var/symbol [:maybe :seon.render.var/symbol]]
         [:seon.render.var/contract {:optional true} :seon.render.var/contract]
         [:seon.render.var/example {:optional true} :seon.render.var/example]
+        [:seon.render.var/malli-refusal {:optional true} :seon.render.var/malli-refusal]
+        [:seon.render.var/findings-error {:optional true} :seon.render.var/findings-error]
         [:seon.render.var/pending {:optional true} :seon.render.var/pending]
         [:seon.render.var/newly-red {:optional true} :seon.render.var/newly-red]
         [:seon.render.var/newly-green {:optional true} :seon.render.var/newly-green]

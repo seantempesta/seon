@@ -1,5 +1,6 @@
 (ns seon.render.entity-pairs-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.edn :as edn]
+            [clojure.test :refer [deftest is]]
             [clojure.string :as str]
             [seon.config :as config]
             [seon.db :as db]
@@ -230,8 +231,8 @@
              emitted (#'render/inline-rendered nil request :seon.render/ai data)]
          (is (= [data html-default] (faces (assoc agent-value :seon.render/ai data)))
              "rendered data in place of a symbol is the AI face's selection")
-         (is (str/includes? (str emitted) "shown as data")
-             "and the AI face's emitter renders that data, never a pre-printed string"))))))
+         (is (= data (edn/read-string emitted))
+             "and the AI face's emitter shows that data: the value printer's text reads back as it"))))))
 
 (deftest the-viewing-agents-own-renderer-beats-the-schema-default
   ;; Per face the first match wins (owner, 2026-09-25): the value's own face,

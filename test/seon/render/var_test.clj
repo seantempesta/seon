@@ -17,5 +17,9 @@
      (let [status (sut/status (db/db connection) 'sample.var-malformed/bare-vector false)]
        (is (not= :missing (:seon.render.var/contract status))
            "a contract the agent wrote is not called missing")
-       (is (some #{:malli.core/child-error} (tree-seq coll? seq status))
-           "the render names Malli's refusal of the contract")))))
+       (is (= :malformed (:seon.render.var/contract status))
+           "an authored contract Malli refuses is called malformed")
+       (is (contains? (:seon.render.var/malli-refusal status) :malli.core/child-error)
+           "the status carries Malli's refusal of the contract, by its type")
+       (is (not (contains? status :seon.render.var/example))
+           "the example for a missing contract is not offered for a malformed one")))))

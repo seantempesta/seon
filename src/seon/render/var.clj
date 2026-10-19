@@ -90,19 +90,23 @@
   (some? (:malli/schema (meta v))))
 
 (defn malformed-refusal
-  "What `seon.fn/contract-findings` says of the authored contract `sym` carries in
-  `:seon.fn/malformed-spec`: `:seon.fn.contract/malli-type` and, when Malli supplies it,
-  `:seon.fn.contract/malli-data`. Empty when the definition's contract is no malformed form."
+  "The status members for the authored contract `sym` carries in `:seon.fn/malformed-spec`:
+  Malli's refusal of it as `:seon.render.var/malli-refusal` (`:seon.fn.contract/malli-type`
+  to `:seon.fn.contract/malli-data`), or, when `seon.fn/contract-findings` itself refuses,
+  that refusal as `:seon.render.var/findings-error`."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol]
-                  [:map-of :qualified-keyword :seon.schema/value]]}
+                  [:map
+                   [:seon.render.var/malli-refusal {:optional true} :seon.render.var/malli-refusal]
+                   [:seon.render.var/findings-error {:optional true} :seon.render.var/findings-error]]]}
   [database sym]
   (let [report (sfn/contract-findings database {:seon.fn.contract/selected #{sym}})]
     (if (vector? report)
-      (into {}
-            (for [row report
-                  :when (= :seon.fn.contract.finding/malformed-spec (:seon.fn.contract/finding row))]
-              [(:seon.fn.contract/malli-type row) (:seon.fn.contract/malli-data row)]))
-      {})))
+      {:seon.render.var/malli-refusal
+       (into {}
+             (for [row report
+                   :when (= :seon.fn.contract.finding/malformed-spec (:seon.fn.contract/finding row))]
+               [(:seon.fn.contract/malli-type row) (:seon.fn.contract/malli-data row)]))}
+      {:seon.render.var/findings-error report})))
 
 (defn status
   "What the definition `sym` has to say, empty when nothing is worth saying.
@@ -132,7 +136,6 @@
         malformed? (and readable? (not armed) (some? (:seon.fn/malformed-spec entity)))
         contract (cond bare? :missing
                        malformed? :malformed)
-        refusal (if malformed? (malformed-refusal database sym) {})
         tests (let [t (sfn/gate-sets {:seon.db/db database :seon.fn/seeds #{sym}})] (if (vector? t) t []))
         since (when (seq tests) (definition-tx database sym))
         latest (if (and (seq tests) since)
@@ -151,9 +154,9 @@
                :seon.render.var/newly-green (newly :fail :pass)}
         counts (into {} (for [[k v] lists :when (< shown-tests (count v))] [k (count v)]))]
     (cond-> (into {} (for [[k v] lists :when (seq v)] [k (vec (take shown-tests v))]))
-      contract (assoc :seon.render.var/contract contract
-                      :seon.render.var/example (list 'defn (symbol (name sym)) {:malli/schema [:=> [:cat :int] :int]} '[x] 'x))
-      (seq refusal) (assoc :seon.render.var/malli-refusal refusal)
+      contract (assoc :seon.render.var/contract contract)
+      bare? (assoc :seon.render.var/example (list 'defn (symbol (name sym)) {:malli/schema [:=> [:cat :int] :int]} '[x] 'x))
+      malformed? (into (malformed-refusal database sym))
       (seq counts) (assoc :seon.render.var/counts counts))))
 
 (defn- unit-status
