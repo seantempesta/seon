@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed (eb7a77b5f; both macro-value rows green on 06614f6a8 in both reviews 3; an open macro remains: an-open-macro-expands-with-the-loaded-runtime.md)
 severity: defect
 tags: [issue, sci, runtime, macro]
 ---

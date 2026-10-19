@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed (c23e1f807 deleted the report and every reader; F2 is the stated exception)
 severity: defect
 tags: [issue, sci, runtime, done-rule]
 ---

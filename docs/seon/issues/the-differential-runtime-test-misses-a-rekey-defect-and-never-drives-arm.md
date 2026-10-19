@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed (25ed6b7ec; the real-entrance rows go red under the reviews 3 mutations of the binder)
 severity: defect
 tags: [issue, test, sci, runtime]
 ---

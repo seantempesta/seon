@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed (57224cfc8; launch-observations row green on 06614f6a8 in both reviews 3)
 severity: defect
 tags: [issue, sci, runtime, values]
 ---

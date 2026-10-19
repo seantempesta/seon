@@ -1,0 +1,160 @@
+From 20ef88d7ea08813a5ab8172467672356c8b6e9b7 Mon Sep 17 00:00:00 2001
+From: Sean Tempesta <sean.tempesta@gmail.com>
+Date: Tue, 20 Oct 2026 04:02:58 +0700
+Subject: [PATCH] A method written in a fork is its own: defmethod and protocol
+ extension copy a MultiFn the context does not own and bind the copy as its
+ own value of the Var (sci.core/fork's model), so no parent or sibling sees
+ the method
+
+Before: [first-fork sibling parent] answered [2 2 2] for a defmethod, an extend-type of an inherited record and an extend-protocol; after: [2 1 1], and satisfies? of the new type stays false in the sibling. The owning context still writes in place, so a held MultiFn sees its later methods. Full clj suite: same 2 pre-existing failures (function-results-dont-have-metadata) as 33039c6e, 432 tests.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/sci/impl/multimethods.cljc  | 51 ++++++++++++++++++++++++++++++++-
+ src/sci/impl/namespaces.cljc    |  1 +
+ src/sci/impl/protocols.cljc     |  4 +--
+ test/sci/fork_bindings_test.clj | 29 +++++++++++++++++++
+ 4 files changed, 82 insertions(+), 3 deletions(-)
+
+diff --git a/src/sci/impl/multimethods.cljc b/src/sci/impl/multimethods.cljc
+index 08f4933c..64b1d46a 100644
+--- a/src/sci/impl/multimethods.cljc
++++ b/src/sci/impl/multimethods.cljc
+@@ -4,6 +4,7 @@
+   (:require
+    #?(:clj [clojure.string :as str])
+    [sci.ctx-store :as store]
++   #?@(:clj [[sci.impl.vars :as vars] [sci.lang]])
+    ;; no hierarchies on cljd, like the host
+    #?@(:cljd [] :default [[sci.impl.hierarchies :refer [global-hierarchy]]])))
+ 
+@@ -181,6 +182,52 @@
+      :clj (.addMethod ^clojure.lang.MultiFn multifn dispatch-val f)
+      :cljs (-add-method multifn dispatch-val f)))
+ 
++;; A multimethod's method table is part of its Var's value, so a forked
++;; context writes it the way it writes the Var (`sci.core/fork`): in place when
++;; the context owns the MultiFn, else on a copy that becomes its own binding.
++#?(:clj
++   (defn- copy-multi-fn
++     "A new MultiFn with mf's dispatch, default, hierarchy, methods and
++     preferences: the same multimethod as a value of its own."
++     ^clojure.lang.MultiFn [mm-name ^clojure.lang.MultiFn mf]
++     (let [copy (clojure.lang.MultiFn. (str mm-name) (.-dispatchFn mf)
++                                       (.-defaultDispatchVal mf) (.-hierarchy mf))]
++       (doseq [[dv f] (.getMethodTable mf)] (.addMethod copy dv f))
++       (doseq [[x ys] (.getPreferTable mf) y ys] (.preferMethod copy x y))
++       copy)))
++
++#?(:clj
++   (defn- owns-multi-fn?
++     "Whether ctx writes mf, the value of sci-var it reads, in place: with no
++     binding of its own, when it owns the Var; with one, when it made mf in
++     its current generation. A fork renews both generations, so neither
++     owns a MultiFn they share."
++     [ctx sci-var mf]
++     (if (and ctx (vars/context-binding ctx sci-var))
++       (let [env @(:env ctx)]
++         (= (:sci/generation env) (get (:sci/multi-fns env) mf)))
++       (vars/owns? ctx sci-var))))
++
++#?(:clj
++   (defn multi-fn-add-method-var-impl
++     "Adds method f for dispatch-val to the multimethod sci-var holds in the
++     executing context (sci-var may be a built-in MultiFn itself); a context that does not own that MultiFn adds it to
++     a copy bound as its own value of the Var, so no context it shares the
++     Var with sees the method. Returns the MultiFn written."
++     [sci-var dispatch-val f]
++     (let [ctx (store/get-ctx)
++           ;; `(var sym)` of a built-in multimethod is the MultiFn itself
++           held? (instance? sci.lang.Var sci-var)
++           mf (if held? @sci-var sci-var)]
++       (if (or (not held?) (not (instance? clojure.lang.MultiFn mf)) (owns-multi-fn? ctx sci-var mf))
++         (multi-fn-add-method-impl mf dispatch-val f)
++         (let [copy (doto (copy-multi-fn (vars/toSymbol sci-var) mf) (.addMethod dispatch-val f))]
++           (swap! (:env ctx) (fn [env] (assoc-in env [:sci/multi-fns copy] (:sci/generation env))))
++           ;; the method table's write is bookkeeping, not a definition
++           (binding [sci.lang/*write-kind* :extend]
++             (vars/bindRoot sci-var copy))
++           copy)))))
++
+ (defn defmethod
+   "Creates and installs a new method of multimethod associated with dispatch-value. "
+   [_x _y multifn dispatch-val & fn-tail]
+@@ -207,6 +254,8 @@
+                   (alter-meta! v# assoc :sci.impl/print-method (fn ~@fn-tail))
+                   :else (clojure.core/multi-fn-add-method-impl ~multifn ~dispatch-val (fn ~@fn-tail))))
+               (clojure.core/multi-fn-add-method-impl ~multifn ~dispatch-val (fn ~@fn-tail))))
+-         `(clojure.core/multi-fn-add-method-impl ~multifn ~dispatch-val (fn ~@fn-tail))))
++         (if (symbol? multifn)
++           `(clojure.core/multi-fn-add-method-var-impl (var ~multifn) ~dispatch-val (fn ~@fn-tail))
++           `(clojure.core/multi-fn-add-method-impl ~multifn ~dispatch-val (fn ~@fn-tail)))))
+      :cljs
+      (list 'clojure.core/multi-fn-add-method-impl multifn dispatch-val (list* 'fn fn-tail))))
+diff --git a/src/sci/impl/namespaces.cljc b/src/sci/impl/namespaces.cljc
+index cee36b08..cb49eb60 100644
+--- a/src/sci/impl/namespaces.cljc
++++ b/src/sci/impl/namespaces.cljc
+@@ -1648,6 +1648,7 @@
+      #?@(:cljd ['methods (new-var 'methods sci.impl.multimethods/methods-impl clojure-core-ns)]
+          :default ['methods (copy-core-var methods)])
+      'multi-fn-add-method-impl (copy-var sci.impl.multimethods/multi-fn-add-method-impl clojure-core-ns)
++     #?@(:clj ['multi-fn-add-method-var-impl (copy-var sci.impl.multimethods/multi-fn-add-method-var-impl clojure-core-ns)])
+      'multi-fn?-impl (copy-var sci.impl.multimethods/multi-fn?-impl clojure-core-ns)
+      'multi-fn-impl (copy-var sci.impl.multimethods/multi-fn-impl clojure-core-ns)
+      #?@(:cljd [] :default ['prefer-method (copy-core-var prefer-method)])
+diff --git a/src/sci/impl/protocols.cljc b/src/sci/impl/protocols.cljc
+index 78c4c18c..cd855e81 100644
+--- a/src/sci/impl/protocols.cljc
++++ b/src/sci/impl/protocols.cljc
+@@ -178,8 +178,8 @@
+                 env (deref (:env (store/get-ctx)))
+                 multi-method-var (get-in env [:namespaces pns meth-sym])
+                 multi-method @multi-method-var]
+-            (mms/multi-fn-add-method-impl
+-             multi-method #?(:cljd (if (identical? Object atype) :default atype)
++            (#?(:clj mms/multi-fn-add-method-var-impl :default mms/multi-fn-add-method-impl)
++             #?(:clj multi-method-var :default multi-method) #?(:cljd (if (identical? Object atype) :default atype)
+                              :default atype)
+              (if extend-via-metadata
+                (let [fq (symbol pns-str meth-str)]
+diff --git a/test/sci/fork_bindings_test.clj b/test/sci/fork_bindings_test.clj
+index b7b8550e..b1b59f64 100644
+--- a/test/sci/fork_bindings_test.clj
++++ b/test/sci/fork_bindings_test.clj
+@@ -285,3 +285,32 @@
+             bytes-per (/ (- (.getThreadAllocatedBytes mx thread) b0) (double n))]
+         (is (< ns-per 1000.0) "a fork takes under a microsecond")
+         (is (< bytes-per 3072.0) "a fork allocates under 3 KB")))))
++
++(defn- in-ctx [ctx s] (store/with-ctx ctx (sci/eval-string* ctx s)))
++
++(deftest a-method-written-in-a-fork-is-its-own
++  (testing "defmethod"
++    (let [base (sci/init {})
++          _ (in-ctx base "(ns r) (defmulti mm identity) (defmethod mm :a [_] 1)")
++          a (sci/fork base) b (sci/fork base)]
++      (in-ctx a "(in-ns 'r) (defmethod mm :a [_] 2)")
++      (is (= [2 1 1] (mapv #(in-ctx % "(r/mm :a)") [a b base])))))
++  (testing "a protocol extension of an inherited record"
++    (let [base (sci/init {})
++          _ (in-ctx base "(ns p) (defprotocol P (m [this])) (defrecord R [] P (m [_] 1)) (def r (->R))")
++          a (sci/fork base) b (sci/fork base)]
++      (in-ctx a "(in-ns 'p) (extend-type R P (m [_] 2))")
++      (is (= [2 1 1] (mapv #(in-ctx % "(p/m p/r)") [a b base])))))
++  (testing "extend-protocol, and satisfies? of the new type"
++    (let [base (sci/init {})
++          _ (in-ctx base "(ns q) (defprotocol P (m [this])) (extend-protocol P String (m [_] 1))")
++          a (sci/fork base) b (sci/fork base)]
++      (in-ctx a "(in-ns 'q) (extend-protocol P String (m [_] 2)) (extend-protocol P nil (m [_] 5))")
++      (is (= [2 1 1] (mapv #(in-ctx % "(q/m \"x\")") [a b base])))
++      (is (= [5 false] [(in-ctx a "(q/m nil)") (in-ctx b "(satisfies? q/P nil)")]))))
++  (testing "the context that owns the MultiFn writes it in place: a held value sees the method"
++    (let [base (sci/init {})]
++      (is (= [1 true] (in-ctx base "(defmulti mm identity) (def held mm) (defmethod mm :a [_] 1) [(held :a) (identical? held mm)]")))
++      (let [a (sci/fork base)]
++        (is (= [2 3 true] (in-ctx a "(defmethod mm :a [_] 2) (def held2 mm) (defmethod mm :b [_] 3) [(held2 :a) (held2 :b) (identical? held2 mm)]")))
++        (is (= 1 (in-ctx base "(mm :a)")))))))
+-- 
+2.54.0 (Apple Git-157)
+

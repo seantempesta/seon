@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed (1bcb3bf65, the exact key; R1 and R2 rows green on 06614f6a8 in both reviews 3; residual class: a-compiled-function-caching-a-handed-derivation-serves-it-across-runtimes.md)
 severity: defect
 tags: [issue, cache, sci, runtime]
 ---
