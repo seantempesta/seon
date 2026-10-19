@@ -8,6 +8,10 @@
  :seon.grade/git-sha [:and {:seon.db/index true :description "The Git commit of the program the attempt ran under: the published archive the JVM that graded it at its end loaded, or the one root named for a backfill. Absent when unknown."} :seon.test.run/git-sha]
  :seon.grade/models [:set {:description "The model ids the provider reported serving the attempt's calls (:seon.ai.attempt/response-model), which may differ from the requested model name. Absent when no response named one."}
                      :seon.ai/response-model]
+ :seon.grade/step [:enum {:description "The kind of step the graded attempt's task was (seon.mine/step-kind): derived from its proofs (a Design or Prove template's handoff test) and its target branch (a merge), implement for other proofs, else other."}
+                   :design :prove :implement :merge :other]
+ :seon.grade/plan-updates [:int {:min 0 :description "How many times the attempt changed its task's plan: the plan versions asserted in history after the attempt opened."}]
+ :seon.grade/first-write-turn [:int {:min 1 :description "The 1-based turn of the attempt's first call that recorded a definition (a def or defn); absent when it recorded none."}]
  :seon.grade/turns [:int {:min 0 :description "The attempt's turns: every call its agent made, a model call or an outside agent's eval request."}]
  :seon.grade/turns-to-green [:int {:min 0 :description "The turns an attempt that ended :done took: the metric. Absent when it did not end done."}]
  :seon.grade/wasted-turns [:int {:min 0 :description "The turns holding no productive form (seon.mine/productive)."}]
@@ -32,6 +36,9 @@
                     [:seon.grade/at :seon.grade/at]
                     [:seon.grade/git-sha {:optional true} :seon.grade/git-sha]
                     [:seon.grade/models {:optional true} :seon.grade/models]
+                    [:seon.grade/step {:optional true} :seon.grade/step]
+                    [:seon.grade/plan-updates {:optional true} :seon.grade/plan-updates]
+                    [:seon.grade/first-write-turn {:optional true} :seon.grade/first-write-turn]
                     [:seon.grade/turns :seon.grade/turns]
                     [:seon.grade/turns-to-green {:optional true} :seon.grade/turns-to-green]
                     [:seon.grade/wasted-turns :seon.grade/wasted-turns]
@@ -56,6 +63,13 @@
  :seon.grade/quantiles [:map {:description "The median and 90th percentile (nearest rank) of turns to green over graded attempts that ended done; absent members when none did."}
                         [:seon.grade/median {:optional true} [:int {:min 0}]]
                         [:seon.grade/p90 {:optional true} [:int {:min 0}]]]
+ :seon.grade/step-row [:map {:description "The grades of one step kind: its attempts, how many ended done, the quantiles of turns to green, and the median plan updates and first write turn over the grades that hold them."}
+                       [:seon.grade/step :seon.grade/step]
+                       [:seon.grade/attempts [:int {:min 1}]]
+                       [:seon.grade/green [:int {:min 0}]]
+                       [:seon.grade/quantiles :seon.grade/quantiles]
+                       [:seon.grade/median-plan-updates {:optional true} [:int {:min 0}]]
+                       [:seon.grade/median-first-write-turn {:optional true} [:int {:min 1}]]]
  :seon.grade/window [:map {:description "The grades of one program commit and reported models, ordered by when its first graded attempt ended."}
                      [:seon.grade/commit [:or :seon.test.run/git-sha [:= :unknown]]]
                      [:seon.grade/models {:optional true} :seon.grade/models]
@@ -63,7 +77,8 @@
                      [:seon.grade/attempts [:int {:min 1}]]
                      [:seon.grade/green [:int {:min 0}]]
                      [:seon.grade/quantiles :seon.grade/quantiles]
-                     [:seon.grade/median-turns [:int {:min 0}]]]
+                     [:seon.grade/median-turns [:int {:min 0}]]
+                     [:seon.grade/steps [:vector :seon.grade/step-row]]]
  :seon.grade/top [:map {:description "One wasted-turn class: a waste rule or a cause's producer, with its wasted forms summed over the graded attempts."}
                   [:seon.grade/name [:or :seon.mine/rule :seon.mine/producer]]
                   [:seon.grade.waste/forms :seon.grade.waste/forms]]
@@ -72,6 +87,7 @@
                      [:seon.grade/attempts [:int {:min 0}]]
                      [:seon.grade/green [:int {:min 0}]]
                      [:seon.grade/quantiles :seon.grade/quantiles]
+                     [:seon.grade/steps [:vector :seon.grade/step-row]]
                      [:seon.grade/windows [:vector :seon.grade/window]]
                      [:seon.grade/top-rules [:vector :seon.grade/top]]
                      [:seon.grade/top-producers [:vector :seon.grade/top]]]}

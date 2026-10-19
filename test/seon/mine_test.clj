@@ -210,3 +210,66 @@
                   "nothing is left to grade"))
             (finally
               (grade/release-chain! (:seon.agent/routing handle) (agent/handle-store handle) branch)))))))))
+
+(deftest a-task-names-its-step-by-its-proofs-and-target
+  (is (= [:design :prove :implement :merge :other]
+         (mapv mine/step-kind
+               [{:seon.task/proofs #{'seon.step.design-test/handoff}} {:seon.task/proofs #{'seon.step.prove-test/handoff}}
+                {:seon.task/proofs #{'app.core-test/f-works}} {:seon.task/target :main} {}]))
+      "a template's handoff proof names Design and Prove, a target a merge, other proofs Implement"))
+
+(deftest the-first-write-turn-is-the-first-call-that-recorded-a-definition
+  (let [calls [{:db/id 1} {:db/id 2} {:db/id 3} {:db/id 4}]
+        form (fn [call source more] (evaluation "e" call 'app.core source more))]
+    (is (= 3 (mine/first-write-turn calls [(form 1 "(doc f)" {}) (form 2 "(defn f [] 1)" {:seon.cluster.eval/error "boom"})
+                                           (form 3 "(my.task/update! 'a/b :seon.task/plan str)" {}) (form 3 "(def x 1)" {})
+                                           (form 4 "(defn g [] 2)" {})]))
+        "a read, an errored defn and a plan update are no write; the def in the third call is")
+    (is (nil? (mine/first-write-turn calls [(form 1 "(doc f)" {})])) "no write, no turn")))
+
+(deftest the-report-splits-its-windows-by-step
+  (let [a (apply str (repeat 40 "a"))
+        step (fn [grade step green plan-updates write]
+               (cond-> (assoc grade :seon.grade/step step)
+                 plan-updates (assoc :seon.grade/plan-updates plan-updates)
+                 write (assoc :seon.grade/first-write-turn write)))
+        report (mine/report [(step (graded "a00000000001" 0 0 a 1000 #{}) :prove 0 0 nil)
+                             (step (graded "a00000000002" 12 12 a 2000 #{}) :implement 12 1 4)
+                             (step (graded "a00000000003" 30 30 a 3000 #{}) :implement 30 3 8)
+                             (step (graded "a00000000004" nil 40 a 4000 #{}) :implement nil 5 nil)])
+        implement (second (:seon.grade/steps report))]
+    (is (= [[:prove 1 {:seon.grade/median 0 :seon.grade/p90 0}] [:implement 3 {:seon.grade/median 12 :seon.grade/p90 30}]]
+           (mapv (juxt :seon.grade/step :seon.grade/attempts :seon.grade/quantiles) (:seon.grade/steps report)))
+        "a zero-call Prove reads on its own row, not in Implement's median")
+    (is (= [3 4] ((juxt :seon.grade/median-plan-updates :seon.grade/median-first-write-turn) implement))
+        "medians over the grades holding each")
+    (is (= (:seon.grade/steps report) (:seon.grade/steps (first (:seon.grade/windows report))))
+        "each window carries the same breakdown")))
+
+(defn- planning
+  "The fixture model's reply to `request`: read, change the task's plan, then define the proof green."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [request]
+  (case (count (filter #(= "assistant" (get % "role")) (get request "messages")))
+    0 "(in-ns 'bench.fixture-proofs)\n(my.program/source 'bench.fixture-proofs/proves-it)"
+    1 "(my.task/update! (get-in (my.task/current {}) [:seon.context/task :seon.task/sym]) :seon.task/plan (constantly \"Make `bench.fixture-proofs/proves-it` green, by redefining it.\"))"
+    "(in-ns 'bench.fixture-proofs)\n(clojure.test/deftest proves-it (clojure.test/is (= 1 1)))"))
+
+(deftest ^{:seon.test/long "One fixture-model chain run of three model calls (a chain fork, its prove pass, three calls and the proof step over db<->flow passes), then the grade read on its kept branch."
+           :seon.test/long-ms 30000}
+  a-grade-names-its-step-its-plan-updates-and-its-first-write-turn
+  (support/with-database
+   (fn [connection]
+     (grade/with-root
+      connection
+      (fn [handle]
+        (let [[run] (grade/launched handle connection 1 planning)
+              branch (:seon.chain/branch run)
+              assignment (:seon.competency/assignment run)]
+          (try
+            (let [entity (db/read-at (db/db connection) branch #(mine/grade-entity % branch assignment nil))]
+              (is (= [:implement 1 3]
+                     ((juxt :seon.grade/step :seon.grade/plan-updates :seon.grade/first-write-turn) entity))
+                  "the fixture task holds a proof, its plan changed once at the second call, and its first definition came at the third"))
+            (finally
+              (grade/release-chain! (:seon.agent/routing handle) (agent/handle-store handle) branch)))))))))
