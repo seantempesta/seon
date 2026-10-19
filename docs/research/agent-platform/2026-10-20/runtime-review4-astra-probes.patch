@@ -1,0 +1,461 @@
+diff --git a/src/seon/review3_fixture.clj b/src/seon/review3_fixture.clj
+new file mode 100644
+index 000000000..8af6c7e56
+--- /dev/null
++++ b/src/seon/review3_fixture.clj
+@@ -0,0 +1,13 @@
++(ns seon.review3-fixture (:require [seon.health]))
++(defn h "The leaf." {:malli/schema [:=> [:cat] :int]} [] 1)
++(defn g "The middle." {:malli/schema [:=> [:cat] :int]} [] (h))
++(defn f "The caller." {:malli/schema [:=> [:cat] :int]} [] (g))
++(def a-value (f))
++(defmacro open-macro "The helper found by name." [] ((resolve 'seon.review3-fixture/h)))
++(defn open-caller "The expanded helper." {:malli/schema [:=> [:cat] :int]} [] (open-macro))
++
++(defn h-dynamic "The dynamic leaf." {:malli/schema [:=> [:cat] :int]} [] 1)
++(defn open-handed "A supplied derivation resolving its helper at execution."
++ {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/value] :seon.schema/value]}
++ [database key]
++ (seon.health/derived database key (fn [_] ((resolve 'seon.review3-fixture/h-dynamic)))))
+diff --git a/test/seon/cost_estimate_test.clj b/test/seon/cost_estimate_test.clj
+index 83afcd4b1..7bbbc3b53 100644
+--- a/test/seon/cost_estimate_test.clj
++++ b/test/seon/cost_estimate_test.clj
+@@ -387,32 +387,6 @@
+-(deftest ^{:seon.test/long "First defn and five warm requests, with whole-request cost and function profile." :seon.test/long-ms 60000}
+-  first-defn-profile
+-  (support/with-running-agent
+-   (fn [running _ _]
+-     (let [observe (fn [agent source]
+-                     (let [before (cache/status)
+-                           measured (profile/measure #(answer running agent source))
+-                           cost (cost-support/bound-cost running agent (:seon.profile/value measured))]
+-                       {:cost (select-keys cost [:seon.cost/ms :seon.cost/alloc-mb :seon.cost/calls :seon.cost/reads :seon.cost/stages :seon.cost/step :seon.cost/entrance :seon.cost/writer :seon.cost/commit :seon.cost/transactions])
+-                        :profile (select-keys measured [:seon.profile/ms :seon.profile/alloc-bytes])
+-                        :calls (select-keys (:seon.profile/called measured)
+-                                '[seon.sci.eval/runtime-rows! seon.sci.runtime/analyse seon.sci.runtime/analysed
+-                                  seon.sci.eval/reach-index seon.sci.eval/bind-analysed! seon.sci.eval/produced-roots
+-                                  seon.sci.eval/derive-overlay-plan seon.sci.eval/fold-overlay-plan
+-                                  seon.sci.eval/plan-identities seon.sci.eval/entity-value seon.sci.eval/identity-entity])
+-                        :analyses-before (get-in before [:seon.cache/kinds :seon.sci.runtime/analysed])
+-                        :analyses-after (get-in (cache/status) [:seon.cache/kinds :seon.sci.runtime/analysed])}))
+-           definitions (mapv (fn [_] (observe (str "defn-perf-" (id/id))
+-                                             "(defn sentinel-probe-inc [x] (inc x))")) (range 3))
+-           warm-id (str "defn-perf-warm-" (id/id))
+-           _ (dotimes [_ 2] (answer running warm-id "(+ 1 2)"))
+-           warm (mapv (fn [_] (observe warm-id "(+ 1 2)")) (range 5))]
+-       (when-let [directory (System/getenv "DEFN_PERF_OUTPUT")]
+-         (doseq [[kind rows] [[:definitions definitions] [:warm warm]]
+-                 [i row] (map-indexed vector rows)]
+-           (let [file (io/file directory (str (System/getenv "DEFN_PERF_LABEL") "-" (name kind) "-" i ".edn"))]
+-             (io/make-parents file)
+-             (spit file (value/core-text row 0)))))
+-       (is (every? #(= 1 (get-in % [:cost :seon.cost/transactions])) definitions))))))
+-
+-
+-(deftest a-first-defn-inherits-the-shared-program-analyses
++(deftest ^{:seon.test/long "Review3 measurement of complete cost sequence" :seon.test/long-ms 180000} review3-cost-evidence
++  (let [seen (measured)]
++    (spit (str "/Users/sean/src/seon/tmp/runtime-review4-astra/out/cost-" (System/getenv "R4_LABEL") ".edn") (pr-str seen))
++    (spit (str "/Users/sean/src/seon/tmp/runtime-review4-astra/out/gate-" (System/getenv "R4_LABEL") ".edn") (pr-str (unaccepted (select-keys seen [:seon-db-nine-forms :hub-change-sequence :similar-by-name-warm]))))
++    (is (pos? (:alloc-mb (:hub-change-sequence seen))))))
++(deftest ^{:seon.test/long "Review3 ordinary unchanged program measurements" :seon.test/long-ms 60000} review3-unchanged-program
+@@ -420,9 +394,15 @@
+-   (fn [running _ _]
+-     (let [agent-id (str "first-defn-" (id/id))
+-           measured (profile/measure #(answer running agent-id "(defn sentinel-probe-inc [x] (inc x))"))
+-           cost (cost-support/bound-cost running agent-id (:seon.profile/value measured))]
+-       (is (= 1 (:seon.cost/transactions cost)))
+-       (is (zero? (profile/calls-of measured 'seon.sci.runtime/analysed))
+-           "a new name inherits program analyses without a lookup per open function")
+-       (is (some #(= 2 (:seon.repl/value %))
+-                 (support/mcp-replies (answer running agent-id "(sentinel-probe-inc 1)"))))))))
++   (fn [running agent-id _]
++     (let [forms ["nil" "(seon.print/form-text '(a 1))" "(seon.db/q '[:find (count ?f) . :where [?f :seon.fn/sym]] (seon.db/db))"]
++           measured (into {} (map (fn [source]
++                                   (answer running agent-id source)
++                                   [source (mapv (fn [_] (request-cost running agent-id source)) (range 5))])) forms)]
++       (spit (str "/Users/sean/src/seon/tmp/runtime-review4-astra/out/main-" (System/getenv "R4_LABEL") ".edn") (pr-str measured))
++       (is (= 3 (count measured)))))))
++(deftest ^{:seon.test/long "Review3 attributable ordinary-call profile" :seon.test/long-ms 60000} review3-profile-main
++ (support/with-running-agent
++  (fn [running agent-id _]
++   (dotimes [_ 3] (answer running agent-id "nil"))
++   (let [m (profile/measure #(dotimes [_ 5] (answer running agent-id "nil")))]
++    (spit (str "/Users/sean/src/seon/tmp/runtime-review4-astra/out/main-profile-" (System/getenv "R4_LABEL") ".edn")
++          (pr-str (dissoc m :seon.profile/value)))
++    (is (pos? (:seon.profile/calls m)))))))
+diff --git a/test/seon/runtime_review4_astra_test.clj b/test/seon/runtime_review4_astra_test.clj
+new file mode 100644
+index 000000000..8675a1aab
+--- /dev/null
++++ b/test/seon/runtime_review4_astra_test.clj
+@@ -0,0 +1,90 @@
++(ns seon.runtime-review4-astra-test
++ (:require [clojure.test :refer [deftest is]] [sci.core :as sci] [sci.ctx-store]
++           [seon.sci.eval :as e] [seon.sci.eval-test] [seon.sci.kernel :as k] [seon.sci.runtime :as r]
++           [seon.test-support :as s] [seon.db :as db] [seon.health :as health]
++           [seon.id :as id] [clojure.data.json :as json] [seon.mcp :as mcp] [seon.review3-fixture]))
++(defn in-context [ctx code] (sci.ctx-store/with-ctx ctx (sci/eval-string* ctx code)))
++(defn record! [label value]
++ (spit (str "/Users/sean/src/seon/tmp/runtime-review4-astra/out/" label ".edn") (pr-str value)))
++(deftest method-removals-and-preferences-are-local
++ (s/with-database
++  (fn [conn]
++   (doseq [[label setup edit query expected]
++           [[:remove "(defmulti mm identity) (defmethod mm :a [_] 1) (defmethod mm :default [_] 0)"
++             "(remove-method mm :a)" "(review4/mm :a)" [0 1 1]]
++            [:remove-all "(defmulti mm identity) (defmethod mm :a [_] 1)"
++             "(remove-all-methods mm)" "(count (methods review4/mm))" [0 1 1]]
++            [:prefer "(defmulti mm identity) (defmethod mm :a [_] 1) (defmethod mm :b [_] 2)"
++             "(prefer-method mm :a :b)" "(prefers review4/mm)" [{:a #{:b}} {} {}]]]]
++    (let [database (db/db conn) c (e/base-ctx database)
++          _ (in-context c (str "(ns review4) " setup))
++          a (e/fork-cluster-ctx c database conn) b (e/fork-cluster-ctx c database conn)
++          _ (in-context a (str "(in-ns 'review4) " edit))
++          actual (mapv #(in-context % query) [a b c])]
++     (record! (str "method-" (name label)) {:actual actual :expected expected})
++     (is (= expected actual)))))))
++(deftest a-new-caller-hands-its-own-derivation
++ (s/with-database
++  (fn [conn]
++   (let [database (db/db conn)
++         c (e/base-ctx database)
++         a (assoc (sci/fork c) ::k/program-snapshot (atom @(::k/program-snapshot c)))
++         source "(defn h [] 2)"
++         _ (in-context a (str "(ns review4) " source))
++         _ (#'e/bind-analysed! a {'review4/h (id/digest 64 [source])} #{})
++         f (in-context a "(fn [database key] (seon.health/derived database key (fn [_] (review4/h))))")
++         key [:review4/new-caller (id/id)]
++         branch-first [(sci.ctx-store/with-ctx a (f database key)) (health/derived database key (fn [_] 1))]
++         key2 [:review4/new-caller (id/id)]
++         main-first (let [m (health/derived database key2 (fn [_] 1))] [(sci.ctx-store/with-ctx a (f database key2)) m])
++         actual {:branch-first branch-first :main-first main-first
++                 :compiled? (sci.ctx-store/with-ctx a (identical? @#'health/derived @(sci/resolve a 'seon.health/derived)))}]
++     (record! "new-caller" actual)
++     (is (= [2 1] branch-first main-first))))))
++
++(deftest ^{:seon.test/long "An agent defines a new handed-cache caller and changes its loaded helper, then both orders use the same branch database." :seon.test/long-ms 30000}
++ an-agent-new-caller-hands-its-own-derivation
++ (s/with-running-agent
++  (fn [running agent-id connection]
++   (let [answer (fn [code] (s/mcp-replies
++                           (json/read-str (mcp/call (json/write-str {"name" "eval_clj" "arguments"
++                             {"cluster" running "agent" agent-id "mode" "sci" "code" code}})))))
++         setup (answer "(in-ns 'seon.review3-fixture) (defn h {:malli/schema [:=> [:cat] :int]} [] 2) (in-ns 'seon.batch) (defn review4-handed {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/value] :seon.schema/value]} [database key] (seon.health/derived database key (fn [_] (seon.review3-fixture/h))))")
++         branch (fn [key] (:seon.repl/value (last (answer (str "(seon.batch/review4-handed (seon.db/db) " (pr-str key) ")")))))
++         main (fn [key] (health/derived (db/db connection) key (fn [_] (seon.review3-fixture/h))))
++         k1 [:review4/mcp (id/id)] k2 [:review4/mcp (id/id)]
++         bf [(branch k1) (main k1)]
++         mf (let [m (main k2)] [(branch k2) m])]
++    (record! "mcp-new-caller" {:setup setup :branch-first bf :main-first mf})
++    (is (= [2 1] bf mf))))))
++(deftest forked-method-updates-retain-only-the-current-table
++ (s/with-database
++  (fn [conn]
++   (let [database (db/db conn) c (e/base-ctx database)
++         _ (in-context c "(ns review4retention) (defmulti mm identity) (defmethod mm :a [_] 0)")
++         after (reduce (fn [ctx i]
++                         (let [fork (e/fork-cluster-ctx ctx database conn)]
++                           (in-context fork (str "(in-ns 'review4retention) (defmethod mm :a [_] " i ")"))
++                           fork)) c (range 1 201))
++         actual {:tables (count (:sci/multi-fns @(:env after)))
++                 :methods (in-context after "(count (methods review4retention/mm))")
++                 :answer (in-context after "(review4retention/mm :a)")
++                 :parent (in-context c "(review4retention/mm :a)")}]
++    (record! "method-retention" actual)
++    (is (= 200 (:answer actual)))
++    (is (= 0 (:parent actual)))
++    (is (= 1 (:methods actual)))
++    (is (= 1 (:tables actual)))))))
++
++(deftest an-open-caller-hands-its-own-derivation
++ (s/with-database
++  (fn [conn]
++   (let [database (#'seon.sci.eval-test/branch-replacing! conn 'seon.review3-fixture/h-dynamic "\\[\\] 1\\)" "[] 2)")
++         ctx (e/base-ctx database)
++         f (in-context ctx "(fn [database key] (seon.review3-fixture/open-handed database key))")
++         branch (fn [key] (sci.ctx-store/with-ctx ctx (f database key)))
++         main (fn [key] (seon.review3-fixture/open-handed database key))
++         k1 [:review4/open (id/id)] k2 [:review4/open (id/id)]
++         bf [(branch k1) (main k1)] mf (let [m (main k2)] [(branch k2) m])]
++    (record! "open-handed" {:branch-first bf :main-first mf})
++    (is (= [2 1] bf mf))))))
+diff --git a/test/seon/runtime_review4_authored_chain_test.clj b/test/seon/runtime_review4_authored_chain_test.clj
+new file mode 100644
+index 000000000..03a05d37d
+--- /dev/null
++++ b/test/seon/runtime_review4_authored_chain_test.clj
+@@ -0,0 +1,127 @@
++(ns seon.runtime-review4-authored-chain-test
++  "The context bench: a chain run is launched through `seon.task/chain!` and graded from its kept branch; its forms
++  are classed, and tables compare by the noise rule."
++  (:require [clojure.core.async :as async]
++            [clojure.test :refer [deftest is]]
++            [seon.cluster :as cluster]
++            [seon.cluster.agent :as agent]
++            [seon.cluster.registry :as registry]
++            [seon.competency :as competency]
++            [seon.config :as config]
++            [seon.db :as db]
++            [seon.flow :as flow]
++            [seon.mine :as mine]
++            [seon.profile :as profile]
++            [seon.batch]
++            [seon.sci.eval :as sci.eval]
++            [seon.turn.world :as world]
++            [seon.test-support :as support]))
++
++(defn- pass!
++  "One db<->flow pass over `handle`, as root's proc runs it on a wake: synchronous."
++  {:malli/schema [:=> [:cat :seon.agent/context-source] :nil]}
++  [handle]
++  (agent/db<->flow {:seon.turn.loop/cluster handle :seon.agent/routing (:seon.agent/routing handle)}
++                   :seon.flow/plan :seon.agent/test-wake)
++  nil)
++
++(defn release-chain!
++  "Stop the graphs db<->flow started on chain `branch` under `routing`, release their executions, retire the branch."
++  {:malli/schema [:=> [:cat :seon.agent/routing :seon.store/store :seon.chain/branch] :nil]}
++  [routing store branch]
++  (when-let [child (get-in @routing [:seon.agent/children branch])]
++    (doseq [started (keys (:seon.agent/started @child))]
++      (agent/stop-flow! {:seon.agent/id started :seon.agent/routing child}))
++    (doseq [execution (vals (:seon.agent/contexts @child))
++            :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
++      (agent/release-context! execution)))
++  (agent/release-chain-route! routing branch)
++  (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
++  nil)
++
++(defn with-root
++  "Call `body` with a cluster handle over `connection`, the executing member's own cluster with root homed on it,
++  as boot arms root's."
++  {:malli/schema [:=> [:cat :seon.db/connection [:=> [:cat :seon.agent/context-source] :seon.schema/value]] :seon.schema/value]}
++  [connection body]
++  (let [cluster-name (:seon.cluster/name (support/execution-handle connection))
++        environment (support/environment cluster-name connection)]
++    (support/transacted! connection (support/agent-tx (db/db connection) "root" 'user))
++    (with-open [launcher (support/closeable
++                          (flow/start-work-launcher!
++                           {:seon.env/environment environment
++                            :seon.flow/configuration (select-keys (config/effective (db/db connection) cluster-name)
++                                                                  flow/flow-workload-attributes)})
++                          flow/stop-work-launcher!)]
++      (let [ctx (support/fork-cluster-ctx connection cluster-name)]
++        (body (support/cluster-handle
++               {:seon.env/environment (assoc environment :seon.flow/work-launcher @launcher)
++                :seon.db/connection connection :seon.cluster/name cluster-name :seon.sci.eval/ctx ctx
++                :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
++                :seon.db.process/id cluster/boot-process-identity}))))))
++
++(def ^:private fixture-task
++  "A task whose unchanged proof is defined red before launch; the fixture provider changes only its helper.
++  Its grade proves whether the actual agent, reaching tests and done rule complete that change."
++  {:seon.competency/id :fixture-proof
++   :seon.competency/split :train
++   :seon.competency/task {:seon.task/ns 'bench.fixture :seon.task/name "prove-it"
++                          :seon.task/plan "Make `review4.chain/proves-it` green."
++                          :seon.task/proofs #{'review4.chain/proves-it}}
++   :seon.competency/oracle "(in-ns 'review4.chain)\n(defn h {:malli/schema [:=> [:cat] :int]} [] 2)"})
++
++(defn launched
++  "The grades of `runs` fixture-model runs of `fixture-task` launched on `handle`'s cluster, its proof defined red
++  first, the model answering each request with `answer` (default: its oracle), while a thread runs db<->flow passes
++  as root's proc would on each wake."
++  {:malli/schema [:function [:=> [:cat :seon.agent/context-source :seon.db/connection pos-int?] [:vector :map]]
++                  [:=> [:cat :seon.agent/context-source :seon.db/connection pos-int? [:fn ifn?]] [:vector :map]]]}
++  ([handle connection runs] (launched handle connection runs (constantly (:seon.competency/oracle fixture-task))))
++  ([handle connection runs answer]
++   (support/transacted! connection (support/agent-tx (db/db connection) "bench-author" 'user))
++   (support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name (:seon.cluster/name handle)
++                                  :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
++                                                                                (db/db connection) connection)
++                                  :seon.batch/sink (seon.batch/sink)
++                                  :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
++                                  :seon.agent/id "bench-author"})
++                    'review4.chain
++                    "(defn h {:malli/schema [:=> [:cat] :int]} [] 1)\n(defn caller {:malli/schema [:=> [:cat] :int]} [] (h))\n(clojure.test/deftest proves-it (clojure.test/is (= 2 (review4.chain/caller))))\n")
++   (support/with-provider
++    (atom []) answer
++    (fn [server]
++      (let [done (async/promise-chan)
++            ;; root's proc, woken by each chain's writes in a running cluster; a fixture cluster runs none
++            root (async/thread (loop [] (when-not (async/poll! done) (pass! handle) (Thread/sleep 100) (recur)))
++                               ::root-stopped)]
++        (try
++          (competency/launch!
++           {:seon.db/connection connection :seon.store/store (agent/handle-store handle)
++            :seon.competency/tasks [fixture-task]
++            :seon.competency/variants
++            [{:seon.competency/variant :fixture
++              :seon.chain/config (assoc (support/provider-config server)
++                                        :seon.config.ai/no-provider config/absent
++                                        :seon.config.run/max-episode-runs 3)}]
++            :seon.competency/runs runs :seon.competency/poll-ms 100
++            :seon.competency/deadline-ms 50000})
++          (finally
++            (async/put! done true)
++            (support/await-event! root ::root-stopped))))))))
++
++
++(deftest ^{:seon.test/long "One real chain: a fixed provider changes h while its caller and original red proof remain unchanged."
++           :seon.test/long-ms 60000}
++ a-chain-fixes-its-helper-and-proves-its-unchanged-caller
++ (support/with-database
++  (fn [connection]
++   (with-root connection
++    (fn [handle]
++     (let [m (profile/measure #(launched handle connection 1))
++           grades (:seon.profile/value m)]
++      (try
++       (spit "/Users/sean/src/seon/tmp/runtime-review4-astra/out/chain.edn" (pr-str m))
++       (is (= [{:seon.competency/end :done :seon.competency/green? true :seon.competency/model-calls 1}]
++              (mapv #(select-keys % [:seon.competency/end :seon.competency/green? :seon.competency/model-calls]) grades)))
++       (finally (doseq [branch (keep :seon.chain/branch grades)]
++                  (release-chain! (:seon.agent/routing handle) (agent/handle-store handle) branch))))))))))
+diff --git a/test/seon/runtime_review4_chain_test.clj b/test/seon/runtime_review4_chain_test.clj
+new file mode 100644
+index 000000000..0c4c002aa
+--- /dev/null
++++ b/test/seon/runtime_review4_chain_test.clj
+@@ -0,0 +1,139 @@
++(ns seon.runtime-review4-chain-test
++  "The context bench: a chain run is launched through `seon.task/chain!` and graded from its kept branch; its forms
++  are classed, and tables compare by the noise rule."
++  (:require [clojure.core.async :as async]
++            [clojure.test :refer [deftest is]]
++            [seon.cluster :as cluster]
++            [seon.cluster.agent :as agent]
++            [seon.cluster.registry :as registry]
++            [seon.competency :as competency]
++            [seon.config :as config]
++            [seon.db :as db]
++            [seon.flow :as flow]
++            [seon.mine :as mine]
++            [seon.profile :as profile] [seon.review3-fixture]
++            [seon.batch] [seon.context] [seon.test] [seon.cluster.source]
++            [seon.sci.eval :as sci.eval]
++            [seon.turn.world :as world]
++            [seon.test-support :as support]))
++
++(defn- pass!
++  "One db<->flow pass over `handle`, as root's proc runs it on a wake: synchronous."
++  {:malli/schema [:=> [:cat :seon.agent/context-source] :nil]}
++  [handle]
++  (agent/db<->flow {:seon.turn.loop/cluster handle :seon.agent/routing (:seon.agent/routing handle)}
++                   :seon.flow/plan :seon.agent/test-wake)
++  nil)
++
++(defn release-chain!
++  "Stop the graphs db<->flow started on chain `branch` under `routing`, release their executions, retire the branch."
++  {:malli/schema [:=> [:cat :seon.agent/routing :seon.store/store :seon.chain/branch] :nil]}
++  [routing store branch]
++  (when-let [child (get-in @routing [:seon.agent/children branch])]
++    (doseq [started (keys (:seon.agent/started @child))]
++      (agent/stop-flow! {:seon.agent/id started :seon.agent/routing child}))
++    (doseq [execution (vals (:seon.agent/contexts @child))
++            :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
++      (agent/release-context! execution)))
++  (agent/release-chain-route! routing branch)
++  (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
++  nil)
++
++(defn with-root
++  "Call `body` with a cluster handle over `connection`, the executing member's own cluster with root homed on it,
++  as boot arms root's."
++  {:malli/schema [:=> [:cat :seon.db/connection [:=> [:cat :seon.agent/context-source] :seon.schema/value]] :seon.schema/value]}
++  [connection body]
++  (let [cluster-name (:seon.cluster/name (support/execution-handle connection))
++        environment (support/environment cluster-name connection)]
++    (support/transacted! connection (support/agent-tx (db/db connection) "root" 'user))
++    (with-open [launcher (support/closeable
++                          (flow/start-work-launcher!
++                           {:seon.env/environment environment
++                            :seon.flow/configuration (select-keys (config/effective (db/db connection) cluster-name)
++                                                                  flow/flow-workload-attributes)})
++                          flow/stop-work-launcher!)]
++      (let [ctx (support/fork-cluster-ctx connection cluster-name)]
++        (body (support/cluster-handle
++               {:seon.env/environment (assoc environment :seon.flow/work-launcher @launcher)
++                :seon.db/connection connection :seon.cluster/name cluster-name :seon.sci.eval/ctx ctx
++                :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
++                :seon.db.process/id cluster/boot-process-identity}))))))
++
++(def ^:private fixture-task
++  "A task whose unchanged proof is defined red before launch; the fixture provider changes only its helper.
++  Its grade proves whether the actual agent, reaching tests and done rule complete that change."
++  {:seon.competency/id :fixture-proof
++   :seon.competency/split :train
++   :seon.competency/task {:seon.task/ns 'bench.fixture :seon.task/name "prove-it"
++                          :seon.task/plan "Make `review4.chain/proves-it` green."
++                          :seon.task/proofs #{'review4.chain/proves-it}}
++   :seon.competency/oracle "(in-ns 'seon.review3-fixture)\n(defn h {:malli/schema [:=> [:cat] :int]} [] 2)"})
++
++(defn launched
++  "The grades of `runs` fixture-model runs of `fixture-task` launched on `handle`'s cluster, its proof defined red
++  first, the model answering each request with `answer` (default: its oracle), while a thread runs db<->flow passes
++  as root's proc would on each wake."
++  {:malli/schema [:function [:=> [:cat :seon.agent/context-source :seon.db/connection pos-int?] [:vector :map]]
++                  [:=> [:cat :seon.agent/context-source :seon.db/connection pos-int? [:fn ifn?]] [:vector :map]]]}
++  ([handle connection runs] (launched handle connection runs (constantly (:seon.competency/oracle fixture-task))))
++  ([handle connection runs answer]
++   (support/transacted! connection (support/agent-tx (db/db connection) "bench-author" 'user))
++   (support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name (:seon.cluster/name handle)
++                                  :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
++                                                                                (db/db connection) connection)
++                                  :seon.batch/sink (seon.batch/sink)
++                                  :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
++                                  :seon.agent/id "bench-author"})
++                    'review4.chain
++                    "(clojure.test/deftest proves-it (clojure.test/is (= 2 (seon.review3-fixture/f))))\n")
++   (support/with-provider
++    (atom []) answer
++    (fn [server]
++      (let [done (async/promise-chan)
++            ;; root's proc, woken by each chain's writes in a running cluster; a fixture cluster runs none
++            root (async/thread (loop [] (when-not (async/poll! done) (pass! handle) (Thread/sleep 100) (recur)))
++                               ::root-stopped)]
++        (try
++          (competency/launch!
++           {:seon.db/connection connection :seon.store/store (agent/handle-store handle)
++            :seon.competency/tasks [fixture-task]
++            :seon.competency/variants
++            [{:seon.competency/variant :fixture
++              :seon.chain/config (assoc (support/provider-config server)
++                                        :seon.config.ai/no-provider config/absent
++                                        :seon.config.run/max-episode-runs 3)}]
++            :seon.competency/runs runs :seon.competency/poll-ms 100
++            :seon.competency/deadline-ms 50000})
++          (finally
++            (async/put! done true)
++            (support/await-event! root ::root-stopped))))))))
++
++
++(deftest ^{:seon.test/long "One real chain: a fixed provider changes h while its caller and original red proof remain unchanged."
++           :seon.test/long-ms 60000}
++ a-chain-fixes-its-helper-and-proves-its-unchanged-caller
++ (support/with-database
++  (fn [connection]
++   (with-root connection
++    (fn [handle]
++     (let [m (profile/measure #(launched handle connection 1))
++           grades (:seon.profile/value m)]
++      (try
++       (spit "/Users/sean/src/seon/tmp/runtime-review4-astra/out/chain-diagnostic3.edn" (pr-str m))
++       (doseq [grade grades]
++        (registry/on-branch (agent/handle-store handle) (:seon.chain/branch grade)
++         (fn [branch-conn]
++          (let [branch (db/db branch-conn)
++                sym (:seon.task/sym (db/pull branch [:seon.task/sym] [:seon.task/id (:seon.competency/task grade)]))
++                judged (seon.context/judged-input (db/db connection) branch sym (:seon.cluster/name handle))]
++           (spit "/Users/sean/src/seon/tmp/runtime-review4-astra/out/chain-diagnostic3-refusals.edn"
++            (pr-str {:selection (seon.test/reaching-selection {:seon.db/db branch :seon.test/changed [[:seon.fn/sym 'seon.review3-fixture/h]]})
++                     :entities (mapv (fn [ident] (db/pull branch [:seon.fn/sym :seon.test/sym :seon.fn/calls :seon.fn/references :seon.fn/host-bound? :seon.test/long :seon.test/subject :seon.test/reach] ident))
++                       [[:seon.fn/sym 'seon.review3-fixture/h] [:seon.fn/sym 'seon.review3-fixture/g] [:seon.fn/sym 'seon.review3-fixture/f] [:seon.test/sym 'review4.chain/proves-it]])
++                     :judged (dissoc judged :seon.context/branch) :refusals (when (:seon.source/judged judged)
++                                            (seon.cluster.source/done-refusals branch (:seon.source/judged judged)))}))))))
++       (is (= [{:seon.competency/end :done :seon.competency/green? true :seon.competency/model-calls 1}]
++              (mapv #(select-keys % [:seon.competency/end :seon.competency/green? :seon.competency/model-calls]) grades)))
++       (finally (doseq [branch (keep :seon.chain/branch grades)]
++                  (release-chain! (:seon.agent/routing handle) (agent/handle-store handle) branch))))))))))
