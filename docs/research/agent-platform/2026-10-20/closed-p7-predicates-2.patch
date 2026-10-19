@@ -1,20 +1,12 @@
 diff --git a/src/seon/schema.clj b/src/seon/schema.clj
-index 7d07696a1..f74bd60d7 100644
+index 7d07696a1..a20afe621 100644
 --- a/src/seon/schema.clj
 +++ b/src/seon/schema.clj
-@@ -179,56 +179,22 @@
+@@ -179,57 +179,6 @@
  
      :else #{}))
  
-+(declare loaded-predicate-var)
-+
-+(defn jvm-var?
-+  "Whether `x` is a JVM Var: the loaded program's definition of a name."
-+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
-+  [x]
-+  (instance? clojure.lang.Var x))
-+
- (defn- runtime-predicate
+-(defn- runtime-predicate
 -  "The Var a qualified predicate symbol names, or nil when nothing names it.
 -
 -   THE resolution rule for host-authored predicates. A qualified symbol names
@@ -42,12 +34,7 @@ index 7d07696a1..f74bd60d7 100644
 -   apart is bound by its context (`seon.sci.kernel/context-bound-projection`);
 -   only a name the JVM has never loaded answers the SCI Var that defines it."
 -  {:malli/schema [:=> [:cat :qualified-symbol] [:or :nil [:fn clojure.core/var?] :seon.sci.eval/sci-var]]}
-+  "The loaded JVM Var a qualified predicate symbol names, or nil when the
-+  loaded program defines none ([[loaded-predicate-var]]). The projection binds
-+  main's definitions; a runtime binds its own over them
-+  (`seon.sci.kernel/context-bound-projection`)."
-+  {:malli/schema [:=> [:cat :qualified-symbol] [:or :nil [:fn seon.schema/jvm-var?]]]}
-   [predicate]
+-  [predicate]
 -  (try
 -    (let [resolved (requiring-resolve predicate)
 -          loaded (clojure.lang.Namespace/find (symbol (namespace predicate)))]
@@ -69,11 +56,11 @@ index 7d07696a1..f74bd60d7 100644
 -              :seon.error/throwable failure
 -              :seon.schema/unloadable-predicate predicate})]
 -        (throw (ex-info (:seon.error/message refusal) refusal failure))))))
-+  (loaded-predicate-var predicate))
- 
+-
  (defn- loaded-predicate-var
    "The Var a qualified predicate symbol names, WITHOUT loading its namespace.
-@@ -247,8 +213,9 @@
+ 
+@@ -247,8 +196,35 @@
     namespace, contract wrappers included."
    [predicate]
    (when (qualified-symbol? predicate)
@@ -82,37 +69,176 @@ index 7d07696a1..f74bd60d7 100644
 +    (when-let [loaded (clojure.lang.Namespace/find (symbol (namespace predicate)))]
 +      (let [mapped (.getMapping ^clojure.lang.Namespace loaded (symbol (name predicate)))]
 +        (when (instance? clojure.lang.Var mapped) mapped)))))
++
++(defn- late-predicate
++  "The callable `predicate` names, resolved by name at each call through the
++  loaded program ([[loaded-predicate-var]]): a projection holds it, so a
++  derivation captures no definition and loads nothing, and a later load or
++  redefinition answers the next call. A name nothing defines refuses by name
++  when called. One per name, held in `seon.cache`."
++  {:malli/schema [:=> [:cat :qualified-symbol] :seon.instrument/callable]}
++  [predicate]
++  (let [owner (symbol (namespace predicate)) local (symbol (name predicate))]
++   (seon.cache/lookup ::late-predicate predicate (constantly 64)
++                     #(with-meta
++                        ;; the loaded Var by interop, uninstrumented: this runs on every validation
++                        (fn [& args]
++                          (if-let [defined (some-> (clojure.lang.Namespace/find owner)
++                                                   (.getMapping local)
++                                                   (as-> mapped (when (instance? clojure.lang.Var mapped) mapped)))]
++                            (apply defined args)
++                            (throw (ex-info (str "Predicate " predicate " has no loaded definition; a declaration names it.")
++                                            {:seon.error/at (java.util.Date.)
++                                             :seon.error/layer :seon.schema/compilation
++                                             :seon.error/operation 'seon.schema/late-predicate
++                                             :seon.error/message "A declaration names a predicate no loaded Var defines."
++                                             :seon.schema/error :seon.schema/unresolved-predicate
++                                             :seon.schema/unresolved-predicate predicate}))))
++                        {::late-predicate predicate}))))
  
  (declare structural-schema)
  
-@@ -974,7 +941,7 @@
+@@ -567,9 +543,7 @@
+          (reduce (fn [bindings predicate]
+                    (if (contains? bindings predicate)
+                      bindings
+-                     (if-let [callable (runtime-predicate predicate)]
+-                       (assoc bindings predicate callable)
+-                       bindings)))
++                     (assoc bindings predicate (late-predicate predicate))))
+                  predicate-functions
+                  (into #{} (mapcat predicate-symbols-in) (vals definitions)))
+          prepared (bound-forms definitions predicate-functions)
+@@ -974,7 +948,7 @@
    A thread that lives in that world for its whole life (a Flow proc loop)
    installs them with `with-bindings`, so its lifetime is never counted as one
    armed call (task `seon.profile/scope-wrappers-report-callback-time-as-work`)."
 -  {:malli/schema [:=> [:cat :map] [:map-of [:or [:fn clojure.core/var?] :seon.sci.eval/sci-var] [:or :nil :map]]]}
-+  {:malli/schema [:=> [:cat :map] [:map-of [:or [:fn seon.schema/jvm-var?] :seon.sci.eval/sci-var] [:or :nil :map]]]}
++  {:malli/schema [:=> [:cat :map] [:map-of :seon.test/var [:or :nil :map]]]}
    [projection]
    {#'handed/*projection* projection
     #'handed/*projection-state* nil})
-@@ -985,7 +952,7 @@
+@@ -985,7 +959,7 @@
    A thread that lives in that world for its whole life (a Flow proc loop)
    installs them with `with-bindings`, so its lifetime is never counted as one
    armed call (task `seon.profile/scope-wrappers-report-callback-time-as-work`)."
 -  {:malli/schema [:=> [:cat [:fn clojure.core/deref]] [:map-of [:or [:fn clojure.core/var?] :seon.sci.eval/sci-var] [:or :nil [:fn clojure.core/deref]]]]}
-+  {:malli/schema [:=> [:cat [:fn clojure.core/deref]] [:map-of [:or [:fn seon.schema/jvm-var?] :seon.sci.eval/sci-var] [:or :nil [:fn clojure.core/deref]]]]}
++  {:malli/schema [:=> [:cat [:fn clojure.core/deref]] [:map-of :seon.test/var [:or :nil [:fn clojure.core/deref]]]]}
    [projection-state]
    {#'handed/*projection-state* projection-state
     #'handed/*projection* nil
-@@ -1012,7 +979,7 @@
+@@ -1008,6 +982,59 @@
+ (defn- active-projection []
+   handed/*projection*)
+ 
++(defn- runtime-predicate
++  "The Var a qualified predicate symbol names, or nil when nothing names it.
++
++   The admission resolution of a predicate a declaration names, loading its
++   namespace (`core-predicate-registered?`); a projection derivation never loads
++   ([[loaded-predicate-var]]). A qualified symbol names
++   exactly one Var, so resolution is collision-free by construction — two
++   environments declaring the same predicate cannot overwrite each other the
++   way the process-global symbol->function cache did (2026-08-07 isolation
++   audit, `probe_predicate_function_cache`: a second registration of one
++   symbol made a value that was valid under the first stop validating,
++   process-wide, though both projections were rebuilt from immutable forms).
++
++   The VAR is retained rather than its current value. Invoking a Var reads its
++   root at call time, so re-evaluating a `defn` changes what an already
++   compiled schema calls, exactly as it changes every other caller.
++
++   Nil means only that nothing names the predicate: its namespace loads
++   without that Var, or no file for the namespace is on the classpath
++   (`RT.load` throws `FileNotFoundException` itself for the requested root).
++   A namespace that exists but fails to load — a missing transitive require
++   arrives wrapped in a `CompilerException` too — throws the declared
++   `:seon.schema/unloadable-predicate-error` carrying the whole cause chain,
++   so a compile failure is never read as an unresolved predicate. The
++   loaded program's own Var answers whenever the JVM holds one, compiled or
++   interpreted: one definition has one binding, so a build on a branch's
++   runtime keys and compiles as main's does. A predicate the branch holds
++   apart is bound by its context (`seon.sci.kernel/context-bound-projection`);
++   only a name the JVM has never loaded answers the SCI Var that defines it."
++  {:malli/schema [:=> [:cat :qualified-symbol] [:or :nil [:fn clojure.core/var?] :seon.sci.eval/sci-var]]}
++  [predicate]
++  (try
++    (let [resolved (requiring-resolve predicate)
++          loaded (clojure.lang.Namespace/find (symbol (namespace predicate)))]
++      (or (when loaded (.findInternedVar ^clojure.lang.Namespace loaded (symbol (name predicate))))
++          resolved))
++    (catch java.io.FileNotFoundException _
++      nil)
++    (catch clojure.lang.Compiler$CompilerException failure
++      (let [refusal
++            (refusal/diagnostic
++             {:seon.error/at (java.util.Date.)
++              :seon.error/layer :seon.schema/derivation
++              :seon.error/operation 'seon.schema/runtime-predicate
++              :seon.error/message
++              (str "Predicate " predicate " cannot resolve: its namespace "
++                   (namespace predicate) " failed to load ("
++                   (ex-message failure) "). Fix that namespace, then retry.")
++              :seon.error/member predicate
++              :seon.error/throwable failure
++              :seon.schema/unloadable-predicate predicate})]
++        (throw (ex-info (:seon.error/message refusal) refusal failure))))))
++
+ (defn core-predicate-registered?
    "True when `predicate` resolves to a callable Var."
    {:malli/schema [:=> [:cat :qualified-symbol] :boolean]}
-   [predicate]
--  (boolean (some-> (runtime-predicate predicate) var-get ifn?)))
-+  (boolean (some-> (runtime-predicate predicate) deref ifn?)))
+@@ -1087,7 +1114,7 @@
+                      #(* declaration-predicates-bytes-per-entry (count %))
+                      (fn []
+                        (into {} (keep (fn [sym]
+-                                        (when-let [f (runtime-predicate sym)] [sym f])))
++                                        [sym (late-predicate sym)]))
+                              (into #{} (mapcat predicate-symbols-in) (vals forms)))))]
+      ;; A pure function of its forms and the predicate Vars they name: equal
+      ;; inputs answer the built value from the process cache (~340 ms /
+@@ -1270,9 +1297,7 @@
+           (reduce (fn [bindings predicate]
+                     (if (contains? bindings predicate)
+                       bindings
+-                      (if-let [f (runtime-predicate predicate)]
+-                        (assoc bindings predicate f)
+-                        bindings)))
++                      (assoc bindings predicate (late-predicate predicate))))
+                   predicate-functions
+                   predicate-symbols))
+         schema-dependencies
+@@ -1993,7 +2018,7 @@
  
- (defn- update-candidate-forms!
-   {:malli/schema [:=> [:cat [:=> [:cat :map [:* :seon.schema/value]] :map] [:* :seon.schema/value]] :map]}
-@@ -2798,8 +2765,8 @@
+ (defn- predicate-bindings
+   "`supplied` plus the loaded Var each other predicate in `forms` and
+-   `function-contracts` names ([[runtime-predicate]])."
++   `function-contracts` names ([[loaded-predicate-var]])."
+   {:malli/schema
+    [:=> [:cat :map :map [:map-of :qualified-symbol [:fn clojure.core/ifn?]]]
+     [:map-of :qualified-symbol [:fn clojure.core/ifn?]]]}
+@@ -2001,9 +2026,7 @@
+   (reduce (fn [bindings predicate]
+             (if (contains? bindings predicate)
+               bindings
+-              (if-let [f (runtime-predicate predicate)]
+-                (assoc bindings predicate f)
+-                bindings)))
++              (assoc bindings predicate (late-predicate predicate))))
+           supplied
+           (population-predicate-symbols forms function-contracts)))
+ 
+@@ -2515,9 +2538,7 @@
+         (reduce (fn [bindings predicate]
+                   (if (contains? bindings predicate)
+                     bindings
+-                    (if-let [f (runtime-predicate predicate)]
+-                      (assoc bindings predicate f)
+-                      bindings)))
++                    (assoc bindings predicate (late-predicate predicate))))
+                 (merge (reduce (fn [bindings predicate]
+                                  (if (contains? in-use-symbols predicate)
+                                    bindings
+@@ -2798,8 +2819,8 @@
    {:malli/schema [:=> [:cat :map :map :map] [:map-of :qualified-symbol [:fn clojure.core/ifn?]]]}
    [forms function-contracts base]
    (let [unloaded? #(and (nil? (loaded-predicate-var %))
@@ -123,16 +249,16 @@ index 7d07696a1..f74bd60d7 100644
          held (predicate-functions-in base)
          refusing (fn [predicate]
                     (let [prior (get held predicate)]
-@@ -3915,7 +3882,7 @@
+@@ -3915,7 +3936,7 @@
                  {:seon.schema/missing-projection true}))))
  
  (defn- identity-only-descriptors-in
 -  {:malli/schema [:=> [:cat :seon.schema/projection] [:vector [:map [:seon.schema/key :keyword] [:seon.schema.identity-only/validator :seon.schema/compiled-validator] [:seon.schema/identity-projection [:fn clojure.core/var?]]]]]}
-+  {:malli/schema [:=> [:cat :seon.schema/projection] [:vector [:map [:seon.schema/key :keyword] [:seon.schema.identity-only/validator :seon.schema/compiled-validator] [:seon.schema/identity-projection [:fn seon.schema/jvm-var?]]]]]}
++  {:malli/schema [:=> [:cat :seon.schema/projection] [:vector [:map [:seon.schema/key :keyword] [:seon.schema.identity-only/validator :seon.schema/compiled-validator] [:seon.schema/identity-projection :seon.test/var]]]]}
    [projection]
    (into
     []
-@@ -3934,8 +3901,8 @@
+@@ -3934,8 +3955,8 @@
                         :seon.schema/identity-projection projection-symbol
                         :seon.schema/invalid-identity-projection true
                         })))
@@ -143,7 +269,7 @@ index 7d07696a1..f74bd60d7 100644
                (throw
                 (ex-info
                  (str schema-key " declares identity-only admission without "
-@@ -4072,7 +4039,7 @@
+@@ -4072,7 +4093,7 @@
    [projection predicate]
    (or (get (predicate-functions-in projection) predicate)
        (when (qualified-symbol? predicate)

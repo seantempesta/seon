@@ -12,8 +12,9 @@ corrections in its section); P4b landed (`66ca5108b`, lane closed-p4b; correctio
 `393e52821` deleted the catch in `seon.instrument/compiled-wrapper` that the guard census refused; it closes
 `seon.cluster/branch-declaration-changes`, 49 -> 48 open derivers); P6a landed (`f1145501b`, lane closed-p6, corrections in its section);
 P6b stopped at its design gap (lane closed-p6: census measured, options in its section) and is folded into P7 (root);
-P7: design and R4 landed (`6d50a5f3b`, `c23e1f807`); the key is proven and held as a patch, red only on the gate (1,595.5 MB
-against 1,167) until the predicate fold, which waits on the owner's choice of mechanism (lane closed-p7, its section); P8 not started.
+P7: design and R4 landed (`6d50a5f3b`, `c23e1f807`); root chose predicate mechanism 2 (1 the recorded target, its gap filed as
+`seon.schema/a-branch-changed-predicate-is-seen-only-after-merge`, `e8aeac94d`); the fold closes 48 -> 17 but with the key fails the
+gate (hub 1,799.5 MB), so neither is committed (lane closed-p7, its section has the profile); P8 not started.
 
 # Closed runtime: the hybrid
 
@@ -729,6 +730,50 @@ M1, M2, M5, M7 of runtime-rereview and the removal of the context binding of the
   a predicate a contract names must be admitted in the corpus before the contracts naming it compile, so the class
   test needs a registered schema (as `:seon.sci.eval/sci-var` is, `[:fn seon.sci.eval/sci-var?]`) or an existing
   predicate. Not measured past that; the census and the gate with the fold are the next lane's first numbers.
+
+- **Root's ruling (2026-10-20): mechanism 2 now, mechanism 1 the recorded target.** Count first (a probe in a
+  check JVM at HEAD `b75caf440`, over the carried projection's population and the `:seon.fn` facts): the population
+  names **108 predicates: 83 `src` functions SCI can run, 25 library, 0 host-bound**; its schema forms name **78, of
+  which 69 are `src` SCI-runnable**. Those 69 are what a branch can change. Mechanism 2's gap: a branch that changes
+  one of them validates with main's definition in the projection its database carries until merge (only an agent
+  context rebinds a predicate it holds apart). Filed as `seon.schema/a-branch-changed-predicate-is-seen-only-after-merge`
+  with its red proof `seon.sci.eval-test/a-branch-changed-predicate-decides-its-branch-projection` (`e8aeac94d`; red
+  on HEAD and under mechanism 2), held for mechanism 1.
+- **Mechanism 2 as built** (patch `closed-p7-predicates-2.patch`, `seon.schema` only). A derivation never loads:
+  loading moved out of the derivers, and the first attempt (bind the loaded Var at derivation) failed boot, because
+  `seon.cluster/resolve-bootstrap` derives the packaged projection before `seon.render.var` is loaded
+  (`seon.render.var/var-value?` refused). So each population predicate binds to **a callable resolved by name at each
+  call** (`seon.schema/late-predicate`, one per name in `seon.cache`, the Var found by `clojure.lang.Namespace/find`
+  and `.getMapping`, uninstrumented); `runtime-predicate` keeps its loading only for admission
+  (`core-predicate-registered?`); the contracts read `:seon.test/var`, the registered Var schema, instead of
+  `[:fn clojure.core/var?]`. **Census: 48 -> 17** (31 close: the four projection derivers, `seon.config/effective`,
+  `seon.sci.eval/overlay-plan`, `reach-index`, the runner's reach graph and the rest, as P6b predicted). Reds it adds:
+  `seon.sci.runtime-test/a-hundred-branches-analyse-each-distinct-digest-once` (5,783 analysed against 5,743 distinct
+  digests; green on HEAD). Two other reds in the run are red on HEAD and carried by tasks
+  (`every-predicate-schema-declares-what-it-accepts`, `canonical-reference-values-use-the-pull-collection-grammar`).
+- **The gate, same check sequence** (MB / calls; accepted overrun 1,358.7 / 287,628 hub, 147,860 calls nine forms):
+
+  | Candidate | `:hub-behavior-change` | `:seon-db-nine-forms` calls |
+  |---|---|---|
+  | HEAD (probe run) | 1,106.0 / 240,319 | 157,351 |
+  | key alone | 1,595.5 / 362,880 | within its bound |
+  | fold alone | 4,152.5 / 652,336 | 428,105 |
+  | fold + key | 1,799.5 / 310,126 (2.0x of 897.7) | 440,200 |
+
+  Fold alone is worst because HEAD's `*reached*` is dynamic: a now-closed `seon.config/effective` reaching the hub
+  change binds its reach around every nested projection lookup, so they all re-derive (the R2 mechanism). With the key
+  that cascade is gone, and what remains is below.
+- **Profile of fold + key against HEAD** (one probe, `seon.cache` misses and derivation ms per kind over each request,
+  after the same two warm passes): **hub**: `:seon.sci.runtime/analysed` **885 misses, 228 ms** on the candidate and
+  none on HEAD; every other kind within a few ms of HEAD (`current-results` 80 / 83 ms, `program-context` 51 / 46,
+  `reach-index` 45 / 45, `builder-digest` 43 / 41). No projection kind re-derives. So the hub's extra ~700 MB is
+  analysing the closed reverse closure of `seon.db/as-of-key` for the first time: on HEAD those names were open, and
+  every open function is analysed (and cached by content) on the warm passes' first change, so the hub row hit them;
+  with the fold they are closed, stay compiled on the warm passes, and are first analysed on the hub row. Whether the
+  sequence as a whole costs more was not measured. **Nine forms**: the same cache kinds and misses as HEAD (no
+  analysed misses), yet 466,385 calls against 157,351: the extra is execution, not derivation, and comes with the
+  fold (428k without the key); not isolated (candidates: the late callables' `apply` per validation, or
+  `unloaded-predicate-functions` now binding refusing callables where `runtime-predicate` used to load the owner).
 
 #### Gate and order
 
