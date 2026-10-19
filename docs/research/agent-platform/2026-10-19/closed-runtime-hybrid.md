@@ -6,7 +6,7 @@ created: 2026-10-19
 ---
 
 Phase status: P0 landed (`seon.sci.open-derivers-test`, `seon.cost-estimate-test/closed-runtime-rows-grow-past-no-accepted-overrun`);
-P4a in flight (lane P4a); P1, P2, P3a, P3b, P4b, P5, P6a, P6b, P7, P8 not started.
+P2, P3b landed; P1 landed (lane closed-p1, the leaf design); P4a in flight (lane P4a); P3a, P4b, P5, P6a, P6b, P7, P8 not started.
 
 # Closed runtime: the hybrid
 
@@ -70,48 +70,22 @@ nothing else of the four; that re-derivation is correct and, with the nested pro
 Landed (`2f7e1c043`, `seon.error.problem` leaf). Nothing to do; Astra is right that the ten lines are not future
 savings, and the census applies the landed edges (my "landed-cycle-2" edit) rather than deleting them.
 
-### Cycle 7 (`seon.db` → `seon.call-preparation`): **Astra's fact, Opus's producers**
+### Cycle 7 (`seon.db` → `seon.call-preparation`): **a pure leaf both require; no stored fact** (root, 2026-10-19)
 
-Both verify root's ruling (no boot-built writer; Astra counts 126 stored callers of `db/transact!`/`db/with`). The
-difference: Opus stores a new per-arity count `:seon.fn.arity/suppliable` and keeps `seon.db/prepared-arity-bounds`
-computing `min - suppliable`; Astra stores the prepared arities themselves. Astra wins on the code: today there are two
-derivations of one fact that already disagree. `seon.call-preparation/prepared-arities` keeps a variadic arity's
-declared minimum ("prepare does not insert their fixed slots"), while `seon.db/prepared-arity-bounds` subtracts the
-plan's slot count from every stored row by position, variadic included (`(max 0 (- minimum slots))`). Storing a count
-would preserve that split; storing the producer's vector removes it (AGENTS "one derivation, every consumer").
-
-- **Fact.** `:seon.fn/prepared-arities` cannot be the stored key: it is already registered as the report member (an alias
-  of `:seon.fn/declared-arities`, a vector of maps), and Datahike stores no vector of maps. The stored fact is
-  **`:seon.call-preparation/prepared-arities`** on the function entity, declared in
-  `resources/seon/schemas/seon.call-preparation.edn` as `[:vector {:seon.db/component true :seon.db/component-schema
-  :seon.call-preparation/prepared-arity} :seon.db/ref]`, with `:seon.call-preparation/prepared-arity` `[:map
-  {:seon.db/attributes true} :seon.fn.arity/min [:seon.fn.arity/max {:optional true}]]`. Present only on a function
-  whose contract has an invocation plan (absent means nothing is suppliable, so the declared arities are the prepared
-  ones). It is derived data, not program: it is outside `seon.program/program-attributes` and never digested (a P1 row
-  proves the definition digest unchanged by its write). The report member `:seon.fn/prepared-arities` keeps its key
-  and meaning: it is the pull `{:seon.call-preparation/prepared-arities [:seon.fn.arity/min :seon.fn.arity/max]}`,
-  which is exactly what `seon.call-preparation/prepared-arities` returns (one derivation).
-- **Producer.** One function, `seon.call-preparation/prepared-arities-tx` (`[database syms] -> tx-data`): for each
-  symbol, retract its old component rows and assert `prepared-arities` of `plan-for` (it pays one
-  `seon.call-preparation/snapshot`, the memo keyed by the supplier rows, per transaction, not per function). Every
-  write of `:seon.fn/spec` or of a supplier row appends it in the same transaction. The narrow check's census of
-  those writers is the list: `seon.fn/index!` (which gains a static `[seon.call-preparation]` require; the edge is
-  legal, `seon.call-preparation` reaches `seon.db` but not `seon.fn`), the recording in `seon.turn.batch` (reaches it
-  through `seon.sci.eval`), the supplier-row write in `seon.call-preparation`, and the `:seon.fn/spec` writes in
-  `my.program`, `seon.cluster.instruction`, `seon.effect`, `seon.sci.eval`, `seon.sci.lookup`, `seon.test.runner`,
-  `seon.turn` and the fixture helpers `seon.test-support/program-fn-entity` and `seon.program/with-contract-facts`'s
-  callers. `seon.program/canonical-row` cannot call it (`seon.call-preparation` requires `seon.db`, which requires
-  `seon.program` after P2). P1's first step re-runs that census; a writer it misses is found by P1's red row
-  `missing-producer` below.
-- **Writer.** `seon.db/prepared-arity-bounds` becomes the pull above, falling to the declared arities only when the
-  fact is absent (its meaning, not a fallback); `arity-mismatch-report` loses its `snapshot` argument; the three
-  `defonce` seams (`call-preparation-snapshot`, `call-preparation-report-snapshot`, `call-preparation-plan-for`) go,
-  and `seon.call-preparation/report-snapshot` loses its only `src` caller and is deleted with its test site
-  (`seon.call-preparation-test`). The writer gains no check (Opus): Datahike's final-report hook already judges
-  `:db-after` (Astra), which is where `validate-write-report` sits.
-- **Red proof**: rows of the existing table `seon.db-test/arity-components-and-callers-are-checked-in-the-final-state`,
-  written as exact fixtures in the P1 spec below (variadic, supplier retracted, same-transaction repair, idempotent,
-  missing producer, digest unchanged).
+Both plans stored something (Opus a per-arity count, Astra the prepared arities). P1's census (lane closed-p1) showed
+the stored fact grows: every `:seon.fn/spec` writer is a producer (the shared row writer `seon.fn/reconcile-tx-in` that
+`seon.merge`, `seon.cluster.source`, `seon.test` and `seon.fn/index!` use, plus the `canonical-row` and
+`contract-facts-row` transactors in `seon.turn`, `seon.turn.batch`, `seon.sci.eval`, `my.program`, `seon.effect`,
+`seon.test.runner`, and every raw-map fixture), a merge copying only program attributes drops a derived fact, and the
+writer's change detector needs the new key. Three of the plan's named writers (`seon.cluster.instruction`,
+`seon.sci.lookup`, `seon.effect`'s error member) write no spec. A fix that grows means the model is wrong, so the fact
+was dropped for the smaller composition: the pure derivation the gate needs (the contract's arities joined to the
+admitted supplied-default rows) moves into the leaf `seon.call-preparation.plan`, which requires only Malli,
+`seon.schema`, `seon.schema.internal`, `seon.batch` and `seon.error.refusal`; `seon.db` and `seon.call-preparation`
+both require it, and the writer derives each callee's plans on the value it judges. Nothing above `seon.db` was needed
+except `seon.error/declared-schema-keys` (pure over the projection), which moves into the leaf. No derived copy exists
+to drift, the gate and the armed wrapper share one derivation, and the variadic disagreement goes: the gate widens a
+fixed arity by its slot count and keeps a variadic arity's minimum, as `seon.call-preparation/prepared-arities` does.
 
 ### `seon.db` → `seon.program` and `seon.fn/stored-namespace-context`: **Opus**
 
@@ -337,39 +311,36 @@ it into its gate.
   long 60 s.
 - Deletes: nothing. `tmp/runtime-fix2/cost_test.clj` (gitignored) is superseded; it read `RR_LABEL` and wrote into `tmp`.
 
-### P1. Cycle 7: prepared arities stored (platform: schema resource and writer)
+### P1. Cycle 7: the plan derivation as a leaf (platform: writer)
 
-- Files: `resources/seon/schemas/seon.call-preparation.edn` (`:seon.call-preparation/prepared-arities`,
-  `:seon.call-preparation/prepared-arity`), `src/seon/call_preparation.clj` (`prepared-arities-tx`; the supplier-row
-  write appends it; `report-snapshot` deleted), `src/seon/fn.clj` (require `seon.call-preparation`; `index!` appends
-  it), `src/seon/turn/batch.clj`, the `:seon.fn/spec` writers `my.program`, `seon.cluster.instruction`, `seon.effect`,
-  `seon.sci.eval`, `seon.sci.lookup`, `seon.test.runner`, `seon.turn`, `test/seon/test_support.clj`
-  (`program-fn-entity`), `src/seon/db.clj` (`prepared-arity-bounds` pulls; `arity-mismatch-report` loses `snapshot`;
-  `arity-verdict` and `arity-mismatches-with` stop acquiring one), `test/seon/db_test.clj`,
-  `test/seon/call_preparation_test.clj`.
-- First step: `rg` census of `transact!`/`with` callers writing `:seon.fn/spec` or `:seon.call-preparation/key`; each
-  is in the file list or the list grows before the edit.
-- Red rows, in `seon.db-test/arity-components-and-callers-are-checked-in-the-final-state` (each a fixture of callee
-  contract, call arity and expected `:seon.fn/arity-mismatches` member):
-  1. variadic: callee `[:=> [:cat :seon.db/connection [:* :int]] :int]` with the connection suppliable, a call of 0
-     arguments; expected refused (the producer keeps the variadic minimum 1; HEAD's gate subtracts the slot and admits
-     it). Red on HEAD by construction.
-  2. supplier retracted: a supplier row admits a call omitting its slot; a later transaction retracts the row; the
-     call is in the next report's mismatches. Reproduce red on HEAD before filing; if HEAD's snapshot memo already
-     refuses it, the row is kept green as a regression and named so.
-  3. same-transaction repair: caller and callee changed to agree in one transaction; accepted.
-  4. idempotent: the same callee write twice; the second report is equal to the first.
-  5. missing producer: a function written through `seon.test-support/program-fn-entity` with a suppliable slot carries
-     `:seon.call-preparation/prepared-arities` after the write (red until the fixture producer calls
-     `prepared-arities-tx`).
-  6. digest unchanged: the function's `:seon.program/definition-digest` is equal with and without the fact.
+- Files: `src/seon/call_preparation/plan.clj` (new: `entity-query`, `argument-facts`, `arity-facts`,
+  `contract-arities`, `incoherent`, `coherent-supplier`, `by-schema-key`, `world-supplied`, `world-candidates`,
+  `world-member?`, `slot-of`, `arity-plan`, `supply-index`, `planned-arities`, moved from `seon.call-preparation`;
+  `declared-schema-keys` moved from `seon.error`; `admitted-rows`, the coherence and validator step
+  `seon.call-preparation/snapshot` derived inline), `src/seon/call_preparation.clj` (requires the leaf;
+  `derive-snapshot` is `admitted-rows` plus its basis; `report-snapshot` deleted), `src/seon/db.clj` (requires the
+  leaf; the three `defonce` seams deleted; `supplied-defaults` reads the rows on the judged value;
+  `prepared-arity-bounds` takes the arity plans and keeps a variadic minimum; `arity-mismatch-report` takes the
+  projection instead of a snapshot), `src/seon/error.clj` (calls the leaf's `declared-schema-keys`),
+  `test/seon/db_test.clj`, `test/seon/call_preparation_test.clj` (the `report-snapshot` deftest deleted),
+  `test/seon/sci/open_derivers_test.clj`.
+- Red rows, in `seon.db-test/arity-components-and-callers-are-checked-in-the-final-state` (`testing` "prepared
+  arities"): (1) variadic: callee `[:=> [:cat :seon.db/connection [:* :int]] :int]`, a call of 0 arguments is refused
+  with declared and prepared `[{:min 1}]` (red on HEAD: the gate subtracted the slot, measured in a check JVM);
+  (2) a row-backed supplied slot (`:sample/marker`) omitted while its row is admitted; (3) retracting the row refuses
+  that caller; (4) writing the callee twice leaves the report equal; (5) the retraction with its caller repaired in
+  one transaction is accepted; (6) a world-supplied slot is admitted with no written fact. Rows 2-6 are regressions,
+  green on HEAD (its report snapshot derived at the report value whenever supplier rows changed). A seventh row,
+  `seon.db/arity-mismatches` on a raw `d/with` value, was dropped: a value written around the writer stores
+  unencoded call arities, so it proves nothing about the gate.
 - Opener row: `{:phase :P1 :functions #{seon.db/call-preparation-snapshot seon.db/call-preparation-report-snapshot
-  seon.db/call-preparation-plan-for}}` (each holds a `requiring-resolve` today; deleted, it holds none); the ratchet is unchanged (P1 closes no deriver).
-- Cost: per transaction writing specs, one `seon.call-preparation/snapshot` (memo keyed by the supplier rows, hit when
-  they did not change) plus one `plan-for` per written function (0.1-1 ms); the writer stops building the 174-188 ms
-  snapshot on candidates; a one-function write < 100 ms, < 8 MB.
-- Deletes: `seon.db/call-preparation-{snapshot,report-snapshot,plan-for}` (14 lines),
-  `seon.call-preparation/report-snapshot` and its test site; `prepared-arity-bounds` 23 -> ~8.
+  seon.db/call-preparation-plan-for}}`, built from names (deleted seams).
+- Cost: a write with arity candidates pays one supplied-default query and one coherence pass over the rows (about
+  1 ms on default's 4 rows with a warm projection, measured 2026-10-19), and one `planned-arities` per candidate callee
+  (projection-cached contract arities); a write with no candidates pays nothing. It replaces the 174-188 ms speculative
+  snapshot the gate built on a report that changed a read attribute.
+- Deletes: the three `seon.db` seams, `seon.call-preparation/report-snapshot` and its deftest, the snapshot argument of
+  the gate, `seon.error/declared-schema-keys` (moved).
 - After P2 (both edit `seon.db`).
 
 ### P2. `seon.db` requires `seon.program` (ordinary)

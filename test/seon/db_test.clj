@@ -2536,6 +2536,45 @@
             (db/q '[:find ?sym . :where [_ :seon.fn/sym ?sym]] (db/db connection)))
          "the first program write is admitted"))))
 
+(defn- marker-population
+  "Schema and function rows for one synthetic supplied default `:sample/marker`
+  (supplier `sample/supply-marker`) and `sample/target`, whose second argument
+  it supplies."
+  [database]
+  (let [forms (assoc (schema/declaration-population) :sample/marker :int)
+        supplier-spec [:=> [:cat :seon.env/environment]
+                       [:or :sample/marker :seon.call-preparation/unresolved-supplier-error]]
+        target-spec [:=> [:cat :string :sample/marker] :string]
+        built (schema/build-projection forms {'sample/supply-marker supplier-spec 'sample/target target-spec})
+        function-entity
+        (fn [function-symbol spec source arglists]
+          (test-support/program-fn-entity
+           database function-symbol source
+           (assoc (program/contract-facts
+                   {:seon.program/function-symbol function-symbol
+                    :seon.program/spec (id/printed spec)
+                    :seon.program/source source
+                    :seon.program/arglists (id/printed arglists)
+                    :seon.program/compile-options (:seon.schema.projection/compile-options built)
+                    :seon.program/predicate-functions (:seon.schema.projection/predicate-functions built)
+                    :seon.program/schema-keys (set (keys forms))
+                    :seon.program/schema-forms forms})
+                  :seon.fn/spec (id/printed spec))))]
+    [(test-support/namespace-entity database 'sample)
+     (program/with-contract-facts
+      {:seon.program/row (program/declaration-row (db/carried-projection database)
+                                                  {:seon.schema/key :sample/marker :seon.schema/form ":int"}
+                                                  :all :core)
+       :seon.program/compile-options (:seon.schema.projection/compile-options built)
+       :seon.program/predicate-functions (:seon.schema.projection/predicate-functions built)
+       :seon.program/schema-keys #{:sample/marker}
+       :seon.program/schema-forms forms})
+     (function-entity 'sample/supply-marker supplier-spec "(defn supply-marker [environment] 1)" '([environment]))
+     (function-entity 'sample/target target-spec "(defn target [label marker] label)" '([label marker]))
+     {:seon.call-preparation/key :sample/marker
+      :seon.call-preparation/schema [:seon.schema/key :sample/marker]
+      :seon.call-preparation/supplier [:seon.fn/sym 'sample/supply-marker]}]))
+
 (deftest arity-components-and-callers-are-checked-in-the-final-state
   (test-support/with-database
    (fn [connection]
@@ -2582,7 +2621,71 @@
           connection
           (into edits [[:db/retract [:seon.fn/sym caller] :seon.fn/call-arities [callee 1]]
                        [:db/add [:seon.fn/sym caller] :seon.fn/call-arities [callee 2]]]))
-         (is (empty? (:seon.fn/arity-mismatches (db/arity-mismatches (db/db connection))))))))))
+         (is (empty? (:seon.fn/arity-mismatches (db/arity-mismatches (db/db connection)))))))))
+  (testing "prepared arities: the gate derives each callee's plan on the value it judges"
+    (test-support/with-database
+     (fn [connection]
+       (let [projection (db/carried-projection (db/db connection))
+             forms (:seon.schema.projection/forms projection)
+             callee-entity (fn [sym source]
+                             (test-support/revised-entity
+                              (db/db connection)
+                              (program/with-contract-facts
+                               {:seon.program/row (test-support/program-fn-entity (db/db connection) sym source)
+                                :seon.program/compile-options (:seon.schema.projection/compile-options projection)
+                                :seon.program/predicate-functions (schema/predicate-functions-in projection)
+                                :seon.program/schema-keys (set (keys forms))
+                                :seon.program/schema-forms forms})
+                              {}))
+             caller-entity (fn [caller callee n]
+                             (test-support/program-fn-entity (db/db connection) caller
+                                                             (str "(defn " (name caller) " [] nil)")
+                                                             {:seon.fn/calls #{'clojure.core/defn callee}
+                                                              :seon.fn/call-arities #{[callee n]}}))
+             mismatches #(get-in % [:seon.error/data :seon.fn/arity-mismatches])
+             variadic 'sample.prepared/variadic
+             supplied 'sample.prepared/supplied
+             row [:seon.call-preparation/key :sample/marker]]
+         (test-support/transacted! connection [(test-support/namespace-entity (db/db connection) 'sample.prepared)])
+         (testing "a variadic arity keeps its minimum: preparation inserts no slot into a variadic call"
+           (let [callee (callee-entity variadic (str "(defn variadic {:malli/schema [:=> [:cat :seon.db/connection [:* :int]] :int]}"
+                                                     " [connection & xs] 0)"))
+                 tx [callee (caller-entity 'sample.prepared/calls-variadic variadic 0)]
+                 refusal (db/transact! connection tx)
+                 expected [{:seon.fn/caller 'sample.prepared/calls-variadic :seon.fn/callee variadic
+                            :seon.fn/call-arity 0
+                            :seon.fn/declared-arities [{:seon.fn.arity/min 1}]
+                            :seon.fn/prepared-arities [{:seon.fn.arity/min 1}]}]]
+             (is (= expected (mismatches refusal)))))
+         (testing "a supplied slot may be omitted while its row is admitted"
+           (test-support/transacted! connection (marker-population (db/db connection)))
+           (test-support/transacted! connection [(caller-entity 'sample.prepared/calls-target 'sample/target 1)]))
+         (testing "retracting the supplier row refuses the caller that omitted its slot"
+           (let [refusal (db/transact! connection [[:db/retractEntity row]])]
+             (is (= [{:seon.fn/caller 'sample.prepared/calls-target :seon.fn/callee 'sample/target
+                      :seon.fn/call-arity 1
+                      :seon.fn/declared-arities [{:seon.fn.arity/min 2 :seon.fn.arity/max 2}]
+                      :seon.fn/prepared-arities [{:seon.fn.arity/min 2 :seon.fn.arity/max 2}]}]
+                    (mismatches refusal)))))
+         (testing "writing the same callee twice leaves the report equal"
+           (let [before (db/arity-mismatches (db/db connection))]
+             (is (empty? (:seon.fn/arity-mismatches before)))
+             (test-support/transacted! connection (marker-population (db/db connection)))
+             (is (= before (db/arity-mismatches (db/db connection))))))
+         (testing "the same retraction with its caller repaired in one transaction is accepted"
+           (test-support/transacted!
+            connection
+            [[:db/retractEntity row]
+             [:db/retract [:seon.fn/sym 'sample.prepared/calls-target] :seon.fn/call-arities ['sample/target 1]]
+             [:db/add [:seon.fn/sym 'sample.prepared/calls-target] :seon.fn/call-arities ['sample/target 2]]])
+           (is (nil? (:db/id (db/pull (db/db connection) [:db/id] row)))))
+         (testing "a world-supplied slot needs no written fact: a callee and its omitting caller are admitted together"
+           (test-support/transacted!
+            connection
+            [(callee-entity supplied (str "(defn supplied {:malli/schema [:=> [:cat :seon.db/connection :int] :int]}"
+                                          " [connection x] x)"))
+             (caller-entity 'sample.prepared/calls-supplied supplied 1)])
+           (is (empty? (:seon.fn/arity-mismatches (db/arity-mismatches (db/db connection)))))))))))
 
 (deftest a-program-entity-keeps-only-the-definition-digest-it-produces
   ;; CLASS: an identity every reader trusts that the writer never checked. A

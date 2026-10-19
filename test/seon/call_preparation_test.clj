@@ -581,29 +581,6 @@
             (is (not (prepared? @sibling sibling-snapshot))
                 "a sibling branch at the earlier commit reads its own program"))))))))
 
-(deftest a-report-changing-no-read-attribute-reads-its-committed-parent
-  (testing "the writer's speculative value derives nothing when the report's
-            datoms name no attribute the snapshot reads"
-    (test-support/with-database
-     (fn [connection]
-       (test-support/transacted! connection database-entities)
-       (let [fixed-projection (projection)
-             committed (cp/snapshot @connection fixed-projection)
-             report (d/with @connection [(unrelated-entity @connection "report")])
-             speculative (cp/report-snapshot report fixed-projection)]
-         (is (held? committed speculative))
-         (is (= (db/basis-t (:db-after report))
-                (:seon.call-preparation/checked-through-t speculative)))
-         (is (= (dissoc (cp/snapshot (:db-after report) fixed-projection)
-                        :seon.call-preparation/validators)
-                (dissoc speculative :seon.call-preparation/validators))
-             "the held members equal a derivation at the report value")
-         (testing "and a report writing an entity derives at its report value"
-           (let [entity-report (d/with @connection [(alternate-entity @connection)])
-                 derived (cp/report-snapshot entity-report fixed-projection)]
-             (is (contains? (:seon.call-preparation/supplied-defaults derived)
-                            :test/alternate-database)))))))))
-
 ;;; ---------------------------------------------------------------------------
 ;;; Per-cluster plan isolation
 ;;; ---------------------------------------------------------------------------

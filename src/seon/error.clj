@@ -23,6 +23,7 @@
             [malli.generator :as mg]
             [malli.util :as mu]
             [seon.blob :as blob]
+            [seon.call-preparation.plan :as call-preparation.plan]
             [seon.db :as db]
             [seon.env :as env]
             [seon.id :as id]
@@ -134,7 +135,7 @@
         (str "An unclassified " (.getName (class source)) " arrived where an "
              "error was expected."))))
 
-(declare declared-schema-keys stored-observation observation-selector latest-fact)
+(declare stored-observation observation-selector latest-fact)
 
 (defn- frame-site
   "The compile-stable part of a stack frame: its named function's class, method
@@ -1427,7 +1428,7 @@
    (fn []
      (let [forms (:seon.schema.projection/forms projection)
            storable? #(schema.datahike/storable-attribute-in? projection %)
-           observation-keys (conj (declared-schema-keys projection)
+           observation-keys (conj (call-preparation.plan/declared-schema-keys projection)
                                   :seon.error/base :seon.error.occurrence/occurrence)]
        (letfn [(members [schemas]
                  (sort (into #{} (comp (mapcat #(let [compiled (mr/schema (:seon.schema.projection/registry projection) %)]
@@ -1536,36 +1537,6 @@
                                     (internal/extends-schema? schema :seon.error/base))))
                      (map (fn [{:keys [schema]}] [(m/form schema) (m/validator schema)])))
                (m/-function-schema-arities contract)))))))
-
-(defn declared-schema-keys
-  "Canonical base-extension declarations in this projection, excluding aliases.
-  The immutable projection retains the derived population, never error values."
-  {:malli/schema [:=> [:cat :map] [:set :qualified-keyword]]}
-  [projection]
-  (schema/projection-cache-value
-   projection ::declared-schema-keys
-   (fn []
-     (let [forms (:seon.schema.projection/forms projection)]
-       (into #{}
-             (keep (fn [[k definition]]
-                     (when (and (not= k :seon.error/base)
-                                (#{:and :merge} (m/type (mr/schema (:seon.schema.projection/registry projection) k)))
-                                (internal/extends-schema?
-                                 (mr/schema (:seon.schema.projection/registry projection) k) :seon.error/base))
-                       k)))
-             forms)))))
-
-
-
-
-
-
-
-
-
-
-
-
 
 (defn- evidence-path
   {:malli/schema [:=> [:cat :seon.error/id]

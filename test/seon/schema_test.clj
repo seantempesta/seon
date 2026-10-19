@@ -12,7 +12,7 @@
             [malli.error :as me]
             [malli.generator :as mg]
             [malli.registry :as mr]
-            [seon.call-preparation :as call-preparation]
+            [seon.call-preparation.plan :as call-preparation.plan]
             [seon.config :as config]
             [seon.db]
             [seon.error.refusal :as refusal]
@@ -1173,7 +1173,7 @@
                        (config/result-caps configuration)
                        (select-keys configuration [:seon.config.error/max-evidence-bytes]))))))
        (testing "call preparation's argument validators compile"
-         (let [arities (into {} (map (fn [sym] [sym (#'call-preparation/contract-arities bare sym)]))
+         (let [arities (into {} (map (fn [sym] [sym (call-preparation.plan/contract-arities bare sym)]))
                             (keys (:seon.schema.projection/function-contracts bare)))
                arguments (for [[_ function-arities] arities
                                arity function-arities

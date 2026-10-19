@@ -29,6 +29,7 @@
             [clojure.test.check.generators :as gen]
             [seon.cache]
             [seon.batch :as batch]
+            [seon.call-preparation.plan :as call-preparation.plan]
             [seon.env :as env]
             [seon.error.problem :as error.problem]
             [seon.error.refusal :as error.refusal]
@@ -49,16 +50,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Ambient custody and optional read evidence
 ;;; ---------------------------------------------------------------------------
-
-;;; LOAD-CYCLE BOUNDARY. `seon.call-preparation` requires `seon.db`, so this
-;;; namespace cannot require it back. One resolution per var, realized at
-;;; first use, instead of a `requiring-resolve` on every call (AGENTS §2.1).
-(defonce ^:private call-preparation-snapshot
-  (delay (requiring-resolve 'seon.call-preparation/snapshot)))
-(defonce ^:private call-preparation-report-snapshot
-  (delay (requiring-resolve 'seon.call-preparation/report-snapshot)))
-(defonce ^:private call-preparation-plan-for
-  (delay (requiring-resolve 'seon.call-preparation/plan-for)))
 
 (defn connection?
   "True for a live (unreleased) Datahike connection."
@@ -5141,18 +5132,21 @@
     (assoc (arity-comparison edges bounds) ::bounds bounds)))
 
 (defn- prepared-arity-bounds
-  "The call counts `callee`'s STORED arities admit once its invocation plan's
-  suppliable slots may be omitted: each stored arity row's minimum widened by
-  the slot count of the plan arity at the same position of the callee's
-  arity vector. The stored rows are what the program graph knows, so a
-  changed arity row is compared as written; the compiled contract contributes
-  only which slots a call may omit."
-  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol [:maybe :map]]
+  "The call counts `callee`'s STORED arities admit once its arity plans'
+  suppliable slots may be omitted: each stored fixed arity row's minimum
+  widened by the slot count of the plan arity at the same position of the
+  callee's arity vector; a variadic arity keeps its minimum, since
+  preparation inserts no slot into a variadic call
+  (`seon.call-preparation/prepared-arities`). The stored rows are what the
+  program graph knows, so a changed arity row is compared as written; the
+  compiled contract contributes only which slots a call may omit."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol [:maybe :seon.call-preparation/arity-plans]]
                   [:or :seon.fn/declared-arities :seon.db/error-result]]}
-  [database callee plan]
+  [database callee arity-plans]
   (let [pulled (pull database [{:seon.fn/arities [:seon.fn.arity/min :seon.fn.arity/max]}] [:seon.fn/sym callee])
-        slots (into {} (map (juxt :seon.fn.arity/order (comp count :seon.call-preparation/slots)))
-                    (:seon.call-preparation/arities plan))]
+        slots (into {} (map (fn [{order :seon.fn.arity/order variadic? :seon.call-preparation/variadic? slots :seon.call-preparation/slots}]
+                              [order (if variadic? 0 (count slots))]))
+                    arity-plans)]
     (if (:seon.db/invalid-read pulled)
       pulled
       (->> (:seon.fn/arities pulled)
@@ -5163,26 +5157,39 @@
            (sort-by (juxt :seon.fn.arity/min #(get % :seon.fn.arity/max Long/MAX_VALUE)))
            vec))))
 
+(defn- supplied-defaults
+  "The supplied-default rows `database` holds, proved under `projection`
+  (`seon.call-preparation.plan/admitted-rows`), or the read's error."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection]
+                  [:or :map :seon.db/error-result]]}
+  [database projection]
+  (let [entities (q database call-preparation.plan/entity-query)]
+    (if (read-refusal? entities)
+      entities
+      (call-preparation.plan/admitted-rows (carried-projection database) projection entities))))
+
 (defn- arity-mismatch-report
   "Refuse or report `candidates` (calls no stored arity admits) that the
   callee's stored arities do not admit even with its plan's suppliable slots
-  omitted. `snapshot` is the call-preparation snapshot its caller acquired."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :map] :map [:vector :seon.schema/value] :int :int]
+  omitted, the plans derived on `database` itself under `projection`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :map [:vector :seon.schema/value] :int :int]
                   [:or :seon.fn/arity-mismatch-report :seon.db/error-result]]}
-  [database snapshot bounds candidates checked edges]
-  (let [refusal (or (when (and snapshot (nil? (:seon.call-preparation/basis-t snapshot))) snapshot)
-                    (first (:seon.call-preparation/refusals snapshot)))]
-    (or refusal
-        (let [callees (distinct (map (comp first second) candidates))
-              plans (into {} (map (fn [callee]
-                                    [callee (@call-preparation-plan-for database snapshot callee)]))
-                          callees)
-              refused (some #(when (and % (nil? (:seon.fn/sym %))) %) (vals plans))
-              prepared (into {} (map (fn [callee] [callee (prepared-arity-bounds database callee (get plans callee))]))
+  [database projection bounds candidates checked edges]
+  (let [rows (if (seq candidates)
+               (supplied-defaults database projection)
+               {:seon.call-preparation/supplied-defaults {} :seon.call-preparation/refusals []})]
+    (or (when (read-refusal? rows) rows)
+        (first (:seon.call-preparation/refusals rows))
+        (let [program (carried-projection database)
+              callees (distinct (map (comp first second) candidates))
+              prepared (into {} (map (fn [callee]
+                                       [callee (prepared-arity-bounds
+                                                database callee
+                                                (call-preparation.plan/planned-arities
+                                                 program (:seon.call-preparation/supplied-defaults rows) callee))]))
                              callees)
               unreadable (some #(when (:seon.db/invalid-read %) %) (vals prepared))]
-          (or refused
-              unreadable
+          (or unreadable
               {:seon.fn/arity-mismatches
                (->> candidates
                     (keep (fn [[caller [callee n]]]
@@ -5203,19 +5210,13 @@
                :seon.fn/arity-unchecked (- edges checked)})))))
 
 (defn- arity-verdict
-  "Refuse or report the candidates whose prepared arities also refuse.
-
-  The call-preparation snapshot is the report's (`report-snapshot`): a report
-  that changed none of its read attributes reads its committed `:db-before`'s
-  memo instead of deriving the whole program on the speculative value."
+  "Refuse or report the candidates whose prepared arities also refuse, the
+  plans derived on the report's own `:db-after`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection
                        :seon.db/transaction-report :map]
                   [:or :seon.fn/arity-mismatch-report :seon.db/error-result]]}
-  [database projection report {candidates ::candidates bounds ::bounds checked ::checked edges ::edges}]
-  (let [candidates (vec candidates)]
-    (arity-mismatch-report database
-                           (when (seq candidates) (@call-preparation-report-snapshot report projection))
-                           bounds candidates checked edges)))
+  [database projection _report {candidates ::candidates bounds ::bounds checked ::checked edges ::edges}]
+  (arity-mismatch-report database projection bounds (vec candidates) checked edges))
 
 (defn- arity-mismatches-with
   {:malli/schema [:=> [:cat [:=> [:cat :seon.db/query :seon.db/database-value] [:or :seon.schema/value :seon.db/error-result]] :seon.db/database-value :seon.schema/projection] [:or :seon.fn/arity-mismatch-report :seon.db/error-result]]}
@@ -5229,9 +5230,7 @@
               candidates (filterv (fn [[_ [callee n]]]
                                     (not (arity-admitted? (get bounds callee) n)))
                                   checked)]
-          (arity-mismatch-report database
-                                 (when (seq candidates) (@call-preparation-snapshot database projection))
-                                 bounds candidates (count checked) (count edges))))))
+          (arity-mismatch-report database projection bounds candidates (count checked) (count edges))))))
 
 (defn arity-mismatches
   "Call sites whose source count no prepared arity of the callee admits.

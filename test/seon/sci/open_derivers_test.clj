@@ -40,7 +40,10 @@
                      ["program-definition-digest" "program-behavior-digest" "stored-namespace-context"
                       "program-shapes-in" "program-canonical-entity"])}
    {:phase :P3b
-    :functions (into #{} (map #(symbol "seon.program" %)) ["derived-shape" "derived-program-attributes"])}])
+    :functions (into #{} (map #(symbol "seon.program" %)) ["derived-shape" "derived-program-attributes"])}
+   {:phase :P1
+    :functions (into #{} (map #(symbol "seon.db" %))
+                     ["call-preparation-snapshot" "call-preparation-report-snapshot" "call-preparation-plan-for"])}])
 
 (defn- open-cache-derivers
   "The cache derivers of `database`'s program that its reach index leaves open."
