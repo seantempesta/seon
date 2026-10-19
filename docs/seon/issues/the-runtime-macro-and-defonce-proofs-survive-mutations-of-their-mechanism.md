@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed (lane runtime-fix3, item 4)
 severity: defect
 tags: [issue, sci, runtime, tests]
 ---
@@ -26,3 +26,15 @@ analysed cache. Proof to add: the two-branch row above in `a-branch-changed-valu
 The second: the row's change (`seon.print/literal`) reaches neither launch observation, so no rule of the binder is
 exercised; and an SCI `defonce` of a Var the context already binds is a no-op. Either the `defonce` exclusion is
 redundant (delete it) or a row must change a definition the `defonce`'s initializer reaches; decide by that row.
+
+## Fix (lane runtime-fix3, 2026-10-20)
+
+Both rows now hold their mechanism, each mutation re-run on HEAD `00430af64`:
+
+- `seon.sci.eval-test/a-branch-changed-value-a-macro-reads-is-expanded-by-its-callers` gains the second branch
+  (`buckets` 3 then 5, `(seon.profile/bucket 5)` = 3 on it): green unmutated, red under mg (answers 2, the first
+  branch's analysis).
+- `seon.sci.eval-test/a-changed-runtime-keeps-the-process-launch-observations` gains a branch changing
+  `seon.cluster.source/path-digests`, which `seon.cluster/launched-source-digests`' initializer calls: the value stays
+  identical under the mutation too (SCI's `defonce` of a bound Var is a no-op), so the row also asserts on the data
+  the rule decides: no runtime row names a launch observation. Green unmutated, red under mc.

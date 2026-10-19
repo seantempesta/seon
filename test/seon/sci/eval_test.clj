@@ -230,7 +230,25 @@
            "the source digests the JVM launched with")
        (is (identical? @#'seon.cluster.source/launched-dependencies
                        (in-context branch "@#'seon.cluster.source/launched-dependencies"))
-           "the dependency digests the JVM launched with")))))
+           "the dependency digests the JVM launched with"))))
+  ;; Runtime review 3 (Opus) step 3: a change the `defonce`'s own initializer reaches, so a binder that gave it a
+  ;; value row would evaluate it again on this runtime.
+  (test-support/with-database
+   (fn [connection]
+     (let [database (branch-replacing! connection 'seon.cluster.source/path-digests
+                                       "\\(first \\(capture-paths directory paths\\)\\)" "{}")
+           branch (eval/base-ctx database)]
+       (is (= {} (in-context branch "(seon.cluster.source/path-digests \"src\" [\"seon/id.clj\"])"))
+           "the branch reads no digests")
+       (is (identical? @#'seon.cluster/launched-source-digests
+                       (in-context branch "@#'seon.cluster/launched-source-digests"))
+           "the source digests the JVM launched with, though the branch changed what computed them")
+       ;; SCI's `defonce` of a bound Var is a no-op, so the value alone cannot tell an evaluation from none: a
+       ;; launch observation has no runtime row, so no runtime evaluates it
+       (is (= [] (into [] (comp (map :seon.fn/sym)
+                                (filter '#{seon.cluster/launched-source-digests seon.cluster.source/launched-dependencies}))
+                       (::eval/runtime-rows @(::kernel/program-snapshot branch))))
+           "no runtime row for a launch observation")))))
 
 (deftest a-branch-changed-macro-is-expanded-by-its-callers
   ;; Runtime review F3 on the database path: the caller's analysis is keyed by
@@ -259,7 +277,12 @@
        (seon.cache/evict-kinds! #{:seon.sci.runtime/analysed :seon.sci.eval/program-context})
        (is (= 2 (in-context (eval/base-ctx database) "(seon.profile/bucket 5)")) "and again from a cold cache")
        (is (= 3 (in-context (eval/base-ctx before) "(seon.profile/bucket 5)"))
-           "main's analysis is not the branch's: its key holds what the macro reads")))))
+           "main's analysis is not the branch's: its key holds what the macro reads")
+       ;; Runtime review 3 (Opus) step 3: main runs `bucket` compiled, so only a second branch reads the analysed
+       ;; cache; under a key without the macro's reached changes it is served the first branch's analysis.
+       (let [other (branch-replacing! connection 'seon.profile/buckets "(?s)3\\)\\s*$" "5)")]
+         (is (= 3 (in-context (eval/base-ctx other) "(seon.profile/bucket 5)"))
+             "a second branch holding 5 buckets expands with its own, not the first branch's analysis"))))))
 
 (deftest ^{:seon.test/long "Three agent requests through MCP: a value a compiled macro reads is changed, then read through its caller."
            :seon.test/long-ms 120000}
