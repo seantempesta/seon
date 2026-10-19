@@ -1,0 +1,151 @@
+diff --git a/test/seon/cost_estimate_test.clj b/test/seon/cost_estimate_test.clj
+index 198b1145c..593f54136 100644
+--- a/test/seon/cost_estimate_test.clj
++++ b/test/seon/cost_estimate_test.clj
+@@ -18,6 +18,12 @@
+     `ratchet` of the overrun recorded beside it, so a regression is always red and an existing overrun is red only
+     in the first test."
+   (:require [clojure.data.json :as json]
++            [clojure.data]
++            [seon.turn.batch]
++            [seon.sci.eval]
++            [datahike.api]
++            [sci.lang]
++            [sci.ctx-store]
+             [clojure.java.io :as io]
+             [clojure.string :as str]
+             [clojure.test :refer [deftest is]]
+@@ -124,7 +130,13 @@
+   [running agent-id code]
+   (let [cost (cost-support/bound-cost running agent-id (answer running agent-id code))]
+     {:alloc-mb (:seon.cost/alloc-mb (batch/render-request-cost-ai cost))
+-     :calls (:seon.cost/calls cost) :reads (:seon.cost/reads cost) :ms (:seon.cost/ms cost)}))
++     :calls (:seon.cost/calls cost) :reads (:seon.cost/reads cost) :ms (:seon.cost/ms cost)
++     :parts (into {} (keep (fn [k] (when-let [v (get-in cost [k :seon.cost/alloc-mb])] [k v])))
++                  [:seon.cost/entrance :seon.cost/step :seon.cost/tests :seon.cost/writer :seon.cost/commit])
++     :forms-mb (:seon.cost/alloc-mb cost)
++     :fns (mapv (juxt :seon.cost.function/sym :seon.cost.function/calls :seon.cost.function/self-alloc-mb
++                      :seon.cost.function/alloc-mb :seon.cost.function/ms)
++                (:seon.cost.functions/by-alloc (:seon.cost/functions cost)))}))
+ 
+ (defn- seon-db-forms
+   "The text of nine consecutive top-level forms of `seon.db`, from `seon.db/as-of-key`, as the checkout holds them."
+@@ -348,3 +360,118 @@
+            :seon.test/long-ms 60000}
+   no-ordinary-operation-grows-past-its-accepted-overrun
+   (is (= [] (unaccepted (measured)))))
++
++;; lane runtime-arm probe (never committed)
++(defn- kinds-now []
++  (into {} (map (fn [[k v]] [k (select-keys v [:seon.cache/hits :seon.cache/misses :seon.cache/load-ms :seon.cache/evictions])]))
++        (:seon.cache/kinds (cache/status))))
++
++(defn- kinds-delta [a b]
++  (into (sorted-map)
++        (keep (fn [[k v]] (let [d (merge-with - v (get a k {}))] (when (some pos? (vals d)) [k d]))))
++        b))
++
++(defn- with-jfr [file f]
++  (let [rec (jdk.jfr.Recording.)]
++    (doto (.enable rec "jdk.ObjectAllocationSample") (.withStackTrace) (.with "throttle" "2000/s"))
++    (.start rec)
++    (try (f) (finally (.stop rec) (.dump rec (java.nio.file.Path/of file (make-array String 0))) (.close rec)))))
++
++(defn- probe-measured []
++  (support/with-running-agent
++   (fn [running agent-id connection]
++     (let [request (partial answer running agent-id)
++           _ (when (System/getenv "RUNTIME_ARM_TOP") (support/apply-config! connection (:seon.cluster/name (support/execution-handle nil)) {:seon.config.test.cost/top 600}))
++           k0 (kinds-now)
++           _warm-pass (program-change-pass running agent-id connection (str "w" (id/id)))
++           k1 (kinds-now)
++           suffix (str "m" (id/id))
++           changes (program-change-pass running agent-id connection suffix)
++           k2 (kinds-now)
++           row (fn [label code]
++                 (let [a (kinds-now)
++                       c (if-let [f (System/getenv "RUNTIME_ARM_JFR")]
++                           (if (= f (name label))
++                             (with-jfr (str "/Users/sean/src/seon/tmp/runtime-arm/" (name label) ".jfr") #(request-cost running agent-id code))
++                             (request-cost running agent-id code))
++                           (request-cost running agent-id code))]
++                   (assoc c :cache (kinds-delta a (kinds-now)))))
++           _ (support/declare-proof! connection 'cost.estimate.proof 'pending 'cost.estimate/read)
++           task-id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id
++                                                 :seon.task/ns 'cost.estimate :seon.task/name "read"
++                                                 :seon.task/plan (str "Read `seon.ref/references`, `seon.ref/resolve-path`, "
++                                                                      "`seon.context/current-state`, `seon.task/agent-attempt`, "
++                                                                      "`seon.task/agent-task`, `seon.db/pull` and `seon.db/q`.")}))
++           _ (task/assign! {:seon.agent/context-source (support/running-cluster running)
++                            :seon.db/connection connection :seon.task/assigned task-id
++                            :seon.task/agent [:seon.agent/id agent-id]
++                            :seon.task/branch (get-in (db/db connection) [:config :branch])})
++           _ (request "(seon.context/current-state)")
++           current-state (row :current-state "(seon.context/current-state)")
++           agent-ctx (fn [] (let [found (#'mcp/instance @@(requiring-resolve 'seon.operator.runtime/running-instances) running)
++                                  custody (#'mcp/execution found agent-id nil)]
++                              (or (get-in ((requiring-resolve 'seon.cluster.agent/started) (:seon.agent/routing custody) agent-id)
++                                          [:seon.turn.loop/cluster :seon.sci.eval/agent-ctx])
++                                  (:seon.sci.eval/ctx ((requiring-resolve 'seon.cluster.agent/acquire-context!) (:seon.turn.loop/cluster custody) agent-id)))))
++           resolver (fn [] (update-vals (select-keys (get-in @(:env (agent-ctx)) [:namespaces 'seon.db]) [:aliases :imports :refers :refer :required-namespaces :types])
++                                        (fn [m] (if (map? m) (update-vals m #(if (class? %) [:class (.getName ^Class %)] (str (type %) " " %))) m))))
++           changed-after (fn [t] (let [h (datahike.api/history (db/db connection))]
++                                   (frequencies (map (fn [[a added]] [a added])
++                                                     (datahike.api/q '[:find ?a ?added ?e ?v :in $ ?t :where [?e ?a ?v ?tx ?added] [(> ?tx ?t)]] h t)))))
++           enter-diff (let [res (fn [ctx] (update-vals (select-keys (get-in @(:env ctx) [:namespaces 'seon.db]) [:aliases :imports :refers :refer :required-namespaces :types])
++                                                     (fn [m] (if (map? m) (update-vals m #(if (class? %) [:class (.getName ^Class %)] (str (type %) " " %))) m))))
++                            base (agent-ctx)
++                            f ((requiring-resolve 'sci.core/fork) base)
++                            r0 (res f)
++                            row (get (:namespaces @(:seon.sci.kernel/program-snapshot f)) 'seon.db)
++                            entered (contains? (:seon.sci.eval/entered-namespaces @(:seon.sci.kernel/program-snapshot f)) 'seon.db)
++                            _ (when (System/getenv "RUNTIME_ARM_ENTER") (seon.sci.eval/enter-namespace! f 'seon.db (db/db connection)))
++                            r1 (res f)]
++                        {:has-row (some? row) :entered entered
++                         :diff (take 2 (clojure.data/diff r0 r1))})
++           r-before (resolver)
++           t-pre (:max-tx (db/db connection))
++           _ (when-let [pre (System/getenv "RUNTIME_ARM_PRE")] (request pre))
++           pre-changed (let [h (datahike.api/history (db/db connection))]
++                         (frequencies (map (fn [[a added e]] [a added (:seon.ns/name (datahike.api/pull (db/db connection) [:seon.ns/name] e))])
++                                           (datahike.api/q '[:find ?a ?added ?e ?v :in $ ?t :where [?e ?a ?v ?tx ?added] [(> ?tx ?t)] [(contains? #{:seon.ns/aliases :seon.ns/imports :seon.ns/requires :seon.ns/refers} ?a)]] h t-pre))))
++           r-after (resolver)
++           ns-before (dissoc (db/pull (db/db connection) '[*] [:seon.ns/name 'seon.db]) :db/id)
++           t-before (:max-tx (db/db connection))
++           nine (row :nine (str "(in-ns 'seon.db)\n" (seon-db-forms)))
++           ns-after (dissoc (db/pull (db/db connection) '[*] [:seon.ns/name 'seon.db]) :db/id)
++           live-diff (fn []
++                       (let [found (#'mcp/instance @@(requiring-resolve 'seon.operator.runtime/running-instances) running)
++                             custody (#'mcp/execution found agent-id nil)
++                             ctx (or (get-in ((requiring-resolve 'seon.cluster.agent/started) (:seon.agent/routing custody) agent-id)
++                                             [:seon.turn.loop/cluster :seon.sci.eval/agent-ctx])
++                                     (:seon.sci.eval/ctx ((requiring-resolve 'seon.cluster.agent/acquire-context!) (:seon.turn.loop/cluster custody) agent-id)))
++                             live (#'seon.turn.batch/live-bindings (#'seon.sci.eval/reader-context ctx 'seon.db))
++                             held (#'seon.sci.eval/row-bindings (db/pull (db/db connection) @#'seon.sci.eval/namespace-pattern [:seon.ns/name 'seon.db]))]
++                         (into {} (map (fn [k] [k (take 2 (clojure.data/diff (get held k) (get live k)))])) [:requires :aliases :refers :imports])))
++           nine (assoc nine :pre-changed pre-changed :enter-diff enter-diff :resolver-diff (take 2 (clojure.data/diff r-before r-after)) :changed (changed-after t-before) :live-diff (live-diff) :ns-diff (take 2 (clojure.data/diff ns-before ns-after)) :tx [t-before (:max-tx (db/db connection))])
++           hub-docstring (row :hub-docstring (str "(in-ns 'seon.db)\n" (hub-docstring-change)))
++           hub-behavior (row :hub (str "(in-ns 'seon.db)\n" (hub-behavior-change)))
++           _ (request "(in-ns 'user) (seon.embed/fill! (seon.db/db) seon.embed/request!) nil")
++           _ (request "(my.program/similar 'seon.db/transcat! 5)")
++           similar-by-name (row :similar "(my.program/similar 'seon.db/transcat! 5)")
++           _ (request "(my.task/current)")
++           reuse-again (row :task "(my.task/current)")
++           check (str "(:seon.test/reused-count (my.test/check {:seon.test/identities #{'cost.estimate.redefine-" suffix "/tiny-test}}))")
++           _ (request check)
++           reuse2 (row :reuse check)]
++       {:passes {:warm (kinds-delta k0 k1) :measured (kinds-delta k1 k2)}
++        :rows (assoc (select-keys changes [:redefine-one-form :reuse-one-unchanged-test :unchanged-request])
++                     :current-state-with-task current-state :seon-db-nine-forms nine
++                     :hub-docstring-change hub-docstring :hub-behavior-change hub-behavior
++                     :similar-by-name-warm similar-by-name :task-current reuse-again :reuse-late reuse2)}))))
++
++(deftest ^{:seon.test/long "lane runtime-arm probe: the rows' measures, written to tmp/runtime-arm."
++           :seon.test/long-ms 240000}
++  cost-rows-probe
++  (let [seen (probe-measured)
++        out (or (System/getenv "RUNTIME_ARM_OUT") "/Users/sean/src/seon/tmp/runtime-arm/rows.edn")]
++    (spit out (with-out-str ((requiring-resolve (quote clojure.pprint/pprint))
++                             (assoc seen :pain (mapv #(select-keys % [:seon.profile/sym :seon.profile/calls :seon.profile.pain/share :seon.profile/digest])
++                                                     (take 40 (profile/pain)))))))
++    (is (map? seen))))

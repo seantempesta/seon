@@ -1,0 +1,743 @@
+diff --git a/resources/seon/operator/runtime.clj b/resources/seon/operator/runtime.clj
+index aecbb0146..095387e73 100644
+--- a/resources/seon/operator/runtime.clj
++++ b/resources/seon/operator/runtime.clj
+@@ -12,3 +12,11 @@
+ 
+ (defonce held-flocks (atom {}))
+ 
++
++;; The Var space: one SCI Var per program name for the whole process, which
++;; every SCI context binds and every analysed function body holds
++;; (`seon.sci.runtime/space-var`). Vars are identity with no data form, so a
++;; second space would split every analysis keyed against it.
++(defonce sci-var-space
++  {:seon.sci.runtime/space (random-uuid)
++   :seon.sci.runtime/vars (java.util.concurrent.ConcurrentHashMap.)})
+diff --git a/resources/seon/tasks/seon.fn.edn b/resources/seon/tasks/seon.fn.edn
+index 51455675f..f76e477d6 100644
+--- a/resources/seon/tasks/seon.fn.edn
++++ b/resources/seon/tasks/seon.fn.edn
+@@ -70,7 +70,4 @@
+  #:seon.task{:name "lint-entities-answers-a-finding-without-a-position"
+              :plan "`seon.fn/lint-entities` reads each clj-kondo finding's `:seon.fn.analyzer/row` and `:seon.fn.analyzer/col` with `long`, so a finding that carries no position (a file-level finding, e.g. an unresolved namespace) throws a NullPointerException and the whole lint of the file fails (root working state item 25, `docs/research/agent-platform/2026-10-14/root-working-state.md`, found by the writeback-fix report). Done when `seon.fn/lint-entities` answers a finding with no row or column as a file-scoped `:seon.lint/finding` (owner the file's relative path, no `:seon.lint/row`, `:seon.lint/col` or `:seon.lint/fn`: absence is no key, never nil) and a deftest over `seon.fn/lint-entities` with one such finding proves it. Fix at the producer: declare `:seon.lint/row` and `:seon.lint/col` optional in `:seon.lint/finding` and let `seon.program/declaration-at` take an absent position instead of fabricating one. Read `seon.fn/lint-entities`, `seon.program/declaration-at` and `:seon.lint/finding`."}
+  #:seon.task{:name "analysis-on-an-agent-branch-reads-a-closed-stream"
+-             :plan "Lane done-one-derivation (2026-10-16): once `seon.fn` is interpreted on an agent branch, the test runner errors with `java.io.IOException: Stream closed` in `seon.fn.analyzer/analyze` via `seon.fn/runtime-analysis-batch`, so every `seon.fn-test` fixture errors on that branch, and the edit hook took 53 s per `src/seon/fn.clj` edit ('REPL entrance ... 7 changed: 53100 ms'). Reproduce on a disposable agent branch by defining a changed `seon.fn` function and running one `seon.fn-test` var; find what the interpreted copy closes (a reader or kondo's stream shared with the compiled one). Proof to write first: a `seon.fn-test` var runs green on an agent branch that redefines one `seon.fn` function."}
+- #:seon.task{:name "src-declarations-the-index-calls-runnable-that-sci-cannot-analyse"
+-             :plan "The branch runtime analyses every src function whose row says `:seon.fn/host-bound? false` (`seon.sci.runtime/analysed`, branch-runtime note). On default at f04cbe446, 39 of 4,442 refused analysis in P1's probe (`docs/research/agent-platform/2026-10-19/branch-runtime-p1.patch`), so a branch's change to their callees would not reach them: unresolved private `defonce`/`def` state before the namespace's interns were bound (`seon.cluster.boot/running-instances` 8, `seon.cluster.store/held-flocks` 2, `seon.cluster/root-store-holder` 2), unresolved classes (`CountedSlidingBuffer` 2, `DatabaseSchemaIdentity` 1, `Raw` 4) and source SCI reads otherwise than the JVM reader (map literals with an odd count 9, `cond`/`let` with an odd count 3, a catch binding read as a class name 6, `append` 1). Once the base is built from `seon.sci.runtime`, rerun the analysis to see which remain with the interns bound, then fix the producer of `:seon.fn/host-bound?` (`seon.fn/host-bound-callers`) or the SCI reader gap, so that the declaration's row and what SCI can run agree."
+-             :proofs #{seon.sci.eval-test/no-sci-runnable-src-function-runs-its-compiled-var}}]
++             :plan "Lane done-one-derivation (2026-10-16): once `seon.fn` is interpreted on an agent branch, the test runner errors with `java.io.IOException: Stream closed` in `seon.fn.analyzer/analyze` via `seon.fn/runtime-analysis-batch`, so every `seon.fn-test` fixture errors on that branch, and the edit hook took 53 s per `src/seon/fn.clj` edit ('REPL entrance ... 7 changed: 53100 ms'). Reproduce on a disposable agent branch by defining a changed `seon.fn` function and running one `seon.fn-test` var; find what the interpreted copy closes (a reader or kondo's stream shared with the compiled one). Proof to write first: a `seon.fn-test` var runs green on an agent branch that redefines one `seon.fn` function."}]
+diff --git a/src/seon/fn.clj b/src/seon/fn.clj
+index d9e7c5f9c..cebf869a4 100644
+--- a/src/seon/fn.clj
++++ b/src/seon/fn.clj
+@@ -1194,14 +1194,44 @@
+       (into (map (comp symbol namespace)) first-party-functions)
+       (into (map ::analyzer/name) (::analyzer/namespace-definitions analysis))))
+ 
++(defn- host-buffer-class?
++  "Whether the class kondo names `class-name` is a `java.nio.Buffer`; a name
++  the classpath does not hold is none."
++  {:malli/schema [:=> [:cat :string] :boolean]}
++  [class-name]
++  (try
++    (.isAssignableFrom java.nio.Buffer (Class/forName class-name false (.getContextClassLoader (Thread/currentThread))))
++    (catch ClassNotFoundException _
++      false)))
++
++(defn- host-loops
++  "Declarations whose own body loops (`loop`, `dotimes`) over host arrays
++  (`aget`, `aset`, `alength`, `aset-*`) or `java.nio.Buffer`s: a numeric kernel.
++  SCI runs one, but boxes every element, index and accumulator it touches and
++  reflects every buffer access, tens of times the compiled cost per pass, so
++  it runs as loaded, as code SCI cannot run does."
++  {:malli/schema [:=> [:cat :map] [:set :qualified-symbol]]}
++  [analysis]
++  (let [owned (fn [owned? usages] (into #{} (comp (filter owned?) (keep usage-caller)) usages))
++        core? #(= "clojure.core" (some-> (usage-symbol %) namespace))
++        array? #(let [n (name (usage-symbol %))]
++                  (or (#{"aget" "aset" "alength"} n) (str/starts-with? n "aset-")))
++        loops (owned #(and (core? %) (#{"loop" "dotimes"} (name (usage-symbol %)))) (::analyzer/var-usages analysis))
++        host (into (owned #(and (core? %) (array? %)) (::analyzer/var-usages analysis))
++                   (owned #(host-buffer-class? (::analyzer/class %)) (::analyzer/java-class-usages analysis)))]
++    (set/intersection loops host)))
++
+ (defn- host-bound-callers
+   "Declarations whose own body uses an operation SCI cannot interpret.
+    Class usage is never one: the configured interpreter resolves every class
+    on the classpath (`seon.sci.eval/build-base-ctx` `:classes {:allow :all}`;
+    fork `interop/host-class-opts`), so a copied class list cannot decide it.
+-   Import calls remain host-bound under the program declaration rule. A JVM
++   Import calls remain host-bound under the program declaration rule, and so
++   does a use of `print-method` or `print-dup`: SCI's are stand-ins that refuse
++   (`reference-code/sci/src/sci/impl/namespaces.cljc`), never the host's. A JVM
+    macro from a namespace SCI does not interpret is host-bound: SCI hands it
+-   SCI's `&env`, which `clojure.core.async/go` reads as compiler locals.
++   SCI's `&env`, which `clojure.core.async/go` reads as compiler locals. A
++   numeric kernel ([[host-loops]]) runs as loaded too.
+    Macro status is clj-kondo's `:macro` from the dependency's analysis, never
+    the loaded JVM; a call into a namespace kondo never analyzed refuses by name."
+   {:malli/schema [:=> [:cat :map [:set :qualified-symbol] :seon.schema/projection]
+@@ -1220,10 +1250,12 @@
+          (comp
+           (filter #(some? (::analyzer/arity %)))
+           (filter #(#{'clojure.core/reify 'clojure.core/proxy
+-                      'clojure.core/definterface 'clojure.core/import}
++                      'clojure.core/definterface 'clojure.core/import
++                      'clojure.core/print-method 'clojure.core/print-dup}
+                     (usage-symbol %)))
+           (keep usage-caller))
+          (::analyzer/var-usages analysis))
++        (into (host-loops analysis))
+         (into
+          (comp
+           (filter #(and (host-call? %) (::analyzer/macro %)))
+diff --git a/src/seon/schema.clj b/src/seon/schema.clj
+index dba4a3c68..21e3f7064 100644
+--- a/src/seon/schema.clj
++++ b/src/seon/schema.clj
+@@ -222,11 +222,19 @@
+    A namespace that exists but fails to load — a missing transitive require
+    arrives wrapped in a `CompilerException` too — throws the declared
+    `:seon.schema/unloadable-predicate-error` carrying the whole cause chain,
+-   so a compile failure is never read as an unresolved predicate."
+-  {:malli/schema [:=> [:cat :qualified-symbol] [:or :nil [:fn clojure.core/var?]]]}
++   so a compile failure is never read as an unresolved predicate. The
++   loaded program's own Var answers whenever the JVM holds one, compiled or
++   interpreted: one definition has one binding, so a build on a branch's
++   runtime keys and compiles as main's does. A predicate the branch holds
++   apart is bound by its context (`seon.sci.kernel/context-bound-projection`);
++   only a name the JVM has never loaded answers the SCI Var that defines it."
++  {:malli/schema [:=> [:cat :qualified-symbol] [:or :nil [:fn clojure.core/var?] :seon.sci.eval/sci-var]]}
+   [predicate]
+   (try
+-    (requiring-resolve predicate)
++    (let [resolved (requiring-resolve predicate)
++          loaded (clojure.lang.Namespace/find (symbol (namespace predicate)))]
++      (or (when loaded (.findInternedVar ^clojure.lang.Namespace loaded (symbol (name predicate))))
++          resolved))
+     (catch java.io.FileNotFoundException _
+       nil)
+     (catch clojure.lang.Compiler$CompilerException failure
+@@ -1132,7 +1140,7 @@
+   A thread that lives in that world for its whole life (a Flow proc loop)
+   installs them with `with-bindings`, so its lifetime is never counted as one
+   armed call (task `seon.profile/scope-wrappers-report-callback-time-as-work`)."
+-  {:malli/schema [:=> [:cat :map] [:map-of [:fn clojure.core/var?] [:or :nil :map]]]}
++  {:malli/schema [:=> [:cat :map] [:map-of [:or [:fn clojure.core/var?] :seon.sci.eval/sci-var] [:or :nil :map]]]}
+   [projection]
+   {#'*projection* projection
+    #'*projection-state* nil})
+@@ -1143,7 +1151,7 @@
+   A thread that lives in that world for its whole life (a Flow proc loop)
+   installs them with `with-bindings`, so its lifetime is never counted as one
+   armed call (task `seon.profile/scope-wrappers-report-callback-time-as-work`)."
+-  {:malli/schema [:=> [:cat [:fn clojure.core/deref]] [:map-of [:fn clojure.core/var?] [:or :nil [:fn clojure.core/deref]]]]}
++  {:malli/schema [:=> [:cat [:fn clojure.core/deref]] [:map-of [:or [:fn clojure.core/var?] :seon.sci.eval/sci-var] [:or :nil [:fn clojure.core/deref]]]]}
+   [projection-state]
+   {#'*projection-state* projection-state
+    #'*projection* nil
+diff --git a/src/seon/sci/eval.clj b/src/seon/sci/eval.clj
+index 1b59822dd..09d71ac2a 100644
+--- a/src/seon/sci/eval.clj
++++ b/src/seon/sci/eval.clj
+@@ -138,6 +138,7 @@
+             [seon.schema :as schema]
+             [seon.schema.edn :as schema.edn]
+             [seon.sci.kernel :as kernel]
++            [seon.sci.runtime :as runtime]
+             [seon.sci.lookup :as lookup]
+             [seon.sci.reader :as reader]
+             [seon.test.runner :as test.runner]))
+@@ -250,26 +251,38 @@
+ ;;; ---------------------------------------------------------------------------
+ 
+ (defn- copy-host-var
+-  "Copy a loaded JVM Var into SCI at its root, with its metadata.
+-
+-  SCI's `copy-var*` copies `@host-var` (`reference-code/sci/src/sci/core.cljc:137`),
+-  which for a dynamic Var bound on this thread is the binding: a base context
+-  derived under an evaluation would keep that evaluation's `seon.db/*read-database*`,
+-  and the memoized base would pin its branch's node cache. It copies only a
+-  few metadata keys; the rest (its contract, `:malli/schema`) is the Var's
+-  own data a reader expects, as the compiled Var answers. `:test` stays
+-  behind: a copied test Var would run its compiled body in this context."
++  "The process Var space's SCI Var for a loaded JVM Var (`seon.sci.runtime/space-var`),
++  its root and metadata the host's.
++
++  One SCI Var per name for the whole process, so an analysis holding it serves
++  every context. Its own root and metadata follow the host Var: a reload's new
++  root or a new host Var at the name is written into the shared Var, which
++  every context without its own binding of it reads. SCI's `copy-var*` copies
++  `@host-var` (`reference-code/sci/src/sci/core.cljc:137`), which for a dynamic
++  Var bound on this thread is the binding, so the root is the raw root: a base
++  derived under an evaluation keeps no evaluation's `seon.db/*read-database*`.
++  `copy-var*` copies only a few metadata keys; the rest (its contract,
++  `:malli/schema`) is the Var's own data a reader expects, as the compiled Var
++  answers. `:test` stays behind: a copied test Var would run its compiled body
++  in this context."
+   {:malli/schema [:=> [:cat [:fn clojure.core/var?] [:fn clojure.core/some?]] [:fn clojure.core/some?]]}
+   [^clojure.lang.Var host-var sci-namespace]
+-  (let [copied (sci/copy-var* host-var sci-namespace)]
+-    ;; The new Var's own root and metadata, which every context's binding of
+-    ;; it starts from; under an active context `bindRoot` and `alter-meta!`
+-    ;; write only that context's binding, and the root write would reach the
+-    ;; evaluation's write observer as a definition.
+-    (sci.ctx-store/with-ctx nil
+-      (when (.getThreadBinding host-var)
+-        (.bindRoot ^sci.lang.Var copied (.getRawRoot host-var)))
+-      (alter-meta! copied #(merge (dissoc (meta host-var) :ns :name :test) %)))
++  (let [sym (symbol (str (ns-name (.ns host-var))) (str (.sym host-var)))
++        root (.getRawRoot host-var)
++        ;; The shared Var's own root and metadata, which every context's binding
++        ;; of it starts from; under an active context `bindRoot` and `alter-meta!`
++        ;; write only that context's binding, and the root write would reach the
++        ;; evaluation's write observer as a definition. A new root is a new
++        ;; definition (a reload), so its metadata is taken again with it.
++        follow! (fn [^sci.lang.Var copied]
++                  (sci.ctx-store/with-ctx nil
++                    (.bindRoot copied root)
++                    (alter-meta! copied #(cond-> (merge % (dissoc (meta host-var) :ns :name :test))
++                                           (:dynamic (meta host-var)) (assoc :sci.impl/host-var host-var))))
++                  copied)
++        copied (runtime/space-var sym #(follow! (sci/copy-var* host-var sci-namespace)))]
++    (when-not (identical? root (sci.ctx-store/with-ctx nil (.getRawRoot ^sci.lang.Var copied)))
++      (follow! copied))
+     copied))
+ 
+ 
+@@ -399,7 +412,11 @@
+                         (program/base-context-injected-symbols projection)))
+         injected-namespaces (update injected-namespaces 'clojure.test merge
+                                     (lookup/agent-test-namespace (sci/create-ns 'clojure.test)))
++        ;; Forked at birth, so the context has its own generation: the
++        ;; process Var space's Vars (`copy-host-var`) are born in none, and an
++        ;; unforked context would own them and write their shared roots.
+         ctx
++        (sci/fork
+         (sci/init
+         (->
+         {:interrupt-fn (:interrupt-fn kernel-options)
+@@ -429,7 +446,7 @@
+          ;; the addon's pmap calls the host future-call: its threads escaped
+          ;; the arm and the form's owned work (task sci-pmap-escapes-the-arm)
+          (assoc-in [:namespaces 'clojure.core 'pmap] kernel/pmap)
+-         (assoc-in [:namespaces 'clojure.core 'require] agent-require)))
++         (assoc-in [:namespaces 'clojure.core 'require] agent-require))))
+         help-var (get-in injected-namespaces ['seon.bootstrap 'help])
+         dir-var (get-in injected-namespaces ['seon.bootstrap 'dir])
+         doc-var (get-in injected-namespaces ['seon.bootstrap 'doc])]
+@@ -1114,13 +1131,20 @@
+                                        (get committed source-attribute)))))))
+ 
+ (defn- install-jvm-root!
++  "Bind `function-symbol` in `ctx` to the loaded program's definition: its
++  analysed one (`::analysed-roots`) where the acquisition analysed it, else
++  the compiled root. The Var is the process space's, so a definition `ctx`
++  bound before is replaced, never kept."
+   [ctx function-symbol]
+   (when-let [host-namespace (find-ns (symbol (namespace function-symbol)))]
+     (when-let [host-var (ns-resolve host-namespace (symbol (name function-symbol)))]
+-      (let [sci-namespace (context-namespace ctx (symbol (namespace function-symbol)))]
+-        (sci/add-namespace! ctx (symbol (namespace function-symbol))
+-                            {(symbol (name function-symbol))
+-                             (copy-host-var host-var sci-namespace)})
++      (let [sci-namespace (context-namespace ctx (symbol (namespace function-symbol)))
++            sci-var (copy-host-var host-var sci-namespace)
++            root (get (::analysed-roots @(::kernel/program-snapshot ctx)) function-symbol (.getRawRoot ^clojure.lang.Var host-var))]
++        (sci/add-namespace! ctx (symbol (namespace function-symbol)) {(symbol (name function-symbol)) sci-var})
++        (sci.ctx-store/with-ctx ctx
++          (when-not (identical? root @sci-var)
++            (sci/bind-root! ctx sci-var root)))
+         (kernel/mark-installed! ctx function-symbol)
+         true))))
+ 
+@@ -1933,6 +1957,18 @@
+                   [local-name (copy-host-var host-var sci-namespace)]))
+            intern-map))))
+ 
++(defn- install-host-core!
++  "Join the clojure.core names SCI does not carry (`spit`, `ref`) to `ctx`'s
++  core, `sci-core`, once; SCI's interrupt-aware core and its analyzer's own
++  names are never replaced."
++  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :map] :nil]}
++  [ctx sci-core]
++  (install-host-namespace! ctx 'clojure.core
++                           (remove (fn [[local-name]] (or (contains? sci-core local-name)
++                                                          (contains? sci.utils/ana-macros local-name)))
++                                   (ns-publics 'clojure.core)))
++  nil)
++
+ (defn- install-caller-host-bindings!
+   "Bind the compiled Vars an interpreted caller's source names but no program row installs.
+ 
+@@ -1964,12 +2000,7 @@
+                                            (concat (vals aliases)
+                                                    (map (comp symbol namespace) (vals refers)))))))
+                          namespace-rows))]
+-    ;; clojure.core names SCI does not carry (spit, ref) join its core once;
+-    ;; SCI's interrupt-aware core and its analyzer's own names are never replaced
+-    (install-host-namespace! ctx 'clojure.core
+-                             (remove (fn [[local-name]] (or (contains? sci-core local-name)
+-                                                            (contains? sci.utils/ana-macros local-name)))
+-                                     (ns-publics 'clojure.core)))
++    (install-host-core! ctx sci-core)
+     (doseq [target targets
+             :let [interns (if (own target) (own-bindings target) (some-> (find-ns target) ns-interns))
+                   present (get-in @(:env ctx) [:namespaces target])]
+@@ -2589,6 +2620,128 @@
+          [?binding :seon.ns.refer/target-ns ?target-ns] [?binding :seon.ns.refer/target-name ?target-name]
+          [?ns :seon.ns/refers ?binding] [?ns :seon.ns/name ?name]]]])))
+ 
++(defn- armed-as-compiled
++  "`analysed`, the analysed definition of `sym`, armed with the contract and
++  policy its loaded JVM Var's root `compiled` was armed with (`seon.instrument`
++  keeps them on the wrapper), against the projection that policy's snapshot
++  holds, else `projection`; `analysed` itself when the compiled root is unarmed."
++  {:malli/schema [:=> [:cat :qualified-symbol [:fn clojure.core/ifn?] [:or :nil :seon.program/definition-digest]
++                       :seon.schema/projection :seon.instrument/callable]
++                  :seon.instrument/callable]}
++  [sym compiled digest projection analysed]
++  (let [{policy :seon.instrument/policy contract :seon.instrument/contract} (meta compiled)
++        snapshot (:seon.call-preparation/snapshot policy)]
++    (if (and policy contract)
++      (instrument/wrap-interpreted
++       sym contract (or (:seon.schema/projection snapshot) projection) (:seon.sci.admit/caps policy) analysed
++       (cond-> (select-keys policy [:seon.config.error/max-evidence-bytes :seon.call-preparation/snapshot])
++         digest (assoc :seon.program/definition-digest digest)))
++      analysed)))
++
++(defn- runtime-rows!
++  "The loaded program's `src` functions SCI can run, as `seon.sci.runtime`
++  rows armed as their compiled Vars are, with `ctx` made to resolve them as
++  their files do: each namespace's refers, the classes its own
++  `deftype`/`defrecord` define, and its other compiled interns (private state,
++  `def`/`defonce` values) bound as the host's, so interpreting adds no second
++  copy of process state. A host-bound declaration (`:seon.fn/host-bound?`), a
++  macro, a value definition and a test-root or unloaded namespace have no row."
++  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.schema/projection
++                       [:map-of :symbol :map] [:set :symbol]]
++                  [:vector :map]]}
++  [ctx database projection namespace-row-by-name test-names]
++  (let [read! (fn [result] (when (db/read-refusal? result) (throw (ex-info (:seon.error/message result) result))) result)
++        rows (read! (db/q '[:find ?sym ?source ?digest
++                            :where [?f :seon.fn/host-bound? false]
++                            [?f :seon.schema.admission/source :core]
++                            [?f :seon.fn/arglists ?arglists] [(not= "()" ?arglists)]
++                            (not [?f :seon.fn/macro? true])
++                            [?f :seon.fn/ns ?namespace] [?namespace :seon.fn/file ?file]
++                            [?file :seon.fn.file/relative-root "src"]
++                            [?f :seon.fn/sym ?sym] [?f :seon.fn/source ?source]
++                            [?f :seon.program/definition-digest ?digest]]
++                          database))
++        ;; the program macros each definition expands: a changed macro
++        ;; changes its callers' analyses
++        expanded (reduce (fn [held [sym macro digest]] (update held sym (fnil conj (sorted-map)) [macro digest]))
++                         {}
++                         (read! (db/q '[:find ?sym ?macro ?digest
++                                        :where [?m :seon.fn/macro? true] [?m :seon.fn/sym ?macro]
++                                        [?m :seon.program/definition-digest ?digest]
++                                        [?f :seon.fn/calls ?macro] [?f :seon.fn/sym ?sym]]
++                                      database)))
++        rows (sort-by (comp str first)
++                      (filter (fn [[sym]] (let [namespace-name (symbol (namespace sym))]
++                                            (and (find-ns namespace-name) (not (contains? test-names namespace-name)))))
++                              rows))
++        namespace-digests (into {}
++                                (map (fn [namespace-name]
++                                       (let [row (get namespace-row-by-name namespace-name)]
++                                         [namespace-name (id/digest 32 [(::namespace-source row) (row-bindings row)])])))
++                                (distinct (map (comp symbol namespace first) rows)))]
++    (install-host-core! ctx (get-in @(:env ctx) [:namespaces 'clojure.core]))
++    (doseq [namespace-name (keys namespace-digests)
++            :let [host (find-ns namespace-name)
++                  package (namespace-munge namespace-name)
++                  own-classes (into {} (filter (fn [[_ ^Class class]] (= package (.getPackageName class))))
++                                    (ns-imports host))
++                  present (get-in @(:env ctx) [:namespaces namespace-name])]]
++      (doseq [[_ ^Class class] own-classes]
++        (sci/add-class! ctx (symbol (.getName class)) class))
++      (install-namespace-bindings!
++       ctx namespace-name
++       (update (row-bindings (get namespace-row-by-name namespace-name)) :imports merge
++               (update-vals own-classes #(symbol (.getName ^Class %)))))
++      (install-host-namespace! ctx namespace-name
++                               (remove (fn [[local-name]] (contains? present local-name))
++                                       (ns-interns host))))
++    (into []
++          (keep (fn [[sym source digest]]
++                  (when-let [host-var (find-var sym)]
++                    (let [compiled @host-var]
++                      {:seon.fn/sym sym :seon.fn/source source :seon.program/definition-digest digest
++                       ::runtime/namespace-digest (get namespace-digests (symbol (namespace sym)))
++                       ::runtime/macro-digests (vec (get expanded sym))
++                       ::runtime/armed-with compiled
++                       ::runtime/arm #(armed-as-compiled sym compiled digest projection %)}))))
++          rows)))
++
++(defn- bind-analysed!
++  "Bind each loaded `src` function SCI can run (`::runtime-rows`) in `ctx` to
++  its analysed definition (`seon.sci.runtime/analysed`), once per context; the
++  analysis summary. Main runs its compiled Vars; a runtime whose program
++  differs (an overlay, an agent's own change) binds these, so a call resolves
++  its callees late, through the Var each analysed body holds, in the executing
++  context's own binding: a branch that redefines a helper changes every caller
++  it reaches on that branch, compiled entrance or not. An analysis is keyed by
++  content and shared by every context of the process; one SCI cannot analyse
++  keeps its compiled copy and is answered as a refusal."
++  {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :map]}
++  [ctx]
++  (let [snapshot (::kernel/program-snapshot ctx)]
++    (if (::analysed-roots @snapshot)
++      (::analysis @snapshot)
++      (let [space (runtime/program-space ctx)
++            outcomes (binding [sci.lang/*write-observer* nil sci.lang/*expansion-observer* nil]
++                       (sci.ctx-store/with-ctx ctx
++                         (mapv (fn [{sym :seon.fn/sym :as row}]
++                                 (try
++                                   (let [analysed (runtime/analysed space row)]
++                                     (sci/bind-root! ctx (sci/resolve ctx sym) analysed)
++                                     [sym analysed])
++                                   (catch Exception failure
++                                     (interpretation-failure sym failure))))
++                               (::runtime-rows @snapshot))))
++            roots (into {} (filter vector?) outcomes)
++            analysis {::analysed-count (count roots) ::analysis-refusals (filterv map? outcomes)}
++            vars (sci.ctx-store/with-ctx ctx (mapv #(sci/resolve ctx %) (keys roots)))]
++        ;; the program's own definitions, never this context's: its own
++        ;; definitions differ from these (`own-bindings`)
++        (swap! (:env ctx) (fn [env] (update env ::inherited-var-bindings merge
++                                            (select-keys (:sci/var-bindings env) vars))))
++        (swap! snapshot assoc ::analysed-roots roots ::analysis analysis)
++        analysis))))
++
+ (defn- acquire-program!
+   "Acquire the loaded program into its base context. Compiled definitions bind
+   their JVM roots; namespaces the JVM has not loaded interpret their source.
+@@ -2685,6 +2838,10 @@
+         ;; Libraries the namespaces require resolve through their aliases and
+         ;; full names, as the compiled namespaces that require them do.
+         (install-required-libraries! ctx all-namespace-rows)
++        ;; Every src function SCI can run is bound to its analysed definition:
++        ;; a branch's change is live for its callers on that branch.
++        (swap! (::kernel/program-snapshot ctx) assoc ::runtime-rows
++               (runtime-rows! ctx db projection all-namespace-row-by-name test-namespaces))
+         ;; The bare REPL name refers to the acquired macro itself. Keeping the
+         ;; boot-time copy here would preserve its old expansion after adoption.
+         (sci/add-namespace! ctx 'clojure.core
+@@ -3314,6 +3471,7 @@
+   (binding [sci.lang/*write-observer* nil
+             sci.lang/*expansion-observer* nil]
+     (sci.ctx-store/with-ctx ctx
++      (bind-analysed! ctx)
+       (let [interpreted (interpret-overlay! ctx database
+                                             {::overridden (set changed) ::evaluated (set changed)
+                                              ::added #{} ::namespaces [] ::tests []
+@@ -3872,7 +4030,11 @@
+    (binding [db/*conn* nil db/*read-database* nil *deriving-database* database]
+      (let [ctx (assoc (copy-base-ctx parent database loaded nil)
+                       ::custody {} :seon.schema/projection projection)
+-           acquired (overlay! ctx database plan)
++           ;; a program whose functions differ from main's runs main's src
++           ;; functions analysed, so its changes reach their callers
++           analysis (when (some seq [(::overridden plan) (::added plan) (::retracted plan)])
++                      (bind-analysed! ctx))
++           acquired (cond-> (overlay! ctx database plan) analysis (assoc ::analysis analysis))
+            value (freeze-program ctx)]
+        (assoc value ::acquisition (assoc acquired ::own-namespace-entries (own-namespace-entries value cluster)))))))
+ 
+@@ -4383,12 +4545,15 @@
+                projection-state)
+          ctx (assoc ctx :my.program/base-ctx ctx)]
+      ;; A sovereign branch must not inherit the source branch's recorder.
+-     ;; bind-root! in the fork writes the fork's own binding of each Var.
++     ;; bind-root! in the fork writes the fork's own binding of each Var. The
++     ;; loaded program's analysed definitions are armed as compiled, with no
++     ;; recorder (`armed-as-compiled`).
+      (sci.ctx-store/with-ctx ctx
+        (doseq [function-symbol @(::kernel/installed-functions ctx)
+                :let [candidate (sci/resolve ctx function-symbol)]
+                :when (and candidate
+-                          (::instrument/interpreted-original (meta @candidate)))]
++                          (::instrument/interpreted-original (meta @candidate))
++                          (not (kernel/program-definition? ctx function-symbol @candidate)))]
+          (install-function-contract!
+           ctx (db/pull db '[*] [:seon.fn/sym function-symbol]) projection db)))
+      ;; A fork of an acquired program holds the program of the value it is
+diff --git a/src/seon/sci/kernel.clj b/src/seon/sci/kernel.clj
+index b32e963ca..bc693c191 100644
+--- a/src/seon/sci/kernel.clj
++++ b/src/seon/sci/kernel.clj
+@@ -326,18 +326,39 @@
+             (and (sci.vars/hasRoot sci-var)
+                  (not (:seon.sci.eval/lazy-member (meta @sci-var)))))))))
+ 
++(defn program-definition?
++  "Whether `root` is the loaded program's own definition of `function-symbol`
++  in `ctx`: the analysed one its acquisition bound
++  (`:seon.sci.eval/analysed-roots`, `seon.sci.runtime/analysed`), else, for a
++  definition it did not analyse, the compiled root."
++  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol
++                       [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A Var's root is whatever value its definition binds.", :gen/elements [nil false 0 "" :k [] {}]}]]
++                  :boolean]}
++  [ctx function-symbol root]
++  (let [analysed (get (:seon.sci.eval/analysed-roots @(::program-snapshot ctx)) function-symbol ::none)]
++    (if (identical? analysed ::none)
++      (boolean (some-> (find-ns (symbol (namespace function-symbol)))
++                       (ns-resolve (symbol (name function-symbol)))
++                       deref
++                       (identical? root)))
++      (identical? analysed root))))
++
+ (defn held-apart-var
+   "The SCI Var `ctx` holds `predicate` apart in, or nil when `ctx` calls the
+-  shared definition: `ctx` has its own binding of the Var (a branch `defn` of
+-  a copied function, an affected caller interpreted onto it) or the Var was
+-  born in an agent's context."
++  shared definition: `ctx` has its own binding of the Var holding another
++  definition than the loaded program's (a branch `defn` of a copied function,
++  an affected caller interpreted onto it), or the Var was born in an agent's
++  context. The loaded program's analysed definition
++  (`seon.sci.runtime/analysed`, its digest the one the acquisition analysed
++  under `:seon.sci.eval/analysed-digests`) is the shared definition."
+   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol]
+                   [:or :nil [:fn clojure.core/ifn?]]]}
+   [ctx predicate]
+   (when-let [sci-var (sci/resolve ctx predicate)]
+-    (when (or (sci.vars/context-binding ctx sci-var)
+-              (:sci/generation (meta sci-var)))
+-      sci-var)))
++    (let [^sci.impl.vars.Binding own (sci.vars/context-binding ctx sci-var)]
++      (when (or (and own (not (program-definition? ctx predicate (.-root own))))
++                (:sci/generation (meta sci-var)))
++        sci-var))))
+ 
+ (defn context-bound-projection
+   "`base` with each predicate `ctx` holds apart from it bound to `ctx`'s SCI Var.
+diff --git a/src/seon/sci/runtime.clj b/src/seon/sci/runtime.clj
+index 65e58dc95..15880884a 100644
+--- a/src/seon/sci/runtime.clj
++++ b/src/seon/sci/runtime.clj
+@@ -13,7 +13,8 @@
+   (:require [sci.core :as sci]
+             [sci.ctx-store]
+             [sci.lang]
+-            [seon.cache]))
++            [seon.cache]
++            [seon.operator.runtime :as operator.runtime]))
+ 
+ (def ^:private analysed-function-bytes
+   "Retained bytes of one analysed `src` function: its SCI nodes and closure.
+@@ -29,26 +30,52 @@
+   [ctx]
+   (assoc ctx ::space (random-uuid) ::names {}))
+ 
++(defn program-space
++  "`ctx` as the process's Var space: its namespaces hold the Vars
++  `space-var` answers, so every analysis against it is shared by every
++  context that holds them."
++  {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :seon.sci.eval/ctx]}
++  [ctx]
++  (assoc ctx ::space (::space operator.runtime/sci-var-space)))
++
++(defn space-var
++  "The process Var space's one SCI Var for the program name `sym`, made by
++  `create` on its first request. A name a branch adds gets its Var here too,
++  and joins only the namespaces of the runtimes that define it."
++  {:malli/schema [:=> [:cat :qualified-symbol [:=> [:cat] :seon.sci.eval/sci-var]] :seon.sci.eval/sci-var]}
++  [sym create]
++  (.computeIfAbsent ^java.util.concurrent.ConcurrentHashMap (::vars operator.runtime/sci-var-space) sym
++                    (reify java.util.function.Function (apply [_ _] (create)))))
++
+ (defn- analysis-key
+   "What the analysis of `row` against `ctx`'s Var space is a function of: the
+-  space and the definition digest. The digests of its namespace declaration and
+-  of the macros it expands join the key with the program's rows (the
+-  branch-runtime note's macro exception)."
++  space, the definition digest, the digest of its namespace's declaration
++  (aliases, refers and imports decide resolution), the digests of the program
++  macros it expands, and what it is armed with (`::armed-with`)."
+   {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:map [:seon.fn/sym :seon.fn/sym] [:seon.fn/source :string] [:seon.program/definition-digest :seon.program/definition-digest]]] [:vector :seon.schema/value]]}
+   [ctx row]
+-  [(::space ctx) (:seon.program/definition-digest row)])
++  [(::space ctx) (:seon.program/definition-digest row) (::namespace-digest row) (::macro-digests row) (::armed-with row)])
+ 
+ (defn- analyse
+   "The function `row`'s source defines, analysed against `ctx`'s Vars on a fork
+-  that is then dropped: no runtime's binding is written."
++  that is then dropped: no runtime's binding is written. Armed by `row`'s
++  `::arm` when it has one."
+   {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:map [:seon.fn/sym :seon.fn/sym] [:seon.fn/source :string] [:seon.program/definition-digest :seon.program/definition-digest]]] :seon.instrument/callable]}
+-  [ctx {sym :seon.fn/sym source :seon.fn/source}]
+-  (let [fork (sci/fork ctx)]
+-    (binding [sci.lang/*write-observer* nil sci.lang/*expansion-observer* nil]
+-      (sci.ctx-store/with-ctx fork
+-        (sci/binding [sci/ns (sci/find-ns fork (symbol (namespace sym)))]
+-          (sci/eval-string* fork source))
+-        @(sci/resolve fork sym)))))
++  [ctx {sym :seon.fn/sym source :seon.fn/source arm ::arm :as row}]
++  (let [;; a `.cljc` definition reads its `:clj` branches, as the JVM loaded it
++        fork (assoc (sci/fork ctx) :features #{:clj})
++        analysed (binding [sci.lang/*write-observer* nil sci.lang/*expansion-observer* nil]
++                   (sci.ctx-store/with-ctx fork
++                     (sci/binding [sci/ns (sci/find-ns fork (symbol (namespace sym)))]
++                       (sci/eval-string* fork source))
++                     @(sci/resolve fork sym)))]
++    ;; its digest names the definition it is, so a context can tell the
++    ;; loaded program's from a branch's (`seon.sci.kernel/held-apart-var`)
++    ;; (a definition whose value is a Var, `(def f #'g)`, carries none)
++    (let [armed (if arm (arm analysed) analysed)]
++      (if (instance? clojure.lang.IObj armed)
++        (vary-meta armed assoc ::digest (:seon.program/definition-digest row))
++        armed))))
+ 
+ (defn analysed
+   "The function `row` defines, analysed once per content (`analysis-key`).
+diff --git a/test/seon/sci/branch_execution_test.clj b/test/seon/sci/branch_execution_test.clj
+index 2d958e016..5fe0e9b34 100644
+--- a/test/seon/sci/branch_execution_test.clj
++++ b/test/seon/sci/branch_execution_test.clj
+@@ -83,6 +83,15 @@
+                             :seon.schema.admission/source :agent})
+         symbols))
+ 
++(defn- runs-loaded-definition?
++  "Whether `ctx` runs `database`'s analysed definition of `sym`: the root it
++  calls is the analysis of that row's definition digest
++  (`seon.sci.runtime/analysed`), never the compiled Var's."
++  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :qualified-symbol] :boolean]}
++  [ctx database sym]
++  (= (:seon.program/definition-digest (db/pull database [:seon.program/definition-digest] [:seon.fn/sym sym]))
++     (:seon.sci.runtime/digest (meta (sci.ctx-store/with-ctx ctx @(sci/resolve ctx sym))))))
++
+ (defn- refusal-of
+   "The data of the refusal calling `sym` in `ctx` throws, else nil."
+   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol] [:maybe :map]]}
+@@ -543,9 +552,9 @@
+          (is (identical? @(find-var caller) @(sci/resolve ctx caller))
+              "an unchanged host-bound caller of a changed definition runs as compiled")))))))
+ 
+-(deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting the reverse closure (77 declarations) of one changed hiccup helper; measured 1,426 ms."
++(deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting one changed hiccup helper; measured 1,426 ms."
+            :seon.test/long-ms 12000}
+-  a-branch-change-leaves-its-loaded-src-callers-compiled
++  a-branch-change-reaches-its-loaded-src-callers-through-their-vars
+   (support/with-database
+    (fn [connection]
+      (db/with-branch {:seon.db/connection connection}
+@@ -561,21 +570,21 @@
+              ;; Callers in class-value's current closure (the indexed program,
+              ;; 2026-09-27): derive-page reads the private def stream-strip-id,
+              ;; request! the referred defonce running-instances, start-flows!
+-             ;; the dependency alias async/chan. selected-instance no longer
+-             ;; reaches class-value.
++             ;; the dependency alias async/chan.
+              callers '[seon.render.web/derive-page seon.cluster.boot/request!
+                        seon.cluster/start-flows!]
+-             ;; The indexer marks handler and serve! host-bound: a branch never
+-             ;; changes the platform, so unchanged host-bound callers keep
+-             ;; their compiled roots and are never an SCI definition.
++             ;; The indexer marks handler and serve! host-bound: SCI cannot
++             ;; run them, so they keep their compiled roots.
+              host-bound-callers '[seon.render.web/handler seon.cluster/serve!]]
+-         ;; The loaded src program is the platform (owner, 2026-10-18): its
+-         ;; callers see the branch's change only after merge and reload.
++         ;; Owner (2026-10-19): a branch's change is live for its whole
++         ;; runtime. Callers run the loaded program's analysed definitions,
++         ;; which resolve the changed helper through its Var on the branch.
+          (is (= #{changed} (:interpreted view)) "only the changed helper interprets")
+-         (is (every? #(identical? @(find-var %) (sci.ctx-store/with-ctx ctx @(sci/resolve ctx %)))
+-                     (concat callers host-bound-callers))
+-             "each loaded src caller keeps its compiled root")
+-         (is (every? #(nil? (refusal-of ctx %)) callers) "a compiled root refuses nothing by name")))))))
++         (is (every? #(runs-loaded-definition? ctx before %) callers)
++             "each loaded src caller keeps the loaded program's analysed root: nothing is re-rooted")
++         (is (every? #(identical? @(find-var %) (sci.ctx-store/with-ctx ctx @(sci/resolve ctx %))) host-bound-callers)
++             "each host-bound caller keeps its compiled root")
++         (is (every? #(nil? (refusal-of ctx %)) callers) "an analysed root refuses nothing by name")))))))
+ 
+ (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting two changed entities and their reverse closures; measured 1,090 ms on default."
+            :seon.test/long-ms 12000}
+@@ -700,8 +709,8 @@
+              "only the changed definition interprets: no loaded platform caller is re-rooted")
+          (is (= #{'seon.db-test/only-an-as-of-view-has-an-as-of-key} (:seon.sci.eval/interpreted-tests snapshot))
+              "its one direct test runs interpreted")
+-         (is (identical? @(find-var caller) (sci.ctx-store/with-ctx ctx @(sci/resolve ctx caller)))
+-             "a compiled src caller keeps its compiled root")
++         (is (runs-loaded-definition? ctx before caller)
++             "a src caller is never re-rooted: it keeps the loaded program's analysed root and reaches the change through its Var")
+          (is (zero? (profile/calls-of measured 'seon.sci.eval/interpret-source-namespaces!))
+              "no test namespace is interpreted by the redefinition")))))))
+ 
+diff --git a/test/seon/sci/eval_test.clj b/test/seon/sci/eval_test.clj
+index f7ebe46f0..1aa4132a8 100644
+--- a/test/seon/sci/eval_test.clj
++++ b/test/seon/sci/eval_test.clj
+@@ -38,6 +38,7 @@
+             [seon.program :as program]
+             [sci.core :as sci]
+             [sci.impl.utils :as sci.utils]
++            [sci.impl.vars]
+             [sci.ctx-store]
+             [seon.render :as render]
+             [seon.render-simplification-test :as simplification]
+@@ -177,12 +178,23 @@
+ 
+ (deftest no-sci-runnable-src-function-runs-its-compiled-var
+   ;; Invariant 1 of the branch-runtime note: a runtime's answers depend only on
+-  ;; its name -> digest map, never on what main's JVM compiled. So every src
+-  ;; function the index calls SCI-runnable runs its analysed definition in a
+-  ;; base context, never the compiled function.
++  ;; its name -> digest map, never on what main's JVM compiled. Main may run
++  ;; compiled, having no overrides (owner, 2026-10-19); a branch with a change
++  ;; runs every src function the index calls SCI-runnable as its analysed
++  ;; definition, never the compiled function.
+   (test-support/with-database
+    (fn [connection]
+-     (let [database (db/db connection)
++     (let [before (db/db connection)
++           changed 'seon.print/literal
++           source (str/replace-first (:seon.fn/source (db/pull before [:seon.fn/source] [:seon.fn/sym changed]))
++                                     #"(?s)\[value\].*$" "[value]\n  \"BRANCH\")")
++           _ (test-support/transacted!
++              connection
++              (test-support/replacement-tx
++               before [:seon.fn/sym changed]
++               (:seon.fn/source (test-support/program-fn-entity before changed source {:seon.schema.admission/source :agent}))
++               {:seon.schema.admission/source :agent}))
++           database (db/db connection)
+            ctx (eval/base-ctx database)
+            runnable (db/q '[:find [?sym ...]
+                             :where [?f :seon.fn/host-bound? false] [?f :seon.schema.admission/source :core]
+@@ -190,7 +202,7 @@
+                             (not [?f :seon.fn/macro? true])
+                             [?f :seon.fn/ns ?namespace] [?namespace :seon.fn/file ?file]
+                             [?file :seon.fn.file/relative-root "src"] [?f :seon.fn/sym ?sym]]
+-                          database)
++                          before)
+            compiled (into (sorted-set)
+                           (filter (fn [sym]
+                                     (when-let [host (find-var sym)]
+@@ -520,8 +532,13 @@
+                                   [:namespaces ns-sym sym])]
+               :when (and (instance? sci.lang.Var var-a)
+                          (identical? var-a var-b)
+-                         (not (:sci/built-in (meta var-a))))]
++                         (not (:sci/built-in (meta var-a)))
++                         ;; the process Var space's Vars are shared by every
++                         ;; context and owned by none: a write is the
++                         ;; writer's own binding (`seon.sci.runtime/space-var`)
++                         (or (sci.impl.vars/owns? ctx-a var-a) (sci.impl.vars/owns? ctx-b var-a)))]
+           (symbol (str ns-sym) (str sym)))
++        _ (sci/eval-string* ctx-a "(alter-var-root #'clojure.core/spit (constantly :written))")
+         before (sci/eval-string*
+                 ctx-b
+                 "(clojure.walk/macroexpand-all '(when true :ok))")
+@@ -534,6 +551,7 @@
+           (catch Throwable failure
+             failure))]
+     (is (empty? shared-writable))
++    (is (fn? (sci/eval-string* ctx-b "clojure.core/spit")) "a shared Var written in one context keeps the other's root")
+     (is (instance? Throwable attempt))
+     (is (re-find #"read-only" (ex-message attempt)))
+     (is (= before

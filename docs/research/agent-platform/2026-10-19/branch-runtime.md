@@ -238,7 +238,10 @@ patch, `branch-runtime-wire.patch` next to this note (lane runtime-wire, below):
 invariant test are green and the two test namespaces gain no red, but a branch with a function change pays the
 interpretation of interop-heavy platform functions (`seon.id/digest` 124x, `:similar-by-name-warm` 2.45 GB against
 57 MB), so the hub-change proof misses its bound. The leaf rule on top of it was tried and cut (lane runtime-leaf,
-below): it fixes `seon.id/digest` but leaves `:similar-by-name-warm` at 2,452 MB. P2 is partial in the patch. P3 and P4 are not approved.
+below): it fixes `seon.id/digest` but leaves `:similar-by-name-warm` at 2,452 MB. Lane runtime-arm (below) brought three of the five
+changed-branch rows to HEAD and stopped at a patch, `branch-runtime-arm.patch` (the wire rebased, plus two producer fixes):
+`:seon-db-nine-forms` (1.39x, one defect of the wire) and `:reuse-one-unchanged-test` (1.76x) miss the 1.3x bar. P2 is
+partial in the patch. P3 and P4 are not approved.
 
 P1 attempt (lane runtime-p0-p2, 2026-10-19). The patch is `branch-runtime-p1.patch` next to this note. It adds
 `seon.sci.eval/analyse-loaded-functions!` to `acquire-program!`, the proof
@@ -502,6 +505,69 @@ Ruled out by the owner's test ("doesn't really help ... cut it"): the rows stay 
   `seon.db/query-index-patterns` dominate. Each SCI function call still derefs the dynamic
   `sci.ctx-store/*ctx*` (`sci.impl.fns/in-defining-ctx`), which allocates a `MapEntry` in `Var.getThreadBinding`:
   about a tenth of interpreted `seon.id/id`'s allocation.
+- **Lane runtime-arm (2026-10-19, SCI pin 33039c6e):** the patch `branch-runtime-arm.patch` is the wiring patch plus two
+  producer fixes. Each row was measured with the same probe (`ordinary-operations-cost-...`'s `measured` flow, request cost
+  per row, top functions widened). HEAD and the patch ran in throwaway check JVMs back to back. MB allocated / ms:
+
+  | Row | HEAD | wire | wire + arm patch |
+  |---|---|---|---|
+  | `:similar-by-name-warm` | 26.1-26.8 | 841 | 27.1 (1.01x) |
+  | `:current-state-with-task` | 204-209 | 289 | 232 (1.12x) |
+  | `:hub-behavior-change` | 1,211-1,230 / 1.3-1.5 s | 1,190 / 2.3 s | 1,187-1,206 / 1.1-1.3 s (0.98x) |
+  | `:seon-db-nine-forms` | 978-991 | 1,363 | 1,363-1,384 (1.39x); 1,070-1,106 (1.1x) after the defect below |
+  | `:reuse-one-unchanged-test` | 29.1-29.6 | 52 | 50.7-57 (1.76x) |
+  | `(my.task/current)`, warm (P4's every-turn call) | 187 / 137 ms | | 210 / 126 ms (1.13x) |
+  | `:unchanged-request` | 17.9-18.3 | 18.3 | 18.3-18.4 |
+
+  - **Item 1, "arming per changed branch", was a projection rebuild, not arming.** In the hub row the 4,197
+    `seon.schema/contract-references` and `seon.schema.internal/assert-compilable-schema!` calls come with one
+    `:seon.schema/projection` miss (1,085 ms). The analysed base is armed once per JVM: kind
+    `:seon.sci.runtime/analysed` has 4,458 misses (1.3-1.7 s) in the first changed request and 0 after, across every
+    later branch. On a changed runtime `seon.schema` runs interpreted, its `requiring-resolve` answers the SCI Var of
+    each predicate, so `seon.schema/predicate-bindings` keyed every build by other Var objects and
+    `projection-with-declarations` saw every predicate rebound. Fix at the producer: `seon.schema/runtime-predicate`
+    answers the loaded JVM Var whenever the JVM holds one, interpreted or compiled; a predicate the branch holds apart
+    is still bound by `seon.sci.kernel/context-bound-projection`. The hub row's projection is then a cache hit and both
+    functions leave its profile. The arm key stays the compiled wrapper (`::runtime/armed-with`): a content key would
+    need the call-preparation snapshot's content identity (its projection and the Datahike revisions its memo reads),
+    and no measured row pays a re-arm.
+  - **Item 2, numeric kernels.** `seon.embed/nearest` is not host-bound by the existing rule: SCI resolves every class,
+    and nothing in it is `reify`/`proxy`/`import`/`print-method`. The patch adds one rule computed per declaration,
+    `seon.fn/host-loops`, read by `seon.fn/host-bound-callers`: a declaration whose own body calls `clojure.core/loop` or
+    `dotimes` and also uses host arrays (`aget`, `aset`, `alength`, `aset-*`) or a `java.nio.Buffer` class (clj-kondo's
+    class usage, `isAssignableFrom`). Census over `src` (clj-kondo v2026.07.24): 175 declarations loop, 54 touch arrays,
+    12 touch buffers, and 21 meet both: `seon.embed/nearest`, `seon.id/structural-digest`, `seon.id/print-canonical!`,
+    `my.program/file-line`, `seon.blob/stored-digest-and-size`, `seon.cluster.source/proven-file`,
+    `seon.error.refusal/first-frame-answer`, `seon.error.refusal/stack-frames`, four `seon.fs.jvm` passes,
+    `seon.profile/bracket`, `counts`, `histogram-calls`, `quantile-position`, `top-functions`,
+    `seon.sci.forgive/scan`, `seon.shell.jvm/copy-blob-stdin!`, `seon.test.runner/reach-components` and
+    `seon.web.jvm/captured-octets`. `:similar-by-name-warm` falls from 841 to 27 MB and `my.program/file-line` from 29.5
+    to 2.6 MB in `:current-state-with-task`. What this gives up is the leaf rule's price: such a function runs as loaded
+    on every runtime, and a branch's change to one of its callees does not reach it until merge.
+  - **`:seon-db-nine-forms`: a defect of the wire, bisected.** An agent's first `(in-ns 'seon.db) nil` on a changed
+    runtime rewrites the namespace rows of `seon.profile` (9 imports, 1 alias) and `seon.env` (4 aliases) with equal
+    content. The datoms are retracted and re-added, and `seon.db/namespace-digests-tx` re-derives every declaration digest
+    under them (about 765 `seon.db/declaration-value` calls, about 300 MB, through `seon.db/request-view` replays).
+    HEAD writes nothing. After that first entry the row measures 1,070-1,106 MB (1.1x).
+    - The likely producer: the wire's `runtime-rows!` installs a loaded namespace's own `deftype`/`defrecord` classes
+      as `:imports` (as the JVM's `deftype` imports them). `seon.sci.eval/enter-namespace*` later re-installs the
+      namespaces seon.db aliases from the plain `row-bindings`. `seon.sci.arm/changed-namespaces` sees their resolver
+      state change, and `seon.turn.batch/namespace-facts` writes a row (`declared-bindings` keeps `(:imports live)`
+      whole).
+    - Not yet proven by a probe: entering seon.db on a fork of the agent's context showed no change in seon.db's own
+      resolver keys, and the other namespaces were not compared.
+  - **`:reuse-one-unchanged-test`: the interpretation price.** `(my.test/check ...)` runs interpreted: the evaluation's
+    own allocation grows from 4.5 to 15.3 MB and the step from 14 to 25-31 MB, with the same calls (7,813 against
+    7,820). The per-request profile assigns the extra to no function: no armed function's self allocation grows by more
+    than 1 MB. It is 2x of a 29 MB row, inside the 2-3x the owner accepted for interpretation but outside 1.3x.
+  - **`seon.profile/pain` on the patch's check JVM** puts `seon.sci.eval/fork-cluster-ctx` first by steps (0.98 of
+    the system's steps overrun, 27 calls). Each fork walks every installed function (`seon.sci.kernel/program-definition?`,
+    7,811 calls in one redefinition row), so a fork costs O(program). Next come `seon.fn/declared-callers` (reads) and
+    `seon.db/vector-query-call` (bytes, as on HEAD).
+  - **Rerun:** apply `branch-runtime-arm.patch` and the probe (`branch-runtime-arm-probe.patch`, which adds
+    `seon.cost-estimate-test/cost-rows-probe` and writes each row to `tmp/runtime-arm/*.edn`), then run
+    `bin/seon check <the patch's paths> test/seon/cost_estimate_test.clj --include-long --test
+    seon.cost-estimate-test/cost-rows-probe`. `RUNTIME_ARM_PRE` sets a request to run before the rows.
 - **What would make the rule work:** compile what does not reach the change, not what calls nothing: on a changed
   runtime, interpret only the reverse closure of the changed names (cached analyses, so O(closure) binding) and keep
   every other function compiled. That is a closure walk, which this round excluded.
