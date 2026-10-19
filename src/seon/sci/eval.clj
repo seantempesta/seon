@@ -2665,6 +2665,14 @@
          digest (assoc :seon.program/definition-digest digest)))
       analysed)))
 
+(defn- defonce-source?
+  "Whether `source`, the stored definition of `sym`, is a `defonce`, read as
+  `ctx` reads its namespace."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol :string] :boolean]}
+  [ctx sym source]
+  (sci/binding [sci/ns (sci/find-ns ctx (symbol (namespace sym)))]
+    (= 'defonce (first (sci/parse-string (assoc ctx :features #{:clj}) source)))))
+
 (defn- runtime-rows!
   "The loaded program's `src` definitions SCI can run, as `seon.sci.runtime`
   rows, with `ctx` made to resolve them as their files do: each namespace's
@@ -2675,7 +2683,9 @@
   definition's row (`:value`) carries the program names it calls or holds
   (`::runtime/calls`), which order its evaluation, and so does a macro's
   (`:macro`): its expansion reads them. A host-bound declaration
-  (`:seon.fn/host-bound?`) and a test-root or unloaded namespace have no row."
+  (`:seon.fn/host-bound?`), a `defonce` (an observation the process made once,
+  which every runtime keeps) and a test-root or unloaded namespace have no
+  row."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.schema/projection
                        [:map-of :symbol :map] [:set :symbol]]
                   [:vector :map]]}
@@ -2723,7 +2733,8 @@
                                        (ns-interns host))))
     (into []
           (keep (fn [[sym source digest]]
-                  (when-let [host-var (find-var sym)]
+                  (when-let [host-var (and (not (and (contains? values sym) (defonce-source? ctx sym source)))
+                                           (find-var sym))]
                     (let [row {:seon.fn/sym sym :seon.fn/source source :seon.program/definition-digest digest
                                ::runtime/macro-digests (vec (get expanded sym))}]
                       (cond
@@ -2824,8 +2835,7 @@
   answers on `ctx`'s runtime, and a function or macro analysed (`analyse`, of
   the fork and the row), so a caller expands the macros and the values they
   read as this runtime holds them. The fork is dropped; nothing is written to
-  `ctx`. A `defonce` is evaluated as a `def`: the fork's Var already holds the
-  host's value."
+  `ctx`."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :map [:vector :map]
                        [:=> [:cat :seon.sci.eval/ctx :map] :seon.instrument/callable]]
                   :map]}
@@ -2838,8 +2848,7 @@
         (reduce (fn [held {sym :seon.fn/sym source :seon.fn/source kind ::runtime/kind :as row}]
                   (let [root (if (= :value kind)
                                (sci/binding [sci/ns (sci/find-ns fork (symbol (namespace sym)))]
-                                 (let [form (sci/parse-string fork source)]
-                                   (sci/eval-form fork (if (= 'defonce (first form)) (cons 'def (rest form)) form)))
+                                 (sci/eval-string* fork source)
                                  @(sci/resolve fork sym))
                                (analyse fork row))]
                     (sci/bind-root! fork (sci/resolve fork sym) root)
@@ -2858,8 +2867,9 @@
   (`seon.sci.runtime/analysed`), which resolves its callees late, through the
   Var each analysed body holds, in the executing context's own binding. A
   value definition holds what it computed: one whose reach holds a name
-  changed now, or an open one not yet bound, is evaluated again from its
-  source on `ctx`'s runtime. A macro whose closed reach holds a change runs
+  changed now, or an open one whenever the runtime's changes differ from
+  those it was last evaluated under, is evaluated again from its source on
+  `ctx`'s runtime. A macro whose closed reach holds a change runs
   analysed, so its callers expand it with the values it reads as `ctx` holds
   them; each root is produced after what it reads (`produced-roots`). An
   analysis is keyed by its definition, by how `ctx` resolves its namespace
@@ -2892,7 +2902,9 @@
                                (and (not (contains? held sym))
                                     (not (contains? kept sym))
                                     (case kind
-                                      :value (or (contains? reached sym) (not (contains? roots sym)))
+                                      :value (or (contains? reached sym)
+                                                 (and (not (contains? (::runtime/closed index) sym))
+                                                      (not= changes prior-changes)))
                                       :macro (and (contains? reached sym)
                                                   (or (not (contains? roots sym)) (rekeyed? row)))
                                       :function (or (not (contains? roots sym)) (rekeyed? row))))))

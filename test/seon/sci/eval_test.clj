@@ -14,6 +14,8 @@
             [clojure.data.json :as json]
             [seon.mcp :as mcp]
             [seon.problems]
+            [seon.cluster]
+            [seon.cluster.source]
             [seon.ref]
             [clojure.set :as set]
             [clojure.main]
@@ -214,6 +216,20 @@
          (is (= [{:seon.config.ai/model "BRANCH"}]
                 (in-context branch "(fn [db] (:seon.problems/missing-models (seon.problems/problems db {})))" database))
              "problems reads the branch's missing-models through families"))))))
+
+(deftest a-changed-runtime-keeps-the-process-launch-observations
+  ;; Runtime re-review R5: a `defonce` is an observation the process made once, never evaluated again: a
+  ;; branch changing any definition holds the very values the JVM read at launch, not the disk's bytes now.
+  (test-support/with-database
+   (fn [connection]
+     (let [database (branch-replacing! connection 'seon.print/literal "(?s)\\[value\\].*$" "[value]\n  \"BRANCH\")")
+           branch (eval/base-ctx database)]
+       (is (identical? @#'seon.cluster/launched-source-digests
+                       (in-context branch "@#'seon.cluster/launched-source-digests"))
+           "the source digests the JVM launched with")
+       (is (identical? @#'seon.cluster.source/launched-dependencies
+                       (in-context branch "@#'seon.cluster.source/launched-dependencies"))
+           "the dependency digests the JVM launched with")))))
 
 (deftest a-branch-changed-macro-is-expanded-by-its-callers
   ;; Runtime review F3 on the database path: the caller's analysis is keyed by

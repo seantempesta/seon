@@ -100,7 +100,8 @@
 ;; - m0, a macro expanding to a call of h1 (its versions add a constant), and
 ;;   cm, which uses it: the JVM expanded m0's version 0 into compiled cm.
 ;; - v0, a value definition holding h0, and cv, which calls through it; va, a
-;;   value holding the caller c0 itself, and cva through it.
+;;   value holding the caller c0 itself, and cva through it; vo, an open value
+;;   (it holds r0) holding h3 by object, and cvo through it.
 ;; - hb, host-bound: SCI cannot run it, so it runs compiled on every runtime,
 ;;   calling main's h2 (the one exception, F2); chb calls it. Names reaching hb
 ;;   are not compared.
@@ -113,9 +114,9 @@
 
 (def ^:private macro-callers '{cm [m0 h1]})
 
-(def ^:private value-callers '{v0 [h0] va [c0]})
+(def ^:private value-callers '{v0 [h0] va [c0] vo [h3 r0]})
 
-(def ^:private more-callers '{cv [v0] cva [va] ch [h3] hb [h2] chb [hb] cc [h0]})
+(def ^:private more-callers '{cv [v0] cva [va] ch [h3] hb [h2] chb [hb] cc [h0] cvo [vo]})
 
 (defn- macro-source
   "Version `v` of the macro m0."
@@ -125,7 +126,7 @@
 
 (def ^:private shaped-names
   "Every name of the shaped program but the macro, in definition order."
-  (into program-names '[v0 va cv cva cm ch hb chb cc]))
+  (into program-names '[v0 va cv cva cm ch hb chb cc vo cvo]))
 
 (defn- shaped-source
   "Version `v` of `program-name` in the shaped program: the macro's, a value's
@@ -136,6 +137,8 @@
     m0 (macro-source v)
     v0 "(def v0 {:f h0})"
     va "(def va c0)"
+    vo "(def vo {:f h3 :r r0})"
+    cvo (str "(defn cvo [x] (+ " (* 1000 (inc v)) " ((:f vo) x)))")
     cv (str "(defn cv [x] (+ " (* 1000 (inc v)) " ((:f v0) x)))")
     cva (str "(defn cva [x] (+ " (* 1000 (inc v)) " (va x)))")
     cm (str "(defn cm [x] (+ " (* 1000 (inc v)) " (m0 x)))")
@@ -178,6 +181,7 @@
               " cm (fn [x] (+ 1000 (+ 0 (h1 x)))) ch (fn [x] (+ 1000 (reduce + (mapv h3 [x (inc x)]))))"
               " hb (fn [x] (+ 1000 (h2 x))) chb (fn [x] (+ 1000 (hb x)))"
               " cc (fn [x] (seon.cache/lookup :rt.gen/cc [x] (constantly 1) (fn [] (+ 1000 (h0 x)))))"
+              " vo {:f h3 :r r0} cvo (fn [x] (+ 1000 ((:f vo) x)))"
               "] {" (str/join " " (map #(str "'" % " " %) shaped-names)) "})"))))
 
 (def ^:private shaped-index
@@ -237,6 +241,7 @@
                                                                                (case n
                                                                                  v0 (str "((:f rt.gen/v0) " i ")")
                                                                                  va (str "(rt.gen/va " i ")")
+                                                                                 vo (str "((:f rt.gen/vo) " i ")")
                                                                                  (str "(rt.gen/" n " " i ")")))
                                                                              shaped-names)) "]")))
            ::predicate (let [held @(sci/resolve ctx 'rt.gen/p0)]
@@ -290,6 +295,17 @@
                             (if backwards? (rseq runtimes) runtimes))))
                 :seed 20261019)]
     (is (:pass? result) "every composition answers what its own source answers")))
+
+(deftest an-open-value-holds-the-functions-of-its-runtime
+  ;; Runtime re-review R7: an open value is evaluated again whenever its runtime's delta changes, so a child
+  ;; that changes h3 after its parent evaluated vo holds the child's h3, as its own source answers.
+  (seon.cache/evict-kinds! #{:seon.sci.runtime/analysed :rt.gen/cc})
+  (let [parent (shaped-branch (assoc (shaped-main) ::versions {}) {'h0 1})
+        child (shaped-branch parent {'h3 1})]
+    (is (= (get (shaped-from-scratch (::versions parent)) 'cvo) (get (shaped-answers parent) 'cvo))
+        "the parent's vo holds the h3 it runs")
+    (is (= (get (shaped-from-scratch (::versions child)) 'cvo) (get (shaped-answers child) 'cvo))
+        "the child's vo holds the child's h3")))
 
 (deftest composing-branches-analyses-each-distinct-digest-once
   ;; Invariant 4: A changes h1, B changes h2, C composes A's h1 with B's h2.
