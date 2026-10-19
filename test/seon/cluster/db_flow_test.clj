@@ -2265,6 +2265,95 @@
                 (when (contains? (registry/branches store) branch)
                   (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))))))
 
+(deftest ^{:seon.test/long "One chain world from a filed task: three chain tasks from the real Design, Prove and Implement templates, each one scripted model turn and its test step (Design's and Prove's handoff tables run as their proofs), two advances, one final merge (a nested seon.test/run on a candidate commit) and its publication."
+           :seon.test/long-ms 240000}
+  a-filed-tasks-design-prove-implement-chain-merges-with-no-hand-act
+  ;; Task-system brief 2026-10-19 (docs/research/agent-platform/2026-10-19/task-system-brief.md §4, §6): no test drove
+  ;; the real Design and Prove templates through a chain. A filed task becomes three chain tasks
+  ;; (`seon.task/from-filed` -> `seon.task/chain!`); a scripted model answers each with one reply: Design writes What
+  ;; exists and Approach into the plan, Prove writes a red deftest into Implement's proofs, Implement makes it green;
+  ;; each step's own done rule passes, root advances the chain twice and merges it to main once. Red until the file
+  ;; proof places an added test after the replaced function it calls (`seon.cluster.source/proven-file` puts every
+  ;; addition before the first replaced declaration; patch docs/research/agent-platform/2026-10-19/steps-fix-write-back-placement.patch).
+  (binding [*space* "tq.filedchain"]
+    (test-support/with-database
+     (fn [connection]
+       (let [rows (str *space* "-rows")
+             task-sym (fn [] '(get-in (my.task/current) [:seon.context/task :seon.task/sym]))
+             design (str "(my.task/update! " (task-sym) " :seon.task/plan str \"\\n\\n## What exists\\n\\n`" rows
+                         "/twice` returns its input unchanged; `" rows "/twice-is-an-int` covers it.\\n\\n## Approach\\n\\n"
+                         "Change `" rows "/twice` to answer twice its input, its contract unchanged over ints; nothing "
+                         "else changes. The plan is `:seon.task/plan`.\\n\")")
+             prove (str "(in-ns '" rows ")\n"
+                         "(clojure.test/deftest doubles (clojure.test/is (= 4 (twice 2))))\n"
+                         "(my.task/update! (get-in (my.task/current) [:seon.context/chain :seon.context/after 0 :seon.task/sym]) "
+                         ":seon.task/proofs (fnil into #{}) '[" rows "/doubles])")
+             implement (str "(in-ns '" rows ")\n" twice-work)
+             ledger (atom [])]
+         (test-support/with-provider
+          ledger (test-support/reply-queue [design prove implement])
+          (fn [server]
+            (chain-world
+             ;; z only gives the world's proof namespace a definition; neither world task runs on main
+             connection {"e" [#{} nil] "z" [#{} "(clojure.test/is (= 1 1))"]}
+             (fn [handle]
+               (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                               :seon.config/manifest (assoc (test-support/provider-config server) :seon.config.ai/no-provider false)})
+               (let [root (checkout! connection {(str "test/" (str/replace rows #"[.-]" {"." "/" "-" "_"}) ".clj")
+                                                 (str "(ns " rows "\n  (:require [clojure.test :refer [deftest is]]))\n\n"
+                                                      "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] x)\n\n"
+                                                      "(deftest twice-is-an-int (is (int? (twice 2))))\n")})
+                     ;; the filed entry is the chain's source, never a main task of its own
+                     _ (test-support/transacted! connection (mapv #(vector :db/add [:seon.task/id (chain-handle %)] :seon.task/execution :held)
+                                                                  ["e" "z"]))
+                     routing (:seon.agent/routing handle)
+                     store (agent/handle-store handle)
+                     database (db/db connection)
+                     chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                        (task/from-filed database (task/task-declaration database (chain-handle "e"))))
+                     branch (:seon.chain/branch chain)
+                     handles (:seon.task/handles chain)
+                     attempts (mapv #(id/id [% 1]) handles)
+                     head #(db/branch-database (db/db connection) branch)]
+                 (try
+                   (is (= 3 (count handles)) "the filed task is a Design, a Prove and an Implement task")
+                   (doseq [[i k] (map-indexed vector attempts)]
+                     (pass! handle routing)
+                     (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
+                       (is (= :done (await-on! on-branch #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k]
+                                                                  [?a :seon.task.attempt/end ?e]]
+                                                                (db/db on-branch) k)
+                                               (keyword "seon.cluster.db-flow-test" (str "filed-step-" (inc i) "-ended"))))
+                           (str "step " (inc i) " ends done"))))
+                   (is (= {} (into {} (keep (fn [k] (when-let [r (:seon.agent/end-refusals (db/pull (head) [:seon.agent/end-refusals] [:seon.agent/id (str "attempt/" k)]))] [k r])))
+                                   attempts)) "no step's done rule refused")
+                   (let [[_ _ implement-task] handles
+                         plan (:seon.task/plan (db/pull (head) [:seon.task/plan] [:seon.task/id implement-task]))]
+                     (is (str/includes? plan "## Approach") "Design's plan flows to Implement")
+                     (is (contains? (set (:seon.task/proofs (db/pull (head) [:seon.task/proofs] [:seon.task/id implement-task])))
+                                    (symbol rows "doubles"))
+                         "Prove wrote Implement's proof on the branch"))
+                   (pass! handle routing)
+                   (pass! handle routing)
+                   (let [main (db/db connection)]
+                     (is (= [:done :done :merged]
+                            (mapv #(:seon.task/outcome (db/pull main [:seon.task/outcome] [:seon.task/assignment %])) attempts))
+                         "one merge admits the chain: Design and Prove :done, Implement :merged")
+                     (is (= 3 (count @ledger)) "one model call per step")
+                     (is (eventually #(str/includes? (slurp (java.io.File. ^String root (str "test/" (str/replace rows #"[.-]" {"." "/" "-" "_"}) ".clj")))
+                                                     "(* 2 x)"))
+                         "the merge publishes Implement's change into the checkout"))
+                   (finally
+                     (when-let [child (get-in @routing [:seon.agent/children branch])]
+                       (doseq [started (keys (:seon.agent/started @child))]
+                         (agent/stop-flow! {:seon.agent/id started :seon.agent/routing child}))
+                       (doseq [execution (vals (:seon.agent/contexts @child))
+                               :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
+                         (agent/release-context! execution)))
+                     (agent/release-chain-route! routing branch)
+                     (when (contains? (registry/branches store) branch)
+                       (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))))))))
+
 (deftest ^{:seon.test/long "One chain world: a one-task chain whose attempt's hand-written work and done end, one refused final merge (prepare-merge!'s write-back refuses) and its bail over three db<->flow passes, then root's run and the second attempt's start."
            :seon.test/long-ms 60000}
   a-refused-final-merge-bails-to-root-once-with-its-refusal
