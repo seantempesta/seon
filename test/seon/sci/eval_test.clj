@@ -33,6 +33,7 @@
             [seon.cluster.agent :as agent]
             [seon.turn :as turn]
             [seon.blob :as blob]
+            [seon.bootstrap]
             [seon.cache]
             [seon.db :as db]
             [seon.env :as env]
@@ -300,6 +301,44 @@
        (is (not= 777 main) "main's definition answers main's dial")
        (is (= [777 main] branch-first) "the branch deriving first serves compiled code nothing")
        (is (= [main 777] compiled-first) "compiled code deriving first serves the branch nothing")))))
+
+(deftest a-derivation-handed-to-a-deriver-is-keyed-by-its-runtime-in-either-order
+  ;; Runtime review 3, Opus N1: `seon.bootstrap/groups` hands `seon.health/derived` the derivation
+  ;; `#(sections % text)`; a branch changing `seon.bootstrap/sections` answers its own groups and compiled
+  ;; code main's, whichever derives first.
+  (test-support/with-database
+   (fn [connection]
+     (let [before (db/db connection)
+           database (branch-replacing! connection 'seon.bootstrap/sections "(?s)\\[database text\\].*$" "[database text]\n  [])")
+           branch (eval/base-ctx database)
+           on-branch #(in-context branch "(fn [db] (count (:seon.help/groups (seon.bootstrap/help-value db))))" database)
+           compiled #(count (:seon.help/groups (seon.bootstrap/help-value database)))
+           main (count (:seon.help/groups (seon.bootstrap/help-value before)))
+           evict #(seon.cache/evict-kinds! #{:seon.health/derived :seon.health/reads})
+           branch-first (do (evict) [(on-branch) (compiled)])
+           compiled-first (do (evict) [(compiled) (on-branch)])]
+       (is (pos? main) "main's sections answer groups")
+       (is (= [0 main] branch-first) "the branch deriving first serves compiled code nothing")
+       (is (= [main 0] compiled-first) "compiled code deriving first serves the branch nothing")))))
+
+(deftest a-projection-derivation-is-keyed-by-its-runtime-in-either-order
+  ;; Runtime review 3, Astra blocker 1: a branch changing `seon.schema.datahike/lower-where` and main lower the
+  ;; same held projection's clauses (`seon.db/lowered-where`, held by `seon.schema.internal/projection-cache-value`)
+  ;; each by their own definition, whichever derives first.
+  (test-support/with-database
+   (fn [connection]
+     (let [before (db/db connection)
+           projection (db/carried-projection before)
+           main (eval/base-ctx before)
+           database (branch-replacing! connection 'seon.schema.datahike/lower-where
+                                       "(?s)\\[projection bound clauses\\].*$" "[projection bound clauses] [])")
+           branch (eval/base-ctx database)
+           lowered (fn [ctx clauses] (let [f (in-context ctx "(fn [p clauses] (seon.db/lowered-where p {} clauses))")]
+                                       (sci.ctx-store/with-ctx ctx (f projection clauses))))
+           first-clauses '[[?rt3-a :seon.fn/sym ?rt3-b]]
+           then-clauses '[[?rt3-c :seon.fn/sym ?rt3-d]]]
+       (is (= [[] first-clauses] [(lowered branch first-clauses) (lowered main first-clauses)]) "the branch first")
+       (is (= [[] then-clauses] (let [m (lowered main then-clauses)] [(lowered branch then-clauses) m])) "main first")))))
 
 (deftest a-runtime-derivation-is-keyed-by-its-own-program-through-every-entrance
   ;; Runtime re-review R6 on the real path: the overlay (`seon.sci.eval/base-ctx`), a continuation acquiring a

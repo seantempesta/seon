@@ -90,3 +90,29 @@
                                                  functions)]
                                  (when (seq still) {:phase phase :still-opening still}))))
                     converted)))))
+
+(def ^:private handed-derivers
+  "The cache derivers whose contract takes a function, exactly (`seon.sci.eval/handed-derivers`): code their callers
+  hand them crosses their lookup, so each runs analysed whenever a change reaches its callers' code
+  (`seon.sci.eval/coupling`). A name joining is a new deriver handed code, recorded here in the commit that adds it."
+  '#{seon.db/write-entity-error seon.embed/index seon.embed/layered seon.embed/similar-now seon.health/derived
+     seon.health/problems-unit seon.health/profile-unit seon.instrument/compiled-wrapper
+     seon.schema/with-bound-predicates seon.sci.eval/record-refusals-once!})
+
+(deftest handed-cache-derivers-follow-their-callers
+  ;; Runtime review 3 (Opus N1): a compiled deriver handed a branch's derivation keyed it by main's identity.
+  (let [database (db/db)
+        projection (db/carried-projection database)
+        derivers (map first (@#'seon.sci.eval/cache-derivers database))
+        handed (@#'seon.sci.eval/handed-derivers projection derivers)
+        leaders (::runtime/leaders (@#'seon.sci.eval/coupling database projection))
+        unled (into (sorted-map)
+                    (keep (fn [deriver]
+                            (let [callers (db/q '[:find [?caller ...] :in $ ?d :where [?f :seon.fn/calls ?d] [?f :seon.fn/sym ?caller]]
+                                                database deriver)
+                                  missing (remove #(contains? (get leaders deriver) %) callers)]
+                              (when (seq missing) [deriver (set missing)]))))
+                    handed)]
+    (is (= {:new #{} :gone #{}} {:new (set/difference handed handed-derivers) :gone (set/difference handed-derivers handed)})
+        "a new deriver handed a function is recorded in handed-derivers")
+    (is (= {} unled) "a change to any caller of a handed deriver runs it analysed")))

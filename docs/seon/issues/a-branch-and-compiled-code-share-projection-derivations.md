@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed (lane runtime-fix3, item 2)
 severity: blocker
 created: 2026-10-20
 tags: [issue, sci, branch-runtime, review3-astra]
@@ -17,3 +17,10 @@ Red proof: `seon.runtime-review3-astra-extra-test/projection-cache-holds-the-exe
 The fix belongs to the derivation's identity at its producer. A branch name, a cache flush, or an exemption from the runtime requirement does not supply the missing code dependency.
 
 Evidence and limits: [independent review](../../research/agent-platform/2026-10-20/runtime-review3-astra.md). Reproducible probe source: [review patch](../../research/agent-platform/2026-10-20/runtime-review3-astra-probes.patch); it is evidence, not an installed change.
+
+## Fix (lane runtime-fix3, 2026-10-20)
+
+`seon.schema.internal/projection-cache-value` is a cache entry point like `seon.cache/lookup`: a changed runtime binds
+it in `seon.sci.runtime/keyed-entries`, so a runtime's analysed caller keys its projection derivation by its code.
+Proof `seon.sci.eval-test/a-projection-derivation-is-keyed-by-its-runtime-in-either-order` (Astra's `lower-where` row):
+red on HEAD, green with the fix. The holder's retention outside the budget stays filed separately.

@@ -1,0 +1,192 @@
+diff --git a/src/seon/sci/eval.clj b/src/seon/sci/eval.clj
+index c95a81441..67b3ebcbf 100644
+--- a/src/seon/sci/eval.clj
++++ b/src/seon/sci/eval.clj
+@@ -2793,6 +2793,29 @@
+   '#{seon.cache/lookup seon.cache/lookup-within seon.cache/present seon.cache/evict!
+      seon.schema.internal/projection-cache-value})
+ 
++(defn- cache-kinds
++  "The cache kinds `source` names at its entry-point calls: a `seon.cache`
++  call's kind, or a projection cache key or its head, as the qualified
++  keywords the definition holds (`keywords`, its `:seon.fn/keywords`) spell
++  them in `namespace-name`."
++  {:malli/schema [:=> [:cat :symbol [:set :keyword] :string] [:set :qualified-keyword]]}
++  [namespace-name keywords source]
++  (let [entry-names (into #{} (map name) cache-entry-points)
++        ;; an auto-resolved keyword reads with its alias (or this namespace) as its namespace
++        forms (edamame/parse-string-all source {:all true :read-cond :allow :features #{:clj}
++                                                :auto-resolve (fn [alias] (if (= :current alias) namespace-name alias))})
++        named (into #{} (comp (filter (fn [form] (and (seq? form) (symbol? (first form))
++                                                      (contains? entry-names (name (first form))))))
++                              (keep (fn [[_ a b]] (let [k (if (keyword? a) a b)
++                                                        k (if (vector? k) (first k) k)]
++                                                    (when (qualified-keyword? k) k)))))
++                    (tree-seq coll? seq forms))]
++    (into #{} (filter (fn [held] (some (fn [k] (and (= (name held) (name k))
++                                                    (or (= (namespace held) (namespace k))
++                                                        (not= (namespace k) (str namespace-name)))))
++                                       named)))
++          keywords)))
++
+ (defn- callable-schema?
+   "Whether `form`, a schema form over `forms`' named schemas, admits only a
+   function: a function schema, a callable predicate or a map of them."
+@@ -2814,11 +2837,13 @@
+ 
+ (defn- cache-derivers
+   "The definitions of `database` calling a cache entry point, each as
+-  `[sym]`."
+-  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector [:tuple :qualified-symbol]]]}
++  `[sym source keywords]`."
++  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector [:tuple :qualified-symbol :string [:set :keyword]]]]}
+   [database]
+-  (into [] (comp (remove #(contains? cache-entry-points %)) (map vector))
+-        (db/q '[:find [?sym ...] :in $ [?entry ...] :where [?f :seon.fn/calls ?entry] [?f :seon.fn/sym ?sym]]
++  (into [] (remove (fn [[sym]] (contains? cache-entry-points sym)))
++        (db/q '[:find ?sym ?source (distinct ?keyword) :in $ [?entry ...]
++                :where [?f :seon.fn/calls ?entry] [?f :seon.fn/sym ?sym] [?f :seon.fn/source ?source]
++                [?f :seon.fn/keywords ?keyword]]
+               database cache-entry-points)))
+ 
+ (defn- handed-derivers
+@@ -2844,40 +2869,51 @@
+           sites)))
+ 
+ (defn- derive-coupling
+-  "`coupling`'s derivation: each handed deriver's leaders, the names whose
+-  change may change the code it is handed (`handed-code`), a handed caller's
+-  own leaders included."
++  "`coupling`'s derivation: each cache kind's derivers following each other,
++  and each handed deriver's leaders, the names whose change may change the code
++  it is handed (`handed-code`), a handed caller's own leaders included."
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection]
+-                  [:map [::runtime/leaders [:map-of :qualified-symbol [:set :qualified-symbol]]]]]}
++                  [:map [::runtime/followers [:map-of :qualified-symbol [:set :qualified-symbol]]]
++                   [::runtime/leaders [:map-of :qualified-symbol [:set :qualified-symbol]]]]]}
+   [database projection]
+-  (let [handed (handed-derivers projection (map first (cache-derivers database)))
++  (let [users (cache-derivers database)
++        handed (handed-derivers projection (map first users))
+         own (reduce (fn [held [deriver caller source callees]]
+                       (update held deriver (fnil into #{}) (handed-code deriver caller source (set callees))))
+                     {}
+                     (db/q '[:find ?handed ?caller ?source (distinct ?callee) :in $ [?handed ...]
+                             :where [?f :seon.fn/calls ?handed] [?f :seon.fn/sym ?caller] [?f :seon.fn/source ?source]
+                             [?f :seon.fn/calls ?callee]]
+-                          database (vec handed)))]
+-    ;; a handed caller passes on what its own callers hand it
+-    {::runtime/leaders (loop [held own]
+-                         (let [grown (reduce-kv (fn [grown deriver names]
+-                                                  (assoc grown deriver (into names (mapcat #(get held %)) (filter handed names))))
+-                                                held held)]
+-                           (if (= grown held) held (recur grown))))}))
++                          database (vec handed)))
++        ;; a handed caller passes on what its own callers hand it
++        leaders (loop [held own]
++                  (let [grown (reduce-kv (fn [grown deriver names]
++                                           (assoc grown deriver (into names (mapcat #(get held %)) (filter handed names))))
++                                         held held)]
++                    (if (= grown held) held (recur grown))))
++        kinds (reduce (fn [by [sym source keywords]]
++                        (reduce #(update %1 %2 (fnil conj #{}) sym) by
++                                (cache-kinds (symbol (namespace sym)) (set keywords) source)))
++                      {} users)]
++    {::runtime/leaders leaders
++     ::runtime/followers (reduce (fn [held sharing]
++                                   (reduce #(update %1 %2 (fnil into #{}) (disj sharing %2)) held sharing))
++                                 {} (filter #(< 1 (count %)) (vals kinds)))}))
+ 
+ (defn- coupling
+   "What else decides which program names run compiled
+   (`seon.sci.runtime/compiled-names`): a cache deriver whose contract takes a
+   function runs analysed whenever a change reaches the code its callers hand
+-  it (`::runtime/leaders`), so a derivation it is handed is keyed by the
+-  runtime that wrote it. Once per content of `database`'s definitions and
+-  `projection`'s contracts."
++  it (`::runtime/leaders`), and the derivers of one cache kind run alike
++  (`::runtime/followers`), so the kind's writer and reader key it alike. Once
++  per content of `database`'s definitions and `projection`'s contracts."
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection]
+-                  [:map [::runtime/leaders [:map-of :qualified-symbol [:set :qualified-symbol]]]]]}
++                  [:map [::runtime/followers [:map-of :qualified-symbol [:set :qualified-symbol]]]
++                   [::runtime/leaders [:map-of :qualified-symbol [:set :qualified-symbol]]]]]}
+   [database projection]
+-  (if-let [revisions (db/content-revisions database [:seon.fn/sym :seon.fn/calls :seon.fn/source])]
++  (if-let [revisions (db/content-revisions database [:seon.fn/sym :seon.fn/calls :seon.fn/source :seon.fn/keywords])]
+     (seon.cache/lookup ::coupling [revisions (:seon.schema.projection/fingerprint projection)]
+-                       (fn [held] (* reach-index-entry-bytes (reduce + (map count (vals (::runtime/leaders held))))))
++                       (fn [held] (* reach-index-entry-bytes (reduce + (map count (mapcat vals (vals held))))))
+                        (fn [] (derive-coupling database projection)))
+     (derive-coupling database projection)))
+ 
+diff --git a/src/seon/sci/runtime.clj b/src/seon/sci/runtime.clj
+index 15536411c..60d7c8cce 100644
+--- a/src/seon/sci/runtime.clj
++++ b/src/seon/sci/runtime.clj
+@@ -158,23 +158,39 @@
+                                      held (reach-of callees sym)))
+                            (transient {}) closed))}))
+ 
++(defn- followed
++  "`kept` less every name that follows ([[compiled-names]]) a name `kept` does
++  not hold, transitively; costs the followed names, never the program."
++  {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:set :qualified-symbol]] [:set :qualified-symbol]]
++                  [:set :qualified-symbol]]}
++  [followers kept]
++  (loop [held kept todo (into [] (remove kept) (keys followers))]
++    (if-let [sym (peek todo)]
++      (let [fresh (filter held (get followers sym))]
++        (recur (reduce disj held fresh) (into (pop todo) fresh)))
++      held)))
++
+ (defn compiled-names
+   "What a runtime running `kept` compiled may still run compiled.
+ 
+   `kept` less every name whose closed reach ([[reach-index]]) holds a name in
+-  `changed`, the names whose definitions differ from the loaded program's,
+-  and less every cache deriver one of whose `::leaders` (the names writing the
+-  code its callers hand it) is changed or reaches a change."
++  `changed`, the names whose definitions differ from the loaded program's;
++  less every cache deriver one of whose `::leaders` (the names writing the
++  code its callers hand it) is changed or reaches a change; and less every
++  name that follows ([[followed]], `::followers`) one no longer compiled, so a
++  cache kind's writer and reader key it alike."
+   {:malli/schema [:=> [:cat [:map [::closed [:set :qualified-symbol]]
+                              [::reached-by [:map-of :qualified-symbol [:set :qualified-symbol]]]
+-                             [::leaders {:optional true} [:map-of :qualified-symbol [:set :qualified-symbol]]]]
++                             [::leaders {:optional true} [:map-of :qualified-symbol [:set :qualified-symbol]]]
++                             [::followers {:optional true} [:map-of :qualified-symbol [:set :qualified-symbol]]]]
+                        [:set :qualified-symbol] [:set :symbol]]
+                   [:set :qualified-symbol]]}
+   [index kept changed]
+   (let [reached (into (set changed) (mapcat #(get (::reached-by index) %)) changed)]
+-    (reduce-kv (fn [held deriver leaders] (if (some reached leaders) (disj held deriver) held))
+-               (reduce disj kept reached)
+-               (::leaders index {}))))
++    (followed (::followers index {})
++              (reduce-kv (fn [held deriver leaders] (if (some reached leaders) (disj held deriver) held))
++                         (reduce disj kept reached)
++                         (::leaders index {})))))
+ 
+ (defn bind
+   "A fork of `parent` (a Var space or a runtime forked from one) running `rows`.
+
+;; The proof, for test/seon/sci/eval_test.clj:
+;; (deftest a-cache-kinds-writer-and-reader-key-it-alike-on-a-branch
+;;   ;; Runtime review 3, Astra blocker 3: a branch changing `seon.render/invocation-weight` reaches the writer
+;;   ;; `seon.render/retain-invocation!` but not the reader `seon.render/invocation`; the reader reads what the
+;;   ;; writer retained, on the branch, whether or not main holds the key.
+;;   (test-support/with-database
+;;    (fn [connection]
+;;      (let [database (branch-replacing! connection 'seon.render/invocation-weight "(?s)\\[entry\\].*$" "[entry] 2048)")
+;;            branch (eval/base-ctx database)
+;;            evidence {:seon.render/program-snapshot {} :seon.render/program-evidence {} :seon.render/projection {}}
+;;            write-read (in-context branch "(fn [key evidence] [(seon.render/retain-invocation! key evidence)
+;;                                                                (seon.render/invocation key evidence)])")
+;;            on-branch (fn [key value] (mapv :rt3/value (sci.ctx-store/with-ctx branch (write-read key (assoc evidence :rt3/value value)))))
+;;            main-key [:rt3 (seon.id/id)]]
+;;        (render/retain-invocation! main-key (assoc evidence :rt3/value :main))
+;;        (is (= [:branch :branch] (on-branch [:rt3 (seon.id/id)] :branch)) "a key main never held")
+;;        (is (= [:branch :branch] (on-branch main-key :branch)) "a key main holds")))))
+;; 

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed (lane runtime-fix3, item 2)
 severity: defect
 tags: [issue, cache, sci, runtime]
 ---
@@ -36,3 +36,14 @@ groups, `::calls`, `::tasks`, `::function-files`, `::untested`, `::regressions`)
 Proof to write: a row of `seon.sci.eval-test/a-branch-derivation-is-keyed-by-its-runtime-in-either-order` with the
 `sections` change above. Owner-side options: the deriver takes the derivation's code identity into its key (the
 caller's runtime code), or the handed derivation becomes a named function the deriver calls, so the reach sees it.
+
+## Fix (lane runtime-fix3, 2026-10-20)
+
+The reach decides it structurally. `seon.sci.eval/handed-derivers` names every cache deriver whose contract takes a
+function (ten on the loaded program, recorded exactly in `seon.sci.open-derivers-test/handed-cache-derivers-follow-their-callers`,
+which goes red on a new one); `seon.sci.eval/coupling` gives each its leaders: every caller and the names its calls of
+the deriver mention (`seon.sci.eval/handed-code`), and a handed caller's own leaders. `seon.sci.runtime/compiled-names`
+drops a deriver from the compiled names whenever a leader is changed or reaches a change, so it runs analysed and
+keys its lookup by the runtime (`seon.sci.runtime/keyed-entries`). Proof
+`seon.sci.eval-test/a-derivation-handed-to-a-deriver-is-keyed-by-its-runtime-in-either-order` (the `sections` row
+above): red on HEAD (branch first `[0 0]`, compiled first `[8 8]`), green with the fix.

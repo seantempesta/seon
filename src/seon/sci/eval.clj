@@ -98,6 +98,7 @@
   (:require
             [clojure.edn :as edn]
             [datahike.api :as d]
+            [edamame.core :as edamame]
             [clojure.set :as set]
             [rewrite-clj.node :as n]
             [rewrite-clj.zip :as z]
@@ -2786,6 +2787,100 @@
                          build)
       (build))))
 
+(def ^:private cache-entry-points
+  "The calls that derive, read or evict a cached value: the entry points a
+  changed runtime keys by its code (`seon.sci.runtime/keyed-entries`)."
+  '#{seon.cache/lookup seon.cache/lookup-within seon.cache/present seon.cache/evict!
+     seon.schema.internal/projection-cache-value})
+
+(defn- callable-schema?
+  "Whether `form`, a schema form over `forms`' named schemas, admits only a
+  function: a function schema, a callable predicate or a map of them."
+  {:malli/schema [:=> [:cat [:map-of :keyword :seon.schema/value] :seon.schema/value] :boolean]}
+  [forms form]
+  (let [callable-predicates '#{clojure.core/ifn? clojure.core/fn? ifn? fn?}]
+    (cond (keyword? form) (and (contains? forms form) (callable-schema? forms (get forms form)))
+          (symbol? form) (contains? callable-predicates form)
+          (vector? form) (let [[t & more] form
+                               more (if (map? (first more)) (rest more) more)]
+                           (case t
+                             (:=> :-> :function) true
+                             :fn (contains? callable-predicates (first more))
+                             :map-of (callable-schema? forms (second more))
+                             (:maybe :and) (callable-schema? forms (first more))
+                             :or (boolean (some #(callable-schema? forms %) more))
+                             false))
+          :else false)))
+
+(defn- cache-derivers
+  "The definitions of `database` calling a cache entry point, each as
+  `[sym]`."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector [:tuple :qualified-symbol]]]}
+  [database]
+  (into [] (comp (remove #(contains? cache-entry-points %)) (map vector))
+        (db/q '[:find [?sym ...] :in $ [?entry ...] :where [?f :seon.fn/calls ?entry] [?f :seon.fn/sym ?sym]]
+              database cache-entry-points)))
+
+(defn- handed-derivers
+  "The cache derivers among `syms` whose contract in `projection` takes a
+  function: code their callers hand them, which their closed reach cannot see."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:sequential :qualified-symbol]] [:set :qualified-symbol]]}
+  [{forms :seon.schema.projection/forms contracts :seon.schema.projection/function-contracts} syms]
+  (let [inputs (fn [contract] (mapcat (fn [[_ input]] (let [[t & xs] input] (if (= :catn t) (map last xs) xs)))
+                                      (if (= :function (first contract)) (rest contract) [contract])))]
+    (into #{} (filter (fn [sym] (some #(callable-schema? forms %) (inputs (get contracts sym))))) syms)))
+
+(defn- handed-code
+  "The program names whose code `caller` (its `source` and `calls`) hands
+  `deriver`: the caller itself and the names its calls of `deriver` mention."
+  {:malli/schema [:=> [:cat :qualified-symbol :qualified-symbol :string [:set :qualified-symbol]] [:set :qualified-symbol]]}
+  [deriver caller source calls]
+  (let [forms (edamame/parse-string-all source {:all true :read-cond :allow :features #{:clj}
+                                                :auto-resolve (fn [alias] (if (= :current alias) (symbol (namespace caller)) alias))})
+        by-name (group-by name calls)
+        sites (filter (fn [form] (and (seq? form) (symbol? (first form)) (= (name (first form)) (name deriver))))
+                      (tree-seq coll? seq forms))]
+    (into #{caller} (comp (mapcat rest) (mapcat #(tree-seq coll? seq %)) (filter symbol?) (mapcat #(get by-name (name %))))
+          sites)))
+
+(defn- derive-coupling
+  "`coupling`'s derivation: each handed deriver's leaders, the names whose
+  change may change the code it is handed (`handed-code`), a handed caller's
+  own leaders included."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection]
+                  [:map [::runtime/leaders [:map-of :qualified-symbol [:set :qualified-symbol]]]]]}
+  [database projection]
+  (let [handed (handed-derivers projection (map first (cache-derivers database)))
+        own (reduce (fn [held [deriver caller source callees]]
+                      (update held deriver (fnil into #{}) (handed-code deriver caller source (set callees))))
+                    {}
+                    (db/q '[:find ?handed ?caller ?source (distinct ?callee) :in $ [?handed ...]
+                            :where [?f :seon.fn/calls ?handed] [?f :seon.fn/sym ?caller] [?f :seon.fn/source ?source]
+                            [?f :seon.fn/calls ?callee]]
+                          database (vec handed)))]
+    ;; a handed caller passes on what its own callers hand it
+    {::runtime/leaders (loop [held own]
+                         (let [grown (reduce-kv (fn [grown deriver names]
+                                                  (assoc grown deriver (into names (mapcat #(get held %)) (filter handed names))))
+                                                held held)]
+                           (if (= grown held) held (recur grown))))}))
+
+(defn- coupling
+  "What else decides which program names run compiled
+  (`seon.sci.runtime/compiled-names`): a cache deriver whose contract takes a
+  function runs analysed whenever a change reaches the code its callers hand
+  it (`::runtime/leaders`), so a derivation it is handed is keyed by the
+  runtime that wrote it. Once per content of `database`'s definitions and
+  `projection`'s contracts."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection]
+                  [:map [::runtime/leaders [:map-of :qualified-symbol [:set :qualified-symbol]]]]]}
+  [database projection]
+  (if-let [revisions (db/content-revisions database [:seon.fn/sym :seon.fn/calls :seon.fn/source])]
+    (seon.cache/lookup ::coupling [revisions (:seon.schema.projection/fingerprint projection)]
+                       (fn [held] (* reach-index-entry-bytes (reduce + (map count (vals (::runtime/leaders held))))))
+                       (fn [] (derive-coupling database projection)))
+    (derive-coupling database projection)))
+
 (defn- plan-changes
   "What `plan` changes of the program `ctx` runs, as `bind-analysed!` takes
   it: the names it defines otherwise, to the digest it holds (none for a
@@ -3046,7 +3141,7 @@
         ;; a branch's change is live for its callers on that branch.
         (swap! (::kernel/program-snapshot ctx) assoc
                ::runtime-rows (runtime-rows! ctx db projection all-namespace-row-by-name test-namespaces)
-               ::reach-index (reach-index db))
+               ::reach-index (merge (reach-index db) (coupling db projection)))
         ;; The bare REPL name refers to the acquired macro itself. Keeping the
         ;; boot-time copy here would preserve its old expansion after adoption.
         (sci/add-namespace! ctx 'clojure.core

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: open (a fix measured, not committed: over the cost gate)
 severity: blocker
 created: 2026-10-20
 tags: [issue, sci, branch-runtime, review3-astra]
@@ -17,3 +17,19 @@ Red proofs: `seon.runtime-review3-astra-new-test/cache-reader-and-writer-agree-i
 This is distinct from the projection-holder defect: these operations all use `seon.cache`, but the compiled/analysed boundary splits the key. The runtime must preserve the cache owner's write/read/evict semantics, including mixed compiled and analysed consumers.
 
 Evidence and limits: [independent review](../../research/agent-platform/2026-10-20/runtime-review3-astra.md). Reproducible probe source: [review patch](../../research/agent-platform/2026-10-20/runtime-review3-astra-probes.patch); it is evidence, not an installed change.
+
+## Attempt (lane runtime-fix3, 2026-10-20): measured, not committed
+
+Structural fix tried: the derivers of one cache kind (the qualified keyword their entry-point calls name, read from
+their source with edamame and matched to `:seon.fn/keywords`; 13 kinds with two or more derivers on the loaded
+program, `:seon.render/invocation` among them) follow each other in `seon.sci.runtime/compiled-names`: when one does
+not run compiled, none does. The proof (kept as `docs/research/agent-platform/2026-10-20/runtime-fix3-cache-kind.patch`)
+went green, but the cost table measured, against HEAD in check JVMs one after another: `:hub-change-sequence`
+4,888 -> 5,124-5,151 MB (bound 5,053), `:hub-behavior-change` 1,745 -> 2,050-2,062 MB, `:similar-by-name-warm`
+31 -> 142-144 MB. The same candidate without the kind rule measured 4,868 MB / 31 MB, so the rule is the whole cost:
+a hub change reaches one deriver of each embed kind (`:seon.embed/store`, `:seon.embed/embedding`, `:seon.embed/index`)
+and its partners then key per runtime, re-deriving the store and the index. Options for root: (1) take the rule and
+raise the gate (the exact semantics, +5% on the sequence); (2) key a kind's entries by the runtime's change to its
+derivers only (the kind's own reach, not the whole delta), so a hub change that leaves the embed derivations' answers
+unchanged shares them; (3) make each such cache owner one function per kind (writer and reader in one body), so the
+existing reach covers it, converting `seon.render/retain-invocation!`/`invocation` and the twelve other pairs.

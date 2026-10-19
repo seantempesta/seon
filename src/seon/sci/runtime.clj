@@ -14,6 +14,7 @@
             [sci.ctx-store]
             [sci.lang]
             [seon.cache]
+            [seon.schema.internal]
             [seon.operator.runtime :as operator.runtime]))
 
 (def ^:private analysed-function-bytes
@@ -86,8 +87,9 @@
   (seon.cache/lookup ::analysed (analysis-key ctx row) (constantly analysed-function-bytes) #(analyse ctx row)))
 
 (defn keyed-entries
-  "The `seon.cache` entry points as code of the runtime `code` names calls
-  them, by name: each content key is paired with `code`, so a derivation is
+  "The cache entry points (`seon.cache`'s and the projection's own holder,
+  `seon.schema.internal/projection-cache-value`) as code of the runtime `code`
+  names calls them, by name: each content key is paired with `code`, so a derivation is
   keyed by the code computing it and no runtime running other code is served
   it. A changed runtime binds them in its own context
   (`seon.sci.eval/bind-analysed!`); compiled code calls them with the bare key."
@@ -107,7 +109,10 @@
      'seon.cache/present (fn ([kind content-key] (seon.cache/present kind (k content-key)))
                            ([held kind content-key] (seon.cache/present held kind (k content-key))))
      'seon.cache/evict! (fn ([kind content-key] (seon.cache/evict! kind (k content-key)))
-                          ([held kind content-key] (seon.cache/evict! held kind (k content-key))))}))
+                          ([held kind content-key] (seon.cache/evict! held kind (k content-key))))
+     'seon.schema.internal/projection-cache-value
+     (fn [projection cache-key derive-fn]
+       (seon.schema.internal/projection-cache-value projection (k cache-key) derive-fn))}))
 
 (defn- reach-of
   "`sym` and every program name `callees` reaches from it."
@@ -157,13 +162,19 @@
   "What a runtime running `kept` compiled may still run compiled.
 
   `kept` less every name whose closed reach ([[reach-index]]) holds a name in
-  `changed`, the names whose definitions differ from the loaded program's."
+  `changed`, the names whose definitions differ from the loaded program's,
+  and less every cache deriver one of whose `::leaders` (the names writing the
+  code its callers hand it) is changed or reaches a change."
   {:malli/schema [:=> [:cat [:map [::closed [:set :qualified-symbol]]
-                             [::reached-by [:map-of :qualified-symbol [:set :qualified-symbol]]]]
+                             [::reached-by [:map-of :qualified-symbol [:set :qualified-symbol]]]
+                             [::leaders {:optional true} [:map-of :qualified-symbol [:set :qualified-symbol]]]]
                        [:set :qualified-symbol] [:set :symbol]]
                   [:set :qualified-symbol]]}
   [index kept changed]
-  (reduce (fn [held sym] (reduce disj held (get (::reached-by index) sym))) kept changed))
+  (let [reached (into (set changed) (mapcat #(get (::reached-by index) %)) changed)]
+    (reduce-kv (fn [held deriver leaders] (if (some reached leaders) (disj held deriver) held))
+               (reduce disj kept reached)
+               (::leaders index {}))))
 
 (defn bind
   "A fork of `parent` (a Var space or a runtime forked from one) running `rows`.
