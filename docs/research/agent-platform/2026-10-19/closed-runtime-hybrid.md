@@ -1,9 +1,12 @@
 ---
 title: "Closed runtime: the hybrid of the Opus and Astra plans"
 type: research
-status: hybrid of a design round; phases to be filed as tasks after the narrow check
+status: hybrid of a design round, revised in place after the narrow check (lane closed-revise); P0 landed, P4a in flight, the other phases ready to file as tasks
 created: 2026-10-19
 ---
+
+Phase status: P0 landed (`seon.sci.open-derivers-test`, `seon.cost-estimate-test/closed-runtime-rows-grow-past-no-accepted-overrun`);
+P4a in flight (lane P4a); P1, P2, P3a, P3b, P4b, P5, P6a, P6b, P7, P8 not started.
 
 # Closed runtime: the hybrid
 
@@ -27,7 +30,10 @@ callback-identity machinery. Astra's "capture a runtime observation at the entra
 taken: Opus's probe (re-run below) shows the `find-ns` clause decides nothing, and deleting it makes the classifier a
 pure function of the classpath, which also removes the staleness Astra worried about. Result: **34 of the 50 open
 `seon.cache` derivers close, 16 stay open, and all four projection derivers close** (Opus's number, reached only with
-Astra's `seon.program` sites included). The lexical exact key lands last, gated on the measured hub row.
+Astra's `seon.program` sites included). The lexical exact key lands last, gated on the measured hub row. The narrow check
+(below) showed the count is reached only at P6, whatever the order: P3b closes one deriver, P4b three, P6 thirty. Each
+phase is therefore proven by its own direct-opener row (red before, green after) and by its edit of the exact ratchet
+`seon.sci.open-derivers-test/open-derivers`, never by a census row that stays red until P6.
 
 ## Reconciling 34 and 25
 
@@ -74,22 +80,38 @@ declared minimum ("prepare does not insert their fixed slots"), while `seon.db/p
 plan's slot count from every stored row by position, variadic included (`(max 0 (- minimum slots))`). Storing a count
 would preserve that split; storing the producer's vector removes it (AGENTS "one derivation, every consumer").
 
-- **Fact.** `:seon.fn/prepared-arities` on the function entity, the value `prepared-arities` returns (its value schema
-  already exists as the alias `:prepared-arities :seon.fn/declared-arities` in `resources/seon/schemas/seon.fn.edn`;
-  Astra is right that it is not a stored attribute today: declare it stored, `seon.call-preparation`'s, in that
-  resource).
-- **Producers** (Opus): the writers of the identities the gate watches, each already reaching `seon.call-preparation`
-  statically (verified: `seon.fn` and `seon.turn.batch` require it transitively, `seon.call-preparation` reaches
-  neither): `seon.fn/index!`, the REPL recording in `seon.turn.batch`, and the supplier-row write in
-  `seon.call-preparation`. A supplier change re-asserts the facts of the functions whose slot schemas name its key;
-  Opus's stored `:seon.call-preparation/slot-schemas` on the arity makes that a query. All in the one transaction.
-- **Writer.** `prepared-arity-bounds` becomes a pull of the stored vector; `arity-mismatch-report` loses its
-  `snapshot` argument; the three `defonce` seams go. The writer gains no check (Opus): Datahike's final-report hook
-  already judges `:db-after` (Astra), which is where `validate-write-report` sits.
-- **Red proof** (Astra's rows in the existing table): `seon.db-test/arity-components-and-callers-are-checked-in-the-final-state`
-  gains rows for a variadic callee (settles the semantics as the producer's), a supplier row retracted in a later
-  transaction (the call it admitted is refused), a caller and callee repaired in one transaction (accepted), and an
-  idempotent attempted write.
+- **Fact.** `:seon.fn/prepared-arities` cannot be the stored key: it is already registered as the report member (an alias
+  of `:seon.fn/declared-arities`, a vector of maps), and Datahike stores no vector of maps. The stored fact is
+  **`:seon.call-preparation/prepared-arities`** on the function entity, declared in
+  `resources/seon/schemas/seon.call-preparation.edn` as `[:vector {:seon.db/component true :seon.db/component-schema
+  :seon.call-preparation/prepared-arity} :seon.db/ref]`, with `:seon.call-preparation/prepared-arity` `[:map
+  {:seon.db/attributes true} :seon.fn.arity/min [:seon.fn.arity/max {:optional true}]]`. Present only on a function
+  whose contract has an invocation plan (absent means nothing is suppliable, so the declared arities are the prepared
+  ones). It is derived data, not program: it is outside `seon.program/program-attributes` and never digested (a P1 row
+  proves the definition digest unchanged by its write). The report member `:seon.fn/prepared-arities` keeps its key
+  and meaning: it is the pull `{:seon.call-preparation/prepared-arities [:seon.fn.arity/min :seon.fn.arity/max]}`,
+  which is exactly what `seon.call-preparation/prepared-arities` returns (one derivation).
+- **Producer.** One function, `seon.call-preparation/prepared-arities-tx` (`[database syms] -> tx-data`): for each
+  symbol, retract its old component rows and assert `prepared-arities` of `plan-for` (it pays one
+  `seon.call-preparation/snapshot`, the memo keyed by the supplier rows, per transaction, not per function). Every
+  write of `:seon.fn/spec` or of a supplier row appends it in the same transaction. The narrow check's census of
+  those writers is the list: `seon.fn/index!` (which gains a static `[seon.call-preparation]` require; the edge is
+  legal, `seon.call-preparation` reaches `seon.db` but not `seon.fn`), the recording in `seon.turn.batch` (reaches it
+  through `seon.sci.eval`), the supplier-row write in `seon.call-preparation`, and the `:seon.fn/spec` writes in
+  `my.program`, `seon.cluster.instruction`, `seon.effect`, `seon.sci.eval`, `seon.sci.lookup`, `seon.test.runner`,
+  `seon.turn` and the fixture helpers `seon.test-support/program-fn-entity` and `seon.program/with-contract-facts`'s
+  callers. `seon.program/canonical-row` cannot call it (`seon.call-preparation` requires `seon.db`, which requires
+  `seon.program` after P2). P1's first step re-runs that census; a writer it misses is found by P1's red row
+  `missing-producer` below.
+- **Writer.** `seon.db/prepared-arity-bounds` becomes the pull above, falling to the declared arities only when the
+  fact is absent (its meaning, not a fallback); `arity-mismatch-report` loses its `snapshot` argument; the three
+  `defonce` seams (`call-preparation-snapshot`, `call-preparation-report-snapshot`, `call-preparation-plan-for`) go,
+  and `seon.call-preparation/report-snapshot` loses its only `src` caller and is deleted with its test site
+  (`seon.call-preparation-test`). The writer gains no check (Opus): Datahike's final-report hook already judges
+  `:db-after` (Astra), which is where `validate-write-report` sits.
+- **Red proof**: rows of the existing table `seon.db-test/arity-components-and-callers-are-checked-in-the-final-state`,
+  written as exact fixtures in the P1 spec below (variadic, supplier retracted, same-transaction repair, idempotent,
+  missing producer, digest unchanged).
 
 ### `seon.db` → `seon.program` and `seon.fn/stored-namespace-context`: **Opus**
 
@@ -105,23 +127,35 @@ the bridge is exact (verified by grep: its only function uses of `seon.schema` a
 no-argument conveniences `encode-transaction` and `decode-attribute-value`; the other `schema/` matches are schema
 keywords and docstrings).
 
-1. The five primitives move to `seon.schema.internal` (which "never requires `seon.schema`"); the two conveniences move
-   up to `seon.schema` (Astra's "upper owner"); the packaged-EDN reader (`seon.schema.edn/packaged-forms`) moves below
-   `seon.schema` (Astra's "resource read → forms"), into `seon.schema.internal` or a leaf of its own.
+1. The five primitives move to `seon.schema.internal` (which "never requires `seon.schema`"); the two conveniences
+   (`encode-transaction`, `decode-attribute-value`) move up to `seon.schema` (Astra's "upper owner"). The packaged-EDN
+   reader does **not** move: `seon.schema.edn/packaged-forms` reaches `seon.schema/structural-schema` and five more
+   `seon.schema` functions, so it cannot sit below it. Its seam (`seon.schema/schema-edn-packaged-forms`) exists for one
+   caller, the warned classpath fallback `seon.schema/packaged-forms` inside `candidate-forms`, whose count on default
+   is `{}`. The fallback is deleted: the population is handed by its holder, and the process's one holder before any
+   projection exists is boot, which binds the root of `seon.schema/*packaged-forms*` once from
+   `seon.schema.edn/packaged-forms` (`seon.cluster.boot`, which requires both). `!fallback-counts`,
+   `warn-classpath-fallback!`, `fallback-caller`, `decade?`, `frame-namespace`, `resolution-owner-namespaces` and the
+   seam go with it. P3a's first step counts `!fallback-counts` after the three cost rows and after the check's test
+   namespaces; a caller it names is converted to hand its population in the same commit.
 2. **Load order, found while checking plan A's P3:** `seon.schema.datahike` requires `seon.print`, and `seon.print`
    requires `seon.schema` directly, so "`seon.schema` requires the bridge statically" would cycle through the printer.
-   The bridge uses one function of it, `seon.print/compare-values` (canonical storage order), whose body depends on
-   nothing of `seon.print`. It moves to a leaf both can require (`seon.id` if its digest already orders values
-   canonically, else a small `seon.order` leaf; the lane checks which), `seon.print` keeps calling it. Then the seven
-   `seon.schema` seams and `schema-edn-packaged-forms` become calls, and `seon.schema/database-projection` and the
+   The bridge uses one function of it, `seon.print/compare-values` (canonical storage order), which calls nothing of
+   `seon`. It moves, one definition, to a new leaf **`seon.order/compare-values`** (`src/seon/order.cljc`, no `seon`
+   requires; `seon.id` is identity, not order), and every caller converts in one scripted sweep in the same commit:
+   `seon.print`, `seon.schema.datahike` (2), `seon.test` (2), `seon.db` (2), `seon.fn` (10), `seon.render.web` (2),
+   `seon.turn`, `seon.reconcile`, `seon.program`, `seon.config`, `seon.cluster`; `seon.print/compare-values` is
+   deleted, no alias. Then the seven bridge seams become calls, and `seon.schema/database-projection` and the
    `seon.program/definition-digest` resolution in `canonical-schema-entities` go as Opus says (caller passes the
-   carried projection; the digest is computed by its `seon.program` caller).
+   carried projection; the digest is computed by its `seon.program` caller); their test callers
+   (`test/seon/test_support_test.clj` for `database-projection`, the `canonical-schema-entities` sites in `test`) are in
+   the slice.
 3. **`seon.program` → bridge (Astra's finding, extended).** `derived-shape` resolves
    `seon.schema.datahike/vector-shaped-attr-in?` and `malli->datahike-schema-in`; `derived-program-attributes` resolves
    `storable-properties-in`. Neither namespace reaches the other (verified), so a `#?(:clj [seon.schema.datahike])`
-   require beside the existing `#?(:clj [seon.schema.edn])` and three static calls close them. This one 10-line slice
-   closes `seon.config/effective`, `seon.program/program-attributes` and `seon.sci.eval/overlay-plan` (the eval
-   request's own plan), and is why the count is 34, not 32.
+   require beside the existing `#?(:clj [seon.schema.edn])` and three static calls close them. Alone this slice closes
+   one deriver, `seon.program/program-attributes`; `seon.config/effective` and `seon.sci.eval/overlay-plan` close only
+   with P6 (narrow check). It is still why the final count is 34, not 32.
 
 ### Cycle 6 (`seon.error.refusal` → `seon.schema`): **Opus's mechanism, Astra's rule on the fallback**
 
@@ -132,18 +166,24 @@ portable leaf with no requires (`seon.schema.handed`, ~10 lines; a vocabulary en
 `handed-projection`), which `seon.error.refusal` and `seon.schema` both require; the handed projection carries its
 identity projector and explainer as values (`:seon.schema.projection/identity-projector`,
 `:seon.schema.projection/explain`, put there by the code that builds it, so `with-predicate-functions`-style one
-writer). `schema-seam`, `operation-projection`, `checking-projection`, `identity-projector` go; `cache-seam` becomes a
-static require of `seon.cache` in the JVM half (the operator under babashka has no basis, which is when the seam answers
-nil today).
+writer). `schema-seam`, `operation-projection`, `checking-projection`, `identity-projector` go.
 
-Astra's rule is taken for the no-projection case: **no fallback builds the packaged declaration projection inside the
-refusal**. With nothing handed (boot, namespace load, a bare thread: the existing
-`seon.error.refusal-test/error-is-buildable-where-no-projection-is-handed` builds on a `Thread.`), the error is built
-without world references and the recording boundary (`seon.error`, which holds the database) references its worlds once
-with the projection it holds; that is where a copy could be stored, so "errors hold references" still holds at storage.
-P4's first step counts how often the no-projection path runs on the three cost rows; if it is the common path, the
-boundary hands the packaged projection at boot through the leaf's root binding, set once by the boot layer (Opus's
-alternative), still with no lookup in the refusal.
+`seon.error.refusal` is `^{:seon/babashka true}` and loaded under babashka by `script/seon/operator.clj` and
+`central_round.clj`, where Caffeine does not exist, so `cache-seam` cannot become a static require of `seon.cache`.
+It goes the same way as the projector: the handed state carries the lookup as a value,
+`:seon.schema.handed/lookup` (`seon.cache/lookup`, put there by whoever binds the handed state on the JVM: boot's root
+binding and every builder of a handed projection), and `authored-namespace?` calls it when present and
+`classify-namespace` directly when not (babashka hands none; after P4a the classifier is a pure function of the
+classpath, so the cache saves only repeated classpath probes). One definition, the namespace stays `.clj`.
+
+The no-projection case is decided now, not after a count (narrow check):
+`seon.error.refusal-test/error-is-buildable-where-no-projection-is-handed` builds `:seon.error/base` and an undeclared
+`:no.such/error` on a bare `Thread.` and must tell them apart, which needs a declaration population. So **boot binds
+the handed leaf's root once** (Opus's alternative): `seon.cluster.boot` sets the root of `seon.schema.handed/*projection*`
+to the packaged declaration projection it already builds, and the root of `*packaged-forms*` to its forms (P3a's
+holder, moved into the leaf here). A bare thread, the MCP thread and namespace load read the root; an operation binds its
+own. No lookup and no fallback in the refusal. This makes P4b a platform slice (boot). The count of the no-projection
+path on the three cost rows is still taken, as evidence in the commit message.
 
 ### Frame classifier (`classify-namespace`, `prepared-call-prefix`, `referenced`): **Opus**
 
@@ -167,10 +207,24 @@ alternative), still with no lookup in the refusal.
 ### Projection builder (`seon.db/projection-builder`, `loaded-builder`, `connection-projection-state`): **Opus's deletion, Astra's callback point, solved more simply**
 
 Both delete the two name lookups and the `running-instances` scan, and both make every connection constructor carry
-its projection state (`carry-connection-projection-state!` is the producer; the scan is a fallback and goes with a row
-asserting every constructor in `seon.cluster.boot` and the harness carries it). Opus is right that `::builder-digest` is
-a hand-made exact key and goes with P7; until then `::builder` is the loaded program identity read from the carried
-state, never found by name.
+its projection state (`carry-connection-projection-state!` is the producer; the scan is a fallback and goes). The
+connections are made in `seon.cluster.store` (four sites) and `seon.db` (one), and about 20 test sites call `d/connect`
+directly and carry nothing (`seon.db-test`, `seon.turn-work-test`, `seon.flow-test`, `seon.test-support`,
+`seon.store-transact-test`, `seon.retired-attributes-test`, `seon.acquisition-cost-test`,
+`seon.sci.branch-execution-test`, `seon.web-test`, `seon.admission-test`, ...): P5's first step lists every `d/connect`
+and `d/create-database` site in `src` and `test` by census, and the phase converts each to the canonical constructor
+(the harness's `with-fresh-database` already carries; the rest call it). Opus is right that `::builder-digest` is a
+hand-made exact key and goes with P7.
+
+Until then `::builder` is read from the carried state, never found by name. The state map built by
+`seon.sci.eval/projection-state` (its one constructor) gains two members its callers pass: **`:seon.source/commit-id`**,
+the program the process booted (boot passes its commit; the harness passes the executing handle's), and
+**`:seon.sci.eval/loaded-identity`**, the process's identity place `seon.sci.eval/loaded-identity` held by reference
+(errors and states name a place by reference; development adoption already advances it with
+`advance-loaded-identity!`, so no new writer). `loaded-builder` then takes `[database state]`: the adoption's commit when
+the identity names one, else the state's boot commit, else the value's own builder; the "running instances booted
+different programs" refusal disappears (each connection names its own boot), and the mixed-adoption branch reads its
+prior from the state's own cluster connection instead of every instance's.
 
 Astra's point stands and Opus misses it: `content-projection`'s 6-arity takes a `derivation` callback, and
 `advanced-content-projection` computes `schema/advance-projection` *before* the lookup and passes the result through
@@ -203,9 +257,11 @@ substitute callables, line-level verified). The mechanism exists and is reused, 
   `:seon.program/definition-digest`) and the library coordinate for the 9 library ones. Under P7 this is the explicit
   input Astra asks for; it is not the lexical reach, because the names come from data.
 - `unloaded-predicate-functions` becomes a property of the map (a symbol with no binding maps to the refusing callable,
-  a function of its name alone). `runtime-predicate` and `loaded-predicate-var` are deleted; `register-core-predicate!`
-  stays as the load-time registration Malli's `predicate-schemas` also does, but takes the Var from its caller (the
-  registering namespace passes `#'its/predicate`), so it resolves nothing. `predicate-callable` and
+  a function of its name alone). `runtime-predicate` and `loaded-predicate-var` are deleted. `register-core-predicate!`
+  has about 70 call sites in 25 `src` and 7 test files and its own docstring queues them for deletion; once the
+  environment map supplies every predicate it is a no-op, so **it is deleted with every call site in one scripted sweep,
+  its own commit (P6a) before the rest**, together with `core-predicate-registered?` and the test sites quoting private
+  predicate Vars (`seon.schema-test`, the `seon.instrument-test` docstring). `predicate-callable` and
   `identity-only-descriptors-in` read the handed projection's bindings and the schema property's value, never
   `requiring-resolve`.
 
@@ -233,42 +289,258 @@ the families close (the four `seon.schema` sites above), so it is not the P8 inv
 
 Note for P2: after `seon.db` requires `seon.program`, the `seon.program` → `seon.db` lazy sites (8, inventory "layer
 inversions") can never become static requires; those functions read the database, so they move to `seon.db` or take
-their reads as input. That is P8's first lane (it closes three of the 16).
+their reads as input. That is P8's first lane: `seon.program/{content-digest, own-changed-identities,
+declaration-digest-map, differing-declarations, projected-values, fold-content-digest}` (the first two hold direct
+`requiring-resolve` calls themselves), which closes `unmerged-count`, `own-changed-identities` and `content-digest`
+(16 -> 13, narrow check).
+
+Census fact found by P0 on HEAD (`a8926bb27` candidate): the exact open set is the 50 above plus two that hold
+rather than call: `seon.sci.eval/reach-index` (its `:seon.fn/calls` hold the quoted opening set of
+`run-time-resolution`, which the analysis records as held names) and the test helper
+`seon.sci.runtime-test/shaped-main` (holds `seon.cache/lookup` as a value). So HEAD's ratchet starts at **52**; the 16
+of the end state become 18 until P8 deletes `run-time-resolution` as an input (P8's last step closes `reach-index`).
 
 ## Phases
 
-Each phase is one loadable slice; HEAD boots after each; every deletion is in the commit that converts its last caller.
-"Ordinary" commits with `bin/lane commit LANE --branch-evidence`; "platform" with `--test` through a check JVM
-(schema resources, writer, boot, evaluator, load order). Estimates are what the work must do, with the measured
-numbers the plans already hold; each becomes a row of the cost table (`seon.cost-estimate-test`) in P0.
+Each phase is one loadable slice; HEAD boots after each; every deletion is in the commit that converts its last caller,
+tests and quoted symbols included. "Ordinary" commits with `bin/lane commit LANE --branch-evidence AGENT`; "platform"
+with `--test` through a check JVM (schema resources, writer, boot, evaluator, load order). A red proof lands with its
+phase, never before it (AGENTS: a test already red on main stops the merge), so each phase's spec names its red rows and
+the phase writes them.
 
-| Phase | Slice (files) | Red proof | Kind | Estimate (ms / MB, proportional to) | Deletes with its last caller |
-|---|---|---|---|---|---|
-| **P0** | Commit the measurement and the census: `tmp/runtime-fix2/cost_test.clj`'s `cost-rows` (the three rows, declared long) as `test/seon/cost/closed_runtime_cost_test.clj`; a census deftest over `seon.sci.eval/reach-index` asserting which of the four projection derivers are closed, against a recorded expectation (test only) | `seon.sci.runtime-test/projection-derivers-are-closed` (new; red: all four open today), plus Astra's composed-runtime rows (parent A/h1 then child B/h2, R6's M2 chain; a branch-only predicate; an open value) added to `seon.sci.runtime-test/a-composed-runtime-answers-what-its-own-source-answers` (red on HEAD) | platform (test runner) | census 161 ms, ~64 MB once the calls facts are held; proportional to `:seon.fn/calls` (7,683 names) | nothing |
-| **P1** | Cycle 7: `:seon.fn/prepared-arities` stored (`resources/seon/schemas/seon.fn.edn`, `seon.call-preparation`), written by `seon.fn/index!`, the `seon.turn.batch` recording and the supplier-row write, `:seon.call-preparation/slot-schemas` on the arity; `seon.db/prepared-arity-bounds` pulls; three seams and `arity-mismatch-report`'s snapshot argument deleted. First step: census of `transact!` callers writing `:seon.fn/spec` or `:seon.call-preparation/key` (must be the three producers) | `seon.db-test/arity-components-and-callers-are-checked-in-the-final-state`: variadic, supplier-retracted, same-tx repair, idempotent rows (red while the fact is unread) | platform (schema resource + writer) | per changed function one `plan-for`, 0.1-1 ms, which the gate pays today on a snapshot miss; the writer stops building the 174-188 ms snapshot; bounded one-function write < 100 ms, < 8 MB (Astra) | `seon.db/call-preparation-{snapshot,report-snapshot,plan-for}` (14 lines), `prepared-arity-bounds` shrinks 23 → ~8 |
-| **P2** | `seon.db` requires `seon.program`; `seon.fn/stored-namespace-context` moves to `seon.program`; five seams deleted (`seon.db`, `seon.program`, `seon.fn`) | none new: P0's census row counts `seon.db/program-*` as non-openers (red until moved) | ordinary | 0 runtime cost (a static call replaces a delay deref) | five `defonce` seams (12 lines) |
-| **P3a** | Cycle 3: five primitives → `seon.schema.internal`; the two conveniences → `seon.schema`; `packaged-forms` reader below `seon.schema`; `seon.print/compare-values` → a leaf (`seon.id` or `seon.order`) and the bridge drops `seon.print`; `seon.schema` requires the bridge; eight seams, `database-projection`, `canonical-schema-entities`' resolution deleted (`seon.schema`, `seon.schema.datahike`, `seon.schema.edn`, `seon.schema.internal`, `seon.print`, the leaf) | `seon.schema.datahike-test/encode-transaction-resolves-the-declaration-population-once` gains Astra's closed-reach assertion (the bridge's reach holds no opener), and a `seon.contracts-compile-test` row: a fresh require of `seon.schema.datahike` in a check JVM loads no `seon.schema` (red today) | platform (load order, publication: publish and reload on a branch of the live store) | 0 runtime cost; one explicit-projection transform < 20 ms, < 4 MB on the bounded test population (Astra) | eight seams (25 lines), `database-projection` (3) |
-| **P3b** | `seon.program` requires `seon.schema.datahike` (`#?(:clj)`); `derived-shape`'s two and `derived-program-attributes`' one resolution become calls (`seon.program` only) | P0's census row: `seon.config/effective` closed (red until this lands; it is the only phase that closes it) | ordinary | 0 runtime cost | three `requiring-resolve` forms |
-| **P4a** | Frames: delete `classify-namespace`'s `find-ns` clause; `prepared-call-prefix` literal; `referenced` and the handed-var schema test place classes (`seon.error.refusal`, `seon.error.refusal-test`, the `:seon.schema/handed-var` schema resource) | `seon.error.refusal-test`: (a) the literal equals the munged `#'seon.call-preparation/preparing`; (b) a sourceless namespace created in a disposable context classifies authored; (c) an error built analysed on a changed runtime and compiled on main from one throwable references the same worlds (red today: analysed `var?` differs) | ordinary (the schema resource row is platform) | per error: one `find-ns` and one Var lookup fewer; classification proportional to distinct namespaces in the frames (unchanged) | the `find-ns` clause, the Var lookup (14 → 1 line) |
-| **P4b** | Cycle 6: `seon.schema.handed` leaf; the handed projection carries projector and explainer; the refusal reads handed values; `seon.error` references worlds once where none was handed; `schema-seam`, `operation-projection`, `checking-projection`, `identity-projector`, `cache-seam` deleted (`seon.error.refusal`, `seon.schema`, `seon.error`, the leaf). First step: count the no-projection path on the three cost rows | `seon.error.refusal-test/error-is-buildable-where-no-projection-is-handed` stays green and gains: the bare-thread error, once recorded by the boundary, references its worlds exactly once; `constructor-consumes-only-the-throwable-input`, `a-place-in-an-error-is-named-never-printed-through`, `error-constructor-builds-the-declared-alternative` run | ordinary for the refusal; platform if the boot root binding is needed (decided by the count) | per error after acquisition: < 5 ms, < 0.5 MB over ≤ 16 frames (Astra); one map get instead of a delay deref and a `find-ns` | `schema-seam` (16), `operation-projection` (11), `checking-projection` (15), `identity-projector` (4), `cache-seam` (5) |
-| **P5** | Builder: `::builder` read from the carried projection state; `content-projection` branches on `kind` to two named derivers (no callback crosses the lookup); `projection-builder`'s lookups, `loaded-builder` and the `running-instances` scan deleted (`seon.db`, `seon.cluster.boot`, the harness) | `seon.db-test` row: every connection `seon.cluster.boot` and the harness construct carries `:seon.sci.eval/projection-state` (red if any source lacks it, counted first); Astra's `seon.db-test/projection-cache-uses-the-executing-builder` (new): compiled main reading a branch value derives under its own identity, the branch under its own | platform (writer, boot) | saves a `find-ns` pair and the `running-instances` scan per projection read; warm key selection < 1 ms, < 0.05 MB (Astra) | `projection-builder` (15), `loaded-builder` (65), the scan (~12 of 16) |
-| **P6** | Predicates as input: the environment map supplied by the runtime's holder through `:seon.schema/predicate-functions`; fingerprint gains `{symbol digest}`; `runtime-predicate`, `loaded-predicate-var` deleted; `register-core-predicate!` takes the Var; `unloaded-predicate-functions` a property of the map; `predicate-callable`, `identity-only-descriptors-in` read handed values (`seon.schema`, `seon.sci.kernel`, `seon.print`'s and `seon.schema.edn`'s registrations) | `seon.schema-test/one-predicate-symbol-cannot-name-two-environments-callables` and `a-rebound-predicate-recompiles-the-keys-naming-it` gain Astra's opposite-cache-order and mixed-branch rows through real branch execution (red under the exact key today: the key holds no predicate digest); P0's census row goes green (all four closed) | platform (projection derivation, publication) | 78 digests read per projection derivation (facts, cached with the projection); warm validator call < 1 ms; a one-predicate change recompiles only the keys naming it, < 20 ms, < 4 MB (Astra); unchanged content compiles zero predicates | `runtime-predicate` (51 → 0), `loaded-predicate-var` (20), `unloaded-predicate-functions` (44 → a few), `predicate-callable` (12); the 161 old lines Astra measured, less the registration |
-| **P7** | The lexical exact key (runtime-fix2 option 1: a derivation keyed by its deriver's closed-reach changes, held in the analysed definition, kept by `arm!`, `rearm-dependents!`, `fork-cluster-ctx`); R3 (macro expansion carries the reached code identity) and R5 (`defonce` is an observation, never re-derived) on it; `::builder-digest` deleted; the R4 host-bound report deleted (`seon.sci.eval/host-bound-reaching`, `::host-bound-reached`, `:seon.batch/host-bound-reached`, `seon.sci.runtime/host-bound-reached`, `::host-bound-reach`); R6: the differential test drives `seon.sci.arm/arm!`, `interpret-overlay!`, `fork-cluster-ctx`, changes a namespace's resolution, and holds the re-review's mutants M1, M2, M5, M7 red (`seon.sci.eval`, `seon.sci.runtime`, `seon.sci.arm`, `seon.cache`, `seon.db`) | runtime-rereview's R1, R2 (closure, lazy seq, raw thread), R3 reproductions as `seon.sci.eval-test` rows (red on HEAD); the M2 two-step chain as a deterministic row; `seon.profile/measure` on the three rows, parent against change in one run | platform (evaluator) | **gate: `:hub-behavior-change` ≤ 1.3x of 716cc7527's 897.7 MB on the same probe**, `:seon-db-nine-forms` within 1.1x, `:similar-by-name-warm` within 1.05x. Estimate: hub 1.13-1.28x (Opus, HEAD's 1,015 MB plus `effective`'s re-derivation), Astra's wider band 1.17-1.45x is the risk; a measured miss stops the key for the owner | `seon.cache/*reached*`, `seon.sci.runtime/reaching`, `reached-changes`' open branch, the R4 report (five names) |
-| **P8** | The 16 by Opus's four kinds, one lane per kind, file-disjoint after a census on HEAD; first lane: `seon.program`'s lazy `seon.db` reads move to `seon.db` or take their reads as input (closes `unmerged-count`, `own-changed-identities`, `content-digest`); then `run-time-resolution` becomes the census test and the open branch of `seon.sci.runtime/reach-index` and the binder is deleted | `seon.sci.eval-test/no-runnable-src-function-resolves-a-name-at-run-time` (new, red until the last site); Astra's `seon.test.runner-test/reach-results-use-the-executed-runtime` and `seon.program-test/content-digest-needs-no-loaded-namespace` | ordinary where only pure consumers change; platform for the evaluator, runner and the host-bound producer rule | changed-input work only; each held-data digest or report < 20 ms, < 4 MB at its fixture size; no namespace enumeration | the open branch of the index and binder; `run-time-resolution` as an input |
+Two shared proofs, landed in P0, carry every phase:
+
+- **The ratchet** `seon.sci.open-derivers-test/open-cache-derivers-are-exactly-the-recorded-set`: the open
+  `seon.cache` derivers of the running program (names whose `:seon.fn/calls` hold `seon.cache/lookup` or
+  `lookup-within`, less `::seon.sci.runtime/closed` of `seon.sci.eval/reach-index`) equal the private set
+  `open-derivers` exactly. Green on HEAD at 52. A phase that closes derivers removes them from the set in its commit
+  (the edit is the proof that the count fell); a commit that opens one is red. Platform test: it reads
+  `seon.sci.eval` and `seon.sci.runtime`, which agents' SCI contexts withhold, so it runs in the check JVM.
+- **The direct-opener table** `seon.sci.open-derivers-test/converted-functions-resolve-no-name-at-run-time` over the
+  private vector `converted` of `{:phase :functions}` rows: no listed function's `:seon.fn/calls` holds a member of
+  `seon.sci.eval/run-time-resolution`. Empty at P0. Each phase adds its row in its commit; the row is red on the
+  parent (the functions resolve today) and green with the change, order-independent.
+
+Cost rows: `seon.cost-estimate-test/closed-runtime-rows-grow-past-no-accepted-overrun` measures
+`:seon-db-nine-forms`, `:hub-behavior-change` and `:similar-by-name-warm` through one running agent after two
+program-change passes and judges them by the table's own `estimates` and `unaccepted` (open overrun task, `ratchet`
+1.5x). Every phase names it with `--test` when it touches the writer, the projection path or the evaluator; P7 tightens
+it into its gate.
+
+### P0. Ratchet, opener table, cost rows (landed)
+
+- Files: `test/seon/sci/open_derivers_test.clj` (new), `test/seon/cost_estimate_test.clj` (`closed-runtime-rows`, the
+  deftest above; `unaccepted` judges only the rows measured, EQUIVALENT for the full table which measures all).
+- Proof: both green in a check JVM on the candidate. Kind: test only, platform-run (check JVM, `--test`).
+- Cost: census 3.4 s for both deftests in the check JVM, the reach index once per content of the calls facts (cached
+  by `seon.sci.eval/reach-index`); cost rows about two program-change passes plus three requests, declared long 120 s.
+- Deletes: nothing. `tmp/runtime-fix2/cost_test.clj` (gitignored) is superseded; it read `RR_LABEL` and wrote into `tmp`.
+
+### P1. Cycle 7: prepared arities stored (platform: schema resource and writer)
+
+- Files: `resources/seon/schemas/seon.call-preparation.edn` (`:seon.call-preparation/prepared-arities`,
+  `:seon.call-preparation/prepared-arity`), `src/seon/call_preparation.clj` (`prepared-arities-tx`; the supplier-row
+  write appends it; `report-snapshot` deleted), `src/seon/fn.clj` (require `seon.call-preparation`; `index!` appends
+  it), `src/seon/turn/batch.clj`, the `:seon.fn/spec` writers `my.program`, `seon.cluster.instruction`, `seon.effect`,
+  `seon.sci.eval`, `seon.sci.lookup`, `seon.test.runner`, `seon.turn`, `test/seon/test_support.clj`
+  (`program-fn-entity`), `src/seon/db.clj` (`prepared-arity-bounds` pulls; `arity-mismatch-report` loses `snapshot`;
+  `arity-verdict` and `arity-mismatches-with` stop acquiring one), `test/seon/db_test.clj`,
+  `test/seon/call_preparation_test.clj`.
+- First step: `rg` census of `transact!`/`with` callers writing `:seon.fn/spec` or `:seon.call-preparation/key`; each
+  is in the file list or the list grows before the edit.
+- Red rows, in `seon.db-test/arity-components-and-callers-are-checked-in-the-final-state` (each a fixture of callee
+  contract, call arity and expected `:seon.fn/arity-mismatches` member):
+  1. variadic: callee `[:=> [:cat :seon.db/connection [:* :int]] :int]` with the connection suppliable, a call of 0
+     arguments; expected refused (the producer keeps the variadic minimum 1; HEAD's gate subtracts the slot and admits
+     it). Red on HEAD by construction.
+  2. supplier retracted: a supplier row admits a call omitting its slot; a later transaction retracts the row; the
+     call is in the next report's mismatches. Reproduce red on HEAD before filing; if HEAD's snapshot memo already
+     refuses it, the row is kept green as a regression and named so.
+  3. same-transaction repair: caller and callee changed to agree in one transaction; accepted.
+  4. idempotent: the same callee write twice; the second report is equal to the first.
+  5. missing producer: a function written through `seon.test-support/program-fn-entity` with a suppliable slot carries
+     `:seon.call-preparation/prepared-arities` after the write (red until the fixture producer calls
+     `prepared-arities-tx`).
+  6. digest unchanged: the function's `:seon.program/definition-digest` is equal with and without the fact.
+- Opener row: `{:phase :P1 :functions #{seon.db/call-preparation-snapshot seon.db/call-preparation-report-snapshot
+  seon.db/call-preparation-plan-for}}` (each holds a `requiring-resolve` today; deleted, it holds none); the ratchet is unchanged (P1 closes no deriver).
+- Cost: per transaction writing specs, one `seon.call-preparation/snapshot` (memo keyed by the supplier rows, hit when
+  they did not change) plus one `plan-for` per written function (0.1-1 ms); the writer stops building the 174-188 ms
+  snapshot on candidates; a one-function write < 100 ms, < 8 MB.
+- Deletes: `seon.db/call-preparation-{snapshot,report-snapshot,plan-for}` (14 lines),
+  `seon.call-preparation/report-snapshot` and its test site; `prepared-arity-bounds` 23 -> ~8.
+- After P2 (both edit `seon.db`).
+
+### P2. `seon.db` requires `seon.program` (ordinary)
+
+- Files: `src/seon/db.clj` (require `seon.program`; the five `defonce` seams at the program seams go, their deref sites
+  `definition-digest-of`, `namespace-digest-of`, `behavior-digest`, `namespace-digests-tx`, `write-digest-error`,
+  `dropped-definition-namespaces` call `seon.program` directly; the docstring citing
+  `seon.fn/stored-namespace-context` converts), `src/seon/program.cljc` (`stored-namespace-context` moves in),
+  `src/seon/fn.clj` (definition removed).
+- Red rows: in `converted`, `{:phase :P2 :functions #{seon.db/program-definition-digest seon.db/program-behavior-digest
+  seon.db/stored-namespace-context seon.db/program-shapes-in seon.db/program-canonical-entity}}` (each `defonce` holds a
+  `requiring-resolve` today; a seam reads as a function of its delay in `:seon.fn/calls`, so the row is red on the
+  parent and green once the seam is deleted); and a new deftest
+  `seon.program-test/seon-db-requires-seon-program`: the `(ns ...)` form of `src/seon/db.clj` read with edamame holds
+  `seon.program` in its `:require` (red today).
+- Ratchet: unchanged. Cost: none at run time (a static call replaces a delay deref).
+- Deletes: five seams (12 lines); `seon.fn/stored-namespace-context` (no other `src` caller).
+
+### P3a. Cycle 3 and the order leaf (platform: load order; publish and reload on a branch of the live store)
+
+- First step: count `seon.schema/!fallback-counts` after the cost rows and after the check's test namespaces; every
+  caller named is converted to hand its population in this commit.
+- Files: `src/seon/schema.clj` (fallback and its helpers deleted; the seven bridge seams become calls; requires
+  `seon.schema.datahike`; `database-projection` deleted; `canonical-schema-entities` takes the digest from its caller),
+  `src/seon/schema/datahike.clj` (primitives out, conveniences out, drops `seon.print` and `seon.schema`),
+  `src/seon/schema/internal.clj` (primitives in), `src/seon/order.cljc` (new: `compare-values`),
+  `src/seon/cluster/boot.clj` (root of `seon.schema/*packaged-forms*` bound once at boot), and the scripted
+  `compare-values` sweep: `seon.print`, `seon.test`, `seon.db`, `seon.fn`, `seon.render.web`, `seon.turn`,
+  `seon.reconcile`, `seon.program`, `seon.config`, `seon.cluster`; tests `test/seon/test_support_test.clj` and the
+  `canonical-schema-entities` test sites.
+- Red rows: new deftest `seon.schema.datahike-test/the-bridge-requires-neither-schema-nor-printer`: the transitive
+  `:require` closure of `seon.schema.datahike` over the `(ns ...)` forms of `src` (edamame) holds neither
+  `seon.schema` nor `seon.print` (red today). `encode-transaction-resolves-the-declaration-population-once` stays
+  green. In `converted`, `{:phase :P3a :functions #{seon.schema/schema-edn-packaged-forms
+  seon.schema/schema-datahike-storable-attribute-in? seon.schema/schema-datahike-storable-properties-in
+  seon.schema/schema-datahike-assert-storable-schema! seon.schema/schema-datahike-database-attributes-in
+  seon.schema/schema-datahike-malli->datahike-attr-in seon.schema/schema-datahike-storage-schema
+  seon.schema/schema-datahike-value-schema seon.schema/canonical-schema-entities}}` (red: each holds a
+  `requiring-resolve`).
+- Ratchet: unchanged (closes none alone). Cost: 0 at run time; an explicit-projection transform < 20 ms, < 4 MB.
+- Deletes: eight seams (25 lines), `database-projection` (3), the fallback and its diagnostics (~70),
+  `seon.print/compare-values` (moved, no alias).
+- After wave 1 (the sweep claims `seon.db`, `seon.fn`, `seon.program` in one window, after P1 and P2 release them).
+
+### P3b. `seon.program` requires the bridge (ordinary)
+
+- Files: `src/seon/program.cljc` only: `#?(:clj [seon.schema.datahike])`; `derived-shape`'s two and
+  `derived-program-attributes`' one `requiring-resolve` become calls.
+- Red rows: `{:phase :P3b :functions #{seon.program/derived-shape seon.program/derived-program-attributes}}`.
+- Ratchet: `seon.program/program-attributes` leaves `open-derivers` (52 -> 51).
+- Cost: 0. Deletes: three `requiring-resolve` forms. After P2 (both edit `seon.program`).
+
+### P4a. Frames (ordinary; in flight)
+
+Unchanged; the narrow check passed it. `seon.error.refusal` stays babashka-loadable. Ratchet unchanged.
+
+### P4b. Cycle 6 (platform: boot binds the handed root)
+
+- Files: `src/seon/schema/handed.cljc` (new leaf, no requires: `*projection*`, `*projection-state*`,
+  `*packaged-forms*` move here), `src/seon/schema.clj` (binds the leaf; the handed projection carries
+  `:seon.schema.projection/identity-projector`, `:seon.schema.projection/explain`), `src/seon/error/refusal.clj`
+  (reads handed values and `:seon.schema.handed/lookup`; the five seams go), `src/seon/error.clj`,
+  `src/seon/cluster/boot.clj` (roots bound once), every `binding` of the three moved Vars (scripted rename).
+- Red rows: `seon.error.refusal-test/error-is-buildable-where-no-projection-is-handed` gains: on a bare `Thread.`
+  after boot's root binding, `(seon.error.refusal/error :no.such/error ...)` answers layer
+  `:seon.error.refusal/construction` and the base error is valid, with no `seon.schema` Var read (assert the error's
+  worlds name the root projection's identity). `{:phase :P4b :functions #{seon.error.refusal/diagnostic
+  seon.error.refusal/references seon.error.refusal/authored-namespace?}}`.
+- Ratchet: `seon.cluster/branch-declaration-changes`, `seon.cluster/derivation-keys`,
+  `seon.cluster.source/merge-base` leave (the narrow check's cumulative row).
+- Cost: per error after acquisition < 5 ms, < 0.5 MB over <= 16 frames; one map get instead of a delay deref.
+- Deletes: `schema-seam` (16), `operation-projection` (11), `checking-projection` (15), `identity-projector` (4),
+  `cache-seam` (5). After P3a and P4a.
+
+### P5. Builder (platform: writer, boot)
+
+- First step: census of `d/connect` and `d/create-database` sites in `src` and `test`.
+- Files: `src/seon/sci/eval.clj` (`projection-state` takes and stores `:seon.source/commit-id` and
+  `:seon.sci.eval/loaded-identity`), `src/seon/cluster/boot.clj`, `src/seon/cluster/store.clj` (its four connection
+  sites carry state), `src/seon/db.clj` (`loaded-builder [database state]`; `content-projection` branches on `kind`
+  to two private derivers; `projection-builder`, the scan in `connection-projection-state` deleted), the ~20 test
+  sites converted to the canonical constructor, `test/seon/db_test.clj`, `test/seon/cluster/program_change_test.clj`
+  (quote `projection-builder`, `loaded-builder`).
+- Red rows: new deftest `seon.db-test/every-connection-carries-its-projection-state`: every connection the census
+  lists, opened through its constructor, has `:seon.sci.eval/projection-state` in its meta (red for the bare
+  `d/connect` sites). New deftest `seon.db-test/projection-cache-uses-the-executing-builder`: two connections over one
+  in-memory store carrying states A and B with different `:seon.source/commit-id`s; `seon.db/carried-projection` of
+  each yields two cache keys and two derivations; the same value read twice yields one derivation (count by
+  `seon.cache` misses of `seon.db/projection`). `{:phase :P5 :functions #{seon.db/carried-projection seon.db/content-projection seon.db/connection-projection-state}}`
+  (the callers of `projection-builder` and the scan; the lane adds any the deref sites show).
+- Ratchet: unchanged. Cost: warm key selection < 1 ms, < 0.05 MB; saves a `find-ns` pair and the scan per read.
+- Deletes: `projection-builder` (15), `loaded-builder`'s instance scan (~30 of 65), the scan in
+  `connection-projection-state` (~12 of 16). After P1 (both `seon.db`).
+
+### P6a. Delete `register-core-predicate!` (ordinary sweep, its own commit)
+
+- Files: the ~70 call sites in 25 `src` files and 7 test files (one script: remove each top-level
+  `(schema/register-core-predicate! ...)` form, rewrite-clj), `src/seon/schema.clj` (`register-core-predicate!`,
+  `core-predicate-registered?` deleted).
+- Precondition: P6b's environment map is not yet in, so the sweep needs the registrations to be unused: the lane
+  first proves on its branch that the projection's predicate bindings for every program predicate come from
+  `predicate-bindings` with the registry empty. If they do not, P6a lands after P6b instead.
+- Red rows: none new; the reaching tests of every touched namespace run.
+
+### P6b. Predicates as input (platform: projection derivation, publication)
+
+- Files: `src/seon/schema.clj` (`predicate-bindings` takes the environment map; `runtime-predicate`,
+  `loaded-predicate-var` deleted; `unloaded-predicate-functions` becomes a property of the map;
+  `predicate-callable`, `identity-only-descriptors-in` read handed values; `projection-fingerprint-from-data` gains
+  `{symbol definition-digest}`), `src/seon/sci/kernel.clj` (supplies the map), `test/seon/schema_test.clj`.
+- Red rows: `seon.schema-test/one-predicate-symbol-cannot-name-two-environments-callables` and
+  `a-rebound-predicate-recompiles-the-keys-naming-it` gain the opposite-cache-order and mixed-branch rows through real
+  branch execution (red: the key holds no predicate digest); new `seon.sci.runtime-test/projection-derivers-are-closed`:
+  `seon.schema/build-projection`, `seon.schema/declaration-projection`, `seon.db/content-projection` and
+  `seon.config/effective` are in `::seon.sci.runtime/closed` of `seon.sci.eval/reach-index` (red until this phase).
+  `{:phase :P6 :functions #{seon.schema/predicate-callable seon.schema/identity-only-descriptors-in
+  seon.schema/projection-bindings seon.schema/projection-state-bindings}}`.
+- Ratchet: the four projection derivers and 26 more leave, to **18** (the 16 plus `seon.sci.eval/reach-index` and
+  `seon.sci.runtime-test/shaped-main`); the lane writes the set the check observes.
+- Cost: 78 digests read per projection derivation; warm validator < 1 ms; a one-predicate change recompiles only its
+  keys, < 20 ms, < 4 MB; unchanged content compiles zero predicates.
+- Deletes: `runtime-predicate` (51), `loaded-predicate-var` (20), most of `unloaded-predicate-functions` (44),
+  `predicate-callable`'s resolution (12). After P4b and P5.
+
+### P7. The lexical exact key (platform: evaluator)
+
+- Files: `src/seon/sci/eval.clj`, `src/seon/sci/runtime.clj`, `src/seon/sci/arm.clj`, `src/seon/cache.clj`,
+  `src/seon/db.clj` (`::builder-digest` deleted), `src/seon/turn/batch.clj`, `resources/seon/schemas/seon.batch.edn`,
+  `test/seon/sci/eval_test.clj`, `test/seon/sci/runtime_test.clj`, `test/seon/db_test.clj` (5 `builder-digest` sites).
+- First step: reproduce runtime-rereview's R1, R2 (closure, lazy seq, raw thread), R3 and the M2 chain (dangling
+  `df9737e97`, `3c79c77b8`) on a branch; each that reproduces becomes a red row of `seon.sci.eval-test`; one that does
+  not is dropped with its evidence.
+- Red rows: those rows; the composed-runtime rows (parent A/h1 then child B/h2; a branch-only predicate; an open
+  value) in `seon.sci.runtime-test/a-composed-runtime-answers-what-its-own-source-answers`.
+- Gate: `closed-runtime-rows-grow-past-no-accepted-overrun` run on parent and change in one check; the change's
+  `:hub-behavior-change` alloc <= 1.3x of 716cc7527's 897.7 MB (1,167 MB), `:seon-db-nine-forms` within 1.1x of the
+  parent, `:similar-by-name-warm` within 1.05x; the commit lowers those rows' recorded overruns to the measured values.
+  Estimate 1.13-1.28x on the hub (Opus); a measured miss stops the key for the owner.
+- Deletes: `seon.cache/*reached*`, `seon.sci.runtime/reaching`, `reached-changes`' open branch, the R4 report
+  (`seon.sci.eval/host-bound-reaching`, `::host-bound-reached`, `:seon.batch/host-bound-reached` and its three
+  `seon.batch.edn` sites, `seon.sci.runtime/host-bound-reached`, `::host-bound-reach`) with its readers in
+  `seon.sci.arm` (4), `seon.turn.batch` (2) and the two test namespaces; `::builder-digest`. After P6b.
+
+### P8. The remaining open derivers (ordinary per lane; platform for evaluator and runner)
+
+- Lane 1 (`seon.program`, ordinary): `seon.program/{content-digest, own-changed-identities, declaration-digest-map,
+  differing-declarations, projected-values, fold-content-digest}` move to `seon.db` or take their reads as input;
+  ratchet 18 -> 15 (`seon.cluster.source/unmerged-count`, `seon.program/own-changed-identities`, `seon.program/content-digest`); its opener row lists the six.
+- Lanes 2-4 by Opus's kinds, each with its census on HEAD first (load-cycle seams; names read from data; program
+  questions as fact reads).
+- Last lane (platform): `run-time-resolution` becomes the census test and the open branch of
+  `seon.sci.runtime/reach-index` and the binder is deleted; red row new
+  `seon.sci.eval-test/no-runnable-src-function-resolves-a-name-at-run-time` (over `:seon.fn/calls` of every
+  non-host-bound `src` function, no member of `run-time-resolution`; red until the last site), plus Astra's
+  `seon.test.runner-test/reach-results-use-the-executed-runtime` and
+  `seon.program-test/content-digest-needs-no-loaded-namespace`.
+- Cost: changed-input work only; each held-data digest or report < 20 ms, < 4 MB at fixture size.
 
 **Order and parallelism** (file ownership from the slices above):
 
-- Wave 1, file-disjoint, in parallel: **P0** (tests only), **P2** (`seon.db`, `seon.program`, `seon.fn`), **P3a**
-  (`seon.schema`, the bridge, `seon.schema.edn`, `seon.schema.internal`, `seon.print`, the order leaf), **P4a**
-  (`seon.error.refusal` and its test).
-- Wave 2, after wave 1, in parallel: **P1** (`seon.db`, `seon.call-preparation`, `seon.fn`, `seon.turn.batch`, the
-  schema resource; after P2 for `seon.db`), **P3b** (`seon.program`; after P2), **P4b** (`seon.schema`, the refusal,
-  `seon.error`, the handed leaf; after P3a and P4a).
-- Wave 3: **P5** then **P6** (both on `seon.db`'s and `seon.schema`'s projection path; P6 needs P4b's handed values).
-- Wave 4: **P7**, after P6 (the gate needs the four closed). Wave 5: **P8**'s lanes.
+- Wave 1, in parallel: **P0** (landed), **P2** (`seon.db`, `seon.program`, `seon.fn`), **P4a** (in flight,
+  `seon.error.refusal`).
+- Wave 2, in parallel after P2: **P1** (`seon.db`, `seon.fn`, the spec writers, the schema resource; platform) and
+  **P3b** (`seon.program` only; ordinary).
+- Wave 3: **P3a** after P1 and P3b release `seon.db`, `seon.fn`, `seon.program` (its sweep touches them; platform).
+  **P6a** may run beside P1/P3b if its precondition holds and its sweep's files are disjoint from theirs; otherwise
+  after P6b.
+- Wave 4: **P4b** (after P3a and P4a; platform) beside **P5** (after P1; platform) only if two check slots are free:
+  they share no file but `seon.cluster.boot`, so run them one after the other unless boot's edits are split as patches.
+- Wave 5: **P6b** (after P4b and P5). Wave 6: **P7**. Wave 7: **P8**'s lanes, lane 1 any time after P2 and P3b.
 
-P1, P3a, P5, P6 and P7 are platform slices (one check-JVM slot each; at most one host-bound lane per slot per
-AGENTS); P2, P3b, P4a run REPL-first beside them.
+Platform slices: P1, P3a, P4b, P5, P6b, P7, P8's last lane (one check-JVM slot each). Ordinary: P2, P3b, P4a, P6a, P8 lane 1.
 
 ## What gets deleted, and what was rejected
 
@@ -289,10 +561,11 @@ clause goes).
 
 ## Open questions for the owner
 
-None requires a decision before the phases are filed. One check for root at P4b: if the count shows the no-projection
-path is common on the cost rows, the boot layer sets the handed leaf's root binding once (Opus's alternative), which
-makes P4b a platform slice; the hybrid prefers it over an unreferenced error reaching the boundary only if that count
-says so.
+None. The choices the first draft left open are decided in the phases above by "Choosing the design": P1 stores the
+producer's value under a new key (`:seon.call-preparation/prepared-arities`) and keeps the report member's; P3a deletes
+the packaged-forms fallback instead of moving the reader, and `compare-values` gets one definition in `seon.order`; P4b
+binds the handed root at boot (decided, not counted) and hands the cache lookup as a value, keeping the refusal `.clj`;
+P5 names its state members and their writer; P6 deletes `register-core-predicate!` first.
 
 ## Evidence (rerun)
 
