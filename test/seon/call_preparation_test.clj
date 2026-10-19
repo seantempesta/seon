@@ -9,9 +9,12 @@
             [sci.core :as sci]
             [seon.batch]
             [seon.call-preparation :as cp]
+            [seon.cluster.registry :as registry]
+            [seon.cluster.store]
             [seon.db :as db]
             [seon.env :as env]
             [seon.error :as error]
+            [seon.error.refusal :as error.refusal]
             [seon.instrument :as instrument]
             [seon.program :as program]
             [seon.schema :as schema]
@@ -530,22 +533,28 @@
              (is (contains? (:seon.call-preparation/supplied-defaults changed)
                             :test/alternate-database)))))))))
 
-(deftest ^{:seon/tasks #{'seon.call-preparation/a-sibling-branch-at-the-same-commit-reads-that-commit}}
-  a-new-branch-at-a-derived-commit-reads-the-held-snapshot
+(deftest a-new-branch-at-a-derived-commit-reads-the-held-snapshot
   (testing "a sibling branch at the same commit is the same program: its first
             snapshot is the commit tier's, never a derivation"
-    (let [[fixed-projection commit earlier]
-          (test-support/with-database
-           (fn [connection]
-             (let [fixed-projection (projection)]
-               [fixed-projection
-                (:datahike/commit-id (:meta @connection))
-                (cp/snapshot @connection fixed-projection)])))]
-      (test-support/with-database
-       (fn [connection]
-         (is (= commit (:datahike/commit-id (:meta @connection)))
-             "both fixture branches start at the executing handle's commit")
-         (is (held? earlier (cp/snapshot @connection fixed-projection))))))))
+    (test-support/with-database
+     (fn [connection]
+       (let [fixed-projection (projection)
+             store (:seon.store/store (test-support/execution-handle connection))
+             branch (keyword (str "sibling-" (random-uuid)))
+             earlier (cp/snapshot @connection fixed-projection)]
+         (registry/branch! {:seon.store/store store
+                            :seon.cluster.registry/from (get-in (db/db connection) [:config :branch])
+                            :seon.store/branch branch})
+         (let [sibling (seon.cluster.store/open-branch! store branch)]
+           (try
+             (is (= (:datahike/commit-id (:meta @connection))
+                    (:datahike/commit-id (:meta @sibling)))
+                 "the plain branch starts at the commit it was made at")
+             (is (held? earlier (cp/snapshot @sibling fixed-projection))
+                 "its first snapshot is the commit tier's, never a derivation")
+             (finally (seon.cluster.store/release-branch! sibling)
+                      (registry/retire-branch! {:seon.store/store store
+                                                :seon.store/branch branch})))))))))
 
 (deftest an-older-value-and-a-sibling-branch-read-their-own-snapshot
   ;; CLASS (issue call-preparation-snapshot-answers-an-older-database-with-a-newer-program):
@@ -782,7 +791,8 @@
              (is (= :input (:seon.instrument/check refusal)))
              (is (= 'seon.call-preparation-test/probe-received-connection?
                     (:seon.error/operation refusal)))
-             (is (= [{:seon.db/connection 1}]
+             (is (= [(error.refusal/value-reference (projection)
+                                                    {:seon.db/connection 1})]
                     (:seon.error/offending refusal))
                  "the caller's 1 reached the callee unreplaced")))
          (testing "explicit caller wins, at an exact full arity"
@@ -1061,8 +1071,7 @@
 ;;; version ship dead.
 ;;; ---------------------------------------------------------------------------
 
-(deftest ^{:seon/tasks #{'seon.call-preparation/an-acquired-context-test-resolves-its-probes}}
-  an-acquired-cluster-context-prepares-its-calls
+(deftest an-acquired-cluster-context-prepares-its-calls
   (testing "the production installation path, not a ctx this test built"
     (test-support/with-database
      (fn [connection]
@@ -1077,7 +1086,8 @@
               (env/environment {:seon.boot/cluster-name "acquired"
                                 :seon.db/connection connection
                                 :seon.schema/projection acquired-projection}))
-             live (env/carry-state ctx (env/environment-state environment))]
+             live (-> (merge ctx (sci/merge-opts ctx {:namespaces {'seon.call-preparation-test probe-vars}}))
+                      (env/carry-state (env/environment-state environment)))]
          (arm-probes! @connection)
          (testing "a contracted first-party function outside seon.db, called
                    with its declared connection elided, receives it"
@@ -1093,8 +1103,7 @@
                  (str "(seon.call-preparation-test/probe-received-database?"
                       " \"a\")"))))))))))
 
-(deftest ^{:seon/tasks #{'seon.call-preparation/an-acquired-context-test-resolves-its-probes}}
-  an-acquired-context-supplies-a-leading-database-to-a-first-party-read
+(deftest an-acquired-context-supplies-a-leading-database-to-a-first-party-read
   (testing "a real first-party call uses its contracted shorter shape"
     (test-support/with-database
      (fn [connection]
@@ -1115,7 +1124,8 @@
                                 :seon.db/connection connection
                                 :seon.agent/id "missing"
                                 :seon.schema/projection acquired-projection}))
-             live (env/carry-state ctx (env/environment-state environment))
+             live (-> (merge ctx (sci/merge-opts ctx {:namespaces {'seon.call-preparation-test probe-vars}}))
+                      (env/carry-state (env/environment-state environment)))
              current (cp/snapshot @connection acquired-projection)
              invocation-plan (cp/plan-for @connection current 'my.agent/settings)
              omitted (try
@@ -1129,7 +1139,12 @@
                    ":seon.agent/id \"missing\"})"))]
          (is (contains? (:seon.call-preparation/supplied-defaults current)
                         :seon.db/db))
-         (let [prepared (cp/prepare current environment invocation-plan [])]
+         (let [prepared (binding [seon.batch/*world* nil]
+                          ;; the evaluation's own world supplies, as in the
+                          ;; calls above; the test member's world holds no agent
+                          (kernel/with-arm
+                            live 5000
+                            (fn [_] (cp/prepare current environment invocation-plan []))))]
            (is (= 1 (count prepared)))
            (is (db/database-value? (:seon.db/db (first prepared))))
            (is (= "missing"

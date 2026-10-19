@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open (triaged by lane red-fix2 on HEAD 04d6075ab; no code changed)
+status: fixed (lane red-fix3; all four at the test, no producer change)
 severity: friction
 created: 2026-10-19
 tags: [issue, test, call-preparation]
@@ -52,3 +52,14 @@ Fix at the test: define the probes in the acquired context the way an agent woul
 ## Proof when fixed
 
 `bin/seon check --at HEAD --test seon.call-preparation-test/<each var>` green for the four vars.
+
+## Fixed (lane red-fix3)
+
+1. The refusal's `:seon.error/offending` is the argument vector of references: the test asserts
+   `[(seon.error.refusal/value-reference (projection) {:seon.db/connection 1})]`.
+2. The test now branches a sibling with `seon.cluster.registry/branch!` from the fixture's own branch (a plain branch
+   keeps the commit id, asserted) and asserts its first snapshot is the held one. The refuted F55 task is retired.
+3 and 4. The acquired context binds the probe Vars (`sci/merge-opts`, guard and carried keys kept) before
+   `env/carry-state`; test 4's direct `cp/prepare` runs under `kernel/with-arm` on that context, so its world (which
+   holds the agent id) supplies, as the evaluated calls do. The task `an-acquired-context-test-resolves-its-probes` is
+   retired.
