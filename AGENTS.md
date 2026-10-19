@@ -737,6 +737,14 @@ definition with the same input is computed once for every branch and agent that 
   stop and report when the code contradicts it. Work past about fifteen minutes is split. A fix that fights the design
   goes to the owner with options. `bin/lane commit` takes one `--test` per test and runs a declared-long test only when
   named by var.
+- **A wrong plan goes back to its planner; nobody redesigns on the fly** (owner, 2026-10-20, after every phase of the
+  closed-runtime plan proved wrong on first contact and was redesigned one phase at a time by root and implementers).
+  When the code contradicts a plan's premise (a count, a caller list, a load order, a claim about the live system), the
+  implementer stops at once and sends the phase back with its evidence: the exact form, the measured value and the
+  premise it refutes. Neither the implementer nor root picks a new design. The plan's planner revises the plan in place
+  for every phase the evidence touches, the narrow check re-runs on the revision, and only then does work resume. In
+  Seon this is the same loop: the implementing agent calls `my.task/send-back!` with its reason and counterexample, and
+  root hands the task back to a design step that revises the plan, never to the implementer to invent a new mechanism.
 - **Design by independent plans and a hybrid** (owner, 2026-10-11; revised 2026-10-12). Any design whose spec we are
   not sure of is a chain whose plan holds what we know, what to look into and the questions → a thorough **dig**
   (Haiku: buried data in `reference-code/`, our code, docs, notes and git history, including earlier attempts and why
