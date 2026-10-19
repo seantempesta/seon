@@ -340,7 +340,7 @@
   [:seon.test/namespaces {:optional true} [:set :symbol]]
   [:seon.test/changed {:optional true} :seon.test/changed]
   [:seon.test/include-long? {:optional true} :boolean]
-  [:seon.test/isolate? {:optional true :description "Defer every isolated member (seon.test/isolated-members) whatever JVM runs the request: a merge gate's, whose candidate this JVM did not load, leaves them to root, which proves them with bin/seon check (seon.cluster.source/done-refusals)."} :boolean]
+  [:seon.test/isolate? {:optional true :description "Defer every isolated member (seon.test/isolated-members) whatever JVM runs the request: a merge gate's, whose candidate this JVM did not load, runs them on the candidate's platform host (seon.test.platform/check-files!)."} :boolean]
   [:seon.test/rerun? {:optional true :description "Execute every selected test, reusing no recorded result: for a test whose outcome depends on inputs its reach does not capture."} :boolean]
   [:seon.test/since-previous-run? {:optional true :description "Narrow :seon.test/changed to what changed since this request shape's previous completed run on the branch: tests reached only by changes that run answered are not selected. The automatic test step's reaching request; without an earlier run, the whole change."} :boolean]
   [:seon.test/check-time-limit-ms {:optional true} :seon.test/check-time-limit-ms]

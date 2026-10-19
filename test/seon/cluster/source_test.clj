@@ -352,7 +352,8 @@
                     (let [c (:seon.db/connection execution)
                           written (db/transact! c [(entity c '[:seon.fn/sym scratch.gate-class/f] "(defn f {:malli/schema [:=> [:cat] :int]} [] 2)")])]
                       (is (:db-after written))
-                      #{[:seon.fn/sym 'scratch.gate-class/f]})))]
+                      #{[:seon.fn/sym 'scratch.gate-class/f]}))
+                  nil)]
         (is (true? (:seon.test/passed? gate)))
         (is (str/includes? (:seon.source/tally gate) "executed 1 ")))
       (finally (registry/retire-branch! {:seon.store/store held-store :seon.store/branch s})))))
@@ -460,10 +461,7 @@
                 ["a middle task: the same function waits for the next task's proofs: done"
                  (assoc base :seon.source/merge-identities #{[:seon.fn/sym 'tq.done/stub]}
                         :seon.source/next-proofs #{'tq.done-test/other})
-                 []]
-                ["a changed host-bound function: SCI cannot prove it on the branch, so the chain bails to root"
-                 (update base :seon.program/identities conj [:seon.fn/sym 'seon.cluster/warn-low-space!])
-                 [:seon.source/test-evidence-error]]]]
+                 []]]]
          (is (= expected (mapv :seon.error/type (source/done-refusals branch judged))) row))
        (is (= [:working [:seon.source/lint-error]]
               ((juxt :seon.task/status #(mapv :seon.error/type (:seon.source/refusals %)))
@@ -536,9 +534,8 @@
                "a red proof refuses"))
          (let [deferred (assoc judged :seon.source/results [(recorded 'tq.one-test/proof true)]
                                :seon.source/deferred #{'tq.one-test/reaches-f})]
-           (is (= [[:seon.source/test-evidence-error ['tq.one-test/reaches-f]]]
-                  (mapv (juxt :seon.error/type :seon.error/offending) (source/done-refusals database deferred)))
-               "a deferred member runs on no platform host automatically: done names it and the chain bails to root")))))))
+           (is (= [] (source/done-refusals database deferred))
+               "a deferred member is the merge's platform run's to answer, so done waits for none")))))))
 
 (deftest unchanged-call-graph-reuses-the-merges-member-list
   (test-support/with-database
@@ -656,10 +653,10 @@
                 ["executed red: a red test" [(recorded 'tq.rv-test/proof false)] [:seon.source/red-test-error]]]]
          (is (= expected (mapv :seon.error/type (source/done-refusals branch (assoc judged :seon.source/results results)))) row))))))
 
-(deftest a-hub-change-defers-the-tests-above-its-src-callers-to-root
+(deftest a-hub-change-defers-the-tests-above-its-src-callers-to-the-platform-run
   ;; A branch runs `seon.db/as-of-key`'s src callers compiled (the loaded src
-  ;; program is the platform), so the step runs its direct test and root proves
-  ;; the tests above those callers (`bin/seon check`): no automatic JVM boot.
+  ;; program is the platform), so the step runs its direct test and the merge's
+  ;; platform run the tests above those callers.
   (test-support/with-database
    (fn [connection]
      ;; the members of a behavior change (`merge-members` after its merge-base filter)
@@ -668,7 +665,7 @@
            deferred (:seon.source/deferred listed)]
        (is (contains? (:seon.source/members listed) direct))
        (is (not (contains? deferred direct)) "the step runs the direct test on the branch")
-       (is (< 100 (count deferred)) "root takes the tests above the src callers")
+       (is (< 100 (count deferred)) "the platform run takes the tests above the src callers")
        (is (every? (:seon.source/members listed) deferred) "a deferred test is still a member the merge proves")))))
 
 (deftest member-fold-equals-the-full-merge-list

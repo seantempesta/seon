@@ -41,9 +41,8 @@ supply the facts each operation reads.
    reload. Every SCI-runnable function is analysed once per content, and calls resolve late, by
    name, through the running runtime (`seon.sci.runtime`, owner 2026-10-19). Selection follows the
    same rule: a test reaching a change through any SCI-runnable caller runs on the branch; a test
-   reaching it only through a host-bound declaration is proven by root, deliberately, with `bin/seon check`:
-   automatic testing never boots a JVM (owner 2026-10-17), so the done rule names such a test, and any
-   changed host-bound function, and the chain bails to root (`seon.cluster.source/done-refusals`).
+   reaching it only through a host-bound declaration is proven by the platform check
+   (`seon.test.platform/check-files!`). (Installed until lane runtime-wire lands: the 2026-10-18 rule.)
 3. **Host-bound entities change only through the files.** A declaration SCI cannot
    interpret (host-defining forms: `deftype`, `defrecord`, `defprotocol`,
    `definterface`, `gen-class`, `proxy`, `extend` onto host classes, and entities that

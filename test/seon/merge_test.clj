@@ -1,5 +1,6 @@
 (ns seon.merge-test
-  (:require [clojure.java.shell :as shell]
+  (:require [clojure.java.io :as io]
+            [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.merge :as merge]
@@ -740,24 +741,38 @@
        (is (contains? (seeds [[:seon.ns/name 'tq.bb-read]]) 'tq.bb-reader/reads-bb)
            "a deleted namespace selects the tests that read what it declared, and never fails selection")))))
 
-(deftest ^{:seon.test/long "One prepare-merge!: a nested seon.test/run on a fresh merge branch of main."
-           :seon.test/long-ms 60000}
-  a-file-reading-test-bails-the-merge-to-root-and-boots-no-jvm
+(deftest ^{:seon.test/long "One prepare-merge! under a checkout root (a copied program tree committed to git) whose bb-load test, an isolated member, runs in a throwaway JVM booted from the candidate commit (bin/seon check --at)."
+           :seon.test/long-ms 300000}
+  the-gate-runs-a-file-reading-test-against-the-candidate-and-refuses
   ;; a9e4e9904 merged green while breaking the bb-load test: the gate neither selected it nor gave it the candidate's
-  ;; files. The test reads the program as files (`:seon.test/reads`), a deferred member the one JVM does not run.
-  ;; Owner 2026-10-17 ("No automatic JVM boots"): the merge boots no JVM for it; its refusal names the test and the
-  ;; chain bails to root, which proves it deliberately (`bin/seon check`).
+  ;; files. The test reads the program as files (`:seon.test/reads`), so it is an isolated member, and the gate runs it
+  ;; on the candidate's own platform host (`seon.test.platform/check-files!`): a branch making a
+  ;; `^{:seon/babashka true}` namespace unloadable in bb refuses there.
   (let [target (support/execution-handle nil)
         store (:seon.store/store target)
         main-conn (:seon.db/connection target)
         suffix (id/id)
+        root (support/temp-root "gate-candidate")
+        program (System/getProperty "user.dir")
+        _ (doseq [path ["src" "script" "resources" "deps.edn" "bb.edn" ".clj-kondo"]
+                  :when (.exists (io/file program path))]
+            (let [{:keys [exit err]} (shell/sh "cp" "-R" (str (io/file program path)) root)]
+              (is (zero? exit) err)))
+        _ (support/commit-root! root)
         task-ns (str "tq.bbgate" suffix)
         task-sym (symbol task-ns "fix")
         _ (task/index-tasks! {:seon.db/connection main-conn
                               :seon.task/files {(str "resources/seon/tasks/" task-ns ".edn")
                                                 "[#:seon.task{:name \"fix\" :plan \"Break a bb namespace.\" :proofs #{seon.babashka-load-test/a-declared-namespace-requiring-a-jvm-only-library-fails-to-load}}]"}})
+        ;; a bb namespace function only test-root tests reach: a script-root deftest reaching the change (as
+        ;; `seon.operator-move-test` reaches `seon.dev.dependency-digest`) refuses the gate's request as unknown coverage
         broken 'seon.dev.docstring/format-findings
         reader 'seon.babashka-load-test/declared-namespaces-load-in-babashka
+        ;; main's own green run of the reader: a merge is curated by tests green where it forked (ruling 5a)
+        on-main (db/with-branch {:seon.db/connection main-conn}
+                  #(test-runner/run {:seon.test/policy :named :seon.test/execution target
+                                     :seon.test/recording-connection main-conn :seon.test/identities #{reader}}))
+        _ (is (true? (:seon.test/passed? on-main)) "the bb-load test is green on main")
         branch (keyword (str "bbgate-" suffix))
         _ (registry/fork! {:seon.store/store store :seon.store/branch branch
                            :seon.cluster.registry/from (db/commit-id (db/db main-conn)) :seon.db/db (db/db main-conn)})
@@ -766,16 +781,14 @@
       (registry/on-branch store branch
                           #(support/transacted! % (support/replacement-tx (db/db %) [:seon.fn/sym broken]
                                                                          "(defn format-findings\n  [request]\n  (java.awt.Point. 0 0))" {})))
-      (let [measured (profile/measure #(source/prepare-merge! target store branch task-sym))
-            prepared (:seon.profile/value measured)
-            bailed (filterv #(some #{reader} (:seon.error/offending %)) (:seon.source/refusals prepared))]
+      (let [prepared (source/prepare-merge! target store branch task-sym {:root root})]
         (some->> (:seon.source/candidate prepared) (vswap! made conj))
-        (is (= [:seon.source/test-evidence-error] (mapv :seon.error/type bailed))
-            "the refusal names the file-reading test the one JVM does not run")
-        (is (not (contains? prepared :seon.source/platform-run)) "the merge ran no platform host")
-        (is (zero? (profile/calls-of measured 'seon.test.platform/run-check!)) "the merge booted no JVM"))
+        (is (string? (:seon.source/platform-run prepared)) "the gate ran its isolated member on the candidate's platform host")
+        (is (some #{reader} (map :seon.test/sym (:seon.source/red-tests prepared)))
+            "the gate selected the bb-load test and ran it red against the candidate's files"))
       (finally
-        (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
+        (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
+        (support/delete-root! root)))))
 
 (deftest ^{:seon.test/long "One prepare-merge!: a nested seon.test/run on a fresh merge branch of main."
            :seon.test/long-ms 60000}

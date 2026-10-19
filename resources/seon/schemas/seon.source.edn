@@ -119,9 +119,11 @@
                [:seon.program/identities :seon.program/identity-set]
                [:seon.source/refusals :seon.source/refusals]
                [:seon.source/red-tests {:optional true} :seon.source/red-tests]
+               [:seon.source/platform-run {:optional true} :seon.source/platform-run]
                [:seon.db/basis-t :seon.db/basis-t]
                [:parents [:set :seon.source/commit-id]]],
               :judged-commit [:uuid {:description "The commit of a merge branch its judgment read (seon.cluster.source/prepare-merge!): accept-merge! carries exactly that value, never the branch's later head."}],
+              :platform-run [:and {:description "The run of a merge gate's isolated members on the candidate's platform host (seon.cluster/reaching-run, seon.test.platform/check-files!), recorded on the merge branch beside the gate run."} :seon.test.run/id],
               :refusals [:vector {:description "Every refusal the done rule (seon.cluster.source/done-refusals) gives a judged branch, a merge branch included; empty only for done and acceptance."} :seon.error/value],
               :merging [:map {:description "Transaction data and metadata accept-merge! carries in its transaction: root's merge of the assignment's facts (seon.merge/merge!), and the assignment whose :seon.task/merged-declarations the same transaction writes (seon.cluster.source/moving)."}
                         [:tx-data :seon.store/transaction-data] [:tx-meta {:optional true} :map]
@@ -130,7 +132,7 @@
               :verdict [:enum {:description "Why a test of a merge's run is not green: an executed failure, or no executed outcome."} :red :unknown],
               :red-test [:map {:description "A judged test that is not green, the run that recorded its result (the judged run when none did) and its verdict."} :seon.test/sym :seon.test.run/id :seon.source/verdict],
               :members [:set {:description "The tests a results judgment covers: a merge's run members, or a branch's proofs, product and the tests reaching its change (seon.cluster.source/done-refusals)."} :seon.test/sym],
-              :deferred [:set {:description "The members of a member list that run only on a platform host (seon.test/host-exclusions of an isolated run, or reaching the change only through loaded platform callers): automatic testing never boots a JVM, so the done rule (seon.cluster.source/done-refusals) names them and the chain bails to root."} :seon.test/sym],
+              :deferred [:set {:description "The members of a member list that run only on a platform host (seon.test/host-exclusions of an isolated run): the merge's platform run answers them, so the done rule waits for none of them."} :seon.test/sym],
               :member-list [:map {:description "The one member list of a merge (seon.cluster.source/merge-members): what the attempt's test step runs, the done rule judges and the merge gate runs."}
                             [:seon.source/members :seon.source/members] [:seon.source/deferred :seon.source/deferred]
                             [:seon.source/reaching {:optional true} :seon.source/reaching]],
