@@ -85,9 +85,12 @@
           (is (str/includes? html "<code>start-work-launcher!</code>"))
           (is (not (str/includes? html "seon-namespace-source"))))
         (testing "an empty agent namespace lists no functions and is no error"
-          (is (= [] (:seon.render.ns/functions fresh)))
-          (is (= '(dir (quote my.agents.fresh)) (sut/namespace-form {:seon.ns/name 'my.agents.fresh}))
-              "the form face is the dir that reads it again"))))))
+          (is (= [] (:seon.render.ns/functions fresh))))))))
+
+(deftest the-namespace-form-face-is-the-dir-that-reads-it-again
+  ;; `dir` is Clojure's macro over an unquoted name: the offered `(dir (quote ns))` refuses when run
+  (is (= '(dir my.agents.fresh) (sut/namespace-form {:seon.ns/name 'my.agents.fresh}))
+      "the form face names the namespace unquoted, as dir takes it"))
 
 (deftest a-namespace-names-its-public-functions-and-those-without-a-contract
   (support/with-database
@@ -176,7 +179,6 @@
                                       :where [?s :seon.schema/key ?k] [?s :seon.schema/form ?form]]
                                     database k)))
            plan-form (registered-form :seon.task/plan)
-           ns-form (registered-form :seon.task/ns)
            unit (fn [lookup distance]
                   (let [value (db/pull database '[*] lookup)]
                     (assoc value :seon.db/db database :seon.render/value value :seon.render/distance distance)))]
