@@ -342,12 +342,16 @@ definition with the same input is computed once for every branch and agent that 
 - **The program is entities**: functions, tests, schemas, namespaces, render pairs, contracts, analysis and test
   evidence keyed by exercised definition digests. Evaluations, calls, messages, errors, tasks and live results are
   data and never merge as program; declare that partition on entity schemas, not in a hand list. Default's program
-  entities and loaded namespaces derive from files. A JVM has one set of compiled Vars, and the loaded `src` program
-  is the platform (owner, 2026-10-18). A branch's definitions are seen by what the branch evaluates from source (its
-  own definitions and the test namespaces it runs), which bind compiled Vars for everything else; compiled `src`
-  callers keep running the compiled program and see a branch's change only after merge and reload. So a change to a
-  hub costs its direct source callers, never the 2,000-function closure behind it, and a reaching test that reaches
-  the change only through compiled callers proves it at merge, by the platform check.
+  entities and loaded namespaces derive from files. **A branch's change is live in its whole runtime** (owner,
+  2026-10-19; `docs/research/agent-platform/2026-10-19/branch-runtime.md`). The platform is only what SCI cannot run:
+  host-bound declarations, which run compiled everywhere. Every SCI-runnable function is analysed once per content
+  (its definition digest, the namespace declaration and the macros it expands), the analysis held in `seon.cache` and
+  shared by every branch and agent. A runtime is an immutable name -> digest map derived from its branch's Datahike
+  facts; calls resolve late, by name, through the running runtime, so a caller's analysis never depends on which
+  version of a callee it reaches. Main may run compiled because its map is the loaded program. A branch costs a fork
+  plus the names it changed, continuing an env costs what changed, and any composition of branches is correct and
+  costs only its bindings plus analyses not yet cached. Never re-root callers, walk caller closures or defer tests to a
+  merge to make a branch see its own change. (Installed until lane runtime-wire lands: the narrower 2026-10-18 rule.)
 - **An agent's context** is its SCI context; its task selects the branch it checks out: its task's `:seon.task/branch`
   (installed: its chain's branch; a new agent per task, in turn), or for root the live cluster head. Every agent, filesystem agents on their own named branches
   included, uses the one REPL entrance. Private defs, atoms and objects survive program changes advanced in place at
