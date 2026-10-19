@@ -6,6 +6,7 @@
   phase at a time; each phase's commit edits `open-derivers` and adds its row to `converted`."
   (:require [clojure.set :as set]
             [clojure.test :refer [deftest is]]
+            [edamame.core :as edamame]
             [seon.db :as db]
             [seon.sci.eval]
             [seon.sci.runtime :as runtime]))
@@ -116,3 +117,40 @@
     (is (= {:new #{} :gone #{}} {:new (set/difference handed handed-derivers) :gone (set/difference handed-derivers handed)})
         "a new deriver handed a function is recorded in handed-derivers")
     (is (= {} unled) "a change to any caller of a handed deriver runs it analysed")))
+
+(defn- cache-calls
+  "The `seon.cache` entry-point calls in `source`, the definition of `sym`, each as `[kind sym entry]`: the
+  qualified keyword the call names, or `::variable` for a kind computed at run time, and the entry point's name."
+  {:malli/schema [:=> [:cat :qualified-symbol :string] [:sequential [:tuple :keyword :qualified-symbol :symbol]]]}
+  [sym source]
+  (let [own (symbol (namespace sym))
+        aliases (some-> (find-ns own) ns-aliases)
+        resolve-ns (fn [nick] (or (some-> (get aliases nick) ns-name) nick))
+        forms (edamame/parse-string-all source {:all true :read-cond :allow :features #{:clj}
+                                                :auto-resolve #(if (= :current %) own (resolve-ns %))})
+        held-arity '{present 3 evict! 3 lookup 6 lookup-within 8}]
+    (for [form (tree-seq coll? seq forms)
+          :let [head (when (seq? form) (first form))
+                entry (when (and (qualified-symbol? head) (= 'seon.cache (resolve-ns (symbol (namespace head)))))
+                        (symbol (name head)))]
+          :when (contains? held-arity entry)
+          :let [args (rest form)
+                kind (if (= (held-arity entry) (count args)) (second args) (first args))]]
+      [(if (keyword? kind) kind ::variable) sym entry])))
+
+(deftest a-cache-kind-read-apart-from-its-derivation-has-one-keyer
+  ;; Runtime review 3, Astra blocker 3: a kind's writer and reader keyed it apart on a branch where one ran analysed
+  ;; and the other compiled. Every kind some function reads or evicts (`seon.cache/present`, `seon.cache/evict!`)
+  ;; is keyed by one function, which derives it too, so the reach that decides how it runs decides for all of the
+  ;; kind's calls. `seon.sci.runtime/keyed-entries` is the entry points themselves.
+  (let [database (db/db)
+        rows (db/q '[:find ?sym ?source :in $ [?entry ...]
+                     :where [?f :seon.fn/calls ?entry] [?f :seon.fn/sym ?sym] [?f :seon.fn/source ?source]]
+                   database '[seon.cache/lookup seon.cache/lookup-within seon.cache/present seon.cache/evict!])
+        calls (mapcat (fn [[sym source]] (when-not (= 'seon.sci.runtime/keyed-entries sym) (cache-calls sym source))) rows)
+        keyers (reduce (fn [held [kind sym]] (update held kind (fnil conj #{}) sym)) {} calls)
+        read-kinds (into #{} (keep (fn [[kind _ entry]] (when ('#{present evict!} entry) kind))) calls)]
+    (is (= {} (into (sorted-map-by #(compare (str %1) (str %2)))
+                    (filter (fn [[kind syms]] (and (contains? read-kinds kind) (< 1 (count syms)))))
+                    keyers))
+        "a kind read or evicted is keyed by one function: its reader goes through its deriver")))

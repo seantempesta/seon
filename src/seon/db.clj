@@ -1551,16 +1551,21 @@
 
 (defn- alias!
   "Name the projection held under `canonical` (`[kind key]`) by `alias-key`,
-  replacing a stale alias. A held alias stores the canonical it was named
-  with, so a repeated naming is the identical object and never walks the
-  declaration content of its key."
-  {:malli/schema [:=> [:cat :seon.schema/value [:tuple :qualified-keyword :seon.schema/value]]
-                  [:tuple :qualified-keyword :seon.schema/value]]}
-  [alias-key canonical]
-  (let [held (seon.cache/present ::projection-alias alias-key)]
-    (when-not (or (identical? canonical held) (= canonical held))
-      (seon.cache/evict! ::projection-alias alias-key)))
-  (seon.cache/lookup ::projection-alias alias-key alias-bytes (constantly canonical)))
+  replacing a stale alias; without `canonical`, the canonical `alias-key`
+  names, else nil. The one function keying `::projection-alias`. A held alias
+  stores the canonical it was named with, so a repeated naming is the
+  identical object and never walks the declaration content of its key."
+  {:malli/schema [:function [:=> [:cat :seon.schema/value] [:maybe [:tuple :qualified-keyword :seon.schema/value]]]
+                  [:=> [:cat :seon.schema/value [:tuple :qualified-keyword :seon.schema/value]]
+                   [:tuple :qualified-keyword :seon.schema/value]]]}
+  ([alias-key] (seon.cache/present ::projection-alias alias-key))
+  ([alias-key canonical]
+   (let [held (seon.cache/present ::projection-alias alias-key)]
+     (when-not (or (identical? canonical held) (= canonical held))
+       (seon.cache/evict! ::projection-alias alias-key)))
+   (seon.cache/lookup ::projection-alias alias-key alias-bytes (constantly canonical))))
+
+(declare content-projection)
 
 (defn- resolved
   "`[canonical projection]` behind `alias-key`, or nil when the alias is absent
@@ -1568,8 +1573,8 @@
   {:malli/schema [:=> [:cat :seon.schema/value]
                   [:maybe [:tuple [:tuple :qualified-keyword :seon.schema/value] :seon.schema/projection]]]}
   [alias-key]
-  (when-let [[kind k :as canonical] (seon.cache/present ::projection-alias alias-key)]
-    (when-let [projection (seon.cache/present kind k)]
+  (when-let [canonical (alias! alias-key)]
+    (when-let [projection (content-projection canonical)]
       [canonical projection])))
 
 (defn- projection-cache-key
@@ -1678,9 +1683,9 @@
   [builder database]
   (let [context (when (instance? DB database) (:cache-context database))
         ;; Another builder's entities would survive the replacement unrebuilt.
-        candidates (keep (fn [[k [kind canonical-key]]]
+        candidates (keep (fn [[k canonical]]
                            (when (and (map? k) (= builder (::builder k)))
-                             (when-let [projection (seon.cache/present kind canonical-key)]
+                             (when-let [projection (content-projection canonical)]
                                [k projection])))
                          (seon.cache/retained ::projection-alias))]
     (if (seq candidates)
@@ -1704,7 +1709,9 @@
 
 (defn- content-projection
   "The projection of `database`'s declaration content, held once under that
-  content and the loaded `builder` and named by each of `aliases`. A miss
+  content and the loaded `builder` and named by each of `aliases`; given only
+  a `canonical` `[kind key]`, the projection held there, else nil, so the one
+  function keying the projection kinds reads them too. A miss
   takes the projection a speculative value of the same content derived
   (`speculative-projection`), else derives under `kind`: advanced from the
   held `[before base written]` when `advance` names one (`advanced-derivation`),
@@ -1713,6 +1720,7 @@
   charged the forms it does not share with the projection it derives from
   (`projection-bytes`)."
   {:malli/schema [:function
+                  [:=> [:cat [:tuple :qualified-keyword :seon.schema/value]] [:maybe :seon.schema/projection]]
                   [:=> [:cat :seon.source/digest :seon.db/database-value] :seon.schema/projection]
                   [:=> [:cat :seon.source/digest :seon.db/database-value :qualified-keyword
                         [:sequential :seon.schema/value]]
@@ -1722,6 +1730,7 @@
                         [:maybe [:tuple :seon.db/database-value :seon.schema/projection
                                  [:sequential :seon.schema/value]]]]
                    :seon.schema/projection]]}
+  ([[kind k]] (seon.cache/present kind k))
   ([builder database] (content-projection builder database ::projection []))
   ([builder database kind aliases] (content-projection builder database kind aliases nil))
   ([builder database kind aliases advance]
@@ -1749,15 +1758,19 @@
 
 (defn- hold-basis!
   "Hold `[revision-key commit]` as the basis of the connection `revision-key`
-  names: the latest committed value whose projection it holds."
-  {:malli/schema [:=> [:cat :seon.schema/value :uuid] :nil]}
-  [revision-key commit]
-  (let [connection (:datahike.cache/connection-id revision-key)
-        held (seon.cache/present ::basis connection)]
-    (when-not (= held [revision-key commit])
-      (seon.cache/evict! ::basis connection)
-      (seon.cache/lookup ::basis connection basis-bytes (constantly [revision-key commit])))
-    nil))
+  names: the latest committed value whose projection it holds. Given only a
+  `connection` id, the basis it holds, else nil: the one function keying
+  `::basis`."
+  {:malli/schema [:function [:=> [:cat :seon.schema/value] [:maybe [:tuple :seon.schema/value :uuid]]]
+                  [:=> [:cat :seon.schema/value :uuid] :nil]]}
+  ([connection] (seon.cache/present ::basis connection))
+  ([revision-key commit]
+   (let [connection (:datahike.cache/connection-id revision-key)
+         held (seon.cache/present ::basis connection)]
+     (when-not (= held [revision-key commit])
+       (seon.cache/evict! ::basis connection)
+       (seon.cache/lookup ::basis connection basis-bytes (constantly [revision-key commit])))
+     nil)))
 
 (defn- name-committed!
   "Name the projection held under `canonical` by the committed value's
@@ -1807,7 +1820,7 @@
   {:malli/schema [:=> [:cat :seon.source/digest :seon.db/database-value [:sequential :seon.schema/value]]
                   [:maybe :seon.schema/projection]]}
   [builder database aliases]
-  (when-let [[revision-key commit] (seon.cache/present ::basis (:datahike.cache/connection-id (:cache-context database)))]
+  (when-let [[revision-key commit] (hold-basis! (:datahike.cache/connection-id (:cache-context database)))]
     (when-let [entry (resolved (assoc revision-key ::builder builder))]
       (read-at database commit
                (fn [before]
@@ -2104,7 +2117,7 @@
          (when (:datahike.cache/connection-id (:cache-context source))
            (let [revision-key (assoc (projection-cache-key source) ::builder @builder)]
              ;; once per connection and commit: every later read of the value finds its name held
-             (when-not (identical? canonical (seon.cache/present ::projection-alias revision-key))
+             (when-not (identical? canonical (alias! revision-key))
                (name-committed! @builder revision-key (:datahike.value/commit-id committed) canonical))))
          held))
      (cond

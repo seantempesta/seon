@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open (a fix measured, not committed: over the cost gate)
+status: resolved
 severity: blocker
 created: 2026-10-20
 tags: [issue, sci, branch-runtime, review3-astra]
@@ -18,18 +18,26 @@ This is distinct from the projection-holder defect: these operations all use `se
 
 Evidence and limits: [independent review](../../research/agent-platform/2026-10-20/runtime-review3-astra.md). Reproducible probe source: [review patch](../../research/agent-platform/2026-10-20/runtime-review3-astra-probes.patch); it is evidence, not an installed change.
 
-## Attempt (lane runtime-fix3, 2026-10-20): measured, not committed
+## Resolution (lane runtime-fix4, root option 3)
 
-Structural fix tried: the derivers of one cache kind (the qualified keyword their entry-point calls name, read from
-their source with edamame and matched to `:seon.fn/keywords`; 13 kinds with two or more derivers on the loaded
-program, `:seon.render/invocation` among them) follow each other in `seon.sci.runtime/compiled-names`: when one does
-not run compiled, none does. The proof (kept as `docs/research/agent-platform/2026-10-20/runtime-fix3-cache-kind.patch`)
-went green, but the cost table measured, against HEAD in check JVMs one after another: `:hub-change-sequence`
-4,888 -> 5,124-5,151 MB (bound 5,053), `:hub-behavior-change` 1,745 -> 2,050-2,062 MB, `:similar-by-name-warm`
-31 -> 142-144 MB. The same candidate without the kind rule measured 4,868 MB / 31 MB, so the rule is the whole cost:
-a hub change reaches one deriver of each embed kind (`:seon.embed/store`, `:seon.embed/embedding`, `:seon.embed/index`)
-and its partners then key per runtime, re-deriving the store and the index. Options for root: (1) take the rule and
-raise the gate (the exact semantics, +5% on the sequence); (2) key a kind's entries by the runtime's change to its
-derivers only (the kind's own reach, not the whole delta), so a hub change that leaves the embed derivations' answers
-unchanged shares them; (3) make each such cache owner one function per kind (writer and reader in one body), so the
-existing reach covers it, converting `seon.render/retain-invocation!`/`invocation` and the twelve other pairs.
+Every cache kind some function reads or evicts (`seon.cache/present`, `seon.cache/evict!`) is keyed by one function,
+which derives it too ("One derivation, every consumer"): its readers call that function, so the reach that decides
+whether it runs compiled decides for every call of the kind, and no new rule joins `seon.sci.runtime/compiled-names`.
+The ten kinds read apart from their deriver: `:seon.render/invocation` (`seon.render/invocation` reads through
+`seon.render/retain-invocation!`), `:seon.db/basis` (`seon.db/hold-basis!`), `:seon.db/projection-alias`
+(`seon.db/alias!`), the projection kinds (`seon.db/content-projection`, read by `seon.db/resolved` and
+`seon.db/nearest-base`), `:seon.embed/embedding` (inlined into `seon.embed/layered`, its only writer deleted),
+`:seon.sci.eval/program-context` (`seon.sci.eval/derive-program-context` keeps what `seon.sci.eval/program-context`
+derives), `:seon.sci.runtime/analysed` (`seon.sci.runtime/analysed`, read by `seon.sci.runtime/bind`),
+`:seon.test.runner/current-result-head` (`seon.test.runner/held-answer!`), `:seon.test.runner/reach-index-by-revision`
+(`seon.test.runner/reach-entries`) and `:seon.test.runner/result` (`seon.test.runner/retained-result`, which
+`seon.test/carried-results`, `seon.agent-cost/cache-miss` and the branch-reuse test call). The census row
+`seon.sci.open-derivers-test/a-cache-kind-read-apart-from-its-derivation-has-one-keyer` is red when a kind gains a
+second keyer; `seon.sci.eval-test/a-cache-kinds-writer-and-reader-key-it-alike-on-a-branch` is Astra's reproduction.
+The cost table is unchanged (`:hub-change-sequence` 4,899-4,904 -> 4,885-4,894 MB, `:similar-by-name-warm`
+31.1-31.3 -> 30.7-30.9 MB, check JVMs one after another). An earlier attempt made all derivers of a kind run
+analysed together and cost +250 MB on the sequence (its patch:
+`docs/research/agent-platform/2026-10-20/runtime-fix3-cache-kind.patch`).
+
+The synthetic probe `seon.runtime-review3-astra-new-test/cache-reader-and-writer-agree-in-one-runtime` (a hand-built
+writer and reader of one kind in two functions) stays as written: such a pair in the program is red in the census row.

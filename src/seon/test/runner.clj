@@ -1005,6 +1005,8 @@
     {::nodes nodes
      ::schemas (reach-fixed-point schema-node-of ::keys (into #{} (mapcat ::keys) (keep val nodes)))})))
 
+(declare reach-entries)
+
 (defn- reach-graph
   "`reached-graph` of the requested tests; a committed value's graph is cached
   under the revisions of the attributes it reads (`reach-revision-key`), so the
@@ -1015,7 +1017,7 @@
                    [::reverse {:optional true} [:map-of :seon.schema/value [:set :seon.schema/value]]]]]}
   [database test-symbols]
   (if-let [revisions (reach-revision-key database)]
-    (if-let [held (let [entries (cache/present ::reach-index-by-revision revisions)]
+    (if-let [held (let [entries (reach-entries revisions)]
                    (when (every? #(contains? (::component-digests entries) %) test-symbols) entries))]
       (select-keys held [::nodes ::schemas ::reverse])
       (cache/lookup ::reach-graph [revisions (set test-symbols)]
@@ -1259,55 +1261,58 @@
 (defn- reach-entries
   "The requested digests; only changed definitions and their reverse closure lose known components.
   A work branch's digests are a function of its own HEAD: main's later
-  changes reach it only when merged."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]] :map]}
-  [database test-symbols]
-  (if (empty? test-symbols)
-    {::digests {} ::undigested []}
-    (let [attribute-revisions (reach-revision-key database)
-          ;; equal programs share one index
-          revisions attribute-revisions
-          ;; the store's most recent derivation is the prior, whichever branch built it
-          store (reach-store database)
-          current (when revisions (cache/present ::reach-index-by-revision revisions))
-          covered (into (set (keys (::digests current))) (::undigested current))
-          entries
-          (if (every? covered test-symbols)
-            ;; the held index answers: one hit
-            (cache/lookup ::reach-index-by-revision revisions #(reach-entries-weight % nil) (constantly current))
-            (let [prior (or current
-                              (some->> (when store (cache/present ::reach-head store))
-                                       (cache/present ::reach-index-by-revision)))
-                  declarations (reach-declarations database (::declarations prior {}))
-                  changed (if (and prior (not current)) (changed-reach declarations prior) #{})
-                  known (apply dissoc (::component-digests prior {}) changed)
-                  unknown (set/difference (set (::undigested prior)) changed)
-                  {::keys [nodes schemas] :as graph}
-                  (reached-graph database test-symbols declarations known unknown)
-                  index (cache/lookup ::reach-index [(set test-symbols) nodes (update-vals schemas ::leaf)]
-                                      (fn [_] (* (+ reach-index-entry-bytes 160) (+ (count nodes) (count schemas))))
-                                      #(reach-index graph test-symbols))
-                  concrete (into {} (remove (comp map? ::leaf val)) (concat nodes schemas))
-                  entries {::nodes (merge (::nodes prior) (select-keys concrete (keys nodes)))
-                           ::schemas (merge (::schemas prior) (select-keys concrete (keys schemas)))
-                           ::reverse (reach-reverse (::reverse prior {})
-                                                    (or prior {}) concrete)
-                           ::component-digests (merge known (::component-digests index))
-                           ::digests (merge (apply dissoc (::digests prior) changed) (::digests index))
-                           ::undigested (into unknown (::unknown-names index))
-                           ::revisions attribute-revisions ::declarations declarations}]
-              (when revisions
-                (cache/evict! ::reach-index-by-revision revisions)
-                ;; charged for what it adds to a prior held under other revisions; a replaced one is all of it
-                (cache/lookup ::reach-index-by-revision revisions
-                              #(reach-entries-weight % (when-not (identical? prior current) prior))
-                              (constantly entries)))
-              entries))]
-      (when (and store revisions)
-        (cache/evict! ::reach-head store)
-        (cache/lookup ::reach-head store (constantly 256) (constantly revisions)))
-      (assoc entries ::digests (select-keys (::digests entries) test-symbols)
-                     ::undigested (filterv (set (::undigested entries)) test-symbols)))))
+  changes reach it only when merged. Given only `revisions`, the entries held under them, else nil: the one
+  function keying `::reach-index-by-revision`."
+  {:malli/schema [:function [:=> [:cat :seon.schema/value] :seon.schema/value]
+                  [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]] :map]]}
+  ([revisions] (cache/present ::reach-index-by-revision revisions))
+  ([database test-symbols]
+   (if (empty? test-symbols)
+     {::digests {} ::undigested []}
+     (let [attribute-revisions (reach-revision-key database)
+           ;; equal programs share one index
+           revisions attribute-revisions
+           ;; the store's most recent derivation is the prior, whichever branch built it
+           store (reach-store database)
+           current (when revisions (cache/present ::reach-index-by-revision revisions))
+           covered (into (set (keys (::digests current))) (::undigested current))
+           entries
+           (if (every? covered test-symbols)
+             ;; the held index answers: one hit
+             (cache/lookup ::reach-index-by-revision revisions #(reach-entries-weight % nil) (constantly current))
+             (let [prior (or current
+                               (some->> (when store (cache/present ::reach-head store))
+                                        (cache/present ::reach-index-by-revision)))
+                   declarations (reach-declarations database (::declarations prior {}))
+                   changed (if (and prior (not current)) (changed-reach declarations prior) #{})
+                   known (apply dissoc (::component-digests prior {}) changed)
+                   unknown (set/difference (set (::undigested prior)) changed)
+                   {::keys [nodes schemas] :as graph}
+                   (reached-graph database test-symbols declarations known unknown)
+                   index (cache/lookup ::reach-index [(set test-symbols) nodes (update-vals schemas ::leaf)]
+                                       (fn [_] (* (+ reach-index-entry-bytes 160) (+ (count nodes) (count schemas))))
+                                       #(reach-index graph test-symbols))
+                   concrete (into {} (remove (comp map? ::leaf val)) (concat nodes schemas))
+                   entries {::nodes (merge (::nodes prior) (select-keys concrete (keys nodes)))
+                            ::schemas (merge (::schemas prior) (select-keys concrete (keys schemas)))
+                            ::reverse (reach-reverse (::reverse prior {})
+                                                     (or prior {}) concrete)
+                            ::component-digests (merge known (::component-digests index))
+                            ::digests (merge (apply dissoc (::digests prior) changed) (::digests index))
+                            ::undigested (into unknown (::unknown-names index))
+                            ::revisions attribute-revisions ::declarations declarations}]
+               (when revisions
+                 (cache/evict! ::reach-index-by-revision revisions)
+                 ;; charged for what it adds to a prior held under other revisions; a replaced one is all of it
+                 (cache/lookup ::reach-index-by-revision revisions
+                               #(reach-entries-weight % (when-not (identical? prior current) prior))
+                               (constantly entries)))
+               entries))]
+       (when (and store revisions)
+         (cache/evict! ::reach-head store)
+         (cache/lookup ::reach-head store (constantly 256) (constantly revisions)))
+       (assoc entries ::digests (select-keys (::digests entries) test-symbols)
+                      ::undigested (filterv (set (::undigested entries)) test-symbols))))))
 
 (defn- static-reach-digests
   "Each symbol's static reach digest on `database` (`reach-digests` without extra roots)."
@@ -2427,6 +2432,22 @@
                        (when (seq outside) [test-symbol outside]))))
           executed)))
 
+(defn retained-result
+  "The outcome retained under the reuse identity `reuse-key` (`[sym reach-digest input-digest]`), else nil; with
+  `outcome`, that outcome retained there unless the one held is its run's or newer, answering the one held; with nil,
+  nothing held there any more. The one function keying `::result`."
+  {:malli/schema [:function [:=> [:cat :seon.schema/value] :seon.schema/value]
+                  [:=> [:cat :seon.schema/value [:maybe :map]] :seon.schema/value]]}
+  ([reuse-key] (cache/present ::result reuse-key))
+  ([reuse-key outcome]
+   (if outcome
+     (let [held (cache/present ::result reuse-key)]
+       (when (and held (not= (:seon.test.run/id outcome) (:seon.test.run/id held))
+                  (pos? (compare (:seon.test.run/at outcome) (:seon.test.run/at held))))
+         (cache/evict! ::result reuse-key))
+       (cache/lookup ::result reuse-key #(+ 256 (* 1024 (count (:seon.test.report/values %)))) (constantly outcome)))
+     (cache/evict! ::result reuse-key))))
+
 (defn- retain-results!
   "Retain each terminated outcome of run `run-id` on `database`, red included, in `seon.cache` under its reuse
   identity `[sym reach-digest input-digest]`, the key `seon.test/select` reuses by, naming the run and holding a
@@ -2459,11 +2480,8 @@
             :let [reuse-key [test-symbol digest inputs]
                   outcome (cond-> {:seon.test.run/id run-id :seon.test.run/at at :seon.test/pass-count pass
                                    :seon.test/fail-count fail :seon.test/error-count error}
-                            (get reports member) (assoc :seon.test.report/values (get reports member)))
-                  held (cache/present ::result reuse-key)]]
-      (when (and held (not= run-id (:seon.test.run/id held)) (pos? (compare at (:seon.test.run/at held))))
-        (cache/evict! ::result reuse-key))
-      (cache/lookup ::result reuse-key #(+ 256 (* 1024 (count (:seon.test.report/values %)))) (constantly outcome))))
+                            (get reports member) (assoc :seon.test.report/values (get reports member)))]]
+      (retained-result reuse-key outcome)))
   nil)
 
 (defn commit-results!
@@ -2842,16 +2860,19 @@
 
 (defn- held-answer!
   "The tests' results `held` answers, its key `key` now the newest under `head` when `revisions` hold any; an error
-  `held` answers as itself."
-  {:malli/schema [:=> [:cat [:or [:map [::results :map]] :seon.error/value] [:map-of :qualified-keyword :uuid]
-                       :seon.schema/value :seon.schema/value]
-                  [:or [:map-of :seon.test/sym :map] :seon.error/value]]}
-  [held revisions head key]
-  (if (:seon.error/at held) held
-    (do (when (seq revisions)
-          (cache/evict! ::current-result-head head)
-          (cache/lookup ::current-result-head head (constantly (+ 256 (* 128 (count (second head))))) (constantly key)))
-        (::results held))))
+  `held` answers as itself. Given only `head`, the key newest under it, else nil: the one function keying
+  `::current-result-head`."
+  {:malli/schema [:function [:=> [:cat :seon.schema/value] :seon.schema/value]
+                  [:=> [:cat [:or [:map [::results :map]] :seon.error/value] [:map-of :qualified-keyword :uuid]
+                        :seon.schema/value :seon.schema/value]
+                   [:or [:map-of :seon.test/sym :map] :seon.error/value]]]}
+  ([head] (cache/present ::current-result-head head))
+  ([held revisions head key]
+   (if (:seon.error/at held) held
+     (do (when (seq revisions)
+           (cache/evict! ::current-result-head head)
+           (cache/lookup ::current-result-head head (constantly (+ 256 (* 128 (count (second head))))) (constantly key)))
+         (::results held)))))
 
 (defn current-results
   "Each of `test-symbols` with the result of its newest admitted execution on `database` recorded at its current
@@ -2872,7 +2893,7 @@
           key [revisions names task loaded]
           head [(db/content-revisions database [:seon.task/id :seon.schema/key :seon.schema/form]) names task loaded]
           derive (fn []
-                   (let [prior-key (when (seq revisions) (cache/present ::current-result-head head))
+                   (let [prior-key (when (seq revisions) (held-answer! head))
                          prior (when prior-key (cache/present ::current-results prior-key))
                          fold #(fold-current-results database % prior revisions names task)]
                      (if prior (db/read-at database (::commit prior) fold) (fold nil))))

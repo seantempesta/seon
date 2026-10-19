@@ -1,7 +1,6 @@
 (ns seon.agent-cost
   "Chain request measurements through the MCP entrance, with branch-local tasks and tests."
   (:require [my.agent]
-            [seon.cache :as cache]
             [seon.cluster.host :as host]
             [seon.context :as context]
             [seon.db :as db]
@@ -92,7 +91,7 @@
                        [?member :seon.test.member/reach-digest ?digest]
                        [?run :seon.test.run/members ?member] [?run :seon.test.run/input-digest ?inputs]]
                      database test-symbol digest)
-        _ (cache/evict! :seon.test.runner/result [test-symbol digest inputs])
+        _ (runner/retained-result [test-symbol digest inputs] nil)
         measured (profile/measure #(#'test/carried-results database #{} [test-symbol] {test-symbol digest} inputs))]
     (assoc (dissoc measured :seon.profile/value :seon.profile/called)
            :members (count (:seon.profile/value measured))

@@ -79,12 +79,16 @@
       armed)))
 
 (defn analysed
-  "The function `row` defines, analysed once per content (`analysis-key`).
+  "The function `row` defines, analysed once per content (`analysis-key`);
+  given only an analysis key, the analysis held under it, else nil: the one
+  function keying `::analysed`.
 
   It is held in `seon.cache`, evictable: a miss analyses it again."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:map [:seon.fn/sym :seon.fn/sym] [:seon.fn/source :string] [:seon.program/definition-digest :seon.program/definition-digest]]] :seon.instrument/callable]}
-  [ctx row]
-  (seon.cache/lookup ::analysed (analysis-key ctx row) (constantly analysed-function-bytes) #(analyse ctx row)))
+  {:malli/schema [:function [:=> [:cat [:vector :seon.schema/value]] [:maybe :seon.instrument/callable]]
+                  [:=> [:cat :seon.sci.eval/ctx [:map [:seon.fn/sym :seon.fn/sym] [:seon.fn/source :string] [:seon.program/definition-digest :seon.program/definition-digest]]] :seon.instrument/callable]]}
+  ([analysis] (seon.cache/present ::analysed analysis))
+  ([ctx row]
+   (seon.cache/lookup ::analysed (analysis-key ctx row) (constantly analysed-function-bytes) #(analyse ctx row))))
 
 (defn keyed-entries
   "The cache entry points (`seon.cache`'s and the projection's own holder,
@@ -187,7 +191,7 @@
   [parent rows]
   (let [held (::names parent)
         changed (into [] (remove #(= (:seon.program/definition-digest %) (get held (:seon.fn/sym %)))) rows)
-        unseen (into #{} (comp (remove #(seon.cache/present ::analysed (analysis-key parent %)))
+        unseen (into #{} (comp (remove #(analysed (analysis-key parent %)))
                                (map :seon.program/definition-digest))
                      changed)
         fork (sci/fork parent)]

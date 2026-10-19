@@ -986,13 +986,13 @@
   [entry]
   (* invocation-entry-bytes (inc (count (:seon.render.call/read-evidence entry)))))
 
-(declare same-invocation-evidence?)
+(declare same-invocation-evidence? retain-invocation!)
 
 (defn invocation
   "The retained invocation of `cache-key` that describes the same code and input as `evidence`, else nil."
   {:malli/schema [:=> [:cat :seon.schema/value :map] [:maybe :map]]}
   [cache-key evidence]
-  (let [entry (seon.cache/present ::invocation cache-key)]
+  (let [entry (retain-invocation! cache-key)]
     (when (and entry (same-invocation-evidence? entry evidence))
       entry)))
 
@@ -1004,13 +1004,17 @@
       entry)))
 
 (defn retain-invocation!
-  "Retain `entry` as the one invocation of `cache-key` in `seon.cache`, replacing any earlier one.
-  The retained entry holds evidence and output, never a database, program snapshot or projection."
-  {:malli/schema [:=> [:cat :seon.schema/value :map] :seon.schema/value]}
-  [cache-key entry]
-  (seon.cache/evict! ::invocation cache-key)
-  (seon.cache/lookup ::invocation cache-key invocation-weight
-                     (constantly (dissoc entry :seon.db/db ::program-snapshot ::projection))))
+  "Retain `entry` as the one invocation of `cache-key` in `seon.cache`, replacing any earlier one; without
+  `entry`, the invocation retained under `cache-key`, else nil. The one function keying `::invocation`, so its
+  reader and writer run alike. The retained entry holds evidence and output, never a database, program snapshot
+  or projection."
+  {:malli/schema [:function [:=> [:cat :seon.schema/value] [:maybe :map]]
+                  [:=> [:cat :seon.schema/value :map] :seon.schema/value]]}
+  ([cache-key] (seon.cache/present ::invocation cache-key))
+  ([cache-key entry]
+   (seon.cache/evict! ::invocation cache-key)
+   (seon.cache/lookup ::invocation cache-key invocation-weight
+                      (constantly (dissoc entry :seon.db/db ::program-snapshot ::projection)))))
 
 (defn same-invocation-evidence?
   "True when two invocation entries describe the same code and input."

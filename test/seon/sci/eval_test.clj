@@ -325,6 +325,25 @@
        (is (= [777 main] branch-first) "the branch deriving first serves compiled code nothing")
        (is (= [main 777] compiled-first) "compiled code deriving first serves the branch nothing")))))
 
+(deftest a-cache-kinds-writer-and-reader-key-it-alike-on-a-branch
+  ;; Runtime review 3, Astra blocker 3: a branch changing `seon.render/invocation-weight` reached the writer
+  ;; `seon.render/retain-invocation!` but not the reader `seon.render/invocation`, so the reader read main's key.
+  ;; The reader reads through the writer, the kind's one keyer: it reads what the writer retained on the branch,
+  ;; whether or not main holds the key.
+  (test-support/with-database
+   (fn [connection]
+     (let [database (branch-replacing! connection 'seon.render/invocation-weight "(?s)\\[entry\\].*$" "[entry] 2048)")
+           branch (eval/base-ctx database)
+           evidence {:seon.render/program-snapshot {} :seon.render/program-evidence {} :seon.render/projection {}}
+           write-read (in-context branch "(fn [key evidence] [(seon.render/retain-invocation! key evidence)
+                                                               (seon.render/invocation key evidence)])")
+           on-branch (fn [key value]
+                       (mapv :rt4/value (sci.ctx-store/with-ctx branch (write-read key (assoc evidence :rt4/value value)))))
+           main-key [:rt4 (seon.id/id)]]
+       (render/retain-invocation! main-key (assoc evidence :rt4/value :main))
+       (is (= [:branch :branch] (on-branch [:rt4 (seon.id/id)] :branch)) "a key main never held")
+       (is (= [:branch :branch] (on-branch main-key :branch)) "a key main holds")))))
+
 (deftest a-derivation-handed-to-a-deriver-is-keyed-by-its-runtime-in-either-order
   ;; Runtime review 3, Opus N1: `seon.bootstrap/groups` hands `seon.health/derived` the derivation
   ;; `#(sections % text)`; a branch changing `seon.bootstrap/sections` answers its own groups and compiled

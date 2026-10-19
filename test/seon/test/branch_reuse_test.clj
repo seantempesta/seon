@@ -2,11 +2,11 @@
   "A terminated result, red included, carries to another branch holding the same program."
   (:require [clojure.data.json :as json]
             [clojure.test :refer [deftest is]]
-            [seon.cache]
             [seon.db :as db]
             [seon.mcp :as mcp]
             [seon.profile :as profile]
             [seon.test :as sut]
+            [seon.test.runner :as runner]
             [seon.test-support :as support]))
 
 (defn- agent-value
@@ -57,7 +57,7 @@
                          [?member :seon.test.member/symbol ?symbol] [?member :seon.test.member/reach-digest ?digest]
                          [?run :seon.test.run/input-digest ?inputs]]
                 database branch test-symbols)]
-    (seon.cache/evict! :seon.test.runner/result [test-symbol digest inputs])))
+    (runner/retained-result [test-symbol digest inputs] nil)))
 
 (deftest ^{:seon.test/long "Two own-branch agents, six eval requests, each with its automatic test step: about 5 s measured on default's JVM."
            :seon.test/long-ms 20000}

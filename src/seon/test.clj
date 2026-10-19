@@ -2759,7 +2759,7 @@
 (defn- carried-results
   "Each of `test-symbols` whose reuse identity `[sym reach-digest input-digest]` (`reach` holds the
   digests; the content, not the evaluator that ran it, ruling 6) another branch's run recorded a terminated outcome for, red included, as that run's id, time and counts:
-  retained in `seon.cache` when a run recorded it (`seon.test.runner/retain-results!`), else read from the recorded
+  retained in `seon.cache` when a run recorded it (`seon.test.runner/retained-result`), else read from the recorded
   runs of main and the other live branches (`source-branches`, `asking` excluded), each branch head read directly
   once and released. The newest outcome answers; an identity with two outcomes also carries them all under
   `::outcomes`."
@@ -2768,7 +2768,7 @@
                   [:map-of :seon.test/sym :map]]}
   [database asking test-symbols reach inputs]
   (let [keyed (filterv #(string? (get reach %)) test-symbols)
-        cached (into {} (keep #(when-let [outcome (seon.cache/present :seon.test.runner/result [% (get reach %) inputs])]
+        cached (into {} (keep #(when-let [outcome (runner/retained-result [% (get reach %) inputs])]
                                  [% outcome]))
                      keyed)
         missed (mapv #(vector % (get reach %)) (remove cached keyed))

@@ -213,12 +213,6 @@
       (select-keys effective [:seon.config.embed/endpoint :seon.config.embed/model :seon.config.embed/dimension
                               :seon.config.embed/request-bytes :seon.config.embed/timeout-ms :seon.config.embed/wait-ms]))))
 
-(defn- hot!
-  "Retain `octets` under `content-key` in the process cache, answering them."
-  {:malli/schema [:=> [:cat :seon.embed/key :seon.embed/octets] :seon.embed/octets]}
-  [content-key octets]
-  (seon.cache/lookup ::embedding content-key #(+ 96 (alength ^bytes %)) (constantly octets)))
-
 (defn requests
   "The content keys `missing` as embed-server requests: sorted by their text's length (`text-of`), then cut so
   each request's texts total at most `budget` UTF-8 bytes, a longer text alone."
@@ -253,7 +247,8 @@
 
 (defn- layered
   "The embeddings of `texts` for `task` by content key, with how many came from each layer: the process cache,
-  then `store`'s segments, then `request` for the rest, which are retained in the process cache."
+  then `store`'s segments, then `request` for the rest, which are retained in the process cache. The one function
+  keying `::embedding`, so its reads and writes run alike."
   {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/store :seon.embed/request
                        :seon.embed/task [:vector :seon.embed/text]]
                   :seon.embed/layers]}
@@ -264,10 +259,12 @@
                              (when-let [octets (seon.cache/present ::embedding content-key)] [content-key octets])))
                   distinct-keys)
         durable-octets (stored-octets store (select-keys (present store) (remove hot distinct-keys)))
-        _ (run! (fn [[content-key octets]] (hot! content-key octets)) durable-octets)
+        retain! (fn [[content-key octets]]
+                  (seon.cache/lookup ::embedding content-key #(+ 96 (alength ^bytes %)) (constantly octets)))
+        _ (run! retain! durable-octets)
         missing (into [] (comp (remove hot) (remove durable-octets)) distinct-keys)
         {::keys [found error]} (requested settings request task (zipmap content-keys texts) missing)]
-    (run! (fn [[content-key octets]] (hot! content-key octets)) found)
+    (run! retain! found)
     (cond-> {::content-keys content-keys ::from-cache hot ::from-store durable-octets ::from-server found}
       error (assoc ::error error))))
 

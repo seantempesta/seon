@@ -4450,11 +4450,12 @@
           (assoc plan ::closure (set (:seon.fn/affected closure)) ::closure-tests (set (:seon.fn/tests closure))))))))
 
 (defn- derive-program-context
-  "Derive `database`'s program context: the loaded program's for no `plan`,
-  else the `plan` interpreted on a builder forked from the program context
-  kept under `predecessor` when it holds this program but for Δ
-  (`predecessor-plan`), else from the loaded one, which is kept under its own
-  key. The loaded program's derivation never looks up its own key: a cache
+  "Derive `database`'s program context, kept under `content-key` when one is
+  given: the loaded program's for no `plan`, else the `plan` interpreted on a
+  builder forked from the program context kept under `predecessor` when it
+  holds this program but for Δ (`predecessor-plan`), else from the loaded one,
+  which is kept under its own key. The one function keying `::program-context`.
+  The loaded program's derivation never looks up its own key: a cache
   derivation that joins itself never completes."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.schema/projection
@@ -4465,20 +4466,25 @@
                    :seon.sci.eval/program-context]]}
   ([database loaded projection plan] (derive-program-context database loaded projection plan nil nil))
   ([database loaded projection plan content-key predecessor]
-   (if plan
-     (let [plan (cond-> plan content-key (assoc ::produced-in content-key))
-           base-key (cluster-base-key loaded)
-           derive-base #(with-content-key (derive-base-ctx loaded) base-key)
-           cluster (if base-key
-                     (seon.cache/lookup ::program-context base-key context-weight derive-base)
-                     (derive-base))
-           parent (when (and content-key (vector? predecessor) (not= predecessor content-key))
-                    (seon.cache/present ::program-context predecessor))
-           from-parent (when parent (predecessor-plan database parent predecessor content-key plan))]
-       (if from-parent
-         (derive-overlay-ctx parent cluster database loaded projection from-parent)
-         (derive-overlay-ctx cluster database loaded projection plan)))
-     (derive-base-ctx loaded))))
+   (let [derived #(with-content-key
+                    (if plan
+                      (let [plan (cond-> plan content-key (assoc ::produced-in content-key))
+                            base-key (cluster-base-key loaded)
+                            derive-base (fn [] (with-content-key (derive-base-ctx loaded) base-key))
+                            cluster (if base-key
+                                      (seon.cache/lookup ::program-context base-key context-weight derive-base)
+                                      (derive-base))
+                            parent (when (and content-key (vector? predecessor) (not= predecessor content-key))
+                                     (seon.cache/present ::program-context predecessor))
+                            from-parent (when parent (predecessor-plan database parent predecessor content-key plan))]
+                        (if from-parent
+                          (derive-overlay-ctx parent cluster database loaded projection from-parent)
+                          (derive-overlay-ctx cluster database loaded projection plan)))
+                      (derive-base-ctx loaded))
+                    content-key)]
+     (if content-key
+       (seon.cache/lookup ::program-context content-key (if plan overlay-weight context-weight) derived)
+       (derived)))))
 
 (defn program-context
   "The program context of `database`'s program: a frozen SCI context holding
@@ -4517,13 +4523,7 @@
                                    (some-> supplied-loaded db/commit-id)]
                                   (constantly 1024) content-key)
                (content-key))
-         derive-value #(with-content-key
-                         (derive-program-context database (loaded) projection @plan program-key predecessor)
-                         program-key)
-         weigh #(if @plan (overlay-weight %) (context-weight %))
-         value (if program-key
-                 (seon.cache/lookup ::program-context program-key weigh derive-value)
-                 (derive-value))]
+         value (derive-program-context database (loaded) projection @plan program-key predecessor)]
      (if (identical? projection (:seon.schema/projection value))
        value
        (assoc value :seon.schema/projection projection)))))
