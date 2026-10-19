@@ -377,11 +377,14 @@
        nil))
   (admit-initialization-entities projection population))
 
-(defn- default-document
-  []
-  (read-edn-map
-   (or (io/resource default-manifest-path)
-       default-manifest-path)))
+(defn default-document
+  "The shipped default document: this JVM's, or the one at `path` (a candidate archive's)."
+  {:malli/schema [:function [:=> [:cat] :seon.config/default-document]
+                  [:=> [:cat :seon.config/path] :seon.config/default-document]]}
+  ([]
+   (read-edn-map (or (io/resource default-manifest-path) default-manifest-path)))
+  ([path]
+   (read-edn-map path)))
 
 (defn- admitted-default-document
   [projection document]
@@ -754,6 +757,26 @@
         (when (seon.error.refusal/error? result)
           (throw (ex-info (str (:seon.error/message result)) result))))))
   nil)
+
+(defn adopted-dials-tx
+  "The shipped decision of each of `projection`'s dials that a config entity on `database` lacks, as `:db/add`s:
+  adoption writes them in the transaction that installs the dials, so a new dial exists at its first read and
+  the entity the new declarations judge carries every dial they require. A dial decided absent,
+  by the shipped document or by the entity's own overlay (`:seon.config/overlay-keys`), stays absent."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :seon.config/default-document]
+                  :seon.db/tx-data]}
+  [database projection document]
+  (let [decisions (validate-default-decisions projection (dissoc document initialization-key))
+        dials (dial-attributes projection)
+        selector (into [:seon.config/overlay-keys] dials)]
+    (into []
+          (for [entity (db/q '[:find [?e ...] :where [?e :seon.config/cluster _]] database)
+                :let [held (db/pull database selector entity)
+                      decided (set (:seon.config/overlay-keys held))]
+                dial dials
+                :let [decision (get decisions dial absent)]
+                :when (not (or (contains? held dial) (contains? decided dial) (= absent decision)))]
+            [:db/add entity dial (resolve-smart-decision dial decision)]))))
 
 (defn compiled-tx
   "The exact reconcile of `compiled`'s desired config entity onto `database`: its transaction data (one

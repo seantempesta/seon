@@ -18,7 +18,8 @@
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.config :as config]))
 
 (def ^:private fixture-forms
   "The declarations the branch is brought TO."
@@ -218,6 +219,34 @@
               "the required key's attribute is retired with its data")
           (is (= #{"r"} (values connection :schema.in-place/id))
               "and its entity keeps every other attribute"))))))
+
+(deftest a-new-required-dial-adopts-with-its-decision-onto-a-held-config-entity
+  ;; Class regression (adoption-refuses-a-new-required-dial-on-a-store-with-a-config-entity, 2026-10-19):
+  ;; the adopted `:seon.config/entity` requires a new dial in the transaction that judges the held config entity
+  ;; (here one retiring the dial it replaces touches that entity), so the dial's shipped decision is written onto
+  ;; it in that same transaction, before its first read.
+  (with-population
+    (fn [connection]
+      (support/apply-config! connection "in-place" {})
+      (let [retired :seon.config.in-place/retired
+            dial :seon.config.in-place/dial
+            forms (merge (schema.edn/packaged-forms) fixture-forms)
+            projection #(schema/declaration-projection (schema.edn/derive-config-forms (merge forms %)))
+            adopt (fn [projection]
+                     (let [database (db/db connection)]
+                       (schema/call-with-projection
+                        projection
+                        #(db/transact! connection
+                                       {:tx-data (into (@#'seon.cluster/declaration-adoption-tx
+                                                        projection (config/default-document))
+                                                       (@#'seon.cluster/schema-entity-changes database projection))}))))
+            config #(select-keys (db/pull (db/db connection) '[*] [:seon.config/cluster "in-place"]) [retired dial])]
+        (is (some? (:db-after (adopt (projection {retired [:int {:seon.config/dial true :seon.config/default 3}]}))))
+            "a dial added onto a held config entity commits")
+        (is (= {retired 3} (config)) "with its decision")
+        (is (some? (:db-after (adopt (projection {dial [:int {:seon.config/dial true :seon.config/default 7}]}))))
+            "a dial replacing a retired one commits")
+        (is (= {dial 7} (config)) "the held config entity carries the new dial, the retired one gone")))))
 
 (deftest an-adopted-branch-reopens-with-no-declaration-change
   (adopted-fixture

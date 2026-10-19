@@ -2506,20 +2506,31 @@
     (source/changed-identities held-store published prior-commit)
     (into #{} (keep program/row-identity) (seon.fn/published-index-entities published-database))))
 
+(defn- declaration-adoption-tx
+  "Transaction data adopting `projection`'s declarations: the attribute changes (`declaration-changes`), then the
+  `document`'s decision of each dial a held config entity lacks (`seon.config/adopted-dials-tx`), so the entity
+  the adopted declarations judge carries every dial they require."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.config/default-document] :seon.store/transaction-data]}
+  [projection document]
+  [[:db.fn/call (fn [database] (declaration-changes database projection))]
+   [:db.fn/call (fn [database] (config/adopted-dials-tx database projection document))]])
+
 (defn- adopt-entities!
   "Write the schema, program and task rows among `identities` from
   `published-database` onto `connection` in ONE transaction, and answer the
   program identities. Tasks merge three-way from `prior-database`, the
   published commit the cluster adopted before (`seon.task/adopt-tasks-call`);
-  nil for the first adoption.
+  nil for the first adoption. A dial the declarations add takes its decision
+  from `document`, the shipped default document of the program adopted.
 
   Schema declarations go first: the writer applies schema datoms before the
   operations after them (`datahike/db/transaction.cljc:466`). The write refuses once another
   publication moves `current-src` (`head-guard-tx`); refused, nothing lands."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.source/published
-                       :seon.reconcile/adopt-identities :seon.db/database-value [:maybe :seon.db/database-value]]
+                       :seon.reconcile/adopt-identities :seon.db/database-value [:maybe :seon.db/database-value]
+                       :seon.config/default-document]
                   :seon.reconcile/adopt-identities]}
-  [connection published identities published-database prior-database]
+  [connection published identities published-database prior-database document]
   (let [projection (db/carried-projection published-database)
         program-identities (into #{} (filter (comp (set program/identity-attributes) first)) identities)
         tx-data (into
@@ -2527,7 +2538,7 @@
                            {:seon.source/branch source/current-branch
                             :seon.source/expected-commit-id (:seon.source/commit-id published)}]]
                    (some #(= :seon.schema/key (first %)) identities)
-                   (conj [:db.fn/call (fn [database] (declaration-changes database projection))])
+                   (into (declaration-adoption-tx projection document))
                    (seq program-identities)
                    (into (require-committed! (seon.fn/adoption-tx projection published-database program-identities)
                                              {:seon.boot/population :seon.fn/population})))
@@ -2597,7 +2608,7 @@
         (try
           (adopt-entities! connection published
                            (published-changes store published prior-commit published-database)
-                           published-database prior-database)
+                           published-database prior-database (config/default-document))
           (record-adoption! connection store cluster-ref prior-commit published changed-paths)
           (finally
             (d/release-materialized-db published-database)
@@ -2658,7 +2669,8 @@
     ;; edit that lands during it.
     (verify-development-sources! published-database (fs/source-directory) namespaces)
     (let [prior-database (when prior-commit (source/database held-store prior-commit))]
-      (try (adopt-entities! connection published identities published-database prior-database)
+      (try (adopt-entities! connection published identities published-database prior-database
+                            (config/default-document))
            (finally (some-> prior-database d/release-materialized-db))))
     (report-source-progress! "development loaded definitions")
     ;; Unmap, reload and arm wait for no one: a member or evaluation spanning
@@ -2934,11 +2946,12 @@
   branch, exactly as `development-source-refresh!` writes the cluster's
   entities (its reload, arming and record belong to the JVM and are not run);
   answer the adopted identity count. The adoption's head guard is handed
-  `current-src`'s commit, which the rehearsal leaves in place."
+  `current-src`'s commit, which the rehearsal leaves in place; `document` is
+  the candidate's shipped default document."
   {:malli/schema [:=> [:cat :seon.store/store :seon.source/published :seon.boot/cluster-name
-                       :seon.store/branch]
+                       :seon.store/branch :seon.config/default-document]
                   :int]}
-  [held published cluster-name fork]
+  [held published cluster-name fork document]
   (registry/branch! {:seon.store/store held :seon.store/branch fork
                      :seon.cluster.registry/from (registry/cluster-branch cluster-name)})
   (let [connection (store/open-branch! held fork)
@@ -2959,7 +2972,7 @@
                                     ;; `published` names only the head guard's
                                     ;; commit: `current-src`'s, which stays put
                                     #(adopt-entities! connection (merge published (source/current held))
-                                                      identities published-database prior-database))
+                                                      identities published-database prior-database document))
               (finally (some-> prior-database d/release-materialized-db)))
             (count identities))))
       (finally
@@ -3067,7 +3080,9 @@
                  (if (:seon.error/at published)
                    published
                    (let [published-ms (ms)
-                         adopted (rehearsal-adoption! held published cluster-name fork)]
+                         adopted (rehearsal-adoption! held published cluster-name fork
+                                                      (config/default-document
+                                                       (str (io/file directory config/default-manifest-path))))]
                      (assoc (select-keys published [:seon.source/commit-id :seon.source/built?])
                             ::adopted-identities adopted
                             ::phase-ms {::published-ms published-ms
