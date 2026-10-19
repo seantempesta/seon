@@ -125,9 +125,11 @@
            page (str/join "" html)]
        (is (= #{[:seon.ns/name 'fixture.namespace-page]}
               (into #{} (map :seon.render.walk/lookup) namespace-units)))
-       (is (= 1 (count (filter #(str/includes? % "namespace source") html))))
-       (is (str/includes? page "own-marker"))
        (is (str/includes? page "href=\"/ns/seon.id\""))
+       (is (not (str/includes? page "seon-namespace-source"))
+           "a namespace page is its name, requires and function names, never member source")
+       (is (not (str/includes? page "own-marker"))
+           "the namespace's own source is one evaluation away, not in the page")
        (is (not (str/includes? page "seon.id/id")))))))
 
 (deftest declared-identity-and-producer-lookups-name-their-owners
@@ -220,12 +222,15 @@
               (faces (assoc agent-value :seon.render/ai 'seon.error/render-ai
                             :seon.render/html 'seon.error/render-html)))
            "both faces can be overridden")
-       (let [data {:inline/summary "shown as data"}]
+       (let [data {:inline/summary "shown as data"}
+             request {:seon.db/db database
+                      :seon.render/value data
+                      :seon.render.value/root 'seon.render.entity-pairs-test/probe
+                      :seon.render/profile (render/agent-render-profile config/defaults)}
+             emitted (#'render/inline-rendered nil request :seon.render/ai data)]
          (is (= [data html-default] (faces (assoc agent-value :seon.render/ai data)))
              "rendered data in place of a symbol is the AI face's selection")
-         (is (str/includes? (#'render/inline-rendered {:seon.db/db database :seon.render/profile (render/agent-render-profile config/defaults)}
-                                                   :seon.render/ai data)
-                            "shown as data")
+         (is (str/includes? (str emitted) "shown as data")
              "and the AI face's emitter renders that data, never a pre-printed string"))))))
 
 (deftest the-viewing-agents-own-renderer-beats-the-schema-default
@@ -288,7 +293,7 @@
                           :seon.render/profile (render/agent-render-profile config/defaults)
                           :seon.sci.admit/caps (config/result-caps config/defaults)
                           :seon.sci.eval/time-limit-ms 5000}))]
-         (is (= (str "{:db " (:max-tx database) "}") (rendered {:probe/label "x"}))
+         (is (= {:db (:max-tx database)} (rendered {:probe/label "x"}))
              "an omitted declared database is the request's own, supplied")
-         (is (= (str "{:db " (:max-tx earlier) "}") (rendered {:probe/label "x" :seon.db/db earlier}))
+         (is (= {:db (:max-tx earlier)} (rendered {:probe/label "x" :seon.db/db earlier}))
              "a database the caller's value carries is never replaced"))))))
