@@ -16,7 +16,6 @@ Ledger row DIAL-18 (group O). Source: `dials/dials.md` D13-D15. Model: Sonnet. H
   (`:~482-486`).
 - `command!` bounds passed as literals: 30000 (`:830`, `:851`, `:926`, `:962`, `:1068`, `:1499`), 120000
   (`:837`, `:839`), 300000 (`:949`).
-- `program-classes-kept` 3 (`:~392-394`) and the staging age 86400000 (`:634`).
 
 ## Files
 
@@ -32,8 +31,6 @@ Ledger row DIAL-18 (group O). Source: `dials/dials.md` D13-D15. Model: Sonnet. H
 :archive-bound-ms [:int {:min 1 :seon.config/dial true :seon.config/default 120000 :description "Bound on writing or extracting one commit archive."}]
 :dependency-bound-ms [:int {:min 1 :seon.config/dial true :seon.config/default 300000 :description "Bound on resolving and preparing dependencies (clojure -X:deps prep; the dependency class fill measured 111 s)."}]
 :runtime-probe-bound-ms [:int {:min 1 :seon.config/dial true :seon.config/default 10000 :description "Bound on the java runtime probe (measured 28 ms)."}]
-:program-classes-kept [:int {:min 1 :seon.config/dial true :seon.config/default 3 :description "Compiled program class directories kept per checkout."}]
-:staging-max-age-ms [:int {:min 0 :seon.config/dial true :seon.config/default 86400000 :description "A start's staging directory older than this is deleted."}]
 ```
 
 `dependency-fill-bound-ms` and the `prep` bound are the same kind of work: one dial (`:dependency-bound-ms`).
@@ -41,8 +38,8 @@ Ledger row DIAL-18 (group O). Source: `dials/dials.md` D13-D15. Model: Sonnet. H
 ## Functions
 
 The operator reads its configuration at bootstrap (DIAL-0 added the heap dial read; DIAL-1 makes it one Aero file):
-read the six from the same map and pass them where the literals are. `command!` keeps its bound argument; its
-callers pass the map's value. Delete the four `def`s.
+read the four from the same map and pass them where the literals are. `command!` keeps its bound argument; its
+callers pass the map's value. Delete the two `def`s. (The program class cache and its two dials went with lane class-cache, 2026-10-19.)
 
 ## Proof
 

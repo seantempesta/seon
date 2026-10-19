@@ -75,110 +75,6 @@
         (is (= [newer older] (#'operator/heap-dumps (str root)))))
       (finally (test-support/delete-recursively! root)))))
 
-(deftest a-changed-test-tree-keys-its-own-class-directory
-  ;; 2026-10-12: boot compiles seon.test-support (test/) into the class
-  ;; directory, which was keyed by src and script only, so a check of a changed
-  ;; test-support loaded its predecessor's classes (stamped newer than any source).
-  (let [repository (str (java.nio.file.Files/createTempDirectory
-                         "seon-classes-key" (make-array java.nio.file.attribute.FileAttribute 0)))
-        git (fn [& args] (#'operator/command! (into ["git" "-c" "user.name=t" "-c" "user.email=t@t"] args) repository 30000))
-        write! (fn [path text] (let [file (java.io.File. repository ^String path)]
-                                 (.mkdirs (.getParentFile file))
-                                 (spit file text)))
-        commit! (fn [] (git "add" "-A") (git "commit" "-q" "-m" "c") (str/trim (git "rev-parse" "HEAD")))
-        classes {:seon.dev-cache/status :hit :seon.dev-cache/digest "d"}
-        directory (fn [sha] (#'operator/program-classes repository (str "/archives/" sha) classes))]
-    (try
-      (git "init" "-q")
-      (doseq [path ["src/a.clj" "script/b.clj" "deps.edn" "reference-code/c" "test/d.clj" "docs/e.md"]]
-        (write! path path))
-      (let [base (commit!)
-            _ (write! "docs/e.md" "changed")
-            docs (commit!)
-            _ (write! "test/d.clj" "changed")
-            tests (commit!)]
-        (is (= (directory base) (directory docs)) "a docs change shares its predecessor's classes")
-        (is (not= (directory docs) (directory tests)) "a test change compiles its own"))
-      (finally
-        (doseq [file (reverse (file-seq (java.io.File. repository)))] (.delete ^java.io.File file))))))
-
-(deftest a-class-directory-a-live-process-names-is-never-pruned
-  ;; Two roots starting at once (2026-09-28): one start's prune deleted the
-  ;; class directory the other JVM was loading from (NoSuchFileException).
-  (let [repository (str (java.nio.file.Files/createTempDirectory
-                         "seon-prune" (make-array java.nio.file.attribute.FileAttribute 0)))
-        classes (java.io.File. repository "target/dev-program-classes")
-        directory (fn [name age-ms]
-                    (doto (java.io.File. classes name) .mkdirs
-                      (.setLastModified (- (System/currentTimeMillis) age-ms))))
-        program (directory "program" 0)
-        held (directory "held-oldest" 900000)
-        _ (doseq [i (range 4)] (directory (str "recent-" i) (* 1000 (inc i))))
-        ;; Held as a launched JVM holds it: on its classpath. (macOS hides a
-        ;; platform binary's arguments, so the holder is this JVM's java.)
-        java (str (System/getProperty "java.home") "/bin/java")
-        holder (.start (ProcessBuilder. ^java.util.List
-                                        [java "-cp" (str (.getCanonicalPath held) ":" (System/getProperty "java.class.path"))
-                                         "clojure.main" "-e" "(Thread/sleep 30000)"]))]
-    (try
-      ;; Its arguments are readable once the process is up.
-      (loop [tries 50]
-        (when (and (pos? tries)
-                   (not (some #(.contains ^String % (.getCanonicalPath held)) (#'operator/live-arguments))))
-          (Thread/sleep 100)
-          (recur (dec tries))))
-      (#'operator/prune-program-classes! repository (.getCanonicalPath program))
-      (is (.isDirectory held) "the directory a live process names survives")
-      (is (.isDirectory program))
-      (is (= 3 (count (filter #(.startsWith (.getName ^java.io.File %) "recent-") (.listFiles classes))))
-          "the most recently used unheld directories are kept, the rest pruned")
-      (finally
-        (.destroy holder)
-        (doseq [file (reverse (file-seq (java.io.File. repository)))] (.delete ^java.io.File file))))))
-
-(deftest a-class-directory-held-while-a-prune-runs-keeps-its-classes
-  ;; A launch holds its directory, then reads it as a JVM would. A prune that
-  ;; decided the directory was unheld before the hold must not delete it after:
-  ;; every class the launch saw when it held stays readable.
-  (let [repository (str (java.nio.file.Files/createTempDirectory
-                         "seon-prune-race" (make-array java.nio.file.attribute.FileAttribute 0)))
-        classes (java.io.File. repository "target/dev-program-classes")
-        write-classes! (fn [^java.io.File directory n]
-                         (.mkdirs directory)
-                         (dotimes [i n] (spit (java.io.File. directory (str "c" i ".class")) "x")))
-        wanted (java.io.File. classes "wanted")
-        hold-file (java.io.File. repository
-                                 (str "target/operator-holds/"
-                                      (#'operator/hold-name (.getCanonicalPath wanted)) "."
-                                      (.pid (java.lang.ProcessHandle/current))))
-        violations (atom 0)]
-    (try
-      (dotimes [_ 6]
-        (doseq [i (range 8)]
-          (doto (java.io.File. classes (str "junk-" i))
-            (write-classes! 400)
-            (.setLastModified (- (System/currentTimeMillis) (* 1000 (+ 100 i))))))
-        (doto wanted
-          (write-classes! 5)
-          (.setLastModified (- (System/currentTimeMillis) 900000)))
-        (let [program (doto (java.io.File. classes "program") .mkdirs)
-              done (promise)
-              reader (future
-                       (while (not (realized? done))
-                         (.delete hold-file)
-                         (Thread/sleep 4)
-                         (#'operator/hold! repository (.getCanonicalPath wanted))
-                         (when (.isDirectory wanted)
-                           (Thread/sleep 5)
-                           (when-not (.isFile (java.io.File. wanted "c0.class"))
-                             (swap! violations inc)))))]
-          (try (#'operator/prune-program-classes! repository (.getCanonicalPath program))
-               (finally (deliver done true) @reader))
-          (.delete hold-file)))
-      (is (zero? @violations) "no class a holding launch could see is deleted under it")
-      (finally
-        (doseq [file (reverse (file-seq (java.io.File. repository)))] (.delete ^java.io.File file))))))
-
 (deftest check-names-the-tests-its-throwaway-jvm-runs
   ;; `check PATH --test NS --test NS/NAME` carries both test names in order;
   ;; the runner receives a namespace as --ns and a test as --test.
@@ -378,34 +274,36 @@
     (is (= 1 (slots {:seon.config.operator/check-slots 1})))
     (is (pos-int? (templates nil)) "the template retention is a shipped dial")))
 
-(deftest a-class-directory-a-check-holds-before-its-jvm-launches-is-pruned-only-after-release
-  ;; A check copying a directory has no JVM naming it yet (2026-10-08: another
-  ;; launch's prune deleted it, NoSuchFileException on a class).
-  (let [repository (str (java.nio.file.Files/createTempDirectory
-                         "seon-hold" (make-array java.nio.file.attribute.FileAttribute 0)))
-        classes (java.io.File. repository "target/dev-program-classes")
-        directory (fn [name age-ms]
-                    (doto (java.io.File. classes name) .mkdirs
-                      (.setLastModified (- (System/currentTimeMillis) age-ms))))
-        program (directory "program" 0)
-        held (directory "held-oldest" 900000)
-        _ (doseq [i (range 4)] (directory (str "recent-" i) (* 1000 (inc i))))
-        pid (.pid (java.lang.ProcessHandle/current))]
+(deftest an-archive-a-check-holds-before-its-jvm-launches-is-pruned-only-after-release
+  ;; A check's archive has no JVM naming it yet (2026-10-08: another launch's
+  ;; prune deleted what a check was about to launch from).
+  (let [root (str (java.nio.file.Files/createTempDirectory
+                   "seon-hold" (make-array java.nio.file.attribute.FileAttribute 0)))
+        archive (fn [name] (doto (java.io.File. root (str "data/source/" name)) .mkdirs))
+        kept (archive "kept")
+        held (archive "held")
+        other (archive "other")
+        repository (operator/repository-root)
+        pid (.pid (java.lang.ProcessHandle/current))
+        hold-file (java.io.File. (#'operator/holds-directory repository)
+                                 (str (#'operator/hold-name (.getCanonicalPath held)) "." pid))]
     (try
       (#'operator/hold! repository (.getCanonicalPath held))
-      (#'operator/prune-program-classes! repository (.getCanonicalPath program))
-      (is (.isDirectory held) "a directory a live pid holds survives the prune")
+      (#'operator/prune-archives! root (.getCanonicalPath kept))
+      (is (.isDirectory held) "an archive a live pid holds survives the prune")
+      (is (not (.isDirectory other)) "an unheld archive is pruned")
       ;; The holder ends: its hold names a dead pid.
-      (let [dead (let [p (.start (ProcessBuilder. ["true"]))] (.waitFor p) (.pid p))
-            hold-file (first (filter #(.endsWith (.getName ^java.io.File %) (str "." pid))
-                                     (.listFiles (#'operator/holds-directory repository))))]
+      (let [dead (let [p (.start (ProcessBuilder. ["true"]))] (.waitFor p) (.pid p))]
         (.renameTo hold-file (java.io.File. (.getParentFile hold-file)
                                             (str/replace (.getName hold-file) (str "." pid) (str "." dead)))))
-      (#'operator/prune-program-classes! repository (.getCanonicalPath program))
-      (is (not (.isDirectory held)) "released, it is pruned like any old directory")
-      (is (empty? (.listFiles (#'operator/holds-directory repository))) "the dead hold is swept")
+      (#'operator/prune-archives! root (.getCanonicalPath kept))
+      (is (not (.isDirectory held)) "released, it is pruned like any other archive")
+      (is (not-any? #(str/starts-with? (.getName ^java.io.File %) (#'operator/hold-name (.getCanonicalPath held)))
+                    (.listFiles (#'operator/holds-directory repository)))
+          "the dead hold is swept")
       (finally
-        (doseq [file (reverse (file-seq (java.io.File. repository)))] (.delete ^java.io.File file))))))
+        (.delete hold-file)
+        (doseq [file (reverse (file-seq (java.io.File. root)))] (.delete ^java.io.File file))))))
 
 (deftest a-shared-cache-link-is-replaced-atomically
   ;; A reader of the link (a rehearsal copying the analyzer cache) must never
@@ -508,28 +406,6 @@
         (is (= ["deps.edn" "reference-code/pin"] (#'operator/changed-dependencies repository base pinned))))
       (finally
         (doseq [file (reverse (file-seq (java.io.File. repository)))] (.delete ^java.io.File file))))))
-
-(deftest concurrent-prunes-of-one-stale-directory-both-complete-and-spare-the-program
-  (let [base (fs/create-temp-dir {:prefix "seon-prune-race"})
-        classes (fs/path base "target" "dev-program-classes")
-        program (fs/path classes "program")
-        stale (fs/path classes "stale.staging-1")
-        old (- (System/currentTimeMillis) (* 3 86400000))]
-    (try
-      (fs/create-dirs program)
-      (fs/create-dirs stale)
-      (.setLastModified (fs/file stale) old)
-      ;; The loser of a race finds the directory already renamed aside by the winner.
-      (let [winner (future (#'operator/prune-directory! (str base) (fs/file stale)))
-            loser (future (#'operator/prune-directory! (str base) (fs/file stale)))
-            outcomes (mapv #(try (deref % 10000 ::unfinished) (catch Throwable cause (type cause)))
-                           [winner loser])]
-        (is (= [nil nil] outcomes) "both prunes complete")
-        (is (= ["program"] (mapv #(str (fs/file-name %)) (fs/list-dir classes)))
-            "the stale directory is gone and the program is intact"))
-      (is (nil? (#'operator/prune-directory! (str base) (fs/file stale)))
-          "a prune of a directory another prune already removed completes")
-      (finally (fs/delete-tree base)))))
 
 (deftest the-embed-server-status-observes-and-stop-without-a-record-stops-nothing
   ;; Health reports the embed server; it never launches one. A root that recorded no embed server stops none:

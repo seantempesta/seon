@@ -394,15 +394,6 @@
      (catch Throwable cause#
        {:seon.error/message (ex-message cause#) :seon.error/cause (Throwable->map cause#)})))
 
-(def ^:private program-classes-root
-  "Our compiled classes, one directory per digest of what produces them
-  (`program-classes`), shared by every archive whose inputs match."
-  "target/dev-program-classes")
-
-(def ^:private program-classes-kept
-  "Class directories kept besides the one a launch uses (most recently used)."
-  3)
-
 (defn launcher-pid
   "The pid whose exit must end the JVM `request` launches, or nil when it outlives
   its launcher. A JVM under an isolated operator root (a test or check drill's
@@ -429,13 +420,13 @@
          (.thenRun (.onExit parent#) (reify Runnable (run [_] (System/exit 0))))
          (System/exit 0)))))
 
-(defn- launch-form [request port program launcher]
+(defn- launch-form [request port launcher]
   ;; Only Clojure core loads before opening and reporting the diagnostic REPL.
   ;; The second callback value is terminal boot evidence, never a file poll;
   ;; a move reads the branch heads first, as the value between them.
-  ;; A first launch on an archive writes the classes its program load compiles
-  ;; anyway into a staging directory, promoted whole on success; the next
-  ;; launch prepends it (`start-classpath`) and loads instead of compiling.
+  ;; Our program loads from source: a namespace loaded from a compiled class
+  ;; is not reloadable (`clojure.lang.RT/load` prefers a newer `__init` class,
+  ;; whose static initializer has already run), and adoption reloads.
   (pr-str
    `(do
       (require '~'clojure.core.server '~'clojure.java.io)
@@ -453,44 +444,16 @@
         (with-open [callback# (java.net.Socket. "127.0.0.1" ~port)
                     writer# (~'clojure.java.io/writer callback#)]
           (.write writer# (str (pr-str coordinates#) "\n")) (.flush writer#)
-          ;; Built here, not in the child: `(some-> nil java.io.File.)` does not
-          ;; compile (two one-argument File constructors match a nil local), so a
-          ;; launch without a program class directory opened no REPL at all.
-          (let [final# ~(when program `(java.io.File. ~program))
-                staging# (when (and final# (not (.isDirectory final#)))
-                           (java.io.File. (str final# ".staging-" (:seon.boot/pid identity#))))
-                _# (some-> staging# .mkdirs)
-                ;; The boot's own requires (arming loads the rest of the
-                ;; program) compile under the same binding.
-                [heads# result#]
-                (binding [*compile-path* (if staging# (.getPath staging#) *compile-path*)
-                          *compile-files* (boolean staging#)]
-                  (let [heads# ~(some-> (:seon.operator/capture-heads request) head-capture-form)]
-                    (when heads# (.write writer# (str (pr-str heads#) "\n")) (.flush writer#))
-                    [heads#
-                     (try
-                       (require '~'seon.cluster.boot)
-                       ((resolve '~'seon.cluster.boot/request!)
-                        (assoc '~(dissoc request :seon.operator/capture-heads)
-                               :seon.boot/prepl-server listener#))
-                       (catch Throwable cause#
-                         {:seon.error/message (ex-message cause#)
-                          :seon.error/cause (Throwable->map cause#)}))]))]
-            (when staging#
-              (if (or (:seon.error/message result#) (.isDirectory final#))
-                (doseq [file# (reverse (file-seq staging#))] (.delete ^java.io.File file#))
-                ;; The directory's key proves its classes are this source's, so they
-                ;; must win Clojure's class-newer-than-source test against any
-                ;; archive's extraction time.
-                (try (doseq [file# (file-seq staging#)] (.setLastModified ^java.io.File file# 4102444800000))
-                     (java.nio.file.Files/move (.toPath staging#) (.toPath final#)
-                                               (into-array java.nio.file.CopyOption
-                                                           [java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
-                     ;; The directory's own time is its last use (`prune-program-classes!`).
-                     (.setLastModified final# (System/currentTimeMillis))
-                     ;; Another launch promoted the same key first.
-                     (catch java.nio.file.FileAlreadyExistsException _#
-                       (doseq [file# (reverse (file-seq staging#))] (.delete ^java.io.File file#))))))
+          (let [heads# ~(some-> (:seon.operator/capture-heads request) head-capture-form)
+                _# (when heads# (.write writer# (str (pr-str heads#) "\n")) (.flush writer#))
+                result# (try
+                          (require '~'seon.cluster.boot)
+                          ((resolve '~'seon.cluster.boot/request!)
+                           (assoc '~(dissoc request :seon.operator/capture-heads)
+                                  :seon.boot/prepl-server listener#))
+                          (catch Throwable cause#
+                            {:seon.error/message (ex-message cause#)
+                             :seon.error/cause (Throwable->map cause#)}))]
             ;; The capture's holder of the store ends once boot holds its own.
             (when (:seon.operator/heads heads#)
               ((resolve '~'seon.cluster/release-root-store!) ~(:seon.operator/capture-heads request)))
@@ -616,41 +579,6 @@
                 :seon.dev-cache/fill (str "cd " source " && clojure -T:dev-cache ensure-cache")})
            :seon.dev-cache/selection-ms (quot (- (System/nanoTime) started) 1000000))))
 
-(defn- program-classes
-  "The directory of our compiled classes for the archive `source`: keyed by
-  what compiles into them (the Git trees of `src`, `script`, which holds `seon.operator` that tests load, and `test`, which
-  holds `seon.test-support` that boot loads; `deps.edn` and the pinned
-  `reference-code` gitlinks, whose namespaces boot compiles when the
-  dependency classes miss them; that dependency cache's identity), so a commit
-  changing docs, resources or tasks shares its predecessor's. No macro
-  reads a resource at expansion, and a namespace's top-level reads run at
-  load. Nil for a source that is no commit archive."
-  {:malli/schema [:=> [:cat :string :string :map] [:maybe :string]]}
-  [repository source classes]
-  (let [sha (.getName (io/file source))
-        trees (try (str/split-lines (command! ["git" "rev-parse" (str sha ":src") (str sha ":script") (str sha ":test") (str sha ":deps.edn") (str sha ":reference-code")]
-                                              repository runtime-probe-bound-ms))
-                   (catch clojure.lang.ExceptionInfo _ nil))]
-    (when (= 5 (count trees))
-      (let [digest (.digest (java.security.MessageDigest/getInstance "SHA-256")
-                            (.getBytes (pr-str [trees (select-keys classes [:seon.dev-cache/status
-                                                                            :seon.dev-cache/digest])])
-                                       "UTF-8"))]
-        (.getCanonicalPath (io/file repository program-classes-root
-                                    (apply str (map #(format "%02x" (bit-and % 0xff)) digest))))))))
-
-(defn- live-arguments
-  "Every live process's argument strings on this machine: a launched JVM's
-  classpath argument names the class directories it loads from."
-  {:malli/schema [:=> [:cat] [:vector :string]]}
-  []
-  (with-open [stream (java.lang.ProcessHandle/allProcesses)]
-    (into []
-          (mapcat (fn [handle]
-                    (let [args (.arguments (.info handle))]
-                      (when (.isPresent args) (vec (.get args))))))
-          (iterator-seq (.iterator stream)))))
-
 (defn- holds-directory
   "Where a process registers the directories it will use before any JVM names
   them: `<name of path>.<pid>` files, each alive as long as its pid."
@@ -663,10 +591,9 @@
 
 (defn- hold!
   "Register this process as a user of the directory `path`, so no prune deletes
-  it before a JVM names it on its classpath (a check copying a class directory
-  or an archive it has not yet launched from). Ends with the process: a hold
-  whose pid is gone is swept by `held?`. A process holding a path twice (a
-  check's template JVM and its candidate share a class directory) holds it once."
+  it before a JVM names it as its program (a check's archive it has not yet
+  launched from, `prune-archives!`). Ends with the process: a hold whose pid
+  is gone is swept by `held?`. A process holding a path twice holds it once."
   {:malli/schema [:=> [:cat :string :string] :nil]}
   [repository path]
   (let [directory (doto (holds-directory repository) .mkdirs)
@@ -688,64 +615,16 @@
            (filter #(str/starts-with? (.getName ^java.io.File %) prefix)
                    (or (.listFiles (holds-directory repository)) []))))))
 
-(defn- prune-directory!
-  "Delete the class directory `directory` unless a launch holds it by the time
-  it is out of the way: renamed aside first (atomic, so a reader sees the whole
-  directory or none), then `held?` is read again. A launch that held it after
-  the caller decided it was free gets the directory back; one that holds it
-  from here on finds none and compiles its own. The rename is the claim: when
-  another prune (or a promotion) took the directory first, `renameTo` answers
-  false and there is nothing left to remove."
-  {:malli/schema [:=> [:cat :string [:fn seon.fs/file?]] :nil]}
-  [repository ^java.io.File directory]
-  (let [path (.getCanonicalPath directory)
-        aside (io/file (.getParentFile directory)
-                       (str (.getName directory) ".pruning-" (random-uuid)))]
-    (when (.renameTo directory aside)
-      (if (held? repository path)
-        (fs/move aside directory {:atomic-move true})
-        (fs/delete-tree aside)))
-    nil))
-
-(defn- prune-program-classes!
-  "Keep `program` and the most recently used class directories; delete the
-  rest and any staging or aside directory a day old (a launch or prune that
-  died). A directory a live process names on its classpath, or holds (`hold!`)
-  before it has launched, is never deleted: a concurrent start or check still
-  loads classes from it (NoSuchFileException on a class the other JVM needed)."
-  {:malli/schema [:=> [:cat :string :string] :nil]}
-  [repository program]
-  (let [in-use? (let [arguments (live-arguments)]
-                (fn [^java.io.File directory]
-                  (let [path (.getCanonicalPath directory)]
-                    (or (held? repository path)
-                        (some #(str/includes? % path) arguments)))))
-        directories (remove in-use? (or (.listFiles (io/file repository program-classes-root)) []))
-        {partial true complete false} (group-by #(let [name (.getName ^java.io.File %)]
-                                                   (or (str/includes? name ".staging-")
-                                                       (str/includes? name ".pruning-")))
-                                                directories)
-        stale (concat (drop program-classes-kept
-                            (sort-by #(- (.lastModified ^java.io.File %))
-                                     (remove #(= program (.getCanonicalPath ^java.io.File %)) complete)))
-                      (filter #(< (.lastModified ^java.io.File %) (- (System/currentTimeMillis) 86400000))
-                              partial))]
-    (doseq [directory stale] (prune-directory! repository directory))
-    (.setLastModified (io/file program) (System/currentTimeMillis))
-    nil))
-
 (defn- start-classpath
-  "The `-Scp` argument prepending our compiled classes and a dependency hit's
-  classes to `source`'s own classpath, or nothing."
-  {:malli/schema [:=> [:cat :string :map [:maybe :string]] [:maybe :string]]}
-  [source classes program]
-  (let [prefix (cond-> []
-                 (and program (.isDirectory (io/file program))) (conj program)
-                 (= :hit (:seon.dev-cache/status classes)) (conj (:seon.dev-cache/path classes)))]
-    (when (seq prefix)
-      (str/join java.io.File/pathSeparator
-                (conj prefix (str/trim (command! ["clojure" "-Spath" "-M:dev:test"] source
-                                                 runtime-probe-bound-ms)))))))
+  "The `-Scp` argument prepending a dependency hit's classes to `source`'s own
+  classpath, or nothing."
+  {:malli/schema [:=> [:cat :string :map] [:maybe :string]]}
+  [source classes]
+  (when (= :hit (:seon.dev-cache/status classes))
+    (str/join java.io.File/pathSeparator
+              [(:seon.dev-cache/path classes)
+               (str/trim (command! ["clojure" "-Spath" "-M:dev:test"] source
+                                   runtime-probe-bound-ms))])))
 
 (defn- record-cache-reference!
   "Record the child JVM's use of a cache directory, so `dev-cache/reap` keeps it
@@ -850,13 +729,9 @@
                       (dependency-classes (repository-root) source environment)
                       {:seon.dev-cache/status :skipped
                        :seon.dev-cache/reason :nuke-reads-no-derived-state})
-            program (when reuse-classes? (program-classes (repository-root) source classes))
-            _ (when program (hold! (repository-root) program))
-            program-classes? (boolean (and program (.isDirectory (io/file program))))
-            _ (when program (prune-program-classes! (repository-root) program))
-            argv (launch-argv request source (start-classpath source classes program) (.getCanonicalPath heap)
+            argv (launch-argv request source (start-classpath source classes) (.getCanonicalPath heap)
                               (launch-form (dissoc request :seon.operator/store-origin) (.getLocalPort callback)
-                                           program (launcher-pid request throwaway?)))
+                                           (launcher-pid request throwaway?)))
             builder (doto (ProcessBuilder. ^java.util.List argv)
                       (.directory (io/file source))
                       (.redirectErrorStream true)
@@ -916,8 +791,6 @@
             ;; ahead of the outcome (`-main` prints the outcome's headline first).
             (let [dumps (heap-dumps root)]
               (cond-> {:seon.operator/value (cond-> (assoc value :seon.dev-cache/dependency-classes classes
-                                                           ;; Whether this launch loaded the archive's own classes.
-                                                           :seon.operator/program-classes? program-classes?
                                                            :seon.operator/log (str log))
                                               (seq dumps) (assoc :seon.operator/heap-dumps dumps))
                        :seon.boot/advertisement coordinates}
@@ -1570,35 +1443,6 @@
             :seon.operator/phases (:seon.operator/phases source)}
            (program-source (:seon.boot/advertisement outcome)))))
 
-(declare linked-pins! disposable-root-boot!)
-
-(defn- warmed-program-classes!
-  "`source` with our program class directory filled when it misses: a throwaway
-  JVM of the archive boots on a scratch root and stops, before any JVM of
-  `root` stops, so the replacement loads compiled classes and its ready-ms and
-  the downtime exclude the namespace compile (the way `filled-classes!` fills a
-  dependency miss). A failed warm leaves the replacement to compile as it
-  always did."
-  {:malli/schema [:=> [:cat :string :map] :map]}
-  [root source]
-  (let [began (System/nanoTime)
-        source-root (:seon.operator/source-root source)
-        classes (dependency-classes (repository-root) source-root (child-environment root))
-        program (program-classes (repository-root) source-root classes)]
-    (if (and program (not (.isDirectory (io/file program))))
-      (let [disposable (str (io/file root "data/check" (str "warm-" (.pid (java.lang.ProcessHandle/current)))))
-            boot (try (linked-pins! root disposable)
-                      (disposable-root-boot! root disposable source-root)
-                      (finally
-                        (doseq [process (selected-processes disposable)]
-                          (terminate! process (operator-silence-backstop-ms {})))
-                        (fs/delete-tree disposable)))]
-        (-> source
-            (assoc :seon.operator/program-fill {:seon.operator/ready? (:seon.operator/ready? boot)
-                                                :seon.operator/program program})
-            (assoc-in [:seon.operator/phases :seon.operator/program-fill-ms] (elapsed-ms began))))
-      source)))
-
 (defn move-to-head!
   "Replace the root's JVM with one whose program is committed HEAD, keeping the
   store and every cache.
@@ -1616,9 +1460,7 @@
         ;; The replaced JVM's program directory seeds this root's analyzer cache.
         previous-source (some-> (advertisement root nil) program-source :seon.operator/source-root)
         {source-root :seon.operator/source-root :as source}
-        (warmed-program-classes! root
-                                 (filled-classes! root (prepared-source! root "HEAD"
-                                                                         previous-source)))
+        (filled-classes! root (prepared-source! root "HEAD" previous-source))
         began-down (System/nanoTime)
         stopped (down! request (selected-processes root))
         down-ms (elapsed-ms began-down)
@@ -1944,11 +1786,8 @@
   (its pins linked, `linked-pins!`) and return its boot outcome with
   `:seon.operator/ready?`; the caller stops it. `shape` is merged into the
   launch request (`live-shape`)."
-  {:malli/schema [:function
-                  [:=> [:cat :string :string :string] :map]
-                  [:=> [:cat :string :string :string :map] :map]]}
-  ([root disposable source-root] (disposable-root-boot! root disposable source-root {}))
-  ([root disposable source-root shape]
+  {:malli/schema [:=> [:cat :string :string :string :map] :map]}
+  [root disposable source-root shape]
   ;; A candidate's agents work in its own archive, never the checkout.
   (let [outcome (try (launch-child! (merge-with merge
                                                 {:seon.operator/managed-root disposable
@@ -1964,7 +1803,7 @@
                         (diagnostic (ex-message cause) (or (ex-data cause) {}) :client-failed cause)}))
         missing (get-in outcome [:seon.operator/value :seon.boot/readiness :seon.boot/missing-layers])]
     (assoc outcome :seon.operator/ready?
-           (and (not (:seon.error/message (:seon.operator/value outcome))) (vector? missing) (empty? missing))))))
+           (and (not (:seon.error/message (:seon.operator/value outcome))) (vector? missing) (empty? missing)))))
 
 (defn- launched-throwaway!
   "Boot a JVM of commit `sha` under the disposable root `disposable` on

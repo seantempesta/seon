@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed-pending-default-reload
 severity: defect
 tags: [issue, reload, operator, adoption, test]
 ---
@@ -51,14 +51,10 @@ Measured price of the cache (default's archive and classpath, loading its 124 ca
 two alternating runs under load): from classes 6,238 and 4,735 ms, from source 7,122 and 6,755 ms, so it saves about
 1-2 s per launch.
 
-Owner decision needed, simplest first:
-
-1. Delete the program class cache (`launch-form`'s staging and promotion, `program-classes`, its pruning and holds,
-   `warmed-program-classes!`, the program-classes test); dependency classes stay. Every `require :reload` reads source
-   as Clojure intends for non-AOT code; costs about 1-2 s per launch. Recommended.
-2. Keep the cache and make every reload owner load the source text with `clojure.lang.Compiler/load`
-   (clj-reload's `clj-reload.util/ns-load-file`): `seon.cluster/load-development-definitions!`,
-   `seon.sci.eval/host-namespace!`, `seon.test`'s loader and the eval test. A bare `require :reload` at the JVM REPL
-   stays a silent no-op on every cached namespace.
-3. Keep the cache in a boot-only loader whose class resources are hidden after boot: a bespoke class loader beside
-   Clojure's, keeping the stamp. Not recommended.
+Fix (root, owner-delegated, 2026-10-19: option 1 of three; the others kept the cache and reloaded source text at
+each reload owner, or hid the classes from the post-boot loader): the program class cache is deleted. A launch puts
+no compiled class of ours on the classpath (`seon.operator/start-classpath` prepends only the dependency cache's hit)
+and boots without `*compile-files*` (`seon.operator/launch-form`), so every `require :reload` reads source, as
+Clojure intends for code that is reloaded. The dependency class cache stays. Regression:
+`seon.cluster.program-classes-test/a-launched-namespace-reloads-from-its-source`. Default picks it up at its next
+restart; until then default keeps loading `target/dev-program-classes/3d38c658…`.
