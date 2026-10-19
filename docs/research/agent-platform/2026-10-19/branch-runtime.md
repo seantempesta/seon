@@ -232,8 +232,51 @@ How these fit the owner's constraints:
 
 Each phase is one loadable slice. HEAD boots after each.
 
-Phase status: P0 committed in the sci fork (`b6c51cd9`, branch `seon-ctx-escape`), bumped with a restart batch,
-waiting for root's restart; P1 and P2 open; P3 and P4 not approved.
+Phase status: P0 committed (sci fork `b6c51cd9` on branch `seon-ctx-escape`, bumped in f04cbe446 with a restart
+batch; it is live after root restarts default). P1 is stopped at a working patch: its proof is green, but the cost
+of deriving a base is too high (below). It waits on the owner's choice of option. P2 is not started. P3 and P4 are
+not approved.
+
+P1 attempt (lane runtime-p0-p2, 2026-10-19). The patch is `branch-runtime-p1.patch` next to this note. It adds
+`seon.sci.eval/analyse-loaded-functions!` to `acquire-program!`, the proof
+`seon.sci.eval-test/a-branch-helper-change-is-live-for-its-src-callers-on-that-branch`, the conversions, and a task
+with its proof for the analysis refusals.
+
+- The proof is green in a check JVM: the branch answers `"(BRANCH BRANCH)"`, while main's base and the compiled
+  `form-text` answer `"(a 1)"`.
+- On default, in a disposable fork of a real agent context, analysis refused 39 of 4,442 rows (the classes are in
+  the patch's task).
+  - Analysing the 4,403 `src` defns took 745 ms and 1.34 GB warm.
+  - Arming their 3,486 contracts took 1,034 ms and 1.36 GB, with the call-preparation snapshot read once rather than
+    once per arm, which cost 3.2 s and 1.6 GB.
+  - Per call, interpreted and armed against compiled and instrumented: `form-text` 7.4 vs 8.1 µs,
+    `seon.id/digest` 3.7 vs 4.1 µs, `my.task/current` 240 vs 287 µs. The armed wrapper dominates, so the 2-3×
+    measured uninstrumented does not show.
+  - Without arming, a default-filled call fails: `(my.task/current)` gets "Wrong number of args (0)".
+- The blocker is the cost per base derivation. Each `with-database` fixture, adoption and loaded commit derives its
+  own base, with fresh SCI Vars, so every base pays about 1.8 s and 2.7 GB.
+  - `seon.sci.eval-test` and `seon.sci.branch-execution-test` with long tests ran 597 s on the candidate against
+    28.6 s at HEAD.
+  - The candidate had 11 reds that HEAD lacks:
+    - 4 assert the reversed rule (compiled roots).
+    - 3 exceed their duration.
+    - 4 changed behavior: custody content nil, the eval-form-once schema rows, a test-namespace def answering a
+      refusing root, and the contract-allocation status.
+- The design's "analysed once per process, shared by content" assumes one SCI Var per program name per process.
+  Today each base mints its own Vars (`copy-host-var` per derivation), so an analysis cannot be shared between bases.
+
+Options for the owner, simplest first:
+
+1. **Lazy analysis per base Var.** Each SCI-runnable `src` Var's base root analyses and arms its definition from the
+   loaded commit on its first call, in the base, once. Cost then follows the functions called, and a fixture that
+   calls few `src` functions pays for few. The risk is that this resembles the deleted per-branch lazy roots, though
+   it reads an immutable commit, never a moving branch.
+2. **Recommended: one process program context, which P2's mechanism builds first.** Analyse `src` once per process
+   into Vars shared by every base. A base or branch is then a fork that binds only the names whose digest differs,
+   one cached analysis per distinct definition. This reorders P2's delta fold ahead of P1, and costs one design
+   round over how bases are derived.
+3. **Land the patch as is.** This means about 1.8 s and 2.7 GB per base derivation and a test suite about 20× slower
+   where it derives bases. It is not proportional to the change, so it is not recommended.
 
 - **Phase 0, SCI fork: a function made or read on a context resolves in that context off-thread.**
   - Red proof: a row in `sci.fork-bindings-test` reproducing P5/P5b/P5c above (expected `[1001 1002 1003]`, today

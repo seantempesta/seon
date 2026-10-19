@@ -1,0 +1,238 @@
+diff --git a/resources/seon/tasks/seon.fn.edn b/resources/seon/tasks/seon.fn.edn
+index 75030e507..e3d46e79b 100644
+--- a/resources/seon/tasks/seon.fn.edn
++++ b/resources/seon/tasks/seon.fn.edn
+@@ -71,4 +71,6 @@
+              :plan "`seon.fn/lint-entities` reads each clj-kondo finding's `:seon.fn.analyzer/row` and `:seon.fn.analyzer/col` with `long`, so a finding that carries no position (a file-level finding, e.g. an unresolved namespace) throws a NullPointerException and the whole lint of the file fails (root working state item 25, `docs/research/agent-platform/2026-10-14/root-working-state.md`, found by the writeback-fix report). Done when `seon.fn/lint-entities` answers a finding with no row or column as a file-scoped `:seon.lint/finding` (owner the file's relative path, no `:seon.lint/row`, `:seon.lint/col` or `:seon.lint/fn`: absence is no key, never nil) and a deftest over `seon.fn/lint-entities` with one such finding proves it. Fix at the producer: declare `:seon.lint/row` and `:seon.lint/col` optional in `:seon.lint/finding` and let `seon.program/declaration-at` take an absent position instead of fabricating one. Read `seon.fn/lint-entities`, `seon.program/declaration-at` and `:seon.lint/finding`."}
+  #:seon.task{:name "analysis-on-an-agent-branch-reads-a-closed-stream"
+              :plan "Lane done-one-derivation (2026-10-16): once `seon.fn` is interpreted on an agent branch, the test runner errors with `java.io.IOException: Stream closed` in `seon.fn.analyzer/analyze` via `seon.fn/runtime-analysis-batch`, so every `seon.fn-test` fixture errors on that branch, and the edit hook took 53 s per `src/seon/fn.clj` edit ('REPL entrance ... 7 changed: 53100 ms'). Reproduce on a disposable agent branch by defining a changed `seon.fn` function and running one `seon.fn-test` var; find what the interpreted copy closes (a reader or kondo's stream shared with the compiled one). Proof to write first: a `seon.fn-test` var runs green on an agent branch that redefines one `seon.fn` function."}
+-]
++ #:seon.task{:name "src-declarations-the-index-calls-runnable-that-sci-cannot-analyse"
++             :plan "The base analyses every src function whose row says `:seon.fn/host-bound? false` (`seon.sci.eval/analyse-loaded-functions!`, branch runtime P1). On default at f04cbe446, 39 of 4,442 refused analysis and keep their compiled copy, so a branch's change to their callees does not reach them: unresolved private `defonce`/`def` state before the namespace's interns were bound (`seon.cluster.boot/running-instances` 8, `seon.cluster.store/held-flocks` 2, `seon.cluster/root-store-holder` 2), unresolved classes (`CountedSlidingBuffer` 2, `DatabaseSchemaIdentity` 1, `Raw` 4) and source SCI reads otherwise than the JVM reader (map literals with an odd count 9, `cond`/`let` with an odd count 3, a catch binding read as a class name 6, `append` 1). Rerun the analysis on the base to see which remain once the interns are bound, then fix the producer of `:seon.fn/host-bound?` (`seon.fn/host-bound-callers`) or the SCI reader gap, so that the declaration's row and what SCI can run agree."
++             :proofs #{seon.sci.eval-test/every-src-function-the-index-calls-runnable-analyses-in-the-base}}]
+diff --git a/src/seon/sci/eval.clj b/src/seon/sci/eval.clj
+index 1b59822dd..f7675c678 100644
+--- a/src/seon/sci/eval.clj
++++ b/src/seon/sci/eval.clj
+@@ -2589,6 +2589,75 @@
+          [?binding :seon.ns.refer/target-ns ?target-ns] [?binding :seon.ns.refer/target-name ?target-name]
+          [?ns :seon.ns/refers ?binding] [?ns :seon.ns/name ?name]]]])))
+ 
++(defn- analyse-loaded-functions!
++  "Root each `src` function of the loaded program SCI can run at its analysed
++  definition in `ctx`, armed with its contract; the acquisition summary.
++
++  A call resolves its callees late, through the Var each analysed body holds,
++  in the executing context's own binding: a branch that redefines a helper
++  changes every caller it reaches on that branch, compiled entrance or not.
++  The namespace's other compiled interns (private state, `def`/`defonce`
++  values) are bound as the host's, so interpreting adds no second copy of
++  process state. A host-bound declaration (`:seon.fn/host-bound?`), a macro,
++  a value definition and a test-root or unloaded namespace keep their compiled
++  copy; so does one SCI cannot analyse, which the summary answers as a refusal."
++  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.schema/projection] :map]}
++  [ctx database projection]
++  (let [test-names (::test-namespaces @(::kernel/program-snapshot ctx))
++        rows (db/q '[:find ?sym ?source ?spec ?digest
++                     :where [?f :seon.fn/host-bound? false]
++                     [?f :seon.schema.admission/source :core]
++                     [?f :seon.fn/arglists ?arglists] [(not= "()" ?arglists)]
++                     (not [?f :seon.fn/macro? true])
++                     [?f :seon.fn/ns ?namespace] [?namespace :seon.fn/file ?file]
++                     [?file :seon.fn.file/relative-root "src"]
++                     [?f :seon.fn/sym ?sym] [?f :seon.fn/source ?source]
++                     [(get-else $ ?f :seon.fn/spec "") ?spec]
++                     [(get-else $ ?f :seon.program/definition-digest "") ?digest]]
++                   database)
++        _ (when (db/read-refusal? rows) (throw (ex-info (:seon.error/message rows) rows)))
++        rows (sort-by (comp str first)
++                      (filter (fn [[sym]] (let [namespace-name (symbol (namespace sym))]
++                                            (and (find-ns namespace-name) (not (contains? test-names namespace-name)))))
++                              rows))]
++    (doseq [namespace-name (distinct (map (comp symbol namespace first) rows))
++            :let [present (get-in @(:env ctx) [:namespaces namespace-name])]]
++      (install-host-namespace! ctx namespace-name
++                               (remove (fn [[local-name]] (contains? present local-name))
++                                       (ns-interns (find-ns namespace-name)))))
++    (let [outcomes (binding [sci.lang/*write-observer* nil sci.lang/*expansion-observer* nil]
++                     (sci.ctx-store/with-ctx ctx
++                       (mapv (fn [[sym source]]
++                               (let [namespace-name (symbol (namespace sym))]
++                                 (try
++                                   (let [form (:seon.sci.reader/form (one-event source namespace-name ctx (count source)))]
++                                     (sci/binding [sci/ns (context-namespace ctx namespace-name)]
++                                       (sci/eval-form ctx form))
++                                     sym)
++                                   (catch Exception failure
++                                     (interpretation-failure sym failure)))))
++                             rows)))
++          analysed (set (filter symbol? outcomes))]
++      ;; Armed as the compiled Vars are without a supplied cluster: the base is
++      ;; a function of the loaded program alone (`cluster-base-key`).
++      (let [caps (config/result-caps config/defaults)
++            current (call-preparation/snapshot database projection)]
++        (when (db/read-refusal? current)
++          (throw (ex-info (:seon.error/message current) current)))
++        (sci.ctx-store/with-ctx ctx
++          (doseq [[sym _ spec digest] rows
++                  :when (and (analysed sym) (seq spec))
++                  :let [contract (edn/read-string spec)
++                        sci-var (sci/resolve ctx sym)]]
++            (sci/bind-root!
++             ctx sci-var
++             (instrument/wrap-interpreted
++              sym contract (kernel/context-bound-projection ctx projection contract) caps @sci-var
++              (cond-> {:seon.call-preparation/snapshot current}
++                (seq digest) (assoc :seon.program/definition-digest digest)))))))
++      {::analysed-count (count analysed)
++       ::analysis-refusals (filterv map? outcomes)})))
++
+ (defn- acquire-program!
+   "Acquire the loaded program into its base context. Compiled definitions bind
+   their JVM roots; namespaces the JVM has not loaded interpret their source.
+@@ -2685,6 +2754,10 @@
+         ;; Libraries the namespaces require resolve through their aliases and
+         ;; full names, as the compiled namespaces that require them do.
+         (install-required-libraries! ctx all-namespace-rows)
++        ;; Every src function SCI can run is analysed once into the base: a
++        ;; branch's change is live for its callers on that branch.
++        (let [analysis (analyse-loaded-functions! ctx db projection)]
++          (swap! (::kernel/program-snapshot ctx) assoc ::analysis analysis))
+         ;; The bare REPL name refers to the acquired macro itself. Keeping the
+         ;; boot-time copy here would preserve its old expansion after adoption.
+         (sci/add-namespace! ctx 'clojure.core
+@@ -2699,6 +2772,7 @@
+           ::produced-in (cluster-base-key db)
+           :seon.sci.eval/interpreted-count (count interpreted)
+           :seon.sci.eval/installed 0
++          ::analysis (::analysis @(::kernel/program-snapshot ctx))
+           :seon.sci.eval/load-results
+           (into []
+                 (keep (fn [[sym _source _namespace admission _private]]
+@@ -3832,7 +3906,8 @@
+   (let [functions (:functions (::kernel/program-snapshot value))]
+     (+ (* function-bytes (count functions))
+        (reduce-kv (fn [total _ entry] (+ total (count (::function-source entry)))) 0 functions)
+-       (* interpreted-function-bytes (or (::interpreted-count (::acquisition value)) 0)))))
++       (* interpreted-function-bytes (+ (or (::interpreted-count (::acquisition value)) 0)
++                                        (or (::analysed-count (::analysis (::acquisition value))) 0))))))
+ 
+ (defn- overlay-weight
+   "Retained bytes an overlay adds to the loaded context it forks: its
+diff --git a/test/seon/sci/branch_execution_test.clj b/test/seon/sci/branch_execution_test.clj
+index 2d958e016..3b62ef86e 100644
+--- a/test/seon/sci/branch_execution_test.clj
++++ b/test/seon/sci/branch_execution_test.clj
+@@ -700,8 +700,9 @@
+              "only the changed definition interprets: no loaded platform caller is re-rooted")
+          (is (= #{'seon.db-test/only-an-as-of-view-has-an-as-of-key} (:seon.sci.eval/interpreted-tests snapshot))
+              "its one direct test runs interpreted")
+-         (is (identical? @(find-var caller) (sci.ctx-store/with-ctx ctx @(sci/resolve ctx caller)))
+-             "a compiled src caller keeps its compiled root")
++         (is (let [v (sci/resolve ctx caller)]
++               (identical? (sci.ctx-store/with-ctx nil @v) (sci.ctx-store/with-ctx ctx @v)))
++             "a src caller is never re-rooted: it keeps the base's analysed root and reaches the change through its Var")
+          (is (zero? (profile/calls-of measured 'seon.sci.eval/interpret-source-namespaces!))
+              "no test namespace is interpreted by the redefinition")))))))
+ 
+diff --git a/test/seon/sci/eval_test.clj b/test/seon/sci/eval_test.clj
+index eecf5c8a9..3d62f8c22 100644
+--- a/test/seon/sci/eval_test.clj
++++ b/test/seon/sci/eval_test.clj
+@@ -43,6 +43,7 @@
+             [seon.render-simplification-test :as simplification]
+             [seon.render-test :as render-test]
+             [seon.render.walk :as render.walk]
++            [seon.print]
+             [seon.render.web :as render.web]
+             [seon.schema :as schema]
+             [seon.sci.eval :as eval]
+@@ -149,38 +150,48 @@
+      ctx (assoc :seon.sci.eval/ctx ctx)
+      (nil? ctx) (assoc :seon.db/db (db/db (:seon.db/connection (test-support/execution-handle nil)))))))
+ 
+-(deftest a-branch-change-leaves-its-compiled-callers-compiled
+-  ;; Owner ruling (AGENTS ddd3cf9a2, dogfood B8): a branch never changes the
+-  ;; platform. An unchanged host-bound caller of a branch-changed definition
+-  ;; keeps its compiled Var, so the branch's own evaluator keeps working;
+-  ;; what the branch evaluates from source sees the branch's definition.
+-  ;; seon.cluster/write-advertisement! has one host-bound caller in a loaded
+-  ;; namespace (seon.cluster/serve!) and a small reverse closure.
++(deftest a-branch-helper-change-is-live-for-its-src-callers-on-that-branch
++  ;; Owner (2026-10-19): a branch's change to a src function is live for its
++  ;; branch and runtime. seon.print/literal is a private helper of the loaded
++  ;; public seon.print/form-text; the base analyses both, so form-text resolves
++  ;; literal through the branch's binding, and main keeps its own.
+   (test-support/with-database
+    (fn [connection]
+-     (let [changed-sym 'seon.cluster/write-advertisement!
++     (let [changed-sym 'seon.print/literal
+            before (db/db connection)
+            source (str/replace-first (:seon.fn/source (db/pull before [:seon.fn/source] [:seon.fn/sym changed-sym]))
+-                                     #"^(\(defn-?\s+\S+)" "$1 ;; Changed on the branch.\n \"Branch version.\"")
++                                     #"(?s)\[value\].*$" "[value]\n  \"BRANCH\")")
+            admitted (test-support/program-fn-entity before changed-sym source {:seon.schema.admission/source :agent})
+            _ (test-support/transacted!
+               connection
+               (test-support/replacement-tx
+                before [:seon.fn/sym changed-sym] (:seon.fn/source admitted)
+                {:seon.schema.admission/source :agent}))
+-           after (db/db connection)
+-           ctx (eval/base-ctx after)
+-           callers (filterv #(and (find-ns (symbol (namespace %)))
+-                                  (:seon.fn/host-bound? (db/pull after [:seon.fn/host-bound?] [:seon.fn/sym %])))
+-                            (db/q '[:find [?caller ...] :in $ ?callee :where [?f :seon.fn/calls ?callee] [?f :seon.fn/sym ?caller]]
+-                                  after changed-sym))]
+-       (is (= "Branch version." (sci/eval-string* ctx (str "(:doc (meta #'" changed-sym "))")))
+-           "what the branch evaluates from source sees its definition")
+-       (is (seq callers) "the change reaches host-bound callers in loaded namespaces")
+-       (is (every? #(identical? @(resolve %) (sci.ctx-store/with-ctx ctx @(sci/resolve ctx %))) callers)
+-           "each unchanged host-bound caller keeps its compiled Var, never a refusing stub")
+-       (is (= "{:a 1}" (sci/eval-string* ctx "(pr-str {:a 1})"))
+-           "the branch's evaluator keeps printing")))))
++           branch (eval/base-ctx (db/db connection))
++           main (eval/base-ctx before)]
++       (is (= "(BRANCH BRANCH)" (:seon.sci.admit/value (run-in branch "(seon.print/form-text '(a 1))" 2000)))
++           "on the branch, the loaded public caller answers the branch's helper")
++       (is (= "(a 1)" (sci/eval-string* main "(seon.print/form-text '(a 1))"))
++           "main's base caller keeps main's helper")
++       (is (= "(a 1)" (seon.print/form-text '(a 1))) "the compiled caller is unchanged")))))
++
++(deftest every-src-function-the-index-calls-runnable-analyses-in-the-base
++  ;; The base analyses each src function `:seon.fn/host-bound? false` names;
++  ;; one SCI cannot analyse keeps its compiled copy and is answered as a
++  ;; refusal: the index's host-bound judgement was wrong for it.
++  (test-support/with-database
++   (fn [connection]
++     (let [analysis (:seon.sci.eval/analysis (:seon.sci.eval/acquisition (eval/base-ctx (db/db connection))))]
++       (is (pos? (:seon.sci.eval/analysed-count analysis)))
++       (is (= [] (mapv :seon.sci.eval/refused-function (:seon.sci.eval/analysis-refusals analysis)))
++           "every declaration the index calls SCI-runnable analyses")))))
++
++(defn- main-root?
++  "Whether `ctx` runs main's definition of `sym`: it holds no binding of its
++  own, so it reads the Var's root, which the loaded base analysed."
++  [ctx sym]
++  (let [v (sci/resolve ctx sym)]
++    (identical? (sci.ctx-store/with-ctx ctx @v) (sci.ctx-store/with-ctx nil @v))))
+ 
+ (defn- namespace-paths
+   "Every `[namespace name]` `ctx`'s namespaces hold."
+@@ -218,7 +229,7 @@
+            _ (eval/bind-result! b result-handle private-object)
+            _ (is (not (:seon.cluster.eval/error private-result)))
+            _ (is (not (:seon.cluster.eval/error private-reader)))
+-           _ (is (identical? @#'seon.id/valid? @(sci/resolve initial 'seon.id/valid?)))
++           _ (is (main-root? initial 'seon.id/valid?))
+            ;; Analyzed, so the override carries its own definition digest: a
+            ;; source assoc'd onto the canonical entity keeps the old one, and the
+            ;; program then reads the override as unchanged.
+@@ -299,7 +310,7 @@
+          (is (nil? (:seon.schema.admission/note
+                     (lookup/documentation-value initial restored 'seon.id/valid? 'seon.id/valid?))))
+          (doseq [ctx [initial (fork initial b restored) regenerated]]
+-           (is (identical? @#'seon.id/valid? @(sci/resolve ctx 'seon.id/valid?)))))))))
++           (is (main-root? ctx 'seon.id/valid?))))))))
+ 
+ (deftest a-non-evaluable-agent-override-is-its-agents-mistake-never-the-jvm-definition
+   ;; The JVM fallback (`:jvm-fallback`) is deleted (03bd7cfc9): an agent entity
