@@ -237,7 +237,8 @@ batch; it is live after root restarts default). P1 is wired onto the content-add
 patch, `branch-runtime-wire.patch` next to this note (lane runtime-wire, below): both real-program proofs and every
 invariant test are green and the two test namespaces gain no red, but a branch with a function change pays the
 interpretation of interop-heavy platform functions (`seon.id/digest` 124x, `:similar-by-name-warm` 2.45 GB against
-57 MB), so the hub-change proof misses its bound. P2 is partial in the patch. P3 and P4 are not approved.
+57 MB), so the hub-change proof misses its bound. The leaf rule on top of it was tried and cut (lane runtime-leaf,
+below): it fixes `seon.id/digest` but leaves `:similar-by-name-warm` at 2,452 MB. P2 is partial in the patch. P3 and P4 are not approved.
 
 P1 attempt (lane runtime-p0-p2, 2026-10-19). The patch is `branch-runtime-p1.patch` next to this note. It adds
 `seon.sci.eval/analyse-loaded-functions!` to `acquire-program!`, the proof
@@ -440,6 +441,61 @@ Not yet true or not measured:
   (bodies hold the space's Var); `seon.fn` `source-callers`' `:branch` rule, `selection-walk`'s `::platform-tests`
   and `seon.cluster.source/merge-members`' `:seon.source/deferred` (tests reaching a change through `src` callers can
   now run on the branch).
+
+#### The leaf rule, tried and cut (lane runtime-leaf, 2026-10-19)
+
+The owner approved exploring option 1's narrow form: a function whose own `:seon.fn/calls` name no program definition
+but itself and no run-time resolution (`resolve`, `ns-resolve`, `requiring-resolve`, `find-var`, `eval`,
+`load-string`, `load-file`, `intern`, `var-get`, `the-ns`, `ns-publics`, `ns-interns`), with its analysis complete
+(`:seon.program/analyzed-source-digest`), keeps its compiled Var on a changed runtime; a branch that changes it
+interprets it. The patch is `branch-runtime-leaf.patch` next to this note, on top of `branch-runtime-wire.patch`:
+one predicate, `seon.sci.eval/leaves` (19 lines), consulted once in `runtime-rows!` (3 lines), and
+`no-sci-runnable-src-function-runs-its-compiled-var` narrowed to non-leaves plus "the changed helper is a leaf".
+
+- **Census on default:** 1,095 of 4,457 SCI-runnable `src` functions are leaves; 88 call a resolving function.
+  None of the named expensive ones is a leaf: `seon.id/digest` calls `seon.id/id`, which calls `hex`,
+  `default-length` (a `def`) and `structural-digest`; `seon.print/form-text` calls `literal`; `core-text` calls 6
+  and `brief` 8 program functions. The interop loops of `seon.id` sit in leaves (`structural-digest`, `hex`).
+- **Proofs with the rule, throwaway check JVM:** `seon.sci.runtime-test`, the P1 proof (a branch changes the leaf
+  `seon.print/literal`; its caller `form-text` answers `"(BRANCH BRANCH)"`), the narrowed invariant,
+  `cluster-contexts-share-no-writable-sci-stock-vars`, `evaluation-custody-is-derived-only-from-the-cluster-context`
+  and `seon.sci.branch-execution-test` are green, except `branch-definitions-and-unchanged-callers-share-one-context`,
+  red on HEAD too: 25 vars, 139 assertions.
+- **The cost table on a changed branch** (`ordinary-operations-cost-no-more-than-their-estimates`), MB allocated:
+
+  | Row | HEAD | wire | wire + leaf |
+  |---|---|---|---|
+  | `:similar-by-name-warm` | 57 | 2,453 | 2,452 |
+  | `:seon-db-nine-forms` | 981 | 1,452 | 1,435 |
+  | `:hub-behavior-change` | 880 (1.0 s) | 1,037 (4.1 s) | 1,049 (1.8 s) |
+  | `:current-state-with-task` | 207 | 308 | 245 |
+  | `:reuse-one-unchanged-test` | 30 | 144 | 62 |
+  | `:redefine-one-form` | 332 | 343 | 341 |
+
+- **Per request, after the hub change, wire vs wire + leaf** (one probe JVM each): 300 `seon.id/digest` calls 475
+  vs 25.5 MB (unchanged agent 24.4 MB): fixed. `my.program/similar` 2,449 vs 2,449 MB: unchanged.
+- **Why it misses:** the hot interop sits in functions that call one trivial program helper, so they are not leaves:
+  `seon.embed/nearest` (a `FloatBuffer` dot product; calls `float-view`), `seon.fn.analyzer/invoke-kondo` (379 MB
+  self in nine-forms on a changed branch, absent unchanged; calls `cache-directory`, `config-directory`,
+  `analysis-config`) and `seon.db/query-index-patterns` (181 vs 4.6 MB; calls `pull-index-patterns`). None of them,
+  nor `seon.id/id`, is in the reverse closure of `seon.db/as-of-key` (2,395 functions).
+- **SCI interop per call** (fork `b6c51cd9`, a type-hinted `FloatBuffer` dot product, 192,000 inner iterations, two
+  `.get` each): compiled 6.7 ns and 0.26 B per iteration, SCI 176 ns and 418 B (26x). The same loop without interop:
+  5.8 vs 44 ns (7.6x). So an interop call costs about 65 ns and 190 B interpreted: the call site's inline cache
+  (`sci.impl.evaluator`) finds the method list, then `sci.impl.interop/invoke-instance-method-with-methods` allocates
+  an argument array, boxes each argument and result and reflects through `Reflector.invokeMatchingMethod` every call.
+
+Ruled out by the owner's test ("doesn't really help ... cut it"): the rows stay far from HEAD. Not landed.
+
+- **What would make interpretation cheap:** in the SCI fork, a call site whose class resolved to exactly one
+  method keeps that `Method` (or an unreflected `MethodHandle` adapted to the hinted types) in its inline cache and
+  invokes it without `invokeMatchingMethod`'s per-call matching and array copies; primitive hints avoid the boxing.
+  This is a general gain for every interpreted interop call, measured by the dot-product probe above.
+- **What would make the rule work:** compile what does not reach the change, not what calls nothing: on a changed
+  runtime, interpret only the reverse closure of the changed names (cached analyses, so O(closure) binding) and keep
+  every other function compiled. That is a closure walk, which this round excluded.
+- **The wiring without the rule** is not acceptable on cost: every request on a changed branch pays the rows above
+  (`:similar-by-name-warm` 43x, nine forms +48%).
 
 - **Phase 0, SCI fork: a function made or read on a context resolves in that context off-thread.**
   - Red proof: a row in `sci.fork-bindings-test` reproducing P5/P5b/P5c above (expected `[1001 1002 1003]`, today

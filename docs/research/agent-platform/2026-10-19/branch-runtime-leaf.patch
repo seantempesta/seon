@@ -1,0 +1,91 @@
+diff --git a/src/seon/sci/eval.clj b/src/seon/sci/eval.clj
+index 09d71ac..63feeca 100644
+--- a/src/seon/sci/eval.clj
++++ b/src/seon/sci/eval.clj
+@@ -2638,6 +2638,25 @@
+          digest (assoc :seon.program/definition-digest digest)))
+       analysed)))
+ 
++(defn- leaves
++  "The functions in `database` that behave the same in every runtime: their
++  indexed calls (`:seon.fn/calls`, analysis complete) name no program
++  definition but their own and no run-time name resolution, so the compiled
++  Var is their definition on every branch that has not changed them."
++  {:malli/schema [:=> [:cat :seon.db/database-value] [:set :qualified-symbol]]}
++  [database]
++  (let [read! (fn [result] (when (db/read-refusal? result) (throw (ex-info (:seon.error/message result) result))) result)
++        resolving '#{clojure.core/resolve clojure.core/ns-resolve clojure.core/requiring-resolve clojure.core/find-var
++                     clojure.core/eval clojure.core/load-string clojure.core/load-file clojure.core/intern
++                     clojure.core/var-get clojure.core/the-ns clojure.core/ns-publics clojure.core/ns-interns}
++        program (set (read! (db/q '[:find [?sym ...] :where [_ :seon.fn/sym ?sym]] database)))
++        analysed (set (read! (db/q '[:find [?sym ...] :where [?f :seon.program/analyzed-source-digest] [?f :seon.fn/sym ?sym]]
++                                   database)))
++        calls (read! (db/q '[:find ?sym ?callee :where [?f :seon.fn/sym ?sym] [?f :seon.fn/calls ?callee]] database))]
++    (reduce (fn [held [sym callee]]
++              (cond-> held (or (resolving callee) (and (not= sym callee) (program callee))) (disj sym)))
++            analysed calls)))
++
+ (defn- runtime-rows!
+   "The loaded program's `src` functions SCI can run, as `seon.sci.runtime`
+   rows armed as their compiled Vars are, with `ctx` made to resolve them as
+@@ -2645,7 +2664,8 @@
+   `deftype`/`defrecord` define, and its other compiled interns (private state,
+   `def`/`defonce` values) bound as the host's, so interpreting adds no second
+   copy of process state. A host-bound declaration (`:seon.fn/host-bound?`), a
+-  macro, a value definition and a test-root or unloaded namespace have no row."
++  leaf (`leaves`), a macro, a value definition and a test-root or unloaded
++  namespace have no row."
+   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.schema/projection
+                        [:map-of :symbol :map] [:set :symbol]]
+                   [:vector :map]]}
+@@ -2670,9 +2690,13 @@
+                                         [?m :seon.program/definition-digest ?digest]
+                                         [?f :seon.fn/calls ?macro] [?f :seon.fn/sym ?sym]]
+                                       database)))
++        ;; a leaf keeps its compiled Var: it calls no program definition a
++        ;; branch could change, and a branch that changes it interprets it
++        leaf? (leaves database)
+         rows (sort-by (comp str first)
+                       (filter (fn [[sym]] (let [namespace-name (symbol (namespace sym))]
+-                                            (and (find-ns namespace-name) (not (contains? test-names namespace-name)))))
++                                            (and (find-ns namespace-name) (not (contains? test-names namespace-name))
++                                                 (not (leaf? sym)))))
+                               rows))
+         namespace-digests (into {}
+                                 (map (fn [namespace-name]
+diff --git a/test/seon/sci/eval_test.clj b/test/seon/sci/eval_test.clj
+index 1aa4132..bbcdc59 100644
+--- a/test/seon/sci/eval_test.clj
++++ b/test/seon/sci/eval_test.clj
+@@ -181,7 +181,9 @@
+   ;; its name -> digest map, never on what main's JVM compiled. Main may run
+   ;; compiled, having no overrides (owner, 2026-10-19); a branch with a change
+   ;; runs every src function the index calls SCI-runnable as its analysed
+-  ;; definition, never the compiled function.
++  ;; definition, never the compiled function, except a leaf it did not change
++  ;; (`seon.sci.eval/leaves`): it calls no program definition, so its compiled
++  ;; Var answers what its analysis would.
+   (test-support/with-database
+    (fn [connection]
+      (let [before (db/db connection)
+@@ -203,6 +205,7 @@
+                             [?f :seon.fn/ns ?namespace] [?namespace :seon.fn/file ?file]
+                             [?file :seon.fn.file/relative-root "src"] [?f :seon.fn/sym ?sym]]
+                           before)
++           leaves (#'eval/leaves before)
+            compiled (into (sorted-set)
+                           (filter (fn [sym]
+                                     (when-let [host (find-var sym)]
+@@ -210,7 +213,11 @@
+                                         (identical? @host (sci.ctx-store/with-ctx ctx @held))))))
+                           runnable)]
+        (is (seq runnable) "the index names SCI-runnable src functions")
+-       (is (= #{} compiled) "none of them runs its compiled Var")))))
++       (is (contains? leaves changed) "the changed helper is a leaf: it calls no other program definition")
++       (is (empty? (remove leaves compiled)) "no function calling a program definition runs its compiled Var")
++       (is (= (disj (into (sorted-set) (filter #(and (leaves %) (find-var %) (sci/resolve ctx %))) runnable) changed)
++              compiled)
++           "every leaf the branch did not change runs compiled; the changed one runs the branch's")))))
+ 
+ (defn- namespace-paths
+   "Every `[namespace name]` `ctx`'s namespaces hold."
