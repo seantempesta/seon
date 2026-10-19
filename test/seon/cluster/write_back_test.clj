@@ -16,6 +16,7 @@
             [seon.flow :as flow]
             [seon.fn :as fn]
             [seon.id :as id]
+            [seon.profile :as profile]
             [seon.program :as program]
             [seon.task :as task]
             [seon.test-support :as support]))
@@ -194,12 +195,13 @@
               (let [text (slurp file)]
                 (is (not (:seon.error/type (source/write-back! request))))
                 (is (= text (slurp file)))))
-            (testing "a later change to a written entity refuses by name with both digests, before any file is read"
+            (testing "a later change to a written entity writes back the accepted value"
+              ;; the merge commit is an immutable value: write-back writes what it accepted, never main's later place
               (support/transacted! h-conn (support/replacement-tx (db/db h-conn) callee "(defn callee [x] (+ 1 x))" {}))
-              (let [now (:seon.program/definition-digest (db/pull (db/db h-conn) [:seon.program/definition-digest] callee))]
-                (is (= [:row-changed {callee merged} {callee now}]
-                       ((juxt :seon.source/write-back-refused :seon.error/expected :seon.error/offending)
-                        (source/write-back! request)))))))))
+              (let [text (slurp file)
+                    again (source/write-back! request)]
+                (is (= [path] (:seon.source/changed-paths again)))
+                (is (= text (slurp file)) "the file holds the accepted replacement"))))))
           (finally
             (agent/release-context! candidate))))
       (finally
@@ -304,7 +306,7 @@
         (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
         (support/delete-root! root))))))
 
-(deftest ^{:seon.test/long "One agent turn on C, one prepare-merge! (file proof, then a nested seon.test/run; 60 s is merge-test's measured bound) and two analyses of a one-file fixture."
+(deftest ^{:seon.test/long "One agent turn on C, the branch's file proof (one analysis and one lint of a one-file fixture, held), one prepare-merge! (a nested seon.test/run; 60 s is merge-test's measured bound) and one write-back taking the held proof."
            :seon.test/long-ms 90000}
   a-declaration-naming-an-unrequired-namespace-merges-with-its-ns-form-requiring-it
   ;; The dogfood class: the agent's SCI world resolves `clojure.set/union`
@@ -317,13 +319,30 @@
                   (let [h-conn (:seon.db/connection target)
                         check [:seon.test/sym (symbol (str fixture-ns) "set-check")]
                         namespace-entity [:seon.ns/name fixture-ns]
-                        prepared (do (committed! {:seon.fn/root root}) (source/prepare-merge! target store c proofs {:root root}))
-                        _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
-                        _ (is (true? (:seon.test/passed? prepared)))
-                        accepted (when (:seon.test/passed? prepared) (source/accept-merge! target store prepared))]
+                        _ (committed! {:seon.fn/root root})
+                        ;; the done rule's file proof on the branch, the merge and its write-back: one proof, held by
+                        ;; the files' content, taken three times
+                        measured (profile/measure
+                                  #(let [main (db/db h-conn)
+                                         branch (db/branch-database main c)
+                                         published (try (source/publication main branch #{check namespace-entity} root)
+                                                        (finally (source/release! [branch])))
+                                         prepared (source/prepare-merge! target store c proofs {:root root})
+                                         _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
+                                         accepted (when (:seon.test/passed? prepared) (source/accept-merge! target store prepared))]
+                                     {:published published :prepared prepared :accepted accepted
+                                      :written (when (:seon.source/commit-id accepted)
+                                                 (source/write-back! {:seon.db/connection h-conn :seon.source/accepted accepted
+                                                                      :seon.fn/root root}))}))
+                        {:keys [published prepared accepted written]} (:seon.profile/value measured)]
+                    (is (nil? (:seon.source/file-refusal published)) "the branch's files prove clean")
+                    (is (true? (:seon.test/passed? prepared)))
                     (is (= #{check namespace-entity} (:seon.program/identities accepted)))
+                    (is (= [1 1] [(profile/calls-of measured 'seon.cluster.source/proven-files)
+                                  (profile/calls-of measured 'seon.cluster.source/lint-errors)])
+                        "the done rule, the merge and the write-back prove and lint each file content once")
                     (when (:seon.source/commit-id accepted)
-                      (source/write-back! (committed! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root}))
+                      (is (seq (:seon.source/changed-paths written)) "the write-back installs the proven file")
                       (let [requires (:seon.ns/requires (db/pull (db/db h-conn) [:seon.ns/requires] namespace-entity))
                             analysis (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})]
                         (is (contains? (set requires) 'clojure.set) "the merged namespace requires what its definition names")
@@ -820,7 +839,7 @@
         stage (fn [path candidate]
                 (if (empty? @staged)
                   (let [file (str path ".staged")] (io/copy candidate (io/file file)) (swap! staged conj file) file)
-                  (throw (ex-info "The disk is full." {:seon.source/path path}))))
+                  (throw (java.io.IOException. (str "The disk is full: " path)))))
         c (keyword (str "write-back-staged-c-" suffix))]
     (doseq [[path callee] (map vector paths callees)]
       (io/make-parents (io/file root path))

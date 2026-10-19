@@ -561,10 +561,10 @@
 
 (defn- indexed!
   "Main's program after publication `written` installed its files under `root`: each written source file
-  main records or this publication created (a namespace main never published), analyzed again
-  (`seon.fn/index!` of those paths), so main holds the file's digest and each
-  of its declarations' file and span, and a later merge splices into them. Answers the index result, nil
-  when no written path is such a source file."
+  main records or this publication created (a namespace main never published) reindexed from the analysis the one
+  file proof holds of the bytes it wrote (`:seon.program/rows`, `seon.cluster.source/file-proof`; `seon.fn/index!`
+  of those paths), so main holds the file's digest and each of its declarations' file and span, and a later merge
+  splices into them. Answers the index result, nil when no written path is such a source file."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.fn/root :seon.source/written]
                   [:or :nil :seon.reconcile/result]]}
   [connection root written]
@@ -578,11 +578,12 @@
                   [path (first (str/split path #"/"))])
         files (into (set known) created)]
     (when (seq files)
-      (fn/index! {:seon.db/connection connection
-                  :seon.schema/projection (or (db/carried-projection database) (schema/handed-projection))
-                  :seon.fn/root root :seon.fn/roots (vec (sort (into #{} (map second) files)))
-                  :seon.fn/changed-paths (into #{} (map first) files)
-                  :seon.source/previous-database database}))))
+      (fn/index! (cond-> {:seon.db/connection connection
+                          :seon.schema/projection (or (db/carried-projection database) (schema/handed-projection))
+                          :seon.fn/root root :seon.fn/roots (vec (sort (into #{} (map second) files)))
+                          :seon.fn/changed-paths (into #{} (map first) files)
+                          :seon.source/previous-database database}
+                   (seq (:seon.program/rows written)) (assoc :seon.program/rows (:seon.program/rows written)))))))
 
 (defn merge-commit
   "The main commit of assignment `a`'s latest merge on main `database`: the commit of the transaction that wrote
@@ -599,8 +600,8 @@
   "Publish assignment `key`'s merged declarations, task entries included, into the cluster's checkout (`checkout`) through
   `execution` (root's world: main's connection and `:seon.cluster/name`): derived from main alone
   (`seon.cluster.source/merge-accepted` of its merge commit, `merge-commit`), written back
-  (`seon.cluster.source/write-back!`, which proves and reindexes each file), main's record of those files
-  analyzed again (`indexed!`), and committed as one git
+  (`seon.cluster.source/write-back!`, which takes the one file proof of each file), main's record of those files
+  reindexed from that proof's analysis (`indexed!`), and committed as one git
   commit of exactly those paths (`seon.cluster.source/commit!`) under the merge's own claim in `bin/lane`'s
   ledger (lane `merge-<key>`), then `:seon.task/git-commit` written. A path another lane claims, or one
   with uncommitted changes the merge's claim does not cover, waits: nothing is written and the

@@ -333,8 +333,8 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    - a function new or changed on the branch with a contract gap (`seon.cluster.source/contract-gaps`, the installed
      merge completeness rule: missing spec, `:any`, `:some`; value `def`s are not functions, de1f48c23);
    - what the branch alone decides of its merge, judged by the merge gate's own functions
-     (`seon.cluster.source/publication`, data in `judged`, cached by main's commit and the branch's changed
-     digests): its `:seon.source/file-refusal`, the one file check the merge gate reads too
+     (`seon.cluster.source/publication`, data in `judged`; its file proof, `seon.cluster.source/file-proof`, is held by
+     the content it reads and taken again by the merge and its write-back): its `:seon.source/file-refusal`, the one file check the merge gate reads too
      (`seon.cluster.source/file-refusal`), when the files its merge list writes under the cluster's checkout
      (`seon.merge/checkout`; none, nothing to write) do not prove (`:seon.source/write-back-error`: a change with no
      file, a conflict with the checkout, a candidate that does not analyze) or hold a clj-kondo error
@@ -345,8 +345,9 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
      task the merge would refuse for what its branch holds is not done, so its agent gets a turn with the refusal as
      data (owner 2026-10-15: chain b7ab51e090d5's merge refused a lint error its done rule never saw, and the merge
      step, green at its start, ended with no turn and re-merged into the same refusal). Measured on that branch:
-     about 280 ms and 0.7 GB allocated per uncached judgment (the file proof re-analyzes each written file), a
-     cache hit about 2 ms.
+     about 280 ms and 0.7 GB allocated per uncached file proof (it re-analyzes each written file), once per file
+     content; a judgment after main moved over the same content rebuilds only the merged value (24 ms and 7 MB on a
+     one-file fixture), a cache hit under 1 ms.
    A test main holds no result for is unknown, not a regression: the final merge runs its baselines
    (`prepare-merge!`). Mid-chain a function no test reaches is not refused: the next task's proofs cover it. Measured: about 2 ms per judgment, plus about 7 ms to build the judged input. Refusals reuse
    existing variants where their meanings match.

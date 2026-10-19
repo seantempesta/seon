@@ -164,7 +164,11 @@
               :proof
               [:map {:description "A write-back proven before installation: the file, the bytes it was analyzed from, the candidate and its entities."}
                [:seon.source/path :seon.source/path] [:seon.source/base-digest :seon.source/base-digest]
-               [:seon.source/candidate-bytes :seon.source/candidate-bytes] [:seon.source/proof-rows :seon.source/proof-rows]],
+               [:seon.source/candidate-bytes :seon.source/candidate-bytes] [:seon.source/proof-rows :seon.source/proof-rows]
+               [:seon.program/rows {:optional true :description "A source file's: the analysis of its candidate bytes, which reindexes main once it is written (seon.merge/indexed!)."} :seon.program/rows]],
+              :file-proofs [:vector {:description "Each file a merge writes, proven (seon.cluster.source/proven-files)."} :seon.source/proof],
+              :file-proof [:map {:description "The one file proof of a merge's files, held by the content it reads (seon.cluster.source/file-proof): taken by the done rule, the merge and its write-back."}
+                           [:seon.source/file-proofs :seon.source/file-proofs] [:seon.source/lint-findings {:optional true} :seon.source/lint-findings]],
               :conflict-error [:merge {:description "seon.merge/merge! refused: the source branch and main changed the same declarations since the merge base (seon.program/three-way); or the done rule refused a branch's unresolved unmerged entries (seon.cluster.source/unmerged-refusal)."} :seon.error/base
                                [:map [:seon.program/conflict :seon.program/conflict] [:seon.program/conflict-digests {:optional true :description "Always present on a merge's refusal; optional because a stored error keeps only storable members, and this map has no attribute."} :seon.program/conflict-digests]
                                 [:seon.unmerged/entries {:optional true :description "The done rule's: each unresolved unmerged entry with the commits its versions are read at."} :seon.unmerged/entries]]],
@@ -182,7 +186,7 @@
                       [:cat :string :seon.source/file-bytes] :string],
               :write-back-refused
               [:enum {:description "Why a write-back installed nothing."}
-               :root-refused :row-changed :commit-absent :no-replacement :one-file :file-absent :file-changed :span-mismatch :conflict :not-analyzable :not-equivalent :install-failed],
+               :root-refused :commit-absent :no-replacement :one-file :file-absent :file-changed :span-mismatch :conflict :not-analyzable :not-equivalent :install-failed],
               :write-back-error
               [:merge :seon.error/base
                [:map [:seon.source/write-back-refused :seon.source/write-back-refused]
@@ -197,6 +201,7 @@
               :written
               [:map
                [:seon.source/changed-paths :seon.source/changed-paths]
+               [:seon.program/rows {:optional true :description "The held analysis of the written source files (seon.cluster.source/file-proof), which seon.merge/indexed! reindexes main from."} :seon.program/rows]
                [:seon.source/files [:vector {:min 1 :description "One entry per file a write-back installed, in path order: a merge writes each change into its one file."}
                                     :seon.source/file-written]]],
               :file-written

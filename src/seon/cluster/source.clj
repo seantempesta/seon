@@ -823,13 +823,7 @@
                                 :seon.program/absent)]))
         identities))
 
-(defn- moved-digests
-  "The members of `expected` whose digest `held` disagrees with."
-  {:malli/schema [:=> [:cat :seon.source/expected-digests :seon.source/expected-digests] [:vector :seon.program/declaration-identity]]}
-  [expected held]
-  (vec (sort-by str (filter #(not= (expected %) (held %)) (keys expected)))))
-
-(declare proven-files lint-errors root-refusal identity-namespace new-path done-refusals moving)
+(declare file-proof root-refusal identity-namespace new-path done-refusals moving)
 
 (defn release!
   "Release materialized database values (the result of `compare-branch`, `commit-database`); refusals and nils are skipped."
@@ -1166,44 +1160,36 @@
                              ". Fix it on the branch.")
     :seon.source/path (:seon.source/path (first findings)) :seon.source/lint-findings findings}))
 
-(defn- file-proof
-  "The files a merge writing `tx`, the change `delta`, over `main` would write under the checkout `root`
-  (`proven-files` over the merged value), or why the merged value or a file does not prove."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/transaction-data :seon.program/identity-set :seon.fn/root]
-                  [:or [:vector :seon.source/proof] :seon.source/write-back-error :seon.error/value]]}
-  [main tx delta root]
-  (let [merged (db/with main {:tx-data tx})]
-    (if (:seon.error/at merged) merged (proven-files main merged delta root))))
-
 (defn- file-refusal
-  "Why the files a merge writes cannot publish, from their `proof` (`file-proof`) under the checkout `root`: the
-  file proof's own refusal, else their clj-kondo errors (`lint-refusal`); nil when they publish clean. The one file
+  "Why the files a merge writes cannot publish, from their `proof` (`file-proof`, or the merged value's refusal): the
+  file proof's own refusal, else its clj-kondo errors (`lint-refusal`); nil when they publish clean. The one file
   check the merge gate (`prepare-merge!`) and the done rule (`publication`) both read."
-  {:malli/schema [:=> [:cat [:or [:vector :seon.source/proof] :seon.source/write-back-error :seon.error/value] :seon.fn/root]
+  {:malli/schema [:=> [:cat [:or :seon.source/file-proof :seon.source/write-back-error :seon.error/value]]
                   [:or :nil :seon.source/lint-error :seon.source/write-back-error :seon.error/value]]}
-  [proof root]
-  (if (vector? proof)
-    (let [lint (lint-errors root proof)] (when (seq lint) (lint-refusal lint)))
-    proof))
+  [proof]
+  (cond (:seon.error/at proof) proof
+        (seq (:seon.source/lint-findings proof)) (lint-refusal (:seon.source/lint-findings proof))))
 
 (defn publication
   "What a merge of `branch`, whose own changes since its merge base are `changed`, onto `main` would publish, judged
   from what the branch alone decides: `:seon.source/merge-identities`, its whole change but an agent's own namespace
   (`merge-changes`), and under a checkout `root` `:seon.source/file-refusal` when the files it writes over `main`
-  (`replacement`, `file-proof`) do not prove or hold a clj-kondo error: the refusal the merge gives
-  (`file-refusal`). The done rule's input (`done-refusals`). Cached by main's commit and the digests `branch` holds
-  for `changed`."
+  (`replacement`) do not prove or hold a clj-kondo error: the refusal the merge gives (`file-refusal`) from the one
+  file proof (`file-proof`), held by the content it reads, which the merge (`prepare-merge!`) and its write-back
+  (`write-back!`) take again. The done rule's input (`done-refusals`). Cached by main's commit and the digests
+  `branch` holds for `changed`; once main moves, only the merged value is built again, and the file proof is reused."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set [:maybe :seon.fn/root]]
                   [:or :seon.source/publication :seon.error/value]]}
   [main branch changed root]
   (seon.cache/lookup ::publication [(db/commit-id main) (held-digests branch changed) root] (constantly 1024)
     (fn []
-     (let [delta (merge-changes branch main changed)
-           tx (when (and (seq delta) (string? root) (nil? (root-refusal root))) (replacement branch main delta))
-           refusal (when (vector? tx) (file-refusal (file-proof main tx delta root) root))]
-       (if (:seon.error/at tx)
-         tx
-         (cond-> {:seon.source/merge-identities delta} refusal (assoc :seon.source/file-refusal refusal)))))))
+      (let [delta (merge-changes branch main changed)
+            tx (when (and (seq delta) (string? root) (nil? (root-refusal root))) (replacement branch main delta))
+            merged (when (vector? tx) (db/with main {:tx-data tx}))
+            refusal (when merged (file-refusal (if (:seon.error/at merged) merged (file-proof main merged delta root))))]
+        (if (:seon.error/at tx)
+          tx
+          (cond-> {:seon.source/merge-identities delta} refusal (assoc :seon.source/file-refusal refusal)))))))
 
 (defn- judged-merge!
   "The merge branch S of `source`'s head `head` holding `tx` (the candidate commit `c-id`'s whole change `delta`, root's
@@ -1266,8 +1252,8 @@
   keeps (git's ours, the target); the tests reaching what S changed run there and S is judged as task `task-sym`'s
   step is judged (`judged-merge!`). Answers the prepared merge `accept-merge!` takes: S, its judged commit, Δ, the
   refusals (empty only for acceptance) with their red tests, and H's basis. A conflict, or with the `:root` option
-  (the checkout) a file write-back would produce that does not prove or holds a clj-kondo error (`proven-files`,
-  `file-refusal`, proven over the merged value before any test runs), answers its refusal with S kept
+  (the checkout) a file write-back would produce that does not prove or holds a clj-kondo error (the one file proof,
+  `file-proof`, taken before any test runs), answers its refusal with S kept
   (`:seon.source/candidate`, MERGE-STEP)."
   {:malli/schema [:function
                   [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.task/sym]
@@ -1297,9 +1283,12 @@
                                        (db/commit-id base) c-id))
                tx (when delta (if (seq delta) (replacement branch head delta) []))
                root-error (when (and root (seq tx)) (root-refusal root))
-               ;; the files write-back would produce over the merged value: the bar a lane commit holds (bin/lane)
-               proof (when (and root (nil? root-error) (vector? tx) (seq tx)) (file-proof head tx delta root))
-               published (when proof (file-refusal proof root))]
+               ;; the files write-back would produce over the merged value: the bar a lane commit holds (bin/lane),
+               ;; the one file proof the done rule already holds for this content
+               proof (when (and root (nil? root-error) (vector? tx) (seq tx))
+                       (let [merged (db/with head {:tx-data tx})]
+                         (if (:seon.error/at merged) merged (file-proof head merged delta root))))
+               published (when proof (file-refusal proof))]
            (cond
              root-error root-error
              (not (set? changed)) changed
@@ -1307,7 +1296,7 @@
              (not (vector? tx)) tx
              :else (judged-merge! source held-store head c-id task-sym (-> (vec merging) (into tx) (into recorded)) delta
                                   (cond (seq conflicts) three published published)
-                                  (when (vector? proof) proof))))
+                                  (:seon.source/file-proofs proof))))
          (finally (release! [base branch])))))))
 
 (defn- red-test-verdicts
@@ -1669,25 +1658,30 @@
     (when (= 1 (count files)) (first files))))
 
 (defn- file-rows
-  "The declarations `text`, the file at `path` under `root`, holds by identity,
-  as the ordinary analyzer reads it against `database`'s program; else the
-  analyzer's refusal (`:seon.fn/index-refused`)."
+  "The program entities `text`, the file at `path` under `root`, analyzes to, as the ordinary analyzer reads it
+  against `database`'s program; else the analyzer's refusal (`:seon.fn/index-refused`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/root :string :seon.source/path :string]
-                  [:or [:map-of :seon.program/declaration-identity :map] [:map [:seon.fn/index-refused :boolean]]]]}
+                  [:or :seon.program/rows [:map [:seon.fn/index-refused :boolean]]]]}
   [database root relative-root path text]
   ;; The analyzer refuses blocking findings by throwing (`seon.fn/assert-clean-analysis!`):
   ;; a declaration valid at the REPL may name a namespace its file does not require.
   ;; `database` names the first-party functions the file calls: without it a call into
   ;; another first-party namespace is unclassifiable (`seon.fn/host-bound-callers`).
-  (let [analyzed (try (fn/analyze-entities {:seon.fn/root (str root) :seon.fn/roots [relative-root]
-                                            :seon.fn/changed-paths #{path}
-                                            :seon.source/previous-database database
-                                            :seon.fn.analyzer/sources {(.getCanonicalPath (io/file root (str path))) text}})
-                      (catch clojure.lang.ExceptionInfo failure
-                        (if (:seon.fn/index-refused (ex-data failure)) (ex-data failure) (throw failure))))]
-    (if (sequential? analyzed)
-      (into {} (keep #(when (:seon.program/definition-digest %) [(program/row-identity %) %])) analyzed)
-      analyzed)))
+  (try (fn/analyze-entities {:seon.fn/root (str root) :seon.fn/roots [relative-root]
+                             :seon.fn/changed-paths #{path}
+                             :seon.source/previous-database database
+                             :seon.fn.analyzer/sources {(.getCanonicalPath (io/file root (str path))) text}})
+       (catch clojure.lang.ExceptionInfo failure
+         (if (:seon.fn/index-refused (ex-data failure)) (ex-data failure) (throw failure)))))
+
+(defn- declared-rows
+  "The declarations of `analyzed` (`file-rows`) by identity; its refusal as it is."
+  {:malli/schema [:=> [:cat [:or :seon.program/rows [:map [:seon.fn/index-refused :boolean]]]]
+                  [:or [:map-of :seon.program/declaration-identity :map] [:map [:seon.fn/index-refused :boolean]]]]}
+  [analyzed]
+  (if (sequential? analyzed)
+    (into {} (keep #(when (:seon.program/definition-digest %) [(program/row-identity %) %])) analyzed)
+    analyzed))
 
 (defn- conflicts
   "The conflict digests of each of `identities` that `ours` (the file's
@@ -1776,7 +1770,8 @@
         base-digest (if fresh? (sha-256 (byte-array 0)) (some-> base-bytes sha-256))
         base-text (some-> ^bytes base-bytes (String. "UTF-8"))
         ;; The file's declarations now: as `before` recorded them, or read again when the file changed since.
-        ours (when (and base-bytes (not fresh?) (not= recorded-digest base-digest)) (file-rows before root relative-root path base-text))
+        ours (when (and base-bytes (not fresh?) (not= recorded-digest base-digest))
+               (declared-rows (file-rows before root relative-root path base-text)))
         conflicting (when (and ours (not (:seon.fn/index-refused ours))) (conflicts before after ours (set identities)))
         changes (if ours (mapv (fn [[identity _ now]] [identity (get ours identity) now]) recorded) recorded)
         before-entities (keep second changes)
@@ -1810,7 +1805,6 @@
         refuse (fn [reason message evidence]
                  (write-back-refusal reason message (cond-> evidence path (assoc :seon.source/path path))))]
     (cond
-      (empty? identities) (refuse :no-replacement "The accepted merge changed no declaration." {})
       (or (not= 1 (count files)) (nil? path) (and fresh? (nil? ns-source))
           (some (fn [[_ _ now]] (and now (nil? (source-of now)))) changes))
       (refuse :one-file "Each change needs its source and one file."
@@ -1826,7 +1820,8 @@
       (refuse :span-mismatch "A before-state has no span, or its span no longer holds its declaration's source." {})
       :else
       (let [candidate (spliced base-bytes (edits))
-            reindexed (file-rows after root relative-root path (String. ^bytes candidate "UTF-8"))
+            analyzed (file-rows after root relative-root path (String. ^bytes candidate "UTF-8"))
+            reindexed (declared-rows analyzed)
             ;; Every declaration the file holds after the write: its others as they are now, the written ones as
             ;; `after` holds them. An unchanged file's others are `after`'s: a written namespace row re-derives the
             ;; declarations whose resolver context it changes (`seon.program/definition-digest`).
@@ -1848,7 +1843,8 @@
           (refuse :not-equivalent "The reindexed candidate does not declare exactly the accepted program."
                   {:seon.error/offending differing :seon.error/expected (select-keys expected differing)})
           :else {:seon.source/path path :seon.source/base-digest base-digest
-                 :seon.source/candidate-bytes candidate :seon.source/proof-rows (vec changes)})))))
+                 :seon.source/candidate-bytes candidate :seon.source/proof-rows (vec changes)
+                 :seon.program/rows analyzed})))))
 
 (defn- schema-path
   "The schema resource `k` is declared in: its namespace's file under the
@@ -2165,22 +2161,18 @@
   "`proven-file` (`proven-schema-file` for schemas, `proven-task-file` for
   tasks) for each file the changes
   of `identities` are written into, by path: a function, its schema and the
-  test proving it are three files of one merge. The first refusal answers; a
-  change naming no file refuses `:one-file`."
+  test proving it are three files of one merge. The first refusal answers; a change naming no file is
+  `proven-file`'s `:one-file`, no change at all `:no-replacement`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set :seon.fn/root]
                   [:or [:vector :seon.source/proof] :seon.source/write-back-error]]}
   [before after identities root]
-  (let [groups (group-by #(change-path before identities %) identities)]
-    (cond
-      (empty? identities) (write-back-refusal :no-replacement "The accepted merge changed no declaration." {})
-      (contains? groups nil)
-      (write-back-refusal :one-file "Each change needs its source and one file."
-                          {:seon.error/offending (vec (sort-by str (get groups nil)))})
-      :else (reduce (fn [proofs [_ group]]
-                      (let [prove (case (ffirst group) :seon.task/sym proven-task-file :seon.schema/key proven-schema-file proven-file)
-                            proof (prove before after (set group) root)]
-                        (if (:seon.error/at proof) (reduced proof) (conj proofs proof))))
-                    [] (sort-by key groups)))))
+  (if (empty? identities)
+    (write-back-refusal :no-replacement "The accepted merge changed no declaration." {})
+    (reduce (fn [proofs [_ group]]
+              (let [prove (case (ffirst group) :seon.task/sym proven-task-file :seon.schema/key proven-schema-file proven-file)
+                    proof (prove before after (set group) root)]
+                (if (:seon.error/at proof) (reduced proof) (conj proofs proof))))
+            [] (sort-by key (group-by #(change-path before identities %) identities)))))
 
 (defn lint-errors
   "The clj-kondo errors, under the checkout's `.clj-kondo` configuration (`seon.fn.analyzer/analyze`, one run),
@@ -2202,47 +2194,78 @@
             (sort-by (juxt ::analyzer/filename ::analyzer/row ::analyzer/col)
                      (::analyzer/findings (analyzer/analyze {::analyzer/sources texts})))))))
 
-(defn- write-back-commits
-  "`write-back!` between the accepted merge's `before` and `after` commits."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.source/accepted :seon.db/database-value
-                       :seon.db/database-value :seon.fn/root :seon.source/stage]
+(declare git)
+
+(defn- file-key
+  "What the file proof of `identities` from `before` to `after` reads, as content: `root`, the digests `before` and
+  `after` hold for each identity (`held-digests`) and, for each file the changes are written into (`change-path`),
+  main's recorded digest of it, git's blob id of it at the checkout's HEAD (`committed-bytes` reads that blob) and
+  the digest `after` holds for each declaration it records there (`file-digests`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set :seon.fn/root]
+                  [:tuple :seon.fn/root :seon.source/expected-digests :seon.source/expected-digests
+                   [:map-of :seon.source/path [:tuple [:maybe :string] [:maybe :string] [:map-of :seon.program/identity :string]]]]]}
+  [before after identities root]
+  (let [paths (into (sorted-set) (keep #(change-path before identities %)) identities)
+        ;; one git call for every path; no path, no call (an empty pathspec lists the whole tree).
+        ;; Each line is `<mode> <type> <object>\t<path>`.
+        {out :out} (if (seq paths) (git root (into ["ls-tree" "HEAD" "--"] paths)) {:out ""})
+        blobs (into {} (keep (fn [line]
+                               (when-let [tab (str/index-of line "\t")]
+                                 (let [meta (subs line 0 tab)]
+                                   [(subs line (inc tab)) (subs meta (inc (str/last-index-of meta " ")))]))))
+                    (str/split-lines out))
+        recorded (into {} (db/q '[:find ?path ?digest :in $ [?path ...]
+                                  :where [?f :seon.fn.file/relative-path ?path] [?f :seon.fn.file/digest ?digest]]
+                                before (vec paths)))]
+    [root (held-digests before identities) (held-digests after identities)
+     (into (sorted-map) (map (fn [path] [path [(recorded path) (blobs path) (file-digests after path)]])) paths)]))
+
+(defn file-proof
+  "The one file proof of a merge writing `identities` over `before` into the checkout `root`, `after` the value the
+  merge leaves: each file's candidate bytes and their analysis (`proven-files`) and the clj-kondo errors in them
+  (`lint-errors`); else the refusal of a file that does not prove. Held by the content it reads (`file-key`), so
+  the done rule (`publication`), the merge (`prepare-merge!`) and its write-back (`write-back!`) prove and lint each
+  file content once, however main moved meanwhile."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set :seon.fn/root]
+                  [:or :seon.source/file-proof :seon.source/write-back-error]]}
+  [before after identities root]
+  (seon.cache/lookup ::file-proof (file-key before after identities root)
+    (fn [proof] (reduce + 1024 (map #(alength ^bytes (:seon.source/candidate-bytes %)) (:seon.source/file-proofs proof))))
+    #(let [proofs (proven-files before after identities root)]
+       (if (vector? proofs)
+         (let [lint (lint-errors root proofs)]
+           (cond-> {:seon.source/file-proofs proofs} (seq lint) (assoc :seon.source/lint-findings lint)))
+         proofs))))
+
+(defn- install!
+  "Install the proven candidates `proofs` under the checkout `root`, all or nothing: each staged beside its file
+  (`stage`) before any is renamed onto it. Answers what was written, with the held analysis of the written source
+  files (`:seon.program/rows`, which `seon.merge/indexed!` reindexes main from); else the refusal."
+  {:malli/schema [:=> [:cat [:vector :seon.source/proof] :seon.fn/root :seon.source/stage]
                   [:or :seon.source/written :seon.source/write-back-error]]}
-  [connection accepted before after root stage]
-  (let [identities (:seon.program/identities accepted)
-        merged (held-digests after identities)
-        moved (moved-digests merged (held-digests (db/db connection) identities))
-        proven (when (empty? moved) (proven-files before after identities root))
-        disk-digest #(let [file (io/file root (str (:seon.source/path %)))]
+  [proofs root stage]
+  (let [disk-digest #(let [file (io/file root (str (:seon.source/path %)))]
                        (sha-256 (if (.isFile file) (Files/readAllBytes (.toPath file)) (byte-array 0))))
         ;; the disk holds HEAD's bytes, or this merge's own candidate from a write-back a crash left uncommitted
-        changed (when (vector? proven)
-                  (first (remove #(#{(:seon.source/base-digest %) (sha-256 (:seon.source/candidate-bytes %))} (disk-digest %))
-                                 proven)))
+        changed (first (remove #(#{(:seon.source/base-digest %) (sha-256 (:seon.source/candidate-bytes %))} (disk-digest %))
+                               proofs))
         kind (fn [entities pick] (vec (keep (fn [[identity was now]] (when (pick was now) identity)) entities)))]
-    (cond
-      (seq moved)
-      (write-back-refusal :row-changed "Declarations changed on the branch after the merge was accepted; merge that change before writing back."
-                          {:seon.error/member :seon.source/accepted
-                           :seon.error/expected (select-keys merged moved)
-                           :seon.error/offending (select-keys (held-digests (db/db connection) identities) moved)})
-      (:seon.error/at proven) proven
-      changed
+    (if changed
       (write-back-refusal :file-changed "The file changed while the candidate was proven."
                           {:seon.source/path (:seon.source/path changed) :seon.error/offending (:seon.source/base-digest changed)})
-      :else
-      ;; All or nothing: every candidate is staged beside its file before any is renamed onto it.
       (let [staging (reduce (fn [staging {path :seon.source/path candidate :seon.source/candidate-bytes}]
                               (let [file (.getPath (io/file root (str path)))]
                                 (try (update staging :staged conj [(stage file candidate) file])
-                                     (catch Exception failure (reduced (assoc staging :failed path :failure failure))))))
-                            {:staged []} proven)]
+                                     (catch java.io.IOException failure (reduced (assoc staging :failed path :failure failure))))))
+                            {:staged []} proofs)]
         (if-let [failed (:failed staging)]
           (do (run! (fn [[staged]] (Files/deleteIfExists (.toPath (io/file staged)))) (:staged staging))
               (write-back-refusal :install-failed "A proven candidate could not be staged; no file was installed."
                                   {:seon.source/path failed :seon.source/changed-paths []
                                    :seon.error/throwable (:failure staging)}))
           (do (install-staged! (:staged staging))
-              {:seon.source/changed-paths (mapv :seon.source/path proven)
+              {:seon.source/changed-paths (mapv :seon.source/path proofs)
+               :seon.program/rows (into [] (mapcat :seon.program/rows) proofs)
                :seon.source/files
                (mapv (fn [{path :seon.source/path base-digest :seon.source/base-digest candidate :seon.source/candidate-bytes
                            entities :seon.source/proof-rows}]
@@ -2253,7 +2276,7 @@
                                   :seon.source/replaced (kind entities #(and %1 %2))}
                            (seq added) (assoc :seon.source/added added)
                            (seq retracted) (assoc :seon.source/retracted retracted))))
-                     proven)}))))))
+                     proofs)}))))))
 
 (defn- main-parent
   "The parent of commit `after` on its own branch, or the `:commit-absent` refusal.
@@ -2353,9 +2376,8 @@
   form: its span takes the merged form. A task's change is its entry in its
   task file (`proven-task-file`), a schema's its entry in its resource.
 
-  Proven before installation. Refuses by reason unless each written
-  declaration still holds, on the branch head, the digest the merge commit gave
-  it (other writes never stale it); each file is read at the checkout's git HEAD (`committed-bytes`), never a
+  Proven before installation, by the one file proof the merge already holds for this content (`file-proof`): the
+  accepted value is written, whatever main changed since. Refuses by reason unless each file is read at the checkout's git HEAD (`committed-bytes`), never a
   lane's uncommitted working copy, which `seon.merge/publish!` waits for; every change names one file (a replaced or
   retracted declaration by its state before the merge, an added one by its
   namespace's file) and every before-state a span holding its source; a file
@@ -2386,10 +2408,11 @@
     (try
       (if-let [refused (root-refusal root)]
         refused
-      (if (some nil? [before after])
-        (write-back-refusal :commit-absent "The accepted merge's commits are unavailable in this store."
-                            {:seon.error/offending (select-keys accepted [:seon.source/base-commit-id :seon.source/commit-id])})
-        (write-back-commits connection accepted before after root stage)))
+        (if (some nil? [before after])
+          (write-back-refusal :commit-absent "The accepted merge's commits are unavailable in this store."
+                              {:seon.error/offending (select-keys accepted [:seon.source/base-commit-id :seon.source/commit-id])})
+          (let [proof (file-proof before after (:seon.program/identities accepted) root)]
+            (if (:seon.error/at proof) proof (install! (:seon.source/file-proofs proof) root stage)))))
       (finally (run! #(some-> % d/release-materialized-db) [before after])))))
 
 ;;; ---------------------------------------------------------------------------
