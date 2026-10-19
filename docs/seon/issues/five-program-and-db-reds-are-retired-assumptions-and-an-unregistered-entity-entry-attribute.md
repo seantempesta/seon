@@ -1,6 +1,6 @@
 ---
 type: issue
-status: partly-fixed (reds 1, 2, 4 fixed by lane red-fix; red 3 owned by task seon.turn.batch/a-repl-namespace-row-and-digest-are-red-on-head; red 5 open)
+status: partly-fixed (reds 1, 2, 4 fixed by lane red-fix; red 5 fixed by lane red-fix2; red 3 owned by task seon.turn.batch/a-repl-namespace-row-and-digest-are-red-on-head)
 severity: friction
 created: 2026-10-19
 tags: [issue, test, program, schema]
@@ -82,6 +82,9 @@ template `a92ba5b94` against an older candidate), so those runs carry no signal.
 
 Proposed fix: make `f` spell the namespace through an alias the require adds (`s/union` with
 `(:require [clojure.set :as s])`), which `used-resolver-context` keeps, so the digest does change.
+
+Fixed (lane red-fix2): the test's `f` spells `s/union` and the namespace row declares the alias `s` for `clojure.set`, so
+the kept used resolver context changes with the require.
 
 ## Proof when fixed
 

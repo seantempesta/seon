@@ -2833,15 +2833,16 @@
   (test-support/with-database
    (fn [connection]
      (let [namespace-entity (test-support/namespace-entity (db/db connection) 'sample.rederive)
-           ;; `f` uses the namespace the require adds; `g` uses nothing, so
+           ;; `f` spells the alias the require adds (the digest drops requires, keeps used aliases); `g` uses nothing, so
            ;; its digest keeps (9b6df1ff4: only the used resolver context).
-           entity (test-support/program-fn-entity (db/db connection) 'sample.rederive/f "(defn f [x] (clojure.set/union x))"
+           entity (test-support/program-fn-entity (db/db connection) 'sample.rederive/f "(defn f [x] (s/union x))"
                                             {:seon.fn/calls #{'clojure.set/union}})
            unused (test-support/program-fn-entity (db/db connection) 'sample.rederive/g "(defn g [x] x)")
            _ (test-support/transacted! connection [namespace-entity entity unused])
            required (program/declaration-row (db/carried-projection (db/db connection))
                                              {:seon.ns/name 'sample.rederive :seon.ns/requires #{'clojure.set}
-                                              :seon.ns/source "(ns sample.rederive (:require [clojure.set]))"}
+                                              :seon.ns/aliases #{{:seon.ns.alias/local 's :seon.ns.alias/target-ns 'clojure.set}}
+                                              :seon.ns/source "(ns sample.rederive (:require [clojure.set :as s]))"}
                                              :all :agent)
            _ (test-support/transacted! connection [required])
            database (db/db connection)
