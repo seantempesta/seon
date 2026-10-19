@@ -149,12 +149,12 @@
   "Config membership declared by retained leaf schemas.
 
   A function of the projection alone, so the projection's own holder keeps
-  the answer (`schema/projection-cache-value`): the walk visits every form in
+  the answer (`internal/projection-cache-value`): the walk visits every form in
   the registry, and every config read on a fresh database value asked it again
   (1.9 ms per call, three per agent form, perf-eval-overhead 2026-09-26)."
   {:malli/schema [:=> [:cat :seon.schema/projection] [:set :qualified-keyword]]}
   [projection]
-  (schema/projection-cache-value
+  (internal/projection-cache-value
    projection ::dial-attributes
    #(into #{}
           (filter (fn [attribute]
@@ -165,7 +165,7 @@
 
 (defn- required-dial-attributes
   [projection]
-  (schema/projection-cache-value
+  (internal/projection-cache-value
    projection ::required-dial-attributes
    #(set (internal/map-required-attrs
           (mr/schema (:seon.schema.projection/registry projection) :seon.config/effective)))))
@@ -174,7 +174,7 @@
   "Return the defaults derived from this immutable declaration projection."
   {:malli/schema [:=> [:cat :seon.schema/projection] [:map-of :qualified-keyword :seon.schema/value]]}
   [projection]
-  (schema/projection-cache-value
+  (internal/projection-cache-value
    projection ::registration-defaults
    #(let [required (required-dial-attributes projection)]
       (into {}

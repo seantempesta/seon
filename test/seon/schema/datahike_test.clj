@@ -601,7 +601,7 @@
         calls #(:seon.profile/calls (profile/observation cell))
         resolutions (fn [transaction]
                       (let [before (calls)]
-                        (schema.datahike/encode-transaction transaction)
+                        (schema.datahike/encode-transaction-in (schema/declaration-projection) transaction)
                         (- (calls) before)))
         wide {:seon.agent/id "agent-a" :seon.message/id "m-1" :seon.message/content "do the thing" :seon.turn/id "run-1" ::title "Alpha"}
         nested {:seon.agent/id "agent-b"
@@ -704,6 +704,8 @@
         (recur (into (subvec pending 1) found) (into reached found)))
       reached)))
 
-(deftest the-bridge-requires-no-printer
-  (is (not (contains? (require-closure 'seon.schema.datahike) 'seon.print))
-      "seon.schema.datahike reaches seon.print through no require"))
+(deftest the-bridge-requires-neither-schema-nor-printer
+  (let [closure (require-closure 'seon.schema.datahike)]
+    (is (not (contains? closure 'seon.print)) "seon.schema.datahike reaches seon.print through no require")
+    (is (not (contains? closure 'seon.schema))
+        "seon.schema.datahike reaches seon.schema through no require, so seon.schema requires it statically")))

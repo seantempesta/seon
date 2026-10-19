@@ -39,6 +39,7 @@
             [seon.program :as program]
             [seon.profile :as profile]
             [seon.schema :as schema]
+            [seon.schema.internal :as schema.internal]
             [seon.schema.edn :as schema.edn]
             [seon.schema.datahike :as schema.datahike]
             [malli.registry :as mr])
@@ -2241,7 +2242,7 @@
   (and (= :db.type/string
           (get-in declarations [::installed-schema attribute :db/valueType]))
        (let [projection @(::read-projection declarations)]
-         (schema/projection-cache-value
+         (schema.internal/projection-cache-value
           projection [::edn-encoded? attribute]
           #(ask-declarations
             declarations
@@ -2256,7 +2257,7 @@
   (and (= :db.cardinality/many
           (get-in declarations [::installed-schema attribute :db/cardinality]))
        (let [projection @(::read-projection declarations)]
-         (not (schema/projection-cache-value
+         (not (schema.internal/projection-cache-value
                projection [::vector-shaped? attribute]
                #(ask-declarations
                  declarations
@@ -2754,7 +2755,7 @@
 
 (defn- lowered-where
   "`(schema.datahike/lower-where projection bound clauses)`, derived once per projection
-   (`seon.schema/projection-cache-value`): the lowering reads the projection, the clauses
+   (`seon.schema.internal/projection-cache-value`): the lowering reads the projection, the clauses
    and which input values are keywords (an attribute position reads only keywords), so
    every other input value keys as one scalar. Answers `clauses` itself when unchanged,
    as `lower-where` does."
@@ -2762,7 +2763,7 @@
                   [:sequential :seon.schema/value]]}
   [projection bound clauses]
   (let [bound (update-vals bound (fn [values] (into #{} (map #(if (keyword? %) % 'scalar)) values)))
-        lowered (schema/projection-cache-value
+        lowered (schema.internal/projection-cache-value
                  projection [`lowered-where bound clauses]
                  #(let [lowered (schema.datahike/lower-where projection bound clauses)]
                     (if (identical? lowered clauses) ::unchanged lowered)))]
@@ -4366,7 +4367,7 @@
    already resolved refs; diagnostics still use the submission owner."
   {:malli/schema [:=> [:cat :seon.schema/projection :keyword :boolean] :map]}
   [projection attribute many?]
-  (schema/projection-cache-value
+  (schema.internal/projection-cache-value
    projection [::write-attribute-plan attribute many?]
    (fn []
      (let [authored (get (:seon.schema.projection/forms projection) attribute)
@@ -4513,7 +4514,7 @@
        (fn [schema-key]
          (when-not
           ((m/validator (mr/schema (:seon.schema.projection/registry projection) schema-key)) entity-map)
-           (let [explain (schema/projection-cache-value
+           (let [explain (schema.internal/projection-cache-value
                           projection [::write-explainer schema-key]
                           #(schema/projection-explainer projection schema-key))
                  failures (:errors (explain entity-map))
@@ -5739,7 +5740,7 @@
   [projection entity-map namespace-entity]
   (program/definition-digest
    (program/canonical-row
-    (schema/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
+    (schema.internal/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
     entity-map)
    (some-> namespace-entity program/stored-namespace-context)))
 
@@ -5755,7 +5756,7 @@
   (let [projection (carried-projection database)]
     (program/definition-digest
      (program/canonical-row
-      (schema/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
+      (schema.internal/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
       (dissoc (merge (declaration-value database (identity-attributes database) entity-id) row)
               :seon.program/definition-digest)))))
 
@@ -5781,7 +5782,7 @@
                                        first :v)]
          (program/behavior-digest
           (program/canonical-row
-           (schema/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
+           (schema.internal/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
            entity-map)
           ;; The namespace's stored definition digest determines its resolver context, so
           ;; its functions share one derivation.
@@ -5830,7 +5831,7 @@
                   [:or :nil :seon.error/base]]}
   [projection report identity-attrs]
   (let [database (:db-after report)
-        shapes (schema/projection-cache-value projection ::program-shapes
+        shapes (schema.internal/projection-cache-value projection ::program-shapes
                                               #(program/shapes-in projection))
         ;; Only the families this store installed: Datahike refuses a datom
         ;; read naming an attribute its schema lacks (a raw blob branch).
@@ -5991,7 +5992,7 @@
           (write-report-error (assoc projection attribute limit) report))))))
 
 (defn- retention-rules [projection]
-  (schema/projection-cache-value
+  (schema.internal/projection-cache-value
    projection ::retention-rules
    #(into []
           (keep (fn [[attribute _form]]
@@ -6176,7 +6177,7 @@
   `database`, the value before it; a row whose digest the transaction writes keeps the writer's check."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/database-value [:sequential :any]] [:set :symbol]]}
   [projection database tx-data]
-  (let [shapes (schema/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
+  (let [shapes (schema.internal/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
         owned (into #{} (mapcat #(get-in shapes [% :seon.program/owned-attributes])) [:seon.fn/sym :seon.test/sym])
         dropped (into #{} (keep (fn [op] (when (and (vector? op) (#{:db/retract :db.purge/attribute} (first op))
                                                     (int? (second op)) (owned (nth op 2 nil)))

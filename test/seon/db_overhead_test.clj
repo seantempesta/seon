@@ -127,7 +127,7 @@
        (is (= (mapv (fn [datom]
                       {:e (:e datom) :a (:a datom)
                        :v (if (encoded? (:a datom))
-                            (schema.datahike/decode-attribute-value (:a datom) (:v datom))
+                            (schema.datahike/decode-attribute-value-in (schema/declaration-projection) (:a datom) (:v datom))
                             (:v datom))
                        :tx (:tx datom) :added (:added datom)})
                     raw)

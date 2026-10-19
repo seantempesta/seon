@@ -12,7 +12,6 @@
             [malli.registry :as mr]
             [seon.cache]
             [seon.error.refusal]
-            [seon.schema :as schema]
             [seon.schema.handed :as schema.handed]
             [seon.id :as id]
             [seon.schema.internal :as internal]
@@ -239,7 +238,7 @@
   "Core and storable property attributes retained for this registry and form selection."
   {:malli/schema [:=> [:cat :map] :map]}
   [projection]
-  (schema/projection-cache-value
+  (internal/projection-cache-value
    projection [::compiled-attribute-selection
                (:seon.schema.projection/registry projection)
                (:seon.schema.projection/forms projection)]
@@ -423,7 +422,7 @@
    cells or not ([[vector-attribute-in?]])."
   {:malli/schema [:=> [:cat :seon.schema/projection :keyword] :boolean]}
   [projection attr]
-  (schema/projection-cache-value
+  (internal/projection-cache-value
    projection [::vector-shaped attr]
    #(boolean
      (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
@@ -493,7 +492,7 @@
 
 (defn- validate-logical-slot-in!
   [projection attr value]
-  (when-not ((schema/projection-validator projection attr) value)
+  (when-not ((m/validator (mr/schema (:seon.schema.projection/registry projection) attr)) value)
     (refuse-slot! ::schema-invalid attr value))
   value)
 
@@ -614,7 +613,7 @@
     ;; never encoded as transaction data, where a second refusal would hide it.
     (when (and (map? output)
                (contains? (:seon.schema.projection/forms projection) :seon.error/base)
-               ((schema/projection-validator projection :seon.error/base) output))
+               ((m/validator (mr/schema (:seon.schema.projection/registry projection) :seon.error/base)) output))
       (throw (ex-info (or (:seon.error/message output) "A transaction function refused.") output)))
     ;; The in-transaction value's installed attributes decide each slot's
     ;; storage: an earlier operation of this transaction may have retyped one.
@@ -638,7 +637,7 @@
   "Whether `attr` is declared an upsert identity in `projection`."
   {:malli/schema [:=> [:cat :seon.schema/projection :keyword] :boolean]}
   [projection attr]
-  (schema/projection-cache-value
+  (internal/projection-cache-value
    projection [::identity attr]
    #(boolean
      (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
@@ -649,7 +648,7 @@
    are entities, never data maps."
   {:malli/schema [:=> [:cat :seon.schema/projection :keyword] :boolean]}
   [projection attr]
-  (schema/projection-cache-value
+  (internal/projection-cache-value
    projection [::ref attr]
    #(boolean
      (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
@@ -833,7 +832,7 @@
     ;; nil is never retained, so the answer is held as the one-element vector
     (first
      (seon.cache/lookup ::vector-pull
-                        [(schema/projection-identity projection)
+                        [(internal/projection-identity projection)
                          (true? (::cells-installed? projection)) selector]
                         #(* 48 (count (tree-seq coll? seq %)))
                         #(let [spec (pull-parser/parse-pull selector)]
@@ -1131,21 +1130,6 @@
                  (encode-transaction-data-in projection vectors-fn transaction-data)))
        (encode-transaction-data-in projection vectors-fn transaction)))))
 
-(defn encode-transaction
-  "Encode heterogeneous union slots once at the Datahike transaction seam.
-
-   The declaration population is resolved EXACTLY ONCE per transaction and
-   then passed explicitly to [[encode-transaction-in]]. Resolving it per
-   attribute was the 2026-08-07 suite wedge: with no declaration population
-   supplied on the calling thread, `schema/registered-schemas` falls through
-   to `seon.schema.edn/packaged-forms`, which re-reads and re-validates all
-   151 schema resources from the classpath — 14 ms per attribute, against
-   0.004 ms once the population is a value in hand."
-  {:malli/schema [:=> [:cat :seon.store/transaction]
-                  :seon.store/transaction]}
-  [transaction]
-  (encode-transaction-in (schema/declaration-projection) transaction))
-
 (defn encode-attribute-value-in
   "Encode one attribute value against exactly one projection.
 
@@ -1207,12 +1191,3 @@
   {:malli/schema [:=> [:cat :map :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
   [projection attr value]
   ((attribute-decoder-in projection attr) value))
-
-(defn decode-attribute-value
-  "Decode and validate one value read from an EDN-backed attribute.
-
-   Resolves the declaration population ONCE; a caller decoding more than one
-   attribute resolves it itself and calls [[decode-attribute-value-in]]."
-  {:malli/schema [:=> [:cat :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
-  [attr value]
-  (decode-attribute-value-in (schema/declaration-projection) attr value))

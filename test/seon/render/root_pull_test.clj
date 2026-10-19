@@ -134,7 +134,7 @@
 
 (deftest compiled-root-plan-is-keyed-by-its-selector-and-keeps-caller-bounds
   ;; The plan cache is keyed by projection fingerprint, installed schema and
-  ;; selector (e34164b25, seon.schema/projection-cache-value); distance and caps
+  ;; selector (e34164b25, seon.schema.internal/projection-cache-value); distance and caps
   ;; stay the caller's, never the cached plan's.
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}

@@ -175,7 +175,7 @@
           (is (contains? outcome :db-after))
           (is (= (pr-str logical) stored))
           (is (= logical
-                 (schema.datahike/decode-attribute-value
+                 (schema.datahike/decode-attribute-value-in (schema/declaration-projection)
                   ::mixed-value stored))))))))
 
 (deftest invalid-logical-and-storage-values-refuse-loudly
@@ -188,7 +188,7 @@
                          @connection))))))
   (with-mixed-connection
     (fn [_]
-      (is (true? (schema.datahike/decode-attribute-value ::mixed-value "true"))
+      (is (true? (schema.datahike/decode-attribute-value-in (schema/declaration-projection) ::mixed-value "true"))
           "a committed value reads as written; admission judged its write")))
   (doseq [stored ["["]]
     (with-mixed-connection
@@ -196,7 +196,7 @@
         (d/transact connection [{::mixed-value stored}])
         (let [failure
               (try
-                (schema.datahike/decode-attribute-value
+                (schema.datahike/decode-attribute-value-in (schema/declaration-projection)
                  ::mixed-value stored)
                 nil
                 (catch clojure.lang.ExceptionInfo error

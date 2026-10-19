@@ -10,7 +10,7 @@ created: 2026-10-08
 Ledger row PB-07b (groups F/E; waste row W-9). Task `seon.schema/schema-only-derivations-are-rederived-per-projection`
 (`resources/seon/tasks/seon.schema.edn:72`). Source: `defn-why/defn-why.md` findings 3 and 10. Model: Sonnet.
 
-`seon.schema/projection-cache-value` (`src/seon/schema.clj:432`) holds each derivation by the projection value, and
+`seon.schema.internal/projection-cache-value` (`src/seon/schema.clj:432`) holds each derivation by the projection value, and
 every contracted `defn` builds a new projection, so a derivation that reads only schema forms is recomputed after each
 definition: the pass after a `defn` costs 94-97 MB and 57 k armed calls against 55 MB and 8 k ordinary. The pattern
 that fixes one of them already landed (`65cf8c26d`): `seon.program/program-attributes` (`src/seon/program.cljc:66-83`)

@@ -297,7 +297,7 @@
                   [:map [::identity-rows [:map-of :qualified-keyword :qualified-keyword]]
                    [::owned-keys [:map-of :qualified-keyword [:set :keyword]]]]]}
   [projection]
-  (schema/projection-cache-value
+  (internal/projection-cache-value
    projection ::entity-owners
    (fn []
      (let [registry (:seon.schema.projection/registry projection)
@@ -321,7 +321,7 @@
   and projection."
   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword :map [:maybe :seon.db/database-value]] :boolean]}
   [projection entity value database]
-  (let [[decode valid?] (schema/projection-cache-value
+  (let [[decode valid?] (internal/projection-cache-value
                          projection [::row-check entity]
                          (fn []
                            (let [entity-schema (m/schema entity {:registry (:seon.schema.projection/registry projection)})]
@@ -374,7 +374,7 @@
   parents through aliases, once per projection."
   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword] [:set :qualified-keyword]]}
   [projection schema-key]
-  (schema/projection-cache-value
+  (internal/projection-cache-value
    projection [::refined-names schema-key]
    (fn []
      (let [forms (:seon.schema.projection/forms projection)]
@@ -400,7 +400,7 @@
   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol]
                   [:maybe [:vector :qualified-keyword]]]}
   [projection function-symbol]
-  (schema/projection-cache-value
+  (internal/projection-cache-value
    projection [::output-alternatives function-symbol]
    (fn []
      (some->> (mr/schema (:seon.schema.projection/registry projection) function-symbol)

@@ -7,9 +7,10 @@ created: 2026-10-19
 
 Phase status: P0 landed (`seon.sci.open-derivers-test`, `seon.cost-estimate-test/closed-runtime-rows-grow-past-no-accepted-overrun`);
 P2, P3b landed; P1 landed (lane closed-p1, the leaf design); P3a split: P3a-1 landed (lane closed-p3a1b: the order leaf and the
-digest move; the fallback deletion moves to P4b, option c), P3a-2 scheduled with P4b; P4a landed (`ec87c559c`); P5 landed (`7df8dbb21`,
-corrections in its section); P4b landed (`66ca5108b`, lane closed-p4b; corrections in its section); P3a-2 written and stopped at the
-guard census (patch `docs/research/agent-platform/2026-10-20/closed-p3a2-bridge.patch`, see P3a); P6a, P6b, P7, P8 not started.
+digest move; the fallback deletion moves to P4b, option c); P4a landed (`ec87c559c`); P5 landed (`7df8dbb21`,
+corrections in its section); P4b landed (`66ca5108b`, lane closed-p4b; corrections in its section); P3a-2 landed (lane guards3, the smaller cut of the patch, after
+`393e52821` deleted the catch in `seon.instrument/compiled-wrapper` that the guard census refused; it closes
+`seon.cluster/branch-declaration-changes`, 49 -> 48 open derivers); P6a, P6b, P7, P8 not started.
 
 # Closed runtime: the hybrid
 
@@ -402,10 +403,9 @@ static call to `seon.db/carried-projection`. So:
   `database-projection`/`projection-from-database` (138 sites, 60 files, three in `seon.error`, which `seon.db` requires)
   is not converted: it is its own sweep (callers that can require `seon.db` call `seon.db/carried-projection`;
   `seon.error`'s three take the handed projection).
-  **Blocked:** the sweep changes one symbol in `seon.instrument/compiled-wrapper`, which holds
-  `(catch Throwable failure ...)`; `bin/lane commit`'s guard census refuses a changed function holding a guard. The patch
-  lands once that catch goes (its cause fixed, or the armed wrapper declared an entrant), or the owner exempts the
-  one-symbol rename. Probed in a fresh JVM from the patched tree: `seon.schema.datahike` loads without `seon.schema`,
+  **Landed** (lane guards3) once `393e52821` deleted the wrapper's catch (a fence: a refusal that cannot be built is a
+  defect for the entrant boundary), with the two backticked card references in `docs/seon/schedule/cards/PB-07a.md`
+  and `PB-07b.md` converted. Probed in a fresh JVM from the patched tree: `seon.schema.datahike` loads without `seon.schema`,
   config defaults compile, `projection-identity` and `encode-transaction-in` answer.
 - First step: count `seon.schema/!fallback-counts` after the cost rows and after the check's test namespaces; every
   caller named is converted to hand its population in this commit.

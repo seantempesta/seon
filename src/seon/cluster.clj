@@ -649,11 +649,11 @@
   "The Datahike attribute declarations `projection` derives, in attribute order.
 
   A function of the projection value alone, so it is memoized on the
-  projection's own cache (`seon.schema/projection-cache-value`): a converged
+  projection's own cache (`seon.schema.internal/projection-cache-value`): a converged
   reopen under a held projection derives it once, not once per reopen."
   {:malli/schema [:=> [:cat :seon.schema/projection] [:vector :map]]}
   [projection]
-  (schema/projection-cache-value
+  (internal/projection-cache-value
    projection [::declared-attributes]
    #(vec (schema.datahike/malli->datahike-schema-in
           projection
@@ -838,7 +838,7 @@
       database
       (cond-> (mapv :db/ident declarations)
         retire? (into (retired-attributes database projection)))
-      (schema/projection-cache-value
+      (internal/projection-cache-value
        projection [::declarations-by-attribute]
        #(into {} (map (juxt :db/ident identity)) declarations))))))
 
@@ -875,7 +875,7 @@
     (attribute-change-tx
      database
      (into [] (remove #(agent-admitted? database %)) changed)
-     (schema/projection-cache-value
+     (internal/projection-cache-value
       projection [::declarations-by-attribute]
       #(into {} (map (juxt :db/ident identity)) declarations)))))
 

@@ -1600,7 +1600,7 @@
         [(:datahike.cache/connection-id context) (:datahike.cache/generation context)
          (:datahike.cache/conservative-revision context)
          (select-keys (:datahike.cache/attribute-revisions context)
-                      (schema/projection-cache-value
+                      (schema.internal/projection-cache-value
                        projection ::program-digest-read-attributes
                        #(program-digest-read-attributes projection)))]))))
 
@@ -2782,7 +2782,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value] [:set :qualified-keyword]]}
   [database]
   (let [projection (db/carried-projection database)]
-    (schema/projection-cache-value
+    (schema.internal/projection-cache-value
      projection ::recording-attributes
      #(into #{} (comp (mapcat (fn [k] (schema.internal/entity-entries
                                       (m/schema k {:registry (:seon.schema.projection/registry projection)}))))
@@ -2795,7 +2795,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value] [:map-of :qualified-keyword :uuid]]}
   [database]
   (let [projection (db/carried-projection database)
-        attributes (schema/projection-cache-value
+        attributes (schema.internal/projection-cache-value
                     projection ::result-attributes
                     #(into (into (program/program-attributes projection) (recording-attributes database))
                            (map first)

@@ -49,6 +49,7 @@
             [seon.profile :as profile]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
+            [seon.schema.internal :as schema.internal]
             [seon.sci.eval :as sci.eval]))
 
 (def ranking
@@ -143,7 +144,7 @@
   properties: the forms whose properties declare `:seon.health/severity`."
   {:malli/schema [:=> [:cat :seon.schema/projection] [:map-of :qualified-keyword :map]]}
   [projection]
-  (schema/projection-cache-value
+  (schema.internal/projection-cache-value
    projection ::finding-schemas
    #(into (sorted-map)
           (keep (fn [[k form]]

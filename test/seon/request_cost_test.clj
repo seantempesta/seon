@@ -226,7 +226,7 @@
         (batch/cost-diff [live] (into {} (map (juxt :seon.fn.cost/key identity)) stored) 20)))
 
 (deftest an-unchanged-platform-function-shows-no-entry
-  (let [sym 'seon.schema/projection-cache-value
+  (let [sym 'seon.schema.internal/projection-cache-value
         host #(cost sym :seon.profile/host :warm [%1 30 %2])
         flags (fn [live stored] (mapv :seon.cost.comparison/flags (shown live stored)))]
     (are [live stored expected] (= expected (flags live stored))
@@ -292,7 +292,7 @@
 
 (deftest ^{:seon/tasks #{'seon.profile/cost-values-are-reliable-and-like-for-like}}
   a-warm-like-for-like-regression-of-a-changed-definition-still-shows
-  (let [sym 'seon.schema/projection-cache-value]
+  (let [sym 'seon.schema.internal/projection-cache-value]
     (is (= [{:seon.cost.comparison/measure :self-us :seon.cost.comparison/live 200.0
              :seon.cost.comparison/main 50.0 :seon.cost.comparison/ratio 4.0
              :seon.cost.comparison/flags #{:changed}}]

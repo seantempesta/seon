@@ -64,7 +64,7 @@
   "The requested function's arities, retained by its projection; nil without a contract."
   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol] [:maybe [:vector :map]]]}
   [projection sym]
-  (schema/projection-cache-value
+  (internal/projection-cache-value
    projection [:seon.call-preparation/contract-arities sym]
    #(when (contains? (:seon.schema.projection/function-contracts projection) sym)
       (some-> (mr/schema (:seon.schema.projection/registry projection) sym) arity-facts))))
@@ -261,7 +261,7 @@
   The immutable projection retains the derived population, never error values."
   {:malli/schema [:=> [:cat :map] [:set :qualified-keyword]]}
   [projection]
-  (schema/projection-cache-value
+  (internal/projection-cache-value
    projection :seon.error/declared-schema-keys
    (fn []
      (let [forms (:seon.schema.projection/forms projection)]

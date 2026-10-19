@@ -46,6 +46,7 @@
             [seon.error]
             [seon.error.refusal :as error]
             [seon.schema :as schema]
+            [seon.schema.internal :as schema.internal]
             [seon.schema.edn :as schema.edn]))
 
 (set! *warn-on-reflection* true)
@@ -187,7 +188,7 @@
   "The snapshot memo held by `projection` itself, or nil without a holder.
 
   The same core.cache wrapped LRU `seon.db`'s projection memo uses, retained
-  by the projection's own runtime holder (`schema/projection-cache-value`):
+  by the projection's own runtime holder (`schema.internal/projection-cache-value`):
   compiled validators belong to the projection they were compiled in, and
   equal programs share one projection object through `db/carried-projection`,
   so no second key for the projection is needed and none outlives it."
@@ -195,7 +196,7 @@
   [projection]
   ;; Below `snapshot`, which arming reads per contract, so its callees run
   ;; unarmed for cost; their contracts hold at every other caller.
-  (let [memo ((mi/-f->original schema/projection-cache-value)
+  (let [memo ((mi/-f->original schema.internal/projection-cache-value)
               projection ::snapshot-memo
               #(cache/lru-cache-factory {} :threshold (::snapshot-cache-size snapshot-cache-policy)))]
     (when ((mi/-f->original state?) memo) memo)))

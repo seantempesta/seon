@@ -27,6 +27,7 @@
             [seon.id]
             [seon.profile :as profile]
             [seon.schema :as schema]
+            [seon.schema.internal :as schema.internal]
             [seon.schema.edn :as schema.edn]
             [seon.sci.kernel :as kernel]
             [seon.ref :as ref]))
@@ -891,7 +892,7 @@
         ;; The refusal's own output check: `boundary-refusal` runs unarmed
         ;; inside the report (`*compiling-contract*`), so its declared output
         ;; is validated here, on the refusal path only.
-        refusal? (delay ((mi/-f->original schema/projection-cache-value)
+        refusal? (delay ((mi/-f->original schema.internal/projection-cache-value)
                          projection ::refusal-validator
                          #((mi/-f->original schema/projection-validator)
                            projection :seon.instrument/refusal-result)))

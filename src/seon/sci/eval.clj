@@ -136,6 +136,7 @@
             [seon.render.value :as render.value]
             [seon.sci.admit :as admit]
             [seon.schema :as schema]
+            [seon.schema.internal :as schema.internal]
             [seon.schema.edn :as schema.edn]
             [seon.sci.kernel :as kernel]
             [seon.sci.runtime :as runtime]
@@ -4054,10 +4055,10 @@
   read set (`seon.schema/projection-attributes`) and the loaded source commit.
   Dials are not among them: a context compares the dial values its wrappers
   armed with (`armed-dials`). Retained on the projection's own holder
-  (`schema/projection-cache-value`)."
+  (`schema.internal/projection-cache-value`)."
   {:malli/schema [:=> [:cat :seon.schema/projection] [:vector :qualified-keyword]]}
   [projection]
-  (schema/projection-cache-value
+  (schema.internal/projection-cache-value
    projection ::acquisition-attributes
    (fn []
      (-> (program/program-attributes projection)

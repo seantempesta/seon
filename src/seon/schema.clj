@@ -33,32 +33,10 @@
             [datahike.db.utils :as db-utils]
             [seon.schema.internal :as internal]
             [seon.schema.handed :as handed]
+            [seon.schema.datahike :as schema.datahike]
             [seon.error.refusal :as refusal]
             [clojure.string :as str]
             [clojure.edn :as edn]))
-
-;;; LOAD-CYCLE BOUNDARIES. `seon.error` and
-;;; `seon.schema.datahike` both require `seon.schema`, so this namespace
-;;; cannot require them back. One resolution per var, realized at first use,
-;;; instead of a `requiring-resolve` on every call (AGENTS §2.1).
-(defonce ^:private schema-datahike-storable-attribute-in?
-  (delay (requiring-resolve 'seon.schema.datahike/storable-attribute-in?)))
-(defonce ^:private schema-datahike-storable-properties-in
-  (delay (requiring-resolve 'seon.schema.datahike/storable-properties-in)))
-(defonce ^:private schema-datahike-assert-storable-schema!
-  (delay (requiring-resolve 'seon.schema.datahike/assert-storable-schema!)))
-(defonce ^:private schema-datahike-database-attributes-in
-  (delay (requiring-resolve 'seon.schema.datahike/database-attributes-in)))
-(defonce ^:private schema-datahike-malli->datahike-attr-in
-  (delay (requiring-resolve 'seon.schema.datahike/malli->datahike-attr-in)))
-(defonce ^:private schema-datahike-storage-schema
-  (delay
-    (require 'seon.schema.datahike)
-    (ns-resolve 'seon.schema.datahike 'storage-schema)))
-(defonce ^:private schema-datahike-value-schema
-  (delay
-    (require 'seon.schema.datahike)
-    (ns-resolve 'seon.schema.datahike 'value-schema)))
 
 (defn- reference-children
   "The compiled schemas directly under `node`: plain children, and the schema
@@ -423,32 +401,6 @@
          :seon.schema.projection/compiled (cache/basic-cache-factory {::contract-products products})
          :seon.schema.projection/identity-projector #'identity-only-projector
          :seon.schema.projection/explain #'explained-problems)))
-
-(defn- projection-cache
-  "The holder [[with-compiled-cache]] installed, or nil.
-
-   Nil is honest rather than exceptional: a projection assembled by a caller
-   that did not go through a constructor still answers every question, it
-   just recompiles. Correctness never depends on the cache being there, which
-   is what makes it safe for it to be absent."
-  [projection]
-  (:seon.schema.projection/compiled projection))
-
-(defn projection-cache-value
-  "Return one value derived from `projection`, retaining one answer per key.
-
-   The answer is retained by the projection's own runtime holder. A projection
-   assembled without that holder remains correct and simply derives afresh."
-  {:malli/schema
-   [:=> [:catn [:seon.schema/projection :map] [:seon.schema/cache-key [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A projection cache key is ordinary heterogeneous data chosen by its caller; cached values are the supplied thunk's arbitrary result.", :gen/elements [nil false 0 "" :k [] {}]}]] [:seon.schema/derive-fn [:fn clojure.core/ifn?]]] [:or :seon.schema/value :seon.schema/validation-refusal]]}
-  [projection cache-key derive-fn]
-  (if-let [compiled (projection-cache projection)]
-    ;; A hit is a read; only a miss swaps (lookup-or-miss swaps every call).
-    (let [held (cache/lookup compiled cache-key ::miss)]
-      (if (identical? ::miss held)
-        (cache/lookup-or-miss compiled cache-key (fn [_] (derive-fn)))
-        held))
-    (derive-fn)))
 
 (defn predicate-functions-in
   "Return the predicate bindings `projection` carries; `{}` when none are bound.
@@ -866,40 +818,6 @@
                   [:string {:min 64 :max 64}]]}
   [byte-arrays]
   (id/sha-256 byte-arrays))
-
-(defn- entry-fingerprint
-  "One `section` entry's 32-bit hash: the head of its structural identity."
-  {:malli/schema [:=> [:cat :keyword :seon.schema/value :seon.schema/value] :int]}
-  [section identity value]
-  (unchecked-int (Long/parseLong (id/id [section identity value] 8) 16)))
-
-(defn- projection-fingerprint
-  [forms function-contracts schema-admissions function-admissions
-   artifact-exports]
-  (letfn [(map-fingerprint [section values]
-            (reduce-kv
-             (fn [fingerprint identity value]
-               (bit-xor fingerprint
-                        (entry-fingerprint section identity value)))
-             0
-             values))
-          (set-fingerprint [section values]
-            (reduce
-             (fn [fingerprint value]
-               (bit-xor fingerprint
-                        (entry-fingerprint section value true)))
-             0
-             values))]
-    (reduce
-     bit-xor
-     (.hashCode "seon.schema.projection/fingerprint-v4")
-     [(map-fingerprint :forms forms)
-      (map-fingerprint :function-contracts function-contracts)
-      (map-fingerprint :schema-admissions schema-admissions)
-      (map-fingerprint :function-admissions function-admissions)
-      (set-fingerprint :artifact-exports artifact-exports)])))
-
-(def ^:private projection-fingerprint-version 4)
 
 (defn direct-references
   "Canonical schema keys directly referenced by `form` in `projection`.
@@ -1446,7 +1364,7 @@
             (walk-schema-body [schema role entity-identity entity-definition entity-admission
                                visited]
               (when (keyword? entity-identity)
-                (@schema-datahike-assert-storable-schema! entity-identity schema))
+                (schema.datahike/assert-storable-schema! entity-identity schema))
               (let [advisories
                     (if (and reference-advisories
                              (= :core (:seon.schema.admission/source entity-admission))
@@ -1460,7 +1378,7 @@
                      {:seon.schema/identity entity-identity
                       :seon.schema/forms forms
                       :seon.schema/storable-attribute?
-                      (fn [attribute] (@schema-datahike-storable-attribute-in?
+                      (fn [attribute] (schema.datahike/storable-attribute-in?
                                        {:seon.schema.projection/forms forms
                                         :seon.schema.projection/registry registry} attribute))
                       :seon.schema/definition entity-definition
@@ -2279,7 +2197,7 @@
                       (filter :seon.schema/entity?)
                       vec)
         fingerprint
-        (projection-fingerprint
+        (internal/projection-fingerprint
          forms function-contracts schema-admissions function-admissions
          artifact-exports)
         projection
@@ -2304,7 +2222,7 @@
           :seon.schema.projection/shape-rows shape-entities
           :seon.schema.projection/catalog catalog
           :seon.schema.projection/fingerprint-version
-          projection-fingerprint-version
+          internal/projection-fingerprint-version
           :seon.schema.projection/fingerprint fingerprint}
          predicate-functions)]
     (when validate-render-contracts?
@@ -2361,21 +2279,12 @@
                                  (count (:seon.schema.projection/function-contracts %))))
                           #(projection-build forms function-contracts options))))))
 
-(defn- projection-fingerprint-from-data
-  [projection]
-  (projection-fingerprint
-   (:seon.schema.projection/forms projection)
-   (:seon.schema.projection/function-contracts projection)
-   (:seon.schema.projection/schema-admissions projection)
-   (:seon.schema.projection/function-admissions projection)
-   (:seon.schema.projection/artifact-exports projection)))
-
 (defn- reusable-projection-fingerprint
   [projection]
-  (if (= projection-fingerprint-version
+  (if (= internal/projection-fingerprint-version
          (:seon.schema.projection/fingerprint-version projection))
     (:seon.schema.projection/fingerprint projection)
-    (projection-fingerprint-from-data projection)))
+    (internal/projection-fingerprint-from-data projection)))
 
 (defn- replace-reverse-dependencies
   [reverse-edges dependent before after]
@@ -2457,8 +2366,8 @@
             (let [before (get before identity ::absent)
                   after (get after identity ::absent)]
               (cond-> fingerprint
-                (not= ::absent before) (bit-xor (entry-fingerprint section identity before))
-                (not= ::absent after) (bit-xor (entry-fingerprint section identity after)))))
+                (not= ::absent before) (bit-xor (internal/entry-fingerprint section identity before))
+                (not= ::absent after) (bit-xor (internal/entry-fingerprint section identity after)))))
           fingerprint identities))
 
 (defn- shape-index-attributes
@@ -2742,7 +2651,7 @@
                       (assoc products (get function-contracts function-symbol)
                              (compiled-contract-product
                               registry canonical-keys (mr/schema registry function-symbol))))
-                    (select-keys (cache/lookup (projection-cache projection) ::contract-products {})
+                    (select-keys (cache/lookup (internal/projection-cache projection) ::contract-products {})
                                  (vals function-contracts))
                     affected-fns)
             function-dependencies
@@ -2805,7 +2714,7 @@
                      reverse-function-dependencies
                      :seon.schema.projection/shape-rows shape-entities
                      :seon.schema.projection/fingerprint-version
-                     projection-fingerprint-version
+                     internal/projection-fingerprint-version
                      :seon.schema.projection/fingerprint fingerprint}
                     shape-data)
              predicate-functions)
@@ -2851,7 +2760,7 @@
   (let [held (predicate-functions-in projection)]
     (if (every? (fn [[predicate bound]] (identical? bound (get held predicate))) bindings)
       projection
-      (projection-cache-value
+      (internal/projection-cache-value
        projection [::bound-predicates bindings]
        #(projection-with-declarations
          'seon.schema/with-bound-predicates projection
@@ -3039,7 +2948,7 @@
         ;; fingerprint is computed only for a partial one.
         fingerprint (when (and (:seon.schema.projection/fingerprint reusable)
                                (not (incremental-base? reusable)))
-                      (projection-fingerprint forms function-contracts schema-admissions
+                      (internal/projection-fingerprint forms function-contracts schema-admissions
                                               function-admissions artifact-exports))
         projection
         (if (and fingerprint (= fingerprint (:seon.schema.projection/fingerprint reusable)))
@@ -3514,7 +3423,7 @@
                   :db/txInstant {:db/valueType :db.type/instant
                                  :db/cardinality :db.cardinality/one}
                   (try
-                    (@schema-datahike-malli->datahike-attr-in
+                    (schema.datahike/malli->datahike-attr-in
                      projection attribute)
                     (catch clojure.lang.ExceptionInfo failure failure)))]
             (if (instance? Throwable datahike-attribute)
@@ -3526,7 +3435,7 @@
                     component? (:db/isComponent datahike-attribute)
                     declared-many?
                     (boolean (#{:set :vector :sequential}
-                              (m/type (@schema-datahike-storage-schema
+                              (m/type (schema.datahike/storage-schema
                                        (or (mr/schema (:seon.schema.projection/registry projection) attribute)
                                            (structural-schema attribute-form))))))
                     many? (if forward? declared-many? (not component?))
@@ -3569,7 +3478,7 @@
                             " does not name a reference."))
 
                       :else
-                      (m/form (@schema-datahike-value-schema
+                      (m/form (schema.datahike/value-schema
                                (or (mr/schema (:seon.schema.projection/registry projection) attribute)
                                    (structural-schema attribute-form)))))]
                 (if (map? child)
@@ -3646,7 +3555,7 @@
   [projection schema-key selector]
   (let [derived-key (pulled-schema-key schema-key selector)
         cache-key [::pulled-form (id/id [schema-key selector])]]
-    (projection-cache-value
+    (internal/projection-cache-value
      projection cache-key
      (fn []
        (let [pull-spec (pull-api/pull-plan-spec
@@ -3883,7 +3792,7 @@
       (fn [schema-key]
         (let [references (get reference-graph schema-key)]
           (cond->
-           (merge (@schema-datahike-storable-properties-in projection schema-key)
+           (merge (schema.datahike/storable-properties-in projection schema-key)
                   {:seon.schema/key schema-key
                    :seon.schema/form
                    (binding [*print-namespace-maps* false *print-length* nil *print-level* nil *print-meta* false] (pr-str (get forms schema-key)))
@@ -3898,7 +3807,7 @@
    forms join that population only when they carry a persistence property."
   {:malli/schema [:=> [:cat ::projection] [:vector :qualified-keyword]]}
   [projection]
-  (@schema-datahike-database-attributes-in projection))
+  (schema.datahike/database-attributes-in projection))
 
 (defn schema-definition
   "The raw definition for a registered schema, or nil if not registered.
@@ -3957,7 +3866,7 @@
                      :seon.schema/missing-reference-namespace (namespace schema-key)}))))
 
 (defn- function-arities-in [projection function-symbol]
-  (projection-cache-value
+  (internal/projection-cache-value
    projection [::function-arities function-symbol]
    (fn []
      (if-let [compiled
@@ -4095,7 +4004,7 @@
    answered with this one's descriptors. Value admission asks this per node,
    which is why it must be cheap and why it must be right."
   [projection]
-  (projection-cache-value projection :seon.schema.identity-only/descriptors
+  (internal/projection-cache-value projection :seon.schema.identity-only/descriptors
                           #(identity-only-descriptors-in projection)))
 
 (defn identity-only-projector
@@ -4132,19 +4041,6 @@
        (contains? value :seon.schema.projection/forms)))
 
 (register-core-predicate! 'seon.schema/projection-value? projection-value?)
-
-(defn projection-identity
-  "A projection is referenced by its content fingerprint, never copied: its
-  registry, forms and indexes are megabytes derived from the database."
-  {:malli/schema [:=> [:cat :seon.schema/projection-reference] :map]}
-  [projection]
-  ;; A declaration projection carries no stored fingerprint; its content
-  ;; fingerprint is derived once and kept on the projection's own holder.
-  {:seon.schema.projection/fingerprint
-   (or (:seon.schema.projection/fingerprint projection)
-       (projection-cache-value projection ::fingerprint
-                               #(projection-fingerprint-from-data projection)))
-   :seon.schema.projection/fingerprint-version projection-fingerprint-version})
 
 (defn identity-only-projection
   "Project a registered reference value using the active schema registry."
@@ -4271,7 +4167,7 @@
                    [:seon.schema/references
                     [:vector [:tuple [:set :keyword] [:set :keyword] [:set :keyword]]]]]]}
   [projection {form :seon.schema/form mode :seon.schema/mode}]
-  (or (some-> (projection-cache projection) (cache/lookup ::contract-products {}) (get form))
+  (or (some-> (internal/projection-cache projection) (cache/lookup ::contract-products {}) (get form))
       (let [registry (:seon.schema.projection/registry projection)
             normalized (compilable-form form (predicate-functions-in projection))
             compiled (case mode

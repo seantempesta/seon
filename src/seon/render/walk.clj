@@ -351,7 +351,7 @@
                      (schema/current-projection))
         distance (long (get request :seon.render/distance 1))
         selector (root-selector database distance caps)
-        plan (schema/projection-cache-value
+        plan (internal/projection-cache-value
               projection
               [:seon.render.walk/root-pull-plan
                (:seon.schema.projection/fingerprint projection)
@@ -886,7 +886,7 @@
   attachments; derived once per projection."
   {:malli/schema [:=> [:cat :seon.schema/projection] :seon.render.walk/structure]}
   [projection]
-  (schema/projection-cache-value
+  (internal/projection-cache-value
    projection ::graph-structure
    (fn []
      (let [declared (schema.datahike/malli->datahike-schema-in projection (schema.datahike/database-attributes-in projection))

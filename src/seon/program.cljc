@@ -86,7 +86,7 @@
   ;; derivation reads only schema declarations, so a write that changes only
   ;; function contracts (every contracted defn) builds a new projection with
   ;; equal forms and reuses the answer instead of walking every schema again.
-  (#?(:clj schema/projection-cache-value :cljs (fn [_ _ derive] (derive)))
+  (#?(:clj internal/projection-cache-value :cljs (fn [_ _ derive] (derive)))
    projection ::program-attributes
    #?(:clj #(seon.cache/lookup ::program-attributes
                                [(:seon.schema.projection/forms projection)
@@ -116,7 +116,7 @@
   {:seon/tasks #{'seon.program/cluster-attributes-are-the-declared-cluster-entities}
    :malli/schema [:=> [:cat :seon.schema/projection] :seon.program/cluster-attributes]}
   [projection]
-  (#?(:clj schema/projection-cache-value :cljs (fn [_ _ derive] (derive)))
+  (#?(:clj internal/projection-cache-value :cljs (fn [_ _ derive] (derive)))
    projection ::cluster-attributes
    #?(:clj #(seon.cache/lookup ::cluster-attributes
                                [(:seon.schema.projection/forms projection)
@@ -386,7 +386,7 @@
   [projection]
   ;; A function of the projection value: one walk of its forms per projection,
   ;; never one per caller (a contracted defn asked ~10 times per form).
-  (#?(:clj schema/projection-cache-value :cljs (fn [_ _ derive-fn] (derive-fn)))
+  (#?(:clj internal/projection-cache-value :cljs (fn [_ _ derive-fn] (derive-fn)))
    projection ::shapes
    (fn []
      (into {}
@@ -700,7 +700,7 @@
               (and digested? (not recomputed?)) :seon.program/compared-families
               (and recomputed? (not digested?)) :seon.program/recomputed-families
               :else :seon.program/unclassified-families)))]
-    (#?(:clj schema/projection-cache-value :cljs (fn [_ _ derive-fn] (derive-fn)))
+    (#?(:clj internal/projection-cache-value :cljs (fn [_ _ derive-fn] (derive-fn)))
      projection ::declaration-families
      (fn []
        (reduce (fn [result attribute]

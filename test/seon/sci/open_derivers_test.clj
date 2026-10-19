@@ -13,7 +13,7 @@
 (def ^:private open-derivers
   "The open cache derivers of the program, exactly: a name joining it is a new open derivation, a name leaving it is
   a phase's progress, and both edit this set in the commit that causes them."
-  '#{seon.cluster/branch-declaration-changes seon.cluster/stored-derivation-schema-keys
+  '#{seon.cluster/stored-derivation-schema-keys
      seon.cluster.agent/basis-valid? seon.cluster.agent/branch-admission-end seon.cluster.agent/branch-end
      seon.cluster.source/file-proof seon.cluster.source/member-contributions seon.cluster.source/members-of
      seon.cluster.source/publication seon.cluster.source/unmerged-count
@@ -57,7 +57,15 @@
                            ["diagnostic" "references" "authored-namespace?" "error" "chain" "checking-projection"
                             "identity-projector" "operation-projection"])
                      (map #(symbol "seon.schema" %))
-                     ["candidate-forms" "declaration-population" "packaged-forms"])}])
+                     ["candidate-forms" "declaration-population" "packaged-forms"])}
+   ;; P3a-2: seon.schema requires the bridge statically; its seven seams are deleted, so they are built from names.
+   {:phase :P3a-2
+    :functions (into (into #{} (map #(symbol "seon.schema" %))
+                           ["assert-complete-contract!" "pulled-attribute-entry" "canonical-schema-entities"
+                            "canonical-database-attributes"])
+                     (map #(symbol "seon.schema" (str "schema-datahike-" %)))
+                     ["storable-attribute-in?" "storable-properties-in" "assert-storable-schema!" "database-attributes-in"
+                      "malli->datahike-attr-in" "storage-schema" "value-schema"])}])
 
 (defn- open-cache-derivers
   "The cache derivers of `database`'s program that its reach index leaves open."

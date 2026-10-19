@@ -19,6 +19,7 @@
             [seon.render.schema :as render.schema]
             [seon.ref :as ref]
             [seon.schema :as schema]
+            [seon.schema.internal :as schema.internal]
             [seon.sci.reader :as reader]))
 
 ;;; clojure.test over the evaluating context's namespaces. The agent's
@@ -250,7 +251,7 @@
                          (let [failure (db/projection-fallback
                                         'seon.sci.lookup/documentation-contract)]
                            (throw (ex-info (:seon.error/message failure) failure))))]
-      (schema/projection-cache-value
+      (schema.internal/projection-cache-value
        projection [:seon.sci.eval/documentation-contract spec]
        (fn []
          ;; the one translation: Malli throws compiling a form whose predicate does not resolve, and documentation

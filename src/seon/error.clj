@@ -201,7 +201,7 @@
                       (keep (fn [[attribute observed]]
                               (when (not= :db/id attribute)
                                 (let [declaration
-                                      (schema/projection-cache-value
+                                      (internal/projection-cache-value
                                        projection [::observation-attribute attribute]
                                        #(when (and (qualified-keyword? attribute)
                                                    (schema.datahike/storable-attribute-in? projection attribute))
@@ -1145,7 +1145,7 @@
         ;; (294 schemas, 5,585 armed storability checks, ~120 ms inside the
         ;; writer on each new projection) is gone; one schema is ~1 ms.
         diagnostic-attributes
-        (schema/projection-cache-value
+        (internal/projection-cache-value
          projection [::diagnostic-attributes (:seon.error/declared-schema fact)]
          (fn []
            (into #{}
@@ -1423,7 +1423,7 @@
   implicit cardinality limit. Peer references remain references."
   {:malli/schema [:=> [:cat :seon.schema/projection] :seon.db/pull-selector]}
   [projection]
-  (schema/projection-cache-value
+  (internal/projection-cache-value
    projection ::observation-selector
    (fn []
      (let [forms (:seon.schema.projection/forms projection)
@@ -1519,7 +1519,7 @@
   [projection authored argument-count]
   (if (nil? authored)
     []
-    (schema/projection-cache-value
+    (internal/projection-cache-value
      projection [::declared-output-validators authored argument-count]
      (fn []
        (let [contract (m/schema

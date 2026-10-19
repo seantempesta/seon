@@ -12,7 +12,7 @@ Ledger row PB-07a (group F). Task `seon.error/fault-window-derives-the-error-sel
 
 `seon.error/occurred-since` (`src/seon/error.clj:1547`) builds `observation-selector` whenever its query answers a
 vector, even an empty one (`:1573-1574`: `(when-not (map? entities) (observation-selector …))`). The selector is held
-per projection (`seon.schema/projection-cache-value`, `src/seon/schema.clj:432`), and every contracted `defn` makes a
+per projection (`seon.schema.internal/projection-cache-value`, `src/seon/schema.clj:432`), and every contracted `defn` makes a
 new projection, so the first pass after it rederives the selector over the whole registry: 12.8 MB, 13.5 ms of the
 94 MB pass after a `defn`, with no error in the window. The settlement calls it every pass
 (`seon.turn` `:3493`).

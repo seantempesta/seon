@@ -21,7 +21,7 @@
             [seon.id :as id]
             [seon.ref :as ref]
             [seon.render.route :as route]
-            [seon.schema :as schema]))
+            [seon.schema.internal :as schema.internal]))
 
 ;;; DECLARATIONS (spec 7.1-7.16): declarations from resources/seon/tasks/<ns>.edn; subjects
 ;;; and proofs are the `:seon.task/tasks` symbols program entities carry.
@@ -104,7 +104,7 @@
   "The members of `:seon.task/declaration` under `projection`, in schema order, each with whether its schema is a set."
   {:malli/schema [:=> [:cat :seon.schema/projection] [:vector [:tuple :qualified-keyword :boolean]]]}
   [projection]
-  (schema/projection-cache-value
+  (schema.internal/projection-cache-value
    projection ::declaration-members
    #(mapv (fn [[k _ s]] [k (= :set (m/type (m/deref-all s)))])
           (m/children (m/deref-all (mr/schema (:seon.schema.projection/registry projection) :seon.task/declaration))))))
@@ -131,7 +131,7 @@
   "A task file's schema under `projection`: a vector of `:seon.task/declaration`s, closed."
   {:malli/schema [:=> [:cat :seon.schema/projection] :seon.instrument/compiled-schema]}
   [projection]
-  (schema/projection-cache-value
+  (schema.internal/projection-cache-value
    projection ::entry-file-schema
    #(m/schema [:vector (mu/closed-schema (mr/schema (:seon.schema.projection/registry projection) :seon.task/declaration))])))
 
@@ -283,7 +283,7 @@
   "The members a new task takes when it supplies none: `{}` decoded with the default value transformer under `:seon.task/task`."
   {:malli/schema [:=> [:cat :seon.schema/projection] :map]}
   [projection]
-  (schema/projection-cache-value
+  (schema.internal/projection-cache-value
    projection ::task-defaults
    #(m/decode (mr/schema (:seon.schema.projection/registry projection) :seon.task/task) {}
               (mt/default-value-transformer {:malli.transform/add-optional-keys true}))))
@@ -414,7 +414,7 @@
   "The members of `:seon.task/task` under `projection` whose schema carries `:seon.task/owned`."
   {:malli/schema [:=> [:cat :seon.schema/projection] [:vector :qualified-keyword]]}
   [projection]
-  (schema/projection-cache-value
+  (schema.internal/projection-cache-value
    projection ::owned-members
    #(let [registry (:seon.schema.projection/registry projection)]
       (into [] (comp (map first) (filter (fn [k] (:seon.task/owned (m/properties (mr/schema registry k))))))
@@ -807,7 +807,7 @@
   "The keys of the map schema `schema-key` declares under `projection`, in schema order."
   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword] [:vector :qualified-keyword]]}
   [projection schema-key]
-  (schema/projection-cache-value
+  (schema.internal/projection-cache-value
    projection [::schema-keys schema-key]
    #(mapv first (m/entries (m/deref (mr/schema (:seon.schema.projection/registry projection) schema-key))))))
 
@@ -837,7 +837,7 @@
   `:seon.task/explanation`; nil when it validates."
   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol :map] [:maybe :seon.task/refused-error]]}
   [projection operation view]
-  (when-let [explanation ((schema/projection-cache-value
+  (when-let [explanation ((schema.internal/projection-cache-value
                            projection ::runnable-explainer
                            #(m/explainer (mr/schema (:seon.schema.projection/registry projection) :seon.task/runnable)))
                           view)]

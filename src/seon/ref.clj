@@ -498,7 +498,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword] :seon.ref/render-pair]}
   [database schema-key]
   (let [projection (schema/projection-from-database database)]
-    (schema/projection-cache-value
+    (internal/projection-cache-value
      projection [::render schema-key]
      #(select-keys (some-> (mr/schema (:seon.schema.projection/registry projection) schema-key)
                            (as-> s (or (internal/entity-properties s) (m/properties s))))
@@ -511,7 +511,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value] [:map-of :qualified-keyword :seon.ref/declaration]]}
   [database]
   (let [projection (schema/projection-from-database database)]
-    (schema/projection-cache-value
+    (internal/projection-cache-value
      projection ::declarations
      (fn []
        (let [registry (:seon.schema.projection/registry projection)

@@ -80,7 +80,7 @@
                              [:seon.schema.projection/forms [:= {} {}]]
                              [:seon.schema.projection/fingerprint [:= 0]]]
                 :seon.schema/identity-only true
-                :seon.schema/identity-projection seon.schema/projection-identity}
+                :seon.schema/identity-projection seon.schema.internal/projection-identity}
                seon.schema/projection-value?],
               :compiled-validator fn?,
               :key

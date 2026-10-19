@@ -16,7 +16,8 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.error.refusal :as error]
-            [seon.schema :as schema])
+            [seon.schema :as schema]
+            [seon.schema.internal :as schema.internal])
   (:import [java.net URI]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse
             HttpResponse$BodyHandlers]
@@ -436,10 +437,10 @@
 (defn embedded-attributes
   "Each attribute whose schema declares `:seon.embed/task` in `projection`, with its declaration: `:seon.embed/when`
   :write unless declared, and `:seon.embed/reads` holding the attribute itself. A function of the projection alone,
-  held by the projection's own holder (`seon.schema/projection-cache-value`)."
+  held by the projection's own holder (`seon.schema.internal/projection-cache-value`)."
   {:malli/schema [:=> [:cat :seon.schema/projection] :seon.embed/declarations]}
   [projection]
-  (schema/projection-cache-value
+  (schema.internal/projection-cache-value
    projection ::embedded-attributes
    #(into {}
           (keep (fn [attribute]
@@ -456,7 +457,7 @@
   "Every attribute an embedded text of `projection` reads ([[embedded-attributes]])."
   {:malli/schema [:=> [:cat :seon.schema/projection] [:set :qualified-keyword]]}
   [projection]
-  (schema/projection-cache-value
+  (schema.internal/projection-cache-value
    projection ::embedded-reads
    #(into #{} (mapcat :seon.embed/reads) (vals (embedded-attributes projection)))))
 

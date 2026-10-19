@@ -8,7 +8,9 @@
   (:require [clojure.string :as str]
             [malli.core :as m]
             [malli.registry :as mr]
-            [malli.util :as mu]))
+            [malli.util :as mu]
+            #?(:clj [clojure.core.cache.wrapped :as cache])
+            #?(:clj [seon.id :as id])))
 
 (def default-schemas
   "Malli's default schemas and `malli.util/schemas` (`:merge`, `:union`, `:select-keys`),
@@ -534,3 +536,88 @@
                 :seon.schema/definition v
                 :seon.schema/base-definition inner
                 :seon.schema/nilable-value-schema k})))))
+
+#?(:clj
+ (do
+(defn projection-cache
+  "The holder [[with-compiled-cache]] installed, or nil.
+
+   Nil is honest rather than exceptional: a projection assembled by a caller
+   that did not go through a constructor still answers every question, it
+   just recompiles. Correctness never depends on the cache being there, which
+   is what makes it safe for it to be absent."
+  [projection]
+  (:seon.schema.projection/compiled projection))
+
+(defn projection-cache-value
+  "Return one value derived from `projection`, retaining one answer per key.
+
+   The answer is retained by the projection's own runtime holder. A projection
+   assembled without that holder remains correct and simply derives afresh."
+  {:malli/schema
+   [:=> [:catn [:seon.schema/projection :map] [:seon.schema/cache-key [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A projection cache key is ordinary heterogeneous data chosen by its caller; cached values are the supplied thunk's arbitrary result.", :gen/elements [nil false 0 "" :k [] {}]}]] [:seon.schema/derive-fn [:fn clojure.core/ifn?]]] [:or :seon.schema/value :seon.schema/validation-refusal]]}
+  [projection cache-key derive-fn]
+  (if-let [compiled (projection-cache projection)]
+    ;; A hit is a read; only a miss swaps (lookup-or-miss swaps every call).
+    (let [held (cache/lookup compiled cache-key ::miss)]
+      (if (identical? ::miss held)
+        (cache/lookup-or-miss compiled cache-key (fn [_] (derive-fn)))
+        held))
+    (derive-fn)))
+
+(defn entry-fingerprint
+  "One `section` entry's 32-bit hash: the head of its structural identity."
+  {:malli/schema [:=> [:cat :keyword :seon.schema/value :seon.schema/value] :int]}
+  [section identity value]
+  (unchecked-int (Long/parseLong (id/id [section identity value] 8) 16)))
+
+(defn projection-fingerprint
+  [forms function-contracts schema-admissions function-admissions
+   artifact-exports]
+  (letfn [(map-fingerprint [section values]
+            (reduce-kv
+             (fn [fingerprint identity value]
+               (bit-xor fingerprint
+                        (entry-fingerprint section identity value)))
+             0
+             values))
+          (set-fingerprint [section values]
+            (reduce
+             (fn [fingerprint value]
+               (bit-xor fingerprint
+                        (entry-fingerprint section value true)))
+             0
+             values))]
+    (reduce
+     bit-xor
+     (.hashCode "seon.schema.projection/fingerprint-v4")
+     [(map-fingerprint :forms forms)
+      (map-fingerprint :function-contracts function-contracts)
+      (map-fingerprint :schema-admissions schema-admissions)
+      (map-fingerprint :function-admissions function-admissions)
+      (set-fingerprint :artifact-exports artifact-exports)])))
+
+(def projection-fingerprint-version 4)
+
+(defn projection-fingerprint-from-data
+  [projection]
+  (projection-fingerprint
+   (:seon.schema.projection/forms projection)
+   (:seon.schema.projection/function-contracts projection)
+   (:seon.schema.projection/schema-admissions projection)
+   (:seon.schema.projection/function-admissions projection)
+   (:seon.schema.projection/artifact-exports projection)))
+
+(defn projection-identity
+  "A projection is referenced by its content fingerprint, never copied: its
+  registry, forms and indexes are megabytes derived from the database."
+  {:malli/schema [:=> [:cat :seon.schema/projection-reference] :map]}
+  [projection]
+  ;; A declaration projection carries no stored fingerprint; its content
+  ;; fingerprint is derived once and kept on the projection's own holder.
+  {:seon.schema.projection/fingerprint
+   (or (:seon.schema.projection/fingerprint projection)
+       (projection-cache-value projection ::fingerprint
+                               #(projection-fingerprint-from-data projection)))
+   :seon.schema.projection/fingerprint-version projection-fingerprint-version})
+))
