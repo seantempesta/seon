@@ -103,6 +103,9 @@
     (is (str/includes? text "Every step of your chain works on the same branch") "the steps share the chain's branch")
     (is (str/includes? text "merges onto main once") "main gets one merge, after the last step")
     (is (str/includes? text "Every step keeps the plan true") "help asks every step to correct the plan")
+    ;; Live run 13: six of nine attempts followed help's (def task ...), and a Prove agent spent calls unmapping a
+    ;; Design agent's def from the shared chain branch
+    (is (not (str/includes? text "(def task")) "help binds the task symbols without a def on the chain branch")
     (doseq [step ["design" "prove" "implement" "merge"]]
       (is (str/includes? (instructions step) "my.task/update! (get-in (my.task/current) [:seon.context/task :seon.task/sym]) :seon.task/plan")
           (str "the " step " template names the plan update")))))
