@@ -1,7 +1,8 @@
 (ns my.root-test
   "Root's tools over merge requests, which are assignments: listing the open ones, merging one, closing one
   with its reason. Each test asserts one behavior on data."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.string]
+            [clojure.test :refer [deftest is]]
             [my.root :as my.root]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as cluster.agent]
@@ -38,7 +39,14 @@
      :seon.store/store (:seon.store/store handle)}))
 
 (deftest instructions-are-the-laws-root-applies
-  (is (every? string? (:my.root/laws (my.root/instructions)))))
+  (let [laws (:my.root/laws (my.root/instructions))
+        says? (fn [text] (some #(clojure.string/includes? % text) laws))]
+    (is (every? string? laws))
+    ;; Task-system brief 2026-10-19 §7.6: the laws described per-assignment merge requests and end messages while the
+    ;; installed chain merges itself once at its end (TASK-CHAIN §2.6) and an end is a fact on its attempt.
+    (is (says? "my pass merges the chain branch to main once") "a chain merges by itself, once")
+    (is (not (says? "A merge request is an assignment")) "no law sends a chain's merge through a merge request")
+    (is (not (says? "reaches you as a message")) "an end is a fact on its attempt, not a message")))
 
 (deftest merge-requests-lists-the-open-assignment-with-its-merge-and-close-offered
   (with-assignment
