@@ -244,7 +244,9 @@ changed-branch rows to HEAD and stopped at a patch, `branch-runtime-arm.patch` (
 runtime-exact (below) replaced the arm patch's two shortcuts with one exact rule (a function runs compiled only where
 nothing the branch changed is in its closed reach) and fixed the wire's `in-ns` rewrite: every row is within 1.04x of
 HEAD. Its independent review ([runtime-review](runtime-review.md)) found it not exact; it was reverted (a92ba5b94) and
-lane runtime-fix (below) fixed each blocker at its cause: rows within 1.13x of HEAD. P2 is partial. P3 and P4 are not
+lane runtime-fix (below) fixed each blocker at its cause: rows within 1.13x of HEAD. Its re-review ([runtime-rereview](runtime-rereview.md)) found R1-R7; lane runtime-fix2 (below) traced
+them to the model and stopped at an owner decision: the exact cache key costs 5.8x on the hub row until the schema
+projection chain's derivers are closed. P2 is partial. P3 and P4 are not
 approved.
 
 P1 attempt (lane runtime-p0-p2, 2026-10-19). The patch is `branch-runtime-p1.patch` next to this note. It adds
@@ -782,6 +784,93 @@ Ruled out by the owner's test ("doesn't really help ... cut it"): the rows stay 
   - **Mutation.** With `seon.cache/reached-key` ignoring `*reached*` (dangling 5d08bd2db),
     `seon.sci.runtime-test/a-composed-runtime-answers-what-its-own-source-answers` is red (its `cc` derivation, runtimes
     answered in both orders).
+
+- **Lane runtime-fix2 (2026-10-19): the blockers' causes in the model, and the decision they need.** The re-review
+  ([runtime-rereview](runtime-rereview.md)) found R1-R7 on HEAD (85299376b, f06474e75). Each root cause, stated in the
+  model rather than the symptom:
+  - **R1 (and F7): a derivation is a function of its input and of the code computing it; `seon.cache` keys only the
+    input.** With one program the code was a constant. With many runtimes it is content, and the key must name it: the
+    deriving definition's code as the runtime computing it holds it. For a closed deriver that is static and small,
+    the `[name digest]` changes in its closed reach (none on main, so main and every runtime that left its reach alone
+    share one derivation). For an open deriver the reach index cannot bound what it runs, so its only static identity
+    is the runtime's whole delta. Option 2 gave open derivers main's key; that is the defect itself, not a residual.
+  - **R2: the key was placed in the call stack, not in the code.** `seon.sci.runtime/reaching` binds
+    `seon.cache/*reached*` around a call, so what the call returns or starts (a closure, a lazy sequence, a raw thread)
+    derives under its caller's binding. A lookup is lexically inside one definition, so its key is a property of that
+    definition: taken at the lookup site of the analysed body, or held in the definition's value when it is armed, so
+    that every re-arming (`seon.sci.arm/arm!`, `rearm-dependents!`, `seon.sci.eval/fork-cluster-ctx`) keeps it. The 78
+    `src` functions that call `seon.cache/lookup` or `lookup-within` pass derive-functions written in their own body
+    (one passes a caller's: `seon.db/content-projection`'s `derivation`), so a lexical key covers them.
+  - **R3: macros were exempted from the reach rule.** `seon.sci.eval/runtime-rows!` gives no macro a row ("compiled in
+    every runtime"), and an analysis is keyed by the macro's own digest. A macro is a function run at its callers'
+    analysis, and its expansion is part of each caller's code: the analysis key must carry the macro's code identity
+    (the changes in its closed reach), and a macro whose reach holds a change runs analysed while its callers are
+    analysed on that runtime, like any reaching function.
+  - **R4 (F2): host-bound functions are the one exception physics imposes, and the report named the platform
+    instead of the exception.** Census on default (a92ba5b94's facts): 124 host-bound names, 88 in `src`. Restricted to
+    `src` host-bound functions that an SCI-runnable `src` function calls, one changed name still names 11-21
+    (`seon.db/as-of-key` 20, `seon.id/digest` 21, `seon.ref/words` 15, `seon.profile/buckets` 11), and all but one
+    (`seon.ref/parsed` for `seon.ref/words`) are the platform's own machinery (`seon.sci.eval/evaluate`, `acquire!`,
+    `fork-cluster-ctx`, `seon.cluster/serve!`, `seon.flow/var-process`, `seon.render.web/handler`, ...), which run main
+    by design. The static index cannot tell a call an entrant makes into SCI (the branch's code) from one it makes as
+    compiled code, so the count cannot be made small and true from `:seon.fn/calls`; per root's ruling it is to be
+    deleted with the change that lands the key (`seon.sci.eval/host-bound-reaching`, `::host-bound-reached`, `:seon.batch/host-bound-reached`,
+    `seon.sci.runtime/host-bound-reached` and `::host-bound-reach`), and F2 stays the stated exception.
+  - **R5: the due rule for values confused "open" with "holds changed code".** The design said values are never
+    evaluated again; F1 showed that a value holding functions or Vars is code. A value is derived again exactly when
+    what it is computed from changed: its closed reach holds a change, or, open, any change (the same identity rule as
+    R1). A `defonce` is the other kind: an observation made once per process (`seon.cluster.source/launched-dependencies`,
+    `seon.cluster/launched-source-digests`), never derived again. The 57 `(defonce x (delay (requiring-resolve ...)))`
+    seams are both: they hold a JVM Var, so a branch calling through one runs main's definition until the seam is
+    removed (the owner's requiring-resolve ruling).
+  - **R6: the differential test drove the binder, not the runtime.** Its program, its reach index and its entrance
+    were all the test's own (`shaped-calls`, `eval-string*` own definitions, a direct call of `bind-analysed!`), so a
+    defect in `arm!`, the overlay, a namespace's resolution or the reach facts could not turn it red, and its generator
+    never changed one helper twice along a chain (M2 survived).
+  - **The decision this needs (the model is right; one of its inputs is not).** Keying each derivation by the content
+    of the code that computes it is exact for every mix of runtimes, closures and threads included. Its cost is the
+    open set: 50 of the 78 deriving functions are open, and the schema projection chain is among them. Census on
+    default (7,683 names): narrowing "open" to the calls that yield code (`resolve`, `ns-resolve`,
+    `requiring-resolve`, `find-var`, `var-get`, `eval`, `load*`, `ns-publics`, `ns-interns`, `ns-map`, `intern`) keeps
+    all 50 open; `requiring-resolve` alone keeps 49. Closing all 50 takes a hitting set of 91 directly opening
+    functions; the four derivers that carry the cost (`seon.db/content-projection`, `seon.schema/declaration-projection`,
+    `seon.schema/build-projection`, `seon.config/effective`) are held open by 28: 16 load-cycle seams
+    (`seon.db/call-preparation-*`, `error-*`, `program-*`, `stored-namespace-context`; `seon.error.refusal/schema-seam`,
+    `cache-seam`; `seon.schema/schema-datahike-*`, `schema-edn-packaged-forms`), the error refusal's frame
+    reflection (`classify-namespace`, `checking-projection`, `operation-projection`, `prepared-call-prefix`,
+    `referenced`), the configured builder (`seon.db/projection-builder`, `connection-projection-state`) and predicates
+    resolved from schema data (`seon.schema/runtime-predicate`, `loaded-predicate-var`, `projection-bindings`,
+    `unloaded-predicate-functions`).
+  - **Measured: the exact key for open derivers.** Same probe as the re-review (`cost-rows`), concurrent throwaway
+    check JVMs, MB allocated / calls / ms; "exact" is HEAD with every open analysed function keyed by every change
+    and bound again on each change (dangling `eb9335ac4`; HEAD `11196d4f6`, 716cc7527 `dd219716c`):
+
+    | Row | 716cc7527 | HEAD | exact | exact / 716cc7527 |
+    |---|---|---|---|---|
+    | `:seon-db-nine-forms` | 1,203.7 / 146,625 / 1,182 | 1,240.4 / 150,090 / 1,019 | 2,964.3 / 348,672 / 2,925 | **2.46x** |
+    | `:hub-behavior-change` | 897.7 / 198,696 / 1,175 | 1,015.2 / 222,882 / 1,235 | 5,210.5 / 869,412 / 6,403 | **5.80x** |
+    | `:similar-by-name-warm` | 25.8 / 7,432 / 51 | 26.3 / 7,808 / 35 | 23.8 / 7,587 / 91 | 0.92x |
+
+    Where the hub row's extra time goes (cache derivation ms during the request, exact against HEAD):
+    `:seon.db/projection` 4,418 against 0, `:seon.schema/projection` 645 against 0, `:seon.config/effective` 554
+    against 4, `:seon.schema/declaration-projection` 539 against 0; everything else is within 50 ms. A lexical key
+    re-derives the same four: `seon.db/projection`'s kind is derived by the open `seon.db/content-projection`, and
+    the other three are open derivers themselves.
+  - **Options for the owner, simplest first:**
+    1. **Exact now, cost later.** Land the lexical key with open derivers keyed by the whole delta (and R3, R5, R6 on
+       it): correct for every mix, about 5.8x on the hub row and 2.5x on nine forms (one schema projection derivation,
+       about 6 s, per program change on a branch) until the open set shrinks. Each closed projection deriver then
+       takes its share off, measured by the same rows.
+    2. **Close the projection chain first, then land exact.** Remove the 16 load-cycle seams (the requiring-resolve
+       ruling's work, cycles 2, 3, 6 and 7 of `requiring-resolve-inventory.md`), give the error refusal's frame
+       classification no Var reflection on the derivation path, and key the projection by the digests of the
+       predicates its forms name (they are in its input) instead of resolving them by name. Estimated a design round
+       plus three or four lanes; option 1's cost until then.
+    3. **Main's code for open code.** Run every open function compiled on every runtime and name the residual: cheap
+       (HEAD's cost) but a branch change reached only through open code is not live, about 45% of the program; this
+       is what the owner's requirement rules out.
+    Recommended: 2, with 1's mechanism landed behind it only once the four projection derivers are closed, because
+    1's cost falls on every program change of every branch.
 
 - **What would make the rule work:** compile what does not reach the change, not what calls nothing: on a changed
   runtime, interpret only the reverse closure of the changed names (cached analyses, so O(closure) binding) and keep
