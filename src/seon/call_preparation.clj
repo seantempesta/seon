@@ -43,6 +43,7 @@
             [malli.instrument :as mi]
             [seon.batch]
             [seon.db :as db]
+            [seon.error]
             [seon.error.refusal :as error]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
@@ -66,16 +67,6 @@
   (gen/fmap atom (gen/return {})))
 
 (schema.edn/load! {})
-
-;;; ---------------------------------------------------------------------------
-;;; Errors as values
-;;; ---------------------------------------------------------------------------
-
- ;; The error owner requires call preparation. Resolve its inspection Vars
-;; once after loading, as seon.error does for its SCI dependency. The supplied
-;; projection remains the authority; no error population is copied here.
-(def ^:private error-output-validators (delay (requiring-resolve 'seon.error/declared-output-validators)))
-(def ^:private error-declared-schema-keys (delay (requiring-resolve 'seon.error/declared-schema-keys)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The declared entity attributes — a query over the declaration, not a list
@@ -301,7 +292,7 @@
                                         (when-let [arities (contract-arities program sym)]
                                           [sym arities])))) entities)
             ;; debt: seon.db supplied-database-value and supplied-connection still declare :seon.error/value.
-            error-keys (conj (set (@error-declared-schema-keys projection)) :seon.error/value)
+            error-keys (conj (set (seon.error/declared-schema-keys projection)) :seon.error/value)
             candidates
             (mapv (fn [[default-key schema-key supplier]]
                     {:seon.call-preparation/key default-key
@@ -933,45 +924,26 @@
   [current environment slot sym]
   (let [default-key (:seon.call-preparation/key slot)
         symbol-name (:seon.call-preparation/supplier-symbol slot)
-        ;; A namespace that fails to load is the declared unresolved case;
-        ;; its Throwable rides the refusal whole (class, message, ex-data,
-        ;; cause chain) as the supplier-threw case already carries its own.
-        resolved (try (requiring-resolve symbol-name)
-                      (catch Throwable cause cause))]
-    (if-not (var? resolved)
+        ;; A loaded namespace without the Var is the declared unresolved case;
+        ;; a supplier namespace that does not load is a defect and throws.
+        resolved (requiring-resolve symbol-name)]
+    (if (nil? resolved)
       (unavailable sym slot
-                   (cond-> {:seon.error/at (java.util.Date.)
-                            :seon.error/layer :seon.call-preparation/call
-                            :seon.error/operation 'seon.call-preparation/supply
-                            :seon.error/message
-                            (str "No callable is installed for " symbol-name "."
-                                 (when (instance? Throwable resolved)
-                                   (str " Resolving it threw " (.getName (class resolved))
-                                        ": " (ex-message resolved))))
-                            :seon.call-preparation/unresolved-symbol symbol-name
-                            :seon.error/data {:seon.call-preparation/supplier-symbol
-                                              symbol-name}
-                            :seon.error/expected "an installed callable Var"}
-                     (instance? Throwable resolved)
-                     (assoc :seon.error/exception-class (symbol (.getName (class resolved)))
-                            :seon.error/offending resolved)))
-      (let [produced (try (resolved environment)
-                          (catch Throwable cause
-                            (seon.error.refusal/diagnostic (java.util.Date.) :seon.call-preparation/call 'seon.call-preparation/supply
-                             {:seon.error/message (or (ex-message cause) "The supplier threw.")
-  :seon.call-preparation/thrown-supplier symbol-name
-  :seon.error/exception-class (symbol (.getName (class cause)))
-  :seon.error/offending cause
-  :seon.error/data {:seon.call-preparation/supplier-symbol
-                              symbol-name}
-  :seon.error/expected "a returned supplied value"})))
+                   {:seon.error/at (java.util.Date.)
+                    :seon.error/layer :seon.call-preparation/call
+                    :seon.error/operation 'seon.call-preparation/supply
+                    :seon.error/message (str "No callable is installed for " symbol-name ".")
+                    :seon.call-preparation/unresolved-symbol symbol-name
+                    :seon.error/data {:seon.call-preparation/supplier-symbol
+                                      symbol-name}
+                    :seon.error/expected "an installed callable Var"})
+      (let [produced (resolved environment)
             valid? (get (:seon.call-preparation/validators current)
                         default-key)]
         (cond
-          (or (:seon.call-preparation/thrown-supplier produced)
-              (some (fn [[_ valid?]] (valid? produced))
-                    (@error-output-validators (:seon.schema/projection current)
-                                              (:malli/schema (meta resolved)) 1))) (unavailable sym slot produced)
+          (some (fn [[_ valid?]] (valid? produced))
+                (seon.error/declared-output-validators (:seon.schema/projection current)
+                                          (:malli/schema (meta resolved)) 1)) (unavailable sym slot produced)
 
           (or (nil? valid?) (valid? produced)) produced
 

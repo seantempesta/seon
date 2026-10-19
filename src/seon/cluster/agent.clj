@@ -687,26 +687,12 @@
 
 (declare submit-source-in-projection start-flow!)
 
-(defn- segmenter
-  "The function that segments a submission's text into its ordered sources:
-  `seon.turn/planned-sources` for a model reply unless the request names another
-  stage, which must declare exactly that default's contract. A symbol that
-  resolves to nothing, or to a function with another contract, refuses by name."
-  {:malli/schema [:=> [:cat [:maybe :qualified-symbol] :seon.agent/id]
-                  [:or :seon.instrument/callable :seon.agent/source-submission-refused-error]]}
-  [stage agent-id]
-  (let [default #'turn/planned-sources
-        chosen (if stage (try (requiring-resolve stage) (catch Exception _ nil)) default)]
-    (if (and (var? chosen) (= (:malli/schema (meta chosen)) (:malli/schema (meta default))))
-      chosen
-      (seon.error.refusal/error :seon.agent/source-submission-refused-error
-       {:seon.error/layer :seon.agent/source-submission
-        :seon.error/operation `submit-source!
-        :seon.agent/refused-source-agent agent-id
-        :seon.error/message "The segmenter must name a function declaring seon.turn/planned-sources' contract."
-        :seon.error/member :seon.agent/segmenter
-        :seon.error/expected (:malli/schema (meta default))
-        :seon.error/offending stage}))))
+(def ^:private segmenters
+  "The function each `:seon.agent/segmenter` the request contract admits names:
+  `seon.turn/planned-sources` for a model reply (the default),
+  `seon.turn/code-sources` for code."
+  {'seon.turn/planned-sources #'turn/planned-sources
+   'seon.turn/code-sources #'turn/code-sources})
 
 (defn submit-source!
   "Submit system-authored source as one run of the agent, delivered as a value.
@@ -743,7 +729,7 @@
     stage :seon.agent/segmenter
     text :seon.cluster.reply/text}]
   (let [connection (:seon.db/connection handle)
-        segment (segmenter stage agent-id)
+        segment (segmenters (or stage 'seon.turn/planned-sources))
         database @connection
         namespace-name
         (cond
@@ -768,8 +754,6 @@
                     [?namespace :seon.ns/name ?namespace-name]]
                     database agent-id)))]
     (cond
-      (map? segment) segment
-
       (or (:seon.db/invalid-read namespace-name)
           (:seon.schema/expected-value namespace-name))
       (assoc namespace-name :seon.agent/refused-source-agent agent-id)

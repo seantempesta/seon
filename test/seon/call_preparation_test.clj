@@ -930,7 +930,7 @@
              slot {:seon.fn.argument/index 1
                    :seon.call-preparation/key :seon.db/db
                    :seon.call-preparation/supplier-symbol
-                   'sample/nowhere-at-all}
+                   'seon.call-preparation-test/nowhere-at-all}
              refusal (cp/supply current environment slot 'sample/target)]
          (is (= :seon.db/db (:seon.call-preparation/unavailable-key refusal)))
          (is (= 'sample/target (:seon.fn/sym (:seon.error/data refusal))))
@@ -982,7 +982,7 @@
            entry {:seon.fn.argument/index 0
                   :seon.call-preparation/key :seon.agent/id
                   :seon.call-preparation/entry-key :seon.agent/id
-                  :seon.call-preparation/supplier-symbol 'sample/nowhere-at-all}]
+                  :seon.call-preparation/supplier-symbol 'seon.call-preparation-test/nowhere-at-all}]
        (is (every? (comp seq :seon.call-preparation/entries) (:seon.call-preparation/arities optional-plan))
            "the optional connection, a world member, is an entry the plan fills")
        ;; an optional entry is filled from a world only (e44ce97ff): with none
@@ -1242,7 +1242,7 @@
            value (cp/supply current (environment-for connection) slot 'sample/target)
            missing (cp/supply current (environment-for connection)
                               (assoc slot :seon.call-preparation/supplier-symbol
-                                     'sample/absent-supplier) 'sample/target)
+                                     'seon.call-preparation-test/absent-supplier) 'sample/target)
            cause (get-in missing [:seon.error/data :seon.call-preparation/cause])]
        (is ((seon.schema/projection-validator (projection) :seon.call-preparation/invalid-supplied-value-error) value))
        (is (= :seon.db/db (:seon.call-preparation/invalid-key value)))
@@ -1254,10 +1254,7 @@
        (is ((seon.schema/projection-validator (projection) :seon.call-preparation/unavailable-error) missing))
        (is (= 'sample/target (:seon.call-preparation/target-symbol missing)))
        (is ((seon.schema/projection-validator (projection) :seon.call-preparation/unresolved-supplier-error) cause))
-       (is (= 'sample/absent-supplier (:seon.call-preparation/unresolved-symbol cause)))
-       (is (symbol? (:seon.error/exception-class cause))
-           "the failed resolution's Throwable rides the refusal, never dropped")
-       (is (instance? Throwable (:seon.error/offending cause)))))))
+       (is (= 'seon.call-preparation-test/absent-supplier (:seon.call-preparation/unresolved-symbol cause)))))))
 
 (deftest arming-plans-a-contract-whose-supplied-inputs-are-world-members-only
   ;; `arm-plan` joined contracts to the admitted rows only, while `plan-for`

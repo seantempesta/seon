@@ -118,13 +118,15 @@
                                                      (str/replace defn-source "run-inc " "run-inc2 "))))))))
           (testing "a bare number line is code on the default planner too (reader-fix: only prose becomes comments)"
             (is (= ["1"] (shown connection (agent/evaluate-source! (assoc request :seon.cluster.reply/text "1"))))))
-          (testing "a segmenter without the planner's contract refuses by name before any run"
+          (testing "a segmenter the request contract does not declare is refused at entry before any run"
             (let [runs #(count (db/q '[:find ?r :in $ ?id :where [?a :seon.agent/id ?id] [?r :seon.turn/agent ?a]]
                                      (db/db connection) agent-id))
                   before (runs)
-                  refused (agent/evaluate-source! (assoc request :seon.agent/segmenter 'clojure.core/str
-                                                         :seon.cluster.reply/text "1"))]
-              (is (= :seon.agent/segmenter (:seon.error/member refused)))
+                  refused (try (agent/evaluate-source! (assoc request :seon.agent/segmenter 'clojure.core/str
+                                                              :seon.cluster.reply/text "1"))
+                               (catch clojure.lang.ExceptionInfo refusal (ex-data refusal)))]
+              (is (some #(= :seon.agent/segmenter (peek (:seon.error/path %))) (:seon.error/problems refused))
+                  "the contract names the segmenter's path")
               (is (= before (runs)))))
           (testing "the answer carries the value its settlement left and the receipts it saved"
             ;; eval-path cut 1 (audit M4, task branch-eval-answers-no-events):
