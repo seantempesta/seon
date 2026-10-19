@@ -435,9 +435,9 @@
 
 (deftest no-src-function-a-change-can-reach-runs-its-compiled-var
   ;; Invariant 1 of the branch-runtime note: a runtime's answers depend only on
-  ;; its name -> digest map, never on what main's JVM compiled. Main runs
-  ;; compiled, having no overrides (owner, 2026-10-19). On a branch with a
-  ;; change, a src function runs its compiled Var only where that is the
+  ;; its name -> digest map, never on what main's JVM compiled. Closed main
+  ;; functions run compiled; open functions share their analysed roots with
+  ;; forks. A src function runs its compiled Var only where that is the
   ;; answer its analysed definition gives: the change cannot reach it through
   ;; `:seon.fn/calls`, and nothing it reaches resolves a name at run time. The
   ;; oracle here walks callers from the change and from run-time resolution.
@@ -3439,3 +3439,20 @@
                                               :seon.sci.eval/time-limit-ms 5000})]
        (is (= {:rendered-by :child} (edn/read-string (:seon.eval/shown evaluation)))
            "the child's own pair renders the call's value")))))
+
+
+(deftest overlay-identities-read-two-projections-of-the-changed-entities
+  (test-support/with-database
+   (fn [connection]
+     (doseq [n [1 20]]
+       (let [before (db/db connection)
+             names (mapv #(symbol "my.program" (str "identity-" n "-" %)) (range n))
+             _ (test-support/transacted!
+                connection (mapv #(test-support/program-fn-entity before %
+                                  (str "(defn " (name %) " [] 1)")) names))
+             database (db/db connection)
+             measured (profile/measure #(#'eval/plan-identities before database))]
+         (is (= (set names) (:seon.fn/sym (:seon.profile/value measured))))
+         (is (zero? (profile/calls-of measured 'seon.db/datoms))
+             "identities are pulled together instead of read one attribute at a time")
+         (is (= 2 (profile/calls-of measured 'seon.db/pull-many))))))))

@@ -2955,7 +2955,7 @@
   that may answer otherwise than its compiled Var once `ctx` holds `own`
   (name -> digest of the definitions it holds itself) and the declarations of
   `namespaces` differ from the loaded program; the analysis summary. Main
-  binds nothing. A runtime whose program differs keeps a compiled function
+  shares the open functions' analyses with its forks. A runtime keeps a compiled function
   only where its closed reach holds no changed name
   (`seon.sci.runtime/compiled-names`), which answers what its analysed
   definition would; every other function is bound to its analysed definition
@@ -3042,9 +3042,10 @@
     analysis))
 
 (defn- acquire-program!
-  "Acquire the loaded program into its base context. Compiled definitions bind
-  their JVM roots; namespaces the JVM has not loaded interpret their source.
-  Branch differences belong to `derive-overlay-plan`."
+  "Acquire the loaded program into its shared base context. Closed definitions
+  bind their JVM roots; open functions bind their shared analyses. Namespaces
+  the JVM has not loaded interpret their source. Branch differences belong
+  to `derive-overlay-plan`."
   {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :map]}
   [{ctx :seon.sci.eval/ctx
     db :seon.db/db
@@ -3137,11 +3138,12 @@
         ;; Libraries the namespaces require resolve through their aliases and
         ;; full names, as the compiled namespaces that require them do.
         (install-required-libraries! ctx all-namespace-rows)
-        ;; Every src function SCI can run is bound to its analysed definition:
-        ;; a branch's change is live for its callers on that branch.
+        ;; Open functions resolve runtime names, so every changed fork needs
+        ;; their analyses. Bind them once in the shared program context.
         (swap! (::kernel/program-snapshot ctx) assoc
                ::runtime-rows (runtime-rows! ctx db projection all-namespace-row-by-name test-namespaces)
-               ::reach-index (merge (reach-index db) (coupling db projection)))
+               ::reach-index (merge (reach-index db) (coupling db projection)) ::changes {})
+        (bind-analysed! ctx {} #{})
         ;; The bare REPL name refers to the acquired macro itself. Keeping the
         ;; boot-time copy here would preserve its old expansion after adoption.
         (sci/add-namespace! ctx 'clojure.core
@@ -3313,10 +3315,14 @@
   [before database]
   (let [entities (into #{} (comp (mapcat #(apply concat (db/datoms-diff before database :aevt [%]))) (map first))
                        plan-attributes)
-        names (fn [attribute]
-                (into #{} (comp (mapcat (fn [e] [(entity-value before e attribute) (entity-value database e attribute)]))
-                                (remove nil?))
-                      entities))]
+        identities [:seon.fn/sym :seon.ns/name :seon.test/sym]
+        rows (mapcat (fn [basis]
+                       (let [rows (db/pull-many basis identities (vec entities))]
+                         (when (db/read-refusal? rows)
+                           (throw (ex-info (:seon.error/message rows) rows)))
+                         rows))
+                     [before database])
+        names (fn [attribute] (into #{} (keep attribute) rows))]
     {:seon.fn/sym (names :seon.fn/sym) :seon.ns/name (names :seon.ns/name) :seon.test/sym (names :seon.test/sym)}))
 
 (defn- function-places

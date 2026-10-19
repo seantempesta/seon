@@ -1,5 +1,7 @@
 # First definition on a branch: measured work and proposed patch
 
+Status: applied by lane runtime-fix3 onto `959ec1a91` (the commit that carries this line), proofs red on HEAD and green with the exactness rows; re-measured there: first-defn 1,192 -> 269 MB, 80,872 -> 21,972 calls, 1,200 -> 516 ms, every other cost row within 1%.
+
 2026-10-20, lane `defn-perf`. Default remained on `ac55beffa4840f73b3fea3350b89d8b7b1dd5215`; it was never restarted or loaded with uncommitted source. All default probes used JVM mode with root and cluster explicit. Patch base: `f9dbede9a` (its runtime source is the reported ac55beffa source). The only submitted files are this evidence and [defn-perf.patch](defn-perf.patch). Runtime-fix3 owns the overlapping source; this patch is not installed in the shared tree.
 
 Remaining limits: the desired first-defn estimate is still red, and the live-store hub-change bound fails on both parent and candidate. The focused template check is green; the live-store cost gate is not.
