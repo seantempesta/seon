@@ -325,8 +325,12 @@
                                              entities)
                 :seon.batch/private (vec (keep (fn [[_ [tag x]]] (when (= :private tag) x)) program))
                 :seon.batch/notes (into (schema-notes request working schema-keys)
-                                        (keep (fn [w] (when-let [e (:seon.batch/arm-error w)]
-                                                        {:seon.batch/sym (:seon.batch/sym w) :seon.batch/arm-error e})))
+                                        (mapcat (fn [w] (cond-> []
+                                                          (:seon.batch/arm-error w)
+                                                          (conj {:seon.batch/sym (:seon.batch/sym w) :seon.batch/arm-error (:seon.batch/arm-error w)})
+                                                          (:seon.batch/host-bound-reached w)
+                                                          (conj {:seon.batch/sym (:seon.batch/sym w)
+                                                                 :seon.batch/host-bound-reached (:seon.batch/host-bound-reached w)}))))
                                         writes)}]
     {:seon.batch/change change :seon.batch/derive-state (assoc state :declared declared)}))
 
@@ -478,7 +482,11 @@
               stored-id (dbu/entid db [:seon.ns/name n])
               stored (when stored-id (#'eval/row-bindings (db/pull db @#'eval/namespace-pattern [:seon.ns/name n])))
               in-n (filterv #(= [:seon.ns/name n] (or (:seon.fn/ns %) (:seon.test/ns %))) entities)
-              live (live-bindings context)
+              ;; a class the loaded namespace defines itself is imported
+              ;; as it loads (`seon.sci.eval/own-class-imports`), never by
+              ;; its `ns` form: the row declares only what its form does
+              live (update (live-bindings context) :imports
+                           #(apply dissoc % (remove (set (keys (:imports stored))) (keys (eval/own-class-imports n)))))
               kept (when stored
                      (declared-bindings stored live (mapv #(#'program/used-resolver-context % live) in-n) entity-only?))
               context (cond-> context
@@ -490,9 +498,15 @@
                 ;; a stored namespace changes only the attributes the context row
                 ;; carries: its doc, file, tasks and admission source stay, so its
                 ;; digest is the digest of the row as it is left stored
+                ;; digest is the digest of the row as it is left stored; a row
+                ;; whose digest is the stored one is the stored content, and
+                ;; writing it again writes nothing
                 (let [row (dissoc row :seon.schema.admission/source)
-                      row (assoc row :seon.program/definition-digest (db/namespace-digest-of db stored-id row))]
-                  (program/exact-replacement-tx (select-keys (db/pull db '[*] stored-id) (cons :db/id (keys row))) row))
+                      row (assoc row :seon.program/definition-digest (db/namespace-digest-of db stored-id row))
+                      current (db/pull db '[*] stored-id)]
+                  (if (= (:seon.program/definition-digest row) (:seon.program/definition-digest current))
+                    []
+                    (program/exact-replacement-tx (select-keys current (cons :db/id (keys row))) row)))
                 (entity-facts db [row]))))))
       []))
 

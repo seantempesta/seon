@@ -1199,7 +1199,9 @@
    Class usage is never one: the configured interpreter resolves every class
    on the classpath (`seon.sci.eval/build-base-ctx` `:classes {:allow :all}`;
    fork `interop/host-class-opts`), so a copied class list cannot decide it.
-   Import calls remain host-bound under the program declaration rule. A JVM
+   Import calls remain host-bound under the program declaration rule, and so
+   does a use of `print-method` or `print-dup`: SCI's are stand-ins that refuse
+   (`reference-code/sci/src/sci/impl/namespaces.cljc`), never the host's. A JVM
    macro from a namespace SCI does not interpret is host-bound: SCI hands it
    SCI's `&env`, which `clojure.core.async/go` reads as compiler locals.
    Macro status is clj-kondo's `:macro` from the dependency's analysis, never
@@ -1220,7 +1222,8 @@
          (comp
           (filter #(some? (::analyzer/arity %)))
           (filter #(#{'clojure.core/reify 'clojure.core/proxy
-                      'clojure.core/definterface 'clojure.core/import}
+                      'clojure.core/definterface 'clojure.core/import
+                      'clojure.core/print-method 'clojure.core/print-dup}
                     (usage-symbol %)))
           (keep usage-caller))
          (::analyzer/var-usages analysis))

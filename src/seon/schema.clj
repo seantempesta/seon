@@ -222,11 +222,19 @@
    A namespace that exists but fails to load — a missing transitive require
    arrives wrapped in a `CompilerException` too — throws the declared
    `:seon.schema/unloadable-predicate-error` carrying the whole cause chain,
-   so a compile failure is never read as an unresolved predicate."
-  {:malli/schema [:=> [:cat :qualified-symbol] [:or :nil [:fn clojure.core/var?]]]}
+   so a compile failure is never read as an unresolved predicate. The
+   loaded program's own Var answers whenever the JVM holds one, compiled or
+   interpreted: one definition has one binding, so a build on a branch's
+   runtime keys and compiles as main's does. A predicate the branch holds
+   apart is bound by its context (`seon.sci.kernel/context-bound-projection`);
+   only a name the JVM has never loaded answers the SCI Var that defines it."
+  {:malli/schema [:=> [:cat :qualified-symbol] [:or :nil [:fn clojure.core/var?] :seon.sci.eval/sci-var]]}
   [predicate]
   (try
-    (requiring-resolve predicate)
+    (let [resolved (requiring-resolve predicate)
+          loaded (clojure.lang.Namespace/find (symbol (namespace predicate)))]
+      (or (when loaded (.findInternedVar ^clojure.lang.Namespace loaded (symbol (name predicate))))
+          resolved))
     (catch java.io.FileNotFoundException _
       nil)
     (catch clojure.lang.Compiler$CompilerException failure
@@ -1132,7 +1140,7 @@
   A thread that lives in that world for its whole life (a Flow proc loop)
   installs them with `with-bindings`, so its lifetime is never counted as one
   armed call (task `seon.profile/scope-wrappers-report-callback-time-as-work`)."
-  {:malli/schema [:=> [:cat :map] [:map-of [:fn clojure.core/var?] [:or :nil :map]]]}
+  {:malli/schema [:=> [:cat :map] [:map-of [:or [:fn clojure.core/var?] :seon.sci.eval/sci-var] [:or :nil :map]]]}
   [projection]
   {#'*projection* projection
    #'*projection-state* nil})
@@ -1143,7 +1151,7 @@
   A thread that lives in that world for its whole life (a Flow proc loop)
   installs them with `with-bindings`, so its lifetime is never counted as one
   armed call (task `seon.profile/scope-wrappers-report-callback-time-as-work`)."
-  {:malli/schema [:=> [:cat [:fn clojure.core/deref]] [:map-of [:fn clojure.core/var?] [:or :nil [:fn clojure.core/deref]]]]}
+  {:malli/schema [:=> [:cat [:fn clojure.core/deref]] [:map-of [:or [:fn clojure.core/var?] :seon.sci.eval/sci-var] [:or :nil [:fn clojure.core/deref]]]]}
   [projection-state]
   {#'*projection-state* projection-state
    #'*projection* nil
@@ -1190,7 +1198,10 @@
     :qualified-symbol]}
   [predicate f]
   (let [resolved (runtime-predicate predicate)]
-    (when-not (and resolved (identical? f (var-get resolved)))
+    ;; the definition the executing runtime binds the name to: the loaded
+    ;; Var compiled, the context's binding interpreted (a branch's runtime
+    ;; evaluates the declaring value again with its own definitions)
+    (when-not (and resolved (identical? f @(requiring-resolve predicate)))
       (throw
        (ex-info
         (str "Predicate " predicate " does not name the supplied callable.")

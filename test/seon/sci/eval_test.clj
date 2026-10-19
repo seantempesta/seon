@@ -11,6 +11,10 @@
   fails it."
   (:require [malli.core] [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.data.json :as json]
+            [seon.mcp :as mcp]
+            [seon.problems]
+            [seon.ref]
             [clojure.set :as set]
             [clojure.main]
             [clojure.string :as str]
@@ -38,6 +42,7 @@
             [seon.program :as program]
             [sci.core :as sci]
             [sci.impl.utils :as sci.utils]
+            [sci.impl.vars]
             [sci.ctx-store]
             [seon.render :as render]
             [seon.render-simplification-test :as simplification]
@@ -175,14 +180,114 @@
            "main's base caller keeps main's helper")
        (is (= "(a 1)" (seon.print/form-text '(a 1))) "the compiled caller is unchanged")))))
 
-(deftest no-sci-runnable-src-function-runs-its-compiled-var
+(defn- branch-replacing!
+  "Commit on `connection` `sym`'s stored source with its first match of
+  the regular expression `pattern` replaced by `replacement`, as an agent's definition: a branch whose
+  program differs from the loaded one by that definition."
+  {:malli/schema [:=> [:cat :seon.db/connection :qualified-symbol :string :string] :seon.db/database-value]}
+  [connection sym pattern replacement]
+  (let [before (db/db connection)
+        source (str/replace-first (:seon.fn/source (db/pull before [:seon.fn/source] [:seon.fn/sym sym])) (re-pattern pattern) replacement)]
+    (test-support/transacted!
+     connection
+     (test-support/replacement-tx before [:seon.fn/sym sym]
+                                  (:seon.fn/source (test-support/program-fn-entity before sym source {:seon.schema.admission/source :agent}))
+                                  {:seon.schema.admission/source :agent}))
+    (db/db connection)))
+
+(defn- in-context
+  "`code` evaluated in `ctx`, applied to `args` when it is a function."
+  [ctx code & args]
+  (sci.ctx-store/with-ctx ctx
+    (let [value (sci/eval-string* ctx code)]
+      (if (seq args) (apply value args) value))))
+
+(deftest a-branch-change-is-live-through-a-value-holding-functions
+  ;; Runtime review (e890511a5) F1: a branch's change answers through every
+  ;; caller a fresh interpretation of the branch's source would answer through.
+  (testing "a value definition holding functions (seon.problems/families) holds the branch's"
+    (test-support/with-database
+     (fn [connection]
+       (let [database (branch-replacing! connection 'seon.problems/missing-models "(?s)\\[db\\].*$"
+                                         "[db]\n  [{:seon.config.ai/model \"BRANCH\"}])")
+             branch (eval/base-ctx database)]
+         (is (= [{:seon.config.ai/model "BRANCH"}]
+                (in-context branch "(fn [db] (:seon.problems/missing-models (seon.problems/problems db {})))" database))
+             "problems reads the branch's missing-models through families"))))))
+
+(deftest a-branch-changed-macro-is-expanded-by-its-callers
+  ;; Runtime review F3 on the database path: the caller's analysis is keyed by
+  ;; the macro the branch holds, so neither runtime serves the other's.
+  (testing "a changed macro is expanded by its callers on the branch, cold or warm"
+    (test-support/with-database
+     (fn [connection]
+       (let [before (db/db connection)
+             database (branch-replacing! connection 'seon.profile/bucket-of "(?s)\\[elapsed\\].*$" "[elapsed]\n  22)")]
+         (is (= 3 (in-context (eval/base-ctx before) "(seon.profile/bucket 5)")) "main expands main's macro")
+         (is (= 22 (in-context (eval/base-ctx database) "(seon.profile/bucket 5)")) "the branch expands its own")
+         (seon.cache/evict-kinds! #{:seon.sci.runtime/analysed :seon.sci.eval/program-context})
+         (is (= 22 (in-context (eval/base-ctx database) "(seon.profile/bucket 5)")) "and again from a cold cache")
+         (is (= 3 (in-context (eval/base-ctx before) "(seon.profile/bucket 5)"))
+             "main's analysis is not the branch's: its key holds the macro it expanded"))))))
+
+(deftest a-host-bound-function-reaching-a-branch-change-is-named
+  ;; Runtime review F2: SCI cannot run a host-bound function, so it runs main's
+  ;; helpers on every runtime; the runtime names it instead of pretending.
+  (testing "a host-bound function reaching the change is named, never run as if live"
+    (test-support/with-database
+     (fn [connection]
+       (let [database (branch-replacing! connection 'seon.ref/words "(?s)\\[\\^String text\\].*$" "[^String text]\n  [\"BRANCH\"])")
+             branch (eval/base-ctx database)]
+         (is (= ["BRANCH"] (in-context branch "(#'seon.ref/words \"a b\")")) "the branch's words is live")
+         (is (contains? (::eval/host-bound-reached (::eval/analysis @(::kernel/program-snapshot branch)))
+                        'seon.ref/parsed)
+             "the runtime names seon.ref/parsed, which runs main's words")
+         (is (= {'seon.ref/parsed #{'seon.ref/words}}
+                (select-keys (eval/host-bound-reaching database #{'seon.ref/words}) ['seon.ref/parsed]))
+             "the done rule's derivation names it too"))))))
+
+(deftest an-agent-change-is-live-through-its-macro-callers-and-keeps-namespace-rows
+  ;; Runtime review F4, F4b and F3's agent row, through the real MCP path.
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (let [answer (fn [code] (test-support/mcp-replies
+                              (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                                        "arguments" {"cluster" running "agent" agent-id
+                                                                                     "mode" "sci" "code" code}})))))
+           imports (fn [n] (into (sorted-set) (map (comp str :seon.ns.import/target-class))
+                                 (:seon.ns/imports (db/pull (db/db connection) '[{:seon.ns/imports [*]}] [:seon.ns/name n]))))
+           before {:agent (imports 'seon.cluster.agent) :profile (imports 'seon.profile)}
+           agent-reply (answer "(in-ns 'seon.cluster.agent) (defn rr-probe \"P.\" {:malli/schema [:=> [:cat] :int]} [] 1) (rr-probe)")
+           profile-reply (answer "(in-ns 'seon.profile) (defn rr-probe \"P.\" {:malli/schema [:=> [:cat] :int]} [] 2) (rr-probe)")]
+       (is (= 1 (:seon.repl/value (last agent-reply))) "a defn in seon.cluster.agent answers")
+       (is (= 2 (:seon.repl/value (last profile-reply))) "a defn in seon.profile answers")
+       (is (= before {:agent (imports 'seon.cluster.agent) :profile (imports 'seon.profile)})
+           "no namespace row gains an import its ns form does not have")
+       (answer "(in-ns 'seon.profile) (defmacro bucket-of [elapsed] 33)")
+       (is (= 33 (:seon.repl/value (last (answer "(seon.profile/bucket 5)"))))
+           "the agent's macro is live for its loaded caller")))))
+
+(deftest no-src-function-a-change-can-reach-runs-its-compiled-var
   ;; Invariant 1 of the branch-runtime note: a runtime's answers depend only on
-  ;; its name -> digest map, never on what main's JVM compiled. So every src
-  ;; function the index calls SCI-runnable runs its analysed definition in a
-  ;; base context, never the compiled function.
+  ;; its name -> digest map, never on what main's JVM compiled. Main runs
+  ;; compiled, having no overrides (owner, 2026-10-19). On a branch with a
+  ;; change, a src function runs its compiled Var only where that is the
+  ;; answer its analysed definition gives: the change cannot reach it through
+  ;; `:seon.fn/calls`, and nothing it reaches resolves a name at run time. The
+  ;; oracle here walks callers from the change and from run-time resolution.
   (test-support/with-database
    (fn [connection]
-     (let [database (db/db connection)
+     (let [before (db/db connection)
+           changed 'seon.print/literal
+           source (str/replace-first (:seon.fn/source (db/pull before [:seon.fn/source] [:seon.fn/sym changed]))
+                                     #"(?s)\[value\].*$" "[value]\n  \"BRANCH\")")
+           _ (test-support/transacted!
+              connection
+              (test-support/replacement-tx
+               before [:seon.fn/sym changed]
+               (:seon.fn/source (test-support/program-fn-entity before changed source {:seon.schema.admission/source :agent}))
+               {:seon.schema.admission/source :agent}))
+           database (db/db connection)
            ctx (eval/base-ctx database)
            runnable (db/q '[:find [?sym ...]
                             :where [?f :seon.fn/host-bound? false] [?f :seon.schema.admission/source :core]
@@ -190,7 +295,19 @@
                             (not [?f :seon.fn/macro? true])
                             [?f :seon.fn/ns ?namespace] [?namespace :seon.fn/file ?file]
                             [?file :seon.fn.file/relative-root "src"] [?f :seon.fn/sym ?sym]]
-                          database)
+                          before)
+           edges (db/q '[:find ?caller ?callee :where [?f :seon.fn/sym ?caller] [?f :seon.fn/calls ?callee]] before)
+           callers (reduce (fn [held [caller callee]] (update held callee (fnil conj #{}) caller)) {} edges)
+           upward (fn [seeds] (loop [held (set seeds) todo (vec seeds)]
+                                (if-let [sym (peek todo)]
+                                  (let [fresh (remove held (get callers sym))]
+                                    (recur (into held fresh) (into (pop todo) fresh)))
+                                  held)))
+           exposed (upward (into [changed] (mapcat callers)
+                                 '[clojure.core/resolve clojure.core/ns-resolve clojure.core/requiring-resolve
+                                   clojure.core/find-var clojure.core/eval clojure.core/load-string clojure.core/load-file
+                                   clojure.core/load clojure.core/require clojure.core/intern clojure.core/var-get
+                                   clojure.core/the-ns clojure.core/ns-publics clojure.core/ns-interns]))
            compiled (into (sorted-set)
                           (filter (fn [sym]
                                     (when-let [host (find-var sym)]
@@ -198,7 +315,11 @@
                                         (identical? @host (sci.ctx-store/with-ctx ctx @held))))))
                           runnable)]
        (is (seq runnable) "the index names SCI-runnable src functions")
-       (is (= #{} compiled) "none of them runs its compiled Var")))))
+       (is (contains? exposed 'seon.print/form-text) "the oracle reaches the changed helper's caller")
+       (is (= #{} (into (sorted-set) (filter exposed) compiled))
+           "no function the change or a run-time resolution can reach runs its compiled Var")
+       (is (contains? compiled 'seon.id/structural-digest)
+           "a function the change cannot reach keeps its compiled Var")))))
 
 (defn- namespace-paths
   "Every `[namespace name]` `ctx`'s namespaces hold."
@@ -520,8 +641,13 @@
                                   [:namespaces ns-sym sym])]
               :when (and (instance? sci.lang.Var var-a)
                          (identical? var-a var-b)
-                         (not (:sci/built-in (meta var-a))))]
+                         (not (:sci/built-in (meta var-a)))
+                         ;; the process Var space's Vars are shared by every
+                         ;; context and owned by none: a write is the
+                         ;; writer's own binding (`seon.sci.runtime/space-var`)
+                         (or (sci.impl.vars/owns? ctx-a var-a) (sci.impl.vars/owns? ctx-b var-a)))]
           (symbol (str ns-sym) (str sym)))
+        _ (sci/eval-string* ctx-a "(alter-var-root #'clojure.core/spit (constantly :written))")
         before (sci/eval-string*
                 ctx-b
                 "(clojure.walk/macroexpand-all '(when true :ok))")
@@ -534,6 +660,7 @@
           (catch Throwable failure
             failure))]
     (is (empty? shared-writable))
+    (is (fn? (sci/eval-string* ctx-b "clojure.core/spit")) "a shared Var written in one context keeps the other's root")
     (is (instance? Throwable attempt))
     (is (re-find #"read-only" (ex-message attempt)))
     (is (= before

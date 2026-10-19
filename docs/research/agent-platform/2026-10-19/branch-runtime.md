@@ -243,7 +243,9 @@ changed-branch rows to HEAD and stopped at a patch, `branch-runtime-arm.patch` (
 `:seon-db-nine-forms` (1.39x, one defect of the wire) and `:reuse-one-unchanged-test` (1.76x) miss the 1.3x bar. Lane
 runtime-exact (below) replaced the arm patch's two shortcuts with one exact rule (a function runs compiled only where
 nothing the branch changed is in its closed reach) and fixed the wire's `in-ns` rewrite: every row is within 1.04x of
-HEAD. P2 is partial. P3 and P4 are not approved.
+HEAD. Its independent review ([runtime-review](runtime-review.md)) found it not exact; it was reverted (a92ba5b94) and
+lane runtime-fix (below) fixed each blocker at its cause: rows within 1.13x of HEAD. P2 is partial. P3 and P4 are not
+approved.
 
 P1 attempt (lane runtime-p0-p2, 2026-10-19). The patch is `branch-runtime-p1.patch` next to this note. It adds
 `seon.sci.eval/analyse-loaded-functions!` to `acquire-program!`, the proof
@@ -628,6 +630,69 @@ Ruled out by the owner's test ("doesn't really help ... cut it"): the rows stay 
     `seon.sci.eval-test/no-src-function-a-change-can-reach-runs-its-compiled-var` replaces
     `no-sci-runnable-src-function-runs-its-compiled-var`: its oracle walks callers from the change and from run-time
     resolution, none of them runs compiled, and `seon.id/structural-digest` does.
+
+- **Lane runtime-fix (2026-10-19): the review's blockers, each fixed at its cause.** The rule stays "compiled exactly
+  where nothing the runtime changed is in the function's reach"; what the reach index and the binder did not cover now
+  falls under it or is named.
+  - **F4, the hang, was a namespace row write.** Thread dumps of the probe's check JVM showed no deadlock: the turn ran
+    the tests reaching every member of `seon.cluster.agent`, each BLOCKED on the monitor of
+    `seon.fn.analyzer/analyze`. An agent's `defn` there wrote the namespace's row with its own `deftype` class
+    (`CountedSlidingBuffer`) as an import (F4b), so the whole namespace counted as changed. Producer fix:
+    `seon.sci.eval/own-class-imports` names the imports a `deftype` makes as it loads, and
+    `seon.turn.batch/namespace-facts` never declares them. A namespace counts as changed for the binder only when its
+    resolution (aliases, refers, imports) differs from the program the context runs (`seon.sci.eval/plan-changes`).
+    The cost class stays, filed: `docs/seon/issues/reaching-tests-of-a-namespace-change-serialize-on-the-analyzer-monitor.md`.
+  - **F1, value definitions.** A `def`/`defonce` of `src` is a runtime row (`::runtime/kind :value`, its calls kept).
+    One whose reach holds a name changed now, or an open one not yet bound, is evaluated again from its source on a
+    fork of the runtime that holds the new analysed functions, in dependency order (`seon.sci.eval/evaluated-values`),
+    so `seon.problems/families` holds the branch's derivations. All 482 value rows evaluate in SCI (census, 170 ms);
+    78 are evaluated on a first changed runtime. The one load-time sentinel that refused this,
+    `seon.schema/register-core-predicate!`, now compares with the definition the executing runtime binds.
+  - **F2, host-bound callers.** SCI cannot run them, so they stay compiled, and the runtime names them:
+    `seon.sci.runtime/reach-index` keeps each host-bound name's reach; `::host-bound-reached` in the binder's
+    analysis and `seon.sci.eval/host-bound-reaching` (for the done rule) map each host-bound function to the changed
+    names it reaches; `seon.sci.arm/arm!` answers the write with `:seon.batch/host-bound-reached`, a batch note. The
+    note does not reach the MCP reply text yet: `docs/seon/issues/batch-notes-never-reach-the-mcp-reply.md`.
+  - **F3, macros.** The binder runs after the overlay installs the branch's own definitions (macros included), and an
+    analysis is keyed by the macro digests the runtime holds (`::held-digests`; an agent's write keys by the digest of
+    its form's source) and by how the runtime resolves the definition's namespace (`seon.sci.eval/resolver-digest`),
+    so no runtime's analysis is served to another that expands or resolves otherwise. Callers already bound are
+    analysed again when a macro they expand changes.
+  - **The namespace and Var reflection calls are run-time resolution too** (`all-ns`, `find-ns`, `ns-map`, `bound?`,
+    `var?`, `alter-var-root` and their kind): an analysed caller hands SCI Vars and namespaces, which a compiled callee
+    reads as the JVM's (`seon.problems/indexed-function-var?` threw a `ClassCastException`).
+  - **F5:** everything is analysed and evaluated before anything is bound, so a failure binds nothing.
+  - **F6:** `seon.sci.runtime-test/a-composed-runtime-answers-what-its-own-source-answers` drives
+    `seon.sci.eval/bind-analysed!` on contexts shaped as an acquired base (compiled roots, runtime rows, reach index),
+    with a macro and its caller, a value holding a helper, a value holding a caller, a higher-order caller and a
+    host-bound function, from a cold analysis cache per chain; the oracle is the whole composed source in a fresh SCI
+    context. Mutations of the binder each turn it red: no value evaluation, main's macro digests in the key, no
+    host-bound report.
+  - **F7 is not fixed: options.** Keying every `seon.cache` lookup an analysed function makes by the runtime's whole
+    delta (binding the entry points in the changed context) is correct but costs `:hub-behavior-change` 1,544 MB
+    against 885 (1.74x): the schema projection and `seon.config/effective` are derived again for the branch (about
+    1 s). Precise keying needs the deriving function's identity at the lookup, which the cache's API does not carry:
+    (1) the coarse key above; (2) a dynamic program digest bound by each analysed caller of a `seon.cache` entry point
+    (its reach's delta), which nested compiled lookups inherit as an over-key, never a wrong value; (3) leave
+    derivations shared, as on HEAD (the review's risk, unreproduced). `seon.ref/document`, the review's example, is
+    derived by the host-bound `seon.ref/parsed`, which F2 names.
+  - **Proofs, red then green.** On a dangling commit of the 011edf42f patch with the new proofs
+    (cf0bd2992): `seon.sci.eval-test/a-branch-change-is-live-through-a-value-holding-functions`,
+    `a-branch-changed-macro-is-expanded-by-its-callers` (warm and cold),
+    `a-host-bound-function-reaching-a-branch-change-is-named` red, and
+    `an-agent-change-is-live-through-its-macro-callers-and-keeps-namespace-rows` (the two `rr-probe` requests, the
+    stored imports, the agent's `defmacro` through the MCP path) did not exit in 120 s; all green with the fix.
+    `seon.sci.eval-test` and `seon.sci.branch-execution-test` with long tests: the 9 reds 011edf42f accepted as red on
+    HEAD, no other.
+  - **Rows, one same-run pair of throwaway check JVMs, HEAD against the change (MB allocated / calls / ms):**
+
+    | Row | HEAD | change | ratio (MB) |
+    |---|---|---|---|
+    | `:unchanged-request` | 18.0 / 6,562 / 25 | 18.6 / 6,540 / 33 | 1.03x |
+    | `:reuse-one-unchanged-test` | 29.6 / 7,961 / 45 | 30.9 / 7,955 / 29 | 1.04x |
+    | `:seon-db-nine-forms` | 1,188.8 / 146,531 / 1,283 | 1,243.4 / 146,641 / 952 | 1.05x |
+    | `:hub-behavior-change` | 884.4 / 198,712 / 1,428 | 1,003.2 / 213,329 / 991 | 1.13x |
+    | `:similar-by-name-warm` | 25.8 / 7,466 / 40 | 26.5 / 7,442 / 31 | 1.03x |
 
 - **What would make the rule work:** compile what does not reach the change, not what calls nothing: on a changed
   runtime, interpret only the reverse closure of the changed names (cached analyses, so O(closure) binding) and keep

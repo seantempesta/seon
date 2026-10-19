@@ -5,6 +5,7 @@
   (:require [sci.core :as sci]
             [sci.ctx-store]
             [seon.db :as db]
+            [seon.id :as id]
             [seon.instrument :as instrument]
             [seon.program :as program]
             [seon.schema :as schema]
@@ -111,10 +112,12 @@
   cause beside the write as `:seon.batch/arm-error`. Answers the write with what arming
   did. It reads the Var as `ctx` binds it. The base's callers of a function the
   write defines apart from the base's Var are re-interpreted onto it
-  (`seon.sci.eval/reinterpret-inherited-callers!`), and its source callers and
-  the tests reaching them are bound to run interpreted (`seon.sci.eval/interpret-affected!`),
-  so the forms after the write call the definition through them; a loaded
-  platform caller stays compiled and sees it after merge and reload. When the
+  (`seon.sci.eval/reinterpret-inherited-callers!`), and every loaded definition
+  its change can reach, its source callers and the tests reaching them run
+  interpreted (`seon.sci.eval/interpret-affected!`), so the forms after the
+  write call the definition through them; a host-bound function reaching it
+  runs main's definition, which the write answers as
+  `:seon.batch/host-bound-reached`. When the
   write is a predicate `ctx` now holds apart, the installed functions whose
   contract reaches it re-arm on it (`rearm-dependents!`); a failure there is
   the write's `:seon.batch/arm-error` too. A write of the definition the
@@ -146,9 +149,15 @@
         (as-> armed
               (try
                 (eval/reinterpret-inherited-callers! ctx working sym v)
-                (eval/interpret-affected! ctx working [sym])
-                (rearm-dependents! ctx sym @projection working)
-                armed
+                (let [source (get-in request [:seon.batch/world :seon.batch/source])
+                      acquired (eval/interpret-affected! ctx working {sym (when source (id/digest 32 [source]))})
+                      ;; a host-bound function runs main's definitions: this
+                      ;; write is not live through it, and no branch test proves it
+                      reached (into {} (filter (fn [[_ changed]] (contains? changed sym)))
+                                    (::eval/host-bound-reached (::eval/analysis acquired)))]
+                  (rearm-dependents! ctx sym @projection working)
+                  (cond-> armed
+                    (seq reached) (assoc :seon.batch/host-bound-reached (vec (sort (keys reached))))))
                 ;; a refused read of the closure or a refused interpretation
                 (catch clojure.lang.ExceptionInfo t
                   (update armed :seon.batch/arm-error #(or % (ex-message t))))))))))
@@ -165,6 +174,7 @@
             origin (assoc :seon.batch/origin (if (:line origin) origin {:reason :no-source-position}))
             (:sci.impl/member-of (meta the-var)) (assoc :seon.batch/member-of (:sci.impl/member-of (meta the-var)))
             (contains? w :seon.batch/arm-error) (assoc :seon.batch/arm-error (:seon.batch/arm-error w))
+            (contains? w :seon.batch/host-bound-reached) (assoc :seon.batch/host-bound-reached (:seon.batch/host-bound-reached w))
             (fn? root) (assoc :seon.batch/fn? true))
     :unmap {:seon.batch/op :unmap :seon.batch/sym (symbol (str namespace-symbol) (str sym))}
     :remove-ns {:seon.batch/op :remove-ns :seon.batch/ns namespace-symbol}
