@@ -11,7 +11,8 @@ digest move; the fallback deletion moves to P4b, option c); P4a landed (`ec87c55
 corrections in its section); P4b landed (`66ca5108b`, lane closed-p4b; corrections in its section); P3a-2 landed (lane guards3, the smaller cut of the patch, after
 `393e52821` deleted the catch in `seon.instrument/compiled-wrapper` that the guard census refused; it closes
 `seon.cluster/branch-declaration-changes`, 49 -> 48 open derivers); P6a landed (`f1145501b`, lane closed-p6, corrections in its section);
-P6b stopped at its design gap (lane closed-p6: census measured, options in its section); P7, P8 not started.
+P6b stopped at its design gap (lane closed-p6: census measured, options in its section) and is folded into P7 (root);
+P7 designed (lane closed-p7: the key, the predicate options, R3-R6 in its section), not implemented; P8 not started.
 
 # Closed runtime: the hybrid
 
@@ -588,24 +589,125 @@ predicates and 5 identity projections. Options, simplest first:
 - Deletes: `runtime-predicate` (51), `loaded-predicate-var` (20), most of `unloaded-predicate-functions` (44),
   `predicate-callable`'s resolution (12). After P4b and P5.
 
-### P7. The lexical exact key (platform: evaluator)
+### P7. The exact key, with P6b folded in (platform: evaluator, projection derivation)
 
-- Files: `src/seon/sci/eval.clj`, `src/seon/sci/runtime.clj`, `src/seon/sci/arm.clj`, `src/seon/cache.clj`,
-  `src/seon/db.clj` (`::builder-digest` deleted), `src/seon/turn/batch.clj`, `resources/seon/schemas/seon.batch.edn`,
-  `test/seon/sci/eval_test.clj`, `test/seon/sci/runtime_test.clj`, `test/seon/db_test.clj` (5 `builder-digest` sites).
-- First step: reproduce runtime-rereview's R1, R2 (closure, lazy seq, raw thread), R3 and the M2 chain (dangling
-  `df9737e97`, `3c79c77b8`) on a branch; each that reproduces becomes a red row of `seon.sci.eval-test`; one that does
-  not is dropped with its evidence.
-- Red rows: those rows; the composed-runtime rows (parent A/h1 then child B/h2; a branch-only predicate; an open
-  value) in `seon.sci.runtime-test/a-composed-runtime-answers-what-its-own-source-answers`.
-- Gate: `closed-runtime-rows-grow-past-no-accepted-overrun` run on parent and change in one check; the change's
-  `:hub-behavior-change` alloc <= 1.3x of 716cc7527's 897.7 MB (1,167 MB), `:seon-db-nine-forms` within 1.1x of the
-  parent, `:similar-by-name-warm` within 1.05x; the commit lowers those rows' recorded overruns to the measured values.
-  Estimate 1.13-1.28x on the hub (Opus); a measured miss stops the key for the owner.
-- Deletes: `seon.cache/*reached*`, `seon.sci.runtime/reaching`, `reached-changes`' open branch, the R4 report
-  (`seon.sci.eval/host-bound-reaching`, `::host-bound-reached`, `:seon.batch/host-bound-reached` and its three
-  `seon.batch.edn` sites, `seon.sci.runtime/host-bound-reached`, `::host-bound-reach`) with its readers in
-  `seon.sci.arm` (4), `seon.turn.batch` (2) and the two test namespaces; `::builder-digest`. After P6b.
+**Design (lane closed-p7, HEAD `a18793684`; root's decision: P6b's option 2, the runtime is the one source of
+predicates; option 1, a handed predicate map, is rejected as the R2 class).** Census taken first (babashka over the
+`(ns ...)` and top-level forms of `src` read with edamame; method in the commit): **148** call sites of the four cache
+entry points (`seon.cache/lookup` 51, `lookup-within` 5, `present` 25, `evict!` 8, with aliases), **76** deriving
+functions, **90** kinds. **10 kinds are read or evicted by a function other than the one that derives them**:
+`:seon.test.runner/result` (`seon.test/carried-results`), `seon.db/basis` (`seon.db/folded-projection`),
+`seon.render/invocation` (`seon.render/invocation`), `seon.db/projection-alias` (`seon.db/carried-projection`,
+`seon.db/resolved`), `seon.sci.runtime/analysed` (`seon.sci.runtime/bind`), `seon.embed/embedding`
+(`seon.embed/layered`), `seon.test.runner/current-result-head` (`seon.test.runner/current-results`),
+`seon.test.runner/reach-index-by-revision` (`seon.test.runner/reach-graph`), and the kind-valued sites of
+`seon.db/content-projection` and `seon.db/nearest-base`. Other counts: `seon.cache/*reached*` 2 `src` sites,
+`seon.sci.runtime/reaching` 2, the R4 report 20 `src` + 3 test lines, `::builder-digest` 8 `src` + 5 test lines.
+
+#### The key: one code identity per runtime, bound in the runtime's own context
+
+A derivation is a function of its input and of the code computing it (R1). A changed runtime binds, **in its own SCI
+context** (`seon.sci.eval/bind-analysed!`, the one place a runtime's bindings are written), the program space's Vars
+of the four entry points `seon.cache/lookup`, `lookup-within`, `present` and `evict!` to the same functions applied to
+`[content-key changes]`, where `changes` is the runtime's whole delta (name -> digest, `::seon.sci.eval/changes`,
+already held in its program snapshot). Compiled code calls the JVM entry points with the bare content key: main's
+identity. So:
+
+- **Lexical, not dynamic (R2).** Analysed code and the runtime's own definitions hold the space Vars, so every
+  derivation their bodies make keys by the runtime they run in: a returned closure, a lazy sequence realized later,
+  a raw `Thread`, because an SCI function invoked on a thread that has no context binds its own (Phase 0, the fork's
+  `sci.impl.fns/fun`). Nothing is bound around a call, so nothing escapes it.
+- **Survives re-arming (the arm gap).** No wrapper exists: `seon.sci.arm/arm!`, `rearm-dependents!` and
+  `seon.sci.eval/fork-cluster-ctx` re-root definitions freely, and a fork copies the context's `:sci/var-bindings`, so
+  it keeps the binding. The arm-gap patch is not needed.
+- **One identity per runtime, every site agrees.** A per-definition key (each deriver keyed by the changes in its own
+  closed reach) is rejected by the census: 10 of 90 kinds are read or evicted outside their deriver, so on one runtime
+  a reader and its deriver would key one kind two ways. The delta is the runtime's code identity; within a runtime
+  every site uses it.
+- **Sharing comes from staying compiled.** A closed function whose closed reach holds no change stays compiled
+  (`seon.sci.runtime/compiled-names`) and keys by main's identity, which is exact for it; only functions that run
+  analysed key by the delta. The cost a per-definition key would save is a continuation's re-derivation of the
+  analysed derivers (a second, unrelated change), measured by the gate.
+- **Open derivers are exact too:** they run analysed on every changed runtime and key by its delta (R1 fixed for all
+  50, not only the closed). Their cost is why the fold below is a prerequisite of the gate: with the four projection
+  derivers open, the delta key re-derives every projection on a branch's first change (the "exact" row, 5.80x).
+- **Main's own code identity** across a development adoption stays `::seon.db/builder-digest` (adoption reloads the
+  JVM's code under main's key, which no runtime delta names). It is not deleted in P7; it goes when main's key carries
+  the loaded program identity (`seon.sci.eval/loaded-identity`), a P8 question.
+
+Deletes: `seon.cache/*reached*`, `seon.cache/reached-key`, `seon.sci.runtime/reaching`, the wrapper bookkeeping of
+`bind-analysed!` (`::own-roots`, `::raw`, `::wrapper`, the `reaching` merge) and `reached-changes`' use as a key.
+
+#### Predicates named in schema data: the runtime's Vars (P6b folded)
+
+The eight lookups the projection derivers reach (P6b's census: `runtime-predicate`, `loaded-predicate-var`,
+`unloaded-predicate-functions`, `identity-only-descriptors-in`, `predicate-callable`, `projection-bindings`,
+`projection-state-bindings`, `core-predicate-registered?`) ask the JVM for a Var by name. Two mechanisms close them;
+both keep Malli given callables, never symbols.
+
+1. **Routed by the running runtime (root's option 2 as stated).** A predicate symbol is bound to the program space's
+   one SCI Var for that name (`seon.sci.runtime/space-var`): a call reads the executing runtime's binding (an analysed
+   or own definition) and otherwise the Var's root, the loaded definition. The projection is then one value for every
+   runtime (nothing runtime-specific is captured, so its key needs no predicate digest), and
+   `seon.sci.kernel/context-bound-projection`, `held-apart-var`, `seon.schema/with-bound-predicates` and its
+   `::bound-predicates` recompiles are deleted. Facts it needs that do not hold today: (a) the space Var of every
+   program predicate must exist and follow its JVM root before any projection is derived, but `seon.config/defaults`
+   compiles at namespace load, before any SCI context, and `seon.sci.eval/copy-host-var` (the space's one writer)
+   runs only at base acquisition, so a development reload leaves the root stale until the next acquisition; (b) it
+   reverses the installed rule "compiled callers and the checked writer keep the database's projection"
+   (`seon.sci.kernel/context-bound-projection`): a compiled writer called inside a
+   branch evaluation would validate with the branch's predicate. Both are owner-level.
+2. **The projection is main's; the runtime binds its own (the installed semantics, closed by construction).** The
+   derivers resolve a predicate to the loaded JVM Var through Java interop on the namespace object
+   (`clojure.lang.Namespace/find`, `.findInternedVar`), which analysed and compiled code answer identically (SCI's
+   classes are `{:allow :all}`), so the eight are closed truthfully: an analysed deriver derives what the compiled one
+   does. The runtime-specific part stays where it is installed, `context-bound-projection` over the context's own
+   bindings, keyed by the bound Vars. No namespace is loaded by a derivation (`loaded-predicate-var`'s rule becomes
+   the only one; `requiring-resolve`'s loading moves to admission, `seon.schema.edn/predicate-registered?`, where a
+   name is written). Small (eight functions in `seon.schema`), but it is not "resolves through the running runtime"
+   for compiled callers.
+
+**Recommendation: 2 now, 1 as the target once the owner amends the compiled-callers rule and the loader writes the
+space.** Not implemented by this lane (see the lane's report): it is the gate's prerequisite and the choice is the
+owner's.
+
+#### R3: macros reaching changed names run analysed
+
+`seon.sci.eval/runtime-rows!` gives macros rows (`::seon.sci.runtime/kind :macro`); a macro is due exactly when its
+closed reach holds a change, and is then bound to its analysed definition in the runtime's context, so its callers'
+analyses on that runtime expand with it. The analysis key (`seon.sci.runtime/analysis-key`) already carries
+`[macro digest]` for each expanded macro; it gains the macro's reached changes (`reached-changes` of the macro), and
+`rekeyed?` re-analyses a caller whose macro is in `reached`. Proof: R3's two probes (`seon.profile/bucket-of` reading a
+changed `seon.profile/buckets`) as rows of `seon.sci.eval-test`.
+
+#### R4: the host-bound report is deleted
+
+`seon.sci.eval/host-bound-reaching`, `::seon.sci.eval/host-bound-reached` (in `bind-analysed!`'s analysis),
+`seon.sci.runtime/host-bound-reached`, `::seon.sci.runtime/host-bound-reach` (and `reach-index`'s third argument),
+`:seon.batch/host-bound-reached` (three sites in `resources/seon/schemas/seon.batch.edn`), its readers in
+`seon.sci.arm` (3 lines) and `seon.turn.batch` (2), the rows in `seon.sci.eval-test` (2 sites) and
+`seon.sci.runtime-test` (1), and the open-derivers test's reach-index call. F2 stays the stated exception.
+
+#### R5: a `defonce` is an observation, a `def` a derivation
+
+A value row whose source is a `defonce` is never evaluated again on any runtime (it keeps the process's value; the
+57 `(defonce x (delay (requiring-resolve ...)))` seams go with their removal lanes). A `def` value is due when its
+closed reach holds a change, or, open, when the runtime's delta differs from the delta it was last evaluated under
+(today: only when not yet bound, which is R7). Proof: R5's launch-values probe and R7's shrunk generator case as rows.
+
+#### R6: the differential test drives the real path
+
+`seon.sci.runtime-test/a-composed-runtime-answers-what-its-own-source-answers` gains rows through
+`seon.sci.eval/fork-cluster-ctx`, the overlay (`derive-overlay-ctx`) and `seon.sci.arm/arm!`, a namespace whose
+resolution changes, an open value, and the M2 two-step chain (parent changes `h0` to 1, child to 2). The mutations
+M1, M2, M5, M7 of runtime-rereview and the removal of the context binding of the entry points are each red.
+
+#### Gate and order
+
+Gate unchanged: `seon.cost-estimate-test/closed-runtime-rows-grow-past-no-accepted-overrun` on parent and change in
+one check, `:hub-behavior-change` alloc <= 1.3x of 716cc7527 (1,167 MB). Order: R4 (deletion, no gate effect) ->
+predicates (2, the gate's prerequisite: closes the four projection derivers, ratchet 48 -> about 17) -> the key ->
+R3 -> R5 -> R6. The key is not committed before the fold: with the projection derivers open it is the 5.80x row.
 
 ### P8. The remaining open derivers (ordinary per lane; platform for evaluator and runner)
 
