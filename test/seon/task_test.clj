@@ -18,6 +18,7 @@
             [seon.step :as step]
             [seon.task :as task]
             [seon.test]
+            [seon.test.runner :as runner]
             [seon.test-support :as test-support]))
 
 (def ^:private task-path "resources/seon/tasks/tq.tree.edn")
@@ -716,6 +717,25 @@
                 (finally (seon.cluster.store/release-branch! opened))))
          (is (= [dynamic] (current (db/branch-database (db/db connection) branch))) "the branch head opened from main reads it current")
          (finally (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))))
+
+(deftest a-handoff-is-judged-afresh-once-its-next-tasks-proof-has-run
+  ;; Live run 13 Broken 1 (`docs/research/agent-platform/2026-10-19/live-run-13.md`): a Prove handoff run before its
+  ;; next task's proof had any result was red, and that red was reused after the proof ran, because a task reader's
+  ;; identity held the next task's proofs but not their results
+  (test-support/with-database
+   (fn [connection]
+     (let [handoff 'seon.step.prove-test/handoff successor 'tq.nextproof/successor
+           identity-of #(get (runner/reach-digests (db/db connection) [handoff] {} 'tq.chain/prove) handoff)]
+       (test-support/task-input connection [{:db/id -1 :seon.task/ns 'tq.chain :seon.task/name "prove" :seon.task/plan "## Problem\n\nP."
+                                             :seon.task/proofs #{handoff} :seon.task/next -2}
+                                            {:db/id -2 :seon.task/ns 'tq.chain :seon.task/name "implement" :seon.task/plan "## Problem\n\nP."
+                                             :seon.task/proofs #{successor}}] 'tq.chain/prove)
+       (test-support/declare-source! connection 'tq.nextproof "(ns tq.nextproof (:require [clojure.test :refer [deftest is]]))\n(deftest successor (is (= 1 1)))\n")
+       (let [before (identity-of)]
+         (is (string? before) "the handoff reads its task, so its identity keys the task's input")
+         (is (= before (identity-of)) "an unchanged input is one identity")
+         (task-run! connection #{successor} nil)
+         (is (not= before (identity-of)) "the next task's proof result is part of what the handoff reads: a new identity, so the earlier result is not reused"))))))
 
 (deftest a-tasks-revision-is-its-content-on-an-as-of-view
   ;; Lane identity-stable (064809752): `seon.task/task-revision` answered nil on an as-of view of the very basis

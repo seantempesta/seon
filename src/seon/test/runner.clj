@@ -1387,20 +1387,26 @@
       :seon.test/unknown "task input"
       :seon.error/offending sym})))
 
+(declare current-results)
+
 (defn- task-identity
   "What a result judging task input `input` is keyed by beside its closure, all content: the task's revision, the
-  next task's proofs and the requesting branch's program content (`program-content-digest`); the refusal when that
-  program cannot be read whole."
+  next task's proofs, the execution answering each of those proofs (`current-results`, no task; a handoff judges
+  them) and the requesting branch's program content (`program-content-digest`); the refusal when that program or
+  those results cannot be read."
   {:malli/schema [:=> [:cat :seon.test/task-input]
-                  [:or [:tuple [:maybe :string] [:vector :symbol] :seon.program/definition-digest]
-                   :seon.program/digest-map-refusal]]}
+                  [:or [:tuple [:maybe :string] [:vector :symbol] [:map-of :seon.test/sym [:maybe [:tuple [:= :seon.test.run/id] :seon.test.run/id]]] :seon.program/definition-digest]
+                   :seon.program/digest-map-refusal :seon.test/execution-error :seon.test/unknown-error :seon.error/value]]}
   [{task :seon.test/task database :seon.test/branch}]
-  (let [program (program-content-digest database)]
-    (if (:seon.error/at program)
-      program
-      [((requiring-resolve 'seon.task/task-revision) database (:seon.task/id task))
-       (vec (sort (some->> (:seon.task/next task) (db/pull database [:seon.task/proofs]) :seon.task/proofs)))
-       program])))
+  (let [program (program-content-digest database)
+        proofs (vec (sort (some->> (:seon.task/next task) (db/pull database [:seon.task/proofs]) :seon.task/proofs)))
+        results (if (seq proofs) (current-results database proofs nil) {})]
+    (cond (:seon.error/at program) program
+          (:seon.error/at results) results
+          :else [((requiring-resolve 'seon.task/task-revision) database (:seon.task/id task))
+                 proofs
+                 (into (sorted-map) (map (fn [[sym result]] [sym (:seon.test/run result)])) results)
+                 program])))
 
 (defn task-inputs
   "Each of `test-symbols` whose body calls the test namespace's task reader, mapped to the `task-input` of `task` on
