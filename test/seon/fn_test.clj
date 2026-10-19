@@ -485,28 +485,6 @@
                         {:seon.ns.import/local 'Date
                         :seon.ns.import/target-class 'java.util.Date})))))))
 
-(deftest a-quoted-name-a-function-resolves-is-a-call
-  (let [root (fixture-root)]
-    (write-source! root "sample/resolving.clj"
-                   (str "(ns sample.resolving)\n"
-                        "(defn target [] 1)\n"
-                        "(defn other [] 2)\n"
-                        "(defn quoted [] ((requiring-resolve 'sample.resolving/target)))\n"
-                        "(defn either [x] @(resolve (if x 'sample.resolving/target 'sample.resolving/other)))\n"
-                        "(defn computed [n] ((requiring-resolve (symbol \"sample.resolving\" n))))\n"
-                        "(defn both [n] [(find-var 'sample.resolving/target) (resolve (symbol n))])\n"))
-    (let [calls (into {} (keep (juxt :seon.fn/sym :seon.fn/calls))
-                      (seon.fn/program-entities {:seon.fn/roots [(.getPath root)]}))]
-      (is (= '#{clojure.core/defn sample.resolving/target} (calls 'sample.resolving/quoted))
-          "a quoted name resolved is a call of it")
-      (is (contains? (calls 'sample.resolving/either) 'clojure.core/resolve)
-          "an argument choosing between names at run time stays a run-time resolution")
-      (is (contains? (calls 'sample.resolving/computed) 'clojure.core/requiring-resolve)
-          "a name computed at run time stays a run-time resolution")
-      (is (= '#{clojure.core/defn clojure.core/resolve clojure.core/symbol sample.resolving/target}
-             (calls 'sample.resolving/both))
-          "each resolving call is judged alone"))))
-
 (deftest publication-is-first-party-only
   (let [root (fixture-root)]
     (write-source! root "first/party.clj"
@@ -2824,10 +2802,9 @@
 (deftest value-uses-are-calls-and-quoted-symbols-select-nothing
   ;; Selection by call reach (owner 2026-09-26): a function handed on as a
   ;; value (`apply`, `partial`, `comp`), a syntax-quoted body a macro expands
-  ;; and the macro use itself exercise their target, and so does a quoted
-  ;; name a function resolves (`seon.fn/quoted-resolutions`); a quoted symbol
-  ;; otherwise only names it, in a function body or in a test (the host test
-  ;; quoting the symbol its hosted agent defines selected itself without bound).
+  ;; and the macro use itself exercise their target; a quoted symbol only
+  ;; names it, in a function body or in a test (the host test quoting the
+  ;; symbol its hosted agent defines selected itself without bound).
   (with-provenance-file
     "sample/call_references.clj"
     (slurp (io/resource "test/fixtures/call_graph_fidelity/references.txt"))
@@ -2845,12 +2822,8 @@
             (is (not-any? #(= target (first %)) (:seon.fn/call-arities edges)))
             (is (= [(quote sample.call-references/reaches-references)]
                    (seon.fn/tests-reaching @connection target)))))
-        (let [target (quote sample.call-references/resolve-target)]
-          (is (contains? (set (:seon.fn/calls (entity "resolved"))) target)
-              "a quoted name a function resolves is a call of it")
-          (is (= [(quote sample.call-references/reaches-references)] (seon.fn/tests-reaching @connection target))))
-        (let [target (quote sample.call-references/mention-target)
-              edges (entity "mentioned")]
+        (let [target (quote sample.call-references/resolve-target)
+              edges (entity "resolved")]
           (is (contains? (set (:seon.fn/references edges)) target))
           (is (not (contains? (set (:seon.fn/calls edges)) target)))
           (is (= [] (seon.fn/tests-reaching @connection target))
@@ -2868,11 +2841,8 @@
           (is (contains? (affected (quote sample.call-references/apply-target))
                          (quote sample.call-references/applied))
               "a caller of a changed definition is in its closure")
-          (is (contains? (affected (quote sample.call-references/resolve-target))
-                         (quote sample.call-references/resolved))
-              "a resolved quoted name is in its resolver's closure")
-          (is (not (contains? (affected (quote sample.call-references/mention-target))
-                              (quote sample.call-references/mentioned)))
+          (is (not (contains? (affected (quote sample.call-references/resolve-target))
+                              (quote sample.call-references/resolved)))
               "a quoted mention reaches nothing: the closure an override interprets is call reach"))))))
 
 (deftest analyzer-edges-are-readable-symbols-or-no-edge

@@ -699,17 +699,19 @@ Ruled out by the owner's test ("doesn't really help ... cut it"): the rows stay 
     binds each analysed function whose closed reach holds a change as `seon.sci.runtime/reaching` (the changes its
     reach holds, `seon.sci.runtime/reached-changes`), and the runtime's own definitions with every change it holds. An
     open function keeps its key and is not bound again per change.
-  - **The open set at its cause.** `seon.fn/call-targets-by-caller` records a one-argument `requiring-resolve`,
-    `resolve` or `find-var` whose argument is quoted qualified names only as a call of those names
-    (`seon.fn/quoted-resolutions`), so the resolving function is followable; a name computed at run time, or an
-    argument choosing between names (`(resolve (if x 'a/b 'c/d))`), stays a run-time resolution. Proof:
-    `seon.fn-test/a-quoted-name-a-function-resolves-is-a-call`, red on HEAD (dangling adc38dda9).
-  - **Census, the candidate's own analysis of `src` in a check JVM (`seon.fn/program-entities`, the reach index over
-    `seon.sci.eval/run-time-resolution`):** open 2,381 of 5,078 names before, 2,353 of 5,080 after; the functions
-    calling a resolving function directly fall from 190 to 102 (`requiring-resolve` 105 to 17). Over the whole program
-    on default (src, test, script; the same rule approximated by reading each source): 3,447 of 7,683 before, 3,397
-    after. Quoted resolution was not what kept the set open: about twenty hubs that reflect on namespaces and Vars
-    named by data each sit under 1,600 to 2,200 of the open `src` names, and they stay open by the rule:
+  - **The open set: a census, no analyzer change.** An analyzer rule recording a quoted name a function resolves
+    as a call (`(requiring-resolve 'a/b)`) landed as 3ab155566 and was reverted: the owner ruled that
+    `requiring-resolve` is a hack to audit and remove, not to make followable. The census below is what the removal
+    lanes start from.
+  - **Census, HEAD's own analysis of `src` in a check JVM (`seon.fn/program-entities`, the reach index over
+    `seon.sci.eval/run-time-resolution`):** 2,381 of 5,078 `src` names are open; 190 call a run-time resolution
+    directly: `requiring-resolve` 105, `find-ns` 47, `var?` 18, `ns-resolve` 15, `find-var` 11, `ns-interns` 11,
+    `require` 8, `bound?` 7, `all-ns` 6, `var-get` 4, `alter-var-root` 3, `ns-publics` 3, `resolve` 3, one each of
+    `eval`, `create-ns`, `ns-unmap`, `ns-imports`. Over the whole program on default (src, test, script): 3,447 of
+    7,683. Of the 105 `requiring-resolve` callers, 88 name only a quoted symbol; following those as calls (the
+    reverted rule) closes only 28 `src` names (about 50 program-wide, 3,447 to 3,397), because the set is held open
+    by about twenty hubs that reflect on namespaces and Vars named by data, each with 1,600 to 2,200 of the open `src`
+    names among its callers:
     - error classification of stack frames: `seon.error.refusal/classify-namespace` (`find-ns` of a frame's
       namespace), `operation-projection`, `checking-projection`, `interpreted-frames`, `current-world`,
       `frame-function`, `var-digest`, `referenced` (`var?` over error data), `seon.error/library-names`,

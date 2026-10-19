@@ -397,65 +397,22 @@
   [first-party-functions target]
   (and target (not (contains? first-party-functions target))))
 
-(defn- span-contains?
-  "True when one analyzer entry's position lies inside another's form span."
-  [span entry]
-  (let [end-row (::analyzer/end-row span)
-        end-col (::analyzer/end-col span)
-        row (long (or (::analyzer/row entry) 0))
-        col (long (or (::analyzer/col entry) 0))
-        start-row (long (or (::analyzer/row span) 0))
-        start-col (long (or (::analyzer/col span) 0))]
-    (and (some? end-row)
-         (some? end-col)
-         (or (> row start-row)
-             (and (= row start-row) (>= col start-col)))
-         (or (< row (long end-row))
-             (and (= row (long end-row)) (<= col (long end-col)))))))
-
-(def ^:private name-resolving-calls
-  "The calls that answer the definition a qualified symbol names: given only
-  quoted names, `(requiring-resolve 'a/b)`, the call is a call of `a/b`."
-  '#{clojure.core/requiring-resolve clojure.core/resolve clojure.core/find-var})
-
-(defn- quoted-resolutions
-  "Each one-argument call of `usages` resolving a name (`name-resolving-calls`)
-  whose argument holds quoted qualified names and nothing else, to the names
-  it can resolve. A name computed at run time holds another usage or none, so
-  its call stays the resolving call itself."
-  {:malli/schema [:=> [:cat [:sequential :map]] [:map-of :map [:set :qualified-symbol]]]}
-  [usages]
-  (let [by-file (group-by ::analyzer/filename usages)]
-    (into {} (keep (fn [usage]
-                     (when (and (contains? name-resolving-calls (usage-symbol usage))
-                                (= 1 (::analyzer/arity usage)))
-                       (let [inside (filterv #(and (not (identical? % usage)) (span-contains? usage %))
-                                             (get by-file (::analyzer/filename usage)))]
-                         (when (and (seq inside) (every? ::analyzer/reference inside))
-                           [usage (into #{} (map usage-symbol) inside)])))))
-          usages)))
-
 (defn- call-targets-by-caller
-  "Each first-party caller to the names it calls (`call-target`); a name a
-  quoted symbol resolves is called (`quoted-resolutions`)."
   ([analysis first-party-functions]
    (call-targets-by-caller analysis first-party-functions nil))
   ([analysis first-party-functions resolvable-targets]
-  (let [usages (::analyzer/var-usages analysis)
-        resolved (quoted-resolutions usages)]
-    (reduce
-     (fn [calls usage]
-       (let [caller (usage-caller usage)]
-         (reduce (fn [calls target]
-                   (if (and (contains? first-party-functions caller)
-                            target
-                            (or (nil? resolvable-targets)
-                                (contains? resolvable-targets target)))
-                     (update calls caller (fnil conj #{}) target)
-                     calls))
-                 calls (get resolved usage [(call-target usage)]))))
-     {}
-     usages))))
+  (reduce
+   (fn [calls usage]
+     (let [caller (usage-caller usage)
+           target (call-target usage)]
+       (if (and (contains? first-party-functions caller)
+                target
+                (or (nil? resolvable-targets)
+                    (contains? resolvable-targets target)))
+         (update calls caller (fnil conj #{}) target)
+         calls)))
+   {}
+   (::analyzer/var-usages analysis))))
 
 (defn- keywords-by-holder
   "Qualified keywords read literally inside each analyzed declaration body.
@@ -496,6 +453,22 @@
   write entry, so transaction data a declaration asserts is lexically inside
   a usage of that seam."
   #{'seon.db/transact!})
+
+(defn- span-contains?
+  "True when one analyzer entry's position lies inside another's form span."
+  [span entry]
+  (let [end-row (::analyzer/end-row span)
+        end-col (::analyzer/end-col span)
+        row (long (or (::analyzer/row entry) 0))
+        col (long (or (::analyzer/col entry) 0))
+        start-row (long (or (::analyzer/row span) 0))
+        start-col (long (or (::analyzer/col span) 0))]
+    (and (some? end-row)
+         (some? end-col)
+         (or (> row start-row)
+             (and (= row start-row) (>= col start-col)))
+         (or (< row (long end-row))
+             (and (= row (long end-row)) (<= col (long end-col)))))))
 
 (defn- writes-by-writer
   "Literal qualified keywords each declaration carries at a write-seam call site.
