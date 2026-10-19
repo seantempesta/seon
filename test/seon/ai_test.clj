@@ -661,6 +661,24 @@
     (is (= reported (:seon.ai/response-model one-shot)) "a one-shot completion keeps the body's model")
     (is (= reported (:seon.ai/response-model streamed)) "a streamed completion keeps its chunks' model")))
 
+(deftest the-provider-build-it-reported-is-kept-from-either-transport
+  ;; live run 12: DeepSeek reported "deepseek-flash" as its model on every attempt, the name requested, so the model
+  ;; member cannot show a swap behind the name; the response's system_fingerprint names the build that served it
+  (let [build "fp_8802369eaa_prod0623_fp8_kvcache"
+        one-shot (ai/completion-text {"model" "deepseek-flash" "system_fingerprint" build
+                                      "choices" [{"message" {"content" "OK"} "finish_reason" "stop"}]})
+        streamed (#'seon.ai/streamed-completion
+                  (java.io.ByteArrayInputStream.
+                   (.getBytes (str/join "\n" [(str "data: " (json/write-str {"model" "deepseek-flash" "system_fingerprint" build
+                                                                             "choices" [{"delta" {"content" "OK"}}]}))
+                                              (str "data: " (json/write-str {"model" "deepseek-flash" "system_fingerprint" build
+                                                                             "choices" [{"delta" {} "finish_reason" "stop"}]}))
+                                              "data: [DONE]"])
+                              "UTF-8"))
+                  nil)]
+    (is (= build (:seon.ai/system-fingerprint one-shot)) "a one-shot completion keeps the body's build")
+    (is (= build (:seon.ai/system-fingerprint streamed)) "a streamed completion keeps its chunks' build")))
+
 (deftest a-reasoning-only-response-is-a-named-evidenced-error
   (let [usage {"prompt_tokens" 104
                "completion_tokens" 8
