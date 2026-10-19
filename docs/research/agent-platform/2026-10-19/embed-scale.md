@@ -1,7 +1,7 @@
 ---
 title: "Embeddings at scale: generation, space, search, and declarative embedding"
 type: research
-status: lane embed-scale (Opus), 2026-10-19; estimates and measurements on scratch stores and the embed server, no production code
+status: owner approved P1-P3 on 2026-10-19 (later phases need their own go-ahead); lane embed-p1-p3 implementing
 created: 2026-10-19
 ---
 
@@ -352,9 +352,22 @@ keys already present, so it makes no embed call.
 
 Each phase names its owner and the proof that is red until it lands. Root files them as tasks.
 
+**Phase status (lane embed-p1-p3):**
+- P1: the MLX cache cap, worker health and server error replies landed (`script/embed/`, `seon.operator/embed-server-status`).
+  Measured on 61,458 `mix` texts: the batch CLI's peak footprint fell from 84.4 GB to 5.1 GB at 536/s (499/s before);
+  the server under the load that killed it (256-text requests, 2 clients) peaked at 2.9 GB footprint (sampled every
+  2-3 s) at 340/s, and at 3.3 GB and 380/s with 1,500-text requests, a check JVM running beside it.
+  The byte-budget requests (`:seon.config.embed/request-bytes`) are blocked: a new required dial cannot be adopted
+  onto a store that holds a config entity (`seon.cluster/adoption-refuses-a-new-required-dial-on-a-store-with-a-config-entity`).
+  Until then a pass sorts its backlog by length before cutting it at `:seon.config.embed/batch-size`.
+- P2: packed segments and the conversion of the per-key store landed in `seon.embed`; the live store converts when
+  default restarts onto it.
+- P3: not started.
+- P4-P6: awaiting the owner.
+
 | phase | change | owner | red proof |
 |---|---|---|---|
-| P1 | The embed server bounds MLX memory (`mx.set_cache_limit`, a dial sized for 16 GB) and buckets across queued requests. `seon.embed/embed!` batches by a token budget instead of `:seon.config.embed/batch-size`. | `script/embed/server.py`, `seon.embed/embed!` | `seon.embed-test/a-fill-pass-sends-its-backlog-in-token-budget-requests` (requests ≤ ⌈tokens / budget⌉). Measured with `seon.profile/measure` on 10k `mix` texts: ≥400/s, against 189-352/s today, and peak footprint under the dial. |
+| P1 | The embed server bounds MLX memory (`mx.set_cache_limit`, a dial sized for 16 GB) and buckets across queued requests. `seon.embed/embed!` batches by a byte budget (`:seon.config.embed/request-bytes`, about 3.2 UTF-8 bytes per token) instead of `:seon.config.embed/batch-size`. | `script/embed/server.py`, `seon.embed/embed!` | `seon.embed-test/a-fill-pass-sends-its-backlog-in-byte-budget-requests` (shortest first, cut at the budget, a longer text alone). Measured: ≥400/s, against 189-352/s today, and peak footprint under the dial. |
 | P2 | Packed segments replace the per-key store. The present-digest set is derived from segment headers. | `seon.embed/open-store`, `embed!` | `seon.embed-test/a-fill-pass-writes-one-segment`. `seon.embed-test/unchanged-text-costs-no-request-and-no-write-after-restart` (exists in spirit as probe6; make it a row). |
 | P3 | The `:seon.embed/task` attribute property, and the fill reads the derived attribute set. Deletes `corpus-attributes`, `meaning-texts` and `name-texts` as hand lists. | schema registry, `seon.embed/fill-step` | `seon.embed-test/an-attribute-declaring-an-embed-task-is-embedded-without-a-hand-list` |
 | P4 | Index folded from transaction reports into base plus overlay, off-heap int8 SIMD scan with f16 rerank, partial answers with a pending count. | `seon.embed/index`, `nearest`, `similar-now` | `seon.embed-test/a-query-allocates-in-proportion-to-its-answer-not-the-corpus` (extends `my.program-query-test/a-warm-similar-by-name-allocates-in-proportion-to-its-answer` to 100k synthetic rows). `seon.embed-test/a-changed-text-re-embeds-only-that-text`. A measured row: 1M synthetic vectors in under 10 ms per query. |

@@ -12,7 +12,25 @@
               [:seon.config.embed/batch-size :seon.config.embed/batch-size]
               [:seon.config.embed/timeout-ms :seon.config.embed/timeout-ms]
               [:seon.config.embed/wait-ms :seon.config.embed/wait-ms]],
-             :store [:map {:description "The durable konserve store of embeddings, keyed by :seon.embed/key."}],
+             :store [:map {:description "The durable konserve store of embeddings: packed segments and their manifest (seon.embed/write-segment!)."}],
+             :segment [:fn {:error/message "must be a packed segment: int32 count and width, the digests, then the embeddings"} clojure.core/bytes?],
+             :segment-id [:string {:min 64, :max 64, :description "SHA-256 of a packed segment's bytes: its content identity and store key."}],
+             :count [:int {:min 1 :description "How many embeddings a segment holds."}],
+             :width [:int {:min 1 :description "Octets per embedding in a segment."}],
+             :row
+             [:map {:description "Where one embedding lives: its segment, its row there and the segment's count and width (seon.embed/present)."}
+              [:seon.embed/segment :seon.embed/segment-id]
+              [:seon.embed/row nat-int?]
+              [:seon.embed/count :seon.embed/count]
+              [:seon.embed/width :seon.embed/width]],
+             :layers
+             [:map {:description "The embeddings of texts by content key, by the layer that held them (seon.embed/layered)."}
+              [:seon.embed/content-keys [:vector :seon.embed/key]]
+              [:seon.embed/from-cache :seon.embed/found]
+              [:seon.embed/from-store :seon.embed/found]
+              [:seon.embed/from-server :seon.embed/found]
+              [:seon.embed/error {:optional true} :seon.embed/unreachable-error]],
+             :found [:map-of {:description "Embeddings by content key."} :seon.embed/key :seon.embed/octets],
              :request [:fn {:error/message "must be a function of settings, task and texts, like seon.embed/request!"} clojure.core/ifn?],
              :reason [:string {:min 1}],
              :unreachable-error

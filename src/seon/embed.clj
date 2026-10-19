@@ -1,8 +1,8 @@
 (ns seon.embed
   "Embeddings of text, keyed by the content they embed, and the texts nearest a
-  query by them. `seon.cache` is the hot layer, a konserve store beside the
-  cluster's Datahike store the durable one (it survives restart and reset), and
-  the embed server is reached only for text neither holds."
+  query by them. `seon.cache` is the hot layer, packed segments in a konserve
+  store beside the cluster's Datahike store the durable one (it survives restart
+  and reset), and the embed server is reached only for text neither holds."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
             [clojure.data.json :as json]
@@ -21,7 +21,7 @@
            [java.nio ByteBuffer ByteOrder FloatBuffer]
            [java.nio.charset StandardCharsets]
            [java.time Duration]
-           [java.util Arrays Base64 PriorityQueue]))
+           [java.util Arrays Base64 HexFormat PriorityQueue]))
 
 (set! *warn-on-reflection* true)
 
@@ -80,14 +80,107 @@
            (io/file (.getParentFile (io/file ^String path)) "embeddings")
            (io/file (System/getProperty "java.io.tmpdir") (str "seon-embeddings-" id))))))
 
+;;; The durable store: packed segments, one per fill pass. A segment is one immutable binary value under
+;;; `[:seon.embed/segment id]`, its id the SHA-256 of its bytes: a little-endian int32 count n and int32 width w,
+;;; then n 32-byte digests (the content keys), then n embeddings of w octets in the same order. The manifest
+;;; `:seon.embed/segments` lists the segment ids in write order.
+
+(def ^:private digest-width
+  "Bytes per content key in a segment: a SHA-256 digest."
+  32)
+
+(defn segment
+  "The packed segment of the embeddings `found` holds by content key, in key order."
+  {:malli/schema [:=> [:cat :seon.embed/found] :seon.embed/segment]}
+  [found]
+  (let [rows (sort-by key found)
+        width (alength ^bytes (val (first rows)))
+        buffer (.order (ByteBuffer/allocate (+ 8 (* (count rows) (+ digest-width width)))) ByteOrder/LITTLE_ENDIAN)]
+    (.putInt buffer (count rows))
+    (.putInt buffer width)
+    (run! #(.put buffer (.parseHex (HexFormat/of) ^String (key %))) rows)
+    (run! #(.put buffer ^bytes (val %)) rows)
+    (.array buffer)))
+
+(defn- segment-rows
+  "Each content key segment `id` of `store` holds, with its segment, row and width: read from its header alone."
+  {:malli/schema [:=> [:cat :seon.embed/store :seon.embed/segment-id] [:map-of :seon.embed/key :seon.embed/row]]}
+  [store id]
+  (let [head (.order (ByteBuffer/wrap (k/bget-range store [::segment id] 0 8 {:sync? true})) ByteOrder/LITTLE_ENDIAN)
+        n (.getInt head)
+        width (.getInt head)
+        ^bytes digests (k/bget-range store [::segment id] 8 (* n digest-width) {:sync? true})
+        hex (HexFormat/of)]
+    (into {} (map (fn [row]
+                    [(.formatHex hex digests (int (* row digest-width)) (int (* (inc row) digest-width)))
+                     {::segment id ::row row ::count n ::width width}]))
+          (range n))))
+
+(defn- segment-ids
+  "The ids of `store`'s segments, in write order."
+  {:malli/schema [:=> [:cat :seon.embed/store] [:vector :seon.embed/segment-id]]}
+  [store]
+  (k/get store ::segments [] {:sync? true}))
+
+(defn present
+  "Where each embedding `store` holds lives, by content key: derived once per manifest, from the previous
+  manifest's answer and the newest segment's header when that answer is held."
+  {:malli/schema [:=> [:cat :seon.embed/store] [:map-of :seon.embed/key :seon.embed/row]]}
+  [store]
+  (let [ids (segment-ids store)]
+    (seon.cache/lookup ::present ids #(+ 64 (* 192 (count %)))
+                       (fn [] (if-let [before (and (seq ids) (seon.cache/present ::present (pop ids)))]
+                                (merge before (segment-rows store (peek ids)))
+                                (transduce (map #(segment-rows store %)) merge {} ids))))))
+
+(defn- stored-octets
+  "The octets of each of `rows` (content key to where it lives in `store`): one range read per segment,
+  spanning that segment's lowest to highest wanted row."
+  {:malli/schema [:=> [:cat :seon.embed/store [:map-of :seon.embed/key :seon.embed/row]]
+                  :seon.embed/found]}
+  [store rows]
+  (into {} (mapcat (fn [[id wanted]]
+                     (let [{n ::count width ::width} (val (first wanted))
+                           low (transduce (map (comp ::row val)) min Long/MAX_VALUE wanted)
+                           high (transduce (map (comp ::row val)) max -1 wanted)
+                           start (+ 8 (* n digest-width) (* low width))
+                           ^bytes span (k/bget-range store [::segment id] start (* (inc (- high low)) width) {:sync? true})]
+                       (map (fn [[content-key {::keys [row]}]]
+                              (let [from (* (- row low) width)]
+                                [content-key (Arrays/copyOfRange span (int from) (int (+ from width)))]))
+                            wanted))))
+        (group-by (comp ::segment val) rows)))
+
+(defn write-segment!
+  "Write the segment of `found` to `store` and append its id to the manifest; the id."
+  {:malli/schema [:=> [:cat :seon.embed/store :seon.embed/found] :seon.embed/segment-id]}
+  [store found]
+  (let [packed (segment found)
+        id (schema/sha-256 [packed])]
+    (k/bassoc store [::segment id] packed {:immutable? true} {:sync? true})
+    (k/update store ::segments #(conj (or % []) id) {:sync? true})
+    id))
+
+(defn convert!
+  "Pack the embeddings `store` holds in the per-key layout (one content key per stored value) into one segment,
+  then delete them; how many it moved. The per-key layout's conversion, run as the store opens."
+  {:malli/schema [:=> [:cat :seon.embed/store] nat-int?]}
+  [store]
+  (let [legacy (into [] (comp (map :key) (filter string?)) (k/keys store {:sync? true}))]
+    (when (seq legacy)
+      (write-segment! store (into {} (map (fn [content-key] [content-key (k/get store content-key nil {:sync? true})]))
+                                  legacy))
+      (run! #(k/dissoc store % {:sync? true}) legacy))
+    (count legacy)))
+
 (defn open-store
-  "The durable embedding store in directory `dir`, created when absent and
-  opened once per process. Its writes skip the fsync: a write a crash loses
-  costs one re-embed of its text."
+  "The durable embedding store in directory `dir`, created when absent, converted from the per-key layout, and
+  opened once per process. Its writes skip the fsync: a segment a crash loses costs one re-embed of its texts."
   {:malli/schema [:=> [:cat [:string {:min 1}]] :seon.embed/store]}
   [dir]
   (seon.cache/lookup ::store dir (constantly 1024)
-                     #(filestore/connect-fs-store dir :opts {:sync? true} :config {:sync-blob? false})))
+                     #(doto (filestore/connect-fs-store dir :opts {:sync? true} :config {:sync-blob? false})
+                        convert!)))
 
 (defn cluster-settings
   "The embed dials of the cluster `database` belongs to (`seon.config/effective`)."
@@ -105,53 +198,81 @@
   [content-key octets]
   (seon.cache/lookup ::embedding content-key #(+ 96 (alength ^bytes %)) (constantly octets)))
 
-(defn- requested!
-  "`found` with the embeddings `request` answers for the texts of `batch`
-  (content keys, `text-of` naming each one's text), each written to `store`
-  and the process cache; the unreachable error, reduced, when it answers none."
-  {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/store :seon.embed/request :seon.embed/task
-                       [:map-of :seon.embed/key :seon.embed/text] [:map-of :seon.embed/key :seon.embed/octets]
-                       [:sequential :seon.embed/key]]
-                  :seon.schema/value]}
-  [settings store request task text-of found batch]
-  (let [answer (request settings task (mapv text-of batch))]
-    (if (error/error? answer)
-      (reduced answer)
-      (into found (map (fn [content-key octets]
-                         (k/assoc store content-key octets {:sync? true})
-                         [content-key (hot! content-key octets)])
-                       batch answer)))))
+(defn requests
+  "The content keys `missing` as embed-server requests: sorted by their text's length (`text-of`), so each request
+  holds texts of like length, then cut every `batch-size` texts."
+  {:malli/schema [:=> [:cat [:map-of :seon.embed/key :seon.embed/text] pos-int? [:vector :seon.embed/key]]
+                  [:vector [:vector :seon.embed/key]]]}
+  [text-of batch-size missing]
+  (into [] (partition-all batch-size) (sort-by #(count (text-of %)) missing)))
+
+(defn- requested
+  "The embeddings `request` answers for `missing` (content keys, `text-of` naming each one's text), in
+  `settings`' batch-size requests, and the unreachable error of the first request that answered none."
+  {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/request :seon.embed/task
+                       [:map-of :seon.embed/key :seon.embed/text] [:vector :seon.embed/key]]
+                  [:map [::found :seon.embed/found]
+                   [::error {:optional true} :seon.embed/unreachable-error]]]}
+  [settings request task text-of missing]
+  (reduce (fn [answered batch]
+            (let [answer (request settings task (mapv text-of batch))]
+              (if (error/error? answer)
+                (reduced (assoc answered ::error answer))
+                (update answered ::found into (map vector batch answer)))))
+          {::found {}}
+          (requests text-of (:seon.config.embed/batch-size settings) missing)))
+
+(defn- layered
+  "The embeddings of `texts` for `task` by content key, with how many came from each layer: the process cache,
+  then `store`'s segments, then `request` for the rest, which are retained in the process cache."
+  {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/store :seon.embed/request
+                       :seon.embed/task [:vector :seon.embed/text]]
+                  :seon.embed/layers]}
+  [settings store request task texts]
+  (let [content-keys (mapv #(embedding-key settings task %) texts)
+        distinct-keys (distinct content-keys)
+        hot (into {} (keep (fn [content-key]
+                             (when-let [octets (seon.cache/present ::embedding content-key)] [content-key octets])))
+                  distinct-keys)
+        durable-octets (stored-octets store (select-keys (present store) (remove hot distinct-keys)))
+        _ (run! (fn [[content-key octets]] (hot! content-key octets)) durable-octets)
+        missing (into [] (comp (remove hot) (remove durable-octets)) distinct-keys)
+        {::keys [found error]} (requested settings request task (zipmap content-keys texts) missing)]
+    (run! (fn [[content-key octets]] (hot! content-key octets)) found)
+    (cond-> {::content-keys content-keys ::from-cache hot ::from-store durable-octets ::from-server found}
+      error (assoc ::error error))))
+
+(defn- answer
+  "What [[layered]] found as the embeddings of its texts in order with their layer counts, or its error."
+  {:malli/schema [:=> [:cat :seon.embed/layers] [:or :seon.embed/embedded :seon.embed/unreachable-error]]}
+  [{::keys [content-keys from-cache from-store from-server error]}]
+  (if error
+    error
+    (let [found (merge from-cache from-store from-server)]
+      {:seon.embed/vectors (mapv found content-keys)
+       :seon.embed/hot (count from-cache)
+       :seon.embed/durable (count from-store)
+       :seon.embed/requested (count from-server)})))
 
 (defn embed!
-  "The embeddings of `texts` for `task`, in order, with how many came from each
-  layer: the process cache first, then `store`, then one `request` per
-  `settings`' batch-size of the rest, each written to `store` and the cache
-  once. Text repeated within `texts` is requested once. The unreachable error
-  when the embed server is needed and does not answer."
+  "The embeddings of `texts` for `task`, in order, with how many came from each layer: the process cache first,
+  then `store`'s segments, then `settings`' batch-size requests for the rest, written to `store` as one segment
+  and to the cache. Text repeated within `texts` is requested once. The unreachable error when the embed server
+  is needed and does not answer; what it answered before is still written."
   {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/store :seon.embed/request
                        :seon.embed/task [:vector :seon.embed/text]]
                   [:or :seon.embed/embedded :seon.embed/unreachable-error]]}
   [settings store request task texts]
-  (let [content-keys (mapv #(embedding-key settings task %) texts)
-        hot (into {} (keep (fn [content-key]
-                             (when-let [octets (seon.cache/present ::embedding content-key)] [content-key octets])))
-                  (distinct content-keys))
-        durable (into {} (keep (fn [content-key]
-                                 (when-let [octets (k/get store content-key nil {:sync? true})]
-                                   [content-key (hot! content-key octets)])))
-                      (into [] (comp (distinct) (remove hot)) content-keys))
-        text-of (zipmap content-keys texts)
-        missing (into [] (comp (distinct) (remove hot) (remove durable)) content-keys)
-        requested (reduce (partial requested! settings store request task text-of)
-                          {}
-                          (partition-all (:seon.config.embed/batch-size settings) missing))]
-    (if (error/error? requested)
-      requested
-      (let [found (merge hot durable requested)]
-        {:seon.embed/vectors (mapv found content-keys)
-         :seon.embed/hot (count hot)
-         :seon.embed/durable (count durable)
-         :seon.embed/requested (count requested)}))))
+  (let [found (layered settings store request task texts)]
+    (when (seq (::from-server found)) (write-segment! store (::from-server found)))
+    (answer found)))
+
+(defn- embed-query!
+  "[[embed!]] of one query text, never written to `store`: a query embedding stays in the process cache."
+  {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/store :seon.embed/request :seon.embed/task :seon.embed/text]
+                  [:or :seon.embed/embedded :seon.embed/unreachable-error]]}
+  [settings store request task text]
+  (answer (layered settings store request task [text])))
 
 (defn- stacked
   "The index of `texts` from their embeddings: row i the embedding of text i."
@@ -233,7 +354,7 @@
                   [:or :seon.embed/neighbours :seon.embed/unreachable-error]]}
   [settings store request task texts query-task query k]
   (let [held (index settings store request task texts)
-        asked (when-not (error/error? held) (embed! settings store request query-task [query]))]
+        asked (when-not (error/error? held) (embed-query! settings store request query-task query))]
     (cond (error/error? held) held
           (error/error? asked) asked
           :else (nearest held (first (:seon.embed/vectors asked)) k))))
@@ -252,7 +373,7 @@
                                                 (if (error/error? embedded) embedded (stacked texts embedded))))
                                        #(not (error/error? %)) (:seon.config.embed/wait-ms settings) nil)
         pending? (some? (:seon.cache/pending-kind held))
-        asked (when-not (or pending? (error/error? held)) (embed! settings store request query-task [query]))]
+        asked (when-not (or pending? (error/error? held)) (embed-query! settings store request query-task query))]
     (cond pending? {:seon.embed/pending (count texts)}
           (error/error? held) held
           (error/error? asked) asked

@@ -1,6 +1,7 @@
 (ns ^{:seon/babashka true} seon.operator
   "Source-independent CLI client: argv data, one request, exact process identity."
   (:require [babashka.fs :as fs]
+            [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -2240,16 +2241,22 @@
   (let [endpoint (:seon.config.embed/endpoint (edn/read-string (slurp (io/file (program-root) "config/default.edn"))))]
     (.getPort (java.net.URI/create endpoint))))
 
-(defn- embed-healthy?
-  "Whether the embed server's /healthz answers ok within a second."
+(defn- embed-health
+  "The embed server's /healthz answer within a second, parsed: `ok` is false once its GPU worker has stopped
+  (HTTP 503); nil when nothing answers."
   [port]
   (try
     (let [client (-> (java.net.http.HttpClient/newBuilder) (.connectTimeout (java.time.Duration/ofSeconds 1)) .build)
           request (-> (java.net.http.HttpRequest/newBuilder (java.net.URI/create (str "http://127.0.0.1:" port "/healthz")))
                       (.timeout (java.time.Duration/ofSeconds 1)) .build)
           reply (.send client request (java.net.http.HttpResponse$BodyHandlers/ofString))]
-      (and (= 200 (.statusCode reply)) (str/includes? (str (.body reply)) "\"ok\": true")))
-    (catch java.io.IOException _ false)))
+      (json/parse-string (.body reply) true))
+    (catch java.io.IOException _ nil)))
+
+(defn- embed-healthy?
+  "Whether the embed server's /healthz answers ok within a second."
+  [port]
+  (true? (:ok (embed-health port))))
 
 (defn- recorded-embed-server
   "The recorded embed server's identity under `root`, or nothing."
@@ -2258,12 +2265,21 @@
     (when (.isFile file) (edn/read-string (slurp file)))))
 
 (defn embed-server-status
-  "The embed server as observed: :healthy, or :unreachable with its port; never a restart."
+  "The embed server as observed, never a restart: :healthy; :worker-stopped when it answers but its GPU worker
+  has stopped; :down when its recorded process has exited; else :unreachable. Its MLX memory figures when it
+  answers."
   [root]
-  (let [port (embed-port)]
-    (cond-> {:seon.operator.embed/state (if (embed-healthy? port) :healthy :unreachable)
+  (let [port (embed-port)
+        health (embed-health port)
+        recorded (recorded-embed-server root)]
+    (cond-> {:seon.operator.embed/state (cond (true? (:ok health)) :healthy
+                                              health :worker-stopped
+                                              (and recorded (nil? (matching-handle recorded true))) :down
+                                              :else :unreachable)
              :seon.operator.embed/port port}
-      (recorded-embed-server root) (assoc :seon.operator.embed/process (recorded-embed-server root)))))
+      (:memory health) (assoc :seon.operator.embed/memory (:memory health))
+      (:last_error health) (assoc :seon.operator.embed/last-error (:last_error health))
+      recorded (assoc :seon.operator.embed/process recorded))))
 
 (defn embed-server-start!
   "Launch the embed server under `root` when its health endpoint does not answer and no recorded one is still

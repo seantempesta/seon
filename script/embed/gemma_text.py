@@ -10,6 +10,8 @@ with three changes for speed, none changing the math:
   * masks are built once per batch and omitted when there is no padding.
 Depends only on mlx, numpy and tokenizers (no mlx_vlm, torch or transformers at runtime).
 
+Every process that loads it calls bound_memory first: MLX's Metal buffer cache is otherwise unbounded.
+
 API:  enc = Encoder.load(DIR); vecs = enc.embed(texts, task="code", dim=256)  -> float32 [n, dim], L2-normalised.
 """
 import json, math, time
@@ -145,6 +147,18 @@ class TextModel(nn.Module):
         f = mask.astype(mx.float32)[..., None]
         e = (h * f).sum(1) / mx.maximum(f.sum(1), 1e-9)
         return e / mx.maximum(mx.linalg.norm(e, axis=-1, keepdims=True), 1e-9)
+
+
+def bound_memory(cache_bytes):
+    """Cap MLX's Metal buffer cache at `cache_bytes`: uncapped it keeps a buffer for every batch shape seen, growing
+    without bound and invisible to RSS. Returns the memory figures `memory()` reports."""
+    mx.set_cache_limit(int(cache_bytes))
+    return memory()
+
+
+def memory():
+    """MLX's active, cached and peak Metal memory, in bytes."""
+    return {"active": mx.get_active_memory(), "cache": mx.get_cache_memory(), "peak": mx.get_peak_memory()}
 
 
 def round_len(n, W=512):

@@ -33,7 +33,8 @@
  :seon.config.flow.io/concurrency 64
  :seon.config.flow.io/queue-depth 64
 
- ; The embed server (EmbeddingGemma 2 text path, MLX bf16): 5.7 ms per 100-token text, about 1,000 per second batched.
+ ; The embed server (EmbeddingGemma 2 text path, MLX bf16): about 500 embeddings per second on code forms (166
+ ; tokens), 1,500 on declaration docs (67 tokens), 3,000 on names, fed whole backlogs.
  ; Store 256 Matryoshka dimensions (1 MTEB point below 768, a third of the bytes).
  :seon.config.embed/endpoint "http://127.0.0.1:8701/v1/embed"
  :seon.config.embed/model "eg2-text-bf16"

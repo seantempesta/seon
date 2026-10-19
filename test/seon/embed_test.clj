@@ -3,6 +3,8 @@
   texts by them."
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
+            [konserve.core :as k]
+            [konserve.filestore :as filestore]
             [seon.cache]
             [seon.embed :as embed]
             [seon.id :as id])
@@ -38,7 +40,14 @@
   {"seon.db/transact!" [1 0 0 0] "seon.db/transcat!" [0.9 0.1 0 0] "seon.db/pull" [0 1 0 0]
    "seon.cache/lookup" [0 0 1 0] "seon.db/q" [0.1 0.9 0 0]})
 
-(deftest a-text-is-requested-once-across-a-restart
+(defn- restart!
+  "What a process restart leaves of the embeddings: nothing held in the process cache."
+  {:malli/schema [:=> [:cat] :nil]}
+  []
+  (seon.cache/evict-kinds! #{:seon.embed/embedding :seon.embed/present :seon.embed/store})
+  nil)
+
+(deftest unchanged-text-costs-no-request-and-no-write-after-restart
   ;; The request is the external effect, passed as a value that counts its texts at the edge.
   (let [dir (temp-dir)
         dials (settings)
@@ -48,20 +57,52 @@
     (try
       (let [first-run (embed/embed! dials (embed/open-store dir) request "similarity" texts)
             warm (embed/embed! dials (embed/open-store dir) request "similarity" texts)
-            ;; a restart: the process cache holds nothing, the durable store everything
-            _ (seon.cache/evict-kinds! #{:seon.embed/embedding})
+            segments (k/get (embed/open-store dir) :seon.embed/segments nil {:sync? true})
+            _ (restart!)
             restarted (embed/embed! dials (embed/open-store dir) request "similarity" texts)]
-        (testing "the first run requests each distinct text once, in batches of the dial"
-          (is (= ["seon.db/transact!" "seon.db/pull" "seon.cache/lookup"] @requested))
+        (testing "the first run requests each distinct text once"
+          (is (= {"seon.db/transact!" 1 "seon.db/pull" 1 "seon.cache/lookup" 1} (frequencies @requested)))
           (is (= 3 (:seon.embed/requested first-run))))
         (testing "a warm process reads neither the store nor the server"
           (is (= {:seon.embed/hot 3 :seon.embed/durable 0 :seon.embed/requested 0} (dissoc warm :seon.embed/vectors))))
-        (testing "a restart makes zero embed calls for unchanged text"
+        (testing "a restart makes zero embed calls and zero writes for unchanged text"
           (is (= {:seon.embed/hot 0 :seon.embed/durable 3 :seon.embed/requested 0} (dissoc restarted :seon.embed/vectors)))
           (is (= 3 (count @requested)))
+          (is (= segments (k/get (embed/open-store dir) :seon.embed/segments nil {:sync? true})))
           (is (= (mapv vec (:seon.embed/vectors first-run)) (mapv vec (:seon.embed/vectors restarted)))))
         (testing "another task is another content key"
           (is (= 3 (:seon.embed/requested (embed/embed! dials (embed/open-store dir) request "code" texts))))))
+      (finally
+        (run! io/delete-file (reverse (file-seq (io/file dir))))))))
+
+(deftest a-fill-pass-writes-one-segment
+  (let [dir (temp-dir)
+        dials (settings)
+        request (fn [_settings _task texts] (mapv (comp unit axes) texts))
+        segments #(k/get (embed/open-store dir) :seon.embed/segments [] {:sync? true})]
+    (try
+      (embed/embed! dials (embed/open-store dir) request "similarity" (vec (keys axes)))
+      (is (= 1 (count (segments))) "five texts in three requests are one segment")
+      (embed/embed! dials (embed/open-store dir) request "similarity" ["seon.db/pull" "seon.db/q"])
+      (is (= 1 (count (segments))) "a pass with nothing to request writes nothing")
+      (finally
+        (run! io/delete-file (reverse (file-seq (io/file dir))))))))
+
+(deftest a-store-of-one-value-per-embedding-converts-to-one-segment-as-it-opens
+  (let [dir (temp-dir)
+        dials (settings)
+        texts ["seon.db/pull" "seon.db/q"]
+        request (fn [_settings _task _texts] (throw (ex-info "no request expected" {})))]
+    (try
+      (let [legacy (filestore/connect-fs-store dir :opts {:sync? true})]
+        (run! #(k/assoc legacy (embed/embedding-key dials "similarity" %) ((comp unit axes) %) {:sync? true}) texts))
+      (let [store (embed/open-store dir)
+            converted (embed/embed! dials store request "similarity" texts)]
+        (is (= {:seon.embed/hot 0 :seon.embed/durable 2 :seon.embed/requested 0} (dissoc converted :seon.embed/vectors)))
+        (is (= (mapv (comp vec unit axes) texts) (mapv vec (:seon.embed/vectors converted))))
+        (is (= [:seon.embed/segments [:seon.embed/segment (first (k/get store :seon.embed/segments nil {:sync? true}))]]
+               (sort-by str (map :key (k/keys store {:sync? true}))))
+            "the per-embedding values are gone, one segment and its manifest remain"))
       (finally
         (run! io/delete-file (reverse (file-seq (io/file dir))))))))
 
