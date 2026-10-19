@@ -3,6 +3,7 @@
   member's branch through the agent entrance and unlinks it after the body."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [datahike.api :as d]
             [datahike.connections :as connections]
             [seon.cluster.registry :as registry]
             [seon.config :as config]
@@ -210,6 +211,82 @@
          (is (some? (support/await-event! connections/*connections* ::world-released (complement held?)))
              "its exit releases its branch and then the request's world")
          (finally (.countDown gate)))))))
+
+;; The release of a member is the boundary of its own thread: a refused release is recorded as Seon's own error,
+;; on the request's thread and on the watcher that observes a late exit. A member that holds a second connection to
+;; its own branch makes its release fail for real: the branch's retirement is refused while that connection is open
+;; (`seon.cluster.registry/retire-branch!`, ::cluster-connected).
+
+(def ^:dynamic ^:private *leaked*
+  "The promise a member delivers its second connection to its own branch to, bound only by the request that leaks it."
+  nil)
+
+(defn- hold-a-second-connection!
+  "Run alone, true at once; under a request binding `*leaked*`, deliver it a second connection to the member's own
+  branch, then await `*member-gate*` when one is bound."
+  []
+  (or (nil? *leaked*)
+      (and (some? (deliver *leaked* (d/connect (:config @db/*conn*))))
+           (or (nil? *member-gate*)
+               (.await ^java.util.concurrent.CountDownLatch *member-gate* 30 java.util.concurrent.TimeUnit/SECONDS)))))
+
+(deftest a-member-holding-a-second-connection-to-its-branch
+  (is (hold-a-second-connection!)))
+
+;; Its own name and result: the request after it must execute its member, never reuse this one's record.
+(deftest a-late-member-holding-a-second-connection-to-its-branch
+  (is (hold-a-second-connection!)))
+
+(defn- release-errors
+  "The recorded errors of member releases on `connection`'s branch."
+  [connection]
+  (set (db/q '[:find [?e ...] :where [?e :seon.error/signature] [?e :seon.error/operation seon.test/release-context!]]
+             (db/db connection))))
+
+(deftest a-member-whose-release-fails-records-it-as-seons-own-error
+  (support/with-database
+   (fn [connection]
+     (let [leaked (promise)
+           member 'seon.test.one-request-test/a-member-holding-a-second-connection-to-its-branch
+           result (binding [*leaked* leaked]
+                    (sut/run {:seon.test/execution (support/execution-handle connection)
+                              :seon.test/recording-connection connection
+                              :seon.test/policy :named :seon.test/rerun? true
+                              :seon.test/identities #{member}}))]
+       (try
+         (is (realized? leaked) "the member held a second connection to its branch")
+         (is (str/includes? (str (:seon.test/failure-message (first (:seon.test/results result))))
+                            "Member cleanup failed")
+             "the release's failure reaches the member's result")
+         (is (= 1 (count (release-errors connection))) "the release's failure is recorded once as Seon's own error")
+         (finally (when (realized? leaked) (d/release @leaked))))))))
+
+(deftest ^{:seon.test/long "One request on a fixture branch whose one member stays live past the request's 8 s bound, then exits; its release on the watcher fails and is recorded; the request's admission and recording dominate."
+           :seon.test/long-ms 45000}
+  a-late-member-whose-release-fails-records-it-on-the-watcher
+  (support/with-database
+   (fn [connection]
+     (let [gate (java.util.concurrent.CountDownLatch. 1)
+           leaked (promise)
+           member 'seon.test.one-request-test/a-late-member-holding-a-second-connection-to-its-branch
+           result (binding [*member-gate* gate *leaked* leaked]
+                    (sut/run {:seon.test/execution (support/execution-handle connection)
+                              :seon.test/recording-connection connection
+                              :seon.test/policy :named
+                              :seon.test/check-time-limit-ms 8000 :seon.test/rerun? true
+                              :seon.test/identities #{member}}))]
+       (try
+         (is (= [member] (map :seon.test/sym (:seon.test/unfinished result))) "the member is live at the request's bound")
+         (is (empty? (release-errors connection)) "nothing is released while the body runs")
+         (.countDown gate)
+         ;; the watcher records the failure before it completes the member's exit
+         (is (true? (support/await-event!
+                     (future (loop [] (if (seq (release-errors connection)) true (do (Thread/sleep 20) (recur)))))
+                     ::release-recorded))
+             "the watcher's release failure is recorded as Seon's own error")
+         (is (= 1 (count (release-errors connection))) "once")
+         (finally (.countDown gate)
+                  (when (realized? leaked) (d/release @leaked))))))))
 
 (def ^:dynamic ^:private *member-written*
   "The promise a gated member delivers its write's report to, bound only by the request that gates it."

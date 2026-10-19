@@ -2503,6 +2503,20 @@
                  destructive)
            :seon.test/deferred deferred})))))
 
+(defn- release-member!
+  "Release a test member's execution handle: nil, or the release's failure, recorded once as Seon's own error
+  through `fault!`. The boundary of the release, which runs on the request's thread or on the watcher that observed
+  a body's exit after the bound, where nothing above it could catch."
+  {:seon/entrant true
+   :malli/schema [:=> [:cat :seon.agent/execution-handle [:=> [:cat :seon.error/throwable] :any]]
+                  [:maybe :seon.error/throwable]]}
+  [child fault!]
+  (try (@release-context! child)
+       nil
+       (catch Throwable failure
+         (fault! failure)
+         failure)))
+
 (defn- member-result
   "Execute one admitted member on its own branch off the captured commit.
 
@@ -2510,13 +2524,15 @@
   entrance, exactly as an isolated agent's do. The body runs on its own thread;
   the branch is released and unlinked only after that thread has been observed
   to exit. Every cleanup is attempted even when setup or another cleanup
-  fails, and each failure's cause chain reaches the member's recorded result.
-  A body still live at the bound keeps its branch; once the watcher observes
-  its exit and releases the branch, `exited!` gets any cleanup failure. The
+  fails: a release failure is recorded through `fault!` (`release-member!`)
+  and its cause chain reaches the member's result when the release ran before
+  it. A body still live at the bound keeps its branch; once the watcher
+  observes its exit and releases the branch, `exited!` records the exit. The
   answer's `:seon.test/exit` completes once the member is released: the request's
   world outlives it."
   {:malli/schema [:=> [:cat :seon.agent/execution-handle :map :seon.test/sym [:int {:min 1}]
-                       [:=> [:cat [:maybe :seon.error/throwable]] :nil] :boolean :seon.config.test.cost/top]
+                       [:=> [:cat] :nil] [:=> [:cat :seon.error/throwable] :any] :boolean
+                       :seon.config.test.cost/top]
                   [:map [:seon.test/result :seon.test.runner/captured-result]
                    [:seon.test/exit :seon.flow/future]
                    [:seon.test/timings
@@ -2525,7 +2541,7 @@
                      [:seon.test.timing/resolve-ms :seon.test.timing/resolve-ms]
                      [:seon.test.timing/run-ms :seon.test.timing/run-ms]
                      [:seon.test.timing/release-ms :seon.test.timing/release-ms]]]]]}
-  [request-handle since test-symbol remaining-ms exited! effect-attempt? top]
+  [request-handle since test-symbol remaining-ms exited! fault! effect-attempt? top]
   (let [elapsed (fn [started] (/ (- (System/nanoTime) started) 1000000.0))
         started (System/nanoTime)
         child (@acquire-context! request-handle nil
@@ -2550,10 +2566,9 @@
         ;; Owned by this function until `bounded-result` takes it.
         release! (fn [_watched?]
                    (let [started (System/nanoTime)]
-                     (try (@release-context! child)
-                          (catch Throwable failure (vreset! cleanup-failure failure)))
-                     (vreset! release-ms (elapsed started)))
-                   (.complete exit nil)
+                     (try (vreset! cleanup-failure (release-member! child fault!))
+                          (finally (vreset! release-ms (elapsed started))
+                                   (.complete exit nil))))
                    nil)
         handed? (volatile! false)
         timing (fn [resolved executed]
@@ -2601,7 +2616,7 @@
                                 {:seon.test/task-input input}))
                         (fn [watched?]
                           (release! watched?)
-                          (when watched? (exited! @cleanup-failure))
+                          (when watched? (exited!))
                           nil))))
             executed (- (elapsed started) @resolved)
             drifted (runner/schema-restore-drift
@@ -2616,17 +2631,14 @@
                                        ;; bounded once by the floor: the drift can
                                        ;; be whole registry entries
                                        (render.value/core-text drifted)))))]
-        (when-not @handed? (vreset! handed? true) (release! false))
         {:seon.test/result (cond-> (with-cleanup-failure result)
                              (not (:seon.test.run/terminated? result))
                              (assoc :seon.agent/branch (:seon.agent/branch child))
                              @evaluator (assoc :seon.test.member/evaluator @evaluator))
          :seon.test/timings (timing @resolved executed)
          :seon.test/exit exit})
-      (catch Throwable failure
-        (when-not @handed? (release! false))
-        (when-let [cleanup @cleanup-failure] (.addSuppressed failure cleanup))
-        (throw failure)))))
+      (finally
+        (when-not @handed? (release! false))))))
 
 (defn isolated-members
   "The tests a development-root JVM never runs, which the platform host does:
@@ -3193,11 +3205,10 @@
                         ;; Shared only with this batch's asynchronous exit callbacks.
                         ;; The atomic handoff fences exits racing its one recording.
                         observed (atom {::exited #{} ::results [] ::recorded? false})
-                        record-exit! (fn [test-symbol cleanup-failure]
-                                       (try (when (::recorded? (swap! observed update ::exited conj test-symbol))
-                                              (own-write! `runner/record-exit!
-                                                          (runner/record-exit! recording run-id test-symbol)))
-                                            (finally (some->> cleanup-failure (core-fault! `release-context!))))
+                        record-exit! (fn [test-symbol]
+                                       (when (::recorded? (swap! observed update ::exited conj test-symbol))
+                                         (own-write! `runner/record-exit!
+                                                     (runner/record-exit! recording run-id test-symbol)))
                                        nil)
                         captured (fn [{::keys [results exited]}]
                                    (mapv #(assoc % :seon.test.run/terminated?
@@ -3235,7 +3246,8 @@
                           (assoc outcome ::stopped (vec remaining) ::stop-cause :deadline)
                           (let [{result :seon.test/result timings :seon.test/timings exit :seon.test/exit}
                                 (member-result handle since test-symbol left
-                                               #(record-exit! test-symbol %)
+                                               #(record-exit! test-symbol)
+                                               (::fault! @custody)
                                (contains? effect-reach test-symbol)
                                (or (:seon.config.test.cost/top effective)
                                    (:seon.config.test.cost/top config/defaults)))]
