@@ -1762,6 +1762,14 @@
       (is (= '([a b]) (:seon.instrument/arglists reply)))
       (is (not (contains? reply :seon.instrument/declared-arities))))))
 
+(deftest a-name-its-namespace-declares-but-the-context-has-not-loaded-offers-the-require
+  ;; live run 12: two chains called seon.test-support/with-database five times without requiring it; the reply
+  ;; listed with-database among seon.test-support's names and never said to load the namespace
+  (let [reply (seon.error/reply-value (seon.db/db) {:seon.error/message "Unable to resolve symbol: seon.db/pull"
+                                                    :seon.program/not-found 'seon.db/pull})]
+    (is (str/includes? (str (:seon.error/fix reply)) "(require 'seon.db)")
+        "the fix names the require that loads the namespace declaring the name")))
+
 (deftest a-missing-name-with-no-near-names-has-no-namespace-list
   (let [database (seon.db/db)]
     (is (not (contains? (seon.error/reply-value database {:seon.error/message "Could not resolve symbol: nosuch.zz/undefined-sym"

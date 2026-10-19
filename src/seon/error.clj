@@ -2206,7 +2206,8 @@
     `:seon.instrument/caller`, the call's place in the agent's code.
   - `:seon.error/in-namespace`: when a name was not found, the names its
     namespace declares nearest to it by spelling, at most eight; absent
-    when it declares none.
+    when it declares none. When the namespace declares the very name, the
+    context has not loaded it, and `:seon.error/fix` names its `require`.
   - `:seon.error/nearest`: when a name was not found, first the locals in
     scope at the failing form nearest to it by spelling
     (`:seon.sci.eval/locals` of the error's data), then the calling forms
@@ -2295,6 +2296,10 @@
          arity? (contains? error :seon.instrument/declared-arities)
          ;; an empty name list is no key; a refused read is shown as it is
          in-namespace (when (and database namespace-name) (names-in database namespace-name missing))
+         ;; the namespace declares the very name: what is missing is the namespace in this context
+         unloaded (when (and (qualified-symbol? missing) (some #{(symbol (name missing))} in-namespace))
+                    (str namespace-name " declares " (name missing) ", but this context has not loaded "
+                         namespace-name ": evaluate (require '" namespace-name "), then call it again."))
          locals (when (and missing (simple-symbol? missing))
                   (nearest-locals missing (get-in error [:seon.error/data :seon.sci.eval/locals])))
          declared (when (and database missing) (nearest-declared database missing))
@@ -2315,6 +2320,7 @@
        (and (not problems) (some? member)) (assoc :seon.error/member member)
        (and (not problems) (string? (:seon.error/fix error)))
        (assoc :seon.error/fix (:seon.error/fix error))
+       unloaded (assoc :seon.error/fix unloaded)
        (and arity? (seq (:seon.instrument/arglists error)))
        (assoc :seon.instrument/arglists (:seon.instrument/arglists error))
        ;; the arglists already say which counts are declared
