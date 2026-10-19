@@ -2865,11 +2865,18 @@
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:map-of :symbol [:maybe :string]] [:set :symbol]] :map]}
   [ctx own namespaces]
   (let [snapshot (::kernel/program-snapshot ctx)
-        {rows ::runtime-rows index ::reach-index roots ::analysed-roots prior ::analysis held ::held-digests} @snapshot
+        {rows ::runtime-rows index ::reach-index roots ::analysed-roots prior ::analysis held ::held-digests
+         prior-changes ::changes wrapped-own ::own-roots} @snapshot
         held (merge held own)
         changed (into (set (keys own))
                       (when (seq namespaces)
                         (filter #(contains? namespaces (symbol (namespace %))) (::runtime/closed index))))
+        ;; every change the runtime holds, to what it is: a definition's
+        ;; digest, else (a namespace whose resolution changed) the digest of
+        ;; how this runtime resolves it
+        changes (into (or prior-changes {})
+                      (map (fn [sym] [sym (if (contains? held sym) (get held sym) (resolver-digest ctx (symbol (namespace sym))))]))
+                      changed)
         kept (runtime/compiled-names index (::compiled-kept @snapshot (::runtime/closed index)) changed)
         reached (into #{} (mapcat #(get (::runtime/reached-by index) %)) changed)
         rekeyed? (fn [row] (or (contains? namespaces (symbol (namespace (:seon.fn/sym row))))
@@ -2879,7 +2886,8 @@
                                     (not (contains? kept sym))
                                     (if (= :value kind)
                                       (or (contains? reached sym) (not (contains? roots sym)))
-                                      (or (not (contains? roots sym)) (rekeyed? row))))))
+                                      ;; bound again to key what it newly reaches
+                                      (or (not (contains? roots sym)) (rekeyed? row) (contains? reached sym))))))
               rows)
         space (runtime/program-space ctx)
         resolution (into {} (map (fn [namespace-name] [namespace-name (resolver-digest ctx namespace-name)]))
@@ -2894,7 +2902,21 @@
                                      (map (fn [row] [(:seon.fn/sym row) (runtime/analysed space (keyed row))])))
                             due)))
         values (evaluated-values ctx functions (dependency-order (filterv #(= :value (::runtime/kind %)) due)))
-        bound (merge functions values)
+        ;; a derivation is keyed by the changes its code reaches; the
+        ;; runtime's own definitions may reach any of them
+        own-roots (sci.ctx-store/with-ctx ctx
+                    (into {} (keep (fn [sym]
+                                     (when-let [sci-var (sci/resolve ctx sym)]
+                                       (let [root @sci-var
+                                             {raw ::raw wrapper ::wrapper} (get wrapped-own sym)]
+                                         (when (and (fn? root) (not (:macro (meta sci-var))))
+                                           [sym (if (identical? root wrapper) raw root)])))))
+                          (keys held)))
+        reaching (merge (runtime/reached-changes index changes (set (keys functions)))
+                        (zipmap (keys own-roots) (repeat (into #{} (map vec) changes))))
+        bound (merge (into {} (map (fn [[sym f]] [sym (if-let [reached (reaching sym)] (runtime/reaching f reached) f)]))
+                           (merge functions own-roots))
+                     values)
         analysis {::analysed-count (+ (::analysed-count prior 0) (count functions))
                   ::evaluated-count (+ (::evaluated-count prior 0) (count values))
                   ::compiled-count (count kept)
@@ -2904,12 +2926,15 @@
         (sci/bind-root! ctx (sci/resolve ctx sym) root)))
     ;; the program's own definitions, never this context's: its own
     ;; definitions differ from these (`own-bindings`)
-    (let [vars (sci.ctx-store/with-ctx ctx (mapv #(sci/resolve ctx %) (keys bound)))]
+    (let [vars (sci.ctx-store/with-ctx ctx (mapv #(sci/resolve ctx %) (keys (apply dissoc bound (keys own-roots)))))]
       (swap! (:env ctx) (fn [env] (update env ::inherited-var-bindings merge
                                           (select-keys (:sci/var-bindings env) vars)))))
     (swap! snapshot (fn [held-snapshot] (-> held-snapshot
-                                            (update ::analysed-roots merge bound)
-                                            (assoc ::compiled-kept kept ::analysis analysis ::held-digests held))))
+                                            (update ::analysed-roots merge (apply dissoc bound (keys own-roots)))
+                                            (assoc ::compiled-kept kept ::analysis analysis ::held-digests held
+                                                   ::changes changes
+                                                   ::own-roots (into {} (map (fn [[sym raw]] [sym {::raw raw ::wrapper (bound sym)}]))
+                                                                     own-roots)))))
     analysis))
 
 (defn- acquire-program!

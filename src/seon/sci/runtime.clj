@@ -85,6 +85,22 @@
   [ctx row]
   (seon.cache/lookup ::analysed (analysis-key ctx row) (constantly analysed-function-bytes) #(analyse ctx row)))
 
+(defn reaching
+  "`f`, keying every `seon.cache` derivation made while it runs by `reached`,
+  the branch changes its code reaches (`[name digest]` pairs), so no runtime
+  running other code is served it. Carries `f`'s metadata."
+  {:malli/schema [:=> [:cat :seon.instrument/callable [:set :seon.schema/value]] :seon.instrument/callable]}
+  [f reached]
+  ;; a function value a caller handed in derives with the caller's code, so
+  ;; an inner frame only adds to what its callers bound
+  (cond-> (fn [& args]
+            (let [outer seon.cache/*reached*]
+              (if (or (identical? outer reached) (and outer (every? #(contains? outer %) reached)))
+                (apply f args)
+                (binding [seon.cache/*reached* (if outer (into outer reached) reached)]
+                  (apply f args)))))
+    (meta f) (with-meta (meta f))))
+
 (defn- reach-of
   "`sym` and every program name `callees` reaches from it."
   {:malli/schema [:=> [:cat [:=> [:cat :qualified-symbol] [:sequential :qualified-symbol]] :qualified-symbol]
@@ -147,6 +163,22 @@
                    (let [reached (into #{} (filter reach) changed)]
                      (when (seq reached) [sym reached]))))
         (::host-bound-reach index)))
+
+(defn reached-changes
+  "Each name of `names` to the changes in `changes` (name -> digest) its closed
+  reach in `index` ([[reach-index]]) holds, as `[name digest]` pairs. A name
+  reaching none is absent, and so is an open name: the index cannot follow
+  its reach, and its derivations keep their keys (the branch-runtime note's
+  residual). Costs the changes' inverted reaches, never a walk."
+  {:malli/schema [:=> [:cat [:map [::closed [:set :qualified-symbol]]
+                             [::reached-by [:map-of :qualified-symbol [:set :qualified-symbol]]]]
+                       [:map-of :symbol :seon.schema/value] [:set :qualified-symbol]]
+                  [:map-of :qualified-symbol [:set :seon.schema/value]]]}
+  [index changes names]
+  (reduce-kv (fn [held changed digest]
+               (reduce #(update %1 %2 (fnil conj #{}) [changed digest])
+                       held (filter names (get (::reached-by index) changed))))
+             {} changes))
 
 (defn compiled-names
   "What a runtime running `kept` compiled may still run compiled.

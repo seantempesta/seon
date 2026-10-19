@@ -105,6 +105,9 @@
 ;;   calling main's h2; chb calls it. A branch reaching it is reported, and
 ;;   names reaching hb are not compared.
 ;; - ch hands h3 to compiled library functions (`mapv`, `reduce`).
+;; - cc derives a value through `seon.cache/lookup`, keyed by its input only,
+;;   with h0: a branch changing h0 or cc must not read main's derivation, and
+;;   main must not read the branch's.
 
 (def ^:private macro-name 'm0)
 
@@ -112,7 +115,7 @@
 
 (def ^:private value-callers '{v0 [h0] va [c0]})
 
-(def ^:private more-callers '{cv [v0] cva [va] ch [h3] hb [h2] chb [hb]})
+(def ^:private more-callers '{cv [v0] cva [va] ch [h3] hb [h2] chb [hb] cc [h0]})
 
 (defn- macro-source
   "Version `v` of the macro m0."
@@ -122,7 +125,7 @@
 
 (def ^:private shaped-names
   "Every name of the shaped program but the macro, in definition order."
-  (into program-names '[v0 va cv cva cm ch hb chb]))
+  (into program-names '[v0 va cv cva cm ch hb chb cc]))
 
 (defn- shaped-source
   "Version `v` of `program-name` in the shaped program: the macro's, a value's
@@ -139,6 +142,7 @@
     ch (str "(defn ch [x] (+ " (* 1000 (inc v)) " (reduce + (mapv h3 [x (inc x)]))))")
     hb (str "(defn hb [x] (+ " (* 1000 (inc v)) " (h2 x)))")
     chb (str "(defn chb [x] (+ " (* 1000 (inc v)) " (hb x)))")
+    cc (str "(defn cc [x] (seon.cache/lookup :rt.gen/cc [x] (constantly 1) (fn [] (+ " (* 1000 (inc v)) " (h0 x)))))")
     (source program-name v)))
 
 (defn- shaped-row
@@ -173,6 +177,7 @@
               " cv (fn [x] (+ 1000 ((:f v0) x))) cva (fn [x] (+ 1000 (va x)))"
               " cm (fn [x] (+ 1000 (+ 0 (h1 x)))) ch (fn [x] (+ 1000 (reduce + (mapv h3 [x (inc x)]))))"
               " hb (fn [x] (+ 1000 (h2 x))) chb (fn [x] (+ 1000 (hb x)))"
+              " cc (fn [x] (seon.cache/lookup :rt.gen/cc [x] (constantly 1) (fn [] (+ 1000 (h0 x)))))"
               "] {" (str/join " " (map #(str "'" % " " %) shaped-names)) "})"))))
 
 (def ^:private shaped-index
@@ -193,7 +198,7 @@
   macro or the host-bound hb) and the reach index."
   {:malli/schema [:=> [:cat] :seon.sci.eval/ctx]}
   []
-  (let [ctx (sci/fork (sci/init {}))]
+  (let [ctx (sci/fork (sci/init {:namespaces {'seon.cache {'lookup seon.cache/lookup}}}))]
     (sci.ctx-store/with-ctx ctx
       (sci/eval-string* ctx (str "(ns rt.gen) (declare " (str/join " " shaped-names) ") " (macro-source 0)))
       (doseq [program-name shaped-names]
@@ -240,10 +245,11 @@
 
 (defn- shaped-from-scratch
   "What the composition `versions` answers evaluated from its own source alone
-  in a fresh SCI context: every name interpreted, hb included."
+  in a fresh SCI context: every name interpreted, hb included, and every
+  derivation computed, never read from the cache."
   {:malli/schema [:=> [:cat [:map-of :symbol nat-int?]] :map]}
   [versions]
-  (let [ctx (sci/init {})]
+  (let [ctx (sci/init {:namespaces {'seon.cache {'lookup (fn [_kind _key _weigh derive-fn] (derive-fn))}}})]
     (sci/eval-string* ctx (str "(ns rt.gen) (declare " (str/join " " shaped-names) ") "
                                (macro-source (get versions macro-name 0)) " "
                                (str/join " " (map #(shaped-source % (get versions % 0)) shaped-names))))
@@ -267,8 +273,8 @@
         steps (gen/vector (gen/tuple (gen/choose 0 5) (gen/map (gen/elements changing) (gen/choose 0 2) {:max-elements 6})) 1 5)
         result (tc/quick-check
                 60
-                (prop/for-all [chain steps]
-                  (seon.cache/evict-kinds! #{:seon.sci.runtime/analysed})
+                (prop/for-all [chain steps backwards? gen/boolean]
+                  (seon.cache/evict-kinds! #{:seon.sci.runtime/analysed :rt.gen/cc})
                   (let [main (assoc (shaped-main) ::versions {})
                         runtimes (reduce (fn [held [pick change]]
                                            (conj held (shaped-branch (nth held (mod pick (count held))) change)))
@@ -283,7 +289,9 @@
                                 (and (= (apply dissoc expected reaching-hb) (apply dissoc answered reaching-hb))
                                      (or (not h2-changed?) (contains? reached 'rt.gen/hb))
                                      (or (contains? reached 'rt.gen/hb) (= expected answered)))))
-                            runtimes)))
+                            ;; whichever runtime derives first must not decide
+                            ;; another's cached answer
+                            (if backwards? (rseq runtimes) runtimes))))
                 :seed 20261019)]
     (is (:pass? result) "every composition answers what its own source answers")))
 
