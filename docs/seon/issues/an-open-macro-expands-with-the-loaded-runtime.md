@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed (lane runtime-fix3, item 3)
 severity: high
 created: 2026-10-20
 tags: [issue, sci, branch-runtime, review3-astra]
@@ -17,3 +17,11 @@ Red proofs: `seon.runtime-review3-astra-extra-test/a-loaded-open-macro-reads-its
 This is the open-macro case missing from R3's closed-macro fix. The existing generator's macro never performs runtime name resolution. Its key also needs to describe what an open expansion can read; fixing only the due condition does not prove reuse correct.
 
 Evidence and limits: [independent review](../../research/agent-platform/2026-10-20/runtime-review3-astra.md). Reproducible probe source: [review patch](../../research/agent-platform/2026-10-20/runtime-review3-astra-probes.patch); it is evidence, not an installed change.
+
+## Fix (lane runtime-fix3, 2026-10-20)
+
+An open macro (its reach unknown) runs analysed: `seon.sci.eval/bind-analysed!` makes it due when it has no analysed
+root, so the shared program context analyses it once (`my.background/background` and `my.test/run` on the loaded
+program) and every fork inherits it, resolving late in its own context; its callers are re-keyed by every change the
+runtime holds, since any may be what it reads. Proof `seon.sci.runtime-test/an-open-macro-expands-with-its-runtime`
+(a compiled macro finding `h` by `resolve`): red on HEAD, green with the fix.

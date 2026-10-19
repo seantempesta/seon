@@ -2909,13 +2909,16 @@
 
 (defn- dependency-order
   "The due rows `rows`, each after the rows it reads when it is produced: a
-  value's and a macro's `::runtime/calls`, the macros a function expands."
-  {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
-  [rows]
+  function after the macros it expands, a value or a macro after the due rows
+  it calls and those `reached` names for it (its reach among `rows`), which
+  its evaluation or expansion may run."
+  {:malli/schema [:=> [:cat [:vector :map] [:map-of :qualified-symbol [:set :qualified-symbol]]] [:vector :map]]}
+  [rows reached]
   (let [by-sym (into {} (map (juxt :seon.fn/sym identity)) rows)
-        reads (fn [row] (if (= :function (::runtime/kind row))
-                          (map first (::runtime/macro-digests row))
-                          (::runtime/calls row)))
+        reads (fn [{sym :seon.fn/sym kind ::runtime/kind :as row}]
+                (if (= :function kind)
+                  (map first (::runtime/macro-digests row))
+                  (concat (::runtime/calls row) (get reached sym))))
         visit (fn visit [[ordered seen :as held] sym]
                 (if (or (contains? seen sym) (not (contains? by-sym sym)))
                   held
@@ -2964,12 +2967,14 @@
   value definition holds what it computed: one whose reach holds a name
   changed now, or an open one whenever the runtime's changes differ from
   those it was last evaluated under, is evaluated again from its source on
-  `ctx`'s runtime. A macro whose closed reach holds a change runs
-  analysed, so its callers expand it with the values it reads as `ctx` holds
-  them; each root is produced after what it reads (`produced-roots`). An
+  `ctx`'s runtime. A macro whose closed reach holds a change, or an open one
+  (analysed once in the shared program context), runs analysed, so its callers expand it with the
+  values and functions it reads as `ctx` holds them; each root is produced
+  after what it reads, its whole reach (`dependency-order`, `produced-roots`). An
   analysis is keyed by its definition, by how `ctx` resolves its namespace
   (`resolver-digest`) and by each macro it expands: its digest as `ctx` holds
-  it and the changes its closed reach holds, so a changed macro, or a change
+  it and the changes its closed reach holds (every change, for an open
+  macro), so a changed macro, or a change
   a macro reads, re-analyses its callers here only and an analysis is shared
   by every context holding the same. Everything is analysed and evaluated
   before anything is bound: a failure binds nothing."
@@ -2990,8 +2995,12 @@
                       changed)
         kept (runtime/compiled-names index (::compiled-kept @snapshot (::runtime/closed index)) changed)
         reached (into #{} (mapcat #(get (::runtime/reached-by index) %)) changed)
+        ;; an open name's reach is unknown: any change may be what it reads
+        open? (fn [sym] (not (contains? (::runtime/closed index) sym)))
+        changed-now? (not= changes prior-changes)
         rekeyed? (fn [row] (or (contains? namespaces (symbol (namespace (:seon.fn/sym row))))
-                               (some (fn [[macro]] (or (contains? own macro) (contains? reached macro)))
+                               (some (fn [[macro]] (or (contains? own macro) (contains? reached macro)
+                                                       (and (open? macro) changed-now?)))
                                      (::runtime/macro-digests row))))
         due (into [] (filter (fn [{sym :seon.fn/sym kind ::runtime/kind :as row}]
                                (and (not (contains? held sym))
@@ -3000,15 +3009,28 @@
                                       :value (or (contains? reached sym)
                                                  (and (not (contains? (::runtime/closed index) sym))
                                                       (not= changes prior-changes)))
-                                      :macro (and (contains? reached sym)
+                                      :macro (and (or (contains? reached sym) (open? sym))
                                                   (or (not (contains? roots sym)) (rekeyed? row)))
                                       :function (or (not (contains? roots sym)) (rekeyed? row))))))
               rows)
         resolution (into {} (map (fn [namespace-name] [namespace-name (resolver-digest ctx namespace-name)]))
                          (distinct (map (comp symbol namespace :seon.fn/sym) due)))
         ;; the changes a macro's closed reach holds: what its expansion may read
-        reaching (fn [macro] (into (sorted-map) (filter (fn [[sym]] (contains? (get (::runtime/reached-by index) sym) macro)))
+        reaching (fn [macro] (into (sorted-map) (filter (fn [[sym]] (or (open? macro)
+                                                                        (contains? (get (::runtime/reached-by index) sym) macro))))
                                    changes))
+        ;; what a due value or macro may run while it is produced: its reach, or
+        ;; when that is unknown every due function that does not expand it
+        due-functions (into {} (comp (filter #(= :function (::runtime/kind %))) (map (juxt :seon.fn/sym identity))) due)
+        reaches? (fn [reader sym]
+                   (if (open? reader)
+                     (boolean (some->> (get due-functions sym) ::runtime/macro-digests (not-any? #(= reader (first %)))))
+                     (contains? (get (::runtime/reached-by index) sym) reader)))
+        reached-due (into {} (comp (remove #(= :function (::runtime/kind %)))
+                                   (map (fn [{reader :seon.fn/sym}]
+                                          [reader (into #{} (comp (map :seon.fn/sym) (filter #(and (not= reader %) (reaches? reader %))))
+                                                        due)])))
+                          due)
         keyed (fn [row] (assoc row
                                ::runtime/namespace-digest (resolution (symbol (namespace (:seon.fn/sym row))))
                                ::runtime/macro-digests (mapv (fn [[macro digest]] [macro (get held macro digest) (reaching macro)])
@@ -3020,7 +3042,7 @@
                   (sci.ctx-store/with-ctx ctx
                     (into {} (filter (fn [[sym]] (sci/resolve ctx sym)))
                           (runtime/keyed-entries (id/digest 32 [(into (sorted-map) changes)])))))
-        produced (produced-roots ctx entries (dependency-order due)
+        produced (produced-roots ctx entries (dependency-order due reached-due)
                                  (fn [fork row] (runtime/analysed (runtime/program-space fork) (keyed row))))
         values (into #{} (comp (filter #(= :value (::runtime/kind %))) (map :seon.fn/sym)) due)
         bound (merge entries produced)

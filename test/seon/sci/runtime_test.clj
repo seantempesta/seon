@@ -411,3 +411,74 @@
     (is (= [0 0 1 2] [(call main 'rt.scale/f0) (call main 'rt.scale/f500)
                       (call (first branches) 'rt.scale/f0) (call (first branches) 'rt.scale/f500)])
         "each runtime answers its own versions")))
+
+(defn- small-main
+  "A loaded program of `sources` ([sym kind source]) in namespace rt.small: `calls` as `:seon.fn/calls` holds them
+  (`resolve` the run-time resolution), listed callers first, each name evaluated from its source and then rooted at `roots`, its compiled
+  value (a compiled macro's root answers what main's expansion answered)."
+  {:malli/schema [:=> [:cat [:sequential [:tuple :qualified-symbol :keyword :string]] [:map-of :qualified-symbol [:set :symbol]]
+                       [:map-of :qualified-symbol :any]]
+                  :seon.sci.eval/ctx]}
+  [sources calls roots]
+  (let [ctx (sci/fork (sci/init {}))
+        rows (mapv (fn [[sym kind source]]
+                     {:seon.fn/sym sym :seon.fn/source source :seon.program/definition-digest (id/digest 64 [source])
+                      ::runtime/kind kind ::runtime/calls (get calls sym #{})
+                      ::runtime/macro-digests (vec (for [[caller-sym callees] calls :when (= caller-sym sym)
+                                                         [macro-sym kind] (map (juxt first second) sources)
+                                                         :when (and (= :macro kind) (contains? callees macro-sym))]
+                                                     [macro-sym (id/digest 64 [(some #(when (= macro-sym (first %)) (last %)) sources)])]))})
+                   sources)]
+    (sci.ctx-store/with-ctx ctx
+      (sci/eval-string* ctx (str "(ns rt.small) (declare " (str/join " " (map (comp name first) sources)) ")"))
+      ;; callees first: `sources` lists each name before what it reads
+      (doseq [[_ _ source] (reverse sources)]
+        (sci/eval-string* ctx (str "(in-ns 'rt.small) " source)))
+      (doseq [[sym v] roots] (sci/bind-root! ctx (sci/resolve ctx sym) v)))
+    ;; acquired as the shared program context is: its open definitions analysed once, with no change
+    (doto (assoc ctx :seon.sci.kernel/program-snapshot
+                 (atom {:seon.sci.eval/runtime-rows rows :seon.sci.eval/changes {}
+                        :seon.sci.eval/reach-index (runtime/reach-index calls '#{clojure.core/resolve})}))
+      (#'eval/bind-analysed! {} #{}))))
+
+(defn- small-branch
+  "A runtime forked from `parent` holding `source` as `sym`'s own definition, bound by the production binder."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol :string] :seon.sci.eval/ctx]}
+  [parent sym source]
+  (let [ctx (assoc (sci/fork parent) :seon.sci.kernel/program-snapshot (atom @(:seon.sci.kernel/program-snapshot parent)))]
+    (sci.ctx-store/with-ctx ctx (sci/eval-string* ctx (str "(in-ns 'rt.small) " source)))
+    (#'eval/bind-analysed! ctx {sym (id/digest 64 [source])} #{})
+    ctx))
+
+(defn- small-answer
+  "What `ctx` answers for `text`."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :string] :any]}
+  [ctx text]
+  (sci.ctx-store/with-ctx ctx (sci/eval-string* ctx text)))
+
+(deftest a-value-is-produced-after-its-whole-reach
+  ;; Runtime review 3 (Astra) blocker 4: `(def a-value (f))` with f -> g -> h; a branch changing h evaluates
+  ;; a-value after every due function its evaluation runs, so it holds the branch's h.
+  (seon.cache/evict-kinds! #{:seon.sci.runtime/analysed})
+  (let [main (small-main '[[rt.small/a-value :value "(def a-value (f))"] [rt.small/f :function "(defn f [] (g))"]
+                           [rt.small/g :function "(defn g [] (h))"] [rt.small/h :function "(defn h [] 1)"]]
+                         '{rt.small/a-value #{rt.small/f} rt.small/f #{rt.small/g} rt.small/g #{rt.small/h} rt.small/h #{}}
+                         {'rt.small/a-value 1 'rt.small/f (fn [] 1) 'rt.small/g (fn [] 1) 'rt.small/h (fn [] 1)})
+        query "[rt.small/a-value (rt.small/f) (rt.small/g)]"
+        branch (small-branch main 'rt.small/h "(defn h [] 2)")
+        child (small-branch branch 'rt.small/h "(defn h [] 3)")]
+    (is (= [2 2 2] (small-answer branch query)) "the branch's value holds its h")
+    (is (= [3 3 3] (small-answer child query)) "a continuation's value holds its own h")
+    (is (= [1 1 1] (small-answer main query)) "main keeps its own")))
+
+(deftest an-open-macro-expands-with-its-runtime
+  ;; Runtime review 3 (Astra) blocker 5: a macro finding its helper by name (`resolve`, open) expands, on a branch
+  ;; changing that helper, with the branch's helper, and its caller is analysed again.
+  (seon.cache/evict-kinds! #{:seon.sci.runtime/analysed})
+  (let [main (small-main '[[rt.small/m :macro "(defmacro m [] ((resolve 'rt.small/h)))"]
+                           [rt.small/f :function "(defn f [] (m))"] [rt.small/h :function "(defn h [] 1)"]]
+                         '{rt.small/f #{rt.small/m} rt.small/m #{clojure.core/resolve} rt.small/h #{}}
+                         {'rt.small/m (fn [_form _env] 1) 'rt.small/f (fn [] 1) 'rt.small/h (fn [] 1)})
+        branch (small-branch main 'rt.small/h "(defn h [] 2)")]
+    (is (= [2 2 2] (small-answer branch "[(rt.small/h) (rt.small/m) (rt.small/f)]")) "the branch's macro reads its h")
+    (is (= [1 1 1] (small-answer main "[(rt.small/h) (rt.small/m) (rt.small/f)]")) "main keeps its own")))

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed (lane runtime-fix3, item 3)
 severity: blocker
 created: 2026-10-20
 tags: [issue, sci, branch-runtime, review3-astra]
@@ -17,3 +17,11 @@ Red proofs: `seon.runtime-review3-astra-new-test/a-value-executes-its-whole-runt
 The existing generator tests values holding functions, not eager values calling a transitive chain during initialization. Producing roots before binding the destination prevents a partial destination on failure, but does not make the temporary production runtime complete.
 
 Evidence and limits: [independent review](../../research/agent-platform/2026-10-20/runtime-review3-astra.md). Reproducible probe source: [review patch](../../research/agent-platform/2026-10-20/runtime-review3-astra-probes.patch); it is evidence, not an installed change.
+
+## Fix (lane runtime-fix3, 2026-10-20)
+
+`seon.sci.eval/dependency-order` orders a due value or macro after every due row its reach holds (the reach index's
+`::reached-by`, computed once per binding in `seon.sci.eval/bind-analysed!`), not only its direct calls; an open reader
+(unknown reach) reads every due function that does not expand it. Proof `seon.sci.runtime-test/a-value-is-produced-after-its-whole-reach`
+(`(def a-value (f))`, f -> g -> h, branch and continuation through the production binder): red on HEAD (`[1 2 2]`),
+green with the fix.
