@@ -1,0 +1,288 @@
+diff --git a/src/seon/cache.clj b/src/seon/cache.clj
+index 93e655bfb..d32f8508a 100644
+--- a/src/seon/cache.clj
++++ b/src/seon/cache.clj
+@@ -88,21 +88,6 @@
+ ;;; the process scope is this Var; status reads it through [[status]].
+ (defonce ^:private process (delay (create (declared-max-bytes))))
+ 
+-(def ^:dynamic *reached*
+-  "The branch changes the executing derivation's code reaches, as a set of
+-  `[name digest]`, or nil where it reaches none: a branch runtime binds it
+-  around each analysed function whose reach holds a change
+-  (`seon.sci.runtime/reaching`), so a derivation that code makes is keyed by
+-  what it is computed with, never served to a runtime that runs other code."
+-  nil)
+-
+-(defn- reached-key
+-  "`content-key` as the executing code derives it: itself, or with the branch
+-  changes that code reaches (`*reached*`)."
+-  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
+-  [content-key]
+-  (if-let [reached *reached*] [content-key reached] content-key))
+-
+ (defn- eviction
+   "Caffeine's size-eviction policy of `held`."
+   {:malli/schema [:=> [:cat :seon.cache/cache] :seon.schema/value]}
+@@ -206,8 +191,7 @@
+   ([kind content-key weigh derive-fn] (lookup @process kind content-key weigh derive-fn some?))
+   ([kind content-key weigh derive-fn retain?] (lookup @process kind content-key weigh derive-fn retain?))
+   ([{::keys [cache] :as held} kind content-key weigh derive-fn retain?]
+-   (let [content-key (reached-key content-key)
+-         [pending mine?] (claim cache [kind content-key])]
++   (let [[pending mine?] (claim cache [kind content-key])]
+      (if mine?
+        (let [{::keys [value thrown]} (settle! held kind content-key weigh derive-fn retain? pending)]
+          (if thrown (throw thrown) value))
+@@ -238,10 +222,9 @@
+   ([kind content-key weigh derive-fn retain? deadline-ms on-complete]
+    (lookup-within @process kind content-key weigh derive-fn retain? deadline-ms on-complete))
+   ([{::keys [cache] :as held} kind content-key weigh derive-fn retain? deadline-ms on-complete]
+-   (let [content-key (reached-key content-key)
+-         [^CompletableFuture pending mine?] (claim cache [kind content-key])]
++   (let [[^CompletableFuture pending mine?] (claim cache [kind content-key])]
+      (if mine?
+-       ;; the derivation's own lookups are keyed as the reader's
++       ;; the derivation runs with the reader's bindings, its SCI context among them
+        (Thread/startVirtualThread (bound-fn [] (settle! held kind content-key weigh derive-fn retain? pending)))
+        (.increment ^LongAdder (::hits (kind-counters held kind))))
+      (try
+@@ -260,7 +243,7 @@
+                   [:=> [:cat :seon.cache/cache :qualified-keyword :seon.schema/value] :seon.schema/value]]}
+   ([kind content-key] (present @process kind content-key))
+   ([{::keys [^AsyncCache cache] :as held} kind content-key]
+-   (when-let [^CompletableFuture pending (.getIfPresent cache [kind (reached-key content-key)])]
++   (when-let [^CompletableFuture pending (.getIfPresent cache [kind content-key])]
+      (when (and (.isDone pending) (not (.isCompletedExceptionally pending)))
+        (let [value (::value (.join pending))]
+          (when (some? value) (.increment ^LongAdder (::hits (kind-counters held kind))))
+@@ -274,7 +257,7 @@
+                   [:=> [:cat :seon.cache/cache :qualified-keyword :seon.schema/value] :nil]]}
+   ([kind content-key] (evict! @process kind content-key))
+   ([{::keys [^AsyncCache cache]} kind content-key]
+-   (.remove (.asMap cache) [kind (reached-key content-key)])
++   (.remove (.asMap cache) [kind content-key])
+    nil))
+ 
+ (defn retained
+diff --git a/src/seon/sci/eval.clj b/src/seon/sci/eval.clj
+index 2521449bc..c2c69bb18 100644
+--- a/src/seon/sci/eval.clj
++++ b/src/seon/sci/eval.clj
+@@ -2851,7 +2851,7 @@
+   [ctx own namespaces]
+   (let [snapshot (::kernel/program-snapshot ctx)
+         {rows ::runtime-rows index ::reach-index roots ::analysed-roots prior ::analysis held ::held-digests
+-         prior-changes ::changes wrapped-own ::own-roots} @snapshot
++         prior-changes ::changes} @snapshot
+         held (merge held own)
+         changed (into (set (keys own))
+                       (when (seq namespaces)
+@@ -2871,8 +2871,7 @@
+                                     (not (contains? kept sym))
+                                     (if (= :value kind)
+                                       (or (contains? reached sym) (not (contains? roots sym)))
+-                                      ;; bound again to key what it newly reaches
+-                                      (or (not (contains? roots sym)) (rekeyed? row) (contains? reached sym))))))
++                                      (or (not (contains? roots sym)) (rekeyed? row))))))
+               rows)
+         space (runtime/program-space ctx)
+         resolution (into {} (map (fn [namespace-name] [namespace-name (resolver-digest ctx namespace-name)]))
+@@ -2886,22 +2885,16 @@
+                       (into {} (comp (remove #(= :value (::runtime/kind %)))
+                                      (map (fn [row] [(:seon.fn/sym row) (runtime/analysed space (keyed row))])))
+                             due)))
+-        values (evaluated-values ctx functions (dependency-order (filterv #(= :value (::runtime/kind %)) due)))
+-        ;; a derivation is keyed by the changes its code reaches; the
+-        ;; runtime's own definitions may reach any of them
+-        own-roots (sci.ctx-store/with-ctx ctx
+-                    (into {} (keep (fn [sym]
+-                                     (when-let [sci-var (sci/resolve ctx sym)]
+-                                       (let [root @sci-var
+-                                             {raw ::raw wrapper ::wrapper} (get wrapped-own sym)]
+-                                         (when (and (fn? root) (not (:macro (meta sci-var))))
+-                                           [sym (if (identical? root wrapper) raw root)])))))
+-                          (keys held)))
+-        reaching (merge (runtime/reached-changes index changes (set (keys functions)))
+-                        (zipmap (keys own-roots) (repeat (into #{} (map vec) changes))))
+-        bound (merge (into {} (map (fn [[sym f]] [sym (if-let [reached (reaching sym)] (runtime/reaching f reached) f)]))
+-                           (merge functions own-roots))
+-                     values)
++        ;; every derivation this runtime's code makes is keyed by the code it
++        ;; runs, its delta (`seon.sci.runtime/keyed-entries`); main's is the bare key
++        entries (if (empty? changes)
++                  {}
++                  (sci.ctx-store/with-ctx ctx
++                    (into {} (filter (fn [[sym]] (sci/resolve ctx sym)))
++                          (runtime/keyed-entries (id/digest 32 [(into (sorted-map) changes)])))))
++        values (evaluated-values ctx (merge functions entries)
++                                 (dependency-order (filterv #(= :value (::runtime/kind %)) due)))
++        bound (merge functions entries values)
+         analysis {::analysed-count (+ (::analysed-count prior 0) (count functions))
+                   ::evaluated-count (+ (::evaluated-count prior 0) (count values))
+                   ::compiled-count (count kept)}]
+@@ -2910,15 +2903,13 @@
+         (sci/bind-root! ctx (sci/resolve ctx sym) root)))
+     ;; the program's own definitions, never this context's: its own
+     ;; definitions differ from these (`own-bindings`)
+-    (let [vars (sci.ctx-store/with-ctx ctx (mapv #(sci/resolve ctx %) (keys (apply dissoc bound (keys own-roots)))))]
++    (let [vars (sci.ctx-store/with-ctx ctx (mapv #(sci/resolve ctx %) (keys bound)))]
+       (swap! (:env ctx) (fn [env] (update env ::inherited-var-bindings merge
+                                           (select-keys (:sci/var-bindings env) vars)))))
+     (swap! snapshot (fn [held-snapshot] (-> held-snapshot
+-                                            (update ::analysed-roots merge (apply dissoc bound (keys own-roots)))
++                                            (update ::analysed-roots merge bound)
+                                             (assoc ::compiled-kept kept ::analysis analysis ::held-digests held
+-                                                   ::changes changes
+-                                                   ::own-roots (into {} (map (fn [[sym raw]] [sym {::raw raw ::wrapper (bound sym)}]))
+-                                                                     own-roots)))))
++                                                   ::changes changes))))
+     analysis))
+ 
+ (defn- acquire-program!
+diff --git a/src/seon/sci/runtime.clj b/src/seon/sci/runtime.clj
+index 9337f9f86..aa1909245 100644
+--- a/src/seon/sci/runtime.clj
++++ b/src/seon/sci/runtime.clj
+@@ -85,21 +85,29 @@
+   [ctx row]
+   (seon.cache/lookup ::analysed (analysis-key ctx row) (constantly analysed-function-bytes) #(analyse ctx row)))
+ 
+-(defn reaching
+-  "`f`, keying every `seon.cache` derivation made while it runs by `reached`,
+-  the branch changes its code reaches (`[name digest]` pairs), so no runtime
+-  running other code is served it. Carries `f`'s metadata."
+-  {:malli/schema [:=> [:cat :seon.instrument/callable [:set :seon.schema/value]] :seon.instrument/callable]}
+-  [f reached]
+-  ;; a function value a caller handed in derives with the caller's code, so
+-  ;; an inner frame only adds to what its callers bound
+-  (cond-> (fn [& args]
+-            (let [outer seon.cache/*reached*]
+-              (if (or (identical? outer reached) (and outer (every? #(contains? outer %) reached)))
+-                (apply f args)
+-                (binding [seon.cache/*reached* (if outer (into outer reached) reached)]
+-                  (apply f args)))))
+-    (meta f) (with-meta (meta f))))
++(defn keyed-entries
++  "The `seon.cache` entry points as code of the runtime `code` names calls
++  them, by name: each content key is paired with `code`, so a derivation is
++  keyed by the code computing it and no runtime running other code is served
++  it. A changed runtime binds them in its own context
++  (`seon.sci.eval/bind-analysed!`); compiled code calls them with the bare key."
++  {:malli/schema [:=> [:cat :string] [:map-of :qualified-symbol :seon.instrument/callable]]}
++  [code]
++  (let [k (fn [content-key] [content-key code])]
++    {'seon.cache/lookup (fn ([kind content-key weigh derive-fn] (seon.cache/lookup kind (k content-key) weigh derive-fn))
++                          ([kind content-key weigh derive-fn retain?]
++                           (seon.cache/lookup kind (k content-key) weigh derive-fn retain?))
++                          ([held kind content-key weigh derive-fn retain?]
++                           (seon.cache/lookup held kind (k content-key) weigh derive-fn retain?)))
++     'seon.cache/lookup-within (fn ([kind content-key weigh derive-fn retain? deadline-ms on-complete]
++                                    (seon.cache/lookup-within kind (k content-key) weigh derive-fn retain? deadline-ms on-complete))
++                                 ([held kind content-key weigh derive-fn retain? deadline-ms on-complete]
++                                  (seon.cache/lookup-within held kind (k content-key) weigh derive-fn retain? deadline-ms
++                                                            on-complete)))
++     'seon.cache/present (fn ([kind content-key] (seon.cache/present kind (k content-key)))
++                           ([held kind content-key] (seon.cache/present held kind (k content-key))))
++     'seon.cache/evict! (fn ([kind content-key] (seon.cache/evict! kind (k content-key)))
++                          ([held kind content-key] (seon.cache/evict! held kind (k content-key))))}))
+ 
+ (defn- reach-of
+   "`sym` and every program name `callees` reaches from it."
+@@ -145,22 +153,6 @@
+                                      held (reach-of callees sym)))
+                            (transient {}) closed))}))
+ 
+-(defn reached-changes
+-  "Each name of `names` to the changes in `changes` (name -> digest) its closed
+-  reach in `index` ([[reach-index]]) holds, as `[name digest]` pairs. A name
+-  reaching none is absent, and so is an open name: the index cannot follow
+-  its reach, and its derivations keep their keys (the branch-runtime note's
+-  residual). Costs the changes' inverted reaches, never a walk."
+-  {:malli/schema [:=> [:cat [:map [::closed [:set :qualified-symbol]]
+-                             [::reached-by [:map-of :qualified-symbol [:set :qualified-symbol]]]]
+-                       [:map-of :symbol :seon.schema/value] [:set :qualified-symbol]]
+-                  [:map-of :qualified-symbol [:set :seon.schema/value]]]}
+-  [index changes names]
+-  (reduce-kv (fn [held changed digest]
+-               (reduce #(update %1 %2 (fnil conj #{}) [changed digest])
+-                       held (filter names (get (::reached-by index) changed))))
+-             {} changes))
+-
+ (defn compiled-names
+   "What a runtime running `kept` compiled may still run compiled.
+ 
+diff --git a/test/seon/sci/eval_test.clj b/test/seon/sci/eval_test.clj
+index b6021b567..c69f785c2 100644
+--- a/test/seon/sci/eval_test.clj
++++ b/test/seon/sci/eval_test.clj
+@@ -230,6 +230,55 @@
+          (is (= 3 (in-context (eval/base-ctx before) "(seon.profile/bucket 5)"))
+              "main's analysis is not the branch's: its key holds the macro it expanded"))))))
+ 
++(deftest a-branch-derivation-is-keyed-by-its-runtime-in-either-order
++  ;; Runtime re-review R1: a branch changes `seon.config/effective-in`; whichever runtime derives
++  ;; `seon.config/effective` first, the branch answers its own definition and compiled code main's.
++  (test-support/with-database
++   (fn [connection]
++     (let [before (db/db connection)
++           cluster (first (db/q '[:find [?c ...] :where [_ :seon.config/cluster ?c]] before))
++           database (branch-replacing! connection 'seon.config/effective-in
++                                       "\\(empty\\? missing\\)\\)\\s*config-effective"
++                                       "(empty? missing))\n          (assoc config-effective :seon.config.agent/max-running 777)")
++           branch (eval/base-ctx database)
++           on-branch #(in-context branch "(fn [db cn] (:seon.config.agent/max-running (seon.config/effective db cn)))"
++                                  database cluster)
++           compiled #(:seon.config.agent/max-running (config/effective database cluster))
++           main (compiled)
++           _ (seon.cache/evict-kinds! #{:seon.config/effective})
++           branch-first [(on-branch) (compiled)]
++           _ (seon.cache/evict-kinds! #{:seon.config/effective})
++           compiled-first [(compiled) (on-branch)]]
++       (is (not= 777 main) "main's definition answers main's dial")
++       (is (= [777 main] branch-first) "the branch deriving first serves compiled code nothing")
++       (is (= [main 777] compiled-first) "compiled code deriving first serves the branch nothing")))))
++
++(deftest ^{:seon.test/long "Two agent requests through MCP: five definitions deriving through seon.cache, then one call of each."
++           :seon.test/long-ms 120000}
++  an-agent-derivation-is-keyed-by-its-runtime-wherever-it-runs
++  ;; Runtime re-review R2: a derivation an agent's code makes is keyed by its runtime whether it runs in the
++  ;; definition's frame, a returned closure, a lazy sequence realized by the caller, a raw thread or a future.
++  (test-support/with-running-agent
++   (fn [running agent-id _connection]
++     (let [answer (fn [code] (test-support/mcp-replies
++                              (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
++                                                                        "arguments" {"cluster" running "agent" agent-id
++                                                                                     "mode" "sci" "code" code}})))))
++           lookup (fn [kind] (str "(seon.cache/lookup " kind " [x] (constantly 1) (fn [] (* 10 x)))"))
++           kinds [:p7.r2/direct :p7.r2/closure :p7.r2/lazy :p7.r2/thread :p7.r2/future]]
++       (answer (str "(in-ns 'seon.batch) "
++                    "(defn p7-direct \"P.\" {:malli/schema [:=> [:cat :int] :int]} [x] " (lookup :p7.r2/direct) ") "
++                    "(defn p7-closure \"P.\" {:malli/schema [:=> [:cat] :any]} [] (fn [x] " (lookup :p7.r2/closure) ")) "
++                    "(defn p7-lazy \"P.\" {:malli/schema [:=> [:cat [:sequential :int]] :any]} [xs] (map (fn [x] " (lookup :p7.r2/lazy) ") xs)) "
++                    "(defn p7-thread \"P.\" {:malli/schema [:=> [:cat :int] :int]} [x] (let [p (promise)] (.start (Thread. (fn [] (deliver p " (lookup :p7.r2/thread) ")))) @p)) "
++                    "(defn p7-future \"P.\" {:malli/schema [:=> [:cat :int] :int]} [x] @(future " (lookup :p7.r2/future) "))"))
++       (is (= [10 20 30 40 50]
++              (:seon.repl/value (last (answer (str "(in-ns 'user) [(seon.batch/p7-direct 1) ((seon.batch/p7-closure) 2) "
++                                                   "(first (seon.batch/p7-lazy [3])) (seon.batch/p7-thread 4) (seon.batch/p7-future 5)]")))))
++           "every shape derives its value")
++       (is (= (zipmap kinds (repeat nil)) (zipmap kinds (map #(seon.cache/present %1 [%2]) kinds [1 2 3 4 5])))
++           "no derivation of the agent's runtime is held under main's key")))))
++
+ (deftest an-agent-change-is-live-through-its-macro-callers-and-keeps-namespace-rows
+   ;; Runtime review F4, F4b and F3's agent row, through the real MCP path.
+   (test-support/with-running-agent
+diff --git a/test/seon/sci/runtime_test.clj b/test/seon/sci/runtime_test.clj
+index d7f7679b2..030e7a5ed 100644
+--- a/test/seon/sci/runtime_test.clj
++++ b/test/seon/sci/runtime_test.clj
+@@ -196,7 +196,8 @@
+   macro or the host-bound hb) and the reach index."
+   {:malli/schema [:=> [:cat] :seon.sci.eval/ctx]}
+   []
+-  (let [ctx (sci/fork (sci/init {:namespaces {'seon.cache {'lookup seon.cache/lookup}}}))]
++  ;; `seon.cache/lookup` is a Var, as the program space copies it, so a changed runtime binds its own
++  (let [ctx (sci/fork (sci/init {:namespaces {'seon.cache {'lookup (sci/copy-var* #'seon.cache/lookup (sci/create-ns 'seon.cache))}}}))]
+     (sci.ctx-store/with-ctx ctx
+       (sci/eval-string* ctx (str "(ns rt.gen) (declare " (str/join " " shaped-names) ") " (macro-source 0)))
+       (doseq [program-name shaped-names]

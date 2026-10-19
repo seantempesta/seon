@@ -12,7 +12,8 @@ corrections in its section); P4b landed (`66ca5108b`, lane closed-p4b; correctio
 `393e52821` deleted the catch in `seon.instrument/compiled-wrapper` that the guard census refused; it closes
 `seon.cluster/branch-declaration-changes`, 49 -> 48 open derivers); P6a landed (`f1145501b`, lane closed-p6, corrections in its section);
 P6b stopped at its design gap (lane closed-p6: census measured, options in its section) and is folded into P7 (root);
-P7 designed (lane closed-p7: the key, the predicate options, R3-R6 in its section), not implemented; P8 not started.
+P7: design and R4 landed (`6d50a5f3b`, `c23e1f807`); the key is proven and held as a patch, red only on the gate (1,595.5 MB
+against 1,167) until the predicate fold, which waits on the owner's choice of mechanism (lane closed-p7, its section); P8 not started.
 
 # Closed runtime: the hybrid
 
@@ -701,6 +702,33 @@ closed reach holds a change, or, open, when the runtime's delta differs from the
 `seon.sci.eval/fork-cluster-ctx`, the overlay (`derive-overlay-ctx`) and `seon.sci.arm/arm!`, a namespace whose
 resolution changes, an open value, and the M2 two-step chain (parent changes `h0` to 1, child to 2). The mutations
 M1, M2, M5, M7 of runtime-rereview and the removal of the context binding of the entry points are each red.
+
+#### Status and measurements (lane closed-p7, 2026-10-20, HEAD `c23e1f807`)
+
+- **R4 landed** (`c23e1f807`): the report and every reader deleted, 24 insertions / 95 deletions; check green (runtime
+  test, ratchet, the two macro rows, the gate) in 107 s.
+- **The key, proven, not committed** (patch `docs/research/agent-platform/2026-10-20/closed-p7-key.patch`, applies on
+  `c23e1f807`): `seon.sci.runtime/keyed-entries` bound by `bind-analysed!` on a changed runtime;
+  `seon.cache/*reached*`, `reached-key`, `seon.sci.runtime/reaching`, `reached-changes`, the own-roots wrapper
+  bookkeeping and the functions' rebind clause ("bound again to key what it newly reaches") deleted; the differential
+  test's `seon.cache/lookup` is a Var as the program space copies it (a plain value in `sci/init` cannot be bound per
+  context). New rows, red on HEAD (check `1b7c933d6`, HEAD plus the test file):
+  `seon.sci.eval-test/a-branch-derivation-is-keyed-by-its-runtime-in-either-order` (R1, main's dial 0: branch first
+  answered `[777 777]` for branch then compiled, compiled first `[0 0]`) and
+  `seon.sci.eval-test/an-agent-derivation-is-keyed-by-its-runtime-wherever-it-runs` (R2: closure 20, lazy 30, thread
+  40 held under main's key). With the patch (check `aac98f528`, 13 tests, 44 assertions): both green, the
+  differential test, the ratchet (48, unchanged), the macro rows, the value-holding row and
+  `no-src-function-a-change-can-reach-runs-its-compiled-var` green; **the gate red: `:hub-behavior-change` 1,595.5 MB
+  / 362,880 calls** (1.78x of 716cc7527's 897.7 MB; limit 1,167; accepted overrun 1,358.7 / 287,628). An earlier run
+  measured 1,608.7 MB / 364,453. So the key costs what the open projection derivers re-derive under a branch's delta,
+  as the design predicted (the "exact" row was 5.80x with every open function also bound again on each change).
+- **Predicate mechanism 2, not working yet** (patch `closed-p7-predicates-2.patch`, `seon.schema` only): the eight
+  lookups read the loaded JVM Var by `clojure.lang.Namespace/find` and `.getMapping`, no loading, contracts naming a
+  new predicate `seon.schema/jvm-var?`. The candidate's publication refuses ("Predicate seon.schema/jvm-var? has no
+  admitted callable in the corpus projection", from `seon.cluster/rehearse-source!` -> `seon.schema/compilable-form`):
+  a predicate a contract names must be admitted in the corpus before the contracts naming it compile, so the class
+  test needs a registered schema (as `:seon.sci.eval/sci-var` is, `[:fn seon.sci.eval/sci-var?]`) or an existing
+  predicate. Not measured past that; the census and the gate with the fold are the next lane's first numbers.
 
 #### Gate and order
 
