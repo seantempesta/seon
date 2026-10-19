@@ -783,6 +783,44 @@
          (is (= :unrunnable (:seon.task/refused refusal)) "a task with no needs is refused when its runnable view is incomplete")
          (is (some? (get-in (:seon.task/explanation refusal) [:seon.task/proofs])) "the explanation names the missing member"))))))
 
+(deftest a-filed-tasks-four-maps-chain-as-design-prove-and-implement
+  ;; Task-system brief 2026-10-19 (docs/research/agent-platform/2026-10-19/task-system-brief.md, Broken 2): chain! of
+  ;; from-filed's four needs-linked maps threw "Nothing found for entity id" after forking its branch. Until T3b the
+  ;; installed chain links by position and root's final merge is its merge, so its needs and its merge task go.
+  (test-support/with-database
+   (fn [connection]
+     (let [store (:seon.store/store (test-support/execution-handle connection))
+           _ (test-support/transacted! connection (test-support/agent-tx (db/db connection) "root"))
+           handle #(task/task-handle 'tq.filed %)
+           _ (test-support/transacted! connection
+                                       (task/adopt-tasks-tx (db/db connection)
+                                                            [{:seon.task/ns 'tq.filed :seon.task/name "chained"
+                                                              :seon.task/plan "## Problem\n\nFix `seon.task/chain!`."
+                                                              :seon.task/proofs '#{tq.filed/proof}}]
+                                                            #{(handle "chained")} {}))
+           database (db/db connection)
+           maps (task/from-filed database (task/task-declaration database (handle "chained")))
+           answer (task/chain! {:seon.db/connection connection :seon.store/store store} maps)
+           branch (:seon.chain/branch answer)]
+       (try
+         (is (= (mapv handle ["chained" "chained-2" "chained-3"]) (:seon.task/handles answer))
+             "Design, Prove and Implement are the chain; root's final merge is its merge")
+         (let [on-branch (db/branch-database (db/db connection) branch)
+               tasks (mapv #(db/pull on-branch [:seon.task/proofs :seon.task/execution :seon.task/needs :seon.task/target
+                                                {:seon.task/next [:seon.task/name]}]
+                                     [:seon.task/id %])
+                           (:seon.task/handles answer))]
+           (is (= ['#{seon.step.design-test/handoff} '#{seon.step.prove-test/handoff} '#{tq.filed/proof}]
+                  (mapv (comp set :seon.task/proofs) tasks))
+               "each stage carries its template's proofs, Implement the filed entry's")
+           (is (= ["chained-2" "chained-3" nil] (mapv #(get-in % [:seon.task/next :seon.task/name]) tasks))
+               "the stages link by position")
+           (is (= [:running :held :held] (mapv :seon.task/execution tasks)) "Design runs, the rest are held")
+           (is (not-any? #(or (:seon.task/needs %) (:seon.task/target %)) tasks) "no chain task carries needs or a target"))
+         (finally
+           (when (contains? (registry/branches store) branch)
+             (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))
+
 (deftest a-filed-task-becomes-four-linked-tasks-ending-in-a-merge-task
   ;; task-model T1 (`docs/research/agent-platform/2026-10-17/task-model.md#62-the-merge-task-reuses-p4a`)
   (test-support/with-database

@@ -776,14 +776,17 @@
   of its position and names the next one's as its `:seon.task/next`; a map's own execution is kept, else the first
   runs and the rest are held; each is
   created by root (`:seon.task/created-by`), a runtime task no task file declares. A map's own
-  `:db/id`, `:seon.task/id`, `:seon.task/sym` and `:seon.task/next` are ignored."
+  `:db/id`, `:seon.task/id`, `:seon.task/sym`, `:seon.task/next` and `:seon.task/needs` are ignored: position links a
+  chain. The chain ends before the first map with a `:seon.task/target` (`seon.task/from-filed`'s merge task), since
+  root's final merge of the chain branch is the chain's merge."
   {:malli/schema [:=> [:cat [:vector {:min 1} :seon.task/task-map]] [:vector :map]]}
   [tasks]
   (let [{ns :seon.task/ns first-name :seon.task/name} (first tasks)
+        tasks (into [] (take-while (complement :seon.task/target)) tasks)
         n (count tasks)]
     (into [] (map-indexed
               (fn [i task]
-                (cond-> (assoc (dissoc task :db/id :seon.task/id :seon.task/sym :seon.task/next)
+                (cond-> (assoc (dissoc task :db/id :seon.task/id :seon.task/sym :seon.task/next :seon.task/needs)
                                :db/id (- (inc i)) :seon.task/ns ns
                                :seon.task/name (if (zero? i) first-name (str first-name "-" (inc i)))
                                :seon.task/execution (or (:seon.task/execution task) (if (zero? i) :running :held))
@@ -1076,7 +1079,9 @@
   template needing it; `<name>-implement` from the Implement template, carrying the entry's proofs, needing Prove; and
   `<name>-merge` from the merge template, needing Implement and Design, with main's branch (`database`'s) as its
   `:seon.task/target` and no proofs (a merge task's members are derived). The entry's `:seon.task/model`, when set, is
-  on all four. A plan with no `## Problem` section is wrapped as one, so Design has the request to keep.
+  on all four. A plan with no `## Problem` section is wrapped as one, so Design has the request to keep. Until T3b,
+  `seon.task/chain!` of these maps writes the installed chain: Design, Prove and Implement linked by position, its
+  merge root's final merge of the chain branch.
 
   ## Example
 
