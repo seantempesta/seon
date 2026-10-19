@@ -6,7 +6,8 @@ created: 2026-10-19
 ---
 
 Phase status: P0 landed (`seon.sci.open-derivers-test`, `seon.cost-estimate-test/closed-runtime-rows-grow-past-no-accepted-overrun`);
-P2, P3b landed; P1 landed (lane closed-p1, the leaf design); P4a in flight (lane P4a); P3a, P4b, P5, P6a, P6b, P7, P8 not started.
+P2, P3b landed; P1 landed (lane closed-p1, the leaf design); P3a split: P3a-1 landed (lane closed-p3a1b: the order leaf and the
+digest move; the fallback deletion moves to P4b, option c), P3a-2 scheduled with P4b; P4a in flight (lane P4a); P4b, P5, P6a, P6b, P7, P8 not started.
 
 # Closed runtime: the hybrid
 
@@ -360,6 +361,30 @@ it into its gate.
 - Deletes: five seams (12 lines); `seon.fn/stored-namespace-context` (no other `src` caller).
 
 ### P3a. Cycle 3 and the order leaf (platform: load order; publish and reload on a branch of the live store)
+
+**Split (lane closed-p3a, root's option B).** The primitive move below converts every caller of
+`seon.schema/projection-validator` (312 sites), `projection-cache-value` (64), `projection-identity` and
+`call-with-forms` (10): 80 files the file list did not count, and `call-with-forms` binds `*packaged-forms*`, which
+P4b moves into `seon.schema.handed`. The fallback count on default was not `{}` but one occurrence its caller
+detection named as `seon.profile` (the instrumentation wrapper), and `database-projection`'s only caller is
+`seon.schema/projection-from-database` (141 sites, three in `seon.error`, which `seon.db` requires), so it cannot be a
+static call to `seon.db/carried-projection`. So:
+
+- **P3a-1 (landed, lane closed-p3a1b):** `seon.order/compare-values` (leaf, no `seon` requires) with the scripted sweep,
+  no alias, and the eight `seon.print` requires it left unused dropped; `seon.schema/canonical-schema-entities` returns
+  rows without digests and `seon.program/schema-entities` adds them (every caller converted). Proofs:
+  `seon.schema.datahike-test/the-bridge-requires-no-printer` and the `:P3a-1` row of `converted`.
+- **The fallback deletion moves to P4b (root's option c).** `seon.schema/packaged-forms`, `warn-classpath-fallback!`, the
+  `schema-edn-packaged-forms` seam and boot's binding of `*packaged-forms*` stay as on HEAD, because
+  `seon.config/defaults` is a compiled constant that loads the packaged population before boot ever binds a root:
+  `seon.config-test/config-loads-the-packaged-population-in-a-fresh-jvm` proves it. The population then needs a home
+  that exists before boot, which is `seon.schema.handed` (P4b), so the fallback, `*packaged-forms*` and the seam move
+  there once.
+- **P3a-2 (scheduled with P4b, so `*packaged-forms*` moves once, into `seon.schema.handed`):** the primitive sweep, the
+  seven bridge seams to calls, the two conveniences up to `seon.schema`, and
+  `seon.schema.datahike-test/the-bridge-requires-neither-schema-nor-printer`. `database-projection` and
+  `projection-from-database` go with P4b's handed projection (the callers in `seon.error` take the projection they are
+  handed).
 
 - First step: count `seon.schema/!fallback-counts` after the cost rows and after the check's test namespaces; every
   caller named is converted to hand its population in this commit.

@@ -5,7 +5,7 @@
             [seon.error.refusal :as error]
             [seon.fn.signature :as signature]
             [seon.id :as id]
-            [seon.print :as print]
+            [seon.order :as order]
             [seon.schema :as schema]
             [malli.registry :as mr]
             [seon.schema.internal :as internal]
@@ -613,6 +613,24 @@
   ([entity resolver-context]
    (declaration-digest entity (some->> resolver-context (used-resolver-context entity)))))
 
+(defn- with-definition-digests
+  "`entities`, each with its `:seon.program/definition-digest`."
+  {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
+  [entities]
+  (mapv #(assoc % :seon.program/definition-digest (definition-digest %)) entities))
+
+(defn schema-entities
+  "The canonical schema rows (`seon.schema/canonical-schema-entities`), each
+  with its `:seon.program/definition-digest`."
+  {:malli/schema
+   [:function
+    [:=> [:cat] [:vector :map]]
+    [:=> [:cat :map] [:vector :map]]
+    [:=> [:cat :seon.schema/projection :map] [:vector :map]]]}
+  ([] (with-definition-digests (schema/canonical-schema-entities)))
+  ([forms] (with-definition-digests (schema/canonical-schema-entities forms)))
+  ([projection forms] (with-definition-digests (schema/canonical-schema-entities projection forms))))
+
 (defn- without-docstring
   "`source` without its def form's docstring literal `doc`: the form's third
   form when it reads as exactly `doc` and another form follows it; `source`
@@ -1202,7 +1220,7 @@
          (sort-by (juxt :seon.fn.binding.entry/source-key
                         :seon.fn.binding.entry/spelling
                         :seon.fn.binding.entry/local-binding)
-                  print/compare-values)
+                  order/compare-values)
          (map-indexed
           (fn [order entry]
             (let [local-binding (:seon.fn.binding.entry/local-binding entry)]
@@ -1691,7 +1709,7 @@
                  projection schema-key definition
                  {:seon.schema.admission/source admission-source})
                 entity (some #(when (= schema-key (:seon.schema/key %)) %)
-                          (schema/canonical-schema-entities
+                          (schema-entities
                            candidate-projection {schema-key definition}))]
             (cond-> (assoc (merge (select-keys candidate
                                               [:seon.schema/generatable?])

@@ -18,6 +18,7 @@
             [seon.error.refusal :as refusal]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
+            [seon.program :as program]
             [seon.schema.edn :as schema.edn]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.internal :as schema.internal]
@@ -805,7 +806,7 @@
                :gen/schema :seon.schema/definition
                schema-key definition}
         entity (some #(when (= schema-key (:seon.schema/key %)) %)
-                  (schema/canonical-schema-entities
+                  (program/schema-entities
                    (schema/build-projection
                     (merge (:seon.schema.projection/forms (schema/handed-projection)) forms))
                    forms))]
@@ -2008,7 +2009,7 @@
                built (schema/build-projection
                       (assoc (:seon.schema.projection/forms (seon.db/carried-projection (seon.db/db connection)))
                              schema-key definition))
-               entity (first (schema/canonical-schema-entities built {schema-key definition}))
+               entity (first (program/schema-entities built {schema-key definition}))
                basis (:max-tx @connection)
                refusal (seon.db/transact! connection [entity])]
            (is (string? (:seon.db.write.attempt/request-id refusal)))

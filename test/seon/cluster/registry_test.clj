@@ -32,6 +32,7 @@
             [seon.cluster.source :as source]
             [seon.merge :as merge]
             [seon.cluster.store :as store]
+            [seon.program :as program]
             [seon.schema]
             [seon.schema.datahike :as schema-datahike]
             [seon.sci.eval :as sci.eval]
@@ -71,7 +72,7 @@
                            (mapcat #(get references %))
                            needed)]
         (if (= needed expanded)
-          (seon.schema/canonical-schema-entities projection (select-keys forms expanded))
+          (program/schema-entities projection (select-keys forms expanded))
           (recur expanded))))))
 
 (def ^:private source-branch :current-src)

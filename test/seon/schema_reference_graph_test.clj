@@ -3,6 +3,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
             [seon.schema :as schema]
+            [seon.program :as program]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
 
@@ -29,7 +30,7 @@
   (test-support/with-database
     (fn [connection]
       (let [forms (schema.edn/packaged-forms)
-            entities (schema/canonical-schema-entities forms)
+            entities (program/schema-entities forms)
             materialized-keys (into #{} (map :seon.schema/key) entities)
             entity-positions
             (into {}

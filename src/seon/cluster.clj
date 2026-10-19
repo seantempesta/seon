@@ -15,7 +15,7 @@
   `readiness` derives its report from the instance and its database.
   `stop!` idempotently unwinds only the addressed instance and releases
   the shared store when its last holder stops."
-  (:require [seon.print :as print]
+  (:require [seon.order :as order]
             [clojure.core.async :as async]
             [clojure.core.async.impl.dispatch :as async.dispatch]
             [clojure.core.async.impl.protocols :as async.protocols]
@@ -1086,7 +1086,7 @@
                     pulled))]
         (when-not (schema-entity-converged? db desired current)
           desired))))
-   (schema/canonical-schema-entities projection (:seon.schema.projection/forms projection))))
+   (program/schema-entities projection (:seon.schema.projection/forms projection))))
 
 (defn- instruction-entity-changes
   [db entities]
@@ -1115,7 +1115,7 @@
               (map? candidate) (mapcat walk (vals candidate))
               (coll? candidate) (mapcat walk candidate)
               :else []))]
-    (->> (walk value) distinct (sort print/compare-values) vec)))
+    (->> (walk value) distinct (sort order/compare-values) vec)))
 
 (defn- lookup-resolution
   "How one lookup ref answers at `database`: resolved, absent, or REFUSED.

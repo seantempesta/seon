@@ -43,7 +43,9 @@
     :functions (into #{} (map #(symbol "seon.program" %)) ["derived-shape" "derived-program-attributes"])}
    {:phase :P1
     :functions (into #{} (map #(symbol "seon.db" %))
-                     ["call-preparation-snapshot" "call-preparation-report-snapshot" "call-preparation-plan-for"])}])
+                     ["call-preparation-snapshot" "call-preparation-report-snapshot" "call-preparation-plan-for"])}
+   {:phase :P3a-1
+    :functions (into #{} (map #(symbol "seon.schema" %)) ["canonical-schema-entities"])}])
 
 (defn- open-cache-derivers
   "The cache derivers of `database`'s program that its reach index leaves open."

@@ -12,7 +12,7 @@
   (`:seon.config/overlay-keys`), else the shipped decision; it does not retract
   a defaulted optional attribute. `:seon.config/absent` is the one explicit retraction form, is
   refused for required attributes, and never becomes nil or a datom."
-  (:require [seon.print :as print]
+  (:require [seon.order :as order]
             [seon.error.refusal]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -680,7 +680,7 @@
       (when (seon.error.refusal/error? missing)
         (throw (ex-info (:seon.error/message missing) missing)))
       (when (seq missing)
-        (let [missing (vec (sort print/compare-values missing))]
+        (let [missing (vec (sort order/compare-values missing))]
           (refuse!
            {:seon.error/at (java.util.Date.)
              :seon.error/layer :seon.config/compile

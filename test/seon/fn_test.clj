@@ -2007,7 +2007,7 @@
        (let [declared {::identity-value [:tuple :keyword :symbol] ::identity-ref :seon.db/ref}]
          (test-support/transacted!
           connection
-          (seon.schema/canonical-schema-entities
+          (program/schema-entities
            (reduce-kv #(seon.schema/projection-with-schema %1 %2 %3 {:seon.schema.admission/source :agent})
                       (db/carried-projection @connection) declared)
            declared)))

@@ -20,6 +20,7 @@
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
             [seon.schema :as schema]
+            [seon.program :as program]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as evaluation]
             [seon.sci.lookup :as lookup]
@@ -320,7 +321,7 @@
           projection (schema/build-projection
                       (merge (:seon.schema.projection/forms (schema/handed-projection))
                              forms))]
-      (schema/canonical-schema-entities projection forms))}
+      (program/schema-entities projection forms))}
    (fn [connection]
      (let [;; Selection is by declared identity, never structural
            ;; resemblance: the producer declares the value's schema.

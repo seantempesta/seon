@@ -3946,7 +3946,8 @@
       (sort-by str schema-keys)))))
 
 (defn canonical-schema-entities
-  "Build canonical rows from a complete construction generation.
+  "Build canonical rows, without their definition digests, from a complete
+  construction generation (`seon.program/schema-entities` adds the digests).
   The two-argument arity selects authored rows while reference and storage
   decisions use the complete supplied projection. Missing targets still refuse."
   {:malli/schema
@@ -3963,16 +3964,13 @@
      (mapv
       (fn [schema-key]
         (let [references (get reference-graph schema-key)]
-          (let [entity
-                (cond->
-                 (merge (@schema-datahike-storable-properties-in projection schema-key)
-                        {:seon.schema/key schema-key
-                         :seon.schema/form
-                         (binding [*print-namespace-maps* false *print-length* nil *print-level* nil *print-meta* false] (pr-str (get forms schema-key)))
-                         :seon.schema.admission/source :core})
-                  (seq references) (assoc :seon.schema/references (set references)))]
-            (assoc entity :seon.program/definition-digest
-                   ((requiring-resolve 'seon.program/definition-digest) entity)))))
+          (cond->
+           (merge (@schema-datahike-storable-properties-in projection schema-key)
+                  {:seon.schema/key schema-key
+                   :seon.schema/form
+                   (binding [*print-namespace-maps* false *print-length* nil *print-level* nil *print-meta* false] (pr-str (get forms schema-key)))
+                   :seon.schema.admission/source :core})
+            (seq references) (assoc :seon.schema/references (set references)))))
       (dependency-first-schema-keys ordering-graph materialized-keys)))))
 
 (defn canonical-database-attributes

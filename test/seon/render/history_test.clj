@@ -8,7 +8,7 @@
             [seon.render.ns :as render.ns]
             [seon.render.transcript :as transcript]
             [seon.render.walk :as walk]
-            [seon.schema :as schema]
+            [seon.program :as program]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as support]))
 
@@ -40,7 +40,7 @@
                                    :seon.message/to
                                    :seon.agent/agent}
                                  :seon.schema/key))
-                   (schema/canonical-schema-entities)))
+                   (program/schema-entities)))
      (support/transacted!
              connection
              (into [(support/namespace-entity @connection 'fixture.history)]
@@ -141,7 +141,7 @@
                             :seon.ns/ns
                             :seon.agent/agent}
                           :seon.schema/key))
-            (schema/canonical-schema-entities)))
+            (program/schema-entities)))
      (support/transacted!
       connection
       (into [(support/namespace-entity @connection 'fixture.neighbour)]

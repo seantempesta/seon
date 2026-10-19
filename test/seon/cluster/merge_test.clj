@@ -548,7 +548,7 @@
   [database forms]
   (let [projection (reduce-kv (fn [p k v] (schema/projection-with-schema p k v {:seon.schema.admission/source :core}))
                               (db/carried-projection database) forms)]
-    (schema/canonical-schema-entities projection forms)))
+    (program/schema-entities projection forms)))
 
 (deftest ^{:seon.test/long "One own-branch agent's first request, assignment and request run, and one land (one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one)."
            :seon.test/long-ms 180000}
@@ -581,7 +581,7 @@
                main (db/db connection)
                file-schemas (edn/read-string (slurp (io/file root schema-path)))
                published (into {} (map (juxt :seon.schema/key :seon.program/definition-digest))
-                               (schema/canonical-schema-entities (db/carried-projection main) file-schemas))
+                               (program/schema-entities (db/carried-projection main) file-schemas))
                held #(:seon.program/definition-digest (db/pull main [:seon.program/definition-digest] [:seon.schema/key %]))]
            (is (nil? (:seon.error/message landed)) "the merge answers no refusal")
            (is (= git-commit (git! root "rev-parse" "HEAD")) "the next pass published it")

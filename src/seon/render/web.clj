@@ -71,7 +71,7 @@
             [seon.render.route :as route]
             [seon.render.sent :as sent]
             [seon.render.transcript :as transcript]
-            [seon.print :as print]
+            [seon.order :as order]
             [seon.render.value :as value]
             [seon.render.walk :as render.walk]
             [seon.schema :as schema]
@@ -895,7 +895,7 @@
                      (filter #(ref-attributes (:a %)) datoms))
           selected-label
           (or (some->> (:seon.render.data/identities observation)
-                       (sort-by (juxt :a :v) print/compare-values)
+                       (sort-by (juxt :a :v) order/compare-values)
                        first :v scalar-label)
               (str selected-eid))
           nodes (mapv (fn [eid]
@@ -2294,7 +2294,7 @@
 
 (defn- watched-registration-keys
   [registration]
-  (sort print/compare-values
+  (sort order/compare-values
         (keep (fn [[registration-key tabs]]
                 (when (pos? (long tabs)) registration-key))
               @registration)))

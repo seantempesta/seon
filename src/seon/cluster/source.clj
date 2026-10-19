@@ -1947,10 +1947,10 @@
 
 (defn- schema-entry-digest
   "The definition digest publication gives `form` declared as `k` under
-  `projection` (`seon.schema/canonical-schema-entities`)."
+  `projection` (`seon.program/schema-entities`)."
   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword :any] :seon.program/definition-digest]}
   [projection k form]
-  (:seon.program/definition-digest (first (schema/canonical-schema-entities projection {k form}))))
+  (:seon.program/definition-digest (first (program/schema-entities projection {k form}))))
 
 (defn- proven-schema-file
   "The candidate bytes of the schema resource `identities` (schema keys of one

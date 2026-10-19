@@ -1,10 +1,7 @@
 (ns seon.schema.internal
   "Registration admission and entity-shape derivation for `seon.schema`.
 
-   Private engine internals, factored out of the public registry surface
-   so they stay indexed + grep-able WITHOUT rendering into agent context
-   (the `*.internal` convention drops them from the curated namespaces
-   body — see `seon.agent.ctx.ns-name/hidden-ns-name?`).
+   Engine internals factored out of the public registry surface.
 
    Compiled schemas carry their registry scope. This namespace never requires
    `seon.schema`; the dependency is schema → schema.internal only."

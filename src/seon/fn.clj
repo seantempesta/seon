@@ -16,6 +16,7 @@
             [seon.fn.signature :as signature]
             [seon.id :as id]
             [seon.print :as print]
+            [seon.order :as order]
             [seon.fs :as fs]
             [seon.program :as program]
             [seon.ref :as ref]
@@ -1823,7 +1824,7 @@
       :seon.fn.file/identities
       (->> canonical-entities
            (keep program/row-identity)
-           (sort print/compare-values)
+           (sort order/compare-values)
            vec)}
       (seq findings) (assoc :seon.fn.file/findings findings))))
 
@@ -2272,12 +2273,12 @@
          :seon.program/analyzed-count (or population 0)
          :seon.program/stale-test-reach
          (mapv (fn [[test callee]] {:seon.test/sym test :seon.fn/callee callee})
-               (sort print/compare-values stale))
+               (sort order/compare-values stale))
          :seon.program/unresolved-callers
          (mapv (fn [[attribute caller callee]]
                  {:seon.program/identity [attribute caller]
                   :seon.fn/callee callee})
-               (sort print/compare-values entities))})))
+               (sort order/compare-values entities))})))
 
 (defn gate-set
   "The tests exercising one function identity (`seon.fn/reverse-closure`).
@@ -2519,7 +2520,7 @@
                             :seon.fn.contract/position
                             :seon.fn.contract/finding
                             :seon.fn.contract/form)
-                      print/compare-values)
+                      order/compare-values)
              vec))))))
 
 (defn functions-using
@@ -2942,7 +2943,7 @@
       :seon.fn.manifest/identities
       (->> artifacts
            (mapcat :seon.fn.file/identities)
-           (sort print/compare-values)
+           (sort order/compare-values)
            vec)}
       (seq findings) (assoc :seon.fn.manifest/findings findings))))
 
@@ -3362,10 +3363,10 @@
                 (:seon.fn.file/relative-path desired)
                 :seon.fn.change/removed-identities
                 (->> (set/difference current-identities desired-identities)
-                     (sort print/compare-values)
+                     (sort order/compare-values)
                      vec)
                 :seon.fn.change/added-identities
-                (->> added-identities (sort print/compare-values) vec)
+                (->> added-identities (sort order/compare-values) vec)
                 :seon.fn.change/changed-attributes
                 (vec (sort changed-attributes))}
          (seq findings) (assoc :seon.fn.change/findings findings)))
@@ -3686,7 +3687,7 @@
         canonical-schemas
         (if (seq selected-forms)
           (mapv (partial accretion/schema-row-in (schema/declaration-projection packaged-forms))
-                (schema/canonical-schema-entities projection selected-forms)) [])
+                (program/schema-entities projection selected-forms)) [])
         canonical-keys (into #{} (map :seon.schema/key) canonical-schemas)
         source-only
         (remove (fn [entity]
@@ -3736,7 +3737,7 @@
     (into {}
           (map-indexed (fn [index program-identity]
                          [program-identity (str "seon.fn.index/" index)]))
-          (sort print/compare-values identities))))
+          (sort order/compare-values identities))))
 
 (defn- compile-index-transaction
   "Flatten one program population through transaction-local identities.
@@ -3837,7 +3838,7 @@
          (into []
                (map (fn [[[attribute value] tempid]]
                       [:db/add tempid attribute value]))
-               (sort-by key print/compare-values tempids))
+               (sort-by key order/compare-values tempids))
          :seon.fn/index-keyword-operations keyword-operations}))))
 
 (defn- normalized-index-entity
@@ -4233,7 +4234,7 @@
                              :seon.fn.file/rows (vec entities)
                              :seon.fn.file/findings (filterv :seon.lint/id entities)
                              :seon.fn.file/declaration-digests (declaration-digests entities)
-                             :seon.fn.file/identities (vec (sort print/compare-values (map program/row-identity entities)))}))
+                             :seon.fn.file/identities (vec (sort order/compare-values (map program/row-identity entities)))}))
                         analysis-paths)
         projection (db/carried-projection database)
         schema-digests (if (or (nil? paths)

@@ -1,6 +1,8 @@
 (ns seon.schema.datahike-test
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.string :as str]
+            [edamame.core :as edamame]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -12,6 +14,7 @@
             [seon.env :as env]
             [seon.profile :as profile]
             [seon.schema :as schema]
+            [seon.program :as program]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
             [seon.schema.internal :as internal]
@@ -54,7 +57,7 @@
        (support/transacted!
         connection
         (into [(schema.datahike/malli->datahike-attr-in projection ::subject)]
-              (schema/canonical-schema-entities projection
+              (program/schema-entities projection
                                             (select-keys candidate [::subject ::observation]))))
        (is (some? (db/pull (db/db connection) [:seon.schema/key]
                           [:seon.schema/key ::observation])))
@@ -678,3 +681,29 @@
              (when (:db-after report)
                (is (= [9 2] (::position (db/pull (:db-after report) [::position]
                                                 [:seon.ns/name 'sample.tuple]))))))))))))
+
+(defn- source-requires
+  "The namespaces the `(ns ...)` form of `namespace`'s file under `src` requires, read as Clojure; `#{}` without one."
+  {:malli/schema [:=> [:cat :symbol] [:set :symbol]]}
+  [namespace-name]
+  (let [path (str "src/" (str/replace (munge (str namespace-name)) "." "/"))]
+    (if-let [file (some #(let [file (io/file (str path %))] (when (.exists file) file)) [".clj" ".cljc"])]
+      (into #{} (comp (filter #(and (seq? %) (= :require (first %))))
+                      (mapcat rest)
+                      (map #(if (sequential? %) (first %) %)))
+            (edamame/parse-string (slurp file) {:all true :read-cond :allow :features #{:clj}}))
+      #{})))
+
+(defn- require-closure
+  "Every namespace `namespace` reaches through the `:require`s of the source files under `src`."
+  {:malli/schema [:=> [:cat :symbol] [:set :symbol]]}
+  [namespace-name]
+  (loop [pending [namespace-name] reached #{}]
+    (if-let [next-namespace (first pending)]
+      (let [found (remove reached (source-requires next-namespace))]
+        (recur (into (subvec pending 1) found) (into reached found)))
+      reached)))
+
+(deftest the-bridge-requires-no-printer
+  (is (not (contains? (require-closure 'seon.schema.datahike) 'seon.print))
+      "seon.schema.datahike reaches seon.print through no require"))

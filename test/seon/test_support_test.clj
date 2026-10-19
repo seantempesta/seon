@@ -16,6 +16,7 @@
             [malli.core :as m]
             [malli.instrument :as mi]
             [seon.schema :as schema]
+            [seon.program :as program]
             [seon.schema.edn :as schema.edn]
             [seon.render.value :as value]
             [seon.batch]
@@ -209,7 +210,7 @@
             (into
              (into #{}
                    (map :seon.schema/key)
-                   (schema/canonical-schema-entities packaged-forms))
+                   (program/schema-entities packaged-forms))
              (keep :seon.schema/key)
              (mapcat :seon.fn.file/rows
                      (:seon.fn.manifest/artifacts @test-support/source-manifest)))
@@ -223,7 +224,7 @@
                     (schema/canonical-database-attributes (schema/handed-projection))))
         (is (not (contains? installed :seon.schema/created-at)))
         (is (every? #(not (contains? % :seon.schema/created-at))
-                    (schema/canonical-schema-entities packaged-forms)))
+                    (program/schema-entities packaged-forms)))
         (is (= expected-schema-keys (set actual-schema-keys)))
         (is (= (->> (db/identity-attributes database)
                     (filter #(seq (db/datoms database :avet %)))

@@ -1211,7 +1211,7 @@
                              (schema/projection-with-schema
                               current schema-key definition {:seon.schema.admission/source :core}))
                            (db/carried-projection database) forms)]
-    (vec (schema/canonical-schema-entities projection (into {} forms)))))
+    (vec (program/schema-entities projection (into {} forms)))))
 
 (defn revised-entity
   "`row` with `overrides` merged, digested from that FINAL row through the one

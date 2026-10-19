@@ -4,6 +4,7 @@
             [datahike.db.interface :as dbi]
             [seon.db :as db]
             [seon.schema :as schema]
+            [seon.program :as program]
             [seon.schema.edn :as schema.edn]
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.eval :as evaluation]
@@ -37,7 +38,7 @@
        (support/transacted!
         connection
         (mapv (partial accretion/schema-row forms)
-              (schema/canonical-schema-entities
+              (program/schema-entities
                projection (into {} (filter #(= (namespace ::id) (namespace (key %)))) forms))))
        (db/carry-connection-projection-state!
         connection (evaluation/projection-state @connection projection))

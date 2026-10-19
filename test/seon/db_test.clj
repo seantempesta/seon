@@ -2888,7 +2888,7 @@
            projection (schema/build-projection
                        (assoc (:seon.schema.projection/forms (db/carried-projection (db/db connection)))
                               schema-key definition))
-           entity (first (schema/canonical-schema-entities projection {schema-key definition}))
+           entity (first (program/schema-entities projection {schema-key definition}))
            basis (:max-tx @connection)
            refusal (db/transact! connection [entity])
            expected [{:seon.schema/key schema-key

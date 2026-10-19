@@ -29,6 +29,7 @@
             [seon.cluster.wake :as wake]
             [seon.config :as config]
             [seon.error :as error]
+            [seon.program :as program]
             [seon.schema]
             [seon.test-support :as test-support])
   (:import [java.util Date]))
@@ -278,7 +279,7 @@
   (into #{}
         (comp (filter (fn [entity] (true? (get entity property))))
               (map :seon.schema/key))
-        (seon.schema/canonical-schema-entities)))
+        (program/schema-entities)))
 
 (deftest the-listened-set-is-declared-not-listed
   ;; THE CLASS: a hand list of wake attributes drifts from the families

@@ -35,6 +35,7 @@
             [seon.error.refusal :as error.refusal]
             [seon.id :as id]
             [seon.print :as print]
+            [seon.order :as order]
             [seon.program :as program]
             [seon.profile :as profile]
             [seon.schema :as schema]
@@ -3856,7 +3857,7 @@
                    (some #(and (< (count %) (count path))
                                (= % (subvec path 0 (count %)))) sequence-paths))
         operations (into {} (map (juxt first second)) edits)]
-    (into (sorted-map-by print/compare-values)
+    (into (sorted-map-by order/compare-values)
           (comp (remove covered?)
                 (map (fn [path]
                        [path (if (and (= :- (get operations path))
@@ -4121,7 +4122,7 @@
         declarations (when forms
                        (into (schema.datahike/malli->datahike-schema-in projection missing)
                              (when (get (dbi/-schema database) :seon.schema/key)
-                               (schema/canonical-schema-entities projection forms))))
+                               (program/schema-entities projection forms))))
         operation (or (:seon.db.transaction/operation request)
                       (some (fn [op]
                               (when (and (vector? op) (= :db.fn/call (first op)))
@@ -5370,7 +5371,7 @@
                       :db/id (:e datom)}))))
               removed)]
     (when (seq breaks)
-      (let [breaks (vec (sort print/compare-values breaks))]
+      (let [breaks (vec (sort order/compare-values breaks))]
         ;; The producer declares what it refused; `write-observation` carries
         ;; that identity as `:seon.db.write/validator-schema`.
         (assoc (diagnostic

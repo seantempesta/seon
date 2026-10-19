@@ -1467,7 +1467,7 @@
                           :seon.program/schema-forms forms})
                        (into (:seon.fn.file/rows artifact)
                              (map #(accretion/schema-row forms %))
-                             (schema/canonical-schema-entities projection fixture-forms)))
+                             (program/schema-entities projection fixture-forms)))
                  selected (filterv #(or (:seon.fn.file/relative-path %)
                                         (some #{(program/row-identity %)} identities)) entities)]
              (test-support/transacted!

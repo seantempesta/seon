@@ -369,7 +369,7 @@
   "Commit one synthetic declaration the way the canonical entities express it."
   [connection schema-key]
   (test-support/transacted!
-   connection (schema/canonical-schema-entities {schema-key :string})))
+   connection (program/schema-entities {schema-key :string})))
 
 (defn- retract-schema-key!
   "Retract the synthetic declaration; its past remains in history."

@@ -79,7 +79,7 @@
   (schema/build-projection (merge (schema/snapshot) probe-forms)))
 
 (defn- printed
-  "`form` printed as `seon.schema/canonical-schema-entities` stores `:seon.schema/form`."
+  "`form` printed as `seon.program/schema-entities` stores `:seon.schema/form`."
   {:malli/schema [:=> [:cat :any] :string]}
   [form]
   (binding [*print-namespace-maps* false] (pr-str form)))
@@ -148,7 +148,7 @@
            projection
            (schema.datahike/database-attributes-for-in
             projection selected-forms))
-          (schema/canonical-schema-entities projection selected-forms)))
+          (program/schema-entities projection selected-forms)))
         _ (advance-fixture-projection! connection)]
     report))
 

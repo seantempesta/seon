@@ -1,7 +1,7 @@
 (ns seon.test
   "One test request on the agent execution lifecycle, and the recorded evidence it reads."
   (:require
-            [seon.print :as print]
+            [seon.order :as order]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test]
@@ -2233,7 +2233,7 @@
   (let [changed (program/own-changed-identities base candidate source/merge-bound)]
     (if (:seon.error/at changed)
       changed
-      (vec (sort print/compare-values (observable-changes base candidate changed))))))
+      (vec (sort order/compare-values (observable-changes base candidate changed))))))
 
 (defn branch-changes
   "Every declaration `execution`'s program changed since its base (`change-base`: the published commit on the
@@ -2296,7 +2296,7 @@
                                                (:seon.ns/_imports %)))
                               (keep :seon.ns/name)) rows)
         schemas (into #{} (comp (filter :seon.schema/form) (map :seon.schema/key)) rows)]
-    (vec (sort print/compare-values
+    (vec (sort order/compare-values
                (concat (behavior-changed before after (vec symbols))
                        (keep #(when (binding-lost? before after %) [:seon.ns/name %]) names)
                        (map #(vector :seon.schema/key %) schemas))))))
