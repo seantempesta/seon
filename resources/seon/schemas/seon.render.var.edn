@@ -5,7 +5,7 @@
             :seon.render/ai seon.render.var/render-ai
             :seon.render/html seon.render.var/render-html}
        seon.render.var/var-value?]
- :contract [:enum {:description "A definition's contract when it is not present (a malformed contract joins when its stored form lands, :seon.fn/malformed-spec)."} :missing]
+ :contract [:enum {:description "A definition's contract when it is not present: :missing, or an authored contract Malli refuses, :malformed (its refusal under :seon.render.var/malli-refusal)."} :missing :malformed]
  :example [:any {:description "A contract form to start from, as data: the defn with an example :malli/schema." :gen/elements [(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)]}]
  :symbol [:qualified-symbol {:description "The symbol the rendered Var names."}]
  :pending [:vector {:description "Reaching tests with no result recorded against a program holding the current definition (the first five)."} :qualified-symbol]
