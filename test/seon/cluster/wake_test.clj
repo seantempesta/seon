@@ -73,7 +73,6 @@
    (let [recipient-eid (agent-eid connection)
          channels {recipient-eid mailbox}
          db<->flow (async/chan (async/sliding-buffer 1))
-         search (async/chan (async/sliding-buffer 1))
          faults (async/chan (async/sliding-buffer 1))]
      ;; the connection's failure recorder, as boot installs it
      ;; (seon.cluster.store/listen-failures!), here a channel the test reads
@@ -82,7 +81,6 @@
      {:mailbox mailbox
       :db<->flow db<->flow
       :render render
-      :search search
       :faults faults
       :key (wake/route! {:seon.cluster.wake/connection connection
                          :seon.cluster.wake/channels
@@ -91,7 +89,6 @@
                          :seon.flow/plan-channel db<->flow
                          :seon.cluster.wake/render-channel render
                          :seon.render.web/interest interest
-                         :seon.cluster.wake/search-channel search
                          :seon.cluster.wake/fault-channel faults
                          :seon.cluster.wake/key ::probe})})))
 
@@ -103,27 +100,25 @@
   (with-connection
     (fn [connection]
       (let [mailbox (async/chan (async/sliding-buffer 1))
-            {:keys [render search key]} (route-probe! connection mailbox)]
+            {:keys [render key]} (route-probe! connection mailbox)]
         (try
           (test-support/transacted! connection (message-tx "m-1"))
           (is (some? (test-support/await-event! mailbox "mailbox wake"))
               "a message to this agent reaches ITS mailbox")
-          (let [report (test-support/await-event! search
-                                                  "search transaction report")]
-            (is (= (:max-tx (:db-after report))
-                   (:max-tx @connection))
-                "the same listener forwards the exact committed basis"))
+          ;; Datahike delivers the transaction report BEFORE it notifies
+          ;; listeners (`datahike.writer/transact!`), so the test awaits the
+          ;; render wake: the callback offers it after every mailbox offer,
+          ;; which makes the mailbox poll below an ordering fact.
+          (is (some? (test-support/await-event! render "message render wake")))
           (testing "a commit of attributes only a TURN writes wakes no
                     mailbox — the trap that would spin an idle cluster"
             (test-support/transacted! connection (run-tx "run-1"))
-            (is (nil? (async/poll! mailbox))))
-          (testing "a transaction instant is in EVERY report and routes
-                    nowhere by itself"
-            ;; the run commit above carried one, and the mailbox stayed
-            ;; empty; this probe publishes cold `:all` render interest,
+            ;; a transaction instant is in EVERY report and routes nowhere
+            ;; by itself; this probe publishes cold `:all` render interest,
             ;; so its passive render consumer accepts the report
-            (is (some? (async/poll! render))
-                "every commit is render interest"))
+            (is (some? (test-support/await-event! render "run render wake"))
+                "every commit is render interest")
+            (is (nil? (async/poll! mailbox))))
           (finally
             (wake/unlisten! {:seon.cluster.wake/connection connection
                              :seon.cluster.wake/key key})))))))
@@ -149,7 +144,7 @@
                                 {:seon.message/id "order-b" :seon.message/content "b"
                                  :seon.message/to [:seon.agent/id "agent-a"]}])))))
      (let [mailbox (async/chan (async/sliding-buffer 1))
-           {:keys [key faults db<->flow render search]} (route-probe! connection mailbox)
+           {:keys [key faults db<->flow render]} (route-probe! connection mailbox)
            write! (fn [tx]
                     (let [result (db/transact! connection tx)]
                       (is (some? (:db-after result)))
@@ -180,7 +175,7 @@
          (is (nil? (async/poll! faults)))
          (finally
            (wake/unlisten! {:seon.cluster.wake/connection connection :seon.cluster.wake/key key})
-           (doseq [channel [mailbox faults db<->flow render search]] (async/close! channel))))))))
+           (doseq [channel [mailbox faults db<->flow render]] (async/close! channel))))))))
 
 (deftest a-constrained-listen-matcher-reads-both-declared-datom-shapes
   ;; A compiled matcher is a predicate over ONE datom, and the system has two
@@ -406,17 +401,20 @@
   ;; listened attribute without the index answers every seek with an
   ;; empty sequence — no exception, no refusal — so the agent would
   ;; simply never turn. The declaration is refused where it is
-  ;; registered instead.
+  ;; registered instead. Datahike puts every `:db.type/ref` attribute in
+  ;; `:avet` whether or not it says `:db/index`
+  ;; (`datahike.db.utils/attr->properties`), so the unindexed fixture is a
+  ;; long that holds the agent's entity id.
   (test-support/with-database
     {::test-support/extra-schema
      [{:db/ident ::unindexed-notice
-       :db/valueType :db.type/ref
+       :db/valueType :db.type/long
        :db/cardinality :db.cardinality/one}]}
     (fn [connection]
       (test-support/transacted!
        connection
        (test-support/schema-entities
-        @connection [[::unindexed-notice [:and {:seon.wake/listen true :seon.wake/opens-turn? true} :seon.db/ref]]]))
+        @connection [[::unindexed-notice [:and {:seon.wake/listen true :seon.wake/opens-turn? true} :int]]]))
       (is (contains? (:seon.cluster.wake/attributes (wake/declarations-refusal (db/db connection))) ::unindexed-notice)
           "the derivation names the attribute the index does not hold")
       (is (contains? (wake/unindexed-listened-attributes (db/db connection))
@@ -432,6 +430,10 @@
       (test-support/transacted! connection (into (test-support/agent-tx @connection "agent-a")
                                              [{:seon.ns/name 'my.agents.agent-a
                                               :seon.ns/steward [:seon.agent/id "agent-a"]}]))
+      ;; the fault happens in agent-b's work: the agent a fault happened to
+      ;; reads it through `seon.error/for-agent` and is never its
+      ;; notification's recipient (`seon.error/commit-call`)
+      (test-support/transacted! connection (test-support/agent-tx @connection "agent-b"))
       (test-support/transacted!
        connection
        [(test-support/program-fn-entity (db/db connection) 'my.agents.agent-a/broken
@@ -451,7 +453,7 @@
                         :seon.sci.admit/caps result-caps
                         :seon.config.error/max-evidence-bytes 4096
                         :seon.config.error/recurrence-limit 3
-                        :seon.agent/id "agent-a"})]
+                        :seon.agent/id "agent-b"})]
         (try
           (is (:db-after (db/transact! connection (:seon.db/tx-data recording))))
           (let [fact (db/pull (db/db connection) '[*] (:seon.error/ref recording))]
@@ -621,7 +623,10 @@
               (is (map? (test-support/await-event!
                          (future (db/transact! connection (message-tx "m-g")))
                          "later transaction")))
-              (is (= :seon.cluster.wake/wake (async/poll! mailbox))
+              ;; awaited: Datahike delivers the report before it notifies
+              ;; listeners (`datahike.writer/transact!`)
+              (is (= :seon.cluster.wake/wake
+                     (test-support/await-event! mailbox "later mailbox wake"))
                   "the routing listener survived the refusal")))
           (finally
             (wake/unlisten! {:seon.cluster.wake/connection connection
@@ -700,13 +705,18 @@
                       :agent (db/transact! connection
                                          (test-support/agent-tx @connection (str "pa-" index)))
                       :run (db/transact! connection (run-tx
-                                                   (str "pr-" index)))))
+                                                   (str "pr-" index))))
+                    ;; Datahike delivers the report before it notifies
+                    ;; listeners (`datahike.writer/transact!`); the render
+                    ;; wake is the callback's last offer, so awaiting it
+                    ;; per report makes the drains below ordering facts
+                    (test-support/await-event! render "per-report render wake"))
                   (let [drain (fn [channel]
                                 (loop [n 0]
                                   (if (async/poll! channel)
                                     (recur (inc n))
                                     n)))
-                        rendered (drain render)
+                        rendered (+ (count commits) (drain render))
                         mailed (drain mailbox)
                         started (drain db<->flow)]
                     (and
