@@ -1,0 +1,191 @@
+diff --git a/src/seon/sci/eval.clj b/src/seon/sci/eval.clj
+index 4ce2bd4a4..331d1e167 100644
+--- a/src/seon/sci/eval.clj
++++ b/src/seon/sci/eval.clj
+@@ -2860,7 +2860,7 @@
+   that may answer otherwise than its compiled Var once `ctx` holds `own`
+   (name -> digest of the definitions it holds itself) and the declarations of
+   `namespaces` differ from the loaded program; the analysis summary. Main
+-  binds nothing. A runtime whose program differs keeps a compiled function
++  shares the open functions' analyses with its forks. A runtime keeps a compiled function
+   only where its closed reach holds no changed name
+   (`seon.sci.runtime/compiled-names`), which answers what its analysed
+   definition would; every other function is bound to its analysed definition
+@@ -2947,9 +2947,10 @@
+     analysis))
+ 
+ (defn- acquire-program!
+-  "Acquire the loaded program into its base context. Compiled definitions bind
+-  their JVM roots; namespaces the JVM has not loaded interpret their source.
+-  Branch differences belong to `derive-overlay-plan`."
++  "Acquire the loaded program into its shared base context. Closed definitions
++  bind their JVM roots; open functions bind their shared analyses. Namespaces
++  the JVM has not loaded interpret their source. Branch differences belong
++  to `derive-overlay-plan`."
+   {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :map]}
+   [{ctx :seon.sci.eval/ctx
+     db :seon.db/db
+@@ -3042,11 +3043,12 @@
+         ;; Libraries the namespaces require resolve through their aliases and
+         ;; full names, as the compiled namespaces that require them do.
+         (install-required-libraries! ctx all-namespace-rows)
+-        ;; Every src function SCI can run is bound to its analysed definition:
+-        ;; a branch's change is live for its callers on that branch.
++        ;; Open functions resolve runtime names, so every changed fork needs
++        ;; their analyses. Bind them once in the shared program context.
+         (swap! (::kernel/program-snapshot ctx) assoc
+                ::runtime-rows (runtime-rows! ctx db projection all-namespace-row-by-name test-namespaces)
+-               ::reach-index (reach-index db))
++               ::reach-index (reach-index db) ::changes {})
++        (bind-analysed! ctx {} #{})
+         ;; The bare REPL name refers to the acquired macro itself. Keeping the
+         ;; boot-time copy here would preserve its old expansion after adoption.
+         (sci/add-namespace! ctx 'clojure.core
+@@ -3218,10 +3220,14 @@
+   [before database]
+   (let [entities (into #{} (comp (mapcat #(apply concat (db/datoms-diff before database :aevt [%]))) (map first))
+                        plan-attributes)
+-        names (fn [attribute]
+-                (into #{} (comp (mapcat (fn [e] [(entity-value before e attribute) (entity-value database e attribute)]))
+-                                (remove nil?))
+-                      entities))]
++        identities [:seon.fn/sym :seon.ns/name :seon.test/sym]
++        rows (mapcat (fn [basis]
++                       (let [rows (db/pull-many basis identities (vec entities))]
++                         (when (db/read-refusal? rows)
++                           (throw (ex-info (:seon.error/message rows) rows)))
++                         rows))
++                     [before database])
++        names (fn [attribute] (into #{} (keep attribute) rows))]
+     {:seon.fn/sym (names :seon.fn/sym) :seon.ns/name (names :seon.ns/name) :seon.test/sym (names :seon.test/sym)}))
+ 
+ (defn- function-places
+diff --git a/test/seon/cost_estimate_test.clj b/test/seon/cost_estimate_test.clj
+index 94bf988a1..83afcd4b1 100644
+--- a/test/seon/cost_estimate_test.clj
++++ b/test/seon/cost_estimate_test.clj
+@@ -33,6 +33,7 @@
+             [seon.id :as id]
+             [seon.mcp :as mcp]
+             [seon.profile :as profile]
++            [seon.render.value :as value]
+             [seon.program :as program]
+             [seon.task :as task]
+             [seon.test :as seon-test]
+@@ -52,6 +53,10 @@
+     :why "The unchanged request plus one agent entity, one `d/branch!` pointer and one `sci/fork`: constant, about 3x the unchanged request."
+     :estimate {:alloc-mb 12.0 :calls 1500 :reads 30 :ms 75.0}
+     :overrun '{:task seon.cluster.agent/a-fresh-agents-environment-costs-one-fork :alloc-mb 54.3 :calls 7401 :reads 45}}
++   {:op :first-defn-on-a-branch
++    :why "A fresh agent's pointer and SCI fork plus one form's analysis, contract and roughly thirty program datoms. The new name has no reaching test. Open program functions are already analysed in the shared program context: proportional to one form, not the loaded program."
++    :estimate {:alloc-mb 32.0 :calls 4000 :reads 80 :ms 150.0}
++    :overrun '{:task seon.repl/the-first-requests-on-a-new-agent-branch-are-sub-second :alloc-mb 266.8 :calls 22014 :reads 409}}
+    {:op :new-def
+     :why "The unchanged request plus one form's analysis, digest and entity (~30 datoms); no test reaches a new name: proportional to 1 form."
+     :estimate {:alloc-mb 16.0 :calls 2500 :reads 40 :ms 60.0}
+@@ -277,7 +282,8 @@
+   []
+   (support/with-running-agent
+    (fn [running agent-id connection]
+-     (let [cold-stale (cold-stale-cost connection)
++     (let [first-defn (request-cost running (str "first-defn-" (id/id)) "(defn sentinel-probe-inc [x] (inc x))")
++           cold-stale (cold-stale-cost connection)
+            warm-pass (program-change-pass running agent-id connection (str "w" (id/id)))
+            changes (program-change-pass running agent-id connection (str "m" (id/id)))
+            request (partial answer running agent-id)
+@@ -305,7 +311,8 @@
+            similar-by-name (cost "(my.program/similar 'seon.db/transcat! 5)")
+            _ (request "(seon.db/transcat! 1)")
+            unresolved (cost "(seon.db/transcat! 1)")]
+-       (assoc changes :current-state-with-task current-state :seon-db-nine-forms nine
++       (assoc changes :first-defn-on-a-branch first-defn
++              :current-state-with-task current-state :seon-db-nine-forms nine
+               :similar-by-name-warm similar-by-name :unresolved-symbol-request unresolved
+               :hub-docstring-change hub-docstring :hub-behavior-change hub-behavior :cold-stale-merge-members cold-stale
+               ;; every request from the first program-change pass through the hub row: a hub change's own work
+@@ -375,3 +382,47 @@
+            :seon.test/long-ms 60000}
+   closed-runtime-rows-grow-past-no-accepted-overrun
+   (is (= [] (unaccepted (closed-runtime-rows)))))
++
++
++(deftest ^{:seon.test/long "First defn and five warm requests, with whole-request cost and function profile." :seon.test/long-ms 60000}
++  first-defn-profile
++  (support/with-running-agent
++   (fn [running _ _]
++     (let [observe (fn [agent source]
++                     (let [before (cache/status)
++                           measured (profile/measure #(answer running agent source))
++                           cost (cost-support/bound-cost running agent (:seon.profile/value measured))]
++                       {:cost (select-keys cost [:seon.cost/ms :seon.cost/alloc-mb :seon.cost/calls :seon.cost/reads :seon.cost/stages :seon.cost/step :seon.cost/entrance :seon.cost/writer :seon.cost/commit :seon.cost/transactions])
++                        :profile (select-keys measured [:seon.profile/ms :seon.profile/alloc-bytes])
++                        :calls (select-keys (:seon.profile/called measured)
++                                '[seon.sci.eval/runtime-rows! seon.sci.runtime/analyse seon.sci.runtime/analysed
++                                  seon.sci.eval/reach-index seon.sci.eval/bind-analysed! seon.sci.eval/produced-roots
++                                  seon.sci.eval/derive-overlay-plan seon.sci.eval/fold-overlay-plan
++                                  seon.sci.eval/plan-identities seon.sci.eval/entity-value seon.sci.eval/identity-entity])
++                        :analyses-before (get-in before [:seon.cache/kinds :seon.sci.runtime/analysed])
++                        :analyses-after (get-in (cache/status) [:seon.cache/kinds :seon.sci.runtime/analysed])}))
++           definitions (mapv (fn [_] (observe (str "defn-perf-" (id/id))
++                                             "(defn sentinel-probe-inc [x] (inc x))")) (range 3))
++           warm-id (str "defn-perf-warm-" (id/id))
++           _ (dotimes [_ 2] (answer running warm-id "(+ 1 2)"))
++           warm (mapv (fn [_] (observe warm-id "(+ 1 2)")) (range 5))]
++       (when-let [directory (System/getenv "DEFN_PERF_OUTPUT")]
++         (doseq [[kind rows] [[:definitions definitions] [:warm warm]]
++                 [i row] (map-indexed vector rows)]
++           (let [file (io/file directory (str (System/getenv "DEFN_PERF_LABEL") "-" (name kind) "-" i ".edn"))]
++             (io/make-parents file)
++             (spit file (value/core-text row 0)))))
++       (is (every? #(= 1 (get-in % [:cost :seon.cost/transactions])) definitions))))))
++
++
++(deftest a-first-defn-inherits-the-shared-program-analyses
++  (support/with-running-agent
++   (fn [running _ _]
++     (let [agent-id (str "first-defn-" (id/id))
++           measured (profile/measure #(answer running agent-id "(defn sentinel-probe-inc [x] (inc x))"))
++           cost (cost-support/bound-cost running agent-id (:seon.profile/value measured))]
++       (is (= 1 (:seon.cost/transactions cost)))
++       (is (zero? (profile/calls-of measured 'seon.sci.runtime/analysed))
++           "a new name inherits program analyses without a lookup per open function")
++       (is (some #(= 2 (:seon.repl/value %))
++                 (support/mcp-replies (answer running agent-id "(sentinel-probe-inc 1)"))))))))
+diff --git a/test/seon/sci/eval_test.clj b/test/seon/sci/eval_test.clj
+index 83a5aebd5..884ad8f69 100644
+--- a/test/seon/sci/eval_test.clj
++++ b/test/seon/sci/eval_test.clj
+@@ -396,9 +396,9 @@
+ 
+ (deftest no-src-function-a-change-can-reach-runs-its-compiled-var
+   ;; Invariant 1 of the branch-runtime note: a runtime's answers depend only on
+-  ;; its name -> digest map, never on what main's JVM compiled. Main runs
+-  ;; compiled, having no overrides (owner, 2026-10-19). On a branch with a
+-  ;; change, a src function runs its compiled Var only where that is the
++  ;; its name -> digest map, never on what main's JVM compiled. Closed main
++  ;; functions run compiled; open functions share their analysed roots with
++  ;; forks. A src function runs its compiled Var only where that is the
+   ;; answer its analysed definition gives: the change cannot reach it through
+   ;; `:seon.fn/calls`, and nothing it reaches resolves a name at run time. The
+   ;; oracle here walks callers from the change and from run-time resolution.
+@@ -3400,3 +3400,20 @@
+                                               :seon.sci.eval/time-limit-ms 5000})]
+        (is (= {:rendered-by :child} (edn/read-string (:seon.eval/shown evaluation)))
+            "the child's own pair renders the call's value")))))
++
++
++(deftest overlay-identities-read-two-projections-of-the-changed-entities
++  (test-support/with-database
++   (fn [connection]
++     (doseq [n [1 20]]
++       (let [before (db/db connection)
++             names (mapv #(symbol "my.program" (str "identity-" n "-" %)) (range n))
++             _ (test-support/transacted!
++                connection (mapv #(test-support/program-fn-entity before %
++                                  (str "(defn " (name %) " [] 1)")) names))
++             database (db/db connection)
++             measured (profile/measure #(#'eval/plan-identities before database))]
++         (is (= (set names) (:seon.fn/sym (:seon.profile/value measured))))
++         (is (zero? (profile/calls-of measured 'seon.db/datoms))
++             "identities are pulled together instead of read one attribute at a time")
++         (is (= 2 (profile/calls-of measured 'seon.db/pull-many))))))))
