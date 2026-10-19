@@ -301,6 +301,36 @@
        (is (= [777 main] branch-first) "the branch deriving first serves compiled code nothing")
        (is (= [main 777] compiled-first) "compiled code deriving first serves the branch nothing")))))
 
+(deftest a-runtime-derivation-is-keyed-by-its-own-program-through-every-entrance
+  ;; Runtime re-review R6 on the real path: the overlay (`seon.sci.eval/base-ctx`), a continuation acquiring a
+  ;; child that changes its parent's helper again (`seon.sci.eval/acquire!` from its predecessor) and a fork
+  ;; onto a connection (`seon.sci.eval/fork-cluster-ctx`) each answer their own `seon.config/effective-in`
+  ;; through `seon.config/effective`'s derivation, whichever of them or compiled code derives first.
+  (test-support/with-database
+   (fn [connection]
+     (let [before (db/db connection)
+           cluster (first (db/q '[:find [?c ...] :where [_ :seon.config/cluster ?c]] before))
+           a-db (branch-replacing! connection 'seon.config/effective-in
+                                   "\\(empty\\? missing\\)\\)\\s*config-effective"
+                                   "(empty? missing))\n          (assoc config-effective :seon.config.agent/max-running 777)")
+           a (eval/base-ctx a-db)
+           fork (eval/fork-cluster-ctx a a-db connection)
+           c-db (branch-replacing! connection 'seon.config/effective-in "max-running 777" "max-running 778")
+           c (doto (eval/base-ctx a-db) (#(eval/acquire! {:seon.sci.eval/ctx % :seon.db/db c-db})))
+           answer-of (fn [ctx database]
+                  (in-context ctx "(fn [db cn] (:seon.config.agent/max-running (seon.config/effective db cn)))"
+                              database cluster))
+           compiled (fn [database] (:seon.config.agent/max-running (config/effective database cluster)))
+           main (compiled before)
+           in-order (fn [reads] (seon.cache/evict-kinds! #{:seon.config/effective}) (mapv #(%) reads))]
+       (is (not (contains? #{777 778} main)) "main's definition answers main's dial")
+       (is (= [main 777 777 778] (in-order [#(compiled a-db) #(answer-of a a-db) #(answer-of fork a-db) #(answer-of c c-db)]))
+           "compiled code first")
+       (is (= [778 777 777 main] (in-order [#(answer-of c c-db) #(answer-of fork a-db) #(answer-of a a-db) #(compiled a-db)]))
+           "the child first, then the fork, its parent and compiled code")
+       (is (= [777 778 main] (in-order [#(answer-of fork a-db) #(answer-of c a-db) #(compiled a-db)]))
+           "the parent's database read by the child's code answers the child's definition")))))
+
 (deftest ^{:seon.test/long "Two agent requests through MCP: five definitions deriving through seon.cache, then one call of each."
            :seon.test/long-ms 120000}
   an-agent-derivation-is-keyed-by-its-runtime-wherever-it-runs

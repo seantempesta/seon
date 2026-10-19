@@ -109,6 +109,8 @@
 ;; - cc derives a value through `seon.cache/lookup`, keyed by its input only,
 ;;   with h0: a branch changing h0 or cc must not read main's derivation, and
 ;;   main must not read the branch's.
+;; - cn calls `al/hx`, the alias al naming rt.a (hx adds 7) on main; a branch
+;;   may point al at rt.b (hx adds 9), a change of the namespace's resolution.
 
 (def ^:private macro-name 'm0)
 
@@ -116,7 +118,7 @@
 
 (def ^:private value-callers '{v0 [h0] va [c0] vo [h3 r0]})
 
-(def ^:private more-callers '{cv [v0] cva [va] ch [h3] hb [h2] chb [hb] cc [h0] cvo [vo]})
+(def ^:private more-callers '{cv [v0] cva [va] ch [h3] hb [h2] chb [hb] cc [h0] cvo [vo] cn []})
 
 (defn- macro-source
   "Version `v` of the macro m0."
@@ -126,7 +128,7 @@
 
 (def ^:private shaped-names
   "Every name of the shaped program but the macro, in definition order."
-  (into program-names '[v0 va cv cva cm ch hb chb cc vo cvo]))
+  (into program-names '[v0 va cv cva cm ch hb chb cc vo cvo cn]))
 
 (defn- shaped-source
   "Version `v` of `program-name` in the shaped program: the macro's, a value's
@@ -139,6 +141,7 @@
     va "(def va c0)"
     vo "(def vo {:f h3 :r r0})"
     cvo (str "(defn cvo [x] (+ " (* 1000 (inc v)) " ((:f vo) x)))")
+    cn (str "(defn cn [x] (+ " (* 1000 (inc v)) " (al/hx x)))")
     cv (str "(defn cv [x] (+ " (* 1000 (inc v)) " ((:f v0) x)))")
     cva (str "(defn cva [x] (+ " (* 1000 (inc v)) " (va x)))")
     cm (str "(defn cm [x] (+ " (* 1000 (inc v)) " (m0 x)))")
@@ -181,7 +184,7 @@
               " cm (fn [x] (+ 1000 (+ 0 (h1 x)))) ch (fn [x] (+ 1000 (reduce + (mapv h3 [x (inc x)]))))"
               " hb (fn [x] (+ 1000 (h2 x))) chb (fn [x] (+ 1000 (hb x)))"
               " cc (fn [x] (seon.cache/lookup :rt.gen/cc [x] (constantly 1) (fn [] (+ 1000 (h0 x)))))"
-              " vo {:f h3 :r r0} cvo (fn [x] (+ 1000 ((:f vo) x)))"
+              " vo {:f h3 :r r0} cvo (fn [x] (+ 1000 ((:f vo) x))) cn (fn [x] (+ 1000 (+ x 7)))"
               "] {" (str/join " " (map #(str "'" % " " %) shaped-names)) "})"))))
 
 (def ^:private shaped-index
@@ -194,16 +197,21 @@
                              (merge (zipmap (conj shaped-names macro-name) (repeat [])) shaped-calls))
                        '#{clojure.core/resolve}))
 
+(def ^:private alias-namespaces
+  "rt.a and rt.b, each defining hx, which rt.gen's alias al names."
+  "(ns rt.a) (defn hx [x] (+ x 7)) (ns rt.b) (defn hx [x] (+ x 9))")
+
 (defn- shaped-main
   "Main's shaped runtime: every Var rooted at its compiled version and the
-  macro at version 0, with the base's snapshot of runtime rows (no row for the
-  macro or the host-bound hb) and the reach index."
+  macro at version 0, al naming rt.a, with the base's snapshot of runtime rows
+  (no row for the macro or the host-bound hb) and the reach index."
   {:malli/schema [:=> [:cat] :seon.sci.eval/ctx]}
   []
   ;; `seon.cache/lookup` is a Var, as the program space copies it, so a changed runtime binds its own
   (let [ctx (sci/fork (sci/init {:namespaces {'seon.cache {'lookup (sci/copy-var* #'seon.cache/lookup (sci/create-ns 'seon.cache))}}}))]
     (sci.ctx-store/with-ctx ctx
-      (sci/eval-string* ctx (str "(ns rt.gen) (declare " (str/join " " shaped-names) ") " (macro-source 0)))
+      (sci/eval-string* ctx (str alias-namespaces " (ns rt.gen) (alias 'al 'rt.a) (declare " (str/join " " shaped-names) ") "
+                                 (macro-source 0)))
       (doseq [program-name shaped-names]
         (sci/bind-root! ctx (sci/resolve ctx (symbol "rt.gen" (str program-name))) (shaped-compiled program-name))))
     (assoc ctx :seon.sci.kernel/program-snapshot
@@ -212,23 +220,32 @@
 
 (defn- shaped-branch
   "A runtime forked from `parent` holding `change` (name -> version) as its own
-  definitions, installed as an overlay or an agent's write installs them, then
-  bound by the production binder; its composition rides on it."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:map-of :symbol nat-int?]] :seon.sci.eval/ctx]}
-  [parent change]
+  definitions, installed as an overlay or an agent's write installs them, and
+  al naming `target` (`parent`'s when absent), then bound by the production
+  binder, with rt.gen's resolution changed when al moved; its composition
+  rides on it."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.sci.eval/ctx [:map-of :symbol nat-int?]] :seon.sci.eval/ctx]
+                  [:=> [:cat :seon.sci.eval/ctx [:map-of :symbol nat-int?] [:maybe :symbol]] :seon.sci.eval/ctx]]}
+  ([parent change] (shaped-branch parent change nil))
+  ([parent change target]
   (let [ctx (assoc (sci/fork parent) :seon.sci.kernel/program-snapshot (atom @(:seon.sci.kernel/program-snapshot parent)))
+        held-target (::alias parent 'rt.a)
+        target (or target held-target)
         ;; the overlay interprets the branch's own rows again in definition
         ;; order, so its own callers expand its macro and read its helpers
         own (merge (::versions parent) change)
         ordered (sort-by #(if (= macro-name %) -1 (.indexOf ^java.util.List shaped-names %)) (keys own))]
     (sci.ctx-store/with-ctx ctx
+      (when (not= target held-target)
+        (sci/eval-string* ctx (str "(in-ns 'rt.gen) (ns-unalias 'rt.gen 'al) (alias 'al '" target ")")))
       (doseq [program-name ordered]
         (sci/eval-string* ctx (str "(in-ns 'rt.gen) " (shaped-source program-name (own program-name))))))
     (#'eval/bind-analysed! ctx (into {} (map (fn [[program-name v]] [(symbol "rt.gen" (str program-name))
                                                                     (id/digest 64 [(shaped-source program-name v)])]))
                                      change)
-                           #{})
-    (assoc ctx ::versions (merge (::versions parent) change))))
+                           (if (= target held-target) #{} #{'rt.gen}))
+    (assoc ctx ::versions (merge (::versions parent) change) ::alias target))))
 
 (defn- shaped-answers
   "What `ctx` answers for every shaped name at one input each, by name; p0
@@ -251,13 +268,14 @@
   "What the composition `versions` answers evaluated from its own source alone
   in a fresh SCI context: every name interpreted, hb included, and every
   derivation computed, never read from the cache."
-  {:malli/schema [:=> [:cat [:map-of :symbol nat-int?]] :map]}
-  [versions]
+  {:malli/schema [:function [:=> [:cat [:map-of :symbol nat-int?]] :map] [:=> [:cat [:map-of :symbol nat-int?] :symbol] :map]]}
+  ([versions] (shaped-from-scratch versions 'rt.a))
+  ([versions target]
   (let [ctx (sci/init {:namespaces {'seon.cache {'lookup (fn [_kind _key _weigh derive-fn] (derive-fn))}}})]
-    (sci/eval-string* ctx (str "(ns rt.gen) (declare " (str/join " " shaped-names) ") "
+    (sci/eval-string* ctx (str alias-namespaces " (ns rt.gen) (alias 'al '" target ") (declare " (str/join " " shaped-names) ") "
                                (macro-source (get versions macro-name 0)) " "
                                (str/join " " (map #(shaped-source % (get versions % 0)) shaped-names))))
-    (shaped-answers ctx)))
+    (shaped-answers ctx))))
 
 (def ^:private reaching-hb
   "The names whose answer passes through hb."
@@ -274,18 +292,20 @@
   ;; A branch's own value definition is its own write, re-derived by the
   ;; overlay's closure, not by the binder: values never change here.
   (let [changing (vec (remove (into #{'hb} (keys value-callers)) (conj shaped-names macro-name)))
-        steps (gen/vector (gen/tuple (gen/choose 0 5) (gen/map (gen/elements changing) (gen/choose 0 2) {:max-elements 6})) 1 5)
+        steps (gen/vector (gen/tuple (gen/choose 0 5) (gen/map (gen/elements changing) (gen/choose 0 2) {:max-elements 6})
+                                     (gen/elements [nil 'rt.a 'rt.b]))
+                          1 5)
         result (tc/quick-check
                 60
                 (prop/for-all [chain steps backwards? gen/boolean]
                   (seon.cache/evict-kinds! #{:seon.sci.runtime/analysed :rt.gen/cc})
                   (let [main (assoc (shaped-main) ::versions {})
-                        runtimes (reduce (fn [held [pick change]]
-                                           (conj held (shaped-branch (nth held (mod pick (count held))) change)))
+                        runtimes (reduce (fn [held [pick change target]]
+                                           (conj held (shaped-branch (nth held (mod pick (count held))) change target)))
                                          [main] chain)]
                     (every? (fn [ctx]
                               (let [versions (::versions ctx)
-                                    expected (shaped-from-scratch versions)
+                                    expected (shaped-from-scratch versions (::alias ctx 'rt.a))
                                     answered (shaped-answers ctx)
                                     h2-changed? (not= 0 (get versions 'h2 0))]
                                 (and (= (apply dissoc expected reaching-hb) (apply dissoc answered reaching-hb))
@@ -306,6 +326,38 @@
         "the parent's vo holds the h3 it runs")
     (is (= (get (shaped-from-scratch (::versions child)) 'cvo) (get (shaped-answers child) 'cvo))
         "the child's vo holds the child's h3")))
+
+(deftest a-child-derivation-holds-its-own-change-of-its-parents-helper
+  ;; Runtime re-review R6's two-step chain: a parent changes h0 to 1 and its child changes it to 2; cc derives
+  ;; through `seon.cache` with h0, and each answers its own h0.
+  (seon.cache/evict-kinds! #{:seon.sci.runtime/analysed :rt.gen/cc})
+  (let [parent (shaped-branch (assoc (shaped-main) ::versions {}) {'h0 1})
+        child (shaped-branch parent {'h0 2})]
+    (is (= (get (shaped-from-scratch (::versions parent)) 'cc) (get (shaped-answers parent) 'cc)) "the parent's h0")
+    (is (= (get (shaped-from-scratch (::versions child)) 'cc) (get (shaped-answers child) 'cc)) "the child's h0")))
+
+(deftest a-derivation-is-keyed-by-its-runtimes-whole-delta
+  ;; Two runtimes that differ only by what an ancestor changed: x changes h0 then cc, y only cc. cc derives
+  ;; with h0, so whichever derives first must not serve the other.
+  (doseq [x-first? [true false]]
+    (seon.cache/evict-kinds! #{:seon.sci.runtime/analysed :rt.gen/cc})
+    (let [main (assoc (shaped-main) ::versions {})
+          x (shaped-branch (shaped-branch main {'h0 1}) {'cc 1})
+          y (shaped-branch main {'cc 1})
+          answer (fn [ctx] (get (shaped-answers ctx) 'cc))
+          pair (if x-first? (let [a (answer x)] [a (answer y)]) (let [b (answer y)] [(answer x) b]))]
+      (is (= [(get (shaped-from-scratch (::versions x)) 'cc) (get (shaped-from-scratch (::versions y)) 'cc)] pair)
+          "each answers its own composition"))))
+
+(deftest a-namespace-resolution-change-answers-its-own-namespace
+  ;; A branch pointing rt.gen's alias al at rt.b re-analyses the names it resolves, and its child keeps it.
+  (seon.cache/evict-kinds! #{:seon.sci.runtime/analysed :rt.gen/cc})
+  (let [main (assoc (shaped-main) ::versions {})
+        moved (shaped-branch main {} 'rt.b)
+        child (shaped-branch moved {'h1 1})]
+    (is (= (shaped-from-scratch {} 'rt.a) (shaped-answers main)) "main resolves al to rt.a")
+    (is (= (shaped-from-scratch {} 'rt.b) (shaped-answers moved)) "the branch resolves al to rt.b")
+    (is (= (shaped-from-scratch {'h1 1} 'rt.b) (shaped-answers child)) "and so does its child")))
 
 (deftest composing-branches-analyses-each-distinct-digest-once
   ;; Invariant 4: A changes h1, B changes h2, C composes A's h1 with B's h2.
