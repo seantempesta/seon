@@ -233,11 +233,11 @@ How these fit the owner's constraints:
 Each phase is one loadable slice. HEAD boots after each.
 
 Phase status: P0 committed (sci fork `b6c51cd9` on branch `seon-ctx-escape`, bumped in f04cbe446 with a restart
-batch; it is live after root restarts default). P1 is stopped at a working patch: its proof is green, but the cost
-of deriving a base is too high (below). The owner chose option 2, refined to content-addressed analysis; its
-mechanism `seon.sci.runtime` and the invariant tests are committed (lane runtime-base), and the real base built
-from it is the next slice. P2 is not started. P3 and P4 are
-not approved.
+batch; it is live after root restarts default). P1 is wired onto the content-addressed mechanism and stopped at a
+patch, `branch-runtime-wire.patch` next to this note (lane runtime-wire, below): both real-program proofs and every
+invariant test are green and the two test namespaces gain no red, but a branch with a function change pays the
+interpretation of interop-heavy platform functions (`seon.id/digest` 124x, `:similar-by-name-warm` 2.45 GB against
+57 MB), so the hub-change proof misses its bound. P2 is partial in the patch. P3 and P4 are not approved.
 
 P1 attempt (lane runtime-p0-p2, 2026-10-19). The patch is `branch-runtime-p1.patch` next to this note. It adds
 `seon.sci.eval/analyse-loaded-functions!` to `acquire-program!`, the proof
@@ -342,8 +342,8 @@ built from it.
 | Invariant | Test | Status, measured |
 |---|---|---|
 | 1. A runtime depends only on its name → digest map, never on main's compiled JVM | `seon.sci.runtime-test/a-composed-runtime-answers-what-its-own-source-answers`: 40 generated chains of up to 6 branches over 7 names in 3 versions, each runtime compared with its own source evaluated from scratch in a fresh SCI context | green |
-| 1, on the real program: no SCI-runnable `src` function runs its compiled Var | `seon.sci.eval-test/no-sci-runnable-src-function-runs-its-compiled-var` | **red** at 494ff6a42: every runnable `src` function (`my.agent/*`, `my.edit/*`, ...) runs compiled |
-| 1, on the real program: a branch's helper change reaches its `src` callers | `seon.sci.eval-test/a-branch-helper-change-is-live-for-its-src-callers-on-that-branch` (P1's proof) | **red** at 494ff6a42: the branch answers `"(a 1)"`, not `"(BRANCH BRANCH)"` |
+| 1, on the real program: on a branch with a change, no SCI-runnable `src` function runs its compiled Var (main may run compiled: it has no overrides) | `seon.sci.eval-test/no-sci-runnable-src-function-runs-its-compiled-var` | **red** at HEAD; green with `branch-runtime-wire.patch`: all 4,463 runnable `src` functions analyse |
+| 1, on the real program: a branch's helper change reaches its `src` callers | `seon.sci.eval-test/a-branch-helper-change-is-live-for-its-src-callers-on-that-branch` (P1's proof) | **red** at HEAD; green with the patch: the branch answers `"(BRANCH BRANCH)"`, main's base and the compiled caller `"(a 1)"` |
 | 2. Creating a branch is a fork plus an empty difference | `seon.sci.runtime-test/creating-a-branch-and-continuing-an-env-cost-only-what-changed`: no analysis, no binding, under 1 MB allocated | green; fork plus empty bind 0.4 µs (10,000 runs on default, JVM mode) |
 | 3. Continuing an env with nothing changed pays nothing; one change pays one analysis and one binding | same test: the unchanged continuation analyses and binds nothing and allocates under 1 MB; one change is one analysis, one binding, under 4 MB | green; a tiny `defn` analyses in 35 µs, a real `src` one in 0.3 ms average (1.37 s over 4,496) |
 | 4. Composing branches re-analyses nothing already cached | `seon.sci.runtime-test/composing-branches-analyses-each-distinct-digest-once`: A changes `h1`, B `h2`, C composes A's `h1` with B's `h2` and analyses nothing, binding only `h2` | green |
@@ -361,23 +361,85 @@ after, so noisy at about ±2 MB):
 Rerun with `bin/seon check src/seon/sci/runtime.clj test/seon/sci/runtime_test.clj test/seon/sci/eval_test.clj
 --test seon.sci.runtime-test` (3.7 s for the six tests, 2026-10-19).
 
+#### The real program on the mechanism (lane runtime-wire, 2026-10-19)
+
+What the patch builds, by symbol (none of it is on HEAD):
+
+- **The Var space** is `seon.operator.runtime/sci-var-space`: one SCI Var per program name for the process
+  (`seon.sci.runtime/space-var`). `seon.sci.eval/copy-host-var` answers that Var, its root and metadata following the
+  host Var, so every base, overlay, fixture and agent shares Var identity and no analysis is split. Every built
+  context is forked at birth (`seon.sci.eval/build-base-ctx`), so it owns none of the shared Vars and a write is its
+  own binding (`seon.sci.eval-test/cluster-contexts-share-no-writable-sci-stock-vars`).
+- **The rows.** `seon.sci.eval/runtime-rows!` reads the loaded program's SCI-runnable `src` rows (definition digest,
+  the namespace declaration's digest, the digests of the program macros each calls) once per base, and makes the
+  base resolve them as their files do (refers, own `deftype` classes, private interns, the clojure.core names SCI
+  lacks).
+- **Analysis by content.** `seon.sci.runtime/analysed` keys an analysis by space, definition digest, namespace digest,
+  macro digests and what it is armed with: the compiled Var's own contract and policy (`seon.sci.eval/armed-as-compiled`).
+  4,463 analyses and their arming cost about 1.5 s once per JVM (`seon.cache` kind `:seon.sci.runtime/analysed`,
+  load-ms 1,487-1,576); every later base hits.
+- **Who runs analysed.** Main's program context keeps its compiled roots (owner: main has no overrides). A runtime
+  whose functions differ binds main's analysed functions once (`seon.sci.eval/bind-analysed!`, from
+  `derive-overlay-ctx` and from `interpret-affected!` on an agent's own change): 31 ms, 43 MB, then its delta
+  overrides them. The bindings are recorded as inherited, so they are never the context's own definitions.
+  `seon.sci.kernel/program-definition?` tells the loaded program's definition from a branch's, so neither predicate
+  holding-apart (`held-apart-var`) nor `fork-cluster-ctx`'s re-arming treats them as changes; before that fix one
+  `fork-cluster-ctx` recompiled every contract (31 s, 27 GB).
+- **Producer fixes the analysis exposed.** A use of `print-method`/`print-dup` is host-bound (`seon.fn/host-bound-callers`:
+  SCI's are refusing stand-ins). `seon.schema/runtime-predicate`, `projection-bindings` and
+  `projection-state-bindings` answer the SCI Var when they run interpreted, so an agent's `seon.db/transact!` on a
+  changed branch keeps working (`seon.sci.eval-test/evaluation-custody-is-derived-only-from-the-cluster-context`).
+
+Measured in throwaway check JVMs (concurrent checks, so wall time is approximate; allocation and calls are not):
+
+- `seon.sci.eval-test` and `seon.sci.branch-execution-test` with long tests: 33-44 s against HEAD's 29.7 s, the same
+  9 reds as HEAD and none new (`the-evaluator-remains-live-after-its-namespace-reloads` turned green).
+- Per call, interpreted on a changed branch against compiled on main, 300 calls through one SCI evaluation:
+  `seon.print/form-text` 5.5 vs 1.9 ms (2.9x); `seon.render.value/core-text` 297 vs 75 ms and 346 vs 115 MB (4x);
+  `seon.ref/brief` 3.5 vs 2.7 ms (1.3x); `seon.id/digest` 153 vs 1.2 ms and 466 vs 4 MB (**124x**).
+- The ordinary-operation table (`seon.cost-estimate-test/ordinary-operations-cost-no-more-than-their-estimates`),
+  whose agent changes functions in its earlier rows, so its later rows run on a changed branch: patch against HEAD,
+  allocation and calls: `:similar-by-name-warm` 2,453 vs 57 MB (0.9-3.3 s vs about 0.1 s); `:hub-behavior-change`
+  1,037 vs 880 MB, 295k vs 196k calls, 4.1 vs 1.0 s (the proof's bound was 318-852 MB, its estimate 40 MB);
+  `:seon-db-nine-forms` 1,452 vs 981 MB; `:current-state-with-task` 308 vs 207 MB; `:reuse-one-unchanged-test` 144 vs
+  30 MB. `:unchanged-request` is equal (18.2 vs 18.0 MB): an unchanged agent pays nothing.
+
+Where the gap comes from: not re-analysis (every analysis after the first is a cache hit) but interpretation of
+interop-heavy hot functions. `seon.id/id` hashes with `MessageDigest`, `ByteBuffer` and `ArrayDeque` in a loop; each
+interop call in SCI resolves reflectively and boxes, so it is 100x, not the 2-3x measured on `form-text`. Every
+digest, write and reach computation on a changed branch calls it.
+
+Options for the owner, simplest first:
+
+1. **Keep the hot interop functions compiled by a producer rule.** Count which runnable `src` functions are mostly
+   host interop (type-hinted calls, primitive arrays) and decide host-bound for them at `seon.fn/host-bound-callers`,
+   as `print-method` now is. A branch's change to one of them then refuses as host-bound changes do. Cost: a rule
+   and its census; risk: the rule is a heuristic beside the analysis.
+2. **Bind analysed functions lazily per Var on a changed runtime**, so only what the branch's calls reach is
+   interpreted and `seon.id`-style leaves called by compiled entrants stay compiled. Correctness for callers that the
+   branch's change does not reach is unchanged; it does not remove the cost on paths that do reach the change.
+3. **Land the patch as is**: correct for every combination, an unchanged agent pays nothing, a changed branch pays the
+   numbers above on every request.
+
 Not yet true or not measured:
 
-- **The real base is not built from `seon.sci.runtime`.** `seon.sci.eval/derive-base-ctx` still copies compiled
-  Vars per store and commit, so invariant 1 is red on the real program. The next slice builds the Var space once
-  per JVM load in the process registry (`seon.operator.runtime`), derives each loaded program's map from its
-  Datahike rows, and arms each analysed function by content. Today's `:seon.sci.eval/program-context` entries then
-  shrink to a fork plus a map.
-- **The analysis key lacks the namespace declaration and macro digests.** A branch that changes a namespace's
-  aliases or a macro would reuse an analysis keyed by definition digest alone. In `src` this concerns 7
-  `defmacro`s; the key gains both digests when the base reads them from the rows.
-- **A name the Var space lacks** (a function a branch adds) has no shared Var. `bind` requires the space to hold
-  every name it binds. Adding one means adding its Var to the space, which is the next slice's design question.
-- **Interpreted against compiled, end to end, is unmeasured.** Lane embed-fix saw a publication interpreted on a
-  branch allocate 10.8 GB in 9.5 s against 1.6 s compiled. Today's branch path re-interprets the changed rows and
-  lazily promotes closure members per derived context (`seon.sci.eval/promote-member!`), so that number may be
-  re-analysis rather than interpretation. It must be measured on the real base once it is built from the
-  content-keyed analyses: a publication run, a test run and an ordinary request, interpreted against compiled.
+- **The hub change with its reaching tests on a branch** was not run through the done rule here; the cost-table row
+  `:hub-behavior-change` above is the measured request.
+- **A publication run and a test run interpreted against compiled** are not measured separately; the
+  `:similar-by-name-warm` and `seon.id/digest` rows say they will be dominated by the interop-heavy functions.
+- **A name a branch adds** gets a context-local Var from SCI's `declare` in that runtime: isolated and O(1), but its
+  callers' analyses are not shared across runtimes. `seon.sci.runtime/space-var` can mint the shared Var; the overlay
+  does not use it yet.
+- **The delta** is still interpreted per derived context (`install-row!`), not by `seon.sci.runtime/analysed`, and a
+  branch-changed macro does not re-key its callers' analyses on that branch (the key carries main's macro digests).
+- **Escaping analysed functions** re-enter the analysis fork they were defined in when called on a context-less
+  thread (P0's rule), which holds a partial base.
+- **Now redundant, kept for P3:** `seon.sci.eval/bind-lazy-members!`, `lazy-root`, `promote-member!`,
+  `source-database`, `*deriving-database*` and `executing-ctx` (closure members already resolve late on a changed
+  runtime); `seon.sci.eval/reinterpret-inherited-callers!`, `stale-reach`, `reinterpret-reach!` and `inherited?`
+  (bodies hold the space's Var); `seon.fn` `source-callers`' `:branch` rule, `selection-walk`'s `::platform-tests`
+  and `seon.cluster.source/merge-members`' `:seon.source/deferred` (tests reaching a change through `src` callers can
+  now run on the branch).
 
 - **Phase 0, SCI fork: a function made or read on a context resolves in that context off-thread.**
   - Red proof: a row in `sci.fork-bindings-test` reproducing P5/P5b/P5c above (expected `[1001 1002 1003]`, today
