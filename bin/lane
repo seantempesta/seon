@@ -15,14 +15,16 @@
 #                                        in a throwaway JVM, then commit exactly PATH...; refused when every
 #                                        path is an ordinary src/test Clojure file
 #   bin/lane commit  LANE -m MSG --at-candidate --test NS... PATH...
-#                                        check the exact candidate archive in its own JVM (dependency changes).
+#                                        check the exact candidate archive in its own JVM (dependency changes),
+#                                        booted on a clone of default's live store (`bin/seon check --live-shape`).
 #   bin/lane commit  LANE -m MSG --test NS... --accept-red-before NS/VAR... PATH...
 #                                        a red bin/seon check still commits when every red var is accepted AND red on HEAD
 #                                        too (`bin/seon check --at HEAD` on those vars; trailer Check-red-before-accepted:),
 #                                        or absent on HEAD (a new proof, red by design; trailer Check-new-red-proof:)
 #   bin/lane commit  LANE -m MSG --restart-batch ... PATH...
 #                                        root only, when it has opened a restart batch: without it a commit of deps.edn
-#                                        or a reference-code/ gitlink (dependency or fork bump) is refused
+#                                        or a reference-code/ gitlink (dependency or fork bump) is refused; its check
+#                                        boots the candidate on a clone of default's live store (--live-shape)
 #   bin/lane evidence AGENT PATH... [-- TEST...]
 #                                        ask the branch-evidence question alone (exit 0 proven, 2 not, 3 unavailable);
 #                                        tests after -- are accepted as red before the change
@@ -673,6 +675,9 @@ commit() {
       revision="$(git commit-tree "$tree" -p HEAD -m "$message")"
       check_args=(--at "$revision")
     fi
+    # A restart batch and a boot-critical candidate boot on a clone of default's live store, not only the template
+    # (owner 2026-10-19: a commit booted on every template and refused on the live store).
+    [[ -n "$restart_batch$at_candidate" ]] && check_args+=(--live-shape)
     echo "== bin/seon check ${check_args[*]} ${tests[*]+"${tests[*]}"}"
     if [[ ${#accepted[@]} -gt 0 ]]; then
       SEON_TEST_RESULT_FILE="$scratch/check.edn" bin/seon check "${check_args[@]}" ${tests[@]+"${tests[@]}"} && rm -f "$scratch/check.edn" ||

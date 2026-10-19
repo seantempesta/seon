@@ -190,6 +190,15 @@
       (is (not (str/includes? (:err platform) "--branch-evidence AGENT")) "a platform path is not refused")
       (is (str/includes? (:out platform) "== bin/seon check bin/tool --test x.core-test/f") "a platform path runs the check"))))
 
+(deftest a-restart-batch-checks-on-the-live-store-shape
+  (let [dir (code-scratch "bin/tool" "#!/bin/sh\n")
+        _ (spit (io/file dir "bin/tool") "#!/bin/sh\nexit 0\n")
+        ordinary (lane dir "commit" "one" "-m" "y" "--test" "x.core-test/f" "bin/tool")
+        batch (lane dir "commit" "one" "-m" "y" "--restart-batch" "--test" "x.core-test/f" "bin/tool")]
+    (is (str/includes? (:out ordinary) "== bin/seon check bin/tool --test x.core-test/f") "an ordinary check stays on the template")
+    (is (str/includes? (:out batch) "== bin/seon check bin/tool --live-shape --test x.core-test/f")
+        "a restart batch boots on a clone of the live store")))
+
 (defn- java-descendants
   "Run `command` in `dir` to its end, sampling its descendant processes: its exit, output and every descendant command
   naming java."

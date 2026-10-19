@@ -186,11 +186,28 @@
   {'transact! (processing-measured datahike.writing/transact!)
    'merge! (processing-measured datahike.writing/merge-writer!)})
 
+(defn- identity-path
+  "The path the store id of the store at canonical `path` derives from: the
+  path itself, or, for this JVM's root store (`<seon.operator.root>/data/store`),
+  the store it was cloned from when the operator declared one
+  (`-Dseon.store.origin`: a live-shape check boots a clone of a live store, whose
+  stored id Datahike checks at connect). Read at the one seam, so every opener
+  of the store in this JVM presents the one id."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [path]
+  (let [root (System/getProperty "seon.operator.root")
+        origin (System/getProperty "seon.store.origin")]
+    (if (and (not (str/blank? origin)) (not (str/blank? root))
+             (= path (canonical-path (io/file root "data/store"))))
+      (canonical-path origin)
+      path)))
+
 (defn datahike-configuration
   "The creation configuration for a cluster store.
   `:file` backend at the CANONICAL path of `store-dir` (the store id
   derives from the path, so every spelling of one physical directory
-  must be the ONE store) with LZ4-compressed values, fused persistent-set roots with a 32-entry
+  must be the ONE store; a check's clone of a live store presents its
+  origin's id, `identity-path`) with LZ4-compressed values, fused persistent-set roots with a 32-entry
   diff buffer and a measured 128-way branching factor, a byte-bounded node cache shared by branches, retained history by
   the settled default policy, and
   write-time schema flexibility. Fusion and index settings are
@@ -216,7 +233,7 @@
               ; path, or a reopen — or another spelling of the same
               ; directory — would present itself as a different store.
               :id (java.util.UUID/nameUUIDFromBytes
-                   (.getBytes ^String path "UTF-8"))
+                   (.getBytes ^String (identity-path path) "UTF-8"))
               ; Datahike writes index nodes and the commit record (new,
               ; content-addressed, immutable) before the branch head that
               ; names them, so konserve may make them durable at the head's

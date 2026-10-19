@@ -799,8 +799,12 @@
                 (str "-J-XX:HeapDumpPath=" heap-dump-path)
                 ;; the crash on OOM's JFR emergency dump and error log, beside the heap dump
                 (str "-J-XX:FlightRecorderOptions=dumppath=" heap-dump-path)
-                (str "-J-XX:ErrorFile=" heap-dump-path "/hs_err_pid%p.log")
-                "-M:dev:test" "-e" form])))
+                (str "-J-XX:ErrorFile=" heap-dump-path "/hs_err_pid%p.log")])
+    ;; A live-shape check's clone presents its origin's store id
+    ;; (`seon.cluster.store/identity-path`).
+    (:seon.operator/store-origin request)
+    (conj (str "-J-Dseon.store.origin=" (:seon.operator/store-origin request)))
+    true (into ["-M:dev:test" "-e" form])))
 
 (defn boot-request
   "`request` with the agents' filesystem working root (`:seon.config.fs/working-root`)
@@ -851,7 +855,8 @@
             program-classes? (boolean (and program (.isDirectory (io/file program))))
             _ (when program (prune-program-classes! (repository-root) program))
             argv (launch-argv request source (start-classpath source classes program) (.getCanonicalPath heap)
-                              (launch-form request (.getLocalPort callback) program (launcher-pid request throwaway?)))
+                              (launch-form (dissoc request :seon.operator/store-origin) (.getLocalPort callback)
+                                           program (launcher-pid request throwaway?)))
             builder (doto (ProcessBuilder. ^java.util.List argv)
                       (.directory (io/file source))
                       (.redirectErrorStream true)
@@ -1035,6 +1040,23 @@
           :when (.exists (io/file checkout nested ".git"))]
     (extract-pinned! (str (io/file checkout nested)) nested-pin (str (io/file destination nested)))))
 
+(defn- promoted!
+  "Rename the complete directory `staging` to `target`: true, or false when a
+  concurrent build of the same content renamed first (its bytes are this
+  staging's, the directory being a function of its key), whose target then
+  stands and the staging is deleted. `fs/move` would move the staging INTO an
+  existing target."
+  {:malli/schema [:=> [:cat :any :any] :boolean]}
+  [^java.io.File staging ^java.io.File target]
+  (try (java.nio.file.Files/move (.toPath staging) (.toPath target)
+                                 (into-array java.nio.file.CopyOption
+                                             [java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
+       true
+       (catch java.io.IOException lost
+         (when-not (.isDirectory target) (throw lost))
+         (fs/delete-tree staging)
+         false)))
+
 (defn- pinned-checkout!
   "The directory holding `path` at `pin`, archived from its checkout once:
   staged, then atomically moved (its existence is completion). Never the
@@ -1048,7 +1070,7 @@
                              (str pin ".staging-" (.pid (java.lang.ProcessHandle/current))))]
         (fs/delete-tree staging)
         (extract-pinned! (str (io/file repository path)) pin (str staging))
-        (fs/move staging target {:atomic-move true})))
+        (promoted! staging target)))
     (.getCanonicalPath target)))
 
 (defn- seal-pinned!
@@ -1127,10 +1149,10 @@
             ;; inventory `seon.test.cache/input-paths` reads when present.
             committed-paths (command! ["git" "ls-tree" "-r" "-z" "--name-only" sha] repository 30000)
             _ (spit (io/file staging "test-input-paths.txt") committed-paths)
-            _ (seal-archive! (str staging) committed-paths)]
-        (fs/move staging target {:atomic-move true})
+            _ (seal-archive! (str staging) committed-paths)
+            built? (promoted! staging target)]
         {:seon.source/git-sha sha :seon.operator/source-root (.getCanonicalPath target)
-         :seon.operator/source-built? true :seon.operator/submodules submodules})))))
+         :seon.operator/source-built? built? :seon.operator/submodules submodules})))))
 
 (defn- elapsed-ms [began] (quot (- (System/nanoTime) began) 1000000))
 
@@ -1920,37 +1942,47 @@
 (defn- disposable-root-boot!
   "Boot a JVM of the archive `source-root` under the scratch root `disposable`
   (its pins linked, `linked-pins!`) and return its boot outcome with
-  `:seon.operator/ready?`; the caller stops it."
-  {:malli/schema [:=> [:cat :string :string :string] :map]}
-  [root disposable source-root]
+  `:seon.operator/ready?`; the caller stops it. `shape` is merged into the
+  launch request (`live-shape`)."
+  {:malli/schema [:function
+                  [:=> [:cat :string :string :string] :map]
+                  [:=> [:cat :string :string :string :map] :map]]}
+  ([root disposable source-root] (disposable-root-boot! root disposable source-root {}))
+  ([root disposable source-root shape]
   ;; A candidate's agents work in its own archive, never the checkout.
-  (let [outcome (try (launch-child! {:seon.operator/managed-root disposable
-                                     :seon.operator/throwaway? true
-                                     :seon.operator/command :start
-                                     :seon.boot/cluster-name "default"
-                                     :seon.config/environment
-                                     {:seon.config.fs/working-root source-root}}
+  (let [outcome (try (launch-child! (merge-with merge
+                                                {:seon.operator/managed-root disposable
+                                                 :seon.operator/throwaway? true
+                                                 :seon.operator/command :start
+                                                 :seon.boot/cluster-name "default"
+                                                 :seon.config/environment
+                                                 {:seon.config.fs/working-root source-root}}
+                                                shape)
                                     source-root true)
                      (catch Exception cause
                        {:seon.operator/value
                         (diagnostic (ex-message cause) (or (ex-data cause) {}) :client-failed cause)}))
         missing (get-in outcome [:seon.operator/value :seon.boot/readiness :seon.boot/missing-layers])]
     (assoc outcome :seon.operator/ready?
-           (and (not (:seon.error/message (:seon.operator/value outcome))) (vector? missing) (empty? missing)))))
+           (and (not (:seon.error/message (:seon.operator/value outcome))) (vector? missing) (empty? missing))))))
 
 (defn- launched-throwaway!
   "Boot a JVM of commit `sha` under the disposable root `disposable` on
   whatever store `disposable`'s `data/store` holds: whether it reached
-  readiness, its boot value and the phases. The caller stops it."
-  {:malli/schema [:=> [:cat :string :string :string] :map]}
-  [root disposable sha]
+  readiness, its boot value and the phases. The caller stops it. `shape` is
+  merged into the launch request (`live-shape`)."
+  {:malli/schema [:function
+                  [:=> [:cat :string :string :string] :map]
+                  [:=> [:cat :string :string :string :map] :map]]}
+  ([root disposable sha] (launched-throwaway! root disposable sha {}))
+  ([root disposable sha shape]
   (let [began (System/nanoTime)
         _ (linked-pins! root disposable)
         previous (some-> (advertisement root nil) program-source :seon.operator/source-root)
         source (filled-classes! disposable (prepared-source! disposable sha previous))
         source-root (:seon.operator/source-root source)
         prepared-ms (elapsed-ms began)
-        outcome (disposable-root-boot! root disposable source-root)
+        outcome (disposable-root-boot! root disposable source-root shape)
         value (:seon.operator/value outcome)]
     {:seon.operator/ready? (:seon.operator/ready? outcome)
      :seon.operator/value value
@@ -1958,7 +1990,7 @@
      :seon.operator/phases (merge (:seon.operator/phases source)
                                   {:seon.operator/prepare-ms prepared-ms
                                    :seon.operator/boot-ms (- (elapsed-ms began) prepared-ms)
-                                   :seon.boot/ready-ms (get-in value [:seon.boot/readiness :seon.boot/ready-ms])})}))
+                                   :seon.boot/ready-ms (get-in value [:seon.boot/readiness :seon.boot/ready-ms])})})))
 
 ;;; A template store per published commit (card PLATFORM-STEP slice 2). A
 ;;; throwaway JVM booted onto an empty store spends most of its boot publishing
@@ -2103,15 +2135,82 @@
                 {:seon.operator/seeded :empty :seon.operator/reason :template-build-failed
                  :seon.operator/built built}))))))))
 
+;;; A live-shape check (`check --live-shape`: restart batches and boot-critical
+;;; commits; owner 2026-10-19, after a commit refused to boot on the live store
+;;; while every template booted it) boots the candidate on a clone of this
+;;; root's live store instead of a template. Datahike writes every value before
+;;; the pointer that names it (`datahike.gc-guard`), so pointers copied BEFORE
+;;; the bulk clone name only values the clone holds: the live JVM copies
+;;; `:branches`, then every branch head it lists (it knows their konserve file
+;;; names, `konserve.impl.defaults/key->store-key`); the directory is cloned
+;;; (`cp -c -R`, APFS) and those pointers laid over it, so a writer active
+;;; during the clone tears no branch. The clone presents the live store's id
+;;; (`-Dseon.store.origin`, `seon.cluster.store/identity-path`), and the boot
+;;; resumes on it like `start --head`. Its agents start nothing
+;;; (`:seon.config.agent/max-running` 0).
+
+(defn- pointer-copy-form
+  "The live JVM's copy of its store's pointers into the directory `pointers`:
+  `:branches` first, then the head of every branch listed after it, so each
+  listed branch has its head (a branch created between them leaves an unlisted
+  head, which nothing reads)."
+  [pointers]
+  `(let [conn# (seon.cluster.boot/connection "default")
+         dir# (get-in @conn# [:config :store :path])
+         copy# (fn [key#]
+                 (let [file# (konserve.impl.defaults/key->store-key key#)]
+                   (java.nio.file.Files/copy (.toPath (java.io.File. dir# file#))
+                                             (.toPath (java.io.File. ~pointers file#))
+                                             (into-array java.nio.file.CopyOption
+                                                         [java.nio.file.StandardCopyOption/REPLACE_EXISTING]))
+                   file#))
+         listing# (copy# :branches)]
+     {:seon.operator/store-dir dir#
+      :seon.operator/pointers (into [listing#] (map copy#) (sort (datahike.api/branches conn#)))}))
+
+(defn- live-store!
+  "Place a clone of this root's live store at the slot root `disposable`'s
+  `data/store`, its pointers copied by the live JVM first (`pointer-copy-form`);
+  with no live JVM nothing writes the store and the clone is whole as taken.
+  `store` names a copy of this root's store nobody writes (a preserved
+  reproduction), cloned instead. The seed, its origin and timings."
+  {:malli/schema [:=> [:cat :string :string [:maybe :string]] :map]}
+  [root disposable store]
+  (let [began (System/nanoTime)
+        origin (.getCanonicalPath (io/file root "data/store"))
+        source (if store (.getCanonicalPath (io/file store)) origin)
+        target (io/file disposable "data/store")
+        pointers (doto (io/file disposable "data/store.pointers") .mkdirs)
+        live (when-not store (advertisement root "default"))
+        copied (when live
+                 (prepl-value! live (pr-str (pointer-copy-form (.getCanonicalPath pointers)))
+                               (operator-silence-backstop-ms {})))
+        pointer-ms (elapsed-ms began)]
+    (command! ["cp" "-c" "-R" source (str target)] root (operator-silence-backstop-ms {}))
+    (let [clone-ms (- (elapsed-ms began) pointer-ms)]
+      (doseq [^java.io.File file (.listFiles pointers)]
+        (fs/copy file (io/file target (.getName file)) {:replace-existing true}))
+      (fs/delete-tree pointers)
+      {:seon.operator/seeded :live :seon.operator/origin origin :seon.operator/source source
+       :seon.operator/pointers (count (:seon.operator/pointers copied))
+       :seon.operator/pointer-ms pointer-ms :seon.operator/clone-ms clone-ms
+       :seon.operator/seed-ms (elapsed-ms began)})))
+
+(def ^:private live-shape-launch
+  "What a live-shape check's boot adds to its launch request (`live-store!`)."
+  {:seon.config/environment {:seon.config.agent/max-running 0}})
+
 (defn- candidate-tests!
   "Boot a throwaway JVM of `root` from commit `sha` on a clone of the published
-  commit's template store, run `tests` there and answer the summary with the
-  phases; a boot that does not reach readiness answers its failure with the
-  log's tail. The JVM runs under its slot's root `data/check/slot-<n>`, is
-  terminated by exact identity and the root deleted on every exit path; dead
-  checks' roots are swept first."
-  {:malli/schema [:=> [:cat :string :string [:vector :string] :boolean] :map]}
-  [root sha tests include-long?]
+  commit's template store, or with `:seon.operator/live-shape?` on a clone of
+  the live store (`live-store!`, `:seon.operator/live-store` naming a copy of
+  it), run `tests` there and answer the summary with the phases; a boot that
+  does not reach readiness answers its failure with the log's tail. The JVM
+  runs under its slot's root `data/check/slot-<n>`, is terminated by exact
+  identity and the root deleted on every exit path; dead checks' roots are
+  swept first."
+  {:malli/schema [:=> [:cat :string :string [:vector :string] :boolean :map] :map]}
+  [root sha tests include-long? shape]
   (let [began (System/nanoTime)
         swept (into (swept-check-roots! root) (map str) (reaped-orphan-slots! root))
         slot (check-slot! root (operator-boot-bound-ms {}) (operator-check-slots {})
@@ -2125,12 +2224,19 @@
         _ (fs/delete-tree disposable)
         _ (fs/create-dirs disposable)]
     (try
-      (let [seed (try (seeded-store! root disposable (:seon.operator/slot slot))
-                      (catch clojure.lang.ExceptionInfo refusal
-                        (fs/delete-tree (io/file disposable "data/store"))
-                        {:seon.operator/seeded :empty :seon.operator/reason (ex-data refusal)}))
+      (let [live? (:seon.operator/live-shape? shape)
+            seed (if live?
+                   (live-store! root disposable (:seon.operator/live-store shape))
+                   (try (seeded-store! root disposable (:seon.operator/slot slot))
+                        (catch clojure.lang.ExceptionInfo refusal
+                          (fs/delete-tree (io/file disposable "data/store"))
+                          {:seon.operator/seeded :empty :seon.operator/reason (ex-data refusal)})))
             seeded-ms (elapsed-ms began)
-            boot (launched-throwaway! root disposable sha)
+            boot (launched-throwaway! root disposable sha
+                                      (if live?
+                                        (assoc live-shape-launch :seon.operator/store-origin
+                                               (:seon.operator/origin seed))
+                                        {}))
             booted-ms (elapsed-ms began)
             ;; The template's `default` ran the base's program: its boot adopts
             ;; the candidate's publication before readiness, so a test the
@@ -2194,7 +2300,9 @@
             ;; The throwaway JVM boots from its own archive while the running
             ;; JVM rehearses adoption; both are awaited, and either refuses.
             run (when (seq tests)
-                  (future (candidate-tests! root sha tests (true? (:seon.operator/include-long? request)))))
+                  (future (candidate-tests! root sha tests (true? (:seon.operator/include-long? request))
+                                            (select-keys request [:seon.operator/live-shape?
+                                                                  :seon.operator/live-store]))))
             ;; `--at REV` only runs tests on REV's archive: nothing to adopt.
             ;; A candidate that changes the running JVM's dependencies cannot be
             ;; adopted there; the throwaway JVM booted from its archive is its proof.
@@ -2375,7 +2483,7 @@
    [:nuke "nuke --force"]
    [:logs "logs [NAME]"]
    [:config-apply "config apply [NAME] PATH [--branch B | --chains]"]
-   [:check "check [PATH... | --at REV] [--test NS | --test NS/NAME]... [--include-long] (check --at REV runs the named tests on a throwaway JVM booted from git archive REV; each test needs its own --test)"]])
+   [:check "check [PATH... | --at REV] [--test NS | --test NS/NAME]... [--include-long] [--live-shape [--store PATH]] (--live-shape boots the candidate on a clone of this root's live store, or of the copy PATH, instead of the published commit's template; check --at REV runs the named tests on a throwaway JVM booted from git archive REV; each test needs its own --test)"]])
 
 (defn parse-argv
   "The operator request, or usage data when the caller asks for help."
@@ -2413,6 +2521,14 @@
           "--include-long" (if (= :check command)
                              (recur (next args) (assoc request :seon.operator/include-long? true) positionals)
                              (fail! "--include-long is supported only by check." request))
+          "--live-shape" (if (= :check command)
+                           (recur (next args) (assoc request :seon.operator/live-shape? true) positionals)
+                           (fail! "--live-shape is supported only by check." request))
+          "--store" (if (and (= :check command) (seq (next args)))
+                      (recur (nnext args) (assoc request :seon.operator/live-store
+                                                 (.getCanonicalPath (io/file (second args))))
+                             positionals)
+                      (fail! "--store PATH is supported only by check." request))
           "--at" (if (and (= :check command) (seq (next args)))
                    (recur (nnext args) (assoc request :seon.operator/at (second args)) positionals)
                    (fail! "--at REV is supported only by check." request))
@@ -2463,6 +2579,10 @@
                      (when stray
                        (fail! (str "'" stray "' is not a path: each test needs its own --test (--test A --test B), not --test A B.")
                               {:seon.operator/argument stray}))
+                     (when (and (:seon.operator/live-store request) (not (:seon.operator/live-shape? request)))
+                       (fail! "--store PATH names the live-shape check's store: it needs --live-shape." request))
+                     (when (and (:seon.operator/live-shape? request) (empty? (:seon.operator/tests request)))
+                       (fail! "--live-shape boots the candidate to run its tests: name each with --test." request))
                      (when (and (:seon.operator/at request) (seq positionals))
                        (fail! "--at REV checks REV's own archive: it takes no PATH." request))
                      (assoc request :seon.operator/paths
