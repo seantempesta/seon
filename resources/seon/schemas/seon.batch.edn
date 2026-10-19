@@ -140,7 +140,6 @@
  :origin :seon.batch/def-origin
  :member-of :symbol
  :arm-error :string
- :host-bound-reached [:vector {:description "The host-bound functions whose reach holds the written definition: they run compiled on every runtime, so the write is not live through them and no branch test proves it; root proves it with bin/seon check."} :qualified-symbol]
  :var [:any {:description "The live SCI Var written; held only during the call."}]
  :write [:multi {:dispatch :seon.batch/op}
          [:bind [:map [:seon.batch/op [:= :bind]] [:seon.batch/sym {:optional true} :seon.batch/sym]
@@ -148,7 +147,6 @@
                  [:seon.batch/origin {:optional true} :seon.batch/origin]
                  [:seon.batch/member-of {:optional true} :seon.batch/member-of]
                  [:seon.batch/arm-error {:optional true} :seon.batch/arm-error]
-                 [:seon.batch/host-bound-reached {:optional true} :seon.batch/host-bound-reached]
                  [:seon.batch/fn? {:optional true} :boolean]
                  [:seon.batch/ordinal {:optional true} :seon.cluster.eval/ordinal]]]
          [:unmap [:map [:seon.batch/op [:= :unmap]] [:seon.batch/sym :seon.batch/sym]
@@ -179,8 +177,7 @@
           [:seon.batch/facts-error {:optional true} :seon.batch/facts-error]]
  :note [:or
         [:map [:seon.schema/key :qualified-keyword] [:seon.schema/installed? [:= false]] [:seon.error/message :string]]
-        [:map [:seon.batch/sym :seon.batch/sym] [:seon.batch/arm-error :seon.batch/arm-error]]
-        [:map [:seon.batch/sym :seon.batch/sym] [:seon.batch/host-bound-reached :seon.batch/host-bound-reached]]]
+        [:map [:seon.batch/sym :seon.batch/sym] [:seon.batch/arm-error :seon.batch/arm-error]]]
  :change [:map
           [:seon.batch/entities [:vector :seon.program/row]]
           [:seon.batch/removals [:vector :symbol]]

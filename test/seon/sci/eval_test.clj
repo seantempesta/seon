@@ -230,22 +230,6 @@
          (is (= 3 (in-context (eval/base-ctx before) "(seon.profile/bucket 5)"))
              "main's analysis is not the branch's: its key holds the macro it expanded"))))))
 
-(deftest a-host-bound-function-reaching-a-branch-change-is-named
-  ;; Runtime review F2: SCI cannot run a host-bound function, so it runs main's
-  ;; helpers on every runtime; the runtime names it instead of pretending.
-  (testing "a host-bound function reaching the change is named, never run as if live"
-    (test-support/with-database
-     (fn [connection]
-       (let [database (branch-replacing! connection 'seon.ref/words "(?s)\\[\\^String text\\].*$" "[^String text]\n  [\"BRANCH\"])")
-             branch (eval/base-ctx database)]
-         (is (= ["BRANCH"] (in-context branch "(#'seon.ref/words \"a b\")")) "the branch's words is live")
-         (is (contains? (::eval/host-bound-reached (::eval/analysis @(::kernel/program-snapshot branch)))
-                        'seon.ref/parsed)
-             "the runtime names seon.ref/parsed, which runs main's words")
-         (is (= {'seon.ref/parsed #{'seon.ref/words}}
-                (select-keys (eval/host-bound-reaching database #{'seon.ref/words}) ['seon.ref/parsed]))
-             "the done rule's derivation names it too"))))))
-
 (deftest an-agent-change-is-live-through-its-macro-callers-and-keeps-namespace-rows
   ;; Runtime review F4, F4b and F3's agent row, through the real MCP path.
   (test-support/with-running-agent

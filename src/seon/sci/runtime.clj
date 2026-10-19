@@ -123,14 +123,11 @@
   change touches. A compiled function answers what its analysed definition
   answers on a runtime exactly when that runtime changed nothing in its closed
   reach: its body is the same source, and every call it makes reads the same
-  definitions. `host-bound` names run compiled on every runtime (SCI cannot run
-  them); `::host-bound-reach` holds each one's reach through the calls the
-  index follows, which [[host-bound-reached]] reads."
-  {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:set :symbol]] [:set :qualified-symbol] [:set :qualified-symbol]]
+  definitions."
+  {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:set :symbol]] [:set :qualified-symbol]]
                   [:map [::closed [:set :qualified-symbol]]
-                   [::reached-by [:map-of :qualified-symbol [:set :qualified-symbol]]]
-                   [::host-bound-reach [:map-of :qualified-symbol [:set :qualified-symbol]]]]]}
-  [calls opening host-bound]
+                   [::reached-by [:map-of :qualified-symbol [:set :qualified-symbol]]]]]}
+  [calls opening]
   (let [callees (fn [sym] (filter #(contains? calls %) (get calls sym)))
         callers (reduce-kv (fn [held sym called] (reduce #(update %1 %2 (fnil conj []) sym) held (filter calls called)))
                            {} calls)
@@ -146,23 +143,7 @@
                    (reduce (fn [held sym]
                              (reduce (fn [held reached] (assoc! held reached (conj (get held reached #{}) sym)))
                                      held (reach-of callees sym)))
-                           (transient {}) closed))
-     ::host-bound-reach (into {} (comp (filter #(contains? calls %))
-                                       (map (fn [sym] [sym (disj (reach-of callees sym) sym)])))
-                              host-bound)}))
-
-(defn host-bound-reached
-  "Each host-bound name of `index` whose reach holds a name in `changed`, to
-  those names: the compiled function runs main's definitions of them on every
-  runtime, so a branch cannot prove that change through it."
-  {:malli/schema [:=> [:cat [:map [::host-bound-reach [:map-of :qualified-symbol [:set :qualified-symbol]]]]
-                       [:set :symbol]]
-                  [:map-of :qualified-symbol [:set :symbol]]]}
-  [index changed]
-  (into {} (keep (fn [[sym reach]]
-                   (let [reached (into #{} (filter reach) changed)]
-                     (when (seq reached) [sym reached]))))
-        (::host-bound-reach index)))
+                           (transient {}) closed))}))
 
 (defn reached-changes
   "Each name of `names` to the changes in `changes` (name -> digest) its closed

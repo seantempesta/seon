@@ -325,12 +325,8 @@
                                              entities)
                 :seon.batch/private (vec (keep (fn [[_ [tag x]]] (when (= :private tag) x)) program))
                 :seon.batch/notes (into (schema-notes request working schema-keys)
-                                        (mapcat (fn [w] (cond-> []
-                                                          (:seon.batch/arm-error w)
-                                                          (conj {:seon.batch/sym (:seon.batch/sym w) :seon.batch/arm-error (:seon.batch/arm-error w)})
-                                                          (:seon.batch/host-bound-reached w)
-                                                          (conj {:seon.batch/sym (:seon.batch/sym w)
-                                                                 :seon.batch/host-bound-reached (:seon.batch/host-bound-reached w)}))))
+                                        (keep (fn [w] (when (:seon.batch/arm-error w)
+                                                        {:seon.batch/sym (:seon.batch/sym w) :seon.batch/arm-error (:seon.batch/arm-error w)})))
                                         writes)}]
     {:seon.batch/change change :seon.batch/derive-state (assoc state :declared declared)}))
 

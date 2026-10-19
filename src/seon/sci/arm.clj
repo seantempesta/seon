@@ -115,10 +115,7 @@
   (`seon.sci.eval/reinterpret-inherited-callers!`), and every loaded definition
   its change can reach, its source callers and the tests reaching them run
   interpreted (`seon.sci.eval/interpret-affected!`), so the forms after the
-  write call the definition through them; a host-bound function reaching it
-  runs main's definition, which the write answers as
-  `:seon.batch/host-bound-reached`. When the
-  write is a predicate `ctx` now holds apart, the installed functions whose
+  write call the definition through them. When the write is a predicate `ctx` now holds apart, the installed functions whose
   contract reaches it re-arm on it (`rearm-dependents!`); a failure there is
   the write's `:seon.batch/arm-error` too. A write of the definition the
   branch already holds (`behavior-held?`) changes no caller: none of this runs."
@@ -149,15 +146,10 @@
         (as-> armed
               (try
                 (eval/reinterpret-inherited-callers! ctx working sym v)
-                (let [source (get-in request [:seon.batch/world :seon.batch/source])
-                      acquired (eval/interpret-affected! ctx working {sym (when source (id/digest 32 [source]))})
-                      ;; a host-bound function runs main's definitions: this
-                      ;; write is not live through it, and no branch test proves it
-                      reached (into {} (filter (fn [[_ changed]] (contains? changed sym)))
-                                    (::eval/host-bound-reached (::eval/analysis acquired)))]
+                (let [source (get-in request [:seon.batch/world :seon.batch/source])]
+                  (eval/interpret-affected! ctx working {sym (when source (id/digest 32 [source]))})
                   (rearm-dependents! ctx sym @projection working)
-                  (cond-> armed
-                    (seq reached) (assoc :seon.batch/host-bound-reached (vec (sort (keys reached))))))
+                  armed)
                 ;; a refused read of the closure or a refused interpretation
                 (catch clojure.lang.ExceptionInfo t
                   (update armed :seon.batch/arm-error #(or % (ex-message t))))))))))
@@ -174,7 +166,6 @@
             origin (assoc :seon.batch/origin (if (:line origin) origin {:reason :no-source-position}))
             (:sci.impl/member-of (meta the-var)) (assoc :seon.batch/member-of (:sci.impl/member-of (meta the-var)))
             (contains? w :seon.batch/arm-error) (assoc :seon.batch/arm-error (:seon.batch/arm-error w))
-            (contains? w :seon.batch/host-bound-reached) (assoc :seon.batch/host-bound-reached (:seon.batch/host-bound-reached w))
             (fn? root) (assoc :seon.batch/fn? true))
     :unmap {:seon.batch/op :unmap :seon.batch/sym (symbol (str namespace-symbol) (str sym))}
     :remove-ns {:seon.batch/op :remove-ns :seon.batch/ns namespace-symbol}

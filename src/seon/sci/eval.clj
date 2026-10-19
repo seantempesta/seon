@@ -2754,33 +2754,21 @@
 
 (defn- reach-index
   "The program's reach index (`seon.sci.runtime/reach-index`) over
-  `database`'s `:seon.fn/calls` and host-bound facts, once per content of
-  those facts."
+  `database`'s `:seon.fn/calls` facts, once per content of those facts."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:map [::runtime/closed [:set :qualified-symbol]]
-                   [::runtime/reached-by [:map-of :qualified-symbol [:set :qualified-symbol]]]
-                   [::runtime/host-bound-reach [:map-of :qualified-symbol [:set :qualified-symbol]]]]]}
+                   [::runtime/reached-by [:map-of :qualified-symbol [:set :qualified-symbol]]]]]}
   [database]
   (let [build #(let [names (db/q '[:find [?sym ...] :where [?f :seon.fn/sym ?sym]] database)
                      called (db/q '[:find ?sym (distinct ?callee) :where [?f :seon.fn/sym ?sym] [?f :seon.fn/calls ?callee]]
-                                  database)
-                     host-bound (db/q '[:find [?sym ...] :where [?f :seon.fn/host-bound? true] [?f :seon.fn/sym ?sym]] database)]
+                                  database)]
                  (runtime/reach-index (into (zipmap names (repeat #{})) (map (fn [[sym callees]] [sym (set callees)])) called)
-                                      run-time-resolution (set host-bound)))]
-    (if-let [revisions (db/content-revisions database [:seon.fn/sym :seon.fn/calls :seon.fn/host-bound?])]
+                                      run-time-resolution))]
+    (if-let [revisions (db/content-revisions database [:seon.fn/sym :seon.fn/calls])]
       (seon.cache/lookup ::reach-index revisions
                          #(* reach-index-entry-bytes (reduce + (map count (vals (::runtime/reached-by %)))))
                          build)
       (build))))
-
-(defn host-bound-reaching
-  "Each host-bound function of `database`'s program whose reach holds a name
-  in `changed`, to the changed names it reaches (`seon.sci.runtime/host-bound-reached`):
-  it runs compiled on every runtime, so it runs main's definitions of them and
-  no branch test proves the change through it."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :symbol]] [:map-of :qualified-symbol [:set :symbol]]]}
-  [database changed]
-  (runtime/host-bound-reached (reach-index database) changed))
 
 (defn- plan-changes
   "What `plan` changes of the program `ctx` runs, as `bind-analysed!` takes
@@ -2858,9 +2846,7 @@
   the digests of the macros it expands as `ctx` holds them, so a changed
   macro re-analyses its callers here only and an analysis is shared by every
   context holding the same. Everything is analysed and evaluated before
-  anything is bound: a failure binds nothing. `::host-bound-reached` names the
-  host-bound functions whose reach holds a name `ctx` holds otherwise
-  (`seon.sci.runtime/host-bound-reached`)."
+  anything is bound: a failure binds nothing."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:map-of :symbol [:maybe :string]] [:set :symbol]] :map]}
   [ctx own namespaces]
   (let [snapshot (::kernel/program-snapshot ctx)
@@ -2918,8 +2904,7 @@
                      values)
         analysis {::analysed-count (+ (::analysed-count prior 0) (count functions))
                   ::evaluated-count (+ (::evaluated-count prior 0) (count values))
-                  ::compiled-count (count kept)
-                  ::host-bound-reached (runtime/host-bound-reached index (into (set (keys held)) changed))}]
+                  ::compiled-count (count kept)}]
     (sci.ctx-store/with-ctx ctx
       (doseq [[sym root] bound]
         (sci/bind-root! ctx (sci/resolve ctx sym) root)))

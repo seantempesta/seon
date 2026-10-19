@@ -102,8 +102,8 @@
 ;; - v0, a value definition holding h0, and cv, which calls through it; va, a
 ;;   value holding the caller c0 itself, and cva through it.
 ;; - hb, host-bound: SCI cannot run it, so it runs compiled on every runtime,
-;;   calling main's h2; chb calls it. A branch reaching it is reported, and
-;;   names reaching hb are not compared.
+;;   calling main's h2 (the one exception, F2); chb calls it. Names reaching hb
+;;   are not compared.
 ;; - ch hands h3 to compiled library functions (`mapv`, `reduce`).
 ;; - cc derives a value through `seon.cache/lookup`, keyed by its input only,
 ;;   with h0: a branch changing h0 or cc must not read main's derivation, and
@@ -181,16 +181,14 @@
               "] {" (str/join " " (map #(str "'" % " " %) shaped-names)) "})"))))
 
 (def ^:private shaped-index
-  "The shaped program's reach index: `resolve` is the run-time resolution and
-  hb is host-bound."
+  "The shaped program's reach index: `resolve` is the run-time resolution."
   (runtime/reach-index (into {} (map (fn [[caller callees]]
                                        [(symbol "rt.gen" (str caller))
                                         (if (= 'r0 caller)
                                           '#{clojure.core/resolve}
                                           (into #{} (map #(symbol "rt.gen" (str %))) callees))]))
                              (merge (zipmap (conj shaped-names macro-name) (repeat [])) shaped-calls))
-                       '#{clojure.core/resolve}
-                       '#{rt.gen/hb}))
+                       '#{clojure.core/resolve}))
 
 (defn- shaped-main
   "Main's shaped runtime: every Var rooted at its compiled version and the
@@ -283,12 +281,9 @@
                               (let [versions (::versions ctx)
                                     expected (shaped-from-scratch versions)
                                     answered (shaped-answers ctx)
-                                    reached (:seon.sci.eval/host-bound-reached
-                                             (:seon.sci.eval/analysis @(:seon.sci.kernel/program-snapshot ctx)))
                                     h2-changed? (not= 0 (get versions 'h2 0))]
                                 (and (= (apply dissoc expected reaching-hb) (apply dissoc answered reaching-hb))
-                                     (or (not h2-changed?) (contains? reached 'rt.gen/hb))
-                                     (or (contains? reached 'rt.gen/hb) (= expected answered)))))
+                                     (or h2-changed? (= expected answered)))))
                             ;; whichever runtime derives first must not decide
                             ;; another's cached answer
                             (if backwards? (rseq runtimes) runtimes))))
