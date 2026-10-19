@@ -21,9 +21,44 @@ second launch, the class resolves from the cached directory (mtime 4102444800000
 with or without the runtime-f7b arm-gap patch), which explains its listing among 85299376b's accepted reds and the
 arm-gap bisection.
 
-Scope: development adoption reloads with `require :reload` (`seon.cluster/load-development-definitions!`), and a
-default launched on a checked commit finds its classes cached, so an adoption there would keep the launch code of
-every cached namespace while recording the new commit. Not probed on default.
+Scope (probed 2026-10-19, lane class-cache, JVM-mode reads on default pid 11460, nothing reloaded):
 
-Owner: the operator's class cache (`script/seon/operator.clj`) or the reload owner: a reload must read the source it
-names.
+- Default runs cached classes: `seon/cluster__init.class` resolves from
+  `target/dev-program-classes/3d38c658…` with mtime 4102444800000 against the source's 1792409481000, and
+  `seon.cluster__init` is initialized.
+- Development adoption on default is not affected in practice: its source directory is the sealed archive
+  `data/source/a92ba5b9…` (`seon.operator/seal-archive!`), adoption reloads only namespaces whose published bytes
+  changed and `seon.cluster/verify-development-sources!` refuses changed bytes, so an archive JVM has nothing to
+  reload. A JVM on a mutable checkout gets no class cache (`seon.operator/program-classes` is nil for a source that is
+  no commit archive).
+- Default IS affected where an absent namespace is loaded with `require :reload` after a `remove-ns`
+  (`seon.sci.eval/host-namespace!`, `seon.test`'s test-Var loader): with the class cached, the initialized `__init`
+  class runs nothing and the namespace stays absent. Reproduced with a two-namespace fixture: classes first on the
+  classpath, `(remove-ns 'xa.b) (require 'xa.b :reload)` leaves `(find-ns 'xa.b)` nil; from source it is present.
+- `seon.cluster.program-classes-test/a-namespace-loaded-from-its-classes-keeps-protocol-and-record-identity-across-reload`
+  asserts this defect as the intended behavior ("the reload loads the same classes again"): the record class is
+  identical before and after because the namespace was never re-evaluated.
+
+Cause is Clojure's own model, not only the stamp: `clojure.lang.RT/load` prefers `<ns>__init.class` whenever it is
+newer than the source, and `loadClassForName` on an initialized class runs nothing, so no AOT-loaded namespace is
+reloadable by `require :reload` (Clojure's own jar namespaces behave the same). With honest compile-time mtimes the
+class is still newer than the archive's commit-time sources, so removing the 2100 stamp alone fixes nothing; it only
+turns later commits sharing the key into misses. Hiding the classes from the post-boot loader (a URLClassLoader bound
+as `Compiler/LOADER` only while boot loads) makes reload read the source but breaks it the other way: the reloaded
+source cannot resolve a record or protocol class the hidden loader defined (`ClassNotFoundException xa.a.R`).
+
+Measured price of the cache (default's archive and classpath, loading its 124 cached namespaces in a throwaway JVM,
+two alternating runs under load): from classes 6,238 and 4,735 ms, from source 7,122 and 6,755 ms, so it saves about
+1-2 s per launch.
+
+Owner decision needed, simplest first:
+
+1. Delete the program class cache (`launch-form`'s staging and promotion, `program-classes`, its pruning and holds,
+   `warmed-program-classes!`, the program-classes test); dependency classes stay. Every `require :reload` reads source
+   as Clojure intends for non-AOT code; costs about 1-2 s per launch. Recommended.
+2. Keep the cache and make every reload owner load the source text with `clojure.lang.Compiler/load`
+   (clj-reload's `clj-reload.util/ns-load-file`): `seon.cluster/load-development-definitions!`,
+   `seon.sci.eval/host-namespace!`, `seon.test`'s loader and the eval test. A bare `require :reload` at the JVM REPL
+   stays a silent no-op on every cached namespace.
+3. Keep the cache in a boot-only loader whose class resources are hidden after boot: a bespoke class loader beside
+   Clojure's, keeping the stamp. Not recommended.
