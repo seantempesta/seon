@@ -610,7 +610,7 @@
   admitted attribute declarations. Refuses, naming the key (and file
   when known): `::unresolved-reference` (a referenced registry key
   absent from the population), `::unregistered-predicate` (a `[:fn]`
-  symbol with no `register-core-predicate!`), and
+  symbol that resolves to no callable Var), and
   `::dishonest-generator` (a `[:fn]` form carrying neither
   `:gen/schema` nor `:gen/gen`), each RETURNED as a
   `:seon.schema.edn/population-refused-error`; any other failure of the

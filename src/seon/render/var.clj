@@ -17,7 +17,6 @@
             [seon.db :as db]
             [seon.fn :as sfn]
             [seon.render.value :as render.value]
-            [seon.schema :as schema]
             [seon.test.runner :as runner]))
 
 (defn var-value?
@@ -25,8 +24,6 @@
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "A predicate answers for any value." :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [x]
   (or (instance? clojure.lang.Var x) (instance? sci.lang.Var x)))
-
-(schema/register-core-predicate! 'seon.render.var/var-value? var-value?)
 
 (def var-generator
   "Host Vars, for the Var schema's honest generator."

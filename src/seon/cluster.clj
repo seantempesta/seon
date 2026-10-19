@@ -125,9 +125,6 @@
   [value]
   (instance? java.net.ServerSocket value))
 
-(schema/register-core-predicate! 'seon.cluster/socket-server?
-                                 socket-server?)
-
 (defn cluster-name?
   "True when `value` is one valid relative path segment.
 
@@ -156,9 +153,6 @@
                 (seq "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"))
                1 48))
     (gen/elements ["default" "alpha.beta"])]))
-
-(schema/register-core-predicate! 'seon.cluster/cluster-name?
-                                 cluster-name?)
 
 ;;; Each generation makes a FRESH UNBOUND server socket. One shared
 ;;; delayed socket bound a real process port that no cluster owned and

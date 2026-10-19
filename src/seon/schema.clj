@@ -236,10 +236,10 @@
    Compilation must never load code as a side effect of examining a
    declaration: agents author `[:fn ...]` forms, and [[malli-form?]] answers
    structural questions about them, so a loading resolver would let an
-   arbitrary namespace be required by writing its name into a schema. The
-   load-time `register-core-predicate!` assertion is what makes this
-   sufficient for a valid declaration — a predicate's owner is loaded before
-   anything can declare against it, and `clojure.core` is always loaded. A
+   arbitrary namespace be required by writing its name into a schema. This
+   suffices for a valid declaration: a population's predicate owners are
+   loaded when its bindings resolve ([[predicate-bindings]]), and
+   `clojure.core` is always loaded. A
    predicate added to a namespace this process already loaded resolves as
    nothing and the compile refuses naming that namespace: its adoption
    reloads the owner (`seon.cluster/load-development-definitions!`); the
@@ -1008,51 +1008,11 @@
 (defn- active-projection []
   handed/*projection*)
 
-(defn register-core-predicate!
-  "Assert at load time that `predicate` names the callable `f`, and return it.
-
-   This no longer caches anything: resolution is [[runtime-predicate]], which
-   reads the Var the qualified symbol names, so there is no process-global
-   symbol->function map for a second environment to overwrite (2026-08-07
-   isolation audit, Defect I.3).
-
-   It remains a call rather than nothing for one reason worth keeping: it
-   resolves the predicate EAGERLY, as the owning namespace loads, instead of
-   leaving the first resolution to happen lazily inside a schema compile —
-   which is where a `require` triggered mid-compile could meet a load cycle.
-   A typo'd symbol therefore fails while loading the namespace that declared
-   it, naming that namespace, rather than at some later projection build.
-
-   Its 37 call sites across `src/` are queued for deletion with the rest of
-   the load-time registration sentinels when acquisition-at-a-basis lands
-   (seon.env PRD deletion list); eight of them sit in `seon.flow` and
-   `seon.sci.admit`, which this owner does not hold."
-  {:malli/schema
-   [:=> [:cat :qualified-symbol [:fn clojure.core/ifn?]]
-    :qualified-symbol]}
-  [predicate f]
-  (let [resolved (runtime-predicate predicate)]
-    ;; the definition the executing runtime binds the name to: the loaded
-    ;; Var compiled, the context's binding interpreted (a branch's runtime
-    ;; evaluates the declaring value again with its own definitions)
-    (when-not (and resolved (identical? f @(requiring-resolve predicate)))
-      (throw
-       (ex-info
-        (str "Predicate " predicate " does not name the supplied callable.")
-        {:seon.schema/error :seon.schema/unresolved-predicate
-         :seon.schema/unresolved-predicate predicate
-         :seon.schema/predicate predicate
-         :seon.schema/resolved resolved
-         }))))
-  predicate)
-
 (defn core-predicate-registered?
   "True when `predicate` resolves to a callable Var."
   {:malli/schema [:=> [:cat :qualified-symbol] :boolean]}
   [predicate]
   (boolean (some-> (runtime-predicate predicate) var-get ifn?)))
-
-(register-core-predicate! 'seon.schema/byte-array? byte-array?)
 
 (defn- update-candidate-forms!
   {:malli/schema [:=> [:cat [:=> [:cat :map [:* :seon.schema/value]] :map] [:* :seon.schema/value]] :map]}
@@ -1222,8 +1182,6 @@
                   false
                   (throw failure)))))))))
 
-(register-core-predicate! 'seon.schema/malli-form? malli-form?)
-
 (defn pull-selector?
   "True when `value` is a Datahike pull selector."
   {:malli/schema
@@ -1251,9 +1209,6 @@
             (if (= :parser/pull (:error (ex-data failure)))
               false
               (throw failure)))))))
-
-(register-core-predicate! 'seon.schema/pull-selector? pull-selector?)
-
 
 ;;; ---------------------------------------------------------------------------
 ;;; Registration API
@@ -4039,8 +3994,6 @@
   (and (map? value)
        (contains? value :seon.schema.projection/registry)
        (contains? value :seon.schema.projection/forms)))
-
-(register-core-predicate! 'seon.schema/projection-value? projection-value?)
 
 (defn identity-only-projection
   "Project a registered reference value using the active schema registry."

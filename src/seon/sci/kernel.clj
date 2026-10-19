@@ -771,8 +771,6 @@
        (instance? AtomicBoolean (::reached value))
        (instance? AtomicBoolean (::travelled value))))
 
-(schema/register-core-predicate! 'seon.sci.kernel/arm? arm?)
-
 (def arm-generator
   "A real arm value — honest by constructing an instance."
   (gen/fmap (fn [_] (new-armed)) (gen/return nil)))

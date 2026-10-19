@@ -101,10 +101,6 @@
   [value]
   {::identity (:id value)})
 
-(schema/register-core-predicate!
- 'seon.sci.admit-test/identity-only-record?
- identity-only-record?)
-
 (defn- projection-with-identity-only-record
   []
   (schema/build-projection

@@ -3,7 +3,6 @@
   {:seon/tasks #{'my.edit/file-edit-tools-bypass-write-back}}
   (:require [clojure.test.check.generators :as gen]
             [seon.edit :as edit]
-            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
 
@@ -22,10 +21,6 @@
              :my.edit/operation operation}
       (not= :delete operation)
       (assoc :my.edit/source "(defn generated [] nil)"))))
-
-(defonce ^:private _form-operation-predicate
-  (schema/register-core-predicate!
-   'seon.edit/valid-form-operation? edit/valid-form-operation?))
 
 ;; The predicate must exist before seon.effect loads the schema population,
 ;; whose :my.edit/form-request declaration resolves this Var.

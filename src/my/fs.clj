@@ -4,7 +4,6 @@
   (:require [seon.fs :as fs]
             [seon.ref :as ref]
             [clojure.test.check.generators :as gen]
-            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 (def ^:private digest-generator
   (gen/fmap #(apply str %)
@@ -23,13 +22,6 @@
    [(gen/return {:my.fs/expected-absence? true})
     (gen/fmap (fn [digest] {:my.fs/expected-digest digest})
               digest-generator)]))
-
-(defonce ^:private _content-predicate
-  (schema/register-core-predicate! 'seon.fs/content? fs/content?))
-
-(defonce ^:private _write-precondition-predicate
-  (schema/register-core-predicate!
-   'seon.fs/write-precondition? fs/write-precondition?))
 
 ;; The predicates must exist before seon.effect loads the complete schema
 ;; population, whose :my.fs/content declaration resolves these Vars.

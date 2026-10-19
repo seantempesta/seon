@@ -28,7 +28,6 @@
             [seon.fs :as fs]
             [seon.operator.runtime :refer [held-flocks]]
             [seon.render.value :as render.value]
-            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [taoensso.timbre :as log]
             [taoensso.trove :as trove])
@@ -87,18 +86,6 @@
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (db/database-value? value))
-
-(schema/register-core-predicate! 'seon.cluster.store/connection-object?
-                                 connection-object?)
-
-(schema/register-core-predicate! 'seon.cluster.store/connection?
-                                 connection?)
-(schema/register-core-predicate! 'seon.cluster.store/file-lock?
-                                 file-lock?)
-(schema/register-core-predicate! 'seon.cluster.store/file-lock-object?
-                                 file-lock-object?)
-(schema/register-core-predicate! 'seon.cluster.store/database-value?
-                                 database-value?)
 
 (defn- fresh-file-lock
   {:malli/schema [:=> [:cat] [:fn seon.cluster.store/file-lock-object?]]}

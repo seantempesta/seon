@@ -69,9 +69,6 @@
   [value]
   (ifn? value))
 
-(schema/register-core-predicate! 'seon.sci.admit/interrupt-fn?
-                                 interrupt-fn?)
-
 (def interrupt-fn-generator
   "A real interrupt-fn — honest by constructing an instance."
   (gen/return (fn [] nil)))
@@ -195,8 +192,6 @@
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (instance? sci.impl.opts.Ctx value))
-
-(schema/register-core-predicate! 'seon.sci.admit/sci-context? sci-context?)
 
 (defn sci-context-identity
   "An SCI context's references: its environment, projection and custody connection."

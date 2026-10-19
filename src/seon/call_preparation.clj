@@ -61,8 +61,6 @@
   [value]
   (instance? clojure.lang.IAtom value))
 
-(schema/register-core-predicate! 'seon.call-preparation/state? state?)
-
 ;; The generator the packaged `:seon.call-preparation/state` declaration names.
 (def state-generator
   (gen/fmap atom (gen/return {})))

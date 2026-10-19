@@ -93,12 +93,6 @@
        (int? (:tx value))
        (boolean? (:added value))))
 
-(schema/register-core-predicate! 'seon.db/connection? connection?)
-(schema/register-core-predicate! 'seon.db/connection-object? connection-object?)
-(schema/register-core-predicate! 'seon.db/database-value? database-value?)
-(schema/register-core-predicate! 'seon.db/transaction-report-datom?
-                                 transaction-report-datom?)
-
 (def ^:private root-frame
   "Clojure's root binding frame, as a fresh thread starts with it (`Var.dvals`)."
   (let [task (java.util.concurrent.FutureTask. ^java.util.concurrent.Callable

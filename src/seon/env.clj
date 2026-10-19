@@ -46,8 +46,6 @@
   [value]
   (instance? (class empty-environment) value))
 
-(schema/register-core-predicate! 'seon.env/environment? environment?)
-
 (defmethod print-method (class empty-environment)
   [environment ^java.io.Writer writer]
   ;; A connection, a projection, and a work launcher each print as a wall of

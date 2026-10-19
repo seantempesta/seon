@@ -59,7 +59,6 @@
   (:require [clojure.string :as str]
             [clojure.test.check.generators :as gen]
             [seon.error.refusal :as refusal]
-            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -196,8 +195,6 @@
 ;;; else, which is what keeps a schema from pointing at a function
 ;;; nobody vouched for.
 ;;; ---------------------------------------------------------------------------
-
-(schema/register-core-predicate! 'seon.render.hiccup/hiccup? hiccup?)
 
 (schema.edn/load! {})
 

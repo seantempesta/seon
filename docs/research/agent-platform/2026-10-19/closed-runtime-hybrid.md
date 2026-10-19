@@ -10,7 +10,8 @@ P2, P3b landed; P1 landed (lane closed-p1, the leaf design); P3a split: P3a-1 la
 digest move; the fallback deletion moves to P4b, option c); P4a landed (`ec87c559c`); P5 landed (`7df8dbb21`,
 corrections in its section); P4b landed (`66ca5108b`, lane closed-p4b; corrections in its section); P3a-2 landed (lane guards3, the smaller cut of the patch, after
 `393e52821` deleted the catch in `seon.instrument/compiled-wrapper` that the guard census refused; it closes
-`seon.cluster/branch-declaration-changes`, 49 -> 48 open derivers); P6a, P6b, P7, P8 not started.
+`seon.cluster/branch-declaration-changes`, 49 -> 48 open derivers); P6a landed (lane closed-p6, corrections in its section);
+P6b, P7, P8 not started.
 
 # Closed runtime: the hybrid
 
@@ -502,6 +503,17 @@ the value's own builder; the open-derivers set is unchanged (P5 closes none) and
   `connection-projection-state` (~12 of 16). After P1 (both `seon.db`).
 
 ### P6a. Delete `register-core-predicate!` (ordinary sweep, its own commit)
+
+**Landed (lane closed-p6), with corrections.** (1) There was no registry: `register-core-predicate!` cached nothing
+since the 2026-08-07 isolation audit; its only effect was a load-time throw when the symbol did not name the callable
+handed to it (every caller handed the Var's own value, so it never threw). The precondition held by construction and
+was measured in a check JVM on the candidate: the stored population names 108 predicates (4,204 forms, 4,551
+contracts), `predicate-bindings` binds all 108 to callables with every registration deleted, and the carried
+projection's bindings equal them. (2) 59 forms in 23 `src` and 4 test files (the defonce holders in `my.fs`, `my.edit`,
+`seon.blob` with them), plus the definition; 9 namespaces lost their only use of `seon.schema` and drop the require.
+(3) `core-predicate-registered?` is **not** deleted here: it is `seon.schema.edn`'s admission check
+(`::unregistered-predicate`), a resolution, not a registration; it goes with `runtime-predicate` in P6b. (4) The
+`seon.schema-test` arm asserting that a second registration refuses is deleted with the function it exercised.
 
 - Files: the ~70 call sites in 25 `src` files and 7 test files (one script: remove each top-level
   `(schema/register-core-predicate! ...)` form, rewrite-clj), `src/seon/schema.clj` (`register-core-predicate!`,

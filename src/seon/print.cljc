@@ -881,9 +881,4 @@
     (and (nil? requery-id) (nil? requery-refusal))
     (assoc ::requery-refusal "the source has no stable requery identity")))
 
-(schema/register-core-predicate! 'seon.print/node? node?)
-(schema/register-core-predicate! 'seon.print/node-child? node-child?)
-(schema/register-core-predicate! 'seon.print/print-number? print-number?)
-(schema/register-core-predicate! 'seon.print/print-char? print-char?)
-
 #?(:clj (schema.edn/load! {}))

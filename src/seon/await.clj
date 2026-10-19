@@ -20,9 +20,6 @@
               (doto (promise) (deliver value)))
             (gen/large-integer* {:min -1000 :max 1000})))
 
-(schema/register-core-predicate! 'seon.await/blocking-deref?
-                                 blocking-deref?)
-
 (def ^:private timed-out (Object.))
 
 (defn- diagnostic

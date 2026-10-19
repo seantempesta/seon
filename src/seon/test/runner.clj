@@ -39,9 +39,6 @@
   "Finite representatives for the closed host/SCI Var representation sum."
   (gen/elements [#'var-reference? #'var-generator]))
 
-(schema/register-core-predicate! 'seon.test.runner/var-reference?
-                                 var-reference?)
-
 (def class-loader-generator
   (gen/return (clojure.lang.RT/baseLoader)))
 
@@ -50,8 +47,6 @@
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
   (instance? ClassLoader value))
-
-(schema/register-core-predicate! 'seon.test.runner/class-loader? class-loader?)
 
 (defn- var-symbol
   [test-var]

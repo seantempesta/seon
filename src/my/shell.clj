@@ -3,7 +3,6 @@
   (:refer-clojure :exclude [run!])
   (:require [seon.shell :as shell]
             [clojure.test.check.generators :as gen]
-            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 (def ^{:seon.fn/internal? true} stdin-generator
   (gen/one-of
@@ -15,10 +14,7 @@
                         (gen/vector
                          (gen/elements (seq "0123456789abcdef")) 64)))]))
 
-(schema/register-core-predicate! 'seon.shell/stdin? shell/stdin?)
-(schema/register-core-predicate! 'seon.shell/output? shell/output?)
-
-;; Register predicates before seon.effect loads the complete population.
+;; The predicates load before seon.effect loads the complete population.
 (require '[seon.effect :as effect])
 
 (schema.edn/load! {})

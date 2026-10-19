@@ -62,8 +62,6 @@
   [candidate]
   (instance? Throwable candidate))
 
-(schema/register-core-predicate! 'seon.error/throwable? throwable?)
-
 (schema.edn/load! {})
 
 ;;; ---------------------------------------------------------------------------

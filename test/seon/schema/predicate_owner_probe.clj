@@ -9,12 +9,8 @@
 
    It owns nothing global beyond its own private predicate, and a reload
    restores that predicate to the definition below, so the regression leaves
-   the worker in the state it entered."
-  (:require [seon.schema :as schema]))
+   the worker in the state it entered.")
 
 (defn- probe-handle?
   [value]
   (= ::handle value))
-
-(schema/register-core-predicate! 'seon.schema.predicate-owner-probe/probe-handle?
-                                 probe-handle?)

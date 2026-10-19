@@ -157,8 +157,6 @@
   [value]
   (and (map? value) (instance? clojure.lang.IDeref (:env value))))
 
-(schema/register-core-predicate! 'seon.sci.eval/ctx? ctx?)
-
 (defn program-context?
   "True for a program context: a frozen SCI context (`sci.core/freeze`), whose
   environment and kernel state are values. Only its forks evaluate."
@@ -166,23 +164,17 @@
   [value]
   (and (map? value) (map? (:env value))))
 
-(schema/register-core-predicate! 'seon.sci.eval/program-context? program-context?)
-
 (defn sci-var?
   "True for an SCI Var, the interned value of an SCI namespace map."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (sci.utils/var? value))
 
-(schema/register-core-predicate! 'seon.sci.eval/sci-var? sci-var?)
-
 (defn context-state?
   "True for the atom holding one piece of an SCI context's program state."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (instance? clojure.lang.IAtom value))
-
-(schema/register-core-predicate! 'seon.sci.eval/context-state? context-state?)
 
 (def sci-var-generator
   (gen/fmap (fn [_] (sci.utils/new-var 'generated nil)) (gen/return nil)))
@@ -192,9 +184,6 @@
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (env/environment-state? value))
-
-(schema/register-core-predicate! 'seon.sci.eval/projection-state?
-                                 projection-state?)
 
 (def projection-state-generator env/environment-state-generator)
 

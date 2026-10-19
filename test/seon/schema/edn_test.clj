@@ -255,9 +255,6 @@
   [value]
   (inst? value))
 
-(schema/register-core-predicate! 'seon.schema.edn-test/fixture-instant?
-                                 fixture-instant?)
-
 (def ^:private mutation-generator
   (gen/elements
    [{:mutation :unresolved

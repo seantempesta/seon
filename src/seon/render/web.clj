@@ -127,8 +127,6 @@
 
 ;; the gate refuses a `[:fn]` naming anything that is not a REGISTERED
 ;; core predicate — resolvable is not the same as vouched for
-(schema/register-core-predicate! 'seon.render.web/server? server?)
-
 (defn mult?
   "True for a core.async mult — the fan-out the render packages ride."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
@@ -147,8 +145,6 @@
 (def byte-array-generator
   "Platform byte arrays for process-local package schemas."
   gen/bytes)
-
-(schema/register-core-predicate! 'seon.render.web/mult? mult?)
 
 (schema.edn/load! {})
 

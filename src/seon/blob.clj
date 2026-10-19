@@ -28,10 +28,6 @@
   [value]
   (instance? InputStream value))
 
-(defonce ^:private _input-stream-predicate
-  (schema/register-core-predicate!
-   'seon.blob/input-stream? input-stream?))
-
 (def input-stream-generator
   (gen/fmap (fn [octets]
               (ByteArrayInputStream. ^bytes octets))

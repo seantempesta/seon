@@ -64,15 +64,6 @@
   [value]
   (satisfies? async.impl/WritePort value))
 
-(schema/register-core-predicate! 'seon.flow/executor? executor?)
-(schema/register-core-predicate! 'seon.flow/atom-reference? atom-reference?)
-(schema/register-core-predicate! 'seon.flow/java-future? java-future?)
-(schema/register-core-predicate! 'seon.flow/proc-launcher? proc-launcher?)
-(schema/register-core-predicate! 'seon.flow/graph? graph?)
-(schema/register-core-predicate! 'seon.flow/channel? channel?)
-(schema/register-core-predicate! 'seon.flow/step-var? step-var?)
-(schema/register-core-predicate! 'seon.flow/write-port? write-port?)
-
 (def ^:private ^:dynamic *proc-thread-name*
   "The name `graph-executor` gives the thread it makes: bound by a proc's
   `start`, on whose thread Flow's `futurize` asks the factory for it."

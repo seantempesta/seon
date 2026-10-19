@@ -74,8 +74,6 @@
   (gen/fmap (fn [_] (fn [_partial] nil)) (gen/return nil)))
 
 ;; the gate refuses a `[:fn]` naming anything not registered
-(schema/register-core-predicate! 'seon.ai/sink? sink?)
-
 (schema.edn/load! {})
 
 (defn- attempt-without-private-provider-data

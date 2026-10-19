@@ -631,7 +631,7 @@
     ;; file, leaving 121 of 382 contracted functions in the program graph.
     (doseq [call ["(set! *warn-on-reflection* true)"
                   "(schema.edn/load! {})"
-                  "(schema/register-core-predicate! 'a/p? p?)"
+                  "(prn 'a/p?)"
                   "(switch-namespace)"]]
       (let [read-events
             (events

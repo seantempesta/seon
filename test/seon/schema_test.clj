@@ -650,22 +650,6 @@
       (is (false? (valid? environment-b :a)))
       (is (true? (valid? environment-a :a))
           "and the first still answers for itself after the second was built"))
-    (testing "the probe's own move — a second registration of one symbol —
-              is now refused instead of quietly winning process-wide"
-      ;; This is the arm that reproduces `probe_predicate_function_cache`.
-      ;; It used to succeed and silently retarget the symbol for every
-      ;; environment in the JVM; it now cannot even be expressed, because a
-      ;; registration that does not agree with the Var the symbol names is a
-      ;; core bug rather than a new binding.
-      (let [refused (refusal
-                     #(schema/register-core-predicate!
-                       predicate (fn [value] (= value :b))))]
-        (is (instance? clojure.lang.ExceptionInfo refused)
-            "registering a different callable under a live symbol must refuse")
-        (is (= :seon.schema/unresolved-predicate
-               (:seon.schema/error (ex-data refused))))
-        (is (true? (valid? (project {}) :original))
-            "and the refused attempt changed nothing for anybody")))
     (testing "an environment that declares nothing resolves the one named Var"
       (let [resolved (project {})]
         (is (true? (valid? resolved :original)))

@@ -9,16 +9,10 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.fault :as fault]
-            [seon.id :as id]
-            [seon.schema :as schema]))
+            [seon.id :as id]))
 
-;; `seon.batch` requires nothing of Seon, so the call sink's predicate and
-;; generator are registered by the world's owner.
-(schema/register-core-predicate! 'seon.batch/sink? seon.batch/sink?)
-
-(schema/register-core-predicate! 'seon.batch/owned? seon.batch/owned?)
-(schema/register-core-predicate! 'seon.batch/stamped-clock? seon.batch/stamped-clock?)
-
+;; `seon.batch` requires nothing of Seon, so the call sink's generator is
+;; defined by the world's owner.
 (def sink-generator
   "Fresh, empty call sinks."
   (gen/fmap (fn [_] (seon.batch/sink)) (gen/return nil)))
