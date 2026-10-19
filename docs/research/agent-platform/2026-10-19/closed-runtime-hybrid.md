@@ -310,3 +310,262 @@ says so.
   seon.flow.actions] :loaded-with-init-class 546 :sourceless-with-init-class ()}` (105 ms, 44 MB).
 - Malli fork `-loaded-qualified-value`: plan B's two-registry experiment, not re-run; the constraint it implies
   (callables, never symbols) is already how `seon.schema/compilable-form` binds.
+
+## Narrow check
+
+Lane closed-check, 2026-10-19, HEAD `f636718cd`, default `a92ba5b94`. Three questions per phase: (1) every claim about the
+live system reproduces on default; (2) every deletion is in the commit that converts its last caller; (3) every phase names
+a red proof that resolves. Probes: JVM-mode reads on default (the sourceless-namespace form, the calls facts spit to the
+scratchpad, `seon.schema/!fallback-counts`), babashka over those facts for the census, the `(ns ...)` forms of `src` read as
+text for the require graph, `rg` over `src script test resources`. No SCI request, no reload.
+
+### What reproduced (claims, all supported)
+
+- Facts: 7,683 names, 7,679 with calls, 124 host-bound. Baseline census 3,447 open names, 241 direct openers, 78 cache
+  callers, **50 open** derivers.
+- Reconciliation table: baseline 50; Astra's 28 plus callees 45 open derivers (effective open); plus `derived-shape` **25**,
+  all four closed; Opus families 44 (2,661 names here; plan says 2,668, my 12-name list is approximate); plus `derived-shape`
+  18; plus `derived-program-attributes` **16** (1,580 names). The remaining 16 are exactly the hybrid's list.
+- The four projection derivers are `seon.schema/build-projection`, `seon.schema/declaration-projection`,
+  `seon.db/content-projection`, `seon.config/effective`. Closed reaches 132 / 100 / 163 / 553; `seon.db/as-of-key` is only in
+  `effective`'s and `seon.db/with` too.
+- `seon.print/compare-values` calls no `seon.*` function (its `:seon.fn/calls` are all `clojure.core`).
+- Frame classifier: 614 loaded namespaces, sourceless `[user seon.flow.actions]`, 546 with an `__init.class`, none sourceless
+  with one. `classify-namespace`'s second clause (`(not (io/resource <frame class>.class))`) already answers authored for a
+  REPL-defined class. SCI's `var?` is `(instance? sci.lang.Var x)` (`sci.impl.utils/var?`), so analysed code reads a
+  `clojure.lang.Var` as a place: the red for P4a (c) is real.
+- Require graph (static `:require`): `seon.print` -> `seon.schema` direct; `seon.schema.datahike` -> `seon.print`, `seon.schema`
+  direct; `seon.schema` -> `seon.schema.datahike` not; `seon.program` and `seon.schema.datahike` reach neither each other nor
+  `seon.db`; `seon.call-preparation` reaches `seon.db` and `seon.batch` and neither `seon.fn` nor `seon.turn.batch`;
+  `seon.cache` reaches no `seon.*`. The bridge's `seon.schema` uses are exactly projection-cache-value 4, projection-validator 2,
+  call-with-forms 2, projection-identity 1, declaration-projection 2.
+- `seon.schema/!fallback-counts` on default is `{}`: the packaged-forms fallback has not been taken in this process.
+
+### Per-phase verdict
+
+| Phase | Q1 claims | Q2 deletions and callers | Q3 red proof | Verdict |
+|---|---|---|---|---|
+| P0 | pass (census 63 ms / 228 MB to hold the facts, 0.2 s fold; plan said 161 ms / 64 MB for the fold alone) | nothing deleted | **fail** | **fail** |
+| P1 | **fail** | pass with a miss (below) | **fail** | **fail** |
+| P2 | pass | pass | **fail** | **fail** |
+| P3a | **fail** | **fail** | **fail** | **fail** |
+| P3b | pass for the edit; the effect claim fails | pass | **fail** | **fail** |
+| P4a | pass | pass | pass | **pass** |
+| P4b | **fail** | pass with a miss | pass with a change | **fail** |
+| P5 | **fail** | **fail** | **fail** | **fail** |
+| P6 | pass | **fail** | pass | **fail** |
+| P7 | pass (gate numbers match plan A's table) | **fail** | uncertain | **fail** |
+| P8 | **fail** | pass | pass | **fail** |
+
+#### P0. The census row cannot be the red proof of P2, P3b or P5
+
+The cumulative census (P1, P2, P3a, P3b, P4a, P4b, P5, P6 in that order; the `seon.db/error-*` seams already landed) is:
+
+| After | open names | open derivers | newly closed derivers |
+|---|---|---|---|
+| landed cycle 2 | 3,443 | 50 | |
+| P1 | 3,440 | 50 | none |
+| P2 | 3,438 | 50 | none |
+| P3a | 3,423 | 50 | none |
+| P3b | 3,418 | 49 | `seon.program/program-attributes` |
+| P4a | 3,386 | 49 | none |
+| P4b | 2,893 | 46 | `seon.cluster/branch-declaration-changes`, `seon.cluster/derivation-keys`, `seon.cluster.source/merge-base` |
+| P5 | 2,889 | 46 | none |
+| P6 | 1,580 | **16** | the four projection derivers and 26 more, among them `seon.config/effective`, `seon.sci.eval/overlay-plan`, `seon.db/request-view`, `seon.test.runner/tests-reaching` |
+
+(The order matters for the intermediate rows; only P6's 16 is order-independent.) So a single row "the four projection
+derivers are closed" is red from P0 to P5 and gives P2, P3a, P3b, P4a and P5 nothing to turn green. **Correction.** (a) P0's
+census is the exact ratchet, green on HEAD: it reads `seon.sci.eval/reach-index` and asserts the recorded open-deriver set
+(50 names); each phase's commit edits the recorded set (P3b -1, P4b -3, P6 -30) and the count of open names. (b) Each phase
+adds rows over `:seon.fn/calls`, which are order-independent and red before, green after: for every function the phase
+converts, no member of `seon.sci.eval/run-time-resolution` is in its `:seon.fn/calls`. The named functions per phase are
+in the tables below. (c) `seon.sci.runtime-test/projection-derivers-are-closed` is filed with P6, where it turns green; the
+composed-runtime rows move to P7. AGENTS ("a test already red on main stops the merge") forbids landing red proofs ahead of
+the phase that turns them green, so P0 itself is only the cost rows (green: they record) and the ratchet. (d) The cost rows
+are the committed `tmp/runtime-fix2/cost_test.clj`; it reads `System/getenv "RR_LABEL"` and writes records into `tmp`
+(`guarded`, `record!`): rewrite it to the cost-table shape of `seon.cost-estimate-test` (estimate in the row, measurement
+by `seon.profile/measure`, nothing written to `tmp`).
+
+#### P1. Cycle 7
+
+- **Fail, Q1.** The hybrid says `seon.fn` and `seon.turn.batch` "require `seon.call-preparation` transitively". `seon.turn.batch`
+  does (through `seon.sci.eval`); **`seon.fn` does not** (its `:require` closure holds neither `seon.call-preparation` nor a
+  namespace requiring it). The edge is legal (`seon.call-preparation` reaches `seon.db` but not `seon.fn`), so P1 adds a static
+  require of `seon.call-preparation` to `seon.fn` for `index!`; say so.
+- **Fail, Q1/Q3: the attribute name is taken.** `:seon.fn/prepared-arities` is already a registered key
+  (`resources/seon/schemas/seon.fn.edn`, alias of `:seon.fn/declared-arities`, a vector of maps) and a member of the arity
+  mismatch report. The stored form must be written down: card-many component refs of `:seon.fn.arity/min`/`max`, as
+  `:seon.fn/arities` is (the attribute and the report member then share the key with one meaning, the pull of the stored
+  rows being the report's vector). Datahike cannot store the vector value the report uses.
+- **Fail, Q1 (cost).** `seon.call-preparation/plan-for` takes the `current` snapshot (`supply-index`). The producers pay one
+  `seon.call-preparation/snapshot` (the memo keyed by the supplier rows) per supplier change, not 0.1-1 ms per function. Name
+  it in the estimate; the snapshot memo is what the writer pays today.
+- **Q1, supported.** `seon.call-preparation/prepared-arities` has **no `src` caller today** (only
+  `seon.call-preparation-test` line 844); the live gate is `seon.db/prepared-arity-bounds`. The variadic disagreement (the
+  producer keeps the minimum, the gate subtracts the slot count by position) is real, so the variadic row is red on HEAD.
+- **Q2.** The three `defonce` seams and their derefs (`seon.db` 5198-5232, `prepared-arity-bounds`, `arity-mismatch-report`'s
+  snapshot argument) have no caller outside `seon.db`. **Miss:** `seon.call-preparation/report-snapshot` loses its only `src`
+  caller (kept alive only by `seon.call-preparation-test` line 593): delete it in the P1 commit with its test, or the phase
+  leaves a dead public function. `plan-for` stays (the producers call it; 15 test sites).
+- **Fail, Q3.** The proof's fixtures are `test-support/program-fn-entity` and `program/with-contract-facts`, which produce the
+  entity without the new fact (`:seon.fn/arities` is derived in `seon.program/canonical-row`, which `seon.program` cannot
+  extend with a `seon.call-preparation` call: P2 makes `seon.db` require `seon.program`, and `seon.call-preparation` requires
+  `seon.db`). The fixture helpers are a fourth producer: they must write the fact through the canonical path, and the census
+  first step ("`transact!` callers writing `:seon.fn/spec` or `:seon.call-preparation/key` must be the three producers") must
+  count them: `:seon.fn/spec` is written in `my.program`, `seon.cluster.instruction`, `seon.effect`, `seon.sci.eval`,
+  `seon.sci.lookup`, `seon.test.runner`, `seon.turn` and `test/seon/test_support`. Only the variadic row is red on HEAD by
+  construction; the supplier-retracted row is **uncertain** (written to be red only if the snapshot memo can answer a stale
+  supplier set; reproduce on HEAD before filing it). Write the four rows as exact fixtures (callee contract, call arity,
+  expected refusal member) before the task is filed.
+
+#### P2. `seon.db` requires `seon.program`
+
+- Q1 pass: no `seon.program` -> `seon.db` edge, no `seon.db` -> `seon.program` edge, `seon.program` reaches no `seon.fn`.
+- Q2 pass: the five `defonce`s are all in `seon.db` (lines 5459-5467); their deref sites are `definition-digest-of`,
+  `namespace-digest-of`, `behavior-digest`, `namespace-digests-tx`, `write-digest-error` and `dropped-definition-namespaces`.
+  `seon.fn/stored-namespace-context` has no other `src` caller; `seon.db`'s docstring at line 5754 and three `docs/seon/issues`
+  pages cite it (convert the docstring; the issues are history).
+- **Fail, Q3.** "P0's census row counts them as non-openers" turns nothing green (P2 closes no deriver; table above).
+  **Correction:** the row asserts that the six functions above have no direct opener in `:seon.fn/calls` (red on HEAD,
+  green after), and a require-graph assertion that `seon.db` requires `seon.program` (read the `(ns ...)` form with edamame,
+  as the census does).
+
+#### P3a. Cycle 3 and the printer leaf
+
+- **Fail, Q1: the packaged-forms reader cannot move "below `seon.schema`".** `seon.schema.edn/packaged-forms` ->
+  `packaged-population` -> `resource-population` -> `derive-config-forms` -> `config-dial-entries` and
+  `config-registration-defaults`, which call `seon.schema/structural-schema` (lines 67 and 136); the same namespace also calls
+  `schema/core-predicate-registered?`, `projection-with-schema`, `assert-complete-contract!`, `current-projection`,
+  `handed-projection`. Moving the reader means moving that dependency set too. **Correction (simpler, and AGENTS says no
+  fallbacks):** the seam exists for one place, `seon.schema/packaged-forms` (the warned classpath fallback,
+  `warn-classpath-fallback!`), whose count on default is `{}`. Delete the fallback: a caller with no population in hand
+  hands one (the fallback's own warning already names the caller to convert). First step of P3a: count the fallback on the
+  three cost rows and the test suite's `!fallback-counts`; if zero in steady state, `seon.schema` needs neither the seam nor
+  the move, and `seon.schema.edn` stays above `seon.schema`. Only if the count is non-zero does the minimal set move.
+- **Fail, Q2: `print/compare-values` has 19 other callers.** The hybrid says "moves to a leaf, `seon.print` keeps calling it".
+  A moved function converts every caller in the same commit: `seon.test` (2), `seon.db` (2), `seon.fn` (11), `seon.turn`,
+  `seon.reconcile` (cljc), `seon.program` (cljc), `seon.config`, `seon.cluster`, the bridge (2) and its own uses in
+  `seon.print`. That is a scripted sweep over eight files other lanes hold (P1, P2 edit `seon.db`, `seon.fn`, `seon.program`
+  in the same wave). Either schedule P3a's sweep after wave 1 (claim the eight files in one window), or reduce it: only the
+  bridge needs the leaf, so make the bridge's two calls use `seon.id`'s new function and leave one definition (the leaf's)
+  with `seon.print/compare-values` deleted and its callers converted; there is no thin alias.
+- Q2 also: `seon.schema/database-projection` has a test caller (`test/seon/test_support_test.clj`); `canonical-schema-entities`
+  has about 40 caller sites in `src` and `test` (the hybrid deletes only its `seon.program/definition-digest` resolution,
+  which is right, but the test files must be in the slice).
+- Q1 pass: the eight seams are exactly `schema-edn-packaged-forms` and seven bridge seams (lines 42-59); the bridge's
+  `seon.print` use is only `compare-values` (lines 523 and 546).
+- **Fail, Q3.** "A fresh require of `seon.schema.datahike` in a check JVM loads no `seon.schema`" in
+  `seon.contracts-compile-test` is impossible in that namespace (it requires `seon.schema` itself) and needs a JVM per row.
+  **Correction:** a deftest in `seon.schema.datahike-test` that reads the `(ns ...)` forms of `src` with edamame and asserts the
+  transitive `:require` closure of `seon.schema.datahike` does not contain `seon.schema` or `seon.print`. Red today (the
+  bridge requires both). The existing `encode-transaction-resolves-the-declaration-population-once` is green on HEAD and
+  stays so; its closed-reach addition is fine as a second row.
+
+#### P3b. `seon.program` requires the bridge
+
+- Q1/Q2 pass: `seon.program` and the bridge reach each other not; the three `requiring-resolve` sites are
+  `seon.program` lines 62, 320-325 (`derived-shape`'s two and `derived-program-attributes`').
+- **Fail, Q3 (a false claim).** "`seon.config/effective` closed; it is the only phase that closes it" is contradicted:
+  after P3b alone the four projection derivers stay open and only `seon.program/program-attributes` closes (49 open
+  derivers); `effective` closes at P6. **Correction:** the proof is the P3b row of the P0 ratchet (open derivers 50 ->
+  49, `seon.program/program-attributes` leaves the set) plus the direct-opener row for `derived-shape` and
+  `derived-program-attributes`. The statement that the slice "closes `effective`, `overlay-plan`" holds only with P6.
+
+#### P4a. Frames: pass
+
+Q1: reproduced above; the literal is `seon.call_preparation$preparing$` (munge of the current derivation). Q2: `classify-namespace`,
+`prepared-call-prefix`, `referenced` have callers only inside `seon.error.refusal`; `identity-projector` hits in
+`seon.sci.admit` are a map key and `schema/identity-only-projector`, not the refusal's. Q3: refusal-test rows (a)-(c) resolve
+to the existing namespace; `error-is-buildable-where-no-projection-is-handed` exists (line 463) and is green by reading.
+Note for the implementer: `seon.error.refusal` is `^{:seon/babashka true}` and loaded by `script/seon/operator.clj`, so every
+edit must stay babashka-loadable (the class test names `sci.lang.Var`, which babashka has).
+
+#### P4b. Cycle 6
+
+- **Fail, Q1: the cache seam cannot become a static require.** `seon.error.refusal` is a `.clj` namespace loaded under
+  babashka by `script/seon/operator.clj` and `central_round.clj`; `seon.cache` is Caffeine. "A static require of `seon.cache`
+  in the JVM half" needs a `.cljc` (a `#?(:bb ...)` branch) or does not exist. **Correction:** rename
+  `seon.error.refusal` to `.cljc` with a reader conditional, or hand the cache lookup as a value through the handed leaf like
+  the projector; pick the one that keeps one definition. Without it P4b breaks the operator.
+- **Fail, Q1/Q3: the "no fallback" route contradicts a test that must stay green.**
+  `error-is-buildable-where-no-projection-is-handed` builds `:seon.error/base` (valid) and `:no.such/error` (undeclared,
+  layer `:seon.error.refusal/construction`) on a bare `Thread.`, which needs a declaration population to tell the two
+  apart. Without a handed projection the refusal cannot, so the bare-thread error cannot be "built without world references
+  and referenced once at the boundary" and still pass. The test's own comment says the MCP thread, boot and namespace load
+  are exactly that case. **Correction:** decide now, not after the count: the handed leaf's root binding is set once by the
+  boot layer (Opus's alternative), which makes P4b a platform slice. The count step then only measures, it does not choose.
+- Q2: `schema-seam`, `operation-projection`, `checking-projection`, `cache-seam` have callers only in
+  `seon.error.refusal` (6, 4, 2, 2 sites); `identity-projector` too. Pass with the miss above.
+
+#### P5. Builder
+
+- **Fail, Q1: the constructor list is wrong.** The hybrid says "every constructor in `seon.cluster.boot` and the harness". The
+  carriers of `:seon.sci.eval/projection-state` are `seon.sci.eval`, `seon.cluster.agent`, `seon.test`; the connections are made
+  by `seon.cluster.store` (lines 640, 724, 761, 777) and `seon.db` (137), and about 20 test sites call `d/connect` directly
+  and carry nothing (`test/seon/db_test`, `turn_work_test`, `flow_test`, `test_support`, `store_transact_test`,
+  `retired_attributes_test`, `acquisition_cost_test`, `branch_execution_test`, `web_test`, `admission_test`, ...). Removing the
+  `running-instances` scan makes every one of them read no state. The proof row's census must list these sites and the phase
+  must convert them to the canonical constructor (or the scan has a remaining user).
+- **Fail, Q1: the producer of the loaded identity is not named.** `loaded-builder` today folds `seon.sci.eval/loaded-identity`
+  (adoption record, mixed state, boot commits that disagree). "`::builder` read from the carried projection state" requires the
+  state map to hold the loaded program identity and the adoption path (`seon.sci.eval`, where `loaded-identity` is reset)
+  to write it; say which key, and who writes it, or the phase cannot be implemented.
+- **Fail, Q2: test callers missed.** `seon.db/projection-builder` (`test/seon/db_test.clj`) and `loaded-builder`
+  (`test/seon/db_test.clj`, `test/seon/cluster/program_change_test.clj`) are quoted by tests; they convert in the commit.
+  `connection-projection-state` has one caller (`seon.db` line 359).
+- **Fail, Q3.** `projection-cache-uses-the-executing-builder` is not specified enough to write (no fixture, no assertion).
+  Specify: two values over one store, one carrying state A and one state B with different builder identities; reading both
+  through `seon.db/carried-projection` yields two cache keys and two derivations, and the same value read twice yields one.
+
+#### P6. Predicates as input
+
+- Q1 pass (callers of `runtime-predicate` 11 sites, all in `seon.schema`; `loaded-predicate-var` 3; `unloaded-predicate-functions`,
+  `predicate-callable`, `identity-only-descriptors-in` one site each in `seon.schema`).
+- **Fail, Q2: `register-core-predicate!` has about 70 call sites in 25 `src` files and 7 test files**
+  (`seon.flow` 8, `seon.cluster.store` 5, `seon.sci.eval` 5, `seon.db` 4, `seon.print` 4, `seon.turn.world` 3, `my.*`,
+  `seon.render.*`, `seon.sci.admit`, `seon.test.runner`, ...), not "`seon.print`'s and `seon.schema.edn`'s registrations". Its
+  docstring says its call sites are "queued for deletion". After the change it resolves nothing, so it is a no-op: **delete
+  the function with its call sites in one scripted sweep (its own commit, before the rest of P6)**; "takes the Var from its
+  caller" would convert 70 sites to keep a no-op. `core-predicate-registered?` (uses `runtime-predicate`) and the tests that quote
+  private vars (`seon.schema-test` lines 1165, 1716; `seon.instrument-test` docstring 1204) are callers to convert too.
+- Q3: the named tests (`one-predicate-symbol-cannot-name-two-environments-callables`, `a-rebound-predicate-recompiles-the-keys-naming-it`)
+  exist in `test/seon/schema_test.clj` (lines 599, 1642) and are green by reading; the added rows are the red part. The
+  census row `projection-derivers-are-closed` is filed here (see P0).
+
+#### P7. The exact key
+
+- Q1 pass: the gate (hub row <= 1.3x of 897.7 MB = 1,167 MB, nine-forms 1.1x, warm 1.05x) matches plan A's table; R1-R6, M1, M2,
+  M5, M7 exist in `runtime-rereview.md` with their dangling commits.
+- **Fail, Q2: the R4 deletion misses callers.** `host-bound-reached` is read by `seon.sci.arm` (4 sites), `seon.turn.batch` (2),
+  `resources/seon/schemas/seon.batch.edn` (3), `seon.sci.eval-test`, `seon.sci.runtime-test`; `host-bound-reaching` by
+  `seon.sci.eval-test`. The slice's file list omits `seon.turn.batch` and the two tests; `seon.db`'s `builder-digest` has 5 test
+  sites in `seon.db-test`.
+- Q3 uncertain: the R1-R3 and M2 rows "red on HEAD" were not reproduced here (they need SCI on a branch, which this check does
+  not run). The M2 chain exists as a dangling commit (`df9737e97`, `3c79c77b8`); reproduce before filing.
+
+#### P8. The 16
+
+- **Fail, Q1: the first lane's list does not close the three it names.** Converting the four helpers the hybrid names
+  (`declaration-digest-map`, `differing-declarations`, `projected-values`, `fold-content-digest`) leaves
+  `unmerged-count`, `own-changed-identities` and `content-digest` open, because `content-digest` and `own-changed-identities`
+  hold direct `requiring-resolve` calls themselves (also `changed-identities`, `declaration-changed-identities`, `overrides`).
+  Re-run with exactly these six converted: **16 -> 13**, those three close. **Correction:** the lane converts
+  `seon.program/{content-digest, own-changed-identities, declaration-digest-map, differing-declarations, projected-values,
+  fold-content-digest}` (`changed-identities`, `declaration-changed-identities`, `overrides` are not needed for the count).
+- Q2 pass (the open branch of the index and `run-time-resolution` have one consumer each, `seon.sci.eval/reach-index`).
+- Q3: `no-runnable-src-function-resolves-a-name-at-run-time`, `reach-results-use-the-executed-runtime` and
+  `content-digest-needs-no-loaded-namespace` are new; their namespaces exist (`seon.sci.eval-test`, `seon.test.runner-test`,
+  `seon.program-test`). The first is writable exactly: over `:seon.fn/calls` of every non-host-bound `src` function, no member of
+  `run-time-resolution` after the last site; it is red until then.
+
+### Corrections that change the plan
+
+1. P0: census as a green exact ratchet with per-phase direct-opener rows; red proofs move to P6 (census) and P7 (composed rows).
+2. P1: add `seon.fn` -> `seon.call-preparation`; specify the stored shape of `:seon.fn/prepared-arities`; count the fixture helpers as a producer; delete `report-snapshot`.
+3. P3a: delete the packaged-forms fallback (count first) instead of moving the reader; `compare-values` move is a 19-caller sweep or a single definition; proof is a require-closure test.
+4. P3b: its effect is `program-attributes` only; `effective` closes at P6.
+5. P4b: `seon.error.refusal` is babashka-loaded (`.cljc` or a handed lookup); the boot root binding is required, not conditional.
+6. P5: constructors are in `seon.cluster.store`, `seon.db` and ~20 test sites; name the state key and its writer; convert the tests.
+7. P6: delete `register-core-predicate!` and its ~70 sites first, as a scripted sweep.
+8. P7: add `seon.turn.batch` and the tests to the R4 deletion.
+9. P8: convert the six named `seon.program` functions, not the four.
