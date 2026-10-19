@@ -1,0 +1,322 @@
+diff --git a/src/seon/review3_fixture.clj b/src/seon/review3_fixture.clj
+new file mode 100644
+index 000000000..a2b743014
+--- /dev/null
++++ b/src/seon/review3_fixture.clj
+@@ -0,0 +1,7 @@
++(ns seon.review3-fixture)
++(defn h "The leaf." {:malli/schema [:=> [:cat] :int]} [] 1)
++(defn g "The middle." {:malli/schema [:=> [:cat] :int]} [] (h))
++(defn f "The caller." {:malli/schema [:=> [:cat] :int]} [] (g))
++(def a-value (f))
++(defmacro open-macro "The helper found by name." [] ((resolve 'seon.review3-fixture/h)))
++(defn open-caller "The expanded helper." {:malli/schema [:=> [:cat] :int]} [] (open-macro))
+diff --git a/test/seon/cost_estimate_test.clj b/test/seon/cost_estimate_test.clj
+index 94bf988a1..9ea2015e4 100644
+--- a/test/seon/cost_estimate_test.clj
++++ b/test/seon/cost_estimate_test.clj
+@@ -375,3 +375,25 @@
+            :seon.test/long-ms 60000}
+   closed-runtime-rows-grow-past-no-accepted-overrun
+   (is (= [] (unaccepted (closed-runtime-rows)))))
++
++(deftest ^{:seon.test/long "Review3 measurement of complete cost sequence" :seon.test/long-ms 180000} review3-cost-evidence
++  (let [seen (measured)]
++    (spit (str "/Users/sean/src/seon/tmp/runtime-review3-astra/out/cost-" (System/getenv "R3_LABEL") ".edn") (pr-str seen))
++    (is (pos? (:alloc-mb (:hub-change-sequence seen))))))
++(deftest ^{:seon.test/long "Review3 ordinary unchanged program measurements" :seon.test/long-ms 60000} review3-unchanged-program
++  (support/with-running-agent
++   (fn [running agent-id _]
++     (let [forms ["nil" "(seon.print/form-text '(a 1))" "(seon.db/q '[:find (count ?f) . :where [?f :seon.fn/sym]] (seon.db/db))"]
++           measured (into {} (map (fn [source]
++                                   (answer running agent-id source)
++                                   [source (mapv (fn [_] (request-cost running agent-id source)) (range 5))])) forms)]
++       (spit (str "/Users/sean/src/seon/tmp/runtime-review3-astra/out/main-" (System/getenv "R3_LABEL") ".edn") (pr-str measured))
++       (is (= 3 (count measured)))))))
++(deftest ^{:seon.test/long "Review3 attributable ordinary-call profile" :seon.test/long-ms 60000} review3-profile-main
++ (support/with-running-agent
++  (fn [running agent-id _]
++   (dotimes [_ 3] (answer running agent-id "nil"))
++   (let [m (profile/measure #(dotimes [_ 5] (answer running agent-id "nil")))]
++    (spit (str "/Users/sean/src/seon/tmp/runtime-review3-astra/out/main-profile-" (System/getenv "R3_LABEL") ".edn")
++          (pr-str (dissoc m :seon.profile/value)))
++    (is (pos? (:seon.profile/calls m)))))))
+diff --git a/test/seon/runtime_review3_astra_capacity_test.clj b/test/seon/runtime_review3_astra_capacity_test.clj
+new file mode 100644
+index 000000000..c50bc87ca
+--- /dev/null
++++ b/test/seon/runtime_review3_astra_capacity_test.clj
+@@ -0,0 +1,20 @@
++(ns seon.runtime-review3-astra-capacity-test
++ (:require [clojure.test :refer [deftest is]] [seon.db :as db] [seon.cache :as cache]
++           [seon.schema.internal :as internal] [seon.test-support :as s] [seon.profile :as profile]))
++(deftest projection-query-cache-retention-is-observable
++ (s/with-database
++  (fn [conn]
++   (let [p (db/carried-projection (db/db conn))
++         holder (internal/projection-cache p)
++         query (fn [i] (#'db/lowered-where p {} [[(symbol (str "?review3" i)) :seon.fn/sym '?value]]))
++         _ (query -1)
++         before {:entries (count @holder) :central (cache/status)}
++         first-batch (profile/measure #(dotimes [i 1000] (query i)))
++         middle {:entries (count @holder) :central (cache/status)}
++         second-batch (profile/measure #(dotimes [i 1000] (query (+ 1000 i))))
++         after {:entries (count @holder) :central (cache/status)}]
++    (spit "/Users/sean/src/seon/tmp/runtime-review3-astra/out/projection-capacity.edn"
++          (pr-str {:before before :middle middle :after after :holder-class (str (class @holder))
++                   :first (dissoc first-batch :seon.profile/value) :second (dissoc second-batch :seon.profile/value)}))
++    (is (= 1000 (- (:entries middle) (:entries before))))
++    (is (= 1000 (- (:entries after) (:entries middle))))))))
+diff --git a/test/seon/runtime_review3_astra_extra_test.clj b/test/seon/runtime_review3_astra_extra_test.clj
+new file mode 100644
+index 000000000..a17f5204a
+--- /dev/null
++++ b/test/seon/runtime_review3_astra_extra_test.clj
+@@ -0,0 +1,73 @@
++(ns seon.runtime-review3-astra-extra-test
++ (:require [clojure.test :refer [deftest is]] [clojure.pprint] [clojure.string]
++           [sci.core :as sci] [sci.ctx-store]
++           [seon.runtime-review3-astra-new-test :as p]
++           [seon.test-support :as s] [seon.db :as db] [seon.sci.eval :as e]
++           [seon.sci.runtime :as r] [seon.sci.kernel :as k]
++           [seon.sci.eval-test] [seon.schema.internal :as internal]))
++(deftest projection-cache-holds-the-executing-program
++ (s/with-database
++  (fn [conn]
++   (let [before (db/db conn)
++         projection (db/carried-projection before)
++         main (e/base-ctx before)
++         database (#'seon.sci.eval-test/branch-replacing! conn 'seon.schema.datahike/lower-where
++                      "(?s)\\[projection bound clauses\\].*$" "[projection bound clauses] [])")
++         b (e/base-ctx database)
++         caller (fn [ctx clauses]
++                  (let [f (p/in ctx "(fn [p clauses] (seon.db/lowered-where p {} clauses))")]
++                    (sci.ctx-store/with-ctx ctx (f projection clauses))))
++         ca '[[?review3-a :seon.fn/sym ?review3-b]]
++         cb '[[?review3-c :seon.fn/sym ?review3-d]]
++         branch-first [(caller b ca) (caller main ca)]
++         main-first (let [m (caller main cb)] [(caller b cb) m])]
++     (p/record! "projection-cache" {:branch-first branch-first :main-first main-first
++                                  :holder? (some? (internal/projection-cache projection))})
++     (is (= [[] ca] branch-first))
++     (is (= [[] cb] main-first))))))
++(deftest failed-production-does-not-bind-a-partial-runtime
++ (let [sources [['review3/a :function "(defn a [] (h))"]
++                ['review3/z :function "(defn z [] (UNRESOLVED))"]
++                ['review3/h :function "(defn h [] 1)"]]
++       main (p/shaped sources {'review3/a #{'review3/h} 'review3/z #{'review3/h} 'review3/h #{}}
++                             {'review3/a (fn [] 1) 'review3/z (fn [] 1) 'review3/h (fn [] 1)})
++       b (assoc (sci/fork main) ::k/program-snapshot (atom @(::k/program-snapshot main)))
++       _ (p/in b "(in-ns 'review3) (defn h [] 2)")
++       old @(::k/program-snapshot b)
++       result (try (#'e/bind-analysed! b {'review3/h "changed"} #{}) :no-error
++                   (catch Exception ex {:error (.getMessage ex)}))
++       actual (p/in b "[(review3/a) (review3/z) (review3/h)]")]
++   (p/record! "atomic-production" {:result result :actual actual :snapshot-equal? (= old @(::k/program-snapshot b))})
++   (is (map? result)) (is (= [1 1 2] actual)) (is (= old @(::k/program-snapshot b)))))
++(deftest record-protocol-and-multimethod-follow-a-childs-helper
++ (let [c (sci/init {})
++       _ (p/in c "(ns review3) (defn h [] 1) (defprotocol P (m [this])) (defrecord R [] P (m [_] (h))) (defmulti mm identity) (defmethod mm :a [_] (h)) (def r (->R))")
++       a (sci/fork c) _ (p/in a "(in-ns 'review3) (defn h [] 2)")
++       b (sci/fork a) _ (p/in b "(in-ns 'review3) (defn h [] 3)")
++       query "[(review3/m review3/r) (review3/mm :a)]"
++       actual (mapv #(p/in % query) [b a c b c])]
++   (p/record! "record-protocol-multi" {:actual actual :expected [[3 3] [2 2] [1 1] [3 3] [1 1]]})
++   (is (= [[3 3] [2 2] [1 1] [3 3] [1 1]] actual))))
++(deftest changing-a-multimethod-is-local-to-the-fork
++ (let [c (sci/init {})
++       _ (p/in c "(ns review3) (defmulti mm identity) (defmethod mm :a [_] 1)")
++       a (sci/fork c) b (sci/fork c)
++       _ (p/in a "(in-ns 'review3) (defmethod mm :a [_] 2)")
++       actual (mapv #(p/in % "(review3/mm :a)") [a b c])]
++   (p/record! "multimethod-local" {:actual actual :expected [2 1 1]})
++   (is (= [2 1 1] actual))))
++(deftest a-loaded-open-macro-reads-its-branches-helper
++ (let [sources [['review3/f :function "(defn f [] (m))"]
++                ['review3/m :macro "(defmacro m [] ((resolve 'review3/h)))"]
++                ['review3/h :function "(defn h [] 1)"]]
++       c (p/shaped sources {'review3/f #{'review3/m} 'review3/m #{'clojure.core/resolve} 'review3/h #{}}
++                           {'review3/f (fn [] 1) 'review3/h (fn [] 1)})
++       _ (p/in c "(in-ns 'review3) (defmacro m [] 1)")
++       _ (swap! (::k/program-snapshot c)
++                (fn [snap] (-> snap
++                  (assoc ::e/reach-index (r/reach-index {'review3/f #{'review3/m} 'review3/m #{'clojure.core/resolve} 'review3/h #{}} #{'clojure.core/resolve}))
++                  (update ::e/runtime-rows (fn [rows] (mapv #(if (= 'review3/f (:seon.fn/sym %)) (assoc % ::r/macro-digests [['review3/m "m0"]]) %) rows))))))
++       b (p/branch c "(defn h [] 2)" 'review3/h)
++       actual (p/in b "[(review3/h) (review3/f)]")]
++   (p/record! "open-macro" {:actual actual :expected [2 2]})
++   (is (= [2 2] actual))))
+diff --git a/test/seon/runtime_review3_astra_new_test.clj b/test/seon/runtime_review3_astra_new_test.clj
+new file mode 100644
+index 000000000..58451dc3e
+--- /dev/null
++++ b/test/seon/runtime_review3_astra_new_test.clj
+@@ -0,0 +1,68 @@
++(ns seon.runtime-review3-astra-new-test
++  (:require [clojure.test :refer [deftest is]] [clojure.pprint] [clojure.string]
++            [sci.core :as sci] [sci.ctx-store]
++            [seon.cache :as cache] [seon.id :as id] [seon.sci.eval :as e]
++            [seon.sci.runtime :as r] [seon.sci.kernel :as k]
++            [seon.sci.eval-test] [seon.test-support :as s] [seon.db :as db] [seon.render]))
++(defn record! [label x]
++  (spit (str "/Users/sean/src/seon/tmp/runtime-review3-astra/out/" label ".edn")
++        (with-out-str (clojure.pprint/pprint x))))
++(defn in [c text] (sci.ctx-store/with-ctx c (sci/eval-string* c text)))
++(defn shaped [sources calls roots]
++  (let [c (sci/fork (sci/init {:namespaces {'seon.cache
++                 {'lookup (sci/copy-var* #'cache/lookup (sci/create-ns 'seon.cache))
++                  'present (sci/copy-var* #'cache/present (sci/create-ns 'seon.cache))}}}))
++        rows (mapv (fn [[sym kind source]] {:seon.fn/sym sym :seon.fn/source source
++                    :seon.program/definition-digest (id/digest 64 [source])
++                    ::r/kind kind ::r/calls (get calls sym) ::r/macro-digests []}) sources)]
++    (in c (str "(ns review3) (declare " (clojure.string/join " " (map (comp name first) sources)) ")"))
++    (sci.ctx-store/with-ctx c
++      (doseq [[sym v] roots] (sci/bind-root! c (sci/resolve c sym) v)))
++    (assoc c ::k/program-snapshot (atom {::e/runtime-rows rows ::e/reach-index (r/reach-index calls #{})}))))
++(defn branch [c source sym]
++  (let [b (assoc (sci/fork c) ::k/program-snapshot (atom @(::k/program-snapshot c)))]
++    (in b (str "(in-ns 'review3) " source))
++    (#'e/bind-analysed! b {sym (id/digest 64 [source])} #{}) b))
++(deftest cache-reader-and-writer-agree-in-one-runtime
++  (cache/evict-kinds! #{:review3/value})
++  (let [sources [['review3/helper :function "(defn helper [] 1)"]
++                 ['review3/write-value :function "(defn write-value [] (seon.cache/lookup :review3/value :x (constantly 1) (fn [] (helper))))"]
++                 ['review3/read-value :function "(defn read-value [] (seon.cache/present :review3/value :x))"]]
++        main (shaped sources {'review3/helper #{} 'review3/write-value #{'review3/helper 'seon.cache/lookup}
++                              'review3/read-value #{'seon.cache/present}}
++                     {'review3/helper (fn [] 1)
++                      'review3/write-value (fn [] (cache/lookup :review3/value :x (constantly 1) (fn [] 1)))
++                      'review3/read-value (fn [] (cache/present :review3/value :x))})
++        b (branch main "(defn helper [] 2)" 'review3/helper)
++        before [(in b "(review3/write-value)") (in b "(review3/read-value)")]
++        _ (in main "(review3/write-value)")
++        after [(in b "(review3/write-value)") (in b "(review3/read-value)")]]
++    (record! "cache-read-write" {:expected [2 2] :before before :after after})
++    (is (= [2 2] before after))))
++(deftest a-value-executes-its-whole-runtime-during-production
++  (let [sources [['review3/a-value :value "(def a-value (f))"]
++                 ['review3/f :function "(defn f [] (g))"]
++                 ['review3/g :function "(defn g [] (h))"]
++                 ['review3/h :function "(defn h [] 1)"]]
++        main (shaped sources {'review3/a-value #{'review3/f} 'review3/f #{'review3/g}
++                              'review3/g #{'review3/h} 'review3/h #{}}
++                     {'review3/a-value 1 'review3/f (fn [] 1) 'review3/g (fn [] 1) 'review3/h (fn [] 1)})
++        b (branch main "(defn h [] 2)" 'review3/h)
++        actual (in b "[review3/a-value (review3/f) (review3/g)]")]
++    (record! "value-production-order" {:expected [2 2 2] :actual actual})
++    (is (= [2 2 2] actual))))
++(deftest real-invocation-cache-reader-and-writer
++  (s/with-database
++    (fn [conn]
++      (let [database (#'seon.sci.eval-test/branch-replacing! conn 'seon.render/invocation-weight
++                       "(?s)\\[entry\\].*$" "[entry] 2048)")
++            b (e/base-ctx database)
++            evidence {:seon.render/program-snapshot {} :seon.render/program-evidence {} :seon.render/projection {}}
++            key [:review3 (id/id)]
++            f (#'seon.sci.eval-test/in-context b
++                 "(fn [key evidence] [(seon.render/retain-invocation! key evidence) (seon.render/invocation key evidence)])")
++            actual (sci.ctx-store/with-ctx b (f key evidence))
++            expected [(dissoc evidence :seon.render/program-snapshot :seon.render/projection)
++                      (dissoc evidence :seon.render/program-snapshot :seon.render/projection)]]
++        (record! "real-invocation-cache" {:actual actual :expected expected})
++        (is (= expected actual))))))
+diff --git a/test/seon/runtime_review3_astra_real_test.clj b/test/seon/runtime_review3_astra_real_test.clj
+new file mode 100644
+index 000000000..6fb6ff072
+--- /dev/null
++++ b/test/seon/runtime_review3_astra_real_test.clj
+@@ -0,0 +1,64 @@
++(ns seon.runtime-review3-astra-real-test
++ (:require [clojure.test :refer [deftest is]]
++           [seon.runtime-review3-astra-new-test :as p]
++           [seon.review3-fixture]
++           [seon.sci.eval-test] [seon.test-support :as s] [seon.db :as db]
++           [seon.sci.eval :as e] [sci.core :as sci] [sci.ctx-store]
++           [seon.id :as id] [seon.render]))
++(deftest a-loaded-value-initializer-executes-the-whole-branch
++ (s/with-database
++  (fn [conn]
++    (let [before (db/db conn)
++          a-db (#'seon.sci.eval-test/branch-replacing! conn 'seon.review3-fixture/h "\\[\\] 1\\)" "[] 2)")
++          a (e/base-ctx a-db)
++          b-db (#'seon.sci.eval-test/branch-replacing! conn 'seon.review3-fixture/h "\\[\\] 2\\)" "[] 3)")
++          b (e/base-ctx b-db)
++          continued (doto (e/base-ctx a-db) (#(e/acquire! {:seon.sci.eval/ctx % :seon.db/db b-db})))
++          query "[seon.review3-fixture/a-value (seon.review3-fixture/f) (seon.review3-fixture/g)]"
++          actual (mapv #(p/in % query) [a b continued (e/base-ctx before)])]
++      (p/record! "real-value-production" {:actual actual :expected [[2 2 2] [3 3 3] [3 3 3] [1 1 1]]})
++      (is (= [[2 2 2] [3 3 3] [3 3 3] [1 1 1]] actual))))))
++(deftest a-branch-cache-reader-cannot-read-the-entry-it-replaced
++ (s/with-database
++  (fn [conn]
++   (let [database (#'seon.sci.eval-test/branch-replacing! conn 'seon.render/invocation-weight
++                        "(?s)\\[entry\\].*$" "[entry] 2048)")
++         b (e/base-ctx database)
++         evidence {:seon.render/program-snapshot {} :seon.render/program-evidence {} :seon.render/projection {}}
++         key [:review3 (id/id)]
++         _ (seon.render/retain-invocation! key (assoc evidence :review3/value :main))
++         f (p/in b "(fn [key evidence] [(seon.render/retain-invocation! key (assoc evidence :review3/value :branch)) (seon.render/invocation key evidence)])")
++         actual (mapv :review3/value (sci.ctx-store/with-ctx b (f key evidence)))]
++     (p/record! "real-stale-invocation" {:actual actual :expected [:branch :branch]})
++     (is (= [:branch :branch] actual))))))
++(deftest a-loaded-open-macro-executes-the-whole-branch
++ (s/with-database
++  (fn [conn]
++   (let [database (#'seon.sci.eval-test/branch-replacing! conn 'seon.review3-fixture/h "\\[\\] 1\\)" "[] 2)")
++         b (e/base-ctx database)
++         actual (p/in b "[(seon.review3-fixture/h) (seon.review3-fixture/open-macro) (seon.review3-fixture/open-caller)]")
++         flags (db/pull database [:seon.fn/host-bound? :seon.fn/macro?] [:seon.fn/sym 'seon.review3-fixture/open-macro])]
++    (p/record! "real-open-macro" {:actual actual :expected [2 2 2] :flags flags})
++    (is (= [2 2 2] actual))))))
++(deftest a-multimethod-change-is-local-to-an-acquired-fork
++ (s/with-database
++  (fn [conn]
++   (let [database (db/db conn)
++         c (e/base-ctx database)
++         _ (p/in c "(ns review3) (defmulti mm identity) (defmethod mm :a [_] 1)")
++         a (e/fork-cluster-ctx c database conn)
++         b (e/fork-cluster-ctx c database conn)
++         _ (p/in a "(in-ns 'review3) (defmethod mm :a [_] 2)")
++         actual (mapv #(p/in % "(review3/mm :a)") [a b c])]
++    (p/record! "real-multimethod-local" {:actual actual :expected [2 1 1]})
++    (is (= [2 1 1] actual))))))
++(deftest a-protocol-extension-is-local-to-an-acquired-fork
++ (s/with-database
++  (fn [conn]
++   (let [database (db/db conn) c (e/base-ctx database)
++         _ (p/in c "(ns review3protocol) (defprotocol P (m [this])) (defrecord R [] P (m [_] 1)) (def r (->R))")
++         a (e/fork-cluster-ctx c database conn) b (e/fork-cluster-ctx c database conn)
++         _ (p/in a "(in-ns 'review3protocol) (extend-type R P (m [_] 2))")
++         actual (mapv #(p/in % "(review3protocol/m review3protocol/r)") [a b c])]
++    (p/record! "real-protocol-local" {:actual actual :expected [2 1 1]})
++    (is (= [2 1 1] actual))))))
+diff --git a/test/seon/zz_runtime_review3_astra_pressure_test.clj b/test/seon/zz_runtime_review3_astra_pressure_test.clj
+new file mode 100644
+index 000000000..d443bdcc9
+--- /dev/null
++++ b/test/seon/zz_runtime_review3_astra_pressure_test.clj
+@@ -0,0 +1,24 @@
++(ns seon.zz-runtime-review3-astra-pressure-test
++ (:require [clojure.test :refer [deftest is]] [clojure.string :as str]
++           [sci.core :as sci] [sci.ctx-store] [seon.cache :as cache]
++           [seon.sci.runtime :as runtime] [seon.sci.runtime-test]))
++(deftest ^{:seon.test/long "Replay 100 branches under the shipped shared cache budget" :seon.test/long-ms 30000}
++ analyses-under-budget-pressure
++ (let [before (cache/status)
++       names (mapv #(symbol (str "f" %)) (range 1000))
++       scaled (fn [n v] (#'seon.sci.runtime-test/row 'rt.scale (str "(defn " n " [x] (+ x " v "))")))
++       main (runtime/bind (#'seon.sci.runtime-test/fresh-space (str "(ns rt.scale) (declare " (str/join " " names) ")"))
++                          (mapv #(scaled % 0) names))
++       rewrites (fn [b] (into (mapv #(scaled (nth names (mod (+ (* 7 b) %) 1000)) 1) (range 50))
++                              (mapv #(scaled (nth names (mod (+ (* 13 b) 500 %) 1000)) (+ 2 b)) (range 50))))
++       branches (mapv #(runtime/bind main (rewrites %)) (range 100))
++       distinct-digests (into #{} (comp (mapcat rewrites) (map :seon.program/definition-digest)) (range 100))
++       n (reduce + (map (comp count ::runtime/analysed) branches))
++       call (fn [ctx sym] (sci.ctx-store/with-ctx ctx (sci/eval-string* ctx (str "(" sym " 0)"))))
++       actual [(call main 'rt.scale/f0) (call main 'rt.scale/f500)
++               (call (first branches) 'rt.scale/f0) (call (first branches) 'rt.scale/f500)]
++       observation {:before before :after (cache/status) :distinct (count distinct-digests) :analysed n :answers actual}]
++   (spit "/Users/sean/src/seon/tmp/runtime-review3-astra/out/cache-pressure3.edn" (pr-str observation))
++   (is (= 1000 (count (::runtime/analysed main))))
++   (is (= (count distinct-digests) n))
++   (is (= [0 0 1 2] actual))))
