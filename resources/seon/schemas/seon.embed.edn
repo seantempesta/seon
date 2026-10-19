@@ -9,7 +9,7 @@
               [:seon.config.embed/endpoint :seon.config.embed/endpoint]
               [:seon.config.embed/model :seon.config.embed/model]
               [:seon.config.embed/dimension :seon.config.embed/dimension]
-              [:seon.config.embed/batch-size :seon.config.embed/batch-size]
+              [:seon.config.embed/request-bytes :seon.config.embed/request-bytes]
               [:seon.config.embed/timeout-ms :seon.config.embed/timeout-ms]
               [:seon.config.embed/wait-ms :seon.config.embed/wait-ms]],
              :store [:map {:description "The durable konserve store of embeddings: packed segments and their manifest (seon.embed/write-segment!)."}],

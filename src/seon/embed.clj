@@ -208,7 +208,7 @@
     (if (:seon.error/operation effective)
       effective
       (select-keys effective [:seon.config.embed/endpoint :seon.config.embed/model :seon.config.embed/dimension
-                              :seon.config.embed/batch-size :seon.config.embed/timeout-ms :seon.config.embed/wait-ms]))))
+                              :seon.config.embed/request-bytes :seon.config.embed/timeout-ms :seon.config.embed/wait-ms]))))
 
 (defn- hot!
   "Retain `octets` under `content-key` in the process cache, answering them."
@@ -217,16 +217,24 @@
   (seon.cache/lookup ::embedding content-key #(+ 96 (alength ^bytes %)) (constantly octets)))
 
 (defn requests
-  "The content keys `missing` as embed-server requests: sorted by their text's length (`text-of`), so each request
-  holds texts of like length, then cut every `batch-size` texts."
+  "The content keys `missing` as embed-server requests: sorted by their text's length (`text-of`), then cut so
+  each request's texts total at most `budget` UTF-8 bytes, a longer text alone."
   {:malli/schema [:=> [:cat [:map-of :seon.embed/key :seon.embed/text] pos-int? [:vector :seon.embed/key]]
                   [:vector [:vector :seon.embed/key]]]}
-  [text-of batch-size missing]
-  (into [] (partition-all batch-size) (sort-by #(count (text-of %)) missing)))
+  [text-of budget missing]
+  (let [size #(alength (.getBytes ^String (text-of %) StandardCharsets/UTF_8))
+        [done last-batch _] (reduce (fn [[done batch total] content-key]
+                                      (let [n (size content-key)]
+                                        (if (and (seq batch) (< budget (+ total n)))
+                                          [(conj done batch) [content-key] n]
+                                          [done (conj batch content-key) (+ total n)])))
+                                    [[] [] 0]
+                                    (sort-by size missing))]
+    (cond-> done (seq last-batch) (conj last-batch))))
 
 (defn- requested
   "The embeddings `request` answers for `missing` (content keys, `text-of` naming each one's text), in
-  `settings`' batch-size requests, and the unreachable error of the first request that answered none."
+  `settings`' byte-budget requests, and the unreachable error of the first request that answered none."
   {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/request :seon.embed/task
                        [:map-of :seon.embed/key :seon.embed/text] [:vector :seon.embed/key]]
                   [:map [::found :seon.embed/found]
@@ -238,7 +246,7 @@
                 (reduced (assoc answered ::error answer))
                 (update answered ::found into (map vector batch answer)))))
           {::found {}}
-          (requests text-of (:seon.config.embed/batch-size settings) missing)))
+          (requests text-of (:seon.config.embed/request-bytes settings) missing)))
 
 (defn- layered
   "The embeddings of `texts` for `task` by content key, with how many came from each layer: the process cache,
@@ -274,7 +282,7 @@
 
 (defn embed!
   "The embeddings of `texts` for `task`, in order, with how many came from each layer: the process cache first,
-  then `store`'s segments, then `settings`' batch-size requests for the rest, written to `store` as one segment
+  then `store`'s segments, then `settings`' byte-budget requests for the rest, written to `store` as one segment
   and to the cache. Text repeated within `texts` is requested once. The unreachable error when the embed server
   is needed and does not answer; what it answered before is still written."
   {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/store :seon.embed/request

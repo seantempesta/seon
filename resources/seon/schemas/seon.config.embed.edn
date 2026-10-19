@@ -17,11 +17,11 @@
                       :description
                       "The Matryoshka dimension stored per embedding.",
                       :seon.config/dial true}],
-                    :batch-size
+                    :request-bytes
                     [:int
                      {:min 1,
                       :description
-                      "Texts per embed-server request.",
+                      "UTF-8 bytes of text per embed-server request: a pass sorts its backlog by length and cuts it at this budget (seon.embed/requests).",
                       :seon.config/dial true}],
                     :timeout-ms
                     [:int

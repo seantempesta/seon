@@ -39,7 +39,9 @@
  :seon.config.embed/endpoint "http://127.0.0.1:8701/v1/embed"
  :seon.config.embed/model "eg2-text-bf16"
  :seon.config.embed/dimension 256
- :seon.config.embed/batch-size 256
+ ; Unit: UTF-8 bytes of text per request (about 3.2 per token): 768 KiB is about the 262,144 tokens the server merges
+ ; into one GPU round, a few seconds of work, so a pass sends its backlog in a few large requests.
+ :seon.config.embed/request-bytes 786432
  :seon.config.embed/timeout-ms 30000
  ; Unit: milliseconds a by-meaning or by-name call waits for an index the background fill has not derived yet before
  ; it answers in progress: a warm index answers in about 2 ms, a cold one costs seconds of embedding.

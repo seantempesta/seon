@@ -357,9 +357,10 @@ Each phase names its owner and the proof that is red until it lands. Root files 
   Measured on 61,458 `mix` texts: the batch CLI's peak footprint fell from 84.4 GB to 5.1 GB at 536/s (499/s before);
   the server under the load that killed it (256-text requests, 2 clients) peaked at 2.9 GB footprint (sampled every
   2-3 s) at 340/s, and at 3.3 GB and 380/s with 1,500-text requests, a check JVM running beside it.
-  The byte-budget requests (`:seon.config.embed/request-bytes`) are blocked: a new required dial cannot be adopted
-  onto a store that holds a config entity (`seon.cluster/adoption-refuses-a-new-required-dial-on-a-store-with-a-config-entity`).
-  Until then a pass sorts its backlog by length before cutting it at `:seon.config.embed/batch-size`.
+  The byte-budget requests landed with lane embed-fix: `:seon.config.embed/request-bytes` (768 KiB) replaces
+  `:seon.config.embed/batch-size`, and a pass sorts its backlog by length and cuts it at that budget
+  (`seon.embed/requests`), once adoption wrote a new dial's decision onto a held config entity
+  (`seon.config/adopted-dials-tx`). The ≥400/s rate on the live server is not measured yet.
 - P2: packed segments and the conversion of the per-key store landed in `seon.embed`. The live store converted on
   2026-10-19, but inside an agent's call that the 2 GB allocation bound cut while it deleted the per-key files; the
   next open packed the 10,986 left into a second segment (11.6 MB of duplicates, until a P4 compaction). Lane

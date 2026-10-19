@@ -18,7 +18,7 @@
   {:malli/schema [:=> [:cat] :seon.embed/settings]}
   []
   #:seon.config.embed{:endpoint "http://127.0.0.1:8701/v1/embed" :model (str "test-model-" (id/id)) :dimension 4
-                      :batch-size 2 :timeout-ms 2000 :wait-ms 2000})
+                      :request-bytes 40 :timeout-ms 2000 :wait-ms 2000})
 
 (defn- unit
   "The little-endian float32 octets of `xs` scaled to unit length."
@@ -72,6 +72,19 @@
           (is (= (mapv vec (:seon.embed/vectors first-run)) (mapv vec (:seon.embed/vectors restarted)))))
         (testing "another task is another content key"
           (is (= 3 (:seon.embed/requested (embed/embed! dials (embed/open-store dir) request "code" texts))))))
+      (finally
+        (run! io/delete-file (reverse (file-seq (io/file dir))))))))
+
+(deftest a-fill-pass-sends-its-backlog-in-byte-budget-requests
+  (let [dir (temp-dir)
+        batches (atom [])
+        request (fn [_settings _task texts] (swap! batches conj texts) (mapv (fn [_] (unit [1 0 0 0])) texts))
+        ;; ten 10-byte texts and one 50-byte text, under a 30-byte budget
+        texts (conj (mapv #(format "text-%05d" %) (range 10)) (apply str (repeat 50 "x")))]
+    (try
+      (embed/embed! (assoc (settings) :seon.config.embed/request-bytes 30) (embed/open-store dir) request "similarity" texts)
+      (is (= [3 3 3 1 1] (mapv count @batches)) "shortest first, cut at the budget, a longer text alone")
+      (is (= #{(apply str (repeat 50 "x"))} (set (peek @batches))))
       (finally
         (run! io/delete-file (reverse (file-seq (io/file dir))))))))
 
