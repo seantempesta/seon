@@ -43,6 +43,7 @@
             [seon.render-simplification-test :as simplification]
             [seon.render-test :as render-test]
             [seon.render.walk :as render.walk]
+            [seon.print]
             [seon.render.web :as render.web]
             [seon.schema :as schema]
             [seon.sci.eval :as eval]
@@ -149,38 +150,55 @@
      ctx (assoc :seon.sci.eval/ctx ctx)
      (nil? ctx) (assoc :seon.db/db (db/db (:seon.db/connection (test-support/execution-handle nil)))))))
 
-(deftest a-branch-change-leaves-its-compiled-callers-compiled
-  ;; Owner ruling (AGENTS ddd3cf9a2, dogfood B8): a branch never changes the
-  ;; platform. An unchanged host-bound caller of a branch-changed definition
-  ;; keeps its compiled Var, so the branch's own evaluator keeps working;
-  ;; what the branch evaluates from source sees the branch's definition.
-  ;; seon.cluster/write-advertisement! has one host-bound caller in a loaded
-  ;; namespace (seon.cluster/serve!) and a small reverse closure.
+(deftest a-branch-helper-change-is-live-for-its-src-callers-on-that-branch
+  ;; Owner (2026-10-19): a branch's change to a src function is live for its
+  ;; branch and runtime. seon.print/literal is a private helper of the loaded
+  ;; public seon.print/form-text; form-text resolves literal through the
+  ;; branch's binding, and main keeps its own.
   (test-support/with-database
    (fn [connection]
-     (let [changed-sym 'seon.cluster/write-advertisement!
+     (let [changed-sym 'seon.print/literal
            before (db/db connection)
            source (str/replace-first (:seon.fn/source (db/pull before [:seon.fn/source] [:seon.fn/sym changed-sym]))
-                                     #"^(\(defn-?\s+\S+)" "$1 ;; Changed on the branch.\n \"Branch version.\"")
+                                     #"(?s)\[value\].*$" "[value]\n  \"BRANCH\")")
            admitted (test-support/program-fn-entity before changed-sym source {:seon.schema.admission/source :agent})
            _ (test-support/transacted!
               connection
               (test-support/replacement-tx
                before [:seon.fn/sym changed-sym] (:seon.fn/source admitted)
                {:seon.schema.admission/source :agent}))
-           after (db/db connection)
-           ctx (eval/base-ctx after)
-           callers (filterv #(and (find-ns (symbol (namespace %)))
-                                  (:seon.fn/host-bound? (db/pull after [:seon.fn/host-bound?] [:seon.fn/sym %])))
-                            (db/q '[:find [?caller ...] :in $ ?callee :where [?f :seon.fn/calls ?callee] [?f :seon.fn/sym ?caller]]
-                                  after changed-sym))]
-       (is (= "Branch version." (sci/eval-string* ctx (str "(:doc (meta #'" changed-sym "))")))
-           "what the branch evaluates from source sees its definition")
-       (is (seq callers) "the change reaches host-bound callers in loaded namespaces")
-       (is (every? #(identical? @(resolve %) (sci.ctx-store/with-ctx ctx @(sci/resolve ctx %))) callers)
-           "each unchanged host-bound caller keeps its compiled Var, never a refusing stub")
-       (is (= "{:a 1}" (sci/eval-string* ctx "(pr-str {:a 1})"))
-           "the branch's evaluator keeps printing")))))
+           branch (eval/base-ctx (db/db connection))
+           main (eval/base-ctx before)]
+       (is (= "(BRANCH BRANCH)" (:seon.sci.admit/value (run-in branch "(seon.print/form-text '(a 1))" 2000)))
+           "on the branch, the loaded public caller answers the branch's helper")
+       (is (= "(a 1)" (sci/eval-string* main "(seon.print/form-text '(a 1))"))
+           "main's base caller keeps main's helper")
+       (is (= "(a 1)" (seon.print/form-text '(a 1))) "the compiled caller is unchanged")))))
+
+(deftest no-sci-runnable-src-function-runs-its-compiled-var
+  ;; Invariant 1 of the branch-runtime note: a runtime's answers depend only on
+  ;; its name -> digest map, never on what main's JVM compiled. So every src
+  ;; function the index calls SCI-runnable runs its analysed definition in a
+  ;; base context, never the compiled function.
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           ctx (eval/base-ctx database)
+           runnable (db/q '[:find [?sym ...]
+                            :where [?f :seon.fn/host-bound? false] [?f :seon.schema.admission/source :core]
+                            [?f :seon.fn/arglists ?arglists] [(not= "()" ?arglists)]
+                            (not [?f :seon.fn/macro? true])
+                            [?f :seon.fn/ns ?namespace] [?namespace :seon.fn/file ?file]
+                            [?file :seon.fn.file/relative-root "src"] [?f :seon.fn/sym ?sym]]
+                          database)
+           compiled (into (sorted-set)
+                          (filter (fn [sym]
+                                    (when-let [host (find-var sym)]
+                                      (when-let [held (sci/resolve ctx sym)]
+                                        (identical? @host (sci.ctx-store/with-ctx ctx @held))))))
+                          runnable)]
+       (is (seq runnable) "the index names SCI-runnable src functions")
+       (is (= #{} compiled) "none of them runs its compiled Var")))))
 
 (defn- namespace-paths
   "Every `[namespace name]` `ctx`'s namespaces hold."
