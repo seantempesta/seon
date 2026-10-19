@@ -8,7 +8,8 @@ created: 2026-10-19
 Phase status: P0 landed (`seon.sci.open-derivers-test`, `seon.cost-estimate-test/closed-runtime-rows-grow-past-no-accepted-overrun`);
 P2, P3b landed; P1 landed (lane closed-p1, the leaf design); P3a split: P3a-1 landed (lane closed-p3a1b: the order leaf and the
 digest move; the fallback deletion moves to P4b, option c), P3a-2 scheduled with P4b; P4a landed (`ec87c559c`); P5 landed (`7df8dbb21`,
-corrections in its section); P4b in flight (lane closed-p4b); P6a, P6b, P7, P8 not started.
+corrections in its section); P4b landed (`66ca5108b`, lane closed-p4b; corrections in its section); P3a-2 written and stopped at the
+guard census (patch `docs/research/agent-platform/2026-10-20/closed-p3a2-bridge.patch`, see P3a); P6a, P6b, P7, P8 not started.
 
 # Closed runtime: the hybrid
 
@@ -374,7 +375,7 @@ static call to `seon.db/carried-projection`. So:
 - **P3a-1 (landed, lane closed-p3a1b):** `seon.order/compare-values` (leaf, no `seon` requires) with the scripted sweep,
   no alias, and the eight `seon.print` requires it left unused dropped; `seon.schema/canonical-schema-entities` returns
   rows without digests and `seon.program/schema-entities` adds them (every caller converted). Proofs:
-  `seon.schema.datahike-test/the-bridge-requires-no-printer` and the `:P3a-1` row of `converted`.
+  `seon.schema.datahike-test/the-bridge-requires-no-printer` (now `the-bridge-requires-neither-schema-nor-printer`) and the `:P3a-1` row of `converted`.
 - **The fallback deletion moves to P4b (root's option c).** `seon.schema/packaged-forms`, `warn-classpath-fallback!`, the
   `schema-edn-packaged-forms` seam and boot's binding of `*packaged-forms*` stay as on HEAD, because
   `seon.config/defaults` is a compiled constant that loads the packaged population before boot ever binds a root:
@@ -387,6 +388,25 @@ static call to `seon.db/carried-projection`. So:
   `projection-from-database` go with P4b's handed projection (the callers in `seon.error` take the projection they are
   handed).
 
+- **P3a-2 as written (lane closed-p4b, patch `docs/research/agent-platform/2026-10-20/closed-p3a2-bridge.patch`, applies on
+  `66ca5108b`): the smaller cut, not the 312-site move.** Counted on HEAD `66ca5108b`: the bridge's
+  `seon.schema` uses were `projection-validator` 2, `projection-cache-value` 4, `projection-identity` 1, `call-with-forms` 2,
+  `declaration-projection` 2 (the two conveniences). Moving all five primitives sweeps 312 + 64 + 10 sites in ~75 files;
+  instead only what the bridge needs moved: `call-with-forms` to `seon.schema.handed` (10 sites, P4b),
+  `projection-cache-value`, `projection-cache`, `projection-identity` and the fingerprint functions to
+  `seon.schema.internal` (64 + 1 sites in 20 files, the identity projection symbol in `seon.schema.edn` and four task
+  plans); the bridge's two validators are Malli's own (`m/validator` of `mr/schema` on the projection's registry, Malli
+  caches it per schema), so `projection-validator` stays in `seon.schema` with its 312 callers. The conveniences
+  `encode-transaction` and `decode-attribute-value` had no `src` caller; they are deleted and their five test sites hand
+  `(schema/declaration-projection)`. `seon.schema` requires the bridge; the seven seams are static calls.
+  `database-projection`/`projection-from-database` (138 sites, 60 files, three in `seon.error`, which `seon.db` requires)
+  is not converted: it is its own sweep (callers that can require `seon.db` call `seon.db/carried-projection`;
+  `seon.error`'s three take the handed projection).
+  **Blocked:** the sweep changes one symbol in `seon.instrument/compiled-wrapper`, which holds
+  `(catch Throwable failure ...)`; `bin/lane commit`'s guard census refuses a changed function holding a guard. The patch
+  lands once that catch goes (its cause fixed, or the armed wrapper declared an entrant), or the owner exempts the
+  one-symbol rename. Probed in a fresh JVM from the patched tree: `seon.schema.datahike` loads without `seon.schema`,
+  config defaults compile, `projection-identity` and `encode-transaction-in` answer.
 - First step: count `seon.schema/!fallback-counts` after the cost rows and after the check's test namespaces; every
   caller named is converted to hand its population in this commit.
 - Files: `src/seon/schema.clj` (fallback and its helpers deleted; the seven bridge seams become calls; requires
@@ -424,6 +444,17 @@ static call to `seon.db/carried-projection`. So:
 Unchanged; the narrow check passed it. `seon.error.refusal` stays babashka-loadable. Ratchet unchanged.
 
 ### P4b. Cycle 6 (platform: boot binds the handed root)
+
+**Landed (`66ca5108b`), with corrections.** (1) The root is bound by `seon.schema.edn` at load, not boot:
+`seon.config/defaults` compiles at namespace load. (2) `*projection*` is not root-bound: 29 `src` readers of
+`seon.schema/handed-projection` treat an unbound projection as absent, and a root would answer them with the packaged
+one. The root lives in its own Var, `seon.schema.handed/packaged` (forms, a delay of their declaration projection, the
+`seon.cache` lookup); `candidate-forms` falls back to it, `declaration-population` still refuses with nothing handed.
+(3) The lookup is not on the projection: carried there it made `seon.schema/with-compiled-cache` an open cache deriver.
+(4) The ratchet fell by two, `seon.cluster/derivation-keys` and `seon.cluster.source/merge-base`;
+`seon.cluster/branch-declaration-changes` stays open. (5) `config-loads-the-packaged-population-in-a-fresh-jvm` was red
+because `seon.error.refusal` named `sci.lang.Var` (P4a) before SCI loaded; the refusal now requires `sci.core`.
+`seon.schema/handed-projection` (102 files) reads `seon.schema.handed/projection`; it was not swept.
 
 - Files: `src/seon/schema/handed.cljc` (new leaf, no requires: `*projection*`, `*projection-state*`,
   `*packaged-forms*` move here), `src/seon/schema.clj` (binds the leaf; the handed projection carries

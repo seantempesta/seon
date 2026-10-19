@@ -1,0 +1,1354 @@
+diff --git a/resources/seon/schemas/seon.schema.edn b/resources/seon/schemas/seon.schema.edn
+index a4fff4269..5c60bb13c 100644
+--- a/resources/seon/schemas/seon.schema.edn
++++ b/resources/seon/schemas/seon.schema.edn
+@@ -80,7 +80,7 @@
+                              [:seon.schema.projection/forms [:= {} {}]]
+                              [:seon.schema.projection/fingerprint [:= 0]]]
+                 :seon.schema/identity-only true
+-                :seon.schema/identity-projection seon.schema/projection-identity}
++                :seon.schema/identity-projection seon.schema.internal/projection-identity}
+                seon.schema/projection-value?],
+               :compiled-validator fn?,
+               :key
+diff --git a/resources/seon/tasks/seon.cluster.branch-evidence.edn b/resources/seon/tasks/seon.cluster.branch-evidence.edn
+index c52766c76..fb4a87275 100644
+--- a/resources/seon/tasks/seon.cluster.branch-evidence.edn
++++ b/resources/seon/tasks/seon.cluster.branch-evidence.edn
+@@ -1,7 +1,7 @@
+ [#:seon.task{:name "the-branch-evidence-gate-rarely-sees-red-before-on-main"
+              :plan "Default's main holds no recorded result for any of the 30 tests reaching seon.cluster.branch/cluster-branch (2026-10-08): tests run in throwaway JVMs, not on main. A test red before a lane's change therefore reads as unproven, not red-before, unless root runs it on main first. Done when main carries current results for the tests the gate asks about (root's merge or a scheduled run), or the gate takes red-before evidence from an unchanged fork of the head. Read `seon.cluster.branch-evidence/branch-evidence` and `seon.test/recorded-result`."}
+  #:seon.task{:name "an-agent-check-costs-ten-times-its-one-test"
+-             :plan "my.test/check {:seon.test/changed [seon.agent/archived?]} on a lane branch took 6.4 s and 8.9 s for one test whose run was 0.53 s (acquire 95 ms), about 110,000 calls, seon.schema/projection-cache-value about 19,000 times (2026-10-08). A defn and its check in one eval request recorded evidence for the pre-defn digest, so the branch-evidence gate correctly refused it as unproven until a second check. Done when one reaching test's check is under 1.5 s and evidence from a defn plus check in one request is current. Read `my.test/check` and `seon.test/run`."}
++             :plan "my.test/check {:seon.test/changed [seon.agent/archived?]} on a lane branch took 6.4 s and 8.9 s for one test whose run was 0.53 s (acquire 95 ms), about 110,000 calls, seon.schema.internal/projection-cache-value about 19,000 times (2026-10-08). A defn and its check in one eval request recorded evidence for the pre-defn digest, so the branch-evidence gate correctly refused it as unproven until a second check. Done when one reaching test's check is under 1.5 s and evidence from a defn plus check in one request is current. Read `my.test/check` and `seon.test/run`."}
+  #:seon.task{:name "a-printer-failure-answers-unprintable-without-its-cause"
+              :plan "A JVM eval_clj whose value was [rows kw (keys @conn)] answered `#unprintable[clojure.lang.PersistentVector java.lang.ClassCastException]` with no diagnostic naming the failing member or cause (2026-10-08, agent impl-rf2). Done when the printer shows the printable members and names the failing path, with its error delivered beside the value. More evidence (default, 2026-10-08): in the SCI path (keys [1 2]) printed a diagnostic with a 76-frame stack (~3,500 tokens, ClassCastException in KeySeq) while JVM mode shows only #unprintable[...] with no diagnostic. Done also when the diagnostic is compact data (type, message, top frames; ledger PR-04) in both modes. Owners: seon.sci.eval/shown-result and the diagnostic builder. Read `seon.mcp/call`."}
+  #:seon.task{:name "agent-identity-prints-its-id-into-the-message"
+diff --git a/resources/seon/tasks/seon.config.edn b/resources/seon/tasks/seon.config.edn
+index 6afaffa18..599ac97f5 100644
+--- a/resources/seon/tasks/seon.config.edn
++++ b/resources/seon/tasks/seon.config.edn
+@@ -3,7 +3,7 @@
+  #:seon.task{:name "a-config-read-rebuilds-the-packaged-projection"
+              :plan "Make `seon.config/effective` reuse the held program's declaration information instead of asking `seon.config/declared-projection` to rebuild `seon.schema/declaration-projection` from `seon.schema.edn/packaged-forms` after central cache eviction. H9's cold SCI sample performs 3,604 `seon.schema/contract-references` walks (253 ms self) and 217 schema-resource reads through this config path; `seon.sci.eval/derive-base-ctx` itself performs zero walks and copies armed roots. Preserve branch-local dials, newer loaded-program dials and the existing shipped-default semantics; no second cache or per-call packaged population build. Red proof `seon.sci.acquisition-cost-test/a-config-read-reuses-its-carried-projection` measures `seon.config/effective` with the database and carried projection already held after emptying seon.cache in a test runs, requiring zero reference walks and resource reads. H10's retained-contract arming optimization does not reach this path. Read `seon.config/effective-in` and `docs/research/agent-platform/2026-10-11/start-a-flow-benchmark.md`."}
+  #:seon.task{:name "a-config-read-walks-the-whole-registry"
+-             :plan "dial-attributes (and required-dial-attributes) walk every form in the projection's registry on every config/effective call; a trivial agent form reads config three times on fresh database values, 1.9 ms each under load (0.97 ms quiet). Both are functions of the projection alone: keep the answer on the projection's own holder (schema/projection-cache-value; 0.0008 ms on a hit, same answer, the carried projection is identical across commits). Patch: tmp/perf-eval-overhead-opus/patches/config-dial-attributes-memo.patch. Read `seon.config/dial-attributes`, `seon.config/effective`, `seon.schema/projection-cache-value` and `docs/research/agent-platform/landing/perf-eval-overhead-2026-09-26.md`."}
++             :plan "dial-attributes (and required-dial-attributes) walk every form in the projection's registry on every config/effective call; a trivial agent form reads config three times on fresh database values, 1.9 ms each under load (0.97 ms quiet). Both are functions of the projection alone: keep the answer on the projection's own holder (schema/projection-cache-value; 0.0008 ms on a hit, same answer, the carried projection is identical across commits). Patch: tmp/perf-eval-overhead-opus/patches/config-dial-attributes-memo.patch. Read `seon.config/dial-attributes`, `seon.config/effective`, `seon.schema.internal/projection-cache-value` and `docs/research/agent-platform/landing/perf-eval-overhead-2026-09-26.md`."}
+  #:seon.task{:name "compute-concurrency-dial-has-no-executor"
+              :plan "After d2604ede9 removed the launcher's compute half, :seon.config.flow.compute/concurrency is read only by seon.config's status display and its available-processors default; nothing executes with it. Retire it as 13387dc38 retired its sibling queue-depth, or name the executor that consumes it. The process root's :compute executor (resources/seon/operator/runtime.clj:17-22, availableProcessors platform threads) is likewise unused (active 0, 2026-09-27); test agents (option B) name it as the JVM-wide CPU bound for test bodies. Read `docs/prds/agent-platform/plan/lane-b3-errors-tasks-dials.md` and `docs/research/agent-platform/test-agents-concurrency-2026-09-27.md`."}
+  #:seon.task{:name "no-provider-cannot-be-lifted-per-agent"
+diff --git a/resources/seon/tasks/seon.schema.datahike.edn b/resources/seon/tasks/seon.schema.datahike.edn
+index f72669036..b5b54245c 100644
+--- a/resources/seon/tasks/seon.schema.datahike.edn
++++ b/resources/seon/tasks/seon.schema.datahike.edn
+@@ -1,5 +1,5 @@
+ [#:seon.task{:name "attribute-selection-reuses-its-immutable-inputs"
+-             :plan "Retain `seon.schema.datahike/compiled-attribute-selection` for the immutable inputs of `seon.schema/canonical-database-attributes` through `seon.schema/projection-cache-value`. Full and subset form selections remain independent. Repeated selection makes zero calls to `seon.schema.datahike/declared-storable?`, proven through `seon.profile/measure`. Read `docs/research/agent-platform/2026-10-12/cost-acquire.md`."}
++             :plan "Retain `seon.schema.datahike/compiled-attribute-selection` for the immutable inputs of `seon.schema/canonical-database-attributes` through `seon.schema.internal/projection-cache-value`. Full and subset form selections remain independent. Repeated selection makes zero calls to `seon.schema.datahike/declared-storable?`, proven through `seon.profile/measure`. Read `docs/research/agent-platform/2026-10-12/cost-acquire.md`."}
+  #:seon.task{:name "decoding-pays-a-projection-scope-and-cache-claim-per-value"
+              :plan "Each decoded attribute value enters `seon.schema/call-with-projection`, `seon.cache/claim` and compiled-storage separately. An agent's (`seon.db/q` '[:find (pull ?e [*]) :where [?e `:seon.cluster.eval/source` _]] db) over 715 evaluations took 1,529 ms and 937,544 armed calls: projection-cache-value 169,764, call-with-projection 47,309 (756 ms), compiled-storage 47,316 (518 ms), edn-encoded-attr-in? 47,309 (530 ms), `seon.cache/claim` 47,303 (default 2026-10-07). Over a 50 min session compiled-storage ran 551,856 times and allocated 1.85 GB self in one 60 s JFR window; projection-cache-value ran 3.94 M times. Fix: resolve the projection and each attribute's decoder once per query/pull (per result shape), then decode values with the resolved decoders. Done when the 715-entity pull answers in under 150 ms with armed calls proportional to attributes, not datoms; regression: the pull probe as a test with a call-count bound. Read `seon.schema.datahike/compiled-storage`, `seon.schema.datahike/decode-attribute-value-in`, `docs/research/agent-platform/2026-10-08/task-census/evidence/waste-rank--jfr-large-errors-alloc.txt` and `docs/research/agent-platform/2026-10-08/task-census/evidence/waste-rank--profile-delta-table.txt`."}
+  #:seon.task{:name "an-attribute-query-calls-logical-attribute-once-per-datom"
+diff --git a/resources/seon/tasks/seon.schema.edn b/resources/seon/tasks/seon.schema.edn
+index bbeac0eb6..a59eadaec 100644
+--- a/resources/seon/tasks/seon.schema.edn
++++ b/resources/seon/tasks/seon.schema.edn
+@@ -18,7 +18,7 @@
+  #:seon.task{:name "a-registration-refusal-carries-an-error-type"
+   :plan "register! of [:maybe :int] returns a flat map with layer and member but no `:seon.error/type` (registration-refusal, schema.clj:1643). Every error is one flat map with `:seon.error/type` extending `:seon.error/base`, built by the installed constructor `seon.error.refusal/error`. Proof: schema-design.md probe 3 answers a map whose `:seon.error/type` is a registered variant. Read `seon.schema/registration-refusal` and `docs/research/agent-platform/2026-10-08/s5-admission/schema-design.md`."}
+  #:seon.task{:name "schema-only-derivations-are-rederived-per-projection"
+-             :plan "projection-cache-value holds each derivation by the projection value, and every contracted defn builds a new projection, so every derivation that reads only schema forms is recomputed after each definition: on default the pass after a defn spends 25-37 MB re-deriving program-attributes (fixed by holding it by forms and admissions), observation-selector (12.8 MB), declared-schema-keys (1.6 MB), shapes-in (2.1 MB) and the storable-attribute plans; that pass costs 94-97 MB and 57,000 armed calls against 55 MB and 8,000 for an ordinary pass (defn-why, 2026-10-08). Give the projection a schema-population identity that a contract-only write keeps (the advanced projection knows no schema row changed) and hold schema-only derivations by it. Done when the pass after a contract-only defn costs what an ordinary pass costs. Read `seon.schema/load-projection`, `seon.schema/projection-cache-value` and `docs/research/agent-platform/2026-10-08/defn-why/defn-why.md`."}
++             :plan "projection-cache-value holds each derivation by the projection value, and every contracted defn builds a new projection, so every derivation that reads only schema forms is recomputed after each definition: on default the pass after a defn spends 25-37 MB re-deriving program-attributes (fixed by holding it by forms and admissions), observation-selector (12.8 MB), declared-schema-keys (1.6 MB), shapes-in (2.1 MB) and the storable-attribute plans; that pass costs 94-97 MB and 57,000 armed calls against 55 MB and 8,000 for an ordinary pass (defn-why, 2026-10-08). Give the projection a schema-population identity that a contract-only write keeps (the advanced projection knows no schema row changed) and hold schema-only derivations by it. Done when the pass after a contract-only defn costs what an ordinary pass costs. Read `seon.schema/load-projection`, `seon.schema.internal/projection-cache-value` and `docs/research/agent-platform/2026-10-08/defn-why/defn-why.md`."}
+  #:seon.task{:name "the-durable-projection-cache-evicts-a-commits-entry-across-tests-sharing-a-jvm"
+              :plan "`seon.schema.projection-writer-test/a-new-branch-at-an-equal-commit-reads-the-held-projection` passes alone and with its own namespace but fails (one `seon.db/declaration-content-key` call) when run in one JVM with `seon.db-test` and `seon.schema-test` tests, at HEAD and with PB-08 (2026-10-09): the likely cause is the 24-entry durable projection cache (`seon.db/carried-projection`, `content-projection`) evicting the commit's entry. Either the bound is a dial sized from what projections weigh, or the test owns its cache state."}
+  #:seon.task{:name "an-agent-contract-naming-an-unregistered-schema-is-refused-as-a-platform-fault"
+diff --git a/src/seon/call_preparation.clj b/src/seon/call_preparation.clj
+index f8f8d1357..3351249d2 100644
+--- a/src/seon/call_preparation.clj
++++ b/src/seon/call_preparation.clj
+@@ -46,6 +46,7 @@
+             [seon.error]
+             [seon.error.refusal :as error]
+             [seon.schema :as schema]
++            [seon.schema.internal :as schema.internal]
+             [seon.schema.edn :as schema.edn]))
+ 
+ (set! *warn-on-reflection* true)
+@@ -187,7 +188,7 @@
+   "The snapshot memo held by `projection` itself, or nil without a holder.
+ 
+   The same core.cache wrapped LRU `seon.db`'s projection memo uses, retained
+-  by the projection's own runtime holder (`schema/projection-cache-value`):
++  by the projection's own runtime holder (`schema.internal/projection-cache-value`):
+   compiled validators belong to the projection they were compiled in, and
+   equal programs share one projection object through `db/carried-projection`,
+   so no second key for the projection is needed and none outlives it."
+@@ -195,7 +196,7 @@
+   [projection]
+   ;; Below `snapshot`, which arming reads per contract, so its callees run
+   ;; unarmed for cost; their contracts hold at every other caller.
+-  (let [memo ((mi/-f->original schema/projection-cache-value)
++  (let [memo ((mi/-f->original schema.internal/projection-cache-value)
+               projection ::snapshot-memo
+               #(cache/lru-cache-factory {} :threshold (::snapshot-cache-size snapshot-cache-policy)))]
+     (when ((mi/-f->original state?) memo) memo)))
+diff --git a/src/seon/call_preparation/plan.clj b/src/seon/call_preparation/plan.clj
+index 4055fe711..f2f2ab11f 100644
+--- a/src/seon/call_preparation/plan.clj
++++ b/src/seon/call_preparation/plan.clj
+@@ -64,7 +64,7 @@
+   "The requested function's arities, retained by its projection; nil without a contract."
+   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol] [:maybe [:vector :map]]]}
+   [projection sym]
+-  (schema/projection-cache-value
++  (internal/projection-cache-value
+    projection [:seon.call-preparation/contract-arities sym]
+    #(when (contains? (:seon.schema.projection/function-contracts projection) sym)
+       (some-> (mr/schema (:seon.schema.projection/registry projection) sym) arity-facts))))
+@@ -261,7 +261,7 @@
+   The immutable projection retains the derived population, never error values."
+   {:malli/schema [:=> [:cat :map] [:set :qualified-keyword]]}
+   [projection]
+-  (schema/projection-cache-value
++  (internal/projection-cache-value
+    projection :seon.error/declared-schema-keys
+    (fn []
+      (let [forms (:seon.schema.projection/forms projection)]
+diff --git a/src/seon/cluster.clj b/src/seon/cluster.clj
+index 63dd125ab..1ac6c1e2e 100644
+--- a/src/seon/cluster.clj
++++ b/src/seon/cluster.clj
+@@ -649,11 +649,11 @@
+   "The Datahike attribute declarations `projection` derives, in attribute order.
+ 
+   A function of the projection value alone, so it is memoized on the
+-  projection's own cache (`seon.schema/projection-cache-value`): a converged
++  projection's own cache (`seon.schema.internal/projection-cache-value`): a converged
+   reopen under a held projection derives it once, not once per reopen."
+   {:malli/schema [:=> [:cat :seon.schema/projection] [:vector :map]]}
+   [projection]
+-  (schema/projection-cache-value
++  (internal/projection-cache-value
+    projection [::declared-attributes]
+    #(vec (schema.datahike/malli->datahike-schema-in
+           projection
+@@ -838,7 +838,7 @@
+       database
+       (cond-> (mapv :db/ident declarations)
+         retire? (into (retired-attributes database projection)))
+-      (schema/projection-cache-value
++      (internal/projection-cache-value
+        projection [::declarations-by-attribute]
+        #(into {} (map (juxt :db/ident identity)) declarations))))))
+ 
+@@ -875,7 +875,7 @@
+     (attribute-change-tx
+      database
+      (into [] (remove #(agent-admitted? database %)) changed)
+-     (schema/projection-cache-value
++     (internal/projection-cache-value
+       projection [::declarations-by-attribute]
+       #(into {} (map (juxt :db/ident identity)) declarations)))))
+ 
+diff --git a/src/seon/config.clj b/src/seon/config.clj
+index 03d924850..c27cc0f5a 100644
+--- a/src/seon/config.clj
++++ b/src/seon/config.clj
+@@ -149,12 +149,12 @@
+   "Config membership declared by retained leaf schemas.
+ 
+   A function of the projection alone, so the projection's own holder keeps
+-  the answer (`schema/projection-cache-value`): the walk visits every form in
++  the answer (`internal/projection-cache-value`): the walk visits every form in
+   the registry, and every config read on a fresh database value asked it again
+   (1.9 ms per call, three per agent form, perf-eval-overhead 2026-09-26)."
+   {:malli/schema [:=> [:cat :seon.schema/projection] [:set :qualified-keyword]]}
+   [projection]
+-  (schema/projection-cache-value
++  (internal/projection-cache-value
+    projection ::dial-attributes
+    #(into #{}
+           (filter (fn [attribute]
+@@ -165,7 +165,7 @@
+ 
+ (defn- required-dial-attributes
+   [projection]
+-  (schema/projection-cache-value
++  (internal/projection-cache-value
+    projection ::required-dial-attributes
+    #(set (internal/map-required-attrs
+           (mr/schema (:seon.schema.projection/registry projection) :seon.config/effective)))))
+@@ -174,7 +174,7 @@
+   "Return the defaults derived from this immutable declaration projection."
+   {:malli/schema [:=> [:cat :seon.schema/projection] [:map-of :qualified-keyword :seon.schema/value]]}
+   [projection]
+-  (schema/projection-cache-value
++  (internal/projection-cache-value
+    projection ::registration-defaults
+    #(let [required (required-dial-attributes projection)]
+       (into {}
+diff --git a/src/seon/db.clj b/src/seon/db.clj
+index 373cb87ac..45c73ae8e 100644
+--- a/src/seon/db.clj
++++ b/src/seon/db.clj
+@@ -39,6 +39,7 @@
+             [seon.program :as program]
+             [seon.profile :as profile]
+             [seon.schema :as schema]
++            [seon.schema.internal :as schema.internal]
+             [seon.schema.edn :as schema.edn]
+             [seon.schema.datahike :as schema.datahike]
+             [malli.registry :as mr])
+@@ -2241,7 +2242,7 @@
+   (and (= :db.type/string
+           (get-in declarations [::installed-schema attribute :db/valueType]))
+        (let [projection @(::read-projection declarations)]
+-         (schema/projection-cache-value
++         (schema.internal/projection-cache-value
+           projection [::edn-encoded? attribute]
+           #(ask-declarations
+             declarations
+@@ -2256,7 +2257,7 @@
+   (and (= :db.cardinality/many
+           (get-in declarations [::installed-schema attribute :db/cardinality]))
+        (let [projection @(::read-projection declarations)]
+-         (not (schema/projection-cache-value
++         (not (schema.internal/projection-cache-value
+                projection [::vector-shaped? attribute]
+                #(ask-declarations
+                  declarations
+@@ -2754,7 +2755,7 @@
+ 
+ (defn- lowered-where
+   "`(schema.datahike/lower-where projection bound clauses)`, derived once per projection
+-   (`seon.schema/projection-cache-value`): the lowering reads the projection, the clauses
++   (`seon.schema.internal/projection-cache-value`): the lowering reads the projection, the clauses
+    and which input values are keywords (an attribute position reads only keywords), so
+    every other input value keys as one scalar. Answers `clauses` itself when unchanged,
+    as `lower-where` does."
+@@ -2762,7 +2763,7 @@
+                   [:sequential :seon.schema/value]]}
+   [projection bound clauses]
+   (let [bound (update-vals bound (fn [values] (into #{} (map #(if (keyword? %) % 'scalar)) values)))
+-        lowered (schema/projection-cache-value
++        lowered (schema.internal/projection-cache-value
+                  projection [`lowered-where bound clauses]
+                  #(let [lowered (schema.datahike/lower-where projection bound clauses)]
+                     (if (identical? lowered clauses) ::unchanged lowered)))]
+@@ -4366,7 +4367,7 @@
+    already resolved refs; diagnostics still use the submission owner."
+   {:malli/schema [:=> [:cat :seon.schema/projection :keyword :boolean] :map]}
+   [projection attribute many?]
+-  (schema/projection-cache-value
++  (schema.internal/projection-cache-value
+    projection [::write-attribute-plan attribute many?]
+    (fn []
+      (let [authored (get (:seon.schema.projection/forms projection) attribute)
+@@ -4513,7 +4514,7 @@
+        (fn [schema-key]
+          (when-not
+           ((m/validator (mr/schema (:seon.schema.projection/registry projection) schema-key)) entity-map)
+-           (let [explain (schema/projection-cache-value
++           (let [explain (schema.internal/projection-cache-value
+                           projection [::write-explainer schema-key]
+                           #(schema/projection-explainer projection schema-key))
+                  failures (:errors (explain entity-map))
+@@ -5739,7 +5740,7 @@
+   [projection entity-map namespace-entity]
+   (program/definition-digest
+    (program/canonical-row
+-    (schema/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
++    (schema.internal/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
+     entity-map)
+    (some-> namespace-entity program/stored-namespace-context)))
+ 
+@@ -5755,7 +5756,7 @@
+   (let [projection (carried-projection database)]
+     (program/definition-digest
+      (program/canonical-row
+-      (schema/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
++      (schema.internal/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
+       (dissoc (merge (declaration-value database (identity-attributes database) entity-id) row)
+               :seon.program/definition-digest)))))
+ 
+@@ -5781,7 +5782,7 @@
+                                        first :v)]
+          (program/behavior-digest
+           (program/canonical-row
+-           (schema/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
++           (schema.internal/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
+            entity-map)
+           ;; The namespace's stored definition digest determines its resolver context, so
+           ;; its functions share one derivation.
+@@ -5830,7 +5831,7 @@
+                   [:or :nil :seon.error/base]]}
+   [projection report identity-attrs]
+   (let [database (:db-after report)
+-        shapes (schema/projection-cache-value projection ::program-shapes
++        shapes (schema.internal/projection-cache-value projection ::program-shapes
+                                               #(program/shapes-in projection))
+         ;; Only the families this store installed: Datahike refuses a datom
+         ;; read naming an attribute its schema lacks (a raw blob branch).
+@@ -5991,7 +5992,7 @@
+           (write-report-error (assoc projection attribute limit) report))))))
+ 
+ (defn- retention-rules [projection]
+-  (schema/projection-cache-value
++  (schema.internal/projection-cache-value
+    projection ::retention-rules
+    #(into []
+           (keep (fn [[attribute _form]]
+@@ -6176,7 +6177,7 @@
+   `database`, the value before it; a row whose digest the transaction writes keeps the writer's check."
+   {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/database-value [:sequential :any]] [:set :symbol]]}
+   [projection database tx-data]
+-  (let [shapes (schema/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
++  (let [shapes (schema.internal/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
+         owned (into #{} (mapcat #(get-in shapes [% :seon.program/owned-attributes])) [:seon.fn/sym :seon.test/sym])
+         dropped (into #{} (keep (fn [op] (when (and (vector? op) (#{:db/retract :db.purge/attribute} (first op))
+                                                     (int? (second op)) (owned (nth op 2 nil)))
+diff --git a/src/seon/embed.clj b/src/seon/embed.clj
+index 985e96b10..fbc77b2a2 100644
+--- a/src/seon/embed.clj
++++ b/src/seon/embed.clj
+@@ -16,7 +16,8 @@
+             [seon.config :as config]
+             [seon.db :as db]
+             [seon.error.refusal :as error]
+-            [seon.schema :as schema])
++            [seon.schema :as schema]
++            [seon.schema.internal :as schema.internal])
+   (:import [java.net URI]
+            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse
+             HttpResponse$BodyHandlers]
+@@ -436,10 +437,10 @@
+ (defn embedded-attributes
+   "Each attribute whose schema declares `:seon.embed/task` in `projection`, with its declaration: `:seon.embed/when`
+   :write unless declared, and `:seon.embed/reads` holding the attribute itself. A function of the projection alone,
+-  held by the projection's own holder (`seon.schema/projection-cache-value`)."
++  held by the projection's own holder (`seon.schema.internal/projection-cache-value`)."
+   {:malli/schema [:=> [:cat :seon.schema/projection] :seon.embed/declarations]}
+   [projection]
+-  (schema/projection-cache-value
++  (schema.internal/projection-cache-value
+    projection ::embedded-attributes
+    #(into {}
+           (keep (fn [attribute]
+@@ -456,7 +457,7 @@
+   "Every attribute an embedded text of `projection` reads ([[embedded-attributes]])."
+   {:malli/schema [:=> [:cat :seon.schema/projection] [:set :qualified-keyword]]}
+   [projection]
+-  (schema/projection-cache-value
++  (schema.internal/projection-cache-value
+    projection ::embedded-reads
+    #(into #{} (mapcat :seon.embed/reads) (vals (embedded-attributes projection)))))
+ 
+diff --git a/src/seon/error.clj b/src/seon/error.clj
+index 6586c5779..8dabfa0e8 100644
+--- a/src/seon/error.clj
++++ b/src/seon/error.clj
+@@ -201,7 +201,7 @@
+                       (keep (fn [[attribute observed]]
+                               (when (not= :db/id attribute)
+                                 (let [declaration
+-                                      (schema/projection-cache-value
++                                      (internal/projection-cache-value
+                                        projection [::observation-attribute attribute]
+                                        #(when (and (qualified-keyword? attribute)
+                                                    (schema.datahike/storable-attribute-in? projection attribute))
+@@ -1145,7 +1145,7 @@
+         ;; (294 schemas, 5,585 armed storability checks, ~120 ms inside the
+         ;; writer on each new projection) is gone; one schema is ~1 ms.
+         diagnostic-attributes
+-        (schema/projection-cache-value
++        (internal/projection-cache-value
+          projection [::diagnostic-attributes (:seon.error/declared-schema fact)]
+          (fn []
+            (into #{}
+@@ -1423,7 +1423,7 @@
+   implicit cardinality limit. Peer references remain references."
+   {:malli/schema [:=> [:cat :seon.schema/projection] :seon.db/pull-selector]}
+   [projection]
+-  (schema/projection-cache-value
++  (internal/projection-cache-value
+    projection ::observation-selector
+    (fn []
+      (let [forms (:seon.schema.projection/forms projection)
+@@ -1519,7 +1519,7 @@
+   [projection authored argument-count]
+   (if (nil? authored)
+     []
+-    (schema/projection-cache-value
++    (internal/projection-cache-value
+      projection [::declared-output-validators authored argument-count]
+      (fn []
+        (let [contract (m/schema
+diff --git a/src/seon/health.clj b/src/seon/health.clj
+index e4877b118..e4e18c734 100644
+--- a/src/seon/health.clj
++++ b/src/seon/health.clj
+@@ -49,6 +49,7 @@
+             [seon.profile :as profile]
+             [seon.render.value :as render.value]
+             [seon.schema :as schema]
++            [seon.schema.internal :as schema.internal]
+             [seon.sci.eval :as sci.eval]))
+ 
+ (def ranking
+@@ -143,7 +144,7 @@
+   properties: the forms whose properties declare `:seon.health/severity`."
+   {:malli/schema [:=> [:cat :seon.schema/projection] [:map-of :qualified-keyword :map]]}
+   [projection]
+-  (schema/projection-cache-value
++  (schema.internal/projection-cache-value
+    projection ::finding-schemas
+    #(into (sorted-map)
+           (keep (fn [[k form]]
+diff --git a/src/seon/instrument.clj b/src/seon/instrument.clj
+index cb3a15844..e99b14e3d 100644
+--- a/src/seon/instrument.clj
++++ b/src/seon/instrument.clj
+@@ -27,6 +27,7 @@
+             [seon.id]
+             [seon.profile :as profile]
+             [seon.schema :as schema]
++            [seon.schema.internal :as schema.internal]
+             [seon.schema.edn :as schema.edn]
+             [seon.sci.kernel :as kernel]
+             [seon.ref :as ref]))
+@@ -890,7 +891,7 @@
+                                              arity-schemas)))
+         ;; Read on the refusal path only, so an absent refusal schema is a
+         ;; minimal refusal at the call, not an arming failure.
+-        refusal? (delay ((mi/-f->original schema/projection-cache-value)
++        refusal? (delay ((mi/-f->original schema.internal/projection-cache-value)
+                          projection ::refusal-validator
+                          #((mi/-f->original schema/projection-validator)
+                            projection :seon.instrument/refusal-result)))
+diff --git a/src/seon/program.cljc b/src/seon/program.cljc
+index 2530f3122..8e0f7a80f 100644
+--- a/src/seon/program.cljc
++++ b/src/seon/program.cljc
+@@ -86,7 +86,7 @@
+   ;; derivation reads only schema declarations, so a write that changes only
+   ;; function contracts (every contracted defn) builds a new projection with
+   ;; equal forms and reuses the answer instead of walking every schema again.
+-  (#?(:clj schema/projection-cache-value :cljs (fn [_ _ derive] (derive)))
++  (#?(:clj internal/projection-cache-value :cljs (fn [_ _ derive] (derive)))
+    projection ::program-attributes
+    #?(:clj #(seon.cache/lookup ::program-attributes
+                                [(:seon.schema.projection/forms projection)
+@@ -116,7 +116,7 @@
+   {:seon/tasks #{'seon.program/cluster-attributes-are-the-declared-cluster-entities}
+    :malli/schema [:=> [:cat :seon.schema/projection] :seon.program/cluster-attributes]}
+   [projection]
+-  (#?(:clj schema/projection-cache-value :cljs (fn [_ _ derive] (derive)))
++  (#?(:clj internal/projection-cache-value :cljs (fn [_ _ derive] (derive)))
+    projection ::cluster-attributes
+    #?(:clj #(seon.cache/lookup ::cluster-attributes
+                                [(:seon.schema.projection/forms projection)
+@@ -386,7 +386,7 @@
+   [projection]
+   ;; A function of the projection value: one walk of its forms per projection,
+   ;; never one per caller (a contracted defn asked ~10 times per form).
+-  (#?(:clj schema/projection-cache-value :cljs (fn [_ _ derive-fn] (derive-fn)))
++  (#?(:clj internal/projection-cache-value :cljs (fn [_ _ derive-fn] (derive-fn)))
+    projection ::shapes
+    (fn []
+      (into {}
+@@ -700,7 +700,7 @@
+               (and digested? (not recomputed?)) :seon.program/compared-families
+               (and recomputed? (not digested?)) :seon.program/recomputed-families
+               :else :seon.program/unclassified-families)))]
+-    (#?(:clj schema/projection-cache-value :cljs (fn [_ _ derive-fn] (derive-fn)))
++    (#?(:clj internal/projection-cache-value :cljs (fn [_ _ derive-fn] (derive-fn)))
+      projection ::declaration-families
+      (fn []
+        (reduce (fn [result attribute]
+diff --git a/src/seon/ref.clj b/src/seon/ref.clj
+index aed9f9ca6..3b69911c1 100644
+--- a/src/seon/ref.clj
++++ b/src/seon/ref.clj
+@@ -498,7 +498,7 @@
+   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword] :seon.ref/render-pair]}
+   [database schema-key]
+   (let [projection (schema/projection-from-database database)]
+-    (schema/projection-cache-value
++    (internal/projection-cache-value
+      projection [::render schema-key]
+      #(select-keys (some-> (mr/schema (:seon.schema.projection/registry projection) schema-key)
+                            (as-> s (or (internal/entity-properties s) (m/properties s))))
+@@ -511,7 +511,7 @@
+   {:malli/schema [:=> [:cat :seon.db/database-value] [:map-of :qualified-keyword :seon.ref/declaration]]}
+   [database]
+   (let [projection (schema/projection-from-database database)]
+-    (schema/projection-cache-value
++    (internal/projection-cache-value
+      projection ::declarations
+      (fn []
+        (let [registry (:seon.schema.projection/registry projection)
+diff --git a/src/seon/render.clj b/src/seon/render.clj
+index 414565437..7414fd11f 100644
+--- a/src/seon/render.clj
++++ b/src/seon/render.clj
+@@ -297,7 +297,7 @@
+                   [:map [::identity-rows [:map-of :qualified-keyword :qualified-keyword]]
+                    [::owned-keys [:map-of :qualified-keyword [:set :keyword]]]]]}
+   [projection]
+-  (schema/projection-cache-value
++  (internal/projection-cache-value
+    projection ::entity-owners
+    (fn []
+      (let [registry (:seon.schema.projection/registry projection)
+@@ -321,7 +321,7 @@
+   and projection."
+   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword :map [:maybe :seon.db/database-value]] :boolean]}
+   [projection entity value database]
+-  (let [[decode valid?] (schema/projection-cache-value
++  (let [[decode valid?] (internal/projection-cache-value
+                          projection [::row-check entity]
+                          (fn []
+                            (let [entity-schema (m/schema entity {:registry (:seon.schema.projection/registry projection)})]
+@@ -374,7 +374,7 @@
+   parents through aliases, once per projection."
+   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword] [:set :qualified-keyword]]}
+   [projection schema-key]
+-  (schema/projection-cache-value
++  (internal/projection-cache-value
+    projection [::refined-names schema-key]
+    (fn []
+      (let [forms (:seon.schema.projection/forms projection)]
+@@ -400,7 +400,7 @@
+   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol]
+                   [:maybe [:vector :qualified-keyword]]]}
+   [projection function-symbol]
+-  (schema/projection-cache-value
++  (internal/projection-cache-value
+    projection [::output-alternatives function-symbol]
+    (fn []
+      (some->> (mr/schema (:seon.schema.projection/registry projection) function-symbol)
+diff --git a/src/seon/render/walk.clj b/src/seon/render/walk.clj
+index f88a850ec..a830d7068 100644
+--- a/src/seon/render/walk.clj
++++ b/src/seon/render/walk.clj
+@@ -351,7 +351,7 @@
+                      (schema/current-projection))
+         distance (long (get request :seon.render/distance 1))
+         selector (root-selector database distance caps)
+-        plan (schema/projection-cache-value
++        plan (internal/projection-cache-value
+               projection
+               [:seon.render.walk/root-pull-plan
+                (:seon.schema.projection/fingerprint projection)
+@@ -886,7 +886,7 @@
+   attachments; derived once per projection."
+   {:malli/schema [:=> [:cat :seon.schema/projection] :seon.render.walk/structure]}
+   [projection]
+-  (schema/projection-cache-value
++  (internal/projection-cache-value
+    projection ::graph-structure
+    (fn []
+      (let [declared (schema.datahike/malli->datahike-schema-in projection (schema.datahike/database-attributes-in projection))
+diff --git a/src/seon/schema.clj b/src/seon/schema.clj
+index af0d4cf8d..c6c1d68dc 100644
+--- a/src/seon/schema.clj
++++ b/src/seon/schema.clj
+@@ -33,33 +33,11 @@
+             [datahike.db.utils :as db-utils]
+             [seon.schema.internal :as internal]
+             [seon.schema.handed :as handed]
++            [seon.schema.datahike :as schema.datahike]
+             [seon.error.refusal :as refusal]
+             [clojure.string :as str]
+             [clojure.edn :as edn]))
+ 
+-;;; LOAD-CYCLE BOUNDARIES. `seon.error` and
+-;;; `seon.schema.datahike` both require `seon.schema`, so this namespace
+-;;; cannot require them back. One resolution per var, realized at first use,
+-;;; instead of a `requiring-resolve` on every call (AGENTS §2.1).
+-(defonce ^:private schema-datahike-storable-attribute-in?
+-  (delay (requiring-resolve 'seon.schema.datahike/storable-attribute-in?)))
+-(defonce ^:private schema-datahike-storable-properties-in
+-  (delay (requiring-resolve 'seon.schema.datahike/storable-properties-in)))
+-(defonce ^:private schema-datahike-assert-storable-schema!
+-  (delay (requiring-resolve 'seon.schema.datahike/assert-storable-schema!)))
+-(defonce ^:private schema-datahike-database-attributes-in
+-  (delay (requiring-resolve 'seon.schema.datahike/database-attributes-in)))
+-(defonce ^:private schema-datahike-malli->datahike-attr-in
+-  (delay (requiring-resolve 'seon.schema.datahike/malli->datahike-attr-in)))
+-(defonce ^:private schema-datahike-storage-schema
+-  (delay
+-    (require 'seon.schema.datahike)
+-    (ns-resolve 'seon.schema.datahike 'storage-schema)))
+-(defonce ^:private schema-datahike-value-schema
+-  (delay
+-    (require 'seon.schema.datahike)
+-    (ns-resolve 'seon.schema.datahike 'value-schema)))
+-
+ (defn- reference-children
+   "The compiled schemas directly under `node`: plain children, and the schema
+    of each map entry (`[key properties schema]`)."
+@@ -424,32 +402,6 @@
+          :seon.schema.projection/identity-projector #'identity-only-projector
+          :seon.schema.projection/explain #'explained-problems)))
+ 
+-(defn- projection-cache
+-  "The holder [[with-compiled-cache]] installed, or nil.
+-
+-   Nil is honest rather than exceptional: a projection assembled by a caller
+-   that did not go through a constructor still answers every question, it
+-   just recompiles. Correctness never depends on the cache being there, which
+-   is what makes it safe for it to be absent."
+-  [projection]
+-  (:seon.schema.projection/compiled projection))
+-
+-(defn projection-cache-value
+-  "Return one value derived from `projection`, retaining one answer per key.
+-
+-   The answer is retained by the projection's own runtime holder. A projection
+-   assembled without that holder remains correct and simply derives afresh."
+-  {:malli/schema
+-   [:=> [:catn [:seon.schema/projection :map] [:seon.schema/cache-key [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A projection cache key is ordinary heterogeneous data chosen by its caller; cached values are the supplied thunk's arbitrary result.", :gen/elements [nil false 0 "" :k [] {}]}]] [:seon.schema/derive-fn [:fn clojure.core/ifn?]]] [:or :seon.schema/value :seon.schema/validation-refusal]]}
+-  [projection cache-key derive-fn]
+-  (if-let [compiled (projection-cache projection)]
+-    ;; A hit is a read; only a miss swaps (lookup-or-miss swaps every call).
+-    (let [held (cache/lookup compiled cache-key ::miss)]
+-      (if (identical? ::miss held)
+-        (cache/lookup-or-miss compiled cache-key (fn [_] (derive-fn)))
+-        held))
+-    (derive-fn)))
+-
+ (defn predicate-functions-in
+   "Return the predicate bindings `projection` carries; `{}` when none are bound.
+ 
+@@ -867,40 +819,6 @@
+   [byte-arrays]
+   (id/sha-256 byte-arrays))
+ 
+-(defn- entry-fingerprint
+-  "One `section` entry's 32-bit hash: the head of its structural identity."
+-  {:malli/schema [:=> [:cat :keyword :seon.schema/value :seon.schema/value] :int]}
+-  [section identity value]
+-  (unchecked-int (Long/parseLong (id/id [section identity value] 8) 16)))
+-
+-(defn- projection-fingerprint
+-  [forms function-contracts schema-admissions function-admissions
+-   artifact-exports]
+-  (letfn [(map-fingerprint [section values]
+-            (reduce-kv
+-             (fn [fingerprint identity value]
+-               (bit-xor fingerprint
+-                        (entry-fingerprint section identity value)))
+-             0
+-             values))
+-          (set-fingerprint [section values]
+-            (reduce
+-             (fn [fingerprint value]
+-               (bit-xor fingerprint
+-                        (entry-fingerprint section value true)))
+-             0
+-             values))]
+-    (reduce
+-     bit-xor
+-     (.hashCode "seon.schema.projection/fingerprint-v4")
+-     [(map-fingerprint :forms forms)
+-      (map-fingerprint :function-contracts function-contracts)
+-      (map-fingerprint :schema-admissions schema-admissions)
+-      (map-fingerprint :function-admissions function-admissions)
+-      (set-fingerprint :artifact-exports artifact-exports)])))
+-
+-(def ^:private projection-fingerprint-version 4)
+-
+ (defn direct-references
+   "Canonical schema keys directly referenced by `form` in `projection`.
+ 
+@@ -1446,7 +1364,7 @@
+             (walk-schema-body [schema role entity-identity entity-definition entity-admission
+                                visited]
+               (when (keyword? entity-identity)
+-                (@schema-datahike-assert-storable-schema! entity-identity schema))
++                (schema.datahike/assert-storable-schema! entity-identity schema))
+               (let [advisories
+                     (if (and reference-advisories
+                              (= :core (:seon.schema.admission/source entity-admission))
+@@ -1460,7 +1378,7 @@
+                      {:seon.schema/identity entity-identity
+                       :seon.schema/forms forms
+                       :seon.schema/storable-attribute?
+-                      (fn [attribute] (@schema-datahike-storable-attribute-in?
++                      (fn [attribute] (schema.datahike/storable-attribute-in?
+                                        {:seon.schema.projection/forms forms
+                                         :seon.schema.projection/registry registry} attribute))
+                       :seon.schema/definition entity-definition
+@@ -2279,7 +2197,7 @@
+                       (filter :seon.schema/entity?)
+                       vec)
+         fingerprint
+-        (projection-fingerprint
++        (internal/projection-fingerprint
+          forms function-contracts schema-admissions function-admissions
+          artifact-exports)
+         projection
+@@ -2304,7 +2222,7 @@
+           :seon.schema.projection/shape-rows shape-entities
+           :seon.schema.projection/catalog catalog
+           :seon.schema.projection/fingerprint-version
+-          projection-fingerprint-version
++          internal/projection-fingerprint-version
+           :seon.schema.projection/fingerprint fingerprint}
+          predicate-functions)]
+     (when validate-render-contracts?
+@@ -2361,21 +2279,12 @@
+                                  (count (:seon.schema.projection/function-contracts %))))
+                           #(projection-build forms function-contracts options))))))
+ 
+-(defn- projection-fingerprint-from-data
+-  [projection]
+-  (projection-fingerprint
+-   (:seon.schema.projection/forms projection)
+-   (:seon.schema.projection/function-contracts projection)
+-   (:seon.schema.projection/schema-admissions projection)
+-   (:seon.schema.projection/function-admissions projection)
+-   (:seon.schema.projection/artifact-exports projection)))
+-
+ (defn- reusable-projection-fingerprint
+   [projection]
+-  (if (= projection-fingerprint-version
++  (if (= internal/projection-fingerprint-version
+          (:seon.schema.projection/fingerprint-version projection))
+     (:seon.schema.projection/fingerprint projection)
+-    (projection-fingerprint-from-data projection)))
++    (internal/projection-fingerprint-from-data projection)))
+ 
+ (defn- replace-reverse-dependencies
+   [reverse-edges dependent before after]
+@@ -2457,8 +2366,8 @@
+             (let [before (get before identity ::absent)
+                   after (get after identity ::absent)]
+               (cond-> fingerprint
+-                (not= ::absent before) (bit-xor (entry-fingerprint section identity before))
+-                (not= ::absent after) (bit-xor (entry-fingerprint section identity after)))))
++                (not= ::absent before) (bit-xor (internal/entry-fingerprint section identity before))
++                (not= ::absent after) (bit-xor (internal/entry-fingerprint section identity after)))))
+           fingerprint identities))
+ 
+ (defn- shape-index-attributes
+@@ -2742,7 +2651,7 @@
+                       (assoc products (get function-contracts function-symbol)
+                              (compiled-contract-product
+                               registry canonical-keys (mr/schema registry function-symbol))))
+-                    (select-keys (cache/lookup (projection-cache projection) ::contract-products {})
++                    (select-keys (cache/lookup (internal/projection-cache projection) ::contract-products {})
+                                  (vals function-contracts))
+                     affected-fns)
+             function-dependencies
+@@ -2805,7 +2714,7 @@
+                      reverse-function-dependencies
+                      :seon.schema.projection/shape-rows shape-entities
+                      :seon.schema.projection/fingerprint-version
+-                     projection-fingerprint-version
++                     internal/projection-fingerprint-version
+                      :seon.schema.projection/fingerprint fingerprint}
+                     shape-data)
+              predicate-functions)
+@@ -2851,7 +2760,7 @@
+   (let [held (predicate-functions-in projection)]
+     (if (every? (fn [[predicate bound]] (identical? bound (get held predicate))) bindings)
+       projection
+-      (projection-cache-value
++      (internal/projection-cache-value
+        projection [::bound-predicates bindings]
+        #(projection-with-declarations
+          'seon.schema/with-bound-predicates projection
+@@ -3039,7 +2948,7 @@
+         ;; fingerprint is computed only for a partial one.
+         fingerprint (when (and (:seon.schema.projection/fingerprint reusable)
+                                (not (incremental-base? reusable)))
+-                      (projection-fingerprint forms function-contracts schema-admissions
++                      (internal/projection-fingerprint forms function-contracts schema-admissions
+                                               function-admissions artifact-exports))
+         projection
+         (if (and fingerprint (= fingerprint (:seon.schema.projection/fingerprint reusable)))
+@@ -3514,7 +3423,7 @@
+                   :db/txInstant {:db/valueType :db.type/instant
+                                  :db/cardinality :db.cardinality/one}
+                   (try
+-                    (@schema-datahike-malli->datahike-attr-in
++                    (schema.datahike/malli->datahike-attr-in
+                      projection attribute)
+                     (catch clojure.lang.ExceptionInfo failure failure)))]
+             (if (instance? Throwable datahike-attribute)
+@@ -3526,7 +3435,7 @@
+                     component? (:db/isComponent datahike-attribute)
+                     declared-many?
+                     (boolean (#{:set :vector :sequential}
+-                              (m/type (@schema-datahike-storage-schema
++                              (m/type (schema.datahike/storage-schema
+                                        (or (mr/schema (:seon.schema.projection/registry projection) attribute)
+                                            (structural-schema attribute-form))))))
+                     many? (if forward? declared-many? (not component?))
+@@ -3569,7 +3478,7 @@
+                             " does not name a reference."))
+ 
+                       :else
+-                      (m/form (@schema-datahike-value-schema
++                      (m/form (schema.datahike/value-schema
+                                (or (mr/schema (:seon.schema.projection/registry projection) attribute)
+                                    (structural-schema attribute-form)))))]
+                 (if (map? child)
+@@ -3646,7 +3555,7 @@
+   [projection schema-key selector]
+   (let [derived-key (pulled-schema-key schema-key selector)
+         cache-key [::pulled-form (id/id [schema-key selector])]]
+-    (projection-cache-value
++    (internal/projection-cache-value
+      projection cache-key
+      (fn []
+        (let [pull-spec (pull-api/pull-plan-spec
+@@ -3883,7 +3792,7 @@
+       (fn [schema-key]
+         (let [references (get reference-graph schema-key)]
+           (cond->
+-           (merge (@schema-datahike-storable-properties-in projection schema-key)
++           (merge (schema.datahike/storable-properties-in projection schema-key)
+                   {:seon.schema/key schema-key
+                    :seon.schema/form
+                    (binding [*print-namespace-maps* false *print-length* nil *print-level* nil *print-meta* false] (pr-str (get forms schema-key)))
+@@ -3898,7 +3807,7 @@
+    forms join that population only when they carry a persistence property."
+   {:malli/schema [:=> [:cat ::projection] [:vector :qualified-keyword]]}
+   [projection]
+-  (@schema-datahike-database-attributes-in projection))
++  (schema.datahike/database-attributes-in projection))
+ 
+ (defn schema-definition
+   "The raw definition for a registered schema, or nil if not registered.
+@@ -3957,7 +3866,7 @@
+                      :seon.schema/missing-reference-namespace (namespace schema-key)}))))
+ 
+ (defn- function-arities-in [projection function-symbol]
+-  (projection-cache-value
++  (internal/projection-cache-value
+    projection [::function-arities function-symbol]
+    (fn []
+      (if-let [compiled
+@@ -4095,7 +4004,7 @@
+    answered with this one's descriptors. Value admission asks this per node,
+    which is why it must be cheap and why it must be right."
+   [projection]
+-  (projection-cache-value projection :seon.schema.identity-only/descriptors
++  (internal/projection-cache-value projection :seon.schema.identity-only/descriptors
+                           #(identity-only-descriptors-in projection)))
+ 
+ (defn identity-only-projector
+@@ -4133,19 +4042,6 @@
+ 
+ (register-core-predicate! 'seon.schema/projection-value? projection-value?)
+ 
+-(defn projection-identity
+-  "A projection is referenced by its content fingerprint, never copied: its
+-  registry, forms and indexes are megabytes derived from the database."
+-  {:malli/schema [:=> [:cat :seon.schema/projection-reference] :map]}
+-  [projection]
+-  ;; A declaration projection carries no stored fingerprint; its content
+-  ;; fingerprint is derived once and kept on the projection's own holder.
+-  {:seon.schema.projection/fingerprint
+-   (or (:seon.schema.projection/fingerprint projection)
+-       (projection-cache-value projection ::fingerprint
+-                               #(projection-fingerprint-from-data projection)))
+-   :seon.schema.projection/fingerprint-version projection-fingerprint-version})
+-
+ (defn identity-only-projection
+   "Project a registered reference value using the active schema registry."
+   {:malli/schema [:=> [:catn [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :map]]}
+@@ -4271,7 +4167,7 @@
+                    [:seon.schema/references
+                     [:vector [:tuple [:set :keyword] [:set :keyword] [:set :keyword]]]]]]}
+   [projection {form :seon.schema/form mode :seon.schema/mode}]
+-  (or (some-> (projection-cache projection) (cache/lookup ::contract-products {}) (get form))
++  (or (some-> (internal/projection-cache projection) (cache/lookup ::contract-products {}) (get form))
+       (let [registry (:seon.schema.projection/registry projection)
+             normalized (compilable-form form (predicate-functions-in projection))
+             compiled (case mode
+diff --git a/src/seon/schema/datahike.clj b/src/seon/schema/datahike.clj
+index a006f4d13..65252c433 100644
+--- a/src/seon/schema/datahike.clj
++++ b/src/seon/schema/datahike.clj
+@@ -12,7 +12,6 @@
+             [malli.registry :as mr]
+             [seon.cache]
+             [seon.error.refusal]
+-            [seon.schema :as schema]
+             [seon.schema.handed :as schema.handed]
+             [seon.id :as id]
+             [seon.schema.internal :as internal]
+@@ -239,7 +238,7 @@
+   "Core and storable property attributes retained for this registry and form selection."
+   {:malli/schema [:=> [:cat :map] :map]}
+   [projection]
+-  (schema/projection-cache-value
++  (internal/projection-cache-value
+    projection [::compiled-attribute-selection
+                (:seon.schema.projection/registry projection)
+                (:seon.schema.projection/forms projection)]
+@@ -423,7 +422,7 @@
+    cells or not ([[vector-attribute-in?]])."
+   {:malli/schema [:=> [:cat :seon.schema/projection :keyword] :boolean]}
+   [projection attr]
+-  (schema/projection-cache-value
++  (internal/projection-cache-value
+    projection [::vector-shaped attr]
+    #(boolean
+      (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
+@@ -493,7 +492,7 @@
+ 
+ (defn- validate-logical-slot-in!
+   [projection attr value]
+-  (when-not ((schema/projection-validator projection attr) value)
++  (when-not ((m/validator (mr/schema (:seon.schema.projection/registry projection) attr)) value)
+     (refuse-slot! ::schema-invalid attr value))
+   value)
+ 
+@@ -614,7 +613,7 @@
+     ;; never encoded as transaction data, where a second refusal would hide it.
+     (when (and (map? output)
+                (contains? (:seon.schema.projection/forms projection) :seon.error/base)
+-               ((schema/projection-validator projection :seon.error/base) output))
++               ((m/validator (mr/schema (:seon.schema.projection/registry projection) :seon.error/base)) output))
+       (throw (ex-info (or (:seon.error/message output) "A transaction function refused.") output)))
+     ;; The in-transaction value's installed attributes decide each slot's
+     ;; storage: an earlier operation of this transaction may have retyped one.
+@@ -638,7 +637,7 @@
+   "Whether `attr` is declared an upsert identity in `projection`."
+   {:malli/schema [:=> [:cat :seon.schema/projection :keyword] :boolean]}
+   [projection attr]
+-  (schema/projection-cache-value
++  (internal/projection-cache-value
+    projection [::identity attr]
+    #(boolean
+      (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
+@@ -649,7 +648,7 @@
+    are entities, never data maps."
+   {:malli/schema [:=> [:cat :seon.schema/projection :keyword] :boolean]}
+   [projection attr]
+-  (schema/projection-cache-value
++  (internal/projection-cache-value
+    projection [::ref attr]
+    #(boolean
+      (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
+@@ -833,7 +832,7 @@
+     ;; nil is never retained, so the answer is held as the one-element vector
+     (first
+      (seon.cache/lookup ::vector-pull
+-                        [(schema/projection-identity projection)
++                        [(internal/projection-identity projection)
+                          (true? (::cells-installed? projection)) selector]
+                         #(* 48 (count (tree-seq coll? seq %)))
+                         #(let [spec (pull-parser/parse-pull selector)]
+@@ -1131,21 +1130,6 @@
+                  (encode-transaction-data-in projection vectors-fn transaction-data)))
+        (encode-transaction-data-in projection vectors-fn transaction)))))
+ 
+-(defn encode-transaction
+-  "Encode heterogeneous union slots once at the Datahike transaction seam.
+-
+-   The declaration population is resolved EXACTLY ONCE per transaction and
+-   then passed explicitly to [[encode-transaction-in]]. Resolving it per
+-   attribute was the 2026-08-07 suite wedge: with no declaration population
+-   supplied on the calling thread, `schema/registered-schemas` falls through
+-   to `seon.schema.edn/packaged-forms`, which re-reads and re-validates all
+-   151 schema resources from the classpath — 14 ms per attribute, against
+-   0.004 ms once the population is a value in hand."
+-  {:malli/schema [:=> [:cat :seon.store/transaction]
+-                  :seon.store/transaction]}
+-  [transaction]
+-  (encode-transaction-in (schema/declaration-projection) transaction))
+-
+ (defn encode-attribute-value-in
+   "Encode one attribute value against exactly one projection.
+ 
+@@ -1207,12 +1191,3 @@
+   {:malli/schema [:=> [:cat :map :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
+   [projection attr value]
+   ((attribute-decoder-in projection attr) value))
+-
+-(defn decode-attribute-value
+-  "Decode and validate one value read from an EDN-backed attribute.
+-
+-   Resolves the declaration population ONCE; a caller decoding more than one
+-   attribute resolves it itself and calls [[decode-attribute-value-in]]."
+-  {:malli/schema [:=> [:cat :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
+-  [attr value]
+-  (decode-attribute-value-in (schema/declaration-projection) attr value))
+diff --git a/src/seon/schema/internal.cljc b/src/seon/schema/internal.cljc
+index 6d769b7d4..09ee6c610 100644
+--- a/src/seon/schema/internal.cljc
++++ b/src/seon/schema/internal.cljc
+@@ -8,7 +8,9 @@
+   (:require [clojure.string :as str]
+             [malli.core :as m]
+             [malli.registry :as mr]
+-            [malli.util :as mu]))
++            [malli.util :as mu]
++            #?(:clj [clojure.core.cache.wrapped :as cache])
++            #?(:clj [seon.id :as id])))
+ 
+ (def default-schemas
+   "Malli's default schemas and `malli.util/schemas` (`:merge`, `:union`, `:select-keys`),
+@@ -534,3 +536,88 @@
+                 :seon.schema/definition v
+                 :seon.schema/base-definition inner
+                 :seon.schema/nilable-value-schema k})))))
++
++#?(:clj
++ (do
++(defn projection-cache
++  "The holder [[with-compiled-cache]] installed, or nil.
++
++   Nil is honest rather than exceptional: a projection assembled by a caller
++   that did not go through a constructor still answers every question, it
++   just recompiles. Correctness never depends on the cache being there, which
++   is what makes it safe for it to be absent."
++  [projection]
++  (:seon.schema.projection/compiled projection))
++
++(defn projection-cache-value
++  "Return one value derived from `projection`, retaining one answer per key.
++
++   The answer is retained by the projection's own runtime holder. A projection
++   assembled without that holder remains correct and simply derives afresh."
++  {:malli/schema
++   [:=> [:catn [:seon.schema/projection :map] [:seon.schema/cache-key [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A projection cache key is ordinary heterogeneous data chosen by its caller; cached values are the supplied thunk's arbitrary result.", :gen/elements [nil false 0 "" :k [] {}]}]] [:seon.schema/derive-fn [:fn clojure.core/ifn?]]] [:or :seon.schema/value :seon.schema/validation-refusal]]}
++  [projection cache-key derive-fn]
++  (if-let [compiled (projection-cache projection)]
++    ;; A hit is a read; only a miss swaps (lookup-or-miss swaps every call).
++    (let [held (cache/lookup compiled cache-key ::miss)]
++      (if (identical? ::miss held)
++        (cache/lookup-or-miss compiled cache-key (fn [_] (derive-fn)))
++        held))
++    (derive-fn)))
++
++(defn entry-fingerprint
++  "One `section` entry's 32-bit hash: the head of its structural identity."
++  {:malli/schema [:=> [:cat :keyword :seon.schema/value :seon.schema/value] :int]}
++  [section identity value]
++  (unchecked-int (Long/parseLong (id/id [section identity value] 8) 16)))
++
++(defn projection-fingerprint
++  [forms function-contracts schema-admissions function-admissions
++   artifact-exports]
++  (letfn [(map-fingerprint [section values]
++            (reduce-kv
++             (fn [fingerprint identity value]
++               (bit-xor fingerprint
++                        (entry-fingerprint section identity value)))
++             0
++             values))
++          (set-fingerprint [section values]
++            (reduce
++             (fn [fingerprint value]
++               (bit-xor fingerprint
++                        (entry-fingerprint section value true)))
++             0
++             values))]
++    (reduce
++     bit-xor
++     (.hashCode "seon.schema.projection/fingerprint-v4")
++     [(map-fingerprint :forms forms)
++      (map-fingerprint :function-contracts function-contracts)
++      (map-fingerprint :schema-admissions schema-admissions)
++      (map-fingerprint :function-admissions function-admissions)
++      (set-fingerprint :artifact-exports artifact-exports)])))
++
++(def projection-fingerprint-version 4)
++
++(defn projection-fingerprint-from-data
++  [projection]
++  (projection-fingerprint
++   (:seon.schema.projection/forms projection)
++   (:seon.schema.projection/function-contracts projection)
++   (:seon.schema.projection/schema-admissions projection)
++   (:seon.schema.projection/function-admissions projection)
++   (:seon.schema.projection/artifact-exports projection)))
++
++(defn projection-identity
++  "A projection is referenced by its content fingerprint, never copied: its
++  registry, forms and indexes are megabytes derived from the database."
++  {:malli/schema [:=> [:cat :seon.schema/projection-reference] :map]}
++  [projection]
++  ;; A declaration projection carries no stored fingerprint; its content
++  ;; fingerprint is derived once and kept on the projection's own holder.
++  {:seon.schema.projection/fingerprint
++   (or (:seon.schema.projection/fingerprint projection)
++       (projection-cache-value projection ::fingerprint
++                               #(projection-fingerprint-from-data projection)))
++   :seon.schema.projection/fingerprint-version projection-fingerprint-version})
++))
+diff --git a/src/seon/sci/eval.clj b/src/seon/sci/eval.clj
+index f3d5c97ae..34f6f49fa 100644
+--- a/src/seon/sci/eval.clj
++++ b/src/seon/sci/eval.clj
+@@ -136,6 +136,7 @@
+             [seon.render.value :as render.value]
+             [seon.sci.admit :as admit]
+             [seon.schema :as schema]
++            [seon.schema.internal :as schema.internal]
+             [seon.schema.edn :as schema.edn]
+             [seon.sci.kernel :as kernel]
+             [seon.sci.runtime :as runtime]
+@@ -4054,10 +4055,10 @@
+   read set (`seon.schema/projection-attributes`) and the loaded source commit.
+   Dials are not among them: a context compares the dial values its wrappers
+   armed with (`armed-dials`). Retained on the projection's own holder
+-  (`schema/projection-cache-value`)."
++  (`schema.internal/projection-cache-value`)."
+   {:malli/schema [:=> [:cat :seon.schema/projection] [:vector :qualified-keyword]]}
+   [projection]
+-  (schema/projection-cache-value
++  (schema.internal/projection-cache-value
+    projection ::acquisition-attributes
+    (fn []
+      (-> (program/program-attributes projection)
+diff --git a/src/seon/sci/lookup.clj b/src/seon/sci/lookup.clj
+index 0d2936a00..e31bcd8be 100644
+--- a/src/seon/sci/lookup.clj
++++ b/src/seon/sci/lookup.clj
+@@ -19,6 +19,7 @@
+             [seon.render.schema :as render.schema]
+             [seon.ref :as ref]
+             [seon.schema :as schema]
++            [seon.schema.internal :as schema.internal]
+             [seon.sci.reader :as reader]))
+ 
+ ;;; clojure.test over the evaluating context's namespaces. The agent's
+@@ -250,7 +251,7 @@
+                          (let [failure (db/projection-fallback
+                                         'seon.sci.lookup/documentation-contract)]
+                            (throw (ex-info (:seon.error/message failure) failure))))]
+-      (schema/projection-cache-value
++      (schema.internal/projection-cache-value
+        projection [:seon.sci.eval/documentation-contract spec]
+        (fn []
+          ;; the one translation: Malli throws compiling a form whose predicate does not resolve, and documentation
+diff --git a/src/seon/task.clj b/src/seon/task.clj
+index a28bc362e..7718407d9 100644
+--- a/src/seon/task.clj
++++ b/src/seon/task.clj
+@@ -21,7 +21,7 @@
+             [seon.id :as id]
+             [seon.ref :as ref]
+             [seon.render.route :as route]
+-            [seon.schema :as schema]))
++            [seon.schema.internal :as schema.internal]))
+ 
+ ;;; DECLARATIONS (spec 7.1-7.16): declarations from resources/seon/tasks/<ns>.edn; subjects
+ ;;; and proofs are the `:seon.task/tasks` symbols program entities carry.
+@@ -104,7 +104,7 @@
+   "The members of `:seon.task/declaration` under `projection`, in schema order, each with whether its schema is a set."
+   {:malli/schema [:=> [:cat :seon.schema/projection] [:vector [:tuple :qualified-keyword :boolean]]]}
+   [projection]
+-  (schema/projection-cache-value
++  (schema.internal/projection-cache-value
+    projection ::declaration-members
+    #(mapv (fn [[k _ s]] [k (= :set (m/type (m/deref-all s)))])
+           (m/children (m/deref-all (mr/schema (:seon.schema.projection/registry projection) :seon.task/declaration))))))
+@@ -131,7 +131,7 @@
+   "A task file's schema under `projection`: a vector of `:seon.task/declaration`s, closed."
+   {:malli/schema [:=> [:cat :seon.schema/projection] :seon.instrument/compiled-schema]}
+   [projection]
+-  (schema/projection-cache-value
++  (schema.internal/projection-cache-value
+    projection ::entry-file-schema
+    #(m/schema [:vector (mu/closed-schema (mr/schema (:seon.schema.projection/registry projection) :seon.task/declaration))])))
+ 
+@@ -283,7 +283,7 @@
+   "The members a new task takes when it supplies none: `{}` decoded with the default value transformer under `:seon.task/task`."
+   {:malli/schema [:=> [:cat :seon.schema/projection] :map]}
+   [projection]
+-  (schema/projection-cache-value
++  (schema.internal/projection-cache-value
+    projection ::task-defaults
+    #(m/decode (mr/schema (:seon.schema.projection/registry projection) :seon.task/task) {}
+               (mt/default-value-transformer {:malli.transform/add-optional-keys true}))))
+@@ -414,7 +414,7 @@
+   "The members of `:seon.task/task` under `projection` whose schema carries `:seon.task/owned`."
+   {:malli/schema [:=> [:cat :seon.schema/projection] [:vector :qualified-keyword]]}
+   [projection]
+-  (schema/projection-cache-value
++  (schema.internal/projection-cache-value
+    projection ::owned-members
+    #(let [registry (:seon.schema.projection/registry projection)]
+       (into [] (comp (map first) (filter (fn [k] (:seon.task/owned (m/properties (mr/schema registry k))))))
+@@ -807,7 +807,7 @@
+   "The keys of the map schema `schema-key` declares under `projection`, in schema order."
+   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword] [:vector :qualified-keyword]]}
+   [projection schema-key]
+-  (schema/projection-cache-value
++  (schema.internal/projection-cache-value
+    projection [::schema-keys schema-key]
+    #(mapv first (m/entries (m/deref (mr/schema (:seon.schema.projection/registry projection) schema-key))))))
+ 
+@@ -837,7 +837,7 @@
+   `:seon.task/explanation`; nil when it validates."
+   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol :map] [:maybe :seon.task/refused-error]]}
+   [projection operation view]
+-  (when-let [explanation ((schema/projection-cache-value
++  (when-let [explanation ((schema.internal/projection-cache-value
+                            projection ::runnable-explainer
+                            #(m/explainer (mr/schema (:seon.schema.projection/registry projection) :seon.task/runnable)))
+                           view)]
+diff --git a/src/seon/test/runner.clj b/src/seon/test/runner.clj
+index c862ebcc6..38464045b 100644
+--- a/src/seon/test/runner.clj
++++ b/src/seon/test/runner.clj
+@@ -1600,7 +1600,7 @@
+         [(:datahike.cache/connection-id context) (:datahike.cache/generation context)
+          (:datahike.cache/conservative-revision context)
+          (select-keys (:datahike.cache/attribute-revisions context)
+-                      (schema/projection-cache-value
++                      (schema.internal/projection-cache-value
+                        projection ::program-digest-read-attributes
+                        #(program-digest-read-attributes projection)))]))))
+ 
+@@ -2782,7 +2782,7 @@
+   {:malli/schema [:=> [:cat :seon.db/database-value] [:set :qualified-keyword]]}
+   [database]
+   (let [projection (db/carried-projection database)]
+-    (schema/projection-cache-value
++    (schema.internal/projection-cache-value
+      projection ::recording-attributes
+      #(into #{} (comp (mapcat (fn [k] (schema.internal/entity-entries
+                                       (m/schema k {:registry (:seon.schema.projection/registry projection)}))))
+@@ -2795,7 +2795,7 @@
+   {:malli/schema [:=> [:cat :seon.db/database-value] [:map-of :qualified-keyword :uuid]]}
+   [database]
+   (let [projection (db/carried-projection database)
+-        attributes (schema/projection-cache-value
++        attributes (schema.internal/projection-cache-value
+                     projection ::result-attributes
+                     #(into (into (program/program-attributes projection) (recording-attributes database))
+                            (map first)
+diff --git a/test/seon/cluster/store_transact_test.clj b/test/seon/cluster/store_transact_test.clj
+index 780ab7422..75a1ef7d8 100644
+--- a/test/seon/cluster/store_transact_test.clj
++++ b/test/seon/cluster/store_transact_test.clj
+@@ -175,7 +175,7 @@
+           (is (contains? outcome :db-after))
+           (is (= (pr-str logical) stored))
+           (is (= logical
+-                 (schema.datahike/decode-attribute-value
++                 (schema.datahike/decode-attribute-value-in (schema/declaration-projection)
+                   ::mixed-value stored))))))))
+ 
+ (deftest invalid-logical-and-storage-values-refuse-loudly
+@@ -188,7 +188,7 @@
+                          @connection))))))
+   (with-mixed-connection
+     (fn [_]
+-      (is (true? (schema.datahike/decode-attribute-value ::mixed-value "true"))
++      (is (true? (schema.datahike/decode-attribute-value-in (schema/declaration-projection) ::mixed-value "true"))
+           "a committed value reads as written; admission judged its write")))
+   (doseq [stored ["["]]
+     (with-mixed-connection
+@@ -196,7 +196,7 @@
+         (d/transact connection [{::mixed-value stored}])
+         (let [failure
+               (try
+-                (schema.datahike/decode-attribute-value
++                (schema.datahike/decode-attribute-value-in (schema/declaration-projection)
+                  ::mixed-value stored)
+                 nil
+                 (catch clojure.lang.ExceptionInfo error
+diff --git a/test/seon/db_overhead_test.clj b/test/seon/db_overhead_test.clj
+index 5ff06a85e..e3d71f46c 100644
+--- a/test/seon/db_overhead_test.clj
++++ b/test/seon/db_overhead_test.clj
+@@ -127,7 +127,7 @@
+        (is (= (mapv (fn [datom]
+                       {:e (:e datom) :a (:a datom)
+                        :v (if (encoded? (:a datom))
+-                            (schema.datahike/decode-attribute-value (:a datom) (:v datom))
++                            (schema.datahike/decode-attribute-value-in (schema/declaration-projection) (:a datom) (:v datom))
+                             (:v datom))
+                        :tx (:tx datom) :added (:added datom)})
+                     raw)
+diff --git a/test/seon/render/root_pull_test.clj b/test/seon/render/root_pull_test.clj
+index 6083d559e..5e86b699f 100644
+--- a/test/seon/render/root_pull_test.clj
++++ b/test/seon/render/root_pull_test.clj
+@@ -134,7 +134,7 @@
+ 
+ (deftest compiled-root-plan-is-keyed-by-its-selector-and-keeps-caller-bounds
+   ;; The plan cache is keyed by projection fingerprint, installed schema and
+-  ;; selector (e34164b25, seon.schema/projection-cache-value); distance and caps
++  ;; selector (e34164b25, seon.schema.internal/projection-cache-value); distance and caps
+   ;; stay the caller's, never the cached plan's.
+   (support/with-database
+    {:seon.test-support/extra-schema root-pull-schema}
+diff --git a/test/seon/request_cost_test.clj b/test/seon/request_cost_test.clj
+index 540f4be8e..afb0267ca 100644
+--- a/test/seon/request_cost_test.clj
++++ b/test/seon/request_cost_test.clj
+@@ -226,7 +226,7 @@
+         (batch/cost-diff [live] (into {} (map (juxt :seon.fn.cost/key identity)) stored) 20)))
+ 
+ (deftest an-unchanged-platform-function-shows-no-entry
+-  (let [sym 'seon.schema/projection-cache-value
++  (let [sym 'seon.schema.internal/projection-cache-value
+         host #(cost sym :seon.profile/host :warm [%1 30 %2])
+         flags (fn [live stored] (mapv :seon.cost.comparison/flags (shown live stored)))]
+     (are [live stored expected] (= expected (flags live stored))
+@@ -292,7 +292,7 @@
+ 
+ (deftest ^{:seon/tasks #{'seon.profile/cost-values-are-reliable-and-like-for-like}}
+   a-warm-like-for-like-regression-of-a-changed-definition-still-shows
+-  (let [sym 'seon.schema/projection-cache-value]
++  (let [sym 'seon.schema.internal/projection-cache-value]
+     (is (= [{:seon.cost.comparison/measure :self-us :seon.cost.comparison/live 200.0
+              :seon.cost.comparison/main 50.0 :seon.cost.comparison/ratio 4.0
+              :seon.cost.comparison/flags #{:changed}}]
+diff --git a/test/seon/schema/datahike_test.clj b/test/seon/schema/datahike_test.clj
+index 0fae59476..99fd3323c 100644
+--- a/test/seon/schema/datahike_test.clj
++++ b/test/seon/schema/datahike_test.clj
+@@ -601,7 +601,7 @@
+         calls #(:seon.profile/calls (profile/observation cell))
+         resolutions (fn [transaction]
+                       (let [before (calls)]
+-                        (schema.datahike/encode-transaction transaction)
++                        (schema.datahike/encode-transaction-in (schema/declaration-projection) transaction)
+                         (- (calls) before)))
+         wide {:seon.agent/id "agent-a" :seon.message/id "m-1" :seon.message/content "do the thing" :seon.turn/id "run-1" ::title "Alpha"}
+         nested {:seon.agent/id "agent-b"
+@@ -704,6 +704,8 @@
+         (recur (into (subvec pending 1) found) (into reached found)))
+       reached)))
+ 
+-(deftest the-bridge-requires-no-printer
+-  (is (not (contains? (require-closure 'seon.schema.datahike) 'seon.print))
+-      "seon.schema.datahike reaches seon.print through no require"))
++(deftest the-bridge-requires-neither-schema-nor-printer
++  (let [closure (require-closure 'seon.schema.datahike)]
++    (is (not (contains? closure 'seon.print)) "seon.schema.datahike reaches seon.print through no require")
++    (is (not (contains? closure 'seon.schema))
++        "seon.schema.datahike reaches seon.schema through no require, so seon.schema requires it statically")))
+diff --git a/test/seon/sci/open_derivers_test.clj b/test/seon/sci/open_derivers_test.clj
+index d1234bd14..1df0cb0d4 100644
+--- a/test/seon/sci/open_derivers_test.clj
++++ b/test/seon/sci/open_derivers_test.clj
+@@ -57,7 +57,15 @@
+                            ["diagnostic" "references" "authored-namespace?" "error" "chain" "checking-projection"
+                             "identity-projector" "operation-projection"])
+                      (map #(symbol "seon.schema" %))
+-                     ["candidate-forms" "declaration-population" "packaged-forms"])}])
++                     ["candidate-forms" "declaration-population" "packaged-forms"])}
++   ;; P3a-2: seon.schema requires the bridge statically; its seven seams are deleted, so they are built from names.
++   {:phase :P3a-2
++    :functions (into (into #{} (map #(symbol "seon.schema" %))
++                           ["assert-complete-contract!" "pulled-attribute-entry" "canonical-schema-entities"
++                            "canonical-database-attributes"])
++                     (map #(symbol "seon.schema" (str "schema-datahike-" %)))
++                     ["storable-attribute-in?" "storable-properties-in" "assert-storable-schema!" "database-attributes-in"
++                      "malli->datahike-attr-in" "storage-schema" "value-schema"])}])
+ 
+ (defn- open-cache-derivers
+   "The cache derivers of `database`'s program that its reach index leaves open."
