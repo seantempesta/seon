@@ -1,7 +1,7 @@
 ---
 title: "Branch runtime: a branch's change is live for its whole runtime"
 type: research
-status: lane branch-runtime (Opus), 2026-10-19; for owner approval; check-JVM prototypes, no production code
+status: approved P0–P2 (owner 2026-10-19); P3 and P4 need their own go-ahead
 created: 2026-10-19
 ---
 
@@ -231,6 +231,9 @@ How these fit the owner's constraints:
 ### Phases with red proofs
 
 Each phase is one loadable slice. HEAD boots after each.
+
+Phase status: P0 committed in the sci fork (`b6c51cd9`, branch `seon-ctx-escape`), bumped with a restart batch,
+waiting for root's restart; P1 and P2 open; P3 and P4 not approved.
 
 - **Phase 0, SCI fork: a function made or read on a context resolves in that context off-thread.**
   - Red proof: a row in `sci.fork-bindings-test` reproducing P5/P5b/P5c above (expected `[1001 1002 1003]`, today
