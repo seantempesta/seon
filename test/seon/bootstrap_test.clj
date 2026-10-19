@@ -91,3 +91,18 @@
     (is (not (str/includes? text "(in-ns 'user)")) "help never sends an agent to change the user namespace")
     (is (str/includes? text "(in-ns 'my.attempt-<your attempt>) then (require 'seon.test-support)")
         "help loads fixtures from the agent's own namespace, which never merges")))
+
+(deftest help-and-every-step-template-describe-one-chain-branch-and-plan-updates
+  ;; Task-system brief 2026-10-19 (docs/research/agent-platform/2026-10-19/task-system-brief.md, Broken 3): help
+  ;; promised a merge onto main after every step, while the installed chain's steps share one branch and main gets one
+  ;; merge after the last (TASK-CHAIN §2.5-2.6); and only Design's template told its agent to update the plan.
+  (let [text (slurp (io/resource "seon/help.md"))
+        instructions (fn [step] (:seon.task/instructions
+                                 (first (read-string (slurp (io/resource (str "seon/tasks/seon.step." step ".edn")))))))]
+    (is (not (str/includes? text "starts from main")) "no step starts from main mid-chain")
+    (is (str/includes? text "Every step of your chain works on the same branch") "the steps share the chain's branch")
+    (is (str/includes? text "merges onto main once") "main gets one merge, after the last step")
+    (is (str/includes? text "Every step keeps the plan true") "help asks every step to correct the plan")
+    (doseq [step ["design" "prove" "implement" "merge"]]
+      (is (str/includes? (instructions step) "my.task/update! (get-in (my.task/current) [:seon.context/task :seon.task/sym]) :seon.task/plan")
+          (str "the " step " template names the plan update")))))

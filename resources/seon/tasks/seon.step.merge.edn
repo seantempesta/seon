@@ -8,6 +8,9 @@ names why the merge refused. Resolve each with ordinary REPL work: keep main's v
 `in-ns` and `defn` the chain's version or a combination. Everything in `:seon.context/changes` merges, each shown with
 its test status, so change only what the refusal needs. A refusal you cannot fix here (a test that is wrong, a change
 that must not merge) is root's: send it back with `my.task/send-back!` and why.
+When you learn something the plan gets wrong or leaves out (an owner it misnames, a case it misses, a decision
+you made), correct the plan before you continue, since every later step and root read it:
+`(my.task/update! (get-in (my.task/current) [:seon.context/task :seon.task/sym]) :seon.task/plan my.edit/text old new)`.
 
 ## Done
 

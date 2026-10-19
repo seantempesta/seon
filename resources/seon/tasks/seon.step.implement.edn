@@ -7,6 +7,9 @@ Every def and defn you evaluate is a program definition on your branch and merge
 `my.program/ns-unmap!`.
 A proof that contradicts the plan, or a row you believe is wrong, is not yours to satisfy: send it back with
 `my.task/send-back!` and the row and why. Never special-case one row to pass.
+When you learn something the plan gets wrong or leaves out (an owner it misnames, a case it misses, a decision
+you made), correct the plan before you continue, since every later step and root read it:
+`(my.task/update! (get-in (my.task/current) [:seon.context/task :seon.task/sym]) :seon.task/plan my.edit/text old new)`.
 
 ## Done
 
