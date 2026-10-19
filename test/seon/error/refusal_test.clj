@@ -13,7 +13,8 @@
             [seon.error.refusal :as error.refusal]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [sci.core]))
 
 (def ^:private entries [#'error.refusal/refusal #'error/refusal])
 
@@ -271,6 +272,27 @@
     (is (= 'seon.error.refusal-test/probe-var
            (error.refusal/frame-function 'seon.error.refusal_test$probe_var)))
     (is (nil? (error.refusal/frame-function 'user$eval479$fn__480)))))
+
+(deftest the-frame-classifier-reads-the-classpath-never-a-name-lookup
+  (testing "the prepared-call prefix is the munged name of the function it names"
+    (is (= (str (clojure.lang.Compiler/munge "seon.call-preparation") "$"
+                (clojure.lang.Compiler/munge "preparing") "$")
+           @#'error.refusal/prepared-call-prefix)
+        "renaming `seon.call-preparation/preparing` fails here.")
+    (is (some? (ns-resolve 'seon.call-preparation 'preparing))))
+  (testing "a namespace with no source, made now, is authored; a dependency's class is not"
+    (let [made (create-ns (gensym "seon.error.refusal-test.sourceless"))]
+      (try (is (true? (@#'error.refusal/classify-namespace
+                       (str (ns-name made)) (symbol (str (ns-name made) "$eval1")))))
+           (finally (remove-ns (ns-name made)))))
+    (is (false? (@#'error.refusal/classify-namespace "clojure.lang.Compiler" 'clojure.lang.Compiler$FnExpr)))
+    (is (false? (@#'error.refusal/classify-namespace "java.lang.String" 'java.lang.String))))
+  (testing "both Var kinds are values to reference, not places to name"
+    (let [host #'clojure.core/map
+          sci (sci.core/new-var 'v 1)
+          out (error.refusal/references nil {:host host :sci sci})]
+      (is (identical? host (:host out)))
+      (is (identical? sci (:sci out))))))
 
 (deftest a-cleanup-failure-survives-beside-the-primary
   (let [primary (ex-info "primary" {:seon.probe/step :work} (ex-info "root" {:seon.probe/step :leaf}))

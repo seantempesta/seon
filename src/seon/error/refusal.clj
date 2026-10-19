@@ -68,11 +68,11 @@
   "Whether frames of `frame-ns` (one of whose classes is `class-name`) are
   code an agent or Seon wrote, decided from the classpath, never a name:
   its source is a file outside every library root of the basis; or it has
-  no source and is loaded — defined at a REPL or by `eval`, as `user` is; or
-  it is neither loaded nor a class the classpath holds (the JDK's and a
-  dependency's inner classes, `clojure.lang.Compiler$FnExpr`, are). Without
-  a basis no sourceless namespace can be told from the host's own, so none
-  is authored."
+  no source and its class is not one the classpath holds — defined at a REPL
+  or by `eval`, as `user` is (the JDK's and a dependency's classes,
+  `clojure.lang.Compiler$FnExpr`, are held). Without a basis no sourceless
+  namespace can be told from the host's own, so none is authored. Pure over
+  the classpath: load state is never read."
   {:malli/schema [:=> [:cat :string :symbol] :boolean]}
   [^String frame-ns class-name]
   (let [path (-> frame-ns (.replace \- \_) (.replace \. \/))]
@@ -80,8 +80,7 @@
       (not (library-url? (str source)))
       (boolean
        (and @basis
-            (or (find-ns (symbol frame-ns))
-                (not (io/resource (str (.replace (str class-name) \. \/) ".class")))))))))
+            (not (io/resource (str (.replace (str class-name) \. \/) ".class"))))))))
 
 (defn- frame-site
   "`[namespace function]` of a demunged Clojure frame class, or nil for a
@@ -119,19 +118,13 @@
                            (when (pos? cut) [(subs text 0 cut) class-name]))))
               (rseq (vec frames)))))
 
-(defn- prepared-call-prefix
-  "The class prefix of the prepared-call closure `seon.call-preparation/preparing`
-  installs around every contract that declares a supplied default: contract
-  machinery whose frame sits between each such caller and the refusal
-  (`call_preparation.clj:1033`), the rule `seon.instrument/caller-frame`
-  applies. Derived from the Var, so a rename moves it; nil where the
-  namespace is not loaded."
-  {:malli/schema [:=> [:cat] [:or :nil :string]]}
-  []
-  (when-let [preparing (some-> (find-ns 'seon.call-preparation) (ns-resolve 'preparing))]
-    (let [{namespace-object :ns var-name :name} (meta preparing)]
-      (str (clojure.lang.Compiler/munge (str (ns-name namespace-object)))
-           "$" (clojure.lang.Compiler/munge (str var-name)) "$"))))
+(def ^:private prepared-call-prefix
+  ;; The class prefix of the prepared-call closure `seon.call-preparation/preparing`
+  ;; installs around every contract that declares a supplied default: contract
+  ;; machinery whose frame sits between each such caller and the refusal, the
+  ;; rule `seon.instrument/caller-frame` applies. A literal, never a lookup:
+  ;; `seon.error.refusal-test` asserts it is that function's munged name.
+  "seon.call_preparation$preparing$")
 
 (defn- first-party-in
   "The frames of `frames` whose class's namespace part is in `authored`,
@@ -139,11 +132,11 @@
   {:malli/schema [:=> [:cat [:set :string] [:vector [:cat :symbol [:* [:or :symbol :string :int]]]]]
                   [:vector [:cat :symbol [:* [:or :symbol :string :int]]]]]}
   [authored frames]
-  (let [^String wrapper (prepared-call-prefix)]
+  (let [^String wrapper prepared-call-prefix]
     (filterv (fn [[class-name]]
                (let [text (str class-name) cut (.indexOf text "$")]
                  (and (pos? cut) (contains? authored (subs text 0 cut))
-                      (not (and wrapper (.startsWith text wrapper))))))
+                      (not (.startsWith text wrapper)))))
              frames)))
 
 (defn frame-function
@@ -314,7 +307,8 @@
                      ;; A PLACE IS ITS NAME: an atom, delay or promise prints its
                      ;; current state (`core_print.clj` deref-as-map), so it is
                      ;; named, never entered; a string, so a stored error reads back.
-                     (and (instance? clojure.lang.IDeref value) (not (var? value))) {::result (object-name value)}
+                     (and (instance? clojure.lang.IDeref value)
+                          (not (instance? clojure.lang.Var value)) (not (instance? sci.lang.Var value))) {::result (object-name value)}
                      (record? value) {::result value}
                      ;; a vector by index, never reduce-kv, which walks a map entry as a map
                      (or (map? value) (vector? value) (set? value))
