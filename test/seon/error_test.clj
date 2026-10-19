@@ -12,6 +12,7 @@
             [datahike.db]
             [seon.config :as config]
             [seon.error :as error]
+            [seon.error.problem :as error.problem]
             [seon.error.refusal :as error.refusal]
             [seon.instrument :as instrument]
             [seon.problems]
@@ -1782,10 +1783,10 @@
 
 (deftest a-missing-key-and-an-equals-schema-read-as-one-expectation
   (let [missing (:seon.error/expected-description
-                 (seon.error/explain-problem {:seon.error/problem (first (:errors ((requiring-resolve 'malli.core/explain) [:map [:at inst?]] {})))
+                 (error.problem/explain-problem {:seon.error/problem (first (:errors ((requiring-resolve 'malli.core/explain) [:map [:at inst?]] {})))
                                               :seon.error/path [:at] :seon.error/argument "value" :seon.error/parent {}}))
         equals (:seon.error/expected-description
-                (seon.error/explain-problem {:seon.error/problem (first (:errors ((requiring-resolve 'malli.core/explain) [:map [:k [:= {:description "d"} true]]] {:k false})))
+                (error.problem/explain-problem {:seon.error/problem (first (:errors ((requiring-resolve 'malli.core/explain) [:map [:k [:= {:description "d"} true]]] {:k false})))
                                              :seon.error/path [:k] :seon.error/argument "value" :seon.error/parent {:k false}}))]
     (is (clojure.string/includes? missing ":at") "the missing key is named")
     (is (clojure.string/includes? equals "true") "the := schema's value is named")
@@ -1796,7 +1797,7 @@
 (deftest an-equals-or-enum-expectation-carries-no-properties
   (let [expected (fn [schema value]
                    (:seon.error/expected
-                    (seon.error/explain-problem {:seon.error/problem (first (:errors ((requiring-resolve 'malli.core/explain) schema value)))
+                    (error.problem/explain-problem {:seon.error/problem (first (:errors ((requiring-resolve 'malli.core/explain) schema value)))
                                                  :seon.error/path [] :seon.error/argument "value" :seon.error/parent value})))]
     (is (= [:= true] (expected [:= {:seon.config/display-label "No provider" :description "Use virtual turns"} true] false)))
     (is (= [:enum :a :b] (expected [:enum {:description "x"} :a :b] :c)))
@@ -1804,7 +1805,7 @@
 
 (deftest a-map-for-a-sequential-is-refused-as-the-map
   (let [described (fn [value]
-                    (seon.error/explain-problem {:seon.error/problem (first (:errors ((requiring-resolve 'malli.core/explain) [:sequential :map] value)))
+                    (error.problem/explain-problem {:seon.error/problem (first (:errors ((requiring-resolve 'malli.core/explain) [:sequential :map] value)))
                                                  :seon.error/path [] :seon.error/argument "xs" :seon.error/parent value}))]
     (is (not (find (described {:a 1}) :seon.error/offending)) "a collection leaf is never copied")
     (is (= [:sequential :map] (:seon.error/expected (described {:a 1}))))
@@ -1825,7 +1826,7 @@
 (deftest a-missing-key-names-the-same-name-the-map-holds
   (let [fix (fn [parent]
               (:seon.error/fix
-               (seon.error/explain-problem {:seon.error/problem (first (:errors (malli.core/explain [:map [:my.message/to :string]] parent)))
+               (error.problem/explain-problem {:seon.error/problem (first (:errors (malli.core/explain [:map [:my.message/to :string]] parent)))
                                             :seon.error/path [:my.message/to] :seon.error/argument "request" :seon.error/parent parent})))]
     (is (clojure.string/includes? (fix {:seon.message/to "x"}) ":seon.message/to") "the held key of the same name is named")
     (is (= "Supply :my.message/to with a string." (fix {:other 1})))))

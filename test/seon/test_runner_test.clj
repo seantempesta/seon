@@ -11,6 +11,7 @@
             [seon.test-runner-failure-fixture]
             [sci.core :as sci]
             [seon.error :as error]
+            [seon.error.problem :as error.problem]
             [seon.operator.runtime]
             [seon.test :as sut]
             [seon.test.runner :as runner]
@@ -311,7 +312,7 @@
   (let [huge (apply str (repeat 1000000 "x"))
         test-var (throwaway-test-var
                   #(is true)
-                  [(fn [_] (error/problem-sentence [huge] {} nil nil))])]
+                  [(fn [_] (error.problem/problem-sentence [huge] {} nil nil))])]
     (try
       (let [loaded (atom {})
             result (#'sut/bounded-result loaded @loaded
@@ -321,7 +322,7 @@
         (is (= 1 (:seon.test/error-count result)))
         (is (str/includes? message "Test execution failed"))
         ;; The headline names the refused argument by position and binding (2014f98b6).
-        (is (str/includes? message "seon.error/problem-sentence refused argument 0 `operation`")
+        (is (str/includes? message "seon.error.problem/problem-sentence refused argument 0 `operation`")
             "the stored text names the refusal")
         (is (< (count message) 10000)
             "the whole argument in the refusal's ex-data is not printed"))

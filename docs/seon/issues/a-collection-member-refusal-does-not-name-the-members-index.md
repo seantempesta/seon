@@ -14,10 +14,10 @@ instead of the container-level contradiction. That is the ruled direction:
 the error-entities PRD's "Offending value" row
 (`docs/prds/steward-platform/plan/error-entities-prd-2026-09-17.md:56`) says
 the fault retains the bounded projection of its own LEAF, and the member
-wording is what `seon.error/explain-problem`
+wording is what `seon.error.problem/explain-problem`
 (`src/seon/error.clj:859-872`) now produces.
 
-`seon.error/collection-member-problem` (`src/seon/error.clj:812`) replaces
+`seon.error.problem/collection-member-problem` (`src/seon/error.clj:812`) replaces
 the problem's `:schema` and `:value` with the member's, but leaves
 `:seon.error/path` as the CONTAINER's path. Measured 2026-09-17 through
 `seon.instrument-test/refusal-value-projection-obeys-the-profile-and-html-keeps-the-whole-value`

@@ -146,12 +146,12 @@
             ;; declared report shape holds database values, never identity maps.
             shown-report (db/transact! connection [])]
         (readable! (db/render-transaction-html report) ["Committed transaction" "Prepare" "Changes"])
-        (readable! (db/render-rejection-html refusal)
+        (readable! (error/render-html refusal)
                    ["seon.db/transact!" "Supply :seon.task/plan with a string of length at least 1."])
         (is (= {:seon.db.report/facts 0 :seon.db.report/entities []}
                (select-keys (db/render-transaction-ai shown-report) [:seon.db.report/facts :seon.db.report/entities]))
             "a report is data: its facts counted and its changed entities by identity")
-        (is (str/includes? (db/render-rejection-ai refusal)
+        (is (str/includes? (error/render-ai refusal)
                            "Supply :seon.task/plan with a string of length at least 1."))))))
 
 (deftest settings-display-follows-declarations-without-name-based-units

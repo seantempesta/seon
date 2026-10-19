@@ -196,10 +196,10 @@
        " :seon.db/db (seon.db/db) :seon.render/distance 0}))"))
 
 (def ^:private descending-member-problem
-  "A branch definition of the file function `seon.error/collection-member-problem`
+  "A branch definition of the file function `seon.error.problem/collection-member-problem`
   that descends into any collection, so a map given for `[:sequential :map]`
   is refused as one of its entries (its definition before 982a4e1ad)."
-  (str "(in-ns 'seon.error)"
+  (str "(in-ns 'seon.error.problem)"
        " (defn- collection-member-problem {:malli/schema [:=> [:cat :map] [:or :nil :map]]} [problem]"
        " (let [schema (m/deref-all (:schema problem)) schema-type (m/type schema)"
        " child (when (#{:set :vector :sequential} schema-type) (first (m/children schema))) value (:value problem)]"
@@ -209,7 +209,7 @@
 
 (deftest a-file-test-reaching-a-change-only-through-a-compiled-caller-is-not-the-branchs-to-run
   ;; `seon.error-test/a-map-for-a-sequential-is-refused-as-the-map` reaches the
-  ;; helper only through the compiled `seon.error/explain-problem`: on the branch
+  ;; helper only through the compiled `seon.error.problem/explain-problem`: on the branch
   ;; it would run the compiled behavior, so the merge's platform run proves it.
   (support/with-running-agent
    (fn [running agent-id _]

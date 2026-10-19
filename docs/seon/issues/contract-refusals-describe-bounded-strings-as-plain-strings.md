@@ -17,7 +17,7 @@ contract (`:seon.cluster.eval/source` is `[:string {:min 1}]`,
 > seon.sci.eval/evaluate refused argument 0 (0-based) at [:seon.cluster.eval/source]:
 > expected a string, got a string. Fix: Supply a string at [:seon.cluster.eval/source].
 
-`seon.error/schema-expectation` (`src/seon/error.clj:759`) answers `"a string"`
+`seon.error.problem/schema-expectation` (`src/seon/error.clj:759`) answers `"a string"`
 for every `:string` schema before consulting Malli, so the `:min`/`:max`
 properties vanish. Malli already owns the message:
 `reference-code/malli/src/malli/error.cljc:127-134` answers

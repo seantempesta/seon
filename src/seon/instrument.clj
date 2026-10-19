@@ -23,7 +23,7 @@
             [seon.db :as db]
             [seon.effect :as effect]
             [seon.env :as env]
-            [seon.error :as error]
+            [seon.error.problem :as error.problem]
             [seon.id]
             [seon.profile :as profile]
             [seon.schema :as schema]
@@ -361,7 +361,7 @@
   return (`location`, `file:line`, or the function itself when it has none).
 
   Malli's declared `:error/message` is both the expectation and, for a
-  predicate, the fix (`seon.error/explain-problem`), so the sentence read
+  predicate, the fix (`seon.error.problem/explain-problem`), so the sentence read
   \"expected must be X ... Fix: must be X\"; a return value's fix read
   \"Supply a vector at []\", addressed to nobody."
   {:malli/schema [:=> [:cat :seon.error/problem-description
@@ -518,7 +518,7 @@
                          (apply str))
                     ")")
                :seon.error/offending (:arity data)
-               ;; PROSE ONLY: `seon.error/problem-sentence` prints the
+               ;; PROSE ONLY: `seon.error.problem/problem-sentence` prints the
                ;; offending value after this description. Carrying the count
                ;; here as well rendered "got an argument count of 0 0"
                ;; (3e41a5d22, measured 2026-09-17); the flat message below
@@ -549,7 +549,7 @@
                   (cond-> (assoc
                    (attributed-problem
                     (actionable-problem
-                     (error/explain-problem
+                     (error.problem/explain-problem
                       {:seon.error/problem problem
                        :seon.error/path (problem-path kind problem)
                        :seon.error/parent
@@ -601,9 +601,9 @@
        (merge {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.instrument/invocation
          :seon.error/operation function-symbol
-         :seon.error/message (str (error/problem-sentence
+         :seon.error/message (str (error.problem/problem-sentence
                function-symbol first-problem nil
-               (error/scalar-text (:seon.error/offending first-problem)))
+               (error.problem/scalar-text (:seon.error/offending first-problem)))
               (when (qualified-keyword? expected)
                 (str " Contract: " expected "."))
               (when cause (str " Its result is itself an error, kept as the cause: "

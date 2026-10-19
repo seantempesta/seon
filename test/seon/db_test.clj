@@ -23,6 +23,7 @@
             [seon.config :as config]
             [seon.turn :as turn]
             [seon.db :as db]
+            [seon.error :as error]
             [clojure.set]
             [seon.env :as env]
             [seon.fn :as seon.fn]
@@ -1757,13 +1758,13 @@
                              [:seon.db/conflict-attribute
                               :seon.db/conflict-owner])))
          (is (= [:seon.cluster.eval/id owner-id]
-                (get-in (db/render-rejection-ai rejected)
+                (get-in (error/render-ai rejected)
                         [:seon.error/problems 0 :seon.error/offending :seon.db/conflict-owner]))
              "the AI face names the existing owner as data")
          (is (some #(str/includes? (str %) owner-id)
-                   (test-support/hiccup-leaves (db/render-rejection-html rejected)))
+                   (test-support/hiccup-leaves (error/render-html rejected)))
              "the HTML face shows the existing owner")
-         (is (= 'seon.db/render-rejection-ai
+         (is (= 'seon.error/render-ai
                 (->> (schema/matching-shapes rejected)
                      (some #(when (= :seon.db.write/validation-refusal
                                      (:seon.schema/key %))

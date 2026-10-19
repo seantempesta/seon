@@ -34,7 +34,7 @@
        ;; §2.4's refusal grammar: the shown text names the layer and member
        ;; that refused, the expected shape, and the offending value. The
        ;; legacy two-line "Expected:/Got:" form survives in no producer —
-       ;; seon.db/render-rejection-ai delegates to seon.error/render-ai —
+       ;; the refusal schema's render is seon.error/render-ai —
        ;; and reaches an agent only as already-saved shown text, asserted
        ;; at the end of this test.
        (is (str/includes? shown "seon.db/transact! refused"))
@@ -43,7 +43,7 @@
        (is (< (tokens/estimate shown) 200))
        (is (= shown (:seon.repl/value (into {} (#'repl/response-entries result))))
            "the reply's :value is the shown text")
-       (is (= 'seon.db/render-rejection-ai (:seon.eval/renderer result)))
+       (is (= 'seon.error/render-ai (:seon.eval/renderer result)))
        (is (= before (db/basis-t @connection)))
        (is (= "Verify" (:seon.task/plan
                         (db/pull @connection [:seon.task/plan]

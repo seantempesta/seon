@@ -18,7 +18,7 @@ about 0.5 s per megabyte of a string argument:
 
 | call | ms |
 |---|---:|
-| `(seon.error/problem-sentence [one-MB-string] {} nil nil)` inside a test fixture, through `seon.test/bounded-result` | 1,160 / 1,170 / 1,422 |
+| `(seon.error.problem/problem-sentence [one-MB-string] {} nil nil)` inside a test fixture, through `seon.test/bounded-result` | 1,160 / 1,170 / 1,422 |
 | the same refusal with a 10 MB string, on default (archive `ce7384682`) | 905–967 per form (message only) |
 | the same refusal with a 10 MB string on the scratch root, raised by a fixture | 1,944–2,352 (refusal alone), 4,689–6,912 (whole `bounded-result`) |
 

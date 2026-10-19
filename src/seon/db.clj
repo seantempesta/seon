@@ -30,6 +30,7 @@
             [seon.cache]
             [seon.batch :as batch]
             [seon.env :as env]
+            [seon.error.problem :as error.problem]
             [seon.error.refusal :as error.refusal]
             [seon.id :as id]
             [seon.print :as print]
@@ -48,20 +49,9 @@
 ;;; Ambient custody and optional read evidence
 ;;; ---------------------------------------------------------------------------
 
-;;; LOAD-CYCLE BOUNDARIES. `seon.error` and `seon.call-preparation` both
-;;; require `seon.db`, so this namespace cannot require them back. One
-;;; resolution per var, realized at first use, instead of a
-;;; `requiring-resolve` on every call (AGENTS §2.1).
-(defonce ^:private error-explain-problem
-  (delay (requiring-resolve 'seon.error/explain-problem)))
-(defonce ^:private error-problem-sentence
-  (delay (requiring-resolve 'seon.error/problem-sentence)))
-(defonce ^:private error-scalar-text
-  (delay (requiring-resolve 'seon.error/scalar-text)))
-(defonce ^:private error-render-ai
-  (delay (requiring-resolve 'seon.error/render-ai)))
-(defonce ^:private error-render-html
-  (delay (requiring-resolve 'seon.error/render-html)))
+;;; LOAD-CYCLE BOUNDARY. `seon.call-preparation` requires `seon.db`, so this
+;;; namespace cannot require it back. One resolution per var, realized at
+;;; first use, instead of a `requiring-resolve` on every call (AGENTS §2.1).
 (defonce ^:private call-preparation-snapshot
   (delay (requiring-resolve 'seon.call-preparation/snapshot)))
 (defonce ^:private call-preparation-report-snapshot
@@ -4196,7 +4186,7 @@
            attributes))))
 
 (defn- write-problem
-  "One refused write as a problem description (`seon.error/explain-problem`).
+  "One refused write as a problem description (`seon.error.problem/explain-problem`).
   A missing key's offending value is its parent map, never a placeholder."
   {:malli/schema [:=> [:cat :qualified-keyword :seon.schema/value :seon.schema/value [:sequential :seon.schema/value] :seon.schema/value [:maybe :map]]
                   :seon.error/problem-description]}
@@ -4209,7 +4199,7 @@
            :seon.error/offending attribute
            :seon.error/actual-description "an undeclared attribute"
            :seon.error/fix "Use a declared attribute from the entity's schema."}
-          (@error-explain-problem
+          (error.problem/explain-problem
            (cond-> {:seon.error/argument "transaction data"
                     :seon.error/path path
                     :seon.error/problem
@@ -4225,9 +4215,9 @@
         problem (write-problem attribute compiled value path cause nil)]
   (diagnostic
    (cond->
-    {:seon.error/message (@error-problem-sentence
+    {:seon.error/message (error.problem/problem-sentence
       'seon.db/transact! problem nil
-      (@error-scalar-text (:seon.error/offending problem)))
+      (error.problem/scalar-text (:seon.error/offending problem)))
      ::transaction-refused true
      ::attribute attribute
      :seon.schema/form form
@@ -6571,20 +6561,6 @@
                        (if (and reference? (empty? (dissoc shown :db/id)))
                          "related record" (transaction-value-html shown))])))
              transaction-data))]))
-
-(defn render-rejection-ai
-  "A rejected database transaction's AI face: `seon.error/render-ai`'s data."
-  {:malli/schema
-   [:=> [:cat :seon.db.write/validation-refusal] [:or [:string {:min 1}] :seon.error/reply]]}
-  [unit]
-  (@error-render-ai unit))
-
-(defn render-rejection-html
-  "Render a rejected database transaction as readable Hiccup."
-  {:malli/schema
-   [:=> [:cat :seon.db.write/validation-refusal] :seon.render/hiccup]}
-  [unit]
-  (@error-render-html unit))
 
 (defn- transaction-result
   {:malli/schema

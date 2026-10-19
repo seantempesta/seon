@@ -1,6 +1,7 @@
 (ns seon.transact-feedback-probe
   "Reproduce the scratch-cluster evaluation and validation cost evidence."
   (:require [seon.db :as db]
+            [seon.error :as error]
             [seon.cluster.boot :as operator]
             [seon.operator.runtime :as runtime]
             [seon.repl :as repl]
@@ -44,7 +45,7 @@
          (assert (:db-after committed) (pr-str committed))
          {:seon.test/shown shown
           :seon.test/bytes (alength (.getBytes shown "UTF-8"))
-          :seon.test/refusal-ai (db/render-rejection-ai (:seon.sci.admit/value evaluation))
+          :seon.test/refusal-ai (error/render-ai (:seon.sci.admit/value evaluation))
           :seon.test/validation-ms average-ms
           :seon.test/input-datoms (count transaction)
           :seon.test/committed-datoms (count (:tx-data committed))

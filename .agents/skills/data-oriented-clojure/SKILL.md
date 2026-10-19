@@ -319,7 +319,7 @@ got a string". Spelling suggestions need a closed schema: on the refusal path on
 (`malli.util/closed-schema`) and keep only extra-key errors that carry a suggestion, so valid calls on open maps
 pay nothing.
 
-SEON: `seon.error/schema-expectation` composes expectation English from a schema's children and declared bounds; spelling
+SEON: `seon.error.problem/schema-expectation` composes expectation English from a schema's children and declared bounds; spelling
 distance calls Malli's own `malli.error/levenshtein` (`seon.error/name-distance`).
 
 **Worked error flow (TARGET: errors P2 installs the arities and `fail!`, the cut installs `caught`).** Today's form of

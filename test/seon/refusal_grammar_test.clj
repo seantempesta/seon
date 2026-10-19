@@ -6,6 +6,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
+            [seon.error.problem :as error.problem]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
             [seon.test-support :as support]))
@@ -19,7 +20,7 @@
              "the required key :seon.cluster.eval/run with an integer or a string or a tuple with 2 entries or a map"
              :malli.core/invalid-type
              "an integer or a string or a tuple with 2 entries or a map"}]
-      (let [description (error/explain-problem
+      (let [description (error.problem/explain-problem
                          {:seon.error/problem {:schema check :type category :value false}
                           :seon.error/path [:seon.cluster.eval/run]
                           :seon.error/argument "transaction data"})]
@@ -28,7 +29,7 @@
 
 (deftest collection-refusals-name-the-failing-member-and-element-form
   (let [description
-        (error/explain-problem
+        (error.problem/explain-problem
          {:seon.error/problem
           {:schema (m/schema [:set :qualified-keyword])
            :value #{"seon.fn.index/17904"}}
@@ -51,7 +52,7 @@
            [[:vector {:max 2} :int] [1 2 3] "a vector of count at most 2"]
            [[:int {:min 2 :max 2}] 3 "an integer exactly 2"]
            [:int "x" "an integer"]]]
-    (let [description (error/explain-problem
+    (let [description (error.problem/explain-problem
                        {:seon.error/problem (first (:errors (m/explain schema value)))
                         :seon.error/path []
                         :seon.error/argument "argument 0"})]
@@ -100,7 +101,7 @@
               "the refusal's first problem names the expected and actual shapes")
           (is (= "either :core or :agent"
                  (:seon.error/expected-description
-                  (error/explain-problem
+                  (error.problem/explain-problem
                    {:seon.error/problem {:schema (m/schema [:enum :core :agent]) :value :x}
                     :seon.error/path [0 :seon.schema.admission/source]
                     :seon.error/argument "transaction data"}))))
@@ -111,7 +112,7 @@
                                 {::m/function-checker mg/function-checker
                                  ::mg/=>iterations 1})
               problem (first (:errors (m/explain compiled (constantly "wrong"))))
-              description (error/explain-problem
+              description (error.problem/explain-problem
                            {:seon.error/problem problem :seon.error/path []
                             :seon.error/argument "return value"})
               refusal (assoc diagnostic :seon.error/data

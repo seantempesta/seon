@@ -3,6 +3,7 @@
             [datahike.api :as d]
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.cluster.agent :as agent]
             [seon.turn :as turn]
             [seon.sci.eval :as evaluation]
@@ -89,8 +90,8 @@
          (is (= (get (:seon.schema.projection/forms (schema/handed-projection))
                      :seon.task/plan)
                 (:seon.schema/form result)))
-         (is (= (:seon.error/message result) (:seon.error/message (db/render-rejection-ai result))))
-         (is (= [42] (mapv :seon.error/offending (:seon.error/problems (db/render-rejection-ai result)))))))
+         (is (= (:seon.error/message result) (:seon.error/message (error/render-ai result))))
+         (is (= [42] (mapv :seon.error/offending (:seon.error/problems (error/render-ai result)))))))
      (testing "the supplied projection owns constraints on the same attribute"
        (let [forms (:seon.schema.projection/forms (schema/handed-projection))
              projection (schema/declaration-projection
@@ -128,7 +129,7 @@
            result (refused connection [(assoc (dissoc (test-support/task-row "feedbacktypo" "A real task") :seon.task/id)
                                           unknown "feedbacktypo")]
                            unknown "feedbacktypo" [0 unknown])
-           shown (db/render-rejection-ai result)]
+           shown (error/render-ai result)]
        (is (= [:seon.task/id] (:seon.db/registered-candidates result)))
        (is (= [unknown] (mapv :seon.error/offending (:seon.error/problems shown))))))))
 
