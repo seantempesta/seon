@@ -2272,9 +2272,8 @@
   ;; the real Design and Prove templates through a chain. A filed task becomes three chain tasks
   ;; (`seon.task/from-filed` -> `seon.task/chain!`); a scripted model answers each with one reply: Design writes What
   ;; exists and Approach into the plan, Prove writes a red deftest into Implement's proofs, Implement makes it green;
-  ;; each step's own done rule passes, root advances the chain twice and merges it to main once. Red until the file
-  ;; proof places an added test after the replaced function it calls (`seon.cluster.source/proven-file` puts every
-  ;; addition before the first replaced declaration; patch docs/research/agent-platform/2026-10-19/steps-fix-write-back-placement.patch).
+  ;; each step's own done rule passes, root advances the chain twice and merges it to main once. Prove's new test
+  ;; calls the function Implement replaces, so the file proof writes it after that function.
   (binding [*space* "tq.filedchain"]
     (test-support/with-database
      (fn [connection]
