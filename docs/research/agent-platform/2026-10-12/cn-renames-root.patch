@@ -1,0 +1,128 @@
+--- a/resources/seon/tasks/seon.cluster.agent.edn
++++ b/resources/seon/tasks/seon.cluster.agent.edn
+@@ -24,8 +24,8 @@
+              :must-read #{my.agent/retire-branch! seon.cluster.registry/retire-branch!}}
+ #:seon.task{:name "two-plan-passes-start-one-attempt"
+              :kind :function
+-             :intent "Card R1 (r1-db-flow-design.md, hybrid-start-a-flow.md H6/H7). `seon.cluster.agent/db<->flow` (the one Flow proc in the cluster graph linking Datahike and Flow) reads `seon.cluster.agent/plan-facts` on main (`seon.task/frontier`, open attempts with their task's intent, ended counts, need end commits) and the roster, asks the pure `seon.cluster.agent/plan` for actions and applies each: `:attempt` writes the attempt and its agent in ONE main transaction (`seon.task/attempt-tx` + `seon.cluster.agent/creation-tx`) before anything runs, `:start-flow` calls `seon.cluster.agent/start-flow!` (fork from the fork point, world, environment, graph paused, resumed only under :running). A second pass writes nothing and starts nothing; `:seon.config.agent/max-running` (default 4) counts open attempts. Nothing else starts a graph: `seon.cluster.host/host!` and the per-branch db<->flow graph are deleted. Proofs: seon.cluster.db-flow-test/plan-writes-the-attempt-first-and-makes-flow-follow (the table), the two-step chain test."
+-             :must-read #{seon.cluster.agent/db<->flow seon.cluster.agent/plan seon.cluster.agent/start-flow! seon.flow/start-graph! seon.cluster.registry/fork! seon.task/frontier seon.task/attempt-tx seon.context/current-state seon.profile/measure}
++             :intent "Card R1 (r1-db-flow-design.md, hybrid-start-a-flow.md H6/H7). `seon.cluster.agent/db<->flow` (the one Flow proc in the cluster graph linking Datahike and Flow) reads `seon.cluster.agent/plan-facts` on main (`seon.task/ready`, open attempts with their task's intent, ended counts, need end commits) and the roster, asks the pure `seon.cluster.agent/plan` for actions and applies each: `:attempt` writes the attempt and its agent in ONE main transaction (`seon.task/attempt-tx` + `seon.cluster.agent/creation-tx`) before anything runs, `:start-flow` calls `seon.cluster.agent/start-flow!` (fork from the fork point, world, environment, graph paused, resumed only under :running). A second pass writes nothing and starts nothing; `:seon.config.agent/max-running` (default 4) counts open attempts. Nothing else starts a graph: `seon.cluster.host/host!` and the per-branch db<->flow graph are deleted. Proofs: seon.cluster.db-flow-test/plan-writes-the-attempt-first-and-makes-flow-follow (the table), the two-step chain test."
++             :must-read #{seon.cluster.agent/db<->flow seon.cluster.agent/plan seon.cluster.agent/start-flow! seon.flow/start-graph! seon.cluster.registry/fork! seon.task/ready seon.task/attempt-tx seon.context/current-state seon.profile/measure}
+              :evidence #{"docs/research/agent-platform/2026-10-11/hybrid-start-a-flow.md" "docs/research/agent-platform/2026-10-11/r1-db-flow-design.md"}}
+  #:seon.task{:name "each-intent-names-one-roster-state"
+              :kind :function
+@@ -64,7 +64,7 @@
+              :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-push.md"}}
+  #:seon.task{:name "a-successor-whose-proof-its-predecessor-wrote-starts"
+   :kind :function
+-  :intent "Phase P5 of hybrid-step-semantics.md (F3). A chain step whose proof its predecessor wrote cannot start: `seon.cluster.agent/plan-facts` judges a frontier leaf valid by `seon.task/task-edges` on main, but the predecessor's proof lives on its attempt branch, so the leaf is :invalid, `seon.cluster.agent/plan` writes the problem task seon.task/invalid-task-<handle> and never attempts it. Observed on default 2319152dc (chain experiment 1): trailing-prose-implement became ready when Design+Prove ended :done and was refused for want of a proof that its fork point held. Correct: validity reads `seon.task/obligations` on the value the leaf will fork from (the done needs' end commits in `:seon.flow.plan/basis` opened as a database, else main), cached by commit id, the same value its first pass proves on. An :implement step needs its own proofs at that value; a :prove step needs its own proofs or a successor declaring it in :seon.task/needs (the product is what it will write, not an admission input); `seon.cluster.agent/write-problem!`'s hardcoded 'names no proof' intent becomes the failed check as data. Proof: seon.cluster.db-flow-test/a-successor-whose-proof-its-predecessor-wrote-starts (chain-experiment-1-proofs.patch). Files: src/seon/cluster/agent.clj, test/seon/cluster/db_flow_test.clj."
++  :intent "Phase P5 of hybrid-step-semantics.md (F3). A chain step whose proof its predecessor wrote cannot start: `seon.cluster.agent/plan-facts` judges a ready leaf valid by `seon.task/task-edges` on main, but the predecessor's proof lives on its attempt branch, so the leaf is :invalid, `seon.cluster.agent/plan` writes the problem task seon.task/invalid-task-<handle> and never attempts it. Observed on default 2319152dc (chain experiment 1): trailing-prose-implement became ready when Design+Prove ended :done and was refused for want of a proof that its fork point held. Correct: validity reads `seon.task/obligations` on the value the leaf will fork from (the done needs' end commits in `:seon.flow.plan/basis` opened as a database, else main), cached by commit id, the same value its first pass proves on. An :implement step needs its own proofs at that value; a :prove step needs its own proofs or a successor declaring it in :seon.task/needs (the product is what it will write, not an admission input); `seon.cluster.agent/write-problem!`'s hardcoded 'names no proof' intent becomes the failed check as data. Proof: seon.cluster.db-flow-test/a-successor-whose-proof-its-predecessor-wrote-starts (chain-experiment-1-proofs.patch). Files: src/seon/cluster/agent.clj, test/seon/cluster/db_flow_test.clj."
+   :must-read #{seon.cluster.agent/plan-facts seon.cluster.agent/plan seon.task/obligations datahike.api/commit-as-db seon.cluster.agent/write-problem!}
+   :evidence #{"docs/research/agent-platform/2026-10-12/step-p5-p6-landing.md" "docs/research/agent-platform/2026-10-12/hybrid-step-semantics.md" "docs/research/agent-platform/2026-10-12/chain-experiment-1.md"}}
+  #:seon.task{:name "a-failed-start-ends-its-attempt-and-the-next-plans"
+@@ -74,8 +74,8 @@
+   :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-step-semantics.md"}}
+  #:seon.task{:name "a-capped-attempt-has-no-relaunch"
+   :kind :function
+-  :intent "Phase P9 of hybrid-step-semantics.md (F5). A step whose attempt ended :capped, :stalled, :given-back or :error leaves the chain stopped with no way on: `seon.task/frontier` excludes the leaf for good, root receives only an end message (no repair problem task, runtime-follows-db §5), and nothing starts attempt 2. Chain experiment 1 relaunched twice by hand (a new step task with the needs rewired; an end rewritten from :capped to :sent-back). Correct: the end is the attempt's own fact; `seon.cluster.agent/plan` writes one repair problem task by identity [class attempt] assigned to root, carrying the end and reason; root's `my.root/relaunch!` writes `:seon.task.attempt/relaunch` (its reason) on the ended attempt, with optional `:seon.task.attempt/relaunch-fork` (a commit root names instead), and the ready rule reads 'an ended attempt of a terminal class with no relaunch' (one not), so attempt n+1 starts from the ended attempt's fork point (a plain restart) or the named commit; root may adjust the environment before it starts; no end is rewritten and nothing retries by itself. The repair problem's proof: its attempt carries a relaunch or its task is :held or :cancelled. Proof: seon.cluster.db-flow-test/a-capped-attempt-relaunches-only-by-roots-fact (capped -> problem, no attempt 2; relaunch -> attempt 2 forked from attempt 1's fork point; a relaunch naming a commit forks that commit); rows of seon.task/each-problem-class-is-detected-from-its-facts. Files: src/seon/task.clj, src/seon/cluster/agent.clj, src/my/root.clj, test/seon/cluster/db_flow_test.clj."
+-  :must-read #{seon.task/frontier seon.cluster.agent/plan seon.turn/end-task-call seon.task/create! my.root/merge!}
++  :intent "Phase P9 of hybrid-step-semantics.md (F5). A step whose attempt ended :capped, :stalled, :given-back or :error leaves the chain stopped with no way on: `seon.task/ready` excludes the leaf for good, root receives only an end message (no repair problem task, runtime-follows-db §5), and nothing starts attempt 2. Chain experiment 1 relaunched twice by hand (a new step task with the needs rewired; an end rewritten from :capped to :sent-back). Correct: the end is the attempt's own fact; `seon.cluster.agent/plan` writes one repair problem task by identity [class attempt] assigned to root, carrying the end and reason; root's `my.root/relaunch!` writes `:seon.task.attempt/relaunch` (its reason) on the ended attempt, with optional `:seon.task.attempt/relaunch-fork` (a commit root names instead), and the ready rule reads 'an ended attempt of a terminal class with no relaunch' (one not), so attempt n+1 starts from the ended attempt's fork point (a plain restart) or the named commit; root may adjust the environment before it starts; no end is rewritten and nothing retries by itself. The repair problem's proof: its attempt carries a relaunch or its task is :held or :cancelled. Proof: seon.cluster.db-flow-test/a-capped-attempt-relaunches-only-by-roots-fact (capped -> problem, no attempt 2; relaunch -> attempt 2 forked from attempt 1's fork point; a relaunch naming a commit forks that commit); rows of seon.task/each-problem-class-is-detected-from-its-facts. Files: src/seon/task.clj, src/seon/cluster/agent.clj, src/my/root.clj, test/seon/cluster/db_flow_test.clj."
++  :must-read #{seon.task/ready seon.cluster.agent/plan seon.turn/end-task-call seon.task/create! my.root/merge!}
+   :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-step-semantics.md" "docs/research/agent-platform/2026-10-12/chain-experiment-1.md"}}
+  #:seon.task{:name "the-real-chain-runs-with-no-nudges"
+   :kind :function
+--- a/docs/seon/plan.md
++++ b/docs/seon/plan.md
+@@ -152,7 +152,7 @@
+   §10 is the build order, 22 cards of about fifteen minutes each with a red proof). An agent wakes and runs a task; a
+   subject task owns step tasks (`:seon.task/children`, in the schema), siblings run in parallel unless one
+   `:seon.task/needs` another, a parent never runs; each step carries its `:seon.task/instructions`. What should be
+-  running is two reads (`seon.task/frontier` today, `seon.task/ready` after U6), under the dial
++  running is two reads (`seon.task/ready`), under the dial
+   `:seon.config.agent/max-running` (default 4, in `config/default.edn`); the attempt is the launch's write; one clock proc
+   fires cron tasks; problems are tasks assigned to root; the plan is rendered from needs, never stored; `start --paused`
+   for debugging.
+--- a/test/seon/cluster/db_flow_test.clj
++++ b/test/seon/cluster/db_flow_test.clj
+@@ -33,8 +33,8 @@
+ 
+ (defn- roster
+   "A roster holding `started` graphs, `paused` among them."
+-  {:malli/schema [:function [:=> [:cat] :seon.flow.plan/roster]
+-                  [:=> [:cat :seon.flow.plan/started :seon.flow.plan/paused] :seon.flow.plan/roster]]}
++  {:malli/schema [:function [:=> [:cat] :seon.flow.plan/registry]
++                  [:=> [:cat :seon.flow.plan/started :seon.flow.plan/paused] :seon.flow.plan/registry]]}
+   ([] (roster #{} #{}))
+   ([started paused] {:seon.flow.plan/started started :seon.flow.plan/paused paused}))
+ 
+@@ -321,7 +321,7 @@
+                                               :where [?agent :seon.agent/id ?id] [?work :seon.task/agent ?agent]
+                                               [?request :seon.task/of-assignment ?work] [?request :seon.task/merge ?merge]]
+                                             (db/db connection) agent-id))
+-                    _ (is (contains? (registry/roster store) branch) "landing keeps the branch for its open merge request")
++                    _ (is (contains? (registry/branches store) branch) "landing keeps the branch for its open merge request")
+                     closed (task/close! {:seon.db/connection connection :seon.store/store store
+                                          :seon.agent/routing (if from-attempt? child routing)}
+                                         merge-task :closed "The lifecycle proof closes this request.")]
+@@ -331,7 +331,7 @@
+                 (is (.isTerminated ^java.util.concurrent.ExecutorService graph) "the actual graph exited")
+                 (is (= :released @(:wrapped-atom branch-connection)))
+                 (is (nil? (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})))
+-                (is (not (contains? (registry/roster store) branch)))
++                (is (not (contains? (registry/branches store) branch)))
+                 (is (empty? (db/q '[:find ?error :where [?error :seon.error/signature]] (db/db connection)))))))))))))
+ 
+ (deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
+@@ -343,7 +343,7 @@
+       connection {"a" [#{} "(clojure.test/is (= 1 2))"] "b" [#{"a"} "(clojure.test/is (= 1 2))"]}
+       (fn [handle]
+      (let [routing (:seon.agent/routing handle)
+-           started (fn [routing] (:seon.flow.plan/started (agent/roster-facts routing)))]
++           started (fn [routing] (:seon.flow.plan/started (agent/registry-facts routing)))]
+        ;; A's hand-written end has no merge request, so landing it would delete A's branch before B forks from
+        ;; its end commit: the dial keeps it, as an open merge request does in the real chain
+        (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+@@ -511,13 +511,13 @@
+                   (is (empty? (db/q '[:find ?m :where [?m :seon.message/content "Only on my branch."]] database))
+                       "and no message")
+                   (is (= "Refined on the branch." (intent)))
+-                  (is (not (contains? (:seon.flow.plan/started (agent/roster-facts routing)) agent-id))
++                  (is (not (contains? (:seon.flow.plan/started (agent/registry-facts routing)) agent-id))
+                       "its graph is stopped"))
+                 (pass! handle routing)
+                 (is (= 1 (count (copies (db/db connection) a))) "a second pass copies nothing")
+                 (if keep?
+-                  (is (contains? (registry/roster store) branch) "the dial keeps the ended branch for audit")
+-                  (is (eventually #(not (contains? (registry/roster store) branch)))
++                  (is (contains? (registry/branches store) branch) "the dial keeps the ended branch for audit")
++                  (is (eventually #(not (contains? (registry/branches store) branch)))
+                       "with no merge request the branch is deleted"))
+                 (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))
+                     "with no fault recorded"))))))))))
+@@ -540,7 +540,7 @@
+               (pass! handle routing)
+               (is (= #{[key branch (str "attempt/" key) :given-back]} (attempts connection "e")) "main holds the end")
+               (is (= "Do e." (intent)) "and no refinement")
+-              (is (contains? (registry/roster store) branch) "the branch stays")
++              (is (contains? (registry/branches store) branch) "the branch stays")
+               (is (str/includes? (str (:seon.task/intent (problem))) (name branch))
+                   "root's problem task names the branch")
+               (is (str/includes? (str (:seon.task/intent (problem))) "The proof asks the impossible.")
+@@ -762,7 +762,7 @@
+                                  (db/branch-database (db/db connection) branch-b)))
+                     "and B's branch forked from it, not from main")
+                 (pass! handle routing)
+-                (is (eventually #(not (contains? (registry/roster store) branch-a)))
++                (is (eventually #(not (contains? (registry/branches store) branch-a)))
+                     "once B forked, A's kept branch is deleted")
+                 (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))
+                     "with no fault recorded"))))))))))
+@@ -797,7 +797,7 @@
+             (pass! handle routing)
+             (let [[[_ branch agent-id]] (seq (attempts connection "s"))
+                   database (db/branch-database (db/db connection) branch)]
+-              (is (not (contains? (:seon.flow.plan/started (agent/roster-facts routing)) agent-id)) "the graph is stopped")
++              (is (not (contains? (:seon.flow.plan/started (agent/registry-facts routing)) agent-id)) "the graph is stopped")
+               (is (seq (proof-runs database (proof "s"))) "after its pass recorded its proof run")
+               (is (empty? (db/q '[:find ?e :where [?e :seon.cluster.eval/interrupted-at _]] database))
+                   "with nothing interrupted")))))))))

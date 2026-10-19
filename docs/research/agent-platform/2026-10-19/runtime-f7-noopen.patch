@@ -1,0 +1,13 @@
+diff --git a/src/seon/sci/runtime.clj b/src/seon/sci/runtime.clj
+index 6155c81ff..d8ce59a19 100644
+--- a/src/seon/sci/runtime.clj
++++ b/src/seon/sci/runtime.clj
+@@ -182,7 +182,7 @@
+                                 (reduce #(update %1 %2 (fnil conj #{}) [changed digest])
+                                         held (filter names (get (::reached-by index) changed))))
+                               {} changes)]
+-      (into by-reach (comp (remove (::closed index)) (map (fn [sym] [sym every-change]))) names))))
++      (do every-change by-reach))))
+ 
+ (defn compiled-names
+   "What a runtime running `kept` compiled may still run compiled.

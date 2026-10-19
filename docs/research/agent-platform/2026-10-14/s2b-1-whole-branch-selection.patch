@@ -1,0 +1,422 @@
+diff --git a/resources/seon/schemas/seon.turn.loop.edn b/resources/seon/schemas/seon.turn.loop.edn
+index f2fc7f0bc..0da5a56f3 100644
+--- a/resources/seon/schemas/seon.turn.loop.edn
++++ b/resources/seon/schemas/seon.turn.loop.edn
+@@ -185,8 +185,9 @@
+                   [:seon.turn.loop/pending [:vector :seon.test/sym]]
+                   [:seon.render/operations :seon.render/operations]],
+                  :test-summary
+-                 [:map {:description "What the automatic test step executed: its proofs' and its reaching tests' summaries, and the platform proof a host-bound change waits for; the commit they ran on is the queue's and is not shown."}
++                 [:map {:description "What the automatic test step executed, in its order: the summaries of the tests the branch defined or changed since its base, of the tests reaching the request's change and of the task's proofs, and the platform proof a host-bound change waits for; the commit they ran on is the queue's and is not shown."}
+                   [:seon.source/commit-id {:optional true} :seon.source/commit-id]
++                  [:seon.turn.loop/branch {:optional true} :seon.turn.loop/request-summary]
+                   [:seon.turn.loop/proofs {:optional true} :seon.turn.loop/request-summary]
+                   [:seon.turn.loop/reaching {:optional true} :seon.turn.loop/request-summary]
+                   [:seon.turn.loop/platform {:optional true} :seon.turn.loop/platform]
+diff --git a/src/seon/test.clj b/src/seon/test.clj
+index 5d47e92ad..c0cd7b9aa 100644
+--- a/src/seon/test.clj
++++ b/src/seon/test.clj
+@@ -2133,28 +2133,63 @@
+   [world candidate ns-name]
+   (boolean (seq (remove (bindings candidate ns-name) (bindings world ns-name)))))
+ 
+-(defn- changed-identities
+-  "The identities `candidate` holds at other behavior digests than its change base
+-  (`change-base` of the `recorded` published commit), namespaces kept only for a lost
+-  binding (`changes`), in print order; a refused read answers its refusal."
+-  {:malli/schema [:=> [:cat :seon.store/store :seon.cluster/name :seon.db/database-value :seon.source/commit-id]
+-                  [:or :seon.test/changed :seon.error/value]]}
+-  [store cluster candidate recorded]
+-  (let [families (vec (:seon.program/compared-families
+-                       (program/declaration-families (db/carried-projection candidate))))
+-        world (source/database store (change-base store cluster candidate recorded))
+-        differences (digest-differences world candidate families)
+-        identities (when (vector? differences) (apply into (behavior-differences world candidate differences)))
+-        declaring (when identities
+-                    (db/q '[:find [?name ...] :in $ [?name ...]
+-                            :where [?n :seon.ns/name ?name] (or [?e :seon.fn/ns ?n] [?e :seon.test/ns ?n])]
+-                          candidate (vec (keep (fn [[a v]] (when (= :seon.ns/name a) v)) identities))))]
+-    (cond (:seon.error/at differences) differences
+-          (not (sequential? declaring)) declaring
+-          :else (vec (sort print/compare-values
+-                           (filter (fn [[a v]] (or (not= :seon.ns/name a)
+-                                                   (and (some #{v} declaring) (binding-lost? world candidate v))))
+-                                   identities))))))
++(defn branch-delta
++  "The pure branch delta: the declarations `candidate` holds at other behavior digests than `base` (its change
++  base, a committed value), namespaces kept only for a lost binding (`binding-lost?`), in print order; empty when
++  nothing changed, a refused read its refusal. Derived once per base and program: keyed in `seon.cache` by the base's
++  commit and the program attributes' revision digest (`seon.test.runner/program-revisions-digest`), so a request
++  that changed no program row reads it back."
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] [:or :seon.test/changed :seon.error/value]]}
++  [base candidate]
++  (let [delta (fn []
++                 (let [families (vec (:seon.program/compared-families
++                                      (program/declaration-families (db/carried-projection candidate))))
++                       differences (digest-differences base candidate families)
++                       identities (when (vector? differences) (apply into (behavior-differences base candidate differences)))
++                       declaring (when identities
++                                   (db/q '[:find [?name ...] :in $ [?name ...]
++                                           :where [?n :seon.ns/name ?name] (or [?e :seon.fn/ns ?n] [?e :seon.test/ns ?n])]
++                                         candidate (vec (keep (fn [[a v]] (when (= :seon.ns/name a) v)) identities))))]
++                   (cond (:seon.error/at differences) differences
++                         (not (sequential? declaring)) declaring
++                         :else (vec (sort print/compare-values
++                                          (filter (fn [[a v]] (or (not= :seon.ns/name a)
++                                                                  (and (some #{v} declaring) (binding-lost? base candidate v))))
++                                                  identities))))))
++        ;; No revision authority (a value without a complete revision context) derives every time.
++        revisions (runner/program-revisions-digest candidate)
++        commit (db/commit-id base)]
++    (if (and revisions commit)
++      (seon.cache/lookup ::branch-delta [commit revisions] #(+ 256 (* 128 (count %))) delta vector?)
++      (delta))))
++
++(defn branch-changes
++  "Every declaration `execution`'s program changed since its base (`change-base`: the published commit on the
++  cluster's own branch, the commit it was forked at on any other), the `branch-delta`: empty when nothing changed;
++  a cluster recording no adopted source commit refuses by name."
++  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection]
++                  [:or :seon.test/changed :seon.test/selection-error :seon.error/value]]}
++  [execution recording]
++  (let [cluster (:seon.cluster/name execution)
++        recorded (:seon.source/commit-id
++                  (db/pull (db/db recording) [:seon.source/commit-id] [:seon.cluster/name cluster]))]
++    (if (nil? recorded)
++      (request-refusal :seon.test/policy-unscoped
++                       "The cluster records no adopted source commit to compare my program against: there is no change to check."
++                       cluster)
++      (let [store (or (:seon.store/store execution) (:seon.store/store (env/of execution)))
++            candidate (db/db (:seon.db/connection execution))]
++        (branch-delta (source/database store (change-base store cluster candidate recorded)) candidate)))))
++
++(defn branch-tests
++  "The tests `execution`'s branch defined or changed since its base (`branch-changes`), sorted: empty when none."
++  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection]
++                  [:or [:vector :seon.test/sym] :seon.test/selection-error :seon.error/value]]}
++  [execution recording]
++  (let [changed (branch-changes execution recording)]
++    (if (:seon.error/at changed)
++      changed
++      (into [] (keep (fn [[a v]] (when (= :seon.test/sym a) v))) changed))))
+ 
+ (defn request-changes
+   "What one eval request changed, in print order; empty when it defined nothing.
+@@ -2180,42 +2215,18 @@
+                        (map #(vector :seon.schema/key %) schemas))))))
+ 
+ (defn changes
+-  "What a check of `execution` must reach: the declarations its program holds
+-  at other behavior digests than its base (`change-base`: the published commit
+-  on the cluster's own branch, the fork commit on any other), so a branch's
+-  change is its own (`behavior-differences`: a docstring-only change is none).
+-  A namespace identity is a binding change; it stays only when the namespace
+-  declares something a test can reach and lost or retargeted a binding its base
+-  held (`binding-lost?`): a require that only adds an alias reaches no test.
+-  A change no test can observe refuses by name: there is no change to check.
+-  The set is derived once per base and branch program: keyed in `seon.cache` by
+-  the program attributes' revision digest (`seon.test.runner/program-revisions-digest`),
+-  so an eval request that changed no program row reads it back."
++  "What a check of `execution` must reach: its `branch-changes`, the declarations its program holds at other
++  behavior digests than its base, so a branch's change is its own (a docstring-only change is none; a namespace
++  stays only for a lost binding). A change no test can observe refuses by name: there is no change to check."
+   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection]
+                   [:or :seon.test/changed :seon.test/selection-error :seon.error/value]]}
+   [execution recording]
+-  (let [cluster (:seon.cluster/name execution)
+-        base (:seon.source/commit-id
+-              (db/pull (db/db recording) [:seon.source/commit-id] [:seon.cluster/name cluster]))]
+-    (if (nil? base)
++  (let [changed (branch-changes execution recording)]
++    (if (and (vector? changed) (empty? changed))
+       (request-refusal :seon.test/policy-unscoped
+-                       "The cluster records no adopted source commit to compare my program against: there is no change to check."
+-                       cluster)
+-      (let [store (or (:seon.store/store execution) (:seon.store/store (env/of execution)))
+-            candidate (db/db (:seon.db/connection execution))
+-            derive-changes #(changed-identities store cluster candidate base)
+-            ;; No revision authority (a value without a complete revision context) derives every time.
+-            revisions (runner/program-revisions-digest candidate)
+-            changed (if revisions
+-                      (seon.cache/lookup ::changes [cluster base revisions]
+-                                         #(+ 256 (* 128 (count %))) derive-changes vector?)
+-                      (derive-changes))]
+-        (cond (:seon.error/at changed) changed
+-              (empty? changed)
+-              (request-refusal :seon.test/policy-unscoped
+-                               "Nothing I changed since my base (the published commit, or the commit my branch was forked at) is a change a test can observe: there is no change to check. Name tests with :seon.test/identities, or run my namespace's tests with (my.test/run)."
+-                               base)
+-              :else changed)))))
++                       "Nothing I changed since my base (the published commit, or the commit my branch was forked at) is a change a test can observe: there is no change to check. Name tests with :seon.test/identities, or run my namespace's tests with (my.test/run)."
++                       (:seon.cluster/name execution))
++      changed)))
+ 
+ (defn- clean-request-handle
+   "Acquire the request's world: the loaded published program, boot's facts and
+diff --git a/src/seon/turn.clj b/src/seon/turn.clj
+index 6c1d5bdec..0ebb194c9 100644
+--- a/src/seon/turn.clj
++++ b/src/seon/turn.clj
+@@ -79,6 +79,8 @@
+   (delay (requiring-resolve 'seon.test/request-changes)))
+ (defonce ^:private test-reaching
+   (delay (requiring-resolve 'seon.test/reaching)))
++(defonce ^:private test-branch-tests
++  (delay (requiring-resolve 'seon.test/branch-tests)))
+ (defonce ^:private fn-reverse-closure
+   (delay (requiring-resolve 'seon.fn/reverse-closure)))
+ (defn stage-reply!
+@@ -5190,19 +5192,11 @@
+ (declare task-proofs)
+ 
+ (defn- step-due?
+-  "Whether the pass `report` evaluated a form and the agent's tests may see it: its recording transaction wrote
+-  program rows, or a proof of the task the agent holds has no result at its current reach
+-  (`seon.test/stale`), read on `database`, the agent's branch."
+-  {:malli/schema [:=> [:cat :seon.turn.loop/turn-report :seon.db/database-value :seon.agent/id] :boolean]}
+-  [report database agent-id]
+-  (boolean
+-   (and (pos? (:seon.turn.loop/forms-run report))
+-        (or (seq (get-in report [:seon.turn.loop/recording :seon.turn.loop/entities]))
+-            (let [proofs (task-proofs database agent-id)]
+-              (or (:seon.error/at proofs)
+-                  (and (seq proofs)
+-                       (let [stale (@test-stale database (vec proofs))]
+-                         (or (:seon.error/at stale) (seq stale))))))))))
++  "Whether the pass `report` evaluated a form: the test step (`test-step`) then decides what it runs, so a test the
++  branch defined two requests earlier, or a proof a plan-only task update left unrun, is still selected."
++  {:malli/schema [:=> [:cat :seon.turn.loop/turn-report] :boolean]}
++  [report]
++  (pos? (:seon.turn.loop/forms-run report)))
+ 
+ (defn- held-task
+   "The symbol of the task `agent-id` holds on `database`, the agent's branch; nil when it holds none."
+@@ -5282,8 +5276,19 @@
+           (:seon.error/at results) false
+           :else (= tests (into #{} (map :seon.test/sym) results)))))
+ 
++(defn- run-branch
++  "Run `tests`, those the agent's branch defined or changed since its base (`seon.test/branch-tests`), on
++  `execution` as one request bounded by `limit-ms`; nil when none."
++  {:malli/schema [:=> [:cat :seon.agent/execution-handle pos-int? [:vector :seon.test/sym]]
++                  [:or :nil :seon.test/run-result :seon.error/value]]}
++  [execution limit-ms tests]
++  (when (seq tests)
++    (@test-run {:seon.test/execution execution :seon.test/recording-connection (:seon.db/connection execution)
++                :seon.test/policy :named :seon.test/identities (set tests) :seon.test/check-time-limit-ms limit-ms})))
++
+ (defn- prove-turn
+-  "A fresh attempt's first pass: run its task's proofs in the agent's world, recorded on its branch, with no
++  "A fresh attempt's first pass: run the tests its branch defined or changed since its base
++  (`seon.test/branch-tests`), then its task's proofs, last, in the agent's world, recorded on its branch, with no
+   model call and no form: the run at the base program, so a step whose merge would already accept it is
+   `:done` (`seon.context/step-status`) and opens no model turn; a run that could not happen is the pass's refusal, which the turn proc's write-refusal
+   bound parks after its repeats."
+@@ -5291,7 +5296,13 @@
+   [{cluster :seon.turn.loop/cluster work :seon.turn.loop/work report :seon.turn.loop/report}]
+   (let [agent-id (:seon.agent/id work)
+         execution (@cluster-agent-acquire-context! cluster agent-id)
+-        ran (run-proofs execution agent-id (step-limit-ms cluster agent-id) #{})]
++        connection (:seon.db/connection execution)
++        limit (step-limit-ms cluster agent-id)
++        proofs (task-proofs (db/db connection) agent-id)
++        branch (when-not (:seon.error/at proofs) (@test-branch-tests execution connection))
++        branched (when (vector? branch) (run-branch execution limit (into [] (remove proofs) branch)))
++        ran (some #(when (:seon.error/at %) %) [proofs branch branched])
++        ran (or ran (run-proofs execution agent-id limit #{}))]
+     (if (:seon.error/at ran)
+       (report :error 0 ran)
+       (report :closed 0))))
+@@ -5372,15 +5383,16 @@
+         (seq pending) (assoc :seon.turn.loop/pending pending)))))
+ 
+ (defn- summary
+-  "The test step's results, one summary per request that ran, with the commit they ran on for the queue
++  "The test step's results, one summary per request that ran (the branch's tests, the proofs, the reaching), with the commit they ran on for the queue
+   (`summary-queue`), and the `platform` proof a host-bound change waits for; nil when none ran and none waits."
+-  {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map] [:maybe :seon.turn.loop/platform]] [:maybe :seon.turn.loop/test-summary]]}
+-  [proofs reaching platform]
+-  (when (or proofs reaching platform)
++  {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map] [:maybe :map] [:maybe :seon.turn.loop/platform]] [:maybe :seon.turn.loop/test-summary]]}
++  [branch proofs reaching platform]
++  (when (or branch proofs reaching platform)
+     (cond-> {}
+       platform (assoc :seon.turn.loop/platform platform)
+-      (some :seon.source/commit-id [reaching proofs])
+-      (assoc :seon.source/commit-id (some :seon.source/commit-id [reaching proofs]))
++      (some :seon.source/commit-id [proofs reaching branch])
++      (assoc :seon.source/commit-id (some :seon.source/commit-id [proofs reaching branch]))
++      branch (assoc :seon.turn.loop/branch (request-summary branch))
+       proofs (assoc :seon.turn.loop/proofs (request-summary proofs))
+       reaching (assoc :seon.turn.loop/reaching (request-summary reaching)))))
+ 
+@@ -5475,29 +5487,42 @@
+             (sort-by (comp str :seon.test/sym) (mapcat :seon.source/red-tests (:seon.source/refusals verdict)))))))
+ 
+ (defn- test-step
+-  "The pass's automatic test step: the held task's proofs, then the tests reaching what the run changed
+-  (`seon.test/request-changes` over `run`, its recording transaction's databases and entities), on one
+-  acquisition of the agent's world; tests reaching a host-bound change are named as its platform proof, not
+-  run. Within the dial `:seon.config.test/step-time-limit-ms` the proofs take the bound first; the reaching
+-  request gets what they left, at least 1 ms, so it selects its tests and reports those it did not start as
+-  pending. A throw from either becomes the error beside the pass's values, never a replacement for them; nil
+-  when no request ran, and nothing is acquired when the agent holds no proof and the run changed nothing."
++  "The pass's automatic test step, in order on one acquisition of the agent's world: the tests its branch defined
++  or changed since its base (`seon.test/branch-tests`, the branch delta; empty when nothing changed), the tests
++  reaching what the run changed (`seon.test/request-changes` over `run`, its recording transaction's databases and
++  entities), then the held task's proofs, last, so the branch they read holds the earlier results. Tests reaching a
++  host-bound change are named as its platform proof, not run. Each request gets what the dial
++  `:seon.config.test/step-time-limit-ms` left, at least 1 ms, and reports those it did not start as pending;
++  unchanged results answer from their record. A throw becomes the error beside the pass's values, never a
++  replacement for them; nil when nothing is due: the run changed nothing and every branch test and proof holds a
++  result at its current reach (`seon.test/stale`)."
+   {:malli/schema [:=> [:cat :map :seon.agent/id [:maybe :seon.turn.loop/recording]]
+                   [:maybe :seon.turn.loop/test-summary]]}
+   [cluster agent-id run]
+   (try
+-    (let [proofs? (seq (task-proofs (db/db (:seon.db/connection cluster)) agent-id))
++    (let [database (db/db (:seon.db/connection cluster))
++          proofs (task-proofs database agent-id)
++          _ (when (:seon.error/at proofs) (throw (ex-info (:seon.error/message proofs) proofs)))
++          branch (@test-branch-tests cluster (:seon.db/connection cluster))
++          _ (when (:seon.error/at branch) (throw (ex-info (:seon.error/message branch) branch)))
++          branch (into [] (remove proofs) branch)
+           changed (if run
+                     (@test-request-changes (:seon.turn.loop/before run) (:seon.turn.loop/after run) (:seon.turn.loop/entities run))
+-                    [])]
+-      (when (or proofs? (seq changed))
++                    [])
++          watched (into branch proofs)
++          stale (when (seq watched) (@test-stale database watched))
++          _ (when (:seon.error/at stale) (throw (ex-info (:seon.error/message stale) stale)))]
++      (when (or (seq changed) (seq stale))
+         (let [limit (step-limit-ms cluster agent-id)
++              began (System/nanoTime)
++              left #(max 1 (- limit (quot (- (System/nanoTime) began) 1000000)))
+               execution (@cluster-agent-acquire-context! cluster agent-id)
+               connection (:seon.db/connection execution)
+               platform (platform-proof (db/db connection) changed)
+-              proofs (when proofs? (run-proofs execution agent-id limit (set (:seon.turn.loop/pending platform))))
+-              left (- limit (long (or (:seon.test/elapsed-ms proofs) 0)))
+-              reaching (run-reaching execution (max 1 left) changed platform)
++              pending (set (:seon.turn.loop/pending platform))
++              branched (run-branch execution (left) (into [] (remove pending) branch))
++              reaching (run-reaching execution (left) changed platform)
++              proved (when (seq proofs) (run-proofs execution agent-id (left) pending))
+               ;; a derivation that fails is shown beside the step's values, never in place of them
+               red (try (step-reds execution agent-id)
+                        (catch Throwable failure
+@@ -5506,10 +5531,10 @@
+                               (Date.) :seon.turn/test-step `step-reds
+                               {:seon.error/message "The tests the change broke could not be judged."
+                                :seon.error/exception-class (.getName (class failure))}))))]
+-          (some-> (summary (ran-something proofs) (ran-something reaching) platform)
++          (some-> (summary (ran-something branched) (ran-something proved) (ran-something reaching) platform)
+                   (cond-> (and (nil? platform) reaching (ran-something reaching))
+                     (update :seon.turn.loop/reaching #(partial-reaching (db/db connection) changed reaching %)))
+-                  (merge (test-costs (db/db connection) [proofs reaching]))
++                  (merge (test-costs (db/db connection) [branched proved reaching]))
+                   (cond-> (or (:seon.error/at red) (seq red)) (assoc :seon.turn.loop/broken red))))))
+     (catch Throwable failure
+       {:seon.turn.loop/proofs
+@@ -5536,12 +5561,12 @@
+     (or newer older)))
+ 
+ (defn- summary-queue
+-  "The queue a step's `tests` summary leaves: its proofs' then its reaching tests' pending."
++  "The queue a step's `tests` summary leaves: its branch tests', proofs' then reaching tests' pending."
+   {:malli/schema [:=> [:cat [:maybe :seon.turn.loop/test-summary]] [:maybe :seon.turn.loop/queue]]}
+   [tests]
+   (queue-of (:seon.source/commit-id tests)
+             (into [] (mapcat #(get-in tests [% :seon.turn.loop/pending]))
+-                  [:seon.turn.loop/proofs :seon.turn.loop/reaching])))
++                  [:seon.turn.loop/branch :seon.turn.loop/proofs :seon.turn.loop/reaching])))
+ 
+ (defn- continue-queue
+   "Run the tests a bounded step left queued, within the step dial, as one request on the agent's world;
+@@ -5756,7 +5781,7 @@
+                           ;; THE TESTS RUN AFTER A PASS THAT EVALUATED A FORM, serially inside the
+                           ;; pass; their failure rides beside the values (test-step).
+                           test-start (System/nanoTime)
+-                          stepped? (and (step-due? (cond-> report run-change (assoc :seon.turn.loop/recording run-change)) (db/db connection) agent-id) (not (:seon.turn.loop/refusal report))
++                          stepped? (and (step-due? report) (not (:seon.turn.loop/refusal report))
+                                         (not (false? (agent-dial (db/db connection) cluster agent-id :seon.config.test/step?))))
+                           tests (when stepped? (test-step cluster agent-id run-change))
+                           report (cond-> report
+diff --git a/test/seon/test_test.clj b/test/seon/test_test.clj
+index f25bbdd7f..eaaa47b28 100644
+--- a/test/seon/test_test.clj
++++ b/test/seon/test_test.clj
+@@ -1,11 +1,14 @@
+ (ns seon.test-test
+   "Run admission uses the canonical writer and preserves selected obligations."
+-  (:require [clojure.set :as set]
++  (:require [clojure.data.json]
++            [clojure.set :as set]
+             [clojure.test :refer [deftest is]]
+             [seon.batch]
+             [seon.cluster.agent :as cluster.agent]
+             [seon.cluster.registry :as registry]
+             [seon.db :as db]
++            [seon.mcp]
++            [seon.task]
+             [seon.config :as config]
+             [seon.id :as id]
+             [seon.program :as program]
+@@ -589,3 +592,55 @@
+       (is (= [fails] (mapv :seon.test/fail-count (get-in result [:ran :seon.test/results]))))
+       (is (= passed? (get-in result [:reused :seon.test/passed?])))
+       (is (= 1 (get-in result [:reused :seon.test/reused-count]))))))
++
++(defn- agent-eval
++  "Evaluate `code` as `agent-id` of the running instance `running` through the MCP entrance; the parsed result."
++  {:malli/schema [:=> [:cat :string :seon.agent/id :string] :map]}
++  [running agent-id code]
++  (clojure.data.json/read-str
++   (seon.mcp/call (clojure.data.json/write-str
++                   {"name" "eval_clj" "arguments" {"code" code "agent" agent-id "cluster" running}}))))
++
++(defn- unrun-deftest!
++  "Write deftest `sym` with `source` on `connection`'s branch through the canonical writer, outside any eval
++  request, so no test step has run it."
++  {:malli/schema [:=> [:cat :seon.db/connection :seon.test/sym :string] :nil]}
++  [connection sym source]
++  (let [declaring (symbol (namespace sym))]
++    (when-not (seq (db/datoms (db/db connection) :avet :seon.ns/name declaring))
++      (test-support/transacted! connection [(test-support/namespace-entity (db/db connection) declaring)]))
++    (test-support/transacted! connection [(test-support/program-entity (db/db connection) [:seon.test/sym sym] source)])
++    nil))
++
++(deftest ^{:seon.test/long "Three eval requests through the MCP entrance, each followed by the step's test worlds."
++           :seon.test/long-ms 30000}
++  an-earlier-deftest-on-the-branch-is-still-selected
++  (test-support/with-running-agent
++   (fn [running agent-id connection]
++     (agent-eval running agent-id "(ns tq.s2b1e) (defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)")
++     (unrun-deftest! connection 'tq.s2b1e-test/earlier "(clojure.test/deftest earlier (clojure.test/is (= 1 1)))")
++     (agent-eval running agent-id "(+ 1 2)")
++     (agent-eval running agent-id "(in-ns 'tq.s2b1e) (defn g {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
++     (let [results (runner/latest-results (db/db connection) ['tq.s2b1e-test/earlier])]
++       (is (= [1] (mapv :seon.test/pass-count results))
++           "the deftest the branch defined is selected and recorded though it reaches no changed function")))))
++
++(deftest ^{:seon.test/long "Two eval requests through the MCP entrance, each followed by the step's test worlds."
++           :seon.test/long-ms 30000}
++  a-plan-only-update-runs-the-tasks-proof
++  (test-support/with-running-agent
++   (fn [running agent-id connection]
++     (agent-eval running agent-id "(ns tq.s2b1p) (defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)")
++     (unrun-deftest! connection 'tq.s2b1p-test/proof "(clojure.test/deftest proof (clojure.test/is (= 1 (tq.s2b1p/f 1))))")
++     (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
++                                                 :seon.task/ns 'tq.s2b1p :seon.task/name "f" :seon.task/plan "Identity."
++                                                 :seon.task/proofs #{'tq.s2b1p-test/proof}}))]
++       (seon.task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
++                           :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id]
++                           :seon.task/branch (get-in (db/db connection) [:config :branch])}))
++     (let [tests (test-support/mcp-tests
++                  (agent-eval running agent-id "(my.task/update! 'tq.s2b1p/f :seon.task/plan (constantly \"Identity, unchanged.\"))"))
++           results (runner/latest-results (db/db connection) ['tq.s2b1p-test/proof])]
++       (is (not-any? #(get-in tests [% :seon.turn.loop/test-error]) [:seon.turn.loop/branch :seon.turn.loop/reaching :seon.turn.loop/proofs])
++           "the step makes no selection error")
++       (is (= [1] (mapv :seon.test/pass-count results)) "the task's proof ran and is recorded")))))

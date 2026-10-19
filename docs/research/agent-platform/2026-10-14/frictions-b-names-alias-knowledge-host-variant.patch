@@ -1,0 +1,125 @@
+diff --git a/src/seon/ref.clj b/src/seon/ref.clj
+index 89c19f297..d0882e0e6 100644
+--- a/src/seon/ref.clj
++++ b/src/seon/ref.clj
+@@ -588,18 +588,30 @@
+   [path]
+   (boolean (some-> (based-file path) :seon.ref/file io/file .isDirectory)))
+ 
++(defn- host-namespace?
++  "Does `space` name a namespace the host knows without a database: a loaded one, a dependency-cache one, or one
++  whose source the loaded commit holds? The knowledge `names` and `alias-form?` share."
++  {:malli/schema [:=> [:cat :symbol] :boolean]}
++  [space]
++  (let [source (fs/source-directory)
++        stem (str/replace (munge space) "." "/")]
++    (boolean
++     (or (find-ns space)
++         (analyzer/cached-namespace space)
++         (some (fn [[root extension]] (.isFile (java.io.File. (io/file source root) (str stem extension))))
++               (for [root ["src" "test" "script"] extension [".clj" ".cljc"]] [root extension]))))))
++
+ (defn- alias-form?
+   "Is `reference` a qualified symbol whose namespace part names no namespace the resolver knows (a stored program
+-  namespace, a loaded one, or a dependency-cache one)? Then it is an alias form, which is code and no reference
++  namespace or one `host-namespace?` knows)? Then it is an alias form, which is code and no reference
+   (TASK-CHAIN §3a)."
+   {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.ref/name]] :boolean]}
+   [database reference]
+   (boolean
+    (when (qualified-symbol? reference)
+      (let [space (symbol (namespace reference))]
+-       (not (or (find-ns space)
+-                (seq (db/datoms database :avet :seon.ns/name space))
+-                (analyzer/cached-namespace space)))))))
++       (not (or (host-namespace? space)
++                (seq (db/datoms database :avet :seon.ns/name space))))))))
+ 
+ (defn- answer
+   "One candidate resolved on `database`, or its problem with what it means; nil for a directory, and for a
+@@ -665,20 +677,16 @@
+          cite-once)))
+ 
+ (defn names
+-  "The qualified symbols `text` cites, read by the one rule `references` resolves: each code span naming one, and
+-  each prose word naming one in a namespace whose source the loaded commit holds, so the same text always cites
+-  the same names."
++  "The qualified symbols `text` cites, read by the one rule `references` resolves: each code span or prose word
++  naming one in a namespace the host knows (`host-namespace?`; an alias form is code), so the same text always
++  cites the same names, whatever a database holds."
+   {:malli/schema [:=> [:cat :string] [:set :qualified-symbol]]}
+   [text]
+-  (let [source (fs/source-directory)
+-        roots (set (.list (io/file source)))
+-        sourced? (fn [cited]
+-                  (let [stem (str/replace (munge (namespace cited)) "." "/")]
+-                    (some (fn [[root extension]] (.isFile (io/file source root (str stem extension))))
+-                          (for [root ["src" "test" "script"] extension [".clj" ".cljc"]] [root extension]))))]
++  (let [roots (set (.list (io/file (fs/source-directory))))]
+     (into #{} (comp (keep #(candidate roots nil %))
+-                    (filter (comp qualified-symbol? :seon.ref/name))
+-                    (keep (fn [{cited :seon.ref/name only :seon.ref/resolve-only}] (when (or (not only) (sourced? cited)) cited))))
++                    (keep :seon.ref/name)
++                    (filter qualified-symbol?)
++                    (filter (comp host-namespace? symbol namespace)))
+           (:seon.ref/spans (document text)))))
+ 
+ ;;; ---------------------------------------------------------------------------
+diff --git a/test/seon/ref_test.clj b/test/seon/ref_test.clj
+index 4e22e6716..dfc9dff19 100644
+--- a/test/seon/ref_test.clj
++++ b/test/seon/ref_test.clj
+@@ -158,6 +158,10 @@
+   (let [found (seon.ref/references (seon.db/db) {:seon.ref/text "Call `str/subs` and `m/validator`, not `seon.ref/references`."})]
+     (is (= ['seon.ref/references] (vec (keep :seon.ref/name found))))))
+ 
++(deftest the-names-a-text-cites-leave-out-an-alias-form
++  (is (= '#{seon.ref/section} (seon.ref/names "Call `str/subs` and `m/validator`, read `seon.ref/section`."))
++      "names reads the alias knowledge references does"))
++
+ (deftest a-library-name-resolves-where-its-alias-form-is-code
+   (let [found (seon.ref/references (seon.db/db) {:seon.ref/text "Alias `m/validator`, name `malli.core/validator`."})]
+     (is (= [['malli.core/validator nil]] (mapv (juxt :seon.ref/name :seon.ref/problem-kind) found)))))
+diff --git a/test/seon/task_test.clj b/test/seon/task_test.clj
+index 543ad1a61..37865cfd3 100644
+--- a/test/seon/task_test.clj
++++ b/test/seon/task_test.clj
+@@ -330,7 +330,7 @@
+   {:malli/schema [:=> [:cat :string :string] [:vector :string]]}
+   [goal own]
+   [(str "#:seon.task{:name \"subject\" :plan \"" goal "\" " (children ["prove" "implement"]) "}")
+-   "#:seon.task{:name \"prove\" :step :prove :instructions \"Add rows to `tq.tree-test/rows`.\"}"
++   "#:seon.task{:name \"prove\" :step :prove :instructions \"Add rows to `seon.task-test/rows`.\"}"
+    (str "#:seon.task{:name \"implement\" " (needs "prove") " :instructions \"Fix `tq.tree/scan`.\" " own "}")])
+ 
+ (deftest a-steps-effective-task-is-its-subjects-merged-with-its-own
+@@ -340,9 +340,9 @@
+      (let [content #(select-keys (task/effective (db/db connection) (handle %)) [:seon.task/plan :seon.task/instructions])]
+        (are [step expected] (= expected (content step))
+          "subject" {:seon.task/plan "Make `tq.tree/scan` idempotent."}
+-         "prove" {:seon.task/plan "Make `tq.tree/scan` idempotent." :seon.task/instructions "Add rows to `tq.tree-test/rows`."}
++         "prove" {:seon.task/plan "Make `tq.tree/scan` idempotent." :seon.task/instructions "Add rows to `seon.task-test/rows`."}
+          "implement" {:seon.task/plan "Only the body." :seon.task/instructions "Fix `tq.tree/scan`."})
+-       (is (= #{'tq.tree-test/rows}
++       (is (= #{'seon.task-test/rows}
+               (set (:seon.task/references (db/pull (db/db connection) [:seon.task/references] [:seon.task/id (handle "prove")]))))
+            "the writer derives references from the instructions too")
+        (apply ingest! connection (chain-entries "Make `tq.tree/scan` total." ""))
+@@ -455,7 +455,7 @@
+                        :seon.task/instructions "Check with `seon.task/template`." :seon.task/proofs '#{tq.link/proof}}])
+            owned (task/template (db/db connection) 'tq.link/template)
+            report (write! [(merge owned {:db/id -1 :seon.task/ns 'tq.link :seon.task/name "fix" :seon.task/next -2
+-                                         :seon.task/plan "Fix `seon.task/task-handle`." :seon.task/execution :running})
++                                         :seon.task/plan "Fix `seon.task/task-handle`, not `str/subs`; see `seon.ref/section`." :seon.task/execution :running})
+                            (merge owned {:db/id -2 :seon.task/ns 'tq.link :seon.task/name "fix-2" :seon.task/next -3})
+                            (merge owned {:db/id -3 :seon.task/ns 'tq.link :seon.task/name "fix-3"})])
+            database (db/db connection)
+@@ -472,7 +472,7 @@
+            "identity and symbol derive from ns and name")
+        (is (= [:running :held :held] (mapv (comp :seon.task/execution pulled) ["fix" "fix-2" "fix-3"]))
+            "a supplied execution stays; the rest take the default")
+-       (is (= ['#{seon.task/task-handle seon.task/template} '#{seon.task/template}]
++       (is (= ['#{seon.task/task-handle seon.ref/section seon.task/template} '#{seon.task/template}]
+               (mapv (comp set :seon.task/references pulled) ["fix" "fix-2"]))
+            "the writer derives each task's references from its plan and instructions")
+        (is (nil? (:seon.task/plan (pulled "fix-2"))) "a template carries no plan")

@@ -1,0 +1,197 @@
+diff --git a/src/seon/turn.clj b/src/seon/turn.clj
+index d60a07934..c3aad6648 100644
+--- a/src/seon/turn.clj
++++ b/src/seon/turn.clj
+@@ -2246,8 +2246,8 @@
+   `:resume` carries the ordinal the fold restarts at — the first form
+   ordinal with no terminal receipt — so a turn never recomputes it;
+   when no such ordinal remains the situation is `:close`. With no open
+-  turn, the `:open` arm needs a held assignment (`seon.task/agent-task`),
+-  read in its own world (its branch holds its attempt row);
++  turn, the `:open` arm needs a held assignment (`seon.task/agent-task`) of a task under execution :running,
++  read in its own world (its branch holds its attempt row): a :held task opens no model turn;
+   a held task whose intent is :running (db<->flow started the attempt) and
+   whose proofs have no run recorded on the agent's branch is `:prove` first
+   (`prove-turn`: proofs only, no model call), and a red first run is its work: the next pass
+@@ -2299,8 +2299,7 @@
+           (admission-closed? db agent-id) nil
+           (map? held) held
+           ;; A FRESH ATTEMPT OF A :running TASK PROVES FIRST: its proofs run on its branch
+-          ;; before any model call, and proofs already green end it with none (`prove-turn`);
+-          ;; a :held task root assigned by hand waits for its wakes as before
++          ;; before any model call, and proofs already green end it with none (`prove-turn`)
+           (and (string? held) (attempt-running? db held) (not (proof-run-recorded? db agent-id)))
+           {:seon.turn.work/situation :prove :seon.agent/id agent-id}
+           (and (map? deferred)
+@@ -2308,7 +2307,8 @@
+                (contains? deferred :seon.error/layer)
+                (contains? deferred :seon.error/operation))
+           deferred
+-          (string? held)
++          ;; A :held TASK OPENS NO MODEL TURN: its wakes wait until someone sets it :running
++          (and (string? held) (attempt-running? db held))
+           (when-not deferred
+             (let [wakes (unanswered-wakes db agent-id {})]
+               ;; a task whose proofs are all green continues nothing, before or after its end closes the agent
+diff --git a/test/seon/test_support.clj b/test/seon/test_support.clj
+index cf1994ecb..3a7cfa400 100644
+--- a/test/seon/test_support.clj
++++ b/test/seon/test_support.clj
+@@ -759,21 +759,37 @@
+             (vals @operator.runtime/running-instances))
+       (execution-handle connection)))
+ 
++(defn running!
++  "Set the task `handle` :running on `connection`, as root launches it, and return `handle`: only a :running
++  task's agent opens model turns."
++  {:malli/schema [:=> [:cat :seon.db/connection :seon.task/handle] :seon.task/handle]}
++  [connection handle]
++  (transacted! connection [[:db/add [:seon.task/id handle] :seon.task/execution :running]])
++  handle)
++
+ (defn assign-task!
+-  "Assign `agent-id` a task of its own whose proof has not run: a model turn needs an assignment."
++  "Assign `agent-id` a task of its own under execution :running and run its red proof on `connection`, as the
++  agent's first pass proves (`seon.turn/run-proofs`): a model turn needs an assignment of a :running task, and the
++  first wake's turn answers both the red proof and the wake."
+   {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id] :nil]}
+   [connection agent-id]
+   (let [slug (str/replace (str/lower-case agent-id) #"[^a-z0-9]+" "-")
+-        task-name (str "work-" slug)]
+-    (declare-proof! connection 'tq.assigned (symbol (str "proves-" slug)) (symbol "tq.assigned" task-name))
++        task-name (str "work-" slug)
++        proof (symbol "tq.assigned" (str "proves-" slug))]
++    (declare-proof! connection 'tq.assigned (symbol (name proof)) (symbol "tq.assigned" task-name))
+     (let [created (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.assigned
+                                  :seon.task/name task-name :seon.task/intent "Work."})]
++      (running! connection (:seon.task/id created))
+       (let [assigned (task/assign! {:seon.db/connection connection :seon.task/assigned (:seon.task/id created)
+                                     :seon.task/agent [:seon.agent/id agent-id]
+                                     :seon.task/branch (get-in (db/db connection) [:config :branch])
+                                     :seon.agent/context-source (context-source connection)})]
+         ;; a refused fixture write is surfaced, never left for the turn to miss
+         (when (:seon.error/at assigned) (throw (ex-info (:seon.error/message assigned) assigned))))
++      (let [proved (seon.test/run {:seon.test/execution (context-source connection)
++                                   :seon.test/recording-connection connection :seon.test/policy :named
++                                   :seon.test/identities #{proof} :seon.test/task (symbol "tq.assigned" task-name)})]
++        (when (:seon.error/at proved) (throw (ex-info (:seon.error/message proved) proved))))
+       nil)))
+ 
+ (defn running-cluster
+diff --git a/test/seon/turn_continue_test.clj b/test/seon/turn_continue_test.clj
+index 205411866..d3eba558f 100644
+--- a/test/seon/turn_continue_test.clj
++++ b/test/seon/turn_continue_test.clj
+@@ -260,8 +260,8 @@
+                              (:seon.cluster/name (support/execution-handle nil))]])
+   (agent-eval running agent-id (str "(ns " owner ") (defn area [r] r)"))
+   (agent-eval running agent-id (str "(in-ns '" owner ") (clojure.test/deftest ^{:seon/tasks #{'" owner "/area}} area-test (clojure.test/is (= 25 (" owner "/area 5))))"))
+-  (let [id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id
+-                                         :seon.task/ns owner :seon.task/name "area" :seon.task/intent "Square."}))
++  (let [id (support/running! connection (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id
++                                         :seon.task/ns owner :seon.task/name "area" :seon.task/intent "Square."})))
+         ledger (atom [])]
+     (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                    :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
+@@ -331,8 +331,8 @@
+            _ (agent-eval running "root" (str "(ns tq.endm) (defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                              "(clojure.test/deftest ^{:seon/tasks #{'tq.endm/area}} area-test (clojure.test/is (= 25 (area 5))))"))
+            {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.endm)")
+-           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
+-                                            :seon.task/ns 'tq.endm :seon.task/name "area" :seon.task/intent "Square."}))
++           id (support/running! connection (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
++                                            :seon.task/ns 'tq.endm :seon.task/name "area" :seon.task/intent "Square."})))
+            ledger (atom [])]
+        (is (keyword? branch) "the agent has a branch of its own")
+        (is (nil? (:seon.error/at (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+@@ -374,8 +374,8 @@
+                                            "(deftest identity-test (is (= 3 (area 3))))\n")
+                                       "test")
+            {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.endr)")
+-           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
+-                                            :seon.task/ns 'tq.endr :seon.task/name "area" :seon.task/intent "Square."}))]
++           id (support/running! connection (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
++                                            :seon.task/ns 'tq.endr :seon.task/name "area" :seon.task/intent "Square."})))]
+        (is (string? (:seon.task/assignment (task/assign! {:seon.agent/context-source (support/running-cluster running)
+                                                           :seon.db/connection connection :seon.task/assigned id
+                                                           :seon.task/agent [:seon.agent/id agent-id]
+@@ -411,8 +411,8 @@
+                                            "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                            "(deftest ^{:seon/tasks #{'tq.ends/area}} area-test (is (= 25 (area 5))))\n"))
+            {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.ends)")
+-           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
+-                                            :seon.task/ns 'tq.ends :seon.task/name "area" :seon.task/intent "Square."}))]
++           id (support/running! connection (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
++                                            :seon.task/ns 'tq.ends :seon.task/name "area" :seon.task/intent "Square."})))]
+        (is (string? (:seon.task/assignment (task/assign! {:seon.agent/context-source (support/running-cluster running)
+                                                           :seon.db/connection connection :seon.task/assigned id
+                                                           :seon.task/agent [:seon.agent/id agent-id]
+@@ -445,8 +445,8 @@
+      (agent-eval running agent-id (str "(ns tq.endo (:require [clojure.test :refer [deftest is]]))\n"
+                                        "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                        "(deftest ^{:seon/tasks #{'tq.endo/area}} area-test (is (= 25 (area 5))))"))
+-     (let [id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id
+-                                            :seon.task/ns 'tq.endo :seon.task/name "area" :seon.task/intent "Square."}))
++     (let [id (support/running! connection (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id
++                                            :seon.task/ns 'tq.endo :seon.task/name "area" :seon.task/intent "Square."})))
+            _ (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection
+                             :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id]
+                             :seon.task/branch (get-in (db/db connection) [:config :branch])})
+@@ -487,8 +487,8 @@
+            _ (is (= [[0 1]] (mapv (juxt :seon.test/pass-count :seon.test/fail-count) (:seon.test/results main-run)))
+                  "legacy-test is red on main before the change")
+            {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.endu)")
+-           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
+-                                            :seon.task/ns 'tq.endu :seon.task/name "area" :seon.task/intent "Square."}))]
++           id (support/running! connection (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
++                                            :seon.task/ns 'tq.endu :seon.task/name "area" :seon.task/intent "Square."})))]
+        (is (string? (:seon.task/assignment (task/assign! {:seon.agent/context-source (support/running-cluster running)
+                                                           :seon.db/connection connection :seon.task/assigned id
+                                                           :seon.task/agent [:seon.agent/id agent-id]
+diff --git a/test/seon/turn_test.clj b/test/seon/turn_test.clj
+index 606565d6f..f93ce4e17 100644
+--- a/test/seon/turn_test.clj
++++ b/test/seon/turn_test.clj
+@@ -2040,6 +2040,25 @@
+                        [:seon.task/assignment (id/id [h 1])]))
+            "the end names the task the work went back to, as a ref on the attempt")))))
+ 
++(deftest ^{:seon/tasks #{'seon.turn/a-held-task-opens-no-model-turn}} a-held-task-opens-no-model-turn
++  (support/with-database
++   (fn [connection]
++     (task/index-tasks! {:seon.db/connection connection
++                         :seon.task/files {"resources/seon/tasks/tq.holds.edn"
++                                           "[#:seon.task{:name \"a\" :intent \"Do a.\"}]"}})
++     (let [agent-id "tq-held-agent"
++           handle (task/task-handle 'tq.holds "a")]
++       (doseq [id ["root" agent-id]] (support/transacted! connection (support/agent-tx (db/db connection) id)))
++       (support/transacted! connection (task/attempt-tx (db/db connection) handle agent-id :tq-held))
++       (support/transacted! connection [{:seon.message/id "tq-held-wake" :seon.message/to [:seon.agent/id agent-id]
++                                         :seon.message/content "Work your task."}])
++       (is (= :held (task/execution (db/db connection) handle)) "a task nobody set :running is :held")
++       (is (nil? (turn/next-agent-work (db/db connection) {:seon.agent/id agent-id}))
++           "a :held task's wake opens no model turn")
++       (support/transacted! connection [[:db/add [:seon.task/id handle] :seon.task/execution :running]])
++       (is (= :open (:seon.turn.work/situation (turn/next-agent-work (db/db connection) {:seon.agent/id agent-id})))
++           "the same wake opens the model turn once the task runs")))))
++
+ (deftest a-fresh-attempt-of-a-task-naming-no-proof-is-work
+   (support/with-database
+    (fn [connection]
+diff --git a/test/seon/turn_work_test.clj b/test/seon/turn_work_test.clj
+index 7b317b4d3..cd7acef61 100644
+--- a/test/seon/turn_work_test.clj
++++ b/test/seon/turn_work_test.clj
+@@ -266,9 +266,10 @@
+ 
+ (def ^:private states
+   "Every state the derivation must answer, with its crash-walk entity."
+-  [{::label "idle: no trigger, no run"
++  [{::label "no trigger, no run: the running attempt's red proof run is its work"
+     ::build (fn [_connection] nil)
+-    ::expect nil}
++    ::expect {:seon.turn.work/situation :open
++              :seon.agent/id agent-id}}
+ 
+    {::label "entity 1 — trigger committed, nothing else (also the boot pass)"
+     ::build (fn [connection] (add-trigger! connection))

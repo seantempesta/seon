@@ -1,0 +1,120 @@
+diff --git a/docs/research/agent-platform/2026-10-12/agent-hangs.md b/docs/research/agent-platform/2026-10-12/agent-hangs.md
+index a01f941af..edf753bc3 100644
+--- a/docs/research/agent-platform/2026-10-12/agent-hangs.md
++++ b/docs/research/agent-platform/2026-10-12/agent-hangs.md
+@@ -23,7 +23,7 @@ cluster ... its branch holds 2 cluster config rows") and the loop never opens a
+ | `agent-test/n-agent-parallel-turns-property` | no assignment; agents without cluster | (a) converted; (c) twelve trials are proportional work: `:seon.test/long` 12,000 ms, measured 8,001 ms | 120,561 ms, red | 9,691 ms, green |
+ | `agent-test/wake-routing-conservation-property`, `routing-conservation-waits-for-terminal-evidence` (and their vacuity guard `routing-proof-rejects-an-empty-production-subject`) | see item R below | **deleted** with `routing-trial`, `create-generated-agent!` | 25,000 ms each | gone |
+ | `blob-publication-test/publication-and-collection-are-exclusive-in-both-orderings` | (c) `populate-published-root!` published the whole checkout (44,846 ms) and five `registry/collect!` marked it (about 3 s each) | fixture is a fresh file store holding only what collection reads: one synthetic digest attribute plus the program's own `:seon.blob/digest`, `:seon.config.db/validation-node-limit`, `:seon.config.db/write-time-limit-ms` declarations | 70,906 ms, red | 2,692 ms, green |
+-| `armed-test/a-message-committed-during-boot-start-is-conserved` | item A below | not converted; tagged with its task | 73,228 ms | unchanged |
++| `armed-test/a-message-committed-during-boot-start-is-conserved` | item A below | **deleted (owner)** | 73,228 ms | gone |
+ 
+ Same class, same file, fixed alongside: `stop-flow-has-a-declared-loud-turn-completion-backstop` (20,230 ms red →
+ 4,371 ms green, assigned), `wait-closes-in-terminal-tx-test` (20,168 ms red → 5,007 ms green, converted),
+@@ -33,23 +33,21 @@ check: 25 members, 38,080 ms, no member unfinished.
+ 
+ ## Remaining items (one short lane each)
+ 
+-**R. Routing tests: deletion to confirm.** `routing-trial`'s subject is db<->flow starting a created agent
++**R. Routing tests: deletion confirmed by the owner.** `routing-trial`'s subject is db<->flow starting a created agent
+ because it has a message (`seon.cluster.agent/agents-to-start`, creation as a `:seon.wake/starts` wake). Verified
+ by run: without an assignment the agent has no work (CX-2, 7e39aeed3); with a hand `:held` assignment
+ `next-agent-work` answers `:open` but `seon.cluster.agent/plan` (c15d1eace, R1 slice 2) plans `:start-flow` with
+ `:seon.task/execution :paused` for that attempt, and db<->flow took only its prime (one plan message, no started
+ graph). So no production path answers a newborn agent's message; M13 deletes the second starter. Message
+-conservation to started agents stays proven by `n-agent-parallel-turns-property`. **Question for root:** accept the
++conservation to started agents stays proven by `n-agent-parallel-turns-property`. **Owner:** deletion accepted. The question was: accept the
+ deletion (named commits 7e39aeed3, c15d1eace), or keep a version through `:running` task attempts, which would be a
+ db_flow_test case, not a routing one. Side finding: db<->flow in that fixture saw no wake after its prime although
+ `wake/route!` should offer `plan-channel` on `:seon.agent/id` assertion; not traced. File:
+ `test/seon/cluster/agent_test.clj` (already deleted in this commit).
+ 
+-**A. Armed boot-window message.** Task `seon.cluster.armed-test/a-boot-window-message-is-observed-as-a-delivered-wake`.
+-It awaits a model run root never opens (no assignment; a hand one is paused by `plan`); three `with-redefs`; its
+-fixture alone exceeds 5 s. What's left: assert the delivered wake instead, no redefinition. **Question:** is the
+-boot-window loss still a behavior once M13 removes `host/start!`'s start? File: `test/seon/cluster/armed_test.clj`.
+-Blocked on item P for its bound.
++**A. Armed boot-window message: deleted (owner).** `armed-test/a-message-committed-during-boot-start-is-conserved` and its
++task `seon.cluster.armed-test/a-boot-window-message-is-observed-as-a-delivered-wake` are gone (owner 2026-10-12:
++boot-window delivery is covered by deriving work from facts after boot).
+ 
+ **P. Published-root cost.** Task `seon.test-support/a-published-root-costs-a-template-clone-not-a-publication`:
+ `populate-published-root!` costs about 45 s per call, 19 callers; every armed-test member is over its bound before
+diff --git a/resources/seon/tasks/seon.cluster.armed-test.edn b/resources/seon/tasks/seon.cluster.armed-test.edn
+deleted file mode 100644
+index f67775f27..000000000
+--- a/resources/seon/tasks/seon.cluster.armed-test.edn
++++ /dev/null
+@@ -1,5 +0,0 @@
+-[#:seon.task{:name "a-boot-window-message-is-observed-as-a-delivered-wake"
+-             :kind :function
+-             :intent "`seon.cluster.armed-test/a-message-committed-during-boot-start-is-conserved` proves that a message committed while boot starts root's graph is not lost (the routing listener is registered before `seon.cluster.agent/start-flow!` returns). It observes conservation as a model run root opens for the message, which production no longer produces: root holds no assignment (`seon.turn/next-agent-work` opens no model turn without one, CX-2 7e39aeed3), and the hand assignment the test writes inside its redefined `start-flow!` is a :held attempt that `seon.cluster.agent/plan` starts paused. It waits the 20 s backstop for that run (body 67,533 ms in one check JVM, 2026-10-12, of which `seon.test-support/populate-published-root!` is about 45 s), and it redefines three Vars (`seon.turn/next-agent-work`, `seon.cluster.agent/start-flow!`, `seon.ai/complete`) in the shared JVM. Done when the test asserts the delivered wake (the message an unanswered trigger of root and root's mailbox delivery observed, `seon.turn/unanswered-triggers`) with no Var redefined, inside a bound its fixture can meet."
+-             :must-read #{seon.cluster.armed-test/a-message-committed-during-boot-start-is-conserved seon.cluster.boot/start! seon.cluster.agent/start-flow! seon.cluster.agent/plan seon.turn/next-agent-work seon.turn/unanswered-triggers seon.test-support/populate-published-root!}
+-             :evidence #{"docs/research/agent-platform/2026-10-12/agent-hangs.md"}}]
+diff --git a/test/seon/cluster/armed_test.clj b/test/seon/cluster/armed_test.clj
+index 94958f4fd..0253f5c22 100644
+--- a/test/seon/cluster/armed_test.clj
++++ b/test/seon/cluster/armed_test.clj
+@@ -246,62 +246,6 @@
+             (is (zero? @calls)
+                 "and nothing anywhere called the model")))))))
+ 
+-(deftest ^{:seon.test/fixture-observation "The observation is listener installation during real boot starting, which an already-populated branch never executes."
+-           :seon/tasks #{'seon.cluster.armed-test/a-boot-window-message-is-observed-as-a-delivered-wake}}
+-  a-message-committed-during-boot-start-is-conserved
+-  (let [name "arming-window"
+-        root (str "tmp/armed-test/" name)
+-        primed (CountDownLatch. 1)
+-        next-agent-work turn/next-agent-work
+-        start-flow! agent/start-flow!]
+-    (test-support/delete-recursively! root)
+-    (test-support/populate-published-root! root)
+-    (with-redefs
+-      [turn/next-agent-work
+-       (fn [& arguments]
+-         (let [result (apply next-agent-work arguments)]
+-           (.countDown primed)
+-           result))
+-       agent/start-flow!
+-       (fn [request]
+-         (let [entry (start-flow! request)]
+-           ;; This is the historical loss window: the start prime has
+-           ;; completed, then a message commits before start-flow! returns.
+-           ;; Boot must already have registered the routing listener.
+-           (test-support/await-event! primed "boot start prime")
+-           (test-support/assign-task! (:seon.db/connection (:seon.turn.loop/cluster request)) "root")
+-           (test-support/transacted!
+-                        (:seon.db/connection
+-                         (:seon.turn.loop/cluster request))
+-                        [{:seon.message/id "boot-window-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "answer during boot"}])
+-           entry))
+-       ai/complete
+-       (fn [_projection _request]
+-         {:seon.ai/text "(seon.run/complete \"answered\")"})]
+-      (let [instance (boot/start! {:seon.boot/cluster-name name
+-                                      :seon.boot/root root})]
+-        (try
+-          (let [run
+-                (await-fact
+-                 (:seon.boot/cluster-connection instance)
+-                 (fn [database]
+-                   (db/q
+-                    '[:find (pull ?run
+-                                  [:seon.turn/id
+-                                   {:seon.turn/trigger
+-                                    [:seon.message/id]}]) .
+-                      :in $ ?message-id
+-                      :where
+-                      [?message :seon.message/id ?message-id]
+-                      [?run :seon.turn/trigger ?message]]
+-                    database "boot-window-message")))]
+-            (is (= "boot-window-message"
+-                   (get-in run [:seon.turn/trigger
+-                                :seon.message/id]))
+-                "the committed message opened a run without a later wake"))
+-          (finally
+-            (boot/stop! instance)))))))
+-
+ ;;; ---------------------------------------------------------------------------
+ ;;; THE VISIBILITY PROPERTY — an escaped Throwable becomes facts
+ ;;; ---------------------------------------------------------------------------

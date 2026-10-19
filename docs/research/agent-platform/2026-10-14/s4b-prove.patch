@@ -1,0 +1,122 @@
+diff --git a/resources/seon/schemas/seon.step.prove.edn b/resources/seon/schemas/seon.step.prove.edn
+new file mode 100644
+index 000000000..bca2b0299
+--- /dev/null
++++ b/resources/seon/schemas/seon.step.prove.edn
+@@ -0,0 +1,5 @@
++#:seon.step.prove{:check [:enum {:description "The handoff check a Prove step failed (TASK-CHAIN section 4): no proofs on the next task, a proof that is no deftest, a proof not red by design, a changed or cited function no proof reaches."}
++                          :no-proofs :not-a-deftest :not-designed-red :unreached]
++                  :refusal [:and {:description "One failed Prove handoff check, naming what failed it."} :seon.error/base
++                            [:map [:seon.step.prove/check :seon.step.prove/check]
++                             [:seon.error/offending {:optional true} :seon.schema/value]]]}
+diff --git a/src/seon/step/prove.clj b/src/seon/step/prove.clj
+new file mode 100644
+index 000000000..3762b6023
+--- /dev/null
++++ b/src/seon/step/prove.clj
+@@ -0,0 +1,35 @@
++(ns seon.step.prove
++  "The Prove stage's handoff (`docs/seon/schedule/cards/TASK-CHAIN.md#prove-seonstepprovetemplate`)."
++  (:require [seon.db :as db]
++            [seon.error.refusal :as refusal]
++            [seon.fn :as fn]
++            [seon.step :as step]
++            [seon.test.runner :as runner]))
++
++(defn- refuse
++  "The `:seon.step.prove/refusal` of the failed `check`, naming what failed it."
++  {:malli/schema [:=> [:cat :seon.step.prove/check :seon.schema/value] :seon.step.prove/refusal]}
++  [check offending]
++  (refusal/error :seon.step.prove/refusal
++                 {:seon.error/operation 'seon.step.prove/handoff :seon.step.prove/check check
++                  :seon.error/message "A Prove step's handoff check failed." :seon.error/offending offending}))
++
++(defn handoff
++  "Each failed check of Prove `task` on `database`, as a `:seon.step.prove/refusal`; empty when satisfied.
++  Checks its next task's proofs: `:no-proofs`, `:not-a-deftest`, `:not-designed-red`, and `:unreached` for a
++  changed or Approach-cited function none reaches."
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/task] :seon.source/refusals]}
++  [database task]
++  (let [proofs (vec (sort (:seon.task/proofs (some->> (:seon.task/next task) (db/pull database [:seon.task/proofs])))))]
++    (if (empty? proofs)
++      [(refuse :no-proofs (:seon.task/sym task))]
++      (let [tests (filterv #(step/deftest? database %) proofs)
++            results (step/results database tests)
++            not-red (vec (remove #(some-> (get results %) runner/designed-red?) tests))
++            approach (get (step/sections (:seon.task/plan task "")) "approach" "")
++            targets (into (step/changed database :seon.fn/sym) (step/cited-fns database approach))
++            unreached (vec (sort (remove #(some (set proofs) (fn/tests-reaching database %)) targets)))]
++        (cond-> []
++          (not= (count tests) (count proofs)) (conj (refuse :not-a-deftest (vec (remove (set tests) proofs))))
++          (seq not-red) (conj (refuse :not-designed-red not-red))
++          (seq unreached) (conj (refuse :unreached unreached)))))))
+diff --git a/test/seon/step/prove_test.clj b/test/seon/step/prove_test.clj
+new file mode 100644
+index 000000000..7cde8145e
+--- /dev/null
++++ b/test/seon/step/prove_test.clj
+@@ -0,0 +1,64 @@
++(ns seon.step.prove-test
++  "The Prove stage's handoff (`docs/seon/schedule/cards/TASK-CHAIN.md#prove-seonstepprovetemplate`)."
++  (:require [clojure.test :refer [deftest is]]
++            [seon.db :as db]
++            [seon.step.prove :as sut]
++            [seon.test]
++            [seon.test-support :as test-support]))
++
++(def ^:private source
++  (str "(ns tq.prv (:require [clojure.test :refer [deftest is]]))\n"
++       "(defn producer {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))\n"
++       "(defn other {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
++       "(deftest assertion-red (is (= 3 (producer 1))))\n"
++       "(deftest body-error (is (= 1 (producer \"x\"))))\n"
++       "(deftest green (is (= 2 (producer 1))))\n"
++       "(deftest unreaching-red (is (= 1 2)))\n"
++       "(deftest never-run (is (= 1 (producer 0))))\n"))
++
++(def ^:private approach "## Approach\n\nChange `tq.prv/producer`.")
++
++(def ^:private rows
++  "Row name, the plan's text, the successor's proofs (nil: no successor) and the exact refusals: each check with what it names."
++  [["no successor" approach nil [[:no-proofs 'tq.prv/r1]]]
++   ["empty proofs" approach #{} [[:no-proofs 'tq.prv/r2]]]
++   ["not a deftest" approach '#{tq.prv/no-such-test} [[:not-a-deftest '[tq.prv/no-such-test]]
++                                                      [:unreached '[tq.prv/producer]]]]
++   ["a green proof" approach '#{tq.prv/green} [[:not-designed-red '[tq.prv/green]]]]
++   ["a proof never run" approach '#{tq.prv/never-run} [[:not-designed-red '[tq.prv/never-run]]
++                                                       [:unreached '[tq.prv/producer]]]]
++   ["assertion red reaching the producer" approach '#{tq.prv/assertion-red} []]
++   ["body error from the code under test" approach '#{tq.prv/body-error} []]
++   ["red reaching nothing" approach '#{tq.prv/unreaching-red} [[:unreached '[tq.prv/producer]]]]
++   ["a cited function no proof reaches" "## Approach\n\nChange `tq.prv/other`." '#{tq.prv/assertion-red}
++    [[:unreached '[tq.prv/other]]]]
++   ["every failed check is reported" "## Approach\n\nChange `tq.prv/other`." '#{tq.prv/green}
++    [[:not-designed-red '[tq.prv/green]] [:unreached '[tq.prv/other]]]]])
++
++(defn- chain
++  "The task maps of row number `i`: the Prove task `tq.prv/r<i>` and, when the row has proofs, its successor."
++  {:malli/schema [:=> [:cat :int :string [:maybe :string] [:maybe [:set :symbol]]] [:vector :map]]}
++  [i _ plan proofs]
++  (let [id (- (* 2 i)) handle (str "r" i)]
++    (cond-> [(cond-> {:db/id id :seon.task/ns 'tq.prv :seon.task/name handle :seon.task/plan plan}
++               proofs (assoc :seon.task/next (dec id)))]
++      proofs (conj (cond-> {:db/id (dec id) :seon.task/ns 'tq.prv :seon.task/name (str handle "-next")}
++                     (seq proofs) (assoc :seon.task/proofs proofs))))))
++
++(deftest handoff
++  (test-support/with-database
++   (fn [connection]
++     (test-support/declare-source! connection 'tq.prv source)
++     (seon.test/run {:seon.test/execution (test-support/execution-handle connection)
++                     :seon.test/recording-connection connection
++                     :seon.test/policy :named :seon.test/rerun? true
++                     :seon.test/identities '#{tq.prv/assertion-red tq.prv/body-error tq.prv/green tq.prv/unreaching-red}})
++     (let [numbered (map-indexed (fn [i row] (into [(inc i)] row)) rows)
++           input (partial test-support/task-input connection)
++           _ (input (into [] (mapcat (fn [[i n plan proofs]] (chain i n plan proofs))) numbered) 'tq.prv/r1)]
++       (doseq [[i row-name _ _ expected] numbered
++               :let [{task :seon.test/task database :seon.test/branch} (input [] (symbol "tq.prv" (str "r" i)))]]
++         (is (= expected (mapv (juxt :seon.step.prove/check :seon.error/offending) (sut/handoff database task))) row-name)))))
++  ;; (b) the task the runner supplies, when it supplies one
++  (when-let [{task :seon.test/task branch :seon.test/branch} (seon.test/task)]
++    (is (= [] (sut/handoff branch task)) "the task the runner supplies satisfies its own handoff")))

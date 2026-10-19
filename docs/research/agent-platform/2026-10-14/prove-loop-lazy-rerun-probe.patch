@@ -1,0 +1,54 @@
+diff --git a/test/seon/test_test.clj b/test/seon/test_test.clj
+index eaaa47b28..499120602 100644
+--- a/test/seon/test_test.clj
++++ b/test/seon/test_test.clj
+@@ -6,6 +6,7 @@
+             [seon.batch]
+             [seon.cluster.agent :as cluster.agent]
+             [seon.cluster.registry :as registry]
++            [seon.cluster.store :as cluster.store]
+             [seon.db :as db]
+             [seon.mcp]
+             [seon.task]
+@@ -644,3 +645,41 @@
+        (is (not-any? #(get-in tests [% :seon.turn.loop/test-error]) [:seon.turn.loop/branch :seon.turn.loop/reaching :seon.turn.loop/proofs])
+            "the step makes no selection error")
+        (is (= [1] (mapv :seon.test/pass-count results)) "the task's proof ran and is recorded")))))
++
++(deftest a-rerun-interprets-a-lazy-member-in-its-own-request
++  ;; S5 run 7: a proof whose body called a branch-interpreted function ran green once, then every later request in
++  ;; the same agent context threw a NullPointerException in `seon.sci.eval/lazy-root`
++  (test-support/with-database
++   (fn [connection]
++     (let [handle (test-support/execution-handle connection)
++           store (:seon.store/store handle)
++           branch (keyword (str "lazy-rerun-" (id/id)))
++           cited [:seon.fn/sym 'seon.id/id]
++           platform-doc (:seon.fn/doc (db/pull (db/db connection) [:seon.fn/doc] cited))
++           revise! #(test-support/transacted! connection [(test-support/revision (db/db connection) cited {:seon.fn/doc %})])
++           _ (revise! "Main's row before the fork.")
++           request {:seon.store/store store :seon.store/branch branch
++                    :seon.cluster.registry/from (db/commit-id (db/db connection)) :seon.db/db (db/db connection)}]
++       (is (:seon.cluster/created? (registry/fork! request)))
++       (try
++         (revise! platform-doc)
++         (let [fork (cluster.store/open-branch! store branch)]
++           (try
++             (test-support/declare-source!
++              fork 'tq.lazyrerun
++              (str "(ns tq.lazyrerun (:require [clojure.test :refer [deftest is]] [seon.id :as id]))\n"
++                   "(defn one \"One.\" {:malli/schema [:=> [:cat] :int]} [] (count (str (id/id 1))))\n"
++                   "(deftest calls-one (is (pos? (one))))\n"))
++             (finally (cluster.store/release-branch! fork))))
++         (let [attempt (cluster.agent/acquire-context! handle nil {:seon.agent/branch branch})
++               conn (:seon.db/connection attempt)
++               run-once #(db/with-branch {:seon.db/connection conn}
++                           (fn [] (sut/run {:seon.test/execution (assoc attempt :seon.agent/id "lazy-rerun")
++                                            :seon.test/recording-connection conn :seon.test/policy :named
++                                            :seon.test/identities #{'tq.lazyrerun/calls-one} :seon.test/rerun? true})))
++               outcome #(mapv (juxt :seon.test/pass-count :seon.test/error-count) (:seon.test/results %))]
++           (try
++             (is (= [[1 0]] (outcome (run-once))) "the first request interprets the member it calls")
++             (is (= [[1 0]] (outcome (run-once))) "a second request in the same context interprets it again")
++             (finally (cluster.agent/release-context! attempt))))
++         (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch]))))))))

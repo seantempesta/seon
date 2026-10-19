@@ -1,0 +1,11 @@
+seon.test world: derive a changed program from the execution's by delta (overlay phase 2)
+
+Applies docs/research/agent-platform/2026-10-14/overlay-phase2-seon-test.patch
+(lane overlay-impl, after 46c8540f8) for root: clean-request-handle's
+sci.eval/base-ctx call passes the execution context's program content key as
+:seon.sci.eval/predecessor, so a test world deriving a changed program first
+derives the delta from the predecessor instead of the whole plan from the
+loaded base. No timing measured in this commit; overlay-impl owns the cost
+evidence.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

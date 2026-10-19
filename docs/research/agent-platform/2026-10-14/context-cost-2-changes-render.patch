@@ -1,0 +1,119 @@
+diff --git a/resources/seon/schemas/seon.context.edn b/resources/seon/schemas/seon.context.edn
+index aa522ddf7..814fe37af 100644
+--- a/resources/seon/schemas/seon.context.edn
++++ b/resources/seon/schemas/seon.context.edn
+@@ -38,7 +38,18 @@
+                          [:seon.context/last-step {:optional true} :seon.context/last-step]]
+                :last-step [:string {:min 1 :description "The last step an earlier attempt's agent took: its last my.turn/wait note, else the prose it wrote with its last form, else that form's source. Producer: seon.context/last-step."}]
+                :attempts [:vector {:description "The held task's attempts by other agents, by number; absent when none. Producer: seon.context/earlier-attempts."} :seon.context/attempt]
+-               :changes [:and {:description "Every declaration the agent's branch changed since its task's merge base, by family, each name one level with the form that reads it (seon.context/by-family): its earlier attempts' work and its own scratch, each a name to keep or to remove (my.program/ns-unmap!). Absent when nothing changed."} :seon.context/merged]
++               :changes [:map {:description "Every declaration the agent's branch changed since its task's merge base, by family, each by its name and the form that reads it (seon.context/branch-changes): its earlier attempts' work and its own scratch, each a name to keep or to remove (my.program/ns-unmap!); a function no test reaches says so; a declaration the branch removed is named under :seon.context/removed. Absent when nothing changed."}
++                         [:seon.context/functions {:optional true} [:vector :seon.context/changed]]
++                         [:seon.context/schemas {:optional true} [:vector :seon.context/changed]]
++                         [:seon.context/tests {:optional true} [:vector :seon.context/changed]]
++                         [:seon.context/tasks {:optional true} [:vector :seon.context/changed]]
++                         [:seon.context/removed {:optional true} :seon.context/removed]]
++               :changed [:map {:description "One declaration the branch changed: its name and the form that reads it, and for a function no test reaches, :seon.context/reached-by-no-test with the form that removes it. Producer: seon.context/branch-changes."}
++                         [:seon.ref/name :seon.ref/name]
++                         [:seon.context/reached-by-no-test {:optional true} :seon.context/reached-by-no-test]
++                         [:seon.render/operations [:vector {:min 1} :seon.render/read-form]]]
++               :reached-by-no-test [:= {:description "Present on a changed function no test of the branch reaches (seon.test.runner/tests-reaching): keep it by giving it a test, or remove it."} true]
++               :removed [:vector {:description "The declarations the branch removed since its merge base, by name."} [:map [:seon.ref/name :seon.ref/name]]]
+                :turns
+                [:map {:description "Model calls left against the current wake and the held task's status."}
+                 [:my.agent/turns-left :my.agent/turns-left]
+diff --git a/src/seon/context.clj b/src/seon/context.clj
+index f91cfb2fa..93510ab1e 100644
+--- a/src/seon/context.clj
++++ b/src/seon/context.clj
+@@ -206,6 +206,31 @@
+                       {} (sort-by (comp str second) identities))]
+     (or (some #(when (:seon.error/at %) %) (mapcat val shown)) shown)))
+ 
++(defn- branch-changes
++  "The declaration `identities` the branch changed since its merge base, shown on `database` by family in name order,
++  each by its name and the form that reads it; a function no test of the branch reaches
++  (`seon.test.runner/tests-reaching` over the branch's tests' reach graph) says so, with the form that removes it;
++  a declaration the branch removed is named under `:seon.context/removed`. Families are absent when empty."
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set] [:or :seon.context/changes :seon.error/value]]}
++  [database identities]
++  (let [tests (db/q '[:find [?s ...] :where [_ :seon.test/sym ?s]] database)
++        entry (fn [[attribute value]]
++                (let [read-form (list 'my.program/source (if (keyword? value) value (list 'quote value)))
++                      reaching (when (= :seon.fn/sym attribute) (runner/tests-reaching database (vec (sort tests)) value))]
++                  (cond (:seon.error/at reaching) reaching
++                        (and (set? reaching) (empty? reaching))
++                        {:seon.ref/name value :seon.context/reached-by-no-test true
++                         :seon.render/operations [read-form (list 'my.program/ns-unmap! (list 'quote value))]}
++                        :else {:seon.ref/name value :seon.render/operations [read-form]})))
++        shown (reduce (fn [shown [attribute value :as identity]]
++                        (if-let [family (merged-families attribute)]
++                          (if (seq (db/datoms database :avet attribute value))
++                            (update shown family (fnil conj []) (entry identity))
++                            (update shown :seon.context/removed (fnil conj []) {:seon.ref/name value}))
++                          shown))
++                      {} (sort-by (comp str second) identities))]
++    (or (when (:seon.error/at tests) tests) (some #(when (:seon.error/at %) %) (mapcat val shown)) shown)))
++
+ (defn- merged
+   "What main's merge `commit` moved (`seon.cluster.source/merge-accepted`), shown on `database` by family
+   (`by-family`)."
+@@ -674,7 +699,7 @@
+   handle, symbol, goal and its step's instructions; the chain it is a step of (`chain`); its
+   proofs, each placed once with its resolution (its source) beside its status; its step; the latest send-back;
+   the task's earlier attempts, one entry each (`earlier-attempts`); every declaration the branch changed since its
+-  merge base, by family, each name with the form that reads it (`by-family`), so a rerun sees its earlier work and
++  merge base, by family, each name with the form that reads it (`branch-changes`), so a rerun sees its earlier work and
+   its scratch; and every other reference it makes, resolved on the attempt's starting value (`must-reads`). Empty when
+   it holds none.
+ 
+@@ -694,7 +719,7 @@
+             steps (chain database (:seon.task/id held))
+             earlier (earlier-attempts database (:seon.task/id held) agent-id)
+             changes (when (and verdict (not (:seon.error/at verdict)) (seq (:seon.program/identities verdict)))
+-                      (by-family database (:seon.program/identities verdict)))
++                      (branch-changes database (:seon.program/identities verdict)))
+             proof-names (into #{} (map :seon.test/sym) (:seon.context/proof-list proven))
+             reads (when-not (:seon.error/at proven) (ref/references database {:seon.ref/text "" :seon.ref/names proof-names}))
+             resolution (into {} (keep #(when (proof-names (:seon.ref/name %)) [(:seon.ref/name %) %])) reads)
+diff --git a/test/seon/context_test.clj b/test/seon/context_test.clj
+index 7f8971a5e..f6cb697db 100644
+--- a/test/seon/context_test.clj
++++ b/test/seon/context_test.clj
+@@ -822,6 +822,7 @@
+            _ (test-support/declare-source! connection 'tq.ra
+                                            (str "(ns tq.ra (:require [clojure.test :refer [deftest is]]))\n"
+                                                 "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
++                                                "(defn spare \"Unused.\" {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                                 "(deftest area-test (is (= 25 (area 5))))\n")
+                                            "test")
+            [first-task] (linked-chain! connection [{:seon.task/ns 'tq.ra :seon.task/name "implement" :seon.task/plan "Square."
+@@ -844,16 +845,24 @@
+            second-attempt (assign! agent-id)]
+        (is (= [nil nil] (mapv :seon.error/type [first-attempt second-attempt])) "both attempts are assigned")
+        (evaluate running agent-id (str "(in-ns 'tq.ra)\n(defn squared {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))\n"
+-                                       "(def scratch 1)"))
++                                       "(def scratch 1)\n(my.program/ns-unmap! 'tq.ra/spare)"))
+        (let [state (block running agent-id)
+-             changed (into #{} (comp (mapcat val) (map :seon.ref/name)) (:seon.context/changes state))]
++             changes (:seon.context/changes state)
++             changed (into #{} (comp (mapcat val) (map :seon.ref/name)) (dissoc changes :seon.context/removed))
++             squared (some #(when (= 'tq.ra/squared (:seon.ref/name %)) %) (:seon.context/functions changes))]
+          (is (= [{:seon.task.attempt/number 1 :seon.task.attempt/end :capped :seon.task/outcome :closed
+                   :seon.task/reason "The attempt ended :capped." :seon.task/calls 0}]
+                 (:seon.context/attempts state))
+              "the earlier attempt, one entry: its number, end, outcome, reason and model calls")
+          (is (every? changed ['tq.ra/squared 'tq.ra/scratch]) "the branch's new definitions, scratch included")
+-         (is (every? #(seq (:seon.render/operations %)) (mapcat val (:seon.context/changes state)))
+-             "each with the form that reads it"))
++         (is (every? #(seq (:seon.render/operations %)) (mapcat val (dissoc changes :seon.context/removed)))
++             "each with the form that reads it")
++         (is (= [{:seon.ref/name 'tq.ra/spare}] (:seon.context/removed changes))
++             "a declaration the branch removed is named as removed, never as an unresolved problem")
++         (is (= {:seon.ref/name 'tq.ra/squared :seon.context/reached-by-no-test true
++                 :seon.render/operations ['(my.program/source 'tq.ra/squared) '(my.program/ns-unmap! 'tq.ra/squared)]}
++                squared)
++             "a function no test reaches says so, with the form that removes it, and no doc echo"))
+        ;; a later attempt's block shows this one's last step: the note of the wait it ended its turn with
+        (evaluate running agent-id "(my.turn/wait {:my.turn/note \"Stopped at the cycle probe.\"})")
+        (is (= "Stopped at the cycle probe." (#'context/last-step (db/db target) agent-id))

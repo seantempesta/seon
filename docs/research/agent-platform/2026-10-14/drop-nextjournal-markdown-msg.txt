@@ -1,0 +1,7 @@
+Drop the unused io.github.nextjournal/markdown dependency
+
+Nothing in src, test, script, resources or bin requires it. First dependency
+change committed through `bin/lane commit --restart-batch` with the throwaway
+check booting the candidate's own classpath (e748f08c2).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>

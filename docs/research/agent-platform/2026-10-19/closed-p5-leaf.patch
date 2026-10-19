@@ -1,0 +1,1065 @@
+diff --git a/docs/research/agent-platform/2026-10-19/closed-runtime-hybrid.md b/docs/research/agent-platform/2026-10-19/closed-runtime-hybrid.md
+index c5c7749ce..d8ab5a5e7 100644
+--- a/docs/research/agent-platform/2026-10-19/closed-runtime-hybrid.md
++++ b/docs/research/agent-platform/2026-10-19/closed-runtime-hybrid.md
+@@ -7,7 +7,8 @@ created: 2026-10-19
+ 
+ Phase status: P0 landed (`seon.sci.open-derivers-test`, `seon.cost-estimate-test/closed-runtime-rows-grow-past-no-accepted-overrun`);
+ P2, P3b landed; P1 landed (lane closed-p1, the leaf design); P3a split: P3a-1 landed (lane closed-p3a1b: the order leaf and the
+-digest move; the fallback deletion moves to P4b, option c), P3a-2 scheduled with P4b; P4a in flight (lane P4a); P4b, P5, P6a, P6b, P7, P8 not started.
++digest move; the fallback deletion moves to P4b, option c), P3a-2 scheduled with P4b; P4a in flight (lane P4a); P5 landed (lane closed-p5: the loaded-identity place moved to
++the leaf `seon.loaded`, the scan and `projection-builder` deleted, corrections in P5 below); P4b, P6a, P6b, P7, P8 not started.
+ 
+ # Closed runtime: the hybrid
+ 
+@@ -459,6 +460,21 @@ Unchanged; the narrow check passed it. `seon.error.refusal` stays babashka-loada
+ - Ratchet: unchanged. Cost: warm key selection < 1 ms, < 0.05 MB; saves a `find-ns` pair and the scan per read.
+ - Deletes: `projection-builder` (15), `loaded-builder`'s instance scan (~30 of 65), the scan in
+   `connection-projection-state` (~12 of 16). After P1 (both `seon.db`).
++- As landed (lane closed-p5), corrections. Census at `bf54c1179`: `d/connect` 5 sites in `src` (`seon.cluster.store` 4,
++  `seon.db` 1) and 20 in `test`; `d/create-database` 2 in `src` and 15 in `test`; the store constructors have ~150
++  callers. None of them was converted: (a) the instance scan supplied the state of the one connection that needed it,
++  the cluster connection, which nothing carried (measured on default); boot now carries its state there after its
++  environment replacement, which also copies the two new members. (b) A value with no state (a store connection, a
++  writer's transaction value, a bare test connection) reads the JVM's loaded program through a static reference:
++  `seon.sci.eval/loaded-identity` moved to the leaf `seon.loaded/loaded-identity`, which `seon.db`, `seon.sci.eval`
++  and `seon.test.runner` require (its `requiring-resolve` deleted); a state's `:seon.sci.eval/loaded-identity` names
++  the place, defaulting to the JVM's. Keying a bare value by its own builder instead exposed a defect fixed in the
++  same commit: `seon.schema/load-projection` from an empty base read the function-contract range on a store that
++  never installed `:seon.fn/spec` and refused ("Bad entity attribute"), so "any base gives the same result" failed;
++  an uninstalled range now declares nothing (`seon.schema-test/a-store-without-function-attributes-loads-its-schema-rows`).
++  (c) `content-projection` branches on whether its caller hands `[before base written]` (`advanced-derivation`, else
++  `based-derivation` from the nearest base), not on `kind`: `speculative-projection` derives `::value-projection`
++  from the nearest base too. On a miss the advance is computed again inside the deriver.
+ 
+ ### P6a. Delete `register-core-predicate!` (ordinary sweep, its own commit)
+ 
+diff --git a/docs/seon/issues/an-evaluation-that-overlaps-a-reload-is-not-detected.md b/docs/seon/issues/an-evaluation-that-overlaps-a-reload-is-not-detected.md
+index 1e5fc88dd..9c1d21222 100644
+--- a/docs/seon/issues/an-evaluation-that-overlaps-a-reload-is-not-detected.md
++++ b/docs/seon/issues/an-evaluation-that-overlaps-a-reload-is-not-detected.md
+@@ -12,7 +12,7 @@ tags: [issue, sci, reload, agent, adoption]
+ 
+ - AGENTS ("One JVM, many realities") requires that work overlapping a reload detects it, comparing the loaded program
+   identity at start and at end, and pushes back.
+-- `seon.sci.eval/loaded-identity` is read by the test runner (`src/seon/test.clj:947`, `:1153`, `:2053`, `:2183`),
++- `seon.loaded/loaded-identity` is read by the test runner (`src/seon/test.clj:947`, `:1153`, `:2053`, `:2183`),
+   by `seon.db`'s builder (`src/seon/db.clj:1545`) and by cluster readiness (`src/seon/cluster.clj:625`). No
+   evaluation path reads it. A run through `seon.cluster.agent/evaluate-source!`, or a hosted branch run, compares
+   nothing across its evaluation.
+diff --git a/docs/seon/issues/the-running-instance-and-loaded-identity-disagree-on-the-loaded-program.md b/docs/seon/issues/the-running-instance-and-loaded-identity-disagree-on-the-loaded-program.md
+index f4181197c..210a151c1 100644
+--- a/docs/seon/issues/the-running-instance-and-loaded-identity-disagree-on-the-loaded-program.md
++++ b/docs/seon/issues/the-running-instance-and-loaded-identity-disagree-on-the-loaded-program.md
+@@ -13,7 +13,7 @@ tags: [issue, adoption, identity, boot, class/n3]
+ | Place | Value |
+ |---|---|
+ | `(:seon.source/commit-id (get @seon.operator.runtime/running-instances "default"))` | `6ab710a0-8e4e-595b-8bcd-0757573ccf16` |
+-| `@seon.sci.eval/loaded-identity` | `{:seon.source/commit-id #uuid "6ab714b1-dabb-5427-85eb-60ceddec3173"}` |
++| `@seon.loaded/loaded-identity` | `{:seon.source/commit-id #uuid "6ab714b1-dabb-5427-85eb-60ceddec3173"}` |
+ 
+ The instance value is built once by `seon.cluster.boot/start!`, so its commit id is the boot commit. `loaded-identity`
+ (`src/seon/sci/eval.clj:1366`) is advanced by development adoption (`advance-loaded-identity!`) and gates every
+diff --git a/resources/seon/schemas/seon.env.edn b/resources/seon/schemas/seon.env.edn
+index 3da2ae322..37e74949f 100644
+--- a/resources/seon/schemas/seon.env.edn
++++ b/resources/seon/schemas/seon.env.edn
+@@ -49,6 +49,15 @@
+                :seon.env/layer :facts,
+                :seon.env/boot :required}
+               :seon.sci.admit/caps]
++             ;; The program the cluster booted and the JVM's loaded-program place
++             ;; (`seon.sci.eval/projection-state` writes both): the projection
++             ;; builder (`seon.db/loaded-builder`) reads them here.
++             [:seon.source/commit-id
++              {:optional true, :seon.env/layer :facts}
++              :seon.source/commit-id]
++             [:seon.sci.eval/loaded-identity
++              {:optional true, :seon.env/layer :facts}
++              :seon.sci.eval/loaded-identity]
+              ;; PRD ruling 9: the read-evidence sink rides the environment as
+              ;; an OPTIONAL declared member. The db read path offers evidence
+              ;; to it when present; boot never requires one.
+diff --git a/resources/seon/tasks/seon.cluster.edn b/resources/seon/tasks/seon.cluster.edn
+index b407911ce..2f253f826 100644
+--- a/resources/seon/tasks/seon.cluster.edn
++++ b/resources/seon/tasks/seon.cluster.edn
+@@ -7,7 +7,7 @@
+  #:seon.task{:name "boot-publication-phases-are-invisible"
+              :plan "A boot resume publication runs before arm-host-program!, so no profile cell observes it and refresh-source!'s explain-slow says nothing; *source-progress!* is bound nowhere (report-source-progress! is a no-op outside tests), so its phase lines vanish. The 132 s store->branch layer of the e405f51be boot could only be split by replaying the publication on a scratch branch (tmp/perf-boot-opus/replay.clj). Carry the boot publication's phase milliseconds in its result and the instance's readiness. Still true 2026-10-07: the 44.5 s `:seon.source/current` layer of the 108dd1c3e boot has no profile cell; seon.log has two lines for the whole boot. Read `seon.cluster/populate-source!`, `seon.cluster/refresh-source!` and `docs/research/agent-platform/landing/perf-boot-opus-2026-09-26.md`."}
+  #:seon.task{:name "a-test-adoption-moves-the-jvms-loaded-identity"
+-             :plan "`seon.sci.eval/loaded-identity` is one process-wide atom, and call-with-program-change (from development-source-refresh!) advances it to the commit the adopting store published. A test that boots a cluster on its own root and store and adopts there (seon.adoption-contract-freshness-test calls refresh-source! with a development cluster) therefore renames the JVM's loaded program after a commit of another store, and later test requests' `seon.test/arm-first-loads!` open that commit through `seon.cluster.source/database`. That is JVM-global test state (CLAUDE.md). Unconfirmed instance: shrink-test saw requests at 18:20:59 and 18:24:08 CST open 6ab855c9 (default's 17:31 publication) through that path although the cluster record named 6ab86150; the note attributes them to pid 50733, which started only at 18:26:24 CST, so they ran on the JVM before it. Key the loaded identity by the store whose program the JVM loaded, and never let an adoption on another store move it. Read `seon.cluster/development-source-refresh!` and `docs/research/agent-platform/landing/perf-boot-opus-2026-09-26.md`."}
++             :plan "`seon.loaded/loaded-identity` is one process-wide atom, and call-with-program-change (from development-source-refresh!) advances it to the commit the adopting store published. A test that boots a cluster on its own root and store and adopts there (seon.adoption-contract-freshness-test calls refresh-source! with a development cluster) therefore renames the JVM's loaded program after a commit of another store, and later test requests' `seon.test/arm-first-loads!` open that commit through `seon.cluster.source/database`. That is JVM-global test state (CLAUDE.md). Unconfirmed instance: shrink-test saw requests at 18:20:59 and 18:24:08 CST open 6ab855c9 (default's 17:31 publication) through that path although the cluster record named 6ab86150; the note attributes them to pid 50733, which started only at 18:26:24 CST, so they ran on the JVM before it. Key the loaded identity by the store whose program the JVM loaded, and never let an adoption on another store move it. Read `seon.cluster/development-source-refresh!` and `docs/research/agent-platform/landing/perf-boot-opus-2026-09-26.md`."}
+  #:seon.task{:name "incremental-publication-test-redefines-process-wide-vars"
+              :plan "`seon.incremental-publication-test/non-program-inputs-have-their-own-publication-owner` points publication at a fixture checkout with with-redefs-fn over clojure.java.io/resource and `seon.cluster/publication-roots`. Both are Var roots, so every thread of the shared JVM (default's agents, other test members) reads the fixture's schemas and roots while it runs. Give refresh-source! a source seam (publication roots and the schema resource directory passed as values) so the test hands its checkout, or declare the test isolated until then. Read `seon.cluster/refresh-source!` and `test/seon/incremental_publication_test.clj`."}
+  #:seon.task{:name "schema-adoption-refuses-instead-of-dropping-an-edn-encoded-value"
+diff --git a/resources/seon/tasks/seon.test.edn b/resources/seon/tasks/seon.test.edn
+index b26d463e1..0cff38504 100644
+--- a/resources/seon/tasks/seon.test.edn
++++ b/resources/seon/tasks/seon.test.edn
+@@ -116,7 +116,7 @@
+  #:seon.task{:name "since-previous-run-narrowing-has-no-production-caller"
+              :plan "`seon.turn/test-step` selects the tests reaching what the eval request changed (`seon.test/request-changes` over its recording transaction), so no production caller asks `:seon.test/since-previous-run?` any more: the narrowing in `seon.test/selection-admission` (`narrow?`, the `observed-direct` fold into `named-changes`), the request key in `:seon.test/request` and `:seon.test.selection/request`, and the tests exercising it (`seon.test-reaching-test` narrowing, `seon.test-test` observed change) are machinery for a deleted path. Done when they are deleted, `seon.test/an-observed-change-a-script-test-reaches-does-not-refuse-the-step` is retired as moot, and the cost-follows-change rows move onto `seon.test/request-changes`."}
+  #:seon.task{:name "a-branch-test-world-runs-the-jvm-loaded-program-not-its-fork-point-record"
+-             :plan "`seon.test/clean-request-handle` builds a test world's source with `(seon.sci.eval/base-ctx candidate)`, whose loaded program is `seon.sci.eval/loaded-program` of the candidate branch: the adoption record the branch copied at its fork point, not the JVM's (`seon.sci.eval/loaded-source` reads main's through `:seon.sci.eval/loaded-connection`; its docstring: a branch's own record stays behind a later adoption). After a restart onto a commit that deletes or renames contracted functions, every branch forked before it builds its test world on the old published commit: `seon.sci.eval/derive-program-context` finds no compiled Var for the old functions, interprets them against the published-source database, which holds no configuration, and each contract install refuses (`seon.sci.eval/database-effective-config`). Default recorded 20 such refusals for `seon.cluster.squash/attribute-tx` at the 10:10Z boot of b14dc2b3f, the commit after M6 renamed `seon.cluster.squash` (recorded error 500ddeeeca09, `docs/research/agent-platform/2026-10-12/db-clean/root-causes.md`). Even with nothing deleted, such a world judges the branch against the old platform source instead of the compiled one. The world-base also read the branch's record (`seon.test/world-base` on the recording branch) and the overlay copied every difference from it. The world is the JVM's loaded program (`seon.sci.eval/loaded-identity`) plus the candidate's changes since the program its record names (`seon.test/program-overlay-tx`); the proof forks a branch from a commit holding a function the world lacks and records that commit as its program. Read `seon.cluster/name-loaded-program!`, `seon.sci.eval/base-ctx`, `seon.sci.eval/loaded-database` and `docs/research/agent-platform/2026-10-12/db-clean/faults-before-reset.edn`."}
++             :plan "`seon.test/clean-request-handle` builds a test world's source with `(seon.sci.eval/base-ctx candidate)`, whose loaded program is `seon.sci.eval/loaded-program` of the candidate branch: the adoption record the branch copied at its fork point, not the JVM's (`seon.sci.eval/loaded-source` reads main's through `:seon.sci.eval/loaded-connection`; its docstring: a branch's own record stays behind a later adoption). After a restart onto a commit that deletes or renames contracted functions, every branch forked before it builds its test world on the old published commit: `seon.sci.eval/derive-program-context` finds no compiled Var for the old functions, interprets them against the published-source database, which holds no configuration, and each contract install refuses (`seon.sci.eval/database-effective-config`). Default recorded 20 such refusals for `seon.cluster.squash/attribute-tx` at the 10:10Z boot of b14dc2b3f, the commit after M6 renamed `seon.cluster.squash` (recorded error 500ddeeeca09, `docs/research/agent-platform/2026-10-12/db-clean/root-causes.md`). Even with nothing deleted, such a world judges the branch against the old platform source instead of the compiled one. The world-base also read the branch's record (`seon.test/world-base` on the recording branch) and the overlay copied every difference from it. The world is the JVM's loaded program (`seon.loaded/loaded-identity`) plus the candidate's changes since the program its record names (`seon.test/program-overlay-tx`); the proof forks a branch from a commit holding a function the world lacks and records that commit as its program. Read `seon.cluster/name-loaded-program!`, `seon.sci.eval/base-ctx`, `seon.sci.eval/loaded-database` and `docs/research/agent-platform/2026-10-12/db-clean/faults-before-reset.edn`."}
+  #:seon.task{:name "an-effect-attempt-opens-only-for-a-test-calling-an-effect-owner"
+              :plan "`seon.test/run-request` opens an attempt agent and turn (`seon.test/attempt-request-context`, one transaction, 350 to 440 ms on a member branch by its comment) for every member in `seon.test.runner/tests-reaching` of `seon.effect/request*`, which on default is 2,699 of 3,016 tests, where 21 tests reach it by `:seon.fn/calls` edges alone and `my.fs/read` is called by 16. Cause (measured on default's `seon.test.runner/reach-graph`): `seon.test.runner/reach-node` merges `:seon.fn/references` (quoted symbols, kept so a changed symbol that is resolved at run time changes a test's key) with `:seon.fn/calls` into `:seon.test.runner/out`, so every quoted effect owner is an edge: `seon.test/run-request` quotes `seon.effect/request*`, `seon.fn/request-symbol` quotes `seon.effect/request!`, `seon.effect/dispatch` names every tool, and 3,339 reference-only edges join the reach of nearly every test through `seon.test/run`; building the one symbol as c5eb7b814 did for `seon.test/task` still leaves 2,699 (checked on the check JVM and on default's graph with both edges removed). Quoted references must stay in the key, so the change is to the question, not the analysis: add `:seon.test.runner/calls` to `seon.test.runner/reach-node` and a `seon.test.runner/tests-calling` (reverse walk over call edges only, cached like `seon.test.runner/tests-reaching`), and let `seon.test/run-request` ask it for `seon.effect/request*`. Decide first whether a member that reaches an effect only through a runtime-resolved symbol (an interpreted form naming a tool) still needs its attempt context: the call-edge answer is 21 tests, and no stored run records which members executed an effect. Written red proof, not applied: `docs/research/agent-platform/2026-10-12/quoted-reach-calls-only.patch` (its deftest asserts a test running a request is not in the effect reach; the patch also holds the insufficient symbol-building edit, drop it). Measure: member cost with and without the attempt context on one fast member."}
+  #:seon.task{:name "check-run-refused-once-with-active-connections-on-store-deletion"
+diff --git a/resources/seon/tasks/seon.test.runner.edn b/resources/seon/tasks/seon.test.runner.edn
+index 390c62456..baecdf5d6 100644
+--- a/resources/seon/tasks/seon.test.runner.edn
++++ b/resources/seon/tasks/seon.test.runner.edn
+@@ -34,7 +34,7 @@
+  #:seon.task{:name "a-timed-out-result-reused-by-reach-digest-leaves-no-assertions-to-read"
+              :plan "After a test timed out, `(clojure.test/run-test-var ...)` answered the reused timeout red (`:seon.test/reused-count 1`) and the assertion failures stayed unreachable while the timeout result held the reach digest (outside-1, `docs/research/agent-platform/2026-10-14/outside-1.md`, call 4): an agent has no way to see what the body asserted short of editing the test. Done when a timed-out result is not reused as the current result for a changed question, or the reply carries what the body recorded before the limit, proven by a runner row. Read `seon.test.runner` and `seon.test.cache`."}
+  #:seon.task{:name "a-mixed-path-result-keys-what-ran"
+-             :plan "Reuse is keyed by `[sym reach-digest input-digest]` (no evaluator, owner ruling 2026-10-15, branch-model rulings 6), so the reach digest must name what actually ran. A branch test reached through both an interpreted path and a host-bound caller (`seon.sci.eval/host-bound-row?`; `seon.fn/closure-walk` stops there since 57e359aa9) runs that caller's callees as main's loaded seed, yet `seon.test.runner/reach-digests` keys it with the branch's definitions of those callees, so after the merge main could reuse a result part of which never saw the change. Count a host-bound caller's callees at their loaded digests (the loaded commit, `seon.sci.eval/loaded-identity`) in `seon.test.runner/task-reach-digests`: one lookup per host-bound node, so a run with a compiled path gets a digest the candidate and main do not share, and a run with none keeps an equal digest and is reused. Red proof to write: a row beside `seon.merge-test/a-merge-reuses-the-chain-branchs-green-at-an-unchanged-reach` where the seed reaches the branch change through a host-bound caller too, asserting the candidate does not reuse the branch's run (`:seon.test.member/reused-run` absent). Read `seon.test/carried-results` and `docs/research/agent-platform/2026-10-15/merge-closure-plan.md#phases-each-with-its-red-proof`."}
++             :plan "Reuse is keyed by `[sym reach-digest input-digest]` (no evaluator, owner ruling 2026-10-15, branch-model rulings 6), so the reach digest must name what actually ran. A branch test reached through both an interpreted path and a host-bound caller (`seon.sci.eval/host-bound-row?`; `seon.fn/closure-walk` stops there since 57e359aa9) runs that caller's callees as main's loaded seed, yet `seon.test.runner/reach-digests` keys it with the branch's definitions of those callees, so after the merge main could reuse a result part of which never saw the change. Count a host-bound caller's callees at their loaded digests (the loaded commit, `seon.loaded/loaded-identity`) in `seon.test.runner/task-reach-digests`: one lookup per host-bound node, so a run with a compiled path gets a digest the candidate and main do not share, and a run with none keeps an equal digest and is reused. Red proof to write: a row beside `seon.merge-test/a-merge-reuses-the-chain-branchs-green-at-an-unchanged-reach` where the seed reaches the branch change through a host-bound caller too, asserting the candidate does not reuse the branch's run (`:seon.test.member/reused-run` absent). Read `seon.test/carried-results` and `docs/research/agent-platform/2026-10-15/merge-closure-plan.md#phases-each-with-its-red-proof`."}
+  #:seon.task{:name "reach-on-an-uncommitted-value-costs-the-change-not-the-program"
+             :plan "A test step or merge gate that judges an uncommitted `datahike.api/with` value pays reach over the whole program: `seon.test.runner/reach-revision-key` is nil there (`seon.db/content-revisions` answers nil for a value with no committed identity, 0.02 ms), so every `seon.test.runner/reach-attribute` rescans its attribute in full and `seon.test.runner/reached-graph` and `seon.test.runner/reach-index` run with no prior. Measured by lane datoms-maps (default cd7714c97, JVM mode, 29 seed tests, one `:seon.fn/doc` or `:seon.schema/form` datom changed): `seon.test.runner/reach-digests` 271 MB / 136 ms warm, of which `seon.test.runner/reach-declarations` 98 MB / 47 ms (89.5 MB of it the 232,856 datom maps of the eleven `seon.db/datoms` scans). Exp-c's 1.9 GB (`docs/research/agent-platform/2026-10-15/exp-c-reach-by-content.md` section 7) is not `content-revisions` and not a per-datom cost of `seon.db/datoms` (a full `:seon.fn/calls` scan, 134,693 datoms, is 28-36 MB / 11-16 ms, about 1.4 times building the bare maps): it reproduced only as 1.56 GB right after a cold main `reach-digests` (4.4 GB / 2.7 s, `seon.test.runner/verified-recomputes-reach-digests-for-the-whole-program`) with `seon.cache` at its byte budget, spent in `seon.db/vector-query-call` and `seon.db/declaration-value` rederiving evicted declaration state. Done when reach on a one-change `d/with` value derives from its basis's held reach (the basis commit's revisions plus the transaction's changed entities), proven by a `seon.profile/measure` allocation assertion that it costs about the change, not the 271 MB program scan."}
+  #:seon.task{:name "a-test-whose-body-adopts-records-a-reach-digest-that-is-never-current"
+diff --git a/src/seon/cluster.clj b/src/seon/cluster.clj
+index b92a2cc74..4708e83d3 100644
+--- a/src/seon/cluster.clj
++++ b/src/seon/cluster.clj
+@@ -59,6 +59,7 @@
+             [seon.schedule :as schedule]
+             [seon.embed :as embed]
+             [seon.render.web :as web]
++            [seon.loaded :as loaded]
+             [seon.sci.eval :as sci.eval]
+             [taoensso.timbre :as log]
+             [seon.schema :as schema]
+@@ -1496,7 +1497,7 @@
+       (let [database (db/db connection)
+             projection (schema/projection-from-database database)
+             ;; The cluster whose fork this base becomes names its environment.
+-            projection-state (sci.eval/projection-state database projection cluster-name)
++            projection-state (sci.eval/projection-state database projection cluster-name commit-id)
+             [source-digest base-ctx]
+             (schema/call-with-projection-state
+              projection-state
+@@ -2216,7 +2217,7 @@
+   ;; The bytes of each first-party source file this JVM loaded at launch: the
+   ;; namespaces loaded before this one read these files moments ago, and a
+   ;; later reload leaves this record alone because adoption names what it
+-  ;; reloads (`sci.eval/loaded-identity`). The same digests the publication
++  ;; reloads (`seon.loaded/loaded-identity`). The same digests the publication
+   ;; captures (`source/path-digests`).
+   (source/path-digests (fs/source-directory) (loaded-namespace-paths)))
+ 
+@@ -2257,7 +2258,7 @@
+ (defn name-loaded-program!
+   "Name `commit-id` as the JVM's loaded program once its loaded bytes match.
+ 
+-  Sets `sci.eval/loaded-identity` when no adoption has named one yet and
++  Sets `seon.loaded/loaded-identity` when no adoption has named one yet and
+   [[loaded-commit]] holds for the files this JVM loaded; answers the loaded
+   identity either way. A JVM launched on the files a boot publication just
+   indexed, and armed by `arm-host-program!` against that commit, already runs
+@@ -2266,14 +2267,14 @@
+   disk for namespaces loaded before this one; later loads are read now."
+   {:malli/schema [:=> [:cat :seon.store/store :seon.source/commit-id] :map]}
+   [store commit-id]
+-  (let [database (when (empty? @sci.eval/loaded-identity)
++  (let [database (when (empty? @loaded/loaded-identity)
+                    (source/commit-database store commit-id))]
+     (if-not database
+-      @sci.eval/loaded-identity
++      @loaded/loaded-identity
+       (try
+         (if-let [loaded (loaded-commit database commit-id (loaded-program-digests))]
+-          (sci.eval/advance-loaded-identity! sci.eval/loaded-identity loaded)
+-          @sci.eval/loaded-identity)
++          (sci.eval/advance-loaded-identity! loaded/loaded-identity loaded)
++          @loaded/loaded-identity)
+         (finally (d/release-materialized-db database))))))
+ 
+ (defn- analyzer-reach
+@@ -2337,7 +2338,7 @@
+ (defn- loaded-files
+   "The bytes the code this JVM runs came from, which a publication's seal reads
+   its entities through (`selected-analyzer-digest`): the files the commit its
+-  last adoption loaded publishes (`sci.eval/loaded-identity`); before any
++  last adoption loaded publishes (`seon.loaded/loaded-identity`); before any
+   adoption, the files launch loaded; none when the loaded program is unknown
+   (an adoption failed mid-reload) or the adopted commit is another store's (a
+   fixture's root), so every reached declaration names another analyzer.
+@@ -2348,7 +2349,7 @@
+   and no program-wide read."
+   {:malli/schema [:=> [:cat :seon.store/store] :seon.source/relative-file-digests]}
+   [store]
+-  (let [loaded @sci.eval/loaded-identity
++  (let [loaded @loaded/loaded-identity
+         adopted (:seon.source/commit-id loaded)]
+     (cond
+       (not adopted) (if (seq loaded) {} launched-source-digests)
+@@ -2660,7 +2661,7 @@
+         ;; JVM already running the published commit (booted on it, or adopted
+         ;; for another cluster) only writes this cluster's entities and record.
+         loaded? (= (:seon.source/commit-id published)
+-                   (:seon.source/commit-id @sci.eval/loaded-identity))
++                   (:seon.source/commit-id @loaded/loaded-identity))
+         namespaces (if loaded? #{}
+                        (development-namespaces previous-database published-database changed-identities))]
+     ;; `require :reload` reads the disk, so every namespace it will reload must
+@@ -2687,7 +2688,7 @@
+           (if loaded?
+            (record! [] #{})
+            (call-with-program-change
+-           sci.eval/loaded-identity (:seon.source/commit-id published)
++           loaded/loaded-identity (:seon.source/commit-id published)
+            (fn []
+           ;; Clojure reload leaves removed interns behind. Remove only definitions
+           ;; whose identity is absent from the published database.
+@@ -2880,7 +2881,7 @@
+   supplies prior identities. Analyzer configuration changes select every source.
+   A refusal after reload began (source change, arming, record) leaves the
+   record unchanged and the loaded program unknown
+-  (`seon.sci.eval/loaded-identity`): no test member or evaluation runs until
++  (`seon.loaded/loaded-identity`): no test member or evaluation runs until
+   the next request reconciles from the last adopted source database and records."
+   {:malli/schema
+    [:function
+diff --git a/src/seon/cluster/boot.clj b/src/seon/cluster/boot.clj
+index ca131442a..2ee5da43b 100644
+--- a/src/seon/cluster/boot.clj
++++ b/src/seon/cluster/boot.clj
+@@ -99,13 +99,15 @@
+            pre-graph-environment
+            (env/refuse-incomplete-environment!
+             (env/environment
+-             {:seon.boot/cluster-name cluster-name
++             (merge
++              {:seon.boot/cluster-name cluster-name
+               :seon.store/store (:seon.store/store instance)
+               :seon.db/connection connection
+               :seon.schema/projection
+               (:seon.schema/projection @projection-state)
+               :seon.db/basis-t (:seon.db/basis-t @projection-state)
+-              :seon.sci.admit/caps (config/result-caps boot-dials)}))
++              :seon.sci.admit/caps (config/result-caps boot-dials)}
++             (select-keys @projection-state [:seon.source/commit-id :seon.sci.eval/loaded-identity]))))
+            work-launcher
+            (flow/start-work-launcher!
+             {:seon.env/environment pre-graph-environment
+@@ -117,6 +119,8 @@
+              (assoc pre-graph-environment
+                     :seon.flow/work-launcher work-launcher)))
+            _ (env/replace-environment! projection-state environment)
++           ;; the cluster connection's reads take their builder from this state (`seon.db/loaded-builder`)
++           _ (db/carry-connection-projection-state! connection projection-state)
+            ;; this cluster's heap watch, recording in its world; removed at stop
+            instance (publish! (assoc instance :seon.heap/watch
+                                      (heap/watch! (heap-dials boot-dials) #(heap-crossed! environment %))))
+@@ -250,7 +254,8 @@
+         (or (:seon.schema/projection source-base)
+             (schema/projection-from-database initial-database))
+         initial-projection-state
+-        (sci.eval/projection-state initial-database initial-projection cluster-name)
++        (sci.eval/projection-state initial-database initial-projection cluster-name
++                                    (:seon.source/commit-id instance))
+         _ (schema/call-with-projection-state
+            initial-projection-state
+            ;; The provisional connection's own schema accretion, then the
+@@ -271,7 +276,8 @@
+         (if (= (db/basis-t initial-database) (db/basis-t database))
+           initial-projection
+           (schema/projection-from-database database))
+-        projection-state (sci.eval/projection-state database projection cluster-name)
++        projection-state (sci.eval/projection-state database projection cluster-name
++                                                     (:seon.source/commit-id instance))
+         _ (store/release-branch! provisional-connection)
+         connection
+         (schema/call-with-projection-state
+diff --git a/src/seon/db.clj b/src/seon/db.clj
+index 26ab08d31..c79532762 100644
+--- a/src/seon/db.clj
++++ b/src/seon/db.clj
+@@ -34,6 +34,7 @@
+             [seon.error.problem :as error.problem]
+             [seon.error.refusal :as error.refusal]
+             [seon.id :as id]
++            [seon.loaded :as loaded]
+             [seon.print :as print]
+             [seon.order :as order]
+             [seon.program :as program]
+@@ -270,20 +271,10 @@
+             :seon.error/throwable error))))
+ 
+ (defn- connection-projection-state
++  "The projection state `connection` carries (`carry-connection-projection-state!`), nil when it carries none."
++  {:malli/schema [:=> [:cat :seon.db/connection] [:maybe :seon.sci.eval/projection-state]]}
+   [connection]
+-  ;; The operator owns this table. Do not load the operator during database
+-  ;; bootstrap, and match the actual connection rather than a branch name
+-  ;; that another store could also use.
+-  (or (:seon.sci.eval/projection-state (meta connection))
+-      (when-let [instances (some-> (find-ns 'seon.operator.runtime)
+-                              (ns-resolve 'running-instances)
+-                              deref)]
+-    (some (fn [instance]
+-            (let [state (get-in instance [:seon.sci.eval/ctx env/state-carrier])]
+-              (when (and state
+-                         (identical? connection (:seon.db/connection @state)))
+-                state)))
+-          (vals @instances)))))
++  (:seon.sci.eval/projection-state (meta connection)))
+ 
+ (defn carry-connection-projection-state!
+   "Attach the owning projection state to a live connection at construction.
+@@ -1702,13 +1693,30 @@
+       (second (apply max-key #(revision-agreement (or context {}) (first %)) candidates))
+       {})))
+ 
++(defn- based-derivation
++  "The projection of `database`'s declarations, loaded from `base`."
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection] :seon.schema/projection]}
++  [database base]
++  (schema/load-projection database base))
++
++(defn- advanced-derivation
++  "The projection of `after`, advanced from `before`'s `base` by the declaration datoms `written`
++  (`schema/advance-projection`), else loaded from `base`."
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.schema/projection
++                       [:sequential :seon.schema/value]]
++                  :seon.schema/projection]}
++  [before after base written]
++  (or (schema/advance-projection before after base written) (schema/load-projection after base)))
++
+ (defn- content-projection
+   "The projection of `database`'s declaration content, held once under that
+   content and the loaded `builder` and named by each of `aliases`. A miss
+   takes the projection a speculative value of the same content derived
+-  (`speculative-projection`), else derives under `kind` by `derivation`, by
+-  default from its `nearest-base`, and is charged the forms it does not share
+-  with the projection the delay `base` holds, the one it derives from
++  (`speculative-projection`), else derives under `kind`: advanced from the
++  held `[before base written]` when `advance` names one (`advanced-derivation`),
++  else from its `nearest-base` (`based-derivation`). Both derivations are
++  written here, so the key's reach holds the code that derives under it. It is
++  charged the forms it does not share with the projection it derives from
+   (`projection-bytes`)."
+   {:malli/schema [:function
+                   [:=> [:cat :seon.source/digest :seon.db/database-value] :seon.schema/projection]
+@@ -1716,22 +1724,26 @@
+                         [:sequential :seon.schema/value]]
+                    :seon.schema/projection]
+                   [:=> [:cat :seon.source/digest :seon.db/database-value :qualified-keyword
+-                        [:sequential :seon.schema/value] :seon.instrument/callable
+-                        [:fn clojure.core/delay?]]
++                        [:sequential :seon.schema/value]
++                        [:maybe [:tuple :seon.db/database-value :seon.schema/projection
++                                 [:sequential :seon.schema/value]]]]
+                    :seon.schema/projection]]}
+   ([builder database] (content-projection builder database ::projection []))
+-  ([builder database kind aliases]
+-   (let [base (delay (nearest-base builder database))]
+-     (content-projection builder database kind aliases #(schema/load-projection database @base) base)))
+-  ([builder database kind aliases derivation base]
+-   (let [content-key [::declaration-content builder (declaration-content-key database)]
++  ([builder database kind aliases] (content-projection builder database kind aliases nil))
++  ([builder database kind aliases advance]
++   (let [[before held-base written] advance
++         base (if advance (delay held-base) (delay (nearest-base builder database)))
++         content-key [::declaration-content builder (declaration-content-key database)]
+          held (some #(when (seon.cache/present % content-key) %) [::projection ::value-projection])
+          ;; The content names itself in the alias kind, which answers the
+          ;; canonical first named with it: every alias and every later read
+          ;; then holds that one key object, compared by identity.
+          [canonical-kind canonical-key :as canonical]
+          (alias! content-key [(or held kind) content-key])
+-         projection (seon.cache/lookup canonical-kind canonical-key #(projection-bytes @base %) derivation)]
++         projection (seon.cache/lookup canonical-kind canonical-key #(projection-bytes @base %)
++                                       #(if advance
++                                          (advanced-derivation before database held-base written)
++                                          (based-derivation database @base)))]
+      (run! #(alias! % canonical) aliases)
+      projection)))
+ 
+@@ -1780,8 +1792,7 @@
+   (let [advanced (schema/advance-projection before after base written)]
+     (if (identical? advanced base)
+       (do (run! #(alias! % canonical) aliases) base)
+-      (content-projection builder after ::value-projection aliases
+-                          #(or advanced (schema/load-projection after base)) (delay base)))))
++      (content-projection builder after ::value-projection aliases [before base written]))))
+ 
+ (defn- separating-declarations
+   "The declaration datoms held by exactly one of `before` and `database`, two
+@@ -1914,36 +1925,39 @@
+                        (stored-call-reach database 'seon.schema/load-projection))]))
+ 
+ (defn- loaded-builder
+-  "The builder digest of the program this JVM loaded, memoized by its commit.
+-
+-  The authority is the process, never the value read: `loaded` is
+-  `seon.sci.eval/loaded-identity`, which development adoption names by commit
+-  after its record commits; before any adoption it is empty and the JVM runs
+-  its boot commit, which each running instance holds. A value's own adoption
+-  record names its branch's historical program. While an adoption loads (an
+-  unknown identity), the loaded code is mixed: an unchanged builder keeps its
+-  digest, a changed one keys a projection to that adoption alone, so no mixed
+-  construction is ever reused. Boot commits that disagree refuse by name. A JVM
+-  with no running instance keys by the value's own commit or rows.
++  "The builder digest of the program the executing `state` loaded, memoized by its commit.
++
++  The authority is the process, never the value read: the loaded-program place
++  `state` names (`seon.sci.eval/projection-state`), else the JVM's
++  (`seon.loaded/loaded-identity`), which development adoption names by commit
++  after its record commits; before that, the `:seon.source/commit-id` the
++  state's cluster booted. A value's own adoption record
++  names its branch's historical program. While an adoption loads (an unknown
++  identity), the loaded code is mixed: an unchanged builder keeps its digest
++  when the state's own cluster record already names the target, and otherwise
++  keys a projection to that adoption alone, so no mixed construction is ever
++  reused. Naming no program, it keys by the value's own commit or rows.
+ 
+   A value whose store lacks the loaded commit (another store's value) keys by
+   that commit and its own builder, and a miss that materializes nothing caches
+   nothing: `delay` rethrows a stored failure on every deref, so one such read
+   refused every later read of the commit (lane-fix-unknown-identity-blocks-reads)."
+-  {:malli/schema [:=> [:cat :seon.db/database-value :map [:maybe [:sequential :map]]]
++  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.sci.eval/projection-state]]
+                   :seon.source/digest]}
+-  [database loaded instances]
+-  (let [memo (fn [commit]
++  [database state]
++  (let [environment (some-> state deref)
++        loaded @(:seon.sci.eval/loaded-identity environment loaded/loaded-identity)
++        boot (:seon.source/commit-id environment)
++        memo (fn [commit]
+                (when commit
+                  (seon.cache/lookup ::builder-digest commit digest-bytes
+                                     #(when-let [program (d/commit-as-db database commit {:secondary-indices? false})]
+                                        (builder-digest program)))))
+         ;; An uncommitted value (a transaction function's argument, a report's
+         ;; :db-after) is keyed by the revisions of the attributes
+-        ;; `builder-digest` reads: during boot no instance names its commit yet,
+-        ;; and deriving per read cost a whole reach query each time a
+-        ;; transaction compared a stored collection (298 of 581 writer samples,
+-        ;; one cold boot publication, 2026-09-27).
++        ;; `builder-digest` reads: deriving per read cost a whole reach query
++        ;; each time a transaction compared a stored collection (298 of 581
++        ;; writer samples, one cold boot publication, 2026-09-27).
+         revisions (fn [] (let [context (:cache-context database)]
+                            (when (:datahike.cache/connection-id context)
+                              [::builder-revisions
+@@ -1956,43 +1970,22 @@
+                      (if-let [k (revisions)]
+                        (seon.cache/lookup ::builder-digest k digest-bytes #(builder-digest database))
+                        (builder-digest database))))
+-        loaded-key (fn [commit] (or (memo commit) (id/digest 64 [::foreign-store commit (own)])))
+-        boots (into #{} (keep :seon.source/commit-id) instances)]
++        loaded-key (fn [commit] (or (memo commit) (id/digest 64 [::foreign-store commit (own)])))]
+     (cond
+       (:seon.error/at loaded)
+       (let [target (memo (:seon.source/commit-id loaded))
+-            ;; Each adopting cluster's record still names the program before this adoption.
+-            priors (into #{} (keep #(:seon.source/commit-id
+-                                     (d/pull (d/db (:seon.boot/cluster-connection %)) [:seon.source/commit-id]
+-                                             [:seon.cluster/name (get-in % [:seon.boot/advertisement
+-                                                                            :seon.boot/cluster-name])])))
+-                         instances)]
+-        (if (and target (seq priors) (every? #(= target (memo %)) priors))
++            ;; The adopting cluster's record still names the program before this adoption.
++            prior (some-> (:seon.db/connection environment) d/db
++                          (d/pull [:seon.source/commit-id] [:seon.cluster/name (:seon.boot/cluster-name environment)])
++                          :seon.source/commit-id)]
++        (if (and target prior (= target (memo prior)))
+           target
+           (id/digest 64 [::mixed-program (str (:seon.error/at loaded)) (str (:seon.source/commit-id loaded))])))
+ 
+       (:seon.source/commit-id loaded) (loaded-key (:seon.source/commit-id loaded))
+-      (= 1 (count boots)) (loaded-key (first boots))
+-      (seq boots) (throw (ex-info "The running instances booted different programs; the loaded projection builder is ambiguous."
+-                                  {:seon.error/expected :seon.source/commit-id
+-                                   :seon.error/offending boots}))
++      boot (loaded-key boot)
+       :else (own))))
+ 
+-(defn- projection-builder
+-  "The loaded builder (`loaded-builder`) every projection key of `origin`
+-  names; a converged identity's memo is read here, since one more armed call
+-  per read doubled the hit cost."
+-  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.source/digest]}
+-  [origin]
+-  (let [loaded (or (some-> (find-ns 'seon.sci.eval) (ns-resolve 'loaded-identity) deref deref) {})
+-        instances (some-> (find-ns 'seon.operator.runtime) (ns-resolve 'running-instances)
+-                          deref deref vals)
+-        boots (into #{} (keep :seon.source/commit-id) instances)
+-        commit (when-not (:seon.error/at loaded)
+-                 (or (:seon.source/commit-id loaded) (when (= 1 (count boots)) (first boots))))]
+-    (or (when commit (seon.cache/present ::builder-digest commit))
+-        (loaded-builder origin loaded instances))))
+-
+ (defn- held-entry
+   "`[canonical projection]` already derived for the native value `database`
+   under its revision key (durable or value tier) or its commit; nil when none
+@@ -2039,7 +2032,7 @@
+   {:malli/schema [:=> [:cat :map] [:maybe :seon.schema/projection]]}
+   [{before :db-before after :db-after :as report}]
+   (when-let [written (written-declarations report)]
+-    (let [builder (projection-builder after)
++    (let [builder (loaded-builder after (:seon.sci.eval/projection-state (meta after)))
+           advanced (advanced-key builder before written)]
+       (or (second (resolved advanced))
+           (when-let [entry (held-entry builder before)]
+@@ -2054,7 +2047,7 @@
+   {:malli/schema [:=> [:cat :seon.db/transaction-report] :seon.db/transaction-report]}
+   [{before :db-before after :db-after tx-data :tx-data :as report}]
+   (when-let [committed (datahike.db/committed-value-identity after)]
+-    (let [builder (projection-builder after)
++    (let [builder (loaded-builder after (:seon.sci.eval/projection-state (meta after)))
+           revision-key (assoc (projection-cache-key after) ::builder builder)
+           canonical (or (first (resolved revision-key))
+                         (when (= (:max-tx after) (:tx (first tx-data)))
+@@ -2086,9 +2079,8 @@
+   (let [as-of? (instance? AsOfDB database)
+         source (if as-of? database (schema-database database))
+         origin (if as-of? (schema-database database) source)
+-        ;; The JVM's loaded builder (`loaded-builder`); a converged identity's
+-        ;; memo is read here, since one more armed call per read doubled the hit cost.
+-        builder (delay (projection-builder origin))
++        ;; The executing state's loaded builder (`loaded-builder`).
++        builder (delay (loaded-builder origin (:seon.sci.eval/projection-state (meta origin))))
+         ;; An as-of view keys by its own declaration datoms, never its origin's.
+         ;; An uncommitted origin (the writer's in-transaction value) names them
+         ;; by its revision key and the time point: within one connection an
+diff --git a/src/seon/health.clj b/src/seon/health.clj
+index e4877b118..529df4515 100644
+--- a/src/seon/health.clj
++++ b/src/seon/health.clj
+@@ -49,6 +49,7 @@
+             [seon.profile :as profile]
+             [seon.render.value :as render.value]
+             [seon.schema :as schema]
++            [seon.loaded :as loaded]
+             [seon.sci.eval :as sci.eval]))
+ 
+ (def ranking
+@@ -80,7 +81,7 @@
+   [database derivation-name reads]
+   (let [context (:cache-context database)]
+     (when (:datahike.cache/committed? context)
+-      [derivation-name @sci.eval/loaded-identity
++      [derivation-name @loaded/loaded-identity
+        (if (set? reads)
+          [(:datahike.cache/connection-id context) (:datahike.cache/generation context)
+           (select-keys (:datahike.cache/attribute-revisions context) reads)]
+@@ -578,7 +579,7 @@
+                            :seon.error/operation `report :seon.health/cluster cluster-name
+                            :seon.error/message "No running cluster named :seon.health/cluster has a readable database in this JVM."
+                            :seon.error/fix "Name a cluster bin/seon status lists."})
+-      (let [loaded @sci.eval/loaded-identity
++      (let [loaded @loaded/loaded-identity
+             units (cond-> {:seon.health/cluster cluster-name
+                            :seon.health/observed-at (java.util.Date.)
+                            :seon.health/basis (cond-> {:seon.db/basis-t (db/basis-t database)}
+diff --git a/src/seon/loaded.clj b/src/seon/loaded.clj
+new file mode 100644
+index 000000000..0cad62d00
+--- /dev/null
++++ b/src/seon/loaded.clj
+@@ -0,0 +1,9 @@
++(ns seon.loaded
++  "The JVM's loaded program: one place every reader requires statically.")
++
++;;; Loaded Var roots have no database owner: this value names the JVM's loaded
++;;; program. Development adoption replaces it with its unknown-program
++;;; diagnostic before touching a root and with `{:seon.source/commit-id}` once its
++;;; record commits (`seon.sci.eval/advance-loaded-identity!`); a failed adoption
++;;; leaves the diagnostic. Nothing waits on it.
++(defonce loaded-identity (atom {}))
+diff --git a/src/seon/schema.clj b/src/seon/schema.clj
+index b4f8ace03..659c98ed7 100644
+--- a/src/seon/schema.clj
++++ b/src/seon/schema.clj
+@@ -2947,21 +2947,24 @@
+                 :seon.schema/validate-render-contracts? false))))))
+ 
+ (defn- projection-entities
+-  "Join attribute ranges, retaining historical values for duplicate refusal."
++  "Join attribute ranges, retaining historical values for duplicate refusal.
++  A range whose attributes the store has not installed declares nothing."
+   {:malli/schema
+    [:=> [:cat :seon.db/database-value :qualified-keyword :qualified-keyword :boolean]
+     [:vector [:tuple [:or :keyword :symbol :string] :string :int]]]}
+   [database identity-attribute value-attribute identity-transaction?]
+-  (let [values (group-by :e (d/datoms database :aevt value-attribute))]
+-    (into []
+-          (comp
+-           (mapcat (fn [identity-datom]
+-                     (map (fn [value-datom]
+-                            [(:v identity-datom) (:v value-datom)
+-                             (:tx (if identity-transaction? identity-datom value-datom))])
+-                          (get values (:e identity-datom)))))
+-           (distinct))
+-          (d/datoms database :avet identity-attribute))))
++  (if-not (and (get (dbi/-schema database) identity-attribute) (get (dbi/-schema database) value-attribute))
++    []
++    (let [values (group-by :e (d/datoms database :aevt value-attribute))]
++      (into []
++            (comp
++             (mapcat (fn [identity-datom]
++                       (map (fn [value-datom]
++                              [(:v identity-datom) (:v value-datom)
++                               (:tx (if identity-transaction? identity-datom value-datom))])
++                            (get values (:e identity-datom)))))
++             (distinct))
++            (d/datoms database :avet identity-attribute)))))
+ 
+ (defn- projection-admissions
+   "Join declaration identities to admission datoms once, without per-entity reads."
+diff --git a/src/seon/sci/eval.clj b/src/seon/sci/eval.clj
+index d6addf084..708594cab 100644
+--- a/src/seon/sci/eval.clj
++++ b/src/seon/sci/eval.clj
+@@ -127,6 +127,7 @@
+             [seon.effect :as effect]
+             [seon.fn]
+             [seon.env :as env]
++            [seon.loaded :as loaded]
+             [seon.error :as error]
+             [seon.error.refusal :as error.refusal]
+             [seon.instrument :as instrument]
+@@ -214,19 +215,28 @@
+ (defn projection-state
+   "Create `cluster-name`'s context environment replacement reference; the
+   caller names the cluster whose world `db` is. Without a name, the cluster is
+-  the one that world itself names (`carried-cluster-name`), never an invented one."
++  the one that world itself names (`carried-cluster-name`), never an invented one.
++  It holds the JVM's loaded-program place (`seon.loaded/loaded-identity`) by reference and,
++  when the caller names it, the program `commit-id` the cluster booted: the
++  projection builder reads both from here (`seon.db/loaded-builder`)."
+   {:malli/schema
+    [:function
+     [:=> [:cat :seon.db/database-value :seon.schema/projection] :seon.sci.eval/projection-state]
+     [:=> [:cat :seon.db/database-value :seon.schema/projection :seon.boot/cluster-name]
++     :seon.sci.eval/projection-state]
++    [:=> [:cat :seon.db/database-value :seon.schema/projection :seon.boot/cluster-name
++          [:maybe :seon.source/commit-id]]
+      :seon.sci.eval/projection-state]]}
+   ([db projection] (projection-state db projection (carried-cluster-name nil db)))
+-  ([db projection cluster-name]
++  ([db projection cluster-name] (projection-state db projection cluster-name nil))
++  ([db projection cluster-name commit-id]
+    (env/environment-state
+     (env/refuse-incomplete-environment!
+-     (env/environment {:seon.boot/cluster-name cluster-name
+-                       :seon.db/basis-t (db/basis-t db)
+-                       :seon.schema/projection projection})))))
++     (env/environment (cond-> {:seon.boot/cluster-name cluster-name
++                               :seon.db/basis-t (db/basis-t db)
++                               :seon.schema/projection projection
++                               :seon.sci.eval/loaded-identity loaded/loaded-identity}
++                        commit-id (assoc :seon.source/commit-id commit-id)))))))
+ 
+ (defn- carried-cluster-name
+   "The cluster the caller's world names: the environment its connection or
+@@ -1191,12 +1201,6 @@
+                    :seon.error/chain (error.refusal/chain failure))
+       frame (assoc :seon.error/frame frame))))
+ 
+-;;; Loaded Var roots have no database owner: this value names the JVM's loaded
+-;;; program. Development adoption replaces it with its unknown-program
+-;;; diagnostic before touching a root and with `{:seon.source/commit-id}` once its
+-;;; record commits; a failed adoption leaves the diagnostic. Nothing waits on it.
+-(defonce loaded-identity (atom {}))
+-
+ (def ^:dynamic ^:private *expected-identities*
+   "This thread's detecting executions, innermost first, each an identity atom
+   with the value it expects at its end: its own adoptions advance them, so only
+@@ -4680,7 +4684,8 @@
+                                 :my.program/executing-ctx :seon.sci.kernel/arm)
+                         :seon.db/connection connection
+                         :seon.db/basis-t (db/basis-t db)
+-                        :seon.schema/projection projection))))]
++                        :seon.schema/projection projection
++                        :seon.sci.eval/loaded-identity loaded/loaded-identity))))]
+     (db/carry-connection-projection-state! connection state)
+     state))
+ 
+@@ -5261,7 +5266,7 @@
+   5. disarm in `finally`.
+   Step 4 answers the declared refusal instead of their value when the
+   loaded program (`:seon.sci.eval/loaded-identity`, else the JVM's
+-  `loaded-identity`) changed while they ran: nothing waits for adoption.
++  `seon.loaded/loaded-identity`) changed while they ran: nothing waits for adoption.
+ 
+   Never throws. A failure of any kind returns an ordinary map whose
+   `:seon.sci.admit/value` is a flat `:seon.error` value. PRESENCE IS
+@@ -5526,7 +5531,7 @@
+         (kernel/evaluating! (::form request))
+         (try
+          (trusted-evaluation
+-          (:seon.sci.eval/loaded-identity request loaded-identity)
++          (:seon.sci.eval/loaded-identity request loaded/loaded-identity)
+           (fn []
+           (when-let [failure (first (:seon.test/acquisition-refusals
+                                     (acquired-program evaluation-ctx)))]
+diff --git a/src/seon/test.clj b/src/seon/test.clj
+index 81602978d..5c8abab14 100644
+--- a/src/seon/test.clj
++++ b/src/seon/test.clj
+@@ -27,6 +27,7 @@
+             [seon.instrument :as instrument]
+             [seon.program :as program]
+             [seon.schema :as schema]
++            [seon.loaded :as loaded]
+             [seon.sci.eval :as sci.eval]
+             [seon.sci.kernel :as kernel]
+             [seon.task :as task]
+@@ -1105,7 +1106,7 @@
+             ;; (a restart from changed files, before adoption), the entities cannot
+             ;; vouch for what executes: unknown, so nothing is reused.
+             ;; The adopted commit whose loaded, armed definitions agree with
+-            ;; its record (`seon.sci.eval/loaded-identity`): base provenance.
++            ;; its record (`seon.loaded/loaded-identity`): base provenance.
+             recorded (when cluster-id
+                        (:seon.source/commit-id
+                         (selection-read! (db/pull database [:seon.source/commit-id] cluster))))
+@@ -1517,7 +1518,7 @@
+         ;; A run of another commit (a base the destination forked from) keeps its tested program's digest and basis.
+         tested? (some? (:seon.test.run/tested-branch run))
+         ;; Its commit is the adopted program agreeing with its record
+-        ;; (`seon.sci.eval/loaded-identity`), read here at the writer.
++        ;; (`seon.loaded/loaded-identity`), read here at the writer.
+         cluster-entity (when cluster (db/pull database [:db/id :seon.cluster/name :seon.source/commit-id] cluster))
+         cluster-id (:db/id cluster-entity)
+         branch (get-in (db/schema-database database) [:config :branch])
+@@ -2144,13 +2145,13 @@
+ 
+ (defn- world-base
+   "The published program this JVM loaded, which every test world starts from:
+-  the commit `seon.sci.eval/loaded-identity` names when `store` holds it, else
++  the commit `seon.loaded/loaded-identity` names when `store` holds it, else
+   (a store that never held it) the one `cluster`'s adoption record on
+   `recording` names. A branch's own record is its fork point's and stays behind
+   a later adoption."
+   {:malli/schema [:=> [:cat :seon.store/store :seon.db/connection :seon.cluster/name] :seon.source/commit-id]}
+   [store recording cluster]
+-  (let [loaded (:seon.source/commit-id @sci.eval/loaded-identity)
++  (let [loaded (:seon.source/commit-id @loaded/loaded-identity)
+         recorded (:seon.source/commit-id
+                   (db/pull (db/db recording) [:seon.source/commit-id] [:seon.cluster/name cluster]))
+         held? #(when-let [database (source/commit-database store loaded)]
+@@ -2593,7 +2594,7 @@
+                       ;; through this custody, a host body through the custody
+                       ;; `bounded-result` hands `run-var!`.
+                       #(bounded-result
+-                        sci.eval/loaded-identity since test-symbol resolve! remaining-ms
++                        loaded/loaded-identity since test-symbol resolve! remaining-ms
+                         (into {:seon.sci.eval/ctx ctx :seon.db/connection (:seon.db/connection child)
+                                :seon.test/member child :seon.test/effect-attempt? effect-attempt?
+                                :seon.config.test.cost/top top}
+@@ -2831,7 +2832,7 @@
+ 
+ (defn- loaded-program
+   "The program this JVM loaded, as `ctx`'s world holds it: the commit
+-  `seon.sci.eval/loaded-identity` names now, read from `ctx`'s store, else (an
++  `seon.loaded/loaded-identity` names now, read from `ctx`'s store, else (an
+   identity naming no commit, or a commit another store adopted, which this
+   world's store never held) the booted program `ctx`'s snapshot acquired; an
+   unknown identity answers its diagnostic. The snapshot is its acquisition's
+@@ -2839,7 +2840,7 @@
+   holds no named commit."
+   {:malli/schema [:=> [:cat :seon.sci.eval/ctx] [:or :seon.db/database-value :seon.sci.eval/interpretation-error]]}
+   [ctx]
+-  (let [loaded-id @sci.eval/loaded-identity
++  (let [loaded-id @loaded/loaded-identity
+         store (:seon.store/store (env/of ctx))
+         commit-id (:seon.source/commit-id loaded-id)]
+     (cond
+@@ -3050,7 +3051,7 @@
+             ;; 317 ms for each member read alone, 2026-09-23).
+             ;; The loaded program every member must run in: an adoption from
+             ;; here on, before or during a member, makes that member unknown.
+-            since @sci.eval/loaded-identity
++            since @loaded/loaded-identity
+             ;; Keyed as each member's result is recorded: a task reader's by the request's task too.
+             reach (when (seq runnable) (runner/reach-digests database runnable {} (:seon.test/task request)))
+             ;; A result another branch recorded for the same identity, red included, answers here
+diff --git a/src/seon/test/runner.clj b/src/seon/test/runner.clj
+index c862ebcc6..6e2093725 100644
+--- a/src/seon/test/runner.clj
++++ b/src/seon/test/runner.clj
+@@ -21,6 +21,7 @@
+             [seon.instrument :as instrument]
+             [seon.id :as id]
+             [seon.ai.tokens :as tokens]
++            [seon.loaded :as loaded]
+             [seon.program :as program]
+             [seon.render :as render]
+             [seon.render.value :as value]
+@@ -1453,10 +1454,6 @@
+       keyed
+       (update-vals keyed #(id/id [% loaded] 64)))))
+ 
+-(def ^:private loaded-identity
+-  "The JVM's loaded identity, `seon.sci.eval/loaded-identity` (which requires this namespace)."
+-  (delay @(requiring-resolve 'seon.sci.eval/loaded-identity)))
+-
+ (defn reach-digests
+   "Each test's reach digest: the content of its static closure on `database`,
+   and, given `extra-roots` (test -> the definitions its body executed outside
+@@ -1464,7 +1461,7 @@
+   closure calls the test namespace's task reader also keys, given `task` (the
+   request's `:seon.test/task`; nil: none), the content of the input it judges (`task-identity`): the one result
+   identity every recorder and reader of a task-reading test shares. Every digest also keys `loaded`, the loaded
+-  commit L (default: the one `seon.sci.eval/loaded-identity` names): a result is evidence of the platform that ran
++  commit L (default: the one `seon.loaded/loaded-identity` names): a result is evidence of the platform that ran
+   it, so a result recorded under another L is another identity and never answers here."
+   {:malli/schema [:function
+                   [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
+@@ -1483,9 +1480,9 @@
+    (reach-digests database test-symbols {}))
+   ([database test-symbols extra-roots]
+    (task-reach-digests database test-symbols extra-roots (task-inputs database test-symbols)
+-                       (:seon.source/commit-id @@loaded-identity)))
++                       (:seon.source/commit-id @loaded/loaded-identity)))
+   ([database test-symbols extra-roots task]
+-   (reach-digests database test-symbols extra-roots task (:seon.source/commit-id @@loaded-identity)))
++   (reach-digests database test-symbols extra-roots task (:seon.source/commit-id @loaded/loaded-identity)))
+   ([database test-symbols extra-roots task loaded]
+    (task-reach-digests database test-symbols extra-roots (task-inputs database test-symbols task) loaded)))
+ 
+@@ -2860,7 +2857,7 @@
+   (try
+     (let [revisions (result-revisions database)
+           names (vec (sort (distinct test-symbols)))
+-          loaded (:seon.source/commit-id @@loaded-identity)
++          loaded (:seon.source/commit-id @loaded/loaded-identity)
+           key [revisions names task loaded]
+           head [(db/content-revisions database [:seon.task/id :seon.schema/key :seon.schema/form]) names task loaded]
+           derive (fn []
+diff --git a/test/seon/cluster/program_change_test.clj b/test/seon/cluster/program_change_test.clj
+index 7a69e6bb2..8f0f038a0 100644
+--- a/test/seon/cluster/program_change_test.clj
++++ b/test/seon/cluster/program_change_test.clj
+@@ -3,7 +3,7 @@
+   program identity when it starts and when it ends; a change between them
+   makes it unknown (`:program-unknown`, never green or red). A failed adoption
+   leaves the program unknown until one records. Every test injects its own
+-  identity atom; the JVM's `seon.sci.eval/loaded-identity` is never touched."
++  identity atom; the JVM's `seon.loaded/loaded-identity` is never touched."
+   (:require [clojure.java.io :as io]
+             [clojure.string :as str]
+             [clojure.test :refer [deftest is testing]]
+@@ -16,6 +16,7 @@
+             [seon.repl :as repl]
+             [seon.schema :as schema]
+             [seon.schema.edn :as schema.edn]
++            [seon.loaded :as loaded]
+             [seon.sci.eval :as sci.eval]
+             [seon.sci.arm :as sci.arm]
+             [sci.core :as sci]
+@@ -92,7 +93,7 @@
+         (is (false? @ran) "admission's program is not the execution's")))))
+ 
+ (deftest an-adoption-failing-after-roots-change-keeps-the-program-unknown-until-one-records
+-  (let [jvm-loaded @sci.eval/loaded-identity
++  (let [jvm-loaded @loaded/loaded-identity
+         loaded (atom {})
+         database (db/db (:seon.db/connection (support/execution-handle nil)))
+         entries (atom 0)
+@@ -137,14 +138,15 @@
+     (testing "a loaded commit this value's store lacks, known or unknown, still keys a projection"
+       ;; A failed materialization cached as a thrown `delay` once refused every later read.
+       (let [absent (random-uuid)
+-            builder #(@#'db/loaded-builder database % nil)]
++            builder #(@#'db/loaded-builder database (atom (assoc @(sci.eval/projection-state database (db/carried-projection database))
++                                                                   :seon.sci.eval/loaded-identity (atom %))))]
+         (doseq [program [{:seon.source/commit-id absent}
+                          (let [failed (atom {})]
+                            (adopt! failed absent #(throw (ex-info "arming refused" {})))
+                            @failed)]]
+           (is (string? (builder program)))
+           (is (= (builder program) (builder program)) "nothing failed was cached"))))
+-    (is (= jvm-loaded @sci.eval/loaded-identity) "the JVM's loaded identity is untouched")
++    (is (= jvm-loaded @loaded/loaded-identity) "the JVM's loaded identity is untouched")
+     (remove-ns (symbol scratch))))
+ 
+ (deftest a-jvm-running-the-published-bytes-names-that-commit
+diff --git a/test/seon/db_test.clj b/test/seon/db_test.clj
+index d81bb9e06..ee7c45b69 100644
+--- a/test/seon/db_test.clj
++++ b/test/seon/db_test.clj
+@@ -29,6 +29,8 @@
+             [seon.fn :as seon.fn]
+             [seon.id :as id]
+             [seon.instrument :as instrument]
++            [seon.loaded :as loaded]
++            [seon.operator.runtime :as operator.runtime]
+             [seon.profile :as profile]
+             [seon.program :as program]
+             [seon.render :as render]
+@@ -1106,12 +1108,54 @@
+            reads 20
+            [digests calls] (test-support/armed-calls
+                             '#{seon.db/builder-digest}
+-                            #(vec (repeatedly reads (fn [] (@#'db/loaded-builder value {} nil)))))]
++                            #(vec (repeatedly reads (fn [] (@#'db/loaded-builder value nil)))))]
+        (is (not (:seon.error/at value)))
+        (is (= 1 (count (set digests))))
+        (is (< (get calls 'seon.db/builder-digest 0) reads)
+            "the identity is derived once per revision set, not per read")))))
+ 
++;; The projection builder reads the loaded program from the projection state a
++;; connection carries (`:seon.sci.eval/loaded-identity`, `:seon.source/commit-id`),
++;; never by looking the process's names up, so every cluster connection carries one.
++(deftest every-connection-carries-its-projection-state
++  (let [carried #(some-> (:seon.sci.eval/projection-state (meta %)) deref)]
++    (doseq [[cluster instance] @operator.runtime/running-instances
++            :when (and (map? instance) (:seon.sci.eval/ctx instance))
++            :let [state (carried (:seon.boot/cluster-connection instance))]]
++      (is (identical? loaded/loaded-identity (:seon.sci.eval/loaded-identity state))
++          (str "the cluster connection of " cluster " carries the JVM's loaded identity place"))
++      (is (= (:seon.source/commit-id instance) (:seon.source/commit-id state))
++          (str "the cluster connection of " cluster " carries the commit it booted")))
++    (test-support/with-database
++     (fn [connection]
++       (is (identical? loaded/loaded-identity (:seon.sci.eval/loaded-identity (carried connection)))
++           "a harness connection carries the JVM's loaded identity place")))))
++
++;; Two states naming different booted programs key two projections of one
++;; value: the builder is the executing state's, and one state's repeated read
++;; derives once.
++(deftest projection-cache-uses-the-executing-builder
++  (test-support/with-database
++   (fn [connection]
++     (let [database (db/db connection)
++           state (fn [] (atom (assoc @(sci.eval/projection-state
++                                       database (db/carried-projection database)
++                                       (:seon.cluster/name (test-support/execution-handle connection)))
++                                     :seon.source/commit-id (random-uuid)
++                                     :seon.sci.eval/loaded-identity (atom {}))))
++           a (db/carry-projection-state database (state))
++           b (db/carry-projection-state database (state))
++           derive (fn [value] (test-support/armed-calls '#{seon.schema/load-projection}
++                                                        #(db/carried-projection value)))
++           [projection-a calls-a] (derive a)
++           [projection-b calls-b] (derive b)
++           [again calls-again] (derive a)]
++       (is (= 1 (get calls-a 'seon.schema/load-projection 0)) "state A derives its projection")
++       (is (= 1 (get calls-b 'seon.schema/load-projection 0)) "state B's builder keys its own derivation")
++       (is (not (identical? projection-a projection-b)))
++       (is (= 0 (get calls-again 'seon.schema/load-projection 0)) "state A's second read derives nothing")
++       (is (identical? projection-a again))))))
++
+ (deftest equal-reads-record-one-evidence-entry
+   ;; An evaluation that read one thing 440,605 times stored 440,605 evidence
+   ;; rows, 8,266 of them distinct, and its recording took about 66 s.
+diff --git a/test/seon/schema_test.clj b/test/seon/schema_test.clj
+index 13838579f..61842f3de 100644
+--- a/test/seon/schema_test.clj
++++ b/test/seon/schema_test.clj
+@@ -414,6 +414,23 @@
+                          (schema/projection-from-database before projection))
+              "a newer database cannot change the old projection"))))))
+ 
++;; CLASS: a declaration range whose attributes the store never installed was
++;; read as an index, so a store declaring schema rows but no functions refused
++;; its projection from an empty base ("Bad entity attribute :seon.fn/spec").
++(deftest a-store-without-function-attributes-loads-its-schema-rows
++  (let [configuration {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write}
++        _ (d/create-database configuration)
++        connection (d/connect configuration)]
++    (try
++      (d/transact connection [{:db/ident :seon.schema/key :db/valueType :db.type/keyword
++                               :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
++                              {:db/ident :seon.schema/form :db/valueType :db.type/string
++                               :db/cardinality :db.cardinality/one}])
++      (d/transact connection [{:seon.schema/key :seon.schema-test/only-row :seon.schema/form ":string"}])
++      (is (= :string (get (:seon.schema.projection/forms (schema/load-projection @connection {}))
++                          :seon.schema-test/only-row)))
++      (finally (d/release connection)))))
++
+ (deftest function-input-fit-is-total-for-an-absent-contract
+   (let [projection (schema/build-projection (schema/registered-schemas))]
+     (is (false? (schema/function-accepts-in?
+diff --git a/test/seon/sci/open_derivers_test.clj b/test/seon/sci/open_derivers_test.clj
+index 72adc1209..50e2a0472 100644
+--- a/test/seon/sci/open_derivers_test.clj
++++ b/test/seon/sci/open_derivers_test.clj
+@@ -45,7 +45,11 @@
+     :functions (into #{} (map #(symbol "seon.db" %))
+                      ["call-preparation-snapshot" "call-preparation-report-snapshot" "call-preparation-plan-for"])}
+    {:phase :P3a-1
+-    :functions (into #{} (map #(symbol "seon.schema" %)) ["canonical-schema-entities"])}])
++    :functions (into #{} (map #(symbol "seon.schema" %)) ["canonical-schema-entities"])}
++   ;; `projection-builder` is deleted, so it is built from its name.
++   {:phase :P5
++    :functions (into #{} (map #(symbol "seon.db" %))
++                     ["carried-projection" "content-projection" "connection-projection-state" "projection-builder"])}])
+ 
+ (defn- open-cache-derivers
+   "The cache derivers of `database`'s program that its reach index leaves open."
+diff --git a/test/seon/sci/program_change_test.clj b/test/seon/sci/program_change_test.clj
+index ba50db87b..a9863e15e 100644
+--- a/test/seon/sci/program_change_test.clj
++++ b/test/seon/sci/program_change_test.clj
+@@ -2,7 +2,7 @@
+   "An agent evaluation reads the loaded program identity when it starts and
+   when it ends; a change by another thread marks its kept value untrusted,
+   naming both identities, and nothing waits for adoption. Each test injects its own identity atom, so the
+-  JVM's `seon.sci.eval/loaded-identity` is never touched."
++  JVM's `seon.loaded/loaded-identity` is never touched."
+   (:require [clojure.string :as str]
+             [clojure.test :refer [deftest is testing]]
+             [sci.core :as sci]
+diff --git a/test/seon/test/first_load_arming_test.clj b/test/seon/test/first_load_arming_test.clj
+index 2208a1041..7d412c052 100644
+--- a/test/seon/test/first_load_arming_test.clj
++++ b/test/seon/test/first_load_arming_test.clj
+@@ -43,7 +43,7 @@
+        (is (nil? (find-ns fixture)) "deciding loads nothing")))))
+ 
+ (deftest a-stale-acquisition-snapshot-does-not-decide-the-loaded-program
+-  ;; The loaded program is the one `seon.sci.eval/loaded-identity` names, never
++  ;; The loaded program is the one `seon.loaded/loaded-identity` names, never
+   ;; the ctx's acquisition snapshot, which stays behind a later adoption.
+   (test-support/with-database
+    (fn [connection]
+diff --git a/test/seon/test/reach_test.clj b/test/seon/test/reach_test.clj
+index 4524059f0..54d3c8ae2 100644
+--- a/test/seon/test/reach_test.clj
++++ b/test/seon/test/reach_test.clj
+@@ -11,6 +11,7 @@
+             [seon.profile :as profile]
+             [seon.render.value :as value]
+             [seon.schema :as schema]
++            [seon.loaded :as loaded]
+             [seon.sci.eval :as sci.eval]
+             [seon.test :as test]
+             [seon.test.runner :as runner]
+@@ -269,7 +270,7 @@
+                          #(:seon.test.runner/digests
+                            (@#'runner/reach-index (@#'runner/reached-graph changed names) names)))
+                    ;; every reach digest also keys the loaded commit that runs the test
+-                   loaded (:seon.source/commit-id @sci.eval/loaded-identity)]
++                   loaded (:seon.source/commit-id @loaded/loaded-identity)]
+                (is (= (update-vals (:seon.profile/value cold) #(id/id [% loaded] 64)) (:seon.profile/value first-reach))
+                    "the branch's first digests equal a rebuild of its whole closure")
+                (is (not= (get before reaching) (get (:seon.profile/value first-reach) reaching))
+diff --git a/test/seon/test/runner_test.clj b/test/seon/test/runner_test.clj
+index 5d642e742..c5a979f25 100644
+--- a/test/seon/test/runner_test.clj
++++ b/test/seon/test/runner_test.clj
+@@ -1,5 +1,6 @@
+ (ns seon.test.runner-test
+   (:require [clojure.data.json :as json]
++            [seon.loaded]
+             [seon.config]
+             [seon.mcp :as mcp]
+             [seon.cache :as cache]
+@@ -571,7 +572,7 @@
+          (let [database (db/db connection)
+                held (current)
+                result-key [(#'runner/result-revisions database) names nil
+-                           (:seon.source/commit-id @seon.sci.eval/loaded-identity)]]
++                           (:seon.source/commit-id @seon.loaded/loaded-identity)]]
+            (is (= expected (get-in held [proof :seon.test/fail-count])))
+            (cache/evict! :seon.test.runner/current-results result-key)
+            (is (= held (current)) "folded and freshly read dynamic inputs judge the same result")))))))

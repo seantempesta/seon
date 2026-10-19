@@ -1,0 +1,323 @@
+diff --git a/docs/seon/specs/merge.md b/docs/seon/specs/merge.md
+index d160c3b90..b66e3f87c 100644
+--- a/docs/seon/specs/merge.md
++++ b/docs/seon/specs/merge.md
+@@ -63,6 +63,16 @@ path into git, not a merge of the cluster.
+   write-back, history);
+ - the review's test decisions (§4 step 3: kept, folded, dropped).
+ 
++**A green result carries; red and unknown do not** (owner 2026-10-14). A test's result is reused wherever the same
++test is asked of the same content: its identity is `[test reach digest, external-input digest, evaluator]`, the key
++`seon.test/select` reuses by on one branch. A run that records a terminated green retains it in `seon.cache` under
++that identity (`seon.test.runner/retain-greens!`); a request on any branch whose member has that identity answers
++from it, or on a cache miss from main's records in one batched query (`seon.test/carried-greens`), and records the
++member on its own branch with `:seon.test.member/reused-run` naming the run that executed it, so that branch holds
++its own green evidence (`seon.test/verified?`, `seon.cluster.branch-evidence/branch-evidence`) and later requests
++reuse it there. An explicit rerun executes. A red or unknown result is reused only on the branch that recorded it.
++Full suites run only when asked for.
++
+ ## 2. The diff value
+ 
+ One value, from `seon.cluster.source/compare-branch` and `seon.program/three-way`: every
+diff --git a/resources/seon/schemas/seon.test.member.edn b/resources/seon/schemas/seon.test.member.edn
+index 295a8d589..68b6d2700 100644
+--- a/resources/seon/schemas/seon.test.member.edn
++++ b/resources/seon/schemas/seon.test.member.edn
+@@ -24,6 +24,7 @@
+  :seon.test.member/executed [:set {:description "The definitions the member's body executed, `[sym digest]` from its own call sink (`seon.batch/executed`): carried from the body to recording, where it becomes `:seon.test.member/dynamic-calls` and the stale-body check, never stored."} :seon.batch/executed-key]
+  :seon.test.member/dynamic-calls [:set {:description "The declarations the member's body executed outside its test's static closure on the tested database (a name built at run time, for example). The reach digest covers their closures too (`seon.test.runner/reach-digests`), so a change to one re-executes the test. Absent: none."} :qualified-symbol]
+  :seon.test.member/evaluator [:and {:description "What ran this member's body, as `seon.test/resolve-test` resolved it: :compiled, the host JVM's loaded Var, or :interpreted, SCI's Var from the tested branch's rows. Main's side of a branch's red is judged under the same evaluator (`seon.test/fork-point-red`, `seon.cluster.source/accept-merge!`). Absent: no Var resolved, so unknown."} :seon.test.run/evaluator]
++ :seon.test.member/reused-run [:and {:seon.db/identity false :description "The run whose green this member answers without executing: another branch's run (or main's) that recorded the same test at the same reach digest, external inputs and evaluator (`seon.test/carried-greens`). A value, as that run need not be in this branch's history. Only a green crosses branches; its counts, reach digest and termination are copied, so this branch's own readers (`seon.test/select`, `seon.test/verified?`, `seon.cluster.branch-evidence/branch-evidence`) judge it as its own evidence."} :seon.test.run/id]
+  :seon.test.member/member
+  [:map {:seon.db/attributes true}
+   [:seon.test.member/symbol :seon.test.member/symbol]
+@@ -47,4 +48,5 @@
+   [:seon.test.member/run-ms {:optional true} :seon.test.member/run-ms]
+   [:seon.test.member/top {:optional true} :seon.test.member/top]
+   [:seon.test.member/evaluator {:optional true} :seon.test.member/evaluator]
+-  [:seon.test.member/dynamic-calls {:optional true} :seon.test.member/dynamic-calls]]}
++  [:seon.test.member/dynamic-calls {:optional true} :seon.test.member/dynamic-calls]
++  [:seon.test.member/reused-run {:optional true} :seon.test.member/reused-run]]}
+diff --git a/resources/seon/tasks/seon.test.edn b/resources/seon/tasks/seon.test.edn
+index 939a6792f..12fe5a938 100644
+--- a/resources/seon/tasks/seon.test.edn
++++ b/resources/seon/tasks/seon.test.edn
+@@ -125,4 +125,5 @@
+              :plan "Suspected flake, to reproduce before anyone designs a fix: one `bin/seon check` run refused with Datahike's 'Cannot delete a database with active connections' and an identical retry passed. The deletion is `seon.cluster.store/release-store!`, called from `seon.test/run`'s cleanup; the sibling task for overlay connections is the family. Run the same check at least 5 times, and on a refusal record which connections `datahike.api/connections` still lists (agent overlays, listeners, a flow proc) and their agent ids. If an agent or listener outlives its world, the owner is whoever admitted it (stop graphs before retracting their facts, release before deleting); otherwise record that it did not reproduce. Read `seon.test/run`, `seon.cluster.store/release-store!` and the sibling task `seon.test/a-world-holding-agent-overlays-releases-cleanly`. Result 2026-10-14 (HEAD 1e278c103): not reproduced, 0 of 8 runs of `bin/seon check --test seon.context-test/a-plain-eval-renders-each-must-read-from-its-world` printed the refusal (7 passed in 999 to 1,227 ms; the eighth failed in classpath resolution, see `seon.operator/concurrent-checks-race-in-clojure-spath-classpath-resolution`); evidence in `docs/research/agent-platform/2026-10-14/flake-hunt.md` #Suspect 2: active-connections refusal, per run. The 8 runs used a small test, not the full batch in which it was observed, so close this only after a run of that batch also fails to reproduce."}
+  #:seon.task{:name "a-run-with-an-ineligible-namespace-runs-the-rest"
+              :plan "`bin/seon check --test NS ...` refuses the whole run when one named namespace has no eligible tests: `seon.test/select` refuses `:seon.test/namespace-unresolved` (\"The requested namespace has no eligible tests.\") for the first such namespace, before any test runs. Observed in the bulk-tier setup (`docs/research/agent-platform/2026-10-14/red-triage.md`, 5036d2264) with `seon.test-support`, `seon.repl-parity-test` (a deftest-generating macro) and `seon.competency`; the caller had to filter them by hand. A run asks for tests: a namespace without eligible ones contributes none, and is reported beside the run's result as one `:seon.test/namespace-unresolved` entry that names it, while the other namespaces run (a fixture namespace is already refused by its own rule and reported the same way). Done when `seon.test/select` of one eligible and one ineligible namespace selects the eligible one's tests and names the other. Read `seon.test/select` and `script/seon/operator.clj` `test-check-arguments`. Proof: to write before assignment."}
+-]
++ #:seon.task{:name "a-green-result-carries-to-another-branch-of-the-same-program"
++             :plan "Owner, 2026-10-14: a test's result carries wherever the same test is asked of the same content, in any SCI context or branch. `seon.test/select` reuses only runs recorded on the asking branch, so a second agent branch holding the same program reruns every green the first earned. Done when a run that records a complete green member retains it in `seon.cache` under `[test-sym reach-digest input-digest evaluator]`, a miss reads main's records (`seon.task/main-head`) in one batched query, and a hit is recorded on the asking branch as a member carrying `:seon.test.member/reused-run`, so `seon.test/verified?` and `seon.cluster.branch-evidence/branch-evidence` read it as the branch's own green; red and unknown never cross branches. Read `seon.test/run-request` and `seon.test.runner/commit-results!`."}]
+diff --git a/src/seon/test.clj b/src/seon/test.clj
+index 3e950f962..105e434b5 100644
+--- a/src/seon/test.clj
++++ b/src/seon/test.clj
+@@ -29,6 +29,7 @@
+             [seon.schema :as schema]
+             [seon.sci.eval :as sci.eval]
+             [seon.sci.kernel :as kernel]
++            [seon.task :as task]
+             [seon.render.value :as render.value]
+             [seon.test.runner :as runner])
+   (:import [java.util.concurrent FutureTask]))
+@@ -2206,7 +2207,7 @@
+             ;; No revision authority (a value without a complete revision context) derives every time.
+             revisions (runner/program-revisions-digest candidate)
+             changed (if revisions
+-                      (seon.cache/lookup ::changes [cluster base (get-in candidate [:config :branch]) revisions]
++                      (seon.cache/lookup ::changes [cluster base revisions]
+                                          #(+ 256 (* 128 (count %))) derive-changes vector?)
+                       (derive-changes))]
+         (cond (:seon.error/at changed) changed
+@@ -2576,6 +2577,53 @@
+        (zero? (:seon.test/fail-count result 0))
+        (zero? (:seon.test/error-count result 0))))
+ 
++(defn- carried-greens
++  "Each of `test-symbols` whose reuse identity `[sym reach-digest input-digest
++  evaluator]` (`reach` holds the digests) names a green another branch recorded,
++  with that run's id and pass count: retained in `seon.cache` when a run recorded
++  it (`seon.test.runner/retain-greens!`), else read from main's head
++  (`seon.task/main-head`) in one batched query. Only greens cross branches."
++  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.test/sym] :map
++                       :seon.test.run/input-digest :seon.test.run/evaluator]
++                  [:map-of :seon.test/sym [:map [:seon.test.run/id :seon.test.run/id]
++                                           [:seon.test/pass-count :seon.test/pass-count]]]]}
++  [database test-symbols reach inputs evaluator]
++  (let [keyed (filterv #(string? (get reach %)) test-symbols)
++        cached (into {} (keep #(when-let [green (seon.cache/present :seon.test.runner/green [% (get reach %) inputs evaluator])]
++                                 [% green]))
++                     keyed)
++        missed (remove cached keyed)
++        main (when (seq missed) (task/main-head database))]
++    (into cached
++          (map (fn [[test-symbol run-id pass]] [test-symbol {:seon.test.run/id run-id :seon.test/pass-count pass}]))
++          (when main
++            (selection-read!
++             (db/q '[:find ?symbol ?id ?pass :in $ [[?symbol ?digest] ...] ?inputs ?evaluator
++                     :where [?member :seon.test.member/symbol ?symbol]
++                            [?member :seon.test.member/reach-digest ?digest]
++                            [?member :seon.test.member/terminated-tx]
++                            [?member :seon.test.member/pass-count ?pass] [(> ?pass 0)]
++                            [?member :seon.test.member/fail-count 0]
++                            [?member :seon.test.member/error-count 0]
++                            (not [?member :seon.test.member/error])
++                            [?run :seon.test.run/members ?member]
++                            [?run :seon.test.run/input-digest ?inputs]
++                            [?run :seon.test.run/evaluator ?evaluator]
++                            [?run :seon.test.run/id ?id]]
++                   main (mapv #(vector % (get reach %)) missed) inputs evaluator))))))
++
++(defn- carried-member
++  "The member recording `carried`'s green on this branch: `selected`'s
++  symbol and reasons, the green's counts at the current `digest`, terminated, and
++  `:seon.test.member/reused-run` naming the run that executed it."
++  {:malli/schema [:=> [:cat :map :seon.test/reach-digest :map] :map]}
++  [selected digest {run-id :seon.test.run/id pass :seon.test/pass-count}]
++  (assoc (select-keys selected [:seon.test.member/symbol :seon.test.member/reasons])
++         :seon.test.member/reused-run run-id :seon.test.member/reach-digest digest
++         :seon.test.member/pass-count pass :seon.test.member/fail-count 0 :seon.test.member/error-count 0
++         :seon.test.member/began? true :seon.test.member/ended? true
++         :seon.test.member/completed-tx "datomic.tx" :seon.test.member/terminated-tx "datomic.tx"))
++
+ (defn- loaded-program
+   "The program this JVM loaded, as `ctx`'s world holds it: the commit
+   `seon.sci.eval/loaded-identity` names now, read from `ctx`'s store, else (an
+@@ -2755,6 +2803,15 @@
+             ;; here on, before or during a member, makes that member unknown.
+             since @sci.eval/loaded-identity
+             reach (when (seq runnable) (runner/reach-digests database runnable))
++            ;; A green another branch recorded for the same identity answers here
++            ;; and is recorded as this branch's own; an explicit rerun executes.
++            carried (when (and (seq runnable) (not (:seon.error/at reach)) (not (:seon.test/rerun? request))
++                               (not (:seon.test/loaded-source-drift selection)))
++                      (carried-greens database runnable reach (:seon.test.run/input-digest selection) evaluator))
++            carried-members (mapv (fn [member]
++                                    (carried-member member (get reach (:seon.test.member/symbol member))
++                                                    (get carried (:seon.test.member/symbol member))))
++                                  (filter #(contains? carried (:seon.test.member/symbol %)) (:seon.test.run/members selection)))
+             ;; What each task-reading member judges, read once on the request's database (a clone lives on its branch).
+             task-inputs (when (seq runnable)
+                           (if-let [task (:seon.test/task request)]
+@@ -2789,12 +2846,15 @@
+                                         ((:seon.test.member/reasons %) :platform))
+                                   (:seon.test.run/members selection)))
+                 ordered (sort-by (fn [test-symbol] [(if (platform? test-symbol) 0 1) test-symbol])
+-                                 runnable)
++                                 (remove #(contains? carried %) runnable))
+                 ;; Admission, execution and release proceed one bounded batch
+                 ;; at a time: no transaction carries more than `limit` members,
+                 ;; and a batch is admitted only when its turn comes.
+                 limit (or (:seon.test/batch-limit request) batch-limit)
+-                batches (vec (partition-all limit ordered))
++                ;; Carried greens are recorded by the first admission, one with no
++                ;; member to execute when nothing else runs.
++                batches (cond-> (vec (partition-all limit ordered))
++                          (and (empty? ordered) (seq carried-members)) (conj []))
+                 deadline (+ started (* 1000000 bound))
+                 remaining-ms #(quot (- deadline (System/nanoTime)) 1000000)
+                 ;; One policy for the runner's own admission, completion, stop and
+@@ -2835,6 +2895,7 @@
+                                                            (:seon.test.run/members selection)))
+                                      (and (zero? index) (seq exclusion-entities))
+                                      (assoc :seon.test.run/exclusions exclusion-entities)
++                                     (zero? index) (update :seon.test.run/members into carried-members)
+                                      (pos? index) (dissoc :seon.test.run/covered-by))
+                                ;; decided here on the committed head, checked at the writer by its basis
+                                head (db/db recording)
+@@ -3001,7 +3062,15 @@
+                       (try (@release-context! request-handle)
+                            (finally (store/release-store! (:seon.store/store request-handle)))))))
+                 held-elsewhere (::held outcome)
+-                reused (vec (:seon.test.selection/unchanged selection))
++                reused (into (vec (:seon.test.selection/unchanged selection))
++                             (map (fn [[test-symbol {run-id :seon.test.run/id pass :seon.test/pass-count}]]
++                                    {:seon.test/sym test-symbol :seon.test/unchanged true
++                                     :seon.test/pass-count pass :seon.test/fail-count 0 :seon.test/error-count 0
++                                     :seon.test/run [:seon.test.run/id (:seon.test.run/id provenance)]
++                                     :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
++                                     :seon.test/run-at (:seon.test.run/at provenance)
++                                     :seon.test.member/reused-run run-id}))
++                             (sort-by key carried))
+                 results (into (vec (:seon.test/results outcome)) reused)
+                 ;; Every exclusion is an unfulfilled obligation, a declared
+                 ;; long test included: it never reads as green.
+diff --git a/src/seon/test/runner.clj b/src/seon/test/runner.clj
+index 300baefa5..83dfdc879 100644
+--- a/src/seon/test/runner.clj
++++ b/src/seon/test/runner.clj
+@@ -2310,6 +2310,33 @@
+                                  test-symbol)))
+                    executed)}))
+ 
++(defn- retain-greens!
++  "Retain each terminated green member of run `run-id` on `database` in
++  `seon.cache` under its reuse identity `[sym reach-digest input-digest
++  evaluator]`, the key `seon.test/select` reuses by, naming the run: any branch
++  asking that identity answers from it (`seon.test/carried-greens`). Called where
++  a member's outcome or its exit commits, whichever lands last. Red and unknown
++  are never retained."
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/id] :nil]}
++  [database run-id]
++  (doseq [[test-symbol digest pass inputs evaluator]
++          (execution-read
++           (db/q '[:find ?symbol ?digest ?pass ?inputs ?evaluator :in $ ?id
++                   :where [?run :seon.test.run/id ?id] [?run :seon.test.run/selection-tx]
++                          [?run :seon.test.run/input-digest ?inputs] [?run :seon.test.run/evaluator ?evaluator]
++                          [?run :seon.test.run/members ?member]
++                          [?member :seon.test.member/symbol ?symbol]
++                          [?member :seon.test.member/reach-digest ?digest]
++                          [?member :seon.test.member/completed-tx] [?member :seon.test.member/terminated-tx]
++                          [?member :seon.test.member/pass-count ?pass] [(> ?pass 0)]
++                          [?member :seon.test.member/fail-count 0] [?member :seon.test.member/error-count 0]
++                          (not [?member :seon.test.member/error])
++                          (not [?member :seon.test.member/reused-run])]
++                 database run-id))]
++    (cache/lookup ::green [test-symbol digest inputs evaluator] (constantly 256)
++                  (constantly {:seon.test.run/id run-id :seon.test/pass-count pass})))
++  nil)
++
+ (defn commit-results!
+   "Commit captured test results and return those exact committed facts."
+   {:malli/schema
+@@ -2361,7 +2388,9 @@
+                                (get by-symbol (symbol test-symbol))
+                                (dissoc (db/pull after result-selector [:seon.test/sym test-symbol]) :db/id)))
+                            results)]
+-        (or (first (filter seon.error.refusal/error? recorded)) recorded)))))
++        (or (first (filter seon.error.refusal/error? recorded))
++            (do (when admitted? (retain-greens! after (get-in completion [:seon.test.run/provenance :seon.test.run/id])))
++                recorded))))))
+ 
+ (defn exit-tx
+   "Record at the writer that `test-symbol`'s body in `run-id` has exited.
+@@ -2383,7 +2412,10 @@
+   {:malli/schema [:=> [:cat :seon.db/connection :seon.test.run/id :seon.test/sym]
+                   [:or :seon.db/transaction-report :seon.db/transaction-refused-error]]}
+   [connection run-id test-symbol]
+-  (db/transact! connection [[:db.fn/call #'exit-tx run-id test-symbol]]))
++  (let [report (db/transact! connection [[:db.fn/call #'exit-tx run-id test-symbol]])]
++    (when-not (seon.error.refusal/error? report)
++      (retain-greens! (:db-after report) run-id))
++    report))
+ 
+ (defn record-interrupted!
+   "Stop `completion`'s run with `:request-threw` and commit the results its
+diff --git a/test/seon/test/branch_reuse_test.clj b/test/seon/test/branch_reuse_test.clj
+new file mode 100644
+index 000000000..7ef9a48f3
+--- /dev/null
++++ b/test/seon/test/branch_reuse_test.clj
+@@ -0,0 +1,71 @@
++(ns seon.test.branch-reuse-test
++  "A green result carries to another branch holding the same program; red never does."
++  (:require [clojure.data.json :as json]
++            [clojure.test :refer [deftest is]]
++            [seon.db :as db]
++            [seon.mcp :as mcp]
++            [seon.test :as sut]
++            [seon.test-support :as support]))
++
++(defn- agent-value
++  "The value of the last form of `code` evaluated as `agent-id` through `seon.mcp/call`."
++  {:malli/schema [:=> [:cat :string :seon.agent/id :string] :seon.schema/value]}
++  [running agent-id code]
++  (->> (get (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
++                                                       "arguments" {"code" code "agent" agent-id "cluster" running}})))
++            "content")
++       (keep #(let [item (support/reply (get % "text"))]
++                (when (and (map? item) (contains? item :seon.repl/value)) [(:seon.repl/value item)])))
++       last
++       first))
++
++(defn- branch-members
++  "Every member `branch`'s own runs hold for `test-symbol`, pulled whole, oldest admission first."
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch :qualified-symbol] [:vector :map]]}
++  [database branch test-symbol]
++  (->> (db/q '[:find ?member ?selected :in $ ?branch ?symbol
++               :where [?run :seon.test.run/branch ?branch] [?run :seon.test.run/selection-tx ?selected]
++                      [?run :seon.test.run/members ?member] [?member :seon.test.member/symbol ?symbol]]
++             database branch test-symbol)
++       (sort-by second)
++       (mapv #(db/pull database '[*] (first %)))))
++
++(def ^:private program
++  (str "(ns br.area (:require [clojure.test :refer [deftest is]]))\n"
++       "(defn area \"The area.\" {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))\n"
++       "(deftest area-test (is (= 25 (area 5))))\n"
++       "(deftest red-test (is (= 26 (area 5))))"))
++
++(def ^:private check
++  (str "(select-keys (my.test/check {:seon.test/identities #{'br.area/area-test 'br.area/red-test}})"
++       " [:seon.test/passed? :seon.test/executed-count :seon.test/reused-count])"))
++
++(deftest ^{:seon/tasks #{'seon.test/a-green-result-carries-to-another-branch-of-the-same-program}
++           :seon.test/long "Two own-branch agents, five eval requests, each with its automatic test step: about 4 s measured on default's JVM."
++           :seon.test/long-ms 20000}
++  a-green-result-carries-to-another-branch-of-the-same-program
++  (support/with-running-agent
++   (fn [running _ _]
++     (let [first-agent (str "reuse-first-" (random-uuid))
++           second-agent (str "reuse-second-" (random-uuid))
++           _ (support/own-branch-agent! running first-agent program)
++           first-check (agent-value running first-agent check)
++           {lane :seon.store/branch connection :seon.db/connection} (support/own-branch-agent! running second-agent program)
++           second-check (agent-value running second-agent check)
++           database (db/db connection)
++           green (branch-members database lane 'br.area/area-test)
++           red (branch-members database lane 'br.area/red-test)]
++       (is (false? (:seon.test/passed? second-check)) "the red test is red on the second branch too")
++       (is (false? (:seon.test/passed? first-check)) "the red test is red on the first branch")
++       (is (and (seq green) (every? :seon.test.member/reused-run green))
++           "the second branch records the green it answered from the first branch's run, executing nothing")
++       (is (= 1 (:seon.test.member/pass-count (first green))) "the recorded green carries its counts")
++       (is (true? (sut/verified? database 'br.area/area-test)) "the recorded green is the branch's own green evidence")
++       (is (and (seq red) (not-any? :seon.test.member/reused-run red) (every? :seon.test.member/began? red))
++           "a red result never crosses branches: the second branch executes it")
++       (agent-value running second-agent
++                    "(in-ns 'br.area)\n(defn area \"The area.\" {:malli/schema [:=> [:cat :int] :int]} [r] (* r (+ r 0)))")
++       (agent-value running second-agent check)
++       (let [changed (last (branch-members (db/db connection) lane 'br.area/area-test))]
++         (is (and (:seon.test.member/began? changed) (not (:seon.test.member/reused-run changed)))
++             "a change to what the test reaches executes it again"))))))

@@ -1,0 +1,95 @@
+diff --git a/resources/seon/schemas/seon.ns.edn b/resources/seon/schemas/seon.ns.edn
+index c371ccc13..4eb8edb0e 100644
+--- a/resources/seon/schemas/seon.ns.edn
++++ b/resources/seon/schemas/seon.ns.edn
+@@ -7,7 +7,8 @@
+           [:symbol
+            {:seon.db/identity true,
+             :seon.program/row-schema :seon.ns/ns,
+-            :seon.program/source-attribute :seon.ns/source}],
++            :seon.program/source-attribute :seon.ns/source,
++            :seon.ref/content-attributes [:seon.ns/requires]}],
+           :ns
+           [:map
+            {:seon.db/attributes true,
+diff --git a/resources/seon/schemas/seon.ref.edn b/resources/seon/schemas/seon.ref.edn
+index a78c599ce..a836f14b9 100644
+--- a/resources/seon/schemas/seon.ref.edn
++++ b/resources/seon/schemas/seon.ref.edn
+@@ -86,6 +86,7 @@
+            :render-pair [:map {:description "The renderers a schema declares for its values, as symbols."}
+                          [:seon.render/ai {:optional true} :qualified-symbol] [:seon.render/html {:optional true} :qualified-symbol]]
+            :pull [:vector {:description "The attributes an identity's entity is pulled as when it is referenced."} :qualified-keyword]
++           :content-attributes [:vector {:description "Declared on a program family's identity attribute: the attributes besides its source that the identity is pulled as when referenced, such as a namespace's requires."} :qualified-keyword]
+            :row :qualified-keyword
+            :declaration [:map {:description "An identity attribute's reference declaration, read from the schema: what its entity is pulled as and its row schema. Producer: seon.ref/declarations."}
+                          [:seon.ref/pull :seon.ref/pull] [:seon.ref/row :seon.ref/row]]
+diff --git a/resources/seon/tasks/seon.render.ns.edn b/resources/seon/tasks/seon.render.ns.edn
+index 4bda29e9a..03ee32fa7 100644
+--- a/resources/seon/tasks/seon.render.ns.edn
++++ b/resources/seon/tasks/seon.render.ns.edn
+@@ -2,6 +2,4 @@
+             :intent
+             "`seon.render.ns/function-ai` returns source as :seon.render.ns/source-lines, a vector of strings; the value printer fills each output line with several of them (\"        query-input\" \"        (if explicit-database?\" on one line), every quote escaped, and the docstring is shown twice (as `:seon.fn/doc` and inside the source). For `seon.db/q` (62 lines) 32 lines show before the cut. Done when a function's source is shown as code, one source line per output line and unescaped, without repeating the doc, asserted on the render's data and the printer's own test (lane source-display owns the printer side). Read `docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md`."}
+  #:seon.task{:name "ns-render-tests-are-red-on-head"
+-  :intent "Two tests in test/seon/render/ns_test.clj are red on HEAD without a task: task-and-schema-entities-render-as-graph-nodes (56 of 200 stored task intents exceed 400 characters; see also seon.test reds-on-head-9d6b392b6-in-task-reaching-tests) and identity-reads-stewardship-without-an-agent-cluster-attribute (cause not yet diagnosed). Correct: classify each by the commit that changed its behavior, then fix the producer, update the retired assumption or delete the test; do not raise the bound to fit the data. Done when both are green on HEAD. Read `seon.render.ns/task-ai` and `docs/research/agent-platform/2026-10-08/split/reconciled-plan.md`."}
+- #:seon.task{:name "a-namespace-must-read-shows-empty-requires"
+-             :intent "A namespace cited by a task renders in the current-state block's must-reads with `:seon.ns/requires []` although the namespace requires others: `seon.edit` shows [] while `(seon.db/pull db [:seon.ns/requires] [:seon.ns/name 'seon.edit])` answers [rewrite-clj.zip seon.error.refusal] (ctx-sanity, default, 2026-10-14; same for `seon.sci.reader`, `seon.render.value`, `seon.turn`). `seon.ref/resolve-name` pulls the namespace by its declared `:seon.ref/pull`, which omits `:seon.ns/requires`, and `seon.render.ns/render-ai` turns the missing key into `(vec (sort nil))`. Correct: the resolved namespace carries its stored requires, and `seon.render.ns/render-ai` leaves the key absent when the value has none (absence is no key). See `docs/research/agent-platform/2026-10-14/context-sanity.md`."}]
++  :intent "Two tests in test/seon/render/ns_test.clj are red on HEAD without a task: task-and-schema-entities-render-as-graph-nodes (56 of 200 stored task intents exceed 400 characters; see also seon.test reds-on-head-9d6b392b6-in-task-reaching-tests) and identity-reads-stewardship-without-an-agent-cluster-attribute (cause not yet diagnosed). Correct: classify each by the commit that changed its behavior, then fix the producer, update the retired assumption or delete the test; do not raise the bound to fit the data. Done when both are green on HEAD. Read `seon.render.ns/task-ai` and `docs/research/agent-platform/2026-10-08/split/reconciled-plan.md`."}]
+diff --git a/src/seon/render/ns.clj b/src/seon/render/ns.clj
+index 4a22dd338..93219de61 100644
+--- a/src/seon/render/ns.clj
++++ b/src/seon/render/ns.clj
+@@ -272,7 +272,7 @@
+     (cond
+       (nil? listed) named
+       (db/read-refusal? listed) listed
+-      :else (merge named {:seon.ns/requires (vec (sort requires))} listed))))
++      :else (merge named (when requires {:seon.ns/requires (vec (sort requires))}) listed))))
+ 
+ (defn- agent-namespace-ref
+   "The namespace an agent-namespace unit names: the walked namespace itself,
+diff --git a/test/seon/render/ns_test.clj b/test/seon/render/ns_test.clj
+index da35c365a..02cb670ed 100644
+--- a/test/seon/render/ns_test.clj
++++ b/test/seon/render/ns_test.clj
+@@ -3,6 +3,7 @@
+             [clojure.string :as str]
+             [clojure.test :refer [deftest is testing]]
+             [seon.db :as db]
++            [seon.ref :as ref]
+             [seon.cluster.agent :as agent]
+             [seon.render.hiccup :as hiccup]
+             [seon.render.ns :as sut]
+@@ -257,3 +258,13 @@
+     (is (= "Change supplied setting overrides and return my resulting overrides."
+            (shown "Change supplied setting overrides and return\n  my resulting overrides.\n\n  More detail.")))
+     (is (= "A summary with no period" (shown "A summary with no period\n\n  Then a body.")))))
++
++(deftest a-namespace-a-task-cites-shows-its-stored-requires
++  (let [db (db/db)
++        stored (:seon.ns/requires (db/pull db [:seon.ns/requires] [:seon.ns/name 'seon.edit]))
++        [cited] (ref/references db {:seon.ref/text "`seon.edit`"})]
++    (is (seq stored) "the namespace stores requires")
++    (is (= stored (:seon.ns/requires cited)) "the resolved namespace carries them")
++    (is (not (contains? (sut/render-ai (dissoc (namespace-unit db 'seon.edit 1 100000) :seon.ns/requires))
++                        :seon.ns/requires))
++        "a namespace with no stored requires shows no key")))
+diff --git a/src/seon/ref.clj b/src/seon/ref.clj
+--- a/src/seon/ref.clj
++++ b/src/seon/ref.clj
+@@ -405,12 +405,12 @@
+              forms (:seon.schema.projection/forms projection)
+              ref? (fn [form] (or (= :seon.db/ref form) (and (vector? form) (= :seon.db/ref (peek form)))))]
+          (into {} (keep (fn [attribute]
+-                          (let [{row :seon.program/row-schema source :seon.program/source-attribute}
++                          (let [{row :seon.program/row-schema source :seon.program/source-attribute content :seon.ref/content-attributes}
+                                 (some-> (mr/schema registry attribute) m/properties)
+                                 definition (some->> row (mr/schema registry))]
+                             (when definition
+                               [attribute {:seon.ref/pull (if source
+-                                                           [attribute source]
++                                                           (into [attribute source] content)
+                                                            (into [] (comp (map first) (filter qualified-keyword?) (remove #(ref? (get forms %))))
+                                                                  (internal/entity-entries definition)))
+                                           :seon.ref/row row}]))))

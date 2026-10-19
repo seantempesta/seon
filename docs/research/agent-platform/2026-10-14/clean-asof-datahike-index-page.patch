@@ -1,0 +1,38 @@
+--- a/src/datahike/index_page.cljc	2026-10-14 20:06:30.232800979 +0700
++++ b/src/datahike/index_page.cljc	2026-10-14 20:06:30.255577831 +0700
+@@ -127,17 +127,24 @@
+         seek-components (if resolved-cursor
+                           (cursor-components index resolved-cursor)
+                           (prefix-seek-components components direction))
+-        candidates ((if (= :forward direction)
+-                      dbi/seek-datoms
+-                      dbi/rseek-datoms)
+-                    db index seek-components)
+-        ;; Time-filtered temporal reads reconstruct cardinality-one state by
+-        ;; entity/attribute. That grouping is eager and does not retain AVET
+-        ;; (or another requested index's) order. Restore dependency-native
+-        ;; comparator order before a foreign datom can terminate this prefix.
+-        candidates (restore-temporal-index-order db comparator direction
+-                                                  candidates)
+-        candidates (take-while #(within-prefix? index prefix %) candidates)
++        before? (fn [datom] (neg? (if (= :forward direction)
++                                    (comparator datom resolved-cursor)
++                                    (comparator resolved-cursor datom))))
++        candidates
++        (if (dbi/context-time-pred (dbi/-search-context db))
++          ;; Time-filtered temporal reads reconstruct cardinality-one state by
++          ;; entity/attribute, eagerly over everything they read, and lose
++          ;; AVET (or another requested index's) order. An open seek reads to
++          ;; the end of the index, so read the prefix alone, restore native
++          ;; comparator order, and resume after the cursor.
++          (cond->> (restore-temporal-index-order db comparator direction
++                                                 (dbi/datoms db index components))
++            resolved-cursor (drop-while before?))
++          (take-while #(within-prefix? index prefix %)
++                      ((if (= :forward direction)
++                         dbi/seek-datoms
++                         dbi/rseek-datoms)
++                       db index seek-components)))
+         candidates
+         (if resolved-cursor
+           (let [candidate (first candidates)]

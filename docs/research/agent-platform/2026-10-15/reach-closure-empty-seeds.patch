@@ -1,0 +1,11 @@
+--- a/src/seon/test/runner.clj	2026-10-15 09:59:35.542225625 +0700
++++ b/src/seon/test/runner.clj	2026-10-15 09:59:35.565136621 +0700
+@@ -1484,7 +1484,7 @@
+                    :seon.test/unknown-error]]}
+   [database test-symbols]
+   (try
+-    (let [{::keys [nodes schemas]} (when (seq test-symbols) (reach-graph database test-symbols))
++    (let [{::keys [nodes schemas]} (if (seq test-symbols) (reach-graph database test-symbols) {::nodes {} ::schemas {}})
+           names (reach-names nodes (filterv #(get nodes %) test-symbols))
+           named (into #{} (comp (mapcat #(::keys (get nodes %))) (filter qualified-keyword?)) names)
+           ks (loop [pending (vec named) seen (transient #{})]

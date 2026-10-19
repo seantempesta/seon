@@ -1,0 +1,48 @@
+--- a/src/seon/context.clj
++++ b/src/seon/context.clj
+@@ -124,18 +124,23 @@
+ (defn- head-entries
+   "Each of `names` `database` holds, by symbol, with its status at its current reach judging `task` (nil: none)
+   and, when red, its failing assertions; the reads' refusal when one refuses."
+-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym] [:maybe :seon.task/sym]]
+-                  [:or :seon.context/head :seon.error/value]]}
+-  [database names task]
+-  (let [names (into [] (filter #(seq (db/datoms database :avet :seon.test/sym %))) (sort names))
+-        by-sym (if (seq names) (runner/current-results database names task) {})]
+-    (or (when (:seon.error/at by-sym) by-sym)
+-        (into {} (for [s names
+-                       :let [result (get by-sym s)
+-                             status (proof-status result)
+-                             failures (when (= :red status) (proof-failures result))]]
+-                   [s (cond-> {:seon.context/proof-status status}
+-                        failures (assoc :seon.context/proof-failures failures))])))))
++  {:malli/schema [:function
++                  [:=> [:cat :seon.db/database-value [:set :seon.test/sym] [:maybe :seon.task/sym]]
++                   [:or :seon.context/head :seon.error/value]]
++                  [:=> [:cat :seon.db/database-value [:set :seon.test/sym] [:maybe :seon.task/sym] :map]
++                   [:or :seon.context/head :seon.error/value]]]}
++  ([database names task]
++   (let [present (into [] (filter #(seq (db/datoms database :avet :seon.test/sym %))) (sort names))]
++     (head-entries database names task (if (seq present) (runner/current-results database present task) {}))))
++  ([database names _task by-sym]
++   (let [names (into [] (filter #(seq (db/datoms database :avet :seon.test/sym %))) (sort names))]
++     (or (when (:seon.error/at by-sym) by-sym)
++         (into {} (for [s names
++                        :let [result (get by-sym s)
++                              status (proof-status result)
++                              failures (when (= :red status) (proof-failures result))]]
++                    [s (cond-> {:seon.context/proof-status status}
++                         failures (assoc :seon.context/proof-failures failures))]))))))
+ 
+ (defn proofs
+   "The proofs section for the task `sym` on `database` (the agent's branch), its assigned obligations'
+@@ -391,7 +396,8 @@
+                       (into #{} (comp (remove runner/red-result?) (filter #(pos? (:seon.test/pass-count % 0))) (map :seon.test/sym)) held)
+                       (let [reds (into #{} (comp (filter runner/red-result?) (map :seon.test/sym)) results)]
+                         (into #{} (comp (filter runner/red-result?) (map :seon.test/sym) (filter reds)) held))))
+-        head (when members (head-entries database members sym))
++        head (when members
++               (head-entries database members sym (if (vector? results) (into {} (map (juxt :seon.test/sym identity)) results) results)))
+         ;; the run the refusals name: the newest its results came from, else the newest the branch holds
+         newest (fn [runs] (some->> (seq runs) (apply max-key second) first))
+         run-id (when (vector? results)

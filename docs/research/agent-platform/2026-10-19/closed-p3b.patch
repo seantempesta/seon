@@ -1,0 +1,63 @@
+diff --git a/src/seon/program.cljc b/src/seon/program.cljc
+index e2e7321c7..12a7f06a3 100644
+--- a/src/seon/program.cljc
++++ b/src/seon/program.cljc
+@@ -15,6 +15,7 @@
+             ;; below already sit inside a `#?(:clj …)` branch.
+             #?(:clj [seon.schema.edn :as schema.edn])
+             #?(:clj [seon.cache])
++            #?(:clj [seon.schema.datahike :as schema.datahike])
+             [edamame.core :as edamame]))
+ 
+ (defn- source-family?
+@@ -71,8 +72,7 @@
+            program)
+      #?(:clj
+         (when properties?
+-          (let [project (requiring-resolve 'seon.schema.datahike/storable-properties-in)]
+-            (mapcat #(keys (project projection %)) (keys forms))))
++          (mapcat #(keys (schema.datahike/storable-properties-in projection %)) (keys forms)))
+         :cljs []))))
+ 
+ (defn program-attributes
+@@ -329,13 +329,11 @@
+     {:seon.program/identity-attribute identity-attribute
+      :seon.program/source-attribute source-attribute
+      :seon.program/set-attributes
+-     #?(:clj (let [vector-shaped? (requiring-resolve 'seon.schema.datahike/vector-shaped-attr-in?)]
+-               (into #{}
++     #?(:clj (into #{}
+                    (keep (fn [{:db/keys [ident cardinality isComponent]}]
+                            (when (and (= :db.cardinality/many cardinality) (not isComponent)
+-                                      (not (vector-shaped? projection ident))) ident)))
+-                   ((requiring-resolve 'seon.schema.datahike/malli->datahike-schema-in)
+-                    projection owned)))
++                                      (not (schema.datahike/vector-shaped-attr-in? projection ident))) ident)))
++                   (schema.datahike/malli->datahike-schema-in projection owned))
+         :cljs #{})
+      :seon.program/owned-attributes
+      (if (true? (:seon.program/projected-properties
+diff --git a/test/seon/sci/open_derivers_test.clj b/test/seon/sci/open_derivers_test.clj
+index 5c27a22c8..0a8219b49 100644
+--- a/test/seon/sci/open_derivers_test.clj
++++ b/test/seon/sci/open_derivers_test.clj
+@@ -21,7 +21,7 @@
+      seon.db/content-projection seon.db/request-view seon.embed/corpus seon.fn/declared-edge-attributes
+      seon.fn/gate-edges seon.health/problems-unit seon.health/profile-unit seon.health/replaced-roots
+      seon.program/authored-shapes seon.program/content-digest seon.program/own-changed-identities
+-     seon.program/program-attributes seon.schema/build-projection seon.schema/declaration-projection
++     seon.schema/build-projection seon.schema/declaration-projection
+      seon.schema/direct-references seon.sci.eval/derive-program-context seon.sci.eval/loaded-authored
+      seon.sci.eval/loaded-digests seon.sci.eval/overlay-plan seon.sci.eval/program-context
+      seon.sci.eval/reach-index seon.sci.eval/record-refusals-once! seon.sci.runtime-test/shaped-main
+@@ -38,7 +38,9 @@
+   [{:phase :P2
+     :functions (into #{} (map #(symbol "seon.db" %))
+                      ["program-definition-digest" "program-behavior-digest" "stored-namespace-context"
+-                      "program-shapes-in" "program-canonical-entity"])}])
++                      "program-shapes-in" "program-canonical-entity"])}
++   {:phase :P3b
++    :functions (into #{} (map #(symbol "seon.program" %)) ["derived-shape" "derived-program-attributes"])}])
+ 
+ (defn- open-cache-derivers
+   "The cache derivers of `database`'s program that its reach index leaves open."

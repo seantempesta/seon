@@ -1,0 +1,29 @@
+diff --git a/src/seon/context.clj b/src/seon/context.clj
+index 787d25b6f..07cbd6411 100644
+--- a/src/seon/context.clj
++++ b/src/seon/context.clj
+@@ -827,11 +827,19 @@
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.context/task [:set :seon.test/sym]]
+                   [:vector [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]]}
+   [start held proof-names]
+-  (into [] (comp (remove #(contains? proof-names (:seon.ref/name %)))
+-                 (map #(if (summary-level? start %)
+-                         (merge (ref/brief start (:seon.ref/name %)) (select-keys % [:seon.ref/pin]) {:seon.ref/level :summary})
+-                         %)))
+-        (task-references start held #{} (plan-owners start held))))
++  (let [derive #(into [] (comp (remove (fn [entry] (contains? proof-names (:seon.ref/name entry))))
++                               (map (fn [entry]
++                                      (if (summary-level? start entry)
++                                        (merge (ref/brief start (:seon.ref/name entry)) (select-keys entry [:seon.ref/pin])
++                                               {:seon.ref/level :summary})
++                                        entry))))
++                      (task-references start held #{} (plan-owners start held)))]
++    ;; the attempt's starting value is one immutable as-of view: what it answers is read once per attempt
++    (if-let [at (db/as-of-key start)]
++      (cache/lookup ::must-reads [at held proof-names]
++                    #(transduce (comp (filter string?) (map count)) + 256 (tree-seq coll? seq %))
++                    derive #(not-any? :seon.error/at %))
++      (derive))))
+ 
+ (defn- proof-entry
+   "A proof as the block shows it: its name, status and failing assertions, a resolution's problem when it resolves to

@@ -1,0 +1,79 @@
+diff --git a/resources/seon/schemas/seon.context.edn b/resources/seon/schemas/seon.context.edn
+index e5dafa18d..26ce367ad 100644
+--- a/resources/seon/schemas/seon.context.edn
++++ b/resources/seon/schemas/seon.context.edn
+@@ -34,7 +34,7 @@
+                          [:seon.task.attempt/end {:optional true} :seon.task.attempt/end]
+                          [:seon.task/outcome {:optional true} :seon.task/outcome]
+                          [:seon.task/reason {:optional true} :seon.task/reason]
+-                         [:seon.task/calls :seon.task/calls]
++                         [:seon.task/calls {:optional true :description "Absent when the attempt's agent is on a branch the store no longer holds."} :seon.task/calls]
+                          [:seon.context/last-step {:optional true} :seon.context/last-step]]
+                :last-step [:string {:min 1 :description "The last step an earlier attempt's agent took: its last my.turn/wait note, else the prose it wrote with its last form, else that form's source. Producer: seon.context/last-step."}]
+                :attempts [:vector {:description "The held task's attempts by other agents, by number; absent when none. Producer: seon.context/earlier-attempts."} :seon.context/attempt]
+diff --git a/src/seon/context.clj b/src/seon/context.clj
+index 5198de47b..2416b47f9 100644
+--- a/src/seon/context.clj
++++ b/src/seon/context.clj
+@@ -556,11 +556,14 @@
+       rows
+       (let [shown (into [] (comp (remove #(= agent-id (get-in % [:seon.task/agent :seon.agent/id])))
+                                  (map (fn [row]
++                                        ;; an earlier attempt's agent lived on its own branch; once that branch is
++                                        ;; gone its row names no agent this value holds, and its calls are unknown here
+                                         (let [earlier (get-in row [:seon.task/agent :seon.agent/id])
+-                                              usage (model-usage database earlier)
+-                                              step (last-step database earlier)]
++                                              usage (when earlier (model-usage database earlier))
++                                              step (when earlier (last-step database earlier))]
+                                           (or (some #(when (:seon.error/at %) %) [usage step])
+-                                              (cond-> (assoc (dissoc row :seon.task/agent :db/id) :seon.task/calls (:seon.task/calls usage))
++                                              (cond-> (dissoc row :seon.task/agent :db/id)
++                                                usage (assoc :seon.task/calls (:seon.task/calls usage))
+                                                 step (assoc :seon.context/last-step step)))))))
+                         (sort-by :seon.task.attempt/number rows))]
+         (or (some #(when (:seon.error/at %) %) shown) shown)))))
+diff --git a/src/seon/ref.clj b/src/seon/ref.clj
+index c12e5d3bf..2f2060ae8 100644
+--- a/src/seon/ref.clj
++++ b/src/seon/ref.clj
+@@ -584,7 +584,9 @@
+       (if (= :doc level) ((requiring-resolve 'seon.sci.lookup/function-documentation) database reference) (source))
+       :else
+       (if-let [{:keys [doc arglists] pin :seon.ref/pin} (library-definition reference)]
+-        (cond-> (merge (when doc (docstring doc)) (when arglists {:arglists arglists}))
++        ;; a Var with neither docstring nor arglists (a deftest's) is still its read form, never nothing
++        (cond-> (or (merge (when doc (docstring doc)) (when arglists {:arglists arglists}))
++                    {:seon.render/operations [(list 'clojure.repl/source reference)]})
+           pin (assoc :seon.ref/pin pin)
+           (= :code level) (assoc :seon.render/operations [(list 'clojure.repl/source reference)]))
+         unresolved))))
+diff --git a/test/seon/cluster/merge_scenarios_test.clj b/test/seon/cluster/merge_scenarios_test.clj
+index 0f384961e..3b6d92ad1 100644
+--- a/test/seon/cluster/merge_scenarios_test.clj
++++ b/test/seon/cluster/merge_scenarios_test.clj
+@@ -237,7 +237,7 @@
+                              "root's pass merges the merge step's branch")
+                          (is (= (shared-source 3) (source-of main)) "main holds the resolution: its own version")
+                          (is (:db/id (db/pull main [:db/id] [:seon.test/sym (symbol (str proofs-ns) "proves-new")]))
+-                             "and the chain's covered change"))))
++                             "the merge step's merge carries the chain's own declaration (S5, 2026-10-15: never :merged without it)"))))
+                    (finally
+                      (doseq [kept (remove before (#'seon.cluster.db-flow-test/merge-branches store))]
+                        (#'seon.cluster.db-flow-test/release-chain! routing store kept))
+diff --git a/test/seon/ref_test.clj b/test/seon/ref_test.clj
+index 0ec3c026d..2b948186e 100644
+--- a/test/seon/ref_test.clj
++++ b/test/seon/ref_test.clj
+@@ -404,3 +404,11 @@
+     (is (= (:source (my.program/source database 'seon.ref/locate))
+            (:source (my.program/source database {:seon.ref/name 'seon.ref/locate :seon.ref/at commit})))
+         "my.program/source reads a versioned subject at its commit")))
++
++(deftest a-test-var-cited-at-its-doc-answers-a-map
++  ;; seon.ref/a-test-citation-at-doc-level-answers-nil: a deftest Var the branch holds no row for, cited at its doc,
++  ;; has no docstring and no arglists; it answers its read form, never nil
++  (let [found (#'ref/at-level (db/db) 'seon.ref-test/a-citation-ending-in-a-wildcard-is-prose :doc)]
++    (is (map? found))
++    (is (= [(list 'clojure.repl/source 'seon.ref-test/a-citation-ending-in-a-wildcard-is-prose)]
++           (:seon.render/operations found)))))

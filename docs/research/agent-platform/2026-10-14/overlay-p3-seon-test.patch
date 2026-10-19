@@ -1,0 +1,11 @@
+# seon.test world: base-ctx no longer records its acquisition's refusals (overlay phase 3); the world records them
+# once per production through the one owner. Apply after overlay-phase2-seon-test.patch (context lines follow it).
+--- a/src/seon/test.clj
++++ b/src/seon/test.clj
+@@ -2320,6 +2320,9 @@
+                                       {:seon.sci.eval/predecessor held}
+                                       {}))
++          _ (sci.eval/record-refusals-once! source database (:seon.sci.eval/acquisition source)
++                                            (:seon.flow/commit-fault! @(:seon.sci.kernel/program-snapshot source)))
+           environment (or (env/of execution)
+                           (env/of (or (:seon.sci.eval/base-ctx execution) (:seon.sci.eval/ctx execution))))

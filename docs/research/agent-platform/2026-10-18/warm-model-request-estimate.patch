@@ -1,0 +1,36 @@
+diff --git a/test/seon/cost_estimate_test.clj b/test/seon/cost_estimate_test.clj
+index 286d21922..183b580fe 100644
+--- a/test/seon/cost_estimate_test.clj
++++ b/test/seon/cost_estimate_test.clj
+@@ -60,6 +60,10 @@
+     :why "The unchanged request plus one reach digest over the test's closure (~5 definitions) and one indexed read of its record: no run."
+     :estimate {:alloc-mb 8.0 :calls 1500 :reads 25 :ms 40.0}
+     :overrun '{:task my.test/reusing-one-unchanged-test-costs-nine-thousand-calls :alloc-mb 26.9 :calls 8960 :reads 72}}
++   {:op :warm-model-request
++    :why "One model request's context (`seon.context/model-context`) where only the last exchange is new: render that one exchange unit and assemble the cached ones by content (the help, the attempt's sections and must-reads read once per attempt, every earlier exchange unit), plus the turn's small sections: proportional to the new unit and the turn's sections, never to the history or the program."
++    :estimate {:alloc-mb 10.0 :calls 1500 :reads 30 :ms 20.0}
++    :overrun '{:task seon.context/one-agents-current-state-costs-hundreds-of-megabytes :alloc-mb 114.0 :calls 156305 :reads 404}}
+    {:op :current-state-with-task
+     :why "The unchanged request plus the agent's one-hop attachments: its task, 7 references, 1 proof: proportional to ~10 attachments."
+     :estimate {:alloc-mb 24.0 :calls 3000 :reads 100 :ms 100.0}
+@@ -230,11 +234,19 @@
+                  "the agent holds a task")
+            _ (request "(seon.context/current-state)")
+            current-state (cost "(seon.context/current-state)")
++           handle (support/running-cluster running)
++           model-world {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.sci.admit/caps (:seon.sci.admit/caps handle)
++                        :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle)}
++           model-request (let [database (db/db connection)
++                               _ (seon.context/model-context database model-world agent-id)
++                               m (profile/measure #(seon.context/model-context database model-world agent-id))]
++                           {:alloc-mb (/ (:seon.profile/alloc-bytes m 0) 1048576.0) :calls (:seon.profile/calls m)
++                            :reads (:seon.profile/reads m) :ms (:seon.profile/ms m)})
+            nine (cost (str "(in-ns 'seon.db)\n" (seon-db-forms)))
+            hub-docstring (cost (str "(in-ns 'seon.db)\n" (hub-docstring-change)))
+            hub-behavior (cost (str "(in-ns 'seon.db)\n" (hub-behavior-change)))]
+        {:unchanged-request unchanged :fresh-agent-first-request fresh :new-def new-def :unmap-one-def unmap :redefine-one-form redefine
+-        :reuse-one-unchanged-test reuse :current-state-with-task current-state :seon-db-nine-forms nine
++        :reuse-one-unchanged-test reuse :current-state-with-task current-state :warm-model-request model-request :seon-db-nine-forms nine
+         :hub-docstring-change hub-docstring :hub-behavior-change hub-behavior :cold-stale-merge-members cold-stale
+         :merge-one-function (merge-cost running connection)}))))
+ 

@@ -1,0 +1,46 @@
+--- a/src/seon/turn.clj
++++ b/src/seon/turn.clj
+@@ -2812,13 +2812,16 @@
+ (defn- not-admitted
+   "`receipt` whose form's program facts were refused: the value stands, the
+   refusal is delivered whole beside it as one flat error whose message says
+-  the declaration was NOT admitted to the program (a Var the form bound
+-  exists in the agent's SCI context only), and the receipt's error names it."
++  the form's change was NOT admitted to the program, and, when the form bound a
++  Var (`:seon.sci.eval/bindings`), that the Var exists in the agent's SCI
++  context only; the receipt's error names it."
+   {:malli/schema [:=> [:cat :map :seon.error/base] :map]}
+   [receipt refusal]
+-  (let [message (str "Not admitted to the program: its program facts were refused, so any Var it "
+-                     "bound exists in your SCI context only and my.program/history has no such "
+-                     "declaration. " (:seon.error/message refusal))]
++  (let [message (str "Not admitted to the program: its program facts were refused, so "
++                     (if (seq (:seon.sci.eval/bindings receipt))
++                       "any Var it bound exists in your SCI context only and my.program/history has no such declaration. "
++                       "my.program/history has no record of what it changed. ")
++                     (:seon.error/message refusal))]
+     (-> receipt
+         (update :seon.cluster.eval/error #(or % message))
+         (with-diagnostic (assoc refusal :seon.error/message message)))))
+--- a/test/seon/turn_test.clj
++++ b/test/seon/turn_test.clj
+@@ -1828,6 +1828,19 @@
+         "the producer's own message survives in the diagnostic")
+     (is (= "#'my.x/lint3" (:seon.eval/shown receipt)) "the value stands")))
+ 
++(deftest a-refused-form-that-bound-no-var-does-not-claim-a-bound-var
++  ;; frictions-a, 2026-10-14: a refused `(require ...)` bound no Var yet read "any Var it bound exists in your
++  ;; SCI context only". The message describes what the refused form did.
++  (let [refusal {:seon.error/message "The namespace's requires close a cycle."
++                 :seon.error/at (java.util.Date.)
++                 :seon.error/layer :seon.turn.batch/program
++                 :seon.error/operation 'seon.turn.batch/program-facts}
++        no-var (#'turn/not-admitted {:seon.eval/shown "nil"} refusal)
++        bound (#'turn/not-admitted {:seon.eval/shown "#'my.x/f" :seon.sci.eval/bindings {'my.x/f {}}} refusal)]
++    (is (not (str/includes? (:seon.cluster.eval/error no-var) "Var")) "a form that bound no Var names none")
++    (is (str/includes? (:seon.cluster.eval/error no-var) "cycle") "the producer's message survives")
++    (is (str/includes? (:seon.cluster.eval/error bound) "SCI context only") "a form that bound a Var says where it lives")))
++
+ (deftest a-plain-failing-call-never-carries-the-not-admitted-diagnostic
+   ;; Root, 2026-09-28: `(my.program/no-such-fn 1)` (an unresolved qualified
+   ;; symbol in a program namespace) carried "Not admitted to the program" though

@@ -1,0 +1,63 @@
+diff --git a/src/seon/turn.clj b/src/seon/turn.clj
+index dc97d0ec1..09a7478bd 100644
+--- a/src/seon/turn.clj
++++ b/src/seon/turn.clj
+@@ -5809,8 +5809,10 @@
+                                    stepped? (assoc-in [:seon.turn.loop/stages :test-step]
+                                                       (/ (- (System/nanoTime) test-start) 1e6)))
+                           ;; A MODEL PASS THAT CLOSED ITS TURN OBSERVES THE TASK'S END, after the
+-                          ;; step recorded the proofs: the end closes the agent once.
+-                          _ (when (and (nil? submission) (= :closed (:seon.turn.loop/outcome report)))
++                          ;; step recorded the proofs: the end closes the agent once. A turn closed
++                          ;; on an error (a refused context, a provider failure) closed it too: the
++                          ;; loop stopped calling the agent, so its end is observed (`:stalled`).
++                          _ (when (and (nil? submission) (#{:closed :error} (:seon.turn.loop/outcome report)))
+                               (end-task! cluster agent-id))
+                           ;; THE QUEUE IS THIS PROC'S STATE: a step runs only what its own run changed,
+                           ;; so what it left joins the older queue, carried to the idle pass.
+diff --git a/test/seon/turn_continue_test.clj b/test/seon/turn_continue_test.clj
+index 376d401db..64f0501b5 100644
+--- a/test/seon/turn_continue_test.clj
++++ b/test/seon/turn_continue_test.clj
+@@ -509,3 +509,41 @@
+        (let [[end] (attempt-ends (db/db target) agent-id)]
+          (is (= :done end)
+              "the proof is green and the change broke no test: a test red on main and one never run do not block"))))))
++
++(deftest ^{:seon.test/long "An own-branch agent's setup and settings with their test steps and one failed fixture-model pass."
++           :seon.test/long-ms 60000}
++  a-model-turn-that-closes-on-an-error-ends-its-attempt
++  ;; S5 run 4b: a model turn closed by a failure before or at the provider call
++  ;; (a refused context, a provider error) left the attempt with no end, so
++  ;; root's pass had nothing to bail; the loop stopped calling it, so it ends :stalled.
++  (support/with-running-agent
++   (fn [running _ connection]
++     (let [member (get-in (db/db connection) [:config :branch])
++           cluster-name (:seon.cluster/name (support/execution-handle nil))
++           agent-id (str "errored-" (seon.id/id))
++           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
++           _ (support/declare-source! connection 'tq.ende
++                                      (str "(ns tq.ende (:require [clojure.test :refer [deftest is]]))\n"
++                                           "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
++                                           "(deftest ^{:seon/tasks #{'tq.ende/area}} area-test (is (= 25 (area 5))))\n"))
++           {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.ende)")
++           id (support/running! connection (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
++                                            :seon.task/ns 'tq.ende :seon.task/name "area" :seon.task/plan "Square."})))]
++       (is (string? (:seon.task/assignment (task/assign! {:seon.agent/context-source (support/running-cluster running)
++                                                          :seon.db/connection connection :seon.task/assigned id
++                                                          :seon.task/agent [:seon.agent/id agent-id]
++                                                          :seon.task/branch branch}))))
++       ;; no reply left: the provider answers the first call with a 500
++       (support/with-provider
++        (atom []) (support/reply-queue [])
++        (fn [server]
++          (agent-eval running agent-id (str "(my.agent/settings! "
++                                            (seon.id/printed (assoc (support/provider-config server)
++                                                                    :seon.config.ai/no-provider false))
++                                            ")"))
++          (support/outside-wake-on-branch! running agent-id target "Work your task.")
++          (until #(:seon.agent/admission-closed-tx
++                   (db/pull (db/db target) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
++                 200)))
++       (is (= [:stalled] (attempt-ends (db/db target) agent-id))
++           "the turn that closed on the provider's error ended the attempt")))))

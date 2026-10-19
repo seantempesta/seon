@@ -1,0 +1,15 @@
+--- a/src/seon/turn.clj	2026-10-14 20:17:49.742238029 +0700
++++ b/src/seon/turn.clj	2026-10-14 20:17:49.762124283 +0700
+@@ -5541,8 +5541,10 @@
+               platform (platform-proof (db/db connection) changed)
+               pending (set (:seon.turn.loop/pending platform))
+               reaching (run-reaching execution (left) changed platform)
+-              ;; a branch test holding a current result would only answer it again
+-              branched (run-branch execution (left) (into [] (comp (filter (set stale)) (remove pending)) branch))
++              ;; a branch test holding a current result, or one the reaching request just answered, would only
++              ;; answer it again
++              answered (if (:seon.error/at reaching) #{} (into #{} (map :seon.test/sym) (:seon.test/results reaching)))
++              branched (run-branch execution (left) (into [] (comp (filter (set stale)) (remove pending) (remove answered)) branch))
+               proved (when (seq proofs) (run-proofs execution agent-id (left) pending))
+               ;; a derivation that fails is shown beside the step's values, never in place of them
+               red (try (step-reds execution agent-id)

@@ -1,0 +1,37 @@
+--- a/src/seon/sci/eval.clj	2026-10-14 20:03:26.105420376 +0700
++++ b/src/seon/sci/eval.clj	2026-10-14 20:03:35.942280090 +0700
+@@ -262,11 +262,13 @@
+   {:malli/schema [:=> [:cat [:fn clojure.core/var?] [:fn clojure.core/some?]] [:fn clojure.core/some?]]}
+   [^clojure.lang.Var host-var sci-namespace]
+   (let [copied (sci/copy-var* host-var sci-namespace)]
+-    (when (.getThreadBinding host-var)
+-      (.bindRoot ^sci.lang.Var copied (.getRawRoot host-var)))
+-    ;; The new Var's own metadata, which every context's binding of it starts
+-    ;; from; under an active context `alter-meta!` writes only that one's.
++    ;; The new Var's own root and metadata, which every context's binding of
++    ;; it starts from; under an active context `bindRoot` and `alter-meta!`
++    ;; write only that context's binding, and the root write would reach the
++    ;; evaluation's write observer as a definition.
+     (sci.ctx-store/with-ctx nil
++      (when (.getThreadBinding host-var)
++        (.bindRoot ^sci.lang.Var copied (.getRawRoot host-var)))
+       (alter-meta! copied #(merge (dissoc (meta host-var) :ns :name :test) %)))
+     copied))
+ 
+--- a/test/seon/turn/batch_test.clj	2026-10-14 20:03:45.187672567 +0700
++++ b/test/seon/turn/batch_test.clj	2026-10-14 20:03:45.192328682 +0700
+@@ -374,3 +374,14 @@
+      (eval! "(in-ns 'batch-test.rebound) (def fl2 5)" agent-id running)
+      (is (= #:seon.fn{:arglists "()" :source "(def fl2 5)"}
+             (db/pull (db/db connection) [:seon.fn/arglists :seon.fn/source] [:seon.fn/sym 'batch-test.rebound/fl2]))))))
++
++(deftest a-host-var-copied-during-an-evaluation-is-no-private-definition
++  ((requiring-resolve 'seon.test-support/with-running-agent)
++   (fn [running agent-id connection]
++     ;; a thread-bound host dynamic Var copied into the context while a form
++     ;; evaluates (a host namespace entered mid-evaluation), as S5 run 4b's
++     ;; turn 31 copied seon.db/*conn* and seventeen more
++     (eval! "(in-ns 'user) (#'seon.sci.eval/copy-host-var (:sci.impl/host-var (meta #'seon.db/*conn*)) (the-ns 'seon.db))"
++            agent-id running)
++     (is (= #{} (into #{} (db/q '[:find [?p ...] :where [_ :seon.eval/private ?p]] (db/db connection))))
++         "the form defined nothing: no platform Var is recorded as the agent's private state"))))

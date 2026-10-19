@@ -1,0 +1,100 @@
+diff --git a/src/seon/db.clj b/src/seon/db.clj
+index afe2d2b7e..a17316c30 100644
+--- a/src/seon/db.clj
++++ b/src/seon/db.clj
+@@ -1539,25 +1539,23 @@
+                         schema/projection-attributes))))
+ 
+ (defn- declaration-content-key
+-  "The loader's declaration datoms and transactions in AEVT order.
+-  Native database indexes already have that order; temporal views are sorted."
++  "The declaration rows `schema/load-projection` reads, as the count of each
++  distinct row: an entity's attributes and values. Entity ids and
++  transactions are how a population was written, not what it holds, so equal
++  declarations share one key however they were asserted."
+   {:malli/schema
+-   ;; The shape of each attribute's entry, not each of its ~30k datoms, which
+-   ;; the index produced: validating every datom cost 148 ms per armed key
+-   ;; (cache-invalidation audit, 2026-09-23).
+    [:=> [:cat :seon.db/database-value]
+-    [:vector [:tuple :qualified-keyword [:fn clojure.core/vector?] [:fn clojure.core/vector?]]]]}
++    [:map-of [:map-of :qualified-keyword [:set :any]] :int]]}
+   [database]
+-  (let [installed (dbi/-schema (schema-database database))]
+-    (mapv (fn [attribute]
+-            (let [datoms (if (get installed attribute)
+-                           (let [ordered (d/datoms database :aevt attribute)]
+-                             (vec (if (instance? DB database)
+-                                    ordered
+-                                    (sort datahike.datom/cmp-datoms-aevt-quick ordered))))
+-                           [])]
+-              [attribute datoms (into [] (map :tx) datoms)]))
+-          schema/projection-attributes)))
++  (let [installed (dbi/-schema (schema-database database))
++        rows (reduce (fn [rows attribute]
++                       (if (get installed attribute)
++                         (reduce (fn [rows datom]
++                                   (update rows (:e datom) update attribute (fnil conj #{}) (:v datom)))
++                                 rows (d/datoms database :aevt attribute))
++                         rows))
++                     {} schema/projection-attributes)]
++    (frequencies (vals rows))))
+ 
+ (defn- revision-agreement
+   "How many members of a revision key `candidate` shares with `context`:
+@@ -1878,7 +1876,7 @@
+   A committed value keys by its declaration attributes' revisions, then by
+   its commit. A speculative value reuses its basis's entry through the same
+   revision key when it wrote no declaration attribute. Any other value, and a
+-  miss, keys by the declaration datoms themselves
++  miss, keys by the declaration rows it holds
+   (`declaration-content-key`), so equal populations share one derivation
+   across connections, branches and in-transaction values. An as-of view keys
+   by its own declaration datoms: a view older than a declaration change sees
+diff --git a/test/seon/db_test.clj b/test/seon/db_test.clj
+index 4afbcc06e..7cebd4f24 100644
+--- a/test/seon/db_test.clj
++++ b/test/seon/db_test.clj
+@@ -934,6 +934,42 @@
+                   (select-keys projection members))
+                "the advanced projection is the one a full derivation gives")))))))
+ 
++;; A projection is a function of the declaration rows' values and how they
++;; join. The transaction that asserted a row and the entity id that carries it
++;; are not among them, so equal declarations are one population: one
++;; projection object, whichever transaction or entity ids hold them.
++(deftest equal-declarations-in-another-transaction-share-one-projection
++  (test-support/with-database
++   (fn [connection]
++     (let [head (db/db connection)
++           held (db/carried-projection head)
++           row (first (d/datoms head :aevt :seon.schema/key))
++           datoms (vec (d/datoms head :eavt (:e row)))
++           retracted (:db-after (d/with head (mapv (fn [x] [:db/retract (:e x) (:a x) (:v x)]) datoms)))
++           renumbered (:db-after (d/with retracted (mapv (fn [x] [:db/add -1 (:a x) (:v x)]) datoms)))
++           readded (:db-after (d/with (:db-after (d/with head [[:db/retract (:e row) :seon.schema/key (:v row)]]))
++                                      [[:db/add (:e row) :seon.schema/key (:v row)]]))
++           changed (:db-after (d/with head (test-support/replacement-tx
++                                            head [:seon.fn/sym 'seon.db/db]
++                                            "(defn db {:malli/schema [:=> [:cat] :int]} [] 1)" {})))
++           content-key @#'seon.db/declaration-content-key
++           held-entries #(+ (count (seon.cache/retained :seon.db/projection))
++                            (count (seon.cache/retained :seon.db/value-projection)))
++           shared (db/carried-projection readded)
++           entries (held-entries)
++           shared-entity (db/carried-projection renumbered)]
++       (is (not= (:tx row) (:tx (first (filter #(= (:e row) (:e %)) (d/datoms readded :aevt :seon.schema/key)))))
++           "the row was asserted by another transaction")
++       (is (not= (:e row) (:e (first (filter #(= (:v row) (:v %)) (d/datoms renumbered :aevt :seon.schema/key)))))
++           "the row is carried by another entity")
++       (is (= (content-key head) (content-key readded) (content-key renumbered))
++           "the content key is the rows, not their transactions or entity ids")
++       (is (not= (content-key head) (content-key changed)) "a changed declaration has its own")
++       (is (identical? held shared) "another transaction reads the held projection")
++       (is (identical? held shared-entity) "other entity ids read the held projection")
++       (is (= entries (held-entries)) "equal content holds one entry, not one per writing")
++       (is (not (identical? held (db/carried-projection changed))) "a changed declaration derives its own")))))
++
+ ;; CLASS: a per-read whole-program derivation during boot. Before a boot
+ ;; instance names its commit, an uncommitted value's builder identity was
+ ;; derived on every projection read: a transaction function comparing stored

@@ -1,0 +1,60 @@
+seon.test: a terminated result, red included, carries to another branch of the same program
+
+Owner 2026-10-14: test results carry if they are the same tests; no duplicate caches; stored immutable data is read
+from its owner. Continues the stopped lane's patch (b1-test-reuse.patch): alone the second branch answered, but in a
+13-test check the in-process entry was gone and main held nothing, because the first agent's run lives only on its
+own branch.
+
+- seon.test/carried-results: on a cache miss the identity [sym reach-digest input-digest evaluator] is looked up in
+  the recorded runs of main and of every other live branch (seon.test/source-branches: the branches main's agent rows
+  name that the store's :branches record holds, the asking and tested branches excluded), each head opened directly
+  with seon.db/branch-database, read once and released. Nothing is copied to main. The newest outcome answers; an
+  identity holding two outcomes files a problem task on the test's namespace naming it
+  (seon.test/file-two-outcomes!, task `<test-ns>/two-outcomes-at-one-identity-<id>`).
+- seon.test/recorded-outcomes reads each head undecoded (seon.db/undecoded-datoms: aevt on reach-digest, then eavt of
+  the matching members and their runs): seon.db/q on a fresh head first derives its declarations, about 2 ms a head
+  (27 heads: seon.db/q 56-59 ms against datahike's own q 0.2-0.3 ms, measured on default).
+- seon.test.runner/retain-greens! -> retain-results!: every terminated member with at least one assertion, red
+  included, is retained in seon.cache (kind :seon.test.runner/result) as a pure speed-up; a newer outcome at a held
+  identity replaces it (seon.cache/evict!). Timeouts, interrupts, boundary errors, recording failures and
+  zero-assertion members stay unknown and rerun; a member that answered from another run is never an outcome itself.
+- seon.test/carried-member records the reused counts (fail and error included) with :seon.test.member/reused-run;
+  reuse never converts an outcome.
+- seon.cluster.registry/held-branches: the store's :branches record read from a database value (base-commit-id's
+  2-arity now calls it).
+- merge.md §1 Evidence and the reused-run description state the rule.
+
+Decisions (spec gaps): a carried red's failure reports are not copied; they stay with the run that executed it
+(:seon.test.member/reused-run names it), read from their owner. "Zero batches" is read as zero members executed:
+the carried members are recorded by one admission with no member to execute. "Live branches" are the agent branches
+main's rows name that the store still holds, plus main.
+
+Proof seon.test.branch-reuse-test/a-result-carries-to-another-branch-of-the-same-program (rows: green on A answered
+on B with the seon.cache entry evicted via seon.cache/evict!, red on A answered red on B, both recorded with A's run
+id and counts, nothing executed; :seon.test/rerun? executes 2; a change reaching the test executes it).
+Red on HEAD 831df5f72 plus the proof: run 04437d955df8, failing "the second branch records the green it answered
+from the first branch's run, with the cache entry evicted" and "... the red it answered ..." ((every? ... ) false).
+Green on the slice: run 5692946189bc (pass 10, fail 0, 7154 ms request). Task retired, deftest kept untagged.
+
+Miss cost (default JVM, 27 live agent branches, 1,057 members, 20 identities, 21 hits): 20-21 ms warm, 43 ms first
+(opening the heads is ~16 ms of it), against a test body's mean of about 106 ms (M4).
+
+Reaching tests: seon.test-test, seon.test-reaching-test, seon.test-runner-test, seon.test.runner-test,
+seon.test.selection-test, seon.test-provenance-test, seon.test-failure-facts-test, seon.test.redefined-callee-test,
+seon.test.clean-world-test, seon.cluster.branch-evidence-test, seon.cluster.registry-test,
+seon.contracts-compile-test. Whole-namespace runs: HEAD 76190f570 run 9bf6e0c1f433 and slice run 239609f01b22 hold
+the same 10 reds (138 executed each), pre-existing and excluded from the named list:
+seon.test-failure-facts-test/{a-changed-reach-member-retracts-only-itself, an-unchanged-re-record-emits-no-datom},
+seon.test-provenance-test/{runs-are-distinct-immutable-and-linked-atomically,
+verified-requires-the-subject-positive-assertions-and-exact-program},
+seon.test-test/{admission-refuses-stale-program-and-records-empty-selection,
+one-interpreted-test-run-allocates-a-bounded-multiple-of-its-body, recording-distinguishes-run-replay-from-a-new-event,
+resolution-follows-admitted-source-and-acquisition},
+seon.test.clean-world-test/a-member-world-is-the-loaded-program-with-boot-facts-only (red at line 63 on HEAD
+without any overlay patch: not caused by the phase-2 seon.test patch),
+seon.test.selection-test/a-proof-request-runs-only-its-proofs.
+Also excluded: seon.test-reaching-test/a-reaching-request-selects-what-changed-since-its-previous-run, red at line 821 in
+the commit check run 012a5ab8a483 but green in the slice's whole-namespace run 239609f01b22 and HEAD's 9bf6e0c1f433,
+and red on HEAD 92a99f39a in the stopped lane's run 6dccfad0aabd: a suspected flake, for the flake hunt.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

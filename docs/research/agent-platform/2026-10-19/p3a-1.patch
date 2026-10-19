@@ -1,0 +1,1152 @@
+diff --git a/docs/research/agent-platform/2026-10-19/closed-runtime-hybrid.md b/docs/research/agent-platform/2026-10-19/closed-runtime-hybrid.md
+index 570aebfe0..5aaa40726 100644
+--- a/docs/research/agent-platform/2026-10-19/closed-runtime-hybrid.md
++++ b/docs/research/agent-platform/2026-10-19/closed-runtime-hybrid.md
+@@ -6,7 +6,8 @@ created: 2026-10-19
+ ---
+ 
+ Phase status: P0 landed (`seon.sci.open-derivers-test`, `seon.cost-estimate-test/closed-runtime-rows-grow-past-no-accepted-overrun`);
+-P2, P3b landed; P1 landed (lane closed-p1, the leaf design); P4a in flight (lane P4a); P3a, P4b, P5, P6a, P6b, P7, P8 not started.
++P2, P3b landed; P1 landed (lane closed-p1, the leaf design); P3a split: P3a-1 landed (lane closed-p3a), P3a-2 scheduled
++with P4b; P4a in flight (lane P4a); P4b, P5, P6a, P6b, P7, P8 not started.
+ 
+ # Closed runtime: the hybrid
+ 
+@@ -361,6 +362,26 @@ it into its gate.
+ 
+ ### P3a. Cycle 3 and the order leaf (platform: load order; publish and reload on a branch of the live store)
+ 
++**Split (lane closed-p3a, root's option B).** The primitive move below converts every caller of
++`seon.schema/projection-validator` (312 sites), `projection-cache-value` (64), `projection-identity` and
++`call-with-forms` (10): 80 files the file list did not count, and `call-with-forms` binds `*packaged-forms*`, which
++P4b moves into `seon.schema.handed`. The fallback count on default was not `{}` but one occurrence its caller
++detection named as `seon.profile` (the instrumentation wrapper), and `database-projection`'s only caller is
++`seon.schema/projection-from-database` (141 sites, three in `seon.error`, which `seon.db` requires), so it cannot be a
++static call to `seon.db/carried-projection`. So:
++
++- **P3a-1 (landed):** `seon.order/compare-values` (leaf, no `seon` requires) with the scripted sweep, no alias; the
++  classpath fallback, its diagnostics and the `schema-edn-packaged-forms` seam deleted, `seon.cluster.boot/start!` binds
++  the root of `seon.schema/*packaged-forms*` once and `projection-bindings` binds it nil, so a handed projection still
++  wins; `seon.schema/canonical-schema-entities` returns rows without digests and `seon.program/schema-entities` adds
++  them (every caller converted). Proofs: `seon.schema.datahike-test/the-bridge-requires-no-printer`, the `:P3a-1` row of
++  `converted`, `seon.schema-test/the-packaged-population-is-the-root-boot-binds`.
++- **P3a-2 (scheduled with P4b, so `*packaged-forms*` moves once, into `seon.schema.handed`):** the primitive sweep, the
++  seven bridge seams to calls, the two conveniences up to `seon.schema`, and
++  `seon.schema.datahike-test/the-bridge-requires-neither-schema-nor-printer`. `database-projection` and
++  `projection-from-database` go with P4b's handed projection (the callers in `seon.error` take the projection they are
++  handed).
++
+ - First step: count `seon.schema/!fallback-counts` after the cost rows and after the check's test namespaces; every
+   caller named is converted to hand its population in this commit.
+ - Files: `src/seon/schema.clj` (fallback and its helpers deleted; the seven bridge seams become calls; requires
+diff --git a/src/seon/cluster.clj b/src/seon/cluster.clj
+index 15f56c149..b92a2cc74 100644
+--- a/src/seon/cluster.clj
++++ b/src/seon/cluster.clj
+@@ -15,7 +15,7 @@
+   `readiness` derives its report from the instance and its database.
+   `stop!` idempotently unwinds only the addressed instance and releases
+   the shared store when its last holder stops."
+-  (:require [seon.print :as print]
++  (:require [seon.order :as order]
+             [clojure.core.async :as async]
+             [clojure.core.async.impl.dispatch :as async.dispatch]
+             [clojure.core.async.impl.protocols :as async.protocols]
+@@ -1086,7 +1086,7 @@
+                     pulled))]
+         (when-not (schema-entity-converged? db desired current)
+           desired))))
+-   (schema/canonical-schema-entities projection (:seon.schema.projection/forms projection))))
++   (program/schema-entities projection (:seon.schema.projection/forms projection))))
+ 
+ (defn- instruction-entity-changes
+   [db entities]
+@@ -1115,7 +1115,7 @@
+               (map? candidate) (mapcat walk (vals candidate))
+               (coll? candidate) (mapcat walk candidate)
+               :else []))]
+-    (->> (walk value) distinct (sort print/compare-values) vec)))
++    (->> (walk value) distinct (sort order/compare-values) vec)))
+ 
+ (defn- lookup-resolution
+   "How one lookup ref answers at `database`: resolved, absent, or REFUSED.
+diff --git a/src/seon/cluster/boot.clj b/src/seon/cluster/boot.clj
+index ca131442a..467fb4bea 100644
+--- a/src/seon/cluster/boot.clj
++++ b/src/seon/cluster/boot.clj
+@@ -29,6 +29,7 @@
+             [seon.operator.runtime :refer [running-instances]]
+             [seon.render.value :as render.value]
+             [seon.schema :as schema]
++            [seon.schema.edn :as schema.edn]
+             [seon.task :as task]
+             [seon.sci.eval :as sci.eval]
+             [seon.sci.kernel :as kernel]))
+@@ -462,6 +463,9 @@
+   [request]
+   (let [began (System/nanoTime)
+         _ @uncaught-handler
++        ;; The process's declaration population before any projection exists:
++        ;; an operation that hands none reads this root (`seon.schema/*packaged-forms*`).
++        _ (alter-var-root #'schema/*packaged-forms* #(or % (schema.edn/packaged-forms)))
+         config (cluster/resolve-bootstrap
+                 (dissoc request :seon.config/manifest :seon.config/environment :seon.boot/prepl-server))
+         name (:seon.boot/cluster-name config)
+diff --git a/src/seon/cluster/source.clj b/src/seon/cluster/source.clj
+index 36928381a..35660f076 100644
+--- a/src/seon/cluster/source.clj
++++ b/src/seon/cluster/source.clj
+@@ -1947,10 +1947,10 @@
+ 
+ (defn- schema-entry-digest
+   "The definition digest publication gives `form` declared as `k` under
+-  `projection` (`seon.schema/canonical-schema-entities`)."
++  `projection` (`seon.program/schema-entities`)."
+   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword :any] :seon.program/definition-digest]}
+   [projection k form]
+-  (:seon.program/definition-digest (first (schema/canonical-schema-entities projection {k form}))))
++  (:seon.program/definition-digest (first (program/schema-entities projection {k form}))))
+ 
+ (defn- proven-schema-file
+   "The candidate bytes of the schema resource `identities` (schema keys of one
+diff --git a/src/seon/config.clj b/src/seon/config.clj
+index e30b2ba9f..03d924850 100644
+--- a/src/seon/config.clj
++++ b/src/seon/config.clj
+@@ -12,7 +12,7 @@
+   (`:seon.config/overlay-keys`), else the shipped decision; it does not retract
+   a defaulted optional attribute. `:seon.config/absent` is the one explicit retraction form, is
+   refused for required attributes, and never becomes nil or a datom."
+-  (:require [seon.print :as print]
++  (:require [seon.order :as order]
+             [seon.error.refusal]
+             [clojure.edn :as edn]
+             [clojure.java.io :as io]
+@@ -680,7 +680,7 @@
+       (when (seon.error.refusal/error? missing)
+         (throw (ex-info (:seon.error/message missing) missing)))
+       (when (seq missing)
+-        (let [missing (vec (sort print/compare-values missing))]
++        (let [missing (vec (sort order/compare-values missing))]
+           (refuse!
+            {:seon.error/at (java.util.Date.)
+              :seon.error/layer :seon.config/compile
+diff --git a/src/seon/db.clj b/src/seon/db.clj
+index fe4182caa..26ab08d31 100644
+--- a/src/seon/db.clj
++++ b/src/seon/db.clj
+@@ -35,6 +35,7 @@
+             [seon.error.refusal :as error.refusal]
+             [seon.id :as id]
+             [seon.print :as print]
++            [seon.order :as order]
+             [seon.program :as program]
+             [seon.profile :as profile]
+             [seon.schema :as schema]
+@@ -3856,7 +3857,7 @@
+                    (some #(and (< (count %) (count path))
+                                (= % (subvec path 0 (count %)))) sequence-paths))
+         operations (into {} (map (juxt first second)) edits)]
+-    (into (sorted-map-by print/compare-values)
++    (into (sorted-map-by order/compare-values)
+           (comp (remove covered?)
+                 (map (fn [path]
+                        [path (if (and (= :- (get operations path))
+@@ -4121,7 +4122,7 @@
+         declarations (when forms
+                        (into (schema.datahike/malli->datahike-schema-in projection missing)
+                              (when (get (dbi/-schema database) :seon.schema/key)
+-                               (schema/canonical-schema-entities projection forms))))
++                               (program/schema-entities projection forms))))
+         operation (or (:seon.db.transaction/operation request)
+                       (some (fn [op]
+                               (when (and (vector? op) (= :db.fn/call (first op)))
+@@ -5370,7 +5371,7 @@
+                       :db/id (:e datom)}))))
+               removed)]
+     (when (seq breaks)
+-      (let [breaks (vec (sort print/compare-values breaks))]
++      (let [breaks (vec (sort order/compare-values breaks))]
+         ;; The producer declares what it refused; `write-observation` carries
+         ;; that identity as `:seon.db.write/validator-schema`.
+         (assoc (diagnostic
+diff --git a/src/seon/fn.clj b/src/seon/fn.clj
+index 881eb8f85..8f7afa317 100644
+--- a/src/seon/fn.clj
++++ b/src/seon/fn.clj
+@@ -16,6 +16,7 @@
+             [seon.fn.signature :as signature]
+             [seon.id :as id]
+             [seon.print :as print]
++            [seon.order :as order]
+             [seon.fs :as fs]
+             [seon.program :as program]
+             [seon.ref :as ref]
+@@ -1823,7 +1824,7 @@
+       :seon.fn.file/identities
+       (->> canonical-entities
+            (keep program/row-identity)
+-           (sort print/compare-values)
++           (sort order/compare-values)
+            vec)}
+       (seq findings) (assoc :seon.fn.file/findings findings))))
+ 
+@@ -2272,12 +2273,12 @@
+          :seon.program/analyzed-count (or population 0)
+          :seon.program/stale-test-reach
+          (mapv (fn [[test callee]] {:seon.test/sym test :seon.fn/callee callee})
+-               (sort print/compare-values stale))
++               (sort order/compare-values stale))
+          :seon.program/unresolved-callers
+          (mapv (fn [[attribute caller callee]]
+                  {:seon.program/identity [attribute caller]
+                   :seon.fn/callee callee})
+-               (sort print/compare-values entities))})))
++               (sort order/compare-values entities))})))
+ 
+ (defn gate-set
+   "The tests exercising one function identity (`seon.fn/reverse-closure`).
+@@ -2519,7 +2520,7 @@
+                             :seon.fn.contract/position
+                             :seon.fn.contract/finding
+                             :seon.fn.contract/form)
+-                      print/compare-values)
++                      order/compare-values)
+              vec))))))
+ 
+ (defn functions-using
+@@ -2942,7 +2943,7 @@
+       :seon.fn.manifest/identities
+       (->> artifacts
+            (mapcat :seon.fn.file/identities)
+-           (sort print/compare-values)
++           (sort order/compare-values)
+            vec)}
+       (seq findings) (assoc :seon.fn.manifest/findings findings))))
+ 
+@@ -3362,10 +3363,10 @@
+                 (:seon.fn.file/relative-path desired)
+                 :seon.fn.change/removed-identities
+                 (->> (set/difference current-identities desired-identities)
+-                     (sort print/compare-values)
++                     (sort order/compare-values)
+                      vec)
+                 :seon.fn.change/added-identities
+-                (->> added-identities (sort print/compare-values) vec)
++                (->> added-identities (sort order/compare-values) vec)
+                 :seon.fn.change/changed-attributes
+                 (vec (sort changed-attributes))}
+          (seq findings) (assoc :seon.fn.change/findings findings)))
+@@ -3686,7 +3687,7 @@
+         canonical-schemas
+         (if (seq selected-forms)
+           (mapv (partial accretion/schema-row-in (schema/declaration-projection packaged-forms))
+-                (schema/canonical-schema-entities projection selected-forms)) [])
++                (program/schema-entities projection selected-forms)) [])
+         canonical-keys (into #{} (map :seon.schema/key) canonical-schemas)
+         source-only
+         (remove (fn [entity]
+@@ -3736,7 +3737,7 @@
+     (into {}
+           (map-indexed (fn [index program-identity]
+                          [program-identity (str "seon.fn.index/" index)]))
+-          (sort print/compare-values identities))))
++          (sort order/compare-values identities))))
+ 
+ (defn- compile-index-transaction
+   "Flatten one program population through transaction-local identities.
+@@ -3837,7 +3838,7 @@
+          (into []
+                (map (fn [[[attribute value] tempid]]
+                       [:db/add tempid attribute value]))
+-               (sort-by key print/compare-values tempids))
++               (sort-by key order/compare-values tempids))
+          :seon.fn/index-keyword-operations keyword-operations}))))
+ 
+ (defn- normalized-index-entity
+@@ -4233,7 +4234,7 @@
+                              :seon.fn.file/rows (vec entities)
+                              :seon.fn.file/findings (filterv :seon.lint/id entities)
+                              :seon.fn.file/declaration-digests (declaration-digests entities)
+-                             :seon.fn.file/identities (vec (sort print/compare-values (map program/row-identity entities)))}))
++                             :seon.fn.file/identities (vec (sort order/compare-values (map program/row-identity entities)))}))
+                         analysis-paths)
+         projection (db/carried-projection database)
+         schema-digests (if (or (nil? paths)
+diff --git a/src/seon/order.cljc b/src/seon/order.cljc
+new file mode 100644
+index 000000000..b7fe867f6
+--- /dev/null
++++ b/src/seon/order.cljc
+@@ -0,0 +1,34 @@
++(ns seon.order
++  "Canonical structural order of whole values: the one comparator storage,
++   identity sets and stable output sort by. Requires no `seon` namespace.")
++
++(defn compare-values
++  "Order whole values structurally without rendering their contents or invoking pairs."
++  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Structural order compares arbitrary Clojure values, including nil, scalars and host objects.", :gen/elements [nil false 0 "" :k [] {}]}] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Structural order compares arbitrary Clojure values, including nil, scalars and host objects.", :gen/elements [nil false 0 "" :k [] {}]}]] :int]}
++  [left right]
++  (letfn [(category [value]
++            (cond (nil? value) "nil"
++                  (map? value) "map"
++                  (set? value) "set"
++                  (vector? value) "vector"
++                  (sequential? value) "list"
++                  :else (str (type value))))
++          (items [left right]
++            (loop [left (seq left) right (seq right)]
++              (cond (nil? left) (if (nil? right) 0 -1)
++                    (nil? right) 1
++                    :else (let [order (order-value (first left) (first right))]
++                            (if (zero? order)
++                              (recur (next left) (next right)) order)))))
++          (order-value [left right]
++            (let [kind (compare (category left) (category right))]
++              (cond
++                (not (zero? kind)) kind
++                (identical? left right) 0
++                (map? left) (items (sort-by key order-value left)
++                                   (sort-by key order-value right))
++                (set? left) (items (sort order-value left) (sort order-value right))
++                (sequential? left) (items left right)
++                :else (try (compare left right)
++                           (catch #?(:clj ClassCastException :cljs :default) _ 0)))))]
++    (order-value left right)))
+diff --git a/src/seon/print.cljc b/src/seon/print.cljc
+index 19f9ddc8d..a57291ecc 100644
+--- a/src/seon/print.cljc
++++ b/src/seon/print.cljc
+@@ -300,37 +300,6 @@
+     (vary-meta value assoc ::full true)
+     value))
+ 
+-(defn compare-values
+-  "Order whole values structurally without rendering their contents or invoking pairs."
+-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]] :int]}
+-  [left right]
+-  (letfn [(category [value]
+-            (cond (nil? value) "nil"
+-                  (map? value) "map"
+-                  (set? value) "set"
+-                  (vector? value) "vector"
+-                  (sequential? value) "list"
+-                  :else (str (type value))))
+-          (items [left right]
+-            (loop [left (seq left) right (seq right)]
+-              (cond (nil? left) (if (nil? right) 0 -1)
+-                    (nil? right) 1
+-                    :else (let [order (order-value (first left) (first right))]
+-                            (if (zero? order)
+-                              (recur (next left) (next right)) order)))))
+-          (order-value [left right]
+-            (let [kind (compare (category left) (category right))]
+-              (cond
+-                (not (zero? kind)) kind
+-                (identical? left right) 0
+-                (map? left) (items (sort-by key order-value left)
+-                                   (sort-by key order-value right))
+-                (set? left) (items (sort order-value left) (sort order-value right))
+-                (sequential? left) (items left right)
+-                :else (try (compare left right)
+-                           (catch #?(:clj ClassCastException :cljs :default) _ 0)))))]
+-    (order-value left right)))
+-
+ (defn- requery-source
+   [source-identity]
+   (cond
+diff --git a/src/seon/program.cljc b/src/seon/program.cljc
+index ad7ba6698..2530f3122 100644
+--- a/src/seon/program.cljc
++++ b/src/seon/program.cljc
+@@ -5,7 +5,7 @@
+             [seon.error.refusal :as error]
+             [seon.fn.signature :as signature]
+             [seon.id :as id]
+-            [seon.print :as print]
++            [seon.order :as order]
+             [seon.schema :as schema]
+             [malli.registry :as mr]
+             [seon.schema.internal :as internal]
+@@ -613,6 +613,24 @@
+   ([entity resolver-context]
+    (declaration-digest entity (some->> resolver-context (used-resolver-context entity)))))
+ 
++(defn- with-definition-digests
++  "`entities`, each with its `:seon.program/definition-digest`."
++  {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
++  [entities]
++  (mapv #(assoc % :seon.program/definition-digest (definition-digest %)) entities))
++
++(defn schema-entities
++  "The canonical schema rows (`seon.schema/canonical-schema-entities`), each
++  with its `:seon.program/definition-digest`."
++  {:malli/schema
++   [:function
++    [:=> [:cat] [:vector :map]]
++    [:=> [:cat :map] [:vector :map]]
++    [:=> [:cat :seon.schema/projection :map] [:vector :map]]]}
++  ([] (with-definition-digests (schema/canonical-schema-entities)))
++  ([forms] (with-definition-digests (schema/canonical-schema-entities forms)))
++  ([projection forms] (with-definition-digests (schema/canonical-schema-entities projection forms))))
++
+ (defn- without-docstring
+   "`source` without its def form's docstring literal `doc`: the form's third
+   form when it reads as exactly `doc` and another form follows it; `source`
+@@ -1202,7 +1220,7 @@
+          (sort-by (juxt :seon.fn.binding.entry/source-key
+                         :seon.fn.binding.entry/spelling
+                         :seon.fn.binding.entry/local-binding)
+-                  print/compare-values)
++                  order/compare-values)
+          (map-indexed
+           (fn [order entry]
+             (let [local-binding (:seon.fn.binding.entry/local-binding entry)]
+@@ -1691,7 +1709,7 @@
+                  projection schema-key definition
+                  {:seon.schema.admission/source admission-source})
+                 entity (some #(when (= schema-key (:seon.schema/key %)) %)
+-                          (schema/canonical-schema-entities
++                          (schema-entities
+                            candidate-projection {schema-key definition}))]
+             (cond-> (assoc (merge (select-keys candidate
+                                               [:seon.schema/generatable?])
+diff --git a/src/seon/reconcile.cljc b/src/seon/reconcile.cljc
+index 858444f81..12979daf8 100644
+--- a/src/seon/reconcile.cljc
++++ b/src/seon/reconcile.cljc
+@@ -33,7 +33,7 @@
+   Crash walk: `plan` is pure; `reconcile!` is ONE atomic transaction —
+   a kill leaves it fully applied or absent, and re-apply converges
+   either way."
+-  (:require [seon.print :as print]
++  (:require [seon.order :as order]
+             [clojure.set :as set]
+             [seon.db :as seon.db]
+             [seon.schema :as schema]))
+@@ -411,7 +411,7 @@
+                     entity
+                     (some->> (get managed-by-identity identity)
+                              (get entities)))))
+-                (sort-by first print/compare-values
++                (sort-by first order/compare-values
+                          (map vector identities desired)))
+           stale-eids
+           (->> managed-eids
+diff --git a/src/seon/render/web.clj b/src/seon/render/web.clj
+index 3c76ed8b4..a5c425047 100644
+--- a/src/seon/render/web.clj
++++ b/src/seon/render/web.clj
+@@ -71,7 +71,7 @@
+             [seon.render.route :as route]
+             [seon.render.sent :as sent]
+             [seon.render.transcript :as transcript]
+-            [seon.print :as print]
++            [seon.order :as order]
+             [seon.render.value :as value]
+             [seon.render.walk :as render.walk]
+             [seon.schema :as schema]
+@@ -895,7 +895,7 @@
+                      (filter #(ref-attributes (:a %)) datoms))
+           selected-label
+           (or (some->> (:seon.render.data/identities observation)
+-                       (sort-by (juxt :a :v) print/compare-values)
++                       (sort-by (juxt :a :v) order/compare-values)
+                        first :v scalar-label)
+               (str selected-eid))
+           nodes (mapv (fn [eid]
+@@ -2294,7 +2294,7 @@
+ 
+ (defn- watched-registration-keys
+   [registration]
+-  (sort print/compare-values
++  (sort order/compare-values
+         (keep (fn [[registration-key tabs]]
+                 (when (pos? (long tabs)) registration-key))
+               @registration)))
+diff --git a/src/seon/schema.clj b/src/seon/schema.clj
+index 05909e09b..1869f159c 100644
+--- a/src/seon/schema.clj
++++ b/src/seon/schema.clj
+@@ -35,12 +35,9 @@
+             [clojure.string :as str]
+             [clojure.edn :as edn]))
+ 
+-;;; LOAD-CYCLE BOUNDARIES. `seon.schema.edn`, `seon.error` and
+-;;; `seon.schema.datahike` all require `seon.schema`, so this namespace
+-;;; cannot require them back. One resolution per var, realized at first use,
++;;; LOAD-CYCLE BOUNDARIES. `seon.schema.datahike` requires `seon.schema`,
++;;; so this namespace cannot require it back (closed-runtime P3a-2). One resolution per var, realized at first use,
+ ;;; instead of a `requiring-resolve` on every call (AGENTS §2.1).
+-(defonce ^:private schema-edn-packaged-forms
+-  (delay (requiring-resolve 'seon.schema.edn/packaged-forms)))
+ (defonce ^:private schema-datahike-storable-attribute-in?
+   (delay (requiring-resolve 'seon.schema.datahike/storable-attribute-in?)))
+ (defonce ^:private schema-datahike-storable-properties-in
+@@ -972,7 +969,10 @@
+ (def ^:dynamic ^:private *candidate-forms-overlay* nil)
+ (def ^:dynamic ^:private *projection* nil)
+ (def ^:dynamic ^:private *projection-state* nil)
+-(def ^:dynamic ^:private *packaged-forms* nil)
++(def ^:dynamic *packaged-forms*
++  "The declaration population in hand when no operation binds one: its root is
++  the packaged forms, bound once by boot (`seon.cluster.boot/start!`)."
++  nil)
+ (def ^:dynamic ^:private *registration-admission-source* :core)
+ 
+ (defn admission-from-asserting-transaction
+@@ -1007,88 +1007,6 @@
+                   "recorded admission source, so this entity is admitted as "
+                   "agent-authored.")))))
+ 
+-;;; ---------------------------------------------------------------------------
+-;;; The classpath fallback, and why it is loud
+-;;; ---------------------------------------------------------------------------
+-
+-;; Reached with no population in hand, resolution reads and merges every schema
+-;; resource on the classpath. On 2026-08-07 one caller reached it 1,886 times —
+-;; 286,672 file reads, twenty-six seconds — and logged NOTHING; both instances
+-;; found that day were found by thread dump. R41 says development must be
+-;; unable to miss it. The mechanism is the stderr line `seon.instrument/apply!`
+-;; already uses (`instrument.clj:411-414`), which is the only one available
+-;; here: this namespace sits below `seon.db`, so no fault can be recorded, and
+-;; a throw would be wrong regardless — the fallback is the LEGITIMATE bootstrap
+-;; path before any projection exists, so throwing would make boot impossible. Loud therefore
+-;; means NAMED AND COUNTED, and production-bounded means one line per calling
+-;; function per decade of occurrences: the 2026-08-07 loop would have printed
+-;; six lines, not a quarter of a million.
+-(defonce ^:private !fallback-counts (atom {}))
+-
+-(defn- frame-namespace
+-  "The namespace part of a stack frame's demunged class name."
+-  {:malli/schema [:=> [:cat :seon.error/frame] :string]}
+-  [[class-name]]
+-  (let [demunged (clojure.lang.Compiler/demunge (str class-name))
+-        separator (.indexOf demunged "/")]
+-    (if (neg? separator) demunged (subs demunged 0 separator))))
+-
+-;; The warning is only worth printing if its advice is ACTIONABLE, and the
+-;; reader can only act on code we wrote. Which frames those are is the refusal
+-;; owner's one classpath-derived rule (`seon.error.refusal/first-party-frame?`);
+-;; the resolution owners themselves are the callee, never the caller.
+-(def ^:private resolution-owner-namespaces #{"seon.schema" "seon.schema.edn" "seon.instrument"})
+-
+-(defn- fallback-caller
+-  "The nearest first-party frame outside resolution, as `ns (file:line)`.
+-   Stack introspection is a diagnostic and runs only on the fallback path."
+-  {:malli/schema [:=> [:cat] :string]}
+-  []
+-  (or (some (fn [^StackTraceElement element]
+-              (when-let [file (.getFileName element)]
+-                (let [frame [(symbol (.getClassName element)) (symbol (.getMethodName element))
+-                             file (long (.getLineNumber element))]
+-                      frame-ns (frame-namespace frame)]
+-                  (when (and (not (contains? resolution-owner-namespaces frame-ns))
+-                             (refusal/first-party-frame? frame))
+-                    (str frame-ns " (" file ":" (.getLineNumber element) ")")))))
+-            (.getStackTrace (Thread/currentThread)))
+-      "an unidentified caller"))
+-
+-(defn- decade?
+-  [n]
+-  (let [magnitude (Math/log10 (double n))]
+-    (== magnitude (Math/floor magnitude))))
+-
+-;; The explanation is printed ONCE per process; each occurrence after it is one
+-;; short line. Repeating a 300-character sentence per caller per decade made
+-;; the signal its own wall — 45% of `seon.cluster.boot-test`'s wrapped
+-;; transcript on 2026-08-07 — and a diagnostic that buries the reader is the
+-;; defect the ethos names, not a louder version of the right one.
+-(defn- warn-classpath-fallback!
+-  []
+-  (let [caller (fallback-caller)
+-        counts (swap! !fallback-counts update caller (fnil inc 0))
+-        occurrence (get counts caller)]
+-    (when (decade? occurrence)
+-      (binding [*out* *err*]
+-        (when (= 1 (count counts) occurrence)
+-          (println
+-           (str "seon.schema: resolving the declaration population with none"
+-                " in hand reads every schema resource on the classpath (152"
+-                " reads, ~14 ms). ONE per operation is the current floor; the"
+-                " SAME caller repeating within one operation is the defect —"
+-                " resolve it once with schema/declaration-population and pass"
+-                " it to every question that operation asks. Each occurrence"
+-                " below names its caller and its count for this process.")))
+-        (println (str "seon.schema: DECLARATION POPULATION FALLBACK ×"
+-                      occurrence " — " caller))
+-        (flush)))))
+-
+-(defn- packaged-forms []
+-  (warn-classpath-fallback!)
+-  (@schema-edn-packaged-forms))
+-
+ (defn- candidate-forms []
+   (if *candidate-forms-overlay*
+     @*candidate-forms-overlay*
+@@ -1097,8 +1015,7 @@
+                 deref
+                 :seon.schema/projection
+                 :seon.schema.projection/forms)
+-        (:seon.schema.projection/forms *projection*)
+-        (packaged-forms))))
++        (:seon.schema.projection/forms *projection*))))
+ 
+ (defn declaration-population
+   "THE declaration population in hand for this operation.
+@@ -1117,14 +1034,12 @@
+   (if (or *candidate-forms-overlay* *packaged-forms* *projection*
+           *projection-state*)
+     (candidate-forms)
+-    (let [caller (fallback-caller)
+-          diagnostic
++    (let [diagnostic
+           (assoc (seon.error.refusal/diagnostic (java.util.Date.) :seon.schema/derivation 'seon.schema/declaration-population
+            {:seon.error/message "No declaration projection was handed to this schema operation."
+             :seon.schema/missing-projection true
+             :seon.schema/refused-value nil
+-            :seon.schema/expected-value :seon.schema/projection
+-            :seon.error/data {:seon.schema/caller caller}}) :seon.error/type :seon.schema/validation-refusal)]
++            :seon.schema/expected-value :seon.schema/projection}) :seon.error/type :seon.schema/validation-refusal)]
+       (throw (ex-info (:seon.error/message diagnostic) diagnostic)))))
+ 
+ (defn call-with-forms
+@@ -1143,7 +1058,8 @@
+   {:malli/schema [:=> [:cat :map] [:map-of [:or [:fn clojure.core/var?] :seon.sci.eval/sci-var] [:or :nil :map]]]}
+   [projection]
+   {#'*projection* projection
+-   #'*projection-state* nil})
++   #'*projection-state* nil
++   #'*packaged-forms* nil})
+ 
+ (defn projection-state-bindings
+   "The Var bindings that make `projection-state` this thread's advanceable projection.
+@@ -3946,7 +3862,8 @@
+       (sort-by str schema-keys)))))
+ 
+ (defn canonical-schema-entities
+-  "Build canonical rows from a complete construction generation.
++  "Build canonical rows, without their definition digests, from a complete
++  construction generation (`seon.program/schema-entities` adds the digests).
+   The two-argument arity selects authored rows while reference and storage
+   decisions use the complete supplied projection. Missing targets still refuse."
+   {:malli/schema
+@@ -3963,16 +3880,13 @@
+      (mapv
+       (fn [schema-key]
+         (let [references (get reference-graph schema-key)]
+-          (let [entity
+-                (cond->
+-                 (merge (@schema-datahike-storable-properties-in projection schema-key)
+-                        {:seon.schema/key schema-key
+-                         :seon.schema/form
+-                         (binding [*print-namespace-maps* false *print-length* nil *print-level* nil *print-meta* false] (pr-str (get forms schema-key)))
+-                         :seon.schema.admission/source :core})
+-                  (seq references) (assoc :seon.schema/references (set references)))]
+-            (assoc entity :seon.program/definition-digest
+-                   ((requiring-resolve 'seon.program/definition-digest) entity)))))
++          (cond->
++           (merge (@schema-datahike-storable-properties-in projection schema-key)
++                  {:seon.schema/key schema-key
++                   :seon.schema/form
++                   (binding [*print-namespace-maps* false *print-length* nil *print-level* nil *print-meta* false] (pr-str (get forms schema-key)))
++                   :seon.schema.admission/source :core})
++            (seq references) (assoc :seon.schema/references (set references)))))
+       (dependency-first-schema-keys ordering-graph materialized-keys)))))
+ 
+ (defn canonical-database-attributes
+diff --git a/src/seon/schema/datahike.clj b/src/seon/schema/datahike.clj
+index cf9d1bb69..36dbfa1cc 100644
+--- a/src/seon/schema/datahike.clj
++++ b/src/seon/schema/datahike.clj
+@@ -5,7 +5,7 @@
+    database bridge — registered attribute forms in, ordinary Datahike
+    schema maps out. Pure derivation: no connection, no session, no
+   transaction. The store owner transacts the returned declarations."
+-  (:require [seon.print :as print]
++  (:require [seon.order :as order]
+             [clojure.edn :as edn]
+             [clojure.walk :as walk]
+             [malli.core :as m]
+@@ -524,13 +524,13 @@
+      (symbol namespace-name local-name))})
+ 
+ (defn- storage-compare
+-  "Canonical storage order: the values' structure (`seon.print/compare-values`);
++  "Canonical storage order: the values' structure (`seon.order/compare-values`);
+   only leaves that order cannot tell apart (same class, not Comparable, such as
+   a tagged literal) fall back to their printed forms, so distinct members are
+   never merged."
+   {:malli/schema [:=> [:cat :seon.schema/value :seon.schema/value] :int]}
+   [left right]
+-  (let [order (print/compare-values left right)]
++  (let [order (order/compare-values left right)]
+     (if (zero? order)
+       (compare (id/printed left) (id/printed right))
+       order)))
+@@ -553,7 +553,7 @@
+ 
+ (def ^:private natural-order-classes
+   "Classes whose `compare` is total and consistent with `=`, and is exactly
+-  the order `seon.print/compare-values` gives two members of one class."
++  the order `seon.order/compare-values` gives two members of one class."
+   #{clojure.lang.Keyword clojure.lang.Symbol String Long java.util.UUID})
+ 
+ (defn- natural-order?
+diff --git a/src/seon/schema/internal.cljc b/src/seon/schema/internal.cljc
+index 70766e0e0..6d769b7d4 100644
+--- a/src/seon/schema/internal.cljc
++++ b/src/seon/schema/internal.cljc
+@@ -1,10 +1,7 @@
+ (ns seon.schema.internal
+   "Registration admission and entity-shape derivation for `seon.schema`.
+ 
+-   Private engine internals, factored out of the public registry surface
+-   so they stay indexed + grep-able WITHOUT rendering into agent context
+-   (the `*.internal` convention drops them from the curated namespaces
+-   body — see `seon.agent.ctx.ns-name/hidden-ns-name?`).
++   Engine internals factored out of the public registry surface.
+ 
+    Compiled schemas carry their registry scope. This namespace never requires
+    `seon.schema`; the dependency is schema → schema.internal only."
+diff --git a/src/seon/test.clj b/src/seon/test.clj
+index f90a69c13..81602978d 100644
+--- a/src/seon/test.clj
++++ b/src/seon/test.clj
+@@ -1,7 +1,7 @@
+ (ns seon.test
+   "One test request on the agent execution lifecycle, and the recorded evidence it reads."
+   (:require
+-            [seon.print :as print]
++            [seon.order :as order]
+             [clojure.java.io :as io]
+             [clojure.string :as str]
+             [clojure.test]
+@@ -2233,7 +2233,7 @@
+   (let [changed (program/own-changed-identities base candidate source/merge-bound)]
+     (if (:seon.error/at changed)
+       changed
+-      (vec (sort print/compare-values (observable-changes base candidate changed))))))
++      (vec (sort order/compare-values (observable-changes base candidate changed))))))
+ 
+ (defn branch-changes
+   "Every declaration `execution`'s program changed since its base (`change-base`: the published commit on the
+@@ -2296,7 +2296,7 @@
+                                                (:seon.ns/_imports %)))
+                               (keep :seon.ns/name)) rows)
+         schemas (into #{} (comp (filter :seon.schema/form) (map :seon.schema/key)) rows)]
+-    (vec (sort print/compare-values
++    (vec (sort order/compare-values
+                (concat (behavior-changed before after (vec symbols))
+                        (keep #(when (binding-lost? before after %) [:seon.ns/name %]) names)
+                        (map #(vector :seon.schema/key %) schemas))))))
+diff --git a/src/seon/turn.clj b/src/seon/turn.clj
+index baa4fb545..24d24b652 100644
+--- a/src/seon/turn.clj
++++ b/src/seon/turn.clj
+@@ -4,7 +4,7 @@
+   Open means no closed-tx. Boot closes unfinished work; execution never
+   resumes across a JVM restart. The agent graph advances open, call,
+   evaluations, and close from database facts and rewakes only for more work."
+-  (:require [seon.print :as print]
++  (:require [seon.order :as order]
+             [seon.error.refusal]
+             [clojure.core.async :as async]
+             [clojure.core.async.flow :as flow]
+@@ -3343,7 +3343,7 @@
+                                      (keep program/row-identity))
+                            changes)]
+         (->> (group-by :seon.program/identity (:seon.program/referrers refusal))
+-             (sort-by key print/compare-values)
++             (sort-by key order/compare-values)
+              (mapv (fn [[identity referrers]]
+                      (let [ordinals (get deleting identity)]
+                        (cond
+diff --git a/test/seon/cluster/merge_test.clj b/test/seon/cluster/merge_test.clj
+index 648dfdcd4..4ab379f8f 100644
+--- a/test/seon/cluster/merge_test.clj
++++ b/test/seon/cluster/merge_test.clj
+@@ -548,7 +548,7 @@
+   [database forms]
+   (let [projection (reduce-kv (fn [p k v] (schema/projection-with-schema p k v {:seon.schema.admission/source :core}))
+                               (db/carried-projection database) forms)]
+-    (schema/canonical-schema-entities projection forms)))
++    (program/schema-entities projection forms)))
+ 
+ (deftest ^{:seon.test/long "One own-branch agent's first request, assignment and request run, and one land (one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one)."
+            :seon.test/long-ms 180000}
+@@ -581,7 +581,7 @@
+                main (db/db connection)
+                file-schemas (edn/read-string (slurp (io/file root schema-path)))
+                published (into {} (map (juxt :seon.schema/key :seon.program/definition-digest))
+-                               (schema/canonical-schema-entities (db/carried-projection main) file-schemas))
++                               (program/schema-entities (db/carried-projection main) file-schemas))
+                held #(:seon.program/definition-digest (db/pull main [:seon.program/definition-digest] [:seon.schema/key %]))]
+            (is (nil? (:seon.error/message landed)) "the merge answers no refusal")
+            (is (= git-commit (git! root "rev-parse" "HEAD")) "the next pass published it")
+diff --git a/test/seon/cluster/registry_test.clj b/test/seon/cluster/registry_test.clj
+index a65244bdd..cf19e13d2 100644
+--- a/test/seon/cluster/registry_test.clj
++++ b/test/seon/cluster/registry_test.clj
+@@ -32,6 +32,7 @@
+             [seon.cluster.source :as source]
+             [seon.merge :as merge]
+             [seon.cluster.store :as store]
++            [seon.program :as program]
+             [seon.schema]
+             [seon.schema.datahike :as schema-datahike]
+             [seon.sci.eval :as sci.eval]
+@@ -71,7 +72,7 @@
+                            (mapcat #(get references %))
+                            needed)]
+         (if (= needed expanded)
+-          (seon.schema/canonical-schema-entities projection (select-keys forms expanded))
++          (program/schema-entities projection (select-keys forms expanded))
+           (recur expanded))))))
+ 
+ (def ^:private source-branch :current-src)
+diff --git a/test/seon/cluster/wake_test.clj b/test/seon/cluster/wake_test.clj
+index b42dc40a1..ea619c0ea 100644
+--- a/test/seon/cluster/wake_test.clj
++++ b/test/seon/cluster/wake_test.clj
+@@ -29,6 +29,7 @@
+             [seon.cluster.wake :as wake]
+             [seon.config :as config]
+             [seon.error :as error]
++            [seon.program :as program]
+             [seon.schema]
+             [seon.test-support :as test-support])
+   (:import [java.util Date]))
+@@ -278,7 +279,7 @@
+   (into #{}
+         (comp (filter (fn [entity] (true? (get entity property))))
+               (map :seon.schema/key))
+-        (seon.schema/canonical-schema-entities)))
++        (program/schema-entities)))
+ 
+ (deftest the-listened-set-is-declared-not-listed
+   ;; THE CLASS: a hand list of wake attributes drifts from the families
+diff --git a/test/seon/db_test.clj b/test/seon/db_test.clj
+index bdf34f3e4..d81bb9e06 100644
+--- a/test/seon/db_test.clj
++++ b/test/seon/db_test.clj
+@@ -2888,7 +2888,7 @@
+            projection (schema/build-projection
+                        (assoc (:seon.schema.projection/forms (db/carried-projection (db/db connection)))
+                               schema-key definition))
+-           entity (first (schema/canonical-schema-entities projection {schema-key definition}))
++           entity (first (program/schema-entities projection {schema-key definition}))
+            basis (:max-tx @connection)
+            refusal (db/transact! connection [entity])
+            expected [{:seon.schema/key schema-key
+diff --git a/test/seon/fn_test.clj b/test/seon/fn_test.clj
+index f81cffd15..bba095f9b 100644
+--- a/test/seon/fn_test.clj
++++ b/test/seon/fn_test.clj
+@@ -2007,7 +2007,7 @@
+        (let [declared {::identity-value [:tuple :keyword :symbol] ::identity-ref :seon.db/ref}]
+          (test-support/transacted!
+           connection
+-          (seon.schema/canonical-schema-entities
++          (program/schema-entities
+            (reduce-kv #(seon.schema/projection-with-schema %1 %2 %3 {:seon.schema.admission/source :agent})
+                       (db/carried-projection @connection) declared)
+            declared)))
+diff --git a/test/seon/owned_value_test.clj b/test/seon/owned_value_test.clj
+index 48b6b50e2..b1c5693ed 100644
+--- a/test/seon/owned_value_test.clj
++++ b/test/seon/owned_value_test.clj
+@@ -4,6 +4,7 @@
+             [datahike.db.interface :as dbi]
+             [seon.db :as db]
+             [seon.schema :as schema]
++            [seon.program :as program]
+             [seon.schema.edn :as schema.edn]
+             [seon.schema.datahike :as schema.datahike]
+             [seon.sci.eval :as evaluation]
+@@ -37,7 +38,7 @@
+        (support/transacted!
+         connection
+         (mapv (partial accretion/schema-row forms)
+-              (schema/canonical-schema-entities
++              (program/schema-entities
+                projection (into {} (filter #(= (namespace ::id) (namespace (key %)))) forms))))
+        (db/carry-connection-projection-state!
+         connection (evaluation/projection-state @connection projection))
+diff --git a/test/seon/program_test.clj b/test/seon/program_test.clj
+index 67d0d6124..3fbe7af3b 100644
+--- a/test/seon/program_test.clj
++++ b/test/seon/program_test.clj
+@@ -1467,7 +1467,7 @@
+                           :seon.program/schema-forms forms})
+                        (into (:seon.fn.file/rows artifact)
+                              (map #(accretion/schema-row forms %))
+-                             (schema/canonical-schema-entities projection fixture-forms)))
++                             (program/schema-entities projection fixture-forms)))
+                  selected (filterv #(or (:seon.fn.file/relative-path %)
+                                         (some #{(program/row-identity %)} identities)) entities)]
+              (test-support/transacted!
+diff --git a/test/seon/render/history_test.clj b/test/seon/render/history_test.clj
+index ca623a11b..46e5cf9b2 100644
+--- a/test/seon/render/history_test.clj
++++ b/test/seon/render/history_test.clj
+@@ -8,7 +8,7 @@
+             [seon.render.ns :as render.ns]
+             [seon.render.transcript :as transcript]
+             [seon.render.walk :as walk]
+-            [seon.schema :as schema]
++            [seon.program :as program]
+             [seon.sci.kernel :as kernel]
+             [seon.test-support :as support]))
+ 
+@@ -40,7 +40,7 @@
+                                    :seon.message/to
+                                    :seon.agent/agent}
+                                  :seon.schema/key))
+-                   (schema/canonical-schema-entities)))
++                   (program/schema-entities)))
+      (support/transacted!
+              connection
+              (into [(support/namespace-entity @connection 'fixture.history)]
+@@ -141,7 +141,7 @@
+                             :seon.ns/ns
+                             :seon.agent/agent}
+                           :seon.schema/key))
+-            (schema/canonical-schema-entities)))
++            (program/schema-entities)))
+      (support/transacted!
+       connection
+       (into [(support/namespace-entity @connection 'fixture.neighbour)]
+diff --git a/test/seon/render/value_test.clj b/test/seon/render/value_test.clj
+index 56791e318..55a5c054f 100644
+--- a/test/seon/render/value_test.clj
++++ b/test/seon/render/value_test.clj
+@@ -20,6 +20,7 @@
+             [seon.render.hiccup :as hiccup]
+             [seon.render.value :as value]
+             [seon.schema :as schema]
++            [seon.program :as program]
+             [seon.sci.admit :as admit]
+             [seon.sci.eval :as evaluation]
+             [seon.sci.lookup :as lookup]
+@@ -320,7 +321,7 @@
+           projection (schema/build-projection
+                       (merge (:seon.schema.projection/forms (schema/handed-projection))
+                              forms))]
+-      (schema/canonical-schema-entities projection forms))}
++      (program/schema-entities projection forms))}
+    (fn [connection]
+      (let [;; Selection is by declared identity, never structural
+            ;; resemblance: the producer declares the value's schema.
+diff --git a/test/seon/schema/datahike_test.clj b/test/seon/schema/datahike_test.clj
+index d2b709b54..0fae59476 100644
+--- a/test/seon/schema/datahike_test.clj
++++ b/test/seon/schema/datahike_test.clj
+@@ -1,6 +1,8 @@
+ (ns seon.schema.datahike-test
+   (:require [clojure.edn :as edn]
+             [clojure.java.io :as io]
++            [clojure.string :as str]
++            [edamame.core :as edamame]
+             [clojure.test :refer [deftest is testing use-fixtures]]
+             [clojure.test.check :as tc]
+             [clojure.test.check.generators :as gen]
+@@ -12,6 +14,7 @@
+             [seon.env :as env]
+             [seon.profile :as profile]
+             [seon.schema :as schema]
++            [seon.program :as program]
+             [seon.schema.datahike :as schema.datahike]
+             [seon.schema.edn :as schema.edn]
+             [seon.schema.internal :as internal]
+@@ -54,7 +57,7 @@
+        (support/transacted!
+         connection
+         (into [(schema.datahike/malli->datahike-attr-in projection ::subject)]
+-              (schema/canonical-schema-entities projection
++              (program/schema-entities projection
+                                             (select-keys candidate [::subject ::observation]))))
+        (is (some? (db/pull (db/db connection) [:seon.schema/key]
+                           [:seon.schema/key ::observation])))
+@@ -678,3 +681,29 @@
+              (when (:db-after report)
+                (is (= [9 2] (::position (db/pull (:db-after report) [::position]
+                                                 [:seon.ns/name 'sample.tuple]))))))))))))
++
++(defn- source-requires
++  "The namespaces the `(ns ...)` form of `namespace`'s file under `src` requires, read as Clojure; `#{}` without one."
++  {:malli/schema [:=> [:cat :symbol] [:set :symbol]]}
++  [namespace-name]
++  (let [path (str "src/" (str/replace (munge (str namespace-name)) "." "/"))]
++    (if-let [file (some #(let [file (io/file (str path %))] (when (.exists file) file)) [".clj" ".cljc"])]
++      (into #{} (comp (filter #(and (seq? %) (= :require (first %))))
++                      (mapcat rest)
++                      (map #(if (sequential? %) (first %) %)))
++            (edamame/parse-string (slurp file) {:all true :read-cond :allow :features #{:clj}}))
++      #{})))
++
++(defn- require-closure
++  "Every namespace `namespace` reaches through the `:require`s of the source files under `src`."
++  {:malli/schema [:=> [:cat :symbol] [:set :symbol]]}
++  [namespace-name]
++  (loop [pending [namespace-name] reached #{}]
++    (if-let [next-namespace (first pending)]
++      (let [found (remove reached (source-requires next-namespace))]
++        (recur (into (subvec pending 1) found) (into reached found)))
++      reached)))
++
++(deftest the-bridge-requires-no-printer
++  (is (not (contains? (require-closure 'seon.schema.datahike) 'seon.print))
++      "seon.schema.datahike reaches seon.print through no require"))
+diff --git a/test/seon/schema_reference_graph_test.clj b/test/seon/schema_reference_graph_test.clj
+index 38142aa92..b813a9a77 100644
+--- a/test/seon/schema_reference_graph_test.clj
++++ b/test/seon/schema_reference_graph_test.clj
+@@ -3,6 +3,7 @@
+   (:require [clojure.test :refer [deftest is testing]]
+             [seon.db :as db]
+             [seon.schema :as schema]
++            [seon.program :as program]
+             [seon.schema.edn :as schema.edn]
+             [seon.test-support :as test-support]))
+ 
+@@ -29,7 +30,7 @@
+   (test-support/with-database
+     (fn [connection]
+       (let [forms (schema.edn/packaged-forms)
+-            entities (schema/canonical-schema-entities forms)
++            entities (program/schema-entities forms)
+             materialized-keys (into #{} (map :seon.schema/key) entities)
+             entity-positions
+             (into {}
+diff --git a/test/seon/schema_test.clj b/test/seon/schema_test.clj
+index 815997c54..5ceb33811 100644
+--- a/test/seon/schema_test.clj
++++ b/test/seon/schema_test.clj
+@@ -18,6 +18,7 @@
+             [seon.error.refusal :as refusal]
+             [seon.instrument :as instrument]
+             [seon.schema :as schema]
++            [seon.program :as program]
+             [seon.schema.edn :as schema.edn]
+             [seon.schema.datahike :as schema.datahike]
+             [seon.schema.internal :as schema.internal]
+@@ -805,7 +806,7 @@
+                :gen/schema :seon.schema/definition
+                schema-key definition}
+         entity (some #(when (= schema-key (:seon.schema/key %)) %)
+-                  (schema/canonical-schema-entities
++                  (program/schema-entities
+                    (schema/build-projection
+                     (merge (:seon.schema.projection/forms (schema/handed-projection)) forms))
+                    forms))]
+@@ -2008,7 +2009,7 @@
+                built (schema/build-projection
+                       (assoc (:seon.schema.projection/forms (seon.db/carried-projection (seon.db/db connection)))
+                              schema-key definition))
+-               entity (first (schema/canonical-schema-entities built {schema-key definition}))
++               entity (first (program/schema-entities built {schema-key definition}))
+                basis (:max-tx @connection)
+                refusal (seon.db/transact! connection [entity])]
+            (is (string? (:seon.db.write.attempt/request-id refusal)))
+@@ -2066,3 +2067,7 @@
+     (is (= #{'seon.schema/byte-array?} first-answer))
+     (is (identical? first-answer (population-symbols (into {} forms) {}))
+         "An equal population answers the retained set: its forms are not walked again.")))
++
++(deftest the-packaged-population-is-the-root-boot-binds
++  (is (= (schema.edn/packaged-forms) (.getRawRoot #'schema/*packaged-forms*))
++      "boot binds the root of seon.schema/*packaged-forms* to the packaged forms, the population an operation that hands none reads"))
+diff --git a/test/seon/schema_usage_guard_test.clj b/test/seon/schema_usage_guard_test.clj
+index 6785c0834..5b1695896 100644
+--- a/test/seon/schema_usage_guard_test.clj
++++ b/test/seon/schema_usage_guard_test.clj
+@@ -79,7 +79,7 @@
+   (schema/build-projection (merge (schema/snapshot) probe-forms)))
+ 
+ (defn- printed
+-  "`form` printed as `seon.schema/canonical-schema-entities` stores `:seon.schema/form`."
++  "`form` printed as `seon.program/schema-entities` stores `:seon.schema/form`."
+   {:malli/schema [:=> [:cat :any] :string]}
+   [form]
+   (binding [*print-namespace-maps* false] (pr-str form)))
+@@ -148,7 +148,7 @@
+            projection
+            (schema.datahike/database-attributes-for-in
+             projection selected-forms))
+-          (schema/canonical-schema-entities projection selected-forms)))
++          (program/schema-entities projection selected-forms)))
+         _ (advance-fixture-projection! connection)]
+     report))
+ 
+diff --git a/test/seon/sci/open_derivers_test.clj b/test/seon/sci/open_derivers_test.clj
+index 1daa6f3ee..3a081fee9 100644
+--- a/test/seon/sci/open_derivers_test.clj
++++ b/test/seon/sci/open_derivers_test.clj
+@@ -43,7 +43,9 @@
+     :functions (into #{} (map #(symbol "seon.program" %)) ["derived-shape" "derived-program-attributes"])}
+    {:phase :P1
+     :functions (into #{} (map #(symbol "seon.db" %))
+-                     ["call-preparation-snapshot" "call-preparation-report-snapshot" "call-preparation-plan-for"])}])
++                     ["call-preparation-snapshot" "call-preparation-report-snapshot" "call-preparation-plan-for"])}
++   {:phase :P3a-1
++    :functions (into #{} (map #(symbol "seon.schema" %)) ["schema-edn-packaged-forms" "canonical-schema-entities"])}])
+ 
+ (defn- open-cache-derivers
+   "The cache derivers of `database`'s program that its reach index leaves open."
+diff --git a/test/seon/test/runner_test.clj b/test/seon/test/runner_test.clj
+index 24f694ba0..5d642e742 100644
+--- a/test/seon/test/runner_test.clj
++++ b/test/seon/test/runner_test.clj
+@@ -369,7 +369,7 @@
+   "Commit one synthetic declaration the way the canonical entities express it."
+   [connection schema-key]
+   (test-support/transacted!
+-   connection (schema/canonical-schema-entities {schema-key :string})))
++   connection (program/schema-entities {schema-key :string})))
+ 
+ (defn- retract-schema-key!
+   "Retract the synthetic declaration; its past remains in history."
+diff --git a/test/seon/test_support.clj b/test/seon/test_support.clj
+index d0e020484..67f9c913d 100644
+--- a/test/seon/test_support.clj
++++ b/test/seon/test_support.clj
+@@ -1211,7 +1211,7 @@
+                              (schema/projection-with-schema
+                               current schema-key definition {:seon.schema.admission/source :core}))
+                            (db/carried-projection database) forms)]
+-    (vec (schema/canonical-schema-entities projection (into {} forms)))))
++    (vec (program/schema-entities projection (into {} forms)))))
+ 
+ (defn revised-entity
+   "`row` with `overrides` merged, digested from that FINAL row through the one
+diff --git a/test/seon/test_support_test.clj b/test/seon/test_support_test.clj
+index 8e038a441..68a61d843 100644
+--- a/test/seon/test_support_test.clj
++++ b/test/seon/test_support_test.clj
+@@ -16,6 +16,7 @@
+             [malli.core :as m]
+             [malli.instrument :as mi]
+             [seon.schema :as schema]
++            [seon.program :as program]
+             [seon.schema.edn :as schema.edn]
+             [seon.render.value :as value]
+             [seon.batch]
+@@ -209,7 +210,7 @@
+             (into
+              (into #{}
+                    (map :seon.schema/key)
+-                   (schema/canonical-schema-entities packaged-forms))
++                   (program/schema-entities packaged-forms))
+              (keep :seon.schema/key)
+              (mapcat :seon.fn.file/rows
+                      (:seon.fn.manifest/artifacts @test-support/source-manifest)))
+@@ -223,7 +224,7 @@
+                     (schema/canonical-database-attributes (schema/handed-projection))))
+         (is (not (contains? installed :seon.schema/created-at)))
+         (is (every? #(not (contains? % :seon.schema/created-at))
+-                    (schema/canonical-schema-entities packaged-forms)))
++                    (program/schema-entities packaged-forms)))
+         (is (= expected-schema-keys (set actual-schema-keys)))
+         (is (= (->> (db/identity-attributes database)
+                     (filter #(seq (db/datoms database :avet %)))

@@ -1,0 +1,98 @@
+--- a/src/seon/cluster/source.clj	2026-10-16 12:55:39.099263647 +0700
++++ b/src/seon/cluster/source.clj	2026-10-16 12:55:52.825975694 +0700
+@@ -1420,13 +1420,31 @@
+   "A replaced function reaches no green test of the named run.")
+ 
+ (defn- uncovered-functions
+-  "The functions among `identities` that `database` holds which no test of `covering` reaches (`seon.fn/gate-sets`):
+-  what a merge refuses as uncovered."
+-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set [:set :seon.test/sym]] [:vector :seon.fn/sym]]}
++  "The functions among `identities` that `database` holds which no test of `covering` reaches (`seon.fn/gate-sets`),
++  each with the tests that do reach it: what a merge refuses as uncovered, and what would cover it once green."
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set [:set :seon.test/sym]]
++                  [:map-of :seon.fn/sym [:vector :seon.test/sym]]]}
+   [database identities covering]
+-  (vec (for [[a f] identities :when (= :seon.fn/sym a)
+-             :when (:db/id (db/pull database [:db/id] [a f]))
+-             :when (not-any? covering (fn/gate-sets {:seon.db/db database :seon.fn/seeds #{f}}))] f)))
++  (into (sorted-map)
++        (for [[a f] identities :when (= :seon.fn/sym a)
++              :when (:db/id (db/pull database [:db/id] [a f]))
++              :let [reaching (fn/gate-sets {:seon.db/db database :seon.fn/seeds #{f}})]
++              :when (not-any? covering reaching)] [f reaching])))
++
++(defn- uncovered-refusal
++  "The `:seon.source/test-evidence-error` refusing `uncovered` (`uncovered-functions`) with `evidence`'s members: the
++  functions as `:seon.error/offending`, and each red test of `results` reaching one as `:seon.source/red-tests`
++  (`red-test-verdicts`), the test whose green would cover it."
++  {:malli/schema [:=> [:cat :map [:map-of :seon.fn/sym [:vector :seon.test/sym]] [:vector :map]]
++                  :seon.source/test-evidence-error]}
++  [evidence uncovered results]
++  (let [red? (requiring-resolve 'seon.test.runner/red-result?)
++        red (into #{} (comp (filter red?) (map #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)))) results)
++        reaching (vec (sort (filter red (into #{} (mapcat val) uncovered))))]
++    (seon.error.refusal/error :seon.source/test-evidence-error
++     (cond-> (assoc evidence :seon.error/message uncovered-message :seon.error/offending (vec (keys uncovered)))
++       (seq reaching) (assoc :seon.source/red-tests
++                             (red-test-verdicts (:seon.source/refused-test-run evidence) results reaching (set reaching)))))))
+ 
+ (defn results-verdict
+   "Every refusal the recorded results in `judged` give the candidate: each of its `:seon.task/proofs` among its
+@@ -1474,7 +1492,9 @@
+       (conj (uncontracted-refusal (assoc evidence :seon.error/layer :seon.source/merge
+                                          :seon.error/operation 'seon.cluster.source/results-verdict)
+                                   gaps))
+-      (seq uncovered) (conj (refuse uncovered-message uncovered))
++      (seq uncovered) (conj (uncovered-refusal (assoc evidence :seon.error/layer :seon.source/merge
++                                                      :seon.error/operation 'seon.cluster.source/results-verdict)
++                                               uncovered results))
+       (:seon.error/at dangling) (conj dangling)
+       (and (not (:seon.error/at dangling)) (seq dangling))
+       (conj (refuse "The merged program names tasks the destination has not admitted." dangling)))))
+@@ -1558,9 +1578,7 @@
+                     :seon.source/red-tests (verdicts stray))))
+       (seq gaps) (conj (uncontracted-refusal evidence gaps))
+       lint (conj lint)
+-      (seq uncovered)
+-      (conj (seon.error.refusal/error :seon.source/test-evidence-error
+-             (assoc evidence :seon.error/message uncovered-message :seon.error/offending uncovered))))))
++      (seq uncovered) (conj (uncovered-refusal evidence uncovered results)))))
+ 
+ (defn merge-verdict
+   "Every refusal of the candidate `prepared` (`prepare-merge!`'s value) names, judged from what `main`, the
+diff --git a/test/seon/cluster/source_test.clj b/test/seon/cluster/source_test.clj
+index 75a980089..2874a1812 100644
+--- a/test/seon/cluster/source_test.clj
++++ b/test/seon/cluster/source_test.clj
+@@ -502,6 +502,31 @@
+               (mapv #(mapv :seon.test/sym (:seon.source/red-tests %)) (source/done-refusals branch (new-red base))))
+            "the stray refusal names the red test")))))
+ 
++(deftest an-uncovered-refusal-names-the-red-tests-reaching-it
++  ;; live run 2, chain ce9d: its proof was green, but the one test the call graph walks to seon.effect/render-ai
++  ;; was red, so the done rule refused render-ai as reached by no green test, naming no test; the agent spent its
++  ;; last four calls querying runs by hand for what would satisfy the refusal
++  (test-support/with-database
++   (fn [connection]
++     (test-support/declare-source!
++      connection 'tq.reach
++      "(ns tq.reach)\n(defn stub {:malli/schema [:=> [:cat :int] :int]} [x] x)\n")
++     (test-support/declare-source!
++      connection 'tq.reach-test
++      (str "(ns tq.reach-test (:require [clojure.test :refer [deftest is]] [tq.reach]))\n"
++           "(deftest reaches (is (= 1 (tq.reach/stub 1))))\n")
++      "test")
++     (let [judged {:seon.source/members #{'tq.reach-test/proof 'tq.reach-test/reaches}
++                   :seon.task/proofs #{'tq.reach-test/proof}
++                   :seon.source/results [(recorded 'tq.reach-test/proof true) (recorded 'tq.reach-test/reaches false)]
++                   :seon.program/identities #{[:seon.fn/sym 'tq.reach/stub]}
++                   :seon.source/merge-identities #{[:seon.fn/sym 'tq.reach/stub]}
++                   :seon.test.run/id "run-1" :seon.test.run/branch :tq-reach}
++           uncovered (filterv #(= ['tq.reach/stub] (:seon.error/offending %))
++                              (source/done-refusals (db/db connection) judged))]
++       (is (= [['tq.reach-test/reaches]] (mapv #(mapv :seon.test/sym (:seon.source/red-tests %)) uncovered))
++           "the refusal names the red test that would cover the function once green")))))
++
+ (deftest results-verdict-judges-a-never-started-member-as-evidence
+   ;; a member whose recorded result never started is unknown evidence; only an executed failure is a red test
+   (test-support/with-database

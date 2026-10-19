@@ -1,0 +1,24 @@
+diff --git a/test/seon/cluster/turn_test.clj b/test/seon/cluster/turn_test.clj
+index 52fd43b65..37a120c76 100644
+--- a/test/seon/cluster/turn_test.clj
++++ b/test/seon/cluster/turn_test.clj
+@@ -2798,6 +2798,19 @@
+    (seon.mcp/call (clojure.data.json/write-str
+                    {"name" "eval_clj" "arguments" {"code" code "agent" agent-id "cluster" running}}))))
+ 
++(deftest the-step-runs-a-branch-test-the-request-reached-in-one-run
++  (test-support/with-running-agent
++   (fn [running agent-id connection]
++     (agent-eval running agent-id "(ns tq.f3a) (defn area [r] (* r r))")
++     (agent-eval running agent-id "(in-ns 'tq.f3a) (clojure.test/deftest area-test (clojure.test/is (= 4 (tq.f3a/area 2))))")
++     (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
++                                                 :seon.task/ns 'tq.f3a :seon.task/name "area" :seon.task/plan "Square."}))]
++       (seon.task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
++                           :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])}))
++     (agent-eval running agent-id "(in-ns 'tq.f3a) (defn area [r] (* r r r))")
++     (let [runs (db/q '[:find (count ?run) . :where [?run :seon.test.run/id]] (db/db connection))]
++       (is (= 2 runs) "one test run per request that changed the test or what it reaches, never a second for what it answered")))))
++
+ (deftest a-defn-reaching-a-proof-records-its-result-without-a-check-call
+   (test-support/with-running-agent
+    (fn [running agent-id connection]

@@ -1,0 +1,66 @@
+diff --git a/src/seon/task.clj b/src/seon/task.clj
+index b55a9b5e7..f48f738de 100644
+--- a/src/seon/task.clj
++++ b/src/seon/task.clj
+@@ -633,7 +633,8 @@
+                   [:or :seon.store/transaction-data :seon.task/refused-error :seon.error/value]]}
+   [database branch-db key]
+   (let [row (db/pull database [:db/id :seon.task/assignment :seon.task/assigned :seon.task/revision :seon.task/branch
+-                               :seon.task.attempt/number :seon.task.attempt/fork {:seon.task/agent [:seon.agent/id]}]
++                               :seon.task.attempt/number :seon.task.attempt/fork :seon.task/merge-base
++                               {:seon.task/agent [:seon.agent/id]}]
+                      [:seon.task/assignment key])
+         handle (:seon.task/assigned row)
+         present? (fn [lookup] (:db/id (db/pull branch-db [:db/id] lookup)))]
+diff --git a/src/seon/turn.clj b/src/seon/turn.clj
+index 57a2946a1..ebfd9526f 100644
+--- a/src/seon/turn.clj
++++ b/src/seon/turn.clj
+@@ -5514,14 +5514,15 @@
+                   (throw (ex-info (:seon.error/message absent) absent))))))
+ 
+ (defn fork-commit
+-  "The commit the agent's step is judged against, read on `database`, its branch: its open attempt's fork point
+-  (`:seon.task.attempt/fork`, a predecessor's end commit), else the commit its branch was forked at; nil on a
+-  branch with no fork (main itself)."
++  "The commit the agent's step is judged against, read on `database`, its branch: its open assignment's merge base
++  (`:seon.task/merge-base`, copied onto the branch with the row by `seon.task/attempt-rows-tx`); the commit its
++  branch was forked at for a branch with no assignment; nil on main itself."
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :seon.source/commit-id]]}
+   [database agent-id]
+   (let [attempt (task/agent-attempt database agent-id)]
+-    (or (when (int? attempt) (:seon.task.attempt/fork (db/pull database [:seon.task.attempt/fork] attempt)))
+-        (registry/base-commit-id database (get-in database [:config :branch])))))
++    (if (int? attempt)
++      (:seon.task/merge-base (db/pull database [:seon.task/merge-base] attempt))
++      (registry/base-commit-id database (get-in database [:config :branch])))))
+ 
+ (defn- record-broken!
+   "Judge the step of the task `agent-id` holds on its branch, `execution`'s, against its fork point
+diff --git a/test/seon/turn_test.clj b/test/seon/turn_test.clj
+index 1dae7de10..4920c8c1d 100644
+--- a/test/seon/turn_test.clj
++++ b/test/seon/turn_test.clj
+@@ -2110,3 +2110,22 @@
+               (set (:seon.agent/broken (db/pull (db/db target) [:seon.agent/broken] [:seon.agent/id agent-id]))))
+            "the step recorded what the change broke on the agent's branch")
+        (is (= before (db/commit-id (db/db connection))) "and main's head did not move")))))
++
++(deftest a-branch-judges-its-step-at-its-merge-base
++  ;; the merge base is written on main only (`seon.cluster.agent/start-attempt!`); the assignment row copied onto the
++  ;; branch (`seon.task/attempt-rows-tx`) carries it, so the branch's step is judged at it
++  (support/with-database
++   (fn [connection]
++     (task/index-tasks! {:seon.db/connection connection
++                         :seon.task/files {"resources/seon/tasks/tq.base.edn"
++                                           "[#:seon.task{:name \"a\" :kind :work :intent \"Do a.\"}]"}})
++     (let [h (task/task-handle 'tq.base "a" :work)
++           agent-id "tq-base-agent"
++           _ (doseq [id ["root" agent-id]] (support/transacted! connection (support/agent-tx (db/db connection) id)))
++           branch-db (db/db connection)
++           _ (support/transacted! connection (task/attempt-tx (db/db connection) h agent-id :tq-base))
++           base (random-uuid)
++           _ (support/transacted! connection [[:db/add [:seon.task/assignment (id/id [h 1])] :seon.task/merge-base base]])
++           rows (task/attempt-rows-tx (db/db connection) branch-db (id/id [h 1]))]
++       (is (= base (turn/fork-commit (db/with branch-db rows) agent-id))
++           "the branch reads the merge base written on main")))))

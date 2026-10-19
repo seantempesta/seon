@@ -1,0 +1,268 @@
+diff --git a/docs/seon/schedule/cards/BEHAVIOR-SPEC.md b/docs/seon/schedule/cards/BEHAVIOR-SPEC.md
+index 9f24769d4..e1f3982be 100644
+--- a/docs/seon/schedule/cards/BEHAVIOR-SPEC.md
++++ b/docs/seon/schedule/cards/BEHAVIOR-SPEC.md
+@@ -242,7 +242,7 @@ positions once then binary search, exponent 1.01 (0.26 → 2.10 MB). Red on the
+ 
+ 1. Done: an agent's `[:fn pred]` contract is admitted (the predicate-purity rule, which nothing could satisfy, is
+    deleted), and a predicate defined on the branch resolves through the agent's SCI context
+-   (`seon.sci.eval/context-predicates`). An agent's `[:fn]` still declares `:error/message` and a bounded generator.
++   (`seon.sci.eval/bound-projection`, which binds it in the context's projection). An agent's `[:fn]` still declares `:error/message` and a bounded generator.
+    An unquoted predicate in REPL metadata is the ordinary form: the stored contract is the analysis's authored
+    form and arming uses the evaluated one, so nothing prints and re-reads it.
+ 2. **Malli fork: seed and max size in `function-checker`** (§3). Owner: root's batched fork bump.
+diff --git a/src/seon/schema.clj b/src/seon/schema.clj
+index 4fbb8530b..5196917bb 100644
+--- a/src/seon/schema.clj
++++ b/src/seon/schema.clj
+@@ -2667,7 +2667,11 @@
+    Predicate bindings are those of the population, as a build binds them: a
+    binding whose symbol only a replaced or removed definition named is dropped
+    after one scan of the population, which runs only when such a symbol
+-   exists. A changed unqualified key is a bootstrap definition every compile
++   exists. A supplied binding that replaces a held one (a branch context's
++   SCI Var for a predicate it interprets, [[with-bound-predicates]]) changes
++   every declaration and contract whose form names it: they seed the same
++   reverse closure, found by one scan that runs only when a binding changed.
++   A changed unqualified key is a bootstrap definition every compile
+    sees, so it derives the whole build instead."
+   {:malli/schema
+    [:=> [:cat :seon.error/operation :map :map :map :map] :map]}
+@@ -2722,7 +2726,18 @@
+                                old-predicates
+                                (when in-use-symbols dropped-symbols))
+                        predicate-functions)
+-                new-symbols)]
++                new-symbols)
++        rebound (into #{} (keep (fn [[predicate bound]]
++                                  (when-let [held (get old-predicates predicate)]
++                                    (when-not (identical? held bound) predicate))))
++                      predicate-functions)
++        names-rebound? #(some rebound (predicate-symbols-in %))
++        rebound-keys (if (seq rebound)
++                       (into #{} (keep (fn [[k form]] (when (names-rebound? form) k))) forms)
++                       #{})
++        rebound-fns (if (seq rebound)
++                      (into #{} (keep (fn [[sym form]] (when (names-rebound? form) sym))) function-contracts)
++                      #{})]
+     (cond
+       (and (empty? changed-keys) (empty? removed-keys)
+            (empty? changed-fns) (empty? removed-fns)
+@@ -2730,7 +2745,7 @@
+            (empty? export-changes) (= predicate-functions old-predicates))
+       projection
+ 
+-      (some #(not (qualified-keyword? %)) (into changed-keys removed-keys))
++      (some #(not (qualified-keyword? %)) (-> changed-keys (into removed-keys) (into rebound-keys)))
+       (build-projection forms function-contracts
+                         {:seon.schema/schema-admissions schema-admissions
+                          :seon.schema/function-admissions function-admissions
+@@ -2772,13 +2787,14 @@
+                     (dependent-schema-keys
+                      {:seon.schema.projection/reverse-schema-dependencies
+                       reverse-schema-dependencies}
+-                     (-> changed-keys (into removed-keys)
++                     (-> changed-keys (into removed-keys) (into rebound-keys)
+                          (into (filter keyword?) schema-admission-changes)))
+                     removed-keys)
+             affected-fns
+             (reduce disj
+                     (-> (function-dependents-of projection (into affected-keys removed-keys))
+                         (into changed-fns)
++                        (into rebound-fns)
+                         (into (filter symbol?) function-admission-changes))
+                     removed-fns)
+             retained
+@@ -2887,6 +2903,33 @@
+                          (render-declarations-in candidate (keys forms)))))))
+         (with-compiled-cache candidate function-products)))))
+ 
++(defn with-bound-predicates
++  "`projection` with `bindings` as the callables of those predicate symbols.
++
++   Equal bindings answer `projection` itself. Otherwise the declarations and
++   contracts naming a rebound predicate recompile ([[projection-with-declarations]]),
++   held in `projection`'s own holder by `bindings`, so one base and one set of
++   bindings derive once."
++  {:malli/schema
++   [:=> [:catn [:seon.schema/projection :seon.schema/projection]
++               [:seon.schema/predicate-functions
++                [:map-of :qualified-symbol [:fn clojure.core/ifn?]]]]
++    :seon.schema/projection]}
++  [projection bindings]
++  (let [held (predicate-functions-in projection)]
++    (if (every? (fn [[predicate bound]] (identical? bound (get held predicate))) bindings)
++      projection
++      (projection-cache-value
++       projection [::bound-predicates bindings]
++       #(projection-with-declarations
++         'seon.schema/with-bound-predicates projection
++         (:seon.schema.projection/forms projection)
++         (get projection :seon.schema.projection/function-contracts {})
++         (assoc (population-options projection)
++                :seon.schema/predicate-functions (merge held bindings)
++                :seon.schema/admission? false
++                :seon.schema/validate-render-contracts? false))))))
++
+ (defn- projection-entities
+   "Join attribute ranges, retaining historical values for duplicate refusal."
+   {:malli/schema
+diff --git a/src/seon/sci/eval.clj b/src/seon/sci/eval.clj
+index 909cb9d23..c8955e6db 100644
+--- a/src/seon/sci/eval.clj
++++ b/src/seon/sci/eval.clj
+@@ -904,19 +904,35 @@
+     (merge (select-keys effective [:seon.config.error/max-evidence-bytes])
+            {:seon.sci.admit/caps (config/result-caps effective)})))
+ 
+-(defn context-predicates
+-  "The callable of each qualified `[:fn sym]` predicate `contract` names, as
+-  `ctx` resolves it: a predicate defined on the context's branch is its own
+-  interpreted function, a compiled one the Var's value."
+-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.schema/value]
+-                  [:map-of :qualified-symbol [:fn clojure.core/ifn?]]]}
+-  [ctx contract]
+-  (sci.ctx-store/with-ctx ctx
+-    (into {}
+-          (keep (fn [predicate]
+-                  (when-let [found (sci/resolve ctx predicate)]
+-                    (when (ifn? @found) [predicate @found]))))
+-          (#'schema/predicate-symbols-in contract))))
++(defn bound-projection
++  "`projection` with each predicate it binds, and each `form` names, bound as
++  `ctx` resolves it: a predicate `ctx` holds apart from its compiled Var (its
++  branch defines or interprets it) binds `ctx`'s SCI Var, whose call reads
++  `ctx`'s binding, so a later redefinition needs no recompile; every other
++  keeps its compiled Var. Binding nothing new answers `projection` itself
++  (`seon.schema/with-bound-predicates`)."
++  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.schema/projection :seon.schema/value]
++                  :seon.schema/projection]}
++  [ctx projection form]
++  (let [held (schema/predicate-functions-in projection)
++        compiled (fn [predicate]
++                   (let [bound (get held predicate)]
++                     (if (var? bound)
++                       @bound
++                       (some-> (find-ns (symbol (namespace predicate)))
++                               (ns-resolve (symbol (name predicate)))
++                               deref))))
++        rebound (sci.ctx-store/with-ctx ctx
++                  (into {}
++                        (keep (fn [predicate]
++                                (when-let [sci-var (sci/resolve ctx predicate)]
++                                  (let [callable @sci-var]
++                                    (when (and (ifn? callable)
++                                               (not (identical? sci-var (get held predicate)))
++                                               (not (identical? callable (compiled predicate))))
++                                      [predicate sci-var])))))
++                        (into (set (keys held)) (#'schema/predicate-symbols-in form))))]
++    (schema/with-bound-predicates projection rebound)))
+ 
+ (defn- arm-contract!
+   "Arm `contract`, a function contract form, on `function-symbol`'s Var in
+@@ -940,9 +956,7 @@
+         current (call-preparation/snapshot db (or (db/carried-projection db) projection))
+         _ (when (db/read-refusal? current)
+             (throw (ex-info (:seon.error/message current) current)))
+-        projection (schema/with-predicate-functions
+-                    projection (merge (schema/predicate-functions-in projection)
+-                                      (context-predicates ctx contract)))]
++        projection (bound-projection ctx projection contract)]
+     (sci/bind-root!
+      ctx sci-var
+      (instrument/wrap-interpreted
+diff --git a/src/seon/turn/batch.clj b/src/seon/turn/batch.clj
+index b1c2baee6..2ced0b1c4 100644
+--- a/src/seon/turn/batch.clj
++++ b/src/seon/turn/batch.clj
+@@ -290,9 +290,7 @@
+       ;; predicates symbols); they resolve as this context resolves them
+       row {:seon.batch/row (if-let [spec (:seon.fn/spec row)]
+                              (sfn/contract-facts-row
+-                              (schema/with-predicate-functions
+-                               projection (merge (schema/predicate-functions-in projection)
+-                                                 (eval/context-predicates ctx (edn/read-string spec))))
++                              (eval/bound-projection ctx projection (edn/read-string spec))
+                               (namespace-row (symbol (namespace sym)))
+                               row)
+                              row)}
+diff --git a/test/seon/sci/acquisition_cost_test.clj b/test/seon/sci/acquisition_cost_test.clj
+index 460a819c9..e859d28cd 100644
+--- a/test/seon/sci/acquisition_cost_test.clj
++++ b/test/seon/sci/acquisition_cost_test.clj
+@@ -228,3 +228,27 @@
+          (mcp/call (request "(+ 1 3)"))
+          (is (= before (counted))
+              "an unrelated definition records no refusal of a row it does not change"))))))
++
++(deftest a-context-recompiles-only-for-a-predicate-it-interprets
++  ;; the same request on main and on a branch interpreting no predicate, then the
++  ;; branch's redefinition of one registered predicate and a request after it
++  (support/with-running-agent
++   (fn [running agent-id _]
++     (let [call (fn [agent-name code]
++                  (support/mcp-reply (json/read-str (mcp/call (json/write-str
++                                                               {"name" "eval_clj"
++                                                                "arguments" {"cluster" running "agent" agent-name "code" code}})))))
++           recompiles #(profile/calls-of % 'seon.schema/projection-with-declarations)]
++       (call "root" "(+ 1 1)")
++       (call agent-id "(+ 1 1)")
++       (let [main (measured ::main-request #(call "root" "(+ 1 1)"))
++             branch (measured ::branch-request #(call agent-id "(+ 1 1)"))
++             changed (measured ::predicate-change
++                               #(call agent-id "(in-ns 'seon.edit)
++                                  (defn valid-form-operation? {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason \"A total predicate accepts arbitrary objects.\", :gen/elements [nil {}]}]] :boolean]} [request] false)"))
++             after (measured ::after-predicate-change #(call agent-id "(+ 1 1)"))]
++         (is (= 2 (:seon.repl/value (:seon.profile/value main))))
++         (is (zero? (recompiles main)) "main binds every predicate as compiled")
++         (is (zero? (recompiles branch)) "a branch interpreting no predicate recompiles nothing")
++         (is (pos? (recompiles changed)) "the branch's predicate recompiles what names it")
++         (is (zero? (recompiles after)) "a held binding needs no recompile"))))))
+diff --git a/test/seon/turn/batch_test.clj b/test/seon/turn/batch_test.clj
+index 17f609031..e81be138c 100644
+--- a/test/seon/turn/batch_test.clj
++++ b/test/seon/turn/batch_test.clj
+@@ -308,6 +308,43 @@
+      'f40.named-predicate/halve '[:=> [:cat [:fn {:error/message "must be an even integer" :gen/elements [0 2]} f40.named-predicate/even-int?]] :int]
+      "(halve 4)" 2 "(halve 3)"]]))
+ 
++(def ^:private form-request-taker
++  "An interpreted function contracted on `:my.edit/form-request`, whose predicate
++  `seon.edit/valid-form-operation?` the registry reaches."
++  "(ns bp.registered-predicate)
++   (defn takes {:malli/schema [:=> [:cat :my.edit/form-request] :boolean]} [request] true)")
++
++(defn- form-request-call
++  "A call of `function` with a request main's predicate admits."
++  {:malli/schema [:=> [:cat :symbol :keyword :string] :string]}
++  [function operation source-part]
++  (str "(" function " {:my.edit/path \"src/example.clj\" :my.edit/expected-digest \""
++       (apply str (repeat 64 "a")) "\" :my.edit/form {:my.edit.form/head 'defn :my.edit.form/name 'example}"
++       " :my.edit/operation " operation source-part "})"))
++
++(deftest a-registered-predicate-runs-as-the-branch-defines-it
++  ;; each row: the branch's definitions, then the operation and source of a
++  ;; request main's predicate admits, which the branch's refuses
++  (doseq [[definitions operation source-part]
++          [["(in-ns 'seon.edit)
++             (defn valid-form-operation? {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason \"A total predicate accepts arbitrary objects.\", :gen/elements [nil {}]}]] :boolean]} [request] false)"
++            :delete ""]
++           ;; the predicate is unchanged: it interprets as an affected caller of `seon.edit/single-form`
++           ["(in-ns 'seon.edit)
++             (defn- single-form {:malli/schema [:=> [:cat :string :string] [:or :map :my.edit/parse-refused-error]]} [source message] {:my.edit/parse-byte-count 1})"
++            :replace " :my.edit/source \"(defn example [] nil)\""]]]
++    ((requiring-resolve 'seon.test-support/with-running-agent)
++     (fn [running agent-id _]
++       (let [reply (fn [code] ((requiring-resolve 'seon.test-support/mcp-reply) (eval! code agent-id running)))]
++         (is (true? (:seon.repl/value (reply (form-request-call 'seon.edit/valid-form-operation? operation source-part))))
++             "main's predicate admits the request")
++         (is (false? (get (eval! definitions agent-id running) "isError")) "the branch's definitions are admitted")
++         (is (= {:seon.error/type :seon.instrument/contract-error :seon.instrument/check :input}
++                (select-keys (:seon.repl/error (reply (str form-request-taker "\n"
++                                                           (form-request-call 'bp.registered-predicate/takes operation source-part))))
++                             [:seon.error/type :seon.instrument/check]))
++             "the branch's predicate refuses it"))))))
++
+ (defn- stale-declarations
+   "The functions and tests of `namespace-name` on `database` whose stored
+   definition digest is not the one `seon.db/definition-digest-of` produces

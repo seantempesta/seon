@@ -1,0 +1,59 @@
+seon.test: a green result carries to another branch of the same program
+
+Owner 2026-10-14: test results carry wherever the same test is asked of the
+same content, in any SCI context or branch; red and unknown never cross.
+
+- seon.test.runner/retain-greens!: wherever a member's outcome or its exit
+  commits (commit-results!, record-exit!; whichever lands last), each
+  terminated green executed member of the run is retained in seon.cache (kind
+  :seon.test.runner/green) under the identity seon.test/select already reuses
+  by, [sym reach-digest input-digest evaluator] (the run's evaluator), naming
+  the run. One query on the committed value per call. (Retaining only at
+  commit lost the green whenever the body's exit landed after it: the proof
+  was red under load in the first commit check, run 5f4fd4f8ebb7.)
+- seon.test/carried-greens: run-request looks each runnable member's identity
+  up in the cache; misses read main's head (seon.task/main-head) in one
+  batched query over terminated green members. Skipped on :seon.test/rerun?
+  and on loaded-source drift.
+- seon.test/carried-member: a hit executes nothing and is recorded on the
+  asking branch by the first admission (an admission with no member to
+  execute when nothing else runs), with copied counts, current reach digest,
+  termination and the new :seon.test.member/reused-run (the source run's id,
+  a value: that run need not be in this branch's history). The branch then
+  holds its own green: select reuses it there, seon.test/verified? and
+  seon.cluster.branch-evidence read it as the branch's own evidence.
+- seon.test/changes: ::changes key drops the branch name
+  (program-revisions-digest names the content).
+- merge.md §1 Evidence states the rule.
+
+Decisions (spec gaps): "zero batches admitted" in the assignment is read as
+zero members executed. Recording the carried member is one admission write
+(no execution batch). A carried (reused) member is never retained itself: the
+cache names the run that executed.
+
+Proof seon.test.branch-reuse-test/a-green-result-carries-to-another-branch-of-the-same-program:
+red on HEAD 92a99f39a plus the proof, run 079e54e160fa, failing assertion
+"the second branch records the green it answered from the first branch's run,
+executing nothing" ((every? :seon.test.member/reused-run green) false), all
+others green there. Green on the slice, run 701225db066e (8.6 s request).
+The proof asserts seon.test/verified? true on the second branch for the carried
+member, which is branch-evidence's test verdict.
+
+Broad run over the reaching namespaces: HEAD run 6dccfad0aabd has 12 reds,
+pre-existing and excluded here: seon.test-failure-facts-test/{a-changed-reach-member-retracts-only-itself,
+an-unchanged-re-record-emits-no-datom}, seon.test-provenance-test/{runs-are-distinct-immutable-and-linked-atomically,
+verified-requires-the-subject-positive-assertions-and-exact-program},
+seon.test-reaching-test/a-reaching-request-selects-what-changed-since-its-previous-run,
+seon.test-test/{admission-refuses-stale-program-and-records-empty-selection,
+one-interpreted-test-run-allocates-a-bounded-multiple-of-its-body,
+recording-distinguishes-run-replay-from-a-new-event, resolution-follows-admitted-source-and-acquisition},
+seon.test.redefined-callee-test/a-test-reading-task-tags-reruns-when-a-test-is-tagged,
+seon.test.runner-test/a-reopened-fork-reuses-its-programs-proof-reach,
+seon.test.selection-test/a-proof-request-runs-only-its-proofs.
+Slice run 49111847b6b5 has the same reds plus two in seon.test-reaching-test
+(a-host-answer-on-an-unchanged-database-is-derived-once,
+an-unchanged-red-is-answered-from-its-record). Both pass alone on the
+slice (run 6d971d6f7b37) and on HEAD (803c182d0bd4), so they come from load
+in the concurrent run.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

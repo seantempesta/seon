@@ -1,0 +1,30 @@
+diff --git a/test/seon/turn/batch_test.clj b/test/seon/turn/batch_test.clj
+index ddfa50e35..e77065e7e 100644
+--- a/test/seon/turn/batch_test.clj
++++ b/test/seon/turn/batch_test.clj
+@@ -361,6 +361,25 @@
+            (is (true? (:seon.repl/value (reply (taker-call operation source-part) sibling)))
+                "a sibling agent's branch validates with main's predicate")))))))
+ 
++(deftest ^{:seon.test/long "Four MCP eval requests on one agent branch, its first acquiring the branch's context."
++           :seon.test/long-ms 10000}
++  a-function-armed-before-its-registered-predicate-changes-is-then-refused
++  ;; `takes` is armed in one request; the predicate changes in the next
++  ((requiring-resolve 'seon.test-support/with-running-agent)
++   (fn [running agent-id _]
++     (let [reply (fn [code] ((requiring-resolve 'seon.test-support/mcp-reply) (eval! code agent-id running)))
++           call (form-request-call 'bp.registered-predicate/takes :delete "")]
++       (is (true? (:seon.repl/value (reply (str form-request-taker "\n" call))))
++           "main's predicate admits the request")
++       (is (false? (get (eval! "(in-ns 'seon.edit)
++                                (defn valid-form-operation? {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason \"A total predicate accepts arbitrary objects.\", :gen/elements [nil {}]}]] :boolean]} [request] false)"
++                               agent-id running)
++                        "isError"))
++           "the branch's predicate is admitted")
++       (is (= {:seon.error/type :seon.instrument/contract-error :seon.instrument/check :input}
++              (select-keys (:seon.repl/error (reply call)) [:seon.error/type :seon.instrument/check]))
++           "the armed function refuses with the branch's predicate")))))
++
+ (defn- stale-declarations
+   "The functions and tests of `namespace-name` on `database` whose stored
+   definition digest is not the one `seon.db/definition-digest-of` produces

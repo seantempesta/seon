@@ -1,0 +1,19 @@
+# seon.test world: pass the execution context's program content key as the predecessor (overlay phase 2, 46c8540f8).
+# Enables: a test world that derives a changed program first derives it from the predecessor by Δ instead of the whole plan from the loaded base.
+--- a/src/seon/test.clj
++++ b/src/seon/test.clj
+@@ -2312,7 +2312,13 @@
+           ;; candidate holds the world's program; else the world's is acquired.
+           ;; Never an execution's context: its base also holds the roots the
+           ;; agent's evaluations settled, analyzed against the agent's own Vars.
+-          source (sci.eval/base-ctx (if (= built-on base) candidate database))
++          source (sci.eval/base-ctx (if (= built-on base) candidate database)
++                                    ;; derived from the program the execution's context holds, by Δ
++                                    (if-let [held (some-> (or (:seon.sci.eval/base-ctx execution) (:seon.sci.eval/ctx execution))
++                                                          :seon.sci.kernel/program-snapshot deref
++                                                          :seon.sci.eval/program-content-key)]
++                                      {:seon.sci.eval/predecessor held}
++                                      {}))
+           environment (or (env/of execution)
+                           (env/of (or (:seon.sci.eval/base-ctx execution) (:seon.sci.eval/ctx execution))))
+           ;; Acquired once on a fork, never on the execution's own context:

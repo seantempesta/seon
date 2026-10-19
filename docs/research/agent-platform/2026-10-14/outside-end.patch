@@ -1,0 +1,239 @@
+diff --git a/resources/seon/schemas/seon.agent.edn b/resources/seon/schemas/seon.agent.edn
+index c3fe798ea..481e41939 100644
+--- a/resources/seon/schemas/seon.agent.edn
++++ b/resources/seon/schemas/seon.agent.edn
+@@ -177,7 +177,9 @@
+                       [:seon.turn.loop/evaluated-sources {:optional true} :seon.turn.loop/evaluated-sources]
+                       ;; the wall time of each stage the run's pass ran
+                       [:seon.turn.loop/stages {:optional true} :seon.turn.loop/stages]
+-                      [:seon.cost/counts {:optional true} :seon.cost/counts]],
++                      [:seon.cost/counts {:optional true} :seon.cost/counts]
++                      ;; the end the run's pass recorded on the agent's attempt
++                      [:seon.turn.loop/end {:optional true} :seon.turn.loop/end]],
+                      ;; A source submission as the value its agent's turn proc
+                      ;; receives on its bounded request port: the run request
+                      ;; (`seon.turn/system-run-call`'s input), its staged reply,
+diff --git a/resources/seon/schemas/seon.turn.loop.edn b/resources/seon/schemas/seon.turn.loop.edn
+index 8b5e5ed4c..d5d35de6f 100644
+--- a/resources/seon/schemas/seon.turn.loop.edn
++++ b/resources/seon/schemas/seon.turn.loop.edn
+@@ -201,6 +201,14 @@
+                  [:map {:description "The tests a bounded test step left for the next pass; the Flow proc's state, dropped when a pass runs its own step."}
+                   [:seon.turn.loop/queued [:vector :seon.test/sym]]
+                   [:seon.source/commit-id :seon.source/commit-id]],
++:end
++                 [:map {:description "The end this pass recorded on the agent's attempt (seon.turn/task-end, seon.turn/end-task-call), whoever submitted its forms: the attempt, how it ended and, sent back, its target and reason. Root's next db<->flow pass processes it (TASK-CHAIN 2.5-2.7): a done advances or merges, any other end bails to root."}
++                  [:seon.task/assignment :seon.task/assignment]
++                  [:seon.task.attempt/end :seon.task.attempt/end]
++                  [:seon.task.attempt/target {:optional true} :seon.task.attempt/target]
++                  [:seon.task.attempt/reason {:optional true} :seon.task.attempt/reason]
++                  [:seon.turn.loop/processed-by :seon.turn.loop/processed-by]],
++                 :processed-by [:= {:description "Who acts on a recorded end: root, never the agent."} :root],
+                  :turn-report
+                  [:map
+                   [:seon.turn/id {:optional true} :seon.turn/id]
+@@ -215,6 +223,7 @@
+                   [:seon.turn.loop/recording {:optional true}
+                    :seon.turn.loop/recording]
+                   [:seon.turn.loop/tests {:optional true} :seon.turn.loop/tests]
++                  [:seon.turn.loop/end {:optional true} :seon.turn.loop/end]
+                   ; the wall time of each stage the pass ran (fork, the batch's own, settle, test step)
+                   [:seon.turn.loop/stages {:optional true} :seon.turn.loop/stages]
+                   ; the armed calls, reads and transactions of the pass's worlds
+diff --git a/src/seon/cluster/agent.clj b/src/seon/cluster/agent.clj
+index 4861dc56a..675b54fdb 100644
+--- a/src/seon/cluster/agent.clj
++++ b/src/seon/cluster/agent.clj
+@@ -871,7 +871,7 @@
+               (:seon.turn.loop/outcome answer)
+               (cond-> (merge {:seon.turn/id run-id}
+                              (select-keys answer [:seon.turn.loop/refusal :seon.turn.loop/evaluated-sources :seon.turn.loop/tests
+-                                                 :seon.turn.loop/stages :seon.cost/counts]))
++                                                 :seon.turn.loop/end :seon.turn.loop/stages :seon.cost/counts]))
+                 (:seon.turn.loop/basis answer) (assoc :seon.db/db (:seon.turn.loop/basis answer)))
+               ;; At the bound the run may still settle: the timeout carries its id.
+               ;; A closed reply (retirement stopped the graph first) settled nothing.
+diff --git a/src/seon/mcp.clj b/src/seon/mcp.clj
+index ff59d002a..19d4ea17f 100644
+--- a/src/seon/mcp.clj
++++ b/src/seon/mcp.clj
+@@ -322,7 +322,10 @@
+                 (assoc 1 true))
+             ;; the pass's automatic test step (proofs, then the tests reaching the change)
+             (:seon.turn.loop/tests answer)
+-            (update 0 conj (printed (select-keys answer [:seon.turn.loop/tests]) code database cluster-name)))
++            (update 0 conj (printed (select-keys answer [:seon.turn.loop/tests]) code database cluster-name))
++            ;; the end the run recorded on the agent's attempt, for root to process
++            (:seon.turn.loop/end answer)
++            (update 0 conj (printed (select-keys answer [:seon.turn.loop/end]) code database cluster-name)))
+           [[(printed answer code (db/db (get-in custody [:seon.turn.loop/cluster :seon.db/connection])) cluster-name)] true])]
+     [texts failed? (assoc (:seon.turn.loop/stages answer {}) :print (since-ms print-start))
+      (:seon.cost/counts answer)]))
+diff --git a/src/seon/turn.clj b/src/seon/turn.clj
+index 2064054ff..f913094e6 100644
+--- a/src/seon/turn.clj
++++ b/src/seon/turn.clj
+@@ -1846,7 +1846,7 @@
+ ;;; The derivations
+ ;;; ---------------------------------------------------------------------------
+ 
+-(declare unanswered-wakes)
++(declare unanswered-wakes outside?)
+ 
+ ;;; ---------------------------------------------------------------------------
+ ;;; The turn bound — derived from transaction :t, with zero stored counters
+@@ -2153,7 +2153,8 @@
+   "How the task `agent-id` holds ended on `database`, its branch, with no turn open: `:done` when its step's
+   preview of the merge refuses nothing (`seon.context/step-verdict`), a proposal root's merge decides, `:sent-back` once a turn completed naming the task that owns the mistake
+   (`my.task/send-back!` with `:my.task/target`, `sent-back-to`), `:given-back` once a turn completed without one, `:capped` with no
+-  turns left, `:stalled` once the loop stops calling it (`stalled?`); nil while it runs, when it holds no task or
++  turns left, `:stalled` once the loop stops calling it (`stalled?`; never for an `:outside` task, whose agent the
++  loop never calls); nil while it runs, when it holds no task or
+   its admission is already closed."
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :seon.task/end]]}
+   [database agent-id]
+@@ -2167,7 +2168,8 @@
+                       [?turn :seon.turn/disposition :completed]]
+                     database agent-id) :given-back
+               (= 0 (turns-left database agent-id)) :capped
+-              (stalled? database agent-id) :stalled)))))
++              ;; the loop never calls an :outside task's agent, so it cannot stop calling it
++              (and (not (outside? database held)) (stalled? database agent-id)) :stalled)))))
+ 
+ (defn end-task-call
+   "Record the end of the task `agent-id` holds at the writer on `database`, the agent's own world (its
+@@ -2201,8 +2203,9 @@
+   datom wakes db<->flow through the branch's route (`:seon.wake/starts`), which stops the graph, squash-merges the end, refinements
+   and children to main in one transaction and deletes the branch once merged
+   (`seon.cluster.agent/next-actions`); root learns of the end from that merge on main.
+-  nil. A refused step is a fault recorded beside the pass."
+-  {:malli/schema [:=> [:cat :map :seon.agent/id] :nil]}
++  Answers the end it recorded on the attempt (`:seon.turn.loop/end`), nil when it recorded none. A refused step is
++  a fault recorded beside the pass."
++  {:malli/schema [:=> [:cat :map :seon.agent/id] [:maybe :seon.turn.loop/end]]}
+   [cluster agent-id]
+   (let [connection (:seon.db/connection cluster)
+         fault! (fn [operation outcome]
+@@ -2213,7 +2216,8 @@
+                                 :seon.agent/id agent-id}))
+         write! (fn [tx] (db/with-branch {:seon.db/connection connection} #(db/transact! connection tx)))]
+     (when-let [end (task-end (db/db connection) agent-id)]
+-      (let [end-summary-tx (@context-end-summary-tx (db/db connection) agent-id)
++      (let [attempt (task/agent-attempt (db/db connection) agent-id)
++            end-summary-tx (@context-end-summary-tx (db/db connection) agent-id)
+             kept (when (seq end-summary-tx) (write! end-summary-tx))
+             _ (when (and kept (not (:db-after kept))) (fault! `seon.context/end-summary-tx kept))
+             ;; the branch commit the attempt ended at: its successor's fork basis
+@@ -2223,8 +2227,15 @@
+                       (write! {:tx-data [[:db.fn/call #'end-task-call agent-id end commit target]]
+                                :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})
+                       commit)]
+-        (when-not (:db-after outcome) (fault! `end-task-call outcome))))
+-    nil))
++        (if-not (:db-after outcome)
++          (fault! `end-task-call outcome)
++          (when (int? attempt)
++            (assoc (select-keys (db/pull (:db-after outcome) [:seon.task/assignment :seon.task.attempt/end
++                                                              :seon.task.attempt/target :seon.task.attempt/reason]
++                                         attempt)
++                                [:seon.task/assignment :seon.task.attempt/end :seon.task.attempt/target
++                                 :seon.task.attempt/reason])
++                   :seon.turn.loop/processed-by :root)))))))
+ 
+ (declare attempt-t latest-answering-turn-t step-proved? prove-turn step-limit-ms)
+ 
+@@ -5820,12 +5831,13 @@
+                           report (cond-> report
+                                    stepped? (assoc-in [:seon.turn.loop/stages :test-step]
+                                                       (/ (- (System/nanoTime) test-start) 1e6)))
+-                          ;; A MODEL PASS THAT CLOSED ITS TURN OBSERVES THE TASK'S END, after the
+-                          ;; step recorded the proofs: the end closes the agent once. A pass whose turn
++                          ;; A PASS THAT CLOSED ITS TURN OBSERVES THE TASK'S END, after the step
++                          ;; recorded the proofs, whoever submitted its forms (a model reply or an
++                          ;; eval request through MCP): the end closes the agent once. A pass whose turn
+                           ;; closed on an error (a refused context, a failed provider call) observes it
+                           ;; too: the loop stops calling the agent, so the end reads `:stalled`.
+-                          _ (when (and (nil? submission) (#{:closed :error} (:seon.turn.loop/outcome report)))
+-                              (end-task! cluster agent-id))
++                          ended (when (#{:closed :error} (:seon.turn.loop/outcome report))
++                                  (end-task! cluster agent-id))
+                           ;; THE QUEUE IS THIS PROC'S STATE: a step runs only what its own run changed,
+                           ;; so what it left joins the older queue, carried to the idle pass.
+                           queue (merge-queue (:seon.turn.loop/queue state) (summary-queue tests))
+@@ -5839,6 +5851,7 @@
+                               (async/offer! reply (cond-> (merge report pending-commit)
+                                                     park (assoc :seon.turn.loop/refusal park)
+                                                     tests (assoc :seon.turn.loop/tests (shown-tests tests))
++                                                    ended (assoc :seon.turn.loop/end ended)
+                                                     ;; the pass's calls, its batch's among them (one sink,
+                                                     ;; `seon.cluster.agent/turn-step`), and their live values
+                                                     (and (:seon.cost/counts report) (:seon.batch/sink seon.batch/*world*))
+diff --git a/test/seon/cluster/db_flow_test.clj b/test/seon/cluster/db_flow_test.clj
+index f25f91ecd..af3c7ee79 100644
+--- a/test/seon/cluster/db_flow_test.clj
++++ b/test/seon/cluster/db_flow_test.clj
+@@ -879,6 +879,64 @@
+               (finally
+                 (release-chain! routing store branch))))))))))
+ 
++(deftest ^{:seon.test/long "One chain world: task one's start test run, one eval request through the MCP entrance whose last form sends the task back, and two db<->flow passes that bail it."
++           :seon.test/long-ms 30000}
++  an-outside-agents-send-back-ends-its-attempt-and-root-bails-it-once
++  ;; TASK-CHAIN 2.2 and 2.7: an :outside agent's end is the same fact a model agent's is. Its eval request whose last
++  ;; form is `my.task/send-back!` records the end on its attempt, the reply carries that recorded end, and root's
++  ;; pass bails it once: one problem task on main, the attempt :closed and the task :held on the chain branch
++  (binding [*space* "tq.chainoutsideback"]
++    (test-support/with-database
++     (fn [connection]
++       (chain-world
++        connection {"u" [#{} "(clojure.test/is (= 1 1))"]}
++        (fn [handle]
++          (test-support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
++                                              :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
++                                                                                            (db/db connection) connection)
++                                              :seon.batch/sink (seon.batch/sink)
++                                              :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
++                                              :seon.agent/id "tq-chain-author"})
++                                (symbol (str *space* "-proofs"))
++                                "(clojure.test/deftest proves-c (clojure.test/is (= 1 2)))\n")
++          (let [routing (:seon.agent/routing handle)
++                store (agent/handle-store handle)
++                chain (task/chain! {:seon.db/connection connection :seon.store/store store}
++                                   [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Do c."
++                                     :seon.task/proofs #{(proof "c")} :seon.task/model :outside}])
++                branch (:seon.chain/branch chain)
++                [one] (:seon.task/handles chain)
++                key-one (id/id [one 1])
++                agent-id (str "attempt/" key-one)
++                problems #(set (db/q '[:find [?n ...] :where [?t :seon.task/ns seon.task] [?t :seon.task/name ?n]
++                                       [(clojure.string/starts-with? ?n "unfinished-task-")]]
++                                     (db/db connection)))]
++            (try
++              (pass! handle routing)
++              (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})
++                    _ (await-on! on-branch #(not-empty (proof-runs (db/db on-branch) (proof "c"))) ::proved)
++                    custody (#'mcp/execution {:seon.turn.loop/cluster handle :seon.store/store store} agent-id nil)
++                    answer (agent/evaluate-source!
++                            (assoc custody :seon.agent/segmenter 'seon.turn/code-sources
++                                   :seon.cluster.reply/text
++                                   "(my.task/send-back! {:my.task/reason \"The proof contradicts the plan.\"})"))
++                    end-of #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]]
++                                  (db/db on-branch) key-one)]
++                (is (= :given-back (end-of)) "the eval request records the end on the attempt")
++                (is (= {:seon.task/assignment key-one :seon.task.attempt/end :given-back}
++                       (select-keys (:seon.turn.loop/end answer) [:seon.task/assignment :seon.task.attempt/end]))
++                    "its reply carries the recorded end")
++                (pass! handle routing)
++                (pass! handle routing)
++                (is (= #{(str "unfinished-task-" key-one)} (problems)) "root bails it once: one problem task on main")
++                (let [database (db/db on-branch)]
++                  (is (= :closed (:seon.task/outcome (db/pull database [:seon.task/outcome] [:seon.task/assignment key-one])))
++                      "the attempt is :closed on the chain branch")
++                  (is (= :held (:seon.task/execution (db/pull database [:seon.task/execution] [:seon.task/id one])))
++                      "and its task :held")))
++              (finally
++                (release-chain! routing store branch))))))))))
++
+ (deftest a-prove-step-whose-product-main-holds-merges-and-its-successor-forks-main
+   ;; the product, the successor's proof red by design, is on main before the Prove step forks: its merge would
+   ;; accept as it stands, so it ends done with no model call and root's merge completes it

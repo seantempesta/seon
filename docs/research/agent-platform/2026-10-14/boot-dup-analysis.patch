@@ -1,0 +1,120 @@
+diff --git a/resources/seon/schemas/seon.fn.edn b/resources/seon/schemas/seon.fn.edn
+index cac031bb6..8505c3969 100644
+--- a/resources/seon/schemas/seon.fn.edn
++++ b/resources/seon/schemas/seon.fn.edn
+@@ -181,6 +181,7 @@
+           :index-request
+           [:map {:description "An index request. Its connection, when omitted, is supplied from the calling evaluation's world: index! writes through the connection it holds and an absent one fails today (it is dereferenced), so absence carries no meaning."}
+            [:seon.program/rows {:optional true} :seon.program/rows]
++           [:seon.fn.file/artifacts {:optional true} [:vector :seon.fn.file/artifact]]
+            [:seon.fn/root {:optional true} :string]
+            [:seon.fn.analyzer/sources {:optional true} [:map-of :string :string]]
+            [:seon.db/connection
+diff --git a/src/seon/cluster.clj b/src/seon/cluster.clj
+index b1fca5c91..4f0f60d36 100644
+--- a/src/seon/cluster.clj
++++ b/src/seon/cluster.clj
+@@ -1744,13 +1744,14 @@
+ 
+   The changed inputs are analyzed; every other derivation input whose stored
+   key (`derivation-keys`) differs from its key under the code that analyzed
+-  them is then added (`::rederive`) and the analysis repeated once over both."
++  them is then added (`::rederive`), retaining the first analysis artifacts."
+   {:malli/schema
+    [:=> [:cat :seon.boot/root :seon.store/store
+          [:map [:seon.fn/root :string] [:seon.source/roots :seon.source/roots]
+           [:seon.source/changed-paths [:vector :string]]
+           [::loaded-files {:optional true} :seon.source/relative-file-digests]
+           [::rederive {:optional true} [:set :string]]
++          [:seon.fn.file/artifacts {:optional true} [:vector :seon.fn.file/artifact]]
+           [:seon.source/branch {:optional true} :seon.source/branch]
+           [:seon.fn.analyzer/cache-root {:optional true} :string]]]
+     :seon.source/publish-result]}
+@@ -1826,14 +1827,15 @@
+             selected analysis-paths]
+         (try
+           (let [paths (when database selected)
+-                analyzed (seon.fn/analyze-entities
+-                          (cond-> (merge (select-keys roots [:seon.fn.analyzer/cache-root])
++                artifacts (seon.fn/analyzed-files
++                          (cond-> (merge (select-keys roots [:seon.fn.analyzer/cache-root :seon.fn.file/artifacts])
+                                          {:seon.fn/root directory
+                                           :seon.fn/roots (:seon.fn/roots roots)
+                                           :seon.fn/changed-paths selected
+                                           :seon.fn.analyzer/sources captured
+                                           :seon.source/relative-file-digests inputs})
+                             database (assoc :seon.source/previous-database database)))
++                analyzed (into [] (mapcat :seon.fn.file/rows) artifacts)
+                 projection (schema/handed-projection)
+                 ;; The identity of the code that derived `analyzed`.
+                 code (selected-analyzer-digest database selected analyzed inputs loaded)
+@@ -1869,7 +1871,8 @@
+                                analyzed)]
+           (if (seq stale)
+             (do (report-source-progress! (str "re-deriving " (count stale) " inputs whose derivation key changed"))
+-                (full-source-refresh! root store (assoc roots ::rederive stale)))
++                (full-source-refresh! root store
++                                      (assoc roots ::rederive stale :seon.fn.file/artifacts artifacts)))
+             (let [previous-findings (when database
+                                       (seon.fn/file-entities database (vec paths) :seon.lint/file))
+                   _ (when (:seon.error/at previous-findings)
+diff --git a/src/seon/fn.clj b/src/seon/fn.clj
+index 97b61c151..2221739f8 100644
+--- a/src/seon/fn.clj
++++ b/src/seon/fn.clj
+@@ -2964,21 +2964,27 @@
+                                    (declaration-forms request)
+                                    (:seon.schema.projection/forms prior-projection))))))
+ 
+-(defn- analyzed-files
+-  "Analyze selected files; the database supplies invalidation and removed declarations."
++(defn analyzed-files
++  "Analyze selected files, extending artifacts from this same captured publication.
++  The database, projection and captured bytes must be the same for held artifacts."
+   {:malli/schema [:=> [:cat :seon.fn/index-request] [:vector :seon.fn.file/artifact]]}
+   [request]
+   (let [directory (fs/absolute-path (fs/source-directory) (or (:seon.fn/root request) "."))
+         roots (:seon.fn/roots request)
+         database (:seon.source/previous-database request)
+         captured (::analyzer/sources request)
++        held (:seon.fn.file/artifacts request [])
++        held-paths (into #{} (map :seon.fn.file/relative-path) held)
++        held-names (into #{} (comp (mapcat :seon.fn.file/rows) (keep :seon.ns/name)) held)
++        held-functions (into #{} (comp (mapcat :seon.fn.file/rows) (keep :seon.fn/sym)) held)
+         selected (or (:seon.fn/changed-paths request)
+                      (when captured (into #{} (map (partial fs/relative-path directory)) (keys captured))))
+         files (if selected
+                 (into [] (comp (map #(rooted-file directory %))
+                                (filter #(if captured (contains? captured (.getCanonicalPath ^java.io.File %))
+                                            (source-file? %)))
+-                               (filter #(containing-root directory roots %))) (sort selected))
++                               (filter #(containing-root directory roots %)))
++                      (sort (remove held-paths selected)))
+                 (source-files directory roots))
+         prior-projection (when database (db/carried-projection database))
+         projection (analysis-projection request prior-projection (some-> selected set))
+@@ -2997,9 +3003,12 @@
+         previous (mapcat :seon.fn/_file previous)
+         previous-names (fn [attribute] (into #{} (keep attribute) previous))
+         _ (when cache-root
+-            (analyzer/forget-namespaces! cache-root (previous-names :seon.ns/name)))
+-        artifacts (analyzed-artifacts projection roots directory
+-                     (mapv #(.getCanonicalPath ^java.io.File %) files) database cache-root captured)
++            (analyzer/forget-namespaces! cache-root
++                                         (set/difference (previous-names :seon.ns/name) held-names)))
++        artifacts (into held
++                        (analyzed-artifacts projection roots directory
++                          (mapv #(.getCanonicalPath ^java.io.File %) files)
++                          database cache-root captured held-functions))
+         removed (set/difference (previous-names :seon.fn/sym)
+                                (into #{} (comp (mapcat :seon.fn.file/rows) (keep :seon.fn/sym)) artifacts))
+         ;; A removed definition's edges live on its CALLERS, and an invoker's
+@@ -3010,7 +3019,7 @@
+         ;; above seeds their first-party set, so a replacement it introduces
+         ;; (absent from the previous database) keeps its new edge.
+         dependents (if (and database selected)
+-                     (dependent-paths database prior-projection projection removed (set selected))
++                     (dependent-paths database prior-projection projection removed (into (set selected) held-paths))
+                      [])]
+     (let [checked (assert-capability-contracts!
+                    (into artifacts

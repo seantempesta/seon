@@ -1,0 +1,115 @@
+diff --git a/src/seon/program.cljc b/src/seon/program.cljc
+index 3da6ef7e4..5bb6bb69d 100644
+--- a/src/seon/program.cljc
++++ b/src/seon/program.cljc
+@@ -495,17 +495,29 @@
+   `:symbols`, each unqualified symbol."
+   {:malli/schema [:=> [:cat :string] [:map [:qualifiers [:set :symbol]] [:symbols [:set :symbol]]]]}
+   [source]
+-  (reduce (fn [names n]
+-            (let [{:keys [value k auto-resolved? prefix]} n]
+-              (cond
+-                (symbol? value) (if-let [q (namespace value)]
+-                                  (update names :qualifiers conj (symbol q))
+-                                  (update names :symbols conj value))
+-                (and auto-resolved? (keyword? k) (namespace k)) (update names :qualifiers conj (symbol (namespace k)))
+-                (and auto-resolved? prefix) (update names :qualifiers conj (symbol prefix))
+-                :else names)))
+-          {:qualifiers #{} :symbols #{}}
+-          (remove node/inner? (tree-seq node/inner? node/children (parser/parse-string-all source)))))
++  (let [derive-names
++        (fn []
++          (reduce (fn [names n]
++                    (let [{:keys [value k auto-resolved? prefix]} n]
++                      (cond
++                        (symbol? value) (if-let [q (namespace value)]
++                                          (update names :qualifiers conj (symbol q))
++                                          (update names :symbols conj value))
++                        (and auto-resolved? (keyword? k) (namespace k))
++                        (update names :qualifiers conj (symbol (namespace k)))
++                        (and auto-resolved? prefix) (update names :qualifiers conj (symbol prefix))
++                        :else names)))
++                  {:qualifiers #{} :symbols #{}}
++                  (remove node/inner? (tree-seq node/inner? node/children (parser/parse-string-all source)))))]
++    #?(:clj
++       (seon.cache/lookup
++        ::source-names source
++        (fn [names]
++          (+ 256 (* 2 (count source))
++             (reduce (fn [retained-bytes sym] (+ retained-bytes 96 (* 2 (count (name sym)))))
++                     0 (concat (:qualifiers names) (:symbols names)))))
++        derive-names)
++       :cljs (derive-names))))
+ 
+ (defn- used-resolver-context
+   "The part of a namespace's resolver context `row`'s own usages resolve
+diff --git a/test/seon/publication_cost_test.clj b/test/seon/publication_cost_test.clj
+new file mode 100644
+index 000000000..6fb2d6ab3
+--- /dev/null
++++ b/test/seon/publication_cost_test.clj
+@@ -0,0 +1,56 @@
++(ns seon.publication-cost-test
++  (:require [clojure.java.io :as io]
++            [clojure.test :refer [deftest is]]
++            [seon.cache :as cache]
++            [seon.cluster :as cluster]
++            [seon.cluster.store :as store]
++            [seon.db :as db]
++            [seon.fs :as fs]
++            [seon.profile :as profile]
++            [seon.render.value :as value]
++            [seon.test-support :as support]))
++
++(deftest ^{:seon/tasks #{'seon.publication-cost/reuse-source-names}
++           :seon.test/long "Publishes eight namespaces through the resume publication path on a private overlay."
++           :seon.test/long-ms 60000}
++  publication-cost-follows-changed-inputs
++  (let [root (str "tmp/publication-cost-" (random-uuid))
++        directory (str root "/checkout")
++        parent (support/execution-handle db/*conn*)
++        paths ["src/seon/cluster.clj" "src/seon/fn.clj" "src/seon/db.clj"
++               "src/seon/turn.clj" "src/seon/instrument.clj" "src/seon/context.clj"
++               "src/seon/ref.clj" "src/seon/schema.clj"]]
++    (try
++      (doseq [path ["src" "test" "script" "resources" ".clj-kondo"]]
++        (#'support/clone-directory! (io/file (fs/source-directory) path)
++                                   (io/file directory path)))
++      (doseq [path ["deps.edn" "dependency-pins.txt" "test-input-paths.txt"]]
++        (io/copy (io/file (fs/source-directory) path) (io/file directory path)))
++      (java.nio.file.Files/delete (.toPath (io/file directory ".clj-kondo/.cache")))
++      (#'support/clone-directory!
++       (.getCanonicalFile (io/file (fs/source-directory) ".clj-kondo/.cache"))
++       (io/file directory ".clj-kondo/.cache"))
++      (doseq [path paths]
++        (let [file (io/file directory path)]
++          (.setWritable file true)
++          (spit file (str "; Publication cost probe.\n" (slurp file)))))
++      (doseq [sample (range 3)]
++       (let [held (store/open-overlay! (:seon.store/store parent))]
++        (try
++         (let [measured (profile/measure
++                      #(#'cluster/full-source-refresh!
++                         root held
++                         (assoc (#'cluster/publication-roots)
++                                :seon.fn/root directory
++                                :seon.source/changed-paths paths
++                                :seon.source/branch :publication-cost
++                                :seon.fn.analyzer/cache-root (str directory "/.clj-kondo/.cache"))))]
++        (let [output (str "/private/tmp/claude-501/-Users-sean-src-seon/a5acff01-0859-40f4-bc50-1424bc5205cf/scratchpad/publish-cost/repeat-" sample ".edn")]
++          (spit output (value/core-text (select-keys measured [:seon.profile/ms :seon.profile/alloc-bytes :seon.cost/jvm-window])))
++          (doseq [entry (:seon.profile/ranked-by-self measured)]
++            (spit output (str "\n" (value/core-text entry)) :append true))
++          (spit output (str "\n" (value/core-text (get-in (cache/status) [:seon.cache/kinds :seon.program/source-names]))) :append true))
++        (is (true? (:seon.source/built? (:seon.profile/value measured))))
++        (is (< (:seon.profile/ms measured) 5000)))
++         (finally (store/release-store! held)))))
++      (finally (support/delete-recursively! root)))))
+diff --git a/resources/seon/tasks/seon.publication-cost.edn b/resources/seon/tasks/seon.publication-cost.edn
+new file mode 100644
+index 000000000..e0a4fc23a
+--- /dev/null
++++ b/resources/seon/tasks/seon.publication-cost.edn
+@@ -0,0 +1,2 @@
++[{:seon.task/name "reuse-source-names"
++  :seon.task/intent "Publication through `seon.cluster/full-source-refresh!` must reuse `seon.program/source-names` for identical source text across analysis and writer validation, through `seon.cache/lookup`. Prove the end-to-end cost with `seon.profile/measure`."}]

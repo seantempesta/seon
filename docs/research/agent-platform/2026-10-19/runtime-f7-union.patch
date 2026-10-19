@@ -1,0 +1,292 @@
+diff --git a/src/seon/cache.clj b/src/seon/cache.clj
+index 542eae276..93e655bfb 100644
+--- a/src/seon/cache.clj
++++ b/src/seon/cache.clj
+@@ -88,6 +88,21 @@
+ ;;; the process scope is this Var; status reads it through [[status]].
+ (defonce ^:private process (delay (create (declared-max-bytes))))
+ 
++(def ^:dynamic *reached*
++  "The branch changes the executing derivation's code reaches, as a set of
++  `[name digest]`, or nil where it reaches none: a branch runtime binds it
++  around each analysed function whose reach holds a change
++  (`seon.sci.runtime/reaching`), so a derivation that code makes is keyed by
++  what it is computed with, never served to a runtime that runs other code."
++  nil)
++
++(defn- reached-key
++  "`content-key` as the executing code derives it: itself, or with the branch
++  changes that code reaches (`*reached*`)."
++  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
++  [content-key]
++  (if-let [reached *reached*] [content-key reached] content-key))
++
+ (defn- eviction
+   "Caffeine's size-eviction policy of `held`."
+   {:malli/schema [:=> [:cat :seon.cache/cache] :seon.schema/value]}
+@@ -191,7 +206,8 @@
+   ([kind content-key weigh derive-fn] (lookup @process kind content-key weigh derive-fn some?))
+   ([kind content-key weigh derive-fn retain?] (lookup @process kind content-key weigh derive-fn retain?))
+   ([{::keys [cache] :as held} kind content-key weigh derive-fn retain?]
+-   (let [[pending mine?] (claim cache [kind content-key])]
++   (let [content-key (reached-key content-key)
++         [pending mine?] (claim cache [kind content-key])]
+      (if mine?
+        (let [{::keys [value thrown]} (settle! held kind content-key weigh derive-fn retain? pending)]
+          (if thrown (throw thrown) value))
+@@ -222,9 +238,11 @@
+   ([kind content-key weigh derive-fn retain? deadline-ms on-complete]
+    (lookup-within @process kind content-key weigh derive-fn retain? deadline-ms on-complete))
+   ([{::keys [cache] :as held} kind content-key weigh derive-fn retain? deadline-ms on-complete]
+-   (let [[^CompletableFuture pending mine?] (claim cache [kind content-key])]
++   (let [content-key (reached-key content-key)
++         [^CompletableFuture pending mine?] (claim cache [kind content-key])]
+      (if mine?
+-       (Thread/startVirtualThread #(settle! held kind content-key weigh derive-fn retain? pending))
++       ;; the derivation's own lookups are keyed as the reader's
++       (Thread/startVirtualThread (bound-fn [] (settle! held kind content-key weigh derive-fn retain? pending)))
+        (.increment ^LongAdder (::hits (kind-counters held kind))))
+      (try
+        (let [{::keys [value thrown]} (.get pending (long deadline-ms) TimeUnit/MILLISECONDS)]
+@@ -242,7 +260,7 @@
+                   [:=> [:cat :seon.cache/cache :qualified-keyword :seon.schema/value] :seon.schema/value]]}
+   ([kind content-key] (present @process kind content-key))
+   ([{::keys [^AsyncCache cache] :as held} kind content-key]
+-   (when-let [^CompletableFuture pending (.getIfPresent cache [kind content-key])]
++   (when-let [^CompletableFuture pending (.getIfPresent cache [kind (reached-key content-key)])]
+      (when (and (.isDone pending) (not (.isCompletedExceptionally pending)))
+        (let [value (::value (.join pending))]
+          (when (some? value) (.increment ^LongAdder (::hits (kind-counters held kind))))
+@@ -256,7 +274,7 @@
+                   [:=> [:cat :seon.cache/cache :qualified-keyword :seon.schema/value] :nil]]}
+   ([kind content-key] (evict! @process kind content-key))
+   ([{::keys [^AsyncCache cache]} kind content-key]
+-   (.remove (.asMap cache) [kind content-key])
++   (.remove (.asMap cache) [kind (reached-key content-key)])
+    nil))
+ 
+ (defn retained
+diff --git a/src/seon/sci/eval.clj b/src/seon/sci/eval.clj
+index 11dd05c87..36fef86b7 100644
+--- a/src/seon/sci/eval.clj
++++ b/src/seon/sci/eval.clj
+@@ -2865,11 +2865,18 @@
+   {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:map-of :symbol [:maybe :string]] [:set :symbol]] :map]}
+   [ctx own namespaces]
+   (let [snapshot (::kernel/program-snapshot ctx)
+-        {rows ::runtime-rows index ::reach-index roots ::analysed-roots prior ::analysis held ::held-digests} @snapshot
++        {rows ::runtime-rows index ::reach-index roots ::analysed-roots prior ::analysis held ::held-digests
++         prior-changes ::changes wrapped-own ::own-roots} @snapshot
+         held (merge held own)
+         changed (into (set (keys own))
+                       (when (seq namespaces)
+                         (filter #(contains? namespaces (symbol (namespace %))) (::runtime/closed index))))
++        ;; every change the runtime holds, to what it is: a definition's
++        ;; digest, else (a namespace whose resolution changed) the digest of
++        ;; how this runtime resolves it
++        changes (into (or prior-changes {})
++                      (map (fn [sym] [sym (if (contains? held sym) (get held sym) (resolver-digest ctx (symbol (namespace sym))))]))
++                      changed)
+         kept (runtime/compiled-names index (::compiled-kept @snapshot (::runtime/closed index)) changed)
+         reached (into #{} (mapcat #(get (::runtime/reached-by index) %)) changed)
+         rekeyed? (fn [row] (or (contains? namespaces (symbol (namespace (:seon.fn/sym row))))
+@@ -2879,7 +2886,9 @@
+                                     (not (contains? kept sym))
+                                     (if (= :value kind)
+                                       (or (contains? reached sym) (not (contains? roots sym)))
+-                                      (or (not (contains? roots sym)) (rekeyed? row))))))
++                                      ;; an open function reaches every change
++                                      (or (not (contains? roots sym)) (rekeyed? row) (contains? reached sym)
++                                          (not (contains? (::runtime/closed index) sym)))))))
+               rows)
+         space (runtime/program-space ctx)
+         resolution (into {} (map (fn [namespace-name] [namespace-name (resolver-digest ctx namespace-name)]))
+@@ -2894,7 +2903,21 @@
+                                      (map (fn [row] [(:seon.fn/sym row) (runtime/analysed space (keyed row))])))
+                             due)))
+         values (evaluated-values ctx functions (dependency-order (filterv #(= :value (::runtime/kind %)) due)))
+-        bound (merge functions values)
++        ;; a derivation is keyed by the changes its code reaches; the
++        ;; runtime's own definitions may reach any of them
++        own-roots (sci.ctx-store/with-ctx ctx
++                    (into {} (keep (fn [sym]
++                                     (when-let [sci-var (sci/resolve ctx sym)]
++                                       (let [root @sci-var
++                                             {raw ::raw wrapper ::wrapper} (get wrapped-own sym)]
++                                         (when (and (fn? root) (not (:macro (meta sci-var))))
++                                           [sym (if (identical? root wrapper) raw root)])))))
++                          (keys held)))
++        reaching (merge (runtime/reached-changes index changes (set (keys functions)))
++                        (zipmap (keys own-roots) (repeat (into #{} (map vec) changes))))
++        bound (merge (into {} (map (fn [[sym f]] [sym (if-let [reached (reaching sym)] (runtime/reaching f reached) f)]))
++                           (merge functions own-roots))
++                     values)
+         analysis {::analysed-count (+ (::analysed-count prior 0) (count functions))
+                   ::evaluated-count (+ (::evaluated-count prior 0) (count values))
+                   ::compiled-count (count kept)
+@@ -2904,12 +2927,15 @@
+         (sci/bind-root! ctx (sci/resolve ctx sym) root)))
+     ;; the program's own definitions, never this context's: its own
+     ;; definitions differ from these (`own-bindings`)
+-    (let [vars (sci.ctx-store/with-ctx ctx (mapv #(sci/resolve ctx %) (keys bound)))]
++    (let [vars (sci.ctx-store/with-ctx ctx (mapv #(sci/resolve ctx %) (keys (apply dissoc bound (keys own-roots)))))]
+       (swap! (:env ctx) (fn [env] (update env ::inherited-var-bindings merge
+                                           (select-keys (:sci/var-bindings env) vars)))))
+     (swap! snapshot (fn [held-snapshot] (-> held-snapshot
+-                                            (update ::analysed-roots merge bound)
+-                                            (assoc ::compiled-kept kept ::analysis analysis ::held-digests held))))
++                                            (update ::analysed-roots merge (apply dissoc bound (keys own-roots)))
++                                            (assoc ::compiled-kept kept ::analysis analysis ::held-digests held
++                                                   ::changes changes
++                                                   ::own-roots (into {} (map (fn [[sym raw]] [sym {::raw raw ::wrapper (bound sym)}]))
++                                                                     own-roots)))))
+     analysis))
+ 
+ (defn- acquire-program!
+diff --git a/src/seon/sci/runtime.clj b/src/seon/sci/runtime.clj
+index 32b3de24a..6155c81ff 100644
+--- a/src/seon/sci/runtime.clj
++++ b/src/seon/sci/runtime.clj
+@@ -85,6 +85,22 @@
+   [ctx row]
+   (seon.cache/lookup ::analysed (analysis-key ctx row) (constantly analysed-function-bytes) #(analyse ctx row)))
+ 
++(defn reaching
++  "`f`, keying every `seon.cache` derivation made while it runs by `reached`,
++  the branch changes its code reaches (`[name digest]` pairs), so no runtime
++  running other code is served it. Carries `f`'s metadata."
++  {:malli/schema [:=> [:cat :seon.instrument/callable [:set :seon.schema/value]] :seon.instrument/callable]}
++  [f reached]
++  ;; a function value a caller handed in derives with the caller's code, so
++  ;; an inner frame only adds to what its callers bound
++  (cond-> (fn [& args]
++            (let [outer seon.cache/*reached*]
++              (if (or (identical? outer reached) (and outer (every? #(contains? outer %) reached)))
++                (apply f args)
++                (binding [seon.cache/*reached* (if outer (into outer reached) reached)]
++                  (apply f args)))))
++    (meta f) (with-meta (meta f))))
++
+ (defn- reach-of
+   "`sym` and every program name `callees` reaches from it."
+   {:malli/schema [:=> [:cat [:=> [:cat :qualified-symbol] [:sequential :qualified-symbol]] :qualified-symbol]
+@@ -148,6 +164,26 @@
+                      (when (seq reached) [sym reached]))))
+         (::host-bound-reach index)))
+ 
++(defn reached-changes
++  "Each name of `names` to the changes in `changes` (name -> digest) its code
++  reaches as `[name digest]` pairs: through its closed reach in `index`
++  ([[reach-index]]), or every change for an open name, whose reach the index
++  cannot follow. A name reaching none is absent. Costs the changes' inverted
++  reaches, never a walk."
++  {:malli/schema [:=> [:cat [:map [::closed [:set :qualified-symbol]]
++                             [::reached-by [:map-of :qualified-symbol [:set :qualified-symbol]]]]
++                       [:map-of :symbol :seon.schema/value] [:set :qualified-symbol]]
++                  [:map-of :qualified-symbol [:set :seon.schema/value]]]}
++  [index changes names]
++  (if (empty? changes)
++    {}
++    (let [every-change (into #{} (map vec) changes)
++          by-reach (reduce-kv (fn [held changed digest]
++                                (reduce #(update %1 %2 (fnil conj #{}) [changed digest])
++                                        held (filter names (get (::reached-by index) changed))))
++                              {} changes)]
++      (into by-reach (comp (remove (::closed index)) (map (fn [sym] [sym every-change]))) names))))
++
+ (defn compiled-names
+   "What a runtime running `kept` compiled may still run compiled.
+ 
+diff --git a/test/seon/sci/runtime_test.clj b/test/seon/sci/runtime_test.clj
+index dad1e2a7e..229b52741 100644
+--- a/test/seon/sci/runtime_test.clj
++++ b/test/seon/sci/runtime_test.clj
+@@ -105,6 +105,9 @@
+ ;;   calling main's h2; chb calls it. A branch reaching it is reported, and
+ ;;   names reaching hb are not compared.
+ ;; - ch hands h3 to compiled library functions (`mapv`, `reduce`).
++;; - cc derives a value through `seon.cache/lookup`, keyed by its input only,
++;;   with h0: a branch changing h0 or cc must not read main's derivation, and
++;;   main must not read the branch's.
+ 
+ (def ^:private macro-name 'm0)
+ 
+@@ -112,7 +115,7 @@
+ 
+ (def ^:private value-callers '{v0 [h0] va [c0]})
+ 
+-(def ^:private more-callers '{cv [v0] cva [va] ch [h3] hb [h2] chb [hb]})
++(def ^:private more-callers '{cv [v0] cva [va] ch [h3] hb [h2] chb [hb] cc [h0]})
+ 
+ (defn- macro-source
+   "Version `v` of the macro m0."
+@@ -122,7 +125,7 @@
+ 
+ (def ^:private shaped-names
+   "Every name of the shaped program but the macro, in definition order."
+-  (into program-names '[v0 va cv cva cm ch hb chb]))
++  (into program-names '[v0 va cv cva cm ch hb chb cc]))
+ 
+ (defn- shaped-source
+   "Version `v` of `program-name` in the shaped program: the macro's, a value's
+@@ -139,6 +142,7 @@
+     ch (str "(defn ch [x] (+ " (* 1000 (inc v)) " (reduce + (mapv h3 [x (inc x)]))))")
+     hb (str "(defn hb [x] (+ " (* 1000 (inc v)) " (h2 x)))")
+     chb (str "(defn chb [x] (+ " (* 1000 (inc v)) " (hb x)))")
++    cc (str "(defn cc [x] (seon.cache/lookup :rt.gen/cc [x] (constantly 1) (fn [] (+ " (* 1000 (inc v)) " (h0 x)))))")
+     (source program-name v)))
+ 
+ (defn- shaped-row
+@@ -173,6 +177,7 @@
+               " cv (fn [x] (+ 1000 ((:f v0) x))) cva (fn [x] (+ 1000 (va x)))"
+               " cm (fn [x] (+ 1000 (+ 0 (h1 x)))) ch (fn [x] (+ 1000 (reduce + (mapv h3 [x (inc x)]))))"
+               " hb (fn [x] (+ 1000 (h2 x))) chb (fn [x] (+ 1000 (hb x)))"
++              " cc (fn [x] (seon.cache/lookup :rt.gen/cc [x] (constantly 1) (fn [] (+ 1000 (h0 x)))))"
+               "] {" (str/join " " (map #(str "'" % " " %) shaped-names)) "})"))))
+ 
+ (def ^:private shaped-index
+@@ -193,7 +198,7 @@
+   macro or the host-bound hb) and the reach index."
+   {:malli/schema [:=> [:cat] :seon.sci.eval/ctx]}
+   []
+-  (let [ctx (sci/fork (sci/init {}))]
++  (let [ctx (sci/fork (sci/init {:namespaces {'seon.cache {'lookup seon.cache/lookup}}}))]
+     (sci.ctx-store/with-ctx ctx
+       (sci/eval-string* ctx (str "(ns rt.gen) (declare " (str/join " " shaped-names) ") " (macro-source 0)))
+       (doseq [program-name shaped-names]
+@@ -240,10 +245,11 @@
+ 
+ (defn- shaped-from-scratch
+   "What the composition `versions` answers evaluated from its own source alone
+-  in a fresh SCI context: every name interpreted, hb included."
++  in a fresh SCI context: every name interpreted, hb included, and every
++  derivation computed, never read from the cache."
+   {:malli/schema [:=> [:cat [:map-of :symbol nat-int?]] :map]}
+   [versions]
+-  (let [ctx (sci/init {})]
++  (let [ctx (sci/init {:namespaces {'seon.cache {'lookup (fn [_kind _key _weigh derive-fn] (derive-fn))}}})]
+     (sci/eval-string* ctx (str "(ns rt.gen) (declare " (str/join " " shaped-names) ") "
+                                (macro-source (get versions macro-name 0)) " "
+                                (str/join " " (map #(shaped-source % (get versions % 0)) shaped-names))))
+@@ -267,8 +273,8 @@
+         steps (gen/vector (gen/tuple (gen/choose 0 5) (gen/map (gen/elements changing) (gen/choose 0 2) {:max-elements 6})) 1 5)
+         result (tc/quick-check
+                 60
+-                (prop/for-all [chain steps]
+-                  (seon.cache/evict-kinds! #{:seon.sci.runtime/analysed})
++                (prop/for-all [chain steps backwards? gen/boolean]
++                  (seon.cache/evict-kinds! #{:seon.sci.runtime/analysed :rt.gen/cc})
+                   (let [main (assoc (shaped-main) ::versions {})
+                         runtimes (reduce (fn [held [pick change]]
+                                            (conj held (shaped-branch (nth held (mod pick (count held))) change)))
+@@ -283,7 +289,9 @@
+                                 (and (= (apply dissoc expected reaching-hb) (apply dissoc answered reaching-hb))
+                                      (or (not h2-changed?) (contains? reached 'rt.gen/hb))
+                                      (or (contains? reached 'rt.gen/hb) (= expected answered)))))
+-                            runtimes)))
++                            ;; whichever runtime derives first must not decide
++                            ;; another's cached answer
++                            (if backwards? (rseq runtimes) runtimes))))
+                 :seed 20261019)]
+     (is (:pass? result) "every composition answers what its own source answers")))
+ 

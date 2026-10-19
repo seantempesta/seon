@@ -1,0 +1,38 @@
+--- a/src/seon/sci/eval.clj
++++ b/src/seon/sci/eval.clj
+@@ -2261,7 +2261,8 @@
+ (defn auto-require!
+   "Require in `namespace-name` of `ctx` each namespace a definition names fully
+   qualified that the namespace neither is, aliases nor requires, and that
+-  resolves (`ctx` holds it or the platform loaded it): SCI resolves any such
++  resolves (`ctx` holds it or the platform loaded it); a quoted symbol is data,
++  not a use of its namespace, so a `quote` form is not walked: SCI resolves any such
+   namespace, the file's `ns` form only what it requires, so the namespace's
+   resolver state, and with it the merged `ns` form, holds what its definitions
+   use. Answers the namespaces required."
+@@ -2274,7 +2275,7 @@
+                           (remove (into #{namespace-name 'clojure.core} requires))
+                           (remove #(contains? aliases %))
+                           (filter #(or (sci/find-ns ctx %) (find-ns %))))
+-                    (tree-seq coll? seq form))]
++                    (tree-seq #(and (coll? %) (not (and (seq? %) (= 'quote (first %))))) seq form))]
+     (when (seq named)
+       (sci/binding [sci/ns (sci/find-ns ctx namespace-name)]
+         (sci/eval-form ctx (apply list 'clojure.core/require (map #(list 'quote %) named)))))
+--- a/test/seon/unrequired_namespace_test.clj
++++ b/test/seon/unrequired_namespace_test.clj
+@@ -20,3 +20,14 @@
+            required (call "(ns my.urr (:require [clojure.string])) (defn f {:malli/schema [:=> [:cat :string] :string]} [s] (clojure.string/upper-case s))")]
+        (is (= #{'clojure.string} (set (:seon.eval/auto-required (finding-of unrequired)))))
+        (is (nil? (finding-of required)))))))
++
++(deftest a-quoted-symbol-names-no-namespace-to-require
++  ;; frictions-a, 2026-10-14: `(def data '{:a seon.cluster.agent/acquire-context!})` reported `:auto-required
++  ;; seon.cluster.agent` (three lanes hit it); a quoted symbol is data, not a use of its namespace.
++  (support/with-running-agent
++   (fn [running agent-id _]
++     (let [call (fn [code]
++                  (support/mcp-reply
++                   (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
++                                                             "arguments" {"cluster" running "agent" agent-id "code" code}})))))]
++       (is (nil? (finding-of (call "(ns my.urq) (def data '{:a seon.cluster.agent/acquire-context!})"))))))))

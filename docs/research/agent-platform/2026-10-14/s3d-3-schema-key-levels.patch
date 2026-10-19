@@ -1,0 +1,452 @@
+diff --git a/resources/seon/schemas/my.program.edn b/resources/seon/schemas/my.program.edn
+index 17aa5949b..ba3e91da4 100644
+--- a/resources/seon/schemas/my.program.edn
++++ b/resources/seon/schemas/my.program.edn
+@@ -11,6 +11,13 @@
+   [:sym :qualified-symbol] [:kind :keyword] [:source :string]
+   [:line {:optional true} :int] [:file {:optional true} :string] [:doc {:optional true} :string]
+   [:contract {:optional true} :seon.schema/value]]
++ :my.program/schema-source
++ [:map {:description "A schema key's code level: its doc value, the functions whose contract takes or guards it, its members described one level, the schemas whose form names it, the functions declaring its writes and, for an installed attribute, its datom count."}
++  [:key :qualified-keyword] [:form :seon.schema/definition] [:description {:optional true} :string]
++  [:returns [:vector :qualified-symbol]] [:takes [:vector :qualified-symbol]] [:guards [:vector :qualified-symbol]]
++  [:members [:map-of :qualified-keyword [:map [:description {:optional true} :string] [:form {:optional true} :seon.schema/definition]]]]
++  [:referenced-by [:vector :qualified-keyword]] [:writes [:vector :qualified-symbol]]
++  [:datoms {:optional true} [:int {:min 0}]]]
+  :my.program/read-request [:map [:seon.db/db :seon.db/database-value]]
+  :my.program/subject-request
+  [:map [:seon.db/db :seon.db/database-value]
+diff --git a/resources/seon/schemas/seon.schema.usage.edn b/resources/seon/schemas/seon.schema.usage.edn
+index 73c8643c6..7ca8e15a8 100644
+--- a/resources/seon/schemas/seon.schema.usage.edn
++++ b/resources/seon/schemas/seon.schema.usage.edn
+@@ -23,11 +23,9 @@
+                     [:or {:description "A registration's recorded stored-data verdict, or the refusal that prevented it."}
+                      :seon.schema.usage/stored-check :seon.error/base],
+                     :referenced-by
+-                    [:vector {:description "Schemas whose form names the key, the first eight sorted."} :qualified-keyword],
+-                    :referenced-by-count [:int {:min 0}],
++                    [:vector {:description "Schemas whose form names the key, sorted."} :qualified-keyword],
+                     :contracts
+-                    [:vector {:description "Functions whose contract names the key, the first eight sorted."} :qualified-symbol],
+-                    :contract-count [:int {:min 0}],
++                    [:vector {:description "Functions whose contract names the key, sorted."} :qualified-symbol],
+                     :listing
+                     [:map {:description "A schema listed among others: its key and description line."}
+                      [:seon.schema/key :seon.schema/registry-key]
+@@ -40,6 +38,4 @@
+                      [:seon.schema.usage/new? {:optional true} :seon.schema.usage/new?]
+                      [:seon.schema.usage/check {:optional true} :seon.schema.usage/check]
+                      [:seon.schema.usage/referenced-by {:optional true} :seon.schema.usage/referenced-by]
+-                     [:seon.schema.usage/referenced-by-count {:optional true} :seon.schema.usage/referenced-by-count]
+-                     [:seon.schema.usage/contracts {:optional true} :seon.schema.usage/contracts]
+-                     [:seon.schema.usage/contract-count {:optional true} :seon.schema.usage/contract-count]]}
++                     [:seon.schema.usage/contracts {:optional true} :seon.schema.usage/contracts]]}
+diff --git a/resources/seon/schemas/seon.sci.eval.edn b/resources/seon/schemas/seon.sci.eval.edn
+index f20fd1b34..33ac83991 100644
+--- a/resources/seon/schemas/seon.sci.eval.edn
++++ b/resources/seon/schemas/seon.sci.eval.edn
+@@ -248,8 +248,9 @@
+                  :symbol :keyword :int :double :string :boolean :nil
+                  [:sequential :seon.schema/value] [:map-of :seon.schema/value :seon.schema/value]],
+                 :schema-doc
+-                [:map {:description "The declared form of one schema key, with its description property when it has one."}
+-                 [:key :qualified-keyword] [:form :seon.schema/definition] [:description {:optional true} :string]],
++                [:map {:description "The declared form of one schema key, with its description property when it has one, and the functions whose output names it."}
++                 [:key :qualified-keyword] [:form :seon.schema/definition] [:description {:optional true} :string]
++                 [:returns [:vector :qualified-symbol]]],
+                 :namespace-doc
+                 [:map {:description "A namespace's docstring parts when it has a docstring, and its public names."}
+                  [:summary {:optional true} :string] [:body {:optional true} :string] [:example {:optional true} :string]
+diff --git a/src/my/program.clj b/src/my/program.clj
+index 1e29c0afa..46b3ca568 100644
+--- a/src/my/program.clj
++++ b/src/my/program.clj
+@@ -185,21 +185,17 @@
+                                             (if (:seon.db/invalid-read result)
+                                               (throw (ex-info (:seon.error/message result) result)) result)))}))))))
+ 
++(defn- contract-users
++  "The functions whose contract names `schema-key` in any arity role, sorted."
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/key] [:vector :qualified-symbol]]}
++  [database schema-key]
++  (vec (sort (into #{} (mapcat #(db/contract-users database schema-key %))
++                   [:seon.fn.arity/input-refs :seon.fn.arity/output-refs :seon.fn.arity/guard-refs]))))
++
+ (defn- key-data
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/key :int] :map]}
+   [database schema-key _entity]
+-  (let [contracts
+-        (let [result (db/q database
+-               '[:find [?name ...]
+-                 :in $ ?key [?attribute ...]
+-                 :where [?arity ?attribute ?key]
+-                 [?function :seon.fn/arities ?arity]
+-                 [?function :seon.fn/sym ?name]]
+-               schema-key [:seon.fn.arity/input-refs :seon.fn.arity/output-refs
+-                       :seon.fn.arity/guard-refs])]
+- (if (:seon.db/invalid-read result)
+-
+- (throw (ex-info (:seon.error/message result) result)) result))
++  (let [contracts (contract-users database schema-key)
+         datoms (if (get-in (db/schema-database database) [:schema schema-key])
+                  (let [result (db/datoms database :aevt schema-key)]
+  (if (:seon.db/invalid-read result)
+@@ -714,6 +710,44 @@
+           (:seon.fn/file entity) (assoc :file (:seon.fn.file/relative-path (:seon.fn/file entity)))))
+       (not-found database sym))))
+ 
++(defn- member-description
++  "A member schema described one level: its description, else its form; nothing for a key with no stored form."
++  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword]
++                  [:map [:description {:optional true} :string] [:form {:optional true} :seon.schema/definition]]]}
++  [database k]
++  (if-let [form (some-> (db/pull database [:seon.schema/form] [:seon.schema/key k]) :seon.schema/form read-string)]
++    (let [text (when (and (vector? form) (map? (second form))) (:description (second form)))]
++      (if (string? text) {:description text} {:form form}))
++    {}))
++
++(defn- holder-names
++  "The `name-attribute` values of the entities whose `attribute` holds `k`, sorted."
++  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword :qualified-keyword :qualified-keyword]
++                  [:vector [:or :qualified-symbol :qualified-keyword]]]}
++  [database attribute k name-attribute]
++  (vec (sort-by str (keep name-attribute (db/pull-many database [name-attribute] (db/attribute-holders database attribute k))))))
++
++(defn- schema-source
++  "A schema key's code level (TASK-CHAIN §3a): its doc value with who takes and guards it, its members described one
++  level, the schemas naming it, the functions declaring its writes and an installed attribute's datom count, each
++  read through `seon.db/attribute-holders`."
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/key]
++                  [:or :my.program/schema-source :seon.program/not-found-error]]}
++  [database k]
++  (let [found (seon.ref/schema-documentation database k k)]
++    (if-not (:form found)
++      (not-found database k)
++      (cond-> (assoc found
++                     :takes (db/contract-users database k :seon.fn.arity/input-refs)
++                     :guards (db/contract-users database k :seon.fn.arity/guard-refs)
++                     :members (into (sorted-map)
++                                    (map (fn [member] [member (member-description database member)]))
++                                    (:seon.schema/references (db/pull database [:seon.schema/references] [:seon.schema/key k])))
++                     :referenced-by (holder-names database :seon.schema/references k :seon.schema/key)
++                     :writes (holder-names database :seon.fn/writes k :seon.fn/sym))
++        (get-in (db/schema-database database) [:schema k])
++        (assoc :datoms (count (db/datoms database :aevt k)))))))
++
+ (defn source
+   "Read a declaration's source, a schema keyword's definition or a namespace's declarations.
+ 
+@@ -729,14 +763,13 @@
+ 
+   an unknown subject returns a not-found error with the nearest symbols under :seon.error/expected and the forms that work under :seon.error/fix."
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/subject]
+-                  [:or :my.program/declaration-source :seon.sci.eval/schema-doc
++                  [:or :my.program/declaration-source :my.program/schema-source
+                    [:map [:seon.ns/name :symbol] [:seon.program/functions [:vector :qualified-symbol]]
+                     [:seon.program/tests [:vector :qualified-symbol]]]
+                    :seon.program/not-found-error]]}
+   [database subject]
+   (cond
+-    (keyword? subject) (let [found (seon.ref/schema-documentation database subject subject)]
+-                         (if (:form found) found (not-found database subject)))
++    (keyword? subject) (schema-source database subject)
+     (simple-symbol? subject) (namespace-declarations database subject)
+     :else (declaration-source database subject)))
+ 
+diff --git a/src/seon/db.clj b/src/seon/db.clj
+index afe2d2b7e..ff373defd 100644
+--- a/src/seon/db.clj
++++ b/src/seon/db.clj
+@@ -4682,18 +4682,45 @@
+   (when (get (dbi/-schema database) :seon.db.vector/cells)
+     (:e (first (d/datoms database :avet :seon.db.vector/cells cell)))))
+ 
+-(defn- attribute-holders
++(defn attribute-holders
+   "The entities whose `attribute` holds `value`: through the cell holding it
+-   when the attribute is stored in cells, else directly."
++   when the attribute is stored in cells, else directly. Under a read-evidence
++   sink each index seek is recorded as `datoms` records it, so a cached answer
++   holds until a matching datom changes; the work is proportional to the
++   holders, never the attribute's population."
+   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword :seon.schema/value] [:vector :seon.db/entity-id]]}
+   [database attribute value]
+-  (into []
+-        (keep (fn [datom]
+-                (if (and (get (dbi/-schema database) :seon.db.vector/position)
+-                         (first (d/datoms database :eavt (:e datom) :seon.db.vector/position)))
+-                  (cell-owner database (:e datom))
+-                  (:e datom))))
+-        (d/datoms database :avet attribute value)))
++  (let [installed (dbi/-schema database)
++        cells? (and (get installed :seon.db.vector/position) (get installed :seon.db.vector/cells))
++        ;; One raw seek; its dependency is derived only when a sink collects it.
++        seek (fn [index & components]
++               (when *read-evidence-sink*
++                 (let [{plan :datahike.read/dependency-plan pattern :seon.db/read-index-pattern}
++                       (index-read-dependencies database index components)]
++                   (append-read-evidence!
++                    (cond-> {:seon.db/db database
++                             :seon.db/source-argument-position 0
++                             :datahike.read/dependency-plan plan}
++                      (instance? DB database) (assoc :seon.db/read-index-patterns [pattern])))))
++               (apply d/datoms database index components))]
++    (into []
++          (keep (fn [datom]
++                  (if (and cells? (first (seek :eavt (:e datom) :seon.db.vector/position)))
++                    (:e (first (seek :avet :seon.db.vector/cells (:e datom))))
++                    (:e datom))))
++          (seek :avet attribute value))))
++
++(defn contract-users
++  "The functions whose contract names schema key `k` in the arity role `role`,
++   sorted: key to arities to their functions through `attribute-holders`, never
++   a join over the arities population."
++  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword
++                       [:enum :seon.fn.arity/input-refs :seon.fn.arity/output-refs :seon.fn.arity/guard-refs]]
++                  [:vector :qualified-symbol]]}
++  [database k role]
++  (let [owners (into [] (comp (mapcat #(attribute-holders database :seon.fn/arities %)) (distinct))
++                     (attribute-holders database role k))]
++    (vec (sort (keep :seon.fn/sym (pull-many database [:seon.fn/sym] owners))))))
+ 
+ (defn logical-datoms
+   "`report`'s datoms as facts about the entities an agent reads: `[cell a v]`
+diff --git a/src/seon/ref.clj b/src/seon/ref.clj
+index f0270e889..e18450ee6 100644
+--- a/src/seon/ref.clj
++++ b/src/seon/ref.clj
+@@ -168,7 +168,8 @@
+     :seon.error/expected :seon.sci.eval/public-documentation}))
+ 
+ (defn schema-documentation
+-  "The declared form of the schema named `key`, with its description property."
++  "The declared form of the schema named `key`, with its description property and `:returns`, the functions whose
++  output names it (`seon.db/contract-users`)."
+   {:malli/schema [:=> [:cat :seon.db/db :qualified-keyword :seon.sci.eval/authored-reference]
+                   [:or :seon.sci.eval/schema-doc :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
+   [database key authored]
+@@ -179,7 +180,7 @@
+       :else
+       (let [form (edn/read-string (:seon.schema/form row))
+             description (when (and (vector? form) (map? (second form))) (:description (second form)))]
+-        (cond-> {:key key :form form}
++        (cond-> {:key key :form form :returns (db/contract-users database key :seon.fn.arity/output-refs)}
+           description (assoc :description description))))))
+ 
+ ;;; ---------------------------------------------------------------------------
+diff --git a/src/seon/render/schema.clj b/src/seon/render/schema.clj
+index 74f4aa2aa..566a13ab3 100644
+--- a/src/seon/render/schema.clj
++++ b/src/seon/render/schema.clj
+@@ -15,10 +15,6 @@
+             [seon.render.route :as render.route]
+             [seon.render.value :as render.value]))
+ 
+-(def ^:private names-shown
+-  "Referencing schemas and contracts named before the count says the rest."
+-  8)
+-
+ (defn usage
+   "What registering `definition` under `schema-key` means for the program,
+   or the first read the database refused.
+@@ -26,7 +22,8 @@
+   - `:seon.schema.usage/previous`: the committed form it replaces, when it
+     differs; `:seon.schema.usage/new?` when the read found none committed.
+   - `:seon.schema.usage/referenced-by` and `contracts`: the schemas and
+-    function contracts naming the key, eight named, the rest counted.
++    function contracts naming the key, all of them; the value printer is the
++    only cap.
+ 
+   ## Examples
+ 
+@@ -38,36 +35,28 @@
+   ```
+   ## Costs
+ 
+-  Three indexed queries; no validation."
++  One indexed form read and AVET seeks proportional to the referrers
++  (`seon.db/attribute-holders`); no validation."
+   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword :seon.schema/value]
+                   [:or :seon.schema.usage/report :seon.db/error-result]]}
+   [database schema-key definition]
+   (let [previous (db/q '[:find ?form . :in $ ?k
+                          :where [?s :seon.schema/key ?k] [?s :seon.schema/form ?form]]
+-                       database schema-key)
+-        referenced-by (db/q '[:find [?other ...] :in $ ?k
+-                              :where [?s :seon.schema/references ?k] [?s :seon.schema/key ?other]]
+-                            database schema-key)
+-        contracts (db/q '[:find [?sym ...] :in $ ?k [?attribute ...]
+-                          :where [?arity ?attribute ?k] [?f :seon.fn/arities ?arity]
+-                          [?f :seon.fn/sym ?sym]]
+-                        database schema-key
+-                        [:seon.fn.arity/input-refs :seon.fn.arity/output-refs
+-                         :seon.fn.arity/guard-refs])]
+-    (or (first (filter db/read-refusal? [previous referenced-by contracts]))
+-        (let [previous (some-> previous edn/read-string)
+-              referenced-by (sort referenced-by)
+-              contracts (sort contracts)]
+-          (cond-> {:seon.schema/key schema-key :seon.schema/definition definition}
+-            (nil? previous) (assoc :seon.schema.usage/new? true)
+-            (and (some? previous) (not= previous definition))
+-            (assoc :seon.schema.usage/previous previous)
+-            (seq referenced-by)
+-            (assoc :seon.schema.usage/referenced-by (vec (take names-shown referenced-by))
+-                   :seon.schema.usage/referenced-by-count (count referenced-by))
+-            (seq contracts)
+-            (assoc :seon.schema.usage/contracts (vec (take names-shown contracts))
+-                   :seon.schema.usage/contract-count (count contracts)))))))
++                       database schema-key)]
++    (if (db/read-refusal? previous)
++      previous
++      (let [previous (some-> previous edn/read-string)
++            referenced-by (vec (sort (keep :seon.schema/key
++                                           (db/pull-many database [:seon.schema/key]
++                                                         (db/attribute-holders database :seon.schema/references schema-key)))))
++            contracts (vec (sort (into #{} (mapcat #(db/contract-users database schema-key %))
++                                       [:seon.fn.arity/input-refs :seon.fn.arity/output-refs :seon.fn.arity/guard-refs])))]
++        (cond-> {:seon.schema/key schema-key :seon.schema/definition definition}
++          (nil? previous) (assoc :seon.schema.usage/new? true)
++          (and (some? previous) (not= previous definition))
++          (assoc :seon.schema.usage/previous previous)
++          (seq referenced-by) (assoc :seon.schema.usage/referenced-by referenced-by)
++          (seq contracts) (assoc :seon.schema.usage/contracts contracts))))))
+ 
+ (defn- subject
+   "The rendered schema: a registration's key, form and recorded check, or a
+@@ -139,11 +128,10 @@
+    [:code (str value)]])
+ 
+ (defn- named-list
+-  {:malli/schema [:=> [:cat :string [:vector :seon.render/hiccup] [:int {:min 0}]] :seon.render/hiccup]}
+-  [label links total]
+-  [:p {:class "seon-schema-usage-names"} (str label " (" total "): ")
+-   (into [:span] (interpose " " links))
+-   (when (> total (count links)) (str " and " (- total (count links)) " more"))])
++  {:malli/schema [:=> [:cat :string [:vector :seon.render/hiccup]] :seon.render/hiccup]}
++  [label links]
++  [:p {:class "seon-schema-usage-names"} (str label " (" (count links) "): ")
++   (into [:span] (interpose " " links))])
+ 
+ (defn- check-html
+   "The registration's recorded stored-data verdict, or its refusal."
+@@ -165,8 +153,7 @@
+   [unit]
+   (if-let [{schema-key :seon.schema/key definition :seon.schema/definition :as chosen} (subject unit)]
+     (let [report (selection unit chosen)
+-          {:seon.schema.usage/keys [previous new? check referenced-by referenced-by-count
+-                                    contracts contract-count]} report
++          {:seon.schema.usage/keys [previous new? check referenced-by contracts]} report
+           form-text (fn [form] (render.value/html {:seon.render/value form :seon.db/db (:seon.db/db unit) :seon.render.value/root [::form schema-key (identical? form previous)]}))]
+       (into
+        [:article {:class "seon-family-entry seon-schema-entry"}
+@@ -183,7 +170,7 @@
+           :else [(form-text definition)])
+         (when (some? check) [(check-html (:seon.db/db unit) check)])
+         (when (seq referenced-by)
+-          [(named-list "Schemas naming it" (mapv #(link :seon.schema/key %) referenced-by) referenced-by-count)])
++          [(named-list "Schemas naming it" (mapv #(link :seon.schema/key %) referenced-by))])
+         (when (seq contracts)
+-          [(named-list "Contracts naming it" (mapv #(link :seon.fn/sym %) contracts) contract-count)]))))
++          [(named-list "Contracts naming it" (mapv #(link :seon.fn/sym %) contracts))]))))
+     [:p {:class "seon-schema-entry"} "Schema evidence is unavailable."]))
+diff --git a/test/seon/db_test.clj b/test/seon/db_test.clj
+index 4afbcc06e..dd5d108eb 100644
+--- a/test/seon/db_test.clj
++++ b/test/seon/db_test.clj
+@@ -869,6 +869,38 @@
+ ;; `read-evidence-current?` declares its database by schema name, so an
+ ;; agent call omitting it is supplied one (as `q`'s is); an upstream error in
+ ;; that slot is refused by its contract instead of passed through.
++(deftest attribute-holders-follow-logical-membership-with-read-evidence
++  ;; TASK-CHAIN §3a S3d-3: a schema key's takers and returners are read through
++  ;; AVET seeks that follow a vector cell to its logical owner, with read evidence
++  (test-support/with-database
++   (fn [connection]
++     (test-support/seed-cluster! connection "holders")
++     (let [k :my.edit/parse-refused-error
++           holders (fn [attribute value]
++                     (let [captured (atom [])
++                           found (binding [db/*read-evidence-sink* captured]
++                                   (db/attribute-holders @connection attribute value))]
++                       [found (db/read-evidence @captured)]))
++           [none none-evidence] (holders :seon.fn.arity/input-refs k)]
++       (is (= [] none) "no contract takes the key yet")
++       (is (seq none-evidence) "an empty seek records its evidence")
++       (test-support/transacted!
++        connection [(test-support/namespace-entity @connection 'seon.db-test.holders)
++                    (test-support/program-fn-entity
++                     @connection 'seon.db-test.holders/taker
++                     "(defn taker {:malli/schema [:=> [:cat :my.edit/parse-refused-error] :int]} [_] 1)")])
++       (is (false? (db/read-evidence-current? @connection none-evidence))
++           "adding a matching arity invalidates the empty read")
++       (let [[arities arity-evidence] (holders :seon.fn.arity/input-refs k)
++             [owners owner-evidence] (holders :seon.fn/arities (first arities))]
++         (is (= 1 (count arities)) "the new arity takes the key")
++         (is (= ['seon.db-test.holders/taker]
++                (mapv #(:seon.fn/sym (db/pull @connection [:seon.fn/sym] %)) owners))
++             "a vector attribute answers its logical owner, never the cell holding it")
++         (test-support/transacted! connection (test-support/agent-tx @connection "unrelated-holder"))
++         (is (true? (db/read-evidence-current? @connection (into arity-evidence owner-evidence)))
++             "an unrelated write preserves the read"))))))
++
+ (deftest read-evidence-currency-declares-its-database-by-schema-name
+   (let [[_ inputs] (:malli/schema (meta #'db/read-evidence-current?))]
+     (is (= :seon.db/database-value (second inputs)))))
+diff --git a/test/seon/program_test.clj b/test/seon/program_test.clj
+index b90a60215..c69baafc3 100644
+--- a/test/seon/program_test.clj
++++ b/test/seon/program_test.clj
+@@ -20,6 +20,7 @@
+             [clojure.test.check.properties :as prop]
+             [malli.core :as m]
+             [malli.registry :as mr]
++            [my.program]
+             [seon.db :as db]
+             [seon.turn :as turn]
+             [seon.program :as program]
+@@ -1569,3 +1570,28 @@
+     (digest)
+     (is (< (:seon.profile/ms (profile/measure digest)) 120)
+         "a thousand definition digests cost no whole-population comparison")))
++
++(deftest a-schema-key-source-separates-takers-guards-and-members
++  ;; TASK-CHAIN §3a: a schema key's code level separates who takes, returns and guards it from what it holds
++  (let [database (db/db)
++        roles (fn [k] (select-keys (my.program/source database k) [:takes :returns :guards]))
++        section (my.program/source database :seon.ref/section)]
++    (is (= {:takes '[seon.ref/candidate seon.ref/directory? seon.ref/link-candidate seon.ref/locate seon.ref/section-error]
++            :returns [] :guards []}
++           (roles :seon.ref/path)))
++    (is (= {:takes [] :returns '[my.fs/section seon.ref/section] :guards []} (roles :seon.ref/section)))
++    (is (= #{:seon.ref/anchor :seon.ref/below :seon.ref/heading :seon.ref/path :seon.ref/pin :seon.ref/text :seon.ref/tokens}
++           (set (keys (:members section))))
++        "each member described one level")
++    (is (string? (get-in section [:members :seon.ref/path :description])) "a member shows its description")
++    (is (some #{:seon.ref/section} (:referenced-by (my.program/source database :seon.ref/path)))
++        "the schemas whose form names the key")))
++
++(deftest a-schema-key-source-costs-its-indexed-reads
++  ;; TASK-CHAIN §3a: through `seon.db/attribute-holders`, never the arities join (20-60 ms per key)
++  (let [database (db/db)
++        source my.program/source
++        _ (source database :seon.ref/section)
++        measured (profile/measure #(source database :seon.ref/section))]
++    (is (< (:seon.profile/ms measured) 5) "under 5 ms")
++    (is (< (:seon.profile/alloc-bytes measured) (* 5 1024 1024)) "under 5 MB")))
+diff --git a/test/seon/ref_test.clj b/test/seon/ref_test.clj
+index b39894ab6..1be86bdf4 100644
+--- a/test/seon/ref_test.clj
++++ b/test/seon/ref_test.clj
+@@ -325,3 +325,10 @@
+            (is (= [1 expected render] (selected text)) "one reference, its entity, then its declared render")))
+        (is (= [] (ref/references database {:seon.ref/text "Then seon.nope/x follows."}))
+            "an unknown bare form is neither a reference nor a problem")))))
++
++(deftest a-schema-key-doc-names-who-returns-it
++  ;; TASK-CHAIN §3a: a schema key's doc is its form, description and `:returns`; takers wait for its code level
++  (let [doc (first (ref/references (db/db) {:seon.ref/text "Read `:my.edit/parse-refused-error` first."}))]
++    (is (= :doc (:seon.ref/level doc)))
++    (is (some #{'seon.edit/single-form} (:returns doc)) "the functions whose output names the key")
++    (is (not (contains? doc :takes)) "takers are the code level's")))
