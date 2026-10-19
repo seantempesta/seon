@@ -162,25 +162,43 @@
     id))
 
 (defn convert!
-  "Pack the embeddings `store` holds in the per-key layout (one content key per stored value) into one segment,
-  then delete them; how many it moved. The per-key layout's conversion, run as the store opens."
+  "Pack the embeddings `store` holds in the per-key layout (one content key per stored value) that no segment holds
+  into one segment, written durably, then delete every per-key value; how many it packed. A conversion cut short
+  resumes: what its durable segment already holds is not packed again."
   {:malli/schema [:=> [:cat :seon.embed/store] nat-int?]}
   [store]
-  (let [legacy (into [] (comp (map :key) (filter string?)) (k/keys store {:sync? true}))]
-    (when (seq legacy)
-      (write-segment! store (into {} (map (fn [content-key] [content-key (k/get store content-key nil {:sync? true})]))
-                                  legacy))
-      (run! #(k/dissoc store % {:sync? true}) legacy))
-    (count legacy)))
+  (let [legacy (into [] (comp (map :key) (filter string?)) (k/keys store {:sync? true}))
+        held (present store)
+        missing (into [] (remove #(contains? held %)) legacy)]
+    (when (seq missing)
+      ;; durable before a per-key value is deleted: this write syncs, though the store's own writes skip it
+      (write-segment! (assoc-in store [:config :sync-blob?] true)
+                      (into {} (map (fn [content-key] [content-key (k/get store content-key nil {:sync? true})]))
+                            missing)))
+    (run! #(k/dissoc store % {:sync? true}) legacy)
+    (count missing)))
 
-(defn open-store
-  "The durable embedding store in directory `dir`, created when absent, converted from the per-key layout, and
-  opened once per process. Its writes skip the fsync: a segment a crash loses costs one re-embed of its texts."
+(defn- opened
+  "The durable embedding store in directory `dir`, created when absent and converted from the per-key layout
+  ([[convert!]]). Its writes skip the fsync: a segment a crash loses costs one re-embed of its texts."
   {:malli/schema [:=> [:cat [:string {:min 1}]] :seon.embed/store]}
   [dir]
-  (seon.cache/lookup ::store dir (constantly 1024)
-                     #(doto (filestore/connect-fs-store dir :opts {:sync? true} :config {:sync-blob? false})
-                        convert!)))
+  (doto (filestore/connect-fs-store dir :opts {:sync? true} :config {:sync-blob? false})
+    convert!))
+
+(defn open-store
+  "The durable embedding store in directory `dir` ([[opened]]), opened once per process: the background fill's
+  call ([[fill!]]), which converts a per-key store at boot, and a waiting caller's, which joins it."
+  {:malli/schema [:=> [:cat [:string {:min 1}]] :seon.embed/store]}
+  [dir]
+  (seon.cache/lookup ::store dir (constantly 1024) #(opened dir)))
+
+(defn store-within
+  "[[open-store]] that waits at most `wait-ms`: in progress past it, while the store opens on its own thread (or
+  the background fill's), so a call never converts the store itself."
+  {:malli/schema [:=> [:cat [:string {:min 1}] nat-int?] [:or :seon.embed/store :seon.cache/pending]]}
+  [dir wait-ms]
+  (seon.cache/lookup-within ::store dir (constantly 1024) #(opened dir) some? wait-ms nil))
 
 (defn cluster-settings
   "The embed dials of the cluster `database` belongs to (`seon.config/effective`)."
@@ -391,15 +409,18 @@
       (similar dials (open-store (directory database)) request! task texts query-task query k))))
 
 (defn similar-now-in
-  "[[similar-now]] with `database`'s cluster dials, its durable store and the embed server."
+  "[[similar-now]] with `database`'s cluster dials, its durable store and the embed server: in progress while
+  the store still opens ([[store-within]])."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.embed/task [:vector :seon.embed/text] :seon.embed/task
                        :seon.embed/text pos-int?]
                   [:or :seon.embed/answer :seon.embed/unreachable-error :seon.config/error]]}
   [database task texts query-task query k]
-  (let [dials (cluster-settings database)]
-    (if (:seon.error/operation dials)
-      dials
-      (similar-now dials (open-store (directory database)) request! task texts query-task query k))))
+  (let [dials (cluster-settings database)
+        store (when-not (:seon.error/operation dials)
+                (store-within (directory database) (:seon.config.embed/wait-ms dials)))]
+    (cond (:seon.error/operation dials) dials
+          (:seon.cache/pending-kind store) {:seon.embed/pending (count texts)}
+          :else (similar-now dials store request! task texts query-task query k))))
 
 ;;; The corpora agents rank, and their background fill.
 

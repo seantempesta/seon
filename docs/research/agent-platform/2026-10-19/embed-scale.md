@@ -360,8 +360,11 @@ Each phase names its owner and the proof that is red until it lands. Root files 
   The byte-budget requests (`:seon.config.embed/request-bytes`) are blocked: a new required dial cannot be adopted
   onto a store that holds a config entity (`seon.cluster/adoption-refuses-a-new-required-dial-on-a-store-with-a-config-entity`).
   Until then a pass sorts its backlog by length before cutting it at `:seon.config.embed/batch-size`.
-- P2: packed segments and the conversion of the per-key store landed in `seon.embed`; the live store converts when
-  default restarts onto it.
+- P2: packed segments and the conversion of the per-key store landed in `seon.embed`. The live store converted on
+  2026-10-19, but inside an agent's call that the 2 GB allocation bound cut while it deleted the per-key files; the
+  next open packed the 10,986 left into a second segment (11.6 MB of duplicates, until a P4 compaction). Lane
+  embed-fix: a call now answers in progress while the store opens (`seon.embed/store-within`), and a cut conversion
+  resumes without packing again, deleting the per-key values only after its synced segment.
 - P3: not started.
 - P4-P6: awaiting the owner.
 

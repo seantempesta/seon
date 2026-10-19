@@ -106,6 +106,46 @@
       (finally
         (run! io/delete-file (reverse (file-seq (io/file dir))))))))
 
+(deftest a-conversion-cut-after-its-segment-resumes-without-packing-again
+  ;; The cut of 2026-10-19: a conversion interrupted while deleting left its segment and 10,986 per-key values,
+  ;; and the next open packed those again into a second segment.
+  (let [dir (temp-dir)
+        dials (settings)
+        texts ["seon.db/pull" "seon.db/q"]
+        request (fn [_settings _task _texts] (throw (ex-info "no request expected" {})))]
+    (try
+      (let [legacy (filestore/connect-fs-store dir :opts {:sync? true})
+            found (into {} (map (fn [text] [(embed/embedding-key dials "similarity" text) ((comp unit axes) text)])) texts)]
+        (run! (fn [[content-key octets]] (k/assoc legacy content-key octets {:sync? true})) found)
+        (embed/write-segment! legacy found))
+      (let [store (embed/open-store dir)
+            segments (k/get store :seon.embed/segments nil {:sync? true})]
+        (is (= 1 (count segments)) "the segment the cut conversion wrote is the only one")
+        (is (= [:seon.embed/segments [:seon.embed/segment (first segments)]]
+               (sort-by str (map :key (k/keys store {:sync? true}))))
+            "the per-embedding values it left are deleted")
+        (is (= {:seon.embed/hot 0 :seon.embed/durable 2 :seon.embed/requested 0}
+               (dissoc (embed/embed! dials store request "similarity" texts) :seon.embed/vectors))))
+      (finally
+        (run! io/delete-file (reverse (file-seq (io/file dir))))))))
+
+(deftest a-call-while-the-store-converts-answers-in-progress-and-never-converts-it
+  ;; A call waits for the store at most its wait: the conversion of a per-key store runs on its own thread or the
+  ;; background fill's (`seon.embed/open-store`), never in the call.
+  (let [dir (temp-dir)
+        dials (settings)]
+    (try
+      (let [legacy (filestore/connect-fs-store dir :opts {:sync? true})]
+        (run! #(k/assoc legacy (embed/embedding-key dials "similarity" (str "text-" %)) (unit [1 0 0 0]) {:sync? true})
+              (range 64)))
+      (is (= :seon.embed/store (:seon.cache/pending-kind (embed/store-within dir 0)))
+          "the call answers in progress while the store converts")
+      (let [store (embed/open-store dir)]
+        (is (= 1 (count (k/get store :seon.embed/segments nil {:sync? true}))) "the fill's open joins that conversion")
+        (is (identical? store (embed/store-within dir 0)) "a later call holds the converted store at once"))
+      (finally
+        (run! io/delete-file (reverse (file-seq (io/file dir))))))))
+
 (deftest a-misspelled-name-is-nearest-the-name-it-misspells
   (let [dir (temp-dir)
         request (fn [_settings _task texts] (mapv (comp unit axes) texts))]
