@@ -319,10 +319,10 @@
             (refuse! "A program entity schema is not a declared entity map."
                      {:seon.program/row-schema entity-schema}))
         entries (internal/entity-entries definition)
-        owned (into [] (comp (filter #(nil? (:seon.program/written-by
-                                             (entry-properties %))))
-                             (keep entry-attribute))
-                    entries)]
+        owned-entries (filterv #(nil? (:seon.program/written-by
+                                       (entry-properties %)))
+                               entries)
+        owned (into [] (keep entry-attribute) owned-entries)]
     (when-not (some #{identity-attribute} owned)
       (refuse! "A program entity schema does not declare its own identity attribute."
                {:seon.program/row-schema entity-schema}))
@@ -330,10 +330,9 @@
      :seon.program/source-attribute source-attribute
      :seon.program/set-attributes
      #?(:clj (into #{}
-                   (keep (fn [{:db/keys [ident cardinality isComponent]}]
-                           (when (and (= :db.cardinality/many cardinality) (not isComponent)
-                                      (not (schema.datahike/vector-shaped-attr-in? projection ident))) ident)))
-                   (schema.datahike/malli->datahike-schema-in projection owned))
+                   (keep (fn [[attribute _ child]]
+                           (when (schema.datahike/set-valued? child) attribute)))
+                   owned-entries)
         :cljs #{})
      :seon.program/owned-attributes
      (if (true? (:seon.program/projected-properties

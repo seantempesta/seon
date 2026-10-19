@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: partly-fixed (reds 1, 2, 4 fixed by lane red-fix; red 3 owned by task seon.turn.batch/a-repl-namespace-row-and-digest-are-red-on-head; red 5 open)
 severity: friction
 created: 2026-10-19
 tags: [issue, test, program, schema]
@@ -44,6 +44,10 @@ delete the `requiring-resolve` pair there. Then an inline entry is sufficient, a
 `attribute-declaration` is asked only of registered keys. The alternative (the tests register the attribute) keeps the
 bridge and retires the design sentence in the test comments; the owner decides by `seon.program` spec.
 
+Fixed (lane red-fix): `seon.program/derived-shape` reads set-valued membership from each entry's own compiled value
+schema through the new `seon.schema.datahike/set-valued?`, so an inline entry needs no registered attribute and
+`malli->datahike-attr-in` is no longer asked of unregistered names.
+
 ## Red 3: `indexed-and-evaluated-declarations-are-the-same-entities` (program_test.clj:1582)
 
 Cause: the two producers store different `:seon.ns/source` for `sample.s1`: one single-line form
@@ -60,6 +64,10 @@ deletion to retract both entities. Since `c537242c0` (2026-09-28, "the receipt's
 facts are the fold's (`seon.turn.batch/program-facts-call`): settling applies none, as the docstring of
 `seon.turn/receipt-settle-tx` says. The test must drive the deletion through the one REPL path, or be replaced by a
 row in the existing `my.program/ns-unmap!` tests. First recorded red `76a490909`.
+
+Fixed (lane red-fix): the test is deleted. `seon.cluster.turn-test/ns-unmap-retracts-the-owned-function-after-the-terminal-commit`
+already drives `ns-unmap` through the REPL path and asserts the owned function is retracted and the typed deletion
+verifies (`seon.sci.eval/committed-row?`, which also covers the absent sibling test).
 
 ## Red 5: `seon.db-test/a-namespace-entity-change-re-derives-its-declarations-digests` (db_test.clj:2748)
 

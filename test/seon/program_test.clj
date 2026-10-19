@@ -24,7 +24,6 @@
             [malli.registry :as mr]
             [my.program]
             [seon.db :as db]
-            [seon.turn :as turn]
             [seon.program :as program]
             [seon.profile :as profile]
             [seon.schema :as schema]
@@ -1150,65 +1149,6 @@
     (is (vector? events))
     (is (= #{'sample/real-test}
            (into #{} (keep :seon.test/sym) events)))))
-
-(deftest typed-cross-namespace-deletion-retracts-function-and-test
-  (test-support/with-database
-    (fn [connection]
-      (let [now (java.util.Date.)
-            namespace-name 'my.agents.registration-test
-            namespace-ref [:seon.ns/name namespace-name]
-            function-sym (symbol "my.agents.registration-test" "same-name")
-            deletion
-            (program/deletion-row
-             (one-event
-              "(ns-unmap 'my.agents.registration-test 'same-name)"))
-            settlement
-            {:seon.turn/id "registration-delete"
-             :seon.cluster.eval/ordinal 0
-             :seon.eval/shown "nil"
-             :seon.cluster.eval/ns
-             [:seon.ns/name 'my.agents.someone-else]
-             :seon.program/row deletion}]
-        (test-support/seed-cluster! connection "registration-test")
-        (test-support/transacted!
-         connection
-         (into [(test-support/namespace-entity (db/db connection) 'my.agents.someone-else)]
-               (agent/creation-tx {:seon.agent/id "registration-test"
-                                   :seon.ns/name namespace-name
-                                   :seon.cluster/name "registration-test"})))
-        (test-support/transacted!
-         connection
-         [(test-support/program-fn-entity (db/db connection) function-sym
-            "(defn same-name {:malli/schema [:=> [:cat] :int]} [] 1)")
-          ;; The canonical producer digests with the namespace entity the
-          ;; agent's creation stored, not a fresh one.
-          (test-support/program-entity (db/db connection) [:seon.test/sym function-sym]
-                                    "(clojure.test/deftest same-name)")])
-        (test-support/transacted!
-                     connection
-                     (turn/open-tx {:seon.turn/id "registration-delete" :seon.turn/agent [:seon.agent/id "registration-test"] :seon.turn/opened-tx "datomic.tx"}))
-        (test-support/transacted!
-                     connection
-                     (turn/receipt-start-tx
-                      {:seon.turn/id "registration-delete"
-                       :seon.cluster.eval/ordinal 0
-                       :seon.cluster.eval/at now}))
-        (is (= {:seon.program/delete-identities
-                [[:seon.fn/sym function-sym]
-                 [:seon.test/sym function-sym]]
-                :seon.program/source
-                "(ns-unmap 'my.agents.registration-test 'same-name)"
-                :seon.program/ns namespace-ref}
-               deletion))
-        (doseq [identity-attribute [:seon.fn/sym :seon.test/sym]]
-          (is (= function-sym
-                 (get (db/pull (db/db connection) '[*]
-                               [identity-attribute function-sym])
-                      identity-attribute))))
-        (test-support/transacted! connection (turn/receipt-settle-tx settlement))
-        (doseq [identity-attribute [:seon.fn/sym :seon.test/sym]]
-          (is (nil? (db/pull (db/db connection) '[*]
-                             [identity-attribute function-sym]))))))))
 
 (deftest schema-unregister-is-one-global-typed-deletion
   (let [event (one-event

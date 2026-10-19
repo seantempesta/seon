@@ -428,6 +428,16 @@
      (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
        (::vector? (compiled-storage compiled))))))
 
+(defn set-valued?
+  "Whether a compiled value schema stores as a cardinality-many set of plain
+  values: a `:set` or a reference to one, neither vector-shaped nor a component."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?]] :boolean]}
+  [compiled]
+  (let [{::keys [cardinality vector? properties]} (compiled-storage compiled)]
+    (and (= :db.cardinality/many cardinality)
+         (not vector?)
+         (not (:seon.db/component properties)))))
+
 (defn vector-attribute-in?
   "Whether `attr` stores its elements in bridge cells under `projection`: a
    vector-shaped attribute whose projection declares `:seon.db.vector/cells`
