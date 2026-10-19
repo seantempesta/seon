@@ -5,11 +5,13 @@
 (defn comp-target [x] x)
 (defn macro-target [x] x)
 (defn resolve-target [x] x)
+(defn mention-target [x] x)
 (defn applied [xs] (apply apply-target xs))
 (defn partialled [] (partial partial-target))
 (defn composed [] (comp comp-target identity))
 (defmacro expanded [x] `(macro-target ~x))
 (defn resolved [] ((requiring-resolve 'sample.call-references/resolve-target) 1))
+(defn mentioned [] 'sample.call-references/mention-target)
 (deftest reaches-references
   (is (= 1 (applied [1])))
   (is (= 1 ((partialled) 1)))

@@ -668,7 +668,7 @@ Ruled out by the owner's test ("doesn't really help ... cut it"): the rows stay 
     host-bound function, from a cold analysis cache per chain; the oracle is the whole composed source in a fresh SCI
     context. Mutations of the binder each turn it red: no value evaluation, main's macro digests in the key, no
     host-bound report.
-  - **F7 is not fixed: options.** Keying every `seon.cache` lookup an analysed function makes by the runtime's whole
+  - **F7, options (option 2 landed in f06474e75, lane runtime-f7b below).** Keying every `seon.cache` lookup an analysed function makes by the runtime's whole
     delta (binding the entry points in the changed context) is correct but costs `:hub-behavior-change` 1,544 MB
     against 885 (1.74x): the schema projection and `seon.config/effective` are derived again for the branch (about
     1 s). Precise keying needs the deriving function's identity at the lookup, which the cache's API does not carry:
@@ -693,6 +693,38 @@ Ruled out by the owner's test ("doesn't really help ... cut it"): the rows stay 
     | `:seon-db-nine-forms` | 1,188.8 / 146,531 / 1,283 | 1,243.4 / 146,641 / 952 | 1.05x |
     | `:hub-behavior-change` | 884.4 / 198,712 / 1,428 | 1,003.2 / 213,329 / 991 | 1.13x |
     | `:similar-by-name-warm` | 25.8 / 7,466 / 40 | 26.5 / 7,442 / 31 | 1.03x |
+
+- **Lane runtime-f7b (2026-10-19): F7 option 2, the open set at its cause, the arm gap.**
+  - **F7, option 2 (f06474e75).** `seon.cache/*reached*` joins every `seon.cache` key; `seon.sci.eval/bind-analysed!`
+    binds each analysed function whose closed reach holds a change as `seon.sci.runtime/reaching` (the changes its
+    reach holds, `seon.sci.runtime/reached-changes`), and the runtime's own definitions with every change it holds. An
+    open function keeps its key and is not bound again per change.
+  - **The open set at its cause.** `seon.fn/call-targets-by-caller` records a one-argument `requiring-resolve`,
+    `resolve` or `find-var` whose argument is quoted qualified names only as a call of those names
+    (`seon.fn/quoted-resolutions`), so the resolving function is followable; a name computed at run time, or an
+    argument choosing between names (`(resolve (if x 'a/b 'c/d))`), stays a run-time resolution. Proof:
+    `seon.fn-test/a-quoted-name-a-function-resolves-is-a-call`, red on HEAD (dangling adc38dda9).
+  - **Census, the candidate's own analysis of `src` in a check JVM (`seon.fn/program-entities`, the reach index over
+    `seon.sci.eval/run-time-resolution`):** open 2,381 of 5,078 names before, 2,353 of 5,080 after; the functions
+    calling a resolving function directly fall from 190 to 102 (`requiring-resolve` 105 to 17). Over the whole program
+    on default (src, test, script; the same rule approximated by reading each source): 3,447 of 7,683 before, 3,397
+    after. Quoted resolution was not what kept the set open: about twenty hubs that reflect on namespaces and Vars
+    named by data each sit under 1,600 to 2,200 of the open `src` names, and they stay open by the rule:
+    - error classification of stack frames: `seon.error.refusal/classify-namespace` (`find-ns` of a frame's
+      namespace), `operation-projection`, `checking-projection`, `interpreted-frames`, `current-world`,
+      `frame-function`, `var-digest`, `referenced` (`var?` over error data), `seon.error/library-names`,
+      `library-calling-form`, `candidate-calling-form` (`resolve` of a symbol read from a frame);
+    - schema predicates resolved from schema data: `seon.schema/runtime-predicate`, `loaded-predicate-var`,
+      `identity-only-descriptors-in`, `predicate-callable`, `unloaded-predicate-functions`, `projection-bindings`,
+      `seon.call-preparation/supply-from-row`;
+    - projection and storage builders resolving configured names: `seon.db/projection-builder`,
+      `connection-projection-state`, `seon.schema/schema-datahike-storage-schema`, `schema-datahike-value-schema`;
+    - Var and namespace reflection proper: `seon.render.value/datum`, `seon.db/stamp-transaction`,
+      `seon.fn/contract-findings` (`var?`), `seon.instrument/jvm-arglists`, `example-forms`, `definition-location`,
+      and the evaluator's own acquisition (`seon.sci.eval/copy-host-var`, `install-jvm-root!`, `build-base-ctx`, ...);
+    - `seon.error.refusal/prepared-call-prefix` is static (`(find-ns 'seon.call-preparation)` then
+      `(ns-resolve 'preparing)`) but reads the Var's metadata, which is Var reflection.
+    Because the error constructor reaches the frame classifier, nearly every function that can build an error is open.
 
 - **What would make the rule work:** compile what does not reach the change, not what calls nothing: on a changed
   runtime, interpret only the reverse closure of the changed names (cached analyses, so O(closure) binding) and keep
