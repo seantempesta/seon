@@ -590,7 +590,9 @@
           forms identity (get forms identity) {:registry registry}))
        (doseq [identity (sort-by str function-symbols)]
          (mr/schema registry identity))
-       (catch Exception failure
+       ;; Malli's compile is the interop edge: its refusal is an ex-info, translated
+       ;; to the declared unresolved-reference refusal or rethrown unchanged
+       (catch clojure.lang.ExceptionInfo failure
          (refuse-unresolved-reference!
           {:seon.error/operation 'seon.schema/projection-registry
            :seon.schema/definitions (merge {} forms contracts)
