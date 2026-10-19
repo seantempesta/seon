@@ -28,7 +28,8 @@
             [seon.turn :as turn]
             [seon.db :as db]
             [seon.error :as error]
-            [seon.schema.edn :as schema.edn]))
+            [seon.schema.edn :as schema.edn]
+            [my.program]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -843,17 +844,30 @@
                            (and (string? source) (<= (tokens/estimate source) limit))))
             owners))))
 
+(defn- code-read
+  "Must-read `entry` as the agent reads it: a reference at its code level is the value of the form it carries
+  (`my.program/source` of its name, at its `:seon.ref/at` when it has one) beside its name and level, or that read's
+  error; any other entry is itself."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]
+                  [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
+  [database {reference :seon.ref/name at :seon.ref/at [operation] :seon.render/operations :as entry}]
+  (if (and (= :code (:seon.ref/level entry)) (= 'my.program/source (first operation)))
+    (let [sourced (my.program/source database (if at {:seon.ref/name reference :seon.ref/at at} reference))]
+      (if (:seon.error/at sourced) sourced (merge sourced (dissoc entry :seon.render/operations))))
+    entry))
+
 (defn- must-reads
   "The held task's references other than its proofs, read on the attempt's starting value `start`
   (`attempt-start`), each library or namespace-level one at its summary (`seon.ref/brief`, `summary-level?`), a library Var with its pinned
-  revision; a program function its plan cites at doc level at its code level when it is small enough to read at once (`plan-owners`)."
+  revision; a program function its plan cites at doc level at its code level when it is small enough to read at once (`plan-owners`),
+  and every one at its code level as its source (`code-read`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.context/task [:set :seon.test/sym]]
                   [:vector [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]]}
   [start held proof-names]
   (into [] (comp (remove #(contains? proof-names (:seon.ref/name %)))
                  (map #(if (summary-level? start %)
                          (merge (ref/brief start (:seon.ref/name %)) (select-keys % [:seon.ref/pin]) {:seon.ref/level :summary})
-                         %)))
+                         (code-read start %))))
         (task-references start held #{} (plan-owners start held))))
 
 (defn- proof-entry

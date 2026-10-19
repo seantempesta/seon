@@ -121,10 +121,11 @@
   (test-support/with-running-agent
    (fn [running agent-id _]
      (let [code (str "(let [found (seon.ref/references {:seon.ref/text \"```seon.operator/check!``` `rewrite-clj.paredit/slurp-backward` `rewrite-clj.paredit/nope`\"})]"
-                     " (mapv (fn [r] (-> r (select-keys [:seon.ref/name :seon.ref/problem-kind :arglists :seon.ref/pin :source]) (update :seon.ref/pin :seon.ref/project))) found))")
+                     " (mapv (fn [r] (-> r (select-keys [:seon.ref/name :seon.ref/problem-kind :arglists :seon.ref/pin :seon.render/operations]) (update :seon.ref/pin :seon.ref/project))) found))")
            [operator slurp-backward absent] (shown running agent-id code)
            source (shown running agent-id "(with-out-str (clojure.repl/source rewrite-clj.paredit/slurp-backward))")]
-       (is (string? (:source operator)) "a program function cited at its code shows its source")
+       (is (= ['(my.program/source 'seon.operator/check!)] (:seon.render/operations operator))
+           "a program function cited at its code answers the form that reads its source")
        (is (= {:arglists '([zloc]) :seon.ref/pin "rewrite-clj"} (select-keys slurp-backward [:arglists :seon.ref/pin])))
        (is (= :unresolved (:seon.ref/problem-kind absent)))
        (is (str/starts-with? source "(defn ^{:deprecated"))))))
@@ -163,10 +164,12 @@
        (is (= :file (:seon.ref/section-missing answer)))
        (is (some #{"README.md"} (:seon.ref/nearest answer)))))))
 
-(deftest a-function-cited-at-its-code-shows-its-source-whole
+(deftest a-function-cited-at-its-code-answers-the-form-that-reads-its-source
   (let [[entry] (ref/references (db/db) {:seon.ref/text "Read ```seon.ref/references``` whole."})]
-    (is (= (:seon.fn/source (db/pull (db/db) [:seon.fn/source] [:seon.fn/sym 'seon.ref/references])) (:source entry))
-        "a function at its code is its source, as code")))
+    (is (= {:seon.ref/name 'seon.ref/references :seon.ref/level :code
+            :seon.render/operations ['(my.program/source 'seon.ref/references)]}
+           entry)
+        "a function at its code is the form that reads its source; the context that shows it reads it")))
 
 (deftest an-alias-form-in-a-code-span-is-code-not-a-reference
   (let [found (seon.ref/references (seon.db/db) {:seon.ref/text "Call `str/subs` and `m/validator`, not `seon.ref/references`."})]
@@ -247,8 +250,9 @@
 
 (deftest a-referenced-function-shows-its-contract-as-the-agent-writes-it
   (let [[entry] (ref/references (db/db) {:seon.ref/text "Read ```seon.ref/section``` whole."})]
-    (is (str/includes? (:source entry) "[:=> [:cat :seon.ref/reference-text] [:or :seon.ref/section :seon.ref/section-error]]")
-        "the contract is in its source, as the agent wrote it")
+    (is (str/includes? (:source (my.program/source (db/db) (:seon.ref/name entry)))
+                       "[:=> [:cat :seon.ref/reference-text] [:or :seon.ref/section :seon.ref/section-error]]")
+        "the contract is in the source its form reads, as the agent wrote it")
     (is (not (contains? entry :seon.fn/spec)))
     (is (not (contains? entry :seon.ref/line)) "a reference carries no line in its text")))
 

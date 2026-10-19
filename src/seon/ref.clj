@@ -428,12 +428,18 @@
   {:seon.ref/name reference :seon.ref/problem-kind :no-summary :seon.ref/message (problem-messages :no-summary)
    :seon.render/operations [read-form]})
 
+(defn- read-form
+  "The form that reads program `reference`'s source or schema definition at the REPL: `(my.program/source 'x)`."
+  {:malli/schema [:=> [:cat :seon.ref/name] :seon.render/read-form]}
+  [reference]
+  (list 'my.program/source (if (keyword? reference) reference (list 'quote reference))))
+
 (defn brief
   "One name a referent's own content names, shown one level: its name, a one-line summary and the form that reads
   it; never its content."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/name] [:or :seon.ref/brief :seon.ref/problem :seon.error/value]]}
   [database reference]
-  (let [read-form (list 'my.program/source (if (keyword? reference) reference (list 'quote reference)))
+  (let [read-form (read-form reference)
         summary #(first (str/split-lines (:summary (docstring %))))]
     (cond
       (simple-symbol? reference)
@@ -583,22 +589,23 @@
 (defn- at-level
   "A function or schema key at the `level` its citation asks for, each the value of one REPL function (TASK-CHAIN
   §3a): its summary (`brief`), its doc (`seon.sci.lookup/function-documentation`, `schema-documentation`, a library
-  Var's docstring parts and arglists) or its code (`my.program/source`; a library Var's doc with the form that reads
-  its source); or a problem. The doc and code owners sit above this namespace, so they are resolved at the call."
+  Var's docstring parts and arglists) or, at its code, the form that reads it (`read-form`, which the context that
+  shows it reads: `seon.context/must-reads`; a library Var's doc with the form that reads its source); or a problem.
+  The doc owner sits above this namespace, so it is resolved at the call."
   {:malli/schema [:=> [:cat :seon.db/database-value [:or :qualified-symbol :qualified-keyword] :seon.ref/level]
                   [:or :map :seon.ref/problem :seon.error/value]]}
   [database reference level]
   (let [unresolved (unresolved reference)
-        source #((requiring-resolve 'my.program/source) database reference)]
+        source {:seon.render/operations [(read-form reference)]}]
     (cond
       (= :summary level) (brief database reference)
       (keyword? reference)
       (let [found (schema-documentation database reference reference)]
         (cond (:seon.sci.eval/documentation-unavailable found) unresolved
               (or (:seon.error/at found) (= :doc level)) found
-              :else (source)))
+              :else source))
       (seq (db/datoms database :avet :seon.fn/sym reference))
-      (if (= :doc level) ((requiring-resolve 'seon.sci.lookup/function-documentation) database reference) (source))
+      (if (= :doc level) ((requiring-resolve 'seon.sci.lookup/function-documentation) database reference) source)
       :else
       (if-let [{:keys [doc arglists] pin :seon.ref/pin} (library-definition reference)]
         ;; a Var with neither docstring nor arglists (a deftest's) is still its read form, never nothing

@@ -84,7 +84,7 @@
                    [:seon.render/operations {:optional true} [:vector :seon.render/read-form]]]
            :references [:vector {:description "The names a referent's own content cites (a test's docstring, a task's intent, a namespace's docstring, a doc section's text), each one level."}
                         [:or :seon.ref/brief :seon.ref/problem :seon.error/value]]
-           :resolved-name [:map {:description "A name identified at the level its citation asks for: a function, library Var or schema key as the value of brief, doc or source (seon.ref/at-level); a deftest, task or namespace as its entity, pulled as its identity attribute declares, with its row's render pair as its own :seon.render/ai and :seon.render/html keys and the names its content cites, one level (seon.ref/resolve-name)."}
+           :resolved-name [:map {:description "A name identified at the level its citation asks for: a function, library Var or schema key as the value of brief or doc, or at its code the form that reads its source under :seon.render/operations, which the context that shows it reads (seon.ref/at-level, seon.context/code-read); a deftest, task or namespace as its entity, pulled as its identity attribute declares, with its row's render pair as its own :seon.render/ai and :seon.render/html keys and the names its content cites, one level (seon.ref/resolve-name)."}
                            [:seon.ref/level {:optional true} :seon.ref/level]
                            [:seon.ref/name :seon.ref/name]
                            [:seon.ref/at {:optional true} :seon.ref/at]
