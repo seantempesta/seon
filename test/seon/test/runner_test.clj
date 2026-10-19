@@ -551,6 +551,15 @@
        (run!)
        (is (= 1 (get-in (current) [proof :seon.test/fail-count])))))))
 
+(deftest a-held-current-result-error-answers-as-itself
+  ;; The fold's declared error variant (a reach read that is unavailable) reaches the answer as an ordinary branch
+  ;; on data: the error itself, with no result head recorded; a held fold answers its results.
+  (let [refused (#'runner/result-read-error "current-results" (ex-info "The reach read failed." {}))
+        head [{} ['tq.held/proof] nil nil]]
+    (is (identical? refused (#'runner/held-answer! refused {} head head)))
+    (is (= {'tq.held/proof {:seon.test/sym 'tq.held/proof}}
+           (#'runner/held-answer! {::runner/results {'tq.held/proof {:seon.test/sym 'tq.held/proof}}} {} head head)))))
+
 (deftest current-results-fold-recorded-dynamic-calls
   (test-support/with-database
    (fn [connection]

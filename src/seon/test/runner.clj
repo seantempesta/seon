@@ -2829,7 +2829,7 @@
   "Keep outcomes with unchanged reach and recording facts; read only the missed tests' current executions."
   {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.db/database-value] [:maybe :map]
                        [:map-of :qualified-keyword :uuid] [:vector :seon.test/sym] [:maybe :seon.test/task]]
-                  :map]}
+                  [:or [:map [::results :map]] :seon.error/value]]}
   [database before prior revisions names task]
   (let [changed (when before (changed-result-data before database (::revisions prior) revisions))
         inputs (dynamic-call-inputs database names (::inputs prior) (::entities changed))
@@ -2844,6 +2844,19 @@
          ::results (into (select-keys (::results prior) kept)
                          (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity))
                          read-results)}))))
+
+(defn- held-answer!
+  "The tests' results `held` answers, its key `key` now the newest under `head` when `revisions` hold any; an error
+  `held` answers as itself."
+  {:malli/schema [:=> [:cat [:or [:map [::results :map]] :seon.error/value] [:map-of :qualified-keyword :uuid]
+                       :seon.schema/value :seon.schema/value]
+                  [:or [:map-of :seon.test/sym :map] :seon.error/value]]}
+  [held revisions head key]
+  (if (:seon.error/at held) held
+    (do (when (seq revisions)
+          (cache/evict! ::current-result-head head)
+          (cache/lookup ::current-result-head head (constantly (+ 256 (* 128 (count (second head))))) (constantly key)))
+        (::results held))))
 
 (defn current-results
   "Each of `test-symbols` with the result of its newest admitted execution on `database` recorded at its current
@@ -2876,11 +2889,7 @@
                                    (* 1024 (transduce (map (comp count :seon.test.failure/reports val)) + 0 (::results %))))
                                derive #(not (:seon.error/at %)))
                  (derive))]
-      (if (:seon.error/at held) held
-        (do (when (seq revisions)
-              (cache/evict! ::current-result-head head)
-              (cache/lookup ::current-result-head head (constantly (+ 256 (* 128 (count names)))) (constantly key)))
-            (::results held))))
+      (held-answer! held revisions head key))
     (catch Exception failure (result-read-error "current-results" failure))))
 
 (defn red-result?
