@@ -1,0 +1,140 @@
+diff --git a/src/seon/embed.clj b/src/seon/embed.clj
+index d0f450833..d5f4e2c21 100644
+--- a/src/seon/embed.clj
++++ b/src/seon/embed.clj
+@@ -190,7 +190,7 @@
+     (if (:seon.error/operation effective)
+       effective
+       (select-keys effective [:seon.config.embed/endpoint :seon.config.embed/model :seon.config.embed/dimension
+-                              :seon.config.embed/batch-size :seon.config.embed/timeout-ms :seon.config.embed/wait-ms]))))
++                              :seon.config.embed/request-bytes :seon.config.embed/timeout-ms :seon.config.embed/wait-ms]))))
+ 
+ (defn- hot!
+   "Retain `octets` under `content-key` in the process cache, answering them."
+@@ -199,16 +199,24 @@
+   (seon.cache/lookup ::embedding content-key #(+ 96 (alength ^bytes %)) (constantly octets)))
+ 
+ (defn requests
+-  "The content keys `missing` as embed-server requests: sorted by their text's length (`text-of`), so each request
+-  holds texts of like length, then cut every `batch-size` texts."
++  "The content keys `missing` as embed-server requests: sorted by their text's length (`text-of`), then cut so
++  each request's texts total at most `budget` UTF-8 bytes, a longer text alone."
+   {:malli/schema [:=> [:cat [:map-of :seon.embed/key :seon.embed/text] pos-int? [:vector :seon.embed/key]]
+                   [:vector [:vector :seon.embed/key]]]}
+-  [text-of batch-size missing]
+-  (into [] (partition-all batch-size) (sort-by #(count (text-of %)) missing)))
++  [text-of budget missing]
++  (let [size #(alength (.getBytes ^String (text-of %) StandardCharsets/UTF_8))
++        [done last-batch _] (reduce (fn [[done batch total] content-key]
++                                      (let [n (size content-key)]
++                                        (if (and (seq batch) (< budget (+ total n)))
++                                          [(conj done batch) [content-key] n]
++                                          [done (conj batch content-key) (+ total n)])))
++                                    [[] [] 0]
++                                    (sort-by size missing))]
++    (cond-> done (seq last-batch) (conj last-batch))))
+ 
+ (defn- requested
+   "The embeddings `request` answers for `missing` (content keys, `text-of` naming each one's text), in
+-  `settings`' batch-size requests, and the unreachable error of the first request that answered none."
++  `settings`' byte-budget requests, and the unreachable error of the first request that answered none."
+   {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/request :seon.embed/task
+                        [:map-of :seon.embed/key :seon.embed/text] [:vector :seon.embed/key]]
+                   [:map [::found :seon.embed/found]
+@@ -220,7 +228,7 @@
+                 (reduced (assoc answered ::error answer))
+                 (update answered ::found into (map vector batch answer)))))
+           {::found {}}
+-          (requests text-of (:seon.config.embed/batch-size settings) missing)))
++          (requests text-of (:seon.config.embed/request-bytes settings) missing)))
+ 
+ (defn- layered
+   "The embeddings of `texts` for `task` by content key, with how many came from each layer: the process cache,
+@@ -256,7 +264,7 @@
+ 
+ (defn embed!
+   "The embeddings of `texts` for `task`, in order, with how many came from each layer: the process cache first,
+-  then `store`'s segments, then `settings`' batch-size requests for the rest, written to `store` as one segment
++  then `store`'s segments, then `settings`' byte-budget requests for the rest, written to `store` as one segment
+   and to the cache. Text repeated within `texts` is requested once. The unreachable error when the embed server
+   is needed and does not answer; what it answered before is still written."
+   {:malli/schema [:=> [:cat :seon.embed/settings :seon.embed/store :seon.embed/request
+diff --git a/test/seon/embed_test.clj b/test/seon/embed_test.clj
+index 296a43c4a..03139526f 100644
+--- a/test/seon/embed_test.clj
++++ b/test/seon/embed_test.clj
+@@ -18,7 +18,7 @@
+   {:malli/schema [:=> [:cat] :seon.embed/settings]}
+   []
+   #:seon.config.embed{:endpoint "http://127.0.0.1:8701/v1/embed" :model (str "test-model-" (id/id)) :dimension 4
+-                      :batch-size 2 :timeout-ms 2000 :wait-ms 2000})
++                      :request-bytes 40 :timeout-ms 2000 :wait-ms 2000})
+ 
+ (defn- unit
+   "The little-endian float32 octets of `xs` scaled to unit length."
+@@ -75,6 +75,19 @@
+       (finally
+         (run! io/delete-file (reverse (file-seq (io/file dir))))))))
+ 
++(deftest a-fill-pass-sends-its-backlog-in-byte-budget-requests
++  (let [dir (temp-dir)
++        batches (atom [])
++        request (fn [_settings _task texts] (swap! batches conj texts) (mapv (fn [_] (unit [1 0 0 0])) texts))
++        ;; ten 10-byte texts and one 50-byte text, under a 30-byte budget
++        texts (conj (mapv #(format "text-%05d" %) (range 10)) (apply str (repeat 50 "x")))]
++    (try
++      (embed/embed! (assoc (settings) :seon.config.embed/request-bytes 30) (embed/open-store dir) request "similarity" texts)
++      (is (= [3 3 3 1 1] (mapv count @batches)) "shortest first, cut at the budget, a longer text alone")
++      (is (= #{(apply str (repeat 50 "x"))} (set (peek @batches))))
++      (finally
++        (run! io/delete-file (reverse (file-seq (io/file dir))))))))
++
+ (deftest a-fill-pass-writes-one-segment
+   (let [dir (temp-dir)
+         dials (settings)
+diff --git a/resources/seon/schemas/seon.embed.edn b/resources/seon/schemas/seon.embed.edn
+index 0d91e33c7..cdb46ff8c 100644
+--- a/resources/seon/schemas/seon.embed.edn
++++ b/resources/seon/schemas/seon.embed.edn
+@@ -9,7 +9,7 @@
+               [:seon.config.embed/endpoint :seon.config.embed/endpoint]
+               [:seon.config.embed/model :seon.config.embed/model]
+               [:seon.config.embed/dimension :seon.config.embed/dimension]
+-              [:seon.config.embed/batch-size :seon.config.embed/batch-size]
++              [:seon.config.embed/request-bytes :seon.config.embed/request-bytes]
+               [:seon.config.embed/timeout-ms :seon.config.embed/timeout-ms]
+               [:seon.config.embed/wait-ms :seon.config.embed/wait-ms]],
+              :store [:map {:description "The durable konserve store of embeddings: packed segments and their manifest (seon.embed/write-segment!)."}],
+diff --git a/resources/seon/schemas/seon.config.embed.edn b/resources/seon/schemas/seon.config.embed.edn
+index 35de29d93..d80604ddf 100644
+--- a/resources/seon/schemas/seon.config.embed.edn
++++ b/resources/seon/schemas/seon.config.embed.edn
+@@ -17,11 +17,11 @@
+                       :description
+                       "The Matryoshka dimension stored per embedding.",
+                       :seon.config/dial true}],
+-                    :batch-size
++                    :request-bytes
+                     [:int
+                      {:min 1,
+                       :description
+-                      "Texts per embed-server request.",
++                      "UTF-8 bytes of text per embed-server request: a pass sorts its backlog by length and cuts it at this budget (seon.embed/requests).",
+                       :seon.config/dial true}],
+                     :timeout-ms
+                     [:int
+diff --git a/config/default.edn b/config/default.edn
+index c52c528cd..918cc0992 100644
+--- a/config/default.edn
++++ b/config/default.edn
+@@ -39,7 +39,9 @@
+  :seon.config.embed/endpoint "http://127.0.0.1:8701/v1/embed"
+  :seon.config.embed/model "eg2-text-bf16"
+  :seon.config.embed/dimension 256
+- :seon.config.embed/batch-size 256
++ ; Unit: UTF-8 bytes of text per request (about 3.2 per token): 768 KiB is about the 262,144 tokens the server merges
++ ; into one GPU round, a few seconds of work, so a pass sends its backlog in a few large requests.
++ :seon.config.embed/request-bytes 786432
+  :seon.config.embed/timeout-ms 30000
+  ; Unit: milliseconds a by-meaning or by-name call waits for an index the background fill has not derived yet before
+  ; it answers in progress: a warm index answers in about 2 ms, a cold one costs seconds of embedding.
