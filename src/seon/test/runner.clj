@@ -1016,12 +1016,13 @@
   requests and recordings of one program share it."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
                   [:map [::nodes [:map-of :seon.schema/value [:maybe :map]]]
-                   [::schemas [:map-of :seon.schema/value [:maybe :map]]]]]}
+                   [::schemas [:map-of :seon.schema/value [:maybe :map]]]
+                   [::reverse {:optional true} [:map-of :seon.schema/value [:set :seon.schema/value]]]]]}
   [database test-symbols]
   (if-let [revisions (reach-revision-key database)]
     (if-let [held (let [entries (cache/present ::reach-index-by-revision revisions)]
                    (when (every? #(contains? (::component-digests entries) %) test-symbols) entries))]
-      (select-keys held [::nodes ::schemas])
+      (select-keys held [::nodes ::schemas ::reverse])
       (cache/lookup ::reach-graph [revisions (set test-symbols)]
                   (fn [{::keys [nodes schemas]}] (* reach-graph-entry-bytes (+ (count nodes) (count schemas))))
                   #(reached-graph database test-symbols)))
@@ -1522,34 +1523,37 @@
 (defn tests-reaching
   "The tests among `test-symbols` whose closure holds `target` (a test never
   counts as reaching itself): one walk of the reached graph's reversed edges
-  from `target`.
+  from `target`. A held reach index walks the reverse edges it keeps beside its
+  nodes, so a walk always reads the index it was given, however the index grew
+  under the same revisions; a graph of these tests alone is walked once per
+  revisions, tests and target.
 
   ## Costs
 
-  - Linear in the reached graph whatever the number of tests."
+  - A held index: the callers reached from `target`.
+  - Otherwise linear in the reached graph whatever the number of tests."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym] :symbol]
                   [:or [:set :seon.test/sym] :seon.test/unknown-error]]}
   [database test-symbols target]
   (try
-    (let [{::keys [nodes]} (when (seq test-symbols) (reach-graph database test-symbols))
-          walk (fn [] (let [callers (persistent!
-                                     (reduce-kv (fn [m caller node]
-                                                  (reduce (fn [m callee] (assoc! m callee (conj (get m callee []) caller)))
-                                                          m (::out node)))
-                                                (transient {}) nodes))]
-                        (loop [pending (get callers target []) seen (transient #{})]
-                          (if-let [n (peek pending)]
-                            (if (contains? seen n)
-                              (recur (pop pending) seen)
-                              (recur (into (pop pending) (get callers n)) (conj! seen n)))
-                            (persistent! seen)))))
+    (let [{::keys [nodes] callers ::reverse} (when (seq test-symbols) (reach-graph database test-symbols))
+          closure (fn [callers-of]
+                    (loop [pending (vec (callers-of target)) seen (transient #{})]
+                      (if-let [n (peek pending)]
+                        (if (contains? seen n)
+                          (recur (pop pending) seen)
+                          (recur (into (pop pending) (callers-of n)) (conj! seen n)))
+                        (persistent! seen))))
+          walk (fn [] (closure (persistent!
+                                (reduce-kv (fn [m caller node]
+                                             (reduce (fn [m callee] (assoc! m callee (conj (get m callee []) caller)))
+                                                     m (::out node)))
+                                           (transient {}) nodes))))
           revisions (reach-revision-key database)
-          ;; One walk per target and graph: the program's whole index serves every request of that program.
-          whole? (and revisions (identical? nodes (::nodes (cache/present ::reach-index-by-revision revisions))))
-          reaching (if revisions
-                     (cache/lookup ::reaching (if whole? [revisions target] [revisions target (set test-symbols)])
-                                   #(* reach-node-name-bytes (+ 8 (count %))) walk)
-                     (walk))]
+          reaching (cond callers (closure callers)
+                         revisions (cache/lookup ::reaching [revisions target (set test-symbols)]
+                                                 #(* reach-node-name-bytes (+ 8 (count %))) walk)
+                         :else (walk))]
       (into #{} (filter #(and (get nodes %) (not= % target) (contains? reaching %))) test-symbols))
     (catch Exception failure (reach-unavailable `tests-reaching failure test-symbols))))
 

@@ -184,6 +184,24 @@
        (is (= #{} (runner/tests-reaching database symbols reaching))
            "a test never counts as reaching itself")))))
 
+(deftest tests-reaching-reads-the-held-index-as-it-grows
+  ;; A reach request for tests the held index lacks extends it under the same
+  ;; revisions; a walk kept from before that growth answered an empty set for
+  ;; the added test (seon.step.prove-test/handoff, row "a proof never run").
+  (support/with-database
+   (fn [connection]
+     (support/declare-source! connection 'tq.rch
+                              (str "(ns tq.rch (:require [clojure.test :refer [deftest is]]))\n"
+                                   "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
+                                   "(deftest a (is (= 1 (f 1))))\n"
+                                   "(deftest b (is (= 2 (f 2))))\n"))
+     (let [database (db/db connection)]
+       (runner/reach-digests database '[tq.rch/a])
+       (is (= '#{tq.rch/a} (runner/tests-reaching database '[tq.rch/a] 'tq.rch/f)))
+       (runner/reach-digests database '[tq.rch/b])
+       (is (= '#{tq.rch/b} (runner/tests-reaching database '[tq.rch/b] 'tq.rch/f))
+           "a test the held index gained reaches what it calls")))))
+
 (deftest a-branch-result-identity-is-a-function-of-its-own-head
   ;; A branch runs its own HEAD (branch-model ruling 1): its reach digests read
   ;; its own rows. Before, a work branch's digest of a declaration main changed
