@@ -14,7 +14,8 @@ corrections in its section); P4b landed (`66ca5108b`, lane closed-p4b; correctio
 P6b stopped at its design gap (lane closed-p6: census measured, options in its section) and is folded into P7 (root);
 P7: the design, R4 (`c23e1f807`), the gap task (`e8aeac94d`) and the predicate fold with the exact key (`1bcb3bf65`, after
 `57fa7fa7d` narrowed `projection-registry`'s catch) landed: open derivers 48 -> 17, the gate judged on the hub sequence
-(1.27x of 716cc7527); R3, R5 and R6's real-path rows not started (lane closed-p7, its section); P8 not started.
+(1.27x of 716cc7527); R3 (`eb7a77b5f`), R5/R7 (`57224cfc8`) and R6 (`25ed6b7ec`) landed (lane closed-p7b, its section),
+the sequence 4,956 MB / 754,145 calls against its bound 5,053 / 837,784; P8 not started.
 
 # Closed runtime: the hybrid
 
@@ -789,6 +790,21 @@ M1, M2, M5, M7 of runtime-rereview and the removal of the context binding of the
   in `docs/seon/issues/analyses-are-evicted-from-a-full-cache-and-analysed-again.md` (an order-dependent red cannot
   carry a task: `--accept-red-before` re-runs the var alone on HEAD, where it is green). Commit check: 124 tests, only reds
   accepted as red on HEAD (the gap proof and five carried by tasks).
+
+- **R3, R5/R7, R6 landed (lane closed-p7b, 2026-10-20, from HEAD `53ca7e0fa`).** R3 `eb7a77b5f`: macros have rows,
+  due when their closed reach holds a change; every due root is produced in dependency order on one fork
+  (`seon.sci.eval/produced-roots`: a macro after the values it reads, a function after the macros it expands); the
+  analysis key carries each expanded macro's reached changes; `seon.sci.arm/arm!` interprets the affected program for a
+  write of a loaded value too (`seon.sci.eval/program-value?`; every value write measured 48.6 MB more on `:new-def`,
+  a new name no loaded definition reads costs nothing). R5/R7 `57224cfc8`: a `defonce` has no row; an open `def` is
+  due whenever the runtime's changes differ from the prior ones. R6 `25ed6b7ec`: the real-path row
+  `seon.sci.eval-test/a-runtime-derivation-is-keyed-by-its-own-program-through-every-entrance` (overlay, continuation
+  through `acquire!`, `fork-cluster-ctx`; `arm!` through the R2 and R3 MCP rows), the shaped program's alias move (a
+  namespace's resolution), the two-step chain and the whole-delta row. Mutations, each red: the entry binding removed
+  (M1 and M7, one mechanism now: 6 red), the key over the call's changes only (M2's class: the whole-delta row), a
+  value produced without the roots before it (M5: the generator). Gate after each slice (MB / calls,
+  `:hub-change-sequence`): HEAD 4,872.7-4,893.5 / 741,060-748,518; R3 4,951.5 / 746,948; R5/R7 4,956.2 / 754,145
+  (bound 5,053 / 837,784).
 
 #### Gate and order
 
