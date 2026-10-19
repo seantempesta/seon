@@ -3598,6 +3598,7 @@
      [:seon.ai/usage {:optional true} :seon.ai/usage]
      [:seon.ai/reasoning-content {:optional true} :seon.ai/reasoning-content]
      [:seon.ai/finish-reason {:optional true} :seon.ai/finish-reason]
+     [:seon.ai/response-model {:optional true} :seon.ai/response-model]
      [:seon.ai/truncation {:optional true} :seon.ai/stream-truncated-error]]]}
   [{completion :seon.ai/completion}]
   (let [truncation (or (:seon.ai/truncation completion)
@@ -3624,6 +3625,8 @@
              (or (:seon.ai/finish-reason completion)
                  (get-in completion
                          [:seon.error/data :seon.ai/finish-reason])))
+      (:seon.ai/response-model completion)
+      (assoc :seon.ai/response-model (:seon.ai/response-model completion))
       truncation (assoc :seon.ai/truncation truncation))))
 
 (defn- attempt-request
@@ -3707,6 +3710,7 @@
           [:seon.ai.model/last-latency-ms {:optional true} :seon.ai.model/last-latency-ms]
           [:seon.ai/reasoning-content {:optional true} :seon.ai/reasoning-content]
           [:seon.ai/finish-reason {:optional true} :seon.ai/finish-reason]
+          [:seon.ai/response-model {:optional true} :seon.ai/response-model]
           [:seon.ai/truncation {:optional true} :seon.ai/stream-truncated-error]]
          :inst]
     [:or :nil :seon.error/fact :seon.db/error-result]]}
@@ -3722,6 +3726,7 @@
          settings :seon.ai/settings
          reasoning-content :seon.ai/reasoning-content
          finish-reason :seon.ai/finish-reason
+         response-model :seon.ai/response-model
          truncation :seon.ai/truncation} request
         retain-reasoning? (true? (:seon.config.ai/retain-reasoning settings))
         reasoning-content (when retain-reasoning? reasoning-content)
@@ -3798,7 +3803,9 @@
               (assoc :seon.ai.attempt/reasoning-blob reasoning-blob
                      :seon.ai.attempt/reasoning-size reasoning-size)
               finish-reason
-              (assoc :seon.ai.attempt/finish-reason finish-reason))
+              (assoc :seon.ai.attempt/finish-reason finish-reason)
+              response-model
+              (assoc :seon.ai.attempt/response-model response-model))
         observation-tx
         (ai/model-observation-tx
          db

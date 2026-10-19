@@ -646,6 +646,21 @@
     (is (= thinking-usage (:seon.ai/usage completion)))
     (is ((schema/projection-validator (schema/handed-projection) :seon.ai/completion) completion))))
 
+(deftest the-model-the-provider-reported-is-kept-from-either-transport
+  ;; live run 12: DeepSeek served `deepseek-flash` as V4.1-Flash-1017 from 10-17, and only the response said so
+  (let [reported "deepseek-v4.1-flash-1017"
+        one-shot (ai/completion-text {"model" reported
+                                      "choices" [{"message" {"content" "OK"} "finish_reason" "stop"}]})
+        streamed (#'seon.ai/streamed-completion
+                  (java.io.ByteArrayInputStream.
+                   (.getBytes (str/join "\n" [(str "data: " (json/write-str {"model" reported "choices" [{"delta" {"content" "OK"}}]}))
+                                              (str "data: " (json/write-str {"model" reported "choices" [{"delta" {} "finish_reason" "stop"}]}))
+                                              "data: [DONE]"])
+                              "UTF-8"))
+                  nil)]
+    (is (= reported (:seon.ai/response-model one-shot)) "a one-shot completion keeps the body's model")
+    (is (= reported (:seon.ai/response-model streamed)) "a streamed completion keeps its chunks' model")))
+
 (deftest a-reasoning-only-response-is-a-named-evidenced-error
   (let [usage {"prompt_tokens" 104
                "completion_tokens" 8

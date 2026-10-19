@@ -94,12 +94,23 @@
     (into [] (mapcat producers) (if (#{'if 'if-not 'if-let} (first form)) (drop 2 form) [(last form)]))
     [form]))
 
+(defn- translates?
+  "Whether `catch-form` keeps the exception it binds: a named binding its handler uses, as an interop edge's catch
+  does when it builds its declared variant from its library's own exception."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [[_ _ binding & handler]]
+  (boolean (and (symbol? binding) (not= '_ binding)
+                (some #{binding} (tree-seq coll? seq handler)))))
+
 (defn guards
   "The guards function `form` holds. `contract` answers the `:malli/schema` of the call head symbol it is given, or
-  nil; `definition` the named schema form of a key, or nil."
+  nil; `definition` the named schema form of a key, or nil. A catch of a general class is the interop edge's own catch
+  when the function declares an error variant and the handler keeps the exception: a library such as
+  clojure.data.json throws only `java.lang.Exception`, so its own exception has no narrower class."
   {:malli/schema [:=> [:cat :any ifn? ifn?] [:vector :any]]}
   [form contract definition]
   (let [entrant? (some #(and (map? %) (:seon/entrant %)) form)
+        edge? (boolean (some #(error-variant? % definition) (outputs (function-schema form))))
         nodes (tree-seq coll? seq form)
         bound (reduce (fn [held [name init]] (update held name (fnil conj []) init)) {}
                       (sequence (comp (filter #(and (seq? %) (#{'let 'when-let 'if-let 'loop} (first %)) (vector? (second %))))
@@ -107,7 +118,9 @@
                                       (filter (comp symbol? first)))
                                 nodes))
         catches (when-not entrant?
-                  (filter #(and (seq? %) (= 'catch (first %)) (general-catches (second %))) nodes))
+                  (filter #(and (seq? %) (= 'catch (first %)) (general-catches (second %))
+                                (not (and edge? (translates? %))))
+                          nodes))
         call-declares-none? (fn [call]
                               (let [schema (when (and (seq? call) (symbol? (first call))) (contract (first call)))]
                                 (boolean (and schema (not-any? #(error-variant? % definition) (outputs schema))))))

@@ -837,6 +837,7 @@
                 (assoc :seon.ai/reasoning-partial reasoning)
                 ;; newest usage wins, and only when the provider sent one
                 (map? usage) (assoc :seon.ai/usage usage)
+                (string? (get document "model")) (assoc :seon.ai/response-model (get document "model"))
                 (string? finish-reason)
                 (assoc :seon.ai/finish-reason finish-reason)
                 ;; THE LIVE TOKEN COUNT, from the same fold rather than a
@@ -937,8 +938,8 @@
           calls))
 
 (defn- parsed-completion
-  {:malli/schema [:=> [:cat :seon.schema/value :seon.schema/value :seon.schema/value :seon.schema/value :seon.schema/value :seon.schema/value [:sequential :seon.schema/value]] :seon.ai/parsed-completion]}
-  [content reasoning-content finish-reason usage tokens body-shape tool-calls]
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.schema/value :seon.schema/value :seon.schema/value :seon.schema/value :seon.schema/value [:sequential :seon.schema/value] :seon.schema/value] :seon.ai/parsed-completion]}
+  [content reasoning-content finish-reason usage tokens body-shape tool-calls response-model]
   (let [reply (when (or (nil? content) (string? content)) (tool-call-reply content tool-calls))
         text (:seon.ai/text reply)
         unknown (:seon.ai/unknown-tool-calls reply)
@@ -992,6 +993,7 @@
         (and (string? reasoning-content) (seq reasoning-content))
         (assoc :seon.ai/reasoning-content reasoning-content)
         (map? usage) (assoc :seon.ai/usage usage)
+        (and (string? response-model) (seq response-model)) (assoc :seon.ai/response-model response-model)
         (some? tokens) (assoc :seon.ai/tokens tokens)
         (string? finish-reason)
         (assoc :seon.ai/finish-reason finish-reason))
@@ -1037,7 +1039,8 @@
            usage
            (some-> usage (get "completion_tokens"))
            body-shape
-           (mapv #(get % "function" %) tool-calls)))))))
+           (mapv #(get % "function" %) tool-calls)
+           (when (map? body) (get body "model"))))))))
 
 (defn normalize-usage
   "Comparable token counts derived from one open provider usage document."
@@ -1226,7 +1229,7 @@
     (if (seq (:seon.ai/text snapshot))
       (-> snapshot
           (select-keys [:seon.ai/text :seon.ai/reasoning-partial :seon.ai/usage
-                        :seon.ai/tokens :seon.ai/finish-reason])
+                        :seon.ai/tokens :seon.ai/finish-reason :seon.ai/response-model])
           (set/rename-keys {:seon.ai/reasoning-partial :seon.ai/reasoning-content})
           (assoc :seon.ai/truncation ended))
       ended)))
@@ -1273,7 +1276,8 @@
          (:seon.ai/usage snapshot)
          (:seon.ai/tokens snapshot)
          ::empty-stream
-         (vec (vals (:seon.ai/tool-calls snapshot))))))))
+         (vec (vals (:seon.ai/tool-calls snapshot)))
+         (:seon.ai/response-model snapshot))))))
 
 (defn- output-observed?
   [evidence]

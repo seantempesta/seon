@@ -19,11 +19,13 @@
   (let [before "(ns a.core (:require [p.core :as p]))\n(defn old [] (try 1 (catch Exception _ nil)))\n(defn same [] 1)\n"
         after (str before "(defn added [] (try 1 (catch Throwable _ nil)))\n"
                    "(defn edge [] (try 1 (catch java.io.IOException _ nil)))\n"
+                   "(defn parses {:malli/schema [:=> [:cat :string] [:or :map :seon.error/value]]} [s] (try (read-string s) (catch Exception failure (p/refusal failure))))\n"
+                   "(defn drops {:malli/schema [:=> [:cat :string] [:or :map :seon.error/value]]} [s] (try (read-string s) (catch Exception _ nil)))\n"
                    "(defn entrant {:seon/entrant true} [] (try 1 (catch Exception _ nil)))\n"
                    "(defn rechecks [] (let [v (p/plain)] (when (:seon.error/type v) v)))\n"
                    "(defn handles [] (let [v (p/fallible)] (when (:seon.error/type v) v)))\n")
         found (census/census (texts {"base" {"src/a/core.clj" before "src/p/core.clj" producer}
                                      "tree" {"src/a/core.clj" after "src/p/core.clj" producer}})
                              "tree" "base" ["src/a/core.clj"])]
-    (is (= '#{a.core/added a.core/rechecks} (set (keys found)))
-        "a new general catch and a re-check of a contract without an error variant are guards; an interop edge's own catch, the entrant boundary and a declared variant's branch are not")))
+    (is (= '#{a.core/added a.core/drops a.core/rechecks} (set (keys found)))
+        "a new general catch, one that drops its exception and a re-check of a contract without an error variant are guards; an interop edge's own catch (a narrow class, or a general one its declared variant keeps), the entrant boundary and a declared variant's branch are not")))

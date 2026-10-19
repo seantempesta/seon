@@ -265,7 +265,7 @@
 (def ^:private call-selector
   [:db/id :seon.turn/id {:seon.turn/opened-tx [:db/id :db/txInstant]} {:seon.turn/closed-tx [:db/id :db/txInstant]}
    {:seon.turn/attempts [:seon.ai.usage/prompt-tokens :seon.ai.usage/completion-tokens :seon.ai.usage/cached-tokens
-                         :seon.ai.attempt/error]}])
+                         :seon.ai.attempt/error :seon.ai.attempt/response-model]}])
 
 (defn- attempts
   "The attempts `database` (a chain branch) holds: assignment, task symbol and references, and end."
@@ -501,7 +501,7 @@
 
 (defn grade-entity
   "The grade fact of ended attempt `assignment`, read on `database`, the head of `branch` its agent worked on, with
-  the program's Git commit `git-sha` when known: its turns, turns to green when done, wasted turns, form classes,
+  the program's Git commit `git-sha` when known and the models the provider reported serving its calls: its turns, turns to green when done, wasted turns, form classes,
   waste by rule and by cause (`steps`, `rank`), tokens, cached share, wall time and when it ended; or a read's
   refusal.
 
@@ -518,7 +518,8 @@
             mined (steps branch row false calls evaluations)
             ranked (rank mined)
             rules (frequencies (for [situation mined waste (:seon.mine/waste situation)] (:seon.mine/rule waste)))
-            classes (:seon.competency/classes graded)]
+            classes (:seon.competency/classes graded)
+            models (into #{} (keep :seon.ai.attempt/response-model) (mapcat :seon.turn/attempts calls))]
         (cond-> {:seon.grade/assignment assignment :seon.grade/branch branch
                  :seon.grade/end (:seon.task.attempt/end row) :seon.grade/at at
                  :seon.grade/turns (:seon.competency/model-calls graded)
@@ -528,6 +529,7 @@
                  :seon.grade/completion-tokens (:seon.competency/completion-tokens graded)}
           (:seon.competency/task graded) (assoc :seon.grade/task (:seon.competency/task graded))
           git-sha (assoc :seon.grade/git-sha git-sha)
+          (seq models) (assoc :seon.grade/models models)
           (:seon.competency/calls-to-green graded) (assoc :seon.grade/turns-to-green (:seon.competency/calls-to-green graded))
           (seq classes) (assoc :seon.grade/classes (set classes))
           (seq rules) (assoc :seon.grade/rules (set rules))
@@ -612,19 +614,21 @@
 
 (defn report
   "The turns metric over `grades` (pulled grade entities with their waste): the attempts and how many ended done, the
-  median and p90 of turns to green, the same per program commit in the order each commit's first graded attempt
-  ended (a grade naming no commit counts under :unknown), and the ten waste rules and producers that cost most wasted
+  median and p90 of turns to green, the same per program commit and reported models in the order each window's first
+  graded attempt ended (a grade naming no commit counts under :unknown, one naming no model in its commit's window
+  without models), and the ten waste rules and producers that cost most wasted
   forms."
   {:malli/schema [:=> [:cat [:sequential :map]] :seon.grade/report]}
   [grades]
-  (let [windows (->> (group-by #(:seon.grade/git-sha % :unknown) grades)
-                     (map (fn [[commit in]]
-                            {:seon.grade/commit commit
-                             :seon.grade/from (first (sort (map :seon.grade/at in)))
-                             :seon.grade/attempts (count in)
-                             :seon.grade/green (count (filter :seon.grade/turns-to-green in))
-                             :seon.grade/quantiles (quantiles in)
-                             :seon.grade/median-turns (quantile (map :seon.grade/turns in) 0.5)}))
+  (let [windows (->> (group-by (juxt #(:seon.grade/git-sha % :unknown) #(some-> (:seon.grade/models %) set)) grades)
+                     (map (fn [[[commit models] in]]
+                            (cond-> {:seon.grade/commit commit
+                                     :seon.grade/from (first (sort (map :seon.grade/at in)))
+                                     :seon.grade/attempts (count in)
+                                     :seon.grade/green (count (filter :seon.grade/turns-to-green in))
+                                     :seon.grade/quantiles (quantiles in)
+                                     :seon.grade/median-turns (quantile (map :seon.grade/turns in) 0.5)}
+                              models (assoc :seon.grade/models models))))
                      (sort-by (comp inst-ms :seon.grade/from))
                      vec)]
     {:seon.grade/attempts (count grades)
@@ -642,7 +646,7 @@
     (if (refusal/error? rows) rows (vec (sort-by :seon.grade/assignment rows)))))
 
 (defn report-html
-  "`:seon.render/html` of :seon.grade/report: the headline median and p90 of turns to green, a row per commit window,
+  "`:seon.render/html` of :seon.grade/report: the headline median and p90 of turns to green, a row per commit and model window,
   and the costliest waste rules and producers."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [{value :seon.render/value}]
@@ -654,8 +658,8 @@
       [:span (str "median " (:seon.grade/median q "-") " · p90 " (:seon.grade/p90 q "-") " · "
                   (:seon.grade/green value) " of " (:seon.grade/attempts value) " attempts green")]]
      (into [:table {:class "seon-turns-windows"}
-            [:tr [:th "commit"] [:th "attempts"] [:th "green"] [:th "median to green"] [:th "p90"] [:th "median turns"]]]
-           (map (fn [w] [:tr [:td (commit w)] [:td (str (:seon.grade/attempts w))] [:td (str (:seon.grade/green w))]
+            [:tr [:th "commit"] [:th "models"] [:th "attempts"] [:th "green"] [:th "median to green"] [:th "p90"] [:th "median turns"]]]
+           (map (fn [w] [:tr [:td (commit w)] [:td (str/join ", " (sort (:seon.grade/models w)))] [:td (str (:seon.grade/attempts w))] [:td (str (:seon.grade/green w))]
                          [:td (str (get-in w [:seon.grade/quantiles :seon.grade/median] "-"))]
                          [:td (str (get-in w [:seon.grade/quantiles :seon.grade/p90] "-"))]
                          [:td (str (:seon.grade/median-turns w))]]))

@@ -6,6 +6,8 @@
  :seon.grade/end [:and {:description "How the graded attempt ended."} :seon.task.attempt/end]
  :seon.grade/at [:and {:description "When the graded attempt ended: the transaction instant of its end on its branch."} :inst]
  :seon.grade/git-sha [:and {:seon.db/index true :description "The Git commit of the program the attempt ran under: the published archive the JVM that graded it at its end loaded, or the one root named for a backfill. Absent when unknown."} :seon.test.run/git-sha]
+ :seon.grade/models [:set {:description "The model ids the provider reported serving the attempt's calls (:seon.ai.attempt/response-model), which may differ from the requested model name. Absent when no response named one."}
+                     :seon.ai/response-model]
  :seon.grade/turns [:int {:min 0 :description "The attempt's turns: every call its agent made, a model call or an outside agent's eval request."}]
  :seon.grade/turns-to-green [:int {:min 0 :description "The turns an attempt that ended :done took: the metric. Absent when it did not end done."}]
  :seon.grade/wasted-turns [:int {:min 0 :description "The turns holding no productive form (seon.mine/productive)."}]
@@ -22,13 +24,14 @@
  :seon.grade/cached-share [:int {:min 0 :max 100 :description "The percent of prompt tokens the provider served from its cache; absent when no prompt token was counted."}]
  :seon.grade/wall-ms [:int {:min 0 :description "Wall time from the first call's opening to the last call's close."}]
  :seon.grade/grade [:map {:seon.db/attributes true :seon.program/partition :seon.data
-                          :description "One attempt's grade on main, written by root's db<->flow when the attempt ends (seon.mine/grade-ended!): its turns, turns to green, wasted turns by class, rule and cause, tokens, wall time, and the task, branch and commit it ran under. The series my.root/turns-report reads."}
+                          :description "One attempt's grade on main, written by root's db<->flow when the attempt ends (seon.mine/grade-ended!): its turns, turns to green, wasted turns by class, rule and cause, tokens, wall time, and the task, branch, commit and reported models it ran under. The series my.root/turns-report reads."}
                     [:seon.grade/assignment :seon.grade/assignment]
                     [:seon.grade/task {:optional true} :seon.grade/task]
                     [:seon.grade/branch :seon.grade/branch]
                     [:seon.grade/end :seon.grade/end]
                     [:seon.grade/at :seon.grade/at]
                     [:seon.grade/git-sha {:optional true} :seon.grade/git-sha]
+                    [:seon.grade/models {:optional true} :seon.grade/models]
                     [:seon.grade/turns :seon.grade/turns]
                     [:seon.grade/turns-to-green {:optional true} :seon.grade/turns-to-green]
                     [:seon.grade/wasted-turns :seon.grade/wasted-turns]
@@ -53,8 +56,9 @@
  :seon.grade/quantiles [:map {:description "The median and 90th percentile (nearest rank) of turns to green over graded attempts that ended done; absent members when none did."}
                         [:seon.grade/median {:optional true} [:int {:min 0}]]
                         [:seon.grade/p90 {:optional true} [:int {:min 0}]]]
- :seon.grade/window [:map {:description "The grades of one program commit, ordered by when its first graded attempt ended."}
+ :seon.grade/window [:map {:description "The grades of one program commit and reported models, ordered by when its first graded attempt ended."}
                      [:seon.grade/commit [:or :seon.test.run/git-sha [:= :unknown]]]
+                     [:seon.grade/models {:optional true} :seon.grade/models]
                      [:seon.grade/from :inst]
                      [:seon.grade/attempts [:int {:min 1}]]
                      [:seon.grade/green [:int {:min 0}]]

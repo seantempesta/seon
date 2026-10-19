@@ -90,6 +90,7 @@
             :seon.ai/reasoning-partial]
            [:seon.ai/tokens :seon.ai/tokens]
            [:seon.ai/usage {:optional true} :seon.ai/usage]
+           [:seon.ai/response-model {:optional true} :seon.ai/response-model]
            [:seon.ai/finish-reason
             {:optional true}
             :seon.ai/finish-reason]],
@@ -317,6 +318,7 @@
            [:seon.ai.attempt/finish-reason
             {:optional true}
             :seon.ai.attempt/finish-reason]
+           [:seon.ai.attempt/response-model {:optional true} :seon.ai.attempt/response-model]
            [:seon.ai.attempt/truncation
             {:optional true}
             :seon.ai.attempt/truncation]
@@ -342,6 +344,7 @@
              {:optional true}
              :seon.ai/reasoning-content]
             [:seon.ai/usage {:optional true} :seon.ai/usage]
+            [:seon.ai/response-model {:optional true} :seon.ai/response-model]
             [:seon.ai/tokens {:optional true} :seon.ai/tokens]
             [:seon.ai/finish-reason
              {:optional true}
@@ -357,6 +360,7 @@
           :frequency-penalty :seon.config.ai/frequency-penalty,
           :response-started? :boolean,
           :finish-reason [:string {:min 1}],
+          :response-model [:string {:min 1 :description "The model id the provider reported in its response (its \"model\" member), which may differ from the requested :seon.ai/model when the provider serves a name with another model."}],
           :authorization-failure :seon.ai/http-status,
 
           :body-read-message :string,

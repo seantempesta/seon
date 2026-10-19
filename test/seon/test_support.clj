@@ -1494,12 +1494,17 @@
       (.write out payload))
     nil))
 
+(def provider-reported-model
+  "The model id the local provider reports in every response, as a real provider names the model it served."
+  "fixture-provider-0001")
+
 (defn- provider-events
   "The SSE body streaming assistant `message`: its content, then each tool
-  call with its arguments in two fragments, as providers send them."
+  call with its arguments in two fragments, as providers send them, each chunk
+  naming the model served."
   {:malli/schema [:=> [:cat [:map-of :string :seon.ai/json-value]] :string]}
   [message]
-  (let [event #(str "data: " (json/write-str {"choices" [%]}) "\n\n")
+  (let [event #(str "data: " (json/write-str {"model" provider-reported-model "choices" [%]}) "\n\n")
         fragments (fn [index {{arguments "arguments"} "function" :as call}]
                     (let [half (quot (count arguments) 2)]
                       [(event {"delta" {"tool_calls" [(assoc-in (assoc call "index" index) ["function" "arguments"] (subs arguments 0 half))]}})
@@ -1530,7 +1535,8 @@
                (if (get request "stream")
                  (provider-send! exchange 200 "text/event-stream" (provider-events message))
                  (provider-send! exchange 200 "application/json"
-                                 (json/write-str {"choices" [{"message" message
+                                 (json/write-str {"model" provider-reported-model
+                                                  "choices" [{"message" message
                                                               "finish_reason" (if (seq (get message "tool_calls")) "tool_calls" "stop")}]}))))
              (catch Throwable failure
                (provider-send! exchange 500 "application/json"

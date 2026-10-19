@@ -163,6 +163,20 @@
     (is (= [{:seon.grade/name 'seon.render.value/show :seon.grade.waste/forms 6}] (:seon.grade/top-producers report))
         "the producers' wasted forms sum over the attempts")))
 
+(deftest the-report-splits-a-commit-by-the-model-the-provider-reported
+  ;; live run 12: the provider swapped the model behind one name, so a commit's window must not mix the two
+  (let [a (apply str (repeat 40 "a"))
+        old #{"deepseek-v4-flash"}
+        swapped #{"deepseek-v4.1-flash-1017"}
+        report (mine/report [(assoc (graded "a00000000001" 17 17 a 1000 #{}) :seon.grade/models old)
+                             (assoc (graded "a00000000002" 35 35 a 2000 #{}) :seon.grade/models swapped)
+                             (assoc (graded "a00000000003" 9 9 a 3000 #{}) :seon.grade/models swapped)
+                             (graded "a00000000004" nil 40 a 500 #{})])]
+    (is (= [[a nil 1 0] [a old 1 1] [a swapped 2 2]]
+           (mapv (juxt :seon.grade/commit :seon.grade/models :seon.grade/attempts :seon.grade/green)
+                 (:seon.grade/windows report)))
+        "one window per commit and reported models, a grade naming none on its own")))
+
 (deftest ^{:seon.test/long "One fixture-model chain run of one model call over db<->flow passes, then two more passes."
            :seon.test/long-ms 20000}
   an-ended-attempt-is-graded-once-on-main
@@ -176,16 +190,18 @@
               assignment (:seon.competency/assignment run)
               pass! #(agent/db<->flow {:seon.turn.loop/cluster handle :seon.agent/routing (:seon.agent/routing handle)}
                                       :seon.flow/plan :seon.agent/test-wake)
-              grade-of #(db/q '[:find [(pull ?g [:seon.grade/turns :seon.grade/turns-to-green :seon.grade/end :seon.grade/branch]) ...]
+              grade-of #(db/q '[:find [(pull ?g [:seon.grade/turns :seon.grade/turns-to-green :seon.grade/end :seon.grade/branch
+                                                 :seon.grade/models]) ...]
                                 :in $ ?k :where [?g :seon.grade/assignment ?k]]
                               (db/db connection) assignment)
               grade-datoms #(count (db/q '[:find ?g ?a ?v :in $ ?k :where [?g :seon.grade/assignment ?k] [?g ?a ?v]]
                                          (db/db connection) assignment))]
           (try
             (pass!)
-            (is (= [{:seon.grade/turns 1 :seon.grade/turns-to-green 1 :seon.grade/end :done :seon.grade/branch branch}]
+            (is (= [{:seon.grade/turns 1 :seon.grade/turns-to-green 1 :seon.grade/end :done :seon.grade/branch branch
+                     :seon.grade/models #{support/provider-reported-model}}]
                    (grade-of))
-                "the ended attempt has exactly one grade on main, with its turns to green")
+                "the ended attempt has exactly one grade on main, with its turns to green and the model the provider reported")
             (let [before (grade-datoms)]
               (pass!)
               (is (= before (grade-datoms)) "a second pass writes nothing")
