@@ -88,21 +88,6 @@
 ;;; the process scope is this Var; status reads it through [[status]].
 (defonce ^:private process (delay (create (declared-max-bytes))))
 
-(def ^:dynamic *reached*
-  "The branch changes the executing derivation's code reaches, as a set of
-  `[name digest]`, or nil where it reaches none: a branch runtime binds it
-  around each analysed function whose reach holds a change
-  (`seon.sci.runtime/reaching`), so a derivation that code makes is keyed by
-  what it is computed with, never served to a runtime that runs other code."
-  nil)
-
-(defn- reached-key
-  "`content-key` as the executing code derives it: itself, or with the branch
-  changes that code reaches (`*reached*`)."
-  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
-  [content-key]
-  (if-let [reached *reached*] [content-key reached] content-key))
-
 (defn- eviction
   "Caffeine's size-eviction policy of `held`."
   {:malli/schema [:=> [:cat :seon.cache/cache] :seon.schema/value]}
@@ -206,8 +191,7 @@
   ([kind content-key weigh derive-fn] (lookup @process kind content-key weigh derive-fn some?))
   ([kind content-key weigh derive-fn retain?] (lookup @process kind content-key weigh derive-fn retain?))
   ([{::keys [cache] :as held} kind content-key weigh derive-fn retain?]
-   (let [content-key (reached-key content-key)
-         [pending mine?] (claim cache [kind content-key])]
+   (let [[pending mine?] (claim cache [kind content-key])]
      (if mine?
        (let [{::keys [value thrown]} (settle! held kind content-key weigh derive-fn retain? pending)]
          (if thrown (throw thrown) value))
@@ -238,10 +222,9 @@
   ([kind content-key weigh derive-fn retain? deadline-ms on-complete]
    (lookup-within @process kind content-key weigh derive-fn retain? deadline-ms on-complete))
   ([{::keys [cache] :as held} kind content-key weigh derive-fn retain? deadline-ms on-complete]
-   (let [content-key (reached-key content-key)
-         [^CompletableFuture pending mine?] (claim cache [kind content-key])]
+   (let [[^CompletableFuture pending mine?] (claim cache [kind content-key])]
      (if mine?
-       ;; the derivation's own lookups are keyed as the reader's
+       ;; the derivation runs with the reader's bindings, its SCI context among them
        (Thread/startVirtualThread (bound-fn [] (settle! held kind content-key weigh derive-fn retain? pending)))
        (.increment ^LongAdder (::hits (kind-counters held kind))))
      (try
@@ -260,7 +243,7 @@
                   [:=> [:cat :seon.cache/cache :qualified-keyword :seon.schema/value] :seon.schema/value]]}
   ([kind content-key] (present @process kind content-key))
   ([{::keys [^AsyncCache cache] :as held} kind content-key]
-   (when-let [^CompletableFuture pending (.getIfPresent cache [kind (reached-key content-key)])]
+   (when-let [^CompletableFuture pending (.getIfPresent cache [kind content-key])]
      (when (and (.isDone pending) (not (.isCompletedExceptionally pending)))
        (let [value (::value (.join pending))]
          (when (some? value) (.increment ^LongAdder (::hits (kind-counters held kind))))
@@ -274,7 +257,7 @@
                   [:=> [:cat :seon.cache/cache :qualified-keyword :seon.schema/value] :nil]]}
   ([kind content-key] (evict! @process kind content-key))
   ([{::keys [^AsyncCache cache]} kind content-key]
-   (.remove (.asMap cache) [kind (reached-key content-key)])
+   (.remove (.asMap cache) [kind content-key])
    nil))
 
 (defn retained

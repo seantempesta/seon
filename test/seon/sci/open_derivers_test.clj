@@ -13,22 +13,11 @@
 (def ^:private open-derivers
   "The open cache derivers of the program, exactly: a name joining it is a new open derivation, a name leaving it is
   a phase's progress, and both edit this set in the commit that causes them."
-  '#{seon.cluster/stored-derivation-schema-keys
-     seon.cluster.agent/basis-valid? seon.cluster.agent/branch-admission-end seon.cluster.agent/branch-end
-     seon.cluster.source/file-proof seon.cluster.source/member-contributions seon.cluster.source/members-of
-     seon.cluster.source/publication seon.cluster.source/unmerged-count
-     seon.config/effective seon.context/conflicts seon.context/declared-tests seon.db/behavior-digest
-     seon.db/content-projection seon.db/request-view seon.embed/corpus seon.fn/declared-edge-attributes
-     seon.fn/gate-edges seon.health/problems-unit seon.health/profile-unit seon.health/replaced-roots
-     seon.program/authored-shapes seon.program/content-digest seon.program/own-changed-identities
-     seon.schema/build-projection seon.schema/declaration-projection
-     seon.schema/direct-references seon.sci.eval/derive-program-context seon.sci.eval/loaded-authored
-     seon.sci.eval/loaded-digests seon.sci.eval/overlay-plan seon.sci.eval/program-context
-     seon.sci.eval/reach-index seon.sci.eval/record-refusals-once! seon.sci.runtime-test/shaped-main
-     seon.task/task-basis seon.task/tasks-tx seon.task/tasks-tx-in
-     seon.test/destructive-reach seon.test/host seon.test/observable-changes seon.test.runner/current-results
-     seon.test.runner/reach-attribute seon.test.runner/reach-entries seon.test.runner/reach-graph
-     seon.test.runner/reached-graph seon.test.runner/retain-results! seon.test.runner/tests-reaching})
+  '#{seon.cluster.source/file-proof seon.cluster.source/member-contributions seon.cluster.source/members-of
+     seon.cluster.source/publication seon.cluster.source/unmerged-count seon.context/conflicts seon.embed/corpus
+     seon.health/problems-unit seon.health/profile-unit seon.health/replaced-roots seon.program/content-digest
+     seon.program/own-changed-identities seon.sci.eval/derive-program-context seon.sci.eval/program-context
+     seon.sci.eval/record-refusals-once! seon.sci.runtime-test/shaped-main seon.test.runner/current-results})
 
 (def ^:private converted
   "Each landed phase's converted functions: none of them calls a run-time resolution
@@ -65,7 +54,13 @@
                             "canonical-database-attributes"])
                      (map #(symbol "seon.schema" (str "schema-datahike-" %)))
                      ["storable-attribute-in?" "storable-properties-in" "assert-storable-schema!" "database-attributes-in"
-                      "malli->datahike-attr-in" "storage-schema" "value-schema"])}])
+                      "malli->datahike-attr-in" "storage-schema" "value-schema"])}
+   ;; P7 (P6b folded, mechanism 2): the projection binds the loaded Var by interop, or a callable resolving it by name
+   ;; at call; loading stays in admission (`seon.schema/runtime-predicate`, `core-predicate-registered?`).
+   {:phase :P7
+    :functions '#{seon.schema/loaded-predicate-var seon.schema/late-predicate seon.schema/unloaded-predicate-functions
+                  seon.schema/identity-only-descriptors-in seon.schema/predicate-callable seon.schema/projection-bindings
+                  seon.schema/projection-state-bindings seon.schema/predicate-bindings}}])
 
 (defn- open-cache-derivers
   "The cache derivers of `database`'s program that its reach index leaves open."

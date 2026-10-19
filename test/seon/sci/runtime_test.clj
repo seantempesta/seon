@@ -196,7 +196,8 @@
   macro or the host-bound hb) and the reach index."
   {:malli/schema [:=> [:cat] :seon.sci.eval/ctx]}
   []
-  (let [ctx (sci/fork (sci/init {:namespaces {'seon.cache {'lookup seon.cache/lookup}}}))]
+  ;; `seon.cache/lookup` is a Var, as the program space copies it, so a changed runtime binds its own
+  (let [ctx (sci/fork (sci/init {:namespaces {'seon.cache {'lookup (sci/copy-var* #'seon.cache/lookup (sci/create-ns 'seon.cache))}}}))]
     (sci.ctx-store/with-ctx ctx
       (sci/eval-string* ctx (str "(ns rt.gen) (declare " (str/join " " shaped-names) ") " (macro-source 0)))
       (doseq [program-name shaped-names]

@@ -83,7 +83,10 @@
    {:op :hub-behavior-change
     :why "One redefinition of the hub `seon.db/as-of-key` that changes its behavior digest (`AsOfDB` spelled fully qualified): read, analyze, digest and record one form, interpret that one definition (its src callers stay compiled), and run its one direct test on the branch (the ~160 tests above its src callers are the merge's platform run): the redefined form's cost plus one small test, proportional to 1 form and 1 test."
     :estimate {:alloc-mb 40.0 :calls 6000 :reads 100 :ms 300.0}
-    :overrun '{:task seon.repl/a-hub-behavior-change-costs-hundreds-of-megabytes :alloc-mb 905.8 :calls 191752 :reads 1276}}
+    :overrun '{:task seon.repl/a-hub-behavior-change-costs-hundreds-of-megabytes :alloc-mb 1734.4 :calls 275189 :reads 1288}}
+   {:op :hub-change-sequence
+    :why "Every request from the first program-change pass through the hub behavior change, summed: a hub change must analyse its reverse closure (`seon.db/as-of-key`'s, 885 functions, owner ruling 2026-10-20), work that falls in the hub row when its callers are closed and in an earlier change when they are open, so the closed-runtime gate judges the sequence. Bound: 1.3x of 716cc7527 (the pre-runtime program) on this sequence, measured 3,886.9 MB, 644,449 calls, 5,830 reads, 3,482 ms in a check JVM."
+    :estimate {:alloc-mb 5053.0 :calls 837784 :reads 7579 :ms 4526.0}}
    {:op :cold-stale-merge-members
     :why "`seon.test/stale` with every derived value cold over the tests reaching the hub `seon.db/as-of-key` (~140 members, a merge's members): one reach digest per member over the union of their reach (~3,500 definitions), each definition's behavior digest computed once from its stored row and one read of its source (~50 KB, ~10 calls), then one indexed result read per member: proportional to the reached definitions."
     :estimate {:alloc-mb 175.0 :calls 35000 :reads 150 :ms 350.0}
@@ -259,6 +262,13 @@
      :redefine-one-form redefined :reuse-one-unchanged-test reuse
      :merge-one-function (merge-cost running connection suffix)}))
 
+(defn- sequence-total
+  "The summed measures of `rows`, the requests of one sequence: allocated MB, calls, reads and wall ms."
+  {:malli/schema [:=> [:cat [:sequential :map]] :map]}
+  [rows]
+  (reduce (fn [held row] (merge-with (fnil + 0) held (select-keys row [:alloc-mb :calls :reads :ms])))
+          {:alloc-mb 0.0 :calls 0 :reads 0 :ms 0.0} rows))
+
 (defn- measured
   "Each operation of `estimates` measured once on a running agent: op -> measures. The cold stale runs first, on an
   evicted cache; the program-change rows run twice under fresh names and the second pass is kept, so each is
@@ -268,7 +278,7 @@
   (support/with-running-agent
    (fn [running agent-id connection]
      (let [cold-stale (cold-stale-cost connection)
-           _warm-pass (program-change-pass running agent-id connection (str "w" (id/id)))
+           warm-pass (program-change-pass running agent-id connection (str "w" (id/id)))
            changes (program-change-pass running agent-id connection (str "m" (id/id)))
            request (partial answer running agent-id)
            cost (partial request-cost running agent-id)
@@ -297,14 +307,19 @@
            unresolved (cost "(seon.db/transcat! 1)")]
        (assoc changes :current-state-with-task current-state :seon-db-nine-forms nine
               :similar-by-name-warm similar-by-name :unresolved-symbol-request unresolved
-              :hub-docstring-change hub-docstring :hub-behavior-change hub-behavior :cold-stale-merge-members cold-stale)))))
+              :hub-docstring-change hub-docstring :hub-behavior-change hub-behavior :cold-stale-merge-members cold-stale
+              ;; every request from the first program-change pass through the hub row: a hub change's own work
+              ;; (analysing its reverse closure) may fall in an earlier request on one program and in the hub row
+              ;; on another, so the gate judges the sequence
+              :hub-change-sequence (sequence-total (concat (vals warm-pass) (vals changes)
+                                                           [current-state nine hub-docstring hub-behavior])))))))
 
 (defn- closed-runtime-rows
-  "The three rows the closed-runtime plan gates its exact key on (the nine unchanged `seon.db` forms, the hub
-  behavior change and a warm similar-by-name), measured in the table's own state: op -> measures."
+  "The three rows the closed-runtime plan gates its exact key on (the nine unchanged `seon.db` forms, the sequence
+  through the hub behavior change and a warm similar-by-name), measured in the table's own state: op -> measures."
   {:malli/schema [:=> [:cat] [:map-of :keyword :map]]}
   []
-  (select-keys (measured) [:seon-db-nine-forms :hub-behavior-change :similar-by-name-warm]))
+  (select-keys (measured) [:seon-db-nine-forms :hub-change-sequence :similar-by-name-warm]))
 
 (defn- over
   "The measures of `observed` above their `limit`, wall time at `slack` times its limit: measure -> [observed limit]."

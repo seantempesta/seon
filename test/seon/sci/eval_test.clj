@@ -230,6 +230,55 @@
          (is (= 3 (in-context (eval/base-ctx before) "(seon.profile/bucket 5)"))
              "main's analysis is not the branch's: its key holds the macro it expanded"))))))
 
+(deftest a-branch-derivation-is-keyed-by-its-runtime-in-either-order
+  ;; Runtime re-review R1: a branch changes `seon.config/effective-in`; whichever runtime derives
+  ;; `seon.config/effective` first, the branch answers its own definition and compiled code main's.
+  (test-support/with-database
+   (fn [connection]
+     (let [before (db/db connection)
+           cluster (first (db/q '[:find [?c ...] :where [_ :seon.config/cluster ?c]] before))
+           database (branch-replacing! connection 'seon.config/effective-in
+                                       "\\(empty\\? missing\\)\\)\\s*config-effective"
+                                       "(empty? missing))\n          (assoc config-effective :seon.config.agent/max-running 777)")
+           branch (eval/base-ctx database)
+           on-branch #(in-context branch "(fn [db cn] (:seon.config.agent/max-running (seon.config/effective db cn)))"
+                                  database cluster)
+           compiled #(:seon.config.agent/max-running (config/effective database cluster))
+           main (compiled)
+           _ (seon.cache/evict-kinds! #{:seon.config/effective})
+           branch-first [(on-branch) (compiled)]
+           _ (seon.cache/evict-kinds! #{:seon.config/effective})
+           compiled-first [(compiled) (on-branch)]]
+       (is (not= 777 main) "main's definition answers main's dial")
+       (is (= [777 main] branch-first) "the branch deriving first serves compiled code nothing")
+       (is (= [main 777] compiled-first) "compiled code deriving first serves the branch nothing")))))
+
+(deftest ^{:seon.test/long "Two agent requests through MCP: five definitions deriving through seon.cache, then one call of each."
+           :seon.test/long-ms 120000}
+  an-agent-derivation-is-keyed-by-its-runtime-wherever-it-runs
+  ;; Runtime re-review R2: a derivation an agent's code makes is keyed by its runtime whether it runs in the
+  ;; definition's frame, a returned closure, a lazy sequence realized by the caller, a raw thread or a future.
+  (test-support/with-running-agent
+   (fn [running agent-id _connection]
+     (let [answer (fn [code] (test-support/mcp-replies
+                              (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                                        "arguments" {"cluster" running "agent" agent-id
+                                                                                     "mode" "sci" "code" code}})))))
+           lookup (fn [kind] (str "(seon.cache/lookup " kind " [x] (constantly 1) (fn [] (* 10 x)))"))
+           kinds [:p7.r2/direct :p7.r2/closure :p7.r2/lazy :p7.r2/thread :p7.r2/future]]
+       (answer (str "(in-ns 'seon.batch) "
+                    "(defn p7-direct \"P.\" {:malli/schema [:=> [:cat :int] :int]} [x] " (lookup :p7.r2/direct) ") "
+                    "(defn p7-closure \"P.\" {:malli/schema [:=> [:cat] :any]} [] (fn [x] " (lookup :p7.r2/closure) ")) "
+                    "(defn p7-lazy \"P.\" {:malli/schema [:=> [:cat [:sequential :int]] :any]} [xs] (map (fn [x] " (lookup :p7.r2/lazy) ") xs)) "
+                    "(defn p7-thread \"P.\" {:malli/schema [:=> [:cat :int] :int]} [x] (let [p (promise)] (.start (Thread. (fn [] (deliver p " (lookup :p7.r2/thread) ")))) @p)) "
+                    "(defn p7-future \"P.\" {:malli/schema [:=> [:cat :int] :int]} [x] @(future " (lookup :p7.r2/future) "))"))
+       (is (= [10 20 30 40 50]
+              (:seon.repl/value (last (answer (str "(in-ns 'user) [(seon.batch/p7-direct 1) ((seon.batch/p7-closure) 2) "
+                                                   "(first (seon.batch/p7-lazy [3])) (seon.batch/p7-thread 4) (seon.batch/p7-future 5)]")))))
+           "every shape derives its value")
+       (is (= (zipmap kinds (repeat nil)) (zipmap kinds (map #(seon.cache/present %1 [%2]) kinds [1 2 3 4 5])))
+           "no derivation of the agent's runtime is held under main's key")))))
+
 (deftest a-branch-changed-predicate-decides-its-branch-projection
   ;; Closed-runtime P7, mechanism 2's recorded gap (`seon.schema/a-branch-changed-predicate-is-seen-only-after-merge`):
   ;; the projection binds main's loaded Var of each predicate its schemas name, so a branch whose definition of
