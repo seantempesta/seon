@@ -230,6 +230,38 @@
          (is (= 3 (in-context (eval/base-ctx before) "(seon.profile/bucket 5)"))
              "main's analysis is not the branch's: its key holds the macro it expanded"))))))
 
+(deftest a-branch-changed-value-a-macro-reads-is-expanded-by-its-callers
+  ;; Runtime re-review R3: `seon.profile/bucket-of` reads `seon.profile/buckets` at expansion, so a branch
+  ;; holding 3 buckets expands `seon.profile/bucket` with its own value (the last bucket is 2), cold or warm.
+  (test-support/with-database
+   (fn [connection]
+     (let [before (db/db connection)
+           database (branch-replacing! connection 'seon.profile/buckets "(?s)40\\)\\s*$" "3)")]
+       (is (= 3 (in-context (eval/base-ctx before) "(seon.profile/bucket 5)")) "main expands with main's 40 buckets")
+       (is (= 2 (in-context (eval/base-ctx database) "(seon.profile/bucket 5)")) "the branch expands with its 3")
+       (seon.cache/evict-kinds! #{:seon.sci.runtime/analysed :seon.sci.eval/program-context})
+       (is (= 2 (in-context (eval/base-ctx database) "(seon.profile/bucket 5)")) "and again from a cold cache")
+       (is (= 3 (in-context (eval/base-ctx before) "(seon.profile/bucket 5)"))
+           "main's analysis is not the branch's: its key holds what the macro reads")))))
+
+(deftest ^{:seon.test/long "Three agent requests through MCP: a value a compiled macro reads is changed, then read through its caller."
+           :seon.test/long-ms 120000}
+  an-agent-changed-value-a-macro-reads-is-expanded-by-its-callers
+  ;; Runtime re-review R3, the agent path: the request that changes `seon.profile/buckets` and the next one
+  ;; both expand `seon.profile/bucket` with the agent's value.
+  (test-support/with-running-agent
+   (fn [running agent-id _connection]
+     (let [answer (fn [code] (:seon.repl/value
+                              (last (test-support/mcp-replies
+                                     (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                                               "arguments" {"cluster" running "agent" agent-id
+                                                                                            "mode" "sci" "code" code}})))))))]
+       (is (= 3 (answer "(seon.profile/bucket 5)")) "before the change, main's expansion")
+       (is (= [3 2] (answer (str "(in-ns 'seon.profile) (def buckets \"Histogram buckets.\" 3) (in-ns 'user) "
+                                 "[seon.profile/buckets (seon.profile/bucket 5)]")))
+           "the request that changes the value expands with it")
+       (is (= [3 2] (answer "[seon.profile/buckets (seon.profile/bucket 5)]")) "and the next request")))))
+
 (deftest a-branch-derivation-is-keyed-by-its-runtime-in-either-order
   ;; Runtime re-review R1: a branch changes `seon.config/effective-in`; whichever runtime derives
   ;; `seon.config/effective` first, the branch answers its own definition and compiled code main's.

@@ -2673,19 +2673,19 @@
   host's, so interpreting adds no second copy of process state. A function
   row (`::runtime/kind` `:function`) is armed as its compiled Var is; a value
   definition's row (`:value`) carries the program names it calls or holds
-  (`::runtime/calls`), which order its evaluation. A host-bound declaration
-  (`:seon.fn/host-bound?`), a macro and a test-root or unloaded namespace have
-  no row."
+  (`::runtime/calls`), which order its evaluation, and so does a macro's
+  (`:macro`): its expansion reads them. A host-bound declaration
+  (`:seon.fn/host-bound?`) and a test-root or unloaded namespace have no row."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.schema/projection
                        [:map-of :symbol :map] [:set :symbol]]
                   [:vector :map]]}
   [ctx database projection namespace-row-by-name test-names]
   (let [read! (fn [result] (when (db/read-refusal? result) (throw (ex-info (:seon.error/message result) result))) result)
-        rows (read! (db/q '[:find ?sym ?source ?digest ?arglists
+        rows (read! (db/q '[:find ?sym ?source ?digest ?arglists ?macro
                             :where [?f :seon.fn/host-bound? false]
                             [?f :seon.schema.admission/source :core]
                             [?f :seon.fn/arglists ?arglists]
-                            (not [?f :seon.fn/macro? true])
+                            [(get-else $ ?f :seon.fn/macro? false) ?macro]
                             [?f :seon.fn/ns ?namespace] [?namespace :seon.fn/file ?file]
                             [?file :seon.fn.file/relative-root "src"]
                             [?f :seon.fn/sym ?sym] [?f :seon.fn/source ?source]
@@ -2700,12 +2700,13 @@
                                         [?m :seon.program/definition-digest ?digest]
                                         [?f :seon.fn/calls ?macro] [?f :seon.fn/sym ?sym]]
                                       database)))
-        values (into #{} (keep (fn [[sym _ _ arglists]] (when (= "()" arglists) sym))) rows)
+        macros (into #{} (keep (fn [[sym _ _ _ macro?]] (when macro? sym))) rows)
+        values (into #{} (keep (fn [[sym _ _ arglists macro?]] (when (and (not macro?) (= "()" arglists)) sym))) rows)
         value-calls (reduce (fn [held [sym callee]] (update held sym (fnil conj #{}) callee))
                             {}
                             (read! (db/q '[:find ?sym ?callee :in $ [?sym ...]
                                            :where [?f :seon.fn/sym ?sym] [?f :seon.fn/calls ?callee]]
-                                         database (vec values))))
+                                         database (vec (into values macros)))))
         rows (sort-by (comp str first)
                       (filter (fn [[sym]] (let [namespace-name (symbol (namespace sym))]
                                             (and (find-ns namespace-name) (not (contains? test-names namespace-name)))))
@@ -2725,8 +2726,12 @@
                   (when-let [host-var (find-var sym)]
                     (let [row {:seon.fn/sym sym :seon.fn/source source :seon.program/definition-digest digest
                                ::runtime/macro-digests (vec (get expanded sym))}]
-                      (if (contains? values sym)
+                      (cond
+                        (contains? values sym)
                         (assoc row ::runtime/kind :value ::runtime/calls (get value-calls sym #{}))
+                        (contains? macros sym)
+                        (assoc row ::runtime/kind :macro ::runtime/calls (get value-calls sym #{}))
+                        :else
                         (let [compiled @host-var]
                           (assoc row ::runtime/kind :function
                                  ::runtime/armed-with compiled
@@ -2797,36 +2802,49 @@
                    (into (sorted-map) (update-vals refers str))])))
 
 (defn- dependency-order
-  "The value rows `rows`, each after the rows its `::runtime/calls` name."
+  "The due rows `rows`, each after the rows it reads when it is produced: a
+  value's and a macro's `::runtime/calls`, the macros a function expands."
   {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
   [rows]
   (let [by-sym (into {} (map (juxt :seon.fn/sym identity)) rows)
+        reads (fn [row] (if (= :function (::runtime/kind row))
+                          (map first (::runtime/macro-digests row))
+                          (::runtime/calls row)))
         visit (fn visit [[ordered seen :as held] sym]
                 (if (or (contains? seen sym) (not (contains? by-sym sym)))
                   held
-                  (let [[ordered seen] (reduce visit [ordered (conj seen sym)] (sort (::runtime/calls (by-sym sym))))]
+                  (let [[ordered seen] (reduce visit [ordered (conj seen sym)] (sort (reads (by-sym sym))))]
                     [(conj ordered (by-sym sym)) seen])))]
     (first (reduce visit [[] #{}] (sort (keys by-sym))))))
 
-(defn- evaluated-values
-  "The value definitions `rows` (in dependency order) evaluated from their
-  source on a fork of `ctx` that binds `roots` first: what a fresh
-  interpretation of the definition answers on `ctx`'s runtime. The fork is
-  dropped; nothing is written to `ctx`. A `defonce` is evaluated as a `def`:
-  the fork's Var already holds the host's value."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :map [:vector :map]] :map]}
-  [ctx roots rows]
+(defn- produced-roots
+  "The roots of the due `rows` (in dependency order), each produced on a fork
+  of `ctx` that binds `entries` and every root produced before it: a value
+  evaluated from its source, what a fresh interpretation of the definition
+  answers on `ctx`'s runtime, and a function or macro analysed (`analyse`, of
+  the fork and the row), so a caller expands the macros and the values they
+  read as this runtime holds them. The fork is dropped; nothing is written to
+  `ctx`. A `defonce` is evaluated as a `def`: the fork's Var already holds the
+  host's value."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :map [:vector :map]
+                       [:=> [:cat :seon.sci.eval/ctx :map] :seon.instrument/callable]]
+                  :map]}
+  [ctx entries rows analyse]
   (let [fork (assoc (sci/fork ctx) :features #{:clj})]
     (binding [sci.lang/*write-observer* nil sci.lang/*expansion-observer* nil]
       (sci.ctx-store/with-ctx fork
-        (doseq [[sym root] roots]
+        (doseq [[sym root] entries]
           (sci/bind-root! fork (sci/resolve fork sym) root))
-        (into {} (map (fn [{sym :seon.fn/sym source :seon.fn/source}]
-                        (sci/binding [sci/ns (sci/find-ns fork (symbol (namespace sym)))]
-                          (let [form (sci/parse-string fork source)]
-                            (sci/eval-form fork (if (= 'defonce (first form)) (cons 'def (rest form)) form))))
-                        [sym @(sci/resolve fork sym)]))
-              rows)))))
+        (reduce (fn [held {sym :seon.fn/sym source :seon.fn/source kind ::runtime/kind :as row}]
+                  (let [root (if (= :value kind)
+                               (sci/binding [sci/ns (sci/find-ns fork (symbol (namespace sym)))]
+                                 (let [form (sci/parse-string fork source)]
+                                   (sci/eval-form fork (if (= 'defonce (first form)) (cons 'def (rest form)) form)))
+                                 @(sci/resolve fork sym))
+                               (analyse fork row))]
+                    (sci/bind-root! fork (sci/resolve fork sym) root)
+                    (assoc held sym root)))
+                {} rows)))))
 
 (defn- bind-analysed!
   "Bind in `ctx` each loaded `src` definition SCI can run (`::runtime-rows`)
@@ -2841,12 +2859,15 @@
   Var each analysed body holds, in the executing context's own binding. A
   value definition holds what it computed: one whose reach holds a name
   changed now, or an open one not yet bound, is evaluated again from its
-  source on `ctx`'s runtime (`evaluated-values`). An analysis is keyed by its
-  definition, by how `ctx` resolves its namespace (`resolver-digest`) and by
-  the digests of the macros it expands as `ctx` holds them, so a changed
-  macro re-analyses its callers here only and an analysis is shared by every
-  context holding the same. Everything is analysed and evaluated before
-  anything is bound: a failure binds nothing."
+  source on `ctx`'s runtime. A macro whose closed reach holds a change runs
+  analysed, so its callers expand it with the values it reads as `ctx` holds
+  them; each root is produced after what it reads (`produced-roots`). An
+  analysis is keyed by its definition, by how `ctx` resolves its namespace
+  (`resolver-digest`) and by each macro it expands: its digest as `ctx` holds
+  it and the changes its closed reach holds, so a changed macro, or a change
+  a macro reads, re-analyses its callers here only and an analysis is shared
+  by every context holding the same. Everything is analysed and evaluated
+  before anything is bound: a failure binds nothing."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:map-of :symbol [:maybe :string]] [:set :symbol]] :map]}
   [ctx own namespaces]
   (let [snapshot (::kernel/program-snapshot ctx)
@@ -2865,26 +2886,26 @@
         kept (runtime/compiled-names index (::compiled-kept @snapshot (::runtime/closed index)) changed)
         reached (into #{} (mapcat #(get (::runtime/reached-by index) %)) changed)
         rekeyed? (fn [row] (or (contains? namespaces (symbol (namespace (:seon.fn/sym row))))
-                               (some (fn [[macro]] (contains? own macro)) (::runtime/macro-digests row))))
+                               (some (fn [[macro]] (or (contains? own macro) (contains? reached macro)))
+                                     (::runtime/macro-digests row))))
         due (into [] (filter (fn [{sym :seon.fn/sym kind ::runtime/kind :as row}]
                                (and (not (contains? held sym))
                                     (not (contains? kept sym))
-                                    (if (= :value kind)
-                                      (or (contains? reached sym) (not (contains? roots sym)))
-                                      (or (not (contains? roots sym)) (rekeyed? row))))))
+                                    (case kind
+                                      :value (or (contains? reached sym) (not (contains? roots sym)))
+                                      :macro (and (contains? reached sym)
+                                                  (or (not (contains? roots sym)) (rekeyed? row)))
+                                      :function (or (not (contains? roots sym)) (rekeyed? row))))))
               rows)
-        space (runtime/program-space ctx)
         resolution (into {} (map (fn [namespace-name] [namespace-name (resolver-digest ctx namespace-name)]))
                          (distinct (map (comp symbol namespace :seon.fn/sym) due)))
+        ;; the changes a macro's closed reach holds: what its expansion may read
+        reaching (fn [macro] (into (sorted-map) (filter (fn [[sym]] (contains? (get (::runtime/reached-by index) sym) macro)))
+                                   changes))
         keyed (fn [row] (assoc row
                                ::runtime/namespace-digest (resolution (symbol (namespace (:seon.fn/sym row))))
-                               ::runtime/macro-digests (mapv (fn [[macro digest]] [macro (get held macro digest)])
+                               ::runtime/macro-digests (mapv (fn [[macro digest]] [macro (get held macro digest) (reaching macro)])
                                                              (::runtime/macro-digests row))))
-        functions (binding [sci.lang/*write-observer* nil sci.lang/*expansion-observer* nil]
-                    (sci.ctx-store/with-ctx ctx
-                      (into {} (comp (remove #(= :value (::runtime/kind %)))
-                                     (map (fn [row] [(:seon.fn/sym row) (runtime/analysed space (keyed row))])))
-                            due)))
         ;; every derivation this runtime's code makes is keyed by the code it
         ;; runs, its delta (`seon.sci.runtime/keyed-entries`); main's is the bare key
         entries (if (empty? changes)
@@ -2892,10 +2913,11 @@
                   (sci.ctx-store/with-ctx ctx
                     (into {} (filter (fn [[sym]] (sci/resolve ctx sym)))
                           (runtime/keyed-entries (id/digest 32 [(into (sorted-map) changes)])))))
-        values (evaluated-values ctx (merge functions entries)
-                                 (dependency-order (filterv #(= :value (::runtime/kind %)) due)))
-        bound (merge functions entries values)
-        analysis {::analysed-count (+ (::analysed-count prior 0) (count functions))
+        produced (produced-roots ctx entries (dependency-order due)
+                                 (fn [fork row] (runtime/analysed (runtime/program-space fork) (keyed row))))
+        values (into #{} (comp (filter #(= :value (::runtime/kind %))) (map :seon.fn/sym)) due)
+        bound (merge entries produced)
+        analysis {::analysed-count (+ (::analysed-count prior 0) (- (count produced) (count values)))
                   ::evaluated-count (+ (::evaluated-count prior 0) (count values))
                   ::compiled-count (count kept)}]
     (sci.ctx-store/with-ctx ctx
@@ -3624,6 +3646,14 @@
                                   (count (::interpreted @(::kernel/program-snapshot ctx))))))]
          (cond-> acquired
            held (assoc ::plan (select-keys plan [::held ::tests ::namespaces]))))))))
+
+(defn program-value?
+  "Whether `sym` names a loaded `src` value definition `ctx` runs
+  (`::runtime-rows`): a write of it changes what loaded definitions read."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol] :boolean]}
+  [ctx sym]
+  (boolean (some #(and (= sym (:seon.fn/sym %)) (= :value (::runtime/kind %)))
+                 (::runtime-rows @(::kernel/program-snapshot ctx)))))
 
 (defn interpret-affected!
   "Interpret in `ctx` the source callers and tests reaching `changed`, the

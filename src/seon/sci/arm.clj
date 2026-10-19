@@ -110,7 +110,7 @@
   install gate's generated calls, a render) never installs it again from a
   stored row. A contract that cannot arm leaves the function callable as written, with the
   cause beside the write as `:seon.batch/arm-error`. Answers the write with what arming
-  did. It reads the Var as `ctx` binds it. The base's callers of a function the
+  did. It reads the Var as `ctx` binds it. The base's callers of a function or loaded value the
   write defines apart from the base's Var are re-interpreted onto it
   (`seon.sci.eval/reinterpret-inherited-callers!`), and every loaded definition
   its change can reach, its source callers and the tests reaching them run
@@ -139,7 +139,9 @@
                   ;; Var, refuses as ex-info; any other throw is a defect
                   (catch clojure.lang.ExceptionInfo t
                     (assoc write :seon.batch/arm-error (ex-message t)))))
-        (and sym function?
+        ;; a loaded value's write too: its readers and the macros expanding
+        ;; with it change; a new name no loaded definition reads changes none
+        (and sym (or function? (eval/program-value? ctx sym))
              ;; the form's source as read (`seon.batch/evaluate-form`)
              (not (behavior-held? working sym (get-in request [:seon.batch/world :seon.batch/source])
                                   (:doc (meta v)))))
