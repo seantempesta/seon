@@ -16,6 +16,7 @@
             [seon.fn-test]
             [seon.test.accretion :as accretion]
             [clojure.test :refer [are deftest is testing]]
+            [edamame.core :as edamame]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -1634,3 +1635,11 @@
         measured (profile/measure #(source database :seon.ref/section))]
     (is (< (:seon.profile/ms measured) 5) "under 5 ms")
     (is (< (:seon.profile/alloc-bytes measured) (* 5 1024 1024)) "under 5 MB")))
+
+(deftest seon-db-requires-seon-program
+  (let [ns-form (edamame/parse-string (slurp (io/file "src/seon/db.clj")) {:all true :read-cond :allow})
+        required (into #{} (comp (filter #(and (seq? %) (= :require (first %))))
+                                 (mapcat rest)
+                                 (map #(if (sequential? %) (first %) %)))
+                       ns-form)]
+    (is (contains? required 'seon.program) "seon.db's ns form requires seon.program statically")))

@@ -321,16 +321,6 @@
   [{macro? :seon.fn/macro? host-bound? :seon.fn/host-bound? arglists :seon.fn/arglists}]
   (not (or macro? host-bound? (and (some? arglists) (value-definition? arglists)))))
 
-(defn stored-namespace-context
-  [{:seon.ns/keys [requires aliases refers imports]}]
-  {:requires (set requires)
-   :aliases (into {} (map (juxt :seon.ns.alias/local
-                                :seon.ns.alias/target-ns)) aliases)
-   :refers (into {} (map (fn [{:seon.ns.refer/keys [local target-ns target-name]}]
-                            [local (symbol (str target-ns) (str target-name))])) refers)
-   :imports (into {} (map (juxt :seon.ns.import/local
-                                :seon.ns.import/target-class)) imports)})
-
 (defn- first-party-function-symbols
   [analysis]
   (into #{}

@@ -33,7 +33,12 @@
 (def ^:private converted
   "Each landed phase's converted functions: none of them calls a run-time resolution
   (`seon.sci.eval/run-time-resolution`) directly any more."
-  [])
+  ;; P2's functions are deleted seams: built from names, never quoted as symbols, so the program keeps no reference
+  ;; to a function that no longer exists (a deleted function with a surviving referrer refuses the deletion).
+  [{:phase :P2
+    :functions (into #{} (map #(symbol "seon.db" %))
+                     ["program-definition-digest" "program-behavior-digest" "stored-namespace-context"
+                      "program-shapes-in" "program-canonical-entity"])}])
 
 (defn- open-cache-derivers
   "The cache derivers of `database`'s program that its reach index leaves open."

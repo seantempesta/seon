@@ -26,6 +26,18 @@
   (boolean (and (:seon.program/row-schema properties)
                 (:seon.program/source-attribute properties))))
 
+(defn stored-namespace-context
+  "The resolver context (requires, aliases, refers, imports) of a stored namespace entity."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{:seon.ns/keys [requires aliases refers imports]}]
+  {:requires (set requires)
+   :aliases (into {} (map (juxt :seon.ns.alias/local
+                                :seon.ns.alias/target-ns)) aliases)
+   :refers (into {} (map (fn [{:seon.ns.refer/keys [local target-ns target-name]}]
+                            [local (symbol (str target-ns) (str target-name))])) refers)
+   :imports (into {} (map (juxt :seon.ns.import/local
+                                :seon.ns.import/target-class)) imports)})
+
 (def identity-attributes
   "Source declaration identities, derived from their authored row-schema links.
    Program components and other analysis rows are selected by program-attributes."

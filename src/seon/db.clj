@@ -34,6 +34,7 @@
             [seon.error.refusal :as error.refusal]
             [seon.id :as id]
             [seon.print :as print]
+            [seon.program :as program]
             [seon.profile :as profile]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -5454,18 +5455,6 @@
   (set/union (set (identity-attributes (:db-before report)))
              (set (identity-attributes (:db-after report)))))
 
-;; `seon.program` and `seon.fn` require `seon.db` (through `seon.fn.schema-shape`).
-(defonce ^:private program-definition-digest
-  (delay (requiring-resolve 'seon.program/definition-digest)))
-(defonce ^:private program-behavior-digest
-  (delay (requiring-resolve 'seon.program/behavior-digest)))
-;; The one owner of a namespace entity's resolver context (`seon.fn` digests with it).
-(defonce ^:private stored-namespace-context
-  (delay (requiring-resolve 'seon.fn/stored-namespace-context)))
-;; The one answer to which attributes a declaration entity owns: the digest's input.
-(defonce ^:private program-shapes-in (delay (requiring-resolve 'seon.program/shapes-in)))
-(defonce ^:private program-canonical-entity (delay (requiring-resolve 'seon.program/canonical-row)))
-
 ;;; ---------------------------------------------------------------------------
 ;;; Vectors: the writer's transaction function (vector-storage design §3.1)
 ;;; ---------------------------------------------------------------------------
@@ -5751,17 +5740,17 @@
   "The definition digest the writer admits for function or test `row`:
   `seon.program/definition-digest` of the attributes its family owns
   (`seon.program/canonical-row`) with the resolver context
-  (`seon.fn/stored-namespace-context`) of `namespace-row`, the namespace row
+  (`seon.program/stored-namespace-context`) of `namespace-row`, the namespace row
   the same transaction leaves stored. The one digest owner: the writer checks
   every changed row against it, and every producer digests through it."
   {:malli/schema [:=> [:cat :seon.schema/projection :map [:maybe :map]]
                   :seon.program/definition-digest]}
   [projection entity-map namespace-entity]
-  (@program-definition-digest
-   (@program-canonical-entity
-    (schema/projection-cache-value projection ::program-shapes #(@program-shapes-in projection))
+  (program/definition-digest
+   (program/canonical-row
+    (schema/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
     entity-map)
-   (some-> namespace-entity (@stored-namespace-context))))
+   (some-> namespace-entity program/stored-namespace-context)))
 
 (defn namespace-digest-of
   "The definition digest of namespace `entity-id` as `database` stores it
@@ -5773,9 +5762,9 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :int :map] :seon.program/definition-digest]}
   [database entity-id row]
   (let [projection (carried-projection database)]
-    (@program-definition-digest
-     (@program-canonical-entity
-      (schema/projection-cache-value projection ::program-shapes #(@program-shapes-in projection))
+    (program/definition-digest
+     (program/canonical-row
+      (schema/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
       (dissoc (merge (declaration-value database (identity-attributes database) entity-id) row)
               :seon.program/definition-digest)))))
 
@@ -5799,16 +5788,16 @@
              namespace-digest (some->> namespace-entity
                                        (#(d/datoms database :eavt % :seon.program/definition-digest))
                                        first :v)]
-         (@program-behavior-digest
-          (@program-canonical-entity
-           (schema/projection-cache-value projection ::program-shapes #(@program-shapes-in projection))
+         (program/behavior-digest
+          (program/canonical-row
+           (schema/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
            entity-map)
           ;; The namespace's stored definition digest determines its resolver context, so
           ;; its functions share one derivation.
           (when namespace-digest
             (seon.cache/lookup
              ::namespace-resolver-context namespace-digest (constantly 1024)
-             #(@stored-namespace-context
+             #(program/stored-namespace-context
                (declaration-value projection database identity-attrs namespace-entity))))))))))
 
 (defn namespace-digests-tx
@@ -5851,7 +5840,7 @@
   [projection report identity-attrs]
   (let [database (:db-after report)
         shapes (schema/projection-cache-value projection ::program-shapes
-                                              #(@program-shapes-in projection))
+                                              #(program/shapes-in projection))
         ;; Only the families this store installed: Datahike refuses a datom
         ;; read naming an attribute its schema lacks (a raw blob branch).
         families (into {} (keep (fn [family]
@@ -6196,7 +6185,7 @@
   `database`, the value before it; a row whose digest the transaction writes keeps the writer's check."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/database-value [:sequential :any]] [:set :symbol]]}
   [projection database tx-data]
-  (let [shapes (schema/projection-cache-value projection ::program-shapes #(@program-shapes-in projection))
+  (let [shapes (schema/projection-cache-value projection ::program-shapes #(program/shapes-in projection))
         owned (into #{} (mapcat #(get-in shapes [% :seon.program/owned-attributes])) [:seon.fn/sym :seon.test/sym])
         dropped (into #{} (keep (fn [op] (when (and (vector? op) (#{:db/retract :db.purge/attribute} (first op))
                                                     (int? (second op)) (owned (nth op 2 nil)))
