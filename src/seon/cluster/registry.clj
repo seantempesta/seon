@@ -408,20 +408,19 @@
 
 (defn- commit-step
   "The branch `commit` was written on and its first parent: the parent written on that same branch, else its one
-  parent (the commit its branch forked at), git's first parent; nil when the store no longer holds the commit. An
-  immutable commit's record, so it is cached by the commit (`seon.cache`) and read once."
+  parent (the commit its branch forked at), git's first parent; nil when the store no longer holds the commit. Read
+  from Datahike's commit graph records (`datahike.api/commit-graph-record`), a commit's parents and branch without
+  its index roots, and cached by the commit (`seon.cache`): an immutable commit is read once."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/commit-id]
                   [:maybe [:tuple :seon.store/branch [:maybe :seon.source/commit-id]]]]}
   [database commit]
   (seon.cache/lookup ::commit-step commit (constantly 96)
                      #(let [konserve (:store (db/schema-database database))
-                            written (fn [c] (get-in (head-record konserve c) [:config :branch]))]
-                        (when-let [record (head-record konserve commit)]
-                          (let [branch (get-in record [:config :branch])
-                                parents (get-in record [:meta :datahike/parents])]
-                            [branch (if (next parents)
-                                      (some (fn [parent] (when (= branch (written parent)) parent)) parents)
-                                      (first parents))])))))
+                            record (fn [c] (d/commit-graph-record konserve c))]
+                        (when-let [{branch :datahike/branch parents :datahike/parents} (record commit)]
+                          [branch (if (next parents)
+                                    (some (fn [parent] (when (= branch (:datahike/branch (record parent))) parent)) parents)
+                                    (first parents))]))))
 
 (defn first-parent-where
   "The newest commit of `commit`'s first-parent history (git's `log --first-parent`) for which `found?` holds of the
