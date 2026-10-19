@@ -490,15 +490,9 @@
                 ;; a stored namespace changes only the attributes the context row
                 ;; carries: its doc, file, tasks and admission source stay, so its
                 ;; digest is the digest of the row as it is left stored
-                ;; digest is the digest of the row as it is left stored; a row
-                ;; whose digest is the stored one is the stored content, and
-                ;; writing it again writes nothing
                 (let [row (dissoc row :seon.schema.admission/source)
-                      row (assoc row :seon.program/definition-digest (db/namespace-digest-of db stored-id row))
-                      current (db/pull db '[*] stored-id)]
-                  (if (= (:seon.program/definition-digest row) (:seon.program/definition-digest current))
-                    []
-                    (program/exact-replacement-tx (select-keys current (cons :db/id (keys row))) row)))
+                      row (assoc row :seon.program/definition-digest (db/namespace-digest-of db stored-id row))]
+                  (program/exact-replacement-tx (select-keys (db/pull db '[*] stored-id) (cons :db/id (keys row))) row))
                 (entity-facts db [row]))))))
       []))
 
