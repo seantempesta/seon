@@ -54,4 +54,4 @@ Option 2 is exact and within 1.3x only for derivations whose code the reach inde
 names an open function resolves at run time: the quoted symbols its `requiring-resolve` names are static and could
 join `:seon.fn/calls` (an analyzer change), but render functions found in the viewing agent's namespace are resolved
 from data. Not covered either way by the patch: an own definition re-rooted by `seon.sci.arm/arm!` when the write is
-`behavior-held?` (no `interpret-affected!` runs) or by `rearm-dependents!` loses its wrapper.
+`behavior-held?` (no `interpret-affected!` runs) or by `rearm-dependents!` loses its wrapper: proven red by `seon.sci.eval-test/an-own-definition-keys-its-derivations-after-every-re-rooting`; the fix (`docs/research/agent-platform/2026-10-19/runtime-f7b-arm-gap.patch`) is not landed, see the branch-runtime note's lane runtime-f7b section. The 50 open functions that call `seon.cache/lookup` keep main's key (same section, the residual).

@@ -727,6 +727,61 @@ Ruled out by the owner's test ("doesn't really help ... cut it"): the rows stay 
     - `seon.error.refusal/prepared-call-prefix` is static (`(find-ns 'seon.call-preparation)` then
       `(ns-resolve 'preparing)`) but reads the Var's metadata, which is Var reflection.
     Because the error constructor reaches the frame classifier, nearly every function that can build an error is open.
+  - **Rows, two same-run pairs of throwaway check JVMs, 85299376b against f06474e75's code (3a34b1d3f; MB allocated /
+    calls / ms; the lane runtime-f7 probe `cost-rows`):**
+
+    | Row | 85299376b | f06474e75 | ratio (MB) |
+    |---|---|---|---|
+    | `:unchanged-request` | 18.7 / 6,489 / 25; 18.7 / 6,466 / 32 | 18.8 / 6,847 / 21; 18.5 / 6,726 / 24 | 1.01x, 0.99x |
+    | `:reuse-one-unchanged-test` | 30.4 / 7,924 / 26; 31.5 / 7,910 / 33 | 31.4 / 8,330 / 26; 31.0 / 8,208 / 28 | 1.03x, 0.98x |
+    | `:seon-db-nine-forms` | 1,231.0 / 145,820 / 878; 1,244.9 / 146,033 / 867 | 1,236.5 / 149,751 / 879; 1,227.3 / 149,046 / 880 | 1.00x, 0.99x |
+    | `:hub-behavior-change` | 1,006.6 / 211,810 / 1,100; 1,004.4 / 211,757 / 973 | 1,025.9 / 222,682 / 1,024; 1,006.6 / 220,948 / 1,035 | 1.02x, 1.00x |
+    | `:similar-by-name-warm` | 26.5 / 7,394 / 31; 26.5 / 7,370 / 29 | 26.5 / 7,795 / 34; 26.2 / 7,674 / 28 | 1.00x, 0.99x |
+
+    Calls grow 3-5% (the `reaching` frames); allocation stays within 1.03x. The hub row is lower than lane runtime-f7's
+    union-noopen measurement (1.12x) because an open function is no longer bound again on each change.
+  - **The residual: which derivations still cross branches.** A derivation is keyed by the changes its deriving
+    code reaches only where that code is closed. Of the 78 program functions that call `seon.cache/lookup` or
+    `lookup-within` directly (default, 2026-10-19), 28 are closed and 50 open; an open one keeps main's key, so when
+    a branch changes a name in its reach, the branch and main share one derivation and whichever derives first serves
+    both. The 50: `seon.cluster/branch-declaration-changes`, `derivation-keys`, `stored-derivation-schema-keys`;
+    `seon.cluster.agent/basis-valid?`, `branch-admission-end`, `branch-end`; `seon.cluster.source/file-proof`,
+    `member-contributions`, `members-of`, `merge-base`, `publication`, `unmerged-count`; `seon.config/effective`;
+    `seon.context/conflicts`, `declared-tests`; `seon.db/behavior-digest`, `content-projection`, `request-view`;
+    `seon.embed/corpus`; `seon.fn/declared-edge-attributes`, `gate-edges`; `seon.health/problems-unit`,
+    `profile-unit`, `replaced-roots`; `seon.program/authored-shapes`, `content-digest`, `own-changed-identities`,
+    `program-attributes`; `seon.schema/build-projection`, `declaration-projection`, `direct-references`;
+    `seon.sci.eval/derive-program-context`, `loaded-authored`, `loaded-digests`, `overlay-plan`, `program-context`,
+    `record-refusals-once!`; `seon.task/task-basis`, `tasks-tx`, `tasks-tx-in`; `seon.test/destructive-reach`,
+    `host`, `observable-changes`; `seon.test.runner/current-results`, `reach-attribute`, `reach-entries`,
+    `reach-graph`, `reached-graph`, `retain-results!`, `tests-reaching`. Why open: each one's reach holds a
+    run-time resolution (per function not broken down here; the census above names the hubs holding most of the open
+    set). Keying them exactly (every change, root's option measured at 5.11x on the hub row) is what the schema
+    projection and `seon.config/effective` cannot afford; the removal lanes shrinking those hubs close them.
+    Their derivations are also keyed by content (database values, commit ids), so the cross-branch case needs a
+    branch change to the deriving code itself, never only to the data.
+  - **The arm gap: proven, fix written, not landed.** `seon.sci.arm/arm!` re-roots an agent's own definition without
+    interpreting anything when the write is behavior-held (`behavior-held?`), and `rearm-dependents!` re-arms a
+    dependent through `seon.instrument/wrap-interpreted`, which instruments the raw definition under any wrapper;
+    either way the definition loses its `seon.sci.runtime/reaching` wrapper and its derivations fall back to main's
+    key. Proof: `seon.sci.eval-test/an-own-definition-keys-its-derivations-after-every-re-rooting` through MCP (an
+    agent's `seon.batch/rr-derive` derives through `seon.cache/lookup`; main must read no derivation of it after its
+    first write, the same write again, and a redefinition of the predicate `seon.batch/stamped-clock?` its contract
+    reaches). On f06474e75 (dangling 053158e66) the first holds and the second and third are red.
+    The fix, `runtime-f7b-arm-gap.patch` beside this note: `seon.sci.eval/bind-analysed!` records each wrapper it
+    binds (`::seon.sci.eval/wrapped`: name to raw, wrapper, reached changes) and `seon.sci.eval/keep-reaching!` wraps
+    again whatever `arm!` re-rooted. The proof is green with it, but the commit check turned
+    `seon.sci.eval-test/the-evaluator-remains-live-after-its-namespace-reloads` red (`seon.instrument/restore!`
+    answers no replaced Var), green on HEAD. Bisected alone in check JVMs: red only with the fix and the new deftest
+    together (twice); green with the fix alone, the new deftest alone, the fix with a comment-only test-file change,
+    and a trivial `arm.clj` change. A probe running the same body from another test namespace on the candidate
+    reports the Var replaced. Not explained: a suspect is `seon.instrument/replaced-definitions`, an open function
+    (`bound?`), running analysed when the test runtime holds a change and reading the JVM Vars as SCI's, the class
+    of defect the runtime-fix lane found in `seon.problems/indexed-function-var?`. This test was among 85299376b's
+    accepted reds for the same reason class.
+  - **Mutation.** With `seon.cache/reached-key` ignoring `*reached*` (dangling 5d08bd2db),
+    `seon.sci.runtime-test/a-composed-runtime-answers-what-its-own-source-answers` is red (its `cc` derivation, runtimes
+    answered in both orders).
 
 - **What would make the rule work:** compile what does not reach the change, not what calls nothing: on a changed
   runtime, interpret only the reverse closure of the changed names (cached analyses, so O(closure) binding) and keep
