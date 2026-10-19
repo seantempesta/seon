@@ -12,9 +12,9 @@ corrections in its section); P4b landed (`66ca5108b`, lane closed-p4b; correctio
 `393e52821` deleted the catch in `seon.instrument/compiled-wrapper` that the guard census refused; it closes
 `seon.cluster/branch-declaration-changes`, 49 -> 48 open derivers); P6a landed (`f1145501b`, lane closed-p6, corrections in its section);
 P6b stopped at its design gap (lane closed-p6: census measured, options in its section) and is folded into P7 (root);
-P7: design and R4 landed (`6d50a5f3b`, `c23e1f807`); root chose predicate mechanism 2 (1 the recorded target, its gap filed as
-`seon.schema/a-branch-changed-predicate-is-seen-only-after-merge`, `e8aeac94d`); the fold closes 48 -> 17 but with the key fails the
-gate (hub 1,799.5 MB), so neither is committed (lane closed-p7, its section has the profile); P8 not started.
+P7: the design, R4 (`c23e1f807`), the gap task (`e8aeac94d`) and the predicate fold with the exact key (`1bcb3bf65`, after
+`57fa7fa7d` narrowed `projection-registry`'s catch) landed: open derivers 48 -> 17, the gate judged on the hub sequence
+(1.27x of 716cc7527); R3, R5 and R6's real-path rows not started (lane closed-p7, its section); P8 not started.
 
 # Closed runtime: the hybrid
 
@@ -774,6 +774,20 @@ M1, M2, M5, M7 of runtime-rereview and the removal of the context binding of the
   analysed misses), yet 466,385 calls against 157,351: the extra is execution, not derivation, and comes with the
   fold (428k without the key); not isolated (candidates: the late callables' `apply` per validation, or
   `unloaded-predicate-functions` now binding refusing callables where `runtime-predicate` used to load the owner).
+
+- **Landed (`1bcb3bf65`), root's rulings of 2026-10-20 applied.** (1) The gate judges `:hub-change-sequence` in
+  `seon.cost-estimate-test` (every request from the first program-change pass through the hub row), bounded at 1.3x
+  of 716cc7527 on the same sequence (3,886.9 MB, 644,449 calls, 5,830 reads there): the hub change's analysis of its
+  reverse closure is work it must do, and on the closed program it falls in the hub row. Candidate: 4,953.2 MB
+  (1.27x), 752,915 calls (1.17x), 6,126 reads (1.05x); the hub row alone 1,734.4 MB (its recorded overrun). (2) The
+  nine-forms calls came back (112,965 against 716cc7527's 105,574): each predicate binds the loaded Var once per
+  derivation, and the per-call name lookup (`seon.schema/late-predicate`) binds only a predicate whose namespace is
+  not loaded yet; `unloaded-predicate-functions` keeps refusing a contracted predicate of a namespace with no source
+  (checked on the classpath, never loaded). (3) `a-hundred-branches-analyse-each-distinct-digest-once` is not a
+  keying defect: the same tests in one JVM make it red on HEAD too (41 digests twice, 386 `:seon.sci.runtime/analysed`
+  evictions, cache 495 of 512 MB; the candidate 15 and 212), every duplicate a re-analysis of an evicted entry; filed
+  as `seon.cache/analyses-are-evicted-from-a-full-cache-and-analysed-again`. Commit check: 124 tests, only reds
+  accepted as red on HEAD (the gap proof and five carried by tasks).
 
 #### Gate and order
 
