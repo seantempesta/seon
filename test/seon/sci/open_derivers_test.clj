@@ -21,7 +21,7 @@
      seon.db/content-projection seon.db/request-view seon.embed/corpus seon.fn/declared-edge-attributes
      seon.fn/gate-edges seon.health/problems-unit seon.health/profile-unit seon.health/replaced-roots
      seon.program/authored-shapes seon.program/content-digest seon.program/own-changed-identities
-     seon.program/program-attributes seon.schema/build-projection seon.schema/declaration-projection
+     seon.schema/build-projection seon.schema/declaration-projection
      seon.schema/direct-references seon.sci.eval/derive-program-context seon.sci.eval/loaded-authored
      seon.sci.eval/loaded-digests seon.sci.eval/overlay-plan seon.sci.eval/program-context
      seon.sci.eval/reach-index seon.sci.eval/record-refusals-once! seon.sci.runtime-test/shaped-main
@@ -38,7 +38,9 @@
   [{:phase :P2
     :functions (into #{} (map #(symbol "seon.db" %))
                      ["program-definition-digest" "program-behavior-digest" "stored-namespace-context"
-                      "program-shapes-in" "program-canonical-entity"])}])
+                      "program-shapes-in" "program-canonical-entity"])}
+   {:phase :P3b
+    :functions (into #{} (map #(symbol "seon.program" %)) ["derived-shape" "derived-program-attributes"])}])
 
 (defn- open-cache-derivers
   "The cache derivers of `database`'s program that its reach index leaves open."

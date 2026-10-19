@@ -15,6 +15,7 @@
             ;; below already sit inside a `#?(:clj …)` branch.
             #?(:clj [seon.schema.edn :as schema.edn])
             #?(:clj [seon.cache])
+            #?(:clj [seon.schema.datahike :as schema.datahike])
             [edamame.core :as edamame]))
 
 (defn- source-family?
@@ -71,8 +72,7 @@
            program)
      #?(:clj
         (when properties?
-          (let [project (requiring-resolve 'seon.schema.datahike/storable-properties-in)]
-            (mapcat #(keys (project projection %)) (keys forms))))
+          (mapcat #(keys (schema.datahike/storable-properties-in projection %)) (keys forms)))
         :cljs []))))
 
 (defn program-attributes
@@ -329,13 +329,11 @@
     {:seon.program/identity-attribute identity-attribute
      :seon.program/source-attribute source-attribute
      :seon.program/set-attributes
-     #?(:clj (let [vector-shaped? (requiring-resolve 'seon.schema.datahike/vector-shaped-attr-in?)]
-               (into #{}
+     #?(:clj (into #{}
                    (keep (fn [{:db/keys [ident cardinality isComponent]}]
                            (when (and (= :db.cardinality/many cardinality) (not isComponent)
-                                      (not (vector-shaped? projection ident))) ident)))
-                   ((requiring-resolve 'seon.schema.datahike/malli->datahike-schema-in)
-                    projection owned)))
+                                      (not (schema.datahike/vector-shaped-attr-in? projection ident))) ident)))
+                   (schema.datahike/malli->datahike-schema-in projection owned))
         :cljs #{})
      :seon.program/owned-attributes
      (if (true? (:seon.program/projected-properties
