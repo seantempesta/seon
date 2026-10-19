@@ -785,8 +785,9 @@ M1, M2, M5, M7 of runtime-rereview and the removal of the context binding of the
   not loaded yet; `unloaded-predicate-functions` keeps refusing a contracted predicate of a namespace with no source
   (checked on the classpath, never loaded). (3) `a-hundred-branches-analyse-each-distinct-digest-once` is not a
   keying defect: the same tests in one JVM make it red on HEAD too (41 digests twice, 386 `:seon.sci.runtime/analysed`
-  evictions, cache 495 of 512 MB; the candidate 15 and 212), every duplicate a re-analysis of an evicted entry; filed
-  as `seon.cache/analyses-are-evicted-from-a-full-cache-and-analysed-again`. Commit check: 124 tests, only reds
+  evictions, cache 495 of 512 MB; the candidate 15 and 212), every duplicate a re-analysis of an evicted entry; recorded
+  in `docs/seon/issues/analyses-are-evicted-from-a-full-cache-and-analysed-again.md` (an order-dependent red cannot
+  carry a task: `--accept-red-before` re-runs the var alone on HEAD, where it is green). Commit check: 124 tests, only reds
   accepted as red on HEAD (the gap proof and five carried by tasks).
 
 #### Gate and order
