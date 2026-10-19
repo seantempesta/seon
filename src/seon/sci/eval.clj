@@ -138,6 +138,7 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.kernel :as kernel]
+            [seon.sci.runtime :as runtime]
             [seon.sci.lookup :as lookup]
             [seon.sci.reader :as reader]
             [seon.test.runner :as test.runner]))
@@ -250,26 +251,38 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- copy-host-var
-  "Copy a loaded JVM Var into SCI at its root, with its metadata.
+  "The process Var space's SCI Var for a loaded JVM Var (`seon.sci.runtime/space-var`),
+  its root and metadata the host's.
 
-  SCI's `copy-var*` copies `@host-var` (`reference-code/sci/src/sci/core.cljc:137`),
-  which for a dynamic Var bound on this thread is the binding: a base context
-  derived under an evaluation would keep that evaluation's `seon.db/*read-database*`,
-  and the memoized base would pin its branch's node cache. It copies only a
-  few metadata keys; the rest (its contract, `:malli/schema`) is the Var's
-  own data a reader expects, as the compiled Var answers. `:test` stays
-  behind: a copied test Var would run its compiled body in this context."
+  One SCI Var per name for the whole process, so an analysis holding it serves
+  every context. Its own root and metadata follow the host Var: a reload's new
+  root or a new host Var at the name is written into the shared Var, which
+  every context without its own binding of it reads. SCI's `copy-var*` copies
+  `@host-var` (`reference-code/sci/src/sci/core.cljc:137`), which for a dynamic
+  Var bound on this thread is the binding, so the root is the raw root: a base
+  derived under an evaluation keeps no evaluation's `seon.db/*read-database*`.
+  `copy-var*` copies only a few metadata keys; the rest (its contract,
+  `:malli/schema`) is the Var's own data a reader expects, as the compiled Var
+  answers. `:test` stays behind: a copied test Var would run its compiled body
+  in this context."
   {:malli/schema [:=> [:cat [:fn clojure.core/var?] [:fn clojure.core/some?]] [:fn clojure.core/some?]]}
   [^clojure.lang.Var host-var sci-namespace]
-  (let [copied (sci/copy-var* host-var sci-namespace)]
-    ;; The new Var's own root and metadata, which every context's binding of
-    ;; it starts from; under an active context `bindRoot` and `alter-meta!`
-    ;; write only that context's binding, and the root write would reach the
-    ;; evaluation's write observer as a definition.
-    (sci.ctx-store/with-ctx nil
-      (when (.getThreadBinding host-var)
-        (.bindRoot ^sci.lang.Var copied (.getRawRoot host-var)))
-      (alter-meta! copied #(merge (dissoc (meta host-var) :ns :name :test) %)))
+  (let [sym (symbol (str (ns-name (.ns host-var))) (str (.sym host-var)))
+        root (.getRawRoot host-var)
+        ;; The shared Var's own root and metadata, which every context's binding
+        ;; of it starts from; under an active context `bindRoot` and `alter-meta!`
+        ;; write only that context's binding, and the root write would reach the
+        ;; evaluation's write observer as a definition. A new root is a new
+        ;; definition (a reload), so its metadata is taken again with it.
+        follow! (fn [^sci.lang.Var copied]
+                  (sci.ctx-store/with-ctx nil
+                    (.bindRoot copied root)
+                    (alter-meta! copied #(cond-> (merge % (dissoc (meta host-var) :ns :name :test))
+                                           (:dynamic (meta host-var)) (assoc :sci.impl/host-var host-var))))
+                  copied)
+        copied (runtime/space-var sym #(follow! (sci/copy-var* host-var sci-namespace)))]
+    (when-not (identical? root (sci.ctx-store/with-ctx nil (.getRawRoot ^sci.lang.Var copied)))
+      (follow! copied))
     copied))
 
 
@@ -399,7 +412,11 @@
                         (program/base-context-injected-symbols projection)))
         injected-namespaces (update injected-namespaces 'clojure.test merge
                                     (lookup/agent-test-namespace (sci/create-ns 'clojure.test)))
+        ;; Forked at birth, so the context has its own generation: the
+        ;; process Var space's Vars (`copy-host-var`) are born in none, and an
+        ;; unforked context would own them and write their shared roots.
         ctx
+        (sci/fork
         (sci/init
         (->
         {:interrupt-fn (:interrupt-fn kernel-options)
@@ -429,7 +446,7 @@
          ;; the addon's pmap calls the host future-call: its threads escaped
          ;; the arm and the form's owned work (task sci-pmap-escapes-the-arm)
          (assoc-in [:namespaces 'clojure.core 'pmap] kernel/pmap)
-         (assoc-in [:namespaces 'clojure.core 'require] agent-require)))
+         (assoc-in [:namespaces 'clojure.core 'require] agent-require))))
         help-var (get-in injected-namespaces ['seon.bootstrap 'help])
         dir-var (get-in injected-namespaces ['seon.bootstrap 'dir])
         doc-var (get-in injected-namespaces ['seon.bootstrap 'doc])]
@@ -1114,13 +1131,20 @@
                                        (get committed source-attribute)))))))
 
 (defn- install-jvm-root!
+  "Bind `function-symbol` in `ctx` to the loaded program's definition: its
+  analysed one (`::analysed-roots`) where the acquisition analysed it, else
+  the compiled root. The Var is the process space's, so a definition `ctx`
+  bound before is replaced, never kept."
   [ctx function-symbol]
   (when-let [host-namespace (find-ns (symbol (namespace function-symbol)))]
     (when-let [host-var (ns-resolve host-namespace (symbol (name function-symbol)))]
-      (let [sci-namespace (context-namespace ctx (symbol (namespace function-symbol)))]
-        (sci/add-namespace! ctx (symbol (namespace function-symbol))
-                            {(symbol (name function-symbol))
-                             (copy-host-var host-var sci-namespace)})
+      (let [sci-namespace (context-namespace ctx (symbol (namespace function-symbol)))
+            sci-var (copy-host-var host-var sci-namespace)
+            root (get (::analysed-roots @(::kernel/program-snapshot ctx)) function-symbol (.getRawRoot ^clojure.lang.Var host-var))]
+        (sci/add-namespace! ctx (symbol (namespace function-symbol)) {(symbol (name function-symbol)) sci-var})
+        (sci.ctx-store/with-ctx ctx
+          (when-not (identical? root @sci-var)
+            (sci/bind-root! ctx sci-var root)))
         (kernel/mark-installed! ctx function-symbol)
         true))))
 
@@ -1933,6 +1957,18 @@
                   [local-name (copy-host-var host-var sci-namespace)]))
            intern-map))))
 
+(defn- install-host-core!
+  "Join the clojure.core names SCI does not carry (`spit`, `ref`) to `ctx`'s
+  core, `sci-core`, once; SCI's interrupt-aware core and its analyzer's own
+  names are never replaced."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :map] :nil]}
+  [ctx sci-core]
+  (install-host-namespace! ctx 'clojure.core
+                           (remove (fn [[local-name]] (or (contains? sci-core local-name)
+                                                          (contains? sci.utils/ana-macros local-name)))
+                                   (ns-publics 'clojure.core)))
+  nil)
+
 (defn- install-caller-host-bindings!
   "Bind the compiled Vars an interpreted caller's source names but no program row installs.
 
@@ -1964,12 +2000,7 @@
                                            (concat (vals aliases)
                                                    (map (comp symbol namespace) (vals refers)))))))
                          namespace-rows))]
-    ;; clojure.core names SCI does not carry (spit, ref) join its core once;
-    ;; SCI's interrupt-aware core and its analyzer's own names are never replaced
-    (install-host-namespace! ctx 'clojure.core
-                             (remove (fn [[local-name]] (or (contains? sci-core local-name)
-                                                            (contains? sci.utils/ana-macros local-name)))
-                                     (ns-publics 'clojure.core)))
+    (install-host-core! ctx sci-core)
     (doseq [target targets
             :let [interns (if (own target) (own-bindings target) (some-> (find-ns target) ns-interns))
                   present (get-in @(:env ctx) [:namespaces target])]
@@ -2054,6 +2085,26 @@
     (swap! (::kernel/program-snapshot ctx) assoc ::acquisition acquired)
     acquired))
 
+(defn- own-classes
+  "The classes the loaded JVM namespace `namespace-name` defines itself
+  (`deftype`, `defrecord`), by the names it imports them under: a `deftype`
+  imports its class into its namespace as it loads, with no `:import` in the
+  `ns` form, so the namespace's row never declares them."
+  {:malli/schema [:=> [:cat :symbol] [:map-of :symbol [:fn class?]]]}
+  [namespace-name]
+  (let [package (namespace-munge namespace-name)]
+    (into {} (filter (fn [[_ ^Class class]] (= package (.getPackageName class))))
+          (some-> (find-ns namespace-name) ns-imports))))
+
+(defn- loaded-bindings
+  "`row`'s bindings (`row-bindings`) as its loaded JVM namespace resolves
+  them: with the classes the namespace defines itself (`own-classes`)
+  imported, so entering it again leaves its resolver state as it was."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [row]
+  (update (row-bindings row) :imports merge
+          (update-vals (own-classes (:seon.ns/name row)) #(symbol (.getName ^Class %)))))
+
 (defn- enter-namespace*
   "The namespace entry of `enter-namespace!`, with `read-database` called once only when a source namespace interprets."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :symbol [:=> [:cat] :seon.db/database-value]] :seon.sci.eval/ctx]}
@@ -2075,7 +2126,7 @@
           (install-caller-host-bindings! ctx entering)
           (install-required-libraries! ctx entering)
           (doseq [row entering]
-            (install-namespace-bindings! ctx (:seon.ns/name row) (row-bindings row)))
+            (install-namespace-bindings! ctx (:seon.ns/name row) (loaded-bindings row)))
           (when (seq sources)
             (interpret-source-namespaces! ctx (read-database) sources)))))
     ctx))
@@ -2589,6 +2640,167 @@
          [?binding :seon.ns.refer/target-ns ?target-ns] [?binding :seon.ns.refer/target-name ?target-name]
          [?ns :seon.ns/refers ?binding] [?ns :seon.ns/name ?name]]]])))
 
+(defn- armed-as-compiled
+  "`analysed`, the analysed definition of `sym`, armed with the contract and
+  policy its loaded JVM Var's root `compiled` was armed with (`seon.instrument`
+  keeps them on the wrapper), against the projection that policy's snapshot
+  holds, else `projection`; `analysed` itself when the compiled root is unarmed."
+  {:malli/schema [:=> [:cat :qualified-symbol [:fn clojure.core/ifn?] [:or :nil :seon.program/definition-digest]
+                       :seon.schema/projection :seon.instrument/callable]
+                  :seon.instrument/callable]}
+  [sym compiled digest projection analysed]
+  (let [{policy :seon.instrument/policy contract :seon.instrument/contract} (meta compiled)
+        snapshot (:seon.call-preparation/snapshot policy)]
+    (if (and policy contract)
+      (instrument/wrap-interpreted
+       sym contract (or (:seon.schema/projection snapshot) projection) (:seon.sci.admit/caps policy) analysed
+       (cond-> (select-keys policy [:seon.config.error/max-evidence-bytes :seon.call-preparation/snapshot])
+         digest (assoc :seon.program/definition-digest digest)))
+      analysed)))
+
+(defn- runtime-rows!
+  "The loaded program's `src` functions SCI can run, as `seon.sci.runtime`
+  rows armed as their compiled Vars are, with `ctx` made to resolve them as
+  their files do: each namespace's refers, the classes its own
+  `deftype`/`defrecord` define, and its other compiled interns (private state,
+  `def`/`defonce` values) bound as the host's, so interpreting adds no second
+  copy of process state. A host-bound declaration (`:seon.fn/host-bound?`), a
+  macro, a value definition and a test-root or unloaded namespace have no row."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.schema/projection
+                       [:map-of :symbol :map] [:set :symbol]]
+                  [:vector :map]]}
+  [ctx database projection namespace-row-by-name test-names]
+  (let [read! (fn [result] (when (db/read-refusal? result) (throw (ex-info (:seon.error/message result) result))) result)
+        rows (read! (db/q '[:find ?sym ?source ?digest
+                            :where [?f :seon.fn/host-bound? false]
+                            [?f :seon.schema.admission/source :core]
+                            [?f :seon.fn/arglists ?arglists] [(not= "()" ?arglists)]
+                            (not [?f :seon.fn/macro? true])
+                            [?f :seon.fn/ns ?namespace] [?namespace :seon.fn/file ?file]
+                            [?file :seon.fn.file/relative-root "src"]
+                            [?f :seon.fn/sym ?sym] [?f :seon.fn/source ?source]
+                            [?f :seon.program/definition-digest ?digest]]
+                          database))
+        ;; the program macros each definition expands: a changed macro
+        ;; changes its callers' analyses
+        expanded (reduce (fn [held [sym macro digest]] (update held sym (fnil conj (sorted-map)) [macro digest]))
+                         {}
+                         (read! (db/q '[:find ?sym ?macro ?digest
+                                        :where [?m :seon.fn/macro? true] [?m :seon.fn/sym ?macro]
+                                        [?m :seon.program/definition-digest ?digest]
+                                        [?f :seon.fn/calls ?macro] [?f :seon.fn/sym ?sym]]
+                                      database)))
+        rows (sort-by (comp str first)
+                      (filter (fn [[sym]] (let [namespace-name (symbol (namespace sym))]
+                                            (and (find-ns namespace-name) (not (contains? test-names namespace-name)))))
+                              rows))
+        namespace-digests (into {}
+                                (map (fn [namespace-name]
+                                       (let [row (get namespace-row-by-name namespace-name)]
+                                         [namespace-name (id/digest 32 [(::namespace-source row) (row-bindings row)])])))
+                                (distinct (map (comp symbol namespace first) rows)))]
+    (install-host-core! ctx (get-in @(:env ctx) [:namespaces 'clojure.core]))
+    (doseq [namespace-name (keys namespace-digests)
+            :let [host (find-ns namespace-name)
+                  present (get-in @(:env ctx) [:namespaces namespace-name])]]
+      (doseq [[_ ^Class class] (own-classes namespace-name)]
+        (sci/add-class! ctx (symbol (.getName class)) class))
+      (install-namespace-bindings! ctx namespace-name (loaded-bindings (get namespace-row-by-name namespace-name)))
+      (install-host-namespace! ctx namespace-name
+                               (remove (fn [[local-name]] (contains? present local-name))
+                                       (ns-interns host))))
+    (into []
+          (keep (fn [[sym source digest]]
+                  (when-let [host-var (find-var sym)]
+                    (let [compiled @host-var]
+                      {:seon.fn/sym sym :seon.fn/source source :seon.program/definition-digest digest
+                       ::runtime/namespace-digest (get namespace-digests (symbol (namespace sym)))
+                       ::runtime/macro-digests (vec (get expanded sym))
+                       ::runtime/armed-with compiled
+                       ::runtime/arm #(armed-as-compiled sym compiled digest projection %)}))))
+          rows)))
+
+(def ^:private run-time-resolution
+  "The calls that name a definition at run time, which `:seon.fn/calls` cannot
+  follow: a function reaching one runs its analysed definition on every
+  runtime whose program differs (`seon.sci.runtime/reach-index`)."
+  '#{clojure.core/resolve clojure.core/ns-resolve clojure.core/requiring-resolve clojure.core/find-var
+     clojure.core/eval clojure.core/load-string clojure.core/load-file clojure.core/load clojure.core/require
+     clojure.core/intern clojure.core/var-get clojure.core/the-ns clojure.core/ns-publics clojure.core/ns-interns})
+
+(def ^:private reach-index-entry-bytes
+  "Retained bytes of one reach in a reach index: a set entry and its share of
+  the inverted map, measured over the loaded program (15,170 reaches)."
+  96)
+
+(defn- reach-index
+  "The loaded program's reach index (`seon.sci.runtime/reach-index`) over
+  `database`'s `:seon.fn/calls`, once per content of those facts."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:map [::runtime/closed [:set :qualified-symbol]]
+                   [::runtime/reached-by [:map-of :qualified-symbol [:set :qualified-symbol]]]]]}
+  [database]
+  (let [build #(let [names (db/q '[:find [?sym ...] :where [?f :seon.fn/sym ?sym]] database)
+                     called (db/q '[:find ?sym (distinct ?callee) :where [?f :seon.fn/sym ?sym] [?f :seon.fn/calls ?callee]]
+                                  database)]
+                 (runtime/reach-index (into (zipmap names (repeat #{})) (map (fn [[sym callees]] [sym (set callees)])) called)
+                                      run-time-resolution))]
+    (if-let [revisions (db/content-revisions database [:seon.fn/sym :seon.fn/calls])]
+      (seon.cache/lookup ::reach-index revisions
+                         #(* reach-index-entry-bytes (reduce + (map count (vals (::runtime/reached-by %)))))
+                         build)
+      (build))))
+
+(defn- changed-names
+  "The names whose definitions `plan` changes of the loaded program, and every
+  closed name of `index` in a namespace whose declaration it changes: its
+  resolution changes with that declaration."
+  {:malli/schema [:=> [:cat :map [:map [::runtime/closed [:set :qualified-symbol]]]] [:set :symbol]]}
+  [plan index]
+  (let [namespaces (into #{} (map :seon.ns/name) (::namespaces plan))]
+    (cond-> (into #{} cat [(::overridden plan) (::added plan) (::retracted plan)])
+      (seq namespaces) (into (filter #(contains? namespaces (symbol (namespace %)))) (::runtime/closed index)))))
+
+(defn- bind-analysed!
+  "Bind in `ctx` each loaded `src` function SCI can run (`::runtime-rows`)
+  that may answer otherwise than its compiled Var once `changed` differ from
+  the loaded program, to its analysed definition (`seon.sci.runtime/analysed`);
+  the analysis summary. Main runs its compiled Vars. A runtime whose program
+  differs (an overlay, an agent's own change) keeps a compiled Var only where
+  the function's closed reach holds no changed name
+  (`seon.sci.runtime/compiled-names`), which answers what its analysed
+  definition would; every other one resolves its callees late, through the
+  Var each analysed body holds, in the executing context's own binding, so a
+  branch that redefines a helper changes every caller it reaches on that
+  branch. A later change binds only what it newly reaches. An analysis is
+  keyed by content and shared by every context of the process; a row SCI
+  cannot analyse is a defect of its `:seon.fn/host-bound?` fact and throws."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:set :symbol]] :map]}
+  [ctx changed]
+  (let [snapshot (::kernel/program-snapshot ctx)
+        {rows ::runtime-rows index ::reach-index held ::analysed-roots prior ::analysis} @snapshot
+        kept (runtime/compiled-names index (::compiled-kept @snapshot (::runtime/closed index)) changed)
+        due (into [] (remove #(or (contains? kept (:seon.fn/sym %)) (contains? held (:seon.fn/sym %)))) rows)
+        space (runtime/program-space ctx)
+        roots (binding [sci.lang/*write-observer* nil sci.lang/*expansion-observer* nil]
+                (sci.ctx-store/with-ctx ctx
+                  (into {} (map (fn [{sym :seon.fn/sym :as row}]
+                                  (let [analysed (runtime/analysed space row)]
+                                    (sci/bind-root! ctx (sci/resolve ctx sym) analysed)
+                                    [sym analysed])))
+                        due)))
+        analysis {::analysed-count (+ (::analysed-count prior 0) (count roots))
+                  ::compiled-count (count kept)}
+        vars (sci.ctx-store/with-ctx ctx (mapv #(sci/resolve ctx %) (keys roots)))]
+    ;; the program's own definitions, never this context's: its own
+    ;; definitions differ from these (`own-bindings`)
+    (swap! (:env ctx) (fn [env] (update env ::inherited-var-bindings merge
+                                        (select-keys (:sci/var-bindings env) vars))))
+    (swap! snapshot (fn [held-snapshot] (-> held-snapshot
+                                            (update ::analysed-roots merge roots)
+                                            (assoc ::compiled-kept kept ::analysis analysis))))
+    analysis))
+
 (defn- acquire-program!
   "Acquire the loaded program into its base context. Compiled definitions bind
   their JVM roots; namespaces the JVM has not loaded interpret their source.
@@ -2685,6 +2897,11 @@
         ;; Libraries the namespaces require resolve through their aliases and
         ;; full names, as the compiled namespaces that require them do.
         (install-required-libraries! ctx all-namespace-rows)
+        ;; Every src function SCI can run is bound to its analysed definition:
+        ;; a branch's change is live for its callers on that branch.
+        (swap! (::kernel/program-snapshot ctx) assoc
+               ::runtime-rows (runtime-rows! ctx db projection all-namespace-row-by-name test-namespaces)
+               ::reach-index (reach-index db))
         ;; The bare REPL name refers to the acquired macro itself. Keeping the
         ;; boot-time copy here would preserve its old expansion after adoption.
         (sci/add-namespace! ctx 'clojure.core
@@ -3314,6 +3531,7 @@
   (binding [sci.lang/*write-observer* nil
             sci.lang/*expansion-observer* nil]
     (sci.ctx-store/with-ctx ctx
+      (bind-analysed! ctx (set changed))
       (let [interpreted (interpret-overlay! ctx database
                                             {::overridden (set changed) ::evaluated (set changed)
                                              ::added #{} ::namespaces [] ::tests []
@@ -3872,7 +4090,11 @@
    (binding [db/*conn* nil db/*read-database* nil *deriving-database* database]
      (let [ctx (assoc (copy-base-ctx parent database loaded nil)
                       ::custody {} :seon.schema/projection projection)
-           acquired (overlay! ctx database plan)
+           ;; a program whose functions differ from main's runs main's src
+           ;; functions analysed, so its changes reach their callers
+           analysis (when (some seq [(::overridden plan) (::added plan) (::retracted plan)])
+                      (bind-analysed! ctx (changed-names plan (::reach-index @(::kernel/program-snapshot ctx)))))
+           acquired (cond-> (overlay! ctx database plan) analysis (assoc ::analysis analysis))
            value (freeze-program ctx)]
        (assoc value ::acquisition (assoc acquired ::own-namespace-entries (own-namespace-entries value cluster)))))))
 
@@ -4383,12 +4605,15 @@
                projection-state)
          ctx (assoc ctx :my.program/base-ctx ctx)]
      ;; A sovereign branch must not inherit the source branch's recorder.
-     ;; bind-root! in the fork writes the fork's own binding of each Var.
+     ;; bind-root! in the fork writes the fork's own binding of each Var. The
+     ;; loaded program's analysed definitions are armed as compiled, with no
+     ;; recorder (`armed-as-compiled`).
      (sci.ctx-store/with-ctx ctx
        (doseq [function-symbol @(::kernel/installed-functions ctx)
                :let [candidate (sci/resolve ctx function-symbol)]
                :when (and candidate
-                          (::instrument/interpreted-original (meta @candidate)))]
+                          (::instrument/interpreted-original (meta @candidate))
+                          (not (kernel/program-definition? ctx function-symbol @candidate)))]
          (install-function-contract!
           ctx (db/pull db '[*] [:seon.fn/sym function-symbol]) projection db)))
      ;; A fork of an acquired program holds the program of the value it is

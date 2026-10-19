@@ -38,6 +38,7 @@
             [seon.program :as program]
             [sci.core :as sci]
             [sci.impl.utils :as sci.utils]
+            [sci.impl.vars]
             [sci.ctx-store]
             [seon.render :as render]
             [seon.render-simplification-test :as simplification]
@@ -175,14 +176,27 @@
            "main's base caller keeps main's helper")
        (is (= "(a 1)" (seon.print/form-text '(a 1))) "the compiled caller is unchanged")))))
 
-(deftest no-sci-runnable-src-function-runs-its-compiled-var
+(deftest no-src-function-a-change-can-reach-runs-its-compiled-var
   ;; Invariant 1 of the branch-runtime note: a runtime's answers depend only on
-  ;; its name -> digest map, never on what main's JVM compiled. So every src
-  ;; function the index calls SCI-runnable runs its analysed definition in a
-  ;; base context, never the compiled function.
+  ;; its name -> digest map, never on what main's JVM compiled. Main runs
+  ;; compiled, having no overrides (owner, 2026-10-19). On a branch with a
+  ;; change, a src function runs its compiled Var only where that is the
+  ;; answer its analysed definition gives: the change cannot reach it through
+  ;; `:seon.fn/calls`, and nothing it reaches resolves a name at run time. The
+  ;; oracle here walks callers from the change and from run-time resolution.
   (test-support/with-database
    (fn [connection]
-     (let [database (db/db connection)
+     (let [before (db/db connection)
+           changed 'seon.print/literal
+           source (str/replace-first (:seon.fn/source (db/pull before [:seon.fn/source] [:seon.fn/sym changed]))
+                                     #"(?s)\[value\].*$" "[value]\n  \"BRANCH\")")
+           _ (test-support/transacted!
+              connection
+              (test-support/replacement-tx
+               before [:seon.fn/sym changed]
+               (:seon.fn/source (test-support/program-fn-entity before changed source {:seon.schema.admission/source :agent}))
+               {:seon.schema.admission/source :agent}))
+           database (db/db connection)
            ctx (eval/base-ctx database)
            runnable (db/q '[:find [?sym ...]
                             :where [?f :seon.fn/host-bound? false] [?f :seon.schema.admission/source :core]
@@ -190,7 +204,19 @@
                             (not [?f :seon.fn/macro? true])
                             [?f :seon.fn/ns ?namespace] [?namespace :seon.fn/file ?file]
                             [?file :seon.fn.file/relative-root "src"] [?f :seon.fn/sym ?sym]]
-                          database)
+                          before)
+           edges (db/q '[:find ?caller ?callee :where [?f :seon.fn/sym ?caller] [?f :seon.fn/calls ?callee]] before)
+           callers (reduce (fn [held [caller callee]] (update held callee (fnil conj #{}) caller)) {} edges)
+           upward (fn [seeds] (loop [held (set seeds) todo (vec seeds)]
+                                (if-let [sym (peek todo)]
+                                  (let [fresh (remove held (get callers sym))]
+                                    (recur (into held fresh) (into (pop todo) fresh)))
+                                  held)))
+           exposed (upward (into [changed] (mapcat callers)
+                                 '[clojure.core/resolve clojure.core/ns-resolve clojure.core/requiring-resolve
+                                   clojure.core/find-var clojure.core/eval clojure.core/load-string clojure.core/load-file
+                                   clojure.core/load clojure.core/require clojure.core/intern clojure.core/var-get
+                                   clojure.core/the-ns clojure.core/ns-publics clojure.core/ns-interns]))
            compiled (into (sorted-set)
                           (filter (fn [sym]
                                     (when-let [host (find-var sym)]
@@ -198,7 +224,11 @@
                                         (identical? @host (sci.ctx-store/with-ctx ctx @held))))))
                           runnable)]
        (is (seq runnable) "the index names SCI-runnable src functions")
-       (is (= #{} compiled) "none of them runs its compiled Var")))))
+       (is (contains? exposed 'seon.print/form-text) "the oracle reaches the changed helper's caller")
+       (is (= #{} (into (sorted-set) (filter exposed) compiled))
+           "no function the change or a run-time resolution can reach runs its compiled Var")
+       (is (contains? compiled 'seon.id/structural-digest)
+           "a function the change cannot reach keeps its compiled Var")))))
 
 (defn- namespace-paths
   "Every `[namespace name]` `ctx`'s namespaces hold."
@@ -520,8 +550,13 @@
                                   [:namespaces ns-sym sym])]
               :when (and (instance? sci.lang.Var var-a)
                          (identical? var-a var-b)
-                         (not (:sci/built-in (meta var-a))))]
+                         (not (:sci/built-in (meta var-a)))
+                         ;; the process Var space's Vars are shared by every
+                         ;; context and owned by none: a write is the
+                         ;; writer's own binding (`seon.sci.runtime/space-var`)
+                         (or (sci.impl.vars/owns? ctx-a var-a) (sci.impl.vars/owns? ctx-b var-a)))]
           (symbol (str ns-sym) (str sym)))
+        _ (sci/eval-string* ctx-a "(alter-var-root #'clojure.core/spit (constantly :written))")
         before (sci/eval-string*
                 ctx-b
                 "(clojure.walk/macroexpand-all '(when true :ok))")
@@ -534,6 +569,7 @@
           (catch Throwable failure
             failure))]
     (is (empty? shared-writable))
+    (is (fn? (sci/eval-string* ctx-b "clojure.core/spit")) "a shared Var written in one context keeps the other's root")
     (is (instance? Throwable attempt))
     (is (re-find #"read-only" (ex-message attempt)))
     (is (= before

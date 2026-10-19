@@ -326,11 +326,32 @@
             (and (sci.vars/hasRoot sci-var)
                  (not (:seon.sci.eval/lazy-member (meta @sci-var)))))))))
 
+(defn program-definition?
+  "Whether `root` is the loaded program's own definition of `function-symbol`
+  in `ctx`: the analysed one its acquisition bound
+  (`:seon.sci.eval/analysed-roots`, `seon.sci.runtime/analysed`), else, for a
+  definition it did not analyse, the compiled root."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol
+                       [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A Var's root is whatever value its definition binds.", :gen/elements [nil false 0 "" :k [] {}]}]]
+                  :boolean]}
+  [ctx function-symbol root]
+  (let [analysed (get (:seon.sci.eval/analysed-roots @(::program-snapshot ctx)) function-symbol ::none)]
+    (if (identical? analysed ::none)
+      (boolean (some-> (find-ns (symbol (namespace function-symbol)))
+                       (ns-resolve (symbol (name function-symbol)))
+                       deref
+                       (identical? root)))
+      (identical? analysed root))))
+
 (defn held-apart-var
   "The SCI Var `ctx` holds `predicate` apart in, or nil when `ctx` calls the
-  shared definition: `ctx` has its own binding of the Var (a branch `defn` of
-  a copied function, an affected caller interpreted onto it) or the Var was
-  born in an agent's context."
+  loaded program's compiled definition: `ctx` has its own binding of the Var
+  (a branch `defn` of a copied function, or the loaded program's analysed
+  definition where the branch changed something the predicate can reach,
+  `seon.sci.runtime/compiled-names`) or the Var was born in an agent's
+  context. A predicate the branch changed nothing under keeps the loaded Var
+  (`seon.schema/runtime-predicate`), which answers exactly what its analysis
+  would."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol]
                   [:or :nil [:fn clojure.core/ifn?]]]}
   [ctx predicate]

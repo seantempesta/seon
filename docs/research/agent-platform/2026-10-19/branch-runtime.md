@@ -240,8 +240,10 @@ interpretation of interop-heavy platform functions (`seon.id/digest` 124x, `:sim
 57 MB), so the hub-change proof misses its bound. The leaf rule on top of it was tried and cut (lane runtime-leaf,
 below): it fixes `seon.id/digest` but leaves `:similar-by-name-warm` at 2,452 MB. Lane runtime-arm (below) brought three of the five
 changed-branch rows to HEAD and stopped at a patch, `branch-runtime-arm.patch` (the wire rebased, plus two producer fixes):
-`:seon-db-nine-forms` (1.39x, one defect of the wire) and `:reuse-one-unchanged-test` (1.76x) miss the 1.3x bar. P2 is
-partial in the patch. P3 and P4 are not approved.
+`:seon-db-nine-forms` (1.39x, one defect of the wire) and `:reuse-one-unchanged-test` (1.76x) miss the 1.3x bar. Lane
+runtime-exact (below) replaced the arm patch's two shortcuts with one exact rule (a function runs compiled only where
+nothing the branch changed is in its closed reach) and fixed the wire's `in-ns` rewrite: every row is within 1.04x of
+HEAD. P2 is partial. P3 and P4 are not approved.
 
 P1 attempt (lane runtime-p0-p2, 2026-10-19). The patch is `branch-runtime-p1.patch` next to this note. It adds
 `seon.sci.eval/analyse-loaded-functions!` to `acquire-program!`, the proof
@@ -568,6 +570,65 @@ Ruled out by the owner's test ("doesn't really help ... cut it"): the rows stay 
     `seon.cost-estimate-test/cost-rows-probe` and writes each row to `tmp/runtime-arm/*.edn`), then run
     `bin/seon check <the patch's paths> test/seon/cost_estimate_test.clj --include-long --test
     seon.cost-estimate-test/cost-rows-probe`. `RUNTIME_ARM_PRE` sets a request to run before the rows.
+- **Lane runtime-exact (2026-10-19, SCI pin 33039c6e): compiled exactly where it is the same answer.** The arm patch's
+  two shortcuts are replaced by one rule, owner's: "it shouldn't matter how they are mixed it should just work."
+  - **The rule.** `seon.sci.runtime/reach-index` reads the loaded program's `:seon.fn/calls` once per content of those
+    facts (`seon.sci.eval/reach-index`, `seon.cache` kind `:seon.sci.eval/reach-index`, keyed by
+    `seon.db/content-revisions` of `:seon.fn/sym` and `:seon.fn/calls`). A name is open when it reaches a call that
+    resolves a name at run time (`requiring-resolve`, `resolve`, `ns-resolve`, `find-var`, `eval`, `load*`, `require`,
+    `intern`, `var-get`, `the-ns`, `ns-publics`, `ns-interns`), else closed with its reach. On a runtime whose program
+    differs, `seon.sci.eval/bind-analysed!` binds every runnable `src` function to its analysed definition except the
+    closed ones whose reach holds no changed name (`seon.sci.runtime/compiled-names`, a set difference over the
+    inverted reach, O(what the change touches)); those keep their compiled Var, which answers exactly what the analysed
+    definition would. A later change binds only what it newly reaches. A namespace whose declaration the plan changes
+    counts its closed members as changed. Main binds nothing.
+  - **The census on default (2026-10-19, 7,686 program names):** 4,300 closed, the rest open; uncapped, the largest
+    closed reach in `src` holds between 128 and 256 names, so no size cap is needed. Building the index cost 161 ms interpreted on
+    a lane branch (15,170 reaches). Of the 21 `host-loops` declarations, 15 keep compiled unless the branch changes
+    their reach (`seon.embed/nearest` reaches 2 names: itself and `float-view`; `seon.sci.forgive/scan` 12; the five
+    `seon.profile` ones 2 each); `seon.cluster.source/proven-file`, `seon.shell.jvm/copy-blob-stdin!` and the
+    `seon.fs.jvm` passes (`blob-pass`, `window-pass`, `whole-file-pass` checked) are open: they reach error
+    constructors that `requiring-resolve`. The 108 predicates: 25 library predicates always compiled, 80 program
+    predicates closed, 3 open (`seon.edit/valid-form-operation?`, `seon.print/node?`, `seon.schema/malli-form?`).
+  - **Predicates.** `seon.schema/runtime-predicate` keeps answering the loaded JVM Var, the shared definition every
+    projection keys on; `seon.sci.kernel/held-apart-var` is back to HEAD's rule (the context's own binding of the Var
+    holds it apart). Under the reach rule a context binds a predicate exactly when its compiled Var could answer
+    otherwise (the branch changed it or its reach, or it is open), so `seon.sci.kernel/context-bound-projection` binds
+    exactly those. The arm patch's `program-definition?` exception in `held-apart-var` is gone with the shortcut.
+  - **`host-loops` is deleted.** `seon.fn/host-bound-callers` keeps only the `print-method`/`print-dup` rule.
+  - **The `in-ns` rewrite, proven:** with `RUNTIME_ARM_PRE="(in-ns 'seon.db) nil"` the agent context's resolver state
+    of `seon.profile` loses `Bracket` (`seon.profile.Bracket`) and `seon.env` loses `Environment` from `:imports`:
+    `runtime-rows!` imported each loaded namespace's own `deftype`/`defrecord` classes, and `enter-namespace*`
+    reinstalled the row's bindings without them. `seon.sci.arm/changed-namespaces` saw both namespaces change and
+    `seon.turn.batch/namespace-facts` wrote their rows again with equal content: 9 `:seon.ns/imports` and 1
+    `:seon.ns/aliases` datoms of `seon.profile` and 4 aliases of `seon.env` retracted and re-added. Two fixes at the
+    producers: `seon.sci.eval/loaded-bindings` (a namespace's row bindings plus its own classes, `own-classes`) is
+    what both install, so entering leaves the resolver state as it was (resolver diff nil); and `namespace-facts`
+    writes nothing when the row's digest is the stored one. With the fixes the same probe writes no namespace datom.
+  - **Rows, same-run pairs in throwaway check JVMs, HEAD against the change (MB allocated / ms), second pair:**
+
+    | Row | HEAD | change | ratio |
+    |---|---|---|---|
+    | `:similar-by-name-warm` | 26.7 / 52 | 27.2 / 40 | 1.02x |
+    | `:current-state-with-task` | 207.6 / 175 | 215.7 / 173 | 1.04x |
+    | `:hub-behavior-change` | 1,238.8 / 1,812 | 1,273.2 / 1,604 | 1.03x |
+    | `:seon-db-nine-forms` | 986.0 / 1,145 | 998.4 / 967 | 1.01x |
+    | `:reuse-one-unchanged-test` | 29.4 / 48 | 30.4 / 51 | 1.03x |
+    | `(my.task/current)` | 189.3 / 114 | 195.4 / 130 | 1.03x |
+    | `:unchanged-request` | 18.3 / 34 | 18.7 / 54 | 1.02x |
+
+    The first pair (before the `loaded-bindings` fix) measured the same within 0.04x. In the change's warm pass
+    `seon.sci.runtime/analysed` misses 2,212 times (about half the runnable rows analyse; the rest keep compiled),
+    then 0 in the measured pass.
+  - **Proofs:** `seon.sci.runtime-test/a-composed-runtime-answers-what-its-own-source-answers` now runs compiled roots
+    beside analysed ones: two kernels (`k0`, `k1` through `k0`), a predicate `p0` called as a schema calls it, and
+    `r0`, which resolves its callee at run time; 60 generated chains change helpers under the kernels and the
+    predicate, and every runtime answers its own source. Two mutations make it red: keeping every closed name
+    compiled regardless of the change, and treating `resolve` as an ordinary call.
+    `seon.sci.eval-test/no-src-function-a-change-can-reach-runs-its-compiled-var` replaces
+    `no-sci-runnable-src-function-runs-its-compiled-var`: its oracle walks callers from the change and from run-time
+    resolution, none of them runs compiled, and `seon.id/structural-digest` does.
+
 - **What would make the rule work:** compile what does not reach the change, not what calls nothing: on a changed
   runtime, interpret only the reverse closure of the changed names (cached analyses, so O(closure) binding) and keep
   every other function compiled. That is a closure walk, which this round excluded.

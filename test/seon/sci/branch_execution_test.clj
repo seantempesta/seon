@@ -83,6 +83,15 @@
                             :seon.schema.admission/source :agent})
         symbols))
 
+(defn- runs-loaded-definition?
+  "Whether `ctx` runs `database`'s analysed definition of `sym`: the root it
+  calls is the analysis of that row's definition digest
+  (`seon.sci.runtime/analysed`), never the compiled Var's."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :qualified-symbol] :boolean]}
+  [ctx database sym]
+  (= (:seon.program/definition-digest (db/pull database [:seon.program/definition-digest] [:seon.fn/sym sym]))
+     (:seon.sci.runtime/digest (meta (sci.ctx-store/with-ctx ctx @(sci/resolve ctx sym))))))
+
 (defn- refusal-of
   "The data of the refusal calling `sym` in `ctx` throws, else nil."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol] [:maybe :map]]}
@@ -543,9 +552,9 @@
          (is (identical? @(find-var caller) @(sci/resolve ctx caller))
              "an unchanged host-bound caller of a changed definition runs as compiled")))))))
 
-(deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting the reverse closure (77 declarations) of one changed hiccup helper; measured 1,426 ms."
+(deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting one changed hiccup helper; measured 1,426 ms."
            :seon.test/long-ms 12000}
-  a-branch-change-leaves-its-loaded-src-callers-compiled
+  a-branch-change-reaches-its-loaded-src-callers-through-their-vars
   (support/with-database
    (fn [connection]
      (db/with-branch {:seon.db/connection connection}
@@ -561,21 +570,21 @@
              ;; Callers in class-value's current closure (the indexed program,
              ;; 2026-09-27): derive-page reads the private def stream-strip-id,
              ;; request! the referred defonce running-instances, start-flows!
-             ;; the dependency alias async/chan. selected-instance no longer
-             ;; reaches class-value.
+             ;; the dependency alias async/chan.
              callers '[seon.render.web/derive-page seon.cluster.boot/request!
                        seon.cluster/start-flows!]
-             ;; The indexer marks handler and serve! host-bound: a branch never
-             ;; changes the platform, so unchanged host-bound callers keep
-             ;; their compiled roots and are never an SCI definition.
+             ;; The indexer marks handler and serve! host-bound: SCI cannot
+             ;; run them, so they keep their compiled roots.
              host-bound-callers '[seon.render.web/handler seon.cluster/serve!]]
-         ;; The loaded src program is the platform (owner, 2026-10-18): its
-         ;; callers see the branch's change only after merge and reload.
+         ;; Owner (2026-10-19): a branch's change is live for its whole
+         ;; runtime. Callers run the loaded program's analysed definitions,
+         ;; which resolve the changed helper through its Var on the branch.
          (is (= #{changed} (:interpreted view)) "only the changed helper interprets")
-         (is (every? #(identical? @(find-var %) (sci.ctx-store/with-ctx ctx @(sci/resolve ctx %)))
-                     (concat callers host-bound-callers))
-             "each loaded src caller keeps its compiled root")
-         (is (every? #(nil? (refusal-of ctx %)) callers) "a compiled root refuses nothing by name")))))))
+         (is (every? #(runs-loaded-definition? ctx before %) callers)
+             "each loaded src caller keeps the loaded program's analysed root: nothing is re-rooted")
+         (is (every? #(identical? @(find-var %) (sci.ctx-store/with-ctx ctx @(sci/resolve ctx %))) host-bound-callers)
+             "each host-bound caller keeps its compiled root")
+         (is (every? #(nil? (refusal-of ctx %)) callers) "an analysed root refuses nothing by name")))))))
 
 (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting two changed entities and their reverse closures; measured 1,090 ms on default."
            :seon.test/long-ms 12000}
@@ -700,8 +709,8 @@
              "only the changed definition interprets: no loaded platform caller is re-rooted")
          (is (= #{'seon.db-test/only-an-as-of-view-has-an-as-of-key} (:seon.sci.eval/interpreted-tests snapshot))
              "its one direct test runs interpreted")
-         (is (identical? @(find-var caller) (sci.ctx-store/with-ctx ctx @(sci/resolve ctx caller)))
-             "a compiled src caller keeps its compiled root")
+         (is (runs-loaded-definition? ctx before caller)
+             "a src caller is never re-rooted: it keeps the loaded program's analysed root and reaches the change through its Var")
          (is (zero? (profile/calls-of measured 'seon.sci.eval/interpret-source-namespaces!))
              "no test namespace is interpreted by the redefinition")))))))
 
