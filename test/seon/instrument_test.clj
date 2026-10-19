@@ -1219,56 +1219,43 @@
                      (if replacement (assoc schemas schema-key replacement)
                          (dissoc schemas schema-key)))))))))
 
-(deftest a-refusal-that-cannot-be-built-is-a-minimal-declared-error
-  ;; A1-8b (G2-G4). Each case reaches the wrapper's minimal base: a validator
-  ;; that throws at the call (Malli's ::invalid-schema-at-call), an absent
-  ;; refusal schema, a refusal its schema rejects, and a construction that
-  ;; throws. The base keeps the report's expected schema and offending value;
-  ;; the body's own exception passes through untouched. The wrapper is the
-  ;; object `apply!` installs, built without arming any Var.
+(defn- refusal-wrapper
+  "The wrapper `apply!` installs for `form` over `body`, built without arming or interning a Var."
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol :any ifn?] ifn?]}
+  [projection function-symbol form body]
+  (let [lazy {:registry (assoc (m/default-schemas) :lazy-ref (m/-ref-schema {:lazy true}))}]
+    (#'instrument/compiled-wrapper
+     (update projection :seon.schema.projection/registry
+             #(mr/composite-registry {function-symbol (m/schema form lazy)} %))
+     function-symbol form body (config/result-caps config/defaults) {})))
+
+(deftest a-contract-that-cannot-be-checked-is-a-minimal-declared-error
+  ;; A1-8b (G2-G4). Malli's own report of a validator that throws at the call
+  ;; (::invalid-schema-at-call) is the minimal base: it keeps the report's
+  ;; expected schema and offending value; the body's own exception passes
+  ;; through untouched.
   (let [admitted (schema/handed-projection)
         registry (:seon.schema.projection/registry admitted)
         base? (schema/projection-validator admitted :seon.error/base)
         required (into #{} (keep (fn [[k properties _]] (when-not (:optional properties) k)))
                        (m/children (m/deref-all (m/schema :seon.error/base {:registry registry}))))
-        lazy {:registry (assoc (m/default-schemas) :lazy-ref (m/-ref-schema {:lazy true}))}
         absent [:schema [:lazy-ref ::absent]]
-        caps (config/result-caps config/defaults)
-        wrapper (fn [projection function-symbol form body]
-                  (#'instrument/compiled-wrapper
-                   (update projection :seon.schema.projection/registry
-                           #(mr/composite-registry {function-symbol (m/schema form lazy)} %))
-                   function-symbol form body caps {}))
-        refusal (fn [call] (try (call) nil (catch clojure.lang.ExceptionInfo thrown (ex-data thrown))))
-        unhashable (reify Object
-                     (hashCode [_] (throw (ex-info "unhashable" {})))
-                     (toString [_] "unhashable"))]
-    (doseq [[label projection form argument member expected offending cause]
-            [[:input admitted [:=> [:cat absent] :int] 1
-              :malli.core/invalid-schema-at-call [:cat [:schema [:ref ::absent]]] [1] ":malli.core/invalid-ref"]
-             [:output admitted [:=> [:cat :int] absent] 2
-              :malli.core/invalid-schema-at-call [:schema [:ref ::absent]] 2 ":malli.core/invalid-ref"]
-             [:guard admitted [:=> [:cat :int] :int absent] 3
-              :malli.core/invalid-schema-at-call [:schema [:ref ::absent]] [[3] 3] ":malli.core/invalid-ref"]
-             [:missing-refusal-schema (masked-registry admitted :seon.instrument/refusal-result nil)
-              [:=> [:cat :int] :int] "x" :malli.core/invalid-input [:cat :int] ["x"]
-              "Missing schema declaration :seon.instrument/refusal-result."]
-             [:rejected-refusal (masked-registry admitted :seon.instrument/refusal-result (m/schema :nil))
-              [:=> [:cat :int] :int] "x" :malli.core/invalid-input [:cat :int] ["x"]
-              "Instrumentation constructed an invalid refusal."]
-             [:construction-throws admitted [:=> [:cat :int] :int] unhashable
-              :malli.core/invalid-input [:cat :int] [unhashable] "unhashable"]]]
+        refusal (fn [call] (try (call) nil (catch clojure.lang.ExceptionInfo thrown (ex-data thrown))))]
+    (doseq [[label form argument expected offending]
+            [[:input [:=> [:cat absent] :int] 1 [:cat [:schema [:ref ::absent]]] [1]]
+             [:output [:=> [:cat :int] absent] 2 [:schema [:ref ::absent]] 2]
+             [:guard [:=> [:cat :int] :int absent] 3 [:schema [:ref ::absent]] [[3] 3]]]]
       (testing label
         (let [function-symbol (symbol "seon.instrument-test" (str "minimal-" (name label)))
               called (atom 0)
-              value (refusal #((wrapper projection function-symbol form
-                                        (fn [x] (swap! called inc) x))
+              value (refusal #((refusal-wrapper admitted function-symbol form
+                                                (fn [x] (swap! called inc) x))
                                argument))]
-          (is (= member (:seon.error/member value)) "the report key names who is wrong")
+          (is (= :malli.core/invalid-schema-at-call (:seon.error/member value)) "the report key names who is wrong")
           (is (= function-symbol (:seon.error/operation value)) "the error names the call")
           (is (= expected (:seon.error/expected value)) "the report's schema survives")
           (is (= offending (:seon.error/offending value)) "the checked value survives")
-          (is (= cause (:seon.error/message (peek (:seon.error/chain value))))
+          (is (= ":malli.core/invalid-ref" (:seon.error/message (peek (:seon.error/chain value))))
               "the chain carries the whole cause")
           (is (every? #(some? (find value %)) required))
           (is (base? value))
@@ -1276,14 +1263,40 @@
     (testing "the body's own exception is rethrown unchanged"
       (let [boom (ex-info "boom" {::body true})]
         (is (identical? boom
-                        (try ((wrapper admitted 'seon.instrument-test/minimal-body [:=> [:cat :int] :int]
-                                       (fn [_] (throw boom))) 4)
+                        (try ((refusal-wrapper admitted 'seon.instrument-test/minimal-body [:=> [:cat :int] :int]
+                                               (fn [_] (throw boom))) 4)
                              (catch Throwable thrown thrown))))))
     (is (= ::absent (get-in (peek (:seon.error/chain
-                                   (refusal #((wrapper admitted 'seon.instrument-test/minimal-ref
-                                                       [:=> [:cat absent] :int] identity) 1))))
+                                   (refusal #((refusal-wrapper admitted 'seon.instrument-test/minimal-ref
+                                                               [:=> [:cat absent] :int] identity) 1))))
                             [:seon.error/data :data :ref]))
         "the chain names the unresolvable schema")))
+
+(deftest a-refusal-that-cannot-be-built-throws-its-defect-whole
+  ;; Building a refusal is ordinary code: when it fails (an absent refusal
+  ;; schema, a refusal its schema rejects, a construction that throws), that
+  ;; failure is the wrapper's defect and reaches the entrant boundary whole,
+  ;; never a substitute error; the refused input still never runs the body.
+  (let [admitted (schema/handed-projection)
+        unhashable (reify Object
+                     (hashCode [_] (throw (ex-info "unhashable" {})))
+                     (toString [_] "unhashable"))]
+    (doseq [[label projection argument message]
+            [[:missing-refusal-schema (masked-registry admitted :seon.instrument/refusal-result nil) "x"
+              "Missing schema declaration :seon.instrument/refusal-result."]
+             [:rejected-refusal (masked-registry admitted :seon.instrument/refusal-result (m/schema :nil)) "x"
+              "Instrumentation constructed an invalid refusal."]
+             [:construction-throws admitted unhashable "unhashable"]]]
+      (testing label
+        (let [called (atom 0)
+              thrown (try ((refusal-wrapper projection (symbol "seon.instrument-test" (str "defect-" (name label)))
+                                            [:=> [:cat :int] :int] (fn [x] (swap! called inc) x))
+                           argument)
+                          nil
+                          (catch Throwable failure failure))]
+          (is (= message (ex-message thrown)) "the defect is the failure itself")
+          (is (not (contains? (ex-data thrown) :seon.error/type)) "no declared refusal stands in for it")
+          (is (zero? @called) "a refused input never runs the body"))))))
 
 (deftest re-evaluating-a-defn-silently-strips-instrumentation
   ;; the measured fact this namespace's discipline exists for
@@ -1714,28 +1727,21 @@
                                   (nil? (mi/-schema candidate)))]
                    name)))))
 
-(deftest an-invalid-refusal-retains-its-evidence-at-the-kernel-boundary
+(deftest a-refusal-defect-keeps-its-evidence-at-the-kernel-boundary
+  ;; The construction's defect thrown whole is recorded by the entrant
+  ;; boundary as a base error whose chain roots at that failure.
   (let [canonical (schema/handed-projection)
-        ;; A complete canonical population with a deliberately incompatible
-        ;; refusal declaration probes drift at the actual compiled wrapper.
-        projection (schema/build-projection
-                    (assoc (:seon.schema.projection/forms canonical)
-                           :seon.instrument/refusal-result :int))
-        caps (config/result-caps (test-support/effective-config))
+        unhashable (reify Object
+                     (hashCode [_] (throw (ex-info "unhashable" {::evidence "construction"})))
+                     (toString [_] "unhashable"))
         wrapped (instrument/wrap-interpreted
-                 'seon.instrument-test/refusal-drift
-                 '[:=> [:cat :int] :int] projection caps identity)
-        thrown (try (wrapped "wrong") (catch Throwable failure failure))
+                 'seon.instrument-test/refusal-defect
+                 '[:=> [:cat :int] :int] canonical (config/result-caps (test-support/effective-config)) identity)
+        thrown (try (wrapped unhashable) (catch Throwable failure failure))
         options (kernel/context-options)
         ctx (assoc (sci/init {:interrupt-fn (:interrupt-fn options)})
                    :seon.sci.kernel/guard (:seon.sci.kernel/guard options))]
-    ;; A refusal its schema rejects is the minimal base (A1-8b): the rejection
-    ;; is the root of its chain, never the thrown message.
-    (is (= (str "seon.instrument-test/refusal-drift :malli.core/invalid-input: the refusal could not be built: "
-                "Instrumentation constructed an invalid refusal.")
-           (ex-message thrown)))
-    (is (= "Instrumentation constructed an invalid refusal."
-           (:seon.error/message (peek (:seon.error/chain (ex-data thrown))))))
+    (is (= "unhashable" (ex-message thrown)))
     (kernel/with-arm
      ctx (* 1000 test-support/event-backstop-seconds)
      (fn [armed]
@@ -1743,12 +1749,10 @@
                       {:seon.sci.kernel/time-limit-kind :seon.sci.eval/time-limit
                        :seon.sci.kernel/failure-kind :seon.sci.eval/evaluation-failed}
                       thrown ((:seon.sci.kernel/record armed) :error))
-             evidence [:seon.error/member :seon.error/expected :seon.error/offending
-                       :seon.error/chain :seon.error/message]]
+             root (peek (:seon.error/chain outcome))]
          (is ((schema/projection-validator canonical :seon.error/base) outcome))
-         (is (= (select-keys (ex-data thrown) evidence)
-                (select-keys outcome evidence))
-             "the kernel boundary keeps the minimal base's whole evidence"))))))
+         (is (= "unhashable" (:seon.error/message root)) "the chain roots at the construction's failure")
+         (is (= "construction" (get-in root [:seon.error/data ::evidence])) "with its own evidence"))))))
 
 (defn reporting-failure
   "A declared humanizer that fails while the real reporter explains a value."
@@ -1768,13 +1772,10 @@
                  '[:=> [:cat [:fn {:error/fn seon.instrument-test/reporting-failure} clojure.core/int?]] :int]
                  projection (config/result-caps (test-support/effective-config)) identity)
         failure (try (wrapped "wrong") (catch Throwable thrown thrown))]
-    ;; The humanizer's failure is the root of the minimal base's chain, with
-    ;; its own evidence; the base is a core fault, not a contract violation.
-    (let [root (peek (:seon.error/chain (ex-data failure)))]
-      (is (= "The contract humanizer failed." (:seon.error/message root)))
-      (is (= "original cause"
-             (get-in root [:seon.error/data :seon.instrument-test/reporting-evidence]))))
-    (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) (ex-data failure)))
+    ;; The humanizer's failure is the reporter's defect: it reaches the
+    ;; entrant boundary whole, with its own evidence, never a contract violation.
+    (is (= "The contract humanizer failed." (ex-message failure)))
+    (is (= "original cause" (:seon.instrument-test/reporting-evidence (ex-data failure))))
     (is (not ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) (ex-data failure))))))
 
 (deftest adoption-arms-only-the-named-identity

@@ -211,10 +211,11 @@ malformed error while reporting the original refusal. Retain the evaluation refe
   attribution is kept.
 - **Schema-at-call**: its original exception is the `ex-info` cause, so `caught` keeps it in the chain; the failing
   schema is never re-explained. An evaluation interrupt that Malli reported this way is rethrown untouched as the bound.
-- **Reporter failure**: if explaining or spell-checking throws, the reporter's exception becomes the primary error
-  (`:seon.error/exception`, blamed on the reporter), carrying the original report kind and the raw report data as
-  members; it is never relabeled as the contract error (`a-reporter-failure-is-not-relabelled-as-a-contract-violation`).
-  An interrupt propagates unchanged.
+- **Reporter failure**: if building the refusal throws (explaining, spell-checking, an absent or rejecting
+  `:seon.instrument/refusal-result`), that exception is the wrapper's defect: nothing in the wrapper catches it, and it
+  reaches the entrant boundary whole, which records and delivers it as Seon's own error; it is never relabeled as the
+  contract error (`seon.instrument-test/a-reporter-failure-is-not-relabelled-as-a-contract-violation`,
+  `seon.instrument-test/a-refusal-that-cannot-be-built-throws-its-defect-whole`). An interrupt propagates unchanged.
 - **No printing in producers**: the message names the function and kind; `problem` keeps `:in :value :type :message
   ::me/likely-misspelling-of` and `(m/form schema)`; the value printer shows them at the edge. A message says why: a
   failed `[:string {:min 1}]` on `""` reads "should be at least 1 character", never "expected a string, got a string"

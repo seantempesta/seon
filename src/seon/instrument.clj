@@ -888,26 +888,21 @@
         arity-ordinal (fn [data]
                         (first (keep-indexed #(when (identical? %2 (:schema data)) %1)
                                              arity-schemas)))
-        ;; Read on the refusal path only, so an absent refusal schema is a
-        ;; minimal refusal at the call, not an arming failure.
+        ;; The refusal's own output check: `boundary-refusal` runs unarmed
+        ;; inside the report (`*compiling-contract*`), so its declared output
+        ;; is validated here, on the refusal path only.
         refusal? (delay ((mi/-f->original schema/projection-cache-value)
                          projection ::refusal-validator
                          #((mi/-f->original schema/projection-validator)
                            projection :seon.instrument/refusal-result)))
-        ;; The base from Malli's report alone: valid by construction, a core
-        ;; fault, the report key naming who is wrong, the failure in its chain.
-        ;; Each report carries its arm's schema and checked values (arity:
-        ;; the function schema and the count), so expected and offending
-        ;; need no computation that could fail again.
-        minimal (fn [kind data failure]
-                  (let [arm (case kind
-                              :malli.core/invalid-schema-at-call (:arm data)
-                              :malli.core/invalid-arity :arity
-                              :malli.core/invalid-output :output
-                              :malli.core/invalid-guard :guard
-                              :input)
+        ;; Malli's own report of a contract that threw at the call
+        ;; (::invalid-schema-at-call): the base from that report alone, a core
+        ;; fault naming the arm, its schema and checked value, the failure in
+        ;; its chain. Each report carries its arm's schema and checked values,
+        ;; so expected and offending need no computation that could fail again.
+        minimal (fn [data failure]
+                  (let [arm (:arm data)
                         offending (case arm
-                                    :arity (find data :arity)
                                     :input (find data :args)
                                     :output (find data :value)
                                     (clojure.lang.MapEntry/create
@@ -917,46 +912,38 @@
                       (cond-> {:seon.error/at (java.util.Date.)
                                :seon.error/layer :seon.instrument/invocation
                                :seon.error/operation function-symbol
-                               :seon.error/member kind
-                               :seon.error/expected (m/form (if (= :arity arm) (:schema data)
-                                                                (get data arm (:schema data))))
-                               :seon.error/message (str function-symbol " " kind
-                                                        ": the refusal could not be built: "
+                               :seon.error/member :malli.core/invalid-schema-at-call
+                               :seon.error/expected (m/form (get data arm (:schema data)))
+                               :seon.error/message (str function-symbol
+                                                        " :malli.core/invalid-schema-at-call: the contract could not be checked: "
                                                         (ex-message failure))
                                :seon.error/throwable failure}
-                        ;; NOT under the arming projection: this path runs because building
-                        ;; the refusal against it failed, so its registry is the suspect (a
-                        ;; masked refusal-result threw ::invalid-schema from identity-only
-                        ;; descriptors, and the refusal had no members). `diagnostic`
-                        ;; references the whole observation under the handed projection.
+                        ;; NOT under the arming projection: the contract's own
+                        ;; registry is the suspect. `diagnostic` references the
+                        ;; whole observation under the handed projection.
                         offending (assoc :seon.error/offending (val offending))))]))
-        ;; A BOUND FIRING IS ITS OWN REPORT: explaining re-checks the value, so
-        ;; an evaluation deadline can fire mid-refusal (or mid-validation,
-        ;; which Malli reports as ::invalid-schema-at-call). SCI's interrupt
-        ;; leaves unchanged so the bound reports what never arrived.
-        reraise-bound! (fn [failure]
-                         (when (kernel/interrupted? failure) (throw failure)))
+        ;; Building a refusal is ordinary code over Malli's report: a failure
+        ;; there (an evaluation deadline included) is a defect that throws
+        ;; whole to the entrant boundary, which records and delivers it.
         refusal (fn [kind data]
                   (if (= :malli.core/invalid-schema-at-call kind)
-                    (do (reraise-bound! (:exception data))
-                        (minimal kind data (:exception data)))
-                    (try
-                      (let [value (boundary-refusal projection kind
-                                                    (cond-> (assoc data :fn-name function-symbol
-                                                                   ::arity-ordinal (arity-ordinal data))
-                                                      (::digest policy) (assoc ::digest (::digest policy)))
-                                                    arities)]
-                        (if (@refusal? value)
-                          [(if (= :malli.core/invalid-arity kind)
-                             :seon.instrument/arity-error :seon.instrument/contract-error) value]
-                          (minimal kind data (ex-info "Instrumentation constructed an invalid refusal."
-                                                 {:seon.instrument/problems
-                                                  (mapv #(select-keys % [:path :in])
-                                                        (:errors (m/explain :seon.instrument/refusal-result
-                                                                            value options)))}))))
-                      (catch Throwable failure
-                        (reraise-bound! failure)
-                        (minimal kind data failure)))))
+                    (let [failure (:exception data)]
+                      ;; a bound firing mid-validation is its own report
+                      (when (kernel/interrupted? failure) (throw failure))
+                      (minimal data failure))
+                    (let [value (boundary-refusal projection kind
+                                                  (cond-> (assoc data :fn-name function-symbol
+                                                                 ::arity-ordinal (arity-ordinal data))
+                                                    (::digest policy) (assoc ::digest (::digest policy)))
+                                                  arities)]
+                      (when-not (@refusal? value)
+                        (throw (ex-info "Instrumentation constructed an invalid refusal."
+                                        {:seon.instrument/problems
+                                         (mapv #(select-keys % [:path :in])
+                                               (:errors (m/explain :seon.instrument/refusal-result
+                                                                   value options)))})))
+                      [(if (= :malli.core/invalid-arity kind)
+                         :seon.instrument/arity-error :seon.instrument/contract-error) value])))
         wrapped
         (m/-instrument
          {:schema compiled :scope #{:input :output :guard}
