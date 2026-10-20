@@ -56,4 +56,132 @@
                       [:seon.eval/shown {:optional true} :seon.eval/shown] [:seon.eval/duration-us :seon.eval/duration-us]
                       [:seon.eval/alloc-bytes :seon.eval/alloc-bytes]]
  :seon.db/agent-fact [:map {:seon.db/attributes true}
-                       [:seon.agent/id :seon.agent/id] [:seon.agent/answered-t {:optional true} :seon.agent/answered-t]]}
+                       [:seon.agent/id :seon.agent/id] [:seon.agent/answered-t {:optional true} :seon.agent/answered-t]]
+ ;; ---- tasks, attempts, proof results, root's boot, turns and ends (lane D1's proto.agents.facts.edn) ----
+;; ---- the task ----
+ :seon.task/id [:and {:seon.db/identity true} :string]
+ :seon.task/ns :symbol
+ :seon.task/name :string
+ :seon.task/plan :string
+ :seon.task/instructions :string
+ :seon.task/proofs [:set :qualified-symbol]
+ :seon.task/needs [:set :seon.db/ref]
+ :seon.task/branch :keyword
+ :seon.task/model :string
+ :seon.task/execution [:and {:seon.db/index true} [:enum :held :running :cancelled]]
+ :seon.task/problem :string
+ :seon.task/kind [:enum :work :design :implement :test :merge]
+ ;; measured evidence a task starts from: a failed merge's conflicts and the red proofs
+ :seon.task/evidence [:map {:seon.db/edn true}
+                      [:from :seon.attempt/id] [:conflicts [:vector :seon.merge/conflict]]
+                      [:unmerged [:vector :string]] [:red [:vector :qualified-symbol]]]
+ :seon.task/generation :int
+ ;; config dials are attributes of the task, by their own names
+ :seon.config.agent/max-turns [:int {:min 1}]
+ :seon.config.merge/max-conflicts :int
+ :seon.config.merge/max-merge-turns :int
+ :seon.config.merge/max-attach :int
+ :seon.task/task-fact [:map {:seon.db/attributes true}
+                          [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
+                          [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
+                          [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind]
+                          [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/needs {:optional true} :seon.task/needs]
+                          [:seon.task/instructions {:optional true} :seon.task/instructions]
+                          [:seon.task/model {:optional true} :seon.task/model] [:seon.task/problem {:optional true} :seon.task/problem]
+                          [:seon.task/evidence {:optional true} :seon.task/evidence]
+                          [:seon.task/generation {:optional true} :seon.task/generation]
+                          [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
+                          [:seon.config.merge/max-conflicts {:optional true} :seon.config.merge/max-conflicts]
+                          [:seon.config.merge/max-merge-turns {:optional true} :seon.config.merge/max-merge-turns]
+                          [:seon.config.merge/max-attach {:optional true} :seon.config.merge/max-attach]]
+ ;; ---- the attempt and its proof results (observed by root) ----
+ :seon.attempt/id [:and {:seon.db/identity true} :string]
+ :seon.attempt/task [:and {:seon.db/index true} :seon.db/ref]
+ :seon.attempt/status [:and {:seon.db/index true} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed]]
+ :seon.attempt/boot :string
+ :seon.attempt/agent :keyword
+ :seon.attempt/pid :int
+ :seon.attempt/start-ms :int
+ :seon.attempt/end-ms :int
+ :seon.attempt/branch :keyword
+ :seon.attempt/model :string
+ :seon.attempt/max-turns :int
+ :seon.attempt/outcome [:enum :green :red :waiting :cap :sent-back :merge-failed :error]
+ :seon.attempt/reason :string
+ :seon.attempt/turns :int
+ :seon.attempt/model-calls :int
+ :seon.attempt/tokens :int
+ :seon.attempt/merged-t :int
+ :seon.attempt/basis-t :int
+ :seon.attempt/uncontracted [:set :qualified-symbol]
+ :seon.proof/test :qualified-symbol
+ :seon.proof/status [:enum :pass :fail :error :none]
+ ;; one entity per test, owned by the attempt
+ :seon.attempt/results [:set {:seon.db/component true} :seon.db/ref]
+ ;; measured at the attempt's end from the branch: its merge entries (:seon.merge/*) and the keys still unmerged
+ :seon.attempt/conflicts [:set {:seon.db/component true} :seon.db/ref]
+ :seon.attempt/unmerged [:set :string]
+ :seon.attempt/attempt-fact [:map {:seon.db/attributes true}
+                             [:seon.attempt/id :seon.attempt/id] [:seon.attempt/task :seon.attempt/task]
+                             [:seon.attempt/status :seon.attempt/status] [:seon.attempt/boot :seon.attempt/boot]
+                             [:seon.attempt/agent :seon.attempt/agent] [:seon.attempt/start-ms :seon.attempt/start-ms]
+                             [:seon.attempt/pid {:optional true} :seon.attempt/pid] [:seon.attempt/end-ms {:optional true} :seon.attempt/end-ms]
+                             [:seon.attempt/branch {:optional true} :seon.attempt/branch] [:seon.attempt/model {:optional true} :seon.attempt/model]
+                             [:seon.attempt/max-turns {:optional true} :seon.attempt/max-turns]
+                             [:seon.attempt/outcome {:optional true} :seon.attempt/outcome] [:seon.attempt/reason {:optional true} :seon.attempt/reason]
+                             [:seon.attempt/turns {:optional true} :seon.attempt/turns] [:seon.attempt/model-calls {:optional true} :seon.attempt/model-calls]
+                             [:seon.attempt/tokens {:optional true} :seon.attempt/tokens] [:seon.attempt/merged-t {:optional true} :seon.attempt/merged-t]
+                             [:seon.attempt/basis-t {:optional true} :seon.attempt/basis-t]
+                             [:seon.attempt/uncontracted {:optional true} :seon.attempt/uncontracted]
+                             [:seon.attempt/results {:optional true} :seon.attempt/results]
+                             [:seon.attempt/conflicts {:optional true} :seon.attempt/conflicts]
+                             [:seon.attempt/unmerged {:optional true} :seon.attempt/unmerged]]
+ :seon.proof/proof-fact [:map {:seon.db/attributes true} [:seon.proof/test :seon.proof/test] [:seon.proof/status :seon.proof/status]]
+ ;; ---- root's boot and dials (main) ----
+ :seon.root/id [:and {:seon.db/identity true} :keyword]
+ :seon.root/boot :string
+ :seon.config.agent/max-running :int
+ :seon.config.merge/max-running :int
+ :seon.root/root-fact [:map {:seon.db/attributes true}
+                          [:seon.root/id :seon.root/id] [:seon.root/boot :seon.root/boot]
+                          [:seon.config.agent/max-running {:optional true} :seon.config.agent/max-running]
+                          [:seon.config.merge/max-running {:optional true} :seon.config.merge/max-running]]
+ ;; ---- written by an agent on its own branch; they reach main with its merge ----
+ :seon.turn/id [:and {:seon.db/identity true} :string]
+ :seon.turn/attempt [:and {:seon.db/index true} :string]
+ :seon.turn/n :int
+ :seon.turn/reply :string
+ :seon.turn/forms :int
+ :seon.turn/errors :int
+ :seon.turn/red :int
+ :seon.turn/ms :int
+ :seon.turn/tokens :int
+ :seon.end/attempt [:and {:seon.db/identity true} :string]
+ :seon.end/outcome :keyword
+ :seon.end/reason :string
+ :seon.end/turns :int
+ :seon.end/tokens :int
+ :seon.turn/turn-fact [:map {:seon.db/attributes true}
+                          [:seon.turn/id :seon.turn/id] [:seon.turn/attempt :seon.turn/attempt] [:seon.turn/n :seon.turn/n]
+                          [:seon.turn/reply :seon.turn/reply] [:seon.turn/forms :seon.turn/forms] [:seon.turn/errors :seon.turn/errors]
+                          [:seon.turn/red :seon.turn/red] [:seon.turn/ms :seon.turn/ms] [:seon.turn/tokens :seon.turn/tokens]]
+ :seon.end/end-fact [:map {:seon.db/attributes true}
+                         [:seon.end/attempt :seon.end/attempt] [:seon.end/outcome :seon.end/outcome]
+                         [:seon.end/reason {:optional true} :seon.end/reason]
+                         [:seon.end/turns {:optional true} :seon.end/turns] [:seon.end/tokens {:optional true} :seon.end/tokens]]
+ ;; ---- the program merge's facts (lane D1's proto.merge.facts.edn) ----
+:var/flagged :boolean
+ :ns/alias [:set :string]
+ :seon.merge/key [:any {:seon.db/index true :seon.db/edn true}]
+ :seon.merge/kind :keyword
+ :seon.merge/base [:any {:seon.db/edn true}]
+ :seon.merge/ours [:any {:seon.db/edn true}]
+ :seon.merge/theirs [:any {:seon.db/edn true}]
+ :seon.merge/main-t :int
+ :seon.merge/resolved? :boolean
+ :seon.merge/var-flag-fact [:map {:seon.db/attributes true} [:var/flagged :var/flagged] [:ns/alias {:optional true} :ns/alias]]
+ :seon.merge/entry-fact [:map {:seon.db/attributes true}
+                          [:seon.merge/key :seon.merge/key] [:seon.merge/kind :seon.merge/kind]
+                          [:seon.merge/base {:optional true} :seon.merge/base] [:seon.merge/ours {:optional true} :seon.merge/ours]
+                          [:seon.merge/theirs {:optional true} :seon.merge/theirs]
+                          [:seon.merge/main-t {:optional true} :seon.merge/main-t] [:seon.merge/resolved? {:optional true} :seon.merge/resolved?]]}

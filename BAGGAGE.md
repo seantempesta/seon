@@ -9,3 +9,14 @@ Seon mechanisms deliberately left behind, and why. Started from `../proto/BAGGAG
 - **`proto.c-bench`, `proto.f1-bench`**: measurement harnesses for writer design C and F1's writer; their numbers are in `notes/option3-F1-flow.md`.
 - **The pre-nREPL data REPL in `proto.agent`** (`eval-forms`, `eval-one`, `bounded-eval`): dead since agents speak nREPL (`seon.repl/eval-code`).
 - **`proto.seon-printer`, `proto.smoke-seon`**: the printer arrives in its own phase.
+
+## Left behind at the tasks phase (lane A1, from proto/agents R1/M1)
+
+- **Root's executor thread and one observer thread per attempt** (`proto.agents.root/executor!`, `observe-attempt!`): replaced by the reconciler proc, whose flights are requests and answers.
+- **`proto.agents.schema`'s own registry and instrument!**: the one registry (`resources/seon/schemas`) and `seon.contract`.
+- **`proto.agents.task/db-schema`**: derived from the fact schemas (lane D1).
+- **Root's judge-time `harvest!` call**: the turn loop stages the runtime at its end; the judge reads the branch.
+- **The attempt's end read back from the agent's printed reply**: the end is a fact on the branch (`:seon.end/*`).
+- **`proto.agents.entrance`** (the line-EDN outside-agent socket): the MCP phase replaces it.
+- **The harvest demo and the mock provider runs**: the merge tests and the scenarios cover them.
+- **`proto.agent/eval-forms` and `record-items!` for nested evals**: `seon.repl/eval-string`, the one REPL path.

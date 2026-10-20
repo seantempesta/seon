@@ -58,12 +58,36 @@ owns the concept. A new concept gets its word here before it appears in code.
 | **recording** | one transaction per eval request on the agent's branch: its evaluations on its agent entity, its defs | `seon.agent-proc/record-tx` |
 | **observation** | data on the branch that observed it (evaluations, answered t), never carried by a merge | `seon.db/observation-attrs` |
 
+## Tasks (TASK-CHAIN's words; lanes R1 and M1)
+
+| word | meaning | owner |
+|---|---|---|
+| **task** | an entity of desired state: plan, instructions, proofs, `:needs`, environment, execution | `seon.task` |
+| **needs** | a task's prerequisites (refs); the only dependency edge, no chain entity | `seon.task/create-tx` |
+| **accumulated** | a task's plan and proofs with its prerequisites', derived along `:needs` | `seon.task/tasks` |
+| **attempt** | observed state: one agent working one task once (`task#n`) | `seon.task/attempt-start-tx` |
+| **template** | a task kind's defaults: work, design, implement, test, merge | `seon.template` |
+| **merge task** | an ordinary task (kind `:merge`) whose new agent merges main into the branch and goes green | `seon.template/with-merge` |
+| **attach** | a failed merge's design → implement → test → merge tasks, each a new agent | `seon.template/attach-tx` |
+| **done rule** | why an attempt's measured facts do not make its task done; empty means done | `seon.reconcile/done-refusals` |
+| **reconciler** | the pure function of main's db to actions, and the proc that carries them out | `seon.reconcile/reconcile`, `reconciler-proc` |
+| **flight** | one action carried out as a chain of requests and answers in the reconciler proc | `seon.reconcile/advance` |
+| **turn loop** | inside an agent: observe, then end or act (context to the model, forms through the REPL path) | `seon.turn/work!` |
+| **three-way** | git's merge of program maps (base, ours, theirs) keyed `[:var sym]` | `seon.merge/three-way` |
+| **unmerged entry** | a conflict kept on the branch (base, ours, theirs) until re-defn or `resolve!` | `seon.merge/unmerged` |
+| **harvest** | staging the live runtime onto the branch (unmaps, plain defs as values, aliases) | `seon.harvest/harvest!` |
+| **dragon** | a place where the outside world can fail us, met by one named edge | `docs/DRAGONS.md` |
+
 ## Agent-facing verbs (`my.*`)
 
 | ns | verbs |
 |---|---|
 | `my.db` | `db`, `q`, `pull`, `transact!` (on the agent's own branch) |
 | `my.agent` | `$`, `whoami`, `messages`, `send-message` |
+| `my.task` | `current`, `update!`, `send-back!` |
+| `my.turn` | `wait` |
+| `my.branch` | `merge-main!`, `unmerged`, `resolve!` |
+| `my.root` (root's verbs) | `create!`, `run!`, `cancel!` |
 
 ## Renamed from the prototypes
 
@@ -76,4 +100,6 @@ owns the concept. A new concept gets its word here before it appears in code.
 | `proto.lib`, `proto.sock`, `proto.wire`, `proto.intr`, `proto.program`, `proto.db`, `proto.repl` | `seon.lib`, `seon.sock`, `seon.wire`, `seon.intr`, `seon.program`, `seon.db`, `seon.repl` |
 | `x1.codec` | `konserve.jolt.fasl` (in the konserve fork) |
 | `proto.smoke` | `seon.check` |
+| `proto.agents.*` (R1, M1) | `seon.task`, `seon.reconcile`, `seon.template`, `seon.turn`, `seon.context`, `seon.model`, `seon.proofs`, `seon.harvest`, `seon.fixtures`, `seon.e2e`; `proto.merge` → `seon.merge` |
+| `proto.agents.root` (executor thread, observer threads) | `seon.reconcile/reconciler-proc` (one step-fn) and `my.root` |
 | `PROTO_<DIAL>` | `SEON_<DIAL>` |

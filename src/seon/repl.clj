@@ -23,7 +23,7 @@
   is answered once the eval has stopped. Seon's platform ops (tests, stats, sync, clone,
   messages, writes) are seon/<op> messages, handled by `agent-step` as before."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn- defchecked]] [jolt.nrepl :as nrepl] [seon.wire :as wire] [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent]
+  (:require [seon.contract :refer [defn defn- defchecked]] [jolt.nrepl :as nrepl] [seon.wire :as wire] [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract] [clojure.edn] [my.db] [my.agent]
             [seon.program :as program] [seon.lib :as lib] [seon.sock :as sock] [seon.step :as step]
             [jolt.ffi :as ffi]))
 
@@ -185,11 +185,10 @@
                       (program/program-ns? (agent/db) (ns-name (:ns (meta v)))))
                (if contract/record?
                  ;; joins the request's recording transaction (the last def of a var wins)
-                 (do (swap! agent/state assoc-in [:defs (symbol v)] (program/record-tx v (:repl/form m)))
+                 (do (swap! agent/state assoc-in [:defs (symbol v)] (program/record-tx (agent/db) v (:repl/form m)))
                      (assoc m "seon/recorded" (str (symbol v))))
-                 (try (agent/transact! (program/record-tx v (:repl/form m)))
-                      (assoc m "seon/recorded" (str (symbol v)))
-                      (catch Throwable e (assoc m "seon/record-error" (ex-message e)))))
+                 (do (agent/transact! (program/record-tx (agent/db) v (:repl/form m)))
+                     (assoc m "seon/recorded" (str (symbol v)))))
                m)))))))
 
 (defn- admit
@@ -235,6 +234,80 @@
   ([mw] (reduce (fn [h m] (m h)) base-handler (reverse mw))))
 
 (def ^:private the-handler (delay (handler)))
+
+;; ---- reply items and their recording (root folds the wire; the agent folds in-process) ----
+
+(defn- fold-item
+  "One form's nREPL answer (with the out/err text that came before it) as a reply item."
+  {:malli/schema [:=> [:cat :seon.wire/msg :map :seon.host/fn] :seon.agent/item]}
+  [m out text]
+  (let [st (set (get m "status"))
+        err? (or (st "eval-error") (st "interrupted"))
+        em (some-> (get m "seon/error") text clojure.edn/read-string)
+        t #(some-> (get m %) text)]
+    (cond-> {:id (get m "seon/ordinal") :tag (if err? :err :ret) :form (t "seon/form")
+             :ms (some-> (get m "seon/us") (/ 1000.0)) :alloc-bytes (get m "seon/alloc-bytes")}
+      (not err?) (assoc :printed (t "value") :ret (t "value") :handle (some-> (get m "seon/handle") keyword))
+      err? (assoc :printed (:message em) :err em :err-text (:err out))
+      (get m "seon/tokens") (assoc :tokens (get m "seon/tokens"))
+      (get m "seon/truncated") (assoc :truncated? true)
+      (get m "seon/elisions") (assoc :elisions (get m "seon/elisions"))
+      (get m "seon/recorded") (assoc :recorded (symbol (t "seon/recorded")))
+      (get m "seon/record-error") (assoc :record-error (t "seon/record-error"))
+      (get m "seon/contract") (assoc :contract (keyword (t "seon/contract")))
+      (get m "seon/contract-error") (assoc :contract-error (clojure.edn/read-string (t "seon/contract-error")))
+      (get m "seon/warnings") (assoc :warnings (clojure.edn/read-string (t "seon/warnings")))
+      (seq (:out out)) (assoc :out (:out out)))))
+
+(defn fold
+  "The answers of one eval request (in order) -> its reply items. `out`/`err` text goes
+  onto the next form's item (the form that printed it). text decodes a text field
+  (seon.wire/text-> for answers that crossed the wire, identity in-process)."
+  {:malli/schema [:=> [:cat [:sequential :seon.wire/msg] :seon.host/fn] :seon.agent/items]}
+  [answers text]
+  (loop [[m & more :as ms] answers acc {:items [] :out {}}]
+    (if-not (seq ms)
+      (:items acc)
+      (let [st (set (get m "status"))]
+        (cond
+          (or (contains? m "value") (st "eval-error") (st "interrupted"))
+          (recur more (-> acc (update :items conj (fold-item m (:out acc) text)) (assoc :out {})))
+          (contains? m "out") (recur more (update-in acc [:out :out] str (text (get m "out"))))
+          (contains? m "err") (recur more (update-in acc [:out :err] str (text (get m "err"))))
+          :else (recur more acc))))))
+
+(defn record-tx
+  "The recording transaction of one eval request (G1's proto.agent/record-tx, Seon's names):
+  one evaluation entity per item (its id, run, ordinal, source, tag, shown value or error,
+  time, allocation), each on the agent's entity, and the agent's answered t. Ids are new
+  each time; the agent entity is the one upsert."
+  {:malli/schema [:=> [:cat :seon.agent/id :string :seon.agent/items [:maybe :int]] :seon.db/tx-data]}
+  [id run items t-basis]
+  (conj (vec (for [it items :when (:id it)]
+               (cond-> {:seon.cluster.eval/id (str run "/" (:id it)) :seon.cluster.eval/run run
+                        :seon.cluster.eval/ordinal (:id it) :seon.cluster.eval/agent "agent"
+                        :seon.cluster.eval/tag (:tag it) :seon.cluster.eval/source (or (:form it) "")
+                        :seon.eval/duration-us (long (* 1000 (or (:ms it) 0))) :seon.eval/alloc-bytes (long (or (:alloc-bytes it) 0))}
+                 (= :ret (:tag it)) (assoc :seon.eval/shown (or (:printed it) ""))
+                 (= :err (:tag it)) (assoc :seon.cluster.eval/error (or (:printed it) ""))
+                 (:out it) (assoc :seon.cluster.eval/output (:out it)))))
+        (cond-> {:db/id "agent" :seon.agent/id id} t-basis (assoc :seon.agent/answered-t t-basis))))
+
+(defn eval-string
+  "Evaluate code from inside this agent (the turn loop's forms) through the one REPL path:
+  the handler and its middleware, its answers folded into reply items, recorded on the
+  branch in one transaction (the evaluations and the defs) through the agent's write path."
+  {:malli/schema [:=> [:cat :string] :seon.agent/items]}
+  [code]
+  (let [answers (volatile! [])
+        _ (@the-handler {"op" "eval" "code" code :reply #(vswap! answers conj %)})
+        items (fold @answers identity)
+        defs (into [] (mapcat val) (:defs @agent/state))]
+    (swap! agent/state dissoc :defs)
+    (when (and contract/record? (= :agent (:mode @agent/state)) (seq items))
+      (agent/transact! (into defs (record-tx (:id @agent/state) (str (name (:id @agent/state)) "-" (lib/c-getpid) "-" (lib/now-ns))
+                                             items (:max-tx (agent/db))))))
+    items))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 

@@ -10,6 +10,7 @@ S=$ROOT/target/seon
 run() { (cd "$ROOT/target" && ./seon "$@" 2>&1) }
 if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then run "$@"; exit $?; fi
 N=${1:-100}
+echo "== dragons"; "$ROOT/bin/dragons" | tail -1
 echo "== contracts"; run contracts | grep -E ":contracted|:uncontracted|:result"
 echo "== admit"; run admit | tail -1
 echo "== record"; run record | tail -1
@@ -31,4 +32,10 @@ echo "== window (SEON_FLUSH_MS=1000: answered unflushed, flushed within the wind
 D=$(mktemp -d /tmp/seon-window.XXXXXX)
 (export SEON_FLUSH_MS=1000; run window-write $D/store | tail -2; run window-read $D/store | tail -1); rm -rf "$D"
 echo "== swarm $N"; run swarm $N | grep -E ":merged|:tasks-done|:fresh"
+echo "== tasks: calc (6-task graph, cancel), scenarios (conflict, semantic, hairy), swarm 20 over 5 shared vars"
+run e2e calc | tail -1
+for k in conflict semantic hairy; do run e2e scenario $k | tail -1; done
+run e2e swarm 20 8 | tail -1
+D=$(mktemp -d /tmp/seon-resume.XXXXXX)
+echo "== resume (root SIGKILLed mid-graph; a new root finishes it)"; run e2e resume $D/s > /dev/null; run e2e resume2 $D/s | tail -1; rm -rf "$D"
 echo "== scale $N"; run scale $N | grep -E ":all-ok|:spawn->all|:end-to-end|:control-real-mb|:all-killed"

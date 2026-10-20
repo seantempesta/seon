@@ -1,0 +1,43 @@
+# Dragons
+
+Owner, 2026-10-20: "Guards and fences are almost always wrong. We should be doing the right
+thing, not guarding for it or trying to block random shit. We should know where all the
+dragons are and name them explicitly when dealing with them."
+
+A **dragon** is a place where the world outside our code can fail us. Each one is met by
+exactly one function, its **edge**. The edge either answers a declared variant, which is
+plain data its callers handle as an ordinary branch, or it is an **entrant boundary**, which
+turns a defect into a recorded error map. Nothing else catches. `bin/dragons` (run by
+`bin/check`) lists every `catch` in `src/` and fails when one is not named below by its
+function.
+
+## Edges that catch (each names its one variant)
+
+| dragon | edge (`ns/fn`) | declared variant | handled by, as data |
+|---|---|---|---|
+| Datahike or the store refuses a write (a bad transaction, LMDB full or failing) | `seon.writer/writer-one` | the request's answer `{:ok false :error msg}` | the caller of the write: an agent's `transact!` throws it into its own eval (an `:err` item); root's callers read `:ok` |
+| The model's HTTP call (connect, TLS, timeout, a non-200) | `seon.model/http-post` | `:seon.model/provider-error` | `seon.turn/act!` returns it; `seon.turn/work!` ends the attempt `:error` with its message |
+| An agent's authored contract does not compile | `seon.contract/arm!` | `:seon.contract/invalid` | `seon.repl/admit` puts it on the reply item (`:contract-error`); `seon.program/load-src!` reports it as a load error |
+| Program code from the db does not load (a source that throws, a missing alias target) | `seon.program/load-src!`, `seon.program/aliases!` | `:seon.program/error` (`{:ns :message}`) | root and the fork server put load errors in their view and events; an agent's `:load-errors` |
+| An interrupt or a timeout stops a running form (SIGUSR1, SIGALRM) | `seon.intr/run` | ex-info `{:interrupted true}` or `{:timeout-ms n}` | `seon.repl/eval-code` answers the form `interrupted`/`eval-error` and goes on |
+
+## Entrant boundaries (a defect becomes a recorded error map)
+
+| boundary | (`ns/fn`) | what it records |
+|---|---|---|
+| the agent's REPL: reading and evaluating an agent's form | `seon.repl/eval-code` | the form's error as an `:err` reply item (the one error map in `seon/error`) |
+| the agent's request handler | `seon.repl/agent-step` | `err` + `done` on the request |
+| a test run, in the test child of an agent | `seon.agent/run-tests-forked` | an `:error` report in the run |
+| every root proc | Flow's error channel, read by root's error reader | `:root-errors` in the api's view, with the error map |
+
+## Dragons met without a catch (the edge answers data)
+
+| dragon | edge | answer |
+|---|---|---|
+| A peer's socket is gone (EOF) | `seon.sock/fill!`, `seon.wire/poll-msg!` | `:eof`; the reader sends the agent's proc `{:op :dead}` |
+| A write to a dead peer (EPIPE) | `seon.sock/send-frame!` | `:epipe`; the agent exits, root reads EOF |
+| `fork()` refused (another Chez thread active, the OS) | `seon.fork-server/server-step`, `seon.lib/safe-fork` | `:fork-failed`; `-2` from safe-fork (the test run and clone report it) |
+| A process dies (killed, crashed, `System/exit`) | the socket's EOF; `waitpid` in `seon.fork-server/reap` | `:dead` / `:exit` events; the agent's pending replies answer "agent died" |
+| The fork server dies | `seon.fork-server/fork-server-proc` (EOF of its events) | its standby is promoted (`:server-down`, `:server-up`) |
+| A test never ends or kills its process | `seon.agent/run-tests-forked` | killed at its bound; an `:error` report |
+| An agent past its heap bound | Jolt's heap ceiling (`seon.lib/heap-cap!`) | `OutOfMemoryError` in the form: an `:err` item |

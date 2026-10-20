@@ -145,6 +145,29 @@
               (cond-> {:t (:t m) :datoms (:datoms m)} (seq (:tempids m)) (assoc :tempids (:tempids m))))
           (throw (ex-info (str "transact refused: " (:error m)) {:writer-error (:error m)})))))))
 
+;; ---- merging main into this branch (seon.merge, done by the writer; lane M1) ----------
+
+(defn merge-main!
+  "git merge main into this agent's branch: the writer applies main's changes since the
+  merge base that do not conflict (one merge commit) and writes each conflict as an
+  unmerged entry on the branch; this process applies the resolved datoms and loads the
+  definitions they change (an unmapped var is unmapped here). data-attrs: the data that
+  merges beside the program. Answers the writer's {:ok :applied :conflicts :t} with the load
+  errors (M1's core patch 03)."
+  {:malli/schema [:=> [:cat :seon.merge/data-attrs] [:map [:ok :boolean]]]}
+  [data-attrs]
+  (let [k (:tx-seq (swap! state update :tx-seq inc))
+        ;; not interruptible from the send until the writer's answer lands
+        m (locking tx-lock
+            (when (= :dead (send! {:op :merge-main :k k :data-attrs data-attrs})) (lib/c-exit 0))
+            (await-op! :merge-main-reply k))
+        ops (get-in m [:sync :tx-data] [])
+        db' (d/db-with (db) ops)
+        _ (swap! state assoc :db db')
+        errs (program/load-changes! db' ops)]
+    (cond-> (dissoc m :op :k :sync)
+      (seq errs) (assoc :load-errors errs))))
+
 ;; ---- evaluation -----------------------------------------------------------------
 
 (defn error-map {:malli/schema [:=> [:cat :seon.host/throwable] :seon.agent/error]}

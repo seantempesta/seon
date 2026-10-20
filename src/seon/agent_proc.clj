@@ -5,7 +5,7 @@
   eval's nREPL answers into reply items. From proto/flow f2-final proto.control (lane F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.lib :as lib] [seon.sock :as sock] [seon.wire :as wire] [seon.step :as step]
-            [seon.config :as cfg] [clojure.edn] [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
+            [seon.config :as cfg] [seon.repl :as repl] [clojure.edn] [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
 
 (defn- ->wire
   "An internal request for the agent as its wire message: eval as nREPL's `eval`, every
@@ -21,44 +21,6 @@
   {:malli/schema [:function [:=> [:cat :map :seon.wire/seon-msg] :any] [:=> [:cat :map :seon.wire/seon-msg [:maybe :seon.lib/fd]] :any]]}
   ([st m] (to-proc! st m nil))
   ([st m pass-fd] (when-not (:dead? st) (if pass-fd (wire/send! (:fd st) (->wire m) pass-fd) (wire/send! (:fd st) (->wire m))))))
-
-(defn- fold-item
-  "One form's nREPL answer (with the out/err text that came before it) as a reply item."
-  {:malli/schema [:=> [:cat :seon.wire/msg :map] :seon.agent/item]}
-  [m out]
-  (let [st (set (get m "status"))
-        err? (or (st "eval-error") (st "interrupted"))
-        em (some-> (get m "seon/error") wire/text-> clojure.edn/read-string)
-        t #(some-> (get m %) wire/text->)]
-    (cond-> {:id (get m "seon/ordinal") :tag (if err? :err :ret) :form (t "seon/form")
-             :ms (some-> (get m "seon/us") (/ 1000.0)) :alloc-bytes (get m "seon/alloc-bytes")}
-      (not err?) (assoc :printed (t "value") :ret (t "value") :handle (some-> (get m "seon/handle") keyword))
-      err? (assoc :printed (:message em) :err em :err-text (:err out))
-      (get m "seon/tokens") (assoc :tokens (get m "seon/tokens"))
-      (get m "seon/truncated") (assoc :truncated? true)
-      (get m "seon/elisions") (assoc :elisions (get m "seon/elisions"))
-      (get m "seon/recorded") (assoc :recorded (symbol (t "seon/recorded")))
-      (get m "seon/record-error") (assoc :record-error (t "seon/record-error"))
-      (get m "seon/contract") (assoc :contract (keyword (t "seon/contract")))
-      (get m "seon/contract-error") (assoc :contract-error (clojure.edn/read-string (t "seon/contract-error")))
-      (get m "seon/warnings") (assoc :warnings (clojure.edn/read-string (t "seon/warnings")))
-      (seq (:out out)) (assoc :out (:out out)))))
-
-(defn- fold
-  "The answers of one eval request (in order) -> its reply items. `out`/`err` text goes
-  onto the next form's item (the form that printed it)."
-  {:malli/schema [:=> [:cat [:sequential :seon.wire/msg]] :seon.agent/items]}
-  [answers]
-  (loop [[m & more :as ms] answers acc {:items [] :out {}}]
-    (if-not (seq ms)
-      (:items acc)
-      (let [st (set (get m "status"))]
-        (cond
-          (or (contains? m "value") (st "eval-error") (st "interrupted"))
-          (recur more (-> acc (update :items conj (fold-item m (:out acc))) (assoc :out {})))
-          (contains? m "out") (recur more (update-in acc [:out :out] str (wire/text-> (get m "out"))))
-          (contains? m "err") (recur more (update-in acc [:out :err] str (wire/text-> (get m "err"))))
-          :else (recur more acc))))))
 
 (defn- status {:malli/schema [:=> [:cat :map :map] :map]}
   [st m] {:op :status :agent (:id st) :set m})
@@ -77,23 +39,6 @@
               (= :dead (get-in m [:msg :op])) true
               :else (recur))))))
 
-(defn record-tx
-  "The recording transaction of one eval request (G1's proto.agent/record-tx, Seon's names):
-  one evaluation entity per item (its id, run, ordinal, source, tag, shown value or error,
-  time, allocation), each on the agent's entity, and the agent's answered t. Ids are new
-  each time; the agent entity is the one upsert."
-  {:malli/schema [:=> [:cat :seon.agent/id :string :seon.agent/items [:maybe :int]] :seon.db/tx-data]}
-  [id run items t-basis]
-  (conj (vec (for [it items :when (:id it)]
-               (cond-> {:seon.cluster.eval/id (str run "/" (:id it)) :seon.cluster.eval/run run
-                        :seon.cluster.eval/ordinal (:id it) :seon.cluster.eval/agent "agent"
-                        :seon.cluster.eval/tag (:tag it) :seon.cluster.eval/source (or (:form it) "")
-                        :seon.eval/duration-us (long (* 1000 (or (:ms it) 0))) :seon.eval/alloc-bytes (long (or (:alloc-bytes it) 0))}
-                 (= :ret (:tag it)) (assoc :seon.eval/shown (or (:printed it) ""))
-                 (= :err (:tag it)) (assoc :seon.cluster.eval/error (or (:printed it) ""))
-                 (:out it) (assoc :seon.cluster.eval/output (:out it)))))
-        (cond-> {:db/id "agent" :seon.agent/id id} t-basis (assoc :seon.agent/answered-t t-basis))))
-
 (declare agent-frame)
 
 (defn- agent-in
@@ -103,7 +48,7 @@
   (case (:op m)
     :req (let [{:keys [rid msg kind]} m]
            (to-proc! st (assoc msg (if (= kind :clone) :k :id) rid) (:pass-fd m))
-           (let [st (cond-> (update st :inflight assoc rid (select-keys m [:kind :branch :new :merge-branch :pass-fd]))
+           (let [st (cond-> (update st :inflight assoc rid (select-keys m [:kind :branch :new :merge-branch :data-attrs :pass-fd]))
                       (= kind :ping) (update :pings conj rid))]
              [st {:to-api [(status st (cond-> {:status :busy}
                                         (= kind :eval) (assoc :running {:form (let [f (:forms msg)] (if (> (count f) 200) (str (subs f 0 200) " …") f))
@@ -179,13 +124,13 @@
                (step/out! o :to-api (status st {:evals-add (:items m) :mem-mb (:mem-mb m) :t (:t m) :status (busy st) :running nil}))
                (step/out! o :events (step/event {:type :reply :agent id :items (:items m)}))
                st)
-      :tests (let [{:keys [kind merge-branch]} (get-in st [:inflight (:id m)])
+      :tests (let [{:keys [kind merge-branch data-attrs]} (get-in st [:inflight (:id m)])
                    result (:result m)
                    green? (and (zero? (:fail result 0)) (zero? (:error result 0)))
                    summary (select-keys result [:pass :fail :error :test])
                    st (if (and (= kind :merge-tests) green?)
                         ;; a gated merge's green run goes on to the writer; its answer is the merge's
-                        (do (step/out! o :to-writer {:op :merge :branch merge-branch :dest {:merged id :rid (:id m) :tests summary}})
+                        (do (step/out! o :to-writer {:op :merge :branch merge-branch :data-attrs (or data-attrs :all) :dest {:merged id :rid (:id m) :tests summary}})
                             (update st :inflight dissoc (:id m)))
                         (answer-rid st o (:id m) (if (= kind :merge-tests)
                                                    {:merged? false :tests summary :reports (vec (remove #(= :pass (:type %)) (:reports result)))}
@@ -196,6 +141,12 @@
       :stats (let [st (answer-rid st o (:id m) (:result m))]
                (step/out! o :to-api (status st {:mem-mb (:mem-mb (:result m)) :status (busy st)}))
                st)
+      ;; the agent merges main into its own branch (my.branch/merge-main!): the writer's
+      ;; answer, with the resolved datoms, goes back to it
+      :merge-main (do (step/out! o :to-writer {:op :merge-main :branch (:branch st) :data-attrs (:data-attrs m #{})
+                                               :dest {:agent id :op :merge-main-reply :k (:k m)}})
+                      (step/out! o :events (step/event {:type :merge-main :agent id :branch (:branch st)}))
+                      st)
       :tx (do (step/out! o :to-writer {:op :tx :branch (:branch st) :agent id :tx-data (:tx-data m)
                                   :dest {:agent id :op :tx-reply :k (:k m)}})
               st)
@@ -252,7 +203,7 @@
                       (let [rid (some-> (get w "id") parse-long)
                             st (update-in st [:answers rid] (fnil conj []) w)]
                         (if (some #{"done"} (get w "status"))
-                          (let [reply {:op :reply :id rid :items (fold (get-in st [:answers rid]))
+                          (let [reply {:op :reply :id rid :items (repl/fold (get-in st [:answers rid]) wire/text->)
                                        :mem-mb (some-> (get w "seon/mem-mb") parse-double) :t (get w "seon/t")}
                                 st (update st :answers dissoc rid)]
                             (if-let [run (some-> (get w "seon/run") wire/text->)]
@@ -261,7 +212,7 @@
                               ;; is answered when it is durable
                               (do (step/out! o :to-writer {:op :tx :branch (:branch st) :agent (:id st)
                                                            :tx-data (into (clojure.edn/read-string (wire/text-> (get w "seon/defs")))
-                                                                          (record-tx (:id st) run (:items reply) (:t reply)))
+                                                                          (repl/record-tx (:id st) run (:items reply) (:t reply)))
                                                            :dest {:agent (:id st) :op :recorded :k rid}})
                                   (assoc-in st [:recording rid] reply))
                               (agent-frame st o reply)))

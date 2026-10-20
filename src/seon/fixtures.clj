@@ -1,0 +1,162 @@
+(ns seon.fixtures
+  "The end-to-end task graphs and the stand-in model's script.
+
+  The program: `app.calc` and `app.par` hold stub functions that answer wrong values, and
+  `app.proofs` holds the deftests that prove each task (red until the task's agent
+  redefines its function). The proofs namespace sorts after the subjects, so a boot that
+  loads main's program in name order loads a subject before its proof."
+  (:refer-clojure :exclude [defn defn-])
+  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.template :as tpl]))
+
+(defn- var-tx
+  {:malli/schema [:=> [:cat :any :symbol :string :string :keyword] :map]}
+  [ns-ref ns-sym nm src kind]
+  {:var/name (symbol (str ns-sym) nm) :var/ns ns-ref :var/src src})
+
+(def calc
+  "The six-task graph: add; twice and square need add; sum-sq needs both; neg (slow on
+  its first turn, the one the demo cancels) and abs, which needs neg."
+  [{:name "add" :stub "(defn add {:malli/schema [:=> [:cat :int :int] :int]} [a b] 0)"
+    :proof "(deftest add-test (is (= 3 (app.calc/add 1 2))) (is (= 0 (app.calc/add -2 2))))"}
+   {:name "twice" :needs ["add"] :stub "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] 0)"
+    :proof "(deftest twice-test (is (= 8 (app.calc/twice 4))))"}
+   {:name "square" :needs ["add"] :stub "(defn square {:malli/schema [:=> [:cat :int] :int]} [x] 0)"
+    :proof "(deftest square-test (is (= 9 (app.calc/square 3))) (is (= 16 (app.calc/square -4))))"}
+   {:name "sum-sq" :needs ["twice" "square"] :stub "(defn sum-sq {:malli/schema [:=> [:cat :int :int] :int]} [a b] 0)"
+    :proof "(deftest sum-sq-test (is (= 25 (app.calc/sum-sq 3 4))))"}
+   {:name "neg" :stub "(defn neg {:malli/schema [:=> [:cat :int] :int]} [x] 0)"
+    :proof "(deftest neg-test (is (= -5 (app.calc/neg 5))))"}
+   {:name "abs" :needs ["neg"] :stub "(defn abs {:malli/schema [:=> [:cat :int] :int]} [x] 0)"
+    :proof "(deftest abs-test (is (= 5 (app.calc/abs -5))) (is (= 5 (app.calc/abs 5))))"}])
+
+(defn- fenced {:malli/schema [:=> [:cat :string :string] :string]} [prose code] (str prose "\n```clojure\n" code "\n```\n"))
+
+(def calc-replies
+  "The stand-in's replies by task name and turn. square answers wrong first (its proof
+  stays red, the next turn sees the failure and fixes it); neg is slow."
+  {"add" [(fenced "add adds." "(in-ns 'app.calc)\n(defn add {:malli/schema [:=> [:cat :int :int] :int]} [a b] (+ a b))")]
+   "twice" [(fenced "twice is add with itself." "(in-ns 'app.calc)\n(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (add x x))")]
+   "square" [(fenced "Squaring doubles?" "(in-ns 'app.calc)\n(defn square {:malli/schema [:=> [:cat :int] :int]} [x] (twice x))")
+             (fenced "The proof shows 6, not 9: square multiplies." "(in-ns 'app.calc)\n(defn square {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))")]
+   "sum-sq" [(fenced "Sum of squares." "(in-ns 'app.calc)\n(defn sum-sq {:malli/schema [:=> [:cat :int :int] :int]} [a b] (add (square a) (square b)))")]
+   "neg" [(fenced "Thinking slowly first." "(Thread/sleep 8000)\n(in-ns 'app.calc)\n(defn neg {:malli/schema [:=> [:cat :int] :int]} [x] (- x))")]
+   "abs" [(fenced "abs via neg." "(in-ns 'app.calc)\n(defn abs {:malli/schema [:=> [:cat :int] :int]} [x] (if (neg? x) (neg x) x))")]})
+
+(defn par-name {:malli/schema [:=> [:cat :int] :string]} [k] (str "p" k))
+
+(defn par
+  "n independent tasks: app.par/pK must add K."
+  {:malli/schema [:=> [:cat pos-int?] [:vector :map]]}
+  [n]
+  (vec (for [k (range n)]
+         {:name (par-name k) :ns 'app.par
+          :stub (str "(defn " (par-name k) " {:malli/schema [:=> [:cat :int] :int]} [x] 0)")
+          :proof (str "(deftest " (par-name k) "-test (is (= " (+ 10 k) " (app.par/" (par-name k) " 10))))")})))
+
+(defn program-txs
+  "Two transactions writing the program of specs on main: the subjects (a spec's :stub
+  under its :var, else its task :name), then the proofs."
+  {:malli/schema [:=> [:cat [:vector :map]] [:vector [:vector :map]]]}
+  [specs]
+  (let [nss (distinct (map #(:ns % 'app.calc) specs))]
+    [(into (vec (for [n (conj (vec nss) 'app.proofs)] {:db/id (str n) :ns/name n}))
+           (for [{:keys [stub] :as s} specs :when stub :let [n (:ns s 'app.calc)]]
+             (var-tx (str n) n (or (:var s) (:name s)) stub :fn)))
+     (vec (for [{:keys [name proof]} specs :when proof]
+            (var-tx [:ns/name 'app.proofs] 'app.proofs (str name "-test") proof :test)))]))
+
+(defn decls
+  "Task declarations for specs, in task namespace tns, with model env: each work task
+  followed by its merge task (seon.template/with-merge)."
+  {:malli/schema [:=> [:cat [:vector :map] :symbol [:maybe :string]] [:vector :seon.task/declaration]]}
+  [specs tns model]
+  (tpl/with-merge
+    (vec (for [{:keys [name needs] :as s} specs :when name]
+           (cond-> {:seon.task/ns tns :seon.task/name name
+                    :seon.task/plan (or (:plan s)
+                                        (str "Make `" (:ns s 'app.calc) "/" name "` pass its proof `app.proofs/" name "-test`."
+                                             (when (seq needs) (str " It may use " (str/join ", " (map #(str "`app.calc/" % "`") needs)) "."))))
+                    :seon.task/proofs (or (:proofs s) #{(symbol "app.proofs" (str name "-test"))})}
+             (seq needs) (assoc :seon.task/needs (set (map #(str tns "/" %) needs)))
+             model (assoc :seon.task/model model))))))
+
+;; ---- merge scenarios (M1): two tasks on overlapping definitions -----------------------
+
+(defn- defn1 {:malli/schema [:=> [:cat :string :string] :string]} [nm body]
+  (str "(defn " nm " {:malli/schema [:=> [:cat :int] :int]} [x] " body ")"))
+
+(def scenarios
+  "Merge scenarios, by name: :specs (the program and its tasks, in app.m), :after (merge
+  task -> the merge task it must follow, so the order is fixed) and the stand-in's
+  scripted replies by task name and turn.
+  - :conflict: a and b both rewrite f (same behaviour, different text); b merges after a,
+    gets one conflict, and its merge agent takes main's version.
+  - :semantic: a triples scale; b defines six from scale on a branch where scale doubles.
+    No key overlaps, but six-test is red after b's merge agent merges main; it fixes six.
+  - :hairy: a and b both rewrite f1..f4: four conflicts (dial 3), so b's merge fails and
+    design -> implement -> test -> merge attach; on main's code b's proofs pass."
+  {:conflict {:specs [{:name "a" :ns 'app.m :var "f" :stub (defn1 "f" "0")
+                       :plan "Make `app.m/f` pass its proof `app.proofs/a-test`. Write its body as (+ x 1)." :proof "(deftest a-test (is (= 2 (app.m/f 1))))"}
+                      {:name "b" :ns 'app.m :proofs #{'app.proofs/b-test} :proof "(deftest b-test (is (= 11 (app.m/f 10))))"
+                       :plan "Make `app.m/f` pass its proof `app.proofs/b-test`. Write its body as (inc x)."}]
+              :after {"b-merge" "a-merge"}
+              :replies {"a" [(fenced "f adds one." (str "(in-ns 'app.m)\n" (defn1 "f" "(+ x 1)")))]
+                        "b" [(fenced "f increments." (str "(in-ns 'app.m)\n" (defn1 "f" "(inc x)")))]}}
+   :semantic {:specs [{:name "a" :ns 'app.m :var "scale" :stub (defn1 "scale" "(* x 2)") :plan "Make `app.m/scale` pass `app.proofs/a-test`." :proof "(deftest a-test (is (= 9 (app.m/scale 3))))"}
+                      {:name "b" :ns 'app.m :var "six" :plan "Make `app.m/six` pass `app.proofs/b-test`, using `app.m/scale`." :stub "(defn six {:malli/schema [:=> [:cat] :int]} [] 0)"
+                       :proof "(deftest b-test (is (= 6 (app.m/six))))"}]
+              :after {"b-merge" "a-merge"}
+              :replies {"a" [(fenced "scale triples." (str "(in-ns 'app.m)\n" (defn1 "scale" "(* x 3)")))]
+                        "b" [(fenced "six is scale of 3." "(in-ns 'app.m)\n(defn six {:malli/schema [:=> [:cat] :int]} [] (scale 3))")]
+                        "b-merge" [(fenced "Main's scale triples now, so six must not use it." "(in-ns 'app.m)\n(defn six {:malli/schema [:=> [:cat] :int]} [] 6)")]}}
+   :hairy {:specs (into [{:name "a" :ns 'app.m :var "f1" :stub (defn1 "f1" "0") :proofs #{'app.proofs/a-test}
+                          :proof "(deftest a-test (is (= [2 3 4 5] [(app.m/f1 1) (app.m/f2 1) (app.m/f3 1) (app.m/f4 1)])))"}
+                         {:name "b" :ns 'app.m :proofs #{'app.proofs/b-test}
+                          :proof "(deftest b-test (is (= [11 12 13 14] [(app.m/f1 10) (app.m/f2 10) (app.m/f3 10) (app.m/f4 10)])))"}]
+                        (for [k [2 3 4]] {:var (str "f" k) :ns 'app.m :stub (defn1 (str "f" k) "0")}))
+           :after {"b-merge" "a-merge"}
+           :replies {"a" [(fenced "Each fK adds K." (str "(in-ns 'app.m)\n" (str/join "\n" (for [k [1 2 3 4]] (defn1 (str "f" k) (str "(+ x " k ")"))))))]
+                     "b" [(fenced "Each fK adds K, other way round." (str "(in-ns 'app.m)\n" (str/join "\n" (for [k [1 2 3 4]] (defn1 (str "f" k) (str "(+ " k " x)"))))))]}}})
+
+(defn swarm-specs
+  "n tasks over 5 shared definitions: task sK rewrites app.sw/v(K mod 5) to add (K mod
+  5) in its own text (so two tasks on one var conflict) and proves it."
+  {:malli/schema [:=> [:cat pos-int?] [:vector :map]]}
+  [n]
+  (into (vec (for [j (range 5)] {:var (str "v" j) :ns 'app.sw :stub (defn1 (str "v" j) "0")}))
+        (for [k (range n) :let [j (mod k 5)]]
+          {:name (str "s" k) :ns 'app.sw :proofs #{(symbol "app.proofs" (str "s" k "-test"))}
+           :proof (str "(deftest s" k "-test (is (= " (+ 100 j) " (app.sw/v" j " 100))))")
+           :plan (str "Make `app.sw/v" j "` add " j "; its proof is `app.proofs/s" k "-test`.")})))
+
+(defn- swarm-reply
+  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  [nm]
+  (when-let [k (and (str/starts-with? nm "s") (parse-long (subs nm 1)))]
+    (let [j (mod k 5)]
+      (fenced "Rewrite in my own words." (str "(in-ns 'app.sw)\n" (defn1 (str "v" j) (str "(+ x " j (str/join (repeat (quot k 5) " 0")) ")")))))))
+
+(def ^:private generic
+  "The stand-in's reply by task kind (from the name): a merge agent takes main's side of
+  every unmerged entry; a design agent improves the plan and waits."
+  {"-merge" (fenced "Take main's version of each conflict." "(doseq [e (my.branch/unmerged)] (my.branch/resolve! (second (:key e)) :theirs))")
+   "-design" (fenced "Main's code is the base now." "(my.task/update! :seon.task/plan str \" Design: build on main's definitions as they are.\")\n(my.turn/wait)")})
+
+(def ^:private all-replies
+  "Scripted replies by task name (calc) and by task id (a scenario's tasks live in a task
+  namespace named after it, e.g. conflict/b-merge)."
+  (into calc-replies (for [[k {:keys [replies]}] scenarios [nm r] replies] [(str (name k) "/" nm) r])))
+
+(defn reply
+  "The stand-in model: the scripted reply for the request's task and turn (the last one
+  repeats); a swarm or par task's reply is generated from its index; a merge or design
+  task without a script gets the generic reply of its kind."
+  {:malli/schema [:=> [:cat :seon.model/request] :string]}
+  [{:keys [task turn]}]
+  (let [nm (subs task (inc (str/index-of task "/")))]
+    (if-let [rs (or (get all-replies task) (get all-replies nm))]
+      (nth rs (min turn (dec (count rs))))
+      (or (some (fn [[suffix r]] (when (str/ends-with? nm suffix) r)) generic)
+          (swarm-reply nm)
+          (let [k (parse-long (subs nm 1))]
+            (fenced "Add k." (str "(in-ns 'app.par)\n(defn " nm " {:malli/schema [:=> [:cat :int] :int]} [x] (+ x " k "))")))))))

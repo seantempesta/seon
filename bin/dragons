@@ -1,0 +1,16 @@
+#!/bin/sh
+# bin/dragons — every catch in src/ (the check and e2e drivers left out) must be one
+# docs/DRAGONS.md names: an interop edge or an entrant boundary, by its function
+# (`ns/fn`). Prints each site; exits 1 when one is not listed.
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+cd "$ROOT"
+bad=0
+for f in $(find src -name '*.clj' ! -name check.clj ! -name e2e.clj | sort); do
+  ns=$(sed -n 's/^(ns \([^ ]*\).*/\1/p' "$f" | head -1)
+  awk -v ns="$ns" '/^\((defn-?|defchecked|defmacro|def|defonce) /{split($0,a," "); n=a[2]; if (n ~ /^\^/) n=a[3]} /\(catch /{print ns "/" n}' "$f"
+done | sort -u > "$ROOT/target/catch-sites.txt"
+while read -r site; do
+  if grep -qF "\`$site\`" docs/DRAGONS.md; then echo "listed   $site"; else echo "UNLISTED $site"; bad=1; fi
+done < "$ROOT/target/catch-sites.txt"
+[ $bad = 0 ] && echo "DRAGONS OK ($(wc -l < "$ROOT/target/catch-sites.txt" | tr -d ' ') catch sites, all named)" || echo "DRAGONS FAILED"
+exit $bad

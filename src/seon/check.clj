@@ -3,7 +3,7 @@
   f2-final proto.smoke). bin/check runs them; target/seon <check> [args] runs one.
   usage: target/seon smoke        3 agents: define, test, transact; merge one; kill one mid-eval
          target/seon scale N      N agents spawned at once, each eval + transact + test"
-  (:require [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m]))
+  (:require [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [seon.e2e]))
 
 (defn- out! [& xs] (println (apply str xs)) (flush))
 (defn- await-status [sys ids pred ms]
@@ -49,7 +49,10 @@
         _ (out! (ids 2) " after tests, its branch still says: " (:printed (first @(c/submit! sys (ids 2) "(doc-of 'app.m0/f1)"))))
         _ (out! (ids 2) " branch diff before its merge: " @(c/branch-diff sys (ids 2)) "; stats now: " @(c/agent-stats! sys (ids 2)))
         m1 @(c/merge! sys (ids 0))
+        ;; git: a branch merges main first (main took a1's work), then root merges it
+        mm3 @(c/merge-main! sys (ids 2))
         m3 @(c/merge! sys (ids 2))
+        _ (out! "merge main into " (ids 2) " first: " (select-keys mm3 [:ok :applied :conflicts]))
         _ (out! "merge " (ids 0) ": " m1 "\nmerge " (ids 2) ": " m3)
         _ (out! "main notes: " (main-q sys '[:find ?a ?t :where [?n :note/agent ?a] [?n :note/text ?t]]))
         _ (out! "main f1 doc: " (main-q sys '[:find ?d . :where [?e :var/name app.m0/f1] [?e :var/doc ?d]])
@@ -61,8 +64,10 @@
                 (main-q sys '[:find [?t ...] :where [?n :note/agent :a3] [?n :note/text ?t]]))
         ;; a conflict: a2 changes f1's doc on its branch too, after main already took a3's change
         _ @(c/submit! sys (ids 1) "(transact! [{:var/name 'app.m0/f1 :var/doc \"a2's doc\"}])")
+        mm2 @(c/merge-main! sys (ids 1))
+        _ (out! "merge main into " (ids 1) " (both changed f1's doc): " (select-keys mm2 [:ok :applied :conflicts]))
         m2 @(c/merge! sys (ids 1))
-        _ (out! "merge " (ids 1) " (both changed f1's doc): " (dissoc m2 :tx))
+        _ (out! "merge " (ids 1) " with its conflict unmerged: " (dissoc m2 :tx))
         ;; clone: a3 forks itself, live values and all, onto a branch of its branch
         _ @(c/submit! sys (ids 2) "(def memo (atom {:seen 1}))")
         t-clone (lib/now-ns)
@@ -99,7 +104,7 @@
 (defn probe-caller "An uncontracted caller compiled against probe-callee." [x] (probe-callee x))
 
 (defn- platform-nss "Every loaded platform namespace (seon.*, my.*), this check driver left out." []
-  (sort (remove #{'seon.check} (filter #(re-find #"^(seon|my)\." (str %)) (map ns-name (all-ns))))))
+  (sort (remove #{'seon.check 'seon.e2e} (filter #(re-find #"^(seon|my)\." (str %)) (map ns-name (all-ns))))))
 
 (defn contracts
   "In this binary (a release build direct-links and inlines app defs): every function var
@@ -182,7 +187,7 @@
         _ (await-status sys [a b] #{:idle} 5000)
         p1 (fn [id forms] (mapv (juxt :printed :recorded) @(c/submit! sys id forms)))
         _ (out! a " changes app.m0/f1 in REPL terms: "
-                (p1 a "(app.m0/f1 2) (in-ns 'app.m0) (defn f1 [x] (* x 10)) (deftest f1-test (is (= 20 (f1 2)))) (f1 2)"))
+                (p1 a "(app.m0/f1 2) (in-ns 'app.m0) (defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (* x 10)) (deftest f1-test (is (= 20 (f1 2)))) (f1 2)"))
         _ (out! b " (its own branch) still runs the old f1: " (p1 b "(app.m0/f1 2)"))
         m @(c/merge! sys a)
         _ (out! "merge " a " (gated by its tests): " m)
@@ -191,10 +196,10 @@
         _ (out! n ", forked after the merge, inherits the new f1 compiled: " (p1 n "(app.m0/f1 2)")
                 "; its tests include the merged proof: " (select-keys @(c/run-tests! sys n) [:pass :fail :error]))
         mm @(c/merge-main! sys b)
-        _ (out! b " merges main forward " (select-keys mm [:updated? :datoms]) " and now runs: " (p1 b "(app.m0/f1 2)"))
+        _ (out! b " merges main forward " (select-keys mm [:ok :applied]) " and now runs: " (p1 b "(app.m0/f1 2)"))
         x (c/spawn! sys {:task "breaks f1"})
         _ (await-status sys [x] #{:idle} 5000)
-        _ (out! x " breaks f1: " (p1 x "(in-ns 'app.m0) (defn f1 [x] (- x)) (f1 2)"))
+        _ (out! x " breaks f1: " (p1 x "(in-ns 'app.m0) (defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (- x)) (f1 2)"))
         mx @(c/merge! sys x)
         _ (out! "merge " x ": " (dissoc mx :tx))
         y (c/spawn! sys {:task "after the refused merge"})
@@ -457,14 +462,18 @@
                     (let [m (str "app.m" k)
                           r @(c/submit! sys id (str "(in-ns '" m ")"
                                                     ;; a tidy rewrite: same behaviour, new text (each agent its own)
-                                                    " (defn f1 [x] (+ " (rand-int 1000) " (- x " (rand-int 1000) ") (- 1 " (rand-int 1000) ") (- 0 (- " (rand-int 1000) "))))"
-                                                    " (defn f1 [x] (inc x))"
+                                                    " (defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ " (rand-int 1000) " (- x " (rand-int 1000) ") (- 1 " (rand-int 1000) ") (- 0 (- " (rand-int 1000) "))))"
+                                                    " (defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"
                                                     " (deftest f1-proof-" (name id) " (is (= 3 (f1 2))) (is (= 1 (f1 0))))"
-                                                    " (seon.agent/transact! [{:task/name :" m "/tidy :task/status :done :task/agent " id "}])"))
+                                                    " (my.db/transact! [{:task/name :" m "/tidy :task/status :done :task/agent " id "}])"))
                           ok-eval (every? #(= :ret (:tag %)) r)
-                          mr @(c/merge! sys id)]
+                          ;; git: merge main into the branch first (a conflict stays unmerged
+                          ;; there), and again while root finds the branch behind
+                          [mm mr] (loop [k 0]
+                                    (let [mm @(c/merge-main! sys id) mr @(c/merge! sys id)]
+                                      (if (and (= :seon.merge/behind (:seon.error/type mr)) (< k 20)) (recur (inc k)) [mm mr])))]
                       (swap! log conj {:k k :agent id :generation generation :eval ok-eval
-                                       :merged (:merged? mr) :conflicts (count (:conflicts mr))
+                                       :merged (:merged? mr) :conflicts (count (:conflicts mm))
                                        :red (when (:tests mr) (pos? (+ (:fail (:tests mr) 0) (:error (:tests mr) 0))))
                                        :reports (when (System/getenv "SWARM_DEBUG") (take 2 (:reports mr)))})
                       (c/kill! sys id)
@@ -540,10 +549,10 @@
         [a b k] (mapv #(c/spawn! sys {:task % :branch %2}) ["make f1 multiply" "unmerged work" "parent"] [:dur-a :dur-b :dur-c])
         _ (await-status sys [a b k] #{:idle} 5000)
         p1 (fn [id forms] (mapv (juxt :printed :recorded) @(c/submit! sys id forms)))
-        _ (out! a ": " (p1 a "(in-ns 'app.m0) (defn f1 [x] (* x 10)) (deftest f1-test (is (= 20 (f1 2)))) (f1 2)"))
+        _ (out! a ": " (p1 a "(in-ns 'app.m0) (defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (* x 10)) (deftest f1-test (is (= 20 (f1 2)))) (f1 2)"))
         m @(c/merge! sys a)
         _ (out! "merge " a ": " (dissoc m :ops))
-        _ (out! b ": " (p1 b "(in-ns 'app.m1) (defn f2 [x] (str \"b:\" x)) (deftest f2-test (is (= \"b:1\" (f2 1))))
+        _ (out! b ": " (p1 b "(in-ns 'app.m1) (defn f2 {:malli/schema [:=> [:cat :int] :string]} [x] (str \"b:\" x)) (deftest f2-test (is (= \"b:1\" (f2 1))))
                              (in-ns 'agent.a2) (transact! [{:note/text \"b's unmerged note\" :note/agent :b}]) (app.m1/f2 1)"))
         cl @(c/clone! sys k {:branch :dur-clone})
         _ (await-status sys [(:id cl)] #{:idle} 5000)
@@ -580,8 +589,9 @@
         _ (await-status sys [rc] #{:idle} 5000)
         r-c (p1 rc "(sort (q '[:find [?t ...] :where [?n :note/text ?t]]))")
         _ (out! rc " resumes :dur-clone: " r-c)
+        mmb @(c/merge-main! sys rb)
         mb @(c/merge! sys rb)
-        _ (out! "merge the resumed :dur-b now: " (dissoc mb :ops))
+        _ (out! "merge main into the resumed :dur-b " (select-keys mmb [:ok :applied]) ", then merge it: " (dissoc mb :ops))
         n2 (c/spawn! sys {:task "after merging b"})
         _ (await-status sys [n2] #{:idle} 5000)
         r-n2 (p1 n2 "(app.m1/f2 1) (q '[:find [?t ...] :where [?n :note/agent :b] [?n :note/text ?t]]) (app.m0/f1 2)")
@@ -906,6 +916,7 @@
     "backpressure" (backpressure (Long/parseLong (or n "200")))
     "program" (program)
     "contracts" (contracts)
+    "e2e" (lib/c-exit (if (seon.e2e/run n more) 0 1))
     "admit" (admit)
     "record" (record)
     "orphan" (orphan)
