@@ -1,0 +1,48 @@
+;; Costs (idea 16: estimate first; an overrun is a failing proof) and what each contracted
+;; function cost (seon.profile). A cost proof (seon.cost/proof) states an estimate: what N
+;; counts, the least work the data requires, how that work grows, and what each unit of it
+;; costs; it measures the function at three or more sizes and is red when it costs more.
+{:seon.profile/fn-cost [:map {:closed true} [:var :qualified-symbol] [:calls nat-int?] [:ms [:double {:min 0.0}]]]
+ ;; how the least work grows with N: W(n) = 1, log2 n, n, n log2 n, n², n³
+ :seon.cost/growth [:enum :constant :log :linear :n-log-n :quadratic :cubic]
+ ;; the measured dimensions: wall ns (min over repeats), allocated bytes, calls of contracted functions
+ ;; an estimate may state whole numbers; measurements are doubles
+ :seon.cost/amount [:or nat-int? [:double {:min 0.0}]]
+ :seon.cost/dims [:map {:closed true}
+                  [:ns {:optional true} :seon.cost/amount]
+                  [:bytes {:optional true} :seon.cost/amount]
+                  [:calls {:optional true} :seon.cost/amount]]
+ :seon.cost/dim [:enum :ns :bytes :calls]
+ ;; one unit operation of the unit table (seon.cost/units): its measured cost on this runtime
+ :seon.cost/unit [:map {:closed true} [:ns [:double {:min 0.0}]] [:bytes [:double {:min 0.0}]] [:what :string]]
+ :seon.cost/estimate [:map {:closed true}
+                      ;; the function measured, and the function of n answering its argument vector
+                      [:of :qualified-symbol]
+                      [:input :qualified-symbol]
+                      ;; what N counts, and the least work the data requires (the floor, in words)
+                      [:n :string]
+                      [:work :string]
+                      [:growth :seon.cost/growth]
+                      ;; unit operations per unit of W(n), from seon.cost/units (derived), and/or
+                      ;; costs per unit of W(n) stated directly; the stated ones win
+                      [:ops {:optional true} [:map-of :keyword :seon.cost/amount]]
+                      [:per-n {:optional true} :seon.cost/dims]
+                      ;; costs that do not grow with n
+                      [:fixed {:optional true} :seon.cost/dims]
+                      ;; ascending, at least three, spanning at least 100x
+                      [:sizes [:vector {:min 3} pos-int?]]]
+ ;; one size measured: n, what it cost, what the estimate allows there
+ :seon.cost/row [:map {:closed true} [:n pos-int?] [:measured :seon.cost/dims] [:expected :seon.cost/dims]]
+ :seon.cost/over [:map {:closed true} [:dim :seon.cost/dim] [:n pos-int?] [:ratio [:double {:min 0.0}]]]
+ ;; how a measured dimension grew over the sizes, against what the estimate's growth allows
+ :seon.cost/fit [:map {:closed true} [:dim :seon.cost/dim] [:exponent :double] [:allowed :double]]
+ :seon.cost/verdict [:map {:closed true}
+                     [:ok? :boolean]
+                     ;; a size whose measure exceeds its slack times the estimate
+                     [:over [:vector :seon.cost/over]]
+                     ;; a dimension that grew faster than the estimate's growth allows
+                     [:steeper [:vector :seon.cost/fit]]
+                     ;; the largest size under a third of its estimate: the estimate is loose (a finding, not red)
+                     [:under [:vector :seon.cost/over]]
+                     ;; a dimension the estimate states that was not measured (contracts off: no calls)
+                     [:unmeasured [:vector :seon.cost/dim]]]}

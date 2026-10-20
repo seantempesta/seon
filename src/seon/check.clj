@@ -3,7 +3,7 @@
   f2-final proto.smoke). bin/check runs them; target/seon <check> [args] runs one.
   usage: target/seon smoke        3 agents: define, test, transact; merge one; kill one mid-eval
          target/seon scale N      N agents spawned at once, each eval + transact + test"
-  (:require [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.config] [clojure.edn] [seon.entrance] [seon.mcp] [clojure.data.json]))
+  (:require [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.config] [clojure.edn] [seon.entrance] [seon.mcp] [clojure.data.json] [seon.cost :as cost]))
 
 (defn- out! [& xs] (println (apply str xs)) (flush))
 (defn- await-status [sys ids pred ms]
@@ -114,7 +114,7 @@
   plain caller compiled against a contracted function reaches its check. Prints the counts
   and exits 0 only when all hold."
   []
-  (let [boot (contract/instrument! '[seon.contract])
+  (let [boot (contract/instrument! '[seon.contract seon.profile])
         nss (platform-nss)
         vs (for [n nss v (vals (ns-interns n)) :when (contract/contract v)] v)
         at-def (filter #(= :definition (:seon.contract/checked-at (meta %))) vs)
@@ -190,7 +190,8 @@
 (def ^:private pure-fns
   "Pure functions in namespaces that are otherwise host code (seon.lib binds libc: never
   generate its arguments)."
-  '#{seon.lib/percentile seon.lib/r2 seon.lib/summ seon.lib/push-window seon.lib/p50})
+  '#{seon.lib/percentile seon.lib/r2 seon.lib/summ seon.lib/push-window seon.lib/p50
+     seon.cost/work seon.cost/exponent seon.cost/per-unit seon.cost/expected seon.cost/judge seon.profile/top})
 
 (defn- fn-without-gen
   "The [:fn ...] schemas without a :gen property in form f, anywhere in it."
@@ -1153,6 +1154,18 @@
     (clojure.java.shell/sh "rm" "-rf" path)
     (lib/c-exit 0)))
 
+(defn units
+  "The unit table measured on this binary at 1k, 10k and 100k units, and the 10k row as
+  seon.cost/units' literal (ns and bytes per unit)."
+  []
+  (let [rows (into (sorted-map) (for [k (keys cost/unit-benches)]
+                                  [k (mapv #(cost/measure-unit k %) [1000 10000 100000])]))]
+    (doseq [[k ms] rows] (out! k " " (mapv (fn [m] [(lib/r2 (:ns m)) (lib/r2 (:bytes m))]) ms)))
+    (out! "{" (clojure.string/join "\n "
+                (for [[k ms] rows :let [{:keys [ns bytes]} (second ms)]]
+                  (str k " {:ns " (lib/r2 ns) " :bytes " (lib/r2 bytes) " :what " (pr-str (:what (cost/unit-benches k))) "}"))) "}")
+    (lib/c-exit 0)))
+
 (defn -main [& [mode n & more]]
   (case mode
     "dur-bench-write" (dur-bench-write n (Long/parseLong (first more)))
@@ -1171,6 +1184,7 @@
     "program" (program)
     "contracts" (contracts)
     "census" (census)
+    "units" (units)
     "e2e" (lib/c-exit (if (seon.e2e/run n more) 0 1))
     "admit" (admit)
     "record" (record)

@@ -413,7 +413,7 @@
                                 {:kind :scripted :script 'seon.fixtures/reply}))
         program (program/load-all! @conn)
         program-ms (lib/ms-since t1)
-        contracts (contract/instrument! '[seon.contract])
+        contracts (contract/instrument! '[seon.contract seon.profile])
         _ (warm! conn)
         _ (lib/raise-open-files! (+ 256 (* 2 cfg/MAX-AGENTS)))
         _ (lib/static!)

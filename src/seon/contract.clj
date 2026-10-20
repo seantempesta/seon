@@ -20,7 +20,7 @@
     wrappers without the recording transaction."
   (:refer-clojure :exclude [defn defn-])
   (:require [malli.core :as m] [malli.registry :as mr] [clojure.edn :as edn]
-            [clojure.java.io :as io] [clojure.string :as str]))
+            [clojure.java.io :as io] [clojure.string :as str] [seon.profile :as profile]))
 
 (def on?
   "Are the contracts on in this process (SEON_GUARANTEES, read once at load)? off: no
@@ -145,10 +145,14 @@
     (throw (ex-info (:seon.error/message e) e))))
 
 (clojure.core/defn wrap
-  "f instrumented by the compiled function schema s, refusals named fn-sym."
+  "f instrumented by the compiled function schema s, refusals named fn-sym, and counted
+  under fn-sym (seon.profile: every call counted, one in 64 timed, the check included),
+  except seon.profile's own functions."
   {:malli/schema [:=> [:cat :qualified-symbol :seon.host/schema :seon.host/fn] :seon.host/fn]}
   [fn-sym s f]
-  (m/-instrument {:schema (m/deref s) :scope #{:input :output} :report (fn [kind data] (refusal fn-sym kind data))} f options))
+  (let [checked (m/-instrument {:schema (m/deref s) :scope #{:input :output} :report (fn [kind data] (refusal fn-sym kind data))} f options)]
+    ;; the meter is not metered: reading a count must not add one
+    (if (= "seon.profile" (namespace fn-sym)) checked (profile/counted fn-sym checked))))
 
 ;; ---- contracts at definition --------------------------------------------------------
 ;; A release `jolt build` direct-links and inlines a namespace's defs, so a wrapper

@@ -55,6 +55,7 @@ When you feel it, stop and ask three questions:
 - **No added caches.** A content-keyed cache is allowed only for a unit measured as expensive.
 - **Effects go through owner procs** (`my.fx/call`, `my.fx/send`). The asker records the outcome on its own branch.
 - **Durability is batched,** with a flush window of 10 ms by default. A write that is followed by an effect outside the database waits for its flush.
+- **Estimates are proofs.** A function whose input grows carries a cost proof: an overrun, or growth steeper than the work needs, is red like any failing test. Every contracted call is counted (`seon.profile`), and every eval records its costliest functions.
 - **Tests run by reach digest:** only tests reaching a change run, and results are shared by digest. Only good tests: real assertions, sensitive to mutation, not timing-only.
 - **Use the library's words and mechanisms:** Clojure, core.async.flow, Datahike, Malli, git, nREPL.
 - **Procs follow the step-fn contract** (F2's rules, `docs/DECISIONS.md`):
@@ -69,8 +70,8 @@ When you feel it, stop and ask three questions:
 ## How to work a change
 
 1. **Read** DECISIONS, the owning note, and the code you'll touch. Read the dependency before writing around it.
-2. **Estimate** the cost and say what it is proportional to.
-3. **Write the proof** first, red.
+2. **Estimate** the cost and say what it is proportional to: what N counts, the least work the data needs (one pass? one lookup per row?), how it grows. Write it as a cost proof (`seon.cost/proof`) beside the behaviour proofs; its unit costs come from `seon.cost/units`, never from a run.
+3. **Write the proofs** first, red.
 4. **Build the simplest form** that makes it green.
 5. **Measure** parent against change: alternating runs, release build, bench lock. Keep it only if it's a measured win.
 6. **Show it** in the dashboard or the tour if users would care.

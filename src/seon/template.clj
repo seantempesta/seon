@@ -35,8 +35,12 @@
    :design (str "A merge failed: main changed under this task's design. Read the evidence (conflicts: base, ours, theirs; red "
                 "proofs). Decide how the change fits main as it is now. Write the interface: each function's defn with its "
                 "contract (a stub body is fine), and improve the plan (my.task/update! :seon.task/plan str ...) so the "
-                "implement step knows exactly what to do. Then (my.turn/wait).")
-   :implement "Implement what the plan describes on this branch until the proofs pass. Improve the plan with what you learn."
+                "implement step knows exactly what to do. For every function whose input grows, add a cost proof first: "
+                "(deftest f-is-one-pass (seon.cost/proof {:of 'ns/f :input 'ns-test/input :n \"what N counts\" :work \"the least "
+                "work the data needs\" :growth :linear :ops {...units from seon.cost/units...} :sizes [1000 10000 100000]})). "
+                "Derive it from what the work must do, never from a run. Then (my.turn/wait).")
+   :implement (str "Implement what the plan describes on this branch until the proofs pass, the cost proofs included: do the "
+                   "work their :work states and no more. Improve the plan with what you learn.")
    :test (str "Run the proofs and every program test. For any behaviour the evidence shows broke, add a deftest in the "
               "proofs namespace. Make everything pass.")})
 

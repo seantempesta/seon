@@ -14,7 +14,7 @@
   admission and arming plug in as one more `wrap-…`):
     wrap-print    the value through the agent's value printer (seon.agent/print-value)
     wrap-caught   the error also as the one error map
-    wrap-cost     per-form µs and allocated bytes, around the per-form eval fn
+    wrap-cost     per-form µs, allocated bytes and costliest functions, around the per-form eval fn
     wrap-record   a def in a program namespace becomes a fact on this branch (transact!)
   In-process values ride a response under keyword keys (:repl/value, :repl/ex) until a
   middleware turns them into answer keys. The requests and answers are in-process maps:
@@ -26,7 +26,7 @@
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract] [clojure.edn] [my.db] [my.agent]
-            [seon.program :as program] [seon.lib :as lib] [seon.sock :as sock] [seon.step :as step]
+            [seon.program :as program] [seon.lib :as lib] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
             [jolt.ffi :as ffi]))
 
 (defchecked ^:private chunk-writer [:=> [:cat :seon.host/fn] :seon.host/writer] @#'jolt.nrepl/chunk-writer)
@@ -157,8 +157,15 @@
                    (assoc m "seon/error" (pr-str (cond-> (agent/error-map e) (get m "seon/phase") (assoc :phase :read))))
                    m))))))
 
+(def top-fns
+  "How many of a form's costliest contracted functions its record keeps (Seon's
+  :seon.config.test.cost/top)."
+  10)
+
 (defn wrap-cost
-  "Per-form wall µs and allocated bytes, measured around the per-form eval fn."
+  "Per-form wall µs, allocated bytes and the form's costliest contracted functions (each
+  with its exact calls and estimated ms: seon.profile), measured around the per-form eval
+  fn. Reading them costs the functions the form called, not the program's size."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
@@ -166,12 +173,15 @@
           ef (:repl/eval-fn req eval)]
       (h (-> req
              (assoc :repl/eval-fn (fn [form]
-                                    (let [a0 (lib/bytes-allocated) t0 (lib/now-ns)]
+                                    (let [a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/now-ns)]
                                       (try (ef form)
-                                           (finally (vreset! last [(quot (- (lib/now-ns) t0) 1000) (- (lib/bytes-allocated) a0)]))))))
+                                           (finally (let [t1 (profile/now-ns) a1 (profile/alloc-bytes)]
+                                                      (vreset! last [(quot (- t1 t0) 1000) (- a1 a0) (profile/top (profile/touched) top-fns)])))))))
              (around-reply (fn [m]
-                             (if-let [[us a] (when (or (contains? m :repl/value) (contains? m :repl/ex)) @last)]
-                               (do (vreset! last nil) (assoc m "seon/us" us "seon/alloc-bytes" a))
+                             (if-let [[us a fns] (when (or (contains? m :repl/value) (contains? m :repl/ex)) @last)]
+                               (do (vreset! last nil)
+                                   (cond-> (assoc m "seon/us" us "seon/alloc-bytes" a)
+                                     (seq fns) (assoc "seon/fns" (pr-str (mapv (fn [c] (update c :ms #(/ (Math/round (* % 1000.0)) 1000.0))) fns)))))
                                m))))))))
 
 (defn wrap-record
@@ -259,6 +269,7 @@
       (get m "seon/contract") (assoc :contract (keyword (t "seon/contract")))
       (get m "seon/contract-error") (assoc :contract-error (clojure.edn/read-string (t "seon/contract-error")))
       (get m "seon/warnings") (assoc :warnings (clojure.edn/read-string (t "seon/warnings")))
+      (get m "seon/fns") (assoc :fns (clojure.edn/read-string (t "seon/fns")))
       (seq (:out out)) (assoc :out (:out out)))))
 
 (defn fold
@@ -288,7 +299,7 @@
   (conj (vec (for [it items :when (:id it)]
                {:seon.cluster.eval/id (str run "/" (:id it)) :seon.cluster.eval/agent "agent"
                 :seon.cluster.eval/record (binding [*print-length* nil *print-level* nil *print-meta* false]
-                                            (pr-str (cond-> (select-keys it [:tag :form :out :ms :alloc-bytes :origin])
+                                            (pr-str (cond-> (select-keys it [:tag :form :out :ms :alloc-bytes :fns :origin])
                                                       (= :ret (:tag it)) (assoc :shown (:printed it))
                                                       (= :err (:tag it)) (assoc :error (:printed it)))))}))
         (cond-> {:db/id "agent" :seon.agent/id id} t-basis (assoc :seon.agent/answered-t t-basis))))

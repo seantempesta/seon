@@ -76,3 +76,14 @@ number, a socket, a connection) is never handed generated arguments: a generated
 to `kill(2)` is a real signal to a real process, a generated fd closes someone's socket.
 Those functions are proved by their deftests and the end-to-end checks, which call them with
 the values the system really holds.
+
+## The profile's counts are exact on one thread only
+
+`seon.profile` keeps each armed function's counts in a plain Scheme vector, with no lock
+and no atomic, because a lock would cost more than the counter (0.9 ns). An agent, the fork
+server and a test child are single-threaded, so their counts are exact and cost proofs run
+there. Root's procs share functions across threads: two threads can lose an increment, and
+a function first called on two threads at once can be missed from `touched`. Root's counts
+are approximate and nothing reads them as proof. A measurement nested inside another (a
+cost proof run inside an eval form) restarts the epoch, so the outer form records only the
+calls after it.
