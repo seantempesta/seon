@@ -1106,6 +1106,37 @@
     (out! (if ok "MCP OK" "MCP FAIL"))
     (lib/c-exit (if ok 0 1))))
 
+(defn- os-threads
+  "The OS threads of process pid (ps -M lists one line per thread after its header)."
+  [pid]
+  (dec (count (clojure.string/split-lines (:out (clojure.java.shell/sh "ps" "-M" "-p" (str pid)))))))
+
+(defn threads-check
+  "Lane RC1's physics rule: the processes that fork (the fork server; an agent, for its
+  tests and clones) must stay single-threaded, so no sweeper thread ever starts in them.
+  An agent evaluates, collects, runs its tests in a fork and is cloned; then the fork
+  server, the agent and the clone each have one thread."
+  []
+  (let [sys (c/start! {:datoms 2000})
+        a (c/spawn! sys {:task "threads" :branch :threads1})
+        _ (await-status sys [a] #{:idle} 5000)
+        _ @(c/submit! sys a "(deftest t-one (is (= 2 (inc 1)))) (dotimes [i 200] (vec (range 10000))) (System/gc) :ok")
+        tests (select-keys @(c/run-tests! sys a) [:pass :fail :error])
+        cl (:id @(c/clone! sys a {}))
+        _ (await-status sys [cl] #{:idle} 5000)
+        cl-eval (:printed (last @(c/submit! sys cl "(inc 41)")))
+        st (c/state sys)
+        fs-pid (get-in st [:server :pid])
+        a-pid (get-in st [:agents a :pid])
+        cl-pid (get-in st [:agents cl :pid])
+        res {:fork-server (os-threads fs-pid) :agent (os-threads a-pid) :clone (os-threads cl-pid)
+             :tests tests :clone-eval cl-eval}
+        ok (and (= 1 (:fork-server res) (:agent res) (:clone res)) (= 1 (:pass tests)) (= "42" cl-eval))]
+    (pprint res)
+    (c/stop! sys)
+    (out! (if ok "THREADS OK" "THREADS FAIL"))
+    (lib/c-exit (if ok 0 1))))
+
 (defn -main [& [mode n & more]]
   (case mode
     "dur-bench-write" (dur-bench-write n (Long/parseLong (first more)))
@@ -1131,6 +1162,7 @@
     "rtt" (rtt)
     "fx" (fx (Long/parseLong (or n "1000")))
     "system" (system-check)
+    "threads" (threads-check)
     "root" (root-serve (Long/parseLong n))
     "mcp" (do (seon.mcp/serve! (Long/parseLong n)) (lib/c-exit 0))
     "mcp-proof" (mcp-proof)

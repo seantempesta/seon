@@ -4,7 +4,7 @@
   Run: bin/test seon.procs-test (proto/flow f2-final test/proto/procs_test.clj)"
   (:require [clojure.test :refer [deftest is testing run-tests]]
             [malli.core :as m] [seon.contract]
-            [clojure.core.async :as a]
+            [clojure.core.async :as a] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec]
             [clojure.core.async.flow :as flow]
             [datahike.api :as d]
             [seon.step :as step] [seon.db :as pdb] [seon.sock :as sock]
@@ -79,22 +79,30 @@
         (is (= st st2)) (is (nil? outs))))))
 
 (deftest agent-stand-in
+  ;; root's end of the agent's socket is a jolt.async.remote end: the agent's frames arrive
+  ;; as values on its :in (the stand-in's :from), and nil there is its close
   (let [[r a] (sock/socketpair)
-        st (#'ap/agent-proc {:id :a1 :fd r :branch :agent-1 :from (a/chan 4) :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
+        end (remote/open r {:codec {:encode codec/encode :decode codec/decode}})
+        st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
         st (assoc st :pid 42 :inflight {7 {:kind :eval}})]
     (testing "a reply answers its request by id and reports the agent idle"
-      (let [[st outs] (step #'ap/agent-proc st :from {:msg {:op :reply :id 7 :items [{:printed "3"}] :t 1}})]
+      (let [[st outs] (step #'ap/agent-proc st :from {:op :reply :id 7 :items [{:printed "3"}] :t 1})]
         (is (= {:rid 7} (:dest (first (:to-api outs)))))
         (is (empty? (:inflight st)))
         (is (some #(= :idle (get-in % [:set :status])) (:to-api outs)))))
     (testing "the agent committed its own branch: the writer hears it, for the next flush"
-      (let [[_ outs] (step #'ap/agent-proc st :from {:msg {:op :committed :t 5 :txs 2}})]
+      (let [[_ outs] (step #'ap/agent-proc st :from {:op :committed :t 5 :txs 2})]
         (is (= [{:op :agent-commit :branch :agent-1 :t 5}] (:to-writer outs)))))
-    (testing ":dead ends the agent, naming the requests it leaves unanswered"
-      (let [[st outs] (step #'ap/agent-proc st :from {:msg {:op :dead}})]
+    (testing "the end's close ends the agent, naming the requests it leaves unanswered"
+      (let [[st outs] (step #'ap/agent-proc st :from nil)]
         (is (:dead? st))
         (is (= [:ended] (map :op (filter :op (:to-api outs)))))
         (is (= [7] (:inflight (first (filter #(= :ended (:op %)) (:to-api outs))))))))
+    (testing "a request goes onto the end's :out, framed for the agent's socket"
+      (let [_ (step #'ap/agent-proc st :in {:op :write :msg {:op :message :body 1}})
+            c (sock/conn a)]
+        (is (= {:op :message :body 1} (sock/recv! c)))))
+    (remote/close! end)
     (sock/close! a)))
 
 (deftest api-entrance

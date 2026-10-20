@@ -38,7 +38,7 @@ function.
 
 | dragon | edge | answer |
 |---|---|---|
-| A peer's socket is gone (EOF) | `seon.sock/fill!`, `seon.wire/poll-msg!` | `:eof`; the reader sends the agent's proc `{:op :dead}` |
+| A peer's socket is gone (EOF, or its end frame) | root: `jolt.async.remote`'s reader pump; agents and the fork server: `seon.sock/fill!`, `seon.sock/recv!` | root: the end's `:in` closes, the stand-in's `:from` reads nil and becomes `{:op :dead}`; elsewhere `:eof` |
 | A write to a dead peer (EPIPE) | `seon.sock/send-frame!` | `:epipe`; the agent exits, root reads EOF |
 | `fork()` refused (another Chez thread active, the OS) | `seon.fork-server/server-step`, `seon.lib/safe-fork` | `:fork-failed`; `-2` from safe-fork (the test run and clone report it) |
 | A process dies (killed, crashed, `System/exit`) | the socket's EOF; `waitpid` in `seon.fork-server/reap` | `:dead` / `:exit` events; the agent's pending replies answer "agent died" |
@@ -47,6 +47,26 @@ function.
 | An agent past its heap bound | Jolt's heap ceiling (`seon.lib/heap-cap!`) | `OutOfMemoryError` in the form: an `:err` item |
 | A forked process holding its parent's LMDB env and connections (physics: fork shares handles) | `seon.db/after-fork!` | forgotten, not closed; the agent opens the store itself |
 | Datahike refuses an agent's own write (its run-ahead apply) | `datahike.writer/apply!` (the library's edge) | the exception as its answer; `seon.agent/transact!` throws its message into the agent's eval (an `:err` item) |
+
+## Physics: who may run threads
+
+Two rules of the OS and Chez that no code may "fix" by adding a thread or a check:
+
+- **A process that forks must never have started Chez's parallel-collector sweeper
+  threads.** Chez starts them at the first collection that finds another thread, and keeps
+  them; a child forked from such a process hangs in its first multi-threaded collection
+  (lane RC1, sampled in `S_gc_par_entry` -> `run_sweeper`). The processes that fork are the
+  fork server (it forks agents and its standby) and every agent (its test children,
+  `clone!`). So both are single-threaded and read and write their sockets themselves
+  (`seon.sock`), and only root, which never forks after boot, holds `jolt.async.remote`
+  ends with pumps. `bin/check threads` counts the OS threads of the fork server and of an
+  agent. The real fix is a Chez atfork handler that resets the sweepers (RC1's "next (b)").
+- **On macOS, a descriptor in flight by SCM_RIGHTS can be discarded when other unix
+  sockets close**, so the sender keeps its copy until the receiver confirms (the fork
+  server's `:in-flight`, a clone's socket kept until `:cloned`). A descriptor rides a frame
+  of its own on a socket a pump also writes (`seon.agent-proc/send-fd!`), sent only while
+  that pump is idle: the agent asks for it (`:fd-ready`) and the stand-in holds its other
+  messages until it is sent.
 
 ## Contracts over host objects are proved by deftests, never by generation
 

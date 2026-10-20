@@ -22,7 +22,7 @@
   only root's merge! advances main."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
-            [seon.sock :as sock] [seon.wire :as wire] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
+            [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.task :as task] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
@@ -93,8 +93,9 @@
 
 (defn- start-agent
   "Register a new agent: its socket (root keeps one end; the other goes to whoever forks
-  it), its proc definition (added to the graph by update! at the end of the step), and
-  the reader told where its frames go. Answers [st id agent-end-fd]."
+  it), its proc definition (added to the graph by update! at the end of the step). Root's
+  end is a jolt.async.remote end (lane RC1): its :in is the stand-in's :from, so the
+  agent's port is an ordinary channel. Answers [st id agent-end-fd]."
   {:malli/schema [:=> [:cat :seon.root/api-state :map] [:tuple :seon.root/api-state :seon.agent/id :seon.lib/fd]]}
   [st {:keys [branch task cloned-from]}]
   (let [n (inc (:next-id st))
@@ -103,14 +104,12 @@
         lease (+ (:lease-base st) (* n cfg/EID-LEASE))
         branch (or branch (keyword (str "agent-" n)))
         [r a] (sock/socketpair)
-        from (a/chan cfg/AGENT-BUF)]
-    ;; the reader reads this socket from now on, into this agent's :from
-    (a/>!! (:reg st) [r from])
-    (sock/poke! (:wake st))
+        ;; fiber pumps: an end costs no thread of its own (root may run a thousand agents)
+        end (remote/open r {:codec {:encode codec/encode :decode codec/decode} :pump :fiber :buf cfg/AGENT-BUF})]
     [(-> st (assoc :next-id n ::update true)
          (assoc-in [:agents id] {:branch branch :lease lease})
          (assoc-in [:agent-procs id] {:proc agent-launcher
-                                      :args {:id id :fd r :branch branch :from from
+                                      :args {:id id :end end :branch branch
                                              :to-writer (:to-writer st) :back (:back st) :events (:events st)
                                              :fx-kinds (system/fx-owners (get-in st [:system :procs]))}
                                       :chan-opts {:in {:buf-or-n cfg/AGENT-BUF}}})
@@ -202,9 +201,8 @@
                       (-> st (set-agent id {:status :killed}) (to-agent id {:op :kill}))
                       st)
               p (reply! p {:killed id}))
-      :message (let [b (wire/encode (wire/seon->wire {:op :message :from (:from m :root) :body (:body m) :ns (sock/now-ns)}))]
-                 ;; encoded once, the same bytes to every socket
-                 (reduce #(to-agent %1 %2 {:op :bytes :bytes b}) st (:to m)))
+      :message (let [msg {:op :message :from (:from m :root) :body (:body m) :ns (sock/now-ns)}]
+                 (reduce #(to-agent %1 %2 {:op :write :msg msg}) st (:to m)))
       :fs (let [[st rid] (rid! st)]
             (step/out! o :to-fs (assoc (:req m) :rid rid))
             (pend st rid p :fs nil))
@@ -271,8 +269,8 @@
       :stat (case (:k m)
               :noise (view! st update :stats assoc :noise (:v m) :noise-ordered (:ordered m) :noise-first-bad (:bad m))
               (view! st update-in [:stats (:k m)] lib/push-window (:v m) 100000))
-      :message (let [b (wire/encode (wire/seon->wire {:op :message :from (:from m) :body (:body m) :ns (sock/now-ns)}))]
-                 (reduce #(to-agent %1 %2 {:op :bytes :bytes b}) st (:to m)))
+      :message (let [msg {:op :message :from (:from m) :body (:body m) :ns (sock/now-ns)}]
+                 (reduce #(to-agent %1 %2 {:op :write :msg msg}) st (:to m)))
       ;; a proc's request (the reconciler's, the web's, MCP's): an ordinary entrance request
       ;; whose answer goes back to the proc as data
       :request (ext-op st o (assoc (:req m) :p {:route (:route m) :tag (:tag m)}))
@@ -353,62 +351,6 @@
       @o])))
 
 ;; ====================================================================================
-;; The reader: the one reader of every agent's socket
-;; ====================================================================================
-
-(defn- start-reader!
-  "ONE thread reads every agent's socket (an edge reader: a blocking kevent). Each frame
-  goes to that agent's :from channel. When that channel is full (the stand-in paused or
-  slow) the frame becomes ONE pending put and the socket leaves the kqueue, so its buffer
-  fills and the agent's own send waits; the put's completion brings it back (through
-  :reg and a poke). After a socket's last frame comes {:op :dead}: EOF, every holder of
-  the agent's end is gone. Which channel each socket feeds is this loop's own map, told
-  by the api on :reg. Ends when stop-ch has a value."
-  {:malli/schema [:=> [:cat :map] :seon.host/thread]}
-  [{:keys [reg wake wake-r stop-ch]}]
-  (let [kq (sock/kqueue)
-        evs (sock/kq-buffer 256)]
-    (sock/kq-watch! kq wake-r true)
-    (doto (Thread.
-            (fn []
-              (letfn [(pump [peers fd]
-                        ;; deliver fd's frames until none is whole, the channel is full, or EOF
-                        (let [{:keys [conn rd ch]} (get peers fd)]
-                          (loop []
-                            (let [v (wire/poll-msg! rd)]
-                              (cond
-                                (= v :none) peers
-                                (= v :eof) (do (sock/kq-watch! kq fd false) (sock/release-conn! conn)
-                                               ;; the socket's last message: never dropped
-                                               (a/put! ch {:msg {:op :dead}})
-                                               (dissoc peers fd))
-                                (a/offer! ch {:msg v}) (recur)
-                                :else (do (sock/kq-watch! kq fd false)
-                                          (a/put! ch {:msg v} (fn [_] (a/put! reg [:resume fd]) (sock/poke! wake)))
-                                          (assoc-in peers [fd :held] true)))))))]
-                (loop [peers {}]
-                  (let [peers (loop [peers peers]
-                                (if-let [[x y] (a/poll! reg)]
-                                  (if (= x :resume)
-                                    (recur (if (get peers y)
-                                             ;; held until this put completed: the socket's next frames, then the kqueue again
-                                             (let [p (pump (update peers y dissoc :held) y)]
-                                               (when (and (get p y) (not (get-in p [y :held]))) (sock/kq-watch! kq y true))
-                                               p)
-                                             peers))
-                                    (do (sock/kq-watch! kq x true) (recur (assoc peers x (let [c (sock/conn x)] {:conn c :rd (wire/reader c) :ch y})))))
-                                  peers))
-                        fds (sock/kq-wait kq evs 256 50)
-                        peers (reduce (fn [peers fd]
-                                        (cond (= fd wake-r) (do (sock/discard! wake-r) peers)
-                                              (and (get peers fd) (not (get-in peers [fd :held]))) (pump peers fd)
-                                              :else peers))
-                                      peers fds)]
-                    ;; stop!: the wait's 50 ms bound (or a poke) is this thread's exit latency
-                    (when-not (a/poll! stop-ch) (recur peers)))))))
-      (.setDaemon true) (.start))))
-
-;; ====================================================================================
 ;; Boot
 ;; ====================================================================================
 
@@ -426,8 +368,7 @@
       (d/pull db '[:task/name {:task/refs [:var/name]}] [:task/name :app.m0/tidy])
       (d/db-with db [{:note/text "warm" :note/agent :warm}])
       (d/with db [{:note/text "warm" :note/agent :warm}])
-      (sock/frame {:op :reply :items [{:id 1 :printed "x" :ms 0.1}]})
-      (wire/encode (wire/seon->wire {:op :reply :items [{:id 1 :printed "x" :ms 0.1}]})))
+      (sock/frame {:op :reply :items [{:id 1 :printed "x" :ms 0.1}]}))
     (let [nsx (create-ns 'seon.warm)]
       (binding [*ns* nsx]
         (refer-clojure)
@@ -479,10 +420,9 @@
         db @conn
         ;; physics: the fork server is forked before any thread exists
         {:keys [pid fd]} (fs/fork-server db)
-        [wake-r wake] (sock/socketpair)
         events-in (a/chan (a/sliding-buffer 8192))
         chans {:ext (a/chan 1024) :back (a/chan 4096) :to-writer (a/chan cfg/WRITER-BUF)
-               :server-ev (a/chan 4096) :reg (a/chan (* 4 cfg/MAX-AGENTS)) :stop-ch (a/promise-chan)
+               :server-ev (a/chan 4096) :stop-ch (a/promise-chan)
                ;; outside agents' attempts handed back for judgement (seon.entrance)
                :judge (a/chan 64)}
         view {:agents {} :writer {:tx-count 0} :stats {}
@@ -494,8 +434,8 @@
         graph-p (promise)
         root-procs-p (promise)
         ;; what the declaration (resources/seon/system.edn) names as :bind/<name>
-        bindings (merge (select-keys chans [:ext :back :to-writer :server-ev :reg :judge])
-                        {:wake wake :view view :graph graph-p :lease-base (pdb/lease-base conn)
+        bindings (merge (select-keys chans [:ext :back :to-writer :server-ev :judge])
+                        {:view view :graph graph-p :lease-base (pdb/lease-base conn)
                          :system root-procs-p :events events-in
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider
@@ -522,11 +462,11 @@
                                                                   :data (some-> (::flow/ex e) ex-data)})
                                             (recur))))))))
                  (.setDaemon true) (.start))
-        sys (merge chans {:cfg store-cfg :conn conn :graph g :wake wake :wake-r wake-r :t0 t0
+        sys (merge chans {:cfg store-cfg :conn conn :graph g :t0 t0
                           :owned-store (when-not given path) :boot boot
                           :bindings bindings
                           :events-in events-in :events-mult (a/mult events-in) :errors errors})
-        sys (assoc sys :reader (start-reader! sys))]
+        ]
     (flow/resume g)
     ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is
     @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (task/boot-tx boot max-running)}})
@@ -775,11 +715,8 @@
     (let [drained (deref p 15000 :timeout)
           graph (flow/stop (:graph sys))]
       (a/put! (:stop-ch sys) true)
-      (sock/poke! (:wake sys))
-      (some-> ^Thread (:reader sys) (.join 5000))
       (some-> ^Thread (:errors sys) (.join 5000))
       (a/close! (:events-in sys))
-      (sock/close! (:wake sys)) (sock/close! (:wake-r sys))
       ;; a store this root made for itself goes with it
       (when-let [p (:owned-store sys)]
         (d/release (:conn sys))

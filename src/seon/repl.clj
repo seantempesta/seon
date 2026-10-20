@@ -17,13 +17,15 @@
     wrap-cost     per-form µs and allocated bytes, around the per-form eval fn
     wrap-record   a def in a program namespace becomes a fact on this branch (transact!)
   In-process values ride a response under keyword keys (:repl/value, :repl/ex) until a
-  middleware turns them into wire keys; seon.wire never encodes keyword keys.
+  middleware turns them into answer keys. The requests and answers are in-process maps:
+  root's request arrives as a value ({:op :eval :id :forms ...}, a frame on the agent's
+  socket), and the request's answers go back folded, as one {:op :reply :items ...}.
 
   Interrupt is out of band: root sends SIGUSR1 (seon.intr), and an `interrupt` message
-  is answered once the eval has stopped. Seon's platform ops (tests, stats, sync, clone,
-  messages, writes) are seon/<op> messages, handled by `agent-step` as before."
+  is answered once the eval has stopped. Seon's platform ops (tests, stats, clone,
+  messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn- defchecked]] [jolt.nrepl :as nrepl] [seon.wire :as wire] [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract] [clojure.edn] [my.db] [my.agent]
+  (:require [seon.contract :refer [defn defn- defchecked]] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract] [clojure.edn] [my.db] [my.agent]
             [seon.program :as program] [seon.lib :as lib] [seon.sock :as sock] [seon.step :as step]
             [jolt.ffi :as ffi]))
 
@@ -39,7 +41,7 @@
   {:malli/schema [:=> [:cat :seon.wire/msg] :seon.host/namespace]}
   [req]
   (let [s @agent/state]
-    (or (some-> (get req "ns") wire/text-> symbol find-ns)
+    (or (some-> (get req "ns") symbol find-ns)
         (some-> (get-in s [:sessions (get req "session") :ns]) find-ns)
         (:ns s))))
 
@@ -114,8 +116,8 @@
     "close" (do (swap! agent/state update :sessions dissoc (get req "session"))
                 (reply {"status" ["session-closed" "done"]}))
     "ls-sessions" (reply {"sessions" (vec (keys (:sessions @agent/state))) "status" ["done"]})
-    "eval" (eval-code req (wire/text-> (get req "code")))
-    "load-file" (eval-code req (wire/text-> (get req "file")))
+    "eval" (eval-code req (get req "code"))
+    "load-file" (eval-code req (get req "file"))
     ;; root signalled this process before sending this: the eval it meant has stopped
     "interrupt" (let [hit (:interrupted @agent/state)]
                   (swap! agent/state dissoc :interrupted)
@@ -262,7 +264,7 @@
 (defn fold
   "The answers of one eval request (in order) -> its reply items. `out`/`err` text goes
   onto the next form's item (the form that printed it). text decodes a text field
-  (seon.wire/text-> for answers that crossed the wire, identity in-process)."
+  (identity: the answers are in-process)."
   {:malli/schema [:=> [:cat [:sequential :seon.wire/msg] :seon.host/fn] :seon.agent/items]}
   [answers text]
   (loop [[m & more :as ms] answers acc {:items [] :out {}}]
@@ -315,24 +317,31 @@
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 
 (defn- reply-fn
-  "Answers go straight to root's socket; the request's `done` also carries the agent's
-  t and memory (root's view of it)."
+  "The request's answers are kept and folded at its done into one reply value for root
+  ({:op :reply :id :items :t :mem-mb}); an eval's items are recorded first (the agent owns
+  its branch's writes)."
   {:malli/schema [:=> [:cat :seon.wire/msg] :seon.host/fn]}
   [req]
-  (let [id (get req "id") sid (get req "session") answers (volatile! [])]
-    (fn [m] (let [done? (some #{"done"} (get m "status"))]
-              ;; the request's evaluations are recorded here, before its done (the agent owns
-              ;; its branch's writes)
-              (vswap! answers conj m)
-              (when (and done? (= "eval" (get req "op")))
-                (record! (fold @answers identity) (some-> (get req "seon/origin") wire/text-> keyword)))
-              (agent/send-wire! (cond-> (into {} (remove (comp keyword? key)) m)
-                                  id (assoc "id" id) sid (assoc "session" sid)
-                                  done? (assoc "seon/t" (:max-tx (agent/db)) "seon/mem-mb" (str (agent/mem-mb)))))))))
+  (let [answers (volatile! [])]
+    (fn [m]
+      (vswap! answers conj m)
+      (when (some #{"done"} (get m "status"))
+        (let [items (fold @answers identity)]
+          (when (= "eval" (get req "op")) (record! items (some-> (get req "seon/origin") keyword)))
+          (agent/send! {:op :reply :id (:id req) :items items :t (:max-tx (agent/db)) :mem-mb (agent/mem-mb)}))))))
+
+(defn- eval-request
+  "Root's eval request as the nREPL request the handler takes."
+  {:malli/schema [:=> [:cat :seon.wire/seon-msg] :seon.wire/msg]}
+  [m]
+  (let [req (cond-> {"op" "eval" "id" (str (:id m)) "code" (:forms m) :id (:id m)}
+              (:timeout-ms m) (assoc "seon/timeout-ms" (:timeout-ms m))
+              (:origin m) (assoc "seon/origin" (name (:origin m))))]
+    (assoc req :reply (reply-fn req))))
 
 (defn agent-step
   "The agent as a step-fn, run on its one thread by seon.step/run-loop: requests in on
-  :sock (nREPL requests as {:op :nrepl :msg m}, Seon's as {:op k ...}), replies out on
+  :sock (an eval as {:op :eval :id :forms}, Seon's ops as {:op k ...}), replies out on
   :sock; :pause, :resume, :stop and :ping are taken by the loop. Its REPL state is the
   process's one state map (seon.agent/state), which the code it evaluates reads, so the
   step's own state is empty."
@@ -342,8 +351,8 @@
   ([_] {})
   ([st _] st)
   ([st _ m]
-   (if (= :nrepl (:op m))
-     (let [req (assoc (:msg m) :reply (reply-fn (:msg m)))]
+   (if (= :eval (:op m))
+     (let [req (eval-request m)]
        ;; the agent's entrant boundary: a defect answers err + done
        (try (@the-handler req)
             (catch Throwable e

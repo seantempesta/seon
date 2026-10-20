@@ -2,11 +2,19 @@
   "An agent: a process forked from the fork server, holding its branch's db value
   (inherited from main at the branch point, then advanced by its own tx-data with
   d/db-with) and running its REPL over its socket to root (seon.repl). The live value of
-  each form stays here under its handle. Agent code calls the verbs of my.db and my.agent,
+  each form stays here under its handle.
+
+  The agent is single-threaded and reads and writes its socket itself (seon.sock frames,
+  the protocol of root's jolt.async.remote end), never through remote-channel pumps. That
+  is physics, not style: an agent forks (its test children, clone!), and a process that
+  forks must never have started Chez's parallel-collector sweeper threads, which start at
+  the first collection that finds a second thread; a child of such a process hangs in its
+  first multi-threaded collection (lane RC1). Adding pump or worker threads to an agent
+  breaks its forks; docs/DRAGONS.md, "Physics". Agent code calls the verbs of my.db and my.agent,
   referred into its namespace. From proto/flow f2-final proto.agent (lane F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
-            [clojure.string :as str] [jolt.ffi :as ffi] [seon.program :as program] [seon.intr :as intr] [seon.wire :as wire] [clojure.repl]))
+            [clojure.string :as str] [jolt.ffi :as ffi] [seon.program :as program] [seon.intr :as intr] [clojure.repl]))
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :fd :conn :db :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
@@ -56,25 +64,23 @@
   {:malli/schema [:=> [:cat :any] :string]}
   [v] (:printed (print-value v nil)))
 
-;; ---- the socket to root (nREPL's wire, seon.wire) -----------------------------
-
-(defn send-wire!
-  "Send an nREPL message (string keys) to root; :dead when root is gone."
-  {:malli/schema [:=> [:cat :seon.wire/msg] [:or [:= true] [:= :dead]]]}
-  [m] (if (= :epipe (wire/send! (:fd @state) m)) :dead true))
+;; ---- the socket to root: values in frames (root's end is a jolt.async.remote end) ------
+;; This side reads and writes its socket itself, on its one thread, with no pumps: an agent
+;; forks (its tests, a clone), and a process that forks must never have started Chez's
+;; parallel-collector sweeper threads (lane RC1: a child of such a process hangs in its
+;; first multi-threaded collection).
 
 (defn send!
-  "Send a Seon platform message {:op k ...} to root (as seon/<op>); :dead when root is gone."
+  "Send a message {:op k ...} to root, one frame; :dead when root is gone."
   {:malli/schema [:=> [:cat :seon.wire/seon-msg] [:or [:= true] [:= :dead]]]}
-  [m] (send-wire! (wire/seon->wire m)))
+  [m] (if (= :epipe (sock/send! (:fd @state) m)) :dead true))
 
 (defn- recv-raw!
-  "The next message from root: Seon's as {:op k ...}, an nREPL request as
-  {:op :nrepl :msg m}, or :dead at EOF."
+  "The next message from root ({:op k ...}), or :dead at EOF or root's end frame."
   {:malli/schema [:=> [:cat] [:or [:= :dead] :seon.wire/seon-msg]]}
   []
-  (let [m (wire/next-msg! (:rd @state))]
-    (if (= m :eof) :dead (or (wire/wire->seon m) {:op :nrepl :msg m}))))
+  (let [m (sock/recv! (:conn @state))]
+    (if (= m :eof) :dead m)))
 
 (declare commit!)
 
@@ -86,11 +92,11 @@
   (if-let [m (peek (:pending @state))]
     (do (swap! state update :pending pop) m)
     (if (:dirty-at @state)
-      (let [m (wire/poll-msg! (:rd @state))]
+      (let [m (sock/next-frame! (:conn @state))]
         (case m
           :none (do (commit!) (recv-raw!))
           :eof :dead
-          (or (wire/wire->seon m) {:op :nrepl :msg m})))
+          m))
       (recv-raw!))))
 
 ;; ---- the agent's own API ------------------------------------------------------
@@ -397,6 +403,11 @@
   {:malli/schema [:=> [:cat :seon.wire/seon-msg] :any]}
   [{:keys [k] :as m}]
   (let [t0 (lib/now-ns)
+        ;; the clone's socket: root sends it in a frame of its own while its writer pump is
+        ;; idle (SCM_RIGHTS beside another writer's frames would not be atomic): this agent
+        ;; says it waits, root holds its other messages until the descriptor is sent
+        _ (send! {:op :fd-ready :k k})
+        _ (await-op! :fd k)
         fd (sock/take-fd! (:conn @state))]
     ;; the new branch starts at this branch's committed head: what was applied commits first
     (commit!)
@@ -415,7 +426,7 @@
                 (let [c (sock/conn fd)]
                   ;; the clone opens the store itself, on its own branch, with its own lease
                   (pdb/after-fork! (:cfg r) (:lease r))
-                  (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn c :rd (wire/reader c) :mode :agent :tx-seq 0
+                  (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn c :mode :agent :tx-seq 0
                          :pending clojure.lang.PersistentQueue/EMPTY :mem-at nil :fx-pending {}
                          :store-conn (d/connect (assoc (:cfg r) :branch (:branch m))))
                   (swap! state assoc :db @(:store-conn @state)))
@@ -448,6 +459,6 @@
     (intr/install!)
     ;; a kept branch, resumed: its program is what this process runs (it was forked holding main's)
     (when resumed (program/load-diff! db0 @store-conn))
-    (reset! state {:id id :branch branch :fd fd :conn c :rd (wire/reader c) :db @store-conn :store-conn store-conn :cfg cfg :results {} :n 0
+    (reset! state {:id id :branch branch :fd fd :conn c :db @store-conn :store-conn store-conn :cfg cfg :results {} :n 0
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
                    :ns nsx :nss #{(ns-name nsx)} :interrupt-ok intr-ok :serve serve})))

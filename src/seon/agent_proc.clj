@@ -1,28 +1,37 @@
 (ns seon.agent-proc
   "An agent's stand-in in root: one proc of the root graph per agent, added and removed by
-  the api with flow/update!. It owns root's end of the agent's socket and its process,
-  and passes Flow's pause, resume and stop on to the agent's own loop. It folds each
-  eval's nREPL answers into reply items. From proto/flow f2-final proto.control (lane F2)."
+  the api with flow/update!. It owns root's end of the agent's socket, a jolt.async.remote
+  end (lane RC1): the agent's frames arrive as values on the end's :in, which IS this
+  proc's :from in-port, and what it sends the agent is put on the end's :out. It owns the
+  agent's process and passes Flow's pause, resume and stop on to the agent's own loop.
+  From proto/flow f2-final proto.control (lane F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.lib :as lib] [seon.sock :as sock] [seon.wire :as wire] [seon.step :as step]
-            [seon.config :as cfg] [seon.repl :as repl] [clojure.edn] [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
-
-(defn- ->wire
-  "An internal request for the agent as its wire message: eval as nREPL's `eval`, every
-  other op as seon/<op>."
-  {:malli/schema [:=> [:cat :seon.wire/seon-msg] :seon.wire/msg]}
-  [m]
-  (if (= :eval (:op m))
-    (cond-> {"op" "eval" "id" (str (:id m)) "code" (:forms m)}
-      (:timeout-ms m) (assoc "seon/timeout-ms" (:timeout-ms m))
-      (:origin m) (assoc "seon/origin" (name (:origin m))))
-    (wire/seon->wire m)))
+  (:require [seon.contract :refer [defn defn-]] [seon.lib :as lib] [seon.sock :as sock] [seon.step :as step]
+            [seon.config :as cfg] [jolt.async.remote :as remote] [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
 
 (defn- to-proc!
-  "Send m to the agent's process on its socket (with pass-fd, a descriptor goes along)."
-  {:malli/schema [:function [:=> [:cat :map :seon.wire/seon-msg] :any] [:=> [:cat :map :seon.wire/seon-msg [:maybe :seon.lib/fd]] :any]]}
-  ([st m] (to-proc! st m nil))
-  ([st m pass-fd] (when-not (:dead? st) (if pass-fd (wire/send! (:fd st) (->wire m) pass-fd) (wire/send! (:fd st) (->wire m))))))
+  "Send m to the agent's process: onto the end's :out (its writer pump frames it). While a
+  descriptor is in its handshake (:holding), m waits in :held."
+  {:malli/schema [:=> [:cat :map :seon.wire/seon-msg] :map]}
+  [st m]
+  (cond (:dead? st) st
+        (:holding st) (update st :held (fnil conj []) m)
+        :else (do (a/>!! (:out (:end st)) m) st)))
+
+(defn- send-fd!
+  "The descriptor fd to the agent, in a frame of its own ({:op :fd :k k}, SCM_RIGHTS). The
+  agent asked for it ({:op :fd-ready}) after taking the request before it, and nothing was
+  put on :out since (held), so the writer pump is idle: this frame cannot interleave with
+  another. Then what was held goes out."
+  {:malli/schema [:=> [:cat :map :int :seon.lib/fd] :map]}
+  [st k fd]
+  (sock/send! (:fd (:end st)) {:op :fd :k k} fd)
+  (reduce to-proc! (dissoc st :holding :held) (:held st)))
+
+(defn- hang-up!
+  "Close root's end: the agent (if any) reads the end frame; this proc's :from closes."
+  {:malli/schema [:=> [:cat :map] :any]}
+  [st] (remote/close! (:end st)))
 
 (defn- status {:malli/schema [:=> [:cat :map :map] :map]}
   [st m] {:op :status :agent (:id st) :set m})
@@ -31,15 +40,20 @@
   [st] (if (seq (:inflight st)) :busy :idle))
 
 (defn- await-dead
-  "Wait (bounded) on the stand-in's own :from for the socket's :dead (EOF: the process is gone)."
+  "Wait (bounded) on the end's :in for its close (the process is gone): true, or false
+  past ms."
   {:malli/schema [:=> [:cat :seon.host/chan :int] :boolean]}
   [from ms]
   (let [deadline (+ (System/currentTimeMillis) ms)]
     (loop []
-      (let [[m _] (a/alts!! [from (a/timeout (max 1 (- deadline (System/currentTimeMillis))))])]
-        (cond (nil? m) false
-              (= :dead (get-in m [:msg :op])) true
-              :else (recur))))))
+      (let [left (- deadline (System/currentTimeMillis))]
+        (if (<= left 0)
+          false
+          (let [t (a/timeout left)
+                [m c] (a/alts!! [from t])]
+            (cond (= c t) false
+                  (nil? m) true
+                  :else (recur))))))))
 
 (declare agent-frame)
 
@@ -49,21 +63,22 @@
   [st m]
   (case (:op m)
     :req (let [{:keys [rid msg kind]} m]
-           (to-proc! st (assoc msg (if (= kind :clone) :k :id) rid) (:pass-fd m))
-           (let [st (cond-> (update st :inflight assoc rid (select-keys m [:kind :branch :new :merge-branch :data-attrs :pass-fd :lease]))
+           (let [st (cond-> (to-proc! st (assoc msg (if (= kind :clone) :k :id) rid))
+                      ;; a clone's socket follows in its own frame once the agent asks
+                      (= kind :clone) (assoc :holding rid)
+                      true (update :inflight assoc rid (select-keys m [:kind :branch :new :merge-branch :data-attrs :pass-fd :lease]))
                       (= kind :ping) (update :pings conj rid))]
              [st {:to-api [(status st (cond-> {:status :busy}
                                         (= kind :eval) (assoc :running {:form (let [f (:forms msg)] (if (> (count f) 200) (str (subs f 0 200) " …") f))
                                                                         :since-ms (System/currentTimeMillis)})))]}]))
-    :write (do (to-proc! st (:msg m)) [st nil])
-    :bytes (do (when-not (:dead? st) (sock/send-frame! (:fd st) (:bytes m))) [st nil])
+    :write [(to-proc! st (:msg m)) nil]
     :forked (do (when (and (:kill? st) (not (:dead? st))) (lib/c-kill (:pid m) 9))
                 [(assoc st :pid (:pid m)) nil])
     ;; a process that never existed reads as dead: hang up root's end, the reader sees EOF
-    :failed (do (sock/hang-up! (:fd st)) [st {:to-api [(status st {:error (:error m)})]}])
-    :drain (do (if (:pid st) (to-proc! st {:op :stop}) (sock/hang-up! (:fd st)))
-               [(assoc st :draining (:rid m) :stop-sent true) nil])
-    :kill (do (if (:pid st) (lib/c-kill (:pid st) 9) (sock/hang-up! (:fd st)))
+    :failed (do (hang-up! st) [st {:to-api [(status st {:error (:error m)})]}])
+    :drain (let [st (if (:pid st) (to-proc! st {:op :stop}) (do (hang-up! st) st))]
+             [(assoc st :draining (:rid m) :stop-sent true) nil])
+    :kill (do (if (:pid st) (lib/c-kill (:pid st) 9) (hang-up! st))
               [(assoc st :kill? true) nil])
     [st nil]))
 
@@ -87,6 +102,7 @@
                                               (:cloned-from m) (assoc :pid (:pid m)))))
                  (step/out! o :events (step/event {:type :ready :agent id :start-ms (:start-ms m)}))
                  (cond-> st (:cloned-from m) (assoc :pid (:pid m))))
+      :fd-ready (send-fd! st (:k m) (get-in st [:inflight (:k m) :pass-fd]))
       :branch-me (let [{:keys [branch lease]} (get-in st [:inflight (:k m)])]
                    (step/out! o :to-writer {:op :clone-branch :from (:branch st) :branch branch :lease lease
                                        :dest {:agent id :op :branched :k (:k m)}})
@@ -141,18 +157,19 @@
       ;; writer's, {:dest {:agent :op :fx-reply :k}} through the api
       :fx (let [owner (keyword "fx" (name (:kind m)))]
             (if (contains? (:fx-kinds st) owner)
-              (step/out! o [owner :in] (cond-> {:req (:req m) :agent id :prio (:prio m 0)
+              (do (step/out! o [owner :in] (cond-> {:req (:req m) :agent id :prio (:prio m 0)
                                                 :dest {:agent id :op :fx-reply :k (:k m)}}
                                          (:budget m) (assoc :budget (:budget m) :budget-key (or (:budget-key m) id))))
+                  st)
               (to-proc! st {:op :fx-reply :k (:k m) :seon.error/type :seon.fx/unknown-kind :seon.error/operation 'seon.fx/call
-                            :seon.error/message (str "no effect kind " (:kind m))}))
-            st)
+                            :seon.error/message (str "no effect kind " (:kind m))})))
       :merged-main (let [st (answer-rid st o (:id m) (:result m))]
                      (step/out! o :events (step/event {:type :merged-main :agent id :result (:result m)}))
                      (step/out! o :to-api (status st {:status (busy st)}))
                      st)
-      :dead (do (sock/close! (:fd st))
-                (doseq [[_ {:keys [pass-fd]}] (:inflight st)] (some-> pass-fd sock/close!))
+      ;; the end's :in closed: the agent's end frame, EOF or EPIPE (every holder of its
+      ;; socket is gone); the end's pumps closed the descriptor
+      :dead (do (doseq [[_ {:keys [pass-fd]}] (:inflight st)] (some-> pass-fd sock/close!))
                 (step/out! o :to-api {:op :ended :agent id :rid (:draining st) :pid (:pid st) :inflight (vec (keys (:inflight st)))})
                 (assoc st :dead? true :inflight {}))
       st)))
@@ -170,44 +187,33 @@
   In :in (from the api), :from (its socket, via the reader). Out :to-writer, :to-api,
   :events (external channels)."
   {:malli/schema :seon.step/step-fn}
-  ([] {:params {:id "agent id" :fd "root's end of its socket" :branch "its branch"}
+  ([] {:params {:id "agent id" :end "root's end of its socket (jolt.async.remote)" :branch "its branch"}
        :ins {:in "requests from the api, and the writer's answers it routes"} :outs {}
        ;; socket writes are short; a full socket blocks only this agent's proc
        :workload :io
        :ping-map-fn (fn [st] {:id (:id st) :pid (:pid st) :dead? (boolean (:dead? st)) :inflight (count (:inflight st))})})
-  ([args] (assoc (select-keys args [:id :fd :branch :pid])
+  ([args] (assoc (select-keys args [:id :end :branch :pid])
                  :inflight {} :pings clojure.lang.PersistentQueue/EMPTY :fx-kinds (:fx-kinds args)
-                 ::flow/in-ports {:from (:from args)}
+                 ::flow/in-ports {:from (:in (:end args))}
                  ::flow/out-ports {:to-writer (:to-writer args) :to-api (:back args) :events (:events args)}))
   ([st tr]
    (case tr
-     ::flow/pause (do (when (:pid st) (to-proc! st {:op :pause})) st)
-     ::flow/resume (do (when (:pid st) (to-proc! st {:op :resume})) st)
+     ::flow/pause (if (:pid st) (to-proc! st {:op :pause}) st)
+     ::flow/resume (if (:pid st) (to-proc! st {:op :resume}) st)
      ::flow/stop (do (when-not (:dead? st)
                        (when-not (:stop-sent st)
-                         (if (:pid st) (to-proc! st {:op :stop}) (sock/hang-up! (:fd st))))
-                       (when-not (await-dead (get-in st [::flow/in-ports :from]) cfg/STOP-BOUND-MS)
+                         (if (:pid st) (to-proc! st {:op :stop}) (hang-up! st)))
+                       (when-not (await-dead (:in (:end st)) cfg/STOP-BOUND-MS)
                          (some-> (:pid st) (lib/c-kill 9))
-                         (sock/hang-up! (:fd st))
-                         (await-dead (get-in st [::flow/in-ports :from]) 5000)))
+                         (hang-up! st)
+                         (await-dead (:in (:end st)) 5000)))
                      (assoc st :dead? true))
      st))
   ([st in m]
    (case in
      :in (agent-in st m)
+     ;; a value from the agent; nil: the end's :in closed (the process is gone)
      :from (let [o (volatile! {})
-                 w (:msg m)
-                 st (if-let [internal (cond (contains? w :op) w            ; the reader's own {:op :dead}
-                                            (contains? w "op") (wire/wire->seon w))]
-                      (agent-frame st o internal)
-                      ;; an nREPL answer to an eval: kept until its done, then one reply
-                      (let [rid (some-> (get w "id") parse-long)
-                            st (update-in st [:answers rid] (fnil conj []) w)]
-                        (if (some #{"done"} (get w "status"))
-                          (let [reply {:op :reply :id rid :items (repl/fold (get-in st [:answers rid]) wire/text->)
-                                       :mem-mb (some-> (get w "seon/mem-mb") parse-double) :t (get w "seon/t")}
-                                st (update st :answers dissoc rid)]
-                            (agent-frame st o reply))
-                          st)))]
+                 st (agent-frame st o (if (nil? m) {:op :dead} m))]
              [st @o])
      [st nil])))

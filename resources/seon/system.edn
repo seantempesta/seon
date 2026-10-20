@@ -14,9 +14,9 @@
  {:api {:proc seon.root/api-proc
         ;; room for every answer the writer can owe while the api is not reading
         :chan-opts {:from-writer {:buf-or-n :bind/api-from-writer-buf}}
-        :args {:wake :bind/wake :view :bind/view :ext :bind/ext :back :bind/back :graph :bind/graph
+        :args {:view :bind/view :ext :bind/ext :back :bind/back :graph :bind/graph
                :lease-base :bind/lease-base :system :bind/system
-               :reg :bind/reg :to-writer :bind/to-writer :events :bind/events}}
+               :to-writer :bind/to-writer :events :bind/events}}
   :writer {:proc seon.writer/writer-proc
            :args {:conn :bind/conn :cfg :bind/store-cfg :durable? :bind/durable?
                   :to-writer :bind/to-writer :events :bind/events}}

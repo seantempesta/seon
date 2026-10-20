@@ -1,13 +1,17 @@
 (ns seon.sock
-  "The transport between root, the fork server and agents (lane F2, from lane T1's
-  t1.sock, notes/option3-T1-transport.md): one AF_UNIX SOCK_STREAM socketpair per peer,
-  plain libc through jolt.ffi, no Rust helper and no shared memory.
-  - Frames are [u32 len][body]; the body is jfasl (konserve.jolt.fasl, lane X1). Values cross once each way.
+  "The single-threaded side of the transport (lane F2, from lane T1's t1.sock): the fork
+  server's socket to root and each agent's, read and written by the one thread that owns
+  them, with no pumps. Root's side of an agent's socket is a jolt.async.remote end (lane
+  RC1), which speaks the same frames:
+  - Frames are [u32 len][body], the body jfasl (konserve.jolt.fasl); a length word of
+    0xFFFFFFFF is the end frame (the peer closed its writer), read as EOF.
   - A conn is a buffered reader over one fd. It reads with recvmsg, so a descriptor sent
     with a frame (SCM_RIGHTS) is kept in the conn's queue for the handler of that frame.
-  - Root reads every agent's conn with one kqueue. EOF on a conn is the death of every
-    process holding its other end; the agent's end is FD_CLOFORK, so a test child does
-    not hide its parent's death.
+  - Why no pumps here: these processes fork (the fork server its agents; an agent its test
+    children and clones), and a process that forks must never have started Chez's
+    parallel-collector sweeper threads, which start at the first collection that finds
+    another thread (RC1: a child of such a process hangs in its first multi-threaded
+    collection). docs/DRAGONS.md, \"Physics\".
   - The socket's buffer is the bounded channel: a full buffer makes the sender wait."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [jolt.ffi :as ffi] [seon.lib :as lib] [konserve.jolt.fasl :as codec]))
@@ -18,17 +22,12 @@
 (lib/defc c-fcntl "fcntl" [:int :int :varargs :int] :int)
 (lib/defc c-write "write" [:int :pointer :size_t] :ssize_t {:blocking true})
 (lib/defc c-close "close" [:int] :int)
-(lib/defc c-shutdown "shutdown" [:int :int] :int)
 (lib/defc c-setsockopt "setsockopt" [:int :int :int :pointer :int] :int)
 (lib/defc c-memmove "memmove" [:pointer :pointer :size_t] :pointer)
-(lib/defc c-kqueue "kqueue" [] :int)
-(lib/defc c-kevent "kevent" [:int :pointer :int :pointer :int :pointer] :int {:blocking true})
-(lib/defc c-kevent-nb "kevent" [:int :pointer :int :pointer :int :pointer] :int)
 (lib/defc c-sendmsg "sendmsg" [:int :pointer :int] :ssize_t {:blocking true})
 (lib/defc c-recvmsg "recvmsg" [:int :pointer :int] :ssize_t {:blocking true})
 (lib/defc c-recvmsg-nb "recvmsg" [:int :pointer :int] :ssize_t)
 (lib/defc c-poll "poll" [:pointer :int :int] :int {:blocking true})
-(lib/defc c-recv-nb "recv" [:int :pointer :size_t :int] :ssize_t)
 (lib/defc c-clock-ns "clock_gettime_nsec_np" [:int] :uint64)
 
 (defmacro ^:private with-mem
@@ -45,10 +44,6 @@
 (def ^:private F-GETFD 1)
 (def ^:private F-SETFD 2)
 (def ^:private FD-CLOFORK 2)
-(def ^:private EVFILT-READ -1)
-(def ^:private EV-ADD 1)
-(def ^:private EV-DELETE 2)
-(def ^:private EV-EOF 0x8000)
 (def ^:private MSG-DONTWAIT 0x80)
 
 (defn now-ns
@@ -84,10 +79,6 @@
 (defn close! {:malli/schema [:=> [:cat :seon.lib/fd] :int]}
   [fd] (c-close fd))
 
-(defn hang-up!
-  "End both directions of fd: its reader sees EOF (a peer that never existed reads as dead)."
-  {:malli/schema [:=> [:cat :seon.lib/fd] :int]}
-  [fd] (c-shutdown fd 2))
 
 ;; ---- a buffered conn ----------------------------------------------------------
 ;; st: long-array [buf cap lo hi]; fds: descriptors received with frames, in order
@@ -120,11 +111,6 @@
                    (into acc (for [i (range (quot (- len 12) 4))] (ffi/read (+ ctl off 12 (* 4 i)) :int)))
                    acc)))))))
 
-(defn release-conn!
-  "Free a conn's buffers (its owner is done reading; the fd is closed separately)."
-  {:malli/schema [:=> [:cat :seon.sock/conn] :any]}
-  [{:keys [^longs st msg iov ctl]}]
-  (ffi/free (aget st 0)) (ffi/free msg) (ffi/free iov) (ffi/free ctl))
 
 (defn- ensure-room!
   "Make room for `need` bytes from lo: compact, then grow the buffer if needed."
@@ -141,22 +127,28 @@
         (ffi/free buf)
         (aset st 0 nb) (aset st 1 ncap)))))
 
+(def ^:private END
+  "The length word of an end frame (jolt.async.remote's: its writer closed)."
+  0xFFFFFFFF)
+
 (defn- take-frame
-  "The next whole frame's bytes from the conn's buffer, or nil."
-  {:malli/schema [:=> [:cat :seon.sock/conn] [:maybe :seon.host/bytes]]}
+  "The next whole frame's bytes from the conn's buffer, :end (the peer's end frame), or nil."
+  {:malli/schema [:=> [:cat :seon.sock/conn] [:maybe [:or :seon.host/bytes [:= :end]]]]}
   [{:keys [^longs st]}]
   (let [lo (aget st 2) avail (- (aget st 3) lo)]
     (when (>= avail 4)
       (let [buf (aget st 0) n (ffi/read (+ buf lo) :uint32)]
-        (when (>= avail (+ 4 n))
+        (if (= n END)
+          (do (aset st 2 (+ lo 4)) :end)
+          (when (>= avail (+ 4 n))
           (let [b (ffi/read-array (+ buf lo 4) n)]
             (aset st 2 (+ lo 4 n))
-            b))))))
+            b)))))))
 
 (defn- wanted {:malli/schema [:=> [:cat :seon.sock/conn] :int]}
   [{:keys [^longs st]}]
   (let [lo (aget st 2) avail (- (aget st 3) lo)]
-    (if (< avail 4) 4 (+ 4 (ffi/read (+ (aget st 0) lo) :uint32)))))
+    (if (< avail 4) 4 (let [n (ffi/read (+ (aget st 0) lo) :uint32)] (if (= n END) 4 (+ 4 n))))))
 
 (defn- fill!
   "One recvmsg into the conn's buffer (a descriptor that came with it joins :fds).
@@ -180,21 +172,6 @@
               (zero? r) :eof
               :else :again)))))
 
-(defn read-bytes!
-  "One read into c's buffer (blocking? or not), then every buffered byte, taken: a
-  byte-array, :again (nothing there, or EINTR) or :eof. For a stream protocol of its own
-  (bencode, seon.wire); descriptors that came along stay in c's :fds."
-  {:malli/schema [:=> [:cat :seon.sock/conn :boolean] :seon.sock/read]}
-  [{:keys [^longs st] :as c} blocking?]
-  (let [lo (aget st 2) hi (aget st 3)]
-    (if (> hi lo)
-      (let [b (ffi/read-array (+ (aget st 0) lo) (- hi lo))] (aset st 2 0) (aset st 3 0) b)
-      ;; a stream of its own has no length header: just room for what arrives
-      (let [r (fill! c blocking? 1)]
-        (if (number? r)
-          (let [lo (aget st 2) hi (aget st 3) b (ffi/read-array (+ (aget st 0) lo) (- hi lo))]
-            (aset st 2 0) (aset st 3 0) b)
-          r)))))
 
 (defn recv!
   "Blocking: the next frame's value, or :eof. EINTR (a signal) retries."
@@ -202,7 +179,7 @@
   [c]
   (loop []
     (if-let [b (take-frame c)]
-      (codec/decode b)
+      (if (= :end b) :eof (codec/decode b))
       (if (= :eof (fill! c true)) :eof (recur)))))
 
 (defn- c-poll1
@@ -231,7 +208,7 @@
   [c]
   (loop []
     (if-let [b (take-frame c)]
-      (codec/decode b)
+      (if (= :end b) :eof (codec/decode b))
       (case (fill! c false)
         :eof :eof
         :again :none
@@ -297,42 +274,12 @@
   ([fd v] (send-frame! fd (frame v) nil))
   ([fd v pass-fd] (send-frame! fd (frame v) pass-fd)))
 
-(defn poke!
-  "Write one byte to fd: wakes a kqueue loop watching its peer."
-  {:malli/schema [:=> [:cat :seon.lib/fd] :int]}
-  [fd] (with-mem [p 8] (ffi/write p :uint8 1) (c-write fd p 1)))
 
-(defn discard!
-  "Read and drop what is in fd (non-blocking)."
-  {:malli/schema [:=> [:cat :seon.lib/fd] :any]}
-  [fd] (with-mem [p 256] (loop [] (when (pos? (c-recv-nb fd p 256 MSG-DONTWAIT)) (recur)))))
 
 ;; ---- kqueue -----------------------------------------------------------------
 ;; struct kevent (arm64): ident u64 @0, filter i16 @8, flags u16 @10, fflags u32 @12, data i64 @16, udata u64 @24
 
-(def ^:private KEV 32)
 
-(defn kqueue {:malli/schema [:=> [:cat] :seon.lib/fd]}
-  [] (c-kqueue))
 
-(defn kq-watch!
-  "Watch fd for reading (add? true) or stop watching it."
-  {:malli/schema [:=> [:cat :seon.lib/fd :seon.lib/fd :boolean] :int]}
-  [kq fd add?]
-  (with-mem [e KEV]
-    (ffi/write e :uint64 fd 0) (ffi/write e :int16 EVFILT-READ 8) (ffi/write e :uint16 (if add? EV-ADD EV-DELETE) 10)
-    (ffi/write e :uint32 0 12) (ffi/write e :int64 0 16) (ffi/write e :uint64 fd 24)
-    (c-kevent-nb kq e 1 ffi/null 0 ffi/null)))
 
-(defn kq-wait
-  "Block for ready fds (at most max, or until timeout-ms): a vector of fds."
-  {:malli/schema [:=> [:cat :seon.lib/fd :seon.ffi/address :int :int] [:vector :seon.lib/fd]]}
-  [kq evs max timeout-ms]
-  (with-mem [t 16]
-   (let [_ (do (ffi/write t :int64 (quot timeout-ms 1000) 0) (ffi/write t :int64 (* 1000000 (mod timeout-ms 1000)) 8))
-        n (c-kevent kq ffi/null 0 evs max t)]
-    (loop [i 0 acc (transient [])]
-      (if (< i n) (recur (inc i) (conj! acc (ffi/read (+ evs (* KEV i)) :uint64 0))) (persistent! acc))))))
 
-(defn kq-buffer {:malli/schema [:=> [:cat :int] :seon.ffi/address]}
-  [max] (ffi/alloc (* KEV max)))
