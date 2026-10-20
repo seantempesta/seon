@@ -3,7 +3,7 @@
   root. Writes go to the agent's own branch through the writer; root sees them when the
   branch merges, and a send-back through the attempt's end."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.task :as task] [seon.turn :as turn]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.turn :as turn]))
 
 (defn current
   "The task this agent works, as data (:seon.task/task)."
@@ -25,4 +25,4 @@
   the reason as its problem."
   {:malli/schema [:=> [:cat :string :any] :map]}
   [reason counterexample]
-  (turn/request-stop! :sent-back (str reason " — counterexample: " (agent/printer counterexample))))
+  (turn/request-stop! :sent-back (str reason " — counterexample: " (print/text counterexample (:part print/budgets)))))

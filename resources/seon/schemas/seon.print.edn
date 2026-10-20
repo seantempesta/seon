@@ -1,0 +1,16 @@
+;; The one value printer (seon.print): its options, its answer, and the internal shapes its
+;; allotter (seon.print.select) and emitter (seon.print.emit) pass between their functions.
+{:seon.print/opts [:map [:handle {:optional true} [:maybe :symbol]] [:budget {:optional true} pos-int?]
+                   [:max-depth {:optional true} pos-int?] [:width {:optional true} nat-int?]
+                   [:outputs {:optional true} [:set [:enum :text :hiccup]]]]
+ :seon.print/answer [:map [:text :string] [:tokens nat-int?] [:truncated? :boolean] [:elisions nat-int?]
+                     [:cuts [:vector :any]] [:html {:optional true} :seon.print/hiccup]]
+ ;; printed, or the budget refused the value's first part (an error map)
+ :seon.print/result [:or :seon.print/answer [:map [:seon.error/type :qualified-keyword] [:seon.error/message :string]]]
+ :seon.print/hiccup [:vector :any]
+ ;; the allotter's working node ({:kind :leaf|:string|:name|:map|:coll|:entry ...}) and its context (budget, width, dials)
+ :seon.print/alloc [:map [:kind [:enum :leaf :string :name :map :coll :entry]]]
+ :seon.print/context [:map [:budget number?] [:max-depth number?]]
+ ;; a print node (a face and its members), and one fipp operation
+ :seon.print/node :map
+ :seon.print/op [:map [:op :keyword]]}

@@ -13,7 +13,7 @@
   breaks its forks; docs/DRAGONS.md, "Physics". Agent code calls the verbs of my.db and my.agent,
   referred into its namespace. From proto/flow f2-final proto.agent (lane F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [jolt.ffi :as ffi] [seon.program :as program] [seon.intr :as intr] [clojure.repl]))
 
 ;; One state map per agent process (this process is the agent). Fields:
@@ -27,42 +27,6 @@
 ;; An agent's heap may grow this far beyond what it inherited; past it an allocation
 ;; throws OutOfMemoryError (an :err item), so a runaway agent cannot take the machine.
 (def heap-extra-bytes (* 1048576 (Long/parseLong (or (System/getenv "SEON_AGENT_HEAP_MB") "1024"))))
-
-(def ^:dynamic *print-limits* {:length 20 :level 4 :chars 20000})
-
-(defn builtin-print
-  "Collections cut by *print-length*/*print-level*; text beyond the char budget is cut
-  and ends with the elision mark ` …`."
-  {:malli/schema [:=> [:cat :any] :string]}
-  [v]
-  (let [s (binding [*print-length* (:length *print-limits*) *print-level* (:level *print-limits*)] (pr-str v))
-        n (:chars *print-limits*)]
-    (if (> (count s) n) (str (subs s 0 n) " …") s)))
-
-;; The value printer in use: nil is the builtin one. Root installs another (Seon's, lane
-;; L3: proto.seon-printer) before it forks anything, so every agent inherits it. It is a
-;; fn of [value handle-symbol] answering {:text ...} plus what it reports (:tokens ...).
-(def ^:dynamic *value-printer* nil)
-
-(defn print-value
-  "The one place that turns a value into reply text. Answers {:printed text ...}; with
-  Seon's printer also :tokens, :truncated? and :elisions, whose cuts are runnable forms on
-  the handle (result/h3)."
-  {:malli/schema [:function [:=> [:cat :any] :seon.agent/printed] [:=> [:cat :any [:maybe :symbol]] :seon.agent/printed]]}
-  ([v] (print-value v nil))
-  ([v handle]
-   (if-let [p *value-printer*]
-     (let [r (p v handle)]
-       (if (:text r)
-         (cond-> {:printed (:text r)} (:tokens r) (merge (select-keys r [:tokens :truncated? :elisions :html])))
-         ;; the printer refused the value: the builtin print, with the refusal beside it
-         {:printed (builtin-print v) :printer-error (or (:seon.error/message r) (str r))}))
-     {:printed (builtin-print v)})))
-
-(defn printer
-  "Text of v through the value printer in use."
-  {:malli/schema [:=> [:cat :any] :string]}
-  [v] (:printed (print-value v nil)))
 
 ;; ---- the socket to root: values in frames (root's end is a jolt.async.remote end) ------
 ;; This side reads and writes its socket itself, on its one thread, with no pumps: an agent
@@ -247,7 +211,7 @@
 (defn error-map {:malli/schema [:=> [:cat :seon.host/throwable] :seon.agent/error]}
   [^Throwable e]
   (cond-> {:message (or (ex-message e) (str (type e))) :class (str (type e))}
-    (ex-data e) (assoc :data (printer (ex-data e)))))
+    (ex-data e) (assoc :data (print/text (ex-data e) (:part print/budgets)))))
 
 (defn- interrupt-self-test
   "T1's boot check: SIGUSR1 reaches a Chez handler only in a process whose ancestors were
@@ -277,7 +241,7 @@
                                     (when (#{:pass :fail :error} (:type m))
                                       (swap! reports conj {:type (:type m) :var (some-> (first t/*testing-vars*) str)
                                                            :message (:message m)
-                                                           :expected (printer (:expected m)) :actual (printer (:actual m))}))
+                                                           :expected (print/text (:expected m) (:part print/budgets)) :actual (print/text (:actual m) (:part print/budgets))}))
                                     (orig m))
                          t/*test-out* (java.io.StringWriter.)]
                  ;; test-ns tests the vars interned now (Jolt's run-tests also runs its

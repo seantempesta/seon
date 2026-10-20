@@ -20,7 +20,7 @@
     wrappers without the recording transaction."
   (:refer-clojure :exclude [defn defn-])
   (:require [malli.core :as m] [malli.registry :as mr] [clojure.edn :as edn]
-            [clojure.java.io :as io] [clojure.string :as str] [seon.profile :as profile]))
+            [clojure.java.io :as io] [clojure.string :as str] [seon.profile :as profile] [seon.print :as print]))
 
 (def on?
   "Are the contracts on in this process (SEON_GUARANTEES, read once at load)? off: no
@@ -110,15 +110,9 @@
 
 ;; ---- refusals: malli's report -> the error map, thrown ---------------------------------
 
-(def ^:dynamic *printer*
-  "How a refused value is shown inside a problem (text, so the error map stays EDN
-  across rings). Bound to the agent's value printer in agents."
-  (fn [v] (let [s (binding [*print-length* 8 *print-level* 3] (pr-str v))]
-            (if (> (count s) 400) (str (subs s 0 400) " …") s))))
-
 (clojure.core/defn- problems {:malli/schema [:=> [:cat :seon.host/schema :any] [:vector :seon.error/problem]]} [s v]
   (vec (for [{:keys [path in schema value]} (:errors (m/explain s v))]
-         {:path path :in in :expected (m/form schema) :value (*printer* value)})))
+         {:path path :in in :expected (m/form schema) :value (print/text value (:part print/budgets))})))
 
 (clojure.core/defn- refusal
   "Malli's report for fn-sym, as the thrown error map."

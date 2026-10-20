@@ -1,0 +1,641 @@
+(ns seon.print.select
+  "Seon's value printer: a value selected under one token budget, breadth before depth, every
+  cut carrying the form that reads its rest on the result handle; one selection for text and
+  hiccup.
+
+  Need: every agent reply's printed value and the dashboard's value panel. Taken from Seon's
+  `seon.render.value` (clone a780860c3; its Rules 1-10 hold here unchanged) and cut to the
+  path proto reaches: a plain value, a result handle, a budget and a width. Render pairs,
+  databases, routes, cursors, the core printer's fallback text and the stored artifacts
+  stay behind (notes BAGGAGE (proto/BAGGAGE.md))."
+  (:require [seon.print.emit :as emit]))
+
+;;; Tokens (Seon's `seon.ai.tokens`, shipped prior): the one sizer.
+
+(def ^:private chars-per-token 3.2)
+
+(defn estimate
+  "Estimated tokens of `text`."
+  {:malli/schema [:=> [:cat :string] :int]}
+  [text]
+  (long (Math/floor (/ (count text) chars-per-token))))
+
+(defn- estimate-chars
+  "Characters a token budget holds."
+  {:malli/schema [:=> [:cat :int] :int]}
+  [tokens]
+  (long (Math/floor (* tokens chars-per-token))))
+
+;;; Allocation dials (Seon's shipped `:seon.config.render.agent/*`).
+
+(def ^:private dials
+  {:whole-width 24 :max-name 256 :max-number-digits 32 :sort-bound 64})
+
+(def ^:private profile-id :seon.render.profile/agent)
+
+(defn keyword-lookup?
+  "May `value` be asked for a keyword key without running foreign code: an exact array or hash
+  map, or a sorted map whose keys are keywords (Jolt cannot tell a sorted map's comparator)."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [value]
+  (let [c (class value)]
+    (or (identical? c clojure.lang.PersistentArrayMap)
+        (identical? c clojure.lang.PersistentHashMap)
+        (and (identical? c clojure.lang.PersistentTreeMap)
+             (or (zero? (count value)) (identical? (class (key (first value))) clojure.lang.Keyword))))))
+
+(defn- escaped-width
+  "Characters the string literal spends on chars [from, to) of `s`; a newline stays a line break."
+  {:malli/schema [:=> [:cat :string :int :int] :int]}
+  [^String s from to]
+  (loop [i (long from) width 0]
+    (if (< i to)
+      (let [c (.charAt s i)]
+        (recur (inc i) (+ width (if-let [e (when-not (= \newline c) (char-escape-string c))] (count e) 1))))
+      width)))
+
+(defn- integer-digits
+  "An upper bound on a BigInteger's decimal spelling, from its bit length."
+  {:malli/schema [:=> [:cat :any] :int]}
+  [^java.math.BigInteger b]
+  (+ 2 (long (Math/ceil (* (.bitLength b) (Math/log10 2))))))
+
+(defn- throwable-value
+  "A Throwable as plain data: type, message and ex-data per link, cycles bounded by identity."
+  {:malli/schema [:=> [:cat :seon.host/throwable] [:map [:via [:vector :any]]]]}
+  [^Throwable t]
+  (loop [^Throwable link t seen [] via []]
+    (if (or (nil? link) (some #(identical? % link) seen))
+      {:via via}
+      (recur (.getCause link) (conj seen link)
+             (conj via (cond-> {:type (symbol (.getName (class link)))}
+                         (.getMessage link) (assoc :message (.getMessage link))
+                         (identical? (class link) clojure.lang.ExceptionInfo) (assoc :data (ex-data link))))))))
+
+(defn- seq-cells
+  "A seq's first `limit` members, realizing a lazy seq only as far as it prints."
+  {:malli/schema [:=> [:cat :any number?] :map]}
+  [x limit]
+  (loop [cell x out (transient [])]
+    (cond
+      (or (nil? cell) (identical? (class cell) clojure.lang.PersistentList$EmptyList)) {:members (persistent! out)}
+      (>= (count out) limit) {:members (persistent! out) :more? true}
+      (identical? (class cell) clojure.lang.LazySeq) (recur (seq cell) out)
+      (instance? clojure.lang.ISeq cell) (recur (rest cell) (conj! out (first cell)))
+      :else {:members (persistent! out) :pending? true})))
+
+(defn- list-row
+  "A sequential value as a list, with a total when every member was reached or it is Counted."
+  {:malli/schema [:=> [:cat :any :any number?] :map]}
+  [x cells limit]
+  (let [{:keys [members pending? more?]} (seq-cells cells limit)]
+    (cond-> {:kind :coll :face :seon.print/list :open "(" :close ")" :members (seq members)}
+      (not (or pending? more?)) (assoc :total (count members))
+      (and more? (counted? x)) (assoc :total (count x))
+      (or pending? (and more? (not (counted? x)))) (assoc :pending? true))))
+
+(defn- member-rank
+  "Where one keyword-keyed member sorts: a scalar, short string or pair of scalars before a long
+  string before a collection."
+  {:malli/schema [:=> [:cat :any] :int]}
+  [member]
+  (let [v (when (map-entry? member) (val member))]
+    (cond (and (coll? v) (counted? v) (<= (count v) 2) (not-any? coll? (if (map? v) (vals v) v))) 0
+          (coll? v) 2
+          (and (string? v) (> (count v) (:whole-width dials))) 1
+          :else 0)))
+
+(defn- sorts?
+  "True when an exact map or hash set of at most `:sort-bound` exact keywords shows its members in
+  an order of its own."
+  {:malli/schema [:=> [:cat :any :seon.host/fn] :boolean]}
+  [x key-of]
+  (boolean
+   (and (#{clojure.lang.PersistentHashMap clojure.lang.PersistentHashSet clojure.lang.PersistentArrayMap} (class x))
+        (<= (count x) (:sort-bound dials))
+        (every? #(identical? (class (key-of %)) clojure.lang.Keyword) x))))
+
+(defn- held-order
+  "Members as `[index member]`, `index` their place in `seq`: short members first, then a hash map
+  or set alphabetically, an array map in its own order."
+  {:malli/schema [:=> [:cat :any :seon.host/fn] [:sequential :any]]}
+  [x key-of]
+  (let [members (map-indexed vector x)
+        c (class x)]
+    (if (sorts? x key-of)
+      (sort-by (fn [[index member]]
+                 (let [k (key-of member)]
+                   (into [(member-rank member)]
+                         (if (identical? c clojure.lang.PersistentArrayMap) [index] [(namespace k) (name k)]))))
+               members)
+      members)))
+
+(defn- scalar {:malli/schema [:=> [:cat :qualified-keyword :any :string] :map]} [face value text]
+  {:kind :scalar :node {:seon.print/face face :seon.print/value value :seon.print/text text}})
+
+(defn- classify
+  "One row of the permitted-operation table: exact classes for scalars, maps and sets; seqs and
+  other sequentials by interface, stepped to `limit`; anything else is its class and identity."
+  {:malli/schema [:=> [:cat :any number?] :map]}
+  [x limit]
+  (let [c (class x)]
+    (cond
+      (nil? x) (scalar :seon.print/nil nil "nil")
+      (identical? c Boolean) (scalar :seon.print/boolean x (str x))
+      (#{Long Integer Short Byte} c) (scalar :seon.print/number x (str x))
+      (#{Double Float} c)
+      (scalar :seon.print/number x (let [d (double x)]
+                                     (cond (Double/isNaN d) "##NaN"
+                                           (= d Double/POSITIVE_INFINITY) "##Inf"
+                                           (= d Double/NEGATIVE_INFINITY) "##-Inf"
+                                           :else (str x))))
+      (identical? c Character) (scalar :seon.print/char x (if-let [n (char-name-string x)] (str "\\" n) (str "\\" x)))
+      (identical? c String) {:kind :string :value x :total (.length ^String x)}
+      (identical? c clojure.lang.Keyword)
+      {:kind :name :node {:seon.print/face :seon.print/keyword :seon.print/value x}
+       :text (str ":" (when (namespace x) (str (namespace x) "/")) (name x))}
+      (identical? c clojure.lang.Symbol)
+      {:kind :name :node {:seon.print/face :seon.print/symbol :seon.print/value x}
+       :text (str (when (namespace x) (str (namespace x) "/")) (name x))}
+      (identical? c java.util.UUID) (scalar :seon.print/uuid x (str "#uuid \"" x "\""))
+      (identical? c java.util.Date) (scalar :seon.print/inst x (str "#inst \"" (.toInstant ^java.util.Date x) "\""))
+      ;; Jolt unifies a small BigInteger with Long: a BigInt that fits prints whole
+      (identical? c clojure.lang.BigInt)
+      (let [b (biginteger x)]
+        (if (or (< (.bitLength b) 64) (<= (integer-digits b) (:max-number-digits dials)))
+          (scalar :seon.print/number x (str b "N"))
+          (scalar :seon.print/number x (str "#bigint[≈" (integer-digits b) " digits]"))))
+      (identical? c clojure.lang.Ratio)
+      (let [n (biginteger (numerator x)) d (biginteger (denominator x))]
+        (if (<= (+ (integer-digits n) (integer-digits d)) (:max-number-digits dials))
+          (scalar :seon.print/number x (str n "/" d))
+          (scalar :seon.print/number x (str "#ratio[≈" (+ (integer-digits n) (integer-digits d)) " digits]"))))
+      (identical? c java.math.BigDecimal)
+      (let [u (biginteger (.unscaledValue ^java.math.BigDecimal x))]
+        (if (<= (+ (integer-digits u) (count (str (.scale ^java.math.BigDecimal x)))) (:max-number-digits dials))
+          (scalar :seon.print/number x (str x "M"))
+          (scalar :seon.print/number x (str "#bigdec[≈" (integer-digits u) " digits]"))))
+      (#{clojure.lang.PersistentArrayMap clojure.lang.PersistentHashMap clojure.lang.PersistentTreeMap} c)
+      {:kind :map :face :seon.print/map :open "{" :close "}" :total (count x) :indexed? true
+       :lookup? (keyword-lookup? x) :sorted? (sorts? x key) :members (held-order x key)}
+      (#{clojure.lang.PersistentVector clojure.lang.MapEntry} c)
+      {:kind :coll :face :seon.print/vector :open "[" :close "]" :total (count x) :members (seq x)}
+      (#{clojure.lang.PersistentHashSet clojure.lang.PersistentTreeSet} c)
+      {:kind :coll :face :seon.print/set :open "#{" :close "}" :total (count x) :ordered? true :indexed? true
+       :sorted? (sorts? x identity) :members (held-order x identity)}
+      ;; every seq and other Sequential prints as a list, a vector type as a vector
+      (instance? clojure.lang.ISeq x) (list-row x x limit)
+      (instance? clojure.lang.IPersistentVector x)
+      {:kind :coll :face :seon.print/vector :open "[" :close "]" :total (count x) :members (seq x)}
+      (instance? clojure.lang.Sequential x) (list-row x (seq x) limit)
+      (identical? c clojure.lang.Var)
+      {:kind :scalar :node {:seon.print/face :seon.print/var
+                            :seon.print/name (str (.name (.ns ^clojure.lang.Var x)) "/" (.sym ^clojure.lang.Var x))}}
+      (identical? c clojure.lang.Namespace) (scalar :seon.print/symbol (ns-name x) (str "#namespace[" (ns-name x) "]"))
+      (identical? c Class) {:kind :scalar :node {:seon.print/face :seon.print/class :seon.print/name (.getName ^Class x)}}
+      (instance? Throwable x) (assoc (classify (throwable-value x) limit) :prefix "#error " :face :seon.print/throwable)
+      :else
+      {:kind :scalar :node {:seon.print/face :seon.print/object
+                            ;; a TaggedLiteral's class is opaque on Jolt
+                            :seon.print/class (if (tagged-literal? x) "clojure.lang.TaggedLiteral" (clojure.lang.Compiler/demunge (.getName c)))
+                            :seon.print/rep (str "0x" (Integer/toHexString (System/identityHashCode x)))}})))
+
+(defn- leaf-width
+  "The flat width of a leaf node."
+  {:malli/schema [:=> [:cat :map] :int]}
+  [node]
+  (cond
+    (:seon.print/text node) (count (:seon.print/text node))
+    (= :seon.print/var (:seon.print/face node)) (+ 2 (count (:seon.print/name node)))
+    (= :seon.print/class (:seon.print/face node)) (count (:seon.print/name node))
+    (= :seon.print/object (:seon.print/face node))
+    (+ 9 (count (:seon.print/class node)) (if-some [rep (:seon.print/rep node)] (inc (count rep)) 0))
+    :else (count (emit/emit-text node {:seon.print/width 0 :seon.print/length nil :seon.print/level nil
+                                       :seon.print/namespace-maps? false}))))
+
+(defn- node-continuation
+  "The form a cut of `node` prints to read its rest; the whole collection for a map or set shown
+  sorted. Nil without a handle, and for a long keyword or symbol."
+  {:malli/schema [:=> [:cat :seon.print/alloc] :any]}
+  [node]
+  (when (and (:requery-id node) (not= :name (:kind node)))
+    (emit/continuation
+     {:seon.print/requery-id (:requery-id node)
+      :seon.print/elision-unit (cond (= :string (:kind node)) :characters (:pending? node) :pending :else :children)
+      :seon.render.data/path (:path node)
+      :seon.render.data/next-offset (cond (:sorted? node) 0
+                                          (= :string (:kind node)) (:shown node)
+                                          :else (:n node))})))
+
+(defn- cut-text
+  "The cut's text after a node's shown part, as `emit/elided-text` prints it."
+  {:malli/schema [:=> [:cat :seon.print/alloc] :string]}
+  [node]
+  (let [marker (case (:kind node)
+                 (:string :name) (str "…+" (- (:total node) (:shown node)))
+                 (if (:pending? node) "…?" (str "…" (- (:total node) (:n node)))))
+        form (node-continuation node)]
+    (cond-> marker form (str " " (emit/form-text form)))))
+
+(defn- more? {:malli/schema [:=> [:cat :seon.print/alloc] :boolean]} [node]
+  (case (:kind node)
+    (:string :name) (< (:shown node) (:total node))
+    (:map :coll) (boolean (or (:pending? node) (seq (:pending node)) (< (:n node) (:total node))))
+    false))
+
+(defn- flat-width
+  "A node's flat width from its own fields and its children's widths."
+  {:malli/schema [:=> [:cat :seon.print/alloc] :int]}
+  [node]
+  (case (:kind node)
+    :leaf (:width node)
+    :string (+ 2 (:shown-width node) (if (more? node) (count (cut-text node)) 0))
+    :name (+ (:shown-width node) (if (more? node) (count (cut-text node)) 0))
+    (:map :coll) (let [lines (+ (:n node) (if (more? node) 1 0))]
+                   (+ (count (str (:prefix node) (:open node) (:close node))) (:sum node)
+                      (* (if (= :map (:kind node)) 2 1) (max 0 (dec lines)))
+                      (if (more? node) (count (cut-text node)) 0)))
+    :entry (+ (:sum node) 1)))
+
+(defn- fill-end
+  "Where a cut string grown into `room` more characters of literal ends: at most `room` wide,
+  back to its last line end inside the growth."
+  {:malli/schema [:=> [:cat :seon.print/alloc number?] :int]}
+  [node room]
+  (let [^String text (:value node)
+        limit (:total node)
+        to (loop [i (long (:shown node)) width 0]
+             (if (< i limit)
+               (let [c (.charAt text i)
+                     width (+ width (if-let [e (when-not (= \newline c) (char-escape-string c))] (count e) 1))]
+                 (if (<= width room) (recur (inc i) width) i))
+               i))
+        line-end (inc (.lastIndexOf text "\n" (int (dec to))))]
+    (if (and (< to limit) (> line-end (:shown node))) line-end to)))
+
+(defn- insufficient-budget
+  "The declared refusal when the budget cannot show the root or its first member."
+  {:malli/schema [:=> [:cat :seon.print/context number?] :seon.error/base]}
+  [context needed]
+  {:seon.error/type :seon.render.value/insufficient-floor-budget-error
+   :seon.error/operation 'seon.render.value/show
+   :seon.error/message (str "The value printer's budget of " (:budget context) " characters cannot show this value's "
+                            "first part, which needs " needed ".")
+   :seon.error/member :seon.render.profile/token-budget
+   :seon.error/expected "a budget covering the root and its first member"
+   :seon.error/offending (:budget context)
+   :seon.error/data {:seon.render.data/path []}
+   :seon.error/fix "Raise :seon.render.profile/token-budget, or read a deeper path."
+   :seon.render.value/budget (:budget context)
+   :seon.render.value/needed needed})
+
+(defn- leaf {:malli/schema [:=> [:cat :map :map] :seon.print/alloc]} [base node]
+  (assoc base :kind :leaf :node node :width (leaf-width node)))
+
+(defn- make-node
+  "A node for `value` reached at `path` and `depth`, its lines indented `indent`: classified,
+  nothing yet shown."
+  {:malli/schema [:=> [:cat :seon.print/context :any :int [:vector :any] :int] :seon.print/alloc]}
+  [context value depth path indent]
+  (let [base (cond-> {:depth depth :path path :indent indent :kids []}
+               (:requery-id context) (assoc :requery-id (:requery-id context)))
+        c (classify value (:max-children context))]
+    (case (:kind c)
+      :scalar (leaf base (:node c))
+      :name (if (<= (count (:text c)) (:max-name context))
+              (leaf base (assoc (:node c) :seon.print/text (:text c)))
+              (assoc base :kind :name :node (:node c) :text (:text c) :value (:text c) :total (count (:text c))))
+      :string (assoc base :kind :string :value (:value c) :total (:total c))
+      (merge base (select-keys c [:kind :face :open :close :total :pending? :prefix :ordered? :indexed? :sorted? :lookup?])
+             {:pending (:members c)}))))
+
+(defn- member-indent {:malli/schema [:=> [:cat :seon.print/alloc] :int]} [node]
+  (+ (:indent node) (if (= :seon.print/set (:face node)) 2 1)))
+
+(defn- shown-to
+  "String or name `node` showing its first `to` characters."
+  {:malli/schema [:=> [:cat :seon.print/alloc :int] :seon.print/alloc]}
+  [node to]
+  (assoc node :shown to :shown-width (if (= :name (:kind node)) to (escaped-width (:value node) 0 to))))
+
+(defn- sized
+  "`node` with its flat width `:flat` and its charge `:ub`: the flat width plus, when lines may
+  break, the indentation of every line it holds, an upper bound on its laid-out length."
+  {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc] :seon.print/alloc]}
+  [context node]
+  (let [kids (:kids node)
+        node (assoc node :n (count kids) :sum (transduce (map :flat) + 0 kids))
+        flat (flat-width node)
+        breaks? (:breaks? context)
+        nested (+ (- flat (:sum node)) (transduce (map :ub) + 0 kids))]
+    (assoc node :flat flat
+           :ub (case (:kind node)
+                 (:map :coll) (+ nested (if breaks? (* (member-indent node) (max 0 (dec (+ (:n node) (if (more? node) 1 0))))) 0))
+                 :entry (+ nested (if breaks? (+ (:indent node) 2) 0))
+                 flat))))
+
+(defn- separator
+  "What one more member line costs at most: its separator and, when it breaks, its indentation."
+  {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc] :int]}
+  [context node]
+  (+ (if (= :map (:kind node)) 2 1) (if (:breaks? context) (member-indent node) 0)))
+
+(defn- bound? {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc] :boolean]} [context node]
+  (>= (:depth node) (:max-depth context)))
+
+(defn- child
+  "Member `held` of collection `parent`, shown `i`th; a map's member is its entry of key and value."
+  {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc :any :int] :seon.print/alloc]}
+  [context parent held i]
+  (let [depth (inc (:depth parent))
+        indent (member-indent parent)
+        path (:path parent)
+        ;; a map or set member carries its iteration index; a sequence member its position
+        [index member] (if (:indexed? parent) held [i held])]
+    (if (= :map (:kind parent))
+      {:kind :entry :depth (:depth parent) :indent indent
+       :kids [(make-node context (key member) depth (conj path [:seon.render.data/entry index :seon.render.data/key]) indent)
+              (make-node context (val member) depth
+                         (conj path (if (and (:lookup? parent) (keyword? (key member)))
+                                      (key member)
+                                      [:seon.render.data/entry index :seon.render.data/val]))
+                         (+ indent 2))]}
+      ;; `get-in` reads an index of a vector only: a seq's member is read with `nth`
+      (make-node context member depth
+                 (conj path (if (or (:indexed? parent) (not= :seon.print/vector (:face parent))) [:seon.render.data/nth index] index))
+                 indent))))
+
+(defn- whole
+  "`node` shown whole when its charge is at most `cap`, else nil; the work stops once the charge
+  passes `cap`."
+  {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc number?] [:maybe :seon.print/alloc]]}
+  [context node cap]
+  (case (:kind node)
+    :leaf (when (<= (:width node) cap) (sized context node))
+    (:string :name)
+    (when (and (<= (:total node) cap) (or (= :string (:kind node)) (<= (:total node) (:max-name context))))
+      (let [shown (sized context (shown-to node (:total node)))]
+        (when (<= (:ub shown) cap) shown)))
+    :entry
+    (when-let [k (whole context (first (:kids node)) cap)]
+      (when-let [v (whole context (second (:kids node)) (- cap (:ub k)))]
+        (let [entry (sized context (assoc node :kids [k v]))]
+          (when (<= (:ub entry) cap) entry))))
+    (:map :coll)
+    (when (and (not (:pending? node)) (or (not (bound? context node)) (not (seq (:pending node)))))
+      (let [sep (separator context node)
+            open (count (str (:prefix node) (:open node) (:close node)))]
+        (loop [kids [] spent open members (:pending node)]
+          (if-let [[held & more] (seq members)]
+            (let [cost (if (seq kids) sep 0)]
+              (when-let [shown (whole context (child context node held (count kids)) (- cap spent cost))]
+                (recur (conj kids shown) (+ spent cost (:ub shown)) more)))
+            (let [shown (sized context (assoc node :kids kids :pending nil))]
+              (when (and (not (more? shown)) (<= (:ub shown) cap)) shown))))))))
+
+(defn- collapsed
+  "`node` at its least: a collection with no member, a string with no character, a name with
+  `:whole-width` characters."
+  {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc] :seon.print/alloc]}
+  [context node]
+  (sized context (case (:kind node)
+                   :string (shown-to node 0)
+                   :name (shown-to node (min (:whole-width dials) (:total node)))
+                   (:map :coll) (assoc node :kids [])
+                   node)))
+
+(defn- minimal
+  "`node`'s least form: whole when that is at most `:whole-width` wide or no wider than its cut,
+  else collapsed; an entry is its key and value at their least."
+  {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc] :seon.print/alloc]}
+  [context node]
+  (if (= :entry (:kind node))
+    (sized context (update node :kids (fn [kids] (mapv #(minimal context %) kids))))
+    (let [least (collapsed context node)]
+      (or (whole context node (max (:whole-width dials) (:ub least))) least))))
+
+(declare allot)
+
+(defn- fill-string
+  "String or name `node` showing as many characters as `budget` holds beside its cut."
+  {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc number?] :seon.print/alloc]}
+  [context node budget]
+  (let [least (collapsed context node)]
+    (loop [room (- budget (:ub least))]
+      (let [to (if (pos? room) (fill-end least room) (:shown least))
+            grown (if (= to (:shown least)) least (sized context (shown-to node to)))
+            over (- (:ub grown) budget)]
+        (if (or (not (pos? over)) (= to (:shown least)))
+          grown
+          (recur (- room over)))))))
+
+(defn- shows? {:malli/schema [:=> [:cat :seon.print/alloc] :boolean]} [node]
+  (case (:kind node)
+    (:map :coll) (pos? (:n node))
+    (:string :name) (pos? (:shown node))
+    true))
+
+(defn- cut-reserve
+  "An upper bound on what a collection's one cut costs once members show."
+  {:malli/schema [:=> [:cat :seon.print/alloc] :int]}
+  [node]
+  (+ (count " (drop  )") (count (str (:total node 0)))))
+
+(defn- fill-members
+  "Sequence or set `node` within `budget`: whole members in order while each fits beside the one
+  cut that follows them; the first that does not fit is allotted what is left when that shows part of it."
+  {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc number?] :seon.print/alloc]}
+  [context node budget]
+  (let [sep (separator context node)]
+    (loop [kids [] spent (+ (:ub (collapsed context node)) (cut-reserve node)) members (:pending node)]
+      (let [[held & more :as remaining] (seq members)
+            cap (- budget spent sep)
+            member (when remaining (child context node held (count kids)))
+            cut #(sized context (assoc node :kids kids :pending members))
+            shown (when member
+                    (or (whole context member cap)
+                        ;; the last member needs no cut after it
+                        (when-not more
+                          (whole context member (- budget (:ub (sized context (assoc node :kids kids :pending nil))) sep)))))
+            part (when (and member (not shown))
+                   (let [allotted (allot context member cap)]
+                     (when (and (<= (:ub allotted) cap) (shows? allotted)) allotted)))]
+        (cond
+          part (sized context (assoc node :kids (conj kids part) :pending more))
+          (nil? shown) (cut)
+          more (recur (conj kids shown) (+ spent sep (:ub shown)) more)
+          :else (let [complete (sized context (assoc node :kids (conj kids shown) :pending nil))]
+                  (if (<= (:ub complete) budget) complete (cut))))))))
+
+(defn- elides? {:malli/schema [:=> [:cat :seon.print/alloc] :boolean]} [node]
+  (boolean (some more? (tree-seq :kids :kids node))))
+
+(defn- grow-values
+  "Map `entries`, each value at its least, grown into `extra` characters: each cut value whole when
+  its growth fits, else filled to what is left, strings before collections, smallest first."
+  {:malli/schema [:=> [:cat :seon.print/context [:vector :seon.print/alloc] number?] [:vector :seon.print/alloc]]}
+  [context entries extra]
+  (let [value-of #(second (:kids (nth entries %)))
+        order (sort-by (juxt :string-rank :width :i)
+                       (for [i (range (count entries))
+                             :let [v (value-of i)]
+                             :when (elides? v)
+                             :let [w (whole context v (+ (:ub v) extra))]]
+                         {:i i :grown w :string-rank (if (#{:string :name} (:kind v)) 0 1)
+                          :width (if w (:ub w) Long/MAX_VALUE)}))
+        with-value (fn [entries i v] (update entries i #(sized context (assoc-in % [:kids 1] v))))]
+    (loop [entries entries extra extra [{:keys [i grown]} & more] order]
+      (if (nil? i)
+        entries
+        (let [least (value-of i)]
+          (if (and grown (<= (- (:ub grown) (:ub least)) extra))
+            (recur (with-value entries i grown) (- extra (- (:ub grown) (:ub least))) more)
+            (let [allotted (allot context least (+ (:ub least) extra))]
+              (if (< (:ub least) (:ub allotted) (+ (:ub least) extra 1))
+                (recur (with-value entries i allotted) (- extra (- (:ub allotted) (:ub least))) more)
+                (recur entries extra more)))))))))
+
+(defn- fill-map
+  "Map `node` within `budget`, structure first: every key with its value at its least while they
+  fit, then one cut; the budget left grows the values."
+  {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc number?] :seon.print/alloc]}
+  [context node budget]
+  (let [sep (separator context node)
+        [entries members]
+        (loop [entries [] spent (+ (:ub (collapsed context node)) (cut-reserve node)) members (:pending node)]
+          (let [[held & more :as remaining] (seq members)
+                entry (when remaining (minimal context (child context node held (count entries))))]
+            (if (and entry (<= (+ spent sep (:ub entry)) budget))
+              (recur (conj entries entry) (+ spent sep (:ub entry)) more)
+              [entries members])))
+        skeleton (sized context (assoc node :kids entries :pending members))]
+    (sized context (assoc skeleton :kids (grow-values context entries (- budget (:ub skeleton)))))))
+
+(defn- allot
+  "`node` within `budget` characters: whole when it fits, else filled to the budget; a collection
+  at the depth bound collapsed."
+  {:malli/schema [:=> [:cat :seon.print/context :seon.print/alloc number?] :seon.print/alloc]}
+  [context node budget]
+  (if (and (= :coll (:kind node)) (not (bound? context node)))
+    (fill-members context node budget)
+    (or (whole context node budget)
+        (case (:kind node)
+          (:string :name) (fill-string context node budget)
+          (:map :coll) (cond (bound? context node) (collapsed context node)
+                             (= :map (:kind node)) (fill-map context node budget)
+                             :else (fill-members context node budget))
+          (sized context node)))))
+
+(defn- select
+  "`value` allotted under the context's budget, or the insufficient-budget refusal when its least
+  form, or its first member's, cannot fit."
+  {:malli/schema [:=> [:cat :any :seon.print/context] :map]}
+  [value context]
+  (let [root (make-node context value 0 [] 0)
+        budget (:budget context)
+        least (minimal context root)
+        shown (when (<= (:ub least) budget) (allot context root budget))
+        first-member (when (and shown (#{:map :coll} (:kind shown)) (zero? (:n shown)) (not (bound? context shown)))
+                       (when-let [[held] (seq (:pending root))]
+                         (minimal context (child context root held 0))))]
+    (cond
+      (nil? shown) (insufficient-budget context (:ub least))
+      first-member (insufficient-budget context (:ub (sized context (assoc root :kids [first-member]))))
+      :else {:root shown})))
+
+(defn- cut-node
+  "The one tail cut of a node that shows less than it holds."
+  {:malli/schema [:=> [:cat :seon.print/alloc :seon.print/context] :seon.print/node]}
+  [node context]
+  (let [bound (cond (#{:string :name} (:kind node)) :seon.render.profile/token-budget
+                    (>= (:depth node) (:max-depth context)) :seon.render.profile/max-depth
+                    :else :seon.render.profile/token-budget)
+        request (cond-> (merge (:requery context) {:seon.render.profile/id profile-id :seon.render.data/path (:path node)})
+                  (not (:pending? node)) (assoc :seon.print/bound-by bound)
+                  (node-continuation node) (assoc :seon.print/continuation (node-continuation node)))]
+    (emit/elision
+     (case (:kind node)
+       (:string :name) (assoc request :seon.print/omitted (- (:total node) (:shown node))
+                              :seon.print/elision-unit :characters
+                              :seon.print/prefix (subs (if (= :name (:kind node)) (:text node) (:value node)) 0 (:shown node))
+                              :seon.render.data/next-offset (:shown node)
+                              :seon.render.data/total (:total node))
+       (if (:pending? node)
+         (assoc request :seon.print/elision-unit :pending :seon.render.data/next-offset (:n node))
+         (assoc request :seon.print/omitted (- (:total node) (:n node)) :seon.print/elision-unit :children
+                :seon.render.data/next-offset (:n node) :seon.render.data/total (:total node)))))))
+
+(defn- tree
+  "The allotted `root` as one print-node tree, built with an explicit stack, and every cut node in
+  the order they were built."
+  {:malli/schema [:=> [:cat :seon.print/alloc :seon.print/context] [:map [:tree :any] [:cuts [:vector :any]]]]}
+  [root context]
+  (loop [stack (list [:enter root]) built [] cuts []]
+    (if-let [[op node] (first stack)]
+      (if (= op :enter)
+        (recur (into (conj (rest stack) [:exit node]) (map (fn [kid] [:enter kid])) (rseq (:kids node))) built cuts)
+        (let [split (- (count built) (count (:kids node)))
+              kids (subvec built split)
+              cut (when (more? node) (cut-node node context))
+              result
+              (case (:kind node)
+                :leaf (:node node)
+                :entry kids
+                :name (assoc (:node node) :seon.print/text (if cut (str (:seon.print/prefix cut) "…+" (:seon.print/omitted cut)) (:text node)))
+                :string (or cut {:seon.print/face :seon.print/string :seon.print/value (:value node)})
+                (:map :coll)
+                (let [children (cond-> kids cut (conj cut))
+                      collection (cond-> {:seon.print/face (if (= :seon.print/throwable (:face node)) :seon.print/map (:face node))}
+                                   (= :map (:kind node)) (assoc :seon.print/entries children)
+                                   (= :coll (:kind node)) (assoc :seon.print/items children)
+                                   (:ordered? node) (assoc :seon.print/ordered? true)
+                                   (:total node) (assoc :seon.render.data/total (:total node)))]
+                  (if (= :seon.print/throwable (:face node))
+                    {:seon.print/face :seon.print/throwable :seon.print/value collection}
+                    collection)))
+              result (cond-> result (and (map? result) (not= :entry (:kind node))) (assoc :seon.render.data/path (:path node)))]
+          (recur (rest stack) (conj (subvec built 0 split) result)
+                 (cond-> cuts (and cut (not= :name (:kind node))) (conj (if (= :string (:kind node)) result cut))))))
+      {:tree (peek built) :cuts cuts})))
+
+(defn show
+  "`value` selected under `opts` and emitted: `{:text :tokens :truncated? :elisions :cuts}` plus
+  `:html` (hiccup) when `outputs` holds `:hiccup`, or the insufficient-budget refusal.
+  opts: `:handle` (a `result/…` symbol cuts read through), `:budget` tokens, `:max-depth`, `:width`,
+  `:outputs`. A value whose metadata holds `:seon.print/full true` prints whole, and
+  `:seon.print/budget n` raises its own budget."
+  {:malli/schema [:=> [:cat :any :seon.print/opts] :seon.print/result]}
+  [value {:keys [handle budget max-depth width outputs]}]
+  (let [requery (if (and (qualified-symbol? handle) (= "result" (namespace handle)))
+                  {:seon.print/requery-id handle}
+                  {:seon.print/requery-refusal "the value has no result handle"})
+        own (when (instance? clojure.lang.IMeta value) (:seon.print/budget (meta value)))
+        budget-tokens (if (pos-int? own) own budget)
+        full? (and (instance? clojure.lang.IMeta value) (true? (:seon.print/full (meta value))))
+        options (assoc emit/default-options :seon.print/length nil :seon.print/level nil :seon.print/width width)
+        chars (estimate-chars budget-tokens)
+        context (cond-> (merge dials
+                               {:breaks? (pos? width) :requery requery :requery-id (:seon.print/requery-id requery)
+                                :width width :budget chars :max-children (inc (quot chars 2)) :max-depth max-depth})
+                  full? (assoc :budget Long/MAX_VALUE :max-children Long/MAX_VALUE :max-depth Long/MAX_VALUE
+                               :max-name Long/MAX_VALUE))
+        {root :root :as state} (select value context)]
+    (if-not root
+      state
+      (let [{selected :tree cuts :cuts} (tree root context)
+            emitted (emit/emit-both selected options (contains? outputs :hiccup))
+            text (:text emitted)
+            ;; one line holds the root when its flat width fits it
+            limit (if (<= (:flat root) width) (:flat root) (:ub root))]
+        ;; the charge bounds the laid-out length: a longer text is the allocator's defect
+        (when (> (count text) limit)
+          (throw (ex-info "The value printer's text exceeded its charge."
+                          {:seon.error/type :seon.render.value/charge-exceeded :seon.error/operation 'seon.print.select/show
+                           :seon.error/message "The value printer's text exceeded its charge."
+                           :seon.print/charge limit :seon.error/offending (count text)})))
+        (cond-> {:text text
+                 :tokens (estimate text)
+                 :truncated? (elides? root)
+                 :elisions (count (filter more? (tree-seq :kids :kids root)))
+                 :cuts cuts}
+          (contains? outputs :hiccup) (assoc :html [:div {:class "seon-data-panel"} (:hiccup emitted)]))))))

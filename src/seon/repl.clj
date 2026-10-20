@@ -12,7 +12,7 @@
 
   Seon's additions are middleware over nREPL's own seams (a plain stack: G1's contract
   admission and arming plug in as one more `wrap-…`):
-    wrap-print    the value through the agent's value printer (seon.agent/print-value)
+    wrap-print    the value through the one value printer (seon.print)
     wrap-caught   the error also as the one error map
     wrap-cost     per-form µs, allocated bytes and costliest functions, around the per-form eval fn
     wrap-record   a def in a program namespace becomes a fact on this branch (transact!)
@@ -26,7 +26,7 @@
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract] [clojure.edn] [my.db] [my.agent]
-            [seon.program :as program] [seon.lib :as lib] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
+            [seon.program :as program] [seon.lib :as lib] [seon.print :as print] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
             [jolt.ffi :as ffi]))
 
 (defchecked ^:private chunk-writer [:=> [:cat :seon.host/fn] :seon.host/writer] @#'jolt.nrepl/chunk-writer)
@@ -34,7 +34,7 @@
 (defchecked ^:private outer-frames [:=> [:cat] :any] @#'jolt.nrepl/outer-frames)
 
 (defn- form-text {:malli/schema [:=> [:cat :any] :string]}
-  [form] (binding [agent/*print-limits* {:length 12 :level 4 :chars 2000}] (agent/builtin-print form)))
+  [form] (print/text form (:form print/budgets)))
 
 (defn- session-ns
   "The request's namespace: its \"ns\", else its session's, else the agent's own."
@@ -131,20 +131,22 @@
   [req f] (assoc req :reply (let [r (:reply req)] (fn [m] (r (f m))))))
 
 (defn wrap-print
-  "The value through the agent's value printer: `value`, with the printer's tokens,
-  truncation and elision count."
+  "The value through the one value printer (seon.print), its cuts reading the rest through
+  the value's result handle: `value`, with the printer's tokens, truncation and elision
+  count. A value whose first part does not fit the budget answers the printer's refusal
+  message, with the refusal beside it."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
     (h (around-reply req
          (fn [m]
            (if (contains? m :repl/value)
-             (let [pv (agent/print-value (:repl/value m) (some->> (get m "seon/handle") (symbol "result")))]
-               (cond-> (assoc m "value" (:printed pv))
-                 (:tokens pv) (assoc "seon/tokens" (:tokens pv))
-                 (:truncated? pv) (assoc "seon/truncated" 1)
-                 (some-> (:elisions pv) pos?) (assoc "seon/elisions" (:elisions pv))
-                 (:printer-error pv) (assoc "seon/printer-error" (:printer-error pv))))
+             (let [pv (print/print-value (:repl/value m) {:handle (some->> (get m "seon/handle") (symbol "result"))})]
+               (if-let [text (:text pv)]
+                 (cond-> (assoc m "value" text "seon/tokens" (:tokens pv))
+                   (:truncated? pv) (assoc "seon/truncated" 1)
+                   (pos? (:elisions pv)) (assoc "seon/elisions" (:elisions pv)))
+                 (assoc m "value" (:seon.error/message pv) "seon/printer-error" (pr-str pv))))
              m))))))
 
 (defn wrap-caught

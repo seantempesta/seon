@@ -2,11 +2,11 @@
   "The agent's context, rendered live each turn from its task and what it references:
   the current-state block (task plan and instructions, the proofs with their red
   assertions and source, every backticked fully qualified symbol resolved to its doc and
-  source, the last evaluations), printed through the value printer. Nothing is stored:
+  source, the last evaluations), printed through the one value printer (seon.print). Nothing is stored:
   the next turn renders again from the branch's db."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d]
-            [seon.agent :as agent] [seon.reconcile :as r]))
+            [seon.print :as print] [seon.reconcile :as r]))
 
 (def system-prompt
   "What every model is told once per turn: how to answer and which verbs exist."
@@ -71,9 +71,9 @@
 
 (defn messages
   "The model request's messages for the block: the system prompt, then the block printed
-  by the value printer (under a context's budget: the builtin printer's default cuts at
-  depth 4 and 20 items, which would cut a proof's failures)."
+  by the one value printer under the context's budget, breadth first: every section shows
+  before any one deepens, and each cut names the form that reads its rest."
   {:malli/schema [:=> [:cat :map] [:vector :seon.model/message]]}
   [block]
   [{:role "system" :content system-prompt}
-   {:role "user" :content (binding [agent/*print-limits* {:length 64 :level 8 :chars 48000}] (agent/printer block))}])
+   {:role "user" :content (print/text block (:context print/budgets))}])

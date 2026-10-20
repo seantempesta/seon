@@ -24,7 +24,7 @@
   (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
-            [seon.config :as cfg] [seon.contract :as contract] [seon.task :as task] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
+            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
             [seon.turn] [seon.fixtures] [my.fx] [my.task] [my.turn] [my.branch] [clojure.core.async.flow :as flow] [clojure.test]
@@ -368,7 +368,9 @@
       (d/pull db '[:task/name {:task/refs [:var/name]}] [:task/name :app.m0/tidy])
       (d/db-with db [{:note/text "warm" :note/agent :warm}])
       (d/with db [{:note/text "warm" :note/agent :warm}])
-      (sock/frame {:op :reply :items [{:id 1 :printed "x" :ms 0.1}]}))
+      (sock/frame {:op :reply :items [{:id 1 :printed "x" :ms 0.1}]})
+      ;; the one value printer, its text and hiccup paths and a cut
+      (print/print-value {:a [1 2 3] :b "x" :c (vec (range 300))} {:handle 'result/h0 :budget 200 :outputs #{:text :hiccup}}))
     (let [nsx (create-ns 'seon.warm)]
       (binding [*ns* nsx]
         (refer-clojure)
@@ -413,7 +415,7 @@
                                 {:kind :scripted :script 'seon.fixtures/reply}))
         program (program/load-all! @conn)
         program-ms (lib/ms-since t1)
-        contracts (contract/instrument! '[seon.contract seon.profile])
+        contracts (contract/instrument! '[seon.contract seon.profile seon.print seon.print.select seon.print.emit])
         _ (warm! conn)
         _ (lib/raise-open-files! (+ 256 (* 2 cfg/MAX-AGENTS)))
         _ (lib/static!)
