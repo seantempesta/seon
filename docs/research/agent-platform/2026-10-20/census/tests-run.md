@@ -78,7 +78,7 @@ Proofs = distinct cited tests (wildcards expanded). A test cited by two ideas co
 ## Per idea after spec-reds
 
 [spec-reds.md](spec-reds.md) judged the 12 reds:
-- 5 were fixed or rewritten green and 3 were rewritten green: config, help, conflicts, chain-of-one, broken-tests and the two MCP tests.
+- 7 are green now. Config and conflicts were fixed in Seon, help was fixed in help.md with a rewritten test, and chain-of-one, broken-tests and the two MCP tests were rewritten.
 - 4 stay red as valid spec that Seon fails: the warm-context cost, the strict cost table and the forgiving reader's two.
 - 1 was retired: the SCI `test-vars` request-view test.
 
