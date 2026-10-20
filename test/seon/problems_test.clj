@@ -196,7 +196,7 @@
     (d/transact conn tx)
     (d/transact conn (vec (concat (for [i (range k)] (task (str "t/c" i)))
                                   (for [i (range k)] (att (str "t/c" i) (str "t/c" i "#1") {:seon.attempt/status :done :seon.attempt/outcome :green}))
-                                  (for [i (range n)] (task (str "t/r" i)))
+                                  (for [i (range n)] (assoc (task (str "t/r" i)) :seon.task/proofs #{'app.t/red}))
                                   (for [i (range n)] (att (str "t/r" i) (str "t/r" i "#1")
                                                           {:seon.attempt/status :bailed :seon.attempt/outcome :cap
                                                            :seon.attempt/failures (pr-str {'app.t/red [{:type :fail :message "m" :expected "1" :actual "2"}]})}))
@@ -317,3 +317,16 @@
                                                         :usage {:prompt_tokens 10 :completion_tokens 4096}}))]
     (is (true? (:truncated? (model/parse-reply (body "length") 9.0 4096))))
     (is (nil? (:truncated? (model/parse-reply (body "stop") 9.0 4096))) "a reply that stopped on its own is not cut")))
+
+(deftest another-tasks-unfinished-proof-is-not-a-problem
+  ;; T5's real run: one attempt's run reports every program test, so 210 rows named other
+  ;; tasks' proofs not done yet (allowed reds); only the task's own proofs are its problems
+  (let [[_ conn] (pdb/create! 0)]
+    (d/transact conn [{:seon.task/id "t/a" :seon.task/ns 't :seon.task/name "a" :seon.task/plan "p" :seon.task/execution :running
+                       :seon.task/branch :b :seon.task/kind :work :seon.task/proofs #{'app.t/a-test}}])
+    (d/transact conn [{:seon.attempt/id "t/a#1" :seon.attempt/task [:seon.task/id "t/a"] :seon.attempt/boot "b" :seon.attempt/agent :a1
+                       :seon.attempt/start-ms 1 :seon.attempt/end-ms 2 :seon.attempt/branch :b :seon.attempt/max-turns 2
+                       :seon.attempt/status :ended :seon.attempt/outcome :red
+                       :seon.attempt/failures (pr-str {'app.t/a-test [{:type :fail :expected "1" :actual "2"}]
+                                                       'app.t/other-test [{:type :fail :expected "3" :actual "4"}]})}])
+    (is (= ['app.t/a-test] (mapv :test (get-in (problems/report @conn) [:classes :red :rows]))))))

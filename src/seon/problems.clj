@@ -70,7 +70,7 @@
   them)."
   [:seon.attempt/id :seon.attempt/status :seon.attempt/outcome :seon.attempt/reason :seon.attempt/end-ms :seon.attempt/agent
    :seon.attempt/unmerged :seon.attempt/failures :seon.attempt/costs :seon.attempt/error :seon.attempt/waste
-   {:seon.attempt/task [:db/id :seon.task/id :seon.task/ns]}
+   {:seon.attempt/task [:db/id :seon.task/id :seon.task/ns :seon.task/proofs]}
    {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
 (defn- conflict
@@ -103,8 +103,13 @@
               :outcome (:seon.attempt/outcome p) :reason (:seon.attempt/reason p) :end-ms (:seon.attempt/end-ms p)
               :open? (not (task-done? db te)) :owner-ns (get-in p [:seon.attempt/task :seon.task/ns]) :producer nil :proofs []
               :answered-by (get-in ans [:from aid] []) :at-ms (:seon.attempt/end-ms p)}
-        failures (edn-of (:seon.attempt/failures p))
-        costs (edn-of (:seon.attempt/costs p))
+        ;; a red proof is this attempt's problem when the task itself states it: an inherited
+        ;; proof was green on main when the task started (its needs were done), so red now it
+        ;; is a regression, the attempt's refusal reason; another task's proof not green yet is
+        ;; an allowed red. Both stay in the attempt's facts as evidence, never problem rows.
+        own (set (get-in p [:seon.attempt/task :seon.task/proofs]))
+        failures (select-keys (edn-of (:seon.attempt/failures p)) own)
+        costs (select-keys (edn-of (:seon.attempt/costs p)) own)
         err (edn-of (:seon.attempt/error p))
         waste (edn-of (:seon.attempt/waste p))
         merge? (or (seq conflicts) (seq unmerged) (= :behind status) (= :merge-failed (:outcome base))
