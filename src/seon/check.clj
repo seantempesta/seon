@@ -3,7 +3,7 @@
   f2-final proto.smoke). bin/check runs them; target/seon <check> [args] runs one.
   usage: target/seon smoke        3 agents: define, test, transact; merge one; kill one mid-eval
          target/seon scale N      N agents spawned at once, each eval + transact + test"
-  (:require [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.config] [clojure.edn] [seon.entrance] [seon.mcp] [clojure.data.json] [seon.cost :as cost]))
+  (:require [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.entrance] [seon.mcp] [clojure.data.json] [seon.cost :as cost]))
 
 (defn- out! [& xs] (println (apply str xs)) (flush))
 (defn- await-status [sys ids pred ms]
@@ -1019,7 +1019,7 @@
   (let [sys (c/start! {:datoms 2000})
         pids (fn [] (set (keys (flow/ping (:graph sys) :timeout-ms 2000))))
         booted (pids)
-        expect (into #{:api :writer :fork-server :flusher :reconciler :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/model}
+        expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/model}
                      (for [i (range seon.config/MODEL-LANES)] (keyword "fx.model" (str i))))
         dir (str "/tmp/seon-system-" (lib/c-getpid))
         _ (.mkdirs (java.io.File. dir))
@@ -1166,6 +1166,46 @@
                   (str k " {:ns " (lib/r2 ns) " :bytes " (lib/r2 bytes) " :what " (pr-str (:what (cost/unit-benches k))) "}"))) "}")
     (lib/c-exit 0)))
 
+(defn- web-agent-forms
+  "What a hand-spawned agent of the web demo evaluates: a definition, a proof, a cost proof
+  (green, or red for every third agent: a body that copies its map per row) and a value."
+  [i id]
+  (str "(defn index-by {:malli/schema [:=> [:cat [:sequential :map]] :map]} [rows] "
+       (if (zero? (mod i 3))
+         "(reduce (fn [m r] (assoc (into {} m) (:id r) r)) {} rows))"
+         "(persistent! (reduce (fn [m r] (assoc! m (:id r) r)) (transient {}) rows)))")
+       "\n(defn rows {:malli/schema [:=> [:cat :int] :any]} [n] [(vec (for [k (range n)] {:id k}))])"
+       "\n(deftest index-by-test (is (= {1 {:id 1}} (index-by [{:id 1}]))))"
+       "\n(deftest index-by-cost (seon.cost/proof {:of 'agent." (name id) "/index-by :input 'agent." (name id) "/rows"
+       " :n \"rows\" :work \"one pass: one assoc! per row\" :growth :linear :per-n {:ns 300.0} :sizes [100 1000 10000]}))"
+       "\n(frequencies (map #(mod % 7) (range " (* 100 (inc i)) ")))"))
+
+(defn web-serve
+  "Root with its web (seon.web, lane W2) on 127.0.0.1:SEON_WEB_PORT (default 7777) until
+  stdin closes: n agents spawned by hand, each evaluating a definition, a proof and a cost
+  proof (every third one red), then running its tests (`light`: one evaluation each, for
+  the size sweep); with `calc` the six-task graph and with `swarm m` m tasks over shared
+  definitions, worked by agents the reconciler starts (the scripted model)."
+  [n more]
+  (let [sys (c/start! {:datoms 2000 :max-running 4})
+        ids (vec (for [i (range n)] (c/spawn! sys {:task (str "index rows by id, within a linear cost estimate (#" i ")")})))]
+    (await-status sys ids #{:idle} 10000)
+    (if (= "light" (first more))
+      ;; for the size sweep: one evaluation each, no test forks
+      (doall (pmap (fn [[i id]] @(c/submit! sys id (str "(frequencies (map #(mod % 7) (range " (* 10 (inc i)) ")))"))) (map-indexed vector ids)))
+      (doall (pmap (fn [[i id]] @(c/submit! sys id (web-agent-forms i id)) @(c/run-tests! sys id)) (map-indexed vector ids))))
+    (when-let [k (#{"calc" "swarm"} (first more))]
+      (let [specs (case k "calc" seon.fixtures/calc "swarm" (seon.fixtures/swarm-specs (Long/parseLong (or (second more) "12"))))
+            tns (symbol k)
+            ds (seon.fixtures/decls specs tns nil)]
+        (doseq [tx (seon.fixtures/program-txs specs)] @(c/transact-main! sys tx))
+        (my.root/create! sys ds)
+        (my.root/run! sys (mapv #(seon.task/task-id tns (:seon.task/name %)) ds))))
+    (out! "WEB http://127.0.0.1:" (or (System/getenv "SEON_WEB_PORT") "7777") "/ " (count ids) " agents")
+    (loop [] (when (read-line) (recur)))
+    (c/stop! sys)
+    (lib/c-exit 0)))
+
 (defn -main [& [mode n & more]]
   (case mode
     "dur-bench-write" (dur-bench-write n (Long/parseLong (first more)))
@@ -1201,4 +1241,5 @@
     "swarm" (swarm (Long/parseLong (or n "100")))
     "soak" (soak (Long/parseLong (or n "50")) (Long/parseLong (or (first more) "60")))
     "mem" (mem (Long/parseLong (or n "100")) 3)
+    "web" (web-serve (Long/parseLong (or n "6")) more)
     (smoke)))

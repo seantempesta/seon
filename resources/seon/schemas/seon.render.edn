@@ -1,0 +1,52 @@
+;; Renders (seon.render, lane W2; W1's render contract, notes/option3-W1-render.md §1): a
+;; render takes a value and an env and answers one or both faces. A schema declares its
+;; renders in its own properties ({:seon.render/html sym :seon.render/ai sym}); selection is
+;; the value's own override key, else the declared render (the schema, then its parents),
+;; else the one value printer (seon.print). The values below are what root's web renders.
+{:seon.render/hiccup [:vector :any]
+ :seon.render/face [:enum :ai :html]
+ :seon.render/env [:map
+                   [:seon.render/faces {:optional true} [:set :seon.render/face]]
+                   ;; the producer's declared schema of the value, when known
+                   [:seon.render/schema {:optional true} [:maybe :qualified-keyword]]
+                   ;; tokens for the printer (the AI face's budget, and the HTML face's)
+                   [:seon.render/budget {:optional true} pos-int?]
+                   [:seon.render/handle {:optional true} [:maybe :symbol]]]
+ :seon.render/out [:map [:seon.render/html {:optional true} :any] [:seon.render/ai {:optional true} :any]]
+
+ ;; ---- what root's dashboard shows: the whole system as one value ----
+ ;; the api's view (agents, writer, fork server, store, boot, root errors) joined with every
+ ;; proc's health, main's tasks and attempts, the series the tiles draw, and the events.
+ ;; Its HTML face is root's layout; its AI face is root's context (a budgeted text).
+ :seon.render/system [:map {:seon.render/html seon.render.ui/system-page :seon.render/ai seon.render.ai/system}
+                      [:agents :map] [:health :map] [:writer :map] [:server :map]
+                      [:main :map] [:tasks :map] [:attempts :map] [:events [:vector :any]]]
+ ;; one agent as root holds it (the api's view entry, its id added): its card in root's layout
+ :seon.render/agent [:map {:seon.render/html seon.render.ui/agent-card}
+                     [:id :keyword] [:status {:optional true} [:maybe :keyword]]]
+ ;; one agent zoomed: the agent, its attempt and task on main, its evaluations on its branch,
+ ;; the current-state block its model reads. Its HTML face is the agent's page.
+ :seon.render/agent-page [:map {:seon.render/html seon.render.ui/agent-page}
+                          [:agent :seon.render/agent]]
+ ;; one event of root's stream
+ :seon.render/event [:map {:seon.render/html seon.render.ui/event-row} [:type :keyword]]
+ ;; a proc's health beside its pid
+ :seon.render/proc-health [:map {:seon.render/html seon.render.ui/proc-health}
+                           [:pid :keyword] [:health :seon.root/health]]
+ ;; a cost proof's report as the agent's test run holds it: the estimate's function, the
+ ;; rows measured and the verdict (seon.cost/proof's :actual)
+ :seon.render/cost-report [:map {:seon.render/html seon.render.ui/cost-report :seon.render/ai seon.render.ai/cost-report}
+                           [:rows [:vector :seon.cost/row]] [:verdict :seon.cost/verdict]]
+
+ ;; a UI call naming a var not marked ^:seon/callable (seon.web/ui-call)
+ :seon.render/not-callable [:and :seon.error/base [:map [:seon.render/fn :symbol]]]
+ ;; ---- the procs' messages ----
+ ;; a UI call: the /call route's payload (DECISIONS: callbacks are data naming a var)
+ :seon.render/call [:map [:var :symbol] [:agent {:optional true} [:maybe :keyword]]
+                    [:args {:optional true} [:maybe :map]] [:forms {:optional true} [:maybe :string]]]
+ ;; what the render proc sends the web proc: per view, the fragments whose bytes changed
+ ;; (element id -> html), the ones to remove, and the ones appended to a container
+ :seon.render/patch [:map [:view :any] [:frags [:vector [:tuple :string :string]]]
+                     [:removes {:optional true} [:vector :string]]
+                     [:appends {:optional true} [:vector [:tuple :string :string]]]
+                     [:prepends {:optional true} [:vector [:tuple :string :string]]]]}

@@ -423,6 +423,8 @@
         ;; physics: the fork server is forked before any thread exists
         {:keys [pid fd]} (fs/fork-server db)
         events-in (a/chan (a/sliding-buffer 8192))
+        ;; every event, for the API's taps (seon.root/events) and the render proc's (W2)
+        events-mult (a/mult events-in)
         chans {:ext (a/chan 1024) :back (a/chan 4096) :to-writer (a/chan cfg/WRITER-BUF)
                :server-ev (a/chan 4096) :stop-ch (a/promise-chan)
                ;; outside agents' attempts handed back for judgement (seon.entrance)
@@ -438,7 +440,7 @@
         ;; what the declaration (resources/seon/system.edn) names as :bind/<name>
         bindings (merge (select-keys chans [:ext :back :to-writer :server-ev :judge])
                         {:view view :graph graph-p :lease-base (pdb/lease-base conn)
-                         :system root-procs-p :events events-in
+                         :system root-procs-p :events events-in :events-mult events-mult
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider
                          :api-from-writer-buf (+ cfg/WRITER-BUF cfg/WRITER-BATCH cfg/API-WRITES)
@@ -467,7 +469,7 @@
         sys (merge chans {:cfg store-cfg :conn conn :graph g :t0 t0
                           :owned-store (when-not given path) :boot boot
                           :bindings bindings
-                          :events-in events-in :events-mult (a/mult events-in) :errors errors})
+                          :events-in events-in :events-mult events-mult :errors errors})
         ]
     (flow/resume g)
     ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is

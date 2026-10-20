@@ -37,7 +37,7 @@
  :seon.cluster.eval/agent :seon.db/ref
  ;; the evaluation's details as one EDN value: {:tag :form :shown|:error :out :ms :alloc-bytes :fns}
  ;; (:fns: its 10 costliest contracted functions, [{:var :calls :ms}], seon.profile)
- :seon.cluster.eval/record [:map {:seon.db/edn true} [:tag [:enum :ret :err]]]
+ :seon.cluster.eval/record [:map {:seon.db/edn true :seon.render/html seon.render.ui/history-row} [:tag [:enum :ret :err]]]
  :seon.agent/id [:and {:seon.db/identity true} :keyword]
  :seon.agent/answered-t :int
  :seon.db/eval-fact [:map {:seon.db/attributes true}

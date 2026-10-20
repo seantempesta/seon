@@ -28,7 +28,14 @@
   ;; buffer, back-pressure on the writer if it lags
   :reconciler {:proc seon.reconcile/reconciler-proc
                :chan-opts {:main {:buf-or-n :bind/reconciler-buf}}
-               :args {:boot :bind/boot :judge :bind/judge}}}
+               :args {:boot :bind/boot :judge :bind/judge}}
+  ;; root's web (lane W2): the render proc renders what changed into patches per view
+  ;; (:compute, never waits); the web proc owns the listener and the tabs (:io). Port:
+  ;; 127.0.0.1 only; the dial SEON_WEB_PORT overrides it; 0 serves nothing
+  :render {:proc seon.render.proc/render-proc
+           :args {:events-mult :bind/events-mult :graph :bind/graph :system :bind/system}}
+  :web {:proc seon.web/web-proc
+        :args {:port 7777}}}
  :fx
  {:echo {:perform seon.fx/echo :lanes 1}
   :file {:perform seon.fx/write-file :lanes 1}
@@ -41,4 +48,8 @@
   [[:writer :main] [:reconciler :main]]
   [[:fork-server :to-api] [:api :from-fs]]
   [[:api :to-fs] [:fork-server :ext]]
-  [[:writer :to-flusher] [:flusher :in]]]}
+  [[:writer :to-flusher] [:flusher :in]]
+  [[:render :to-api] [:api :from-writer]]
+  [[:web :to-api] [:api :from-writer]]
+  [[:render :to-web] [:web :from-render]]
+  [[:web :to-render] [:render :from-web]]]}

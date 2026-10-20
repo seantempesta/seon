@@ -66,7 +66,7 @@
  :seon.agent/printed [:map [:printed :string]]
  :seon.agent/error [:map [:message :string] [:class :string]]
  :seon.agent/tx-result [:map [:t :int] [:datoms nat-int?]]
- :seon.agent/item [:map {:description "One form's reply at root: the printed value (the live one stays in the agent under :handle) or the error."}
+ :seon.agent/item [:map {:seon.render/html seon.render.ui/history-row :description "One form's reply at root: the printed value (the live one stays in the agent under :handle) or the error."}
                    [:tag [:enum :ret :err]] [:printed {:optional true} [:maybe :string]]]
  :seon.agent/items [:vector :seon.agent/item]
  :seon.test/result [:map [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]
@@ -79,7 +79,7 @@
  :seon.system/decl [:map [:procs [:map-of :keyword [:map [:proc :qualified-symbol] [:args {:optional true} :map] [:chan-opts {:optional true} :map]]]]
                     [:fx {:optional true} [:map-of :keyword :map]] [:conns [:vector [:tuple [:tuple :keyword :keyword] [:tuple :keyword :keyword]]]]]
  :seon.root/spawn-opts [:maybe [:map [:branch {:optional true} :seon.db/branch] [:task {:optional true} [:maybe :string]]]]
- :seon.root/health [:or [:= :unknown] [:map [:status :keyword]]]
+ :seon.root/health [:or {:seon.render/html seon.render.ui/health-cell} [:= :unknown] [:map [:status :keyword]]]
  ;; contracts (seon.contract, from G1)
  :seon.contract/arm-result [:enum :armed :unchanged :off :uncontracted]
  :seon.contract/invalid [:and :seon.error/base [:map [:seon.error/type [:enum :seon.contract/invalid]] [:seon.contract/var :qualified-symbol]]]
