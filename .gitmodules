@@ -2,10 +2,12 @@
 	path = reference-code/malli
 	url = https://github.com/seantempesta/malli.git
 	ignore = dirty
+	branch = seon
 [submodule "reference-code/clj-kondo"]
 	path = reference-code/clj-kondo
 	url = https://github.com/seantempesta/clj-kondo.git
 	ignore = dirty
+	branch = seon
 [submodule "reference-code/clj-reload"]
 	path = reference-code/clj-reload
 	url = https://github.com/tonsky/clj-reload.git
@@ -14,6 +16,7 @@
 	path = reference-code/babashka-process
 	url = https://github.com/babashka/process.git
 	ignore = dirty
+	branch = seon
 [submodule "reference-code/core.async"]
 	path = reference-code/core.async
 	url = https://github.com/clojure/core.async.git
@@ -30,6 +33,7 @@
 	path = reference-code/datahike
 	url = https://github.com/seantempesta/datahike.git
 	ignore = dirty
+	branch = seon/main
 [submodule "reference-code/datastar-clojure"]
 	path = reference-code/datastar-clojure
 	url = https://github.com/starfederation/datastar-clojure.git
@@ -46,10 +50,12 @@
 	path = reference-code/sci
 	url = https://github.com/seantempesta/sci.git
 	ignore = dirty
+	branch = seon
 [submodule "reference-code/konserve"]
 	path = reference-code/konserve
 	url = https://github.com/seantempesta/konserve.git
 	ignore = dirty
+	branch = seon/main
 [submodule "reference-code/babashka"]
 	path = reference-code/babashka
 	url = https://github.com/babashka/babashka.git
@@ -60,12 +66,15 @@
 [submodule "reference-code/http-kit"]
 	path = reference-code/http-kit
 	url = https://github.com/seantempesta/http-kit.git
+	branch = seon
 [submodule "reference-code/core.async.flow-monitor"]
 	path = reference-code/core.async.flow-monitor
 	url = https://github.com/seantempesta/core.async.flow-monitor.git
+	branch = seon
 [submodule "reference-code/edamame"]
 	path = reference-code/edamame
-	url = https://github.com/borkdude/edamame.git
+	url = https://github.com/seantempesta/edamame.git
+	branch = seon
 [submodule "reference-code/langchain4clj"]
 	path = reference-code/langchain4clj
 	url = https://github.com/nandoolle/langchain4clj.git
@@ -76,7 +85,7 @@
 [submodule "reference-code/superv.async"]
 	path = reference-code/superv.async
 	url = https://github.com/seantempesta/superv.async.git
-	branch = main
+	branch = seon
 	ignore = dirty
 [submodule "reference-code/clerk"]
 	path = reference-code/clerk
