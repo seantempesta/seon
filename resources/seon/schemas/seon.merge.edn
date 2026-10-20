@@ -1,11 +1,12 @@
 ;; The program merge's named schemas (lane M1's proto.merge.edn).
 {:seon.merge/data-attrs [:or [:= :all] [:set :keyword]]
  :seon.merge/program-key [:or [:tuple [:= :var] :qualified-symbol]
+                   [:tuple [:= :ns] :symbol]
                    [:tuple [:= :alias] :symbol :symbol]
                    [:tuple [:= :datum] :int :keyword]
                    [:tuple [:= :datum] :int :keyword :any]]
  :seon.merge/entry [:map [:src {:optional true} :string] [:kind {:optional true} :keyword]
-                     [:contract {:optional true} :string] [:doc {:optional true} :string]
+                     [:contract {:optional true} :string] [:doc {:optional true} :string] [:meta {:optional true} :string]
                      [:flagged {:optional true} true?]]
  :seon.merge/program [:map-of :seon.merge/program-key :any]
  :seon.merge/changes [:map-of :seon.merge/program-key [:tuple :any :any]]

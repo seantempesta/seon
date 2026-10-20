@@ -4,6 +4,8 @@
 {;; ---- the program ----
  :ns/name [:and {:seon.db/identity true} :symbol]
  :ns/doc :string
+ ;; the namespace's ns form as written (requires, refers, aliases, :refer-clojure)
+ :ns/src :string
  :var/name [:and {:seon.db/identity true} :symbol]
  :var/ns :seon.db/ref
  :var/doc :string
@@ -12,11 +14,14 @@
  ;; what a recorded def holds (:fn :test :macro :value) and its contract, as text
  :var/kind :keyword
  :var/contract :string
- :seon.db/ns-fact [:map {:seon.db/attributes true} [:ns/name :ns/name] [:ns/doc {:optional true} :ns/doc]]
+ ;; the metadata the definition declared on its var (^:dynamic, ^:private, ...), as EDN
+ :var/meta :string
+ :seon.db/ns-fact [:map {:seon.db/attributes true} [:ns/name :ns/name] [:ns/doc {:optional true} :ns/doc] [:ns/src {:optional true} :ns/src]]
  :seon.db/var-fact [:map {:seon.db/attributes true}
                      [:var/name :var/name] [:var/ns {:optional true} :var/ns] [:var/doc {:optional true} :var/doc]
                      [:var/src {:optional true} :var/src] [:var/arity {:optional true} :var/arity]
-                     [:var/kind {:optional true} :var/kind] [:var/contract {:optional true} :var/contract]]
+                     [:var/kind {:optional true} :var/kind] [:var/contract {:optional true} :var/contract]
+                     [:var/meta {:optional true} :var/meta]]
  ;; ---- the example program's task and note ----
  :task/name [:and {:seon.db/identity true} :keyword]
  :task/plan :string

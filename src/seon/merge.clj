@@ -3,9 +3,10 @@
   M1's proto.merge (proto/agents/core-patches/01-proto-merge.patch).
 
   A db's program is a map from program keys to content (`program`):
-  - `[:var sym]` -> {:src :kind :contract :doc} of a recorded definition. Its identity is
-    its source text (the canonical print seon.program/record-tx stores), so identical
+  - `[:var sym]` -> {:src :kind :contract :doc :meta} of a recorded definition. Its
+    identity is its source text (exactly as written, seon.program/record-tx), so identical
     definitions on two branches are equal whatever their entity ids;
+  - `[:ns nsym]` -> {:src} of a namespace's `ns` form, as written (`:ns/src`);
   - `[:alias ns a]` -> the namespace an alias of program namespace ns names (`:ns/alias`);
   - `[:datum e a]` (cardinality one) / `[:datum e a v]` (many) -> a value of a data
     attribute the caller declares (`data-attrs`: a set, or :all for every attribute that
@@ -24,7 +25,7 @@
 
 (def var-attrs
   "The attributes of a recorded definition that are its content."
-  [:var/src :var/kind :var/contract :var/doc])
+  [:var/src :var/kind :var/contract :var/doc :var/meta])
 
 (defn- pr-edn
   "v printed as EDN that reads back (no print limits, no metadata)."
@@ -58,6 +59,7 @@
                 (cond-> (into {} (for [a var-attrs :let [v (get-in cols [a e])] :when (some? v)] [(keyword (name a)) v]))
                   (get-in cols [:var/flagged e]) (assoc :flagged true))])
         ns-names (col :ns/name)
+        ns-forms (for [dt (d/datoms db :aevt :ns/src)] [[:ns (ns-names (:e dt))] {:src (:v dt)}])
         aliases (for [dt (d/datoms db :aevt :ns/alias)
                       :let [[a target] (edn/read-string (:v dt))]]
                   [[:alias (ns-names (:e dt)) a] target])
@@ -66,7 +68,7 @@
                (if (= :db.cardinality/many (get-in schema [a :db/cardinality]))
                  [[:datum (:e dt) a (:v dt)] true]
                  [[:datum (:e dt) a] (:v dt)]))]
-    (into {} (concat vars aliases data))))
+    (into {} (concat vars ns-forms aliases data))))
 
 (defn changes
   "{key [from-content to-content]} for every key whose content differs (nil: absent)."
@@ -127,6 +129,15 @@
                           :when (and (some? old) (nil? (get entry (keyword (name a)))))]
                       [:db/retract e a old]))))))
 
+(defn- set-ns-tx
+  {:malli/schema [:=> [:cat :seon.host/db :symbol [:maybe [:map [:src :string]]]] :seon.db/tx-data]}
+  [db nsym content]
+  (let [n (d/q '[:find ?e . :in $ ?n :where [?e :ns/name ?n]] db nsym)
+        old (when n (:ns/src (d/entity db n)))]
+    (cond (:src content) [{:db/id (str "ns " nsym) :ns/name nsym :ns/src (:src content)}]
+          old [[:db/retract n :ns/src old]]
+          :else [])))
+
 (defn- set-alias-tx
   {:malli/schema [:=> [:cat :seon.host/db :symbol :symbol [:maybe :symbol]] :seon.db/tx-data]}
   [db nsym a target]
@@ -149,14 +160,15 @@
 
 (defn apply-tx
   "tx-data making each key of m ({key content}, nil content: absent) hold its content on
-  db: definitions upserted by :var/name (entity ids never matter), aliases on their
-  namespace, data by entity id."
+  db: definitions upserted by :var/name (entity ids never matter), ns forms and aliases on
+  their namespace, data by entity id."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :seon.merge/program-key :any]] :seon.db/tx-data]}
   [db m]
   (vec (distinct
          (mapcat (fn [[k content]]
                    (case (first k)
                      :var (set-var-tx db (second k) content)
+                     :ns (set-ns-tx db (second k) content)
                      :alias (set-alias-tx db (second k) (nth k 2) content)
                      :datum (set-datum-tx db k content)))
                  (sort-by (comp pr-edn key) m)))))

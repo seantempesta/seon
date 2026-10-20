@@ -345,6 +345,9 @@
   [id]
   (let [sym (symbol (str "agent." (name id)))
         nsx (create-ns sym)]
+    ;; the agent's own namespace is its scratch pad (seon.program/scratch-ns?): what it
+    ;; defines here never becomes program
+    (alter-meta! nsx assoc :scratch true)
     (binding [*ns* nsx]
       (refer-clojure)
       (refer 'clojure.test :only '[deftest is are testing use-fixtures])

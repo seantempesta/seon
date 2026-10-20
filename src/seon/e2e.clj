@@ -2,7 +2,7 @@
   "Tasks end to end with real agent processes (lanes R1 and M1's proto.agents.e2e): the
   six-task graph with a cancel, a root restart, n parallel tasks, the merge scenarios and a
   swarm over shared definitions. bin/check runs them as modes of target/seon:
-    calc | resume DIR | resume2 DIR | par N | scenario conflict|semantic|hairy [model] | swarm N M | model add|calc
+    calc | resume DIR | resume2 DIR | par N | scenario conflict|semantic|hairy|newns|sibling [model] | swarm N M | model add|calc
   Prints one EDN line per phase; the last line is the run's numbers and its verdict."
   (:require [seon.root :as c] [my.root :as root] [seon.task :as task] [seon.reconcile :as r]
             [seon.fixtures :as fx] [datahike.api :as d] [seon.lib :as lib] [clojure.string :as str]))
@@ -217,6 +217,16 @@
                  (case k
                    :conflict (scenario k pv "(app.m/f 41)" ["42"])
                    :semantic (scenario k pv "[(app.m/scale 3) (app.m/six)]" ["[9 6]"])
-                   :hairy (scenario k pv "(mapv #(% 10) [app.m/f1 app.m/f2 app.m/f3 app.m/f4])" ["[11 12 13 14]"])))
+                   :hairy (scenario k pv "(mapv #(% 10) [app.m/f1 app.m/f2 app.m/f3 app.m/f4])" ["[11 12 13 14]"])
+                   ;; main runs the new namespaces as written: the function, data still data,
+                   ;; the var still dynamic, the test (its :refer) passing, user's def absent,
+                   ;; and the test reaching triple
+                   :sibling (scenario k pv "[(app.s/f 1) (app.s/g 10)]" ["[2 30]"])
+                   :newns (scenario k pv (str "[(app.newns/triple 3) app.newns/ops app.newns/syms"
+                                              " (:dynamic (meta #'app.newns/*depth*)) (binding [app.newns/*depth* 1] app.newns/*depth*)"
+                                              " ((juxt :test :pass :fail :error) (binding [clojure.test/*test-out* (java.io.StringWriter.)] (clojure.test/test-ns 'app.newns-test)))"
+                                              " (some? (resolve 'user/scratch-x))"
+                                              " (seon.program/reaching-tests (seon.agent/db) #{'app.newns/triple})]")
+                                    ["[9 (inc 1) [a b] true 1 [1 1 0 0] false #{app.newns-test/triple-test}]"])))
     "swarm" (swarm (parse-long (first args)) (parse-long (or (second args) "8")))
     "model" (model-run (first args))))

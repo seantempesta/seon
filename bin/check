@@ -39,9 +39,9 @@ echo "== window (SEON_FLUSH_MS=1000: answered unflushed, flushed within the wind
 D=$(mktemp -d /tmp/seon-window.XXXXXX)
 (export SEON_FLUSH_MS=1000; run window-write $D/store | tail -2; run window-read $D/store | tail -1); rm -rf "$D"
 echo "== swarm $N"; run swarm $N | grep -E ":merged|:tasks-done|:fresh"
-echo "== tasks: calc (6-task graph, cancel), scenarios (conflict, semantic, hairy), swarm 20 over 5 shared vars"
+echo "== tasks: calc (6-task graph, cancel), scenarios (conflict, semantic, hairy, newns: new namespaces at the REPL, sibling: a helper in dependency order), swarm 20 over 5 shared vars"
 run e2e calc | tail -1
-for k in conflict semantic hairy; do run e2e scenario $k | tail -1; done
+for k in conflict semantic hairy newns sibling; do run e2e scenario $k | tail -1; done
 run e2e swarm 20 8 | tail -1
 D=$(mktemp -d /tmp/seon-resume.XXXXXX)
 echo "== resume (root SIGKILLed mid-graph; a new root finishes it)"; run e2e resume $D/s > /dev/null; run e2e resume2 $D/s | tail -1; rm -rf "$D"

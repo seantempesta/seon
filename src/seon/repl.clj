@@ -45,12 +45,32 @@
         (some-> (get-in s [:sessions (get req "session") :ns]) find-ns)
         (:ns s))))
 
+(defn- line-starts
+  "The offset in code where each line starts."
+  {:malli/schema [:=> [:cat :string] [:vector :int]]}
+  [^String code]
+  (loop [acc [0] i 0]
+    (let [j (.indexOf code "\n" (int i))]
+      (if (neg? j) acc (recur (conj acc (inc j)) (inc j))))))
+
+(defn- form-src
+  "The exact text of form in code, from its reader position (:line, :column) to where the
+  reader stopped after it (end-line, end-col; all 1-based), or nil for a form that carries
+  no position (a symbol, a number)."
+  {:malli/schema [:=> [:cat :string [:vector :int] :any :int :int] [:maybe :string]]}
+  [code starts form end-line end-col]
+  (let [{:keys [line column]} (meta form)]
+    (when (and line column)
+      (subs code (+ (starts (dec line)) (dec column)) (+ (starts (dec end-line)) (dec end-col))))))
+
 (defn- eval-code
   "Read code once, form by form, and evaluate each with (:repl/eval-fn req) under
-  seon.intr/run. Answers each form; an interrupt stops the request; then done."
+  seon.intr/run. Answers each form, with its exact text (:repl/src); an interrupt stops the
+  request; then done."
   {:malli/schema [:=> [:cat :seon.wire/msg :string] :any]}
   [{:keys [reply] :as req} code]
-  (let [r (java.io.PushbackReader. (java.io.StringReader. code))
+  (let [r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. code))
+        starts (delay (line-starts code))
         eval-fn (:repl/eval-fn req eval)
         timeout (get req "seon/timeout-ms")
         sid (get req "session")]
@@ -79,7 +99,8 @@
                                          (let [v (intr/run timeout #(eval-fn form))] [:ret v *ns*]))
                                        (catch Throwable e [:err e ns (outer-frames)])
                                        (finally (.flush out) (.flush err)))
-                common {"seon/ordinal" n "seon/form" (form-text form) :repl/form form}]
+                common {"seon/ordinal" n "seon/form" (form-text form) :repl/form form
+                        :repl/src (form-src code @starts form (.getLineNumber r) (.getColumnNumber r))}]
             (swap! agent/state update :nss conj (ns-name ns'))
             (if (= tag :ret)
               (let [h (symbol "result" (str "h" n))]
@@ -191,23 +212,23 @@
                                m))))))))
 
 (defn wrap-record
-  "A def in a program namespace becomes a fact on this branch (agent mode): the record
-  goes to the writer as this agent's own transaction."
+  "What a form leaves that is program becomes a fact on this branch (agent mode), as a
+  REPL session leaves it (seon.program/recording): an `ns` form, a new namespace `in-ns`
+  entered, a def, each in any namespace but a scratch one. The record joins the request's
+  recording transaction, the last record of a var or namespace winning."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
     (h (around-reply req
          (fn [m]
-           (let [v (:repl/value m)]
-             (if (and (= :agent (:mode @agent/state)) (var? v) (program/def-form? (:repl/form m))
-                      (program/program-ns? (agent/db) (ns-name (:ns (meta v)))))
-               (if contract/record?
-                 ;; joins the request's recording transaction (the last def of a var wins)
-                 (do (swap! agent/state assoc-in [:defs (symbol v)] (program/record-tx (agent/db) v (:repl/form m)))
-                     (assoc m "seon/recorded" (str (symbol v))))
-                 (do (agent/transact! (program/record-tx (agent/db) v (:repl/form m)))
-                     (assoc m "seon/recorded" (str (symbol v)))))
-               m)))))))
+           (if-let [[what tx] (when (and (= :agent (:mode @agent/state)) (contains? m :repl/value))
+                                (program/recording (agent/db) (:repl/form m) (:repl/src m) (:repl/value m)))]
+             (do (if contract/record?
+                   ;; an in-ns joins the ns form of the same request, never replaces it
+                   (swap! agent/state assoc-in [:defs (if (program/in-ns-form? (:repl/form m)) [:in-ns what] what)] tx)
+                   (agent/transact! tx))
+                 (assoc m "seon/recorded" (str what)))
+             m))))))
 
 (defn- admit
   "Admit a definition by its contract (G1's proto.agent/admit!, Seon's rule): a function var

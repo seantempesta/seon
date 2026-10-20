@@ -93,6 +93,13 @@
     gets one conflict, and its merge agent takes main's version.
   - :semantic: a triples scale; b defines six from scale on a branch where scale doubles.
     No key overlaps, but six-test is red after b's merge agent merges main; it fixes six.
+  - :sibling: a and b change two definitions of one namespace; b merges after a, and b's g
+    calls a helper b defined, h3, which sorts after it. b's merge agent (forked holding
+    main's program, resuming b's branch) must run b's g (lane T5b's finding: loading in name
+    order failed on the helper and left main's stub running).
+  - :newns: n creates two namespaces at its REPL (next-review #6, #5): app.newns with a
+    function, quoted data and a dynamic var, and app.newns-test whose deftest uses a
+    :refer'd fn; a def in `user` stays scratch. Main must run all of it as written.
   - :hairy: a and b both rewrite f1..f4: four conflicts (dial 3), so b's merge fails and
     design -> implement -> test -> merge attach; on main's code b's proofs pass."
   {:conflict {:specs [{:name "a" :ns 'app.m :var "f" :stub (defn1 "f" "0")
@@ -109,6 +116,26 @@
               :replies {"a" [(fenced "scale triples." (str "(in-ns 'app.m)\n" (defn1 "scale" "(* x 3)")))]
                         "b" [(fenced "six is scale of 3." "(in-ns 'app.m)\n(defn six {:malli/schema [:=> [:cat] :int]} [] (scale 3))")]
                         "b-merge" [(fenced "Main's scale triples now, so six must not use it." "(in-ns 'app.m)\n(defn six {:malli/schema [:=> [:cat] :int]} [] 6)")]}}
+   :sibling {:specs [{:name "a" :ns 'app.s :var "f" :stub (defn1 "f" "0") :plan "Make `app.s/f` pass `app.proofs/a-test`." :proof "(deftest a-test (is (= 2 (app.s/f 1))))"}
+                     {:name "b" :ns 'app.s :var "g" :stub (defn1 "g" "0") :plan "Make `app.s/g` pass `app.proofs/b-test`." :proof "(deftest b-test (is (= 30 (app.s/g 10))))"}]
+             :after {"b-merge" "a-merge"}
+             :replies {"a" [(fenced "f adds one." (str "(in-ns 'app.s)\n" (defn1 "f" "(+ x 1)")))]
+                       "b" [(fenced "g triples, through a helper." (str "(in-ns 'app.s)\n" (defn1 "h3" "(* x 3)") "\n" (defn1 "g" "(h3 x)")))]}}
+   :newns {:specs [{:name "n" :ns 'app.m :proofs #{'app.newns-test/triple-test}
+                    :plan "Create the namespace `app.newns` with `triple` (three times x), and its tests in `app.newns-test`, which refers `triple`."}]
+           :after {}
+           :replies {"n" [(fenced "A new namespace and its tests, as at any REPL."
+                                  (str/join "\n" ["(ns app.newns)"
+                                                  "(defn triple {:malli/schema [:=> [:cat :int] :int]} [x] (* 3 x))"
+                                                  "(def ops '(inc 1))"
+                                                  "(def syms '[a b])"
+                                                  "(def ^:dynamic *depth* 0)"
+                                                  "(ns app.newns-test"
+                                                  "  (:require [clojure.test :refer [deftest is]]"
+                                                  "            [app.newns :refer [triple]]))"
+                                                  "(deftest triple-test (is (= 9 (triple 3))))"
+                                                  "(in-ns 'user)"
+                                                  "(def scratch-x 41)"]))]}}
    :hairy {:specs (into [{:name "a" :ns 'app.m :var "f1" :stub (defn1 "f1" "0") :proofs #{'app.proofs/a-test}
                           :proof "(deftest a-test (is (= [2 3 4 5] [(app.m/f1 1) (app.m/f2 1) (app.m/f3 1) (app.m/f4 1)])))"}
                          {:name "b" :ns 'app.m :proofs #{'app.proofs/b-test}
