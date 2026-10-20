@@ -1,0 +1,10 @@
+;; Looks up every `ns-test/name` symbol cited in ideas.md in tests.edn; prints the unresolved ones and the state counts.
+(require '[clojure.edn :as edn] '[clojure.string :as str])
+(def dir "docs/research/agent-platform/2026-10-20/census/")
+(def ts (edn/read-string (slurp (str dir "tests.edn"))))
+(def by (into {} (map (juxt :census/sym identity)) ts))
+(def cited (->> (re-seq #"`([a-z0-9.\-]+-test/[a-z0-9\-?!*<>=]+)`" (slurp (str dir "ideas.md"))) (map (comp symbol second)) distinct))
+(def missing (remove by cited))
+(println "cited" (count cited) "missing" (vec missing))
+(println "states" (frequencies (map #(:census/last-result (by %)) (filter by cited))))
+(println "red cited" (vec (filter #(= :red (:census/last-result (by %))) (filter by cited))))
