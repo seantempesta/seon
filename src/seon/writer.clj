@@ -20,12 +20,14 @@
   st)
 
 (defn- branch-merge
-  "seon.merge/three-way of branch br against main, from its merge base (the writer's :base:
-  the branch point, or main as the branch last merged it). data-attrs: the data that
-  merges beside the program (lane M1)."
-  {:malli/schema [:=> [:cat :seon.writer/state :seon.writer/branch :seon.merge/data-attrs] :seon.merge/result]}
-  [{:keys [conn]} br data-attrs]
-  (pm/three-way (pm/program (:base br) data-attrs) (pm/program @(:conn br) data-attrs) (pm/program @conn data-attrs)))
+  "seon.merge/three-way of branch b against main, from their merge base over Datahike's
+  commit graph (the branch point, or the main the branch last merged), the branch read
+  from the store (its agent commits it). data-attrs: the data that merges beside the
+  program (lane M1)."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.db/branch :seon.merge/data-attrs] [:tuple :seon.host/db :seon.merge/result]]}
+  [{:keys [conn]} b data-attrs]
+  (let [head (pdb/head conn b)]
+    [head (pm/three-way (pm/program (pdb/branch-base conn b) data-attrs) (pm/program head data-attrs) (pm/program @conn data-attrs))]))
 
 (defn- merge-branch
   "Merge the branch into main (git: only a branch that contains main's head; lane M1). Main's
@@ -33,228 +35,119 @@
   apply as one merge commit, clean by construction. Otherwise the branch is behind
   (:seon.merge/behind: a merge task merges main first). Refused also while the branch has
   unmerged entries (:seon.merge/unmerged) or carries an uncontracted function
-  (:seon.merge/uncontracted: contracts decide what is admitted). Answers [st br result]."
-  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.writer/branch :seon.db/branch :seon.merge/data-attrs] [:tuple :seon.writer/state :seon.writer/branch :map]]}
-  [st o br branch data-attrs]
+  (:seon.merge/uncontracted: contracts decide what is admitted). Answers [st result]."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/branch :seon.merge/data-attrs] [:tuple :seon.writer/state :map]]}
+  [st o branch data-attrs]
   (let [conn (:conn st)
-        r (branch-merge st br data-attrs)
-        head @(:conn br)
+        [head r] (branch-merge st branch data-attrs)
         main @conn
         unmerged (pm/unmerged head (pm/program head #{}))
         uncontracted (when contract/on?
-                       (vec (sort-by str (for [[[k sym] [_ o]] (:ours r)
-                                               :when (and (= :var k) (= :fn (:kind o)) (nil? (:contract o)))]
+                       (vec (sort-by str (for [[[k sym] [_ ov]] (:ours r)
+                                               :when (and (= :var k) (= :fn (:kind ov)) (nil? (:contract ov)))]
                                            sym))))]
     (cond
       (seq (:theirs r))
-      [st br (contract/error :seon.merge/behind 'seon.writer/merge-branch
-                             (str "main changed " (count (:theirs r)) " key(s) since the branch's merge base: merge main into the branch first")
-                             {:merged? false :tx (:max-tx main) :behind (count (:theirs r))
-                              :seon.error/fix "A merge task merges main into the branch (my.branch/merge-main!), resolves any conflict, and its proofs run on the combined program."})]
+      [st (contract/error :seon.merge/behind 'seon.writer/merge-branch
+                          (str "main changed " (count (:theirs r)) " key(s) since the branch's merge base: merge main into the branch first")
+                          {:merged? false :tx (:max-tx main) :behind (count (:theirs r))
+                           :seon.error/fix "A merge task merges main into the branch (my.branch/merge-main!), resolves any conflict, and its proofs run on the combined program."})]
       (seq unmerged)
-      [st br (contract/error :seon.merge/unmerged 'seon.writer/merge-branch
-                             (str "the branch has " (count unmerged) " unmerged entr(ies)")
-                             {:merged? false :tx (:max-tx main) :unmerged (mapv :key unmerged)})]
+      [st (contract/error :seon.merge/unmerged 'seon.writer/merge-branch
+                          (str "the branch has " (count unmerged) " unmerged entr(ies)")
+                          {:merged? false :tx (:max-tx main) :unmerged (mapv :key unmerged)})]
       (seq uncontracted)
-      [st br (contract/error :seon.merge/uncontracted 'seon.writer/merge-branch
-                             (str "the branch carries " (count uncontracted) " function(s) without a contract")
-                             {:merged? false :tx (:max-tx main) :uncontracted uncontracted
-                              :seon.error/fix "Declare each function's contract ({:malli/schema [:=> [:cat ...] ...]}) and merge again."})]
-      (empty? (:ours r)) [st br {:merged? true :tx (:max-tx main) :datoms 0 :keys 0}]
+      [st (contract/error :seon.merge/uncontracted 'seon.writer/merge-branch
+                          (str "the branch carries " (count uncontracted) " function(s) without a contract")
+                          {:merged? false :tx (:max-tx main) :uncontracted uncontracted
+                           :seon.error/fix "Declare each function's contract ({:malli/schema [:=> [:cat ...] ...]}) and merge again."})]
+      (empty? (:ours r)) [st {:merged? true :tx (:max-tx main) :datoms 0 :keys 0}]
       :else
       (let [tx (pm/apply-tx main (into {} (for [[k [_ ov]] (:ours r)] [k ov])))
+            ;; git: the branch head becomes a parent, so the merge base moves to it
             rep (d/merge-db conn #{branch} tx)
             t (:max-tx (:db-after rep))
             ops (pdb/report->tx rep)]
-        ;; git: the merge base moves to the branch head that was merged
         [(main-commit st o t ops (:db-after rep))
-         (assoc br :base head)
          {:merged? true :tx t :datoms (count ops) :keys (count (:ours r))}]))))
 
-(defn- merge-main-into
-  "git merge main, on the branch (lane M1): main's changes since the merge base that the
-  branch did not make itself apply in one merge commit with main as parent, and each
-  conflict stays on the branch as an unmerged entry (base, ours, theirs) for its agent to
-  resolve. The merge base moves to main. Nothing changed on main: no commit. The resolved
-  datoms go to the agent as :sync (its program loads them)."
-  {:malli/schema [:=> [:cat :seon.writer/state :seon.writer/branch :seon.merge/data-attrs] [:tuple :seon.writer/branch :map]]}
-  [st br data-attrs]
-  (let [r (branch-merge st br data-attrs)
-        main @(:conn st)
-        head @(:conn br)]
-    (if (empty? (:theirs r))
-      [br {:ok true :applied [] :conflicts [] :t (:max-tx head)}]
-      (let [theirs (pm/program main data-attrs)
-            tx (into (pm/apply-tx head (into {} (for [k (:apply r)] [k (get theirs k)])))
-                     (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
-            rep (d/merge-db (:conn br) #{:db} tx)
-            t (:max-tx (:db-after rep))
-            rops (pdb/report->tx rep)]
-        [(assoc br :base main)
-         {:ok true :applied (:apply r) :conflicts (:conflicts r) :t t :datoms (count rops)
-          :sync {:op :sync :t t :tx-data rops}}]))))
-
-(defn- realize
-  "A branch recovered from the store at boot: its merge base is git's merge-base of the
-  branch and main over Datahike's commit graph (merges record their parents)."
-  {:malli/schema [:=> [:cat :seon.writer/state :seon.db/branch] :seon.writer/state]}
-  [st b]
-  (if-not (get-in st [:branches b :recovered])
-    st
-    (update-in st [:branches b] #(-> % (dissoc :recovered) (assoc :base (pdb/branch-base (:conn st) b))))))
-
-(defn- with-conn {:malli/schema [:=> [:cat :seon.writer/state [:maybe :seon.db/branch]] :seon.writer/state]}
-  [st b]
-  (let [st (if (and b (get-in st [:branches b]) (nil? (get-in st [:branches b :conn])))
-             (assoc-in st [:branches b :conn] (d/connect (assoc (:cfg st) :branch b)))
-             st)]
-    (if (and b (get-in st [:branches b :recovered])) (realize st b) st)))
-
-(defn- release-ended {:malli/schema [:=> [:cat :seon.writer/state [:maybe :seon.db/branch]] :seon.writer/state]}
-  [st b]
-  (let [br (get-in st [:branches b])]
-    (if (and (:released br) (:conn br))
-      (do (d/release (:conn br)) (update-in st [:branches b] dissoc :conn))
-      st)))
-
-(defn- touch {:malli/schema [:=> [:cat :seon.writer/state [:maybe :seon.db/branch]] :seon.writer/state]}
-  [st b]
-  (if (and b (get-in st [:branches b :conn]))
-    (let [t (inc (:tick st 0)) old (get-in st [:branches b :used])]
-      (-> st (assoc :tick t) (assoc-in [:branches b :used] t)
-          (update :lru (fn [l] (assoc (if old (dissoc l old) (or l (sorted-map))) t b)))))
-    st))
-
-(defn- evict-lru {:malli/schema [:=> [:cat :seon.writer/state] :seon.writer/state]}
-  [st]
-  (loop [st st]
-    (if (<= (count (:lru st)) cfg/OPEN-BRANCHES)
-      st
-      (let [[t b] (first (:lru st))
-            br (get-in st [:branches b])
-            st (update st :lru dissoc t)]
-        (recur (if (and (:conn br) (= t (:used br)))
-                 (do (d/release (:conn br)) (update-in st [:branches b] dissoc :conn :used))
-                 st))))))
-
 (defn- answer
-  "The answer r for dest, as data on :to-api; sent after the batch's flush."
+  "The answer r for dest, as data on :to-api."
   {:malli/schema [:=> [:cat :seon.host/volatile [:maybe :map] :any] :nil]}
   [o dest r] (when dest (step/out! o :to-api {:dest dest :r r})))
 
 (defn- commit-batch
-  "Group commit: every queued transaction, one Datahike commit per branch
+  "Group commit of root's writes to main: every queued transaction, one Datahike commit
   (datahike.writer/transact-batch!), in arrival order. Answers st."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile] :seon.writer/state]}
   [st o]
-  (reduce
-    (fn [st [b ms reps]]
-      (do
-        (reduce
-          (fn [st [m rep]]
-            (if-not (map? rep)
-              (do (answer o (:dest m) {:ok false :error (step/error-msg rep)}) st)
-              (let [t (:max-tx (:db-after rep)) ops (pdb/report->tx rep)]
-                (if (= b :db)
-                  (do (answer o (:dest m) {:ok true :t t :datoms (count ops)})
-                      (main-commit st o t ops (:db-after rep)))
-                  (do (step/out! o :events (step/event {:type :tx :agent (:agent m) :branch b :t t :datoms (count ops)}))
-                      (answer o (:dest m) {:ok true :t t :datoms (count ops) :tx-data ops
-                                           :tempids (into {} (filter (comp string? key)) (:tempids rep))})
-                      st)))))
-          (update st :commits inc) (map vector ms reps))))
-    (dissoc st :pend :pend-order)
-    (let [batch (fn [b] (let [ms (get-in st [:pend b])
-                              conn (if (= b :db) (:conn st) (get-in st [:branches b :conn]))]
-                          [b ms (dw/transact-batch! conn (mapv (fn [m] {:tx-data (:tx-data m)}) ms))]))]
-      (if cfg/PAR-COMMIT
-        ;; experiment (writer design B): each branch's batch on its own thread
-        (mapv deref (mapv #(future (batch %)) (:pend-order st)))
-        (map batch (:pend-order st))))))
+  (if-let [ms (seq (:pend st))]
+    (reduce (fn [st [m rep]]
+              (if-not (map? rep)
+                (do (answer o (:dest m) {:ok false :error (step/error-msg rep)}) st)
+                (let [t (:max-tx (:db-after rep)) ops (pdb/report->tx rep)]
+                  (answer o (:dest m) {:ok true :t t :datoms (count ops)})
+                  (main-commit st o t ops (:db-after rep)))))
+            (-> st (dissoc :pend) (update :commits inc))
+            (map vector ms (dw/transact-batch! (:conn st) (mapv (fn [m] {:tx-data (:tx-data m)}) ms))))
+    st))
 
 (defn- other-op
   "Every request but :tx. Answers the new state."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.writer/request] :seon.writer/state]}
   [st o {:keys [op dest] :as m}]
-  (let [conn (:conn st) cfg (:cfg st)
-        st (cond-> st
-             (not (#{:spawn :clone-branch :release} op)) (with-conn (:branch m))
-             (= op :clone-branch) (with-conn (:from m)))
+  (let [conn (:conn st)
+        exists? (fn [b] (contains? (d/branches conn) b))
         reply (fn [st r] (answer o dest r) st)]
     (case op
-      :release (let [br (get-in st [:branches (:branch m)])]
-                 (when-let [c (:conn br)] (d/release c))
-                 (reply (cond-> st br (update-in [:branches (:branch m)] #(-> % (dissoc :conn) (assoc :released true)))) {:ok true}))
-      :spawn (let [{:keys [agent branch slot]} m
-                   fork {:op :fork :agent agent :branch branch :ns (:ns m) :fd (:fd m)}]
-               (if (get-in st [:branches branch])
-                 ;; an existing branch: forked with main, then synced to the branch's head
-                 (let [st (realize (with-conn st branch) branch)
-                       head @(get-in st [:branches branch :conn])]
-                   (step/out! o :to-fork-server fork)
-                   (answer o {:agent agent} {:op :sync :resume true :t (:max-tx head) :tx-data (pdb/diff-ops @conn head)})
-                   (reply (update-in st [:branches branch] dissoc :released) {:ok true :t (:max-tx head) :resumed true}))
-                 ;; the branch, not yet a connection: one is opened at the branch's first
-                 ;; op (with-conn), so a spawn costs d/branch! alone
-                 (let [main @conn]
-                   (d/branch! conn :db branch)
-                   (step/out! o :to-fork-server fork)
-                   (reply (assoc-in st [:branches branch] {:base main})
-                          {:ok true :t (:max-tx main)}))))
-      :clone-branch (let [{:keys [from branch]} m
-                          parent (get-in st [:branches from])]
-                      (d/branch! conn from branch)
-                      (let [bconn (d/connect (assoc cfg :branch branch))]
-                        (reply (assoc-in st [:branches branch] (assoc (select-keys parent [:base]) :conn bconn))
-                               {:ok true :t (:max-tx @bconn)})))
-      :merge-main (let [[br' r] (merge-main-into st (get-in st [:branches (:branch m)]) (:data-attrs m #{}))]
-                    (reply (assoc-in st [:branches (:branch m)] br') r))
-      :merge (if-let [br (get-in st [:branches (:branch m)])]
-               (let [[st br' r] (merge-branch st o br (:branch m) (:data-attrs m #{}))]
-                 (reply (assoc-in st [:branches (:branch m)] br') r))
+      ;; an agent process committed its branch: the store is dirty until the next flush
+      :agent-commit (assoc st :dirty true)
+      ;; the agent's branch (new: a pointer to main's head), then its fork: the agent opens
+      ;; the branch itself and owns its writes (run-ahead, committed by the agent)
+      :spawn (let [{:keys [agent branch]} m
+                   resumed? (exists? branch)]
+               (when-not resumed? (d/branch! conn :db branch))
+               (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :ns (:ns m) :fd (:fd m)
+                                              :cfg (:cfg st) :lease (:lease m) :resumed resumed?})
+               (reply st {:ok true :t (:max-tx @conn) :resumed resumed?}))
+      :clone-branch (do (d/branch! conn (:from m) (:branch m))
+                        (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st) :lease (:lease m)}))
+      :merge (if (exists? (:branch m))
+               (let [[st r] (merge-branch st o (:branch m) (:data-attrs m #{}))] (reply st r))
                (reply st {:merged? false :error (str "no branch " (:branch m))}))
       ;; one derivation (seon.merge/three-way) for the dashboard, the done rule and merges
-      :branch-diff (let [br (get-in st [:branches (:branch m)])]
-                     (reply st (if br
-                                 (let [r (branch-merge st br (:data-attrs m #{}))
-                                       head @(:conn br)]
-                                   {:ok true :ours (vec (sort-by str (keys (:ours r)))) :theirs (count (:theirs r))
-                                    :conflicts (count (:conflicts r))
-                                    :unmerged (mapv :key (pm/unmerged head (pm/program head #{})))
-                                    :vars (into (sorted-set) (keep (fn [[k s]] (when (= :var k) s))) (keys (:ours r)))})
-                                 {:ok false :error (str "no branch " (:branch m))})))
-      ;; root's read of a branch (or main): the value itself, in this process; :base-t is
+      :branch-diff (reply st (if (exists? (:branch m))
+                               (let [[head r] (branch-merge st (:branch m) (:data-attrs m #{}))]
+                                 {:ok true :ours (vec (sort-by str (keys (:ours r)))) :theirs (count (:theirs r))
+                                  :conflicts (count (:conflicts r))
+                                  :unmerged (mapv :key (pm/unmerged head (pm/program head #{})))
+                                  :vars (into (sorted-set) (keep (fn [[k s]] (when (= :var k) s))) (keys (:ours r)))})
+                               {:ok false :error (str "no branch " (:branch m))}))
+      ;; root's read of a branch (or main): its committed value from the store; :base-t is
       ;; main's t at the branch's merge base (what of main it holds)
-      :branch-db (reply st (if (= :db (:branch m))
-                             {:ok true :db @conn}
-                             (if-let [c (get-in st [:branches (:branch m) :conn])]
-                               (cond-> {:ok true :db @c}
-                                 (get-in st [:branches (:branch m) :base]) (assoc :base-t (:max-tx (get-in st [:branches (:branch m) :base]))))
-                               {:ok false :error (str "no branch " (:branch m))})))
-      :branch-info (let [br (get-in st [:branches (:branch m)])]
-                     (reply st (if br
-                                 {:ok true :datoms (count (d/datoms @(:conn br) :eavt)) :t (:max-tx @(:conn br))}
-                                 {:ok false :error (str "no branch " (:branch m))})))
+      :branch-db (reply st (cond
+                             (= :db (:branch m)) {:ok true :db @conn}
+                             (exists? (:branch m)) {:ok true :db (pdb/head conn (:branch m))
+                                                    :base-t (:max-tx (pdb/branch-base conn (:branch m)))}
+                             :else {:ok false :error (str "no branch " (:branch m))}))
+      :branch-info (reply st (if (exists? (:branch m))
+                               (let [h (pdb/head conn (:branch m))] {:ok true :datoms (count (d/datoms h :eavt)) :t (:max-tx h)})
+                               {:ok false :error (str "no branch " (:branch m))}))
       (reply st {:ok false :error (str "unknown op " op)}))))
 
 (defn- writer-one
-  "One request into the batch: a :tx joins its branch's queue; any other op first commits
-  the queue (it reads committed heads), then runs."
+  "One request into the batch: root's :tx on main joins the batch; any other op first
+  commits the batch (it reads committed heads), then runs."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.writer/request] :seon.writer/state]}
   [st o {:keys [op] :as m}]
   (try
     (if (= op :tx)
-      (let [b (:branch m)
-            st (if (= b :db) st (with-conn st b))]
-        (if (or (= b :db) (get-in st [:branches b]))
-          (cond-> (update-in st [:pend b] (fnil conj []) m)
-            (not (get-in st [:pend b])) (update :pend-order (fnil conj []) b))
-          (do (answer o (:dest m) {:ok false :error (str "no branch " b)}) st)))
+      (update st :pend (fnil conj []) m)
       (other-op (commit-batch st o) o m))
     (catch Throwable e
       ;; an interop edge (Datahike) refused: the request's answer is the error, as data
       (answer o (:dest m) {:ok false :merged? false :error (step/error-msg e)})
-      (dissoc st :pend :pend-order))))
+      (dissoc st :pend))))
 
 (defn- drain {:malli/schema [:=> [:cat :seon.host/chan :seon.writer/request] [:vector :seon.writer/request]]}
   [ch m]
@@ -264,8 +157,10 @@
       acc)))
 
 (defn writer-proc
-  "The writer. In :in (every write request, from the :api and the agents' stand-ins; an
-  external channel, so stand-ins in other graphs reach it). Out :to-fork-server (main's
+  "The writer: root's own writes to main (group commit), d/branch!, and every merge into
+  main. Each agent process writes its own branch (run-ahead, seon.agent) and tells it
+  :agent-commit, so the one flush covers it. In :in (every write request, from the :api
+  and the agents' stand-ins). Out :to-fork-server (main's
   commits and forks, FIFO), :to-api (answers {:dest :r}, after the batch's flush, and
   {:op :writer :tx-count :p50-ms :commits}), :main (main's commits), :events.
   A closed :in is the end of the flow: everything taken is committed and flushed, then
@@ -277,13 +172,10 @@
               :to-flusher "the store became dirty"}
        ;; its own thread: a transaction is CPU and store work the fiber scheduler cannot see
        :workload :mixed
-       :ping-map-fn (fn [st] {:tx-count (:tx-count st) :commits (:commits st) :flushes (:flushes st 0) :dirty (boolean (:dirty st)) :open-branches (count (:lru st)) :main-t (:max-tx @(:conn st))})})
-  ([args] (assoc args :branches (into {} (for [b (:recovered args)] [b {:recovered true :released true}]))
-                 :tx-count 0 :commits 0 :batches 0
+       :ping-map-fn (fn [st] {:tx-count (:tx-count st) :commits (:commits st) :flushes (:flushes st 0) :dirty (boolean (:dirty st)) :main-t (:max-tx @(:conn st))})})
+  ([args] (assoc args :tx-count 0 :commits 0 :batches 0
                  ::flow/in-ports {:in (:to-writer args)} ::flow/out-ports {:events (:events args)}))
   ([st tr]
-   (when (= tr ::flow/stop)
-     (doseq [[_ br] (:branches st)] (when-let [c (:conn br)] (d/release c))))
    st)
   ([st _ m]
    (if (nil? m)
@@ -298,7 +190,7 @@
            reqs (remove #(= :flush (:op %)) ms)
            st (commit-batch (reduce #(writer-one %1 o %2) st reqs) o)
            commits (- (:commits st) c0)
-           dirty (or (:dirty st) (pos? commits))
+           dirty (or (:dirty st) (pos? commits))  ; root's commits, or an agent's (:agent-commit)
            ;; one flush covers every commit since the last: when the flusher's window ends, or
            ;; now for a write an outside effect follows (:flush?); otherwise the answers go
            ;; out unflushed and the flusher is told once that the store is dirty
@@ -311,9 +203,7 @@
                                                      (assoc st :dirty true :notified true))
                 :else (assoc st :dirty dirty))
            n-tx (count (filter #(= :tx (:op %)) reqs))
-           st (-> (reduce (fn [st m] (-> st (release-ended (:branch m)) (release-ended (:from m)) (touch (:from m)) (touch (:branch m)))) st reqs)
-                  evict-lru
-                  (update :tx-count + n-tx) (update :batches inc))]
+           st (-> st (update :tx-count + n-tx) (update :batches inc))]
        (when (seq reqs)
          (step/out! o :to-api {:op :writer :tx-count (:tx-count st) :batch-ms (lib/ms-since t0) :n-tx n-tx :commits commits}))
        [st @o]))))

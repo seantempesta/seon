@@ -44,9 +44,7 @@
  :seon.step/control [:maybe [:enum :pause :resume :ping :stop]]
  :seon.step/out [:maybe :seon.host/volatile]
  ;; the writer's state and requests (seon.writer)
- :seon.writer/state [:map [:conn :seon.host/conn] [:cfg :seon.db/cfg] [:branches :map]]
- :seon.writer/branch [:map {:description "The writer's entry for one branch: its merge base, its log since then, its connection once opened."}
-                      [:conn {:optional true} [:maybe :seon.host/conn]] [:base {:optional true} :seon.host/db]]
+ :seon.writer/state [:map [:conn :seon.host/conn] [:cfg :seon.db/cfg]]
  :seon.writer/request [:map [:op :keyword]]
  :seon.writer/answer [:map [:dest :map] [:r :any]]
  ;; the fork server (seon.fork-server)

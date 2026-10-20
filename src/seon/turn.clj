@@ -63,12 +63,14 @@
      :refusals (r/done-refusals (r/done-input (r/view db) id results unc (mapv #(pr-str (:key %)) unmerged) nil))}))
 
 (defn- end!
-  "The attempt's end: the live runtime staged onto the branch, then the end written there."
+  "The attempt's end: the live runtime staged onto the branch, the end written there, and
+  the branch committed (a turn's end commits the agent's run-ahead writes)."
   {:malli/schema [:=> [:cat :map :seon.attempt/outcome [:maybe :string]] :seon.turn/end]}
   [{:keys [turn tokens t0 attempt]} outcome reason]
   (harvest/harvest!)
   (agent/transact! [(cond-> {:seon.end/attempt attempt :seon.end/outcome outcome :seon.end/turns turn :seon.end/tokens tokens}
                       reason (assoc :seon.end/reason reason))])
+  (agent/commit!)
   (cond-> {:outcome outcome :turns turn :model-calls turn :tokens tokens :results {} :uncontracted #{}
            :ms (/ (- (System/nanoTime) t0) 1e6)}
     reason (assoc :reason reason)))

@@ -24,7 +24,9 @@ candidate; **Jolt** = specific to running on Jolt (kept on `jolt/main`).
 - Base: `e95a7ef`, v10.4.1. Ours: `359f151` applies Jolt's chez-patches 0006 (`c/thread.c`) and 0007 (`c/segment.c`, `c/gcwrapper.c`, `c/externs.h`). Both generic (Chez candidates, 0007 macOS arm64 only).
 - **Not applied: patches 0001–0005** (lock-free thread activation, oversize chunk spare segment, boot load in place, vfasl string sharing, same-device). This is the kernel the running runtime (`jolt-final`) was built with: its binary has `S_share_static_code` but neither `S_lockfree_activation` nor `S_vfasl_bytes`. `notes/HANDOFF.md` and `notes/decision-bench.md` say 0001–0007; that is wrong. `e14/chez-full-install` has 0001–0007 but no committed source. See `SCAFFOLD.md` for the choice.
 
-## datahike — `reference-code/datahike`, `a1/jolt-main` = `b8d109b` (owned by L1; moving)
+## datahike — `reference-code/datahike`, `jolt/run-ahead` = `fe50764` on `jolt/main` `25a6b5d` (owned by L1; moving)
+
+- A1 `jolt/run-ahead` (for root to merge onto `jolt/main`): `032552b` `datahike.writer/apply!`, `pending?`, `commit-pending!` (run-ahead writes at a :sync writer's serial caller); `fe50764` `merge-db!` on a :sync writer applies on the calling thread (its `go` block hung a forked agent, which has no scheduler threads). `jolt/main` `25a6b5d` = b8d109b + `jolt/tests-qcache-off` 0f1b619 + `jolt/sync-through` 5ed8d8f.
 
 - A1 (2026-10-20): `a1/jolt-main` = `jolt/main` `fde9f89` (which already holds F2's f2-final `writer.cljc` byte for byte) + `jolt/node-cache-reads` `deee8c2` + `jolt/qcache-off` `21bc8cd` + `jolt/branch-pointer` `7de2e94` (on `jolt/branch-roster` `c0f9149`). `jolt/main` itself is checked out in L1's worktree `l1/qc/dh-main`, so root moves it. Versioning tests: 13 tests, 49 pass, 3 fail, 4 error; `jolt/main` is 1 fail, 4 error. The 2 new failures are `commit-as-db-preserves-only-attached-generation-identity`'s query-cache evidence assertions (miss-owner, hit), which `qcache-off` makes false by design.
 

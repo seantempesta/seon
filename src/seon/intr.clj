@@ -31,7 +31,7 @@
 (defn now-ns {:malli/schema [:=> [:cat] :int]}
   [] (c-clock-gettime-nsec 8)) ; CLOCK_UPTIME_RAW, as T1's harness reads it
 
-(def SIGUSR1 30)
+(def SIGUSR1 lib/SIGUSR1)
 (def SIGALRM 14)
 
 ;; The live bounded evals of this process, innermost first. The signal handlers run

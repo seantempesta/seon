@@ -87,9 +87,9 @@
         (is (= {:rid 7} (:dest (first (:to-api outs)))))
         (is (empty? (:inflight st)))
         (is (some #(= :idle (get-in % [:set :status])) (:to-api outs)))))
-    (testing "the agent's write goes to the writer, its answer addressed back to this agent"
-      (let [[_ outs] (step #'ap/agent-proc st :from {:msg {:op :tx :k 1 :tx-data [{:note/text "x"}]}})]
-        (is (= {:agent :a1 :op :tx-reply :k 1} (:dest (first (:to-writer outs)))))))
+    (testing "the agent committed its own branch: the writer hears it, for the next flush"
+      (let [[_ outs] (step #'ap/agent-proc st :from {:msg {:op :committed :t 5 :txs 2}})]
+        (is (= [{:op :agent-commit :branch :agent-1 :t 5}] (:to-writer outs)))))
     (testing ":dead ends the agent, naming the requests it leaves unanswered"
       (let [[st outs] (step #'ap/agent-proc st :from {:msg {:op :dead}})]
         (is (:dead? st))

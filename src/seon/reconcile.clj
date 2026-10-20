@@ -47,13 +47,13 @@
 
 (defn- live?
   "Is attempt a running in this boot of root (its agent is root's to observe)?"
-  {:malli/schema [:=> [:cat :map :seon.attempt/attempt] :boolean]}
+  {:malli/schema [:=> [:cat :seon.reconcile/view :seon.attempt/attempt] :boolean]}
   [v a] (and (= :running (:seon.attempt/status a)) (= (:boot (:root v)) (:seon.attempt/boot a))))
 
 (defn- done-in?
   "Is task id done: a merge task merged into main (:merged), another accepted on its
   branch (:done)?"
-  {:malli/schema [:=> [:cat :map :seon.task/id] :boolean]}
+  {:malli/schema [:=> [:cat :seon.reconcile/view :seon.task/id] :boolean]}
   [v id] (boolean (some #(#{:merged :done} (:seon.attempt/status %)) (get-in v [:attempts id]))))
 
 (defn desired-env
@@ -124,7 +124,7 @@
 
 (defn- done-by?
   "Was task id merged into main at or before main's t `basis` (nil: at any t)?"
-  {:malli/schema [:=> [:cat :map :seon.task/id [:maybe :int]] :boolean]}
+  {:malli/schema [:=> [:cat :seon.reconcile/view :seon.task/id [:maybe :int]] :boolean]}
   [v id basis]
   (boolean (some #(and (= :merged (:seon.attempt/status %)) (or (nil? basis) (<= (:seon.attempt/merged-t % 0) basis)))
                  (get-in v [:attempts id]))))
@@ -133,7 +133,7 @@
   "The done rule's input for attempt results of task id, observed against main at t
   `basis` (nil: main as the view holds it): proofs of tasks done by then must stay green;
   proofs of the others may be red."
-  {:malli/schema [:=> [:cat :map :seon.task/id :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:maybe :int]] :seon.reconcile/done-input]}
+  {:malli/schema [:=> [:cat :seon.reconcile/view :seon.task/id :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:maybe :int]] :seon.reconcile/done-input]}
   [v id results uncontracted unmerged basis]
   (let [others (vals (dissoc (:tasks v) id))
         done (filter #(done-by? v (:seon.task/id %) basis) others)
@@ -166,7 +166,7 @@
   [db id] (done-in? (view db) id))
 
 (defn- blocked-in
-  {:malli/schema [:=> [:cat :map :seon.task/id] [:set :seon.task/id]]}
+  {:malli/schema [:=> [:cat :seon.reconcile/view :seon.task/id] [:set :seon.task/id]]}
   [v id] (into #{} (remove #(done-in? v %)) (get-in v [:tasks id :seon.task/needs])))
 
 (defn blocked-by
@@ -176,7 +176,7 @@
 
 (defn- depth
   "A task's depth in the needs DAG (0: no needs), the order attempts start in."
-  {:malli/schema [:=> [:cat :map :seon.task/id] :int]}
+  {:malli/schema [:=> [:cat :seon.reconcile/view :seon.task/id] :int]}
   [v id]
   (let [ns (get-in v [:tasks id :seon.task/needs])]
     (if (empty? ns) 0 (inc (apply max (map #(depth v %) ns))))))
@@ -184,7 +184,7 @@
 (defn- ready?
   "Should task t have an attempt running: released, not done, every need done, no attempt
   live or awaiting judgement."
-  {:malli/schema [:=> [:cat :map :seon.task/task] :boolean]}
+  {:malli/schema [:=> [:cat :seon.reconcile/view :seon.task/task] :boolean]}
   [v t]
   (let [id (:seon.task/id t) as (get-in v [:attempts id])]
     (and (= :running (:seon.task/execution t))
@@ -206,19 +206,18 @@
 (defn- kill-reason
   "Why live attempt a must stop, or nil: its task is no longer released, or its desired
   environment differs from the one it runs in."
-  {:malli/schema [:=> [:cat :map :seon.attempt/attempt] [:maybe [:enum :cancelled :held :env-changed]]]}
-  [v a]
-  (let [t (get-in v [:tasks (:seon.attempt/task a)])]
-    (cond (= :cancelled (:seon.task/execution t)) :cancelled
-          (= :held (:seon.task/execution t)) :held
-          (not= (desired-env t) (:seon.attempt/env a)) :env-changed)))
+  {:malli/schema [:=> [:cat :seon.task/task :seon.attempt/attempt] [:maybe [:enum :cancelled :held :env-changed]]]}
+  [t a]
+  (cond (= :cancelled (:seon.task/execution t)) :cancelled
+        (= :held (:seon.task/execution t)) :held
+        (not= (desired-env t) (:seon.attempt/env a)) :env-changed))
 
 (defn- to-kill-in
   {:malli/schema [:=> [:cat :map] [:vector [:tuple :seon.attempt/id :keyword]]]}
   [v]
   (vec (for [a (sort-by :seon.attempt/id (apply concat (vals (:attempts v))))
              :when (live? v a)
-             :let [r (kill-reason v a)] :when r]
+             :let [r (kill-reason (get-in v [:tasks (:seon.attempt/task a)]) a)] :when r]
          [(:seon.attempt/id a) r])))
 
 (defn to-kill
@@ -318,7 +317,7 @@
 (defn- request
   "Send req to the api as this proc's request: the answer comes back on :answers tagged by a
   new request id, which then names step of attempt aid's flight. Answers [st output]."
-  {:malli/schema [:=> [:cat :map :seon.attempt/id :keyword :map] [:tuple :map :map]]}
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.attempt/id :seon.reconcile/step :map] [:tuple :seon.reconcile/state :map]]}
   [st aid step req]
   (let [rid (inc (:rid st))]
     [(-> st (assoc :rid rid) (assoc-in [:pending rid] [aid step]))
@@ -326,18 +325,18 @@
 
 (defn- write
   "A write on main through the writer, as step of aid's flight."
-  {:malli/schema [:=> [:cat :map :seon.attempt/id :keyword [:sequential :any]] [:tuple :map :map]]}
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.attempt/id :seon.reconcile/step [:sequential :any]] [:tuple :seon.reconcile/state :map]]}
   [st aid step tx] (request st aid step {:op :write :req {:op :tx :branch :db :tx-data (vec tx)}}))
 
 (defn- provider-for
   "The provider an attempt's env asks for: the proc's provider, its model the task's when set."
-  {:malli/schema [:=> [:cat :map :seon.task/env] :seon.model/provider]}
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/env] :seon.model/provider]}
   [st env]
   (cond-> (:provider st) (and (:model env) (= :openai-compat (:kind (:provider st)))) (assoc :model (:model env))))
 
 (defn- start
   "Begin action act's flight. Answers [st outputs]."
-  {:malli/schema [:=> [:cat :map :seon.reconcile/action] [:tuple :map [:vector :map]]]}
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.reconcile/action] [:tuple :seon.reconcile/state [:vector :map]]]}
   [st {:keys [op attempt] :as act}]
   (let [;; a kill reaches a live attempt whose observer chain is in flight: that flight stays
         ;; and sees its agent die
@@ -367,7 +366,7 @@
   "Attempt aid's end on main from MEASURED facts: the end its agent wrote on the branch,
   root's own proof results, the branch's merge entries and unmerged keys, the contract gaps
   against main, its improved plan carried to the task."
-  {:malli/schema [:=> [:cat :map :map :seon.proof/results :map] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db]]] [:vector :any]]}
   [st {:keys [act]} results {:keys [db base-t]}]
   (let [main (:db st)
         aid (:attempt act) id (:task act)
@@ -389,7 +388,7 @@
 
 (defn- advance
   "Attempt aid's flight takes answer r of its step. Answers [st outputs]."
-  {:malli/schema [:=> [:cat :map :seon.attempt/id :keyword :any] [:tuple :map [:vector :map]]]}
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.attempt/id :seon.reconcile/step :any] [:tuple :seon.reconcile/state [:vector :map]]]}
   [st aid step r]
   (let [{:keys [act agent] :as f} (get-in st [:flights aid])
         done (fn [st] [(update st :flights dissoc aid) []])
@@ -428,7 +427,7 @@
   "Reconcile main's latest db and start each action whose attempt is not in flight; spawns
   wait while earlier spawns have not written their attempt yet (max-running counts facts).
   Answers [st outputs]."
-  {:malli/schema [:=> [:cat :map] [:tuple :map [:vector :map]]]}
+  {:malli/schema [:=> [:cat :seon.reconcile/state] [:tuple :seon.reconcile/state [:vector :map]]]}
   [st]
   (let [early (count (filter #(and (= :spawn (get-in % [:act :op])) (not (:agent %))) (vals (:flights st))))
         acts (remove #(let [f (get-in st [:flights (:attempt %)])] (and f (or (not= :kill (:op %)) (:killing f)))) (reconcile (:db st)))

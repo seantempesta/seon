@@ -5,7 +5,8 @@
   (konserve.jolt.fasl-store, FaslSerializer), and the JVM-written-store reader stays behind
   (BAGGAGE.md)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-] :as contract] [seon.schema.datahike :as sd] [datahike.api :as d] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
+  (:require [seon.contract :refer [defn defn-] :as contract] [seon.schema.datahike :as sd] [seon.config :as cfg]
+            [datahike.connections] [datahike.writing] [hasch.core :as hasch] [datahike.api :as d] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
             [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix]))
 
 (def schema
@@ -17,7 +18,7 @@
   "Attributes of observations (evaluations, the agent's answered t): data on the branch
   that recorded them, never carried by a merge (G1's proto.db/observation-attrs, derived by
   attribute namespace from the schema)."
-  (into #{} (comp (map :db/ident) (filter #(#{"seon.cluster.eval" "seon.eval" "seon.agent"} (namespace %)))) schema))
+  (into #{} (comp (map :db/ident) (filter #(#{"seon.cluster.eval" "seon.agent"} (namespace %)))) schema))
 
 (defn seed-tx
   "Transactions for about n datoms: per namespace, one tx of the namespace and its 20
@@ -60,7 +61,7 @@
   "Datahike config for the durable store at path; backend :lmdb (default) or :file."
   {:malli/schema [:=> [:cat [:enum :lmdb :file] :string] :seon.db/cfg]}
   [backend path]
-  {:store (cond-> {:backend backend :path path :id #uuid "50a0c0de-0000-4000-8000-000000000001"
+  {:store (cond-> {:backend backend :path path :id (hasch/uuid path)
                    :default-serializer :FaslSerializer}
             (= backend :lmdb) (assoc :lmdb {:flags MDB_NOSYNC :map-size (* 1048576 (Long/parseLong (or (System/getenv "SEON_LMDB_MB") "1024")))})
             (= backend :file) (assoc :config {:defer-immutable-sync? true}))
@@ -113,6 +114,28 @@
       (when-not exists? (seed! conn n))
       (sync! cfg)
       {:cfg cfg :conn conn :recovered? exists?})))
+
+(defn after-fork!
+  "Make this forked process (an agent, a clone) open the store itself: an LMDB env and the
+  connections inherited from its parent must not be used across fork(), so they are
+  forgotten (not closed: they are the parent's), and the store's entity-id allocator starts
+  at this process's lease. Physics, not a guard: fork shares the parent's handles."
+  {:malli/schema [:=> [:cat :seon.db/cfg :int] :any]}
+  [cfg lease]
+  (swap! @#'konserve.jolt.lmdb/envs dissoc (get-in cfg [:store :path]))
+  (reset! datahike.connections/*connections* {})
+  (.put ^java.util.concurrent.ConcurrentHashMap @#'datahike.writing/eid-allocators
+        (get-in cfg [:store :id]) (java.util.concurrent.atomic.AtomicLong. lease)))
+
+(defn lease-base
+  "The first entity id past every branch head of the store: agents' leases start here."
+  {:malli/schema [:=> [:cat :seon.host/conn] :int]}
+  [conn] (+ cfg/EID-LEASE (max (:max-eid @conn) (#'datahike.writing/roster-max-eid (:store @conn)))))
+
+(defn head
+  "Branch b's committed value, read from the store (another process may have committed it)."
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch] :seon.host/db]}
+  [conn b] (d/branch-as-db (:store @conn) b))
 
 (defn diff-ops
   "Explicit-id tx-data turning db `from` into db `to` (retractions first, so an

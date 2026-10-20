@@ -34,27 +34,14 @@
  ;; ---- the recording transaction of each eval request, and the agent's answered t.
  ;; Observations: data on the branch that recorded them, never carried by a merge ----
  :seon.cluster.eval/id :string
- :seon.cluster.eval/run [:and {:seon.db/index true} :string]
- :seon.cluster.eval/ordinal :int
- :seon.cluster.eval/source :string
- :seon.cluster.eval/tag :keyword
- :seon.cluster.eval/error :string
- :seon.cluster.eval/output :string
- :seon.eval/shown :string
- :seon.eval/duration-us :int
- :seon.eval/alloc-bytes :int
  :seon.cluster.eval/agent :seon.db/ref
+ ;; the evaluation's details as one EDN value: {:tag :form :shown|:error :out :ms :alloc-bytes}
+ :seon.cluster.eval/record [:map {:seon.db/edn true} [:tag [:enum :ret :err]]]
  :seon.agent/id [:and {:seon.db/identity true} :keyword]
  :seon.agent/answered-t :int
  :seon.db/eval-fact [:map {:seon.db/attributes true}
-                      [:seon.cluster.eval/id :seon.cluster.eval/id] [:seon.cluster.eval/run :seon.cluster.eval/run]
-                      [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal] [:seon.cluster.eval/source :seon.cluster.eval/source]
-                      [:seon.cluster.eval/tag :seon.cluster.eval/tag]
-                      [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]
-                      [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output]
-                      [:seon.cluster.eval/agent :seon.cluster.eval/agent]
-                      [:seon.eval/shown {:optional true} :seon.eval/shown] [:seon.eval/duration-us :seon.eval/duration-us]
-                      [:seon.eval/alloc-bytes :seon.eval/alloc-bytes]]
+                     [:seon.cluster.eval/id :seon.cluster.eval/id] [:seon.cluster.eval/agent :seon.cluster.eval/agent]
+                     [:seon.cluster.eval/record :seon.cluster.eval/record]]
  :seon.db/agent-fact [:map {:seon.db/attributes true}
                        [:seon.agent/id :seon.agent/id] [:seon.agent/answered-t {:optional true} :seon.agent/answered-t]]
  ;; ---- tasks, attempts, proof results, root's boot, turns and ends (lane D1's proto.agents.facts.edn) ----

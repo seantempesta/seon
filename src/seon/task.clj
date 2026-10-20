@@ -140,7 +140,7 @@
 
 (defn- task-value
   "A pulled task's own members (needs as a set of ids, proofs a set)."
-  {:malli/schema [:=> [:cat :map] :seon.task/own]}
+  {:malli/schema [:=> [:cat :seon.task/pulled] :seon.task/own]}
   [t]
   (cond-> (-> t (update :seon.task/needs #(set (map :seon.task/id %)))
               (update :seon.task/proofs set)
@@ -189,7 +189,7 @@
 
 (defn- attempt-value
   "A pulled attempt as :seon.attempt/attempt."
-  {:malli/schema [:=> [:cat :map] :seon.attempt/attempt]}
+  {:malli/schema [:=> [:cat :seon.attempt/pulled] :seon.attempt/attempt]}
   [a]
   (let [{:seon.attempt/keys [branch model max-turns results uncontracted conflicts unmerged]} a]
     (cond-> (-> a (dissoc :seon.attempt/branch :seon.attempt/model :seon.attempt/max-turns :seon.attempt/results

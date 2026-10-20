@@ -13,7 +13,9 @@ owns the concept. A new concept gets its word here before it appears in code.
 | **root** | the control process: one Flow graph of four procs plus one proc per agent | `seon.root` |
 | **root graph** | that one Flow graph, changed in place by `flow/update!` | `seon.root/start!` |
 | **api** | root's entrance proc: callers' reply promises, routing by request id | `seon.root/api-proc` |
-| **writer** | the only `d/transact`, `d/branch!` and merge caller; group commit | `seon.writer/writer-proc` |
+| **writer** | root's writes to main (group commit), `d/branch!`, and every merge into main | `seon.writer/writer-proc` |
+| **run-ahead write** | an agent's own write on its own branch: applied at once, committed when idle, at a turn's end or within the flush window | `seon.agent/transact!`, `seon.agent/commit!`, `datahike.writer/apply!` |
+| **lease** | the block of entity ids an agent process mints on its branch | `seon.config/EID-LEASE`, `seon.db/after-fork!` |
 | **group commit** | one Datahike commit per branch per writer step | `seon.writer/commit-batch` |
 | **flush window** | every write is answered when committed in memory; one group flush within `FLUSH-MS` makes it durable; `:flush?` waits for it | `seon.writer/flusher-proc`, `seon.config/FLUSH-MS` |
 | **flusher** | the proc that times the flush window and asks the writer to flush | `seon.writer/flusher-proc` |
@@ -55,7 +57,7 @@ owns the concept. A new concept gets its word here before it appears in code.
 | **program** | the definitions held as facts (`:var/src`), loaded where main or a branch changes them | `seon.program` |
 | **store** | konserve under Datahike (LMDB, or the filestore), jfasl node codec | `seon.db` |
 | **entity schema** | a Malli map with `{:seon.db/attributes true}`; its members are Datahike attributes | `seon.schema.datahike/declarations` |
-| **recording** | one transaction per eval request on the agent's branch: its evaluations on its agent entity, its defs | `seon.agent-proc/record-tx` |
+| **recording** | an eval request's evaluations (on its agent entity, one EDN `:seon.cluster.eval/record` each) and its defs, written by the agent on its own branch | `seon.repl/record-tx` |
 | **observation** | data on the branch that observed it (evaluations, answered t), never carried by a merge | `seon.db/observation-attrs` |
 
 ## Tasks (TASK-CHAIN's words; lanes R1 and M1)

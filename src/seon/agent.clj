@@ -5,8 +5,8 @@
   each form stays here under its handle. Agent code calls the verbs of my.db and my.agent,
   referred into its namespace. From proto/flow f2-final proto.agent (lane F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
-            [clojure.string :as str] [jolt.ffi :as ffi] [seon.program :as program] [seon.intr :as intr] [seon.wire :as wire]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
+            [clojure.string :as str] [jolt.ffi :as ffi] [seon.program :as program] [seon.intr :as intr] [seon.wire :as wire] [clojure.repl]))
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :fd :conn :db :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
@@ -76,11 +76,22 @@
   (let [m (wire/next-msg! (:rd @state))]
     (if (= m :eof) :dead (or (wire/wire->seon m) {:op :nrepl :msg m}))))
 
-(defn next-msg! {:malli/schema [:=> [:cat] [:or [:= :dead] :seon.wire/seon-msg]]}
+(declare commit!)
+
+(defn next-msg!
+  "The next message for the loop. Idle with applied writes (no message waiting): they are
+  committed first, so a branch is committed whenever its agent waits."
+  {:malli/schema [:=> [:cat] [:or [:= :dead] :seon.wire/seon-msg]]}
   []
   (if-let [m (peek (:pending @state))]
     (do (swap! state update :pending pop) m)
-    (recv-raw!)))
+    (if (:dirty-at @state)
+      (let [m (wire/poll-msg! (:rd @state))]
+        (case m
+          :none (do (commit!) (recv-raw!))
+          :eof :dead
+          (or (wire/wire->seon m) {:op :nrepl :msg m})))
+      (recv-raw!))))
 
 ;; ---- the agent's own API ------------------------------------------------------
 
@@ -97,21 +108,8 @@
   {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
   [tos body] (when (= :dead (send! {:op :send :to (vec tos) :body body})) (lib/c-exit 0)) nil)
 
-(defn- apply-sync!
-  "Apply the writer's resolved datoms for this branch. A :sync (root merged main forward)
-  may change the program: its :var/src is loaded, so this process runs its branch's code."
-  {:malli/schema [:=> [:cat [:map [:tx-data [:sequential :seon.db/op]]]] :any]}
-  [m]
-  (let [db' (d/db-with (db) (:tx-data m))]
-    (swap! state (fn [s] (cond-> (assoc s :db db')
-                           (and (not (:resume m)) (not= (:max-tx db') (:t m))) (update :mismatch (fnil inc 0)))))
-    (when (= :sync (:op m))
-      (when-let [errs (seq (program/load-changes! db' (:tx-data m)))]
-        (swap! state update :load-errors (fnil into []) errs)))))
-
 (defn- await-op!
-  "Wait for {:op op :k k} on the ring. A :sync is applied in arrival order (the writer's
-  order); anything else waits in :pending for the loop."
+  "Wait for {:op op :k k} from root; anything else waits in :pending for the loop."
   {:malli/schema [:=> [:cat :keyword :int] :seon.wire/seon-msg]}
   [op k]
   (loop []
@@ -119,54 +117,64 @@
       (cond
         (= m :dead) (lib/c-exit 0)
         (and (= op (:op m)) (= k (:k m))) m
-        (= :sync (:op m)) (do (apply-sync! m) (recur))
         :else (do (swap! state update :pending conj m) (recur))))))
 
-(def ^:private tx-lock (Object.))
+
+(defn commit!
+  "Commit the writes this agent applied (run-ahead) to its branch, once, through its own
+  store handle, and tell root (its flush makes the commit durable). nil when nothing waits."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (when-let [c (dw/commit-pending! (:store-conn @state))]
+    (swap! state #(-> % (assoc :db (:db c)) (dissoc :dirty-at)))
+    (send! {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c)})))
 
 (defn transact!
-  "Writes tx-data to this agent's branch through the writer; answers {:t :datoms}."
+  "Write tx-data to this agent's branch: applied at once to the value ahead of the
+  committed one (its answer does not wait for a commit), committed when the agent is idle,
+  at a turn's end or within the flush window (owner, 2026-10-20: the agent-owned run-ahead
+  writer). Answers {:t :datoms :tempids}. Inside a test (a fork of the agent) it applies to
+  the fork's db only. A refused transaction throws its message into the caller's eval."
   {:malli/schema [:=> [:cat :seon.db/tx-data] :seon.agent/tx-result]}
   [tx-data]
   (if (= :test (:mode @state))
     (let [r (d/with (db) tx-data)]
       (swap! state assoc :db (:db-after r))
       {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
-    (let [k (:tx-seq (swap! state update :tx-seq inc))
-          ;; not interruptible from the send until the writer's answer lands
-          ;; (run-interruptible never escapes while a counted lock is held)
-          m (locking tx-lock
-              (when (= :dead (send! {:op :tx :k k :tx-data tx-data})) (lib/c-exit 0))
-              (await-op! :tx-reply k))]
-      (do
-        (if (:ok m)
-          ;; the writer's resolved datoms: ids come from the store-wide counter
-          (do (apply-sync! m)
-              (cond-> {:t (:t m) :datoms (:datoms m)} (seq (:tempids m)) (assoc :tempids (:tempids m))))
-          (throw (ex-info (str "transact refused: " (:error m)) {:writer-error (:error m)})))))))
+    (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data})]
+      (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
+      (let [now (lib/now-ns)
+            since (:dirty-at (swap! state #(-> % (assoc :db (:db-after r)) (update :dirty-at (fn [t] (or t now))))))]
+        (when (>= (- now since) (* 1000000 cfg/FLUSH-MS)) (commit!))
+        (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
+          (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r))))))))
 
-;; ---- merging main into this branch (seon.merge, done by the writer; lane M1) ----------
+;; ---- merging main into this branch (seon.merge; lane M1) -------------------------------
 
 (defn merge-main!
-  "git merge main into this agent's branch: the writer applies main's changes since the
-  merge base that do not conflict (one merge commit) and writes each conflict as an
-  unmerged entry on the branch; this process applies the resolved datoms and loads the
-  definitions they change (an unmapped var is unmapped here). data-attrs: the data that
-  merges beside the program. Answers the writer's {:ok :applied :conflicts :t} with the load
-  errors (M1's core patch 03)."
+  "git merge main into this agent's branch, in this process (it owns the branch's writes):
+  main's changes since the merge base that do not conflict apply in one merge commit with
+  main as parent, each conflict stays on the branch as an unmerged entry, and the changed
+  definitions load here. data-attrs: the data that merges beside the program. Answers
+  {:ok :applied :conflicts :t}."
   {:malli/schema [:=> [:cat :seon.merge/data-attrs] [:map [:ok :boolean]]]}
   [data-attrs]
-  (let [k (:tx-seq (swap! state update :tx-seq inc))
-        ;; not interruptible from the send until the writer's answer lands
-        m (locking tx-lock
-            (when (= :dead (send! {:op :merge-main :k k :data-attrs data-attrs})) (lib/c-exit 0))
-            (await-op! :merge-main-reply k))
-        ops (get-in m [:sync :tx-data] [])
-        db' (d/db-with (db) ops)
-        _ (swap! state assoc :db db')
-        errs (program/load-changes! db' ops)]
-    (cond-> (dissoc m :op :k :sync)
-      (seq errs) (assoc :load-errors errs))))
+  (commit!)
+  (let [conn (:store-conn @state)
+        main (pdb/head conn :db)
+        head @conn
+        r (pm/three-way (pm/program (pdb/branch-base conn (:branch @state)) data-attrs) (pm/program head data-attrs) (pm/program main data-attrs))]
+    (if (empty? (:theirs r))
+      {:ok true :applied [] :conflicts [] :t (:max-tx head)}
+      (let [theirs (pm/program main data-attrs)
+            rep (d/merge-db conn #{:db} (into (pm/apply-tx head (into {} (for [k (:apply r)] [k (get theirs k)])))
+                                              (pm/unmerged-tx head (:conflicts r) (:max-tx main))))
+            ops (pdb/report->tx rep)
+            errs (program/load-changes! (:db-after rep) ops)]
+        (swap! state assoc :db @conn)
+        (send! {:op :committed :t (:max-tx @conn) :txs 1})
+        (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:max-tx @conn) :datoms (count ops)}
+          (seq errs) (assoc :load-errors errs))))))
 
 ;; ---- evaluation -----------------------------------------------------------------
 
@@ -274,6 +282,7 @@
       (refer 'clojure.test :only '[deftest is are testing use-fixtures])
       (refer 'my.db)
       (refer 'my.agent)
+      (refer 'clojure.repl :only '[doc])
       (alias 'd 'datahike.api)
       (alias 'str 'clojure.string))
     nsx))
@@ -298,9 +307,8 @@
   [m]
   (case (:op m)
     :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:timeout-ms m) 30000)) :mem-mb (mem-mb)}]
-    ;; the writer's resolved datoms of this agent's own recording transaction
-    :record-sync (do (apply-sync! m) nil)
-    :sync (do (apply-sync! m) [{:op :synced :t (:max-tx (db)) :mismatch (:mismatch @state 0) :load-errors (:load-errors @state)}])
+    ;; root asks this agent to merge main into its branch (it owns the branch's writes)
+    :merge-main [{:op :merged-main :id (:id m) :result (merge-main! (:data-attrs m #{}))}]
     :clone (do (clone! m) nil)
     :stats [{:op :stats :id (:id m) :result {:mem-mb (mem-mb true) :t (:max-tx (db)) :pid (lib/c-getpid)
                                               :results (count (:results @state)) :evals (:n @state)
@@ -323,6 +331,8 @@
   [{:keys [k] :as m}]
   (let [t0 (lib/now-ns)
         fd (sock/take-fd! (:conn @state))]
+    ;; the new branch starts at this branch's committed head: what was applied commits first
+    (commit!)
     (send! {:op :branch-me :k k})
     (let [r (await-op! :branched k)]
       (if-not (:ok r)
@@ -336,8 +346,12 @@
                 ;; the parent's socket closed on fork (FD_CLOFORK); this clone's came with the request
                 (sock/clofork! fd)
                 (let [c (sock/conn fd)]
+                  ;; the clone opens the store itself, on its own branch, with its own lease
+                  (pdb/after-fork! (:cfg r) (:lease r))
                   (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn c :rd (wire/reader c) :mode :agent :tx-seq 0
-                         :pending clojure.lang.PersistentQueue/EMPTY :mem-at nil))
+                         :pending clojure.lang.PersistentQueue/EMPTY :mem-at nil
+                         :store-conn (d/connect (assoc (:cfg r) :branch (:branch m))))
+                  (swap! state assoc :db @(:store-conn @state)))
                 (hello! t0 {:cloned-from parent})
                 ((:serve @state)))
               (lib/c-exit 0))
@@ -350,16 +364,21 @@
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
-  [fd {id :agent branch :branch} db0 serve]
+  [fd {id :agent branch :branch cfg :cfg lease :lease resumed :resumed} db0 serve]
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone
   (sock/clofork! fd)
   (lib/set-trip! trip-bytes)
   (lib/heap-cap! (+ (lib/bytes-in-heap) heap-extra-bytes))
+  ;; this agent owns its branch's writes: it opens the store itself (seon.db/after-fork!)
+  (pdb/after-fork! cfg lease)
   (let [nsx (make-ns! id)
         intr-ok (interrupt-self-test)
-        c (sock/conn fd)]
+        c (sock/conn fd)
+        store-conn (d/connect (assoc cfg :branch branch))]
     (intr/install!)
-    (reset! state {:id id :branch branch :fd fd :conn c :rd (wire/reader c) :db db0 :results {} :n 0
+    ;; a kept branch, resumed: its program is what this process runs (it was forked holding main's)
+    (when resumed (program/load-diff! db0 @store-conn))
+    (reset! state {:id id :branch branch :fd fd :conn c :rd (wire/reader c) :db @store-conn :store-conn store-conn :cfg cfg :results {} :n 0
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
                    :ns nsx :nss #{(ns-name nsx)} :interrupt-ok intr-ok :serve serve})))

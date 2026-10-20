@@ -48,23 +48,12 @@
   (case (:op m)
     :req (let [{:keys [rid msg kind]} m]
            (to-proc! st (assoc msg (if (= kind :clone) :k :id) rid) (:pass-fd m))
-           (let [st (cond-> (update st :inflight assoc rid (select-keys m [:kind :branch :new :merge-branch :data-attrs :pass-fd]))
+           (let [st (cond-> (update st :inflight assoc rid (select-keys m [:kind :branch :new :merge-branch :data-attrs :pass-fd :lease]))
                       (= kind :ping) (update :pings conj rid))]
              [st {:to-api [(status st (cond-> {:status :busy}
                                         (= kind :eval) (assoc :running {:form (let [f (:forms msg)] (if (> (count f) 200) (str (subs f 0 200) " …") f))
                                                                         :since-ms (System/currentTimeMillis)})))]}]))
-    :write (if (= :recorded (get-in m [:msg :op]))
-             ;; the recording is durable: the caller gets its reply, the agent the resolved datoms
-             (let [{:keys [k ok tx-data t error]} (:msg m)
-                   reply (get-in st [:recording k])
-                   o (volatile! {})
-                   st (update st :recording dissoc k)]
-               (when ok (to-proc! st {:op :record-sync :t t :tx-data tx-data}))
-               [(agent-frame st o (cond-> reply
-                                    ok (assoc :record {:t t :datoms (count tx-data)})
-                                    (not ok) (assoc :record-error error)))
-                @o])
-             (do (to-proc! st (:msg m)) [st nil]))
+    :write (do (to-proc! st (:msg m)) [st nil])
     :bytes (do (when-not (:dead? st) (sock/send-frame! (:fd st) (:bytes m))) [st nil])
     :forked (do (when (and (:kill? st) (not (:dead? st))) (lib/c-kill (:pid m) 9))
                 [(assoc st :pid (:pid m)) nil])
@@ -96,8 +85,8 @@
                                               (:cloned-from m) (assoc :pid (:pid m)))))
                  (step/out! o :events (step/event {:type :ready :agent id :start-ms (:start-ms m)}))
                  (cond-> st (:cloned-from m) (assoc :pid (:pid m))))
-      :branch-me (let [{:keys [branch]} (get-in st [:inflight (:k m)])]
-                   (step/out! o :to-writer {:op :clone-branch :from (:branch st) :branch branch
+      :branch-me (let [{:keys [branch lease]} (get-in st [:inflight (:k m)])]
+                   (step/out! o :to-writer {:op :clone-branch :from (:branch st) :branch branch :lease lease
                                        :dest {:agent id :op :branched :k (:k m)}})
                    st)
       (:cloned :clone-failed)
@@ -141,15 +130,15 @@
       :stats (let [st (answer-rid st o (:id m) (:result m))]
                (step/out! o :to-api (status st {:mem-mb (:mem-mb (:result m)) :status (busy st)}))
                st)
-      ;; the agent merges main into its own branch (my.branch/merge-main!): the writer's
-      ;; answer, with the resolved datoms, goes back to it
-      :merge-main (do (step/out! o :to-writer {:op :merge-main :branch (:branch st) :data-attrs (:data-attrs m #{})
-                                               :dest {:agent id :op :merge-main-reply :k (:k m)}})
-                      (step/out! o :events (step/event {:type :merge-main :agent id :branch (:branch st)}))
-                      st)
-      :tx (do (step/out! o :to-writer {:op :tx :branch (:branch st) :agent id :tx-data (:tx-data m)
-                                  :dest {:agent id :op :tx-reply :k (:k m)}})
-              st)
+      ;; the agent committed its branch (it owns the branch's writes): the writer's next flush
+      ;; covers it
+      :committed (do (step/out! o :to-writer {:op :agent-commit :branch (:branch st) :t (:t m)})
+                     (step/out! o :events (step/event {:type :commit :agent id :branch (:branch st) :t (:t m) :txs (:txs m)}))
+                     st)
+      :merged-main (let [st (answer-rid st o (:id m) (:result m))]
+                     (step/out! o :events (step/event {:type :merged-main :agent id :result (:result m)}))
+                     (step/out! o :to-api (status st {:status (busy st)}))
+                     st)
       :dead (do (sock/close! (:fd st))
                 (doseq [[_ {:keys [pass-fd]}] (:inflight st)] (some-> pass-fd sock/close!))
                 (step/out! o :to-api {:op :ended :agent id :rid (:draining st) :pid (:pid st) :inflight (vec (keys (:inflight st)))})
@@ -206,16 +195,7 @@
                           (let [reply {:op :reply :id rid :items (repl/fold (get-in st [:answers rid]) wire/text->)
                                        :mem-mb (some-> (get w "seon/mem-mb") parse-double) :t (get w "seon/t")}
                                 st (update st :answers dissoc rid)]
-                            (if-let [run (some-> (get w "seon/run") wire/text->)]
-                              ;; the eval request's recording transaction, built here from the reply
-                              ;; root holds (G1, a82fe0c): the printed values crossed once; the caller
-                              ;; is answered when it is durable
-                              (do (step/out! o :to-writer {:op :tx :branch (:branch st) :agent (:id st)
-                                                           :tx-data (into (clojure.edn/read-string (wire/text-> (get w "seon/defs")))
-                                                                          (repl/record-tx (:id st) run (:items reply) (:t reply)))
-                                                           :dest {:agent (:id st) :op :recorded :k rid}})
-                                  (assoc-in st [:recording rid] reply))
-                              (agent-frame st o reply)))
+                            (agent-frame st o reply))
                           st)))]
              [st @o])
      [st nil])))

@@ -277,37 +277,40 @@
           :else (recur more acc))))))
 
 (defn record-tx
-  "The recording transaction of one eval request (G1's proto.agent/record-tx, Seon's names):
-  one evaluation entity per item (its id, run, ordinal, source, tag, shown value or error,
-  time, allocation), each on the agent's entity, and the agent's answered t. Ids are new
-  each time; the agent entity is the one upsert."
+  "The recording transaction of one eval request: one evaluation entity per item, on the
+  agent's entity, its details in one EDN attribute (the lean record, L1's measurement:
+  three attributes, not nine, nothing queries the details apart), and the agent's answered
+  t. Ids are new each time; the agent entity is the one upsert."
   {:malli/schema [:=> [:cat :seon.agent/id :string :seon.agent/items [:maybe :int]] :seon.db/tx-data]}
   [id run items t-basis]
   (conj (vec (for [it items :when (:id it)]
-               (cond-> {:seon.cluster.eval/id (str run "/" (:id it)) :seon.cluster.eval/run run
-                        :seon.cluster.eval/ordinal (:id it) :seon.cluster.eval/agent "agent"
-                        :seon.cluster.eval/tag (:tag it) :seon.cluster.eval/source (or (:form it) "")
-                        :seon.eval/duration-us (long (* 1000 (or (:ms it) 0))) :seon.eval/alloc-bytes (long (or (:alloc-bytes it) 0))}
-                 (= :ret (:tag it)) (assoc :seon.eval/shown (or (:printed it) ""))
-                 (= :err (:tag it)) (assoc :seon.cluster.eval/error (or (:printed it) ""))
-                 (:out it) (assoc :seon.cluster.eval/output (:out it)))))
+               {:seon.cluster.eval/id (str run "/" (:id it)) :seon.cluster.eval/agent "agent"
+                :seon.cluster.eval/record (binding [*print-length* nil *print-level* nil *print-meta* false]
+                                            (pr-str (cond-> (select-keys it [:tag :form :out :ms :alloc-bytes])
+                                                      (= :ret (:tag it)) (assoc :shown (:printed it))
+                                                      (= :err (:tag it)) (assoc :error (:printed it)))))}))
         (cond-> {:db/id "agent" :seon.agent/id id} t-basis (assoc :seon.agent/answered-t t-basis))))
 
-(defn eval-string
-  "Evaluate code from inside this agent (the turn loop's forms) through the one REPL path:
-  the handler and its middleware, its answers folded into reply items, recorded on the
-  branch in one transaction (the evaluations and the defs) through the agent's write path."
-  {:malli/schema [:=> [:cat :string] :seon.agent/items]}
-  [code]
-  (let [answers (volatile! [])
-        _ (@the-handler {"op" "eval" "code" code :reply #(vswap! answers conj %)})
-        items (fold @answers identity)
-        defs (into [] (mapcat val) (:defs @agent/state))]
+(defn- record!
+  "Record items (with the defs their forms recorded) on this branch through the agent's
+  write path. Answers items."
+  {:malli/schema [:=> [:cat :seon.agent/items] :seon.agent/items]}
+  [items]
+  (let [defs (into [] (mapcat val) (:defs @agent/state))]
     (swap! agent/state dissoc :defs)
     (when (and contract/record? (= :agent (:mode @agent/state)) (seq items))
       (agent/transact! (into defs (record-tx (:id @agent/state) (str (name (:id @agent/state)) "-" (lib/c-getpid) "-" (lib/now-ns))
                                              items (:max-tx (agent/db))))))
     items))
+
+(defn eval-string
+  "Evaluate code from inside this agent (the turn loop's forms) through the one REPL path:
+  the handler and its middleware, its answers folded into reply items and recorded."
+  {:malli/schema [:=> [:cat :string] :seon.agent/items]}
+  [code]
+  (let [answers (volatile! [])]
+    (@the-handler {"op" "eval" "code" code :reply #(vswap! answers conj %)})
+    (record! (fold @answers identity))))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 
@@ -316,17 +319,15 @@
   t and memory (root's view of it)."
   {:malli/schema [:=> [:cat :seon.wire/msg] :seon.host/fn]}
   [req]
-  (let [id (get req "id") sid (get req "session")]
-    (fn [m] (let [done? (some #{"done"} (get m "status"))
-                  rec (when (and done? contract/record? (= :agent (:mode @agent/state)) (= "eval" (get req "op")))
-                        (let [defs (into [] (mapcat val) (:defs @agent/state))]
-                          (swap! agent/state dissoc :defs)
-                          {"seon/run" (str (name (:id @agent/state)) "-" (lib/c-getpid) "-" (lib/now-ns))
-                           "seon/defs" (binding [*print-length* nil *print-level* nil] (pr-str defs))}))]
-              (agent/send-wire! (cond-> m
+  (let [id (get req "id") sid (get req "session") answers (volatile! [])]
+    (fn [m] (let [done? (some #{"done"} (get m "status"))]
+              ;; the request's evaluations are recorded here, before its done (the agent owns
+              ;; its branch's writes)
+              (vswap! answers conj m)
+              (when (and done? (= "eval" (get req "op"))) (record! (fold @answers identity)))
+              (agent/send-wire! (cond-> (into {} (remove (comp keyword? key)) m)
                                   id (assoc "id" id) sid (assoc "session" sid)
-                                  done? (assoc "seon/t" (:max-tx (agent/db)) "seon/mem-mb" (str (agent/mem-mb)))
-                                  rec (merge rec)))))))
+                                  done? (assoc "seon/t" (:max-tx (agent/db)) "seon/mem-mb" (str (agent/mem-mb)))))))))
 
 (defn agent-step
   "The agent as a step-fn, run on its one thread by seon.step/run-loop: requests in on

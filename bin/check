@@ -12,6 +12,10 @@ if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then run "$@"; exit $?; fi
 N=${1:-100}
 echo "== dragons"; "$ROOT/bin/dragons" | tail -1
 echo "== contracts"; run contracts | grep -E ":contracted|:uncontracted|:result"
+# the census runs from source: test.check's generators fail in a release build on Jolt
+# ("bit operation not supported for: class clojure.lang.BigInt", a runtime finding)
+echo "== census (no [:fn] without :gen; mg/check on every pure contract)"
+(cd "$ROOT" && HOME=$ROOT/target/home JOLT_PWD=$ROOT "$ROOT/target/jolt/jolt" -m seon.check census 2>&1 | grep -E ":generated|:failed \[\]|:result")
 echo "== admit"; run admit | tail -1
 echo "== record"; run record | tail -1
 echo "== smoke";  run smoke | grep -E "^merge|^killed|spawned|ready"

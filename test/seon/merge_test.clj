@@ -87,7 +87,7 @@
 
 (deftest scratch-and-observations-never-merge
   (let [ours (with base [{:note/text "scratch" :note/agent :a1}
-                         {:seon.cluster.eval/id "r/1" :seon.cluster.eval/run "r" :seon.cluster.eval/source "(+ 1 2)"}
+                         {:seon.cluster.eval/id "r/1" :seon.cluster.eval/record "{:tag :ret :form \"(+ 1 2)\"}"}
                          {:seon.agent/id :a1 :seon.agent/answered-t 7}
                          {:task/name :x/y :task/status :done}])]
     (is (= (pm/program base #{}) (pm/program ours #{})))

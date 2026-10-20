@@ -24,7 +24,8 @@
   (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
             [seon.sock :as sock] [seon.wire :as wire] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.reconcile :as reconcile] [seon.program :as program] [seon.step :as step]
-            [seon.config :as cfg] [seon.contract :as contract] [seon.task :as task] [clojure.core.async :as a]
+            [seon.config :as cfg] [seon.contract :as contract] [seon.task :as task] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
+            [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
             [seon.turn] [seon.fixtures] [my.task] [my.turn] [my.branch] [clojure.core.async.flow :as flow] [clojure.test]
             [taoensso.trove :as trove]))
@@ -98,6 +99,8 @@
   [st {:keys [branch task cloned-from]}]
   (let [n (inc (:next-id st))
         id (keyword (str "a" n))
+        ;; the entity ids this agent mints on its branch (its own block: L1's lease)
+        lease (+ (:lease-base st) (* n cfg/EID-LEASE))
         branch (or branch (keyword (str "agent-" n)))
         [r a] (sock/socketpair)
         from (a/chan cfg/AGENT-BUF)]
@@ -105,7 +108,7 @@
     (a/>!! (:reg st) [r from])
     (sock/poke! (:wake st))
     [(-> st (assoc :next-id n ::update true)
-         (assoc-in [:agents id] {:branch branch})
+         (assoc-in [:agents id] {:branch branch :lease lease})
          (assoc-in [:agent-procs id] {:proc agent-launcher
                                       :args {:id id :fd r :branch branch :from from
                                              :to-writer (:to-writer st) :back (:back st) :events (:events st)}
@@ -123,7 +126,6 @@
   (let [{:keys [branch]} (get-in st [:agents agent])
         killed? (= :killed (get-in st [:view :agents agent :status]))
         why (if rid "agent stopped" "agent died")]
-    (step/out! o :to-writer {:op :release :branch branch})
     (step/out! o :events (step/event {:type (if killed? :killed :dead) :agent agent}))
     (let [st (reduce (fn [st r] (deliver-rid st r (no-agent (get-in st [:pending r :kind]) why))) st inflight)
           st (cond-> st rid (deliver-rid rid {:stopped true :agent agent}))]
@@ -151,20 +153,20 @@
                                       :branch (:branch opts) :agent holder})
                  (>= (count (:agents st)) cfg/MAX-AGENTS) (reply! st p {:error "too many live agents" :max cfg/MAX-AGENTS})
                  :else (let [[st aid fd] (start-agent st opts)
-                             {:keys [branch]} (get-in st [:agents aid])]
-                         (step/out! o :to-writer {:op :spawn :agent aid :branch branch :ns (lib/now-ns) :fd fd :dest {:spawn aid}})
+                             {:keys [branch lease]} (get-in st [:agents aid])]
+                         (step/out! o :to-writer {:op :spawn :agent aid :branch branch :lease lease :ns (lib/now-ns) :fd fd :dest {:spawn aid}})
                          (reply! st p {:id aid}))))
       :clone (let [parent (:parent m)]
                (if (or (nil? (get-in st [:agents parent])) (>= (count (:agents st)) cfg/MAX-AGENTS))
                  (reply! st p {:ok false :error (str "no live agent " parent)})
                  (let [[st aid fd] (start-agent st (merge {:task (get-in st [:view :agents parent :task])} (:opts m) {:cloned-from parent}))
-                       {:keys [branch]} (get-in st [:agents aid])
+                       {:keys [branch lease]} (get-in st [:agents aid])
                        [st rid] (rid! st)]
                    ;; the clone's socket goes to its parent with the request
                    (to-agent (pend st rid p :clone parent) parent
-                             {:op :req :rid rid :kind :clone :new aid :branch branch :pass-fd fd
+                             {:op :req :rid rid :kind :clone :new aid :branch branch :pass-fd fd :lease lease
                               :msg {:op :clone :agent aid :branch branch}}))))
-      (:eval :tests :merge-tests :stats :ping)
+      (:eval :tests :merge-tests :stats :ping :merge-main)
       (if (nil? (get-in st [:agents id]))
         (reply! st p (no-agent op (str "no live agent " id)))
         (let [[st rid] (rid! st)
@@ -172,7 +174,8 @@
                     :eval (cond-> {:op :eval :forms (:forms m)} (:timeout-ms m) (assoc :timeout-ms (:timeout-ms m)))
                     (:tests :merge-tests) {:op :tests :timeout-ms (:timeout-ms m)}
                     :stats {:op :stats}
-                    :ping {:op :ping})]
+                    :ping {:op :ping}
+                    :merge-main {:op :merge-main :data-attrs (:data-attrs m)})]
           (to-agent (pend st rid p op id) id {:op :req :rid rid :kind op :msg msg :merge-branch (:merge-branch m) :data-attrs (:data-attrs m)})))
       ;; requests for the writer: answered by rid
       :write (let [[st rid] (rid! st)
@@ -216,7 +219,7 @@
                                true (deliver-rid (:rid dest) (dissoc r :sync))))
         (:rid dest) (deliver-rid st (:rid dest) r)
         (:agent dest) (to-agent st (:agent dest) {:op :write :msg (cond (:op r) r
-                                                                          (= :branched (:op dest)) {:op :branched :k (:k dest) :ok (:ok r) :error (:error r)}
+                                                                          (= :branched (:op dest)) {:op :branched :k (:k dest) :ok (:ok r) :error (:error r) :cfg (:cfg r) :lease (:lease r)}
                                                                           :else (assoc r :op (:op dest) :k (:k dest)))})
         (:spawn dest) (if (:ok r) st (-> st (set-agent (:spawn dest) {:error (:error r)}) (to-agent (:spawn dest) {:op :failed :error (:error r)})))
         :else st))
@@ -433,14 +436,15 @@
   (lib/ignore-sigpipe!)
   (when-not log? (trove/set-log-fn! nil))
   (let [t0 (lib/now-ns)
-        path (or path (System/getenv "SEON_STORE")
-                 (some-> (System/getenv "SEON_STORE_ROOT") (str "/" (random-uuid))))
+        ;; agents write their own branches, so the store is shared: a durable store, at a
+        ;; fresh directory of this root's own (deleted by stop!) when none is given
+        given (or path (System/getenv "SEON_STORE"))
+        path (or given (str (or (System/getenv "SEON_STORE_ROOT") "/tmp") "/seon-store-" (random-uuid)))
         backend (or backend (some-> (System/getenv "SEON_BACKEND") keyword) :lmdb)
-        {:keys [cfg conn recovered?]} (if path (pdb/open! backend path datoms)
-                                          (let [[cfg conn] (pdb/create! datoms)] {:cfg cfg :conn conn}))
+        {store-cfg :cfg conn :conn recovered? :recovered?} (pdb/open! backend path datoms)
         open-ms (lib/ms-since t0)
         t-pre (lib/now-ns)
-        _ (when path (pdb/preload! @conn))
+        _ (pdb/preload! @conn)
         preload-ms (lib/ms-since t-pre)
         recovered (if recovered? (vec (sort (disj (d/branches conn) :db))) [])
         load-ms (lib/ms-since t0)
@@ -467,10 +471,8 @@
                :server-ev (a/chan 4096) :reg (a/chan (* 4 cfg/MAX-AGENTS)) :stop-ch (a/promise-chan)}
         view {:agents {} :writer {:tx-count 0} :stats {}
               :server {:agents-forked 0 :pid pid :status :up :restarts 0}
-              :store (if path
-                       {:backend backend :path path :recovered? (boolean recovered?)
-                        :recovered-branches recovered :open-ms (lib/r2 open-ms) :preload-ms (lib/r2 preload-ms)}
-                       {:backend :memory})
+              :store {:backend backend :path path :recovered? (boolean recovered?)
+                      :recovered-branches recovered :open-ms (lib/r2 open-ms) :preload-ms (lib/r2 preload-ms)}
               :boot {:load-ms (lib/r2 load-ms) :program (assoc program :ms (lib/r2 program-ms))
                      :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :guarantees (if contract/on? :on :off)}}
         graph-p (promise)
@@ -487,10 +489,11 @@
                    ;; room for every answer the writer can owe while the api is not reading
                    :chan-opts {:from-writer {:buf-or-n (+ cfg/WRITER-BUF cfg/WRITER-BATCH cfg/API-WRITES)}}
                            :args {:wake wake :view view :ext (:ext chans) :back (:back chans) :graph graph-p
+                                  :lease-base (pdb/lease-base conn)
                                   :root-procs root-procs-p :root-conns root-conns
                                   :reg (:reg chans) :to-writer (:to-writer chans) :events events-in}}
                      :writer {:proc (flow/process #'writer/writer-proc)
-                              :args {:conn conn :cfg cfg :recovered recovered :boot-main db :durable? (= :lmdb (get-in cfg [:store :backend]))
+                              :args {:conn conn :cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
                                      :to-writer (:to-writer chans) :events events-in}}
                      :fork-server {:proc (flow/process #'fs/fork-server-proc)
                                    :args {:conn conn :pid pid :fd fd :server-ev (:server-ev chans)}}
@@ -517,7 +520,8 @@
                                                                   :data (some-> (::flow/ex e) ex-data)})
                                             (recur))))))))
                  (.setDaemon true) (.start))
-        sys (merge chans {:cfg cfg :conn conn :graph g :wake wake :wake-r wake-r :t0 t0
+        sys (merge chans {:cfg store-cfg :conn conn :graph g :wake wake :wake-r wake-r :t0 t0
+                          :owned-store (when-not given path)
                           :events-in events-in :events-mult (a/mult events-in) :errors errors})
         sys (assoc sys :reader (start-reader! sys))]
     (flow/resume g)
@@ -635,7 +639,8 @@
    (let [ag (agent-entry sys agent-id)]
      (if (or (nil? ag) (#{:dead :killed} (:status ag)))
        (doto (promise) (deliver {:ok false :applied [] :conflicts [] :error (str "no live agent " agent-id)}))
-       (write! sys {:op :merge-main :branch (:branch ag) :agent agent-id :data-attrs data-attrs})))))
+       ;; the agent owns its branch's writes: it merges main itself
+       (call! sys {:op :merge-main :id agent-id :data-attrs data-attrs})))))
 
 (defn branch-db
   "The writer's current db value of branch (:db is main), for root's reads: a promise of
@@ -715,9 +720,9 @@
       @p)))
 
 (defn freeze! "SIGSTOP the agent's process. nil." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
-  [sys agent-id] (some-> (:pid (agent-entry sys agent-id)) (lib/c-kill 17)) nil)
+  [sys agent-id] (some-> (:pid (agent-entry sys agent-id)) (lib/c-kill lib/SIGSTOP)) nil)
 (defn thaw! "SIGCONT the agent's process. nil." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
-  [sys agent-id] (some-> (:pid (agent-entry sys agent-id)) (lib/c-kill 19)) nil)
+  [sys agent-id] (some-> (:pid (agent-entry sys agent-id)) (lib/c-kill lib/SIGCONT)) nil)
 
 (defn fs-call! "Ask the fork server for {:op :stats} or {:op :static}." {:malli/schema [:=> [:cat :seon.root/sys :seon.root/request] :any]}
   [sys msg] (deref (call! sys {:op :fs :req msg}) 30000 :timeout))
@@ -755,6 +760,11 @@
       (some-> ^Thread (:errors sys) (.join 5000))
       (a/close! (:events-in sys))
       (sock/close! (:wake sys)) (sock/close! (:wake-r sys))
+      ;; a store this root made for itself goes with it
+      (when-let [p (:owned-store sys)]
+        (d/release (:conn sys))
+        (klmdb/close-env! p)
+        (clojure.java.shell/sh "rm" "-rf" p))
       {:stopped true :drained drained :graph graph :agents-left 0 :ms (lib/r2 (lib/ms-since t0))})))
 
 

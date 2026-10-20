@@ -3,7 +3,7 @@
   f2-final proto.smoke). bin/check runs them; target/seon <check> [args] runs one.
   usage: target/seon smoke        3 agents: define, test, transact; merge one; kill one mid-eval
          target/seon scale N      N agents spawned at once, each eval + transact + test"
-  (:require [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [seon.e2e]))
+  (:require [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e]))
 
 (defn- out! [& xs] (println (apply str xs)) (flush))
 (defn- await-status [sys ids pred ms]
@@ -176,6 +176,60 @@
     (pprint {:first (mapv #(select-keys % [:tag :printed :record :recorded]) r1) :second (mapv :printed r2)})
     (out! (if ok "RECORD OK" "RECORD FAILED"))
     (c/stop! sys)
+    (lib/c-exit (if ok 0 1))))
+
+;; ---- the census gate (SEON - Main's census of ~/src/seon, 2026-10-20) ------------------
+
+(def ^:private pure-nss
+  "The namespaces whose contracted functions are pure functions of plain data: mg/check
+  calls them with generated arguments. Every other function touches a host object (a
+  socket, a process, the store) and is never called with random arguments: a generated pid
+  handed to kill(2) is a real signal."
+  '#{seon.merge seon.reconcile seon.template seon.proofs seon.task seon.step})
+
+(def ^:private pure-fns
+  "Pure functions in namespaces that are otherwise host code (seon.lib binds libc: never
+  generate its arguments)."
+  '#{seon.lib/percentile seon.lib/r2 seon.lib/summ seon.lib/push-window seon.lib/p50})
+
+(defn- fn-without-gen
+  "The [:fn ...] schemas without a :gen property in form f, anywhere in it."
+  [f] (filter #(and (vector? %) (= :fn (first %)) (not (:gen (when (map? (second %)) (second %))))) (tree-seq coll? seq f)))
+
+(defn census
+  "The census gate: no [:fn pred] schema without :gen anywhere in the registry or a
+  contract, and every contract whose arguments generate and whose namespace is pure passes
+  malli.generator/check (100 runs each). Prints the counts; exits 0 only when both hold."
+  []
+  (let [nss (platform-nss)
+        vs (for [n nss v (vals (ns-interns n)) :when (contract/contract v)] v)
+        no-gen (vec (concat (for [[k f] contract/forms :when (seq (fn-without-gen f))] k)
+                            (for [v vs :when (seq (fn-without-gen (contract/contract v)))] (symbol v))))
+        ;; its arguments generate (every arity's input)
+        generates? (fn [v] (try (let [s (m/deref (contract/schema (contract/contract v)))]
+                                  (every? #(some? (mg/generator (:input (m/-function-info %)) {:registry contract/registry}))
+                                          (m/-function-schema-arities s)))
+                                (catch Throwable _ false)))
+        ;; a proc's step-fn is tested as a plain function on its own states (seon.procs-test):
+        ;; its contract admits any map as state
+        pure (filter #(and (or (pure-nss (ns-name (:ns (meta %)))) (pure-fns (symbol %)))
+                           (not= :seon.step/step-fn (contract/contract %)) (generates? %)) vs)
+        checked (for [v pure
+                      :let [r (try (mg/check (m/deref (contract/schema (contract/contract v))) @v {:registry contract/registry :num-tests 100 :seed 42})
+                               (catch Throwable e {:smallest :threw :seed (ex-message e)}))]]
+                  [(symbol v) r])
+        ;; malli could not generate an [:and ...] argument (such-that): not generated, not failed
+        such-that (set (for [[sym r] checked :when (= ":malli.generator/such-that-failure" (:seed r))] sym))
+        checked (remove (comp such-that first) checked)
+        failed (vec (for [[sym r] checked :when (some? r)]
+                      [sym (if (= :threw (:smallest r)) r
+                             (let [c (:check (first (:errors r)))]
+                               {:smallest (:smallest c) :problem (some-> (:malli.core/result c) ex-message)}))]))
+        ok (and (empty? no-gen) (empty? failed))]
+    (pprint {:contracts (count vs) :fn-without-gen no-gen
+             :generated-and-checked (count checked) :failed failed
+             :not-generated (count (remove generates? vs))
+             :result (if ok :CENSUS-OK :CENSUS-FAILED)})
     (lib/c-exit (if ok 0 1))))
 
 ;; ---- the program is entities -------------------------------------------------------
@@ -691,7 +745,7 @@
                           ready? (await-status sys ids #{:idle} 5000)
                           ok? (every? #(= "4" (:printed (first @(c/submit! sys % "(+ 2 2)")))) ids)
                           health (c/health sys)
-                          pids (cons (get-in (c/state sys) [:server :pid]) (keep #(get-in (c/state sys) [:agents % :pid]) ids))
+                          pids (vec (cons (get-in (c/state sys) [:server :pid]) (keep #(get-in (c/state sys) [:agents % :pid]) ids)))
                           st (c/stop! sys)
                           left (filter alive? pids)]
                       {:cycle i :ready ready? :ok ok? :boot-ms (lib/r2 boot-ms) :stop st :left (vec left)
@@ -770,7 +824,7 @@
         sys (c/start! {:datoms 2000 :path dir})
         ids (vec (pmap (fn [i] (c/spawn! sys {:task (str "drain " i)})) (range n)))
         _ (await-status sys ids #{:idle} 20000)
-        pids (keep #(get-in (c/state sys) [:agents % :pid]) ids)
+        pids (vec (keep #(get-in (c/state sys) [:agents % :pid]) ids))
         fs-pid (get-in (c/state sys) [:server :pid])
         ;; each agent: one eval writing 50 notes, one transact! at a time
         evals (mapv #(c/submit! sys % (str "(dotimes [i 50] (transact! [{:note/text (str \"d\" i) :note/agent " % "}])) :done")) ids)
@@ -832,7 +886,8 @@
      Its channel fills, the poller leaves the frames in the ring, the ring fills, and the
      agent's own send waits: few messages arrive while paused, the agent is still busy,
      and after resume all 20,000 arrive, in order, then its reply.
-  2. A saturated writer: the writer proc is paused while n agents transact. The writer's
+  2. A saturated writer: the writer proc is paused while n agents transact (their own
+     branches: all answered) and root writes main n times (held). The writer's
      in-port (SEON_WRITER_BUF) fills, then the agent procs' puts park; resume completes
      every transaction. Root's memory before/after is reported (a parked put is a parked
      fiber)."
@@ -855,23 +910,28 @@
         _ (await-status sys ids #{:idle} 20000)
         mb0 (lib/r2 (lib/real-mb))
         _ (flow/pause-proc (:graph sys) :writer)
+        ;; agents own their branches' writes: a paused writer does not hold them
         ps (mapv #(c/submit! sys % "(transact! [{:note/text \"bp\" :note/agent :bp}]) :ok") ids)
+        agents-ok (count (filter #(= ":ok" (:printed (second %))) (mapv #(deref % 20000 :hang) ps)))
+        ;; root's own writes to main wait for it
+        mains (mapv #(c/transact-main! sys [{:note/text (str "bp" %) :note/agent :root}]) (range n))
         _ (Thread/sleep 500)
-        answered-while-paused (count (filter realized? ps))
+        answered-while-paused (count (filter realized? mains))
         mb1 (lib/r2 (lib/real-mb))
         t1 (lib/now-ns)
         _ (flow/resume-proc (:graph sys) :writer)
-        rs (mapv #(deref % 20000 :hang) ps)
+        rs (mapv #(deref % 20000 :hang) mains)
         resume-ms (lib/ms-since t1)
-        ok (count (filter #(= ":ok" (:printed (second %))) rs))
+        ok (count (filter :ok rs))
         checks {:ring-pushes-back (and (< while-paused 2000) (= :busy busy))
                 :flood-all-arrive-in-order (and (= 20000 (:noise st)) (true? (:noise-ordered st)) (= ":flooded" (:printed (second r))))
+                :agents-write-past-a-paused-writer (= n agents-ok)
                 :writer-paused-holds-all (zero? answered-while-paused)
                 :writer-resumed-completes-all (= n ok)}]
     (pprint {:flood {:arrived (:noise st) :ordered (:noise-ordered st) :reply (:printed (second r)) :arrived-while-paused while-paused :status-while-paused busy :drain-ms (lib/r2 drain-ms)}
              :writer {:agents n :writer-buf (System/getenv "SEON_WRITER_BUF") :answered-while-paused answered-while-paused
                       :root-real-mb {:before mb0 :writer-saturated mb1} :resume->all-done-ms (lib/r2 resume-ms) :ok ok
-                      :not-ok (frequencies (map #(if (vector? %) (mapv :printed %) %) (remove #(= ":ok" (:printed (second %))) rs)))}
+                      :agents-ok agents-ok :not-ok (frequencies (remove :ok rs))}
              :checks checks})
     (out! (if (every? true? (vals checks)) "BACKPRESSURE OK" "BACKPRESSURE FAIL"))
     (c/stop! sys)
@@ -916,6 +976,7 @@
     "backpressure" (backpressure (Long/parseLong (or n "200")))
     "program" (program)
     "contracts" (contracts)
+    "census" (census)
     "e2e" (lib/c-exit (if (seon.e2e/run n more) 0 1))
     "admit" (admit)
     "record" (record)

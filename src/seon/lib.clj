@@ -213,8 +213,11 @@
   {:malli/schema [:=> [:cat :int :seon.host/fn] :any]}
   [sig f] (install-signal-handler* sig f))
 
-(def SIGUSR1 30)
+(def ^:private linux? (.startsWith (str (System/getProperty "os.name")) "Linux"))
+(def SIGUSR1 "Root's interrupt: 30 on macOS, 10 on Linux." (if linux? 10 30))
 (def SIGALRM 14)
+(def SIGSTOP "Stop the process: 17 on macOS, 19 on Linux." (if linux? 19 17))
+(def SIGCONT "Continue the process: 19 on macOS, 18 on Linux." (if linux? 18 19))
 
 (defn sigmask
   "This thread's blocked-signal mask (macOS: a 32-bit set), for diagnosis."
@@ -256,7 +259,7 @@
   [ms] (qfork-bounded* (* 20 ms)))
 
 ;; ---- stats ----
-(defn percentile {:malli/schema [:=> [:cat [:maybe [:sequential number?]] number?] [:maybe number?]]}
+(defn percentile {:malli/schema [:=> [:cat [:maybe [:sequential number?]] [:double {:min 0.0 :max 1.0}]] [:maybe number?]]}
   [xs p]
   (let [v (vec (sort xs)) n (count v)] (when (pos? n) (nth v (min (dec n) (int (Math/floor (* p n))))))))
 (defn r2 {:malli/schema [:=> [:cat [:maybe number?]] [:maybe :double]]}
@@ -267,7 +270,7 @@
     {:n (count xs) :min (r2 (apply min xs)) :p50 (r2 (percentile xs 0.5)) :p95 (r2 (percentile xs 0.95))
      :p99 (r2 (percentile xs 0.99)) :max (r2 (apply max xs))}
     {:n 0}))
-(defn push-window "x appended to window v, keeping the last n." {:malli/schema [:=> [:cat [:maybe vector?] :any :int] vector?]}
+(defn push-window "x appended to window v, keeping the last n." {:malli/schema [:=> [:cat [:maybe vector?] :any pos-int?] vector?]}
   [v x n]
   (let [v (conj (or v []) x)] (if (> (count v) n) (subvec v (- (count v) n)) v)))
 (defn p50 "The median of xs, rounded." {:malli/schema [:=> [:cat [:maybe [:sequential number?]]] [:maybe :double]]}

@@ -97,6 +97,20 @@
               :when err]
           err)))
 
+(defn load-diff!
+  "Make this process run db-to's program where it holds db-from's: each definition whose
+  recorded content differs is loaded (or unmapped when db-to has none). An agent resuming
+  a kept branch was forked holding main's program. Answers the load errors."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.program/error]]}
+  [db-from db-to]
+  (let [srcs (fn [db] (into {} (d/q '[:find ?v ?s :where [?e :var/name ?v] [?e :var/src ?s]] db)))
+        from (srcs db-from) to (srcs db-to)]
+    (doseq [[v _] from :when (not (contains? to v))
+            :let [n (find-ns (symbol (namespace v)))] :when n]
+      (ns-unmap n (symbol (name v))))
+    (vec (keep (fn [[v src]] (when (not= src (get from v)) (load-src! (symbol (namespace v)) src)))
+               (sort-by (comp str key) to)))))
+
 (defn var-kind
   "What a defined var holds, as recorded: :fn (a function, which needs a contract), :test,
   :macro or :value (G1's)."

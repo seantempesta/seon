@@ -25,13 +25,6 @@
 (def STOP-BOUND-MS
   "How long an agent may take to exit after :stop before it is SIGKILLed."
   (dial "SEON_STOP_BOUND_MS" 2000))
-(def OPEN-BRANCHES
-  "Branch connections the writer keeps open (least recently used released past it)."
-  (dial "SEON_OPEN_BRANCHES" 32))
-(def PAR-COMMIT
-  "Experiment (writer design B, notes/option3-F1-flow.md section 4): commit the branches of
-  a batch in parallel. Off by default."
-  (= "1" (System/getenv "SEON_PAR_COMMIT")))
 (def STANDBY-EVERY
   "Main commits after which the fork server forks a fresh standby (bounds the log of
   commits a promoted standby is sent)."
@@ -53,3 +46,7 @@
   :flush? and is answered after its flush."
   (dial "SEON_FLUSH_MS" 10))
 
+(def EID-LEASE
+  "Entity ids each agent process may mint on its own branch (a block per agent, from the
+  store's highest id at boot): ids stay unique store-wide with no shared counter (L1's lease)."
+  (dial "SEON_EID_LEASE" 100000))
