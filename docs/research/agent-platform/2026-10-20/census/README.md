@@ -1,6 +1,7 @@
 ---
 title: "Seon census: the keep/delete inventory for the Jolt architecture"
 type: research
+status: final
 created: 2026-10-20
 ---
 
