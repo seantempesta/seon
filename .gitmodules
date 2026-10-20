@@ -9,7 +9,7 @@
 [submodule "reference-code/datahike"]
 	path = reference-code/datahike
 	url = /Users/sean/src/seon-jolt/libs/datahike
-	branch = jolt/main
+	branch = a1/jolt-main
 [submodule "reference-code/persistent-sorted-set"]
 	path = reference-code/persistent-sorted-set
 	url = /Users/sean/src/seon-jolt/e4/pss-a
@@ -25,4 +25,12 @@
 [submodule "reference-code/jolt-overlay"]
 	path = reference-code/jolt-overlay
 	url = /Users/sean/src/seon-jolt/libs/jolt-overlay
+	branch = jolt/main
+[submodule "reference-code/crypto"]
+	path = reference-code/crypto
+	url = /Users/sean/src/seon-jolt/libs/crypto
+	branch = jolt/main
+[submodule "reference-code/malli"]
+	path = reference-code/malli
+	url = /Users/sean/src/seon-jolt/l1/wt/malli
 	branch = jolt/main

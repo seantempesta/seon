@@ -12,14 +12,14 @@
                                               com.github.pkpkpk/cljs-node-io com.github.pkpkpk/fress]}
         ;; clojure.spec.alpha and hasch.platform as .jolt overlays (Datahike needs both)
         jolt/overlay {:local/root "reference-code/jolt-overlay"}
+        ;; instrument wrappers of one fixed arity (L1 jolt/instrument-arity 5a830e14)
+        metosin/malli {:local/root "reference-code/malli"}
+        ;; arms claim host tables only (L1 jolt/seam-claims 902196e)
+        jolt-lang/crypto {:local/root "reference-code/crypto"}
 
         ;; unmodified, pinned
-        metosin/malli {:git/url "https://github.com/seantempesta/malli.git"
-                       :git/sha "dd13ff81139159778edb0a67b491eccc0baa991d"}
         jolt-lang/ring-chez-adapter {:git/url "https://github.com/jolt-lang/ring-chez-adapter.git"
                                      :git/sha "fa0674e3627186fab1ed81c8ea069a66007edd57"}
-        jolt-lang/crypto {:git/url "https://github.com/jolt-lang/crypto.git"
-                          :git/sha "e6981b853adc543120b785a0c29b6d7d6a10f0fe"}
         jolt-lang/multipart {:git/url "https://github.com/jolt-lang/multipart.git"
                              :git/sha "ca51dd47aff27dac3cc09557682e82ec63720310"}
         jolt-lang/time {:git/url "https://github.com/jolt-lang/time.git"
