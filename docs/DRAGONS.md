@@ -20,6 +20,7 @@ function.
 | An agent's authored contract does not compile | `seon.contract/arm!` | `:seon.contract/invalid` | `seon.repl/admit` puts it on the reply item (`:contract-error`); `seon.program/load-src!` reports it as a load error |
 | Program code from the db does not load (a source that throws, a missing alias target) | `seon.program/load-src!`, `seon.program/aliases!` | `:seon.program/error` (`{:ns :message}`) | root and the fork server put load errors in their view and events; an agent's `:load-errors` |
 | The filesystem refuses a write-back (`:file` effect) | `seon.fx/write-file` | `:seon.fx/io-error` | the asker's `my.fx/call` answer, recorded as `:seon.fx/*` on its branch |
+| Root's entrance is not listening (the MCP server's one request: connect, write, read) | `seon.mcp/request!` | the tool's text `{:error ...}` | the outside agent reads it as the tool's answer |
 | An interrupt or a timeout stops a running form (SIGUSR1, SIGALRM) | `seon.intr/run` | ex-info `{:interrupted true}` or `{:timeout-ms n}` | `seon.repl/eval-code` answers the form `interrupted`/`eval-error` and goes on |
 
 ## Entrant boundaries (a defect becomes a recorded error map)
@@ -30,6 +31,7 @@ function.
 | the agent's request handler | `seon.repl/agent-step` | `err` + `done` on the request |
 | a test run, in the test child of an agent | `seon.agent/run-tests-forked` | an `:error` report in the run |
 | an effect lane performing a request (lane FX1) | `seon.fx/lane-proc` | `:seon.fx/defect` as the outcome: its asker is always answered |
+| one outside connection's request (seon.entrance, line EDN) | `seon.entrance/serve-connection!` | the request's answer `{:error :data}`; the connection goes on |
 | every root proc | Flow's error channel, read by root's error reader | `:root-errors` in the api's view, with the error map |
 
 ## Dragons met without a catch (the edge answers data)

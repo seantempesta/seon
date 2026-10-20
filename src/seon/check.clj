@@ -3,7 +3,7 @@
   f2-final proto.smoke). bin/check runs them; target/seon <check> [args] runs one.
   usage: target/seon smoke        3 agents: define, test, transact; merge one; kill one mid-eval
          target/seon scale N      N agents spawned at once, each eval + transact + test"
-  (:require [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.config] [clojure.edn]))
+  (:require [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.config] [clojure.edn] [seon.entrance] [seon.mcp] [clojure.data.json]))
 
 (defn- out! [& xs] (println (apply str xs)) (flush))
 (defn- await-status [sys ids pred ms]
@@ -1051,6 +1051,61 @@
     (out! (if (:ok res) "SYSTEM OK" "SYSTEM FAIL"))
     (lib/c-exit (if (:ok res) 0 1))))
 
+(defn root-serve
+  "A root with its entrance on 127.0.0.1:port (seon.entrance), until stdin closes: what an
+  outside agent's MCP server (target/seon mcp PORT) talks to."
+  [port]
+  (let [sys (c/start! {:datoms 2000})]
+    (seon.entrance/serve! sys port)
+    (out! "ROOT LISTENING " port)
+    (loop [] (when (read-line) (recur)))
+    (c/stop! sys)
+    (lib/c-exit 0)))
+
+(defn- eval-records
+  "The evaluation records on db of agent id: [{:form :origin ...}]."
+  [db id]
+  (mapv clojure.edn/read-string
+        (d/q '[:find [?r ...] :in $ ?id :where [?a :seon.agent/id ?id] [?e :seon.cluster.eval/agent ?a] [?e :seon.cluster.eval/record ?r]] db id)))
+
+(defn mcp-proof
+  "The MCP phase's proof: an outside client (a separate process: target/seon mcp PORT, fed
+  JSON-RPC on stdin) lists agents, evaluates in a running agent and as root, and both
+  evaluations are recorded with origin :outside (the agent's on its branch, root's on main)."
+  []
+  (let [sys (c/start! {:datoms 2000})
+        port (+ 20000 (mod (lib/c-getpid) 20000))
+        _ (seon.entrance/serve! sys port)
+        a (c/spawn! sys {:task "mcp" :branch :mcp1})
+        _ (await-status sys [a] #{:idle} 5000)
+        msgs [{"jsonrpc" "2.0" "id" 1 "method" "initialize" "params" {"protocolVersion" "2024-11-05"}}
+              {"jsonrpc" "2.0" "method" "notifications/initialized"}
+              {"jsonrpc" "2.0" "id" 2 "method" "tools/list"}
+              {"jsonrpc" "2.0" "id" 3 "method" "tools/call" "params" {"name" "seon_agents" "arguments" {}}}
+              {"jsonrpc" "2.0" "id" 4 "method" "tools/call" "params" {"name" "seon_eval" "arguments" {"agent" (name a) "code" "(def outside-x 41) (inc outside-x)"}}}
+              {"jsonrpc" "2.0" "id" 5 "method" "tools/call" "params" {"name" "seon_eval" "arguments" {"agent" "root" "code" "(count (:agents (c/state sys)))"}}}]
+        t0 (lib/now-ns)
+        r (clojure.java.shell/sh "./seon" "mcp" (str port) :in (clojure.string/join "\n" (map clojure.data.json/write-str msgs)))
+        ms (lib/ms-since t0)
+        answers (into {} (for [l (clojure.string/split-lines (:out r)) :when (clojure.string/starts-with? l "{")
+                               :let [j (clojure.data.json/read-str l)]] [(get j "id") j]))
+        text (fn [id] (get-in answers [id "result" "content" 0 "text"]))
+        bdb (:db @(c/branch-db sys :mcp1))
+        mine (filter #(= :outside (:origin %)) (eval-records bdb a))
+        roots (filter #(= :outside (:origin %)) (eval-records @(:conn sys) :root))
+        res {:tools (count (get-in answers [2 "result" "tools"]))
+             :agents-text (some-> (text 3) (subs 0 (min 120 (count (text 3)))))
+             :agent-eval (text 4) :root-eval (text 5)
+             :agent-records (mapv #(select-keys % [:form :shown :origin]) mine)
+             :root-records (mapv #(select-keys % [:form :shown :origin]) roots)
+             :client-ms (lib/r2 ms) :exit (:exit r) :err (some-> (:err r) clojure.string/trim not-empty)}
+        ok (and (= 5 (:tools res)) (= 2 (count mine)) (= 1 (count roots))
+                (clojure.string/includes? (str (text 4)) "42") (clojure.string/includes? (str (text 5)) "1"))]
+    (pprint res)
+    (c/stop! sys)
+    (out! (if ok "MCP OK" "MCP FAIL"))
+    (lib/c-exit (if ok 0 1))))
+
 (defn -main [& [mode n & more]]
   (case mode
     "dur-bench-write" (dur-bench-write n (Long/parseLong (first more)))
@@ -1076,6 +1131,9 @@
     "rtt" (rtt)
     "fx" (fx (Long/parseLong (or n "1000")))
     "system" (system-check)
+    "root" (root-serve (Long/parseLong n))
+    "mcp" (do (seon.mcp/serve! (Long/parseLong n)) (lib/c-exit 0))
+    "mcp-proof" (mcp-proof)
     "hotreload" (hotreload)
     "swarm" (swarm (Long/parseLong (or n "100")))
     "soak" (soak (Long/parseLong (or n "50")) (Long/parseLong (or (first more) "60")))
