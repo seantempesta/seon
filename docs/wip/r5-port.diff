@@ -1274,7 +1274,7 @@ index db56244..3761e26 100644
 +    (do (work (:work m)) (lib/c-exit 0))
 +    (serve!)))
 diff --git a/src/seon/root.clj b/src/seon/root.clj
-index 9ab5a80..644eb2e 100644
+index 9ab5a80..3fc712f 100644
 --- a/src/seon/root.clj
 +++ b/src/seon/root.clj
 @@ -97,9 +97,10 @@
@@ -1344,6 +1344,15 @@ index 9ab5a80..644eb2e 100644
        :kill-all (reduce (fn [st aid] (-> st (set-agent aid {:status :killed}) (to-agent aid {:op :kill}))) st (keys (:agents st)))
        st)))
  
+@@ -313,7 +324,7 @@
+   ([] {:params {:graph "a promise of this graph" :system "a promise of the built system (seon.system/build)"}
+        :ins {:from-writer "writer answers and stats" :from-fs "fork-server events"} :outs {:to-fs "fork-server requests"}
+        :workload :io
+-       :ping-map-fn (fn [st] {:agents (count (:agents st)) :pending (count (:pending st)) :closing (boolean (:closing st))})})
++       :ping-map-fn (fn [st] {:agents (count (:agents st)) :pending (count (:pending st)) :pending-kinds (frequencies (map :kind (vals (:pending st)))) :writes (count (:writes st)) :agent-status (frequencies (map :status (vals (get-in st [:view :agents])))) :closing (boolean (:closing st))})})
+   ;; :system is the root graph's declared procs and conns as built (seon.system), changed by
+   ;; seon.root/apply!; agents' procs join them at each update!
+   ([args] (assoc (dissoc args :system) :agents {} :agent-procs {} :pending {} :rid 0 :next-id 0
 @@ -422,9 +433,7 @@
          {:keys [pid fd]} (fs/fork-server db)
          events-in (a/chan (a/sliding-buffer 8192))
