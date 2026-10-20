@@ -251,8 +251,16 @@
                   :f (fn [v] (reduce (fn [m k] (assoc m k k)) (sorted-map) v))}
    :sort/compare {:what "sort of shuffled integers, per n log2 n" :setup #(vector (vec (shuffle (range %)))) :f (fn [v] (sort v))
                   :per :n-log-n}
+   :str/seq-char {:what "one step of a seq over a String's chars (doseq, reduce)" :setup #(vector (apply str (repeat % \a)))
+                  :f (fn [s] (reduce (fn [n c] (inc n)) 0 s))}
    :str/append {:what "StringBuilder append of one char" :setup #(vector (apply str (repeat % \a)))
-                :f (fn [s] (let [sb (StringBuilder.)] (doseq [c s] (.append sb c)) (.toString sb)))}
+                :f (fn [s] (let [sb (StringBuilder.) n (count s)] (loop [i 0] (when (< i n) (.append sb (.charAt ^String s i)) (recur (inc i)))) (.toString sb)))}
+   :map/literal {:what "a small map literal of 5 keys built per element" :setup #(vector (vec (range %)))
+                 :f (fn [v] (reduce (fn [a x] {:kind :leaf :n x :w a :f 1 :u 2}) nil v))}
+   :map/seq-step {:what "one step of reduce over a hash map's entries (each a map entry)" :setup #(vector (zipmap (range %) (range %)))
+                  :f (fn [m] (reduce (fn [a e] (+ a (val e))) 0 m))}
+   :map/reduce-kv {:what "one step of reduce-kv over a hash map" :setup #(vector (zipmap (range %) (range %)))
+                   :f (fn [m] (reduce-kv (fn [a k v] (+ a v)) 0 m))}
    :edn/read-char {:what "clojure.edn/read-string, per character of a vector of integers" :setup #(vector (pr-str (vec (range (quot % 6)))))
                    :f (fn [s] (edn/read-string s)) :per-char true}
    :pr-str/char {:what "pr-str, per character printed (a vector of integers)" :setup #(vector (vec (range (quot % 6))))
@@ -271,7 +279,9 @@
 
 (def units
   "Measured costs of unit operations on this runtime (release seon binary, M5 Max, load 5,
-  2026-10-20, at 10k units; source mode is within 10% except a plain call, 7 ns), per unit: estimates price their :ops with these. `bin/check
+  2026-10-20, at 10k units; source mode is within 10% except a plain call, 7 ns; the last
+  five rows were measured in source mode after P2 found :str/append mislabeled: the 308 B
+  per char it showed was the String's seq, not the StringBuilder), per unit: estimates price their :ops with these. `bin/check
   units` measures them again, and seon.cost-test/the-unit-table-is-current is red when a
   row has drifted past 3x, so estimates stay derived from today's physics."
   {:seq/reduce {:ns 1.4 :bytes 0.0 :what "one step of reduce over a vector"}
@@ -287,6 +297,10 @@
    :set/conj! {:ns 79.1 :bytes 91.72 :what "conj! of a new integer into a transient hash set"}
    :sorted/assoc {:ns 1334.7 :bytes 3327.21 :what "assoc of a new integer key into a sorted map"}
    :sort/compare {:ns 13.51 :bytes 39.04 :what "sort of shuffled integers, per n log2 n"}
-   :str/append {:ns 39.7 :bytes 308.02 :what "StringBuilder append of one char"}
+   :str/append {:ns 9.9 :bytes 36.0 :what "StringBuilder append of one char"}
+   :str/seq-char {:ns 29.9 :bytes 272.0 :what "one step of a seq over a String's chars (doseq, reduce)"}
+   :map/literal {:ns 5.2 :bytes 144.0 :what "a small map literal of 5 keys built per element"}
+   :map/seq-step {:ns 28.3 :bytes 127.1 :what "one step of reduce over a hash map's entries (each a map entry)"}
+   :map/reduce-kv {:ns 4.7 :bytes 0.0 :what "one step of reduce-kv over a hash map"}
    :edn/read-char {:ns 29.22 :bytes 38.02 :what "clojure.edn/read-string, per character of a vector of integers"}
    :pr-str/char {:ns 61.9 :bytes 25.67 :what "pr-str, per character printed (a vector of integers)"}})
