@@ -1,0 +1,100 @@
+#!/bin/sh
+# bin/build — the runtime from the pinned sources: Chez (our fork) -> Jolt (our fork)
+# -> target/hello, a binary that requires Datahike and opens an in-memory db.
+#
+#   bin/build            all three steps, each skipped when its output is newer than its pin
+#   bin/build chez|jolt|hello   one step (and the steps before it when their output is missing)
+#   BUILD_FORCE=1 bin/build     rebuild every step
+#
+# Everything is written under target/; nothing is installed outside it. Dependency
+# downloads (Maven jars, git deps) land in target/home, because HOME points there
+# for the Jolt steps. The submodules are never written: each source tree is copied
+# into target/src first (an APFS clone on macOS, so the copy is cheap).
+#
+# Prerequisites (not installed by this script): a C compiler and make (on macOS the
+# Xcode command line tools), git, curl, and network access to GitHub and Maven
+# Central for the first run's dependencies.
+set -eu
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+T=$ROOT/target
+RC=$ROOT/reference-code
+STEP=${1:-all}
+JOBS=${BUILD_JOBS:-4}   # BUILD_JOBS overrides; 4 keeps a shared machine responsive
+
+say() { printf '%s build: %s\n' "$(date +%H:%M:%S)" "$*"; }
+die() { printf 'build: %s\n' "$*" >&2; exit 1; }
+
+for tool in cc make git; do
+  command -v "$tool" >/dev/null 2>&1 || die "missing prerequisite: $tool"
+done
+[ -f "$RC/chez/c/thread.c" ] && [ -f "$RC/jolt/host/chez/build-jolt.ss" ] ||
+  die "submodules are not checked out: git -c protocol.file.allow=always submodule update --init --recursive"
+[ -n "$(ls -A "$RC/jolt/vendor/irregex" 2>/dev/null)" ] ||
+  die "reference-code/jolt's own submodules are missing: git submodule update --init --recursive"
+
+mkdir -p "$T/src" "$T/home"
+
+# copy_tree SRC DEST: a fresh copy of a checked-out submodule, without its .git link.
+copy_tree() {
+  rm -rf "$2"
+  if [ "$(uname)" = Darwin ]; then cp -cR "$1" "$2"; else cp -a "$1" "$2"; fi
+  find "$2" -name .git -prune -exec rm -rf {} +
+}
+
+# stamp NAME PIN: true when target/NAME.stamp records PIN (and BUILD_FORCE is unset).
+fresh() { [ -z "${BUILD_FORCE:-}" ] && [ -f "$T/$1.stamp" ] && [ "$(cat "$T/$1.stamp")" = "$2" ]; }
+
+CHEZ_PIN=$(git -C "$RC/chez" rev-parse HEAD)
+JOLT_PIN=$(git -C "$RC/jolt" rev-parse HEAD)
+CHEZ=$T/chez/bin/scheme
+JOLT=$T/jolt/jolt
+
+build_chez() {
+  if fresh chez "$CHEZ_PIN" && [ -x "$CHEZ" ]; then say "chez up to date ($CHEZ_PIN)"; return; fi
+  say "chez: copying reference-code/chez at $CHEZ_PIN"
+  copy_tree "$RC/chez" "$T/src/chez"
+  say "chez: configure + make -j$JOBS + install into target/chez"
+  ( cd "$T/src/chez"
+    # --threads: Jolt requires a threaded Chez. -fPIC: jolt build --library folds
+    # libkernel.a into a shared object (as reference-code/jolt's own provisioning does).
+    ./configure --threads --disable-x11 --disable-curses --installprefix="$T/chez" CFLAGS+=-fPIC
+    make -j"$JOBS"
+    make install ) > "$T/chez-build.log" 2>&1 || die "chez build failed; see target/chez-build.log"
+  threaded=$(printf '(write (threaded?))\n' | "$CHEZ" -q)
+  [ "$threaded" = '#t' ] || die "target/chez is not threaded"
+  echo "$CHEZ_PIN" > "$T/chez.stamp"
+  rm -f "$T/jolt.stamp"
+}
+
+build_jolt() {
+  [ -x "$CHEZ" ] || build_chez
+  if fresh jolt "$JOLT_PIN" && [ -x "$JOLT" ]; then say "jolt up to date ($JOLT_PIN)"; return; fi
+  version=$(cd "$RC/jolt" && sh tools/version.sh)
+  say "jolt: copying reference-code/jolt at $JOLT_PIN ($version)"
+  copy_tree "$RC/jolt" "$T/src/jolt"
+  say "jolt: build-jolt.ss release -> target/jolt/jolt"
+  mkdir -p "$T/jolt"
+  ( cd "$T/src/jolt"
+    HOME=$T/home JOLT_VERSION=$version JOLT_CHEZ=$CHEZ \
+      "$CHEZ" --script host/chez/build-jolt.ss release "$T/jolt/jolt" ) > "$T/jolt-build.log" 2>&1 ||
+    die "jolt build failed; see target/jolt-build.log"
+  echo "$JOLT_PIN" > "$T/jolt.stamp"
+}
+
+build_hello() {
+  [ -x "$JOLT" ] || build_jolt
+  say "hello: jolt build -m build.hello (Datahike from reference-code/) -> target/hello"
+  ( cd "$ROOT"
+    HOME=$T/home JOLT_PWD=$ROOT "$JOLT" -A:hello build -m build.hello -o "$T/hello" ) > "$T/hello-build.log" 2>&1 ||
+    die "hello build failed; see target/hello-build.log"
+  say "hello: built; run target/hello"
+}
+
+case $STEP in
+  chez) build_chez ;;
+  jolt) build_jolt ;;
+  hello) build_hello ;;
+  all) build_chez; build_jolt; build_hello ;;
+  *) die "unknown step $STEP (chez | jolt | hello | all)" ;;
+esac

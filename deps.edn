@@ -1,0 +1,41 @@
+;; Customized libraries are :local/root into reference-code/ (submodules on our forks'
+;; jolt/main branches, see docs/forks.md); everything else is a pinned :git/sha or
+;; :mvn/version. Nothing is vendored.
+{:paths ["src" "resources"
+         ;; persistent-sorted-set's JVM core as Jolt deftypes (E4a): an overlay over the
+         ;; mvn 0.4.137 jar datahike depends on, which still supplies the other namespaces
+         "reference-code/persistent-sorted-set/src"]
+ :deps {;; customized (reference-code/, our forks)
+        io.replikativ/datahike {:local/root "reference-code/datahike"}
+        org.replikativ/konserve {:local/root "reference-code/konserve"
+                                 :exclusions [org.clojure/clojurescript org.clojars.mmb90/cljs-cache
+                                              com.github.pkpkpk/cljs-node-io com.github.pkpkpk/fress]}
+        ;; clojure.spec.alpha and hasch.platform as .jolt overlays (Datahike needs both)
+        jolt/overlay {:local/root "reference-code/jolt-overlay"}
+
+        ;; unmodified, pinned
+        metosin/malli {:git/url "https://github.com/seantempesta/malli.git"
+                       :git/sha "dd13ff81139159778edb0a67b491eccc0baa991d"}
+        jolt-lang/ring-chez-adapter {:git/url "https://github.com/jolt-lang/ring-chez-adapter.git"
+                                     :git/sha "fa0674e3627186fab1ed81c8ea069a66007edd57"}
+        jolt-lang/crypto {:git/url "https://github.com/jolt-lang/crypto.git"
+                          :git/sha "e6981b853adc543120b785a0c29b6d7d6a10f0fe"}
+        jolt-lang/multipart {:git/url "https://github.com/jolt-lang/multipart.git"
+                             :git/sha "ca51dd47aff27dac3cc09557682e82ec63720310"}
+        jolt-lang/time {:git/url "https://github.com/jolt-lang/time.git"
+                        :git/sha "a28ab100111050356957eb42b7ec89a4065de754"}
+        jolt-lang/http-client {:git/url "https://github.com/jolt-lang/http-client.git"
+                               :git/sha "5a9706e093d09d480c1d8ad70d8b64dfa505398d"}
+        ;; konserve and datahike require it (the same pin datahike declares); core.async is
+        ;; excluded because Jolt ships its own
+        org.replikativ/superv.async {:git/url "https://github.com/seantempesta/superv.async"
+                                     :git/sha "501b42945693804fd3e57276cc2a07ed4fe1d602"
+                                     :exclusions [org.clojure/clojurescript org.clojure/core.async]}
+        fipp/fipp {:mvn/version "0.6.29"}
+        org.clojure/core.cache {:mvn/version "1.0.225"}}
+ :aliases {;; bin/build's smoke binary
+           :hello {:extra-paths ["test/build"]}
+           ;; bin/test
+           :test {:extra-paths ["test"]}
+           ;; E9's read-only Fressian, for opening a JVM-written store (not on the default path)
+           :fressian {:extra-deps {jolt-lang/fressian {:local/root "reference-code/jolt-fressian"}}}}}

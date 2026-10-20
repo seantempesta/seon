@@ -1,0 +1,9 @@
+#!/bin/sh
+# bin/test [NS ...] — runs test/'s deftests (every *_test namespace, or the ones named)
+# on the runtime bin/build made (target/jolt/jolt), with dependencies cached in target/home.
+set -eu
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+JOLT=$ROOT/target/jolt/jolt
+[ -x "$JOLT" ] || { echo "test: no target/jolt/jolt; run bin/build jolt first" >&2; exit 1; }
+cd "$ROOT"
+HOME=$ROOT/target/home JOLT_PWD=$ROOT exec "$JOLT" -A:test run -m test-runner "$@"

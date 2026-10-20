@@ -1,0 +1,28 @@
+[submodule "reference-code/jolt"]
+	path = reference-code/jolt
+	url = /Users/sean/src/seon-jolt/jolt
+	branch = jolt/main
+[submodule "reference-code/chez"]
+	path = reference-code/chez
+	url = /Users/sean/src/seon-jolt/e14/chez-share
+	branch = jolt/main
+[submodule "reference-code/datahike"]
+	path = reference-code/datahike
+	url = /Users/sean/src/seon-jolt/libs/datahike
+	branch = jolt/main
+[submodule "reference-code/persistent-sorted-set"]
+	path = reference-code/persistent-sorted-set
+	url = /Users/sean/src/seon-jolt/e4/pss-a
+	branch = jolt/main
+[submodule "reference-code/konserve"]
+	path = reference-code/konserve
+	url = /Users/sean/src/seon-jolt/libs/konserve
+	branch = jolt/main
+[submodule "reference-code/jolt-fressian"]
+	path = reference-code/jolt-fressian
+	url = /Users/sean/src/seon-jolt/e9/jolt-fressian
+	branch = jolt/main
+[submodule "reference-code/jolt-overlay"]
+	path = reference-code/jolt-overlay
+	url = /Users/sean/src/seon-jolt/libs/jolt-overlay
+	branch = jolt/main
