@@ -1,0 +1,207 @@
+diff --git a/resources/seon/schemas/seon.facts.edn b/resources/seon/schemas/seon.facts.edn
+index 7ec7745..4921bca 100644
+--- a/resources/seon/schemas/seon.facts.edn
++++ b/resources/seon/schemas/seon.facts.edn
+@@ -59,9 +59,14 @@
+  :seon.task/problem :string
+  :seon.task/kind [:enum :work :design :implement :test :merge]
+  ;; measured evidence a task starts from: a failed merge's conflicts and the red proofs
+- :seon.task/evidence [:map {:seon.db/edn true}
+-                      [:from :seon.attempt/id] [:conflicts [:vector :seon.merge/conflict]]
+-                      [:unmerged [:vector :string]] [:red [:vector :qualified-symbol]]]
++ ;; ... or (lane R4) a flagged template's worst tasks, or a recorded error's evidence
++ :seon.task/evidence [:or {:seon.db/edn true}
++                      [:map [:from :seon.attempt/id] [:conflicts [:vector :seon.merge/conflict]]
++                       [:unmerged [:vector :string]] [:red [:vector :qualified-symbol]]]
++                      [:map [:kind [:= :template]] [:version :string] [:worst [:vector :map]]]
++                      [:map [:kind [:= :error]] [:signature :string] [:count :int] [:example :string]
++                       [:producer [:maybe :qualified-symbol]] [:producer-src [:maybe :string]]
++                       [:callers [:vector :qualified-symbol]] [:form [:maybe :string]]]]
+  :seon.task/generation :int
+  ;; config dials are attributes of the task, by their own names
+  :seon.config.agent/max-turns [:int {:min 1}]
+diff --git a/resources/seon/schemas/seon.task.edn b/resources/seon/schemas/seon.task.edn
+index 4075a54..3e9cd9b 100644
+--- a/resources/seon/schemas/seon.task.edn
++++ b/resources/seon/schemas/seon.task.edn
+@@ -18,7 +18,10 @@
+                          [:seon.task/config {:optional true} :seon.task/config]
+                          [:seon.task/kind {:optional true} :seon.task/kind]
+                          [:seon.task/evidence {:optional true} :seon.task/evidence]
+-                         [:seon.task/generation {:optional true} :seon.task/generation]]
++                         [:seon.task/generation {:optional true} :seon.task/generation]
++                         [:seon.task/template {:optional true} :seon.task/template]
++                         [:seon.task/template-version {:optional true} :seon.task/template-version]
++                         [:seon.task/about {:optional true} :seon.task/about]]
+  ;; a task as the reconciler reads it (needs as ids)
+  :seon.task/own [:map
+                  [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
+@@ -31,7 +34,10 @@
+                  [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
+                  [:seon.task/kind :seon.task/kind]
+                  [:seon.task/evidence {:optional true} :seon.task/evidence]
+-                 [:seon.task/generation {:optional true} :seon.task/generation]]
++                 [:seon.task/generation {:optional true} :seon.task/generation]
++                 [:seon.task/template {:optional true} :seon.task/template]
++                 [:seon.task/template-version {:optional true} :seon.task/template-version]
++                 [:seon.task/about {:optional true} :seon.task/about]]
+  ;; its plan and proofs accumulated along :needs (derived by the reader)
+  :seon.task/task [:and :seon.task/own [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]
+  ;; the environment an attempt runs in; desired (the task's) = observed (the attempt's), or restart
+@@ -102,10 +108,15 @@
+                          [:merge-train [:map {:closed true} [:op [:= :merge-train]] [:attempt :seon.attempt/id]
+                                         [:members [:vector [:map {:closed true} [:attempt :seon.attempt/id] [:task :seon.task/id]]]]]]
+                          [:accept [:map {:closed true} [:op [:= :accept]] [:attempt :seon.attempt/id] [:task :seon.task/id]]]
+-                         [:attach [:map {:closed true} [:op [:= :attach]] [:attempt :seon.attempt/id] [:task :seon.task/id]]]
++                         [:attach [:map {:closed true} [:op [:= :attach]] [:attempt :seon.attempt/id] [:task :seon.task/id]
++                                   [:refusals {:optional true} :seon.attempt/refusals]]]
+                          [:bail [:map {:closed true} [:op [:= :bail]] [:attempt :seon.attempt/id] [:task :seon.task/id]
+-                                 [:problem :string]]]
++                                 [:problem :string] [:refusals {:optional true} :seon.attempt/refusals]]]
+                          [:close [:map {:closed true} [:op [:= :close]] [:attempt :seon.attempt/id]]]
++                         [:file [:map {:closed true} [:op [:= :file]] [:signature :seon.error/signature]]]
++                         [:resolve [:map {:closed true} [:op [:= :resolve]] [:signature :seon.error/signature]
++                                    [:why [:enum :producer-deleted :producer-changed-green]]]]
++                         [:improve [:map {:closed true} [:op [:= :improve]] [:version :seon.template/version] [:reason :string]]]
+                          [:spawn [:map {:closed true} [:op [:= :spawn]] [:task :seon.task/id] [:env :seon.task/env]
+                                   [:attempt :seon.attempt/id]]]]
+  :seon.reconcile/actions [:vector :seon.reconcile/action]
+diff --git a/src/my/task.clj b/src/my/task.clj
+index ceeb816..13e8fc1 100644
+--- a/src/my/task.clj
++++ b/src/my/task.clj
+@@ -11,9 +11,11 @@
+   [] (some->> (turn/current-task) (task/task (agent/db))))
+ 
+ (defn update!
+-  "clojure.core/update on a content member of this agent's task (:seon.task/plan or
+-  :seon.task/instructions), written on its branch. Answers the task after the update."
+-  {:malli/schema [:=> [:cat [:enum :seon.task/plan :seon.task/instructions] :seon.host/fn [:* :any]] [:maybe :seon.task/task]]}
++  "clojure.core/update on a content member of this agent's task (:seon.task/plan,
++  :seon.task/instructions, or :seon.task/proofs: a design or prove step adds the deftest
++  that the next steps must make pass), written on its branch. Answers the task after the
++  update."
++  {:malli/schema [:=> [:cat [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs] :seon.host/fn [:* :any]] [:maybe :seon.task/task]]}
+   [member f & args]
+   (let [t (current)]
+     (agent/transact! [{:seon.task/id (:seon.task/id t) member (apply f (get t member) args)}])
+diff --git a/src/seon/task.clj b/src/seon/task.clj
+index 7a7d85c..af50ec6 100644
+--- a/src/seon/task.clj
++++ b/src/seon/task.clj
+@@ -130,6 +130,12 @@
+   {:malli/schema [:=> [:cat :seon.task/id :seon.task/plan] [:vector :map]]}
+   [id plan] [{:seon.task/id id :seon.task/plan plan}])
+ 
++(defn proofs-tx
++  "The proofs the attempt added to its task (read from the branch by root's judge),
++  carried to main: proofs only accumulate, so the next tasks along :needs inherit them."
++  {:malli/schema [:=> [:cat :seon.task/id :seon.task/proofs] [:vector :map]]}
++  [id proofs] [{:seon.task/id id :seon.task/proofs proofs}])
++
+ ;; ---- the reader ------------------------------------------------------------------
+ 
+ (def ^:private task-pull
+@@ -139,6 +145,12 @@
+    :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns
+    :seon.config.merge/max-attach {:seon.task/needs [:seon.task/id]}])
+ 
++(def ^:private task-pull-one
++  "One task as its agent and the learning loop read it: the reconciler's pull plus the
++  template it was made from (lane R4; kept out of the whole-view pull, which then costs
++  nothing more per task)."
++  (into task-pull [:seon.task/template :seon.task/template-version :seon.task/about]))
++
+ (defn- task-value
+   "A pulled task's own members (needs as a set of ids, proofs a set)."
+   {:malli/schema [:=> [:cat :seon.task/pulled] :seon.task/own]}
+@@ -176,7 +188,7 @@
+   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe :seon.task/task]]}
+   [db id]
+   (when (eid db :seon.task/id id)
+-    (let [own (fn [i] (when (eid db :seon.task/id i) (task-value (d/pull db task-pull [:seon.task/id i]))))]
++    (let [own (fn [i] (when (eid db :seon.task/id i) (task-value (d/pull db task-pull-one [:seon.task/id i]))))]
+       (assoc (own id) :seon.task/accumulated (accumulate own id)))))
+ 
+ (def ^:private attempt-pull
+@@ -192,13 +204,15 @@
+   "A pulled attempt as :seon.attempt/attempt."
+   {:malli/schema [:=> [:cat :seon.attempt/pulled] :seon.attempt/attempt]}
+   [a]
+-  (let [{:seon.attempt/keys [branch model max-turns results uncontracted conflicts unmerged]} a]
++  (let [{:seon.attempt/keys [branch model max-turns results uncontracted conflicts unmerged refusals]} a]
+     (cond-> (-> a (dissoc :seon.attempt/branch :seon.attempt/model :seon.attempt/max-turns :seon.attempt/results
+-                          :seon.attempt/uncontracted :seon.attempt/conflicts :seon.attempt/unmerged)
++                          :seon.attempt/uncontracted :seon.attempt/conflicts :seon.attempt/unmerged :seon.attempt/refusals)
+                 (update :seon.attempt/task :seon.task/id)
+                 (assoc :seon.attempt/env {:branch branch :model model :max-turns max-turns}))
+       results (assoc :seon.attempt/results (into {} (map (juxt :seon.proof/test :seon.proof/status)) results))
+       uncontracted (assoc :seon.attempt/uncontracted (set uncontracted))
++      refusals (assoc :seon.attempt/refusals (set refusals))
++      (:seon.attempt/waste a) (update :seon.attempt/waste edn/read-string)
+       unmerged (assoc :seon.attempt/unmerged (vec (sort unmerged)))
+       (:seon.attempt/changed a) (update :seon.attempt/changed set)
+       conflicts (assoc :seon.attempt/conflicts
+diff --git a/src/seon/template.clj b/src/seon/template.clj
+index b27bae9..af90678 100644
+--- a/src/seon/template.clj
++++ b/src/seon/template.clj
+@@ -14,7 +14,7 @@
+     evidence (the conflicts with base, ours and theirs; the red proofs). The failed merge
+     is cancelled, and every task that needed it needs the new merge."
+   (:refer-clojure :exclude [defn defn-])
+-  (:require [seon.contract :refer [defn defn-]] [seon.task :as task] [clojure.string :as str]))
++  (:require [seon.contract :refer [defn defn-]] [seon.task :as task] [clojure.string :as str] [seon.learn :as learn]))
+ 
+ (defn merge-name
+   "The name of work task nm's merge task."
+@@ -40,6 +40,49 @@
+    :test (str "Run the proofs and every program test. For any behaviour the evidence shows broke, add a deftest in the "
+               "proofs namespace. Make everything pass.")})
+ 
++(def templates
++  "Every template as a value (lane R4): its kind, its instructions and its estimate of
++  turns-to-green and tokens, stated before any task ran (method.md: estimate first). The
++  version a task was made from is stamped on it (seon.learn/stamp); a candidate names the
++  version it :seon.template/replaces and runs beside it until seon.learn/verdict."
++  (let [m {:merge {:seon.template/name :merge :seon.task/kind :merge :seon.task/instructions (instructions :merge)
++           :seon.template/estimate {:turns 2 :tokens 6000}
++           :seon.template/embed {:from [:conflicts] :search :near-dup :k 5}}
++   :design {:seon.template/name :design :seon.task/kind :design :seon.task/instructions (instructions :design)
++            :seon.template/estimate {:turns 3 :tokens 9000}
++            :seon.template/embed {:from [:instructions :plan] :search :tasks :k 5}}
++   :implement {:seon.template/name :implement :seon.task/kind :implement :seon.task/instructions (instructions :implement)
++               :seon.template/estimate {:turns 3 :tokens 9000}
++               :seon.template/embed {:from [:red :plan] :search :code :k 5}}
++   :test {:seon.template/name :test :seon.task/kind :test :seon.task/instructions (instructions :test)
++          :seon.template/estimate {:turns 2 :tokens 6000}
++          :seon.template/embed {:from [:plan] :search :tests :k 5}}
++   ;; lane R4's measured pair: the same work instructions, without and with the embedding query
++   :work {:seon.template/name :work :seon.task/kind :work
++          :seon.task/instructions "Make the proofs pass by defining the functions the plan names, in their namespaces."
++          :seon.template/estimate {:turns 2 :tokens 6000}}
++   :defect-prove {:seon.template/name :defect-prove :seon.task/kind :design
++                  :seon.task/instructions
++                  (str "Seon itself failed: the evidence holds the signature, the printed error, the failing form, the "
++                       "producer's definition and its callers. Write one deftest that reproduces the failure through the "
++                       "producer's caller that passes the bad value, add it to the proofs "
++                       "(my.task/update! :seon.task/proofs conj 'ns/test-name), and say in the plan which producer must "
++                       "change and why. Then (my.turn/wait).")
++                  :seon.template/estimate {:turns 3 :tokens 9000}
++                  :seon.template/embed {:from [:error] :search :tests :k 5}}
++   :defect-fix {:seon.template/name :defect-fix :seon.task/kind :work
++                :seon.task/instructions
++                (str "Fix the producer the plan names so the reproducing proof passes: tighten its contract at the "
++                     "producer so this class of error is refused at its source, and change its body. Never add a check "
++                     "beside it. Improve the plan with what you learn.")
++                :seon.template/estimate {:turns 3 :tokens 9000}
++                :seon.template/embed {:from [:red :plan] :search :code :k 5}}}]
++    ;; lane R4's measured candidate: :work plus the embedding query; it replaces :work's
++    ;; version (its version is a digest, so it is computed, never typed)
++    (assoc m :work-found (assoc (:work m) :seon.template/embed {:from [:plan :red] :search :code :k 5}
++                                :seon.template/replaces
++                                (learn/version (:work m))))))
++
+ (defn with-merge
+   "decls (task declarations of work) followed by their merge tasks; needs on a work task
+   of decls become needs on its merge."

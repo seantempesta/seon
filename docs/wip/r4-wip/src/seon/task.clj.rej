@@ -1,0 +1,9 @@
+@@ -184,7 +196,7 @@
+    :seon.attempt/pid :seon.attempt/start-ms :seon.attempt/end-ms :seon.attempt/branch :seon.attempt/model
+    :seon.attempt/max-turns :seon.attempt/outcome :seon.attempt/reason :seon.attempt/turns :seon.attempt/model-calls
+    :seon.attempt/tokens :seon.attempt/merged-t :seon.attempt/basis-t :seon.attempt/uncontracted
+-   :seon.attempt/unmerged
++   :seon.attempt/unmerged :seon.attempt/refusals :seon.attempt/waste
+    {:seon.attempt/results [:seon.proof/test :seon.proof/status]}
+    {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
+ 
