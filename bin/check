@@ -12,10 +12,8 @@ if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then run "$@"; exit $?; fi
 N=${1:-100}
 echo "== dragons"; "$ROOT/bin/dragons" | tail -1
 echo "== contracts"; run contracts | grep -E ":contracted|:uncontracted|:result"
-# the census runs from source: test.check's generators fail in a release build on Jolt
-# ("bit operation not supported for: class clojure.lang.BigInt", a runtime finding)
-echo "== census (no [:fn] without :gen; mg/check on every pure contract)"
-(cd "$ROOT" && HOME=$ROOT/target/home JOLT_PWD=$ROOT "$ROOT/target/jolt/jolt" -m seon.check census 2>&1 | grep -E ":generated|:failed \[\]|:result")
+echo "== census (no [:fn] without :gen; mg/check on every pure contract, in the release binary)"
+run census | grep -E ":generated|:failed \[\]|:result"
 echo "== fx (an effect from an agent through its owner proc)"; run fx 200 | grep -E ":unknown|:test-fork"
 echo "== system (root's procs from resources/seon/system.edn; apply! touches only what changed)"; run system | tail -1
 echo "== mcp (an outside MCP client evals in an agent and as root; both recorded :outside)"; run mcp-proof | tail -1

@@ -99,7 +99,7 @@
 
 (deftest api-entrance
   (let [st (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
-                          :view {:agents {}} :graph (promise) :root-procs (promise) :root-conns []})]
+                          :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})]
     (testing "the view is answered to its caller's promise"
       (let [p (promise)
             [_ outs] (step #'root/api-proc st :ext {:op :state :p p})]
