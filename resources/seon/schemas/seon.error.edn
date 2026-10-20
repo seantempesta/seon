@@ -1,0 +1,20 @@
+;; The one error map (Seon's names; the shape is Seon's errors-cut target: :seon.error/base
+;; without :at and :layer). Copied concept by concept, not Seon's registry.
+{:seon.error/type :qualified-keyword
+ :seon.error/operation :qualified-symbol
+ :seon.error/message :string
+ :seon.error/fix :string
+ :seon.error/member :keyword
+ :seon.error/problem [:map {:description "One refused part of a value: malli's path and the value shown as text."}
+                      [:path vector?] [:in vector?] [:expected :any] [:value :string]]
+ :seon.error/problems [:vector :seon.error/problem]
+ :seon.error/base [:map {:description "Every error: its variant (a registered schema key), the operation that raised it, a short message."}
+                   [:seon.error/type :seon.error/type]
+                   [:seon.error/operation :seon.error/operation]
+                   [:seon.error/message :seon.error/message]
+                   [:seon.error/fix {:optional true} :seon.error/fix]
+                   [:seon.error/member {:optional true} :seon.error/member]
+                   [:seon.error/problems {:optional true} :seon.error/problems]]
+ ;; the instrumented wrapper's refusals (Seon's variant names)
+ :seon.instrument/contract-error [:and :seon.error/base [:map [:seon.error/type [:enum :seon.instrument/contract-error]]]]
+ :seon.instrument/arity-error [:and :seon.error/base [:map [:seon.error/type [:enum :seon.instrument/arity-error]]]]}

@@ -21,13 +21,15 @@
 
   Conditions (T1's): the process descends from Chez's main thread on every fork
   (else the signal is lost); every wait loop retries EINTR."
-  (:require [jolt.scheme :as scm] [jolt.ffi :as ffi]))
+  (:refer-clojure :exclude [defn defn-])
+  (:require [seon.contract :refer [defn defn- defchecked]] [jolt.scheme :as scm] [jolt.ffi :as ffi] [seon.lib :as lib]))
 
 (ffi/load-library)
-(ffi/defcfn c-setitimer "setitimer" [:int :pointer :pointer] :int)
-(ffi/defcfn c-clock-gettime-nsec "clock_gettime_nsec_np" [:int] :uint64)
+(lib/defc c-setitimer "setitimer" [:int :pointer :pointer] :int)
+(lib/defc c-clock-gettime-nsec "clock_gettime_nsec_np" [:int] :uint64)
 
-(defn now-ns [] (c-clock-gettime-nsec 8)) ; CLOCK_UPTIME_RAW, as T1's harness reads it
+(defn now-ns {:malli/schema [:=> [:cat] :int]}
+  [] (c-clock-gettime-nsec 8)) ; CLOCK_UPTIME_RAW, as T1's harness reads it
 
 (def SIGUSR1 30)
 (def SIGALRM 14)
@@ -39,6 +41,7 @@
 
 (defn- set-token!
   "Set e's token for cause: true when it was not set before."
+  {:malli/schema [:=> [:cat :map :keyword] :boolean]}
   [e cause]
   (if (jolt.host/interrupted? (:token e))
     false
@@ -50,6 +53,7 @@
 
 (defn- arm-alarm!
   "One ITIMER_REAL for the earliest pending deadline on the stack, or disarmed."
+  {:malli/schema [:=> [:cat] :int]}
   []
   (let [dl (some->> @stack (remove #(jolt.host/interrupted? (:token %))) (keep :deadline) seq (apply min))
         us (if dl (max 1 (quot (- dl (now-ns)) 1000)) 0)]
@@ -60,15 +64,18 @@
 ;; root's interrupt that found no eval running (between two forms of a request): the
 ;; next bounded eval starts stopped. Cleared when the agent answers `interrupt`.
 (defonce ^:private pending (atom false))
-(defn clear-pending! [] (reset! pending false))
+(defn clear-pending! {:malli/schema [:=> [:cat] :boolean]}
+  [] (reset! pending false))
 
-(defn- on-usr1 []
+(defn- on-usr1 {:malli/schema [:=> [:cat] :boolean]}
+  []
   (let [es @stack]
     (if (seq es)
       (boolean (some true? (mapv #(set-token! % :interrupted) es)))
       (do (reset! pending true) false))))
 
-(defn- on-alrm []
+(defn- on-alrm {:malli/schema [:=> [:cat] :boolean]}
+  []
   (let [t (now-ns)
         due (filter #(some-> (:deadline %) (<= t)) @stack)]
     ;; a timed-out eval stops with everything nested inside it
@@ -79,21 +86,22 @@
       (arm-alarm!)
       set?)))
 
-(defonce ^:private install-kick*
+(defchecked ^:private install-kick* [:=> [:cat :int :seon.host/fn] :any]
   (scm/eval-string
     "(lambda (sig f) (register-signal-handler sig (lambda (s) (when (eq? #t (f)) (set-timer 1)))))"))
 ;; without the one-tick kick: the token is seen at run-interruptible's next own poll
-(defonce ^:private install-poll*
+(defchecked ^:private install-poll* [:=> [:cat :int :seon.host/fn] :any]
   (scm/eval-string "(lambda (sig f) (register-signal-handler sig (lambda (s) (f))))"))
 
 ;; Outside any run-interruptible the engine timer has Chez's default handler, which
 ;; raises; a kick that lands just outside one (a token set between push and entry)
 ;; must do nothing there. An agent runs no fibers, so no scheduler handler is replaced.
-(defonce ^:private quiet-timer* (scm/eval-string "(lambda () (timer-interrupt-handler (lambda () (void))))"))
+(defchecked ^:private quiet-timer* [:=> [:cat] :any] (scm/eval-string "(lambda () (timer-interrupt-handler (lambda () (void))))"))
 
 (defn install!
   "Register the two handlers (a forked child inherits them). kick? (default true) arms
   the engine timer for one tick when a token was newly set; false leaves it to the poll."
+  {:malli/schema [:function [:=> [:cat] :boolean] [:=> [:cat :boolean] :boolean]]}
   ([] (install! true))
   ([kick?]
    (quiet-timer*)
@@ -105,6 +113,7 @@
 (defn run
   "(thunk) under its own token, stopped by root's SIGUSR1 or by timeout-ms (nil: none).
   Throws ex-info {:interrupted true} or {:timeout-ms n} when stopped."
+  {:malli/schema [:=> [:cat [:maybe :int] :seon.host/fn] :any]}
   [timeout-ms thunk]
   (let [tok (jolt.host/make-interrupt)
         e {:token tok :cause (volatile! nil)
@@ -124,4 +133,5 @@
            (swap! stack (fn [s] (doall (remove #(identical? % e) s))))
            (when timeout-ms (arm-alarm!))))))
 
-(defn running? [] (boolean (seq @stack)))
+(defn running? {:malli/schema [:=> [:cat] :boolean]}
+  [] (boolean (seq @stack)))

@@ -1,0 +1,59 @@
+;; The program facts seon.db writes (lane D1's proto.db.facts.edn) (namespaces, vars, the example task and note) and the
+;; recording transaction of each eval request, as entity schemas. Stored shapes; the Datahike
+;; schema is derived from them (seon.schema.datahike/declarations).
+{;; ---- the program ----
+ :ns/name [:and {:seon.db/identity true} :symbol]
+ :ns/doc :string
+ :var/name [:and {:seon.db/identity true} :symbol]
+ :var/ns :seon.db/ref
+ :var/doc :string
+ :var/src :string
+ :var/arity :int
+ ;; what a recorded def holds (:fn :test :macro :value) and its contract, as text
+ :var/kind :keyword
+ :var/contract :string
+ :seon.db/ns-fact [:map {:seon.db/attributes true} [:ns/name :ns/name] [:ns/doc {:optional true} :ns/doc]]
+ :seon.db/var-fact [:map {:seon.db/attributes true}
+                     [:var/name :var/name] [:var/ns {:optional true} :var/ns] [:var/doc {:optional true} :var/doc]
+                     [:var/src {:optional true} :var/src] [:var/arity {:optional true} :var/arity]
+                     [:var/kind {:optional true} :var/kind] [:var/contract {:optional true} :var/contract]]
+ ;; ---- the example program's task and note ----
+ :task/name [:and {:seon.db/identity true} :keyword]
+ :task/plan :string
+ :task/status [:and {:seon.db/index true} :keyword]
+ :task/refs [:set :seon.db/ref]
+ :task/agent :keyword
+ :note/text :string
+ :note/agent [:and {:seon.db/index true} :keyword]
+ :note/about :seon.db/ref
+ :seon.db/example-task-fact [:map {:seon.db/attributes true}
+                              [:task/name :task/name] [:task/plan :task/plan] [:task/status :task/status]
+                              [:task/refs {:optional true} :task/refs] [:task/agent {:optional true} :task/agent]]
+ :seon.db/note-fact [:map {:seon.db/attributes true}
+                      [:note/text :note/text] [:note/agent :note/agent] [:note/about {:optional true} :note/about]]
+ ;; ---- the recording transaction of each eval request, and the agent's answered t.
+ ;; Observations: data on the branch that recorded them, never carried by a merge ----
+ :seon.cluster.eval/id :string
+ :seon.cluster.eval/run [:and {:seon.db/index true} :string]
+ :seon.cluster.eval/ordinal :int
+ :seon.cluster.eval/source :string
+ :seon.cluster.eval/tag :keyword
+ :seon.cluster.eval/error :string
+ :seon.cluster.eval/output :string
+ :seon.eval/shown :string
+ :seon.eval/duration-us :int
+ :seon.eval/alloc-bytes :int
+ :seon.cluster.eval/agent :seon.db/ref
+ :seon.agent/id [:and {:seon.db/identity true} :keyword]
+ :seon.agent/answered-t :int
+ :seon.db/eval-fact [:map {:seon.db/attributes true}
+                      [:seon.cluster.eval/id :seon.cluster.eval/id] [:seon.cluster.eval/run :seon.cluster.eval/run]
+                      [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal] [:seon.cluster.eval/source :seon.cluster.eval/source]
+                      [:seon.cluster.eval/tag :seon.cluster.eval/tag]
+                      [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]
+                      [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output]
+                      [:seon.cluster.eval/agent :seon.cluster.eval/agent]
+                      [:seon.eval/shown {:optional true} :seon.eval/shown] [:seon.eval/duration-us :seon.eval/duration-us]
+                      [:seon.eval/alloc-bytes :seon.eval/alloc-bytes]]
+ :seon.db/agent-fact [:map {:seon.db/attributes true}
+                       [:seon.agent/id :seon.agent/id] [:seon.agent/answered-t {:optional true} :seon.agent/answered-t]]}

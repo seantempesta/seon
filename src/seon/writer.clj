@@ -2,7 +2,8 @@
   "The writer: the only d/transact, d/branch! and merge caller, with group commit (drain
   the in-port, one Datahike commit per branch, one flush). From proto/flow f2-final
   proto.control's writer (lane F2; writer design A, notes/option3-F1-flow.md section 4)."
-  (:require [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
+  (:refer-clojure :exclude [defn defn-])
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
             [seon.program :as program] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
 
@@ -10,6 +11,7 @@
   "Main moved to t: the fork server's replica gets the commit (FIFO with fork requests),
   the reconciler the report, and root loads the program change (a restarted fork server
   forks from root). Answers st."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/t :seon.db/resolved-tx :seon.host/db] :seon.writer/state]}
   [st o t ops db]
   (step/out! o :to-fork-server {:op :tx :t t :ns (lib/now-ns) :tx-data ops})
   (step/out! o :main {:t t :ops ops :db db :ns (sock/now-ns)})
@@ -20,6 +22,7 @@
 (defn- merge-branch
   "Merge the branch's net change since its merge base into main. Conflicts leave it
   unmerged, as git does. (Lane M1 replaces this with the three-way program merge.)"
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.writer/branch :seon.db/branch] [:tuple :seon.writer/state :seon.writer/branch :map]]}
   [st o {:keys [base log] :as br} branch]
   (let [conn (:conn st)
         {:keys [tx-data touched]} (pdb/delta-tx base log)
@@ -37,6 +40,7 @@
 
 (defn- merge-main-into
   "git merge main, on the branch (lane M1 replaces this with the three-way merge)."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.writer/branch] [:tuple :seon.writer/branch :map]]}
   [{:keys [main-log]} {:keys [conn log main-t] :as br}]
   (let [ops (into (vec (:main-pending br)) (comp (filter #(> (:t %) main-t)) (mapcat :ops)) main-log)
         db @conn
@@ -55,6 +59,7 @@
 (defn- realize
   "A branch recovered from the store carries no in-memory log: derive it from Datahike's
   commit graph (base = merge-base of the branch and main)."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.db/branch] :seon.writer/state]}
   [st b]
   (let [br (get-in st [:branches b])]
     (if-not (:recovered br)
@@ -66,26 +71,30 @@
                       (assoc :base base :log (pdb/diff-ops base head)
                              :main-pending (pdb/diff-ops base (:boot-main st)))))))))
 
-(defn- with-conn [st b]
+(defn- with-conn {:malli/schema [:=> [:cat :seon.writer/state [:maybe :seon.db/branch]] :seon.writer/state]}
+  [st b]
   (let [st (if (and b (get-in st [:branches b]) (nil? (get-in st [:branches b :conn])))
              (assoc-in st [:branches b :conn] (d/connect (assoc (:cfg st) :branch b)))
              st)]
     (if (and b (get-in st [:branches b :recovered])) (realize st b) st)))
 
-(defn- release-ended [st b]
+(defn- release-ended {:malli/schema [:=> [:cat :seon.writer/state [:maybe :seon.db/branch]] :seon.writer/state]}
+  [st b]
   (let [br (get-in st [:branches b])]
     (if (and (:released br) (:conn br))
       (do (d/release (:conn br)) (update-in st [:branches b] dissoc :conn))
       st)))
 
-(defn- touch [st b]
+(defn- touch {:malli/schema [:=> [:cat :seon.writer/state [:maybe :seon.db/branch]] :seon.writer/state]}
+  [st b]
   (if (and b (get-in st [:branches b :conn]))
     (let [t (inc (:tick st 0)) old (get-in st [:branches b :used])]
       (-> st (assoc :tick t) (assoc-in [:branches b :used] t)
           (update :lru (fn [l] (assoc (if old (dissoc l old) (or l (sorted-map))) t b)))))
     st))
 
-(defn- evict-lru [st]
+(defn- evict-lru {:malli/schema [:=> [:cat :seon.writer/state] :seon.writer/state]}
+  [st]
   (loop [st st]
     (if (<= (count (:lru st)) cfg/OPEN-BRANCHES)
       st
@@ -98,11 +107,13 @@
 
 (defn- answer
   "The answer r for dest, as data on :to-api; sent after the batch's flush."
+  {:malli/schema [:=> [:cat :seon.host/volatile [:maybe :map] :any] :nil]}
   [o dest r] (when dest (step/out! o :to-api {:dest dest :r r})))
 
 (defn- commit-batch
   "Group commit: every queued transaction, one Datahike commit per branch
   (datahike.writer/transact-batch!), in arrival order. Answers st."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile] :seon.writer/state]}
   [st o]
   (reduce
     (fn [st [b ms reps]]
@@ -131,6 +142,7 @@
 
 (defn- other-op
   "Every request but :tx. Answers the new state."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.writer/request] :seon.writer/state]}
   [st o {:keys [op dest] :as m}]
   (let [conn (:conn st) cfg (:cfg st)
         st (cond-> st
@@ -187,6 +199,7 @@
 (defn- writer-one
   "One request into the batch: a :tx joins its branch's queue; any other op first commits
   the queue (it reads committed heads), then runs."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.writer/request] :seon.writer/state]}
   [st o {:keys [op] :as m}]
   (try
     (if (= op :tx)
@@ -202,7 +215,8 @@
       (answer o (:dest m) {:ok false :merged? false :error (step/error-msg e)})
       (dissoc st :pend :pend-order))))
 
-(defn- drain [ch m]
+(defn- drain {:malli/schema [:=> [:cat :seon.host/chan :seon.writer/request] [:vector :seon.writer/request]]}
+  [ch m]
   (loop [acc [m] k 1]
     (if (< k cfg/WRITER-BATCH)
       (if-let [y (a/poll! ch)] (recur (conj acc y) (inc k)) acc)
@@ -214,13 +228,15 @@
   commits and forks, FIFO), :to-api (answers {:dest :r}, after the batch's flush, and
   {:op :writer :tx-count :p50-ms :commits}), :main (main's commits), :events.
   A closed :in is the end of the flow: everything taken is committed and flushed, then
-  {:op :drained} goes out."
-  {:malli/schema step/step-schema}
+  {:op :drained} goes out. Answers leave when their batch is committed; the flusher's
+  window makes them durable (config FLUSH-MS), a :flush? request before its answer."
+  {:malli/schema :seon.step/step-fn}
   ([] {:params {:conn "main's connection" :cfg "the store config" :to-writer "its in-port channel"}
-       :outs {:to-fork-server "commits and forks, FIFO" :to-api "answers {:dest :r}" :main "main's commits"}
+       :outs {:to-fork-server "commits and forks, FIFO" :to-api "answers {:dest :r}" :main "main's commits"
+              :to-flusher "the store became dirty"}
        ;; its own thread: a transaction is CPU and store work the fiber scheduler cannot see
        :workload :mixed
-       :ping-map-fn (fn [st] {:tx-count (:tx-count st) :commits (:commits st) :open-branches (count (:lru st)) :main-t (:max-tx @(:conn st))})})
+       :ping-map-fn (fn [st] {:tx-count (:tx-count st) :commits (:commits st) :flushes (:flushes st 0) :dirty (boolean (:dirty st)) :open-branches (count (:lru st)) :main-t (:max-tx @(:conn st))})})
   ([args] (assoc args :branches (into {} (for [b (:recovered args)] [b {:recovered true :released true}]))
                  :main-log [] :tx-count 0 :commits 0 :batches 0
                  ::flow/in-ports {:in (:to-writer args)} ::flow/out-ports {:events (:events args)}))
@@ -230,18 +246,52 @@
    st)
   ([st _ m]
    (if (nil? m)
-     [st {:to-api [{:op :drained :tx-count (:tx-count st)}]}]
+     ;; the in-port closed: what was taken is committed; flush it, then done flows on
+     (do (when (and (:durable? st) (:dirty st)) (pdb/sync! (:cfg st)))
+         [(assoc st :dirty false) {:to-api [{:op :drained :tx-count (:tx-count st)}]}])
      (let [ms (drain (:to-writer st) m)
            o (volatile! {})
            c0 (:commits st)
            t0 (lib/now-ns)
-           st (commit-batch (reduce #(writer-one %1 o %2) st ms) o)
+           flush-due? (some #(= :flush (:op %)) ms)
+           reqs (remove #(= :flush (:op %)) ms)
+           st (commit-batch (reduce #(writer-one %1 o %2) st reqs) o)
            commits (- (:commits st) c0)
-           ;; one flush covers every commit of the batch
-           _ (when (and (:durable? st) (pos? commits)) (pdb/sync! (:cfg st)))
-           n-tx (count (filter #(= :tx (:op %)) ms))
-           st (-> (reduce (fn [st m] (-> st (release-ended (:branch m)) (release-ended (:from m)) (touch (:from m)) (touch (:branch m)))) st ms)
+           dirty (or (:dirty st) (pos? commits))
+           ;; one flush covers every commit since the last: when the flusher's window ends, or
+           ;; now for a write an outside effect follows (:flush?); otherwise the answers go
+           ;; out unflushed and the flusher is told once that the store is dirty
+           flush-now? (and (:durable? st) dirty (or flush-due? (some :flush? reqs)))
+           _ (when flush-now? (pdb/sync! (:cfg st)))
+           st (cond
+                (not (:durable? st)) st
+                flush-now? (-> st (assoc :dirty false :notified false) (update :flushes (fnil inc 0)))
+                (and dirty (not (:notified st))) (do (step/out! o :to-flusher {:op :dirty :since (lib/now-ns)})
+                                                     (assoc st :dirty true :notified true))
+                :else (assoc st :dirty dirty))
+           n-tx (count (filter #(= :tx (:op %)) reqs))
+           st (-> (reduce (fn [st m] (-> st (release-ended (:branch m)) (release-ended (:from m)) (touch (:from m)) (touch (:branch m)))) st reqs)
                   evict-lru
                   (update :tx-count + n-tx) (update :batches inc))]
-       (step/out! o :to-api {:op :writer :tx-count (:tx-count st) :batch-ms (lib/ms-since t0) :n-tx n-tx :commits commits})
+       (when (seq reqs)
+         (step/out! o :to-api {:op :writer :tx-count (:tx-count st) :batch-ms (lib/ms-since t0) :n-tx n-tx :commits commits}))
        [st @o]))))
+
+(defn flusher-proc
+  "The group flush's clock: told once that the store is dirty ({:op :dirty :since ns}), it
+  waits out the rest of the flush window (config FLUSH-MS) and asks the writer to flush
+  ({:op :flush} on the writer's in-port). The wait blocks only this proc; notices that
+  queued meanwhile are covered by the one flush."
+  {:malli/schema :seon.step/step-fn}
+  ([] {:params {:to-writer "the writer's in-port" :flush-ms "the window"}
+       :ins {:in "dirty notices from the writer"} :outs {}
+       :workload :io
+       :ping-map-fn (fn [st] {:flushes-asked (:asked st 0) :flush-ms (:flush-ms st)})})
+  ([args] (assoc args :asked 0 ::flow/out-ports {:to-writer (:to-writer args)}))
+  ([st _] st)
+  ([st _ m]
+   (if (nil? m)
+     [st nil]
+     (let [left-ms (- (:flush-ms st) (quot (- (lib/now-ns) (:since m)) 1000000))]
+       (when (pos? left-ms) (Thread/sleep (long left-ms)))
+       [(update st :asked inc) {:to-writer [{:op :flush}]}]))))

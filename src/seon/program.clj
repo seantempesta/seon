@@ -8,22 +8,26 @@
     branch (read -> evaluate -> record), and loads :var/src that reaches its branch from
     main (merge-main!).
   Source is evaluated natively in its namespace (Jolt compiles it)."
-  (:require [datahike.api :as d]))
+  (:refer-clojure :exclude [defn defn-])
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d]))
 
 (def ^:private def-heads '#{def defn defn- defmacro defonce deftest defmulti defrecord deftype defprotocol})
 
 (defn def-form?
   "A top-level form that defines a var: (defn f ...), (deftest t ...), ..."
+  {:malli/schema [:=> [:cat :any] :boolean]}
   [form]
   (and (seq? form) (symbol? (first form)) (contains? def-heads (symbol (name (first form))))))
 
 (defn program-ns?
   "Is ns-sym a program namespace in db?"
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] :boolean]}
   [db ns-sym]
   (some? (d/q '[:find ?e . :in $ ?n :where [?e :ns/name ?n]] db ns-sym)))
 
 (defn ensure-ns!
   "The namespace, created with clojure.core referred when it is new."
+  {:malli/schema [:=> [:cat :symbol] :seon.host/namespace]}
   [ns-sym]
   (or (find-ns ns-sym)
       (let [n (create-ns ns-sym)]
@@ -34,12 +38,14 @@
 
 (defn load-src!
   "Evaluate one var's source in its namespace; answers nil, or an error map."
+  {:malli/schema [:=> [:cat :symbol :string] [:maybe :seon.program/error]]}
   [ns-sym src]
   (try (binding [*ns* (ensure-ns! ns-sym)] (eval (read-string src)) nil)
        (catch Throwable e {:ns ns-sym :message (ex-message e)})))
 
 (defn load-all!
   "Load every :var/src in db, namespace by namespace. Answers {:loaded n :errors [...]}."
+  {:malli/schema [:=> [:cat :seon.host/db] :seon.program/load-report]}
   [db]
   (let [rows (d/q '[:find ?v ?src :where [?e :var/name ?v] [?e :var/src ?src]] db)
         errs (vec (keep (fn [[v src]] (load-src! (symbol (namespace v)) src)) (sort-by (comp str first) rows)))]
@@ -49,6 +55,7 @@
   "Load the :var/src that resolved tx-data ops assert, read against db (after them), and
   unmap every var whose :var/name they retract (a resumed branch that predates a var).
   Answers the error maps (empty when all loaded)."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.db/op]] [:vector :seon.program/error]]}
   [db ops]
   (doseq [[op _ a v] ops
           :when (and (= op :db/retract) (= a :var/name) (symbol? v))
@@ -65,6 +72,7 @@
 
 (defn record-tx
   "The fact recording a def evaluated in a program namespace: its var and source."
+  {:malli/schema [:=> [:cat :seon.host/var :any] :seon.db/tx-data]}
   [the-var form]
   (let [m (meta the-var) nsym (ns-name (:ns m)) vsym (symbol (str nsym) (str (:name m)))]
     [{:var/name vsym :var/ns [:ns/name nsym]

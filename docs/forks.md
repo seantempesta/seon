@@ -7,7 +7,7 @@ Fixes arrive as `jolt/<topic>` branches merged into `jolt/main` by root once mea
 fixes are cut again from upstream's main as `upstream/<topic>`. **Generic** = an upstream
 candidate; **Jolt** = specific to running on Jolt (kept on `jolt/main`).
 
-## jolt — `reference-code/jolt`, `jolt/main` = `247b5110` (A1: + jolt/flow-update, jolt/seam-claims, jolt/printer-port)
+## jolt — `reference-code/jolt`, `jolt/main` = `a9aef8ea` (A1: + jolt/flow-update, jolt/seam-claims, jolt/printer-port, jolt/go-fiber-default)
 
 - Repo: `~/src/seon-jolt/jolt` (the worktrees `jolt-final`, `jolt-f1`, `jolt-u1`, `jolt-e14` share it). Upstream: `jolt-lang/jolt`. Fork: `seantempesta/jolt`.
 - Base: `f714b0ed` (upstream main, v0.8.23 + 20). `jolt/main` = branch `final` (`40028e79`) fast-forwarded to F1's `f1-flow` (`00d090a5`); no merge was needed.

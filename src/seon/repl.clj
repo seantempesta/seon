@@ -22,18 +22,21 @@
   Interrupt is out of band: root sends SIGUSR1 (seon.intr), and an `interrupt` message
   is answered once the eval has stopped. Seon's platform ops (tests, stats, sync, clone,
   messages, writes) are seon/<op> messages, handled by `agent-step` as before."
-  (:require [jolt.nrepl :as nrepl] [seon.wire :as wire] [seon.intr :as intr] [seon.agent :as agent] [my.db] [my.agent]
+  (:refer-clojure :exclude [defn defn-])
+  (:require [seon.contract :refer [defn defn- defchecked]] [jolt.nrepl :as nrepl] [seon.wire :as wire] [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent]
             [seon.program :as program] [seon.lib :as lib] [seon.sock :as sock] [seon.step :as step]
             [jolt.ffi :as ffi]))
 
-(def ^:private chunk-writer @#'jolt.nrepl/chunk-writer)
-(def ^:private ex-class-strings @#'jolt.nrepl/ex-class-strings)
-(def ^:private outer-frames @#'jolt.nrepl/outer-frames)
+(defchecked ^:private chunk-writer [:=> [:cat :seon.host/fn] :seon.host/writer] @#'jolt.nrepl/chunk-writer)
+(defchecked ^:private ex-class-strings [:=> [:cat :seon.host/throwable [:maybe :keyword]] [:tuple :string [:maybe :string]]] @#'jolt.nrepl/ex-class-strings)
+(defchecked ^:private outer-frames [:=> [:cat] :any] @#'jolt.nrepl/outer-frames)
 
-(defn- form-text [form] (binding [agent/*print-limits* {:length 12 :level 4 :chars 2000}] (agent/builtin-print form)))
+(defn- form-text {:malli/schema [:=> [:cat :any] :string]}
+  [form] (binding [agent/*print-limits* {:length 12 :level 4 :chars 2000}] (agent/builtin-print form)))
 
 (defn- session-ns
   "The request's namespace: its \"ns\", else its session's, else the agent's own."
+  {:malli/schema [:=> [:cat :seon.wire/msg] :seon.host/namespace]}
   [req]
   (let [s @agent/state]
     (or (some-> (get req "ns") wire/text-> symbol find-ns)
@@ -43,6 +46,7 @@
 (defn- eval-code
   "Read code once, form by form, and evaluate each with (:repl/eval-fn req) under
   seon.intr/run. Answers each form; an interrupt stops the request; then done."
+  {:malli/schema [:=> [:cat :seon.wire/msg :string] :any]}
   [{:keys [reply] :as req} code]
   (let [r (java.io.PushbackReader. (java.io.StringReader. code))
         eval-fn (:repl/eval-fn req eval)
@@ -91,13 +95,15 @@
                       (reply {"status" ["done"]}))
                   (recur ns))))))))))
 
-(defn- describe [_]
+(defn- describe {:malli/schema [:=> [:cat :any] :seon.wire/msg]}
+  [_]
   {"status" ["done"]
    "versions" {"jolt" {"version-string" (jolt.host/jolt-version)} "seon-agent" {"version-string" "f2"}}
    "ops" (zipmap ["describe" "clone" "close" "ls-sessions" "eval" "load-file" "interrupt"] (repeat {}))})
 
 (defn base-handler
   "nREPL's ops, answered on this thread."
+  {:malli/schema [:=> [:cat :seon.wire/msg] :any]}
   [{:keys [reply] :as req}]
   (case (get req "op")
     "describe" (reply (describe req))
@@ -119,11 +125,13 @@
 
 ;; ---- middleware -------------------------------------------------------------------
 
-(defn- around-reply [req f] (assoc req :reply (let [r (:reply req)] (fn [m] (r (f m))))))
+(defn- around-reply {:malli/schema [:=> [:cat :seon.wire/msg :seon.host/fn] :seon.wire/msg]}
+  [req f] (assoc req :reply (let [r (:reply req)] (fn [m] (r (f m))))))
 
 (defn wrap-print
   "The value through the agent's value printer: `value`, with the printer's tokens,
   truncation and elision count."
+  {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
     (h (around-reply req
@@ -139,6 +147,7 @@
 
 (defn wrap-caught
   "An eval error also as the one error map (printed EDN)."
+  {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
     (h (around-reply req
@@ -148,6 +157,7 @@
 
 (defn wrap-cost
   "Per-form wall µs and allocated bytes, measured around the per-form eval fn."
+  {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
     (let [last (volatile! nil)
@@ -165,6 +175,7 @@
 (defn wrap-record
   "A def in a program namespace becomes a fact on this branch (agent mode): the record
   goes to the writer as this agent's own transaction."
+  {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
     (h (around-reply req
@@ -172,16 +183,54 @@
            (let [v (:repl/value m)]
              (if (and (= :agent (:mode @agent/state)) (var? v) (program/def-form? (:repl/form m))
                       (program/program-ns? (agent/db) (ns-name (:ns (meta v)))))
-               (try (agent/transact! (program/record-tx v (:repl/form m)))
-                    (assoc m "seon/recorded" (str (symbol v)))
-                    (catch Throwable e (assoc m "seon/record-error" (ex-message e))))
+               (if contract/record?
+                 ;; joins the request's recording transaction (the last def of a var wins)
+                 (do (swap! agent/state assoc-in [:defs (symbol v)] (program/record-tx v (:repl/form m)))
+                     (assoc m "seon/recorded" (str (symbol v))))
+                 (try (agent/transact! (program/record-tx v (:repl/form m)))
+                      (assoc m "seon/recorded" (str (symbol v)))
+                      (catch Throwable e (assoc m "seon/record-error" (ex-message e)))))
+               m)))))))
+
+(defn- admit
+  "Admit a definition by its contract (G1's proto.agent/admit!, Seon's rule): a function var
+  with :malli/schema is armed and leaves the agent's uncontracted set; one without joins
+  it, and the response carries the warning naming every uncontracted definition so far.
+  Answers the response's additions (wire keys)."
+  {:malli/schema [:=> [:cat :seon.host/var] [:maybe :seon.wire/msg]]}
+  [v]
+  (when (contract/function-var? v)
+    (let [sym (symbol v)]
+      (if (contract/contract v)
+        (let [r (contract/arm! v)]
+          (swap! agent/state update :uncontracted (fnil disj #{}) sym)
+          (if (contract/error? r)
+            {"seon/contract" "invalid" "seon/contract-error" (pr-str r)}
+            {"seon/contract" (name r)}))
+        (let [u (:uncontracted (swap! agent/state update :uncontracted (fnil conj #{}) sym))]
+          {"seon/warnings" (pr-str [{:seon.repl/finding :uncontracted-definition
+                                     :seon.repl/fix (str "Declare a contract: (defn " (name sym) " {:malli/schema [:=> [:cat ...] ...]} [...] ...). "
+                                                         "A branch carrying an uncontracted function is refused at merge.")
+                                     :uncontracted (vec (sort-by str u)) :count (count u)}])})))))
+
+(defn wrap-admit
+  "A def's var is admitted by its contract (admit): armed, or a growing warning."
+  {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
+  [h]
+  (fn [req]
+    (h (around-reply req
+         (fn [m]
+           (let [v (:repl/value m)]
+             (if (and (var? v) (program/def-form? (:repl/form m)))
+               (merge m (admit v))
                m)))))))
 
 (def middleware
-  "Outermost first. Answers pass innermost first: cost, record, caught, print."
-  [wrap-print wrap-caught wrap-record wrap-cost])
+  "Outermost first. Answers pass innermost first: cost, record, admit, caught, print."
+  [wrap-print wrap-caught wrap-admit wrap-record wrap-cost])
 
 (defn handler
+  {:malli/schema [:function [:=> [:cat] :seon.host/fn] [:=> [:cat [:sequential :seon.host/fn]] :seon.host/fn]]}
   ([] (handler middleware))
   ([mw] (reduce (fn [h m] (m h)) base-handler (reverse mw))))
 
@@ -192,11 +241,19 @@
 (defn- reply-fn
   "Answers go straight to root's socket; the request's `done` also carries the agent's
   t and memory (root's view of it)."
+  {:malli/schema [:=> [:cat :seon.wire/msg] :seon.host/fn]}
   [req]
   (let [id (get req "id") sid (get req "session")]
-    (fn [m] (agent/send-wire! (cond-> m
-                                id (assoc "id" id) sid (assoc "session" sid)
-                                (some #{"done"} (get m "status")) (assoc "seon/t" (:max-tx (agent/db)) "seon/mem-mb" (str (agent/mem-mb))))))))
+    (fn [m] (let [done? (some #{"done"} (get m "status"))
+                  rec (when (and done? contract/record? (= :agent (:mode @agent/state)) (= "eval" (get req "op")))
+                        (let [defs (into [] (mapcat val) (:defs @agent/state))]
+                          (swap! agent/state dissoc :defs)
+                          {"seon/run" (str (name (:id @agent/state)) "-" (lib/c-getpid) "-" (lib/now-ns))
+                           "seon/defs" (binding [*print-length* nil *print-level* nil] (pr-str defs))}))]
+              (agent/send-wire! (cond-> m
+                                  id (assoc "id" id) sid (assoc "session" sid)
+                                  done? (assoc "seon/t" (:max-tx (agent/db)) "seon/mem-mb" (str (agent/mem-mb)))
+                                  rec (merge rec)))))))
 
 (defn agent-step
   "The agent as a step-fn, run on its one thread by seon.step/run-loop: requests in on
@@ -204,7 +261,7 @@
   :sock; :pause, :resume, :stop and :ping are taken by the loop. Its REPL state is the
   process's one state map (seon.agent/state), which the code it evaluates reads, so the
   step's own state is empty."
-  {:malli/schema step/step-schema}
+  {:malli/schema :seon.step/step-fn}
   ([] {:ins {:sock "root's requests"} :outs {:sock "replies"} :workload :io
        :ping-map-fn (fn [_] {:evals (:n @agent/state) :pending (count (:pending @agent/state)) :mem-mb (:mem @agent/state)})})
   ([_] {})
@@ -218,12 +275,13 @@
               ((:reply req) {"err" (nrepl/err->msg e)})
               ((:reply req) {"status" ["eval-error" "done"]})))
        [st nil])
-     [st {:sock (agent/handle! m)}])))
+     [st (when-let [ms (agent/handle! m)] {:sock ms})])))
 
 (defn serve!
   "The agent's loop: one request at a time, in arrival order. Never returns."
+  {:malli/schema [:=> [:cat] :any]}
   []
-  (step/run-loop #'agent-step nil
+  (step/run-loop #'agent-step {}
                  (fn [] (let [m (agent/next-msg!)] (when-not (= m :dead) [:sock m])))
                  (fn [_ m] (agent/send! m)))
   (lib/c-exit 0))
@@ -231,6 +289,7 @@
 (defn run!
   "The agent's body, in the child of the fork server; fd is its socket to root. Never
   returns."
+  {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :int] :any]}
   [fd m db0 t-req-ns]
   (agent/init! fd m db0 serve!)
   (agent/hello! t-req-ns {:interrupt-ok (:interrupt-ok @agent/state)})

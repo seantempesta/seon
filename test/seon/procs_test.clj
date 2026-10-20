@@ -3,7 +3,7 @@
   its `:malli/schema` (seon.step/step-schema) and against what each arity must do.
   Run: bin/test seon.procs-test (proto/flow f2-final test/proto/procs_test.clj)"
   (:require [clojure.test :refer [deftest is testing run-tests]]
-            [malli.core :as m]
+            [malli.core :as m] [seon.contract]
             [clojure.core.async :as a]
             [clojure.core.async.flow :as flow]
             [datahike.api :as d]
@@ -14,8 +14,8 @@
 
 (trove/set-log-fn! nil)
 
-(def ^:private describe-ok? (m/validator step/describe-schema))
-(def ^:private step-out-ok? (m/validator [:tuple :map step/outputs-schema]))
+(def ^:private describe-ok? (m/validator (seon.contract/schema :seon.step/describe)))
+(def ^:private step-out-ok? (m/validator (seon.contract/schema [:tuple :map :seon.step/outputs])))
 
 (defn- arity-0 [v] (let [d (v)] (is (describe-ok? d) (str v " describe")) d))
 (defn- step [v st in msg] (let [r (v st in msg)] (is (step-out-ok? r) (str v " transform " in)) r))
@@ -23,7 +23,7 @@
 (deftest every-step-fn-carries-the-contract
   (doseq [v [#'writer/writer-proc #'reconcile/reconciler-proc #'server/fork-server-proc #'ap/agent-proc #'root/api-proc
              #'server/server-step #'repl/agent-step]]
-    (is (= step/step-schema (:malli/schema (meta v))) (str v))
+    (is (= :seon.step/step-fn (:malli/schema (meta v))) (str v))
     (arity-0 v)))
 
 (deftest writer

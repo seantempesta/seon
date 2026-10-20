@@ -1,0 +1,14 @@
+;; The named schemas of seon.schema.datahike (lane D1) (Seon's :seon.db/ref, simplified) and its one error.
+{:seon.db/ref [:or {:description "A Datahike reference: entity id, tempid, lookup ref, or nested entity map carrying :db/id."}
+               :int :string [:tuple :keyword :any] [:map [:db/id :int]]]
+ :seon.schema/declaration [:map {:description "A Datahike attribute map, as d/transact takes it."}
+                            [:db/ident :keyword] [:db/valueType :keyword] [:db/cardinality :keyword]
+                            [:db/unique {:optional true} :keyword] [:db/index {:optional true} :boolean]
+                            [:db/isComponent {:optional true} :boolean] [:db/noHistory {:optional true} :boolean]]
+ :seon.schema/reason [:enum :seon.schema.datahike/absent :seon.schema.datahike/cyclic
+                       :seon.schema.datahike/nested-collection :seon.schema.datahike/ordered-collection
+                       :seon.schema.datahike/nilable :seon.schema.datahike/literal :seon.schema.datahike/enum :seon.schema.datahike/value-type-unavailable]
+ :seon.schema/unstorable [:and :seon.error/base
+                           [:map [:seon.error/type [:enum :seon.schema/unstorable]]
+                            [:seon.schema/attribute :qualified-keyword] [:seon.schema/reason :seon.schema/reason]
+                            [:seon.schema/form :any]]]}

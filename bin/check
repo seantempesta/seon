@@ -10,6 +10,9 @@ S=$ROOT/target/seon
 run() { (cd "$ROOT/target" && ./seon "$@" 2>&1) }
 if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then run "$@"; exit $?; fi
 N=${1:-100}
+echo "== contracts"; run contracts | grep -E ":contracted|:uncontracted|:result"
+echo "== admit"; run admit | tail -1
+echo "== record"; run record | tail -1
 echo "== smoke";  run smoke | grep -E "^merge|^killed|spawned|ready"
 echo "== program"; run program | tail -1
 echo "== robust"; run robust | tail -1
@@ -24,5 +27,8 @@ if [[ -z $PIDS ]]; then echo "FAIL no pids"; elif [[ -n $LEFT ]]; then echo "FAI
 echo "== durable (root writes a store and SIGKILLs itself; a new root recovers it)"
 D=$(mktemp -d /tmp/seon-durable.XXXXXX)
 run durable-write $D/store | tail -1; run durable-read $D/store | tail -1; rm -rf "$D"
+echo "== window (SEON_FLUSH_MS=1000: answered unflushed, flushed within the window; :flush? waits)"
+D=$(mktemp -d /tmp/seon-window.XXXXXX)
+(export SEON_FLUSH_MS=1000; run window-write $D/store | tail -2; run window-read $D/store | tail -1); rm -rf "$D"
 echo "== swarm $N"; run swarm $N | grep -E ":merged|:tasks-done|:fresh"
 echo "== scale $N"; run scale $N | grep -E ":all-ok|:spawn->all|:end-to-end|:control-real-mb|:all-killed"

@@ -10,11 +10,13 @@
   It is a step-fn (`server-step`), run on its one thread by `seon.step/run-loop` (lane
   F2): the same process contract as root's Flow procs, with pause, resume, stop and ping
   as messages on its pipe."
-  (:require [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program]
+  (:refer-clojure :exclude [defn defn-])
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program]
             [seon.step :as step] [seon.sock :as sock] [seon.config :as cfg] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.ffi :as ffi]))
 
 (defn- reap
   "Every child that exited, as :exit events (non-blocking waitpid)."
+  {:malli/schema [:=> [:cat :map] [:vector :seon.fork-server/event]]}
   [st]
   (loop [evs []]
     (let [pid (lib/c-waitpid-nb -1 (:status-buf st) 1)]
@@ -28,7 +30,7 @@
   "The fork server's step-fn. In :cmd ({:op :tx|:fork|:stats|:static}, and :tick when the
   pipe is idle, to reap); out :ev (events for root). The fork is this process's own
   effect: the child never returns from the step (it becomes the agent)."
-  {:malli/schema step/step-schema}
+  {:malli/schema :seon.step/step-fn}
   ([] {:ins {:cmd "main's commits and fork requests, FIFO; :tick when idle"} :outs {:ev "events for root"}
        :workload :io
        :ping-map-fn (fn [st] {:t (:max-tx (:db st)) :mismatch (:mismatch st)})})
@@ -83,6 +85,7 @@
   that every agent, test child and clone inherits; a standby (boot? false) stays in it.
   EOF on the socket is root's death: the server kills the group, itself included. Never
   returns."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.lib/fd :boolean] :any]}
   [db0 fd boot?]
   (when boot? (lib/c-setpgid 0 0))
   (let [conn (sock/conn fd)
@@ -98,6 +101,7 @@
 (defn- start-event-reader!
   "The fork server's socket, read by one thread (a blocking read) into the :fork-server
   proc's :ev port. EOF is {:ev :eof :pid}. Ends at EOF."
+  {:malli/schema [:=> [:cat :seon.host/chan :seon.lib/fd :seon.lib/pid] :seon.host/thread]}
   [ev-ch fd pid]
   (doto (Thread.
           (fn []
@@ -112,6 +116,7 @@
 (defn fork-server
   "Fork the boot fork server holding db (qfork: only while this process has one active
   thread, which at boot it has). In the child it never returns; here answers {:pid :fd}."
+  {:malli/schema [:=> [:cat :seon.host/db] :seon.fork-server/forked]}
   [db]
   (let [[r s] (sock/socketpair)
         pid (lib/qfork)]
@@ -122,6 +127,7 @@
 (defn- request-standby
   "Ask the current server to fork a standby; its socket to root goes with the request
   (SCM_RIGHTS), root keeps the other end."
+  {:malli/schema [:=> [:cat :map] :map]}
   [st]
   (if (or (:stopping st) (:standby-pending st) (nil? (:pid st)))
     st
@@ -131,7 +137,8 @@
       ;; root keeps s until the server answers (a descriptor only in flight may be lost)
       (assoc st :gen gen :standby-pending {:gen gen :fd r :sent s}))))
 
-(defn- drop-standby [sb]
+(defn- drop-standby {:malli/schema [:=> [:cat [:maybe :map]] :any]}
+  [sb]
   (when sb
     (some-> (:pid sb) (lib/c-kill 9))
     (some-> (:sent sb) sock/close!)
@@ -142,6 +149,7 @@
   since its fork and the requests the dead server never answered (an agent socket the
   dead server held reads EOF at root: that spawn fails by itself). Then it forks the next
   standby. Answers [st outputs]."
+  {:malli/schema [:=> [:cat :map] [:tuple :map :seon.step/outputs]]}
   [st]
   (let [sb (:standby st)
         alive? (and sb (zero? (lib/c-kill (:pid sb) 0)))
@@ -164,7 +172,7 @@
   Root never forks after boot: the server keeps a standby (a fork of itself, with its own
   socket to root); when the server dies the standby is promoted (lesson 1: every fork comes from a
   single-threaded process)."
-  {:malli/schema step/step-schema}
+  {:malli/schema :seon.step/step-fn}
   ([] {:params {:pid "the server" :fd "its socket" :server-ev "its events, read by the reader thread"}
        :ins {:cmd "commits and forks, FIFO" :ext "the api's requests"} :outs {:to-api "events and answers"}
        ;; pipe writes: short, blocking only on the pipe

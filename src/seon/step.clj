@@ -13,37 +13,22 @@
   A message taken while the step is running (a nested read inside a form, in an agent)
   is the step's own business; control messages it meets there are pushed back for the
   loop."
-  (:require [clojure.core.async.flow :as flow]))
+  (:refer-clojure :exclude [defn defn-])
+  (:require [clojure.core.async.flow :as flow] [seon.contract :refer [defn defn-]]))
 
-(def describe-schema
-  "Arity 0: what the proc declares (params, ins, outs, workload, a deliberate ping-map-fn)."
-  [:map
-   [:workload [:enum :io :mixed :compute]]
-   [:ins {:optional true} [:map-of :keyword :string]]
-   [:outs {:optional true} [:map-of :keyword :string]]
-   [:params {:optional true} [:map-of :keyword :string]]
-   [:ping-map-fn fn?]])
-
-(def outputs-schema
-  "What a transform emits: port (an out-id, or [pid in-id] routed by the resolver) -> messages."
-  [:maybe [:map-of [:or :keyword [:tuple :keyword :keyword]] [:sequential :any]]])
-
-(def step-schema
-  "The four arities of a step-fn."
-  [:function
-   [:=> [:cat] describe-schema]
-   [:=> [:cat :map] :map]
-   [:=> [:cat :map [:enum :clojure.core.async.flow/stop :clojure.core.async.flow/pause :clojure.core.async.flow/resume]] :map]
-   [:=> [:cat :map :keyword :any] [:tuple :map outputs-schema]]])
+;; The contract every step-fn Var carries is the registered :seon.step/step-fn
+;; (resources/seon/schemas/seon.core.edn): describe, init, transition, transform.
 
 (defn control-op
   "The lifecycle op of a transport message, or nil for ordinary data."
+  {:malli/schema [:=> [:cat :any] :seon.step/control]}
   [m] (when (map? m) (#{:pause :resume :ping :stop} (:op m))))
 
 (defn run-loop
   "Run step (a Var holding a four-arity step-fn) on this thread until :stop or EOF.
   recv! answers [in-id msg], or nil at EOF; send! takes [out-id msg]. Answers the final
   state, after the ::flow/stop transition."
+  {:malli/schema [:=> [:cat [:or :seon.host/var :seon.host/fn] :any :seon.host/fn :seon.host/fn] :any]}
   [step args recv! send!]
   (let [ping-map-fn (or (:ping-map-fn (step)) identity)]
     (loop [st (step args) status :running held clojure.lang.PersistentQueue/EMPTY n 0]
@@ -69,8 +54,9 @@
 
 (defn out!
   "Add message m to port's outputs in the volatile o (a transform's outputs, built up)."
+  {:malli/schema [:=> [:cat :seon.host/volatile [:or :keyword [:tuple :keyword :keyword]] :any] :nil]}
   [o port m] (vswap! o update port (fnil conj []) m) nil)
 
-(defn event "m stamped with the wall-clock ms, for the events channel." [m] (assoc m :at-ms (System/currentTimeMillis)))
+(defn event "m stamped with the wall-clock ms, for the events channel." {:malli/schema [:=> [:cat :map] :map]} [m] (assoc m :at-ms (System/currentTimeMillis)))
 
-(defn error-msg "An exception's message, or its class." [^Throwable e] (or (ex-message e) (str (type e))))
+(defn error-msg "An exception's message, or its class." {:malli/schema [:=> [:cat :seon.host/throwable] :string]} [^Throwable e] (or (ex-message e) (str (type e))))

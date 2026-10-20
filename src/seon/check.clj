@@ -3,7 +3,7 @@
   f2-final proto.smoke). bin/check runs them; target/seon <check> [args] runs one.
   usage: target/seon smoke        3 agents: define, test, transact; merge one; kill one mid-eval
          target/seon scale N      N agents spawned at once, each eval + transact + test"
-  (:require [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile]))
+  (:require [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m]))
 
 (defn- out! [& xs] (println (apply str xs)) (flush))
 (defn- await-status [sys ids pred ms]
@@ -89,6 +89,89 @@
     (pprint (-> st (update :agents (fn [ags] (into (sorted-map) (for [[k v] ags] [k (-> v (dissoc :evals) (update :tests #(some-> % (dissoc :reports))))]))))))
     (c/stop! sys)
     (lib/c-exit 0)))
+
+;; ---- contracts (lane G1, proto/core 9f5100a proto.smoke/contracts) --------------------
+
+(seon.contract/defn probe-callee
+  "A contracted function, for the direct-link check below."
+  {:malli/schema [:=> [:cat :int] :int]}
+  [x] (inc x))
+(defn probe-caller "An uncontracted caller compiled against probe-callee." [x] (probe-callee x))
+
+(defn- platform-nss "Every loaded platform namespace (seon.*, my.*), this check driver left out." []
+  (sort (remove #{'seon.check} (filter #(re-find #"^(seon|my)\." (str %)) (map ns-name (all-ns))))))
+
+(defn contracts
+  "In this binary (a release build direct-links and inlines app defs): every function var
+  of the platform carries a contract; every contracted var holds its checked function
+  from its definition on (or is armed at boot), and that function object (what a
+  direct-linked caller holds) refuses a call with a wrong arity as the one error map; a
+  plain caller compiled against a contracted function reaches its check. Prints the counts
+  and exits 0 only when all hold."
+  []
+  (let [boot (contract/instrument! '[seon.contract])
+        nss (platform-nss)
+        vs (for [n nss v (vals (ns-interns n)) :when (contract/contract v)] v)
+        at-def (filter #(= :definition (:seon.contract/checked-at (meta %))) vs)
+        late (remove #(= :definition (:seon.contract/checked-at (meta %))) vs)
+        uncontracted (contract/uncontracted nss)
+        bad-arity (fn [v] (let [s (m/deref (contract/schema (contract/contract v)))
+                                infos (map m/-function-info (m/-function-schema-arities s))
+                                hi (reduce max -1 (map #(or (:max %) -1) infos))
+                                lo (reduce min 1000 (map :min infos))]
+                            (if (some #(nil? (:max %)) infos) (when (pos? lo) (dec lo)) (inc hi))))
+        refuses (fn [v] (if-let [n (bad-arity v)]
+                          (try (apply @v (repeat n nil)) :not-refused
+                               (catch Throwable e (if (= :seon.instrument/arity-error (:seon.error/type (ex-data e))) :refused :other)))
+                          :no-bad-arity))
+        results (group-by refuses vs)
+        direct (try (probe-caller "x") :not-refused
+                    (catch Throwable e (if (= 'seon.check/probe-callee (:seon.error/operation (ex-data e))) :refused :other)))
+        ok (and (= direct :refused) (empty? uncontracted) (every? contract/armed? late)
+                (empty? (results :not-refused)) (empty? (results :other)))]
+    (pprint {:namespaces (count nss) :contracted (count vs) :checked-at-definition (count at-def)
+             :armed-at-boot (vec (sort (map symbol late))) :uncontracted uncontracted
+             :wrong-arity {:refused (count (results :refused)) :not-refused (mapv symbol (results :not-refused))
+                           :other (mapv symbol (results :other)) :no-bad-arity (mapv symbol (results :no-bad-arity))}
+             :direct-linked-caller direct :boot (dissoc boot :uncontracted)
+             :guarantees (if contract/on? :on :off)
+             :result (if ok :CONTRACTS-OK :CONTRACTS-FAILED)})
+    (lib/c-exit (if ok 0 1))))
+
+(defn admit
+  "An agent's defn with :malli/schema is armed (a bad call refuses as the error map); one
+  without is admitted with a warning that grows with the agent's uncontracted definitions."
+  []
+  (let [sys (c/start! {:datoms 500})
+        a (c/spawn! sys {:task "admit"})
+        _ (await-status sys [a] #{:idle} 5000)
+        [d1 bad] @(c/submit! sys a "(defn sq {:malli/schema [:=> [:cat :int] :int]} [x] (* x x)) (sq \"x\")")
+        [u1] @(c/submit! sys a "(defn plain [x] x)")
+        [u2] @(c/submit! sys a "(defn plain2 [x] x)")
+        ok (and (= :armed (:contract d1)) (= :err (:tag bad)) (re-find #"invalid-input" (str (:printed bad)))
+                (= 1 (:count (first (:warnings u1)))) (= 2 (:count (first (:warnings u2)))))]
+    (pprint {:armed (select-keys d1 [:printed :contract]) :refused (:printed bad)
+             :warnings [(first (:warnings u1)) (dissoc (first (:warnings u2)) :seon.repl/fix)]})
+    (out! (if ok "ADMIT OK" "ADMIT FAILED"))
+    (c/stop! sys)
+    (lib/c-exit (if ok 0 1))))
+
+(defn record
+  "Each eval request is recorded in one transaction on the agent's branch (its evaluations
+  on its agent entity, its defs in program namespaces), built at root from the reply; the
+  agent's next request sees its own recording."
+  []
+  (let [sys (c/start! {:datoms 500})
+        a (c/spawn! sys {:task "record"})
+        _ (await-status sys [a] #{:idle} 5000)
+        r1 @(c/submit! sys a "(+ 1 2) (in-ns 'app.m0) (defn f3 [x] (* 3 x)) (/ 1 0)")
+        r2 @(c/submit! sys a "(count (my.db/q '[:find ?e :where [?e :seon.cluster.eval/agent ?a] [?a :seon.agent/id :a1]]))
+                               (my.db/q '[:find ?s . :where [?e :var/name app.m0/f3] [?e :var/src ?s]])")
+        ok (and (= 4 (count r1)) (= "4" (:printed (first r2))) (re-find #"f3" (str (:printed (second r2)))))]
+    (pprint {:first (mapv #(select-keys % [:tag :printed :record :recorded]) r1) :second (mapv :printed r2)})
+    (out! (if ok "RECORD OK" "RECORD FAILED"))
+    (c/stop! sys)
+    (lib/c-exit (if ok 0 1))))
 
 ;; ---- the program is entities -------------------------------------------------------
 
@@ -512,6 +595,41 @@
     (c/stop! sys)
     (lib/c-exit (if ok 0 1))))
 
+(defn window-write
+  "Phase 1 of the flush-window check (run with SEON_FLUSH_MS=1000): a fresh LMDB store. A is
+  written and the window passes: flushed. B is answered committed and unflushed (the
+  writer's flush count does not move before its answer). C is written with :flush? (an
+  outside effect follows): its answer comes after its flush (the count moved). D is answered
+  unflushed, and root SIGKILLs itself at once."
+  [path]
+  (let [sys (c/start! {:datoms 200 :path path})
+        flushes #(:flushes (::flow/state (flow/ping-proc (:graph sys) :writer :timeout-ms 1000)))
+        t (fn [p] (let [t0 (lib/now-ns) r @p] [(:ok r) (lib/r2 (lib/ms-since t0))]))
+        a (t (c/transact-main! sys [{:note/text "A" :note/agent :window}]))
+        _ (Thread/sleep 1500)
+        f0 (flushes)
+        b (t (c/transact-main! sys [{:note/text "B" :note/agent :window}]))
+        f1 (flushes)
+        cc (t (c/transact-main! sys [{:note/text "C" :note/agent :window}] {:flush? true}))
+        f2 (flushes)
+        d (t (c/transact-main! sys [{:note/text "D" :note/agent :window}]))
+        ok (and (= f0 f1) (= (inc f1) f2) (every? first [a b cc d]))]
+    (out! "answers [ok ms]: A " a " B " b " C(flush?) " cc " D " d "; flushes " [f0 f1 f2])
+    (out! (if ok "WINDOW-WRITE OK" "WINDOW-WRITE FAILED"))
+    (lib/c-kill (lib/c-getpid) 9)))
+
+(defn window-read
+  "Phase 2: the store after root's crash holds A, B and C. (D is there too: a process crash
+  keeps what LMDB handed the kernel; only a machine crash loses the open window.)"
+  [path]
+  (let [sys (c/start! {:datoms 200 :path path})
+        notes (set (main-q sys '[:find [?t ...] :where [?n :note/agent :window] [?n :note/text ?t]]))
+        ok (every? notes ["A" "B" "C"])]
+    (out! "after the crash: " (sort notes))
+    (out! (if ok "WINDOW OK" "WINDOW FAILED"))
+    (c/stop! sys)
+    (lib/c-exit (if ok 0 1))))
+
 ;; ---- durability numbers ----------------------------------------------------------------
 
 (defn dur-bench-write
@@ -777,6 +895,8 @@
     "dur-bench-read" (dur-bench-read n)
     "durable-write" (durable-write n)
     "durable-read" (durable-read n)
+    "window-write" (window-write n)
+    "window-read" (window-read n)
     "scale" (scale (Long/parseLong (or n "100")))
     "robust" (robust)
     "lifecycle" (lifecycle (Long/parseLong (or n "10")))
@@ -785,6 +905,9 @@
     "writers" (writers (or n "mem") (mapv #(Long/parseLong %) (or (seq more) ["1" "8" "32" "256"])))
     "backpressure" (backpressure (Long/parseLong (or n "200")))
     "program" (program)
+    "contracts" (contracts)
+    "admit" (admit)
+    "record" (record)
     "orphan" (orphan)
     "rtt" (rtt)
     "hotreload" (hotreload)

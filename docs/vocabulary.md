@@ -14,7 +14,9 @@ owns the concept. A new concept gets its word here before it appears in code.
 | **root graph** | that one Flow graph, changed in place by `flow/update!` | `seon.root/start!` |
 | **api** | root's entrance proc: callers' reply promises, routing by request id | `seon.root/api-proc` |
 | **writer** | the only `d/transact`, `d/branch!` and merge caller; group commit | `seon.writer/writer-proc` |
-| **group commit** | one Datahike commit per branch and one flush per writer step | `seon.writer/commit-batch` |
+| **group commit** | one Datahike commit per branch per writer step | `seon.writer/commit-batch` |
+| **flush window** | every write is answered when committed in memory; one group flush within `FLUSH-MS` makes it durable; `:flush?` waits for it | `seon.writer/flusher-proc`, `seon.config/FLUSH-MS` |
+| **flusher** | the proc that times the flush window and asks the writer to flush | `seon.writer/flusher-proc` |
 | **fork server** | the single-threaded process holding main's db value that forks agents | `seon.fork-server` |
 | **standby** | a fork of the fork server, promoted when the server dies (root never forks after boot) | `seon.fork-server/promote` |
 | **reconciler** | the proc that sees main's commits through a sliding buffer of one | `seon.reconcile` |
@@ -35,6 +37,16 @@ owns the concept. A new concept gets its word here before it appears in code.
 | **value printer** | the one function that turns a value into text | `seon.agent/print-value` |
 | **interrupt** | SIGUSR1 to an agent, escaping the running form at a safe point | `seon.intr` |
 
+## Contracts (Malli's words)
+
+| word | meaning | owner |
+|---|---|---|
+| **contract** | a function's `:malli/schema`, checked from its definition on (inputs, arity, output) | `seon.contract/defn` |
+| **registry** | the named schemas, data in `resources/seon/schemas/*.edn` | `seon.contract/registry` |
+| **refusal** | a contract's failure, thrown as the one error map (`:seon.error/type`) | `seon.contract/refusal` |
+| **admit** | an agent's def armed by its contract, or warned (the uncontracted set grows) | `seon.repl/wrap-admit` |
+| **guarantees** | `SEON_GUARANTEES`: on, `contracts` (no recording), `off` | `seon.contract/on?`, `record?` |
+
 ## Data (Datahike's and git's words)
 
 | word | meaning | owner |
@@ -42,6 +54,9 @@ owns the concept. A new concept gets its word here before it appears in code.
 | **main**, **branch**, **merge base**, **merge main**, **conflict** | git's words over Datahike branches | `seon.writer`, `seon.db` |
 | **program** | the definitions held as facts (`:var/src`), loaded where main or a branch changes them | `seon.program` |
 | **store** | konserve under Datahike (LMDB, or the filestore), jfasl node codec | `seon.db` |
+| **entity schema** | a Malli map with `{:seon.db/attributes true}`; its members are Datahike attributes | `seon.schema.datahike/declarations` |
+| **recording** | one transaction per eval request on the agent's branch: its evaluations on its agent entity, its defs | `seon.agent-proc/record-tx` |
+| **observation** | data on the branch that observed it (evaluations, answered t), never carried by a merge | `seon.db/observation-attrs` |
 
 ## Agent-facing verbs (`my.*`)
 

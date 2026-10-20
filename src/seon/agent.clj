@@ -4,7 +4,8 @@
   d/db-with) and running its REPL over its socket to root (seon.repl). The live value of
   each form stays here under its handle. Agent code calls the verbs of my.db and my.agent,
   referred into its namespace. From proto/flow f2-final proto.agent (lane F2)."
-  (:require [datahike.api :as d] [seon.lib :as lib] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
+  (:refer-clojure :exclude [defn defn-])
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [jolt.ffi :as ffi] [seon.program :as program] [seon.intr :as intr] [seon.wire :as wire]))
 
 ;; One state map per agent process (this process is the agent). Fields:
@@ -24,6 +25,7 @@
 (defn builtin-print
   "Collections cut by *print-length*/*print-level*; text beyond the char budget is cut
   and ends with the elision mark ` …`."
+  {:malli/schema [:=> [:cat :any] :string]}
   [v]
   (let [s (binding [*print-length* (:length *print-limits*) *print-level* (:level *print-limits*)] (pr-str v))
         n (:chars *print-limits*)]
@@ -38,6 +40,7 @@
   "The one place that turns a value into reply text. Answers {:printed text ...}; with
   Seon's printer also :tokens, :truncated? and :elisions, whose cuts are runnable forms on
   the handle (result/h3)."
+  {:malli/schema [:function [:=> [:cat :any] :seon.agent/printed] [:=> [:cat :any [:maybe :symbol]] :seon.agent/printed]]}
   ([v] (print-value v nil))
   ([v handle]
    (if-let [p *value-printer*]
@@ -50,45 +53,54 @@
 
 (defn printer
   "Text of v through the value printer in use."
+  {:malli/schema [:=> [:cat :any] :string]}
   [v] (:printed (print-value v nil)))
 
 ;; ---- the socket to root (nREPL's wire, seon.wire) -----------------------------
 
 (defn send-wire!
   "Send an nREPL message (string keys) to root; :dead when root is gone."
+  {:malli/schema [:=> [:cat :seon.wire/msg] [:or [:= true] [:= :dead]]]}
   [m] (if (= :epipe (wire/send! (:fd @state) m)) :dead true))
 
 (defn send!
   "Send a Seon platform message {:op k ...} to root (as seon/<op>); :dead when root is gone."
+  {:malli/schema [:=> [:cat :seon.wire/seon-msg] [:or [:= true] [:= :dead]]]}
   [m] (send-wire! (wire/seon->wire m)))
 
 (defn- recv-raw!
   "The next message from root: Seon's as {:op k ...}, an nREPL request as
   {:op :nrepl :msg m}, or :dead at EOF."
+  {:malli/schema [:=> [:cat] [:or [:= :dead] :seon.wire/seon-msg]]}
   []
   (let [m (wire/next-msg! (:rd @state))]
     (if (= m :eof) :dead (or (wire/wire->seon m) {:op :nrepl :msg m}))))
 
-(defn next-msg! []
+(defn next-msg! {:malli/schema [:=> [:cat] [:or [:= :dead] :seon.wire/seon-msg]]}
+  []
   (if-let [m (peek (:pending @state))]
     (do (swap! state update :pending pop) m)
     (recv-raw!)))
 
 ;; ---- the agent's own API ------------------------------------------------------
 
-(defn db [] (:db @state))
+(defn db {:malli/schema [:=> [:cat] :seon.host/db]}
+  [] (:db @state))
 
 (defn messages
   "The messages delivered to this agent and not yet taken ({:from :body}), taken: root's
   requests (e.g. :catch-up, \"main moved, merge main\") and other agents' sends."
+  {:malli/schema [:=> [:cat] [:vector :map]]}
   [] (let [[old _] (swap-vals! state assoc :inbox [])] (:inbox old)))
 (defn send-message
   "Send body to the agents tos (ids); root delivers it by id. nil."
+  {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
   [tos body] (when (= :dead (send! {:op :send :to (vec tos) :body body})) (lib/c-exit 0)) nil)
 
 (defn- apply-sync!
   "Apply the writer's resolved datoms for this branch. A :sync (root merged main forward)
   may change the program: its :var/src is loaded, so this process runs its branch's code."
+  {:malli/schema [:=> [:cat [:map [:tx-data [:sequential :seon.db/op]]]] :any]}
   [m]
   (let [db' (d/db-with (db) (:tx-data m))]
     (swap! state (fn [s] (cond-> (assoc s :db db')
@@ -100,6 +112,7 @@
 (defn- await-op!
   "Wait for {:op op :k k} on the ring. A :sync is applied in arrival order (the writer's
   order); anything else waits in :pending for the loop."
+  {:malli/schema [:=> [:cat :keyword :int] :seon.wire/seon-msg]}
   [op k]
   (loop []
     (let [m (recv-raw!)]
@@ -113,6 +126,7 @@
 
 (defn transact!
   "Writes tx-data to this agent's branch through the writer; answers {:t :datoms}."
+  {:malli/schema [:=> [:cat :seon.db/tx-data] :seon.agent/tx-result]}
   [tx-data]
   (if (= :test (:mode @state))
     (let [r (d/with (db) tx-data)]
@@ -133,13 +147,15 @@
 
 ;; ---- evaluation -----------------------------------------------------------------
 
-(defn error-map [^Throwable e]
+(defn error-map {:malli/schema [:=> [:cat :seon.host/throwable] :seon.agent/error]}
+  [^Throwable e]
   (cond-> {:message (or (ex-message e) (str (type e))) :class (str (type e))}
     (ex-data e) (assoc :data (printer (ex-data e)))))
 
 (defn- interrupt-self-test
   "T1's boot check: SIGUSR1 reaches a Chez handler only in a process whose ancestors were
   all forked from a main thread. Answers whether this agent's handler ran."
+  {:malli/schema [:=> [:cat] :boolean]}
   []
   (let [got (volatile! false)]
     (lib/on-signal! lib/SIGUSR1 (fn [] (vreset! got true)))
@@ -151,6 +167,7 @@
 
 (defn- run-tests-here
   "clojure.test over every namespace this agent evaluated in; answers report data."
+  {:malli/schema [:=> [:cat] :seon.test/result]}
   []
   (let [reports (atom [])
         orig t/report
@@ -175,6 +192,7 @@
 
 (defn- ffi-status
   "Reap the test child (killing it first when kill?); answers its decoded exit status."
+  {:malli/schema [:=> [:cat :seon.lib/pid :boolean] :seon.lib/exit-status]}
   [pid kill?]
   (when kill? (lib/c-kill pid 9))
   (let [b (ffi/alloc 4)]
@@ -184,6 +202,7 @@
 (defn run-tests-forked
   "Fork this agent; the child runs the tests and writes one EDN line on a pipe. A child
   that does not answer in timeout-ms is killed."
+  {:malli/schema [:=> [:cat :int] :seon.test/result]}
   [timeout-ms]
   (let [[r w] (lib/pipe) t0 (lib/now-ns) pid (lib/safe-fork 1000)]
     (cond
@@ -223,7 +242,8 @@
 
 ;; ---- the loop ----------------------------------------------------------------------
 
-(defn- make-ns! [id]
+(defn- make-ns! {:malli/schema [:=> [:cat :seon.agent/id] :seon.host/namespace]}
+  [id]
   (let [sym (symbol (str "agent." (name id)))
         nsx (create-ns sym)]
     (binding [*ns* nsx]
@@ -238,6 +258,7 @@
 (defn mem-mb
   "Real MB of this process (lib/real-mb walks the VM regions, ~1.5 ms), refreshed at most
   once a second, or now when fresh?."
+  {:malli/schema [:function [:=> [:cat] :seon.lib/mb] [:=> [:cat :boolean] :seon.lib/mb]]}
   ([] (mem-mb false))
   ([fresh?]
    (let [{:keys [mem-at mem]} @state now (lib/now-ns)]
@@ -250,9 +271,12 @@
 (defn handle!
   "One Seon platform request; answers the messages to send back (a vector). (REPL
   requests are nREPL's: seon.repl.)"
+  {:malli/schema [:=> [:cat :seon.wire/seon-msg] [:maybe [:vector :seon.wire/seon-msg]]]}
   [m]
   (case (:op m)
     :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:timeout-ms m) 30000)) :mem-mb (mem-mb)}]
+    ;; the writer's resolved datoms of this agent's own recording transaction
+    :record-sync (do (apply-sync! m) nil)
     :sync (do (apply-sync! m) [{:op :synced :t (:max-tx (db)) :mismatch (:mismatch @state 0) :load-errors (:load-errors @state)}])
     :clone (do (clone! m) nil)
     :stats [{:op :stats :id (:id m) :result {:mem-mb (mem-mb true) :t (:max-tx (db)) :pid (lib/c-getpid)
@@ -264,13 +288,15 @@
                  [{:op :received :sent-ns (:ns m) :recv-ns (sock/now-ns)}])
     nil))
 
-(defn hello! [t-req-ns extra]
+(defn hello! {:malli/schema [:=> [:cat :int :map] [:or [:= true] [:= :dead]]]}
+  [t-req-ns extra]
   (send! (merge {:op :hello :pid (lib/c-getpid) :start-ms (lib/ms-since t-req-ns) :mem-mb (mem-mb) :t (:max-tx (db))} extra)))
 
 (defn- clone!
   "Fork this agent, live values and all, into a new agent on a branch of this branch.
   Root branches this branch first (no transaction is in flight here, so the new branch's
   head is this db); the clone is double-forked so it is not this agent's child."
+  {:malli/schema [:=> [:cat :seon.wire/seon-msg] :any]}
   [{:keys [k] :as m}]
   (let [t0 (lib/now-ns)
         fd (sock/take-fd! (:conn @state))]
@@ -300,6 +326,7 @@
 (defn init!
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
+  {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
   [fd {id :agent branch :branch} db0 serve]
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone

@@ -7,9 +7,14 @@
     (transact! tx-data) tx-data to the writer for THIS branch; applied here when the
                         writer answers; answers {:t :datoms}. Inside a test (a fork of the
                         agent) it applies to the fork's db only: a test's writes vanish."
-  (:require [datahike.api :as d] [seon.agent :as agent]))
+  (:refer-clojure :exclude [defn defn-])
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.agent :as agent]))
 
-(defn db "The branch's current db value." [] (agent/db))
-(defn q "d/q against (db)." [query & inputs] (apply d/q query (agent/db) inputs))
-(defn pull "d/pull against (db)." [pattern eid] (d/pull (agent/db) pattern eid))
-(defn transact! "Write tx-data to this agent's branch; answers {:t :datoms}." [tx-data] (agent/transact! tx-data))
+(defn db "The branch's current db value." {:malli/schema [:=> [:cat] :seon.host/db]}
+  [] (agent/db))
+(defn q "d/q against (db)." {:malli/schema [:=> [:cat :any [:* :any]] :any]}
+  [query & inputs] (apply d/q query (agent/db) inputs))
+(defn pull "d/pull against (db)." {:malli/schema [:=> [:cat :any :any] [:maybe :map]]}
+  [pattern eid] (d/pull (agent/db) pattern eid))
+(defn transact! "Write tx-data to this agent's branch; answers {:t :datoms}." {:malli/schema [:=> [:cat :seon.db/tx-data] :seon.agent/tx-result]}
+  [tx-data] (agent/transact! tx-data))

@@ -4,29 +4,25 @@
   From proto/flow f2-final proto.db; the store's node codec is X1's jfasl
   (konserve.jolt.fasl-store, FaslSerializer), and the JVM-written-store reader stays behind
   (BAGGAGE.md)."
-  (:require [datahike.api :as d] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
+  (:refer-clojure :exclude [defn defn-])
+  (:require [seon.contract :refer [defn defn-] :as contract] [seon.schema.datahike :as sd] [datahike.api :as d] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
             [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix]))
 
 (def schema
-  [{:db/ident :ns/name :db/valueType :db.type/symbol :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
-   {:db/ident :ns/doc :db/valueType :db.type/string :db/cardinality :db.cardinality/one}
-   {:db/ident :var/name :db/valueType :db.type/symbol :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
-   {:db/ident :var/ns :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}
-   {:db/ident :var/doc :db/valueType :db.type/string :db/cardinality :db.cardinality/one}
-   {:db/ident :var/src :db/valueType :db.type/string :db/cardinality :db.cardinality/one}
-   {:db/ident :var/arity :db/valueType :db.type/long :db/cardinality :db.cardinality/one}
-   {:db/ident :task/name :db/valueType :db.type/keyword :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
-   {:db/ident :task/plan :db/valueType :db.type/string :db/cardinality :db.cardinality/one}
-   {:db/ident :task/status :db/valueType :db.type/keyword :db/cardinality :db.cardinality/one :db/index true}
-   {:db/ident :task/refs :db/valueType :db.type/ref :db/cardinality :db.cardinality/many}
-   {:db/ident :task/agent :db/valueType :db.type/keyword :db/cardinality :db.cardinality/one}
-   {:db/ident :note/text :db/valueType :db.type/string :db/cardinality :db.cardinality/one}
-   {:db/ident :note/agent :db/valueType :db.type/keyword :db/cardinality :db.cardinality/one :db/index true}
-   {:db/ident :note/about :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}])
+  "The Datahike schema, derived from the registry's entity schemas (resources/seon/schemas,
+  seon.schema.datahike; lane D1): one source of truth with the contracts."
+  (sd/declarations contract/registry))
+
+(def observation-attrs
+  "Attributes of observations (evaluations, the agent's answered t): data on the branch
+  that recorded them, never carried by a merge (G1's proto.db/observation-attrs, derived by
+  attribute namespace from the schema)."
+  (into #{} (comp (map :db/ident) (filter #(#{"seon.cluster.eval" "seon.eval" "seon.agent"} (namespace %)))) schema))
 
 (defn seed-tx
   "Transactions for about n datoms: per namespace, one tx of the namespace and its 20
   vars (5 datoms each), then one tx of a task referring to two of its vars."
+  {:malli/schema [:=> [:cat :int] [:sequential :seon.db/tx-data]]}
   [n]
   (let [nns (max 1 (quot n 110))]
     (mapcat (fn [k]
@@ -45,7 +41,8 @@
 ;; fewer per connection; src/proto/f1_bench.clj).
 (def writer-cfg {:backend :sync})
 
-(defn mem-cfg [] {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false
+(defn mem-cfg {:malli/schema [:=> [:cat] :seon.db/cfg]}
+  [] {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false
                   :writer writer-cfg})
 
 ;; ---- the durable store ----------------------------------------------------------
@@ -61,6 +58,7 @@
 
 (defn store-cfg
   "Datahike config for the durable store at path; backend :lmdb (default) or :file."
+  {:malli/schema [:=> [:cat [:enum :lmdb :file] :string] :seon.db/cfg]}
   [backend path]
   {:store (cond-> {:backend backend :path path :id #uuid "50a0c0de-0000-4000-8000-000000000001"
                    :default-serializer :FaslSerializer}
@@ -73,17 +71,20 @@
 (defn sync!
   "Make every commit so far durable: one env sync for LMDB (MDB_NOSYNC); the filestore
   syncs per write itself. nil."
+  {:malli/schema [:=> [:cat :seon.db/cfg] :nil]}
   [cfg]
   (when (= :lmdb (get-in cfg [:store :backend]))
     (lmdb-ffi/sync! (klmdb/open-env! (get-in cfg [:store :path]) nil)))
   nil)
 
-(defn- seed! [conn n]
+(defn- seed! {:malli/schema [:=> [:cat :seon.host/conn :int] :any]}
+  [conn n]
   (d/transact conn {:tx-data schema})
   (doseq [tx (seed-tx n)] (d/transact conn {:tx-data tx})))
 
 (defn create!
   "A fresh in-memory database seeded with about n datoms. Answers [cfg conn]."
+  {:malli/schema [:=> [:cat :int] [:tuple :seon.db/cfg :seon.host/conn]]}
   [n]
   (let [cfg (mem-cfg)]
     (d/create-database cfg)
@@ -95,6 +96,7 @@
   "Read every node of db's indexes, so this process holds the whole db in its heap and
   forked children (the fork server, agents) never read the store: an LMDB env must not
   be used across fork. Answers the datom count."
+  {:malli/schema [:=> [:cat :seon.host/db] :int]}
   [db]
   (count (d/datoms db :aevt)) (count (d/datoms db :avet))
   (count (d/datoms db :eavt)))
@@ -102,6 +104,7 @@
 (defn open!
   "The durable database at path: recovered when the store exists, else created and
   seeded with about n datoms. Answers {:cfg :conn :recovered? bool}."
+  {:malli/schema [:=> [:cat [:enum :lmdb :file] :string :int] :seon.db/open]}
   [backend path n]
   (let [cfg (store-cfg backend path)
         exists? (posix/exists? (if (= backend :lmdb) (str path "/data.mdb") path))]
@@ -114,6 +117,7 @@
 (defn diff-ops
   "Explicit-id tx-data turning db `from` into db `to` (retractions first, so an
   attribute's new value replaces its old one in net-change). O(datoms of both)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] :seon.db/resolved-tx]}
   [from to]
   (let [ds (fn [db] (into #{} (map (fn [dt] [(:e dt) (:a dt) (:v dt)])) (d/datoms db :eavt)))
         a (ds from) b (ds to)]
@@ -124,6 +128,7 @@
   "The db at the merge base of branch and main (git's merge-base over Datahike's commit
   graph): the branch point, the branch head root last merged, or the main head last
   merged into the branch."
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch] :seon.host/db]}
   [conn branch]
   (d/commit-as-db conn (d/merge-base conn branch :db)))
 
@@ -135,11 +140,13 @@
 
 (defn report->tx
   "The writer's tx-report as explicit-id tx-data (the transaction entity's own datoms left out)."
+  {:malli/schema [:=> [:cat :seon.db/tx-report] :seon.db/resolved-tx]}
   [rep]
   (vec (for [dt (:tx-data rep) :when (not= (:e dt) (:tx dt))]
          [(if (:added dt) :db/add :db/retract) (:e dt) (:a dt) (:v dt)])))
 
-(defn- card-one? [db a]
+(defn- card-one? {:malli/schema [:=> [:cat :seon.host/db :keyword] :boolean]}
+  [db a]
   (not= :db.cardinality/many (get-in (d/schema db) [a :db/cardinality])))
 
 (defn net-change
@@ -147,6 +154,7 @@
   cardinality-one attribute is keyed by [e a], so a later value replaces an earlier one
   (Jolt's tx-report leaves out the retraction of a replaced value), a cardinality-many
   one by [e a v]. db supplies the schema."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.db/op]] [:map-of vector? :seon.db/op]]}
   [db ops]
   (reduce (fn [m [op e a v :as o]] (assoc m (if (card-one? db a) [e a] [e a v]) o)) {} ops))
 
@@ -154,8 +162,9 @@
   "The branch's net change since `base` (its merge base) as tx-data for main, ids as they
   are. Answers {:tx-data [...] :touched #{[e a]}}: touched names the attributes of
   entities that existed at the base, for the conflict check."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.db/op]] :seon.db/delta]}
   [base ops]
-  (let [nc (net-change base ops)
+  (let [nc (net-change base (into [] (remove (fn [[_ _ a]] (observation-attrs a))) ops))
         in-base? (fn [e a v] (seq (d/datoms base :eavt e a v)))
         existed? (fn [e] (seq (d/datoms base :eavt e)))]
     {:tx-data (vec (for [[_ [op e a v]] nc
@@ -166,6 +175,7 @@
 (defn conflicts
   "Attributes of existing entities the branch changed that main also changed since the
   merge base: git's 'both modified'."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set [:tuple :int :keyword]]] [:vector :seon.db/conflict]]}
   [base main touched]
   (vec (for [[e a] touched
              :let [b (set (map :v (d/datoms base :eavt e a)))

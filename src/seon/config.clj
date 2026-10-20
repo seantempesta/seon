@@ -1,9 +1,12 @@
 (ns seon.config
   "Every dial of the platform, read once from the environment when this namespace loads
   (SEON_<NAME>; proto/flow f2-final's PROTO_<NAME> dials, collected in one place). A
-  shipped default fits a 16 GB machine running many agents beside the user's work.")
+  shipped default fits a 16 GB machine running many agents beside the user's work."
+  (:refer-clojure :exclude [defn defn-])
+  (:require [seon.contract :refer [defn defn-]] [seon.contract]))
 
-(defn- dial [k default] (Long/parseLong (or (System/getenv k) (str default))))
+(defn- dial {:malli/schema [:=> [:cat :string :any] :int]}
+  [k default] (Long/parseLong (or (System/getenv k) (str default))))
 
 (def MAX-AGENTS
   "Live agents at most (root holds a socket per agent)."
@@ -42,3 +45,11 @@
   "Most messages one api step takes before it applies its graph change (spawns and ends
   become one update!)."
   (dial "SEON_API_BATCH" 256))
+(def FLUSH-MS
+  "How long a committed write may stay unflushed (:seon.config.store/flush-ms, owner
+  2026-10-20): every write is answered when it is committed in memory, and the next group
+  flush within this window makes it durable. Recovery restores to the last flush. Up to
+  1,000 is acceptable. A write followed by an effect outside the database asks for
+  :flush? and is answered after its flush."
+  (dial "SEON_FLUSH_MS" 10))
+
