@@ -52,6 +52,12 @@
   "At or below this fraction of its estimate at the largest size, the estimate is loose."
   (/ 1.0 3.0))
 
+(def ratchet
+  "An accepted overrun stays green while every dimension at the largest size is within this
+  multiple of what was measured when its task was filed (Seon's ratchet: the spread of one
+  operation measured apart), so a regression is red even inside an open overrun."
+  1.5)
+
 (defn work
   "W(n), the least work's growth at n."
   {:malli/schema [:=> [:cat :seon.cost/growth pos-int?] [:double {:min 0.0}]]}
@@ -115,8 +121,13 @@
         under (vec (for [d [:ns :bytes :calls] :when (dims d)
                          :let [q (when largest (ratio largest d))] :when (and q (< q loose))]
                      {:dim d :n (:n largest) :ratio q}))
-        unmeasured (vec (for [d [:ns :bytes :calls] :when (and (dims d) (seq rows) (every? #(nil? (get-in % [:measured d])) rows))] d))]
-    {:ok? (and (empty? over) (empty? steeper)) :over over :steeper steeper :under under :unmeasured unmeasured}))
+        unmeasured (vec (for [d [:ns :bytes :calls] :when (and (dims d) (seq rows) (every? #(nil? (get-in % [:measured d])) rows))] d))
+        held? (when-let [{:keys [measured]} (:overrun e)]
+                (and largest (every? (fn [[d m]] (<= (get-in largest [:measured d] 0.0) (* ratchet m))) measured)))]
+    (cond-> {:ok? (or (and (empty? over) (empty? steeper)) (boolean held?))
+             :over over :steeper steeper :under under :unmeasured unmeasured}
+      (and held? (or (seq over) (seq steeper)))
+      (assoc :accepted {:task (:task (:overrun e)) :over over :steeper steeper}))))
 
 ;; ---- measuring ----------------------------------------------------------------------------
 
@@ -162,7 +173,7 @@
         {:rows rows :verdict (judge e rows)}
         (let [row {:n n :measured (measure f (vec (input n))) :expected (expected e units n)}
               rows (conj rows row)]
-          (if (seq (:over (judge e [row])))
+          (if (and (nil? (:overrun e)) (seq (:over (judge e [row]))))
             {:rows rows :verdict (judge e rows)}
             (recur more rows)))))))
 
@@ -194,7 +205,12 @@
                " allows n^" (format "%.2f" allowed) ". Something does more passes over the data than the work needs."))
         (for [{:keys [dim n ratio]} (:under v)]
           (str "LOOSE: " (name dim) " at n=" n " is " (format "%.2f" ratio) "x its estimate: tighten the estimate."))
-        (for [d (:unmeasured v)] (str "NOT MEASURED: " (name d) "."))))))
+        (for [d (:unmeasured v)] (str "NOT MEASURED: " (name d) "."))
+        (when-let [{:keys [task]} (:accepted v)]
+          [(str "OVERRUN accepted while task " task " is open (within " ratchet "x of "
+                (pr-str (:measured (:overrun e))) "): it is that task's work.")])
+        (when (and (:overrun e) (not (:ok? v)))
+          [(str "REGRESSION: past " ratchet "x of the overrun recorded for task " (:task (:overrun e)) ".")])))))
 
 (defn proof
   "Assert, inside a deftest, that estimate e holds: one clojure.test report (pass or fail)

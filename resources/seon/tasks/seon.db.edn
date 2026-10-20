@@ -1,0 +1,4 @@
+[{:seon.task/name "avet-seek-allocates"
+  :seon.task/plan "One lookup of an entity by a unique attribute (seon.task/eid: (d/datoms db :avet a v), the same path as datahike.db.utils/entid) costs 13-17 us and 23-32 KB at 100-10k tasks, growing with log n. The work is one seek through 2-3 B-tree nodes with ~6 comparisons each and one datom answered: ~3 us and ~1.3 KB. Find where the seek allocates in our Datahike fork (reference-code/datahike: datahike.db.utils, datahike.index) and our persistent-sorted-set port (reference-code/persistent-sorted-set, E4a) on Jolt, and fix the cause there (profile with seon.profile / seon.cost/measure). Done when seon.task-cost-test/finding-a-task-by-its-id-is-one-index-seek is green with its :overrun key deleted."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.task-cost-test/finding-a-task-by-its-id-is-one-index-seek}}]

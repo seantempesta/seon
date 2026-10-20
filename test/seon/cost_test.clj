@@ -122,3 +122,19 @@
           :let [m (cost/measure-unit k 10000)]]
     (is (<= (/ ns 3.0) (:ns m) (* ns 3.0)) (str k " ns: table " ns ", measured " (:ns m)))
     (is (<= (- (/ bytes 1.25) 1.0) (:bytes m) (+ (* bytes 1.25) 1.0)) (str k " bytes: table " bytes ", measured " (:bytes m)))))
+
+(deftest an-open-overrun-is-accepted-until-it-regresses
+  ;; 400 ns per integer against a 100 ns estimate: 4x, over the 3x slack (4e6 ns at n=10000)
+  (let [m (fn [n] {:ns (* 400.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})]
+    (testing "within the ratchet (1.5x) of what was measured when its task was filed: green, still reported"
+      (let [e (assoc linear :overrun {:task "seon.cost/demo-overrun" :measured {:ns 3000000.0}})
+            v (cost/judge e (rows e m))]
+        (is (:ok? v))
+        (is (= "seon.cost/demo-overrun" (get-in v [:accepted :task])))
+        (is (seq (get-in v [:accepted :over])))
+        (is (re-find #"OVERRUN accepted while task seon.cost/demo-overrun" (cost/explain e (rows e m) v)))))
+    (testing "past the ratchet: a regression, red"
+      (let [e (assoc linear :overrun {:task "seon.cost/demo-overrun" :measured {:ns 2000000.0}})
+            v (cost/judge e (rows e m))]
+        (is (not (:ok? v)))
+        (is (re-find #"REGRESSION" (cost/explain e (rows e m) v)))))))

@@ -14,9 +14,11 @@
 ;; ---- identity --------------------------------------------------------------------
 
 (defn eid
-  "The entity id of the entity whose unique attribute a has value v on db, or nil."
+  "The entity id of the entity whose unique attribute a has value v on db, or nil: one seek
+  in a's AVET index, never a query (a Datalog query here cost ~95 us and
+  100 KB at 100 tasks, planned on every call)."
   {:malli/schema [:=> [:cat :seon.host/db :keyword :any] [:maybe :int]]}
-  [db a v] (d/q '[:find ?e . :in $ ?a ?v :where [?e ?a ?v]] db a v))
+  [db a v] (:e (first (d/datoms db :avet a v))))
 
 (defn task-id
   "The task's handle, ns/name: its identity, derived from its namespace and name."

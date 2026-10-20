@@ -30,7 +30,10 @@
                       ;; costs that do not grow with n
                       [:fixed {:optional true} :seon.cost/dims]
                       ;; ascending, at least three, spanning at least 100x
-                      [:sizes [:vector {:min 3} pos-int?]]]
+                      [:sizes [:vector {:min 3} pos-int?]]
+                      ;; an overrun accepted while its task is open: the task (a task-file entry) and what
+                      ;; the largest size measured when it was filed; red again past ratchet x that
+                      [:overrun {:optional true} [:map {:closed true} [:task :string] [:measured :seon.cost/dims]]]]
  ;; one size measured: n, what it cost, what the estimate allows there
  :seon.cost/row [:map {:closed true} [:n pos-int?] [:measured :seon.cost/dims] [:expected :seon.cost/dims]]
  :seon.cost/over [:map {:closed true} [:dim :seon.cost/dim] [:n pos-int?] [:ratio [:double {:min 0.0}]]]
@@ -45,4 +48,6 @@
                      ;; the largest size under a third of its estimate: the estimate is loose (a finding, not red)
                      [:under [:vector :seon.cost/over]]
                      ;; a dimension the estimate states that was not measured (contracts off: no calls)
-                     [:unmeasured [:vector :seon.cost/dim]]]}
+                     [:unmeasured [:vector :seon.cost/dim]]
+                     ;; the over and steeper findings an open overrun task accepts (still shown, not red)
+                     [:accepted {:optional true} [:map [:task :string] [:over [:vector :seon.cost/over]] [:steeper [:vector :seon.cost/fit]]]]]}
