@@ -8,7 +8,8 @@
   them) and the one reader (pull shapes for the reconciler and the agent). From lanes R1
   and M1's proto.agents.task; the attributes are derived from resources/seon/schemas (lane D1)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn] [seon.merge :as pm]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn] [seon.merge :as pm]
+            [seon.print :as print]))
 
 ;; ---- identity --------------------------------------------------------------------
 
@@ -249,3 +250,101 @@
   [db]
   (vec (concat (map :e (d/datoms db :aevt :seon.root/id)) (map :e (d/datoms db :aevt :seon.task/id))
                (map :e (d/datoms db :aevt :seon.attempt/id)))))
+
+;; ---- task files: declarations as reviewable data -----------------------------------
+;; resources/seon/tasks/<ns>.edn holds one vector of :seon.task/declaration entries (without
+;; :seon.task/ns: the file's name is the owning namespace). Read with clojure.edn, nothing
+;; evaluated. Loading reconciles the files into main: a new entry is created held; an entry
+;; equal to the declaration main remembers (:seon.task/declared) writes nothing, so what main
+;; learned since (the improved plan) stays; a changed entry writes what it states and
+;; retracts what it dropped; an entry no file declares any more is cancelled and forgets its
+;; declaration, so declaring it again revives it. Execution is root's (my.root/run!), except
+;; that revival.
+
+(def ^:private stated-attributes
+  "The task attributes a declaration states (its members, config flattened), as stored."
+  [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
+   :seon.task/kind :seon.task/evidence :seon.task/generation
+   :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns
+   :seon.config.merge/max-attach])
+
+(defn- file-refusal
+  {:malli/schema [:=> [:cat :symbol :string] :map]}
+  [ns-sym m]
+  {:seon.error/type :seon.task/refused :seon.error/operation 'seon.task/file-declarations
+   :seon.error/message (str "task file " ns-sym ".edn: " m)})
+
+(defn file-declarations
+  "The declarations of task file text, owned by namespace ns-sym (the file's name), each
+  with its :seon.task/ns; or the :seon.task/refused error when the text is not exactly one
+  EDN vector of declarations."
+  {:malli/schema [:=> [:cat :symbol :string]
+                  [:or [:vector :seon.task/declaration] [:map [:seon.error/type [:= :seon.task/refused]] [:seon.error/message :string]]]]}
+  [ns-sym text]
+  (let [r (java.io.PushbackReader. (java.io.StringReader. text))
+        forms (try (vec (take-while #(not= ::eof %) (repeatedly #(edn/read {:eof ::eof} r))))
+                   (catch Exception e (ex-message e)))]
+    (cond
+      (string? forms) (file-refusal ns-sym (str "not readable EDN: " forms))
+      (not (and (= 1 (count forms)) (vector? (first forms)))) (file-refusal ns-sym "not exactly one vector of declarations")
+      :else (let [ds (mapv #(if (map? %) (assoc % :seon.task/ns ns-sym) %) (first forms))]
+              (if-let [bad (first (remove #(contract/valid? :seon.task/declaration %) ds))]
+                (file-refusal ns-sym (str "an entry is not a :seon.task/declaration: " (print/text bad (:part print/budgets))))
+                ds)))))
+
+(defn- update-tx
+  "Make task id state exactly declaration decl: each stated attribute asserted or, when decl
+  no longer states it, retracted; needs as the declared set."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :seon.task/declaration] [:vector :any]]}
+  [db id decl]
+  (let [e (eid db :seon.task/id id)
+        now (d/pull db (conj stated-attributes {:seon.task/needs [:seon.task/id]}) e)
+        want (cond-> (merge (dissoc decl :seon.task/ns :seon.task/name :seon.task/config :seon.task/needs) (:seon.task/config decl))
+               true (update :seon.task/branch #(or % (default-branch id)))
+               (:seon.task/evidence decl) (update :seon.task/evidence #(binding [*print-length* nil *print-level* nil] (pr-str %))))
+        old-needs (set (map :seon.task/id (:seon.task/needs now)))
+        new-needs (set (:seon.task/needs decl))]
+    (vec (concat
+           (for [a stated-attributes
+                 :let [v (get want a) old (get now a)]
+                 :when (not= (if (set? v) v v) (if (coll? old) (set old) old))
+                 tx (concat (when (some? old) (if (coll? old) (for [x old] [:db/retract e a x]) [[:db/retract e a old]]))
+                            (when (some? v) (if (set? v) (for [x v] [:db/add e a x]) [[:db/add e a v]])))]
+             tx)
+           (for [n (remove new-needs old-needs)] [:db/retract e :seon.task/needs [:seon.task/id n]])
+           (for [n (remove old-needs new-needs)] [:db/add e :seon.task/needs [:seon.task/id n]])))))
+
+(defn load-tx
+  "The transaction reconciling task files into main db. files: {owning-ns declarations or
+  refusal}, every file read (a file not given is not judged). Answers the tx-data, or the
+  first refusal: a file's own, or needs that name no task or form a cycle."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :symbol :any]] [:or [:vector :any] [:map [:seon.error/type :keyword]]]]}
+  [db files]
+  (if-let [r (first (filter :seon.error/type (vals files)))]
+    r
+    (let [decls (into {} (for [ds (vals files) d ds] [(task-id (:seon.task/ns d) (:seon.task/name d)) d]))
+          owners (set (keys files))
+          stored (into {} (d/q '[:find ?id ?s :where [?e :seon.task/declared ?s] [?e :seon.task/id ?id]] db))
+          all (tasks db)
+          new (vec (for [[id d] decls :when (not (all id))] d))
+          changed (vec (for [[id d] decls :when (and (all id) (not= d (some-> (stored id) edn/read-string)))] [id d]))
+          removed (vec (for [[id _] stored :when (and (not (decls id)) (owners (:seon.task/ns (all id))))] id))
+          missing (seq (for [[_ d] decls n (:seon.task/needs d) :when (not (or (decls n) (all n)))] n))
+          graph (merge (into {} (for [[id t] all] [id (:seon.task/needs t)]))
+                       (into {} (for [[id d] decls] [id (set (:seon.task/needs d))])))
+          declared (fn [id d] {:seon.task/id id :seon.task/declared (binding [*print-length* nil *print-level* nil] (pr-str d))})]
+      (cond
+        missing (file-refusal (first owners) (str "needs name no task: " (str/join ", " missing)))
+        (cycle-in graph) (file-refusal (first owners) (str "needs form a cycle through " (cycle-in graph)))
+        :else
+        (vec (concat
+               (when (seq new) (create-tx db new))
+               (for [d new] (declared (task-id (:seon.task/ns d) (:seon.task/name d)) d))
+               (mapcat (fn [[id d]] (cond-> (conj (update-tx db id d) (declared id d))
+                                      ;; declared again after its removal: revived
+                                      (and (nil? (stored id)) (= :cancelled (:seon.task/execution (all id))))
+                                      (conj {:seon.task/id id :seon.task/execution :held})))
+                       changed)
+               (mapcat (fn [id] [{:seon.task/id id :seon.task/execution :cancelled}
+                                 [:db/retract [:seon.task/id id] :seon.task/declared (stored id)]])
+                       removed)))))))

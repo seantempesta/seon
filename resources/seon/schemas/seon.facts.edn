@@ -64,6 +64,8 @@
                       [:from :seon.attempt/id] [:conflicts [:vector :seon.merge/conflict]]
                       [:unmerged [:vector :string]] [:red [:vector :qualified-symbol]]]
  :seon.task/generation :int
+ ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
+ :seon.task/declared :string
  ;; config dials are attributes of the task, by their own names
  :seon.config.agent/max-turns [:int {:min 1}]
  :seon.config.merge/max-conflicts :int
@@ -78,6 +80,7 @@
                           [:seon.task/model {:optional true} :seon.task/model] [:seon.task/problem {:optional true} :seon.task/problem]
                           [:seon.task/evidence {:optional true} :seon.task/evidence]
                           [:seon.task/generation {:optional true} :seon.task/generation]
+                          [:seon.task/declared {:optional true} :seon.task/declared]
                           [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
                           [:seon.config.merge/max-conflicts {:optional true} :seon.config.merge/max-conflicts]
                           [:seon.config.merge/max-merge-turns {:optional true} :seon.config.merge/max-merge-turns]
