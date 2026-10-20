@@ -23,7 +23,7 @@
   out; a tab that opened or fell behind gets a keyframe composed here from the retained
   fragments, rendering nothing."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn]
+  (:require [seon.contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str] [clojure.edn :as edn]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.ai :as ai]
             [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.context :as context] [seon.print :as print]))
@@ -150,6 +150,7 @@
      ;; merges into main: root's merge! of a branch (its events) and the reconciler's
      ;; merged attempts (main's facts)
      :main (assoc (:main st {}) :merges (+ (:merges st 0) (count (filter #(= :merged (:seon.attempt/status %)) (vals (:attempts st))))))
+     :recorded (:recorded st)
      :tasks (:tasks st {}) :attempts (:attempts st {}) :task-rows (:task-rows st {}) :agent-attempt (:agent-attempt st {})
      :series (:series st {}) :events (:events st [])
      :web (:web-sample st {})
@@ -194,6 +195,8 @@
     (let [tasks (task/tasks db) attempts (task/attempts db)]
       (assoc st :main {:t (:max-tx db) :datoms (count (d/datoms db :eavt)) :vars (count (d/datoms db :aevt :var/name))}
              :main-db db :tasks tasks :attempts attempts
+             ;; the problems recorded on main (D2's one read; ~2.7 ms, costs the problems)
+             :recorded (problems/report db)
              :task-rows (task-rows tasks attempts (reconcile/index db))
              ;; how each agent's work ended, for the words its card and its events use
              :agent-attempt (into {} (for [a (sort-by :seon.attempt/start-ms (vals attempts))] [(:seon.attempt/agent a) a]))))))
@@ -489,7 +492,7 @@
     ;; an agent's branch db; a branch that is gone (merged and removed) is recorded as such
     (and (vector? kind) (= :branch (first kind)))
     (let [z [:zoom (second kind)]
-          st (assoc-in st (conj z :db-error) (when-not (:ok r) (:error r)))]
+          st (assoc-in st (conj z :db-error) (when-not (:ok r) (or (:seon.error/message r) (:error r))))]
       (pass (if (:ok r) (assoc-in st (conj z :db) (:db r)) st) o))
     :else st))
 
@@ -530,10 +533,10 @@
                          (if (and (vector? (:tag m)) (= :web (first (:tag m))))
                            (ask-state (on-event st {:type :ui :call (str (nth (:tag m) 2)) :agent (nth (:tag m) 3 nil)
                                                     :at-ms (System/currentTimeMillis)
-                                                    :detail (let [r (:r m)] (cond (and (map? r) (string? (:error r))) (str "error: " (:error r))
+                                                    :detail (let [r (:r m)] (cond (and (map? r) (string? (or (:seon.error/message r) (:error r)))) (str "error: " (or (:seon.error/message r) (:error r)))
                                                                                   (map? r) (print/text (dissoc r :reports) 40)
                                                                                   :else nil))
-                                                    :error (when (and (map? (:r m)) (string? (:error (:r m)))) (:error (:r m)))})
+                                                    :error (when (map? (:r m)) (let [x (or (:seon.error/message (:r m)) (:error (:r m)))] (when (string? x) x)))})
                                       o)
                            st))
               :from-web (case (:op m)

@@ -26,10 +26,11 @@
 
 (defn problems
   "What is wrong now, most urgent first: procs not running (or not answering), root's
-  defects, live agents with red tests or a refused merge, agents whose process died. An
+  defects, the problems main recorded (seon.problems/report, by class), live agents with
+  red tests or a refused merge, agents whose process died. An
   agent root stopped after its attempt finished is not a problem."
   {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}
-  [{:keys [health root-errors agents agent-attempt]}]
+  [{:keys [health root-errors agents agent-attempt recorded]}]
   (let [bad (for [[pid h] (sort-by (comp str key) health)
                   :when (or (= :unknown h) (not= :running (:status h)))]
               (str "proc " (kn pid) " " (if (= :unknown h) "UNKNOWN (no answer to its ping)" (kn (:status h)))))
@@ -50,8 +51,20 @@
                                                        (when-let [r (first (remove #(= :pass (:type %)) (:reports t)))]
                                                          (str " (" (:var r) ")"))))
                                                 (when (and m (false? (:merged? m)))
-                                                  (str "merge refused" (when (seq (:conflicts m)) (str ", " (count (:conflicts m)) " conflicts"))))]))))]
-    (vec (concat bad errs ags))))
+                                                  (str "merge refused" (when (seq (:conflicts m)) (str ", " (count (:conflicts m)) " conflicts"))))]))))
+        ;; what main recorded (seon.problems/report): one line per class with open problems,
+        ;; its count and its newest or commonest example
+        rec (for [[c {:keys [n rows]}] (sort-by (comp str key) (:classes recorded))
+                  :let [rows (remove #(false? (:open? %)) rows)]
+                  :when (seq rows)
+                  :let [r (first rows)]]
+              (str "recorded " (kn c) " " (if (:signature r) n (count rows)) ": "
+                   (ui/clip (or (:message r)
+                                (some->> [(:attempt r) (:test r) (:reason r) (some-> (:outcome r) kn)] (remove nil?) seq (str/join " "))
+                                (pr-str (select-keys r [:producer :owner-ns])))
+                            140)
+                   (when-let [ts (seq (:answered-by r))] (str " (answered by " (str/join ", " ts) ")"))))]
+    (vec (concat bad errs rec ags))))
 
 (defn- section-work {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}
   [{:keys [tasks attempts task-rows]}]
