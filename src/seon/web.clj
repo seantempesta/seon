@@ -269,7 +269,9 @@
   {:malli/schema [:=> [:cat :map :seon.host/volatile :map] :map]}
   [st o m]
   (case (:op m)
-    :patch (let [chunk (chunk-of m)
+    ;; an SSE comment with the ms the chunk left this proc: a client can tell transport
+    ;; delay from render delay (Datastar ignores comments)
+    :patch (let [chunk (str ": at " (System/currentTimeMillis) "\n" (chunk-of m))
                  [st sent] (offer-all st (:view m) chunk)
                  st (-> st (update :bytes + sent) (update :patches (fnil inc 0))
                         (update :chunk-bytes #(lib/push-window % (count chunk) 200)))]

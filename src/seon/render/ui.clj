@@ -125,8 +125,18 @@
 
 ;;; --- status -------------------------------------------------------------------
 
-(def status-order [:spawning :busy :idle :killed :dead])
-(def ended-statuses #{:killed :dead})
+(def status-order [:spawning :busy :idle :ended :killed :dead])
+
+(defn shown-status
+  "The word for how an agent is: its live status, or how its process ended: :ended when
+  root stopped it after its attempt finished (done or merged), :killed for a kill, :died
+  when its process died on its own (an agent entry carries :ended-as from main's attempt)."
+  {:malli/schema [:=> [:cat :map] :keyword]}
+  [a]
+  (cond (and (#{:killed :dead} (:status a)) (:ended-as a)) :ended
+        (= :dead (:status a)) :died
+        :else (or (:status a) :unknown)))
+(def ended-statuses #{:killed :dead :ended :died})
 
 ;;; --- metric tiles -------------------------------------------------------------
 
@@ -219,11 +229,28 @@
                                      :when (or (number? v) (keyword? v) (boolean? v) (nil? v))]
                                  [:span [:em (name k)] (if (number? v) (str v) (kname v))])])]))})
 
+(def ^:private key-numbers
+  "The numbers worth a glance in a proc's ping map, first found wins (all on hover)."
+  [:pending :queued :inflight :waiting :flights :busy :tabs :agents :tx-count :passes])
+
 (defn proc-health
-  "A proc's id and its health, one row."
+  "A proc's health as one line: status, steps per second, its key number; its whole ping
+  map on hover."
   {:malli/schema [:=> [:cat :seon.render/proc-health :seon.render/env] :seon.render/out]}
-  [{:keys [pid health]} env]
-  {:seon.render/html [:li {:class "ph"} [:code (kname pid)] (render/html health (assoc env :seon.render/schema :seon.root/health))]})
+  [{:keys [pid health]} _]
+  (let [unknown? (= :unknown health)
+        st (if unknown? :unknown (:status health))
+        state (when (map? health) (:state health))
+        k (some #(when (number? (get state %)) %) key-numbers)
+        title (if unknown? "no answer to its ping within 250 ms"
+                  (str/join "\n" (for [[kk v] (sort-by (comp str key) state)] (str (name kk) " " (print/text v 30)))))]
+    {:seon.render/html
+     [:li {:class (str "ph s-" (kname st) (when (or unknown? (not= :running st)) " abnormal")) :title title}
+      [:i {:class (str "dot s-" (kname st))}] [:code (kname pid)]
+      [:b (kname st)]
+      [:span {:class "n"} (if (number? (:rate health)) (str (fmt1 (:rate health)) " steps/s") "")]
+      [:span {:class "n"} (if k (str (name k) " " (get state k)) "")]
+      (when (:error state) [:span {:class "bad"} (clip (:error state) 60)])]}))
 
 (defn tile-health
   "Every root proc's health (Flow's ping of each, effect owners and lanes included), the
@@ -236,37 +263,54 @@
       (kicker "health" (str (count health) " procs pinged · " (if (pos? bad) (str bad " not running") "all running")
                             " · " (clock sampled-ms)))
       [:ul {:class "health"}
-       (for [[pid h] (sort-by (comp str key) health)]
+       ;; anything not running first
+       (for [[pid h] (sort-by (fn [[pid h]] [(if (and (map? h) (= :running (:status h))) 1 0) (str pid)]) health)]
          (render/html {:pid pid :health h} (assoc env :seon.render/schema :seon.render/proc-health)))]]}))
 
+(def task-state-order [:running :blocked :open :held :done :merged :cancelled])
+
 (defn tile-tasks
-  "The reconciler and the work: tasks by execution, attempts by status and outcome, the
-  running attempts with turns and tokens, and the newest ended ones. input {:tasks
-  :attempts :reconciler}."
+  "The work as it is: every task by its observed state (what happened, not the desired
+  execution), the tasks list (state, what blocks it, proofs green/red on its newest
+  attempt, attempts so far, tokens; each links to its newest attempt's agent), then the
+  newest attempts. input {:rows (seon.render.proc/task-rows) :attempts :reconciler}."
   {:malli/schema [:=> [:cat :map :seon.render/env] :seon.render/out]}
-  [{:keys [tasks attempts reconciler]} env]
-  (let [ex (frequencies (map :seon.task/execution (vals tasks)))
-        by-status (frequencies (map :seon.attempt/status (vals attempts)))
-        outcomes (frequencies (keep :seon.attempt/outcome (vals attempts)))
+  [{:keys [rows attempts reconciler]} env]
+  (let [freq (frequencies (map :state (vals rows)))
         newest (take 8 (sort-by (comp - #(or (:seon.attempt/start-ms %) 0)) (vals attempts)))
-        tokens (reduce + 0 (keep :seon.attempt/tokens (vals attempts)))
-        st (when (map? reconciler) (:state reconciler))]
+        tokens (reduce + 0 (map :tokens (vals rows)))
+        st (when (map? reconciler) (:state reconciler))
+        rank (zipmap task-state-order (range))]
     {:seon.render/html
      [:section {:id "t-tasks" :class "tile wide"}
       (kicker "reconciler · tasks" (str "main t " (group3 (:t st)) " · " (group3 (:seen st)) " commits seen · "
                                         (:flights st 0) " in flight"))
-      [:dl {:class "kv"}
-       [:div [:dt "tasks"] [:dd (str (count tasks))]]
-       (for [[k n] (sort-by (comp str key) ex)] [:div [:dt (kname k)] [:dd (str n)]])
-       [:div [:dt "attempts"] [:dd (str (count attempts))]]
-       (for [[k n] (sort-by (comp str key) by-status)] [:div [:dt (kname k)] [:dd (str n)]])
-       (for [[k n] (sort-by (comp str key) outcomes)] [:div {:class (str "o-" (kname k))} [:dt (kname k)] [:dd (str n)]])
-       [:div {:title "model tokens spent by every attempt"} [:dt "tokens"] [:dd (group3 tokens)]]]
-      (if (seq newest)
-        [:table {:class "attempts"}
-         [:thead [:tr [:th "attempt"] [:th "agent"] [:th "status"] [:th "turns"] [:th "tokens"] [:th "outcome"] [:th "ms"]]]
-         [:tbody (for [a newest] (render/html a (assoc env :seon.render/schema :seon.attempt/attempt)))]]
-        [:p {:class "muted"} "no tasks on main yet: the reconciler starts an attempt per ready task"])]}))
+      [:div {:class "states"}
+       [:span [:b (str (count rows))] " tasks"]
+       (for [k task-state-order :let [n (get freq k 0)] :when (pos? n)]
+         [:span {:class (str "pill s-" (name k))} (str (name k) " " n)])
+       [:span {:class "muted" :title "model tokens spent by every attempt"} (str (group3 tokens) " tokens")]]
+      (if (empty? rows)
+        [:p {:class "muted"} "no tasks on main yet: the reconciler starts an attempt per ready task"]
+        (list
+          [:table {:class "attempts tasks"}
+           [:thead [:tr [:th "task"] [:th "state"] [:th "blocked by"] [:th "proofs"] [:th "attempts"] [:th "tokens"]]]
+           [:tbody
+            (for [[id r] (take 40 (sort-by (fn [[id r]] [(rank (:state r) 9) id]) rows))
+                  :let [ag (get-in r [:newest :seon.attempt/agent])]]
+              [:tr {:class (str "s-" (name (:state r)))}
+               [:td (if ag [:a {:href (str "/agent/" (dom-id ag)) :title (str "its newest attempt, " (get-in r [:newest :seon.attempt/id]))} id] id)]
+               [:td [:span {:class (str "pill s-" (name (:state r)))} (name (:state r))]]
+               [:td (if (seq (:blocked-by r)) [:span {:class "warn"} (str/join " " (sort (:blocked-by r)))] [:span {:class "muted"} "–"])]
+               [:td {:title "its own proofs green / red on its newest attempt; other tasks' reds are allowed"}
+                (if (pos? (+ (:green r) (:red r)))
+                  (list [:span {:class "ok"} (str (:green r) " ✓")] (when (pos? (:red r)) [:span {:class "bad"} (str " " (:red r) " ✕")])
+                        (when (pos? (:allowed-red r 0)) [:span {:class "muted"} (str " · " (:allowed-red r) " allowed red")]))
+                  [:span {:class "muted"} (str (:proofs r) " to run")])]
+               [:td (str (:attempts r))] [:td (group3 (:tokens r))]])]]
+          [:table {:class "attempts"}
+           [:thead [:tr [:th "newest attempts"] [:th "agent"] [:th "status"] [:th "turns"] [:th "tokens"] [:th "outcome"] [:th "ms"]]]
+           [:tbody (for [a newest] (render/html a (assoc env :seon.render/schema :seon.attempt/attempt)))]]))]}))
 
 (defn attempt-row
   "An attempt: its agent, status, turns, tokens and outcome (from main's facts)."
@@ -348,6 +392,16 @@
      (for [{:keys [var calls ms]} (take k fns)]
        [:span {:class "fn"} [:code (name var)] [:i (str (group3 calls) "×")] (when (and ms (pos? ms)) [:i (ms-str ms)])])]))
 
+(def BIG-ALLOC "An evaluation that allocated more than this is flagged." (* 10 1024 1024))
+
+(defn alloc-span
+  "An evaluation's allocated bytes, flagged when large (over BIG-ALLOC)."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [b]
+  (if (and (number? b) (> b BIG-ALLOC))
+    [:span {:class "big-alloc" :title "this evaluation allocated a lot: a cost to look at"} (str "⚠ " (bytes-str b) " alloc")]
+    [:span (bytes-str b)]))
+
 (defn- eval-row
   "One evaluation inside a card: its form, value, time, allocation and top functions. Only
   the newest is printed structurally (the printer's cost: inputs before render)."
@@ -363,7 +417,7 @@
         [:div {:class "printed seon"} (value-html txt 400)]
         [:code {:class "printed"} (clip txt 220)])]
      [:div {:class "meta"}
-      [:span (ms-str (:ms e))] [:span (bytes-str (:alloc-bytes e))]
+      [:span (ms-str (:ms e))] (alloc-span (:alloc-bytes e))
       (when (:origin e) [:span {:class "origin"} (kname (:origin e))])
       (when (:recorded e) [:span {:class "rec" :title "recorded as a program fact on this branch"} (str "＋" (:recorded e))])
       (when (seq (:warnings e)) [:span {:class "warn" :title (str (:seon.repl/fix (first (:warnings e))))} (str "⚠ " (kname (:seon.repl/finding (first (:warnings e)))))])
@@ -375,8 +429,8 @@
   morph target so typing survives). Status, branch, task, pid, fork ms, memory, the
   running form, the newest evaluations with their costliest functions, and tests."
   {:malli/schema [:=> [:cat :seon.render/agent :seon.render/env] :seon.render/out]}
-  [{:keys [id status evals running] :as ag} _]
-  (let [st (kname (or status :unknown))
+  [{:keys [id evals running] :as ag} _]
+  (let [st (kname (shown-status ag))
         last-e (peek (vec evals))]
     {:seon.render/html
      [:div {:id (str "cb-" (dom-id id)) :class (str "cb s-" st " flash-" (mod (count evals) 2))}
@@ -389,7 +443,8 @@
          (cond (:merged? m) [:span {:class "pill s-merged" :title (str "merged at t " (:tx m) (:t m))} "⇡ merged"]
                (seq (:conflicts m)) [:span {:class "pill s-conflict" :title (str (count (:conflicts m)) " keys changed on both sides")} "⚔ conflict"]
                :else [:span {:class "pill s-refused" :title (str (or (:error m) "its tests were red"))} "✕ refused"]))
-       [:span {:class (str "pill s-" st)} st]]
+       [:span {:class (str "pill s-" st) :title (when (:ended-as ag) (str "root stopped it after its attempt ended " (kname (:ended-as ag))))}
+        (if (:ended-as ag) (str "ended · " (kname (:ended-as ag))) st)]]
       [:p {:class "task"} (str (or (:task ag) ""))]
       [:div {:class "stats"}
        [:span [:em "pid"] (str (or (:pid ag) "–"))]
@@ -455,8 +510,8 @@
                (str "cloned from " (kname (:cloned-from ev)) " · pid " (:pid ev))
                (str "forked in " (ms-str (:fork-ms ev)) (when (:pid ev) (str " · pid " (:pid ev)))))
     :ready (str "ready" (when (:start-ms ev) (str " in " (ms-str (:start-ms ev)))))
-    :killed "stopped"
-    :dead "its process is gone"
+    :killed (if (:ended-as ev) (str "stopped by root after its attempt ended " (kname (:ended-as ev))) "KILLED")
+    :dead (if (:ended-as ev) (str "exited after its attempt ended " (kname (:ended-as ev))) "its process died")
     :ui (str (:call ev) (when (:detail ev) (str " · " (clip (:detail ev) 60))))
     (clip (print/text (dissoc ev :type :at-ms :agent) 40) 80)))
 
@@ -464,7 +519,8 @@
   [ev]
   (boolean (or (some #(= :err (:tag %)) (:items ev))
                (and (= :tests (:type ev)) (pos? (+ (or (:fail ev) 0) (or (:error ev) 0))))
-               (#{:dead :server-down :server-lost} (:type ev))
+               (and (= :dead (:type ev)) (not (:ended-as ev)))
+               (#{:server-down :server-lost} (:type ev))
                (false? (get-in ev [:result :merged?]))
                (and (= :ui (:type ev)) (some? (:error ev))))))
 
@@ -473,9 +529,9 @@
   {:malli/schema [:=> [:cat :seon.render/event :seon.render/env] :seon.render/out]}
   [ev _]
   {:seon.render/html
-   [:li {:id (when (:seq ev) (str "ev-" (:seq ev))) :class (str "e e-" (kname (:type ev)) (when (bad-event? ev) " e-err"))}
+   [:li {:id (when (:seq ev) (str "ev-" (:seq ev))) :class (str "e e-" (if (:ended-as ev) "ended" (kname (:type ev))) (when (bad-event? ev) " e-err"))}
     [:time (clock (:at-ms ev))]
-    [:span {:class "etype"} (kname (:type ev))]
+    [:span {:class "etype"} (if (:ended-as ev) "ended" (kname (:type ev)))]
     [:span {:class "eagent"} (if (:agent ev) [:a {:href (str "/agent/" (dom-id (:agent ev)))} (kname (:agent ev))] "root")]
     [:span {:class "edetail"} (event-detail ev)]]})
 
@@ -510,6 +566,26 @@
     [:span (str (bytes-str (:bytes-per-s w)) "/s out")]]})
 
 ;;; --- root's layout ------------------------------------------------------------------
+
+(defn ended-as
+  "Agent entry a, with :ended-as when its process ended after its attempt finished (main's
+  attempt done or merged); a live agent's entry as it is (identical: inputs compare O(1))."
+  {:malli/schema [:=> [:cat [:maybe :map] :any :map] [:maybe :map]]}
+  [a id agent-attempt]
+  (let [st (:seon.attempt/status (get agent-attempt id))]
+    (if (and a (#{:killed :dead} (:status a)) (#{:done :merged} st)) (assoc a :ended-as st) a)))
+
+(defn tile-problems
+  "What is wrong now, at the top of the page: the same lines root's context leads with."
+  {:malli/schema [:=> [:cat [:sequential :string] :seon.render/env] :seon.render/out]}
+  [lines _]
+  {:seon.render/html
+   (if (empty? lines)
+     [:section {:id "problems" :class "problems ok"} [:span {:class "dot s-running"}] [:b "no problems"]
+      [:span {:class "muted"} " every proc running · no defects · no red live agents · no agent died"]]
+     [:section {:id "problems" :class "problems bad"}
+      (kicker (str (count lines) " problem" (when (not= 1 (count lines)) "s")) "most urgent first · the same lines root's context leads with")
+      [:ul (for [l lines] [:li l])]])})
 
 (defn- topbar {:malli/schema [:=> [:cat :any] :any]}
   [back?]
@@ -559,7 +635,7 @@
   top bar, the metric tiles, the grid of agent cards, the side column (root's context,
   the event stream), each part a unit reading exactly what it shows."
   {:malli/schema [:=> [:cat :seon.render/system :seon.render/env] :seon.render/out]}
-  [{:keys [agents health series writer server main tasks attempts root-errors boot store web] :as sys} env]
+  [{:keys [agents health series writer server main tasks attempts root-errors boot store web agent-attempt] :as sys} env]
   (let [order (:order sys)
         fx (into {} (filter (fn [[pid]] (= "fx" (namespace pid)))) health)
         procs (into {} (remove (fn [[pid]] (and (keyword? pid) (str/starts-with? (str (namespace pid)) "fx.")))) health)
@@ -569,6 +645,7 @@
       (topbar false)
       [:main {:class "layout"}
        [:div {:class "left"}
+        (slot "problems")
         [:div {:class "tiles"} (slot "t-agents") (slot "t-writer") (slot "t-server") (slot "t-main")]
         [:div {:class "tiles two"} (slot "t-health") (slot "t-tasks")]
         [:div {:class "tiles three"} (slot "t-fx") (slot "t-errors")]
@@ -579,12 +656,13 @@
          [:header [:span {:class "kicker"} "event stream"] [:span {:class "sub"} "newest first"]]
          (slot "events")]]]]
      :seon.render/units
-     (into [(u "t-agents" (mapv (fn [id] (let [a (get agents id)] [id (:status a) (count (:evals a))])) order) `tile-agents)
+     (into [(u "problems" (:problems sys []) `tile-problems)
+            (u "t-agents" (mapv (fn [id] (let [a (get agents id)] [id (shown-status (ended-as a id agent-attempt)) (count (:evals a))])) order) `tile-agents)
             (u "t-writer" {:writer writer :series (select-keys series [:tx]) :health (get health :writer)} `tile-writer)
             (u "t-server" {:server server :series (select-keys series [:fork]) :health (get health :fork-server)} `tile-server)
             (u "t-main" {:main main :series (select-keys series [:datoms])} `tile-main)
             (u "t-health" {:health procs :sampled-ms (:health-ms sys)} `tile-health)
-            (u "t-tasks" {:tasks tasks :attempts attempts :reconciler (get health :reconciler)} `tile-tasks)
+            (u "t-tasks" {:rows (:task-rows sys) :attempts attempts :reconciler (get health :reconciler)} `tile-tasks)
             (u "t-fx" fx `tile-fx)
             (u "t-errors" {:root-errors root-errors :boot boot :store store} `tile-errors)
             (u "ctx" (:context sys) `context-panel)
@@ -593,7 +671,7 @@
             (assoc (u "events" (:event-rows sys []) `events-list) :keyframe-only true)
             (u "webstats" web `web-stats)]
            (for [id order]
-             {:id (str "cb-" (dom-id id)) :input (get agents id) :agent id :schema :seon.render/agent
+             {:id (str "cb-" (dom-id id)) :input (ended-as (get agents id) id agent-attempt) :agent id :schema :seon.render/agent
               :shell (str "card-" (dom-id id)) :container "#grid"}))}))
 
 ;;; --- one agent, zoomed -----------------------------------------------------------------
@@ -642,15 +720,27 @@
                      (str (group3 m) " / " (group3 x) (when (and m x (pos? x)) (str " (" (fmt2 (/ m x)) "×)")))])])]]
       (render/html verdict (assoc env :seon.render/schema :seon.cost/verdict))]}))
 
+(defn red-label
+  "Why a red proof does or does not block: a proof of this attempt's own task blocks; a
+  proof of another task not done yet is an allowed red (whose task)."
+  {:malli/schema [:=> [:cat :any [:maybe [:set :any]] [:maybe :map]] :any]}
+  [p own owners]
+  (let [p (symbol (str/replace (str p) #"^#'" ""))]
+    (cond (contains? (or own #{}) p) [:span {:class "blocking"} "blocking: its own task's proof"]
+          (get owners p) [:span {:class "allowed"} (str "allowed: a proof of " (get owners p))]
+          :else [:span {:class "muted"} "not a task's proof"])))
+
 (defn- proof-row
   "One test report of the agent's last run: pass, or its red assertion with expected and
-  actual; a cost proof shows its rows and verdict by their own render."
-  {:malli/schema [:=> [:cat :map :seon.render/env] :any]}
-  [r env]
+  actual, labelled blocking or allowed; a cost proof shows its rows and verdict by their
+  own render."
+  {:malli/schema [:=> [:cat :map :seon.render/env [:maybe [:set :any]] [:maybe :map]] :any]}
+  [r env own owners]
   (let [cost (or (:cost r) (when (and (map? (:actual r)) (:verdict (:actual r))) (:actual r)))
         pass? (= :pass (:type r))]
     [:li {:class (str "pr t-" (kname (:type r)))}
      [:i {:class (str "sq t-" (kname (:type r)))}] " " [:code (str (:var r))]
+     (when (and (not pass?) (or own (seq owners))) [:span " " (red-label (:var r) own owners)])
      (when (:message r)
        (if pass?
          [:span {:class "muted"} (str " " (clip (first (str/split-lines (str (:message r)))) 160))]
@@ -664,15 +754,18 @@
   "The agent's last test run: every report, the red ones first, cost proofs with their
   measurements. input {:tests :results} (results: main's attempt results by proof)."
   {:malli/schema [:=> [:cat :map :seon.render/env] :seon.render/out]}
-  [{:keys [tests results]} env]
+  [{:keys [tests results own owners]} env]
   {:seon.render/html
    [:section {:class "box" :id "z-proofs"}
     (kicker "proofs" (if tests (str (:pass tests 0) " pass · " (:fail tests 0) " fail · " (:error tests 0) " error · " (ms-str (:ms tests)))
                          "not run"))
     (when (seq results)
-      [:p {:class "muted"} "judged on main: " (for [[p s] (sort-by (comp str key) results)] [:span {:class (str "res s-" (kname s))} (str p " " (kname s) " ")])])
+      [:div {:class "judged"} [:span {:class "muted"} "judged on main: "]
+       [:ul (for [[p s] (sort-by (fn [[p s]] [(if (= :pass s) 1 0) (str p)]) results)]
+              [:li [:span {:class (str "res s-" (kname s))} (str p " " (kname s))]
+               (when (not= :pass s) [:span " " (red-label p own owners)])])]])
     [:ul {:class "proofs"}
-     (for [r (sort-by #(if (= :pass (:type %)) 1 0) (:reports tests))] (proof-row r env))]]})
+     (for [r (sort-by #(if (= :pass (:type %)) 1 0) (:reports tests))] (proof-row r env own owners))]]})
 
 (defn history-row
   "One evaluation, as a row of the agent's history: its form, its value (the printer's
@@ -689,7 +782,7 @@
        (if err? [:code {:class "printed"} (clip txt 600)] [:div {:class "printed seon"} (value-html txt (or (:seon.render/budget env) 600))])]
       (when (seq (:out e)) [:pre {:class "out"} (clip (:out e) 600)])
       [:div {:class "meta"}
-       [:span (ms-str (:ms e))] [:span (bytes-str (:alloc-bytes e))]
+       [:span (ms-str (:ms e))] (alloc-span (:alloc-bytes e))
        [:span {:class "origin"} (kname (or (:origin e) :agent))]
        (when (:recorded e) [:span {:class "rec"} (str "＋" (:recorded e))])
        (when (:handle e) [:span {:class "handle"} (kname (:handle e))])]
@@ -708,11 +801,11 @@
 (defn zoom-head
   "The zoomed agent's head: its card's numbers, its process and its branch."
   {:malli/schema [:=> [:cat :seon.render/agent :seon.render/env] :seon.render/out]}
-  [{:keys [id status] :as ag} _]
-  (let [st (kname (or status :unknown))]
+  [{:keys [id] :as ag} _]
+  (let [st (kname (shown-status ag))]
     {:seon.render/html
      [:section {:id "z-head" :class (str "zhead cb s-" st)}
-      [:h1 [:span {:class (str "dot s-" st)}] (kname id) " " [:span {:class (str "pill s-" st)} st]
+      [:h1 [:span {:class (str "dot s-" st)}] (kname id) " " [:span {:class (str "pill s-" st)} (if (:ended-as ag) (str "ended · " (kname (:ended-as ag))) st)]
        [:span {:class "branch"} (str " branch " (kname (:branch ag)))]]
       [:p {:class "task"} (str (:task ag))]
       [:div {:class "stats"}
@@ -752,7 +845,7 @@
   :seon.render/agent-page): its head, its work (attempt and task), its proofs, its
   evaluations as rows, the context its model reads, and its REPL."
   {:malli/schema [:=> [:cat :seon.render/agent-page :seon.render/env] :seon.render/out]}
-  [{:keys [agent attempt task context history]} _]
+  [{:keys [agent attempt task context history] :as page} _]
   (let [id (:id agent)]
     {:seon.render/html
      [:div {:id "app" :class "zoom"}
@@ -769,6 +862,7 @@
      :seon.render/units
      [{:id "z-head" :input agent :render `zoom-head}
       {:id "z-work" :input {:attempt attempt :task task} :render `zoom-work}
-      {:id "z-proofs" :input {:tests (:tests agent) :results (:seon.attempt/results attempt)} :render `proofs-box}
+      {:id "z-proofs" :input {:tests (:tests agent) :results (:seon.attempt/results attempt)
+                              :own (get-in task [:seon.task/accumulated :proofs]) :owners (:owners page)} :render `proofs-box}
       {:id "z-context" :input context :render `zoom-context}
       {:id "z-history" :input history :render `history-list}]}))

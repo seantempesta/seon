@@ -6,7 +6,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.render.proc :as p]
-            [seon.web.html :as h]))
+            [seon.web.html :as h] [seon.db] [seon.reconcile]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -129,3 +129,54 @@
             [_ out] (answer st view0)
             patch (first (filter #(= :patch (:op %)) (:to-web out)))]
         (is (= #{"ev-1" "ev-2"} (set (filter #(str/starts-with? % "ev-") (:removes patch)))))))))
+
+(deftest end-words
+  (testing "an agent stopped after its attempt finished ended; a kill is a kill; a death with no finished attempt died"
+    (is (= :ended (ui/shown-status (ui/ended-as {:status :killed} :a1 {:a1 {:seon.attempt/status :merged}}))))
+    (is (= :killed (ui/shown-status (ui/ended-as {:status :killed} :a1 {:a1 {:seon.attempt/status :running}}))))
+    (is (= :died (ui/shown-status (ui/ended-as {:status :dead} :a1 {}))))
+    (is (= :idle (ui/shown-status (ui/ended-as {:status :idle} :a1 {:a1 {:seon.attempt/status :merged}})))))
+  (testing "its card says how it ended, not KILLED"
+    (let [html (h/html (:seon.render/html (ui/agent-card {:id :a1 :status :killed :ended-as :merged :evals []} {})))]
+      (is (str/includes? html "ended · merged"))
+      (is (not (str/includes? html ">killed<"))))))
+
+(deftest red-labels
+  (let [owners {'app.proofs/abs-test "calc/abs" 'app.proofs/add-test "calc/add"}]
+    (is (str/includes? (h/html (ui/red-label "#'app.proofs/add-test" #{'app.proofs/add-test} owners)) "blocking"))
+    (is (str/includes? (h/html (ui/red-label 'app.proofs/abs-test #{'app.proofs/add-test} owners)) "allowed: a proof of calc/abs"))))
+
+(deftest problems-tile
+  (is (str/includes? (h/html (:seon.render/html (ui/tile-problems [] {}))) "no problems"))
+  (let [html (h/html (:seon.render/html (ui/tile-problems ["proc writer UNKNOWN"] {})))]
+    (is (str/includes? html "1 problem"))
+    (is (str/includes? html "proc writer UNKNOWN")))
+  (testing "a dead agent whose attempt finished is not a problem"
+    (is (empty? (ai/problems (assoc sys :agents {:a2 {:status :dead}} :health {} :root-errors []
+                                    :agent-attempt {:a2 {:seon.attempt/status :done}}))))))
+
+(deftest observed-task-states
+  (let [[_ conn] (seon.db/create! 50)
+        db @conn
+        tasks {"t/a" {:seon.task/execution :running :seon.task/needs #{} :seon.task/accumulated {:proofs #{'p/x}}} "t/b" {:seon.task/execution :running :seon.task/needs #{"t/a"}}
+               "t/c" {:seon.task/execution :cancelled :seon.task/needs #{}}}
+        attempts {"t/a#1" {:seon.attempt/task "t/a" :seon.attempt/status :running :seon.attempt/start-ms 1 :seon.attempt/tokens 7
+                           :seon.attempt/results {'p/x :pass 'p/y :fail}}}
+        rows (p/task-rows tasks attempts (seon.reconcile/index db))]
+    (testing "what happened, not the desired execution: running, blocked by its need, cancelled"
+      (is (= :running (get-in rows ["t/a" :state])))
+      (is (= :blocked (get-in rows ["t/b" :state])))
+      (is (= #{"t/a"} (get-in rows ["t/b" :blocked-by])))
+      (is (= :cancelled (get-in rows ["t/c" :state]))))
+    (testing "its own proofs on its newest attempt (another task's red is allowed), attempts so far, tokens"
+      (is (= [1 0 1 1 7] ((juxt :green :red :allowed-red :attempts :tokens) (get rows "t/a")))))))
+
+(deftest stop-row-says-how-it-ended-once-main-knows
+  (let [[st1 _] (answer (fresh-state) view0)
+        [st2 _] (answer (assoc st1 :new-events [{:type :killed :agent :a7 :at-ms 1}]) view0)
+        row (second (first (:event-rows st2)))
+        _ (is (str/includes? row "KILLED") "before main records the attempt's end, a stop reads as a kill")
+        [_ out] (answer (assoc st2 :agent-attempt {:a7 {:seon.attempt/status :merged}}) view0)
+        frag (some #(when (= "ev-1" (first %)) (second %)) (:frags (first (filter #(= :patch (:op %)) (:to-web out)))))]
+    (is (str/includes? frag "stopped by root after its attempt ended merged"))
+    (is (str/includes? frag "e-ended"))))

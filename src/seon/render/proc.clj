@@ -26,7 +26,7 @@
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.ai :as ai]
-            [seon.web.html :as h] [seon.task :as task] [seon.context :as context] [seon.print :as print]))
+            [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.context :as context] [seon.print :as print]))
 
 (def SAMPLE-MS "The sampler's beat: health pings and the tiles' series." 500)
 (def EVENT-CAP "Events the stream keeps." 60)
@@ -112,8 +112,21 @@
   "The grid's agents: by id, the ones ended over RETIRE-MS ago left out."
   {:malli/schema [:=> [:cat :map :int] [:vector :keyword]]}
   [agents now-ms]
-  (vec (sort-by (fn [id] [(count (str id)) (str id)])
-                (for [[id a] agents :when (not (and (:ended-ms a) (> (- now-ms (:ended-ms a)) RETIRE-MS)))] id))))
+  ;; each id's key computed once (sort-by would build it per comparison)
+  (mapv peek (sort (for [[id a] agents :when (not (and (:ended-ms a) (> (- now-ms (:ended-ms a)) RETIRE-MS)))
+                         :let [s (str id)]]
+                     [(count s) s id]))))
+
+(defn- ordered
+  "st with the grid's order current: derived again only when root's agents changed (the
+  view's map is persistent: unchanged means identical) or a second passed (retirement is
+  by time)."
+  {:malli/schema [:=> [:cat :map :int] :map]}
+  [st now-ms]
+  (let [agents (get-in st [:view :agents] {})]
+    (if (and (identical? agents (:order-agents st)) (< (- now-ms (:order-at st 0)) 1000))
+      st
+      (assoc st :order (order agents now-ms) :order-agents agents :order-at now-ms))))
 
 (defn system-value
   "The whole system as one value (:seon.render/system), from the render proc's state:
@@ -126,7 +139,7 @@
         tpb (when batches (lib/r2 (/ (double (or batched-tx 0)) batches)))
         agents (:agents v {})]
     {:agents agents
-     :order (order agents now-ms)
+     :order (or (:order st) (order agents now-ms))
      :writer (-> (:writer v) (dissoc :recent :batch-ms)
                  (assoc :tx-per-s (recent-tx-per-s (get-in v [:writer :recent]) now-ns)
                         :batch-p50-ms (lib/p50 (get-in v [:writer :batch-ms])) :tx-per-batch tpb))
@@ -137,12 +150,39 @@
      ;; merges into main: root's merge! of a branch (its events) and the reconciler's
      ;; merged attempts (main's facts)
      :main (assoc (:main st {}) :merges (+ (:merges st 0) (count (filter #(= :merged (:seon.attempt/status %)) (vals (:attempts st))))))
-     :tasks (:tasks st {}) :attempts (:attempts st {})
+     :tasks (:tasks st {}) :attempts (:attempts st {}) :task-rows (:task-rows st {}) :agent-attempt (:agent-attempt st {})
      :series (:series st {}) :events (:events st [])
      :web (:web-sample st {})
      :now-ms now-ms}))
 
 ;;; --- main --------------------------------------------------------------------------------
+
+(defn task-rows
+  "Each task's observed state, from main's tasks, attempts and the reconciler's index:
+  {id {:state :merged|:done|:running|:blocked|:open|:held|:cancelled :blocked-by #{id}
+  :attempts n :tokens n :newest attempt :green n :red n}}. The desired execution stays on
+  the task; this is what happened."
+  {:malli/schema [:=> [:cat :map :map :map] :map]}
+  [tasks attempts idx]
+  (let [by-task (group-by :seon.attempt/task (vals attempts))]
+    (into {} (for [[id t] tasks
+                   :let [as (sort-by :seon.attempt/start-ms (get by-task id))
+                         newest (last as)
+                         blocked (into #{} (remove #(reconcile/done? idx %)) (:seon.task/needs t))
+                         results (:seon.attempt/results newest {})
+                         own (get-in t [:seon.task/accumulated :proofs] #{})
+                         state (cond (= :cancelled (:seon.task/execution t)) :cancelled
+                                     (reconcile/done? idx id) (if (some #(= :merged (:seon.attempt/status %)) as) :merged :done)
+                                     (some #(= :running (:seon.attempt/status %)) as) :running
+                                     (seq blocked) :blocked
+                                     (= :held (:seon.task/execution t)) :held
+                                     :else :open)]]
+               [id {:state state :blocked-by blocked :needs (:seon.task/needs t) :attempts (count as)
+                    :tokens (reduce + 0 (keep :seon.attempt/tokens as)) :newest newest :kind (:seon.task/kind t)
+                    ;; its own proofs (red blocks it) apart from other tasks' (an allowed red)
+                    :green (count (filter #(= :pass (get results %)) own)) :red (count (filter #(and (contains? results %) (not= :pass (get results %))) own))
+                    :allowed-red (count (filter (fn [[p r]] (and (not= :pass r) (not (contains? own p)))) results))
+                    :proofs (count own)}]))))
 
 (defn- main-info
   "What the tiles show of main's db value: t, datoms, program vars, tasks and attempts
@@ -151,8 +191,12 @@
   [st db]
   (if (= (:max-tx db) (get-in st [:main :t]))
     st
-    (assoc st :main {:t (:max-tx db) :datoms (count (d/datoms db :eavt)) :vars (count (d/datoms db :aevt :var/name))}
-           :main-db db :tasks (task/tasks db) :attempts (task/attempts db))))
+    (let [tasks (task/tasks db) attempts (task/attempts db)]
+      (assoc st :main {:t (:max-tx db) :datoms (count (d/datoms db :eavt)) :vars (count (d/datoms db :aevt :var/name))}
+             :main-db db :tasks tasks :attempts attempts
+             :task-rows (task-rows tasks attempts (reconcile/index db))
+             ;; how each agent's work ended, for the words its card and its events use
+             :agent-attempt (into {} (for [a (sort-by :seon.attempt/start-ms (vals attempts))] [(:seon.attempt/agent a) a]))))))
 
 ;;; --- units, rendered incrementally ---------------------------------------------------------
 
@@ -266,7 +310,9 @@
                 (cond-> (context-of (or db (:main-db st)) attempt ag)
                   (and (nil? db) (:main-db st)) (assoc :from :main)))]
     [(assoc-in st [:zoom id] (assoc z :rows rows :ctx-key ctx-key :ctx ctx))
-     {:agent ag :attempt attempt :task (when attempt (get (:tasks st) (:seon.attempt/task attempt)))
+     {:agent (ui/ended-as ag id (:agent-attempt st {})) :attempt attempt :task (when attempt (get (:tasks st) (:seon.attempt/task attempt)))
+      ;; each proof's task, to tell a blocking red from an allowed one
+      :owners (into {} (for [[tid t] (:tasks st) p (:seon.task/proofs t)] [p tid]))
       :context ctx :history (vec (reverse (map #(get rows (first %)) records)))}]))
 
 ;;; --- the pass ------------------------------------------------------------------------------------
@@ -312,7 +358,11 @@
     (let [t0 (lib/now-ns)
           now-ms (System/currentTimeMillis)
           ;; the stream: each new event's row rendered once
-          evs (:new-events st)
+          ;; an agent that ended after its attempt finished ended normally: its event says so
+          evs (mapv (fn [e] (if-let [a (and (#{:killed :dead} (:type e)) (get-in st [:agent-attempt (:agent e)]))]
+                              (cond-> e (#{:done :merged} (:seon.attempt/status a)) (assoc :ended-as (:seon.attempt/status a) :outcome (:seon.attempt/outcome a)))
+                              e))
+                    (:new-events st))
           ;; each new event's row rendered once, with its own id: the stream patch prepends the
           ;; new rows and removes the ones past the cap (not the whole list)
           seq0 (:ev-seq st 0)
@@ -324,13 +374,26 @@
                                 :event-rows (vec (take EVENT-CAP rows))
                                 :ev-seq (+ seq0 (count evs)))
                true (assoc :new-events []))
-          ev-patch (when (seq new-rows)
-                     {:prepends [["#events" (apply str (map second (reverse new-rows)))]]
+          ;; a stop that arrived before main recorded how the attempt ended: its row again,
+          ;; now that main says (60 rows at most)
+          late (for [[i e] (map-indexed vector (:events st))
+                     :let [a (get-in st [:agent-attempt (:agent e)])]
+                     :when (and (#{:killed :dead} (:type e)) (not (:ended-as e)) (#{:done :merged} (:seon.attempt/status a)))]
+                 [i (assoc e :ended-as (:seon.attempt/status a))])
+          st (reduce (fn [st [i e]]
+                       (-> st (assoc-in [:events i] e)
+                           (update :event-rows (fn [rows] (mapv #(if (= (first %) (:seq e)) [(:seq e) (h/html (:seon.render/html (ui/event-row e {})))] %) rows)))))
+                     st late)
+          late-frags (vec (for [[_ e] late :let [r (some #(when (= (first %) (:seq e)) (second %)) (:event-rows st))] :when r] [(str "ev-" (:seq e)) r]))
+          ev-patch (when (or (seq new-rows) (seq late-frags))
+                     {:prepends (if (seq new-rows) [["#events" (apply str (map second (reverse new-rows)))]] [])
+                      :frags late-frags
                       :removes (mapv #(str "ev-" (first %)) (drop EVENT-CAP rows))})
+          st (ordered st now-ms)
           sys (system-value st t0 now-ms)
           ;; root's context: the system's AI face, also a unit of root's layout
           ctx (render/ai sys {:seon.render/schema :seon.render/system :seon.render/budget 700})
-          sys (assoc sys :context {:text ctx :tokens (ai/tokens ctx)})
+          sys (assoc sys :context {:text ctx :tokens (ai/tokens ctx)} :problems (ai/problems sys))
           st (assoc st :context ctx)
           views (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st)))
           [st patches] (reduce (fn [[st ps] v]
@@ -338,6 +401,7 @@
                                        p (if (and (= :root v) ev-patch)
                                            (-> (or p {:op :patch :view :root :frags [] :appends [] :removes []})
                                                (assoc :prepends (:prepends ev-patch))
+                                               (update :frags into (:frags ev-patch))
                                                (update :removes into (:removes ev-patch)))
                                            p)]
                                    [st (cond-> ps p (conj p))]))
@@ -353,6 +417,8 @@
           (cond-> (seq patches) (assoc :render-ms (lib/r2 ms) :patches (reduce + (map #(+ (count (:frags %)) (count (:appends %)) (count (:prepends %)) (count (:removes %))) patches))))
           (update :pass-ms #(lib/push-window % ms 200))
           (update (if (seq patches) :patch-pass-ms :quiet-pass-ms) #(lib/push-window % ms 200))
+          ;; how long the oldest new event waited: its stamp (where it happened) to this pass's end
+          (cond-> (seq evs) (update :event-age-ms #(lib/push-window % (- (System/currentTimeMillis) (reduce min (map :at-ms evs))) 200)))
           (update :patch-bytes #(if (seq patches) (lib/push-window % (reduce + (map (fn [p] (+ (reduce + (map (comp count second) (:frags p)))
                                                                                           (reduce + (map (comp count second) (:appends p)))
                                                                                           (reduce + (map (comp count second) (:prepends p)))))
@@ -366,7 +432,7 @@
   (let [q (fn [xs] (when (seq xs) (let [v (vec (sort xs)) n (count v)]
                                     {:n n :p50 (lib/r2 (v (quot n 2))) :p95 (lib/r2 (v (min (dec n) (int (* 0.95 n))))) :max (lib/r2 (peek v))})))]
     {:passes (:passes st 0) :pass-ms (q (:pass-ms st)) :patch-pass-ms (q (:patch-pass-ms st)) :quiet-pass-ms (q (:quiet-pass-ms st))
-     :patch-bytes (q (:patch-bytes st)) :rendered (get-in st [:counts :rendered] 0) :same-bytes (get-in st [:counts :same] 0)
+     :patch-bytes (q (:patch-bytes st)) :event-age-ms (q (:event-age-ms st)) :rendered (get-in st [:counts :rendered] 0) :same-bytes (get-in st [:counts :same] 0)
      :agents (count (get-in st [:view :agents])) :views (vec (keys (:views st)))}))
 
 ;;; --- the step-fn -------------------------------------------------------------------------------
@@ -382,7 +448,13 @@
   [st {:keys [health ms ping-ms]}]
   (let [v (:view st)
         push (fn [xs x] (vec (take-last SERIES-CAP (conj (or xs []) (double (or x 0))))))]
-    (-> st (assoc :health health :health-ms ms :ping-ms ping-ms)
+    (-> st (assoc :health (let [prev (:health st) dt (/ (- ms (:health-ms st ms)) 1000.0)]
+                            ;; each proc's steps per second since the last beat
+                            (into {} (for [[pid h] health]
+                                       [pid (if (and (map? h) (map? (get prev pid)) (pos? dt))
+                                              (assoc h :rate (/ (- (:count h 0) (:count (get prev pid) 0)) dt))
+                                              h)])))
+                  :health-ms ms :ping-ms ping-ms)
         (update-in [:series :tx] push (recent-tx-per-s (get-in v [:writer :recent]) (lib/now-ns)))
         (update-in [:series :fork] push (lib/p50 (get-in v [:stats :fork-ms])))
         (update-in [:series :datoms] push (get-in st [:main :datoms]))

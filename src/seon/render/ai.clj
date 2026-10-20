@@ -24,17 +24,23 @@
 (defn- counts {:malli/schema [:=> [:cat :map] :string]}
   [freq] (str/join " " (for [[k n] (sort-by (comp str key) freq)] (str (kn k) " " n))))
 
-(defn- line-problems {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}
-  [{:keys [health root-errors agents]}]
+(defn problems
+  "What is wrong now, most urgent first: procs not running (or not answering), root's
+  defects, live agents with red tests or a refused merge, agents whose process died. An
+  agent root stopped after its attempt finished is not a problem."
+  {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}
+  [{:keys [health root-errors agents agent-attempt]}]
   (let [bad (for [[pid h] (sort-by (comp str key) health)
                   :when (or (= :unknown h) (not= :running (:status h)))]
               (str "proc " (kn pid) " " (if (= :unknown h) "UNKNOWN (no answer to its ping)" (kn (:status h)))))
         errs (for [e (take-last 3 root-errors)] (str "defect in " (kn (:pid e)) ": " (ui/clip (:message e) 160)))
         ;; a live agent's red run or refused merge, or an agent whose process died; an agent
         ;; root stopped (an attempt that ended) is not a problem, whatever its last run said
-        ags (for [[id a] (sort-by (comp str key) agents)
-                  :let [t (:tests a) m (:merged a) live? (not (#{:killed :dead} (:status a)))]
-                  :when (or (= :dead (:status a)) (:error a)
+        ;; one pass over the agents; only the few with a problem are sorted
+        ags (for [[id a] (sort-by (comp str key) (filter (fn [[_ a]] (or (:error a) (:tests a) (:merged a) (= :dead (:status a)))) agents))
+                  :let [t (:tests a) m (:merged a) live? (not (#{:killed :dead} (:status a)))
+                        finished? (#{:done :merged} (:seon.attempt/status (get agent-attempt id)))]
+                  :when (or (and (= :dead (:status a)) (not finished?)) (:error a)
                             (and live? (or (pos? (+ (or (:fail t) 0) (or (:error t) 0))) (and m (false? (:merged? m))))))]
               (str (kn id) " " (kn (:status a)) ": "
                    (str/join "; " (remove nil? [(when (= :dead (:status a)) "its process died")
@@ -48,14 +54,17 @@
     (vec (concat bad errs ags))))
 
 (defn- section-work {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}
-  [{:keys [tasks attempts]}]
+  [{:keys [tasks attempts task-rows]}]
   (if (empty? tasks)
     ["no tasks on main"]
     (let [running (filter #(= :running (:seon.attempt/status %)) (vals attempts))
           ended (take 5 (sort-by (comp - #(or (:seon.attempt/end-ms %) 0)) (filter :seon.attempt/outcome (vals attempts))))]
       (vec (concat
-             [(str (count tasks) " tasks (" (counts (frequencies (map :seon.task/execution (vals tasks)))) "); "
+             ;; what happened to each task (observed), not its desired execution
+             [(str (count tasks) " tasks (" (counts (frequencies (map :state (vals task-rows)))) "); "
                    (count attempts) " attempts (" (counts (frequencies (map :seon.attempt/status (vals attempts)))) ")")]
+             (for [[id r] (sort-by key task-rows) :when (seq (:blocked-by r))]
+               (str id " blocked by " (str/join ", " (sort (:blocked-by r)))))
              (for [a (take 8 running)]
                (str "running " (:seon.attempt/id a) " on " (kn (:seon.attempt/agent a)) ", turn " (or (:seon.attempt/turns a) 0)
                     ", " (or (:seon.attempt/tokens a) 0) " tokens"))
@@ -95,7 +104,7 @@
   {:malli/schema [:=> [:cat :seon.render/system :seon.render/env] :seon.render/out]}
   [sys env]
   (let [budget (* 4 (or (:seon.render/budget env) 700))
-        problems (line-problems sys)
+        problems (problems sys)
         sections [["problems" (if (seq problems) problems [(str "none: " (count (:health sys)) " procs running, no defects, no red agents")])]
                   ["work" (section-work sys)]
                   ["load" (section-load sys)]
