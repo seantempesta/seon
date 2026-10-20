@@ -147,8 +147,9 @@ reach a remote. That is an outward push, which needs the owner's OK (D1).
 Fork branches are named `jolt/*`. They never collide with v1's `seon*` branches on the same forks (DECISIONS,
 "Libraries on Jolt"), so v1's pins at `seon-v1` keep resolving.
 
-Until D1 is decided, `v2` keeps the local URLs and works on this machine only. LMDB: `bin/env` looks first in
-`~/src/seon-jolt/vendor-c/lmdb`, then Homebrew. Install `brew install lmdb` before `~/src/seon-jolt` is ever cleaned.
+Until D1 is decided, `v2` keeps the local URLs and works on this machine only. LMDB is built from source inside the
+repo by `bin/build`, as `next/bin/build` will do before the move. Nothing is installed system-wide (owner's rule:
+no system-wide installs). So `v2` never depends on `~/src/seon-jolt/vendor-c/lmdb` or Homebrew.
 
 ## 4. Census verdicts → the deletion list, and the spec tests that carry over
 
