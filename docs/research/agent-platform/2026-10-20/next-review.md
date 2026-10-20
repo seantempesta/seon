@@ -1,15 +1,13 @@
 ---
 title: "Independent review of ~/src/seon-jolt/next against Seon's laws and the 20 ideas"
 type: research
-status: partial
+status: final
 created: 2026-10-20
 ---
 
 # Review of `next/` (the Jolt rebuild), 2026-10-20
 
-**Status: PARTIAL.** Committed early at root's request (usage limit). Finding 1 is reproduced by a run in
-a copy. Findings 2-12 are read from the source with exact symbols, and their reproduction forms are
-written out but not yet run. Each one says which. Later commits replace "not yet run" with output.
+**Status: final.** Findings 1-7 and 11 were reproduced by runs in a copy (outputs below; probe files `../probes/p1.clj`, `p2.clj`, `p3.clj` in the copy). Findings 8-10 and 12 are read from the source by exact symbol and were not run. A first partial version was committed as 4b92ee96f.
 
 **Subject.** `~/src/seon-jolt/next` at HEAD `09e81cde9`, **plus an uncommitted working tree** (lane R5
 in flight: 20 files, +711/−309, mostly `seon.reconcile`, `seon.turn` and `seon.e2e`). I reviewed the
@@ -44,7 +42,7 @@ Findings are ranked by their effect on agents finishing tasks in few turns.
 - **Actual.** It prints `...` and `#`, which are unreadable EDN with no continuation and no `:tokens`. `wrap-print`'s `seon/tokens`, `seon/truncated` and `seon/elisions` keys are therefore never set.
 - **Impact.** The model sees a cut it cannot follow, so it spends a turn re-querying blind. The same printer prints the whole context (finding 2).
 
-### 2. The context is printed through that printer under a 48,000-char cut, so the last keys (`:last-evals`, `:unmerged`) are the first silently dropped (static; form below)
+### 2. The context is printed through that printer under a 48,000-char cut, so the last keys (`:last-evals`, `:unmerged`) are the first silently dropped (REPRODUCED)
 
 - **Where.**
   - `seon.context/messages` binds `{:length 64 :level 8 :chars 48000}` and calls `seon.agent/printer` on the block.
@@ -55,15 +53,17 @@ Findings are ranked by their effect on agents finishing tasks in few turns.
   - Spec red (`spec-reds.md`): "a warm model request allocates in proportion to what it shows".
   - AGENTS.md: "never build a big value and trim it later; elisions name bound, count, path".
 - **Expected vs actual.** A plan that names a few large functions pushes the block past 48,000 chars. The text is then cut mid-EDN with `" …"`, and the agent loses what its last forms evaluated to, which is the feedback the next turn needs. Nothing reports the cut.
-- **Reproduction (not yet run).**
+- **Reproduction (run, `p2.clj`).**
 
   ```
   (seon.context/messages {:task {} :references [{:symbol 'a/b :source (apply str (repeat 50000 "x"))}] :last-evals [{:form "(f)" :value "42"}]})
   ```
 
-  Expect `:last-evals` to be absent from `(:content (second ...))`.
+  ```
+  -> F2 content chars: 48002 has :last-evals? false tail: "xxxxxxxxxxxxxxxxxx …"
+  ```
 
-### 3. `seon.reconcile/references` turns any backticked span containing `/` into a "qualified symbol" (static; form below)
+### 3. `seon.reconcile/references` turns any backticked span containing `/` into a "qualified symbol" (REPRODUCED)
 
 - **Where.** `seon.reconcile/references`. It splits on backticks and keeps any span with a slash and no whitespace.
   - `` `:seon.task/plan` `` → `(symbol ":seon.task/plan")`, whose namespace is `":seon.task"`.
@@ -78,24 +78,30 @@ Findings are ranked by their effect on agents finishing tasks in few turns.
   - AGENTS.md: "no text parsing… References are typed by plain EDN".
   - Use edamame to read the span.
 - **Expected vs actual.** A plan written the way AGENTS.md teaches (keywords and paths in backticks) fills the context with false "unresolved" entries. That is noise the model may chase.
-- **Reproduction (not yet run).**
+- **Reproduction (run, `p2.clj`, `p3.clj`).**
 
   ```
   (seon.reconcile/references "`:seon.task/plan` `docs/DRAGONS.md` `(my.task/current)` `app.calc/add`")
   ```
 
-  Expect `[app.calc/add]`.
+  ```
+  -> F3 references: [:seon.task/plan docs/DRAGONS.md (my.task/current) app.calc/add]
+  -> F3 ns/qualified?: ([":seon.task" true] ["docs" true] ["(my.task" true])
+  -> F3 in context: [{:symbol :seon.task/plan, :unresolved true} {:symbol docs/DRAGONS.md, :unresolved true}]
+  ```
 
-### 4. A reply with no code fence is evaluated whole as code, prose included (static; idea 8 drift)
+  Expected `[app.calc/add]`, with the keyword and the path resolved by their own kinds.
+
+### 4. A reply with no code fence is evaluated whole as code, prose included (REPRODUCED; idea 8 drift)
 
 - **Where.** `seon.turn/reply->source`: `(if-not (str/includes? text "```") text ...)`.
 - **Law / idea.**
   - Idea 8: "prose becomes comments".
   - Spec reds `a]a` and idempotence. These are still open. `IDEAS-MAP` lists idea 8 as missing.
 - **Expected vs actual.** A model that answers "I'll fix add.\n(defn add …)" without a fence gets one `:err` item per prose token ("Unable to resolve symbol I'll"…) ahead of its real form, which wastes context and a turn.
-- **Reproduction (not yet run).** `(seon.turn/reply->source "I'll fix add now.\n(defn add [a b] (+ a b))")` returns the prose unchanged.
+- **Reproduction (run).** `(seon.turn/reply->source "I'll fix add now.\n(defn add [a b] (+ a b))")` gives `-> "I'll fix add now.\n(defn add [a b] (+ a b))"`. The prose is unchanged and goes to `seon.repl/eval-string` as code.
 
-### 5. A recorded definition loses its metadata, and a staged plain def loses its quoting, so merged code changes meaning on main (static; idea 13 drift)
+### 5. A recorded definition loses its metadata, and a staged plain def loses its quoting, so merged code changes meaning on main (REPRODUCED; idea 13 drift)
 
 - **(a) Metadata is dropped.** `seon.program/record-tx` stores `:var/src` as `(pr form)` with `*print-meta* false`.
   - `(def ^:dynamic *x* 1)` is recorded as `(def *x* 1)`.
@@ -106,11 +112,18 @@ Findings are ranked by their effect on agents finishing tasks in few turns.
   - `(def syms '[a b])` becomes `(def syms [a b])`, a load error ("Unable to resolve a").
   - Both contradict harvest's docstring: "carried as its VALUE when the value reads back equal".
 - **Law / idea.** Idea 13 (the merge carries the change) and idea 15 (exact source). Source should be the read span (edamame positions), not a reprint.
-- **Reproduction (not yet run).**
-  - `(:var/src (first (seon.program/record-tx db (eval '(def ^:dynamic *x* 1)) '(def ^:dynamic *x* 1))))`
-  - `(#'seon.harvest/pr-edn (list 'def 'ops '(inc 1)))`, then `load-src!` of the result.
+- **Reproduction (run, `p2.clj`).**
 
-### 6. Defs in a namespace not already in the db are never recorded, and `ns` forms (refers, imports) are never recorded (static)
+  ```
+  (:var/src (first (program/record-tx db0 v '(def ^:dynamic *x* 1))))
+  -> F5a record-tx src: (def *x* 1)
+  (#'seon.harvest/pr-edn (list 'def 'ops '(inc 1))) then (program/load-src! 'app.vals src), @app.vals/ops
+  -> F5b staged src: (def ops (inc 1)) load-src!: nil value: 2
+  (program/load-src! 'app.vals2 (#'seon.harvest/pr-edn (list 'def 'syms '[a b])))
+  -> {:ns app.vals2, :message Unable to resolve symbol: a in this context (did you mean *, +, -?)}
+  ```
+
+### 6. Defs in a namespace not already in the db are never recorded, and `ns` forms (refers, imports) are never recorded (REPRODUCED)
 
 - **Where.**
   - `seon.repl/wrap-record` records only when `seon.program/program-ns?` holds, that is, when an `:ns/name` already exists.
@@ -123,9 +136,16 @@ Findings are ranked by their effect on agents finishing tasks in few turns.
   - `seon.program/reaching-tests` maps an unqualified `add` to `own-ns/add`, so such a test is never selected as reaching `app.calc/add`.
   - The fixtures hide all of this: every proof calls `app.calc/add` fully qualified (`seon.fixtures/calc`).
 - **Law / idea.** Idea 15 ("a new namespace gets its ns form"), idea 2/9 (reaching tests feed the done rule) and "make failure local and loud".
-- **Reproduction (not yet run).** A probe in the style of `seon.merge-test/empty-db`: two namespaces, a test using a referred name, then `reaching-tests` → `#{}`.
+- **Reproduction (run, `p2.clj`).** The db is built as in `seon.merge-test/empty-db`. `app.calc/add` has two tests in `app.calc-test`: `add-test` calls `(add 1 2)`, and `add-test-q` calls `(app.calc/add 1 2)`.
 
-### 7. A second printer inside contract refusals: `pr-str` with its own limits and a 400-char clip (static)
+  ```
+  (program/reaching-tests db #{'app.calc/add})            -> #{app.calc-test/add-test-q}      ; add-test missed
+  (program/program-ns? db 'app.new)                       -> false                           ; its defs are never recorded
+  (program/load-src! 'app.calc-test2 "(deftest add-test (is (= 3 (add 1 2))))")
+  -> {:ns app.calc-test2, :message Unable to resolve symbol: add in this context (did you mean and?)}
+  ```
+
+### 7. A second printer inside contract refusals: `pr-str` with its own limits and a 400-char clip (REPRODUCED)
 
 - **Where.**
   - `seon.contract/*printer*`: `(binding [*print-length* 8 *print-level* 3] (pr-str v))`, cut at 400 chars with `" …"`.
@@ -135,6 +155,7 @@ Findings are ranked by their effect on agents finishing tasks in few turns.
   - `seon.turn/observe` and `end!` key unmerged and changed program keys by `pr-str` text.
   - `seon.merge/three-way` sorts by `pr-edn`.
 - **Law.** AGENTS.md "exactly ONE printer… no printing to hash, sort, compare or store a copy".
+- **Reproduction (run).** `(seon.contract/*printer* (vec (range 100)))` gives `-> [0 1 2 3 4 5 6 7 ...]`. A 1,000-char string comes back as 402 chars.
 
 ### 8. Errors come in several shapes beside `seon.contract/error` (static)
 
@@ -158,7 +179,7 @@ Findings are ranked by their effect on agents finishing tasks in few turns.
 - **Law.** "A hand list beside a schema silently drops the next key."
 - **Fix direction.** Derive the ids from `(:procs built)`.
 
-### 11. Policy numbers in code, and dials read from the environment rather than held as facts (static; idea 19)
+### 11. Policy numbers in code, and dials read from the environment rather than held as facts (static; the default reproduced; idea 19)
 
 - **Hard-coded policy numbers.**
   - `seon.reconcile/default-max-turns` 8, `default-max-merging` 8 and `merge-dials` `{3 2 2}`.
@@ -170,6 +191,19 @@ Findings are ranked by their effect on agents finishing tasks in few turns.
   - Commit `b7459c3` says "merge trains (off by default)" and DECISIONS says trains stay off (`:seon.config.merge/max-running 1`).
   - But `seon.task/boot-tx` writes no merge dial, so `seon.reconcile/actions` uses `default-max-merging` 8.
   - At HEAD this means trains are on with no combined test run. R5's uncommitted `seon.turn/ci!` adds that run.
+  - **Reproduction (run, `p3.clj`).** `(:max-merging {:boot "" :max-running 4} seon.reconcile/default-max-merging)` gives `-> 8`. That is root's index entry when boot set no merge dial.
+
+### 13. The census gate fails on the current working-tree build, and most contracts are not generated (REPRODUCED)
+
+- **Gate result.** `target/seon census` (the binary built 16:17 from the in-flight tree) ends `:result :CENSUS-FAILED`, with:
+  - `{:contracts 488 :generated-and-checked 74 :not-generated 171}`;
+  - failures in R5's new code: `seon.reconcile/branch-of` (both input and output: `get-in` can answer nil against `:seon.db/branch`), `seon.reconcile/running` (output), `seon.reconcile/actions` (input), and two `nil where a java.lang.String is required`.
+- **What this means.** The gate works: it catches R5's non-holding contracts before commit.
+- **Weak contracts the gate never checks.**
+  - 43 of the 465 `:malli/schema` declarations in `src/` answer `:any` (a static count).
+  - The host predicates `:seon.host/object` and `:seon.host/flow-graph` are `some?`, and `:seon.host/void` is `(constantly true)` (`seon.contract/host-schemas`).
+  - Examples of contracts that guarantee nothing: `seon.turn/act!`'s output `[:or :map :map]` and `seon.contract/refusal`'s `:any`.
+- **Law.** "Contract every admitted function… complete"; the census findings in IDEAS-MAP.
 
 ### 12. Per-turn cost follows the program's size, not what changed (static)
 
@@ -190,8 +224,11 @@ Findings are ranked by their effect on agents finishing tasks in few turns.
 - **Dragons.** `docs/DRAGONS.md` with `bin/dragons` names every catch site by function, a mechanical census of the two allowed catches.
 - **Idea 12.** The reconciler is incremental over the tx report's touched entities, and its ready set is ordered deepest-first.
 
-## Still to do (later commits)
+## Not checked (limits of this review)
 
-- Run the forms for findings 2-6 and paste their output.
-- Run `target/seon contracts` / `census` for weak contracts (`:any` outputs, the `some?` and `(constantly true)` host predicates).
-- Check whether `seon.root/api-proc` blocks inside its step on `flow/update!`.
+- **Not run.**
+  - Findings 8-10 and 12 are static. No cost was measured for finding 12.
+  - Whether `seon.root/api-proc` blocks inside its step on `flow/update!`, which awaits the exit of stopped procs (step-fn rule 4), is not established.
+  - `bin/check` was not run: it spawns many processes, and its end-to-end modes belong to root.
+- **What was run.** Only `contracts` and `census` from `target/seon`. `contracts` answered `:CONTRACTS-OK`: 488 refused wrong arities, and the direct-linked caller was refused.
+- **Tree state.** The working tree is mid-lane (R5). Findings 1-12 also hold at HEAD `09e81cde9`: the symbols cited are unchanged by the diff, except `seon.turn/ci!` and `branch-of`, which are R5's.
