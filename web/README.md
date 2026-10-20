@@ -111,9 +111,33 @@ What a pass must do when one agent evaluates, with N agents:
 
 proto/web measured a patch p50 of 22 ms at 100 live agents, with a 16 ms coalescing sleep.
 
-## Measurements
+## Measurements (release binary, `web/bench/sweep.sh` under the bench lock)
 
-See the commit messages and the table below (filled in from `web/bench/latency.py` runs).
+`target/seon web N light` with 3 tabs and 40 evals. Load was 4.4–7.5 (above method.md's 4;
+a run where load went 141 → 57 was discarded). "Async" is proto/web's client, kept for
+comparison; "sync" is a client with no thread handoff of its own.
+
+| agents | patch p50, async (proto 22 ms at 100) | patch p50, sync | pass with patch, p50 | quiet pass, p50 | bytes per eval per tab | page GET p50 (bytes) |
+|---:|---:|---:|---:|---:|---:|---:|
+| 10 | 10.4 ms | 10.3 ms | 0.94 ms (est. 1.5) | 0.34 ms (est. 0.5) | 14.4 KB (est. 7) | 1.2 ms (60 KB) |
+| 100 | 13.3 ms | 12.3 ms | 1.63 ms (est. 3) | 0.85 ms (est. 1) | 19.5 KB (est. 15) | 4.6 ms (435 KB) |
+| 500 | 22.0 ms | 18.8 ms | 4.18 ms (est. 12) | 2.83 ms (est. 4) | 47.7 KB (est. 53) | 19.9 ms (2.1 MB) |
+
+Where the time goes, at 10 agents:
+- POST → the reply event: 2.0 ms. Root's own eval round trip is 1.4 ms (`bin/check rtt`).
+- The reply event → its patch leaves the render proc: 1–2 ms.
+- Leaving the web proc → received by the client: 0.8–1.0 ms. Every chunk carries `: at <ms>`, so this is measured.
+- **An agent idle for about a second answers about 6.5 ms later.** Same agent, POST → patch
+  p50: 3.0 ms after 10 ms idle, 3.3 after 0.1 s, 3.5 after 0.3 s, 9.9 after 1 s, 9.8 after 2 s.
+  - The sweep picks a random agent, so most evals hit an idle one; that is the ~10 ms floor.
+  - It is on the agent's side (its wake-up, or a backoff in the remote end's pump or the
+    poller). It is not in the web path. Filed to root.
+- At 500 agents, a pass's work is the O(N) inputs: the swarm tile's cells and root's context
+  scan. The grid order is derived only when the agents map changes.
+- An event waits 9 ms p50 for its pass behind the previous pass.
+
+The bytes per eval are higher than estimated at 10 agents: an eval produces two events (reply,
+commit), so two passes, and root's context panel (~2.5 KB) re-renders on each.
 
 ## Screenshots (`web/shots/`)
 
@@ -122,3 +146,5 @@ See the commit messages and the table below (filled in from `web/bench/latency.p
 | `root-6-agents-calc-graph.jpg` | Root's view: 6 hand-spawned agents plus the calc graph's 12 attempts. |
 | `zoom-a1-red-cost-proof.jpg` | A zoomed agent whose cost proof is red: OVER, ns at n=100 is 24× its estimate. |
 | `zoom-a8-attempt-calc-neg.jpg` | An attempt agent: attempt, task, proofs with red assertions, evaluations with their costliest functions. |
+| `root-problems-tasks-health.jpg` | After root's feedback: problems first, observed task states with what blocks each, one-line health, ended agents. |
+| `zoom-a9-merge-allowed-reds-big-alloc.jpg` | A merge attempt: "ended · merged", a flagged 88 MB evaluation, and each red proof labelled allowed with its task. |
