@@ -418,3 +418,34 @@
         (is (not (fs/exists? (fs/path root "data/embed-server.edn"))) "observing records nothing")
         (is (nil? (operator/embed-server-stop! root)) "nothing recorded, nothing stopped"))
       (finally (fs/delete-tree root)))))
+
+(deftest a-check-clones-a-store-in-one-call-whatever-its-file-count
+  ;; A live-shape check cloned default's 214,002-file store with `cp -c -R`,
+  ;; per file, and outlasted its bound (2026-10-20). The clone is one
+  ;; clonefile(2) of the directory: the same one call for any file count,
+  ;; faster than the per-file clone of the same tree, and faithful.
+  ;; Resolved at run time: the rehearsal analyzes the running JVM's script/.
+  (let [cloned! (requiring-resolve 'seon.operator/cloned!)
+        root (.getCanonicalFile (java.io.File. (str "tmp/operator-clone-test-" (random-uuid))))
+        store (fn [n]
+                (let [directory (doto (java.io.File. root (str "store-" n)) .mkdirs)]
+                  (dotimes [i n] (spit (java.io.File. directory (str i ".ksv")) (str "value " i)))
+                  (str directory)))
+        listing (fn [directory]
+                  (into {} (map (fn [^java.io.File file] [(.getName file) (slurp file)]))
+                        (.listFiles (java.io.File. ^String directory))))
+        elapsed (fn [f] (let [began (System/nanoTime)] (f) (/ (- (System/nanoTime) began) 1e6)))]
+    (try
+      (let [small (store 3)
+            large (store 2000)
+            calls (mapv (fn [source]
+                          (let [argv (cloned! (str root) source (str source ".clone"))]
+                            (is (= (listing source) (listing (str source ".clone"))) "the clone holds every file whole")
+                            (mapv #(get {source :source (str source ".clone") :target} % %) argv)))
+                        [small large])
+            per-file-ms (elapsed #(.waitFor (.start (ProcessBuilder. ["cp" "-c" "-R" large (str large ".cp")]))))
+            clone-ms (elapsed #(cloned! (str root) large (str large ".again")))]
+        (is (apply = calls) "one call over the directories, the same for 3 files and 2,000")
+        (is (= [:source :target] (take-last 2 (first calls))))
+        (is (< clone-ms per-file-ms) "the one-call clone beats `cp -c -R`'s per-file clone of the same tree"))
+      (finally (fs/delete-tree root)))))

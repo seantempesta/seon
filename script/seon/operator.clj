@@ -1843,10 +1843,31 @@
 ;;; keeps its own template, `data/check/template/<sha>_slot<n>`, built at that
 ;;; path. The commit id names every program input (the schema resources,
 ;;; configuration and pins are committed bytes), so with the slot it is the
-;;; whole key. Each check clones it (`cp -c -R`, an APFS clone) back to its
+;;; whole key. Each check clones it (`cloned!`, an APFS clone) back to its
 ;;; slot's store and its boot publishes only the candidate's files whose
 ;;; digests differ, the resume path `start --head` takes. One exclusive file
 ;;; lock per template orders clone and deletion across processes.
+
+(def ^:private clonefile-script
+  "Python's call of clonefile(2) on `sys.argv[1]` to `sys.argv[2]`; a refusal
+  exits non-zero naming its errno."
+  "import ctypes, os, sys
+libc = ctypes.CDLL(None, use_errno=True)
+if libc.clonefile(os.fsencode(sys.argv[1]), os.fsencode(sys.argv[2]), 0) != 0:
+    sys.exit('clonefile: ' + os.strerror(ctypes.get_errno()))")
+
+(defn- cloned!
+  "Clone the directory `source` to the absent path `target` in one
+  clonefile(2) call, within the operator silence bound; the argv it ran. The
+  kernel clones the tree in one pass, where `cp -c -R` makes a dozen syscalls
+  per file, so a konserve store's clone is not paced by its file count. As
+  with `cp`, the clone is no snapshot: a concurrent writer is not blocked, and
+  a file it writes during the call may or may not be in the clone."
+  {:malli/schema [:=> [:cat :string :string :string] [:vector :string]]}
+  [root source target]
+  (let [argv ["python3" "-I" "-c" clonefile-script source target]]
+    (command! argv root (operator-silence-backstop-ms {}))
+    argv))
 
 (defn- with-template-lock
   "`f`'s value, called holding the exclusive lock of the template `template-name` under
@@ -1964,8 +1985,7 @@
                           (built-template! root directory base template-name disposable))]
               (if (.isDirectory template)
                 (do (fs/create-dirs (io/file disposable "data"))
-                    (command! ["cp" "-c" "-R" (str template) (str (io/file disposable "data/store"))]
-                              root (operator-silence-backstop-ms {}))
+                    (cloned! root (str template) (str (io/file disposable "data/store")))
                     (.setLastModified template (System/currentTimeMillis))
                     (cond-> {:seon.operator/seeded :template :seon.source/git-sha base
                              :seon.operator/seed-ms (elapsed-ms began)}
@@ -1982,7 +2002,7 @@
 ;;; the bulk clone name only values the clone holds: the live JVM copies
 ;;; `:branches`, then every branch head it lists (it knows their konserve file
 ;;; names, `konserve.impl.defaults/key->store-key`); the directory is cloned
-;;; (`cp -c -R`, APFS) and those pointers laid over it, so a writer active
+;;; (`cloned!`, APFS) and those pointers laid over it, so a writer active
 ;;; during the clone tears no branch. The clone presents the live store's id
 ;;; (`-Dseon.store.origin`, `seon.cluster.store/identity-path`), and the boot
 ;;; resumes on it like `start --head`. Its agents start nothing
@@ -2025,7 +2045,7 @@
                  (prepl-value! live (pr-str (pointer-copy-form (.getCanonicalPath pointers)))
                                (operator-silence-backstop-ms {})))
         pointer-ms (elapsed-ms began)]
-    (command! ["cp" "-c" "-R" source (str target)] root (operator-silence-backstop-ms {}))
+    (cloned! root source (str target))
     (let [clone-ms (- (elapsed-ms began) pointer-ms)]
       (doseq [^java.io.File file (.listFiles pointers)]
         (fs/copy file (io/file target (.getName file)) {:replace-existing true}))
