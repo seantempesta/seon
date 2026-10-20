@@ -12,15 +12,18 @@
   data) and is the entrant boundary for a defect in it. Nothing here writes a branch: the
   asker records the outcome in its own recording transaction."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
 
 (defn port "The stand-in's out-port to kind's owner." {:malli/schema [:=> [:cat :keyword] :keyword]}
   [kind] (keyword "fx" (name kind)))
 
-(defn- error {:malli/schema [:=> [:cat :keyword :string :map] :map]}
+(defn- error
+  "An effect's declared failure, as the one error map (its variant registered in
+  seon.problems.edn), raised by seon.fx/call."
+  {:malli/schema [:=> [:cat :qualified-keyword :string :map] :seon.error/base]}
   [type message data]
-  (merge {:seon.error/type type :seon.error/operation 'seon.fx/call :seon.error/message message} data))
+  (contract/error type 'seon.fx/call message data))
 
 ;; ---- performers: the interop edges, one Var per kind ------------------------------------
 
@@ -152,6 +155,11 @@
          :in (let [n (inc (:seq st))]
                [(bound (dispatch (-> st (assoc :seq n) (assoc-in [:queue [(- (:prio m 0)) n]] (assoc m :in-ns (lib/now-ns)))) o)) @o])
          :done (do (reply! o (:dest m) (:outcome m))
+                   ;; root counts every failed effect across agents (seon.error, class :effect);
+                   ;; the asker records its own outcome on its branch
+                   (when (:seon.error/type (:outcome m))
+                     (step/out! o :out {:op :problem :class :effect :error (dissoc (:outcome m) :seon.fx/us :seon.fx/queue-us)
+                                        :agent (get-in m [:dest :agent])}))
                    [(bound (dispatch (settle st m) o)) @o])
          :tick [(bound (dispatch (dissoc st :tick-due) o)) @o])))))
 

@@ -6,7 +6,7 @@
   agent's process and passes Flow's pause, resume and stop on to the agent's own loop.
   From proto/flow f2-final proto.control (lane F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.lib :as lib] [seon.sock :as sock] [seon.step :as step]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.sock :as sock] [seon.step :as step]
             [seon.config :as cfg] [jolt.async.remote :as remote] [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
 
 (defn- to-proc!
@@ -67,11 +67,25 @@
                       ;; a clone's socket follows in its own frame once the agent asks
                       (= kind :clone) (assoc :holding rid)
                       true (update :inflight assoc rid (select-keys m [:kind :branch :new :merge-branch :data-attrs :pass-fd :lease]))
+                      ;; what root last asked of it, for a stall or a death (seon.agent/last-op)
+                      true (assoc :last-op (cond-> {:kind kind :since-ms (System/currentTimeMillis)}
+                                             (string? (:forms msg)) (assoc :form (let [f (:forms msg)] (if (> (count f) 200) (str (subs f 0 200) " …") f)))))
                       (= kind :ping) (update :pings conj rid))]
              [st {:to-api [(status st (cond-> {:status :busy}
                                         (= kind :eval) (assoc :running {:form (let [f (:forms msg)] (if (> (count f) 200) (str (subs f 0 200) " …") f))
                                                                         :since-ms (System/currentTimeMillis)})))]}]))
-    :write [(to-proc! st (:msg m)) nil]
+    :write [(cond-> (to-proc! st (:msg m)) (= :fx-reply (:op (:msg m))) (update :fx-out (fnil dec 1))) nil]
+    ;; root's stall check (seon.root's timer): a request in flight, no frame from the agent
+    ;; for longer than the dial and no effect of its outstanding is a stall, observed once
+    ;; per quiet spell
+    :stall? (let [quiet (- (:now-ms m) (:last-frame-ms st (:now-ms m)))]
+              (if (and (seq (:inflight st)) (not (:stall-seen st)) (> quiet (:dial-ms m)) (zero? (:fx-out st 0)) (not (:dead? st)))
+                [(assoc st :stall-seen true)
+                 {:to-api [{:op :stalled :agent (:id st)
+                            :error (contract/error :seon.agent/stalled 'seon.agent-proc/agent-proc
+                                                   (str "agent " (name (:id st)) " sent nothing for " quiet " ms with a request in flight")
+                                                   {:agent (:id st) :quiet-ms quiet :last-op (:last-op st)})}]}]
+                [st nil]))
     :forked (do (when (and (:kill? st) (not (:dead? st))) (lib/c-kill (:pid m) 9))
                 [(assoc st :pid (:pid m)) nil])
     ;; a process that never existed reads as dead: hang up root's end, the reader sees EOF
@@ -111,7 +125,8 @@
       (let [{:keys [new pass-fd]} (get-in st [:inflight (:k m)])
             ;; the clone's socket end: the parent has it (or failed), root's copy closes now
             _ (some-> pass-fd sock/close!)
-            st (answer-rid st o (:k m) (if (= :cloned (:op m)) {:ok true :id new} {:ok false :error (:error m)}))]
+            st (answer-rid st o (:k m) (if (= :cloned (:op m)) {:ok true :id new}
+                                           (contract/error :seon.root/refused 'seon.root/clone! (str "clone failed: " (:error m)) {:ok false})))]
         (when (= :clone-failed (:op m)) (step/out! o :to-api {:op :clone-failed :agent new :error (:error m)}))
         (step/out! o :to-api (status st {:status (busy st)}))
         st)
@@ -151,18 +166,22 @@
       ;; the agent committed its branch (it owns the branch's writes): the writer's next flush
       ;; covers it
       :committed (do (step/out! o :to-writer {:op :agent-commit :branch (:branch st) :t (:t m)})
+                     ;; its eval errors since its last commit: root counts them (seon.error)
+                     (when (:errors m) (step/out! o :to-api {:op :errors :agent id :entries (:errors m)}))
                      (step/out! o :events (step/event {:type :commit :agent id :branch (:branch st) :t (:t m) :txs (:txs m)}))
                      st)
       ;; an effect (my.fx): to its kind's owner proc; the answer comes back like the
       ;; writer's, {:dest {:agent :op :fx-reply :k}} through the api
-      :fx (let [owner (keyword "fx" (name (:kind m)))]
+      :fx (let [owner (keyword "fx" (name (:kind m)))
+                st (update st :fx-out (fnil inc 0))]
             (if (contains? (:fx-kinds st) owner)
               (do (step/out! o [owner :in] (cond-> {:req (:req m) :agent id :prio (:prio m 0)
                                                 :dest {:agent id :op :fx-reply :k (:k m)}}
                                          (:budget m) (assoc :budget (:budget m) :budget-key (or (:budget-key m) id))))
                   st)
-              (to-proc! st {:op :fx-reply :k (:k m) :seon.error/type :seon.fx/unknown-kind :seon.error/operation 'seon.fx/call
-                            :seon.error/message (str "no effect kind " (:kind m))})))
+              (to-proc! (update st :fx-out dec)
+                        (merge {:op :fx-reply :k (:k m)}
+                               (contract/error :seon.fx/unknown-kind 'seon.fx/call (str "no effect kind " (:kind m)))))))
       :merged-main (let [st (answer-rid st o (:id m) (:result m))]
                      (step/out! o :events (step/event {:type :merged-main :agent id :result (:result m)}))
                      (step/out! o :to-api (status st {:status (busy st)}))
@@ -214,6 +233,7 @@
      :in (agent-in st m)
      ;; a value from the agent; nil: the end's :in closed (the process is gone)
      :from (let [o (volatile! {})
-                 st (agent-frame st o (if (nil? m) {:op :dead} m))]
+                 ;; any frame is progress (the stall check reads it)
+                 st (agent-frame (assoc st :last-frame-ms (System/currentTimeMillis) :stall-seen false) o (if (nil? m) {:op :dead} m))]
              [st @o])
      [st nil])))

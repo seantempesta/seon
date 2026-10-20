@@ -15,12 +15,14 @@ function.
 
 | dragon | edge (`ns/fn`) | declared variant | handled by, as data |
 |---|---|---|---|
-| Datahike or the store refuses a write (a bad transaction, LMDB full or failing) | `seon.writer/writer-one` | the request's answer `{:ok false :error msg}` | the caller of the write: an agent's `transact!` throws it into its own eval (an `:err` item); root's callers read `:ok` |
-| The model's HTTP call (connect, TLS, timeout, a non-200), made by root's `:model` effect lanes | `seon.model/http-post` | `:seon.model/provider-error` | the `:model` owner answers it to the asking agent; `seon.turn/act!` returns it; `seon.turn/work!` ends the attempt `:error` with its message |
+| Datahike or the store refuses a write (a bad transaction, LMDB full or failing) | `seon.writer/writer-one` | `:seon.writer/refused` (the one error map, with `:ok false`) | the caller of the write: an agent's `transact!` throws it into its own eval (an `:err` item); root's callers read `:ok` and `:seon.error/message` |
+| The model's HTTP call (connect, TLS, timeout, a non-200), made by root's `:model` effect lanes | `seon.model/http-post` | `:seon.model/provider-error`, or `:seon.model/rate-limited` for HTTP 429 | the `:model` owner answers it to the asking agent; `seon.turn/act!` returns it; `seon.turn/work!` ends the attempt `:error` with its message |
 | An agent's authored contract does not compile | `seon.contract/arm!` | `:seon.contract/invalid` | `seon.repl/admit` puts it on the reply item (`:contract-error`); `seon.program/load-src!` reports it as a load error |
-| Program code from the db does not load (a source that throws, a missing alias target) | `seon.program/load-src!`, `seon.program/aliases!` | `:seon.program/error` (`{:ns :message}`) | root and the fork server put load errors in their view and events; an agent's `:load-errors` |
+| Program code from the db does not load (a source or ns form that throws, a missing alias target) | `seon.program/load-src!`, `seon.program/load-ns!`, `seon.program/aliases!` | `:seon.program/error` (`{:ns :message}`) | root and the fork server put load errors in their view and events; an agent's `:load-errors` |
 | The filesystem refuses a write-back (`:file` effect) | `seon.fx/write-file` | `:seon.fx/io-error` | the asker's `my.fx/call` answer, recorded as `:seon.fx/*` on its branch |
 | Root's entrance is not listening (the MCP server's one request: connect, write, read) | `seon.mcp/request!` | the tool's text `{:error ...}` | the outside agent reads it as the tool's answer |
+| Text a model or a plan wrote, read as data (a reference span, a reply's line): it may not read as Clojure, and edamame 1.4.32 on Jolt throws a bare IllegalArgumentException for some (`a^`) rather than its `:edamame/error` | `seon.reader/read-text` | `nil`: the text is not Clojure | `seon.reconcile/reference` (not a reference), `seon.reader/forgive` (not a literal line) |
+| Text an agent wrote that does not read as Clojure, read for waste at its attempt's end (lane D2) | `seon.learn/read-forms` | `[]`: the form is charged to no rule | `seon.learn/waste` |
 | An interrupt or a timeout stops a running form (SIGUSR1, SIGALRM) | `seon.intr/run` | ex-info `{:interrupted true}` or `{:timeout-ms n}` | `seon.repl/eval-code` answers the form `interrupted`/`eval-error` and goes on |
 
 ## Entrant boundaries (a defect becomes a recorded error map)
@@ -32,7 +34,7 @@ function.
 | a test run, in the test child of an agent | `seon.agent/run-tests-forked` | an `:error` report in the run |
 | an effect lane performing a request (lane FX1) | `seon.fx/lane-proc` | `:seon.fx/defect` as the outcome: its asker is always answered |
 | one outside connection's request (seon.entrance, line EDN) | `seon.entrance/serve-connection!` | the request's answer `{:error :data}`; the connection goes on |
-| every root proc | Flow's error channel, read by root's error reader | `:root-errors` in the api's view, with the error map |
+| every root proc | Flow's error channel, read by root's error reader | `:root-errors` in the api's view, with the error map; counted by signature on main (`seon.error`, class `:platform`, lane D2) |
 
 ## Dragons met without a catch (the edge answers data)
 
@@ -41,7 +43,9 @@ function.
 | A peer's socket is gone (EOF, or its end frame) | root: `jolt.async.remote`'s reader pump; agents and the fork server: `seon.sock/fill!`, `seon.sock/recv!` | root: the end's `:in` closes, the stand-in's `:from` reads nil and becomes `{:op :dead}`; elsewhere `:eof` |
 | A write to a dead peer (EPIPE) | `seon.sock/send-frame!` | `:epipe`; the agent exits, root reads EOF |
 | `fork()` refused (another Chez thread active, the OS) | `seon.fork-server/server-step`, `seon.lib/safe-fork` | `:fork-failed`; `-2` from safe-fork (the test run and clone report it) |
-| A process dies (killed, crashed, `System/exit`) | the socket's EOF; `waitpid` in `seon.fork-server/reap` | `:dead` / `:exit` events; the agent's pending replies answer "agent died" |
+| A process dies (killed, crashed, `System/exit`) | the socket's EOF; `waitpid` in `seon.fork-server/reap` | `:dead` / `:exit` events; the agent's pending replies answer `:seon.agent/died` (its last op and stderr tail), recorded with its exit status on main (lane D2) |
+| An agent's stderr file cannot be made (a store with no path) | `seon.agent/stderr-to-file!` | stderr stays where it was; a death records no tail |
+| A dead agent's stderr file is gone or empty | `seon.root/stderr-tail` | nil |
 | The fork server dies | `seon.fork-server/fork-server-proc` (EOF of its events) | its standby is promoted (`:server-down`, `:server-up`) |
 | A test never ends or kills its process | `seon.agent/run-tests-forked` | killed at its bound; an `:error` report |
 | An agent past its heap bound | Jolt's heap ceiling (`seon.lib/heap-cap!`) | `OutOfMemoryError` in the form: an `:err` item |

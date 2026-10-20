@@ -18,7 +18,7 @@
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.set :as set]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context]
-            [seon.harvest :as harvest] [my.branch :as branch]))
+            [seon.harvest :as harvest] [my.branch :as branch] [seon.learn :as learn]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: the task and
 ;; attempt it works, and a stop a verb requested.
@@ -63,13 +63,17 @@
      :refusals (r/done-refusals (r/done-input (r/index db) id results unc (mapv #(pr-str (:key %)) unmerged) nil))}))
 
 (defn- end!
-  "The attempt's end: the live runtime staged onto the branch, the end written there, and
-  the branch committed (a turn's end commits the agent's run-ahead writes)."
-  {:malli/schema [:=> [:cat :map :seon.attempt/outcome [:maybe :string]] :seon.turn/end]}
-  [{:keys [turn tokens t0 attempt]} outcome reason]
+  "The attempt's end: the live runtime staged onto the branch, the end written there (with
+  the error that ended it and the turns' waste, as data: lane D2), and the branch committed
+  (a turn's end commits the agent's run-ahead writes)."
+  {:malli/schema [:=> [:cat :map :seon.attempt/outcome [:maybe :string] [:maybe :map]] :seon.turn/end]}
+  [{:keys [turn tokens t0 attempt log]} outcome reason error]
   (harvest/harvest!)
-  (agent/transact! [(cond-> {:seon.end/attempt attempt :seon.end/outcome outcome :seon.end/turns turn :seon.end/tokens tokens}
-                      reason (assoc :seon.end/reason reason))])
+  (let [waste (learn/summary (learn/waste (or log []) (learn/final-symbols (or log []))))]
+    (agent/transact! [(cond-> {:seon.end/attempt attempt :seon.end/outcome outcome :seon.end/turns turn :seon.end/tokens tokens}
+                        reason (assoc :seon.end/reason reason)
+                        error (assoc :seon.end/error (pr-str error))
+                        (seq waste) (assoc :seon.end/waste (pr-str waste)))]))
   (agent/commit!)
   (cond-> {:outcome outcome :turns turn :model-calls turn :tokens tokens :results {} :uncontracted #{}
            :ms (/ (- (System/nanoTime) t0) 1e6)}
@@ -101,7 +105,12 @@
                            :seon.turn/errors (count (filter #(= :err (:tag %)) items))
                            :seon.turn/red (count (remove #(= :pass (val %)) (select-keys results proofs)))
                            :seon.turn/ms (long (/ (- (System/nanoTime) t1) 1e6)) :seon.turn/tokens used}])
-        (cond-> (assoc st :turn (inc turn) :tokens (+ tokens used) :last-items items)
+        (cond-> (-> (assoc st :turn (inc turn) :tokens (+ tokens used) :last-items items)
+                    ;; what this turn's block showed, by producer, and what it evaluated (waste)
+                    (update :log (fnil conj []) {:n turn
+                                                 :shown {'seon.context/resolve-ref (set (map :symbol (:references block)))
+                                                         'seon.context/current-state (set (map :test (:proofs block)))}
+                                                 :items (mapv (fn [it] {:form (:form it) :error (:err it)}) items)}))
           merge? (update :merge-turns inc))))))
 
 (defn context-block
@@ -141,10 +150,10 @@
           ;; it brings nothing new
           (and (empty? refusals) merge?)
           (let [m (branch/merge-main!)]
-            (if (and (empty? (:applied m)) (empty? (:conflicts m))) (end! st :green nil) (recur st)))
-          (empty? refusals) (end! st :green nil)
-          stop (end! st (:outcome stop) (:reason stop))
-          hairy (end! st :merge-failed (:reason hairy))
-          (>= (:turn st) max-turns) (end! st :cap (r/refusals-text refusals))
+            (if (and (empty? (:applied m)) (empty? (:conflicts m))) (end! st :green nil nil) (recur st)))
+          (empty? refusals) (end! st :green nil nil)
+          stop (end! st (:outcome stop) (:reason stop) nil)
+          hairy (end! st :merge-failed (:reason hairy) nil)
+          (>= (:turn st) max-turns) (end! st :cap (r/refusals-text refusals) nil)
           :else (let [st' (act! st obs model)]
-                  (if (:seon.error/type st') (end! st :error (:seon.error/message st')) (recur st'))))))))
+                  (if (:seon.error/type st') (end! st :error (:seon.error/message st') st') (recur st'))))))))

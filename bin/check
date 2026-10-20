@@ -20,6 +20,7 @@ echo "== mcp (an outside MCP client evals in an agent and as root; both recorded
 echo "== threads (the fork server, an agent and its clone stay single-threaded: no GC sweepers where we fork)"; run threads | tail -1
 echo "== admit"; run admit | tail -1
 echo "== record"; run record | tail -1
+echo "== problems (each class provoked, then read back from main by my.root/problems)"; (export SEON_STALL_MS=1000; run problems | tail -1)
 echo "== smoke";  run smoke | grep -E "^merge|^killed|spawned|ready"
 echo "== program"; run program | tail -1
 echo "== robust"; run robust | tail -1

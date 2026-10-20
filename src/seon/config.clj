@@ -51,6 +51,13 @@
   :flush? and is answered after its flush."
   (dial "SEON_FLUSH_MS" 10))
 
+(def STALL-MS
+  "An agent with a request in flight that sends root nothing (no reply, commit or effect)
+  for this long, and has no effect outstanding, is observed stalled once (lane D2: a
+  recorded :seon.agent/stalled; root checks every half of it while an agent is busy). 0:
+  no check."
+  (dial "SEON_STALL_MS" 30000))
+
 (def EID-LEASE
   "Entity ids each agent process may mint on its own branch (a block per agent, from the
   store's highest id at boot): ids stay unique store-wide with no shared counter (L1's lease)."

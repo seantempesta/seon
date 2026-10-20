@@ -2,7 +2,7 @@
   "Root's verbs on tasks (lanes R1 and M1's proto.agents.root): write desired state on main;
   the reconciler proc does the rest. Each takes root's system (seon.root/start!)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [clojure.java.io :as io]))
+  (:require [seon.contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.problems :as problems] [clojure.java.io :as io]))
 
 (defn create!
   "Write task declarations as held tasks. Answers the writer's answer, or the refusal."
@@ -45,3 +45,12 @@
      (cond (:seon.error/type tx) tx
            (empty? tx) {:ok true :files (count files) :changed 0}
            :else (assoc @(root/transact-main! sys tx) :files (count files) :datoms (count tx))))))
+
+(defn problems
+  "Every problem recorded on main, by class (seon.problems/report): recorded errors counted
+  by signature (:platform :eval :agent :effect) and attempts' red proofs, cost verdicts,
+  merges, deaths, errors and waste, each row with its producer, owning namespace, evidence
+  as data, reproducing proofs and the tasks already answering it. Reads main only; costs
+  the problems, not the program."
+  {:malli/schema [:=> [:cat :seon.root/sys] :seon.problems/report]}
+  [sys] (problems/report @(:conn sys)))

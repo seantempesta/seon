@@ -32,7 +32,7 @@
   under (a third of the estimate or less at the largest size: the estimate is loose, a
   finding, not red), unmeasured (a stated dimension with nothing measured)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.profile :as profile]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.profile :as profile] [datahike.api :as d] [seon.db :as pdb]
             [clojure.test :as t] [clojure.string :as str] [clojure.edn :as edn]))
 
 ;; ---- the judge (pure) -----------------------------------------------------------------
@@ -280,18 +280,32 @@
    :edn/read-char {:what "clojure.edn/read-string, per character of a vector of integers" :setup #(vector (pr-str (vec (range (quot % 6)))))
                    :f (fn [s] (edn/read-string s)) :per-char true}
    :pr-str/char {:what "pr-str, per character printed (a vector of integers)" :setup #(vector (vec (range (quot % 6))))
-                 :f (fn [v] (pr-str v)) :per-char true}})
+                 :f (fn [v] (pr-str v)) :per-char true}
+   ;; a pull from an in-memory Datahike db (lane D2: every read of facts is pulls)
+   :db/pull {:what "d/pull of one attribute of an entity, by entity id (per pull)"
+             :setup (fn [n] (let [[_ conn] (pdb/create! 0)]
+                              (d/transact conn (vec (for [i (range n)] {:note/text (str "n" i) :note/agent :u})))
+                              [(d/db conn) (mapv :e (d/datoms (d/db conn) :aevt :note/text))]))
+             :f (fn [db es] (reduce (fn [a e] (d/pull db [:note/text] e) a) 0 es))}
+   :db/pull-attr {:what "each attribute of a d/pull beyond its first (per attribute)"
+                  :setup (fn [n] (let [[_ conn] (pdb/create! 0)]
+                                   (d/transact conn [{:note/text "x" :note/agent :u}])
+                                   [(d/db conn) (first (map :e (d/datoms (d/db conn) :aevt :note/text))) n]))
+                  :f (fn [db e n] (dotimes [_ n] (d/pull db [:note/text :note/agent] e)))
+                  :minus :db/pull}})
 
 (defn measure-unit
   "Unit k measured at n units: {:ns :bytes} per unit."
   {:malli/schema [:=> [:cat :keyword pos-int?] [:map [:ns :double] [:bytes :double]]]}
   [k n]
-  (let [{:keys [setup f per per-char]} (unit-benches k)
+  (let [{:keys [setup f per per-char minus]} (unit-benches k)
         args (setup n)
         units (cond per-char (double (count (if (string? (first args)) (first args) (pr-str (first args)))))
                     per (work per n) :else (double n))
-        m (measure f args)]
-    {:ns (/ (:ns m) units) :bytes (/ (:bytes m) units)}))
+        m (measure f args)
+        ;; a unit measured as the difference from another (an attribute beyond a pull's first)
+        b (when minus (measure-unit minus n))]
+    {:ns (- (/ (:ns m) units) (:ns b 0.0)) :bytes (- (/ (:bytes m) units) (:bytes b 0.0))}))
 
 (def units
   "Measured costs of unit operations on this runtime (release seon binary, M5 Max, load 5,
@@ -319,4 +333,8 @@
    :map/seq-step {:ns 28.3 :bytes 127.1 :what "one step of reduce over a hash map's entries (each a map entry)"}
    :map/reduce-kv {:ns 4.7 :bytes 0.0 :what "one step of reduce-kv over a hash map"}
    :edn/read-char {:ns 29.22 :bytes 38.02 :what "clojure.edn/read-string, per character of a vector of integers"}
-   :pr-str/char {:ns 61.9 :bytes 25.67 :what "pr-str, per character printed (a vector of integers)"}})
+   :pr-str/char {:ns 61.9 :bytes 25.67 :what "pr-str, per character printed (a vector of integers)"}
+   ;; lane D2, source mode, load 3, 2026-10-20, at 2k: a pull is 21 us and 28 KB, each further
+   ;; attribute 9.7 us and 13 KB (a finding: the pull's own allocation, like seon.task/eid's seek)
+   :db/pull {:ns 21351.0 :bytes 27752.86 :what "d/pull of one attribute of an entity, by entity id (per pull)"}
+   :db/pull-attr {:ns 9689.5 :bytes 13030.18 :what "each attribute of a d/pull beyond its first (per attribute)"}})

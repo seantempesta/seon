@@ -25,7 +25,7 @@
   is answered once the eval has stopped. Seon's platform ops (tests, stats, clone,
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn- defchecked]] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract] [clojure.edn] [my.db] [my.agent]
+  (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract] [clojure.edn] [my.db] [my.agent]
             [seon.program :as program] [seon.lib :as lib] [seon.print :as print] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
             [jolt.ffi :as ffi]))
 
@@ -150,13 +150,17 @@
              m))))))
 
 (defn wrap-caught
-  "An eval error also as the one error map (printed EDN)."
+  "An eval error also as the one error map (seon.agent/error-map, EDN on the wire), and
+  noted in this agent's error fold (seon.error/note): its next commit carries the fold to
+  root, which counts each signature across agents."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
     (h (around-reply req
          (fn [m] (if-let [e (:repl/ex m)]
-                   (assoc m "seon/error" (pr-str (cond-> (agent/error-map e) (get m "seon/phase") (assoc :phase :read))))
+                   (let [em (cond-> (agent/error-map e) (get m "seon/phase") (assoc :phase :read))]
+                     (swap! agent/state update :errors err/note em (get m "seon/form") (System/currentTimeMillis))
+                     (assoc m "seon/error" (pr-str em)))
                    m))))))
 
 (def top-fns
@@ -262,7 +266,7 @@
     (cond-> {:id (get m "seon/ordinal") :tag (if err? :err :ret) :form (t "seon/form")
              :ms (some-> (get m "seon/us") (/ 1000.0)) :alloc-bytes (get m "seon/alloc-bytes")}
       (not err?) (assoc :printed (t "value") :ret (t "value") :handle (some-> (get m "seon/handle") keyword))
-      err? (assoc :printed (:message em) :err em :err-text (:err out))
+      err? (assoc :printed (:seon.error/message em) :err em :err-text (:err out))
       (get m "seon/tokens") (assoc :tokens (get m "seon/tokens"))
       (get m "seon/truncated") (assoc :truncated? true)
       (get m "seon/elisions") (assoc :elisions (get m "seon/elisions"))
@@ -295,7 +299,9 @@
   "The recording transaction of one eval request: one evaluation entity per item, on the
   agent's entity, its details in one EDN attribute (the lean record, L1's measurement:
   three attributes, not nine, nothing queries the details apart), and the agent's answered
-  t. Ids are new each time; the agent entity is the one upsert."
+  t. A form's error is stored as its error map (data: grouped by :seon.error/type and
+  operation without parsing text). Ids are new each time; the agent entity is the one
+  upsert."
   {:malli/schema [:=> [:cat :seon.agent/id :string :seon.agent/items [:maybe :int]] :seon.db/tx-data]}
   [id run items t-basis]
   (conj (vec (for [it items :when (:id it)]
@@ -303,7 +309,7 @@
                 :seon.cluster.eval/record (binding [*print-length* nil *print-level* nil *print-meta* false]
                                             (pr-str (cond-> (select-keys it [:tag :form :out :ms :alloc-bytes :fns :origin])
                                                       (= :ret (:tag it)) (assoc :shown (:printed it))
-                                                      (= :err (:tag it)) (assoc :error (:printed it)))))}))
+                                                      (= :err (:tag it)) (assoc :error (or (:err it) (:printed it))))))}))
         (cond-> {:db/id "agent" :seon.agent/id id} t-basis (assoc :seon.agent/answered-t t-basis))))
 
 (defn- record!

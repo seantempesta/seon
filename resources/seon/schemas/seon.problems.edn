@@ -1,0 +1,115 @@
+;; Problems as typed facts (lane D2, notes/option3-D2-problems.md): the error variants every
+;; producer builds through seon.contract/error (the one error map), the recorded error (one
+;; entity per signature on main, R4's seon.error), the problem members of an attempt's end,
+;; and the shape of the one read, seon.problems/report.
+{;; ---- variants of the one error map (each [:and :seon.error/base ...]) ----
+ :seon.agent/eval-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/eval-error]]
+                                                [:class :string] [:data {:optional true} :string] [:phase {:optional true} :keyword]]]
+ :seon.root/no-agent [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-agent]] [:agent {:optional true} [:maybe :keyword]]]]
+ :seon.agent/last-op [:map [:kind :keyword] [:form {:optional true} [:maybe :string]] [:since-ms {:optional true} [:maybe :int]]]
+ :seon.agent/died [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/died]] [:agent :keyword]
+                                          [:pid {:optional true} [:maybe :int]] [:exit {:optional true} [:maybe :seon.lib/exit-status]]
+                                          [:stderr {:optional true} [:maybe :string]] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]
+ :seon.agent/stalled [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/stalled]] [:agent :keyword]
+                                             [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]
+ :seon.root/proc-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/proc-defect]] [:pid {:optional true} [:maybe :keyword]]]]
+ :seon.root/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/refused]]]]
+ :seon.writer/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.writer/refused]] [:ok false?]]]
+ :seon.merge/uncontracted [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/uncontracted]]
+                                                  [:merged? false?] [:uncontracted [:vector :qualified-symbol]]]]
+ :seon.fx/io-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/io-error]]]]
+ :seon.fx/budget-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/budget-spent]]]]
+ :seon.fx/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/defect]]]]
+ :seon.fx/unknown-kind [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/unknown-kind]]]]
+ :seon.fx/in-test [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/in-test]]]]
+ ;; the provider's HTTP 429 (seon.fx/settle halves the model bucket's rate on it)
+ :seon.model/rate-limited [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/rate-limited]] [:status {:optional true} :int]]]
+ ;; the reply's content is empty while its reasoning is not: thinking spent the token budget
+ :seon.model/reasoning-ate-reply [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/reasoning-ate-reply]]
+                                                         [:reasoning-tokens {:optional true} :int] [:completion-tokens {:optional true} :int]
+                                                         [:max-tokens {:optional true} :int] [:reasoning-chars :int]]]
+ :seon.model/failure [:or :seon.model/provider-error :seon.model/rate-limited :seon.model/reasoning-ate-reply]
+
+ ;; ---- recorded errors: one entity per signature (main), counted across agents ----
+ ;; who observed it: a root proc's defect, an agent's eval, an agent's death or stall, an effect's outcome
+ :seon.error/class [:enum :platform :eval :agent :effect]
+ :seon.error/signature [:and {:seon.db/identity true} [:string {:min 16 :max 16}]]
+ :seon.error/count :int
+ :seon.error/agents :int
+ :seon.error/first-ms :int
+ :seon.error/last-ms :int
+ :seon.error/last-agent :keyword
+ :seon.error/last-task :string
+ :seon.error/form :string
+ ;; the first occurrence's error map, as EDN
+ :seon.error/example [:map {:seon.db/edn true}]
+ :seon.error/recorded-fact [:map {:seon.db/attributes true}
+                            [:seon.error/signature :seon.error/signature] [:seon.error/class :seon.error/class]
+                            [:seon.error/count :seon.error/count] [:seon.error/agents :seon.error/agents]
+                            [:seon.error/first-ms :seon.error/first-ms] [:seon.error/last-ms :seon.error/last-ms]
+                            [:seon.error/type {:optional true} :seon.error/type]
+                            [:seon.error/operation {:optional true} :seon.error/operation]
+                            [:seon.error/message {:optional true} :seon.error/message]
+                            [:seon.error/last-agent {:optional true} :seon.error/last-agent]
+                            [:seon.error/last-task {:optional true} :seon.error/last-task]
+                            [:seon.error/form {:optional true} :seon.error/form]
+                            [:seon.error/example {:optional true} :seon.error/example]]
+ ;; one occurrence as its observer sees it (a value; never stored whole)
+ :seon.error/occurrence [:map [:error :map] [:class :seon.error/class] [:cause [:vector :any]]
+                         [:agent [:maybe :keyword]] [:task [:maybe :string]] [:form [:maybe :string]]
+                         [:n pos-int?] [:first-ms :int] [:ms :int]]
+ :seon.error/entry [:map [:signature :seon.error/signature] [:class :seon.error/class] [:count pos-int?]
+                    [:agents [:set :keyword]] [:first-ms :int] [:last-ms :int] [:example :map]
+                    [:form [:maybe :string]] [:last-agent [:maybe :keyword]] [:last-task [:maybe :string]]
+                    [:dirty? :boolean] [:base {:optional true} :int]]
+ ;; the fold in the observer's state: cause -> its running entry
+ :seon.error/fold [:map-of [:vector :any] :seon.error/entry]
+ ;; what an agent sends root with its commit: its occurrences since the last commit, folded
+ :seon.error/sent [:map [:error :map] [:form [:maybe :string]] [:n pos-int?] [:first-ms :int] [:last-ms :int]]
+
+ ;; ---- problem members of an attempt's end (main; the judge writes them) and of the agent's end (branch) ----
+ ;; the error that ended the attempt: the agent's death, the turn loop's error, a merge refusal
+ :seon.attempt/error [:map {:seon.db/edn true}]
+ ;; failing assertions per red test (at most 8 each, printed by seon.print under :part)
+ :seon.problems/assertion [:map [:type [:enum :fail :error]] [:message {:optional true} [:maybe :string]]
+                           [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]]
+ ;; one clojure.test report as the test child keeps it (seon.agent/test-report)
+ :seon.test/report [:map [:type :keyword] [:var {:optional true} [:maybe :string]] [:message {:optional true} [:maybe :string]]
+                    [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]
+                    [:cost {:optional true} :seon.cost/report]]
+ :seon.attempt/failures [:map-of {:seon.db/edn true} :qualified-symbol [:vector :seon.problems/assertion]]
+ ;; a cost proof's measured rows and verdict per test (seon.cost/proof's report)
+ :seon.cost/report [:map [:rows [:vector :seon.cost/row]] [:verdict :seon.cost/verdict]]
+ :seon.attempt/costs [:map-of {:seon.db/edn true} :qualified-symbol :seon.cost/report]
+ ;; waste charged to the producer of what the agent was shown (R4, census idea 14)
+ :seon.learn/waste [:map-of {:seon.db/edn true} :any [:map [:forms :int] [:turns :int]]]
+ :seon.attempt/waste :seon.learn/waste
+ :seon.end/waste :seon.learn/waste
+ :seon.end/error [:map {:seon.db/edn true}]
+ :seon.fx/error-type :qualified-keyword
+ :seon.problems/attempt-fact [:map {:seon.db/attributes true}
+                              [:seon.attempt/error {:optional true} :seon.attempt/error]
+                              [:seon.attempt/failures {:optional true} :seon.attempt/failures]
+                              [:seon.attempt/costs {:optional true} :seon.attempt/costs]
+                              [:seon.attempt/waste {:optional true} :seon.attempt/waste]]
+ :seon.problems/end-fact [:map {:seon.db/attributes true}
+                          [:seon.end/error {:optional true} :seon.end/error] [:seon.end/waste {:optional true} :seon.end/waste]]
+ ;; what a model call cost, on the asker's branch (latency is :seon.fx/us, admission :seon.fx/queue-us)
+ :seon.fx/prompt-tokens :int
+ :seon.fx/completion-tokens :int
+ :seon.fx/reasoning-tokens :int
+ :seon.fx/cache-hit-tokens :int
+ :seon.problems/fx-fact [:map {:seon.db/attributes true} [:seon.fx/error-type {:optional true} :seon.fx/error-type]
+                         [:seon.fx/prompt-tokens {:optional true} :seon.fx/prompt-tokens]
+                         [:seon.fx/completion-tokens {:optional true} :seon.fx/completion-tokens]
+                         [:seon.fx/reasoning-tokens {:optional true} :seon.fx/reasoning-tokens]
+                         [:seon.fx/cache-hit-tokens {:optional true} :seon.fx/cache-hit-tokens]]
+
+ ;; ---- the one read: seon.problems/report ----
+ :seon.problems/class [:enum :platform :eval :agent :effect :red :cost :merge :dead :error :waste]
+ :seon.problems/row [:map
+                     [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
+                     [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]
+                     [:at-ms [:maybe :int]]]
+ :seon.problems/report [:map [:t :int]
+                        [:classes [:map-of :seon.problems/class [:map [:n nat-int?] [:rows [:vector :seon.problems/row]]]]]]}

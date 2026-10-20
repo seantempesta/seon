@@ -178,6 +178,72 @@
     (c/stop! sys)
     (lib/c-exit (if ok 0 1))))
 
+;; ---- problems (lane D2): each class provoked, then read back from main ----------------
+
+(defn- until [pred ms]
+  (let [end (+ (System/currentTimeMillis) ms)]
+    (loop [] (cond (pred) true (> (System/currentTimeMillis) end) false :else (do (Thread/sleep 100) (recur))))))
+
+(def ^:private problem-specs
+  "Two tasks the stand-in model cannot make green in one turn: p1's proof wants 99 (the
+  reply adds 1), and p2's proof is a cost proof whose estimate allows half a call."
+  [{:var "p2-input" :ns 'app.par :stub "(defn p2-input [n] [n])"}
+   {:name "p1" :ns 'app.par :stub "(defn p1 {:malli/schema [:=> [:cat :int] :int]} [x] 0)"
+    :proof "(deftest p1-test (is (= 99 (app.par/p1 10))))"}
+   {:name "p2" :ns 'app.par :stub "(defn p2 {:malli/schema [:=> [:cat :int] :int]} [x] 0)"
+    :proof (str "(deftest p2-test (seon.cost/proof {:of 'app.par/p2 :input 'app.par/p2-input :n \"x\" :work \"one call\""
+                " :growth :constant :fixed {:calls 0.5} :sizes [1 10 100]}))")}])
+
+(defn problems-check
+  "Provoke every class of problem through the paths agents and root use (SEON_STALL_MS=1000
+  for the stall), then read my.root/problems: an eval error and a contract refusal, an
+  effect's io error, a platform defect in the api, a stall, an agent's death with its exit
+  status and stderr, a red proof's assertions and a cost proof's verdict."
+  []
+  (let [t0 (System/currentTimeMillis)
+        sys (c/start! {:datoms 300 :max-running 2})
+        a (c/spawn! sys {:task "problems"})
+        b (c/spawn! sys {:task "dies"})
+        _ (await-status sys [a b] #{:idle} 10000)
+        r1 @(c/submit! sys a (str "(/ 1 0) (defn sq {:malli/schema [:=> [:cat :int] :int]} [x] (* x x)) (sq \"x\")"
+                                 " (my.fx/call :file {:path \"/nonexistent-d2/x\" :text \"x\"})"))
+        r2 @(c/submit! sys a "(Thread/sleep 2500) :awake")
+        _ (clojure.core.async/>!! (:back sys) {:op :writer :tx-count 1 :batch-ms 1 :n-tx "not a number" :commits 1})
+        r3 @(c/submit! sys b "(spit \"/dev/stderr\" \"D2 boom: the agent writes its last words\\n\" :append true) (seon.lib/c-exit 3)")
+        _ (doseq [tx (seon.fixtures/program-txs problem-specs)] @(c/transact-main! sys tx))
+        ds (mapv #(assoc % :seon.task/config {:seon.config.agent/max-turns 1})
+                 (remove #(= :merge (:seon.task/kind %)) (seon.fixtures/decls problem-specs 'problems nil)))
+        _ (my.root/create! sys ds)
+        _ (my.root/run! sys ["problems/p1" "problems/p2"])
+        settled (until #(let [p (my.root/problems sys)]
+                          (and (some (fn [r] (= 'app.proofs/p1-test (:test r))) (get-in p [:classes :red :rows])) (pos? (get-in p [:classes :cost :n]))))
+                       120000)
+        _ (until #(let [p (my.root/problems sys)] (and (pos? (get-in p [:classes :platform :n])) (some (fn [r] (= :seon.agent/died (:type r))) (get-in p [:classes :agent :rows])))) 10000)
+        p (my.root/problems sys)
+        rows (fn [k] (get-in p [:classes k :rows]))
+        types (fn [k] (set (map :type (rows k))))
+        died (first (filter #(= :seon.agent/died (:type %)) (rows :agent)))
+        red (first (filter #(= 'app.proofs/p1-test (:test %)) (rows :red)))
+        cost-row (first (rows :cost))
+        checks {:eval (every? (types :eval) [:seon.agent/eval-error :seon.instrument/contract-error])
+                :effect (contains? (types :effect) :seon.fx/io-error)
+                :platform (contains? (types :platform) :seon.root/proc-defect)
+                :stalled (contains? (types :agent) :seon.agent/stalled)
+                :died (and died (= {:exit 3} (get-in died [:example :exit])) (boolean (re-find #"D2 boom" (str (get-in died [:example :stderr])))))
+                :red (and red (= 'app.proofs/p1-test (:test red)) (seq (:assertions red)) (= ['app.proofs/p1-test] (:proofs red)))
+                :cost (and cost-row (false? (get-in cost-row [:verdict :ok?])) (seq (:rows cost-row)))
+                :settled settled}
+        ok (every? identity (vals checks))]
+    (pprint {:replies (mapv short-items [r1 r2 r3]) :checks checks
+             :counts (into (sorted-map) (for [[k v] (:classes p)] [k (:n v)]))
+             :died (select-keys (:example died) [:exit :stderr :last-op])
+             :red (select-keys red [:attempt :test :assertions :evidence])
+             :cost (select-keys cost-row [:attempt :test :verdict])
+             :ms (- (System/currentTimeMillis) t0)})
+    (out! (if ok "PROBLEMS OK" "PROBLEMS FAILED"))
+    (c/stop! sys)
+    (lib/c-exit (if ok 0 1))))
+
 ;; ---- the census gate (SEON - Main's census of ~/src/seon, 2026-10-20) ------------------
 
 (def ^:private pure-nss
@@ -275,7 +341,7 @@
         r1 @(c/submit! sys a "(+ 1 1) (System/exit 3) (+ 2 2)")
         _ (await-status sys [a] #{:dead} 3000)
         _ (Thread/sleep 100)
-        c1 (check "agent calling System/exit mid-request dies alone" (and (= "agent died" (:printed (last r1)))
+        c1 (check "agent calling System/exit mid-request dies alone" (and (= :seon.agent/died (:seon.error/type (:err (last r1))))
                                                                           (= :dead (get-in (c/state sys) [:agents a :status])))
                   [(short-items r1) (select-keys (get-in (c/state sys) [:agents a]) [:status :exit])])
         r2 @(c/submit! sys b "(transact! [{:no/such-attr 1}])")
@@ -834,7 +900,7 @@
         evr (mapv #(deref % 1000 :hang) evals)
         mr (mapv #(deref % 1000 :hang) mains)
         ok-main (count (filter :ok mr))
-        refused-main (count (filter #(= "root stopped" (:error %)) mr))
+        refused-main (count (filter #(= "root stopped" (:seon.error/message %)) mr))
         eval-done (count (filter #(= ":done" (:printed (second %))) evr))
         eval-other (frequencies (map #(if (vector? %) (:printed (last %)) %) evr))
         cfg (seon.db/store-cfg :lmdb dir)
@@ -1232,6 +1298,7 @@
     "rtt" (rtt)
     "fx" (fx (Long/parseLong (or n "1000")))
     "system" (system-check)
+    "problems" (problems-check)
     "threads" (threads-check)
     "branch-cost" (branch-cost (Long/parseLong n))
     "root" (root-serve (Long/parseLong n))

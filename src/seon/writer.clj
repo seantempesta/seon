@@ -29,6 +29,12 @@
   (let [head (pdb/head conn b)]
     [head (pm/three-way (pm/program (pdb/branch-base conn b) data-attrs) (pm/program head data-attrs) (pm/program @conn data-attrs))]))
 
+(defn- refused
+  "The writer refusing a request, as the one error map (:seon.writer/refused) with the
+  members its callers branch on (:ok false; :merged? false on a merge)."
+  {:malli/schema [:=> [:cat :string :map] :seon.writer/refused]}
+  [why members] (contract/error :seon.writer/refused 'seon.writer/writer-proc why (merge {:ok false} members)))
+
 (defn- merge-refusal
   "Why branch head (its three-way r against main) cannot merge into main now (lane M1), or
   nil: main's program (and declared data) changed since the branch's merge base
@@ -71,7 +77,7 @@
         judged (reduce (fn [{:keys [taken] :as acc} b]
                          (let [have? (pdb/branch? conn b)
                                [head r] (when have? (branch-merge st b data-attrs))
-                               refusal (if have? (merge-refusal main head r) {:merged? false :error (str "no branch " b)})
+                               refusal (if have? (merge-refusal main head r) (refused (str "no branch " b) {:merged? false}))
                                refusal (or refusal
                                            (when (some taken (keys (:ours r)))
                                              (contract/error :seon.merge/behind 'seon.writer/merge-train
@@ -114,7 +120,7 @@
   (if-let [ms (seq (:pend st))]
     (reduce (fn [st [m rep]]
               (if-not (map? rep)
-                (do (answer o (:dest m) {:ok false :error (step/error-msg rep)}) st)
+                (do (answer o (:dest m) (refused (step/error-msg rep) {})) st)
                 (let [t (:max-tx (:db-after rep)) ops (pdb/report->tx rep)]
                   (answer o (:dest m) {:ok true :t t :datoms (count ops)})
                   (main-commit st o t ops (:db-after rep)))))
@@ -145,7 +151,7 @@
       :merge-train (let [[st r] (merge-train st o (vec (:branches m)) (:data-attrs m #{}))] (reply st r))
       :merge (if (exists? (:branch m))
                (let [[st r] (merge-branch st o (:branch m) (:data-attrs m #{}))] (reply st r))
-               (reply st {:merged? false :error (str "no branch " (:branch m))}))
+               (reply st (refused (str "no branch " (:branch m)) {:merged? false})))
       ;; one derivation (seon.merge/three-way) for the dashboard, the done rule and merges
       :branch-diff (reply st (if (exists? (:branch m))
                                (let [[head r] (branch-merge st (:branch m) (:data-attrs m #{}))]
@@ -153,18 +159,18 @@
                                   :conflicts (count (:conflicts r))
                                   :unmerged (mapv :key (pm/unmerged head (pm/program head #{})))
                                   :vars (into (sorted-set) (keep (fn [[k s]] (when (= :var k) s))) (keys (:ours r)))})
-                               {:ok false :error (str "no branch " (:branch m))}))
+                               (refused (str "no branch " (:branch m)) {})))
       ;; root's read of a branch (or main): its committed value from the store; :base-t is
       ;; main's t at the branch's merge base (what of main it holds)
       :branch-db (reply st (cond
                              (= :db (:branch m)) {:ok true :db @conn}
                              (exists? (:branch m)) {:ok true :db (pdb/head conn (:branch m))
                                                     :base-t (:max-tx (pdb/branch-base conn (:branch m)))}
-                             :else {:ok false :error (str "no branch " (:branch m))}))
+                             :else (refused (str "no branch " (:branch m)) {})))
       :branch-info (reply st (if (exists? (:branch m))
                                (let [h (pdb/head conn (:branch m))] {:ok true :datoms (count (d/datoms h :eavt)) :t (:max-tx h)})
-                               {:ok false :error (str "no branch " (:branch m))}))
-      (reply st {:ok false :error (str "unknown op " op)}))))
+                               (refused (str "no branch " (:branch m)) {})))
+      (reply st (refused (str "unknown op " op) {})))))
 
 (defn- writer-one
   "One request into the batch: root's :tx on main joins the batch; any other op first
@@ -177,7 +183,7 @@
       (other-op (commit-batch st o) o m))
     (catch Throwable e
       ;; an interop edge (Datahike) refused: the request's answer is the error, as data
-      (answer o (:dest m) {:ok false :merged? false :error (step/error-msg e)})
+      (answer o (:dest m) (refused (step/error-msg e) {:merged? false}))
       (dissoc st :pend))))
 
 (defn- drain {:malli/schema [:=> [:cat :seon.host/chan :seon.writer/request] [:vector :seon.writer/request]]}

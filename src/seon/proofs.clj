@@ -32,3 +32,25 @@
   (vec (for [{:keys [type var] :as r} (:reports run)
              :when (and (#{:fail :error} type) (tests (test-symbol var)))]
          (-> (select-keys r [:type :message :expected :actual]) (assoc :test (test-symbol var))))))
+
+(def max-assertions
+  "Failing assertions a red test keeps in its attempt's facts (the first ones)."
+  8)
+
+(defn failures
+  "The failing assertions of run, per test: {test [{:type :message :expected :actual}]},
+  the first max-assertions of each (expected and actual as the test child printed them)."
+  {:malli/schema [:=> [:cat [:map [:reports [:sequential :seon.test/report]]]] :seon.attempt/failures]}
+  [run]
+  (reduce (fn [acc {:keys [type var] :as r}]
+            (let [t (test-symbol var)]
+              (if (and t (#{:fail :error} type) (< (count (get acc t)) max-assertions))
+                (update acc t (fnil conj []) (select-keys r [:type :message :expected :actual]))
+                acc)))
+          {} (:reports run)))
+
+(defn costs
+  "The cost proofs' reports of run, per test ({:rows :verdict}, kept as data)."
+  {:malli/schema [:=> [:cat [:map [:reports [:sequential :seon.test/report]]]] :seon.attempt/costs]}
+  [run]
+  (into {} (for [{:keys [var cost]} (:reports run) :let [t (test-symbol var)] :when (and t cost)] [t cost])))

@@ -115,9 +115,14 @@
                        [:scripted [:map [:kind [:= :scripted]] [:script :qualified-symbol]]]
                        [:openai-compat [:map [:kind [:= :openai-compat]] [:base-url :string] [:model :string]
                                         [:api-key-env :string] [:timeout-ms {:optional true} pos-int?]
-                                        [:max-tokens {:optional true} pos-int?]]]]
+                                        [:max-tokens {:optional true} pos-int?]
+                                        ;; DeepSeek's thinking mode and effort; absent: the provider's default
+                                        [:thinking {:optional true} [:enum :enabled :disabled]]
+                                        [:reasoning-effort {:optional true} [:enum :low :medium :high]]]]]
  :seon.model/request [:map [:messages [:vector :seon.model/message]] [:task :seon.task/id] [:turn :int]]
- :seon.model/completion [:map [:text :string] [:prompt-tokens :int] [:completion-tokens :int] [:ms number?]]
+ :seon.model/completion [:map [:text :string] [:prompt-tokens :int] [:completion-tokens :int] [:ms number?]
+                         ;; what the call cost beyond them, when the provider says (lane D2)
+                         [:reasoning-tokens {:optional true} :int] [:cache-hit-tokens {:optional true} :int]]
  :seon.model/provider-error [:map [:seon.error/type [:= :seon.model/provider-error]]
                              [:seon.error/operation :qualified-symbol] [:seon.error/message :string]
                              [:status {:optional true} :int]]

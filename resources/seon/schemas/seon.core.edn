@@ -64,7 +64,6 @@
  :seon.wire/seon-msg [:map [:op :keyword]]
  ;; agents
  :seon.agent/printed [:map [:printed :string]]
- :seon.agent/error [:map [:message :string] [:class :string]]
  :seon.agent/tx-result [:map [:t :int] [:datoms nat-int?]]
  :seon.agent/item [:map {:seon.render/html seon.render.ui/history-row :description "One form's reply at root: the printed value (the live one stays in the agent under :handle) or the error."}
                    [:tag [:enum :ret :err]] [:printed {:optional true} [:maybe :string]]]

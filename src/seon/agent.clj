@@ -13,7 +13,7 @@
   breaks its forks; docs/DRAGONS.md, "Physics". Agent code calls the verbs of my.db and my.agent,
   referred into its namespace. From proto/flow f2-final proto.agent (lane F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [jolt.ffi :as ffi] [seon.program :as program] [seon.intr :as intr] [clojure.repl]))
 
 ;; One state map per agent process (this process is the agent). Fields:
@@ -101,7 +101,11 @@
   []
   (when-let [c (dw/commit-pending! (:store-conn @state))]
     (swap! state #(-> % (assoc :db (:db c)) (dissoc :dirty-at)))
-    (send! {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c)})))
+    ;; the eval errors folded since the last commit ride it (seon.error/note): root counts
+    ;; them across agents
+    (let [errs (:errors @state)]
+      (when errs (swap! state dissoc :errors))
+      (send! (cond-> {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c)} errs (assoc :errors (vec (vals errs))))))))
 
 (defn transact!
   "Write tx-data to this agent's branch: applied at once to the value ahead of the
@@ -130,16 +134,26 @@
   one binds this to a fn of [kind req] answering the outcome, an injected value."
   nil)
 
+(def ^:private model-cost-attrs
+  "A model call's cost members (seon.model's completion, or its failure) and their facts."
+  {:prompt-tokens :seon.fx/prompt-tokens :completion-tokens :seon.fx/completion-tokens
+   :reasoning-tokens :seon.fx/reasoning-tokens :cache-hit-tokens :seon.fx/cache-hit-tokens})
+
 (defn- fx-record!
-  "The outcome joins this eval request's recording transaction (the asker records)."
+  "The outcome joins this eval request's recording transaction (the asker records): its
+  status, latency and queue wait, its error's type, and a model call's tokens (prompt,
+  completion, reasoning, cache hits) when the provider reported them."
   {:malli/schema [:=> [:cat :int :keyword :map] :any]}
   [k kind r]
-  (swap! state assoc-in [:defs [:fx k]]
-         [(cond-> {:seon.fx/id (str (name (:id @state)) "-" (lib/c-getpid) "-fx" k) :seon.fx/kind kind
-                   :seon.fx/status (if (:seon.error/type r) :error :ok)
-                   :seon.fx/us (long (:seon.fx/us r 0)) :seon.fx/queue-us (long (:seon.fx/queue-us r 0))}
-            (:cost r) (assoc :seon.fx/cost (long (:cost r)))
-            (:seon.error/type r) (assoc :seon.fx/error (str (:seon.error/type r) ": " (:seon.error/message r))))]))
+  (let [c (or (:value r) r)]
+    (swap! state assoc-in [:defs [:fx k]]
+           [(cond-> (into {:seon.fx/id (str (name (:id @state)) "-" (lib/c-getpid) "-fx" k) :seon.fx/kind kind
+                           :seon.fx/status (if (:seon.error/type r) :error :ok)
+                           :seon.fx/us (long (:seon.fx/us r 0)) :seon.fx/queue-us (long (:seon.fx/queue-us r 0))}
+                          (for [[f a] model-cost-attrs :let [v (when (map? c) (get c f))] :when (int? v)] [a (long v)]))
+              (:cost r) (assoc :seon.fx/cost (long (:cost r)))
+              (:seon.error/type r) (assoc :seon.fx/error (str (:seon.error/type r) ": " (:seon.error/message r))
+                                          :seon.fx/error-type (:seon.error/type r)))])))
 
 (defn- fx-test
   "An effect asked inside a test fork: the stub's outcome, or the declared refusal."
@@ -147,8 +161,8 @@
   [kind req]
   (if *fx-stub*
     (*fx-stub* kind req)
-    {:seon.error/type :seon.fx/in-test :seon.error/operation 'seon.fx/call :seon.fx/kind kind
-     :seon.error/message "an effect inside a test does not leave the test's process: bind seon.agent/*fx-stub*"}))
+    (contract/error :seon.fx/in-test 'seon.fx/call "an effect inside a test does not leave the test's process: bind seon.agent/*fx-stub*"
+                    {:seon.fx/kind kind})))
 
 (defn fx!
   "The effect kind with req, through root's owner proc, answered here: its outcome
@@ -208,10 +222,23 @@
 
 ;; ---- evaluation -----------------------------------------------------------------
 
-(defn error-map {:malli/schema [:=> [:cat :seon.host/throwable] :seon.agent/error]}
+(def ^:private message-chars
+  "An exception's message is kept to this many characters in its error map."
+  2000)
+
+(defn error-map
+  "A form's exception as the one error map: its ex-data when that already is one (a
+  contract refusal names its operation, member and problems), else the
+  :seon.agent/eval-error variant raised at the agent's REPL boundary, with the exception's
+  class and its ex-data printed by the one printer."
+  {:malli/schema [:=> [:cat :seon.host/throwable] :seon.error/base]}
   [^Throwable e]
-  (cond-> {:message (or (ex-message e) (str (type e))) :class (str (type e))}
-    (ex-data e) (assoc :data (print/text (ex-data e) (:part print/budgets)))))
+  (if (contract/error? (ex-data e))
+    (ex-data e)
+    (let [m (or (ex-message e) (str (type e)))]
+      (contract/error :seon.agent/eval-error 'seon.repl/eval-code (subs m 0 (min message-chars (count m)))
+                      (cond-> {:class (str (type e))}
+                        (ex-data e) (assoc :data (print/text (ex-data e) (:part print/budgets))))))))
 
 (defn- interrupt-self-test
   "T1's boot check: SIGUSR1 reaches a Chez handler only in a process whose ancestors were
@@ -226,6 +253,19 @@
 
 ;; ---- tests, in a fork of this agent ------------------------------------------------
 
+(defn test-report
+  "One clojure.test report as the run keeps it: its type, test var and message; a failing
+  assertion's expected and actual printed by the one printer under :part; a cost proof's
+  rows and verdict (seon.cost/proof's :actual) kept as data under :cost (lane W2's agent
+  page renders them; the judge persists them on the attempt)."
+  {:malli/schema [:=> [:cat :map [:maybe :string]] :map]}
+  [m var]
+  (let [cost (when (map? (:actual m)) (select-keys (:actual m) [:rows :verdict]))]
+    (cond-> {:type (:type m) :var var :message (:message m)}
+      (not= :pass (:type m)) (assoc :expected (print/text (:expected m) (:part print/budgets))
+                                    :actual (print/text (:actual m) (:part print/budgets)))
+      (contract/valid? :seon.cost/report cost) (assoc :cost cost))))
+
 (defn- run-tests-here
   "clojure.test over every namespace this agent evaluated in; answers report data."
   {:malli/schema [:=> [:cat] :seon.test/result]}
@@ -239,9 +279,7 @@
                                 (filter (fn [n] (some->> (find-ns n) ns-interns vals (some (comp :test meta))))) prog))
         counts (binding [t/report (fn [m]
                                     (when (#{:pass :fail :error} (:type m))
-                                      (swap! reports conj {:type (:type m) :var (some-> (first t/*testing-vars*) str)
-                                                           :message (:message m)
-                                                           :expected (print/text (:expected m) (:part print/budgets)) :actual (print/text (:actual m) (:part print/budgets))}))
+                                      (swap! reports conj (test-report m (some-> (first t/*testing-vars*) str))))
                                     (orig m))
                          t/*test-out* (java.io.StringWriter.)]
                  ;; test-ns tests the vars interned now (Jolt's run-tests also runs its
@@ -360,6 +398,24 @@
   [t-req-ns extra]
   (send! (merge {:op :hello :pid (lib/c-getpid) :start-ms (lib/ms-since t-req-ns) :mem-mb (mem-mb) :t (:max-tx (db))} extra)))
 
+;; ---- stderr: a file per agent, its tail read by root when the agent dies -------------
+
+(defn stderr-path
+  "Where agent id's stderr goes: <store path>-agents/<id>.err (root makes the directory at
+  boot and removes it with a store it owns), or nil for a store with no path (in memory)."
+  {:malli/schema [:=> [:cat [:maybe :string] :keyword] [:maybe :string]]}
+  [store-path id] (when store-path (str store-path "-agents/" (name id) ".err")))
+
+(defn- stderr-to-file!
+  "This process's stderr (fd 2: what Chez, the runtime and native code print) into the
+  file at path, truncated. The edge of a dragon: a file that cannot be made leaves stderr
+  where it was (the death then records no tail)."
+  {:malli/schema [:=> [:cat [:maybe :string]] :any]}
+  [path]
+  (when path
+    (let [fd (lib/c-creat path 420)]
+      (when-not (neg? fd) (lib/c-dup2 fd 2) (lib/c-close fd)))))
+
 (defn- clone!
   "Fork this agent, live values and all, into a new agent on a branch of this branch.
   Root branches this branch first (no transaction is in flight here, so the new branch's
@@ -390,6 +446,7 @@
                 (let [c (sock/conn fd)]
                   ;; the clone opens the store itself, on its own branch, with its own lease
                   (pdb/after-fork! (:cfg r) (:lease r))
+                  (stderr-to-file! (stderr-path (get-in r [:cfg :store :path]) (:agent m)))
                   (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn c :mode :agent :tx-seq 0
                          :pending clojure.lang.PersistentQueue/EMPTY :mem-at nil :fx-pending {}
                          :store-conn (d/connect (assoc (:cfg r) :branch (:branch m))))
@@ -412,6 +469,7 @@
   (sock/clofork! fd)
   (lib/set-trip! trip-bytes)
   (lib/heap-cap! (+ (lib/bytes-in-heap) heap-extra-bytes))
+  (stderr-to-file! (stderr-path (get-in cfg [:store :path]) id))
   ;; this agent owns its branch's writes: it opens the store itself (seon.db/after-fork!)
   (pdb/after-fork! cfg lease)
   ;; the model's API key is root's alone (its :model owner calls the model; lane FX1)

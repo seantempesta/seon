@@ -41,6 +41,8 @@
 (defc c-kill "kill" [:int :int] :int)
 (defc c-setpgid "setpgid" [:int :int] :int)
 (defc c-unsetenv "unsetenv" [:string] :int)
+(defc c-creat "creat" [:string :int] :int)
+(defc c-dup2 "dup2" [:int :int] :int)
 (defc c-setrlimit "setrlimit" [:int :pointer] :int)
 (defc c-getrlimit "getrlimit" [:int :pointer] :int)
 

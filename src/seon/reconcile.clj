@@ -6,7 +6,7 @@
   stop). `reconciler-proc` is the root proc that runs it on main's commits and carries the
   actions out as requests to the api, each action's facts written by the writer."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
+  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.edn :as edn] [seon.sock :as sock] [seon.step :as step]
             [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm]
             [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow]))
 
@@ -409,14 +409,26 @@
 ;; ---- what an attempt's agent wrote on its branch ----
 
 (defn pull-end
-  "The end attempt aid's turn loop wrote on branch db ({:outcome :reason :turns :tokens}), or {}."
+  "The end attempt aid's turn loop wrote on branch db ({:outcome :reason :turns :tokens},
+  and the error that ended it and its waste as data), or {}."
   {:malli/schema [:=> [:cat :seon.host/db :seon.attempt/id] :map]}
   [db aid]
   (let [e (d/q '[:find ?e . :in $ ?a :where [?e :seon.end/attempt ?a]] db aid)]
     (if e
-      (let [m (d/pull db [:seon.end/outcome :seon.end/reason :seon.end/turns :seon.end/tokens] e)]
-        (into {} (for [[k v] m] [(keyword (name k)) v])))
+      (let [m (d/pull db [:seon.end/outcome :seon.end/reason :seon.end/turns :seon.end/tokens :seon.end/error :seon.end/waste] e)]
+        (into {} (for [[k v] m] [(keyword (name k)) (if (#{:seon.end/error :seon.end/waste} k) (edn/read-string v) v)])))
       {})))
+
+(defn- edn-text
+  "x as stored EDN (no print limits: its producer bounded it)."
+  {:malli/schema [:=> [:cat :any] :string]}
+  [x] (binding [*print-length* nil *print-level* nil *print-meta* false] (pr-str x)))
+
+(defn- error-text
+  "Error map e as an attempt's stored error (:seon.attempt/error): the one error map, its
+  protocol members (a test count, :ok, :merged?) left out."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [e] (edn-text (dissoc e :pass :fail :error :reports :merged? :ok :tx :applied :conflicts)))
 
 ;; ---- the reconciler proc: actions carried out as requests, every answer as data ----------
 ;; Root's executor (R1's proto.agents.root, a thread per attempt) as one step-fn: main's
@@ -485,7 +497,7 @@
   root's own proof results, the branch's merge entries and unmerged keys, the contract gaps
   against main, its improved plan carried to the task."
   {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db]] [:set :string]] [:vector :any]]}
-  [st {:keys [act]} results {:keys [db base-t]} changed]
+  [st {:keys [act run-problems]} results {:keys [db base-t]} changed]
   (let [main (:db st)
         aid (:attempt act) id (:task act)
         end (pull-end db aid)
@@ -495,14 +507,21 @@
                         sym))
         plan (:seon.task/plan (task/task db id))]
     (into (cas-tx aid :running :ended
-                    (task/end-members (cond-> {:outcome (:outcome end :error) :turns (:turns end 0) :model-calls (:turns end 0)
+                    (merge (task/end-members (cond-> {:outcome (:outcome end :error) :turns (:turns end 0) :model-calls (:turns end 0)
                                                :tokens (:tokens end 0) :ms 0.0 :results results :uncontracted unc
                                                :conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
                                                :unmerged (mapv #(pr-str (:key %)) (pm/unmerged db (pm/program db #{})))
                                                :changed changed}
                                         (:reason end) (assoc :reason (:reason end))
                                         (not (:outcome end)) (assoc :reason "the agent wrote no end"))
-                                      (System/currentTimeMillis) (or base-t (:max-tx main))))
+                                      (System/currentTimeMillis) (or base-t (:max-tx main)))
+                    ;; the problems measured at its end (lane D2): red assertions, cost verdicts,
+                    ;; the error that ended it, its waste
+                    (cond-> {}
+                      (seq (:failures run-problems)) (assoc :seon.attempt/failures (edn-text (:failures run-problems)))
+                      (seq (:costs run-problems)) (assoc :seon.attempt/costs (edn-text (:costs run-problems)))
+                      (:error end) (assoc :seon.attempt/error (error-text (:error end)))
+                      (seq (:waste end)) (assoc :seon.attempt/waste (edn-text (:waste end))))))
             (when (and plan (not= plan (:seon.task/plan (task/task main id)))) (task/plan-tx id plan)))))
 
 (defn- advance
@@ -512,8 +531,11 @@
   (let [{:keys [act agent] :as f} (get-in st [:flights aid])
         done (fn [st] [(update st :flights dissoc aid) []])
         one (fn [[st o]] [st [o]])
-        dead (fn [st why] (one (write st aid :done (cas-tx aid :running :dead {:seon.attempt/end-ms (System/currentTimeMillis)
-                                                                               :seon.attempt/reason why}))))]
+        ;; its agent died: the one error map root answered with (:seon.agent/died: last op,
+        ;; stderr tail; or :seon.root/no-agent) is the attempt's error
+        dead (fn [st e] (one (write st aid :done (cas-tx aid :running :dead {:seon.attempt/end-ms (System/currentTimeMillis)
+                                                                             :seon.attempt/reason (:seon.error/message e)
+                                                                             :seon.attempt/error (error-text e)}))))]
     (case step
       :ignored [st []]
       :done (done st)
@@ -530,10 +552,13 @@
                                                                                        (get-in act [:env :model]) (assoc :model (get-in act [:env :model]))))))})))
       ;; the turn loop answered: died (no live agent), or judge it from measured facts
       :worked (if (= -1 (:id (first r)))
-                (dead st (str (:printed (first r))))
+                (dead st (:err (first r)))
                 (one (request st aid :tested {:op :tests :id agent :timeout-ms 30000})))
-      :tested (one (request (assoc-in st [:flights aid :results] (proofs/results r)) aid :read
-                            {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}}))
+      :tested (if (contract/error? r)
+                (dead st r)
+                (one (request (-> st (assoc-in [:flights aid :results] (proofs/results r))
+                                  (assoc-in [:flights aid :run-problems] {:failures (proofs/failures r) :costs (proofs/costs r)}))
+                              aid :read {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}})))
       ;; what the branch changed since its merge base (three-way's :ours), measured for the train
       :read (one (request (assoc-in st [:flights aid :branch-db] r) aid :diffed
                           {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}}))
@@ -547,10 +572,11 @@
                            (vec (mapcat (fn [{:keys [attempt task]} r]
                                           (cond
                                             (:merged? r) (cas-tx attempt :ended :merged {:seon.attempt/merged-t (long (:tx r))})
-                                            (= :seon.merge/behind (:seon.error/type r)) (cas-tx attempt :ended :behind {:seon.attempt/reason (:seon.error/message r)})
-                                            :else (conj (cas-tx attempt :ended :bailed {})
+                                            (= :seon.merge/behind (:seon.error/type r)) (cas-tx attempt :ended :behind {:seon.attempt/reason (:seon.error/message r)
+                                                                                                                        :seon.attempt/error (error-text r)})
+                                            :else (conj (cas-tx attempt :ended :bailed {:seon.attempt/error (error-text r)})
                                                         {:seon.task/id task :seon.task/execution :held
-                                                         :seon.task/problem (str "merge refused: " (or (:seon.error/message r) (:error r)))})))
+                                                         :seon.task/problem (str "merge refused: " (:seon.error/message r))})))
                                         (:members act) (:results r))))))))
 
 (defn- pass
