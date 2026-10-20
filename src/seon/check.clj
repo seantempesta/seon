@@ -1137,6 +1137,22 @@
     (out! (if ok "THREADS OK" "THREADS FAIL"))
     (lib/c-exit (if ok 0 1))))
 
+(defn branch-cost
+  "The writer's :spawn on a fresh LMDB store, n times (seon.db/branch?, then d/branch!):
+  ms per 100, flat in the number of branches (d/branches, which folds the roster, made
+  it O(branches) per spawn: 15 ms at 1,000)."
+  [n]
+  (let [path (str "/tmp/seon-branch-cost-" (lib/c-getpid))
+        {conn :conn} (seon.db/open! :lmdb path 2000)
+        times (vec (for [k (range (quot n 100))]
+                     (let [t0 (lib/now-ns)]
+                       (dotimes [i 100] (seon.db/branch? conn (keyword (str "b" k "-" i))) (d/branch! conn :db (keyword (str "b" k "-" i))))
+                       (lib/r2 (lib/ms-since t0)))))]
+    (println {:ms-per-100 times :branches (count (d/branches conn))})
+    (d/release conn)
+    (clojure.java.shell/sh "rm" "-rf" path)
+    (lib/c-exit 0)))
+
 (defn -main [& [mode n & more]]
   (case mode
     "dur-bench-write" (dur-bench-write n (Long/parseLong (first more)))
@@ -1163,6 +1179,7 @@
     "fx" (fx (Long/parseLong (or n "1000")))
     "system" (system-check)
     "threads" (threads-check)
+    "branch-cost" (branch-cost (Long/parseLong n))
     "root" (root-serve (Long/parseLong n))
     "mcp" (do (seon.mcp/serve! (Long/parseLong n)) (lib/c-exit 0))
     "mcp-proof" (mcp-proof)

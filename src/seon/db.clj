@@ -6,7 +6,7 @@
   (BAGGAGE.md)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-] :as contract] [seon.schema.datahike :as sd] [seon.config :as cfg]
-            [datahike.connections] [datahike.writing] [hasch.core :as hasch] [datahike.api :as d] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
+            [datahike.connections] [datahike.writing] [hasch.core :as hasch] [datahike.api :as d] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
             [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix]))
 
 (def schema
@@ -131,6 +131,12 @@
   "The first entity id past every branch head of the store: agents' leases start here."
   {:malli/schema [:=> [:cat :seon.host/conn] :int]}
   [conn] (+ cfg/EID-LEASE (max (:max-eid @conn) (#'datahike.writing/roster-max-eid (:store @conn)))))
+
+(defn branch?
+  "Does the store hold branch b? Its head key exists exactly when the branch does
+  (datahike.roster), an O(1) read; d/branches folds the whole roster, O(branches)."
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch] :boolean]}
+  [conn b] (boolean (k/exists? (:store @conn) b {:sync? true})))
 
 (defn head
   "Branch b's committed value, read from the store (another process may have committed it)."

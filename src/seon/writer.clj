@@ -69,7 +69,7 @@
   (let [conn (:conn st)
         main @conn
         judged (reduce (fn [{:keys [taken] :as acc} b]
-                         (let [have? (contains? (d/branches conn) b)
+                         (let [have? (pdb/branch? conn b)
                                [head r] (when have? (branch-merge st b data-attrs))
                                refusal (if have? (merge-refusal main head r) {:merged? false :error (str "no branch " b)})
                                refusal (or refusal
@@ -127,7 +127,7 @@
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.writer/request] :seon.writer/state]}
   [st o {:keys [op dest] :as m}]
   (let [conn (:conn st)
-        exists? (fn [b] (contains? (d/branches conn) b))
+        exists? (fn [b] (pdb/branch? conn b))
         reply (fn [st r] (answer o dest r) st)]
     (case op
       ;; an agent process committed its branch: the store is dirty until the next flush
