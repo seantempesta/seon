@@ -33,16 +33,23 @@ All live in `docs/research/agent-platform/2026-10-20/`.
 | Census: keep/delete inventory, ideas first | `census/README.md`, plus `ideas.md`, `static.md`, `gen.md`, `tests-run.md` and the EDN data | **final** (`cb9568dea`) |
 | The 12 double-red spec tests judged | `census/spec-reds.md` | **final** (`79b1a9272`): 7 green, 4 kept red as spec, 1 retired |
 | Independent review of `~/src/seon-jolt/next` against AGENTS.md and the 20 ideas | `next-review.md` | **final** (`a905c961e`): 13 ranked findings, sent to the Jolt session |
-| The v2 move plan (nothing executed) | `move-plan.md` | **draft complete** (`8fbfbd51d`); owner decisions D1–D11 open |
+| The v2 move plan (nothing executed) | `move-plan.md` | **draft** (`8fbfbd51d`; LMDB amendment `cf8dd8b3c`); owner decisions D1–D11 open |
 
 ## What is left
 
-1. `next-review.md` is final and sent; re-review `next/` only if the Jolt session asks.
-   failing test, all run in a scratchpad copy, never in `~/src/seon-jolt`. Then send the findings to the Jolt session.
-2. `move-plan.md` is complete (draft): it waits on the owner's decisions D1–D11 and on `next/` being committed and paused.
-   turned into a deletion list, the spec tests made runnable, and the owner's open decisions. The owner decides when to
-   execute it.
-3. Stay on call for census cuts the Jolt session asks for.
+1. **The second pass of the `next/` review is waiting for A1's commit sha.** The Jolt session's assembly lane A1 is fixing
+   the 13 findings in priority order: namespaces and per-turn cost, then merge fidelity, the printer, context truncation,
+   references, the reader, errors, health, dials and the census gate. When the Jolt session sends A1's sha:
+   - re-check each finding against `next/` HEAD with the same reproductions, in a scratchpad copy, never in
+     `~/src/seon-jolt` (the probes were `p1.clj`–`p3.clj` in the old scratchpad; if they are gone, rebuild them from the
+     forms quoted in `next-review.md`);
+   - run `target/seon census`;
+   - report fixed / still open / regressed per finding to the Jolt session.
+2. **`move-plan.md` is a draft.** It waits on the owner's decisions D1–D11 and on `next/` being committed and paused. The
+   owner decides when to execute it. LMDB is built from source by `bin/build`, with no system-wide installs (owner's rule).
+3. **Feature work in `~/src/seon` is paused.** Allowed: fixes that keep a census spec test meaningful, and whatever the
+   Jolt session or the owner asks for.
+4. Stay on call for census cuts the Jolt session asks for.
 4. Waiting on the owner: whether `(help)` may teach the `my.attempt-<your attempt>` placeholder. Three `seon.help-test`
    tests are red on it.
 
