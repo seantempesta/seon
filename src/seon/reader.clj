@@ -4,7 +4,7 @@
   reader (seon.repl); this reader never evaluates anything: tagged literals, `::` keywords
   and reader conditionals all read as plain data."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [edamame.core :as e]))
+  (:require [seon.contract :refer [defn defn-]] [edamame.core :as e] [clojure.string :as str]))
 
 (defn opts
   "edamame's options for reading source written in namespace nsym: every Clojure syntax
@@ -39,3 +39,171 @@
   {:malli/schema [:=> [:cat :string :symbol] :any]}
   [text nsym]
   (e/parse-string text (opts nsym)))
+
+;; ---- the forgiving reader: a model's reply as source (idea 8) ----------------------------
+;;
+;; A model's reply mixes prose and code. `forgive` makes it source a REPL reads: prose
+;; becomes comments, and unbalanced delimiters are repaired, each change a repair
+;; {:at :dropped :inserted}: at offset :at of the text as the changes before it left it,
+;; :dropped was replaced by :inserted. Two laws hold (Seon's spec, T5's forgive tasks):
+;;   - forgiving forgiven text changes nothing (\"a]a\" never becomes \"aa\");
+;;   - the repairs account for every change: undone in reverse, they give back the reply.
+
+
+(def ^:private openers {\( \) \[ \] \{ \}})
+(def ^:private closers {\) \( \] \[ \} \{})
+(def ^:private code-tags #{"clojure" "clj" "cljc" "edn"})
+
+(defn- fence
+  "The tag of a fence line (``` first, after blanks and a ;; this reader wrote), \"\" when
+  untagged, else nil."
+  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  [line]
+  (let [t (str/triml (if (str/starts-with? line ";; ") (subs line 3) line))]
+    (when (str/starts-with? t "```")
+      (str/lower-case (first (str/split (str/trim (str/replace t #"^`+" "")) #"\s+"))))))
+
+(defn- literal-line?
+  "Is trimmed line t exactly one literal (number, string, keyword, character, true, false,
+  nil) or one qualified symbol?"
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [t]
+  (let [fs (read-text t 'user) x (first fs)]
+    (boolean (and (= 1 (count fs))
+                  (or (number? x) (string? x) (keyword? x) (char? x) (boolean? x) (nil? x) (qualified-symbol? x))))))
+
+(defn- starts-form?
+  "Does trimmed line t start a form by its first character: a collection, a string, a
+  quote, deref or meta character, # before a dispatch character (a letter, { ( \" ' _ ? :
+  ^ =; never # before a blank, a heading), a backtick before a collection, or a lone
+  backslash (a character not yet written)."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [t]
+  (let [c (first t) d (second t)]
+    (boolean (case c
+               (\( \[ \{ \' \@ \^ \") true
+               \# (and d (or (Character/isLetter ^char d) (#{\{ \( \" \' \_ \? \: \^ \=} d)))
+               \` (contains? openers d)
+               \\ (= "\\" t)
+               false))))
+
+(defn- scan
+  "One pass over a reply, line by line, with one stack of open delimiters (outside strings,
+  character literals and comments). A line is:
+  - a fence line (``` first): it becomes a comment (`;; `), and is still known as a fence
+    when read again. A clojure/clj/cljc/edn fence's body is code; another tag's is prose;
+    an untagged one's (models fence prose too) goes by the rule below, as outside fences;
+  - code: inside an open string; in a code fence; indented or starting with a closer
+    inside an open form; or starting a form, or being one literal or qualified symbol;
+  - blank or a comment: it stays;
+  - else prose: it becomes a comment (`;; ` inserted at its start).
+  In code, a closer that matches no open delimiter becomes a comma (whitespace to the
+  reader, so \"a]a\" never joins into \"aa\", and never the start of a fence line); a closer
+  that matches a deeper open delimiter first closes the ones above it. With col0?, a code
+  line starting in column zero (not indented, not a closer) first closes every open
+  delimiter. At the end an open string closes (\\\" after a lone backslash), then every open
+  delimiter closes. An inserted closer goes right after the last code token before it (so
+  a line stays inside the form it continued however often it is read), but before a lone
+  backslash, which would read it as a character.
+  Each change is a repair {:at :dropped :inserted} at offset :at of the text as the changes
+  before it left it. Answers {:text :repairs :delimiters n} (n: the repairs to delimiters)."
+  {:malli/schema [:=> [:cat :string :boolean] [:map [:text :string] [:repairs [:vector :map]] [:delimiters :int]]]}
+  [^String text col0?]
+  (let [out (StringBuilder.)
+        delim? (fn [c] (or (Character/isWhitespace ^char c) (= c \,) (openers c) (closers c) (= c \") (= c \;)))
+        end! (fn [st] (assoc st :code-end (.length out)))
+        ins (fn [st s] (let [p (:code-end st)]
+                         (.insert out (int p) ^String s)
+                         (-> st (update :repairs conj {:at p :dropped "" :inserted s}) (update :delimiters inc)
+                             (assoc :code-end (+ p (count s))))))
+        close-all (fn [st] (-> (ins st (apply str (map openers (rseq (:stack st))))) (assoc :stack [])))
+        ;; the characters of one code line (no newline), through strings, comments and tokens
+        code (fn [st ^String line]
+               (let [n (count line)]
+                 (loop [i 0 st st]
+                   (if (>= i n)
+                     st
+                     (let [c (.charAt line (int i))]
+                       (cond
+                         (:in-str st) (do (.append out c)
+                                          (recur (inc i) (cond (:esc st) (assoc st :esc false)
+                                                               (= c \\) (assoc st :esc true)
+                                                               (= c \") (end! (assoc st :in-str false))
+                                                               :else st)))
+                         (= c \;) (do (.append out (subs line i)) st)
+                         (or (Character/isWhitespace c) (= c \,)) (do (.append out c) (recur (inc i) st))
+                         (= c \") (do (.append out c) (recur (inc i) (assoc st :in-str true :esc false)))
+                         (openers c) (do (.append out c) (recur (inc i) (end! (update st :stack conj c))))
+                         (closers c)
+                         (let [stack (:stack st)
+                               j (some #(when (= (closers c) (stack %)) %) (reverse (range (count stack))))]
+                           (if (nil? j)
+                             (let [p (.length out)]
+                               (.append out ",")
+                               (recur (inc i) (-> st (update :repairs conj {:at p :dropped (str c) :inserted ","}) (update :delimiters inc))))
+                             (let [st (if (< j (dec (count stack)))
+                                        (-> (ins st (apply str (map openers (rseq (subvec stack (inc j))))))
+                                            (assoc :stack (subvec stack 0 (inc j))))
+                                        st)]
+                               (.append out c)
+                               (recur (inc i) (end! (update st :stack pop))))))
+                         :else
+                         (let [end (loop [k (if (= c \\) (min n (+ i 2)) (inc i))]
+                                     (if (and (< k n) (not (delim? (.charAt line (int k))))) (recur (inc k)) k))
+                               tok (subs line i end)]
+                           (.append out tok)
+                           ;; a closer after a lone backslash would be read as its character
+                           (recur end (if (= "\\" tok) st (end! st))))))))))
+        lines (str/split text #"\n" -1)]
+    (loop [k 0 st {:stack [] :repairs [] :delimiters 0 :code-end 0 :in-str false :esc false :fenced nil}]
+      (if (= k (count lines))
+        (let [st (if (:in-str st)
+                   (let [s (if (:esc st) "\\\"" "\"") p (.length out)]
+                     (.append out s)
+                     (-> st end! (update :repairs conj {:at p :dropped "" :inserted s}) (update :delimiters inc)))
+                   st)
+              st (if (seq (:stack st)) (close-all st) st)]
+          {:text (str out) :repairs (:repairs st) :delimiters (:delimiters st)})
+        (let [line (nth lines k)
+              _ (when (pos? k) (.append out \newline))
+              t (str/replace line #"^[\s,]+" "")
+              indented? (not= t line)
+              tag (when-not (:in-str st) (fence line))
+              kind (cond tag :fence
+                         (:in-str st) :code
+                         (or (str/blank? t) (str/starts-with? t ";")) :keep
+                         (= :code (:fenced st)) :code
+                         (= :prose (:fenced st)) :prose
+                         (and (seq (:stack st)) (or indented? (contains? closers (first t)))) :code
+                         (or (starts-form? t) (literal-line? t)) :code
+                         :else :prose)
+              comment! (fn [st] (let [p (.length out)]
+                                  (.append out ";; ") (.append out line)
+                                  (update st :repairs conj {:at p :dropped "" :inserted ";; "})))
+              st (case kind
+                   :fence (-> (if (str/starts-with? line ";; ") (do (.append out line) st) (comment! st))
+                              (assoc :fenced (if (:fenced st) nil (cond (code-tags tag) :code (= "" tag) :lines :else :prose))))
+                   :keep (do (.append out line) st)
+                   :prose (comment! st)
+                   :code (code (if (and col0? (not (:in-str st)) (seq (:stack st)) (not indented?) (not (closers (first t))))
+                                 (close-all st)
+                                 st)
+                               line))]
+          (recur (inc k) st))))))
+
+(defn forgive
+  "A model's reply as source a REPL reads, and every change made to it (scan): prose
+  becomes comments and delimiters are repaired; a reply whose delimiters balance gets no
+  column-zero closes. Answers {:text :repairs}."
+  {:malli/schema [:=> [:cat :string] [:map [:text :string] [:repairs [:vector [:map [:at :int] [:dropped :string] [:inserted :string]]]]]]}
+  [reply]
+  (let [r (scan reply false)
+        r (if (pos? (:delimiters r)) (scan reply true) r)]
+    (select-keys r [:text :repairs])))
+
+(defn unforgive
+  "The reply forgive was given, from its answer: each repair undone, last first."
+  {:malli/schema [:=> [:cat [:map [:text :string] [:repairs [:vector [:map [:at :int] [:dropped :string] [:inserted :string]]]]]] :string]}
+  [{:keys [text repairs]}]
+  (reduce (fn [t {:keys [at dropped inserted]}] (str (subs t 0 at) dropped (subs t (+ at (count inserted)))))
+          text (rseq repairs)))

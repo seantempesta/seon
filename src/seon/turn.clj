@@ -18,7 +18,7 @@
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.set :as set]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context]
-            [seon.harvest :as harvest] [my.branch :as branch] [seon.learn :as learn]))
+            [seon.harvest :as harvest] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: the task and
 ;; attempt it works, and a stop a verb requested.
@@ -35,18 +35,12 @@
   (:turn (swap! agent/state assoc-in [:turn :stop] (cond-> {:outcome outcome} reason (assoc :reason reason)))))
 
 (defn reply->source
-  "The reply as Clojure source: the bodies of its fenced blocks, every other line a
-  comment. A reply with no fence is taken as source whole."
+  "The reply as Clojure source, through the forgiving reader (seon.reader/forgive): prose,
+  fenced or not, becomes comments and unbalanced delimiters are repaired, so the REPL
+  evaluates only the reply's code."
   {:malli/schema [:=> [:cat :string] :string]}
   [text]
-  (if-not (str/includes? text "```")
-    text
-    (loop [[l & ls] (str/split-lines text) in? false out []]
-      (cond
-        (nil? l) (str/join "\n" out)
-        (str/starts-with? (str/trim l) "```") (recur ls (not in?) out)
-        in? (recur ls in? (conj out l))
-        :else (recur ls in? (conj out (str ";; " l)))))))
+  (:text (reader/forgive text)))
 
 (defn- observe
   "What a turn starts from, measured now: the proofs run in a fork of this agent, the
