@@ -1,0 +1,76 @@
+(ns seon.step
+  "The step-fn contract as the one process abstraction (lane F2; proto/flow f2-final
+  proto.step and proto.proc). Root's procs run under
+  core.async.flow. A process that must stay single-threaded so it can fork (the fork
+  server, an agent) runs the SAME step-fn on its own thread with `run-loop`, and
+  receives Flow's lifecycle as data on its transport:
+    {:op :pause}   the pause transition; then only :resume, :stop and :ping are taken,
+                   every other message is held, in order
+    {:op :resume}  the resume transition; the held messages are taken first
+    {:op :ping}    answered at once on the same port: {:op :pong :status :count :state},
+                   :state being the step-fn's own :ping-map-fn of its state
+    {:op :stop}    the stop transition, then run-loop returns (the caller exits)
+  A message taken while the step is running (a nested read inside a form, in an agent)
+  is the step's own business; control messages it meets there are pushed back for the
+  loop."
+  (:require [clojure.core.async.flow :as flow]))
+
+(def describe-schema
+  "Arity 0: what the proc declares (params, ins, outs, workload, a deliberate ping-map-fn)."
+  [:map
+   [:workload [:enum :io :mixed :compute]]
+   [:ins {:optional true} [:map-of :keyword :string]]
+   [:outs {:optional true} [:map-of :keyword :string]]
+   [:params {:optional true} [:map-of :keyword :string]]
+   [:ping-map-fn fn?]])
+
+(def outputs-schema
+  "What a transform emits: port (an out-id, or [pid in-id] routed by the resolver) -> messages."
+  [:maybe [:map-of [:or :keyword [:tuple :keyword :keyword]] [:sequential :any]]])
+
+(def step-schema
+  "The four arities of a step-fn."
+  [:function
+   [:=> [:cat] describe-schema]
+   [:=> [:cat :map] :map]
+   [:=> [:cat :map [:enum :clojure.core.async.flow/stop :clojure.core.async.flow/pause :clojure.core.async.flow/resume]] :map]
+   [:=> [:cat :map :keyword :any] [:tuple :map outputs-schema]]])
+
+(defn control-op
+  "The lifecycle op of a transport message, or nil for ordinary data."
+  [m] (when (map? m) (#{:pause :resume :ping :stop} (:op m))))
+
+(defn run-loop
+  "Run step (a Var holding a four-arity step-fn) on this thread until :stop or EOF.
+  recv! answers [in-id msg], or nil at EOF; send! takes [out-id msg]. Answers the final
+  state, after the ::flow/stop transition."
+  [step args recv! send!]
+  (let [ping-map-fn (or (:ping-map-fn (step)) identity)]
+    (loop [st (step args) status :running held clojure.lang.PersistentQueue/EMPTY n 0]
+      (let [from-held? (and (= status :running) (seq held))
+            im (if from-held? (peek held) (recv!))
+            held (if from-held? (pop held) held)]
+        (if (nil? im)
+          (step st ::flow/stop)
+          (let [[in m] im]
+            (case (control-op m)
+              :pause (recur (if (= status :running) (step st ::flow/pause) st) :paused held n)
+              :resume (recur (if (= status :paused) (step st ::flow/resume) st) :running held n)
+              :ping (do (send! in {:op :pong :status status :count n :held (count held) :state (ping-map-fn st)})
+                        (recur st status held n))
+              :stop (step st ::flow/stop)
+              (if (= status :paused)
+                (recur st status (conj held im) n)
+                (let [[st outs] (step st in m)]
+                  (doseq [[port msgs] outs, msg msgs] (send! port msg))
+                  (recur st status held (inc n)))))))))))
+
+;; ---- helpers every proc's transform uses ---------------------------------------------
+
+(defn out!
+  "Add message m to port's outputs in the volatile o (a transform's outputs, built up)."
+  [o port m] (vswap! o update port (fnil conj []) m) nil)
+
+(defn event "m stamped with the wall-clock ms, for the events channel." [m] (assoc m :at-ms (System/currentTimeMillis)))
+
+(defn error-msg "An exception's message, or its class." [^Throwable e] (or (ex-message e) (str (type e))))

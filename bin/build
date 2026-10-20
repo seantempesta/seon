@@ -1,9 +1,10 @@
 #!/bin/sh
 # bin/build — the runtime from the pinned sources: Chez (our fork) -> Jolt (our fork)
-# -> target/hello, a binary that requires Datahike and opens an in-memory db.
+# -> target/hello (a binary that requires Datahike and opens an in-memory db), then
+# target/lib/libprobe.dylib (native/probe.c) and target/seon (the platform, -main seon.check).
 #
-#   bin/build            all three steps, each skipped when its output is newer than its pin
-#   bin/build chez|jolt|hello   one step (and the steps before it when their output is missing)
+#   bin/build            every step; chez and jolt are skipped when their output matches their pin
+#   bin/build chez|jolt|hello|native|seon   one step (and the steps before it when their output is missing)
 #   BUILD_FORCE=1 bin/build     rebuild every step
 #
 # Everything is written under target/; nothing is installed outside it. Dependency
@@ -91,10 +92,29 @@ build_hello() {
   say "hello: built; run target/hello"
 }
 
+build_native() {
+  mkdir -p "$T/lib"
+  say "native: native/probe.c -> target/lib/libprobe.dylib"
+  cc -O2 -shared -o "$T/lib/libprobe.dylib" "$ROOT/native/probe.c" || die "native build failed"
+}
+
+build_seon() {
+  [ -x "$JOLT" ] || build_jolt
+  [ -f "$T/lib/libprobe.dylib" ] || build_native
+  . "$ROOT/bin/env"
+  say "seon: jolt build -m seon.check -> target/seon"
+  ( cd "$ROOT"
+    HOME=$T/home JOLT_PWD=$ROOT "$JOLT" build -m seon.check -o "$T/seon" ) > "$T/seon-build.log" 2>&1 ||
+    { tail -30 "$T/seon-build.log" >&2; die "seon build failed; see target/seon-build.log"; }
+  say "seon: built target/seon"
+}
+
 case $STEP in
   chez) build_chez ;;
   jolt) build_jolt ;;
   hello) build_hello ;;
-  all) build_chez; build_jolt; build_hello ;;
-  *) die "unknown step $STEP (chez | jolt | hello | all)" ;;
+  native) build_native ;;
+  seon) build_seon ;;
+  all) build_chez; build_jolt; build_hello; build_native; build_seon ;;
+  *) die "unknown step $STEP (chez | jolt | hello | native | seon | all)" ;;
 esac

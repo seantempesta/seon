@@ -7,7 +7,7 @@ Fixes arrive as `jolt/<topic>` branches merged into `jolt/main` by root once mea
 fixes are cut again from upstream's main as `upstream/<topic>`. **Generic** = an upstream
 candidate; **Jolt** = specific to running on Jolt (kept on `jolt/main`).
 
-## jolt — `reference-code/jolt`, `jolt/main` = `00d090a5`
+## jolt — `reference-code/jolt`, `jolt/main` = `247b5110` (A1: + jolt/flow-update, jolt/seam-claims, jolt/printer-port)
 
 - Repo: `~/src/seon-jolt/jolt` (the worktrees `jolt-final`, `jolt-f1`, `jolt-u1`, `jolt-e14` share it). Upstream: `jolt-lang/jolt`. Fork: `seantempesta/jolt`.
 - Base: `f714b0ed` (upstream main, v0.8.23 + 20). `jolt/main` = branch `final` (`40028e79`) fast-forwarded to F1's `f1-flow` (`00d090a5`); no merge was needed.
@@ -24,7 +24,9 @@ candidate; **Jolt** = specific to running on Jolt (kept on `jolt/main`).
 - Base: `e95a7ef`, v10.4.1. Ours: `359f151` applies Jolt's chez-patches 0006 (`c/thread.c`) and 0007 (`c/segment.c`, `c/gcwrapper.c`, `c/externs.h`). Both generic (Chez candidates, 0007 macOS arm64 only).
 - **Not applied: patches 0001–0005** (lock-free thread activation, oversize chunk spare segment, boot load in place, vfasl string sharing, same-device). This is the kernel the running runtime (`jolt-final`) was built with: its binary has `S_share_static_code` but neither `S_lockfree_activation` nor `S_vfasl_bytes`. `notes/HANDOFF.md` and `notes/decision-bench.md` say 0001–0007; that is wrong. `e14/chez-full-install` has 0001–0007 but no committed source. See `SCAFFOLD.md` for the choice.
 
-## datahike — `reference-code/datahike`, `jolt/main` = `fde9f89` (owned by L1; moving)
+## datahike — `reference-code/datahike`, `a1/jolt-main` = `b8d109b` (owned by L1; moving)
+
+- A1 (2026-10-20): `a1/jolt-main` = `jolt/main` `fde9f89` (which already holds F2's f2-final `writer.cljc` byte for byte) + `jolt/node-cache-reads` `deee8c2` + `jolt/qcache-off` `21bc8cd` + `jolt/branch-pointer` `7de2e94` (on `jolt/branch-roster` `c0f9149`). `jolt/main` itself is checked out in L1's worktree `l1/qc/dh-main`, so root moves it. Versioning tests: 13 tests, 49 pass, 3 fail, 4 error; `jolt/main` is 1 fail, 4 error. The 2 new failures are `commit-as-db-preserves-only-attached-generation-identity`'s query-cache evidence assertions (miss-owner, hit), which `qcache-off` makes false by design.
 
 - Repo: `~/src/seon-jolt/libs/datahike` (L1 works in its worktree `l1/wt/datahike`). Upstream: `replikativ/datahike`; base is Seon's fork `seantempesta/datahike` `ccba220b` (commit `ad9fc97` "baseline").
 - L1 consolidated all four copies: `libs/datahike`, `e4/datahike-a`, `proto/core/vendor/datahike` and F1's `:sync` writer from `proto/flow/vendor/datahike`.
@@ -37,12 +39,20 @@ candidate; **Jolt** = specific to running on Jolt (kept on `jolt/main`).
 - Ours (no upstream history; written fresh): `d397c58` the JVM core as Jolt deftypes, `d565937` EDN node forms, `df6735e` `Arrays/sort`, `9cce727` proto/core's node emitter. Jolt.
 - It is an overlay, not a whole library: `deps.edn` puts its `src` on `:paths`, ahead of the mvn 0.4.137 jar datahike depends on, which still supplies the other namespaces.
 
-## konserve — `reference-code/konserve`, `jolt/main` = `f7cdc98`
+## konserve — `reference-code/konserve`, `jolt/main` = `39ce147` (A1: + jolt/sync-sweep 14a376c, 39ce147)
 
 - Repo: `~/src/seon-jolt/libs/konserve` (`jolt/main` built in S1's clone and fetched back; `main` stays at `b19e78f`). Upstream: `replikativ/konserve`; base is Seon's fork `af35a97` (commit `4991e67` "baseline").
 - Ours: `88753d6` Jolt reader conditionals in serializers (Jolt); `33f81d6` StringSerializer writes and reads UTF-8 EDN through the streams (generic: fixes a JVM ClassCastException); `4f50c49`, `4ae0b8c`, `e186f51` POSIX filestore and LMDB store over `jolt.ffi`, dispatched from `konserve.store` (Jolt); `10e47f6` lock token channel `(chan 1)`, a workaround for Jolt's `poll!` missing a pending put (the generic fix is in Jolt); `b19e78f` `konserve.jolt.bin`, a measured but unwired codec (candidate to delete); `f7cdc98` X1's FaslSerializer, byte 4 (Jolt).
 - `f7cdc98` places X1's files: `x1/src/x1/codec.clj` → `konserve.jolt.fasl` (`src/konserve/jolt/fasl.jolt`), `jfasl.ss` → `src/konserve/jolt/jfasl.ss`, `store_codec.clj` → `konserve.jolt.fasl-store`. X1's patch was written against proto/core's `jvm-interop` overlay of `konserve.serializers`; only its fasl hunks apply to konserve itself. The overlay's E9 Fressian reader stays in proto/core until the Fressian bridge is placed.
 - `konserve.jolt.fasl-store` names persistent-sorted-set node types. Its cleaner home may be the PSS fork, with konserve's serializer taking the freeze/thaw from the store; that is a design call for L1.
+
+## crypto — `reference-code/crypto`, `jolt/main` = `902196e`
+
+- Repo: `~/src/seon-jolt/libs/crypto`. Upstream `jolt-lang/crypto` `e6981b8`. Ours: `902196e` arms claim host tables only ({:kind :table}) (L1, `jolt/seam-claims`). Generic.
+
+## malli — `reference-code/malli`, `jolt/main` = `5a830e14`
+
+- Repo: `~/src/seon-jolt/l1/wt/malli` (L1's clone of `seantempesta/malli`). Base `dd13ff81` (Seon's pin). Ours: `5a830e14` `-instrument` of a one-fixed-arity function schema gets a wrapper of that arity (L1, `jolt/instrument-arity`; call 0.24 -> 0.06 µs). Generic.
 
 ## jolt-fressian — `reference-code/jolt-fressian`, `jolt/main` = `8f3eb5d`
 
@@ -65,6 +75,6 @@ fn, a debugging aid. The library is needed (konserve and datahike require it), t
 
 ## Unmodified, pinned in `deps.edn`
 
-malli `seantempesta/malli` `dd13ff81` (Seon's pin; identical to `libs/malli`), ring-chez-adapter
-`fa0674e3`, crypto `e6981b85`, multipart `ca51dd47`, time `a28ab100`, http-client `5a9706e0`
+ring-chez-adapter
+`fa0674e3`, multipart `ca51dd47`, time `a28ab100`, http-client `5a9706e0`
 (R1's), fipp 0.6.29, core.cache 1.0.225.

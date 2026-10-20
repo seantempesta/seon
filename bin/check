@@ -1,0 +1,28 @@
+#!/bin/zsh
+# bin/check [N] — the platform's end-to-end checks on target/seon (bin/build seon), each a
+# mode of seon.check (proto/flow f2-final's smoke.sh): smoke, program, robust, lifecycle,
+# backpressure, hotreload, drain, orphan, durable, swarm N, scale N (default N = 100).
+# bin/check MODE [ARGS] runs one mode.
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+. "$ROOT/bin/env"
+S=$ROOT/target/seon
+[[ -x $S ]] || { echo "check: no target/seon; run bin/build seon" >&2; exit 1 }
+run() { (cd "$ROOT/target" && ./seon "$@" 2>&1) }
+if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then run "$@"; exit $?; fi
+N=${1:-100}
+echo "== smoke";  run smoke | grep -E "^merge|^killed|spawned|ready"
+echo "== program"; run program | tail -1
+echo "== robust"; run robust | tail -1
+echo "== lifecycle (start!/stop! x10 in one process; pause/resume)"; run lifecycle 10 | grep -E ":threads |false|LIFECYCLE" | tr -s " \n" " "; echo
+echo "== backpressure"; run backpressure 200 | tail -1
+echo "== hotreload"; run hotreload | tail -1
+echo "== drain"; run drain 32 | tail -1
+echo "== orphan (root dies under busy agents, a clone and a test child)"
+PIDS=$(run orphan | sed -n 's/^PIDS //p'); sleep 1
+LEFT=$(for p in ${=PIDS}; do kill -0 $p 2>/dev/null && echo $p; done)
+if [[ -z $PIDS ]]; then echo "FAIL no pids"; elif [[ -n $LEFT ]]; then echo "FAIL left running: $LEFT"; kill -9 ${=LEFT}; else echo "PASS none of $PIDS outlived root"; fi
+echo "== durable (root writes a store and SIGKILLs itself; a new root recovers it)"
+D=$(mktemp -d /tmp/seon-durable.XXXXXX)
+run durable-write $D/store | tail -1; run durable-read $D/store | tail -1; rm -rf "$D"
+echo "== swarm $N"; run swarm $N | grep -E ":merged|:tasks-done|:fresh"
+echo "== scale $N"; run scale $N | grep -E ":all-ok|:spawn->all|:end-to-end|:control-real-mb|:all-killed"

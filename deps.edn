@@ -33,7 +33,9 @@
                                      :exclusions [org.clojure/clojurescript org.clojure/core.async]}
         fipp/fipp {:mvn/version "0.6.29"}
         org.clojure/core.cache {:mvn/version "1.0.225"}}
- :aliases {;; bin/build's smoke binary
+ :aliases {;; Datahike's own tests, for gating a merge onto reference-code/datahike
+           :dhtest {:extra-paths ["reference-code/datahike/test"]}
+           ;; bin/build's smoke binary
            :hello {:extra-paths ["test/build"]}
            ;; bin/test
            :test {:extra-paths ["test"]}

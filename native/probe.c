@@ -1,0 +1,81 @@
+// memprobe: per-process Mach VM accounting of the calling process (self), as EDN text.
+// task_info(TASK_VM_INFO): phys_footprint / internal / compressed / resident.
+// mach_vm_region(VM_REGION_EXTENDED_INFO) per region, summed by class:
+//   jit (executable), malloc (VM_MEMORY_MALLOC* tags), anon0 (untagged anonymous = Chez segments), other.
+// Per class: resident, shared_now_private (pages copied into this process's own top object),
+// dirtied, swapped, and resident pages split by share mode (COW / PRIVATE / other).
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#include <stdio.h>
+#include <string.h>
+
+typedef struct { unsigned long long res, snp, dirty, swap, cow_res, prv_res, oth_res, vsz, nreg; } acc_t;
+
+static int cls(vm_region_extended_info_data_t *e) {
+  if (e->protection & VM_PROT_EXECUTE) return 0;
+  unsigned t = e->user_tag;
+  if ((t >= 1 && t <= 11) || t == 53) return 1;       // malloc zones (tiny/small/large/huge/nano...)
+  if (t == 0) return 2;
+  return 3;
+}
+
+long mp_probe(char *buf, long len) {
+  task_vm_info_data_t vi; mach_msg_type_number_t cnt = TASK_VM_INFO_COUNT;
+  task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vi, &cnt);
+  acc_t a[4]; memset(a, 0, sizeof a);
+  mach_vm_address_t addr = 0; mach_vm_size_t size = 0;
+  for (;;) {
+    vm_region_extended_info_data_t e; mach_msg_type_number_t c = VM_REGION_EXTENDED_INFO_COUNT; mach_port_t obj;
+    if (mach_vm_region(mach_task_self(), &addr, &size, VM_REGION_EXTENDED_INFO, (vm_region_info_t)&e, &c, &obj) != KERN_SUCCESS) break;
+    int k = cls(&e);
+    a[k].res += e.pages_resident; a[k].snp += e.pages_shared_now_private; a[k].dirty += e.pages_dirtied;
+    a[k].swap += e.pages_swapped_out; a[k].vsz += size; a[k].nreg++;
+    if (e.share_mode == SM_COW) a[k].cow_res += e.pages_resident;
+    else if (e.share_mode == SM_PRIVATE || e.share_mode == SM_PRIVATE_ALIASED) a[k].prv_res += e.pages_resident;
+    else a[k].oth_res += e.pages_resident;
+    addr += size;
+  }
+  const char *nm[4] = {"jit", "malloc", "anon0", "other"};
+  double P = vm_kernel_page_size / 1048576.0;
+  long n = snprintf(buf, len, "{:phys-fp %.1f :internal %.1f :compressed %.1f :resident %.1f :regions {",
+                    vi.phys_footprint / 1048576.0, vi.internal / 1048576.0, vi.compressed / 1048576.0, vi.resident_size / 1048576.0);
+  for (int k = 0; k < 4; k++)
+    n += snprintf(buf + n, len - n, ":%s {:n %llu :vsz %.0f :res %.1f :snp %.1f :dirty %.1f :swap %.1f :cow-res %.1f :prv-res %.1f :oth-res %.1f} ",
+                  nm[k], a[k].nreg, a[k].vsz / 1048576.0, a[k].res * P, a[k].snp * P, a[k].dirty * P, a[k].swap * P,
+                  a[k].cow_res * P, a[k].prv_res * P, a[k].oth_res * P);
+  n += snprintf(buf + n, len - n, "}}");
+  return n;
+}
+
+// ---- E13 additions ----
+#include <sys/sysctl.h>
+#include <poll.h>
+// Mach task events: cow_faults, faults, pageins (counts; x 16 KB pages).
+long e13_events(long *out3) {
+  task_events_info_data_t ev; mach_msg_type_number_t c = TASK_EVENTS_INFO_COUNT;
+  if (task_info(mach_task_self(), TASK_EVENTS_INFO, (task_info_t)&ev, &c) != KERN_SUCCESS) return -1;
+  out3[0] = ev.cow_faults; out3[1] = ev.faults; out3[2] = ev.pageins; return 0;
+}
+// OS threads of this task (Mach), independent of Chez's own thread list.
+long e13_nthreads(void) {
+  thread_act_array_t th; mach_msg_type_number_t n = 0;
+  if (task_threads(mach_task_self(), &th, &n) != KERN_SUCCESS) return -1;
+  for (mach_msg_type_number_t i = 0; i < n; i++) mach_port_deallocate(mach_task_self(), th[i]);
+  vm_deallocate(mach_task_self(), (vm_address_t)th, n * sizeof(thread_act_t));
+  return n;
+}
+// System-wide page counters: free, pageable internal, compressor.
+long e13_sysmem(long *out3) {
+  unsigned int v; size_t l = sizeof v;
+  if (sysctlbyname("vm.page_free_count", &v, &l, NULL, 0)) return -1; out3[0] = v; l = sizeof v;
+  if (sysctlbyname("vm.page_pageable_internal_count", &v, &l, NULL, 0)) return -1; out3[1] = v; l = sizeof v;
+  { unsigned long long w; size_t lw = sizeof w;
+    if (sysctlbyname("vm.compressor_bytes_used", &w, &lw, NULL, 0)) out3[2] = -1; else out3[2] = (long)w; }
+  return 0;
+}
+// poll one fd for input with a timeout (ms): 1 readable/hup, 0 timeout, -1 error.
+long e13_poll1(int fd, int ms) {
+  struct pollfd p = { fd, POLLIN, 0 };
+  int r = poll(&p, 1, ms);
+  return r;
+}

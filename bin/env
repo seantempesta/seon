@@ -1,0 +1,10 @@
+# bin/env — sourced by bin/test and bin/check: where the runtime finds its native libraries.
+# LMDB: konserve.jolt.lmdb-ffi loads JOLT_LMDB_LIB (Homebrew's lmdb, or the prototypes' build).
+ROOT=${ROOT:-$(cd "$(dirname "$0")/.." && pwd)}
+if [ -z "${JOLT_LMDB_LIB:-}" ]; then
+  for p in "$HOME/src/seon-jolt/vendor-c/lmdb/libraries/liblmdb/liblmdb.dylib" /opt/homebrew/lib/liblmdb.dylib /usr/local/lib/liblmdb.dylib /usr/lib/x86_64-linux-gnu/liblmdb.so; do
+    [ -f "$p" ] && { JOLT_LMDB_LIB=$p; break; }
+  done
+fi
+export JOLT_LMDB_LIB
+export SEON_PROBE_LIB=${SEON_PROBE_LIB:-$ROOT/target/lib/libprobe.dylib}
