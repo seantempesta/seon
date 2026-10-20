@@ -90,14 +90,14 @@
   (let [db (db-of diamond :extra (concat (merged "a") (attempt "b" 1 :running) (attempt "c" 1 :running)
                                          (task/execution-tx ["demo/b"] :cancelled)))]
     (is (= [{:op :kill :attempt "demo/b#1" :reason :cancelled}] (r/reconcile db)))
-    (is (= #{"demo/b" "demo/c"} (r/blocked-by db "demo/d")))
-    (is (= [["demo/b#1" :cancelled]] (r/to-kill db)))
+    (is (= #{"demo/b" "demo/c"} (r/blocked-by (r/index db) "demo/d")))
+    (is (= [["demo/b#1" :cancelled]] (r/to-kill (r/index db))))
     ;; killed: nothing restarts it, and d stays blocked once c merges
     (let [db (d/db-with db (concat (task/status-tx db "demo/b#1" :running :killed {})
                                    (task/status-tx db "demo/c#1" :running :merged {})))]
       (is (= [] (r/reconcile db)))
-      (is (= #{"demo/b"} (r/blocked-by db "demo/d")))
-      (is (= [] (r/should-run db))))))
+      (is (= #{"demo/b"} (r/blocked-by (r/index db) "demo/d")))
+      (is (= [] (r/should-run (r/index db)))))))
 
 (deftest held-kills-without-restart
   (let [db (db-of [(decl "x")] :extra (concat (attempt "x" 1 :running) (task/execution-tx ["demo/x"] :held)))]
@@ -113,7 +113,7 @@
 (deftest a-previous-roots-attempts-are-reaped-and-resumed
   (let [db (db-of [(decl "x") (decl "y" :needs ["x"])] :extra (attempt "x" 1 :running :boot "boot-0"))]
     (is (= [{:op :reap :attempt "demo/x#1"} (spawn "x" 2)] (r/reconcile db)))
-    (is (= #{} (r/running db)))))
+    (is (= #{} (r/running (r/index db))))))
 
 (deftest ended-attempts-are-judged-by-the-done-rule
   (are [extra expected] (= expected (r/reconcile (db-of diamond :extra extra)))
@@ -208,7 +208,7 @@
     (testing "the done rule judges every accumulated proof"
       (is (= [[:proof-red (t "a")]]
              (mapv (juxt :refusal :symbol)
-                   (r/done-refusals (r/done-input (r/view db) "demo/b-merge" {(t "b") :pass (t "a") :fail} #{} [] nil))))))))
+                   (r/done-refusals (r/done-input (r/index db) "demo/b-merge" {(t "b") :pass (t "a") :fail} #{} [] nil))))))))
 
 (deftest with-merge-chains-work-through-merges
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])])]
@@ -220,10 +220,11 @@
       (let [db (d/db-with db (attempt "a" 1 :done))]
         (is (= [(mspawn "a-merge" 1)] (r/reconcile db)))
         (testing "b waits for a's merge, not a's work"
-          (is (= #{"demo/a-merge"} (r/blocked-by db "demo/b"))))))))
+          (is (= #{"demo/a-merge"} (r/blocked-by (r/index db) "demo/b"))))))))
 
 (deftest green-merge-attempt-merges
-  (is (= [{:op :merge :attempt "demo/a-merge#1" :task "demo/a-merge"}]
+  ;; a train of one: no other merge attempt runs
+  (is (= [{:op :merge-train :attempt "demo/a-merge#1" :members [{:attempt "demo/a-merge#1" :task "demo/a-merge"}]}]
          (r/reconcile (mdb [(decl "a")] :extra (concat (attempt "a" 1 :done)
                                                        (attempt "a-merge" 1 :ended :outcome :green :results {(t "a") :pass}))))))
   ;; (the attempt helper names branches by task id; only the action matters here)

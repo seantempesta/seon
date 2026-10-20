@@ -60,7 +60,7 @@
         unc (set/difference (harvest/uncontracted db) gaps-before)
         unmerged (branch/unmerged)]
     {:run run :results results :uncontracted unc :unmerged unmerged :task (task/task db id)
-     :refusals (r/done-refusals (r/done-input (r/view db) id results unc (mapv #(pr-str (:key %)) unmerged) nil))}))
+     :refusals (r/done-refusals (r/done-input (r/index db) id results unc (mapv #(pr-str (:key %)) unmerged) nil))}))
 
 (defn- end!
   "The attempt's end: the live runtime staged onto the branch, the end written there, and

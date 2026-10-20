@@ -19,9 +19,10 @@
   4)
 
 (def default-max-merging
-  "Merge attempts at once when root's boot set no :seon.config.merge/max-running: one,
-  git's merge queue."
-  1)
+  "Merge attempts at once when root's boot set no :seon.config.merge/max-running. They run
+  together only when the definitions they change are disjoint (a merge train); 1 is git's
+  one-at-a-time merge queue."
+  8)
 
 (def merge-dials
   "The merge dials' defaults, when the task sets none (:seon.config.merge/*)."
@@ -29,36 +30,15 @@
 
 (defn dials
   "Task t's merge dials: its own :seon.config.merge/* over the defaults."
-  {:malli/schema [:=> [:cat :seon.task/task] :seon.reconcile/merge-dials]}
+  {:malli/schema [:=> [:cat :seon.task/own] :seon.reconcile/merge-dials]}
   [t]
   (into {} (for [[k v] merge-dials] [k (get t (keyword "seon.config.merge" (name k)) v)])))
 
 ;; ---- the view: one read of main ---------------------------------------------------
 
-(defn view
-  "Everything the reconciler reads from db, once: tasks, attempts (grouped by task),
-  root's boot and dials."
-  {:malli/schema [:=> [:cat :seon.host/db] :map]}
-  [db]
-  (let [as (vals (task/attempts db))]
-    {:tasks (task/tasks db)
-     :attempts (group-by :seon.attempt/task as)
-     :root (or (task/root db) {:boot "" :max-running default-max-running :max-merging default-max-merging})}))
-
-(defn- live?
-  "Is attempt a running in this boot of root (its agent is root's to observe)?"
-  {:malli/schema [:=> [:cat :seon.reconcile/view :seon.attempt/attempt] :boolean]}
-  [v a] (and (= :running (:seon.attempt/status a)) (= (:boot (:root v)) (:seon.attempt/boot a))))
-
-(defn- done-in?
-  "Is task id done: a merge task merged into main (:merged), another accepted on its
-  branch (:done)?"
-  {:malli/schema [:=> [:cat :seon.reconcile/view :seon.task/id] :boolean]}
-  [v id] (boolean (some #(#{:merged :done} (:seon.attempt/status %)) (get-in v [:attempts id]))))
-
 (defn desired-env
   "The environment task t's attempts must run in."
-  {:malli/schema [:=> [:cat :seon.task/task] :seon.task/env]}
+  {:malli/schema [:=> [:cat :seon.task/own] :seon.task/env]}
   [t]
   {:branch (:seon.task/branch t) :model (:seon.task/model t)
    :max-turns (or (:seon.config.agent/max-turns t) default-max-turns)})
@@ -122,169 +102,309 @@
       (> merge-turns max-merge-turns)
       {:rule :merge-turns :reason (str merge-turns " turns without green > :seon.config.merge/max-merge-turns " max-merge-turns)})))
 
-(defn- done-by?
-  "Was task id merged into main at or before main's t `basis` (nil: at any t)?"
-  {:malli/schema [:=> [:cat :seon.reconcile/view :seon.task/id [:maybe :int]] :boolean]}
-  [v id basis]
-  (boolean (some #(and (= :merged (:seon.attempt/status %)) (or (nil? basis) (<= (:seon.attempt/merged-t % 0) basis)))
-                 (get-in v [:attempts id]))))
-
-(defn done-input
-  "The done rule's input for attempt results of task id, observed against main at t
-  `basis` (nil: main as the view holds it): proofs of tasks done by then must stay green;
-  proofs of the others may be red."
-  {:malli/schema [:=> [:cat :seon.reconcile/view :seon.task/id :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:maybe :int]] :seon.reconcile/done-input]}
-  [v id results uncontracted unmerged basis]
-  (let [others (vals (dissoc (:tasks v) id))
-        done (filter #(done-by? v (:seon.task/id %) basis) others)
-        open (remove #(done-by? v (:seon.task/id %) basis) others)]
-    {:proofs (get-in v [:tasks id :seon.task/accumulated :proofs] #{})
-     :kind (get-in v [:tasks id :seon.task/kind] :work)
-     :results results
-     :main-green (into #{} (mapcat (comp :proofs :seon.task/accumulated)) done)
-     :allowed-red (into #{} (mapcat (comp :proofs :seon.task/accumulated)) open)
-     :uncontracted uncontracted
-     :unmerged (vec unmerged)}))
-
 (defn refusals-text
   "One line naming each refusal."
   {:malli/schema [:=> [:cat [:vector :seon.reconcile/refusal]] :string]}
   [rs] (str/join "; " (map #(str (name (:refusal %)) (some->> (or (:symbol %) (:key %)) (str " "))) rs)))
 
-;; ---- queries ------------------------------------------------------------------------
+;; ---- the incremental reconciler: an index watched through main's tx reports --------------
+;; k8s's informer + W1's engine: list once (index), then each commit's resolved datoms name the
+;; task, attempt and root entities it touched (observe); only those are re-read (one pull
+;; each) and only the tasks they reach are re-derived: the task itself, the tasks of its
+;; attempts, and the tasks that need it (the reverse :needs index), transitively for a needs
+;; change. `actions` derives the same actions as the full view from the index alone; it walks
+;; only the active attempts (running, ended, dead) and the head of the ready set, so a pass
+;; costs what changed plus what is in flight, never the number of tasks.
 
-(defn running
-  "The attempts running now (in this boot), by id."
-  {:malli/schema [:=> [:cat :seon.host/db] [:set :seon.attempt/id]]}
+(def ^:private watched-ns
+  #{"seon.task" "seon.attempt" "seon.root" "seon.config.agent" "seon.config.merge"})
+
+(def empty-index
+  "The index of a db with no tasks."
+  {:root nil :tasks {} :keys {} :needed-by {} :acc {} :depth {} :claims {}
+   :attempts {} :by-task {} :done {} :ready (sorted-set) :ready-key {}
+   :live #{} :reap #{} :kill {} :judge #{} :merging #{}})
+
+(defn- live-in?
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.attempt/attempt] :boolean]}
+  [idx a] (and (= :running (:seon.attempt/status a)) (= (:boot (:root idx)) (:seon.attempt/boot a))))
+
+(defn- done-info
+  "{:any? (merged or accepted) :merged-t (the earliest merge, or nil)} of task id."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:map [:any? :boolean] [:merged-t [:maybe :int]]]]}
+  [idx id]
+  (let [as (map (:attempts idx) (get-in idx [:by-task id]))
+        ms (keep #(when (= :merged (:seon.attempt/status %)) (:seon.attempt/merged-t % 0)) as)]
+    {:any? (boolean (some #(#{:merged :done} (:seon.attempt/status %)) as))
+     :merged-t (when (seq ms) (apply min ms))}))
+
+(defn- idx-done? {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}
+  [idx id] (boolean (get-in idx [:done id :any?])))
+
+(defn- idx-ready?
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}
+  [idx id]
+  (let [t (get-in idx [:tasks id])]
+    (boolean (and t (= :running (:seon.task/execution t)) (not (idx-done? idx id))
+                  (every? #(idx-done? idx %) (:seon.task/needs t))
+                  (not-any? #(let [a (get-in idx [:attempts %])] (or (live-in? idx a) (#{:ended :dead} (:seon.attempt/status a))))
+                            (get-in idx [:by-task id]))))))
+
+(defn- refresh-done
+  "Re-derive task id's done state from its attempts; answers [idx flipped?]."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:tuple :seon.reconcile/index :boolean]]}
+  [idx id]
+  (let [old (get-in idx [:done id :any?]) d (done-info idx id)]
+    [(assoc-in idx [:done id] d) (not= old (:any? d))]))
+
+(defn- refresh-ready
+  "Move task id's key in the ready set to what its values say now."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :seon.reconcile/index]}
+  [idx id]
+  (let [idx (-> idx (update :ready disj (get-in idx [:ready-key id])) (update :ready-key dissoc id))
+        ;; deepest first: finish the chains already under way before starting new ones
+        k [(- (get-in idx [:depth id] 0)) id]]
+    (if (idx-ready? idx id) (-> idx (update :ready conj k) (assoc-in [:ready-key id] k)) idx)))
+
+(defn- derive-needs
+  "Task id's depth and accumulated proofs from its needs' (already derived), its claims moved."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :seon.reconcile/index]}
+  [idx id]
+  (let [t (get-in idx [:tasks id])
+        ns (filter (:tasks idx) (:seon.task/needs t))
+        acc (into (set (:seon.task/proofs t)) (mapcat #(get-in idx [:acc %])) ns)
+        old (get-in idx [:acc id] #{})
+        claims (as-> (:claims idx) c
+                 (reduce (fn [c p] (let [s (disj (get c p) id)] (if (seq s) (assoc c p s) (dissoc c p)))) c (remove acc old))
+                 (reduce (fn [c p] (update c p (fnil conj #{}) id)) c (remove old acc)))]
+    (assoc idx :acc (assoc (:acc idx) id acc) :claims claims
+           :depth (assoc (:depth idx) id (if (seq ns) (inc (apply max (map #(get-in idx [:depth %] 0) ns))) 0)))))
+
+(defn- put-task
+  "Task value t (nil: gone) under id, with the reverse needs index moved."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id [:maybe :seon.task/own]] :seon.reconcile/index]}
+  [idx id t]
+  (let [old (get-in idx [:tasks id :seon.task/needs] #{})
+        new (:seon.task/needs t #{})
+        nb (as-> (:needed-by idx) nb
+             (reduce (fn [nb n] (update nb n disj id)) nb (remove new old))
+             (reduce (fn [nb n] (update nb n (fnil conj #{}) id)) nb (remove old new)))]
+    (assoc idx :needed-by nb :tasks (if t (assoc (:tasks idx) id t) (dissoc (:tasks idx) id)))))
+
+(defn- put-attempt
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.attempt/id [:maybe :seon.attempt/attempt]] :seon.reconcile/index]}
+  [idx aid a]
+  (let [old (get-in idx [:attempts aid])
+        tid (or (:seon.attempt/task a) (:seon.attempt/task old))]
+    (-> idx
+        (assoc :attempts (if a (assoc (:attempts idx) aid a) (dissoc (:attempts idx) aid)))
+        (update-in [:by-task tid] (fnil (if a conj disj) #{}) aid))))
+
+(defn- topo
+  "ids and every task that needs one of them, transitively, each after its needs among them."
+  {:malli/schema [:=> [:cat :seon.reconcile/index [:set :seon.task/id]] [:vector :seon.task/id]]}
+  [idx ids]
+  (let [all (loop [front (vec ids) seen (set ids)]
+              (if-let [[x & more] (seq front)]
+                (let [ns (remove seen (get-in idx [:needed-by x]))] (recur (into (vec more) ns) (into seen ns)))
+                seen))
+        deg (into {} (for [x all] [x (count (filter all (get-in idx [:tasks x :seon.task/needs])))]))]
+    (loop [q (vec (sort (filter #(zero? (deg %)) all))) deg deg out []]
+      (if-let [[x & more] (seq q)]
+        (let [nb (filter all (get-in idx [:needed-by x]))
+              deg (reduce #(update %1 %2 dec) deg nb)]
+          (recur (into (vec more) (sort (filter #(zero? (deg %)) nb))) deg (conj out x)))
+        out))))
+
+(defn- classify
+  "Attempt aid's place in the sets actions reads: live, reap, kill (with the reason), judge
+  (ended or dead), merging (a merge task's attempt live or ended)."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.attempt/id] :seon.reconcile/index]}
+  [idx aid]
+  (let [a (get-in idx [:attempts aid])
+        t (get-in idx [:tasks (:seon.attempt/task a)])
+        st (:seon.attempt/status a)
+        live? (and a (live-in? idx a))
+        kill (when live?
+               (cond (= :cancelled (:seon.task/execution t)) :cancelled
+                     (= :held (:seon.task/execution t)) :held
+                     (not= (desired-env t) (:seon.attempt/env a)) :env-changed))
+        mark (fn [idx k on?] (update idx k (if on? conj disj) aid))]
+    (-> idx
+        (mark :live live?)
+        (mark :reap (and a (= :running st) (not live?)))
+        (update :kill #(if kill (assoc % aid kill) (dissoc % aid)))
+        (mark :judge (boolean (#{:ended :dead} st)))
+        (mark :merging (and a (= :merge (:seon.task/kind t)) (or live? (= :ended st)))))))
+
+(defn- settle
+  "Re-derive after entities changed: tasks whose needs or proofs changed (and the tasks that
+  need them, transitively) get depth and accumulated proofs again in dependency order; each
+  dirty task's done state is re-derived (it depends on its own attempts only); then readiness
+  of the dirty tasks and of the tasks needing one whose done state flipped."
+  {:malli/schema [:=> [:cat :seon.reconcile/index [:set :seon.task/id] [:set :seon.task/id] [:set :seon.attempt/id]] :seon.reconcile/index]}
+  [idx needs-changed dirty touched]
+  (let [order (topo idx needs-changed)
+        idx (reduce derive-needs idx order)
+        dirty (into dirty order)
+        [idx flipped] (reduce (fn [[idx fl] id] (let [[idx f?] (refresh-done idx id)] [idx (cond-> fl f? (conj id))])) [idx []] dirty)]
+    (reduce classify
+            (reduce refresh-ready idx (into dirty (mapcat #(get-in idx [:needed-by %])) flipped))
+            (into touched (mapcat #(get-in idx [:by-task %])) dirty))))
+
+(defn observe
+  "The index after main's commit: ops are the commit's resolved datoms ([op e a v]), db the
+  db after it. Re-reads only the entities the commit touched."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.host/db [:sequential :any]] :seon.reconcile/index]}
+  [idx db ops]
+  (let [es (into #{} (keep (fn [[_ e a]] (when (and (keyword? a) (watched-ns (namespace a))) e))) ops)]
+    (if (empty? es)
+      idx
+      (let [step (fn [[idx nc dirty all? touched] e]
+                   (let [[kind v :as ev] (task/entity-value db e)
+                         [okind oid] (get-in idx [:keys e])]
+                     (case (or kind okind)
+                       :task (let [id (or (:seon.task/id v) oid)
+                                   needs? (not= (get-in idx [:tasks id :seon.task/needs]) (:seon.task/needs v))]
+                               [(-> idx (put-task id v) (update :keys #(if v (assoc % e [:task id]) (dissoc % e))))
+                                (cond-> nc (or needs? (nil? (get-in idx [:acc id])) (not= (get-in idx [:tasks id :seon.task/proofs]) (:seon.task/proofs v))) (conj id))
+                                (conj dirty id) all? touched])
+                       :attempt (let [aid (or (:seon.attempt/id v) oid)
+                                      tid (or (:seon.attempt/task v) (get-in idx [:attempts aid :seon.attempt/task]))]
+                                  [(-> idx (put-attempt aid v) (update :keys #(if v (assoc % e [:attempt aid]) (dissoc % e))))
+                                   nc (conj dirty tid) all? (conj touched aid)])
+                       :root [(-> idx (assoc :root v) (assoc-in [:keys e] [:root :root]))
+                              nc dirty (or all? (not= (:boot (:root idx)) (:boot v))) touched]
+                       [idx nc dirty all? touched])))
+            [idx nc dirty all? touched] (reduce step [idx #{} #{} false #{}] (sort es))]
+        ;; a new boot changes which attempts are live: every task is re-derived (once per boot)
+        (settle idx nc (if all? (set (keys (:tasks idx))) dirty) touched)))))
+
+(defn index
+  "The index of db, listed: observe of every task, attempt and root entity at once."
+  {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
-  (let [v (view db)]
-    (into #{} (comp cat (filter #(live? v %)) (map :seon.attempt/id)) (vals (:attempts v)))))
+  (observe empty-index db (for [e (task/entity-ids db)] [:db/add e :seon.task/id nil])))
 
-(defn done?
-  "Is task id done (merged into its target)?"
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] :boolean]}
-  [db id] (done-in? (view db) id))
+(defn done-input
+  "The done rule's input for attempt results of task id, observed against main at t basis
+  (nil: main as idx holds it), over the index: the regression and allowed-red sets restricted to the tests
+  that ran (the only ones done-refusals asks about), each test looked up by its claimants."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:maybe :int]] :seon.reconcile/done-input]}
+  [idx id results uncontracted unmerged basis]
+  (let [by? (fn [x] (when-let [mt (get-in idx [:done x :merged-t])] (or (nil? basis) (<= mt basis))))
+        claim (fn [t] (disj (get-in idx [:claims t] #{}) id))]
+    {:proofs (get-in idx [:acc id] #{})
+     :kind (get-in idx [:tasks id :seon.task/kind] :work)
+     :results results
+     :main-green (into #{} (filter #(some by? (claim %))) (keys results))
+     :allowed-red (into #{} (filter #(some (complement by?) (claim %))) (keys results))
+     :uncontracted uncontracted
+     :unmerged (vec unmerged)}))
 
-(defn- blocked-in
-  {:malli/schema [:=> [:cat :seon.reconcile/view :seon.task/id] [:set :seon.task/id]]}
-  [v id] (into #{} (remove #(done-in? v %)) (get-in v [:tasks id :seon.task/needs])))
+(defn- merge-keys
+  "The program keys merge task id lands: what the attempts on its branch measured as changed
+  (:seon.attempt/changed of its own attempts and of the tasks it needs on the same branch),
+  or nil when no attempt there measured it (unknown: it overlaps every merge)."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:maybe [:set :string]]]}
+  [idx id]
+  (let [br (get-in idx [:tasks id :seon.task/branch])
+        ts (cons id (filter #(= br (get-in idx [:tasks % :seon.task/branch])) (get-in idx [:tasks id :seon.task/needs])))
+        cs (keep #(:seon.attempt/changed (get-in idx [:attempts %])) (mapcat #(get-in idx [:by-task %]) ts))]
+    (when (seq cs) (into #{} cat cs))))
 
-(defn blocked-by
-  "The needs of task id that are not done."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:set :seon.task/id]]}
-  [db id] (blocked-in (view db) id))
-
-(defn- depth
-  "A task's depth in the needs DAG (0: no needs), the order attempts start in."
-  {:malli/schema [:=> [:cat :seon.reconcile/view :seon.task/id] :int]}
-  [v id]
-  (let [ns (get-in v [:tasks id :seon.task/needs])]
-    (if (empty? ns) 0 (inc (apply max (map #(depth v %) ns))))))
-
-(defn- ready?
-  "Should task t have an attempt running: released, not done, every need done, no attempt
-  live or awaiting judgement."
-  {:malli/schema [:=> [:cat :seon.reconcile/view :seon.task/task] :boolean]}
-  [v t]
-  (let [id (:seon.task/id t) as (get-in v [:attempts id])]
-    (and (= :running (:seon.task/execution t))
-         (not (done-in? v id))
-         (empty? (blocked-in v id))
-         (not-any? #(or (live? v %) (#{:ended :dead} (:seon.attempt/status %))) as))))
-
-(defn- should-run-in
-  {:malli/schema [:=> [:cat :map] [:vector :seon.task/id]]}
-  [v]
-  (->> (vals (:tasks v)) (filter #(ready? v %)) (map :seon.task/id) (sort-by (juxt #(depth v %) identity)) vec))
-
-(defn should-run
-  "Tasks that should have an attempt running and have none, in start order (dependency
-  depth, then id); max-running is not applied here."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.task/id]]}
-  [db] (should-run-in (view db)))
-
-(defn- kill-reason
-  "Why live attempt a must stop, or nil: its task is no longer released, or its desired
-  environment differs from the one it runs in."
-  {:malli/schema [:=> [:cat :seon.task/task :seon.attempt/attempt] [:maybe [:enum :cancelled :held :env-changed]]]}
-  [t a]
-  (cond (= :cancelled (:seon.task/execution t)) :cancelled
-        (= :held (:seon.task/execution t)) :held
-        (not= (desired-env t) (:seon.attempt/env a)) :env-changed))
-
-(defn- to-kill-in
-  {:malli/schema [:=> [:cat :map] [:vector [:tuple :seon.attempt/id :keyword]]]}
-  [v]
-  (vec (for [a (sort-by :seon.attempt/id (apply concat (vals (:attempts v))))
-             :when (live? v a)
-             :let [r (kill-reason (get-in v [:tasks (:seon.attempt/task a)]) a)] :when r]
-         [(:seon.attempt/id a) r])))
-
-(defn to-kill
-  "Live attempts to stop, with why: [[attempt-id reason]]."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector [:tuple :seon.attempt/id :keyword]]]}
-  [db] (to-kill-in (view db)))
-
-;; ---- the reconciler -------------------------------------------------------------------
-
-(defn reconcile-view
-  "The actions for view v, in the order root executes them: reap attempts a previous root
-  left running; kill live attempts whose task changed; judge ended attempts from their
-  measured facts (no refusal: a merge task merges into main, another task is accepted on
-  its branch; a failed merge attaches design -> implement -> test -> merge; anything else
-  bails to root); bail tasks whose agent died; start ready tasks up to max-running. A
-  merge root found behind leaves its task ready: its next attempt is a new agent."
-  {:malli/schema [:=> [:cat :map] :seon.reconcile/actions]}
-  [v]
-  (let [all (sort-by :seon.attempt/id (apply concat (vals (:attempts v))))
-        reaps (for [a all :when (and (= :running (:seon.attempt/status a)) (not (live? v a)))]
-                {:op :reap :attempt (:seon.attempt/id a)})
-        kills (for [[aid r] (to-kill-in v)] {:op :kill :attempt aid :reason r})
-        judged (for [a all
-                     :when (#{:ended :dead} (:seon.attempt/status a))
-                     :let [id (:seon.attempt/task a) aid (:seon.attempt/id a)
-                           t (get-in v [:tasks id])
+(defn actions
+  "The actions for index idx, in the order root executes them (the full view's rule): reap,
+  kill, judge, then start ready tasks up to max-running, merges up to max-merging. Reads the
+  index's sets: its cost is the attempts to reap, kill and judge plus the starts."
+  {:malli/schema [:=> [:cat :seon.reconcile/index] :seon.reconcile/actions]}
+  [idx]
+  (let [root (or (:root idx) {:boot "" :max-running default-max-running :max-merging default-max-merging})
+        att (:attempts idx)
+        reaps (for [aid (sort (:reap idx))] {:op :reap :attempt aid})
+        kills (for [[aid r] (sort-by key (:kill idx))] {:op :kill :attempt aid :reason r})
+        judged (for [aid (sort (:judge idx))
+                     :let [a (att aid) id (:seon.attempt/task a) t (get-in idx [:tasks id])
                            merge? (= :merge (:seon.task/kind t))]]
                  (cond
                    (not= :running (:seon.task/execution t)) {:op :close :attempt aid}
                    (= :dead (:seon.attempt/status a))
                    {:op :bail :attempt aid :task id :problem (str "its agent died" (some->> (:seon.attempt/reason a) (str ": ")))}
                    :else
-                   (let [rs (done-refusals (done-input v id (:seon.attempt/results a {}) (:seon.attempt/uncontracted a #{})
-                                                       (:seon.attempt/unmerged a []) (:seon.attempt/basis-t a)))]
+                   (let [rs (done-refusals (done-input idx id (:seon.attempt/results a {}) (:seon.attempt/uncontracted a #{})
+                                                           (:seon.attempt/unmerged a []) (:seon.attempt/basis-t a)))]
                      (cond
-                       (and (empty? rs) merge?) {:op :merge :attempt aid :task id}
+                       (and (empty? rs) merge?) {:op :land :attempt aid :task id}
                        (empty? rs) {:op :accept :attempt aid :task id}
-                       ;; a failed merge: new tasks attach through :needs, each a new agent
                        (and merge? (< (:seon.task/generation t 0) (:max-attach (dials t)))) {:op :attach :attempt aid :task id}
                        :else
                        {:op :bail :attempt aid :task id
                         :problem (str "attempt " aid " ended " (name (:seon.attempt/outcome a :error))
                                       (some->> (:seon.attempt/reason a) (str " (") (#(str % ")")))
                                       ": " (refusals-text rs))}))))
-        live-after (- (count (filter #(live? v %) all)) (count kills))
-        room (max 0 (- (:max-running (:root v) default-max-running) live-after))
-        ;; git's merge queue: a merge attempt running, or ended and awaiting root's merge,
-        ;; holds the queue, so the main a merge agent merged last is the main root merges into
-        merge? (fn [id] (= :merge (get-in v [:tasks id :seon.task/kind])))
-        merging (count (filter #(and (merge? (:seon.attempt/task %))
-                                     (or (live? v %) (= :ended (:seon.attempt/status %))))
-                               all))
-        merge-room (max 0 (- (:max-merging (:root v) default-max-merging) merging))
-        starts (loop [[id & more] (should-run-in v) n 0 m 0 acc []]
+        ;; the merge train (bors, GitHub's merge queue): green merge attempts land together in
+        ;; one commit once no merge attempt is still running, so every member merged the same
+        ;; main; a train closes when its first member ends (no new member joins until it
+        ;; lands, so landing cannot starve)
+        lands (filter #(= :land (:op %)) judged)
+        judged (remove #(= :land (:op %)) judged)
+        live-merge? (some (:live idx) (:merging idx))
+        train (when (and (seq lands) (not live-merge?))
+                [{:op :merge-train :attempt (:attempt (first lands)) :members (mapv #(select-keys % [:attempt :task]) lands)}])
+        closed? (some #(= :ended (get-in idx [:attempts % :seon.attempt/status])) (:merging idx))
+        room (max 0 (- (:max-running root default-max-running) (- (count (:live idx)) (count (:kill idx)))))
+        merge? (fn [id] (= :merge (get-in idx [:tasks id :seon.task/kind])))
+        merge-room (max 0 (- (:max-merging root default-max-merging) (count (:merging idx))))
+        ;; a merge joins only when what it changes is disjoint from every merge in flight;
+        ;; one whose changes are unknown runs alone; conflicting merges serialize
+        flying (map #(merge-keys idx (get-in idx [:attempts % :seon.attempt/task])) (:merging idx))
+        taken0 (when-not (some nil? flying) (into #{} cat flying))
+        starts (loop [[[_ id] & more] (seq (:ready idx)) n 0 m 0 taken taken0 acc []]
                  (cond (or (nil? id) (>= n room)) acc
-                       (merge? id) (if (< m merge-room) (recur more (inc n) (inc m) (conj acc id)) (recur more n m acc))
-                       :else (recur more (inc n) m (conj acc id))))
-        spawns (for [id starts
-                     :let [t (get-in v [:tasks id])]]
+                       (merge? id) (let [ks (merge-keys idx id)
+                                         ok (and (< m merge-room) (not closed?) taken
+                                                 (if ks (not-any? taken ks) (and (zero? m) (empty? (:merging idx)))))]
+                                     (if ok
+                                       (recur more (inc n) (inc m) (when ks (into taken ks)) (conj acc id))
+                                       (recur more n m taken acc)))
+                       :else (recur more (inc n) m taken (conj acc id))))
+        spawns (for [id starts :let [t (get-in idx [:tasks id])]]
                  {:op :spawn :task id :env (desired-env t)
-                  :attempt (str id "#" (inc (count (get-in v [:attempts id]))))})]
-    (vec (concat reaps kills judged spawns))))
+                  :attempt (str id "#" (inc (count (get-in idx [:by-task id]))))})]
+    (vec (concat reaps kills judged train spawns))))
+
+;; ---- queries, over one index (list it once: (index db)) -----------------------------
 
 (defn reconcile
-  "The actions that move main's observed state toward its desired state."
+  "The actions that move db's observed state toward its desired state (index, then actions)."
   {:malli/schema [:=> [:cat :seon.host/db] :seon.reconcile/actions]}
-  [db] (reconcile-view (view db)))
+  [db] (actions (index db)))
+
+(defn running
+  "The attempts running now (in this boot), by id."
+  {:malli/schema [:=> [:cat :seon.reconcile/index] [:set :seon.attempt/id]]}
+  [idx] (:live idx))
+
+(defn done?
+  "Is task id done (merged into its target, or accepted on its branch)?"
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}
+  [idx id] (idx-done? idx id))
+
+(defn blocked-by
+  "The needs of task id that are not done."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:set :seon.task/id]]}
+  [idx id] (into #{} (remove #(idx-done? idx %)) (get-in idx [:tasks id :seon.task/needs])))
+
+(defn should-run
+  "Tasks that should have an attempt running and have none, in start order (dependency
+  depth, then id); max-running is not applied here."
+  {:malli/schema [:=> [:cat :seon.reconcile/index] [:vector :seon.task/id]]}
+  [idx] (mapv second (:ready idx)))
+
+(defn to-kill
+  "Live attempts to stop, with why: [[attempt-id reason]]."
+  {:malli/schema [:=> [:cat :seon.reconcile/index] [:vector [:tuple :seon.attempt/id :keyword]]]}
+  [idx] (vec (sort-by first (:kill idx))))
 
 ;; ---- what an attempt's agent wrote on its branch ----
 
@@ -352,16 +472,20 @@
                                                {:seon.task/id (:task act) :seon.task/execution :held :seon.task/problem (:problem act)})))
       ;; a merge task's branch into main: clean by construction when the branch holds main's
       ;; program head; behind: its task runs again, a new agent
-      :merge (one (request st attempt :merged {:op :write :req {:op :merge :branch (get-in a [:seon.attempt/env :branch])
-                                                                 :agent agent :data-attrs #{}}}))
+      ;; a merge train: every member's branch into main in one commit (each holds main's
+      ;; program head, the members' changes are disjoint); a member found behind or refused
+      ;; is answered alone
+      :merge-train (let [bs (mapv #(get-in (task/attempt (:db st) (:attempt %)) [:seon.attempt/env :branch]) (:members act))]
+                     (one (request (assoc-in st [:flights attempt :branches] bs) attempt :trained
+                                   {:op :write :req {:op :merge-train :branches bs :data-attrs #{}}})))
       :attach (one (write st attempt :done (tpl/attach-tx (:db st) act))))))
 
 (defn- judge-tx
   "Attempt aid's end on main from MEASURED facts: the end its agent wrote on the branch,
   root's own proof results, the branch's merge entries and unmerged keys, the contract gaps
   against main, its improved plan carried to the task."
-  {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db]]] [:vector :any]]}
-  [st {:keys [act]} results {:keys [db base-t]}]
+  {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db]] [:set :string]] [:vector :any]]}
+  [st {:keys [act]} results {:keys [db base-t]} changed]
   (let [main (:db st)
         aid (:attempt act) id (:task act)
         end (pull-end db aid)
@@ -374,7 +498,8 @@
                     (task/end-members (cond-> {:outcome (:outcome end :error) :turns (:turns end 0) :model-calls (:turns end 0)
                                                :tokens (:tokens end 0) :ms 0.0 :results results :uncontracted unc
                                                :conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
-                                               :unmerged (mapv #(pr-str (:key %)) (pm/unmerged db (pm/program db #{})))}
+                                               :unmerged (mapv #(pr-str (:key %)) (pm/unmerged db (pm/program db #{})))
+                                               :changed changed}
                                         (:reason end) (assoc :reason (:reason end))
                                         (not (:outcome end)) (assoc :reason "the agent wrote no end"))
                                       (System/currentTimeMillis) (or base-t (:max-tx main))))
@@ -400,25 +525,33 @@
       :started (if (= "outside" (get-in act [:env :model]))
                  (done st)
                  (one (request st aid :worked
-                             {:op :eval :id agent
-                              :forms (pr-str (list 'seon.turn/work! (list 'quote (cond-> {:task (:task act) :attempt aid :max-turns (get-in act [:env :max-turns])}
-                                                                                     (get-in act [:env :model]) (assoc :model (get-in act [:env :model]))))))})))
+                               {:op :eval :id agent
+                                :forms (pr-str (list 'seon.turn/work! (list 'quote (cond-> {:task (:task act) :attempt aid :max-turns (get-in act [:env :max-turns])}
+                                                                                       (get-in act [:env :model]) (assoc :model (get-in act [:env :model]))))))})))
       ;; the turn loop answered: died (no live agent), or judge it from measured facts
       :worked (if (= -1 (:id (first r)))
                 (dead st (str (:printed (first r))))
                 (one (request st aid :tested {:op :tests :id agent :timeout-ms 30000})))
       :tested (one (request (assoc-in st [:flights aid :results] (proofs/results r)) aid :read
                             {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}}))
+      ;; what the branch changed since its merge base (three-way's :ours), measured for the train
+      :read (one (request (assoc-in st [:flights aid :branch-db] r) aid :diffed
+                          {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}}))
       ;; every attempt is a new agent: none is reused
-      :read (let [[st o1] (request st aid :ignored {:op :kill :id agent})
-                  [st o2] (write st aid :done (judge-tx st f (:results f) r))]
-              [st [o1 o2]])
-      :merged (cond
-                (:merged? r) (one (write st aid :done (cas-tx aid :ended :merged {:seon.attempt/merged-t (long (:tx r))})))
-                (= :seon.merge/behind (:seon.error/type r)) (one (write st aid :done (cas-tx aid :ended :behind {:seon.attempt/reason (:seon.error/message r)})))
-                :else (one (write st aid :done (conj (cas-tx aid :ended :bailed {})
-                                                     {:seon.task/id (:task act) :seon.task/execution :held
-                                                      :seon.task/problem (str "merge refused: " (or (:seon.error/message r) (:error r)))})))))))
+      :diffed (let [[st o1] (request st aid :ignored {:op :kill :id agent})
+                    [st o2] (write st aid :done (judge-tx st f (:results f) (:branch-db f) (into #{} (map pr-str) (:ours r))))]
+                [st [o1 o2]])
+      ;; each member's answer, as one write: merged at the train's t, behind (its merge task
+      ;; runs again, a new agent), or refused (held for root)
+      :trained (one (write st aid :done
+                           (vec (mapcat (fn [{:keys [attempt task]} r]
+                                          (cond
+                                            (:merged? r) (cas-tx attempt :ended :merged {:seon.attempt/merged-t (long (:tx r))})
+                                            (= :seon.merge/behind (:seon.error/type r)) (cas-tx attempt :ended :behind {:seon.attempt/reason (:seon.error/message r)})
+                                            :else (conj (cas-tx attempt :ended :bailed {})
+                                                        {:seon.task/id task :seon.task/execution :held
+                                                         :seon.task/problem (str "merge refused: " (or (:seon.error/message r) (:error r)))})))
+                                        (:members act) (:results r))))))))
 
 (defn- pass
   "Reconcile main's latest db and start each action whose attempt is not in flight; spawns
@@ -427,24 +560,31 @@
   {:malli/schema [:=> [:cat :seon.reconcile/state] [:tuple :seon.reconcile/state [:vector :map]]]}
   [st]
   (let [early (count (filter #(and (= :spawn (get-in % [:act :op])) (not (:agent %))) (vals (:flights st))))
-        acts (remove #(let [f (get-in st [:flights (:attempt %)])] (and f (or (not= :kill (:op %)) (:killing f)))) (reconcile (:db st)))
+        acts (remove #(let [f (get-in st [:flights (:attempt %)])] (and f (or (not= :kill (:op %)) (:killing f)))) (actions (:idx st)))
         acts (concat (remove #(= :spawn (:op %)) acts) (drop early (filter #(= :spawn (:op %)) acts)))]
     (reduce (fn [[st outs] act] (let [[st o] (start st act)] [st (into outs o)])) [st []] acts)))
 
 (defn reconciler-proc
-  "The reconciler. In :main (main's commits, a sliding buffer of one) and :answers (the
+  "The reconciler. In :main (main's commits {:t :ops :db}, a sliding buffer of one) and :answers (the
   api's answers to its requests). Out :to-api (its requests, as {:op :request ...}).
-  Args: :boot (this root's boot id)."
+  Args: :boot (this root's boot id); in :judge (outside agents' attempts handed back).
+  Starts deepest-first (finish chains under way)."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:boot "root's boot id" :judge "outside agents' attempts to judge (external)"}
        :ins {:main "main's commits" :answers "the api's answers"} :outs {:to-api "requests"}
        :workload :io
-       :ping-map-fn (fn [st] {:seen (:seen st 0) :t (some-> (:db st) :max-tx) :flights (count (:flights st)) :pending (count (:pending st))})})
+       :ping-map-fn (fn [st] {:seen (:seen st 0) :lists (:lists st 0) :t (:t st) :flights (count (:flights st)) :pending (count (:pending st))})})
   ([args] (assoc (dissoc args :judge) :seen 0 :rid 0 :flights {} :pending {} ::flow/in-ports {:judge (:judge args)}))
   ([st _] st)
   ([st in m]
    (case in
-     :main (let [st (assoc st :db (:db m) :seen (inc (:seen st)))
+     ;; each commit's datoms move the index (observe); a commit the sliding buffer dropped
+     ;; (main's t is not the next one) lists main again (index), k8s's relist after a gap
+     :main (let [db (:db m) t (:max-tx db)
+                 idx (if (and (:idx st) (= t (inc (:t st))))
+                       (observe (:idx st) db (:ops m))
+                       (index db))
+                 st (assoc st :db db :t t :idx idx :seen (inc (:seen st)) :lists (cond-> (:lists st 0) (not= t (inc (:t st -2))) inc))
                  [st outs] (pass st)]
              [st {:to-api (into [{:op :stat :k :main-seen-us :v (/ (- (sock/now-ns) (:ns m)) 1000.0)}] outs)}])
      ;; an outside agent handed its attempt back: judged as a turn loop's end is

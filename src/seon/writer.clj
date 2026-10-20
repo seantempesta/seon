@@ -29,47 +29,77 @@
   (let [head (pdb/head conn b)]
     [head (pm/three-way (pm/program (pdb/branch-base conn b) data-attrs) (pm/program head data-attrs) (pm/program @conn data-attrs))]))
 
-(defn- merge-branch
-  "Merge the branch into main (git: only a branch that contains main's head; lane M1). Main's
-  program (and declared data) unchanged since the branch's merge base: the branch's changes
-  apply as one merge commit, clean by construction. Otherwise the branch is behind
-  (:seon.merge/behind: a merge task merges main first). Refused also while the branch has
-  unmerged entries (:seon.merge/unmerged) or carries an uncontracted function
-  (:seon.merge/uncontracted: contracts decide what is admitted). Answers [st result]."
-  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/branch :seon.merge/data-attrs] [:tuple :seon.writer/state :map]]}
-  [st o branch data-attrs]
-  (let [conn (:conn st)
-        [head r] (branch-merge st branch data-attrs)
-        main @conn
-        unmerged (pm/unmerged head (pm/program head #{}))
+(defn- merge-refusal
+  "Why branch head (its three-way r against main) cannot merge into main now (lane M1), or
+  nil: main's program (and declared data) changed since the branch's merge base
+  (:seon.merge/behind: a merge task merges main first); the branch has unmerged entries
+  (:seon.merge/unmerged); it carries an uncontracted function (:seon.merge/uncontracted:
+  contracts decide what is admitted)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/result] [:maybe :map]]}
+  [main head r]
+  (let [unmerged (pm/unmerged head (pm/program head #{}))
         uncontracted (when contract/on?
                        (vec (sort-by str (for [[[k sym] [_ ov]] (:ours r)
                                                :when (and (= :var k) (= :fn (:kind ov)) (nil? (:contract ov)))]
                                            sym))))]
     (cond
       (seq (:theirs r))
-      [st (contract/error :seon.merge/behind 'seon.writer/merge-branch
-                          (str "main changed " (count (:theirs r)) " key(s) since the branch's merge base: merge main into the branch first")
-                          {:merged? false :tx (:max-tx main) :behind (count (:theirs r))
-                           :seon.error/fix "A merge task merges main into the branch (my.branch/merge-main!), resolves any conflict, and its proofs run on the combined program."})]
+      (contract/error :seon.merge/behind 'seon.writer/merge-branch
+                      (str "main changed " (count (:theirs r)) " key(s) since the branch's merge base: merge main into the branch first")
+                      {:merged? false :tx (:max-tx main) :behind (count (:theirs r))
+                       :seon.error/fix "A merge task merges main into the branch (my.branch/merge-main!), resolves any conflict, and its proofs run on the combined program."})
       (seq unmerged)
-      [st (contract/error :seon.merge/unmerged 'seon.writer/merge-branch
-                          (str "the branch has " (count unmerged) " unmerged entr(ies)")
-                          {:merged? false :tx (:max-tx main) :unmerged (mapv :key unmerged)})]
+      (contract/error :seon.merge/unmerged 'seon.writer/merge-branch
+                      (str "the branch has " (count unmerged) " unmerged entr(ies)")
+                      {:merged? false :tx (:max-tx main) :unmerged (mapv :key unmerged)})
       (seq uncontracted)
-      [st (contract/error :seon.merge/uncontracted 'seon.writer/merge-branch
-                          (str "the branch carries " (count uncontracted) " function(s) without a contract")
-                          {:merged? false :tx (:max-tx main) :uncontracted uncontracted
-                           :seon.error/fix "Declare each function's contract ({:malli/schema [:=> [:cat ...] ...]}) and merge again."})]
-      (empty? (:ours r)) [st {:merged? true :tx (:max-tx main) :datoms 0 :keys 0}]
-      :else
-      (let [tx (pm/apply-tx main (into {} (for [[k [_ ov]] (:ours r)] [k ov])))
-            ;; git: the branch head becomes a parent, so the merge base moves to it
-            rep (d/merge-db conn #{branch} tx)
+      (contract/error :seon.merge/uncontracted 'seon.writer/merge-branch
+                      (str "the branch carries " (count uncontracted) " function(s) without a contract")
+                      {:merged? false :tx (:max-tx main) :uncontracted uncontracted
+                       :seon.error/fix "Declare each function's contract ({:malli/schema [:=> [:cat ...] ...]}) and merge again."}))))
+
+(defn- merge-train
+  "Merge branches into main in ONE commit (a merge train, lane R3; git's octopus merge, every
+  member a parent): each member that holds main's program head and is not refused lands, in
+  order; a member whose changes meet an earlier member's is behind (it merges main first).
+  Members are judged against the same main, so the commit is each one's clean merge.
+  Answers [st {:results [answer per branch, in order]}]."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile [:vector :seon.db/branch] :seon.merge/data-attrs] [:tuple :seon.writer/state :map]]}
+  [st o branches data-attrs]
+  (let [conn (:conn st)
+        main @conn
+        judged (reduce (fn [{:keys [taken] :as acc} b]
+                         (let [have? (contains? (d/branches conn) b)
+                               [head r] (when have? (branch-merge st b data-attrs))
+                               refusal (if have? (merge-refusal main head r) {:merged? false :error (str "no branch " b)})
+                               refusal (or refusal
+                                           (when (some taken (keys (:ours r)))
+                                             (contract/error :seon.merge/behind 'seon.writer/merge-train
+                                                             "another member of the train changes the same definitions: merge main into the branch first"
+                                                             {:merged? false :tx (:max-tx main) :behind (count (filter taken (keys (:ours r))))})))]
+                           (-> acc (update :members conj {:branch b :r r :refusal refusal})
+                               (cond-> (nil? refusal) (update :taken into (keys (:ours r)))))))
+                       {:taken #{} :members []} branches)
+        ok (remove :refusal (:members judged))
+        changed (into {} (for [{:keys [r]} ok [k [_ ov]] (:ours r)] [k ov]))]
+    (if (empty? changed)
+      [st {:results (mapv #(or (:refusal %) {:merged? true :tx (:max-tx main) :datoms 0 :keys 0}) (:members judged))}]
+      ;; git: each member's head becomes a parent, so its merge base moves to it
+      (let [rep (d/merge-db conn (set (map :branch ok)) (pm/apply-tx main changed))
             t (:max-tx (:db-after rep))
             ops (pdb/report->tx rep)]
         [(main-commit st o t ops (:db-after rep))
-         {:merged? true :tx t :datoms (count ops) :keys (count (:ours r))}]))))
+         {:tx t :datoms (count ops)
+          :results (mapv #(or (:refusal %) {:merged? true :tx t :keys (count (:ours (:r %)))}) (:members judged))}]))))
+
+(defn- merge-branch
+  "Merge the branch into main (git: only a branch that contains main's head; lane M1): a
+  train of one. Answers [st result]."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/branch :seon.merge/data-attrs] [:tuple :seon.writer/state :map]]}
+  [st o branch data-attrs]
+  (let [[st r] (merge-train st o [branch] data-attrs)
+        r1 (first (:results r))]
+    [st (cond-> r1 (and (:merged? r1) (:datoms r)) (assoc :datoms (:datoms r)))]))
 
 (defn- answer
   "The answer r for dest, as data on :to-api."
@@ -112,6 +142,7 @@
                (reply st {:ok true :t (:max-tx @conn) :resumed resumed?}))
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
                         (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st) :lease (:lease m)}))
+      :merge-train (let [[st r] (merge-train st o (vec (:branches m)) (:data-attrs m #{}))] (reply st r))
       :merge (if (exists? (:branch m))
                (let [[st r] (merge-branch st o (:branch m) (:data-attrs m #{}))] (reply st r))
                (reply st {:merged? false :error (str "no branch " (:branch m))}))

@@ -8,7 +8,7 @@
     :writer       :mixed  the only d/transact, d/branch! and merge caller, with group
                           commit (drain the in-port, one commit per branch, one flush)
     :fork-server  :io     the fork server's command pipe, its events, its restart
-    :reconciler   :io     main's commits through a sliding buffer of one (the hook a
+    :reconciler   :io     main's commits through a bounded buffer (every commit's datoms; the hook a
                           reconciler and the dashboard plug into)
   and one proc per agent (`agent-proc`, added and removed with flow/update!), its stand-in:
   it owns root's end of the agent's socket and its process, and passes Flow's pause, resume and stop on to the
@@ -508,8 +508,9 @@
                      :flusher {:proc (flow/process #'writer/flusher-proc)
                                :args {:to-writer (:to-writer chans) :flush-ms cfg/FLUSH-MS}}
                      :reconciler {:proc (flow/process #'reconcile/reconciler-proc)
-                                  ;; a reconciler reads main's latest db: a sliding buffer of one
-                                  :chan-opts {:main {:buf-or-n (a/sliding-buffer 1)}}
+                                  ;; the incremental reconciler reads every commit's datoms (k8s's
+                                  ;; watch): a bounded buffer, back-pressure on the writer if it lags
+                                  :chan-opts {:main {:buf-or-n cfg/RECONCILER-BUF}}
                                   :args {:boot boot :judge (:judge chans)}}}
         root-procs (merge root-procs fx-procs)
         _ (deliver root-procs-p root-procs)

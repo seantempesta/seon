@@ -18,6 +18,11 @@
   "The writer's in-port. Each agent has at most one write in flight, so a buffer above the
   live agents never fills from agents; beyond it senders park (back-pressure)."
   (dial "SEON_WRITER_BUF" MAX-AGENTS))
+(def RECONCILER-BUF
+  "Main's commits queued for the reconciler. It reads every commit's datoms (an index kept by
+  observing them), so the buffer blocks rather than drops: a full buffer parks the writer's
+  send until the reconciler catches up (a pass costs what the commit changed)."
+  (dial "SEON_RECONCILER_BUF" 1024))
 (def AGENT-BUF
   "Each agent channel's buffer. Small on purpose: a full channel pushes back on its sender
   (the reader leaves frames in the socket)."
@@ -60,6 +65,11 @@
   "Experiment (lane FX1): an effect owner answers straight to the asker's stand-in by id
   ([agent :in]) instead of through the api's :back. Off by default."
   (= "1" (System/getenv "SEON_FX_DIRECT")))
+(def MODEL-RATE
+  "Model tokens per second the provider admits, cluster-wide: the :model owner's token bucket
+  (lane R3; AIMD on a 429). 0: no bucket."
+  (dial "SEON_MODEL_RATE" 0))
+
 (def MODEL-LANES
   "Model calls in flight at once, cluster-wide (the :model owner's lanes). Lane FX1."
   (dial "SEON_MODEL_LANES" 8))

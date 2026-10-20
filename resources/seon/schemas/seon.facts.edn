@@ -108,6 +108,9 @@
  ;; measured at the attempt's end from the branch: its merge entries (:seon.merge/*) and the keys still unmerged
  :seon.attempt/conflicts [:set {:seon.db/component true} :seon.db/ref]
  :seon.attempt/unmerged [:set :string]
+ ;; measured at the attempt's end from the branch (seon.merge/three-way's :ours): the printed
+ ;; program keys the branch changed since its merge base; the merge train admits on them
+ :seon.attempt/changed [:set :string]
  :seon.attempt/attempt-fact [:map {:seon.db/attributes true}
                              [:seon.attempt/id :seon.attempt/id] [:seon.attempt/task :seon.attempt/task]
                              [:seon.attempt/status :seon.attempt/status] [:seon.attempt/boot :seon.attempt/boot]
@@ -122,7 +125,8 @@
                              [:seon.attempt/uncontracted {:optional true} :seon.attempt/uncontracted]
                              [:seon.attempt/results {:optional true} :seon.attempt/results]
                              [:seon.attempt/conflicts {:optional true} :seon.attempt/conflicts]
-                             [:seon.attempt/unmerged {:optional true} :seon.attempt/unmerged]]
+                             [:seon.attempt/unmerged {:optional true} :seon.attempt/unmerged]
+                             [:seon.attempt/changed {:optional true} :seon.attempt/changed]]
  :seon.proof/proof-fact [:map {:seon.db/attributes true} [:seon.proof/test :seon.proof/test] [:seon.proof/status :seon.proof/status]]
  ;; ---- root's boot and dials (main) ----
  :seon.root/id [:and {:seon.db/identity true} :keyword]

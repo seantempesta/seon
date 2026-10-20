@@ -114,13 +114,14 @@
 (defn end-members
   "The observed members of an attempt's end (proto.agents/end), as attributes."
   {:malli/schema [:=> [:cat :seon.turn/end :int :int] :map]}
-  [{:keys [outcome turns model-calls tokens results uncontracted reason conflicts unmerged]} end-ms basis-t]
+  [{:keys [outcome turns model-calls tokens results uncontracted reason conflicts unmerged changed]} end-ms basis-t]
   (cond-> {:seon.attempt/outcome outcome :seon.attempt/basis-t basis-t :seon.attempt/turns turns :seon.attempt/model-calls model-calls
            :seon.attempt/tokens tokens :seon.attempt/end-ms end-ms
            :seon.attempt/results (vec (for [[t s] results] {:seon.proof/test t :seon.proof/status s}))}
     (seq uncontracted) (assoc :seon.attempt/uncontracted (vec uncontracted))
     (seq conflicts) (assoc :seon.attempt/conflicts (conflict-members conflicts))
     (seq unmerged) (assoc :seon.attempt/unmerged (vec unmerged))
+    (seq changed) (assoc :seon.attempt/changed (vec changed))
     reason (assoc :seon.attempt/reason reason)))
 
 (defn plan-tx
@@ -183,7 +184,7 @@
    :seon.attempt/pid :seon.attempt/start-ms :seon.attempt/end-ms :seon.attempt/branch :seon.attempt/model
    :seon.attempt/max-turns :seon.attempt/outcome :seon.attempt/reason :seon.attempt/turns :seon.attempt/model-calls
    :seon.attempt/tokens :seon.attempt/merged-t :seon.attempt/basis-t :seon.attempt/uncontracted
-   :seon.attempt/unmerged
+   :seon.attempt/unmerged :seon.attempt/changed
    {:seon.attempt/results [:seon.proof/test :seon.proof/status]}
    {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
@@ -199,6 +200,7 @@
       results (assoc :seon.attempt/results (into {} (map (juxt :seon.proof/test :seon.proof/status)) results))
       uncontracted (assoc :seon.attempt/uncontracted (set uncontracted))
       unmerged (assoc :seon.attempt/unmerged (vec (sort unmerged)))
+      (:seon.attempt/changed a) (update :seon.attempt/changed set)
       conflicts (assoc :seon.attempt/conflicts
                        (vec (sort-by (comp str :key)
                                      (for [c conflicts]
@@ -228,3 +230,22 @@
                     (d/pull db [:seon.root/boot :seon.config.agent/max-running :seon.config.merge/max-running] [:seon.root/id :root]))]
     (cond-> {:boot (:seon.root/boot r) :max-running (:seon.config.agent/max-running r)}
       (:seon.config.merge/max-running r) (assoc :max-merging (:seon.config.merge/max-running r)))))
+
+(defn entity-value
+  "The task, attempt or root that entity e of db is now, as the reconciler's index holds it:
+  [:task own-value] (no accumulation), [:attempt attempt-value], [:root (root db)], or nil
+  when e is none of them (retracted, or another kind). One pull of e."
+  {:malli/schema [:=> [:cat :seon.host/db :int]
+                  [:maybe [:or [:tuple [:= :task] :seon.task/own] [:tuple [:= :attempt] :seon.attempt/attempt] [:tuple [:= :root] :map]]]]}
+  [db e]
+  (let [k (d/pull db [:seon.task/id :seon.attempt/id :seon.root/id] e)]
+    (cond (:seon.task/id k) [:task (task-value (d/pull db task-pull e))]
+          (:seon.attempt/id k) [:attempt (attempt-value (d/pull db attempt-pull e))]
+          (:seon.root/id k) [:root (root db)])))
+
+(defn entity-ids
+  "Every task, attempt and root entity of db (the reconciler's list, before it watches)."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :int]]}
+  [db]
+  (vec (concat (map :e (d/datoms db :aevt :seon.root/id)) (map :e (d/datoms db :aevt :seon.task/id))
+               (map :e (d/datoms db :aevt :seon.attempt/id)))))

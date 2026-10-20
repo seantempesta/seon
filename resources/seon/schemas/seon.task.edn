@@ -54,14 +54,30 @@
                         [:seon.attempt/uncontracted {:optional true} [:set :qualified-symbol]]
                         [:seon.attempt/results {:optional true} :seon.proof/results]
                         [:seon.attempt/conflicts {:optional true} [:vector :seon.merge/conflict]]
-                        [:seon.attempt/unmerged {:optional true} [:vector :string]]]
+                        [:seon.attempt/unmerged {:optional true} [:vector :string]]
+                        [:seon.attempt/changed {:optional true} [:set :string]]]
  ;; ---- the done rule and the reconciler's answer ----
  :seon.reconcile/merge-dials [:map [:max-conflicts nat-int?] [:max-merge-turns nat-int?] [:max-attach nat-int?]]
  :seon.reconcile/view [:map [:tasks [:map-of :seon.task/id :seon.task/task]] [:attempts :map] [:root :map]]
  ;; the reconciler proc's state, and the steps of a flight
  :seon.reconcile/state [:map [:db :seon.host/db] [:boot :string]
                         [:rid :int] [:flights :map] [:pending :map]]
- :seon.reconcile/step [:enum :ignored :done :spawned :started :worked :tested :read :merged]
+ ;; the incremental reconciler's index of main (lane R3's seon.reconcile/index): desired and
+ ;; observed state by id, the derived needs, depths and claims, and the sets the actions read.
+ ;; Its parts agree with each other (every id in a set is an attempt it holds), which a
+ ;; generator of the parts alone breaks: the census generates the empty index only, and the
+ ;; index's laws are R3's oracle property test (test/r3/inc_test.clj, the same actions as a
+ ;; full reconcile on generated dbs)
+ :seon.reconcile/index [:map {:gen/elements [{:root nil :tasks {} :keys {} :needed-by {} :acc {} :depth {} :claims {}
+                                              :attempts {} :by-task {} :done {} :ready #{} :ready-key {}
+                                              :live #{} :reap #{} :kill {} :judge #{} :merging #{}}]}
+                        [:root [:maybe :map]] [:tasks [:map-of :seon.task/id :map]] [:keys :map] [:needed-by :map]
+                        [:acc :map] [:depth [:map-of :seon.task/id :int]] [:claims :map]
+                        [:attempts [:map-of :seon.attempt/id :map]] [:by-task :map] [:done :map]
+                        [:ready [:set [:tuple :int :seon.task/id]]] [:ready-key :map]
+                        [:live [:set :seon.attempt/id]] [:reap [:set :seon.attempt/id]] [:kill [:map-of :seon.attempt/id :keyword]]
+                        [:judge [:set :seon.attempt/id]] [:merging [:set :seon.attempt/id]]]
+ :seon.reconcile/step [:enum :ignored :done :spawned :started :worked :tested :read :diffed :merged :trained]
  ;; a task and an attempt as Datahike pulls them (the readers' inputs)
  :seon.task/pulled [:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                     [:seon.task/plan :seon.task/plan] [:seon.task/execution [:enum :held :running :cancelled]]
@@ -82,7 +98,9 @@
                          [:reap [:map {:closed true} [:op [:= :reap]] [:attempt :seon.attempt/id]]]
                          [:kill [:map {:closed true} [:op [:= :kill]] [:attempt :seon.attempt/id]
                                  [:reason [:enum :cancelled :held :env-changed]]]]
-                         [:merge [:map {:closed true} [:op [:= :merge]] [:attempt :seon.attempt/id] [:task :seon.task/id]]]
+                         ;; a merge train: every green merge attempt whose keys are disjoint lands in one commit
+                         [:merge-train [:map {:closed true} [:op [:= :merge-train]] [:attempt :seon.attempt/id]
+                                        [:members [:vector [:map {:closed true} [:attempt :seon.attempt/id] [:task :seon.task/id]]]]]]
                          [:accept [:map {:closed true} [:op [:= :accept]] [:attempt :seon.attempt/id] [:task :seon.task/id]]]
                          [:attach [:map {:closed true} [:op [:= :attach]] [:attempt :seon.attempt/id] [:task :seon.task/id]]]
                          [:bail [:map {:closed true} [:op [:= :bail]] [:attempt :seon.attempt/id] [:task :seon.task/id]
@@ -109,4 +127,5 @@
                  [:results :seon.proof/results] [:uncontracted [:set :qualified-symbol]]
                  [:reason {:optional true} :string] [:ms number?]
                  [:conflicts {:optional true} [:vector :seon.merge/conflict]]
-                 [:unmerged {:optional true} [:vector :string]]]}
+                 [:unmerged {:optional true} [:vector :string]]
+                 [:changed {:optional true} [:set :string]]]}
