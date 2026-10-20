@@ -1,0 +1,44 @@
+;; Root's system procs, declared (owner, 2026-10-20: "the definition lives in a file for now
+;; and an explicit start is better"). Read with aero by seon.system/read-decl; started all at
+;; once by seon.root/start! after the physics step (the store opened, the fork server forked
+;; while root is single-threaded), and re-applied by seon.root/apply!, which update!s only
+;; the procs whose declaration changed. Agents are not here: the reconciler starts them
+;; from tasks.
+;;
+;; A proc: {:proc step-fn symbol, :args map, :chan-opts map}. A :bind/<name> keyword is a
+;; value the boot step holds (a connection, a channel, a dial; seon.root/bindings), put in
+;; at build. :conns is the dependency graph: procs park on their inputs until upstream
+;; sends, readiness is each proc's ping-map-fn, and there is no start order.
+;; :fx declares the effect kinds (lane FX1): each becomes an owner :fx/<kind> and its lanes.
+{:procs
+ {:api {:proc seon.root/api-proc
+        ;; room for every answer the writer can owe while the api is not reading
+        :chan-opts {:from-writer {:buf-or-n :bind/api-from-writer-buf}}
+        :args {:wake :bind/wake :view :bind/view :ext :bind/ext :back :bind/back :graph :bind/graph
+               :lease-base :bind/lease-base :system :bind/system
+               :reg :bind/reg :to-writer :bind/to-writer :events :bind/events}}
+  :writer {:proc seon.writer/writer-proc
+           :args {:conn :bind/conn :cfg :bind/store-cfg :durable? :bind/durable?
+                  :to-writer :bind/to-writer :events :bind/events}}
+  :fork-server {:proc seon.fork-server/fork-server-proc
+                :args {:conn :bind/conn :pid :bind/fork-server-pid :fd :bind/fork-server-fd :server-ev :bind/server-ev}}
+  :flusher {:proc seon.writer/flusher-proc
+            :args {:to-writer :bind/to-writer :flush-ms :bind/flush-ms}}
+  ;; the incremental reconciler reads every commit's datoms (k8s's watch): a bounded
+  ;; buffer, back-pressure on the writer if it lags
+  :reconciler {:proc seon.reconcile/reconciler-proc
+               :chan-opts {:main {:buf-or-n :bind/reconciler-buf}}
+               :args {:boot :bind/boot :judge :bind/judge}}}
+ :fx
+ {:echo {:perform seon.fx/echo :lanes 1}
+  :file {:perform seon.fx/write-file :lanes 1}
+  ;; the model provider is only root's: the agents never hold the key
+  :model {:perform seon.fx/model :lanes :bind/model-lanes :ctx {:provider :bind/provider} :rate :bind/model-rate}}
+ :conns
+ [[[:writer :to-fork-server] [:fork-server :cmd]]
+  [[:writer :to-api] [:api :from-writer]]
+  [[:reconciler :to-api] [:api :from-writer]]
+  [[:writer :main] [:reconciler :main]]
+  [[:fork-server :to-api] [:api :from-fs]]
+  [[:api :to-fs] [:fork-server :ext]]
+  [[:writer :to-flusher] [:flusher :in]]]}

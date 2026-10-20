@@ -3,7 +3,7 @@
   f2-final proto.smoke). bin/check runs them; target/seon <check> [args] runs one.
   usage: target/seon smoke        3 agents: define, test, transact; merge one; kill one mid-eval
          target/seon scale N      N agents spawned at once, each eval + transact + test"
-  (:require [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e]))
+  (:require [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [clojure.pprint :refer [pprint]] [clojure.java.shell] [clojure.string] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.system] [seon.config] [clojure.edn]))
 
 (defn- out! [& xs] (println (apply str xs)) (flush))
 (defn- await-status [sys ids pred ms]
@@ -1001,6 +1001,56 @@
     (c/stop! sys)
     (lib/c-exit 0)))
 
+(defn probe-proc
+  "A declared test proc (the system check): counts what arrives on :in, reports it in ping."
+  {:malli/schema :seon.step/step-fn}
+  ([] {:params {:tag "a label"} :ins {:in "anything"} :outs {}
+       :workload :io :ping-map-fn (fn [st] {:got (:got st) :tag (:tag st)})})
+  ([args] (assoc args :got 0))
+  ([st _] st)
+  ([st _ m] [(cond-> st (some? m) (update :got inc)) nil]))
+
+(defn system-check
+  "Root's procs from resources/seon/system.edn: boot reaches the hand map's running set;
+  apply! after adding or removing one proc in the file touches only that proc; an unchanged
+  proc keeps its queued messages across an apply!."
+  []
+  (let [sys (c/start! {:datoms 2000})
+        pids (fn [] (set (keys (flow/ping (:graph sys) :timeout-ms 2000))))
+        booted (pids)
+        expect (into #{:api :writer :fork-server :flusher :reconciler :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/model}
+                     (for [i (range seon.config/MODEL-LANES)] (keyword "fx.model" (str i))))
+        dir (str "/tmp/seon-system-" (lib/c-getpid))
+        _ (.mkdirs (java.io.File. dir))
+        decl (clojure.edn/read-string (slurp seon.system/path))
+        write! (fn [nm d] (let [f (str dir "/" nm ".edn")] (spit f (pr-str d)) f))
+        probe (fn [tag] {:proc 'seon.check/probe-proc :args {:tag tag}})
+        f1 (write! "add" (assoc-in decl [:procs :probe] (probe "one")))
+        r1 @(c/apply! sys f1)
+        ;; the probe paused, three messages queued on its :in, then another proc added
+        _ (flow/pause-proc (:graph sys) :probe)
+        _ @(flow/inject (:graph sys) [:probe :in] [1 2 3])
+        f2 (write! "add2" (-> decl (assoc-in [:procs :probe] (probe "one")) (assoc-in [:procs :probe2] (probe "two"))))
+        r2 @(c/apply! sys f2)
+        _ (flow/resume-proc (:graph sys) :probe)
+        _ (Thread/sleep 200)
+        got (get-in (flow/ping-proc (:graph sys) :probe :timeout-ms 1000) [::flow/state :got])
+        f3 (write! "remove" (assoc-in decl [:procs :probe] (probe "one")))
+        r3 @(c/apply! sys f3)
+        after (pids)
+        res {:boot-set (= expect booted) :missing (vec (remove booted expect)) :extra (vec (remove expect booted))
+             :add (dissoc r1 :kept) :add2 (dissoc r2 :kept) :queued-kept got :remove (dissoc r3 :kept)
+             :ok (and (= expect booted)
+                      (= #{:probe} (set (:started r1))) (empty? (:stopped r1))
+                      (= #{:probe2} (set (:started r2))) (empty? (:stopped r2)) (= 3 got)
+                      (= #{:probe2} (set (:stopped r3))) (empty? (:started r3))
+                      (= (conj expect :probe) after))}]
+    (pprint res)
+    (clojure.java.shell/sh "rm" "-rf" dir)
+    (c/stop! sys)
+    (out! (if (:ok res) "SYSTEM OK" "SYSTEM FAIL"))
+    (lib/c-exit (if (:ok res) 0 1))))
+
 (defn -main [& [mode n & more]]
   (case mode
     "dur-bench-write" (dur-bench-write n (Long/parseLong (first more)))
@@ -1025,6 +1075,7 @@
     "orphan" (orphan)
     "rtt" (rtt)
     "fx" (fx (Long/parseLong (or n "1000")))
+    "system" (system-check)
     "hotreload" (hotreload)
     "swarm" (swarm (Long/parseLong (or n "100")))
     "soak" (soak (Long/parseLong (or n "50")) (Long/parseLong (or (first more) "60")))

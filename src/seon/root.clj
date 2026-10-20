@@ -23,7 +23,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
             [seon.sock :as sock] [seon.wire :as wire] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
-            [seon.writer :as writer] [seon.reconcile :as reconcile] [seon.program :as program] [seon.step :as step]
+            [seon.writer :as writer] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.task :as task] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
@@ -112,7 +112,7 @@
          (assoc-in [:agent-procs id] {:proc agent-launcher
                                       :args {:id id :fd r :branch branch :from from
                                              :to-writer (:to-writer st) :back (:back st) :events (:events st)
-                                             :fx-kinds (:fx-kinds st)}
+                                             :fx-kinds (system/fx-owners (get-in st [:system :procs]))}
                                       :chan-opts {:in {:buf-or-n cfg/AGENT-BUF}}})
          (assoc-in [:view :agents id] (cond-> {:branch branch :status :spawning :task task :pid nil
                                                :forked-ms nil :mem-mb nil :evals [] :tests nil}
@@ -143,6 +143,16 @@
   [st o m]
   (let [{:keys [op p id]} m]
     (case op
+      ;; seon.root/apply!: the declaration again; only the units whose declaration changed are
+      ;; rebuilt, and update! keeps every proc it was handed unchanged (with its queue). The
+      ;; api performs the update!, so it cannot replace itself: its own unit stays as booted
+      ;; (changing the api's declaration takes a restart)
+      :apply (let [sys (:system st)
+                   built (system/build (:decl m) (:bindings m) (:parts sys))
+                   built (-> built (assoc-in [:parts [:proc :api]] (get-in sys [:parts [:proc :api]]))
+                             (assoc-in [:procs :api] (get-in sys [:procs :api])))
+                   r (flow/update! @(:graph st) {:procs (merge (:procs built) (:agent-procs st)) :conns (:conns built)})]
+               (reply! (assoc st :system built) p (select-keys r [:started :stopped :kept :lost :ms])))
       :spawn (let [opts (:opts m)
                    holder (and (:branch opts)
                                (some (fn [[aid a]] (when (and (= (:branch opts) (:branch a)) (not (:ended-ms a))
@@ -302,11 +312,14 @@
   flow/update! at its end (the graph, a live handle, comes in :graph). A closed :ext
   starts the flowing shutdown."
   {:malli/schema :seon.step/step-fn}
-  ([] {:params {:graph "a promise of this graph" :root-procs "the root procs' definitions" :root-conns "their conns"}
+  ([] {:params {:graph "a promise of this graph" :system "a promise of the built system (seon.system/build)"}
        :ins {:from-writer "writer answers and stats" :from-fs "fork-server events"} :outs {:to-fs "fork-server requests"}
        :workload :io
        :ping-map-fn (fn [st] {:agents (count (:agents st)) :pending (count (:pending st)) :closing (boolean (:closing st))})})
-  ([args] (assoc args :agents {} :agent-procs {} :pending {} :rid 0 :next-id 0
+  ;; :system is the root graph's declared procs and conns as built (seon.system), changed by
+  ;; seon.root/apply!; agents' procs join them at each update!
+  ([args] (assoc (dissoc args :system) :agents {} :agent-procs {} :pending {} :rid 0 :next-id 0
+                 :system @(:system args)
                  ::flow/in-ports {:ext (:ext args) :back (:back args)}
                  ::flow/out-ports {:to-writer (:to-writer args) :events (:events args)}))
   ([st tr]
@@ -325,7 +338,7 @@
                   st)
                 st))
          st (if (::update st)
-              (do (flow/update! @(:graph st) {:procs (merge @(:root-procs st) (:agent-procs st)) :conns (:root-conns st)})
+              (do (flow/update! @(:graph st) {:procs (merge (get-in st [:system :procs]) (:agent-procs st)) :conns (get-in st [:system :conns])})
                   (dissoc st ::update))
               st)]
      ;; the writer's in-port closes once the entrance is closed and every agent has ended
@@ -479,41 +492,20 @@
               :boot {:load-ms (lib/r2 load-ms) :program (assoc program :ms (lib/r2 program-ms))
                      :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :guarantees (if contract/on? :on :off)}}
         graph-p (promise)
-        root-conns [[[:writer :to-fork-server] [:fork-server :cmd]]
-                    [[:writer :to-api] [:api :from-writer]]
-                    [[:reconciler :to-api] [:api :from-writer]]
-                    [[:writer :main] [:reconciler :main]]
-                    [[:fork-server :to-api] [:api :from-fs]]
-                    [[:api :to-fs] [:fork-server :ext]]
-                    [[:writer :to-flusher] [:flusher :in]]]
         root-procs-p (promise)
-        ;; every effect kind's owner and lanes (seon.fx, lane FX1); any proc reaches an owner
-        ;; by its id [:fx/<kind> :in]; the model provider is only root's (the agents never hold the key)
-        fx-kinds (fx/kinds provider)
-        fx-procs (fx/procs fx-kinds (:back chans))
-        root-procs
-            {:api {:proc (flow/process #'api-proc)
-                   ;; room for every answer the writer can owe while the api is not reading
-                   :chan-opts {:from-writer {:buf-or-n (+ cfg/WRITER-BUF cfg/WRITER-BATCH cfg/API-WRITES)}}
-                           :args {:wake wake :view view :ext (:ext chans) :back (:back chans) :graph graph-p
-                                  :lease-base (pdb/lease-base conn)
-                                  :root-procs root-procs-p :root-conns root-conns
-                                  :fx-kinds (set (map #(keyword "fx" (name %)) (keys fx-kinds)))
-                                  :reg (:reg chans) :to-writer (:to-writer chans) :events events-in}}
-                     :writer {:proc (flow/process #'writer/writer-proc)
-                              :args {:conn conn :cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
-                                     :to-writer (:to-writer chans) :events events-in}}
-                     :fork-server {:proc (flow/process #'fs/fork-server-proc)
-                                   :args {:conn conn :pid pid :fd fd :server-ev (:server-ev chans)}}
-                     :flusher {:proc (flow/process #'writer/flusher-proc)
-                               :args {:to-writer (:to-writer chans) :flush-ms cfg/FLUSH-MS}}
-                     :reconciler {:proc (flow/process #'reconcile/reconciler-proc)
-                                  ;; the incremental reconciler reads every commit's datoms (k8s's
-                                  ;; watch): a bounded buffer, back-pressure on the writer if it lags
-                                  :chan-opts {:main {:buf-or-n cfg/RECONCILER-BUF}}
-                                  :args {:boot boot :judge (:judge chans)}}}
-        root-procs (merge root-procs fx-procs)
-        _ (deliver root-procs-p root-procs)
+        ;; what the declaration (resources/seon/system.edn) names as :bind/<name>
+        bindings (merge (select-keys chans [:ext :back :to-writer :server-ev :reg :judge])
+                        {:wake wake :view view :graph graph-p :lease-base (pdb/lease-base conn)
+                         :system root-procs-p :events events-in
+                         :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
+                         :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider
+                         :api-from-writer-buf (+ cfg/WRITER-BUF cfg/WRITER-BATCH cfg/API-WRITES)
+                         :flush-ms cfg/FLUSH-MS :reconciler-buf cfg/RECONCILER-BUF
+                         :model-lanes cfg/MODEL-LANES :model-rate (when (pos? cfg/MODEL-RATE) cfg/MODEL-RATE)})
+        decl (system/read-decl system/path)
+        built (system/build decl bindings nil)
+        root-procs (:procs built) root-conns (:conns built)
+        _ (deliver root-procs-p built)
         g (flow/create-flow {:procs root-procs :conns root-conns :stop-timeout-ms 10000})
         _ (deliver graph-p g)
         {root-errors :error-chan} (flow/start g)
@@ -532,6 +524,7 @@
                  (.setDaemon true) (.start))
         sys (merge chans {:cfg store-cfg :conn conn :graph g :wake wake :wake-r wake-r :t0 t0
                           :owned-store (when-not given path) :boot boot
+                          :bindings bindings
                           :events-in events-in :events-mult (a/mult events-in) :errors errors})
         sys (assoc sys :reader (start-reader! sys))]
     (flow/resume g)
@@ -627,6 +620,15 @@
 
 (defn- write! {:malli/schema [:=> [:cat :seon.root/sys :seon.writer/request] :seon.host/promise]}
   [sys req] (call! sys {:op :write :req req}))
+
+(defn apply!
+  "Re-read root's system declaration (seon.system/path, or the file at p) and change the
+  running graph to it: only the procs whose declaration changed are stopped, started or
+  rewired; the others keep running with their queued messages. A promise of Flow's
+  update! answer {:started :stopped :kept :lost :ms}."
+  {:malli/schema [:function [:=> [:cat :seon.root/sys] :seon.host/promise] [:=> [:cat :seon.root/sys :string] :seon.host/promise]]}
+  ([sys] (apply! sys system/path))
+  ([sys p] (call! sys {:op :apply :decl (system/read-decl p) :bindings (:bindings sys)})))
 
 (defn merge!
   "Root merges the agent's branch into main (seon.merge, lane M1); a promise of {:merged?
