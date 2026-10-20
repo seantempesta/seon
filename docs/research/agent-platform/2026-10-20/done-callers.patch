@@ -1,0 +1,484 @@
+diff --git a/resources/seon/tasks/seon.cluster.branch-evidence.edn b/resources/seon/tasks/seon.cluster.branch-evidence.edn
+index fb4a87275..a74fed4d9 100644
+--- a/resources/seon/tasks/seon.cluster.branch-evidence.edn
++++ b/resources/seon/tasks/seon.cluster.branch-evidence.edn
+@@ -13,6 +13,4 @@
+  #:seon.task{:name "a-reaching-red-is-proven-red-before-by-its-result-at-the-base-key"
+              :plan "(hybrid-test-results R9) `--branch-evidence` reads the same answer as the step, and the accepted list goes. `seon.cluster.branch-evidence/test-evidence` sorts reaching reds by `seon.test.runner/results-at` at the cluster head under `:interpreted` and passes the reached set once: red is `:seon.source/red-before` (proves, named in the trailer), green is `:seon.source/broken` (refuses), unknown names the form that runs its base. It runs nothing and needs no execution handle. Delete `seon.test.runner/red-at-current-reach?`, `--accept-red-before`, `bin/lane evidence ... -- TEST`, the accepted trailer, `:seon.source/accepted-red-before` and `verdict`'s `accepted`, converting the callers: `bin/lane`, `resources/seon/schemas/seon.source.edn`, `test/seon/cluster/branch_evidence_test.clj`, the must-read of `seon.turn/a-reached-test-unrun-or-red-on-main-does-not-block-done` and `seon.cluster.source/a-test-never-run-on-the-target-is-not-blamed-on-the-merge`, the intent in `resources/seon/tasks/seon.task.edn`, `docs/seon/schedule/cards/{RF-2,ROOT-AGENT}.md`, the evidence; the `seon.operator.edn` intent is R10's. Host-bound slice (`bin/`): `bin/lane commit` with `--test seon.cluster.branch-evidence-test`. Red proof: `seon.cluster.branch-evidence-test/a-branch-proves-its-files-only-with-current-green-evidence`: the red-before case asserts `:proven?` true with no accepted set, and a new `testing` shows green at H and red on the branch is in `:seon.source/broken` and refuses (HEAD: proven only when accepted). Cost: answer under 1 s over the prepl, no test run. Supersedes `seon.cluster.branch-evidence/the-branch-evidence-gate-rarely-sees-red-before-on-main`. Files: `src/seon/cluster/branch_evidence.clj`, `src/seon/test/runner.clj`, `bin/lane`, `resources/seon/schemas/seon.source.edn`, `test/seon/cluster/branch_evidence_test.clj`, `resources/seon/tasks/{seon.turn,seon.cluster.source,seon.task}.edn`. Read `seon.cluster.branch-evidence/verdict`, `seon.test.runner/latest-results`, `docs/research/agent-platform/2026-10-08/lane-templates/repl-slice.md`, `docs/research/agent-platform/2026-10-12/hybrid-test-results.md` and `docs/seon/schedule/agent-loop-ledger.md`."}
+  #:seon.task{:name "a-deleted-path-answers-an-exception-instead-of-evidence"
+-             :plan "`bin/lane commit writeback-fix --branch-evidence writeback-fix-e2e test/scratch/wbfe2e_test.clj` for a deleted file (2026-10-14) answered `Execution error (NoSuchFileException) ... /Users/sean/src/seon/test/scratch/wbfe2e_test.clj` from the live root's prepl and fell back to the throwaway check: `seon.cluster.branch-evidence/branch-evidence` reads every path's bytes. A deleted path is evidence that the branch declares none of the file's declarations. Read `seon.cluster.branch-evidence/branch-evidence`."}
+- #:seon.task{:name "a-function-only-platform-tests-reach-reads-as-unreached"
+-             :plan "`seon.cluster.branch-evidence/branch-evidence` reached each changed function through `seon.test/reaching`, which answers `:seon.fn/tests` only, so a function whose reaching tests are all platform tests reads as unreached and its file cannot commit by branch evidence. Lane cold-verdict (2026-10-19): `seon.cluster.registry/commit-step` changed on agent cold-verdict's branch; `my.test/check` ran its 8 reaching tests there (7 green, one red before), but `(seon.test/reaching-selection {:seon.db/db main :seon.test/changed ['seon.cluster.registry/first-parent-where]})` answers `:seon.fn/tests []` with 9 platform tests, and the gate answered `unreached [seon.cluster.registry/commit-step]`, proven false. Done when the gate judges a function by every test reaching it (`seon.test/reaching-selection`, its tests and its platform tests), each by the evidence its bucket accepts, and the fixture of a changed function reached only by platform tests is proven by their current green results on the branch. Read `seon.cluster.branch-evidence/branch-evidence` and `seon.test/reaching-selection`."}]
++             :plan "`bin/lane commit writeback-fix --branch-evidence writeback-fix-e2e test/scratch/wbfe2e_test.clj` for a deleted file (2026-10-14) answered `Execution error (NoSuchFileException) ... /Users/sean/src/seon/test/scratch/wbfe2e_test.clj` from the live root's prepl and fell back to the throwaway check: `seon.cluster.branch-evidence/branch-evidence` reads every path's bytes. A deleted path is evidence that the branch declares none of the file's declarations. Read `seon.cluster.branch-evidence/branch-evidence`."}]
+diff --git a/src/my/test.clj b/src/my/test.clj
+index b3329bf83..5c2a07adf 100644
+--- a/src/my/test.clj
++++ b/src/my/test.clj
+@@ -106,11 +106,8 @@
+                       (seon.test/changes context connection)))
+         tests (cond (seq tests) tests
+                     (:seon.error/at changed) changed
+-                    ;; a JVM loaded from my branch observes the change through platform callers too
+                     (seq changed) (let [selected (seon.test/reaching-selection {:seon.db/db tested :seon.test/changed (vec changed)})]
+-                                    (if (:seon.error/at selected)
+-                                      selected
+-                                      (into (vec (:seon.fn/tests selected)) (:seon.fn/platform-tests selected)))))]
++                                    (if (:seon.error/at selected) selected (:seon.fn/tests selected))))]
+     (cond
+       (:seon.error/at published) published
+       (nil? (:seon.cluster/name context))
+diff --git a/src/seon/cluster.clj b/src/seon/cluster.clj
+index 124e31276..2d4c6cd3e 100644
+--- a/src/seon/cluster.clj
++++ b/src/seon/cluster.clj
+@@ -2741,10 +2741,9 @@
+     (finally (d/release-materialized-db published-database)))))))
+ 
+ (defn- isolated-run
+-  "The merge's `deferred` members (`seon.cluster.source/merge-members`: the isolated ones and those reaching the
+-  change only through loaded platform callers), run on the candidate's own platform host over `files` (`proofs`,
+-  `seon.test.platform/check-files!`) and recorded on `execution`'s branch; nil when none was deferred or the gate
+-  wrote no file (its members then stay unrun, which the merge verdict refuses as unknown)."
++  "The merge's `deferred` members (`seon.cluster.source/merge-members`: the isolated ones), run on the candidate's
++  own platform host over `files` (`proofs`, `seon.test.platform/check-files!`) and recorded on `execution`'s branch;
++  nil when none was deferred or the gate wrote no file (its members then stay unrun, which the merge verdict refuses as unknown)."
+   {:malli/schema [:=> [:cat :seon.agent/context-source [:set :seon.test/sym] [:maybe [:vector :seon.source/proof]]]
+                   [:maybe [:or :seon.test.platform/answer :seon.error/value]]]}
+   [execution deferred files]
+@@ -2757,8 +2756,7 @@
+   "The merge's member list of `identities` (`seon.cluster.source/merge-members` over the candidate: the one list the
+   attempt's test step runs and the done rule judges), answered on `execution` and recorded on its connection, each
+   member reused by its reach digest. Every test `identities` names is a proof of the list, so it runs even when it
+-  did not change since the merge base. The members it defers (isolated, or observing the change only through loaded
+-  platform callers) run on the candidate's own platform host over `files` (`isolated-run`), their run as
++  did not change since the merge base. The members it defers (isolated) run on the candidate's own platform host over `files` (`isolated-run`), their run as
+   `:seon.source/platform-run`. No member, no request."
+   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.reconcile/adopt-identities [:maybe [:vector :seon.source/proof]]]
+                   [:map [:seon.test/passed? :boolean] [:seon.source/tally :string]
+diff --git a/src/seon/cluster/source.clj b/src/seon/cluster/source.clj
+index 35660f076..bdee1c863 100644
+--- a/src/seon/cluster/source.clj
++++ b/src/seon/cluster/source.clj
+@@ -840,18 +840,17 @@
+ (declare agent-owned)
+ 
+ (defn- contribution
+-  "The nearest-test contribution of one changed declaration: the tests its branch observes and those only a JVM
+-  loaded from the candidate observes (`seon.fn/selection-walk`)."
++  "The nearest-test contribution of one changed declaration: the tests its branch observes, but those declared long
++  (`seon.fn/selection-walk`)."
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity]
+-                  [:or [:map [:seon.fn/tests :seon.fn/tests] [:seon.fn/platform-tests :seon.fn/tests]
+-                        [:seon.fn/walked [:set :qualified-symbol]]]
++                  [:or [:map [:seon.fn/tests :seon.fn/tests] [:seon.fn/walked [:set :qualified-symbol]]]
+                    :seon.error/value]]}
+   [database identity]
+   (let [selected ((requiring-resolve 'seon.test/reaching-selection)
+                   {:seon.db/db database :seon.test/changed [identity]})
+         short-tests #(into [] (remove (fn [test] (:seon.test/long (db/pull database [:seon.test/long] [:seon.test/sym test])))) %)]
+     (if (:seon.error/at selected) selected
+-      (-> selected (update :seon.fn/tests short-tests) (update :seon.fn/platform-tests (fnil short-tests []))))))
++      (update selected :seon.fn/tests short-tests))))
+ 
+ (defn- remove-contribution
+   "Remove one declaration's contribution, retaining tests shared with other declarations."
+@@ -943,17 +942,12 @@
+                       named (into (set proofs) (keep (fn [[a v]] (when (= :seon.test/sym a) v))) changed)
+                       observed (when (set? reached)
+                                  (into reached (filter held?) named))
+-                      ;; reached only through loaded platform callers: the branch runs those compiled, so only a JVM
+-                      ;; loaded from the candidate observes the change, the merge's platform run
+-                      platform (into #{} (comp (mapcat (comp :seon.fn/platform-tests val)) (remove (set observed)))
+-                                     (::contributions folded))
+-                      members (when observed (into observed platform))
+                       isolated (when observed
+                                  ((requiring-resolve 'seon.test/host-exclusions) database nil true (vec (sort observed))))]
+                   (cond (:seon.error/at folded) folded
+                         (:seon.error/at isolated) isolated
+-                        :else {:seon.source/members members
+-                               :seon.source/deferred (into platform (map :seon.test/sym)
++                        :else {:seon.source/members observed
++                               :seon.source/deferred (into #{} (map :seon.test/sym)
+                                                            (concat (:seon.test/destructive-excluded isolated) (:seon.test/deferred isolated)))
+                                :seon.source/reaching (into {} (map (fn [[identity {tests :seon.fn/tests}]] [identity (set tests)]))
+                                                            (::contributions folded))})))]
+@@ -972,9 +966,8 @@
+   selection walks it (`seon.test/reaching`: a namespace seeds its members and the tests reading it as a file, a
+   schema the functions whose contracts name it) but those declared long; `:seon.source/reaching` holds each changed
+   declaration's own reaching tests, the fold's contribution of it. `:seon.source/deferred` holds the members
+-  that run only on a platform host: those `seon.test/host-exclusions` isolates, and those reaching a change only
+-  through loaded platform callers (`seon.fn/selection-walk`'s platform tests), which the branch runs compiled and
+-  so cannot observe it. The merge's platform run answers them; the step and the done rule leave them to it. Held by selection's content revisions (`seon.test/selection-revisions`), changed identities and proofs.
++  that run only on a platform host: those `seon.test/host-exclusions` isolates. The merge's platform run answers them;
++  the step and the done rule leave them to it. Held by selection's content revisions (`seon.test/selection-revisions`), changed identities and proofs.
+   Call-edge changes fold only the contributions whose walks read those targets; result and evaluation writes reuse the list.
+   Of `changed`, only what a test can observe since `database`'s merge base (`branch-merge-base`,
+   `seon.test/observable-changes`) seeds the walk: a docstring-only change selects no member; a value with no merge
+diff --git a/src/seon/fn.clj b/src/seon/fn.clj
+index 8f7afa317..cc5a1012f 100644
+--- a/src/seon/fn.clj
++++ b/src/seon/fn.clj
+@@ -2016,16 +2016,17 @@
+                 {} (distinct function-symbols))))))
+ 
+ (defn- source-callers
+-  "The function symbols among `entities` a walk goes on through. `:branch`: those a branch interprets from source,
+-  so they call its definitions: not host-bound and not loaded platform code (a file-derived function of a `src`
+-  namespace runs compiled on every branch and sees a change only after merge and reload). `:platform`: those a JVM
+-  loaded from the candidate runs with the change, all but host-bound ones. Throws a read refusal."
+-  {:malli/schema [:=> [:cat :seon.db/database-value [:enum :branch :platform] [:set :int]] [:set :qualified-symbol]]}
++  "The function symbols among `entities` a walk goes on through. `:selection`: those a branch runs with its change,
++  so the tests above them observe it: all but host-bound ones, which run compiled everywhere. `:overlay`: those the
++  overlay binds to interpret from stored source (`seon.sci.eval/interpret-overlay!`), which excludes besides a
++  file-derived function of a `src` namespace, bound analysed by the runtime instead (`seon.sci.eval/bind-analysed!`).
++  Throws a read refusal."
++  {:malli/schema [:=> [:cat :seon.db/database-value [:enum :overlay :selection] [:set :int]] [:set :qualified-symbol]]}
+   [database through entities]
+   (if (empty? entities)
+     #{}
+     (set (read-or-throw!
+-          (if (= :branch through)
++          (if (= :overlay through)
+             (db/q '[:find [?symbol ...] :in $ [?entity ...]
+                     :where [?entity :seon.fn/sym ?symbol] [?entity :seon.fn/host-bound? false]
+                     (not [?entity :seon.schema.admission/source :core] [?entity :seon.fn/file ?file]
+@@ -2053,8 +2054,8 @@
+                         (read! (db/q '[:find ?entity ?symbol :in $ ?attribute [?entity ...]
+                                        :where [?entity ?attribute ?symbol]]
+                                      database attribute (vec entities))))))
+-        ;; the callers SCI interprets on a branch: the walk's next frontier
+-        interpreted (partial source-callers database :branch)
++        ;; the callers the overlay interprets from source: the walk's next frontier
++        interpreted (partial source-callers database :overlay)
+         present (when-not depth
+                   (into #{} (keep :seon.fn/sym)
+                         (read! (db/pull-many database [:seon.fn/sym]
+@@ -2090,11 +2091,11 @@
+   "`closure-walk`'s depth walk of several `seeds` at once: each walked function carries the seeds it was reached
+   from, and a seed's lineage stops once it has walked `depth` levels and some level reached from it holds a test,
+   so each seed selects its own nearest tests in one walk (one caller seek per walked function and level, as
+-  `walk-callers`). `subject-datoms` are the `:seon.test/subject` datoms. Throws a read refusal."
+-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym] [:int {:min 1}] :seon.db/datoms
+-                       [:enum :branch :platform]]
++  `walk-callers`), through every caller a branch runs with the change (`source-callers` `:selection`).
++  `subject-datoms` are the `:seon.test/subject` datoms. Throws a read refusal."
++  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym] [:int {:min 1}] :seon.db/datoms]
+                   [:map [::tests :seon.fn/tests] [::walked [:set :qualified-symbol]]]]}
+-  [database seeds depth subject-datoms through]
++  [database seeds depth subject-datoms]
+   (let [read! read-or-throw!
+         pairs (fn [attribute entities]
+                 (if (empty? entities)
+@@ -2102,7 +2103,7 @@
+                   (read! (db/q '[:find ?entity ?symbol :in $ ?attribute [?entity ...]
+                                  :where [?entity ?attribute ?symbol]]
+                                database attribute (vec entities)))))
+-        interpreted (partial source-callers database through)
++        interpreted (partial source-callers database :selection)
+         subjects (reduce (fn [m {e :e v :v}] (update m v (fnil conj #{}) e)) {} subject-datoms)
+         seed-tests (into #{} (keep :seon.test/sym)
+                          (read! (db/pull-many database [:seon.test/sym] (mapv #(vector :seon.test/sym %) seeds))))
+@@ -2144,24 +2145,22 @@
+   it, whatever the other seeds reach: the selection is the union of each seed's,
+   so adding a seed never drops a test another seed selects. A test reaches by
+   calling a walked function, naming one as `:seon.test/subject` or being a seed.
+-  Declared invocation edges count; symbol mentions do not. Only the callers a
+-  branch interprets from source are walked and affected (`source-callers`): a
+-  host-bound caller and loaded platform code run compiled on every branch, so
+-  they and their callers call the compiled seed and cannot see the change there;
+-  the merge's platform run proves the tests above them (`selection-walk`).
++  Declared invocation edges count; symbol mentions do not. The depth walk goes on
++  through every caller a branch runs with the change; the complete walk only
++  through those the overlay interprets from source (`source-callers`).
+   Throws a read refusal."
+   {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym] [:maybe [:int {:min 1}]]]
+                   [:map [::affected {:optional true} :seon.fn/affected] [::tests :seon.fn/tests]]]}
+   [database seeds depth]
+   (let [subject-datoms (read-or-throw! (db/datoms database :aevt :seon.test/subject))]
+     (if depth
+-      (nearest-tests database (set seeds) depth subject-datoms :branch)
++      (nearest-tests database (set seeds) depth subject-datoms)
+       (walk-callers database seeds depth subject-datoms))))
+ 
+ (defn reverse-closure
+-  "The transitive callers of `seeds` a branch interprets from source (never a
+-  loaded platform caller), and the tests reaching them at any depth: the tests a
+-  branch runs interpreted for a change to `seeds` (`seon.fn/closure-walk`)."
++  "The transitive callers of `seeds` the overlay interprets from source (never a
++  loaded `src` caller, which the runtime binds analysed), and the tests reaching
++  them at any depth (`seon.fn/closure-walk`)."
+   {:malli/schema [:=> [:cat :seon.fn/gate-request]
+                   [:or :seon.fn/reverse-closure-result :seon.db/invalid-read-error]]}
+   [{database :seon.db/db seeds :seon.fn/seeds}]
+@@ -2172,40 +2171,27 @@
+       (if (db/read-refusal? (ex-data failure)) (ex-data failure) (throw failure)))))
+ 
+ (defn selection-walk
+-  "The nearest tests of `seeds` a branch observes (`::tests`: through callers it interprets from source), those a JVM
+-  loaded from the candidate observes besides (`::platform-tests`: through loaded platform callers too, proven by the
+-  merge's platform run), and the target names whose incoming edges either walk read."
++  "The nearest tests of `seeds` (`::tests`): those observing a change to them on a branch, through every caller it
++  runs with the change (`nearest-tests`), and the target names whose incoming edges the walk read (`::walked`)."
+   {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym]]
+-                  [:or [:map [::tests :seon.fn/tests] [::platform-tests :seon.fn/tests] [::walked [:set :qualified-symbol]]]
++                  [:or [:map [::tests :seon.fn/tests] [::walked [:set :qualified-symbol]]]
+                    :seon.db/invalid-read-error]]}
+   [database seeds]
+   (try
+-    (let [subjects (read-or-throw! (db/datoms database :aevt :seon.test/subject))
+-          branch (nearest-tests database seeds 2 subjects :branch)
+-          ;; only a `src` function has loaded platform callers: no walked one, no platform walk
+-          platform (when (seq (read-or-throw! (db/q '[:find [?symbol ...] :in $ [?symbol ...]
+-                                                     :where [?f :seon.fn/sym ?symbol] [?f :seon.fn/ns ?n]
+-                                                     [?n :seon.fn/file ?file] [?file :seon.fn.file/relative-root "src"]]
+-                                                   database (vec (::walked branch)))))
+-                     (nearest-tests database seeds 2 subjects :platform))
+-          observed (set (::tests branch))]
+-      {::tests (::tests branch)
+-       ::platform-tests (into [] (remove observed) (::tests platform))
+-       ::walked (into (::walked branch) (::walked platform))})
++    (nearest-tests database seeds 2 (read-or-throw! (db/datoms database :aevt :seon.test/subject)))
+     (catch clojure.lang.ExceptionInfo failure
+       (if (db/read-refusal? (ex-data failure)) (ex-data failure) (throw failure)))))
+ 
+ (defn- reaching-tests
+   "The tests the walk of `seeds` selects: those calling a seed or a caller within
+-  the nearest level holding a test (`seon.fn/closure-walk`), whether a branch or
+-  only the platform run observes them (`selection-walk`)."
++  the nearest level holding a test (`selection-walk`)."
+   {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym]]
+                   [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
+   [database seeds]
+   (let [selected (selection-walk database seeds)]
+     (if (:seon.db/invalid-read selected)
+       selected
+-      (vec (sort (into (::tests selected) (::platform-tests selected)))))))
++      (::tests selected))))
+ 
+ (defn gate-sets
+   "Select the tests exercising changed definitions (`seon.fn/reverse-closure`).
+diff --git a/test/seon/cluster/source_test.clj b/test/seon/cluster/source_test.clj
+index 8039e22d5..85d86f0d9 100644
+--- a/test/seon/cluster/source_test.clj
++++ b/test/seon/cluster/source_test.clj
+@@ -653,20 +653,17 @@
+                 ["executed red: a red test" [(recorded 'tq.rv-test/proof false)] [:seon.source/red-test-error]]]]
+          (is (= expected (mapv :seon.error/type (source/done-refusals branch (assoc judged :seon.source/results results)))) row))))))
+ 
+-(deftest a-hub-change-defers-the-tests-above-its-src-callers-to-the-platform-run
+-  ;; A branch runs `seon.db/as-of-key`'s src callers compiled (the loaded src
+-  ;; program is the platform), so the step runs its direct test and the merge's
+-  ;; platform run the tests above those callers.
++(deftest a-hub-change-runs-the-tests-above-its-src-callers-on-the-branch
++  ;; A branch runs `seon.db/as-of-key`'s loaded src callers with its change, so
++  ;; the step runs the tests above them as well as its direct test.
+   (test-support/with-database
+    (fn [connection]
+      ;; the members of a behavior change (`merge-members` after its merge-base filter)
+      (let [listed (#'source/members-of (db/db connection) #{[:seon.fn/sym 'seon.db/as-of-key]} #{})
+            direct 'seon.db-test/only-an-as-of-view-has-an-as-of-key
+-           deferred (:seon.source/deferred listed)]
+-       (is (contains? (:seon.source/members listed) direct))
+-       (is (not (contains? deferred direct)) "the step runs the direct test on the branch")
+-       (is (< 100 (count deferred)) "the platform run takes the tests above the src callers")
+-       (is (every? (:seon.source/members listed) deferred) "a deferred test is still a member the merge proves")))))
++           on-branch (into #{} (remove (:seon.source/deferred listed)) (:seon.source/members listed))]
++       (is (contains? on-branch direct) "the step runs the direct test on the branch")
++       (is (< 100 (count on-branch)) "the step runs the tests above the src callers on the branch")))))
+ 
+ (deftest member-fold-equals-the-full-merge-list
+   (test-support/with-database
+diff --git a/test/seon/competency_grade_test.clj b/test/seon/competency_grade_test.clj
+index 3ad9b4792..4fe6703c7 100644
+--- a/test/seon/competency_grade_test.clj
++++ b/test/seon/competency_grade_test.clj
+@@ -9,6 +9,7 @@
+             [seon.competency :as competency]
+             [seon.config :as config]
+             [seon.db :as db]
++            [seon.fixture.loaded-chain]
+             [seon.flow :as flow]
+             [seon.mine :as mine]
+             [seon.batch]
+@@ -67,16 +68,32 @@
+    :seon.competency/task {:seon.task/ns 'bench.fixture :seon.task/name "prove-it"
+                           :seon.task/plan "Make `bench.fixture-proofs/proves-it` green."
+                           :seon.task/proofs #{'bench.fixture-proofs/proves-it}}
+-   :seon.competency/oracle "(in-ns 'bench.fixture-proofs)\n(clojure.test/deftest proves-it (clojure.test/is (= 1 1)))"})
++   :seon.competency/oracle "(in-ns 'bench.fixture-proofs)\n(clojure.test/deftest proves-it (clojure.test/is (= 1 1)))"
++   ::proof-ns 'bench.fixture-proofs
++   ::red-proof "(clojure.test/deftest proves-it (clojure.test/is (= 1 2)))\n"})
++
++(def ^:private loaded-chain-task
++  "A bench entry whose unchanged red proof calls the loaded `seon.fixture.loaded-chain/f`; the oracle changes only its
++  helper `h`, two loaded callers below the proof."
++  {:seon.competency/id :loaded-chain
++   :seon.competency/split :train
++   :seon.competency/task {:seon.task/ns 'bench.fixture :seon.task/name "fix-the-helper"
++                          :seon.task/plan "Make `bench.loaded-chain/proves-it` green."
++                          :seon.task/proofs #{'bench.loaded-chain/proves-it}}
++   :seon.competency/oracle "(in-ns 'seon.fixture.loaded-chain)\n(defn h {:malli/schema [:=> [:cat] :int]} [] 2)"
++   ::proof-ns 'bench.loaded-chain
++   ::red-proof "(clojure.test/deftest proves-it (clojure.test/is (= 2 (seon.fixture.loaded-chain/f))))\n"})
+ 
+ (defn launched
+-  "The grades of `runs` fixture-model runs of `fixture-task` launched on `handle`'s cluster, its proof defined red
+-  first, the model answering each request with `answer` (default: its oracle), while a thread runs db<->flow passes
+-  as root's proc would on each wake."
++  "The grades of `runs` fixture-model runs of `task` (default `fixture-task`) launched on `handle`'s cluster, its
++  proof defined red first, the model answering each request with `answer` (default: its oracle), while a thread runs
++  db<->flow passes as root's proc would on each wake."
+   {:malli/schema [:function [:=> [:cat :seon.agent/context-source :seon.db/connection pos-int?] [:vector :map]]
+-                  [:=> [:cat :seon.agent/context-source :seon.db/connection pos-int? [:fn ifn?]] [:vector :map]]]}
++                  [:=> [:cat :seon.agent/context-source :seon.db/connection pos-int? [:fn ifn?]] [:vector :map]]
++                  [:=> [:cat :seon.agent/context-source :seon.db/connection pos-int? [:fn ifn?] :map] [:vector :map]]]}
+   ([handle connection runs] (launched handle connection runs (constantly (:seon.competency/oracle fixture-task))))
+-  ([handle connection runs answer]
++  ([handle connection runs answer] (launched handle connection runs answer fixture-task))
++  ([handle connection runs answer task]
+    (support/transacted! connection (support/agent-tx (db/db connection) "bench-author" 'user))
+    (support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name (:seon.cluster/name handle)
+                                   :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
+@@ -84,8 +101,7 @@
+                                   :seon.batch/sink (seon.batch/sink)
+                                   :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                   :seon.agent/id "bench-author"})
+-                    'bench.fixture-proofs
+-                    "(clojure.test/deftest proves-it (clojure.test/is (= 1 2)))\n")
++                    (::proof-ns task) (::red-proof task))
+    (support/with-provider
+     (atom []) answer
+     (fn [server]
+@@ -96,7 +112,7 @@
+         (try
+           (competency/launch!
+            {:seon.db/connection connection :seon.store/store (agent/handle-store handle)
+-            :seon.competency/tasks [fixture-task]
++            :seon.competency/tasks [(dissoc task ::proof-ns ::red-proof)]
+             :seon.competency/variants
+             [{:seon.competency/variant :fixture
+               :seon.chain/config (assoc (support/provider-config server)
+@@ -135,6 +151,25 @@
+               (doseq [branch (keep :seon.chain/branch grades)]
+                 (release-chain! (:seon.agent/routing handle) (agent/handle-store handle) branch))))))))))
+ 
++(deftest ^{:seon.test/long "One fixture-model chain run: its prove pass, one model call changing a loaded helper and its proof step over db<->flow passes."
++           :seon.test/long-ms 20000}
++  a-chain-fixes-a-loaded-helper-and-proves-its-unchanged-caller
++  ;; The proof calls loaded `f`, which calls loaded `g`, which calls the changed `h`: the branch runs both callers with
++  ;; the change, so the proof observes it there and the done rule counts it as the helper's reaching test.
++  (support/with-database
++   (fn [connection]
++     (with-root
++      connection
++      (fn [handle]
++        (let [grades (launched handle connection 1 (constantly (:seon.competency/oracle loaded-chain-task)) loaded-chain-task)]
++          (try
++            (is (= [{:seon.competency/end :done :seon.competency/green? true :seon.competency/model-calls 1}]
++                   (mapv #(select-keys % [:seon.competency/end :seon.competency/green? :seon.competency/model-calls]) grades))
++                "the task is done after the one model call that changed the helper")
++            (finally
++              (doseq [branch (keep :seon.chain/branch grades)]
++                (release-chain! (:seon.agent/routing handle) (agent/handle-store handle) branch))))))))))
++
+ (deftest ^{:seon.test/long "One fixture-model chain run as the bench launches it, then root's passes after its done."
+            :seon.test/long-ms 20000}
+   a-bench-chain-ends-done-unmerged-with-its-branch-kept
+diff --git a/test/seon/cost_estimate_test.clj b/test/seon/cost_estimate_test.clj
+index 83afcd4b1..5039aab66 100644
+--- a/test/seon/cost_estimate_test.clj
++++ b/test/seon/cost_estimate_test.clj
+@@ -228,9 +228,8 @@
+   {:malli/schema [:=> [:cat :seon.db/connection] :map]}
+   [connection]
+   (let [database (db/db connection)
+-        ;; the merge's members: what the branch observes and the platform run's
+-        selected (seon-test/reaching-selection {:seon.db/db database :seon.test/changed ['seon.db/as-of-key]})
+-        members (into (vec (:seon.fn/tests selected)) (:seon.fn/platform-tests selected))
++        ;; the merge's members: the tests a branch observes the change through
++        members (:seon.fn/tests (seon-test/reaching-selection {:seon.db/db database :seon.test/changed ['seon.db/as-of-key]}))
+         _ (cache/evict-kinds! (into #{} (remove #(str/starts-with? (namespace %) "seon.sci"))
+                                     (keys (:seon.cache/kinds (cache/status)))))
+         measured (measured-call #(seon-test/stale database members))]
+diff --git a/test/seon/fn_test.clj b/test/seon/fn_test.clj
+index bba095f9b..8b4ef37f1 100644
+--- a/test/seon/fn_test.clj
++++ b/test/seon/fn_test.clj
+@@ -1243,22 +1243,20 @@
+                (seon.fn/gate-sets {:seon.db/db @connection :seon.fn/seeds seeds}))
+             "selection follows the same walk")))))
+ 
+-(deftest a-hub-change-selects-its-direct-test-on-the-branch-and-the-rest-for-the-platform
+-  ;; The loaded src program is the platform (owner, 2026-10-18): a branch runs
+-  ;; `seon.db/as-of-key`'s src callers compiled, so only the test calling it
+-  ;; directly observes a change there; the tests above its src callers are the
+-  ;; merge's platform run.
++(deftest a-hub-change-selects-the-tests-above-its-src-callers
++  ;; A branch runs `seon.db/as-of-key`'s loaded src callers with its change
++  ;; (bound analysed by the runtime, never re-rooted by the overlay), so the
++  ;; tests above them observe it there beside its direct test.
+   (test-support/with-database
+     (fn [connection]
+       (let [database (db/db connection)
+             seeds #{'seon.db/as-of-key}
+             selected (seon.fn/selection-walk database seeds)]
+         (is (= #{'seon.db/as-of-key} (:seon.fn/affected (seon.fn/reverse-closure {:seon.db/db database :seon.fn/seeds seeds})))
+-            "no src caller is in the closure a branch interprets")
+-        (is (= ['seon.db-test/only-an-as-of-view-has-an-as-of-key] (:seon.fn/tests selected))
++            "no src caller is in the closure the overlay interprets from source")
++        (is (some #{'seon.db-test/only-an-as-of-view-has-an-as-of-key} (:seon.fn/tests selected))
+             "the branch observes the change through its direct test")
+-        (is (< 100 (count (:seon.fn/platform-tests selected))) "the platform run takes the tests above its src callers")
+-        (is (not-any? (set (:seon.fn/tests selected)) (:seon.fn/platform-tests selected)))))))
++        (is (< 100 (count (:seon.fn/tests selected))) "and through the tests above its src callers")))))
+ 
+ ;; Class: a program attribute is a stored attribute. The contract-finding report
+ ;; entity declared a program partition, so `program/program-attributes` named four
+diff --git a/test/seon/sci/branch_execution_test.clj b/test/seon/sci/branch_execution_test.clj
+index 0ba832ded..26727c5a1 100644
+--- a/test/seon/sci/branch_execution_test.clj
++++ b/test/seon/sci/branch_execution_test.clj
+@@ -661,11 +661,12 @@
+ 
+ (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting one changed definition's reverse closure (24 functions on default)."
+            :seon.test/long-ms 8000}
+-  a-file-test-reaching-a-change-only-through-src-callers-is-left-to-the-platform-run
++  a-file-test-reaching-a-change-only-through-src-callers-is-selected-on-the-branch
+   ;; seon.ref-test/a-span-of-a-name-and-more-words-is-prose calls
+   ;; seon.ref/references -> seon.ref/candidate -> seon.ref/span-candidate, all
+-  ;; loaded src code: on the branch that chain runs compiled, so the test cannot
+-  ;; observe the change there; the merge's platform run proves it.
++  ;; loaded src code: the branch runs that chain with the change (bound
++  ;; analysed by the runtime, not interpreted by the overlay), so the test
++  ;; observes it there.
+   (support/with-database
+    (fn [connection]
+      (let [changed 'seon.ref/span-candidate
+@@ -677,12 +678,10 @@
+               (support/replacement-tx before [:seon.fn/sym changed] source
+                                       {:seon.schema.admission/source :agent}))
+            ctx (eval/base-ctx (db/db connection))]
+-       (is (= [] (:seon.fn/tests (functions/selection-walk before #{changed})))
+-           "no test calls it directly or through source the branch interprets")
+        (is (not (eval/interpreted-test? ctx proof))
+-           "the file test three src calls from the change is not the branch's to run")
+-       (is (some #{proof} (:seon.fn/platform-tests (functions/selection-walk (db/db connection) #{changed})))
+-           "it is selected for the platform run")))))
++           "the overlay does not interpret the file test three src calls from the change")
++       (is (some #{proof} (:seon.fn/tests (functions/selection-walk (db/db connection) #{changed})))
++           "it is selected on the branch")))))
+ 
+ (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program and one interpretation of the closure of seon.db/as-of-key."
+            :seon.test/long-ms 12000}
+diff --git a/src/seon/fixture/loaded_chain.clj b/src/seon/fixture/loaded_chain.clj
+new file mode 100644
+index 000000000..1772b4b49
+--- /dev/null
++++ b/src/seon/fixture/loaded_chain.clj
+@@ -0,0 +1,6 @@
++(ns seon.fixture.loaded-chain
++  "A loaded chain `f` -> `g` -> `h`: a branch change to `h` reaches its unchanged callers, which a branch runs with it.")
++
++(defn h "The leaf." {:malli/schema [:=> [:cat] :int]} [] 1)
++(defn g "The middle caller." {:malli/schema [:=> [:cat] :int]} [] (h))
++(defn f "The top caller." {:malli/schema [:=> [:cat] :int]} [] (g))
