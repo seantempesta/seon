@@ -98,9 +98,11 @@
      (let [text (agent-text "(help)" agent-id running)
            lines (str/split-lines text)
            forms (mapcat taught-forms lines)
-           heads (distinct (remove special-symbol? (map first forms)))
+           ;; a keyword applied as a function names no Var; a qualified head names an installed Var once its
+           ;; namespace is required, as help teaches for seon.test-support
+           heads (distinct (remove special-symbol? (filter symbol? (map first forms))))
            resolved (support/reply
-                     (agent-text (pr-str (list 'mapv '(fn [s] [s (some? (resolve s))])
+                     (agent-text (pr-str (list 'mapv '(fn [s] [s (some? (if (qualified-symbol? s) (do (require (symbol (namespace s))) (resolve s)) (resolve s)))])
                                                (list 'quote (vec heads))))
                                  agent-id running))
            ;; a key the agent's own block shows is no lesson but the name of what it reads
@@ -108,6 +110,7 @@
                       :seon.repl/value (tree-seq coll? seq) (filter qualified-keyword?) (map str) set)
            lessons (reduce #(str/replace %1 %2 "") text (sort-by (comp - count) shown))]
        (is (seq forms) "help teaches forms")
+       (is (= (count heads) (count (:seon.repl/value resolved))) "every taught head was looked up")
        (is (every? second (:seon.repl/value resolved)) "every taught head resolves at the agent's REPL")
        (is (contains? shown ":my.agent/turns-left") "the block shows the turns left")
        (is (not (re-find #"my\.agent/|my\.test/check|turns-left|NEXT turn" lessons))

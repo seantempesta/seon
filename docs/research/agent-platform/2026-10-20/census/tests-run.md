@@ -75,6 +75,32 @@ Proofs = distinct cited tests (wildcards expanded). A test cited by two ideas co
 | 19 | Dials are facts; the shipped default is one decision per attribute | 7 | 6 | 1 | 0 | 0 | 1 not green |
 | 20 | Datahike attributes are derived from the Malli entity schemas | 56 | 54 | 1 | 0 | 0 | 2 not green |
 
+## Per idea after spec-reds
+
+[spec-reds.md](spec-reds.md) judged the 12 reds:
+- 5 were fixed or rewritten green and 3 were rewritten green: config, help, conflicts, chain-of-one, broken-tests and the two MCP tests.
+- 4 stay red as valid spec that Seon fails: the warm-context cost, the strict cost table and the forgiving reader's two.
+- 1 was retired: the SCI `test-vars` request-view test.
+
+The rewritten and fixed vars were verified green on the candidate (check run 0831f2e66e03). The table above is the census run at bc1a20635 and is not edited. The rows below are only the ideas whose counts moved:
+
+| # | proofs | meaningful | red (all `:spec-holds`) | timeout | flaky | verdict |
+|---|---|---|---|---|---|---|
+| 1 | 11 | 10 | 1 | 0 | 0 | 1 red spec: warm build cost |
+| 2 | 9 | 9 | 0 | 0 | 0 | all meaningful (1 retired) |
+| 3 | 8 | 8 | 0 | 0 | 0 | all meaningful |
+| 4 | 9 | 9 | 0 | 0 | 0 | all meaningful (1 renamed) |
+| 9 | 8 | 8 | 0 | 0 | 0 | all meaningful |
+| 13 | 12 | 12 | 0 | 0 | 0 | all meaningful |
+| 19 | 7 | 7 | 0 | 0 | 0 | all meaningful |
+| 20 | 56 | 55 | 0 | 0 | 0 | 1 not green: `ns-test/name` in tests-idea-map.edn is a placeholder, not a test |
+
+Unchanged:
+- #8 is 7 of 9 meaningful. Its 2 reds are the reader's idempotence law and its example table.
+- #16 is 3 of 6. Its red is the strict cost table, plus 2 flaky.
+- #12 and #14 each carry one timeout.
+- #7 carries one flaky.
+
 ## Ideas lacking a meaningful proof
 
 Ideas with no cited deftest at all (their spec lives in prose and must be written as proofs before porting): none.

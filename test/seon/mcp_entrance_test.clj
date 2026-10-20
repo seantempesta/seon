@@ -234,7 +234,7 @@
        ;; what happens before it runs
        (doseq [[label code about before]
                [["ordinary" "(+ 1 2)\n[nil false \"\"]" :seon.repl/value]
-                ["def keeps its note" "(def held-value 7)" :seon.repl/note]
+                ["def answers its Var" "(def held-value 7)" :seon.repl/value]
                 ["declared renderer" "#'clojure.core/inc" :seon.repl/value]
                 ["in-ns" (str "(in-ns 'scratch.held-reply)\n(in-ns '" agent-ns ")") :seon.repl/ns]
                 ["set! print-length" "(set! *print-length* 2)\n(range 5)" :seon.repl/value]
@@ -258,7 +258,7 @@
                                   :where [?run :seon.turn/id ?id] [?receipt :seon.cluster.eval/run ?run]
                                   [?receipt :seon.eval/print-length ?length]]
                                 (db/db connection) (latest-run-in (db/db connection) agent-id))))))
-       (testing "a settlement the writer refused saved no receipt: the reply is its refusal alone"
+       (testing "a settlement the writer refused saved no receipt: each value still returns, the refusal beside it"
          ;; the form closes its own open run, so the settlement's receipts
          ;; refuse and the refusal's guarded receipts are skipped at the writer
          (let [code (str
@@ -271,24 +271,33 @@
                saved (stored-responses connection agent-id (latest-run-in (db/db connection) agent-id))]
            (is (every? nil? saved) "the run stored no terminal receipt")
            (is (true? (get result "isError")))
-           (is (= 1 (count (support/mcp-texts result))) "only the refusal is answered, never an unsaved value")))))))
+           (let [replies (map support/reply (support/mcp-texts result))
+                 values (filter :seon.repl/result replies)]
+             (is (= 2 (count values)) "the path is total: both forms' values return")
+             (is (every? (fn [value] (some #(= :seon.db.write/error (:seon.error/type %)) (:seon.repl/diagnostics value)))
+                         values)
+                 "each value carries the refused recording beside it")
+             (is (some #(= :seon.db.write/validation-refusal (:seon.error/type %)) replies)
+                 "and the writer's refusal is answered as data"))))))))
 
-(deftest a-jvm-reply-keeps-its-duration-after-an-earlier-run
+(deftest a-reply-keeps-its-duration-after-an-earlier-run
+  ;; A second run's reply carries its time as the first one's does, and it is what the agent's next context reads.
+  ;; (Its JVM-mode form went stale when host evaluation became root's alone, `seon.turn.batch/jvm-evaluate`.)
   (support/with-running-agent
    (fn [running agent-id connection]
-     (answer "eval_clj" {"code" "(+ 1 1)" "agent" agent-id "cluster" running "mode" "jvm"})
-     (let [result (answer "eval_clj" {"code" "(+ 1 2)" "agent" agent-id "cluster" running "mode" "jvm"})
+     (answer "eval_clj" {"code" "(+ 1 1)" "agent" agent-id "cluster" running})
+     (let [result (answer "eval_clj" {"code" "(+ 1 2)" "agent" agent-id "cluster" running})
            text (get-in result ["content" 0 "text"])
            data (support/reply text)
            run (latest-run-in (db/db connection) agent-id)]
        (is (false? (get result "isError")))
        (is (= 3 (:seon.repl/value data)))
        (is (contains? data :seon.repl/ms)
-           "a second JVM run's reply carries its time, as the first one's does")
+           "a second run's reply carries its time, as the first one's does")
        (is (= :call (:seon.turn.work/situation (db/pull (db/db connection) [:seon.turn.work/situation] [:seon.turn/id run])))
-           "a JVM run is recorded with the call situation an SCI run carries")
+           "the run is recorded with the call situation")
        (is (= [text] (stored-responses connection agent-id run))
-           "the JVM reply is what the agent's next context reads")))))
+           "the reply is what the agent's next context reads")))))
 
 (deftest only-a-run-that-changed-loaded-code-signals-pages
   (let [signal (fn [body]

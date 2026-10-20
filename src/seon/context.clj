@@ -269,11 +269,23 @@
   [value]
   (if (symbol? value) (list 'quote value) value))
 
+(defn- code-read
+  "Must-read `entry` as the agent reads it: a reference at its code level is the value of the form it carries
+  (`my.program/source` of its name, at its `:seon.ref/at` when it has one) beside its name and level, or that read's
+  error; any other entry is itself."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]
+                  [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
+  [database {reference :seon.ref/name at :seon.ref/at [operation] :seon.render/operations :as entry}]
+  (if (and (= :code (:seon.ref/level entry)) (= 'my.program/source (first operation)))
+    (let [sourced (my.program/source database (if at {:seon.ref/name reference :seon.ref/at at} reference))]
+      (if (:seon.error/at sourced) sourced (merge sourced (dissoc entry :seon.render/operations))))
+    entry))
+
 (defn conflicts
   "The conflicts section of branch `database`: each unresolved unmerged entry it holds (`seon.cluster.source/unmerged`,
   git's unmerged index entries) by its declaration's name, the commits its versions are read at, main's version
   (ours on a merge branch) and the source's (theirs) and base, each a reference at its code
-  (`seon.cluster.source/versions`) so its source shows, and the form that keeps ours (`my.program/resolve!`); defining
+  (`seon.cluster.source/versions`) read at its code (`code-read`) so its source shows, and the form that keeps ours (`my.program/resolve!`); defining
   the declaration resolves it too. A resolved entry is gone from the next value's section. Held by the value's commit
   (`seon.cache`), so a turn's block reads derive it once; nil when it holds none.
 
@@ -286,7 +298,7 @@
     (let [derive #(not-empty
                    (mapv (fn [{n :seon.unmerged/name :as entry}]
                            (merge (select-keys entry [:seon.unmerged/name :seon.unmerged/base-commit :seon.unmerged/theirs-commit])
-                                  {:seon.unmerged/versions (source/versions database entry)
+                                  {:seon.unmerged/versions (update-vals (source/versions database entry) (partial code-read database))
                                    :seon.render/operations [(list 'my.program/resolve! (shown-name n))]}))
                          (source/unmerged database)))]
       (cache/lookup ::conflicts (db/commit-id database)
@@ -843,18 +855,6 @@
       (into #{} (filter #(let [source (:seon.fn/source (db/pull start [:seon.fn/source] [:seon.fn/sym %]))]
                            (and (string? source) (<= (tokens/estimate source) limit))))
             owners))))
-
-(defn- code-read
-  "Must-read `entry` as the agent reads it: a reference at its code level is the value of the form it carries
-  (`my.program/source` of its name, at its `:seon.ref/at` when it has one) beside its name and level, or that read's
-  error; any other entry is itself."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]
-                  [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
-  [database {reference :seon.ref/name at :seon.ref/at [operation] :seon.render/operations :as entry}]
-  (if (and (= :code (:seon.ref/level entry)) (= 'my.program/source (first operation)))
-    (let [sourced (my.program/source database (if at {:seon.ref/name reference :seon.ref/at at} reference))]
-      (if (:seon.error/at sourced) sourced (merge sourced (dissoc entry :seon.render/operations))))
-    entry))
 
 (defn- must-reads
   "The held task's references other than its proofs, read on the attempt's starting value `start`

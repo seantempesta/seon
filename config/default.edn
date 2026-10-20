@@ -240,6 +240,16 @@
  :seon.config.fn.cost/min-total-us 1000
  :seon.config.fn.cost/hysteresis 1.41
 
+ ; The default cost contract k x N + c a definition's self steps, reads and allocated bytes are judged
+ ; against (seon.profile/pain), and one outermost call in size-period records its touched size N.
+ :seon.config.fn.cost/size-period 64
+ :seon.config.fn.cost/steps-k 8.0
+ :seon.config.fn.cost/steps-c 32.0
+ :seon.config.fn.cost/reads-k 2.0
+ :seon.config.fn.cost/reads-c 4.0
+ :seon.config.fn.cost/bytes-k 4096.0
+ :seon.config.fn.cost/bytes-c 65536.0
+
  ; EVERY TURN AND ORDERLY AGENT STOP WAIT ON THE TURN'S OWN COMPLETION EVENTS.
  ; This is the loud last-resort bound when the permit, completion, or
  ; turn-stopped event never arrives; firing is a core-fault report, never

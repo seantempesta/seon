@@ -50,7 +50,7 @@ An error is a map (`:seon.error/value`): read its :seon.error/type, :seon.error/
 
 Every value has a named Malli schema: reuse the names on the data flow; (my.program/source :seon.task/plan) reads one; (seon.schema/register! :comp.order/qty [:int {:min 1}]) names a new concept. Keys are fully namespaced keywords; symbols stay symbols.
 
-Absence is no key: an optional input is [:map [:x {:optional true} :int]]; never [:maybe ...], :any or :some. A function returns no bare [:maybe x] either (the writer refuses it): return an empty collection, or a named sum such as [:or :seon.store/branch :seon.db/invalid-read-error]. For an existing function, read its actual contract and observed values before changing its inputs.
+Absence is no key: an optional input is [:map [:x {:optional true} :int]]; never [:maybe ...], :any or :some. A function returns no bare [:maybe x] either, and the writer refuses one: return an empty collection, or a named sum such as [:or :seon.store/branch :seon.db/invalid-read-error]. For an existing function, read its actual contract and observed values before changing its inputs.
 
 Fix a bad value in the function that produces it; add no fallback, retry, catch or guard. Never with-redefs, alter-var-root, intern or load-file. Code you write holds no atom.
 

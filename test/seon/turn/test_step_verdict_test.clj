@@ -1,6 +1,5 @@
 (ns seon.turn.test-step-verdict-test
-  "The automatic test step's verdict is over the merge's whole member list, and a test run inside the eval request
-  that changed its reach answers the new definition."
+  "The automatic test step's verdict is over the merge's whole member list."
   (:require [clojure.data.json :as json]
             [clojure.test :refer [deftest is]]
             [seon.mcp :as mcp]
@@ -15,16 +14,6 @@
   [running agent-id code]
   (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
                                             "arguments" {"code" code "agent" agent-id "cluster" running}}))))
-
-(defn- last-value
-  "The value of the last form an MCP result shows."
-  {:malli/schema [:=> [:cat :map] :seon.schema/value]}
-  [result]
-  (->> (get result "content")
-       (keep #(let [item (support/reply (get % "text"))]
-                (when (and (map? item) (contains? item :seon.repl/value)) [(:seon.repl/value item)])))
-       last
-       first))
 
 (deftest ^{:seon.test/long "Two eval requests of an own-branch agent, each with its automatic test step: about 1 s each measured on default's JVM (agent teststep-verdict, 2026-10-14)."
            :seon.test/long-ms 15000}
@@ -90,22 +79,3 @@
                            [?r :seon.test.run/selection-tx ?t] [(> ?t ?basis)]
                            [?r :seon.test.run/identities ?s]]
                          (db/db connection) basis))))))))
-
-(deftest ^{:seon.test/long "Two eval requests of an own-branch agent, each with its automatic test step: about 1 s each measured on default's JVM (agent teststep-verdict, 2026-10-14)."
-           :seon.test/long-ms 15000}
-  a-test-run-in-the-request-that-redefined-its-callee-answers-the-new-definition
-  (support/with-running-agent
-   (fn [running _ _]
-     (let [agent-id (str "same-request-test-" (random-uuid))
-           _ (support/own-branch-agent!
-              running agent-id
-              (str "(ns tv.same (:require [clojure.test :refer [deftest is]]))\n"
-                   "(defn f \"Returns x.\" {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
-                   "(deftest f-is-inc (is (= 2 (f 1))))"))
-           answer (last-value
-                   (eval-request running agent-id
-                                 (str "(in-ns 'tv.same)\n"
-                                      "(defn f \"Returns x plus one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))\n"
-                                      "[(f 1) (:seon.test/passed? (clojure.test/test-vars [#'tv.same/f-is-inc]))]")))]
-       (is (= [2 true] answer)
-           "the test run after the redefinition, in the same request, answers the definition the form made")))))

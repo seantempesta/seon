@@ -2,6 +2,7 @@
   "Contract proof for context derivation between runs."
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
+            [my.task]
             [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
             [seon.cluster.agent :as agent]
@@ -286,8 +287,11 @@
                                              "(deftest edge (is (= 1 2) \"the edge\"))"))
            step (context/step-verdict (db/with (db/db connection) [{:seon.chain/first only :seon.chain/branch branch}])
                                       agent-id)]
-       (is (= [['seon.cluster.source/done-refusals :seon.source/red-test-error ['tq.c1-test/edge]]]
-              (mapv (juxt :seon.error/operation :seon.error/type #(mapv :seon.test/sym (:seon.source/red-tests %)))
+       ;; the done rule also reads the merge's own file check (`seon.cluster.source/write-back!`), so the red proof
+       ;; is asserted among the done rule's red-test refusals, not as the only refusal
+       (is (= [['seon.cluster.source/done-refusals ['tq.c1-test/edge]]]
+              (into [] (comp (filter #(= :seon.source/red-test-error (:seon.error/type %)))
+                             (map (juxt :seon.error/operation #(mapv :seon.test/sym (:seon.source/red-tests %)))))
                     (:seon.source/refusals step)))
            "its red proof is the done rule's refusal, never a merge's")))))
 
@@ -860,14 +864,17 @@
                       :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})
        (evaluate running agent-id "(in-ns 'tq.shb)\n(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))")
        (let [step (:seon.context/step (block running agent-id))
-             current (:seon.context/step (shown running agent-id "(my.task/current {})"))
              [broken] (:seon.context/red-tests step)]
          (is (= {:green 1} (:seon.context/counts (:seon.context/proofs (block running agent-id)))) "the proof is green")
          (is (= 'tq.shb/identity-test (:seon.test/sym broken)) "the broken test is shown")
          (is (= ["area keeps its side"] (mapv :message (:seon.context/proof-failures broken))) "with its failing assertion")
          (is (every? #(and (:expected %) (:actual %)) (:seon.context/proof-failures broken)) "its expected and actual as data")
          (is (= 1 (count (filter #(= 'tq.shb/identity-test (:seon.test/sym %)) (:seon.context/red-tests step)))) "listed once")
-         (is (= (stable step) (stable current)) "my.task/current shows the same step")
+         ;; the two producers compared as data on the agent's branch: their printed replies are each cut by the
+         ;; value printer, and a cut quoted form inside a map does not read back as EDN
+         (is (= (stable (:seon.context/step (context/current-state (db/db target) agent-id)))
+                (stable (:seon.context/step (my.task/current {:seon.db/db (db/db target) :seon.agent/id agent-id}))))
+             "my.task/current shows the same step")
          (is (= :working (:seon.task/status step)
                 (:seon.task/status (:seon.context/turns (block running agent-id))))
              "the step is not done, and the block's status says so")

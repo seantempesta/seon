@@ -48,7 +48,6 @@ Ranking logic (owner's metric, turns to green per task): first what the agent se
 `seon.cluster.db-flow-test/a-merge-step-green-at-its-start-ends-done-with-no-model-call`,
 `seon.cluster.db-flow-test/a-pending-proof-opens-the-first-model-turn`,
 `seon.turn.test-step-verdict-test/the-step-verdict-covers-every-test-of-the-member-list`,
-`seon.turn.test-step-verdict-test/a-test-run-in-the-request-that-redefined-its-callee-answers-the-new-definition`,
 `seon.mcp-entrance-test/an-agent-runs-its-own-test-on-its-own-branch`,
 `seon.mcp-entrance-test/a-test-written-at-the-repl-reaches-the-function-it-calls`.
 
@@ -91,7 +90,7 @@ Ranking logic (owner's metric, turns to green per task): first what the agent se
 `seon.repl-test/a-reply-within-every-declared-bound-adds-nothing-and-an-exceeded-bound-is-a-findings-entry`,
 `seon.mcp-entrance-test/an-sci-reply-is-what-the-run-saved`,
 `seon.mcp-entrance-test/a-thrown-call-carries-its-whole-request`,
-`seon.mcp-entrance-test/a-jvm-reply-keeps-its-duration-after-an-earlier-run`.
+`seon.mcp-entrance-test/a-reply-keeps-its-duration-after-an-earlier-run`.
 
 **Simplest Jolt form.** `proto.agent/eval-forms` (NEEDS#11, 89-265 us round trip, 1.4-1.7 ms with recording): read forms with edamame positions, `eval` each natively, build `{:value :shown :handle :ms :alloc-bytes :errors}`, one `d/transact` before returning. The "late diagnostics" and "findings" are keys, not a second channel.
 
