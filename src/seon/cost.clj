@@ -311,12 +311,13 @@
   "Measured costs of unit operations on this runtime (release seon binary, M5 Max, load 5,
   2026-10-20, at 10k units; source mode is within 10% except a plain call, 7 ns; the last
   five rows were measured in source mode after P2 found :str/append mislabeled: the 308 B
-  per char it showed was the String's seq, not the StringBuilder), per unit: estimates price their :ops with these. `bin/check
+  per char it showed was the String's seq, not the StringBuilder; :fn/armed-call and the
+  pull rows re-measured on Jolt 00a3b321, J3's try/catch: 990 -> 354 B per armed call), per unit: estimates price their :ops with these. `bin/check
   units` measures them again, and seon.cost-test/the-unit-table-is-current is red when a
   row has drifted past 3x, so estimates stay derived from today's physics."
   {:seq/reduce {:ns 1.4 :bytes 0.0 :what "one step of reduce over a vector"}
    :fn/call {:ns 7.4 :bytes 0.0 :what "a reduce step calling one plain function, both defined at the REPL"}
-   :fn/armed-call {:ns 60.5 :bytes 989.66 :what "a reduce step calling one contracted function ([:=> [:cat :int] :int])"}
+   :fn/armed-call {:ns 32.8 :bytes 353.53 :what "a reduce step calling one contracted function ([:=> [:cat :int] :int])"}
    :vec/nth {:ns 12.4 :bytes 0.0 :what "nth of a vector"}
    :vec/conj {:ns 30.7 :bytes 245.99 :what "conj onto a persistent vector"}
    :vec/conj! {:ns 12.3 :bytes 43.28 :what "conj! onto a transient vector"}
@@ -336,5 +337,5 @@
    :pr-str/char {:ns 61.9 :bytes 25.67 :what "pr-str, per character printed (a vector of integers)"}
    ;; lane D2, source mode, load 3, 2026-10-20, at 2k: a pull is 21 us and 28 KB, each further
    ;; attribute 9.7 us and 13 KB (a finding: the pull's own allocation, like seon.task/eid's seek)
-   :db/pull {:ns 21351.0 :bytes 27752.86 :what "d/pull of one attribute of an entity, by entity id (per pull)"}
-   :db/pull-attr {:ns 9689.5 :bytes 13030.18 :what "each attribute of a d/pull beyond its first (per attribute)"}})
+   :db/pull {:ns 16139.9 :bytes 22828.77 :what "d/pull of one attribute of an entity, by entity id (per pull)"}
+   :db/pull-attr {:ns 6055.3 :bytes 7628.21 :what "each attribute of a d/pull beyond its first (per attribute)"}})

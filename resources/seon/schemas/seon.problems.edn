@@ -12,6 +12,8 @@
                                           [:stderr {:optional true} [:maybe :string]] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]
  :seon.agent/stalled [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/stalled]] [:agent :keyword]
                                              [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]
+ ;; a resumed agent's branch program that did not load (seon.program/load-diff!): main's ran instead
+ :seon.agent/load-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/load-failed]] [:ns :symbol]]]
  :seon.root/proc-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/proc-defect]] [:pid {:optional true} [:maybe :keyword]]]]
  :seon.root/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/refused]]]]
  :seon.writer/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.writer/refused]] [:ok false?]]]

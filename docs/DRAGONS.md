@@ -23,6 +23,8 @@ function.
 | Root's entrance is not listening (the MCP server's one request: connect, write, read) | `seon.mcp/request!` | the tool's text `{:error ...}` | the outside agent reads it as the tool's answer |
 | Text a model or a plan wrote, read as data (a reference span, a reply's line): it may not read as Clojure, and edamame 1.4.32 on Jolt throws a bare IllegalArgumentException for some (`a^`) rather than its `:edamame/error` | `seon.reader/read-text` | `nil`: the text is not Clojure | `seon.reconcile/reference` (not a reference), `seon.reader/forgive` (not a literal line) |
 | Text an agent wrote that does not read as Clojure, read for waste at its attempt's end (lane D2) | `seon.learn/read-forms` | `[]`: the form is charged to no rule | `seon.learn/waste` |
+| A task file a person wrote does not read as one EDN vector of declarations | `seon.task/file-declarations` | `:seon.task/refused` (the one error map, naming the file) | `seon.task/load-tx` answers the refusal; `my.root/load-tasks!` returns it and writes nothing |
+| The web listener cannot bind its port (taken, refused) | `seon.web/web-proc` | `{:listening false :error message}` in the `:web` proc's state | its ping shows it on the dashboard's health line; boot goes on without the web |
 | An interrupt or a timeout stops a running form (SIGUSR1, SIGALRM) | `seon.intr/run` | ex-info `{:interrupted true}` or `{:timeout-ms n}` | `seon.repl/eval-code` answers the form `interrupted`/`eval-error` and goes on |
 
 ## Entrant boundaries (a defect becomes a recorded error map)

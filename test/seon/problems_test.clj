@@ -262,7 +262,9 @@
                           "characters of EDN read (example, failures, error)")
                :growth :linear
                :ops {:db/pull 7 :db/pull-attr 38 :edn/read-char 500}
-               :sizes [4 40 400]}))
+               :sizes [4 40 400]
+               ;; measured on Jolt 00a3b321 (pulls got cheaper with J3's try; the read did not as much)
+               :overrun {:task "seon.problems/report-beyond-its-pulls" :measured {:ns 218794000.0 :bytes 227801600.0}}}))
 
 (defn clean-input
   "The flatness proof's input at k: 4 problems of each class over k clean tasks, each with a
@@ -275,7 +277,8 @@
                :work "none per clean task: the indexes the read seeks hold only problem rows; the 4 problem sets cost what they cost"
                :growth :constant
                :ops {:db/pull 28 :db/pull-attr 152 :edn/read-char 2000}
-               :sizes [10 100 1000]}))
+               :sizes [10 100 1000]
+               :overrun {:task "seon.problems/report-beyond-its-pulls" :measured {:ns 2622000.0 :bytes 2686400.0}}}))
 
 ;; ---- the model call: thinking mode as a provider field, its cost and its empty reply as data ----
 

@@ -416,5 +416,6 @@
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :int] :any]}
   [fd m db0 t-req-ns]
   (agent/init! fd m db0 serve!)
-  (agent/hello! t-req-ns {:interrupt-ok (:interrupt-ok @agent/state)})
+  (agent/hello! t-req-ns (cond-> {:interrupt-ok (:interrupt-ok @agent/state)}
+                            (seq (:load-errors @agent/state)) (assoc :load-errors (:load-errors @agent/state))))
   (serve!))

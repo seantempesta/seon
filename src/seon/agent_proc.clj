@@ -113,7 +113,13 @@
                    (step/out! o :events (step/event {:type :spawned :agent id :pid (:pid m) :cloned-from (:cloned-from m)})))
                  (step/out! o :to-api (status st (cond-> {:forked-ms (lib/r2 (:start-ms m)) :mem-mb (:mem-mb m) :t (:t m) :ready true
                                                      :interrupt-ok (:interrupt-ok m)}
-                                              (:cloned-from m) (assoc :pid (:pid m)))))
+                                              (:cloned-from m) (assoc :pid (:pid m))
+                                              (seq (:load-errors m)) (assoc :load-errors (:load-errors m)))))
+                 ;; its branch's program did not load where it resumed: each failure a recorded problem
+                 (doseq [{:keys [ns message]} (:load-errors m)]
+                   (step/out! o :to-api {:op :problem :class :agent :agent id
+                                         :error (contract/error :seon.agent/load-failed 'seon.agent/init!
+                                                                (str "its branch's program did not load in " ns ": " message) {:ns ns})}))
                  (step/out! o :events (step/event {:type :ready :agent id :start-ms (:start-ms m)}))
                  (cond-> st (:cloned-from m) (assoc :pid (:pid m))))
       :fd-ready (send-fd! st (:k m) (get-in st [:inflight (:k m) :pass-fd]))

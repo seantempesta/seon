@@ -17,7 +17,7 @@
   invents one."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [clojure.walk]
-            [seon.render :as render] [seon.print :as print] [seon.web.html :as h]))
+            [seon.render :as render] [seon.print :as print] [seon.web.html :as h] [seon.reader :as reader]))
 
 ;;; --- small formatting helpers -------------------------------------------------
 
@@ -114,7 +114,8 @@
   [txt budget]
   (let [plain? (and (some? txt) (< (count txt) 4000) (not (str/includes? txt "…"))
                     (contains? #{\{ \[ \( \:} (first txt)))
-        v (when plain? (try (edn/read-string txt) (catch Exception _ ::unread)))]
+        ;; through the one reader edge: text that does not read is an answer (nil), not a catch here
+        v (when plain? (let [fs (reader/read-text txt 'user)] (when (= 1 (count fs)) (first fs))))]
     (if (and plain? (coll? v))
       (let [hic (:seon.render/html (render/print-out :html v {:seon.render/budget budget}))]
         ;; the printer's panel id is per value, not per part (ids drive Datastar's morph)

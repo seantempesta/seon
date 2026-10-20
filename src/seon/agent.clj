@@ -483,7 +483,10 @@
         store-conn (d/connect (assoc cfg :branch branch))]
     (intr/install!)
     ;; a kept branch, resumed: its program is what this process runs (it was forked holding main's)
-    (when resumed (program/load-diff! db0 @store-conn))
-    (reset! state {:id id :branch branch :fd fd :conn c :db @store-conn :store-conn store-conn :cfg cfg :results {} :n 0
+    (let [load-errors (when resumed (program/load-diff! db0 @store-conn))]
+     ;; a resumed branch whose program does not load runs main's for what failed: its errors
+     ;; go to root with its hello (recorded problems), never dropped (T5b: a stub ran silently)
+     (reset! state {:id id :branch branch :fd fd :conn c :db @store-conn :store-conn store-conn :cfg cfg :results {} :n 0
+                   :load-errors (vec load-errors)
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
-                   :ns nsx :nss #{(ns-name nsx)} :interrupt-ok intr-ok :serve serve})))
+                   :ns nsx :nss #{(ns-name nsx)} :interrupt-ok intr-ok :serve serve}))))
