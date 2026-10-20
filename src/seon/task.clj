@@ -162,7 +162,10 @@
                 (if (some #{id} acc) acc
                     (conj (reduce order acc (sort (:seon.task/needs (own id)))) id)))
         chain (filter own (order [] id))]
-    {:plan (str/join "\n\n" (distinct (remove str/blank? (map #(:seon.task/plan (own %)) chain))))
+    ;; a merge task's plan is about merging: it is its own, never a later task's (T5b: a work
+    ;; agent was told to merge); its proofs flow on like every task's
+    {:plan (str/join "\n\n" (distinct (remove str/blank? (map #(:seon.task/plan (own %))
+                                                               (remove #(and (not= % id) (= :merge (:seon.task/kind (own %)))) chain)))))
      :proofs (into #{} (mapcat #(:seon.task/proofs (own %))) chain)}))
 
 (defn tasks

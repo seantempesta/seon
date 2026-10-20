@@ -26,7 +26,7 @@
 
 (defn print-value
   "`v` printed under opts (all optional): :handle, the result symbol cuts read through
-  (result/h3); :budget tokens (default-budget); :max-depth (8); :width (72); :outputs, a
+  (result/h3; none: a cut says what it omitted and names no form); :budget tokens (default-budget); :max-depth (8); :width (72); :outputs, a
   subset of #{:text :hiccup} (#{:text}). Answers {:text :tokens :truncated? :elisions :cuts}
   plus :html (hiccup) when asked, or the insufficient-budget refusal (an error map) when the
   budget cannot show the value's first part."
@@ -34,7 +34,8 @@
   ([v] (print-value v {}))
   ([v {:keys [handle budget max-depth width outputs]
        :or {budget default-budget max-depth 8 width 72 outputs #{:text}}}]
-   (select/show v {:handle (or handle 'result/e0) :budget budget :max-depth max-depth :width width :outputs outputs})))
+   ;; without a handle a cut names no form (its reader would hold no such result)
+   (select/show v {:handle handle :budget budget :max-depth max-depth :width width :outputs outputs})))
 
 (defn text
   "`v` as text under budget tokens: the printed text, or the refusal's message when even

@@ -21,6 +21,9 @@
      "A cost proof (seon.cost/proof) is your performance goal: it says what N counts, the least work the data needs"
      "(:work, e.g. one pass with one lookup per row), how that grows and what it may cost. Read it before writing code and"
      "do no more work than it states. It is red when a size costs more than its estimate or grows faster than its :growth."
+     "The judge: allocated bytes may reach 1.25x the estimate and contracted calls 1.0x (both are counted exactly), wall time 3x;"
+     "a dimension whose growth exponent exceeds :growth's by more than 0.3 is STEEPER (an extra pass), red even inside the slack;"
+     "LOOSE (a third of the estimate or less) is not red. Its failure message prints measured/estimate per size."
      "Verbs: (my.task/current) your task; (my.task/update! :seon.task/plan f & args) improve your plan;"
      "(my.task/send-back! reason counterexample) when the task is impossible;"
      "(my.turn/wait) to stop and wait for root."
@@ -35,14 +38,22 @@
   [db sym] (d/q '[:find ?s . :in $ ?v :where [?e :var/name ?v] [?e :var/src ?s]] db sym))
 
 (defn resolve-ref
-  "A reference resolved: its doc (from the var) and source (from the db), as data."
+  "A reference resolved: its source (from the db) when it is program, else its doc (from
+  the var); a source already holds its docstring."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] :map]}
   [db sym]
-  (let [v (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))))]
+  (let [v (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))))
+        src (source-of db sym)]
     (cond-> {:symbol sym}
       (nil? v) (assoc :unresolved true)
-      (some-> v meta :doc) (assoc :doc (:doc (meta v)))
-      (source-of db sym) (assoc :source (source-of db sym)))))
+      src (assoc :source src)
+      (and (nil? src) (some-> v meta :doc)) (assoc :doc (:doc (meta v))))))
+
+(defn- failure
+  "A failing assertion as the agent reads it: what was expected and what happened (the
+  message only when it says something)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [r] (cond-> (select-keys r [:expected :actual]) (:message r) (assoc :message (:message r))))
 
 (defn current-state
   "The current-state block of task t as data: proofs with their status, red assertions and
@@ -56,11 +67,14 @@
                           ;; the plan as it accumulated along :needs (prerequisites first)
                           :seon.task/plan plan)
              :turn (str (inc turn) " of " max-turns)
-             :proofs (vec (for [p (sort-by str proofs)]
-                            (cond-> {:test p :status (get results p :none) :source (source-of db p)}
+             ;; a passing proof is its status; a red or unrun one shows its source and failures
+             :proofs (vec (for [p (sort-by str proofs) :let [st (get results p :none)]]
+                            (cond-> {:test p :status st}
+                              (not= :pass st) (assoc :source (source-of db p))
                               (seq (filter #(= p (:test %)) reds))
-                              (assoc :failures (mapv #(dissoc % :test) (filter #(= p (:test %)) reds))))))
-             :references (mapv #(resolve-ref db %) refs)}
+                              (assoc :failures (mapv failure (filter #(= p (:test %)) reds))))))
+             ;; a reference already shown as a proof is not shown twice
+             :references (mapv #(resolve-ref db %) (remove (set proofs) refs))}
       (:seon.task/evidence t) (assoc :evidence (:seon.task/evidence t))
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
       (seq last-items) (assoc :last-evals (mapv (fn [it] (cond-> {:form (:form it)}
