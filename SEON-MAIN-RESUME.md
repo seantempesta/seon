@@ -33,13 +33,13 @@ All live in `docs/research/agent-platform/2026-10-20/`.
 | Census: keep/delete inventory, ideas first | `census/README.md`, plus `ideas.md`, `static.md`, `gen.md`, `tests-run.md` and the EDN data | **final** (`cb9568dea`) |
 | The 12 double-red spec tests judged | `census/spec-reds.md` | **final** (`79b1a9272`): 7 green, 4 kept red as spec, 1 retired |
 | Independent review of `~/src/seon-jolt/next` against AGENTS.md and the 20 ideas | `next-review.md` | **in progress**; may be partial, check its status line |
-| The v2 move plan (nothing executed) | `move-plan.md` | **in progress**; may be partial, check its status line |
+| The v2 move plan (nothing executed) | `move-plan.md` | **draft complete** (`8fbfbd51d`); owner decisions D1–D11 open |
 
 ## What is left
 
 1. Finish `next-review.md`. Every finding needs a file, a symbol, the law or idea it breaks, and a reproducing form or
    failing test, all run in a scratchpad copy, never in `~/src/seon-jolt`. Then send the findings to the Jolt session.
-2. Finish `move-plan.md`: what stays, what gets wiped, how `next/` is copied in with its history, the census verdicts
+2. `move-plan.md` is complete (draft): it waits on the owner's decisions D1–D11 and on `next/` being committed and paused.
    turned into a deletion list, the spec tests made runnable, and the owner's open decisions. The owner decides when to
    execute it.
 3. Stay on call for census cuts the Jolt session asks for.
