@@ -156,6 +156,8 @@
  :seon.turn/red :int
  :seon.turn/ms :int
  :seon.turn/tokens :int
+ ;; the model's reply stopped at max-tokens: its text was cut
+ :seon.turn/truncated :boolean
  :seon.end/attempt [:and {:seon.db/identity true} :string]
  :seon.end/outcome :keyword
  :seon.end/reason :string
@@ -164,7 +166,8 @@
  :seon.turn/turn-fact [:map {:seon.db/attributes true}
                           [:seon.turn/id :seon.turn/id] [:seon.turn/attempt :seon.turn/attempt] [:seon.turn/n :seon.turn/n]
                           [:seon.turn/reply :seon.turn/reply] [:seon.turn/forms :seon.turn/forms] [:seon.turn/errors :seon.turn/errors]
-                          [:seon.turn/red :seon.turn/red] [:seon.turn/ms :seon.turn/ms] [:seon.turn/tokens :seon.turn/tokens]]
+                          [:seon.turn/red :seon.turn/red] [:seon.turn/ms :seon.turn/ms] [:seon.turn/tokens :seon.turn/tokens]
+                          [:seon.turn/truncated {:optional true} :seon.turn/truncated]]
  :seon.end/end-fact [:map {:seon.db/attributes true}
                          [:seon.end/attempt :seon.end/attempt] [:seon.end/outcome :seon.end/outcome]
                          [:seon.end/reason {:optional true} :seon.end/reason]

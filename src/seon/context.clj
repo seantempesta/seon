@@ -63,7 +63,7 @@
   source; resolved references; the measured evidence it starts from; the branch's
   unmerged entries (base, ours, theirs); the last evaluations; turns left."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds last-items turn max-turns unmerged]}]
+  [db t {:keys [results reds last-items turn max-turns unmerged truncated?]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         refs (r/references (str plan "\n" (:seon.task/instructions t)))]
     (cond-> {:task (assoc (select-keys t [:seon.task/id :seon.task/kind :seon.task/instructions])
@@ -78,6 +78,7 @@
                               (assoc :failures (mapv failure (filter #(= p (:test %)) reds))))))
              ;; a reference already shown as a proof is not shown twice
              :references (mapv #(resolve-ref db %) (remove (set proofs) refs))}
+      truncated? (assoc :your-last-reply "was cut at the model's token limit: what followed the cut was lost. Answer with less: one change at a time.")
       (:seon.task/evidence t) (assoc :evidence (:seon.task/evidence t))
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
       (seq last-items) (assoc :last-evals (mapv (fn [it] (cond-> {:form (:form it)}

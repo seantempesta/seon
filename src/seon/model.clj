@@ -84,7 +84,9 @@
         text (:content msg)
         reasoning (:reasoning_content msg)
         u (:usage j)
-        rt (get-in u [:completion_tokens_details :reasoning_tokens])]
+        rt (get-in u [:completion_tokens_details :reasoning_tokens])
+        ;; the reply stopped at max-tokens: its text is cut (kept; the forgiving reader repairs it)
+        cut? (= "length" (get-in j [:choices 0 :finish_reason]))]
     (cond
       (and (str/blank? text) (string? reasoning) (not (str/blank? reasoning)))
       (contract/error :seon.model/reasoning-ate-reply 'seon.model/complete
@@ -97,7 +99,8 @@
       (string? text)
       (cond-> {:text text :prompt-tokens (long (:prompt_tokens u 0)) :completion-tokens (long (:completion_tokens u 0)) :ms ms}
         rt (assoc :reasoning-tokens (long rt))
-        (:prompt_cache_hit_tokens u) (assoc :cache-hit-tokens (long (:prompt_cache_hit_tokens u))))
+        (:prompt_cache_hit_tokens u) (assoc :cache-hit-tokens (long (:prompt_cache_hit_tokens u)))
+        cut? (assoc :truncated? true))
       :else (provider-error "the reply carries no message content" 200))))
 
 (defn- openai-compat

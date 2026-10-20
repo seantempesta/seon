@@ -45,3 +45,10 @@
     (is (re-find #"…\d+" text))
     (is (not (re-find #"result/" text)) "no result handle the reader does not hold")
     (is (nil? (:seon.print/continuation (first cuts))))))
+
+(deftest a-cut-reply-is-told-to-the-agent
+  (let [db (db-with-program)
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p"}]))
+        t (task/task db "demo/f")]
+    (is (re-find #"cut at the model's token limit" (:your-last-reply (context/current-state db t {:turn 1 :max-turns 4 :truncated? true}))))
+    (is (nil? (:your-last-reply (context/current-state db t {:turn 1 :max-turns 4}))))))

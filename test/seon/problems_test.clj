@@ -310,3 +310,10 @@
       (is (contract/valid? :seon.model/failure e))
       (testing "and root counts it as an effect problem, like any failed effect"
         (is (= :effect (:class (err/occurrence e :effect {} 1))))))))
+
+(deftest a-reply-cut-at-max-tokens-is-marked-cut
+  ;; T5's first real run: replies of exactly max-tokens whose code was cut, recorded nowhere
+  (let [body (fn [finish] (clojure.data.json/write-str {:choices [{:message {:content "(defn f [x]" } :finish_reason finish}]
+                                                        :usage {:prompt_tokens 10 :completion_tokens 4096}}))]
+    (is (true? (:truncated? (model/parse-reply (body "length") 9.0 4096))))
+    (is (nil? (:truncated? (model/parse-reply (body "stop") 9.0 4096))) "a reply that stopped on its own is not cut")))

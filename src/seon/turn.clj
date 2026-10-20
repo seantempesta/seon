@@ -84,7 +84,7 @@
         proofs (:proofs (:seon.task/accumulated t))
         block (context/current-state (agent/db) t {:results results :turn turn :max-turns max-turns
                                                    :reds (proofs/red-reports run proofs) :last-items last-items
-                                                   :unmerged (when merge? unmerged)})
+                                                   :unmerged (when merge? unmerged) :truncated? (:truncated? st)})
         t1 (System/nanoTime)
         r (agent/fx! :model (cond-> {:messages (context/messages block) :task (:seon.task/id t) :turn turn}
                               model-name (assoc :model model-name))
@@ -94,12 +94,13 @@
       r
       (let [items (repl/eval-string (reply->source (:text c)))
             used (+ (:prompt-tokens c) (:completion-tokens c))]
-        (agent/transact! [{:seon.turn/id (str attempt "/" turn) :seon.turn/attempt attempt :seon.turn/n turn
+        (agent/transact! (cond-> [{:seon.turn/id (str attempt "/" turn) :seon.turn/attempt attempt :seon.turn/n turn
                            :seon.turn/reply (:text c) :seon.turn/forms (count items)
                            :seon.turn/errors (count (filter #(= :err (:tag %)) items))
                            :seon.turn/red (count (remove #(= :pass (val %)) (select-keys results proofs)))
-                           :seon.turn/ms (long (/ (- (System/nanoTime) t1) 1e6)) :seon.turn/tokens used}])
-        (cond-> (-> (assoc st :turn (inc turn) :tokens (+ tokens used) :last-items items)
+                           :seon.turn/ms (long (/ (- (System/nanoTime) t1) 1e6)) :seon.turn/tokens used}]
+                           (:truncated? c) (conj {:seon.turn/id (str attempt "/" turn) :seon.turn/truncated true})))
+        (cond-> (-> (assoc st :turn (inc turn) :tokens (+ tokens used) :last-items items :truncated? (boolean (:truncated? c)))
                     ;; what this turn's block showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
                                                  :shown {'seon.context/resolve-ref (set (map :symbol (:references block)))
