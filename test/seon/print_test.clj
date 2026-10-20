@@ -8,7 +8,8 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.print :as seon]
-            [seon.print.select :as select] [seon.contract]))
+            [seon.print.select :as select] [seon.contract]
+            [fipp.engine :as fipp]))
 
 (defn- step
   "The member one path step names in `parent` (the typed steps cuts carry)."
@@ -86,3 +87,38 @@
     (is (= "{:b \"x\", :a [1 2 3]}" text) "short members first, then by name (Seon's rule)")
     (is (= :div (first html)))
     (is (re-find #"seon-print-keyword" (pr-str html)))))
+
+;; ---- the layout is fipp's ---------------------------------------------------------------
+;; seon.print.emit lays its op stream out itself, in two passes over the vector; fipp's own
+;; streaming stages are the oracle, on random documents (groups, nests, lines with inline and
+;; terminate texts) and on the documents where fipp prunes a group for holding more than
+;; `width` open groups, though it would fit.
+
+(defn- fipp-text [ops width]
+  (let [out (StringBuilder.)]
+    (transduce (comp fipp/annotate-rights (fipp/annotate-begins {:width width}) (fipp/format-nodes {:width width}))
+               (fn ([sb] sb) ([^StringBuilder sb ^String s] (.append sb s))) out ops)
+    (str out)))
+
+(defn- random-doc [^java.util.Random r d]
+  (let [k (.nextInt r (if (> d 12) 3 7))
+        many (fn [m depth] (repeatedly (inc (.nextInt r m)) #(random-doc r depth)))]
+    (case k
+      0 (apply str (repeat (.nextInt r 6) "x"))
+      1 :line
+      2 [:line (apply str (repeat (.nextInt r 3) " ")) (apply str (repeat (.nextInt r 2) ","))]
+      (3 4) (into [:group] (many 4 (inc d)))
+      5 (into [:nest (.nextInt r 4)] (many 3 (inc d)))
+      6 (into [:group "("] (many 2 (+ d 3))))))
+
+(deftest the-layout-is-fipps
+  (let [layout @#'seon.print.emit/layout
+        r (java.util.Random. 20261020)
+        docs (concat (for [_ (range 600)] [(vec (fipp/serialize (random-doc r 0))) (inc (.nextInt r 40))])
+                     ;; a group holding more than `width` open groups breaks, though it fits
+                     (for [w [3 5 8] depth [2 5 8 12]]
+                       [(vec (fipp/serialize [:group "a" :line (reduce (fn [d _] [:group d]) "b" (range depth))])) w]))
+        wrong (for [[ops width] docs :when (seq ops) :when (not= (fipp-text ops width) (layout ops width))] [ops width])]
+    (is (empty? wrong) (str "laid out unlike fipp: " (pr-str (first wrong))))
+    (is (= "a\nb" (layout (vec (fipp/serialize [:group "a" :line (reduce (fn [d _] [:group d]) "b" (range 8))])) 5))
+        "the pruned group breaks")))

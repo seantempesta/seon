@@ -1,13 +1,15 @@
 (ns seon.print.emit
-  "Print nodes to fipp-laid-out text and structural hiccup, from one operation stream.
+  "Print nodes to laid-out text and structural hiccup, from one operation stream. The stream is
+  fipp's (begin/end/nest/outdent/line/text) and the layout makes fipp's choices, over the
+  vector in two passes (`group-ends`, `layout`); fipp itself is the layout's test oracle
+  (seon.print-test/the-layout-is-fipps), no longer on the print path.
 
   Need: the agents' reply text and the dashboard's value panel. Taken from Seon's
   `seon.print` (clone a780860c3) and cut to what the value printer (`seon.print.select`)
   reaches: the node kinds it builds, its cuts and their continuation forms. Keys keep
   Seon's names (`:seon.print/*`, `:seon.render.data/*`): the cuts are data agents read.
   Dropped mechanisms are listed in notes BAGGAGE (proto/BAGGAGE.md)."
-  (:require [clojure.string :as str]
-            [fipp.engine :as fipp]))
+  (:require [clojure.string :as str]))
 
 (def default-options
   "Seon's shipped print options (the `:seon.print/default` properties of `:seon.print/options`
@@ -113,8 +115,8 @@
       (and (nil? requery-id) (nil? requery-refusal))
       (assoc :seon.print/requery-refusal "the source has no stable requery identity"))))
 
-;;; Emission: one explicit-stack walk turns a node tree into fipp's operation maps; text is
-;;; fipp's layout of that stream, hiccup a fold over the same stream.
+;;; Emission: one walk appends a node tree's fipp-style operation maps to one vector; text is
+;;; the layout of that stream, hiccup a fold over the same stream.
 
 (def ^:private scalar-kinds
   #{:seon.print/nil :seon.print/boolean :seon.print/number :seon.print/keyword :seon.print/symbol
@@ -127,7 +129,12 @@
 ;; Indentation stops growing past this many open collections.
 (def ^:private nest-depth 6)
 
+;; The ops every collection shares, made once.
 (def ^:private line {:op :line :inline " " :terminate ""})
+(def ^:private begin {:op :begin})
+(def ^:private end {:op :end})
+(def ^:private outdent {:op :outdent})
+(def ^:private nests [{:op :nest :offset 0} {:op :nest :offset 1} {:op :nest :offset 2}])
 
 (defn- css-class {:malli/schema [:=> [:cat :keyword] :string]} [kind] (str "seon-print-" (name kind)))
 
@@ -135,6 +142,8 @@
   {:malli/schema [:function [:=> [:cat :keyword :string] :seon.print/op] [:=> [:cat :keyword :string :any] :seon.print/op]]}
   ([css text] {:op :text :text text :seon.print/class css})
   ([css text hiccup] {:op :text :text text :seon.print/class css :seon.print/hiccup hiccup}))
+
+(def ^:private comma (text-op :seon.print/separator ","))
 
 (defn- elided-hiccup
   "A cut as HTML: a string cut's shown characters, then its marker and continuation form; a cut
@@ -150,37 +159,43 @@
       [:span [:span {:class (css-class :seon.print/string)} shown] marker]
       marker)))
 
-(defn- leaf-ops
-  "The text ops of one leaf node."
-  {:malli/schema [:=> [:cat :seon.print/node] [:vector :seon.print/op]]}
+(defn- leaf-op
+  "The text op of one leaf node."
+  {:malli/schema [:=> [:cat :seon.print/node] :seon.print/op]}
   [node]
   (let [value (:seon.print/value node)]
     (case (:seon.print/face node)
-      :seon.print/nil [(text-op :seon.print/nil "nil")]
+      ;; the common rows build their op here (text-op's shape), one call fewer per leaf
+      :seon.print/nil {:op :text :text "nil" :seon.print/class :seon.print/nil}
       (:seon.print/boolean :seon.print/number :seon.print/keyword :seon.print/symbol :seon.print/char)
-      [(text-op (:seon.print/face node) (or (:seon.print/text node) (literal value)))]
-      :seon.print/string [(text-op :seon.print/string (or (:seon.print/text node) (string-literal value))
-                                   [:span {:class (css-class :seon.print/string)} (or (:seon.print/text node) value)])]
-      (:seon.print/inst :seon.print/uuid) [(text-op :seon.print/tag (or (:seon.print/text node) (literal value)))]
-      :seon.print/var [(text-op :seon.print/symbol (str "#'" (:seon.print/name node)))]
-      :seon.print/class [(text-op :seon.print/symbol (:seon.print/name node))]
-      :seon.print/object [(text-op :seon.print/object (str "#object[" (:seon.print/class node)
-                                                           (when-some [rep (:seon.print/rep node)] (str " " rep)) "]"))]
+      {:op :text :text (or (:seon.print/text node) (literal value)) :seon.print/class (:seon.print/face node)}
+      :seon.print/string (text-op :seon.print/string (or (:seon.print/text node) (string-literal value))
+                                  [:span {:class (css-class :seon.print/string)} (or (:seon.print/text node) value)])
+      (:seon.print/inst :seon.print/uuid) (text-op :seon.print/tag (or (:seon.print/text node) (literal value)))
+      :seon.print/var (text-op :seon.print/symbol (str "#'" (:seon.print/name node)))
+      :seon.print/class (text-op :seon.print/symbol (:seon.print/name node))
+      :seon.print/object (text-op :seon.print/object (str "#object[" (:seon.print/class node)
+                                                          (when-some [rep (:seon.print/rep node)] (str " " rep)) "]"))
       :seon.print/elided (let [text (elided-text node)]
-                           [(text-op :seon.print/elision text (elided-hiccup node text))]))))
+                           (text-op :seon.print/elision text (elided-hiccup node text))))))
 
 (defn- same-key-namespace
+  "The one namespace every key of a map's `entries` (its `[key value]` members; cuts are skipped)
+  shares, when there are two or more and each is a keyword or symbol shown in its own spelling;
+  else nil. One pass, stopping at the first key that differs."
   {:malli/schema [:=> [:cat [:sequential :any]] [:maybe :string]]}
   [entries]
-  (when (< 1 (count entries))
-    (let [key-nodes (map first entries)
-          namespaces (map (comp namespace :seon.print/value) key-nodes)]
-      (when (and (every? #(contains? #{:seon.print/keyword :seon.print/symbol} (:seon.print/face %)) key-nodes)
-                 ;; a key shown as a cut name keeps its own spelling
-                 (every? #(or (nil? (:seon.print/text %)) (= (:seon.print/text %) (literal (:seon.print/value %)))) key-nodes)
-                 (every? some? namespaces)
-                 (apply = namespaces))
-        (first namespaces)))))
+  (loop [[e & more :as remaining] (seq entries) shared nil k 0]
+    (cond
+      (nil? remaining) (when (< 1 k) shared)
+      (not (vector? e)) (recur more shared k)
+      :else (let [node (nth e 0)]
+              (when (contains? #{:seon.print/keyword :seon.print/symbol} (:seon.print/face node))
+                (let [ns (namespace (:seon.print/value node))]
+                  ;; a key shown as a cut name keeps its own spelling
+                  (when (and (some? ns) (or (nil? shared) (= shared ns))
+                             (or (nil? (:seon.print/text node)) (= (:seon.print/text node) (literal (:seon.print/value node)))))
+                    (recur more ns (inc k)))))))))
 
 (defn- unqualified-key-node
   {:malli/schema [:=> [:cat :seon.print/node] :seon.print/node]}
@@ -196,68 +211,73 @@
        (or (:seon.render.data/total node) (count (or (:seon.print/items node) (:seon.print/entries node))))
        " items, depth " (count path)))
 
-(defn- collection-work
-  "The work one collection expands to: its open group, members and close."
-  {:malli/schema [:=> [:cat :seon.print/node :map :int [:vector :any]] [:vector :any]]}
-  [node options depth path]
+(declare emit-node)
+
+(defn- emit-collection
+  "`ops` (a transient vector) with one collection's ops appended: its open group, members and close.
+  A member's path is made only for a member that is itself a collection (a leaf's is never read)."
+  {:malli/schema [:=> [:cat :any :seon.print/node :map :int [:vector :any]] :any]}
+  [ops node options depth path]
   (let [children (vec (or (:seon.print/items node) (:seon.print/entries node)))
         ;; a quoted form prints as the reader writes it, `'x`
         quoted? (and (= :seon.print/list (:seon.print/face node)) (= 2 (count children))
                      (= :seon.print/symbol (:seon.print/face (first children))) (= 'quote (:seon.print/value (first children))))
         children (if quoted? (subvec children 1) children)
         map-like? (= :seon.print/map (:seon.print/face node))
-        lifted (when (and map-like? (:seon.print/namespace-maps? options)) (same-key-namespace (filterv vector? children)))
+        lifted (when (and map-like? (:seon.print/namespace-maps? options)) (same-key-namespace children))
         shown (if lifted (mapv #(if (vector? %) (update % 0 unqualified-key-node) %) children) children)
         open (case (:seon.print/face node)
                :seon.print/vector "[" :seon.print/list (if quoted? "'" "(") :seon.print/set "#{"
                :seon.print/map (str (when lifted (str "#:" lifted)) "{"))
         close (case (:seon.print/face node) :seon.print/vector "]" :seon.print/list (if quoted? "" ")") "}")
-        indent (fn [offset] {:op :nest :offset (if (< depth nest-depth) offset 0)})
+        nest (fn [offset] (nests (if (< depth nest-depth) offset 0)))
         d (inc depth)
         fill? (and (not map-like?) (every? (comp scalar-kinds :seon.print/face) shown))
-        member (fn [index child]
-                 (let [child-path (conj path index)]
-                   (cond
-                     (and map-like? (vector? child))
-                     [{:op :begin} [(first child) d (conj child-path 0)] (indent 2)
-                      line [(second child) d (conj child-path 1)] {:op :outdent} {:op :end}]
-                     (or (zero? index) map-like? (not fill?)) [[child d child-path]]
-                     :else [{:op :begin} line [child d child-path] {:op :end}])))
-        separator (fn [index]
-                    (cond (zero? index) []
-                          map-like? [(text-op :seon.print/separator ",") line]
-                          fill? []
-                          :else [line]))]
-    (-> (reduce-kv (fn [work index child] (reduce conj! work (into (separator index) (member index child))))
-                   (transient [{:op :begin :seon.print/open (assoc node :seon.print/path path)}
-                               (text-op :seon.print/delimiter open)
-                               (indent (if (= :seon.print/set (:seon.print/face node)) 2 1))])
-                   shown)
-        (conj! {:op :outdent})
+        ;; a member's path, `path` then its index (and 0 for a key, 1 for a value)
+        member (fn [ops child index part]
+                 (if (contains? structural-kinds (:seon.print/face child))
+                   (emit-node ops child options d (if part (conj path index part) (conj path index)))
+                   (conj! ops (leaf-op child))))
+        ops (-> ops
+                (conj! {:op :begin :seon.print/open (assoc node :seon.print/path path)})
+                (conj! (text-op :seon.print/delimiter open))
+                (conj! (nest (if (= :seon.print/set (:seon.print/face node)) 2 1))))
+        ops (reduce-kv
+             (fn [ops index child]
+               (let [ops (cond (zero? index) ops
+                               map-like? (-> ops (conj! comma) (conj! line))
+                               fill? ops
+                               :else (conj! ops line))]
+                 (cond
+                   (and map-like? (vector? child))
+                   (-> ops (conj! begin)
+                       (member (nth child 0) index 0) (conj! (nest 2)) (conj! line)
+                       (member (nth child 1) index 1) (conj! outdent) (conj! end))
+                   (or (zero? index) map-like? (not fill?)) (member ops child index nil)
+                   :else (-> ops (conj! begin) (conj! line) (member child index nil) (conj! end)))))
+             ops shown)]
+    (-> ops
+        (conj! outdent)
         (conj! (text-op :seon.print/delimiter close))
-        (conj! {:op :end :seon.print/close node})
-        persistent!)))
+        (conj! {:op :end :seon.print/close node}))))
 
-(defn- node-work
-  {:malli/schema [:=> [:cat :seon.print/node :map :int [:vector :any]] [:vector :any]]}
-  [node options depth path]
+(defn- emit-node
+  "`ops` (a transient vector) with one node's ops appended; `path` is its place, read only for a
+  collection."
+  {:malli/schema [:=> [:cat :any :seon.print/node :map :int [:maybe [:vector :any]]] :any]}
+  [ops node options depth path]
   (cond
     (= :seon.print/throwable (:seon.print/face node))
-    [(text-op :seon.print/tag "#error ") [(:seon.print/value node) depth (conj path :seon.print/throwable)]]
-    (contains? structural-kinds (:seon.print/face node)) (collection-work node options depth path)
-    :else (leaf-ops node)))
+    (emit-node (conj! ops (text-op :seon.print/tag "#error ")) (:seon.print/value node) options depth
+               (conj path :seon.print/throwable))
+    (contains? structural-kinds (:seon.print/face node)) (emit-collection ops node options depth path)
+    :else (conj! ops (leaf-op node))))
 
 (defn- node-ops
-  "One node tree as fipp operation maps, walked with an explicit stack."
+  "One node tree as operation maps, in order."
   {:malli/schema [:=> [:cat :seon.print/node :map] [:vector :seon.print/op]]}
   [node options]
-  (loop [stack (list [node 0 []]) ops (transient [])]
-    (if-some [work (first stack)]
-      (if (map? work)
-        (recur (rest stack) (conj! ops work))
-        (let [[node depth path] work]
-          (recur (into (rest stack) (rseq (node-work node options depth path))) ops)))
-      (persistent! ops))))
+  (persistent! (emit-node (transient []) node options 0 [])))
 
 (defn- flat-width
   "The length of the operations laid out on one line: their texts and their lines' inline forms."
@@ -265,53 +285,138 @@
   [ops]
   (reduce (fn [n op] (case (:op op) :text (+ n (count (:text op))) :line (+ n (count (:inline op))) n)) 0 ops))
 
+;;; Layout: fipp's (Kiselyov, Peyton-Jones and Sabry's "Lazy v. Yield") decisions, made over
+;;; the whole op vector in two linear passes instead of fipp's streaming buffers. fipp
+;;; annotates each :begin with where its group ends on one line, or :too-far when it prunes the
+;;; group unseen; it prunes a group wider than the width (which the fits test would refuse
+;;; anyway) and a group holding more than `width` open groups at once (which it would not).
+;;; Holding the vector, `group-ends` finds both in one pass and `layout` makes fipp's choices
+;;; in a second: the same text, without a buffer per group, a concatenation per close and a
+;;; map per op.
+
+(defn- group-ends
+  "Per :begin of `ops`, in order: where its group ends on one line (the flat position after its
+  last op), or -1 for a group fipp prunes as too far: one that holds more than `width` open
+  groups at once."
+  {:malli/schema [:=> [:cat [:vector :seon.print/op] :int] [:vector :int]]}
+  [ops width]
+  (let [n (count ops)]
+    ;; open: the ordinals of the open groups, innermost first (a group's depth is the number
+    ;; outside it); most: per open group, the most groups open at once while it was
+    (loop [i 0 pos 0 open () most () ends (transient [])]
+      (if (< i n)
+        (let [op (nth ops i)]
+          (case (:op op)
+            :text (recur (inc i) (+ pos (count (:text op))) open most ends)
+            :line (recur (inc i) (+ pos (count (:inline op))) open most ends)
+            :begin (recur (inc i) pos (conj open (count ends)) (conj most (inc (count open))) (conj! ends pos))
+            :end (let [m (first most) outer (rest most) depth (dec (count open))]
+                   (recur (inc i) pos (rest open)
+                          (if (and (seq outer) (> m (first outer))) (conj (rest outer) m) outer)
+                          (assoc! ends (first open) (if (> (- m depth) width) -1 pos))))
+            (recur (inc i) pos open most ends)))
+        (persistent! ends)))))
+
+(def ^:private spaces "                                                                ")
+
+(defn- indentation
+  "`k` spaces."
+  {:malli/schema [:=> [:cat nat-int?] :string]}
+  [k]
+  (apply str (repeat k \space)))
+
+(defn- layout
+  "`ops` laid out to `width` as fipp lays them out: a group whose one-line end fits what is left
+  of the line stays on it, and every :line outside such a group breaks to its nest's indentation."
+  {:malli/schema [:=> [:cat [:vector :seon.print/op] pos-int?] :string]}
+  [ops width]
+  (let [ends (group-ends ops width)
+        n (count ops)
+        ^StringBuilder out (StringBuilder.)]
+    ;; fits: open groups since the outermost that fits (0: lines break); length: the flat
+    ;; position the line ends at; stops: the nest's indentations
+    (loop [i 0 pos 0 fits 0 length width stops '(0) column 0 begun 0]
+      (if (< i n)
+        (let [op (nth ops i) indent (first stops)]
+          (case (:op op)
+            :text (let [text (:text op) k (count text)]
+                    (when (zero? column)
+                      (if (<= indent (count spaces)) (.append out ^String spaces 0 (int indent)) (.append out (indentation indent))))
+                    (.append out ^String text)
+                    (recur (inc i) (+ pos k) fits length stops (+ (if (zero? column) indent column) k) begun))
+            :line (let [inline (:inline op) at (+ pos (count inline))]
+                    (if (zero? fits)
+                      (let [terminate (:terminate op)]
+                        (when (pos? (count terminate)) (.append out ^String terminate))
+                        (.append out "\n")
+                        (recur (inc i) at fits (- (+ at width) indent) stops 0 begun))
+                      (do (.append out ^String inline)
+                          (recur (inc i) at fits length stops (+ column (count inline)) begun))))
+            :nest (recur (inc i) pos fits length (conj stops (+ indent (:offset op))) column begun)
+            :outdent (recur (inc i) pos fits length (rest stops) column begun)
+            :begin (let [end (nth ends begun)]
+                     (recur (inc i) pos (cond (pos? fits) (inc fits) (neg? end) 0 (<= end length) 1 :else 0)
+                            length stops column (inc begun)))
+            :end (recur (inc i) pos (max 0 (dec fits)) length stops column begun)))
+        (str out)))))
+
 (defn- ops-text
-  "Lay operations out to `width` with fipp's own stages; width 0 is one line. Operations that
-  fit `width` on one line are that line: fipp would break none of their groups, so its layout
-  stages are skipped."
+  "Lay operations out to `width`; width 0 is one line. Operations that fit `width` on one line
+  are that line: no group of theirs breaks, so the layout is skipped."
   {:malli/schema [:=> [:cat [:vector :seon.print/op] :int] :string]}
   [ops width]
-  (let [out (StringBuilder.)
-        append (fn ([result] result) ([^StringBuilder result ^String text] (.append result text)))]
-    (if (and (pos? width) (> (flat-width ops) width))
-      (let [layout {:width width}]
-        (transduce (comp fipp/annotate-rights (fipp/annotate-begins layout) (fipp/format-nodes layout)) append out ops))
-      (transduce (keep #(case (:op %) :text (:text %) :line (:inline %) nil)) append out ops))
-    (str out)))
+  (if (and (pos? width) (> (flat-width ops) width))
+    (layout ops width)
+    (let [out (StringBuilder.)]
+      (run! #(case (:op %) :text (.append out ^String (:text %)) :line (.append out ^String (:inline %)) nil) ops)
+      (str out))))
 
 (defn- close-frame
-  {:malli/schema [:=> [:cat :map] :seon.print/hiccup]}
-  [{:seon.print/keys [node children]}]
+  "One collection's `<details>`: its summary and its `children`' hiccup."
+  {:malli/schema [:=> [:cat :map [:sequential :any]] :seon.print/hiccup]}
+  [node children]
   [:details {:class (str "seon-print-node " (css-class (:seon.print/face node)))
              :data-seon-path (literal (:seon.print/path node))}
    [:summary {:class "seon-print-summary"} (summary node (:seon.print/path node))]
    (into [:span {:class "seon-print-content"}] children)])
 
+;; A span's attributes for each class a text op carries, made once (hiccup is immutable data,
+;; so every span of a class shares its map).
+(def ^:private span-attrs
+  (into {} (map (fn [k] [k {:class (css-class k)}]))
+        (concat scalar-kinds [:seon.print/tag :seon.print/separator :seon.print/delimiter :seon.print/elision])))
+
 (defn- ops-hiccup
-  "The same operations as structural hiccup: a `<details>` per collection, the root one open."
+  "The same operations as structural hiccup: a `<details>` per collection, the root one open.
+  One pass: `stack` holds each open collection's hiccup so far, its node first."
   {:malli/schema [:=> [:cat [:vector :seon.print/op]] :seon.print/hiccup]}
   [ops]
-  (let [append (fn [{:seon.print/keys [stack] :as state} child]
-                 (if (seq stack)
-                   (update-in state [:seon.print/stack (dec (count stack)) :seon.print/children] conj child)
-                   (update state :seon.print/roots conj child)))
-        {:seon.print/keys [roots]}
-        (reduce (fn [state {:keys [op] :as event}]
-                  (cond
-                    (:seon.print/open event) (update state :seon.print/stack conj {:seon.print/node (:seon.print/open event) :seon.print/children []})
-                    (:seon.print/close event) (let [frame (peek (:seon.print/stack state))]
-                                                (append (update state :seon.print/stack pop) (close-frame frame)))
-                    (= :text op) (append state (or (:seon.print/hiccup event)
-                                                   [:span {:class (css-class (:seon.print/class event))} (:text event)]))
-                    (= :line op) (append state [:span {:class (css-class :seon.print/separator)} (:inline event)])
-                    :else state))
-                {:seon.print/stack [] :seon.print/roots []}
-                ops)
+  (let [n (count ops)
+        roots (loop [i 0 stack () roots (transient [])]
+                (if (< i n)
+                  (let [event (nth ops i)
+                        op (:op event)
+                        child (cond
+                                (:seon.print/open event) nil
+                                (:seon.print/close event) (let [frame (persistent! (first stack))]
+                                                            (close-frame (nth frame 0) (subvec frame 1)))
+                                (= :text op) (or (:seon.print/hiccup event)
+                                                 (let [k (:seon.print/class event)]
+                                                   [:span (or (span-attrs k) {:class (css-class k)}) (:text event)]))
+                                (= :line op) [:span (span-attrs :seon.print/separator) (:inline event)]
+                                :else nil)
+                        stack (cond (:seon.print/open event) (conj stack (transient [(:seon.print/open event)]))
+                                    (:seon.print/close event) (rest stack)
+                                    :else stack)]
+                    (cond (nil? child) (recur (inc i) stack roots)
+                          (seq stack) (recur (inc i) (conj (rest stack) (conj! (first stack) child)) roots)
+                          :else (recur (inc i) stack (conj! roots child))))
+                  (persistent! roots)))
         hiccup (case (count roots)
                  0 [:span {:class "seon-print-empty"} ""]
-                 1 (first roots)
+                 1 (nth roots 0)
                  (into [:span {:class "seon-print-root"}] roots))]
-    (cond-> hiccup (and (vector? hiccup) (= :details (first hiccup))) (assoc-in [1 :open] true))))
+    (cond-> hiccup (and (vector? hiccup) (= :details (nth hiccup 0))) (assoc-in [1 :open] true))))
 
 (defn emit-text
   "One node as text laid out to its width."
