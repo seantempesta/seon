@@ -10,7 +10,7 @@
 (def ^:private c-schemas
   "Malli schemas of C types, for contracts derived from an FFI declaration (G1's proto.lib)."
   {:int :int :long :int :int64 :int :uint32 [:int {:min 0}] :uint64 :int :size_t [:int {:min 0}]
-   :ssize_t :int :int16 :int :uint8 :int :pointer :seon.ffi/address :void :seon.host/void})
+   :ssize_t :int :int16 :int :uint8 :int :string :string :pointer :seon.ffi/address :void :seon.host/void})
 
 (defmacro defc
   "ffi/defcfn, its value checked from its definition on by the contract derived from its
@@ -40,6 +40,7 @@
 (defc c-signal "signal" [:int :pointer] :pointer)
 (defc c-kill "kill" [:int :int] :int)
 (defc c-setpgid "setpgid" [:int :int] :int)
+(defc c-unsetenv "unsetenv" [:string] :int)
 (defc c-setrlimit "setrlimit" [:int :pointer] :int)
 (defc c-getrlimit "getrlimit" [:int :pointer] :int)
 

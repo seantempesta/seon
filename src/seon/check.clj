@@ -959,6 +959,48 @@
     (c/stop! sys)
     (lib/c-exit (if ok 0 1))))
 
+(defn fx
+  "Lane FX1: the effect hop end to end. One agent; per-call cost of a synchronous effect
+  (my.fx/call :echo) inside one eval, against a plain call and a branch write; file
+  write-back through :file against spit in the agent; async sends; an effect in a test
+  fork; the outcomes recorded on the agent's branch."
+  [n]
+  (let [sys (c/start! {:datoms 2000})
+        a (c/spawn! sys {:task "fx" :branch :fx1})
+        _ (await-status sys [a] #{:idle} 5000)
+        dir (str "/tmp/fx1-" (lib/c-getpid))
+        _ (.mkdirs (java.io.File. dir))
+        ev (fn [code] (let [r @(c/submit! sys a code)] (last r)))
+        ;; per call, timed inside the agent: (loop n) of the form, µs each
+        per (fn [form k] (let [code (str "(let [t0 (System/nanoTime)] (dotimes [i " k "] " form ") (/ (- (System/nanoTime) t0) " k " 1000.0))")]
+                           (dotimes [_ 3] (ev code))
+                           (lib/summ (vec (for [_ (range 7)] (parse-double (:printed (ev code))))))))
+        ok1 (ev "(my.fx/call :echo {:x 1})")
+        r {:echo-once (:printed ok1)
+           :plain-us (per "(identity {:x i})" n)
+           :echo-us (per "(my.fx/call :echo {:x i})" n)
+           :floor-us (per "(my.fx/call :nope {})" n)
+           :transact-us (per "(transact! [{:note/text \"r\"}])" (quot n 4))
+           :spit-us (per (str "(spit \"" dir "/a.txt\" (str \"text \" i))") n)
+           :file-us (per (str "(my.fx/call :file {:path \"" dir "/b.txt\" :text (str \"text \" i)})") n)
+           :send-us (per "(my.fx/send :echo {:x i})" n)
+           :inbox (:printed (ev "(count (filter #(= :fx (:from %)) (messages)))"))
+           :unknown (:printed (ev "(:seon.error/type (my.fx/call :nope {}))"))
+           :test-fork (do (ev "(deftest fx-in-test (is (= :seon.fx/in-test (:seon.error/type (my.fx/call :echo {:x 1}))))
+                                (is (= {:value 7} (binding [seon.agent/*fx-stub* (fn [_ _] {:value 7})] (my.fx/call :echo {:x 1})))))")
+                          (select-keys @(c/run-tests! sys a) [:pass :fail :error]))
+           :file-text (slurp (str dir "/b.txt"))}
+        bdb (:db @(c/branch-db sys :fx1))
+        recs (d/q '[:find ?k (count ?e) :where [?e :seon.fx/kind ?k]] bdb)
+        q (d/q '[:find [?q ...] :where [?e :seon.fx/kind :echo] [?e :seon.fx/queue-us ?q]] bdb)
+        us (d/q '[:find [?q ...] :where [?e :seon.fx/kind :echo] [?e :seon.fx/us ?q]] bdb)
+        ping (flow/ping-proc (:graph sys) :fx/echo :timeout-ms 1000)]
+    (pprint (assoc r :recorded (into {} recs) :echo-queue-us (lib/summ (vec q)) :echo-perform-us (lib/summ (vec us))
+                   :owner-ping ping :load (clojure.string/trim (:out (clojure.java.shell/sh "uptime")))))
+    (clojure.java.shell/sh "rm" "-rf" dir)
+    (c/stop! sys)
+    (lib/c-exit 0)))
+
 (defn -main [& [mode n & more]]
   (case mode
     "dur-bench-write" (dur-bench-write n (Long/parseLong (first more)))
@@ -982,6 +1024,7 @@
     "record" (record)
     "orphan" (orphan)
     "rtt" (rtt)
+    "fx" (fx (Long/parseLong (or n "1000")))
     "hotreload" (hotreload)
     "swarm" (swarm (Long/parseLong (or n "100")))
     "soak" (soak (Long/parseLong (or n "50")) (Long/parseLong (or (first more) "60")))

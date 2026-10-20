@@ -156,6 +156,18 @@
                          [:seon.end/attempt :seon.end/attempt] [:seon.end/outcome :seon.end/outcome]
                          [:seon.end/reason {:optional true} :seon.end/reason]
                          [:seon.end/turns {:optional true} :seon.end/turns] [:seon.end/tokens {:optional true} :seon.end/tokens]]
+ ;; ---- an effect's outcome, recorded by its asker on its own branch (seon.fx, lane FX1) ----
+ :seon.fx/id [:and {:seon.db/identity true} :string]
+ :seon.fx/kind :keyword
+ :seon.fx/status :keyword
+ :seon.fx/us :int
+ :seon.fx/queue-us :int
+ :seon.fx/cost :int
+ :seon.fx/error :string
+ :seon.fx/fx-fact [:map {:seon.db/attributes true}
+                     [:seon.fx/id :seon.fx/id] [:seon.fx/kind :seon.fx/kind] [:seon.fx/status :seon.fx/status]
+                     [:seon.fx/us :seon.fx/us] [:seon.fx/queue-us :seon.fx/queue-us]
+                     [:seon.fx/cost {:optional true} :seon.fx/cost] [:seon.fx/error {:optional true} :seon.fx/error]]
  ;; ---- the program merge's facts (lane D1's proto.merge.facts.edn) ----
 :var/flagged :boolean
  :ns/alias [:set :string]

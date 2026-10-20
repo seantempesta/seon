@@ -286,21 +286,21 @@
   (conj (vec (for [it items :when (:id it)]
                {:seon.cluster.eval/id (str run "/" (:id it)) :seon.cluster.eval/agent "agent"
                 :seon.cluster.eval/record (binding [*print-length* nil *print-level* nil *print-meta* false]
-                                            (pr-str (cond-> (select-keys it [:tag :form :out :ms :alloc-bytes])
+                                            (pr-str (cond-> (select-keys it [:tag :form :out :ms :alloc-bytes :origin])
                                                       (= :ret (:tag it)) (assoc :shown (:printed it))
                                                       (= :err (:tag it)) (assoc :error (:printed it)))))}))
         (cond-> {:db/id "agent" :seon.agent/id id} t-basis (assoc :seon.agent/answered-t t-basis))))
 
 (defn- record!
   "Record items (with the defs their forms recorded) on this branch through the agent's
-  write path. Answers items."
-  {:malli/schema [:=> [:cat :seon.agent/items] :seon.agent/items]}
-  [items]
+  write path; origin (:outside, :ui) says who asked, when not the agent itself. Answers items."
+  {:malli/schema [:=> [:cat :seon.agent/items [:maybe :keyword]] :seon.agent/items]}
+  [items origin]
   (let [defs (into [] (mapcat val) (:defs @agent/state))]
     (swap! agent/state dissoc :defs)
     (when (and contract/record? (= :agent (:mode @agent/state)) (seq items))
       (agent/transact! (into defs (record-tx (:id @agent/state) (str (name (:id @agent/state)) "-" (lib/c-getpid) "-" (lib/now-ns))
-                                             items (:max-tx (agent/db))))))
+                                             (cond->> items origin (mapv #(assoc % :origin origin))) (:max-tx (agent/db))))))
     items))
 
 (defn eval-string
@@ -310,7 +310,7 @@
   [code]
   (let [answers (volatile! [])]
     (@the-handler {"op" "eval" "code" code :reply #(vswap! answers conj %)})
-    (record! (fold @answers identity))))
+    (record! (fold @answers identity) nil)))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 
@@ -324,7 +324,8 @@
               ;; the request's evaluations are recorded here, before its done (the agent owns
               ;; its branch's writes)
               (vswap! answers conj m)
-              (when (and done? (= "eval" (get req "op"))) (record! (fold @answers identity)))
+              (when (and done? (= "eval" (get req "op")))
+                (record! (fold @answers identity) (some-> (get req "seon/origin") wire/text-> keyword)))
               (agent/send-wire! (cond-> (into {} (remove (comp keyword? key)) m)
                                   id (assoc "id" id) sid (assoc "session" sid)
                                   done? (assoc "seon/t" (:max-tx (agent/db)) "seon/mem-mb" (str (agent/mem-mb)))))))))

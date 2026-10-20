@@ -13,7 +13,9 @@
   {:malli/schema [:=> [:cat :seon.wire/seon-msg] :seon.wire/msg]}
   [m]
   (if (= :eval (:op m))
-    (cond-> {"op" "eval" "id" (str (:id m)) "code" (:forms m)} (:timeout-ms m) (assoc "seon/timeout-ms" (:timeout-ms m)))
+    (cond-> {"op" "eval" "id" (str (:id m)) "code" (:forms m)}
+      (:timeout-ms m) (assoc "seon/timeout-ms" (:timeout-ms m))
+      (:origin m) (assoc "seon/origin" (name (:origin m))))
     (wire/seon->wire m)))
 
 (defn- to-proc!
@@ -135,6 +137,16 @@
       :committed (do (step/out! o :to-writer {:op :agent-commit :branch (:branch st) :t (:t m)})
                      (step/out! o :events (step/event {:type :commit :agent id :branch (:branch st) :t (:t m) :txs (:txs m)}))
                      st)
+      ;; an effect (my.fx): to its kind's owner proc; the answer comes back like the
+      ;; writer's, {:dest {:agent :op :fx-reply :k}} through the api
+      :fx (let [owner (keyword "fx" (name (:kind m)))]
+            (if (contains? (:fx-kinds st) owner)
+              (step/out! o [owner :in] (cond-> {:req (:req m) :agent id :prio (:prio m 0)
+                                                :dest {:agent id :op :fx-reply :k (:k m)}}
+                                         (:budget m) (assoc :budget (:budget m) :budget-key (or (:budget-key m) id))))
+              (to-proc! st {:op :fx-reply :k (:k m) :seon.error/type :seon.fx/unknown-kind :seon.error/operation 'seon.fx/call
+                            :seon.error/message (str "no effect kind " (:kind m))}))
+            st)
       :merged-main (let [st (answer-rid st o (:id m) (:result m))]
                      (step/out! o :events (step/event {:type :merged-main :agent id :result (:result m)}))
                      (step/out! o :to-api (status st {:status (busy st)}))
@@ -164,7 +176,7 @@
        :workload :io
        :ping-map-fn (fn [st] {:id (:id st) :pid (:pid st) :dead? (boolean (:dead? st)) :inflight (count (:inflight st))})})
   ([args] (assoc (select-keys args [:id :fd :branch :pid])
-                 :inflight {} :pings clojure.lang.PersistentQueue/EMPTY
+                 :inflight {} :pings clojure.lang.PersistentQueue/EMPTY :fx-kinds (:fx-kinds args)
                  ::flow/in-ports {:from (:from args)}
                  ::flow/out-ports {:to-writer (:to-writer args) :to-api (:back args) :events (:events args)}))
   ([st tr]

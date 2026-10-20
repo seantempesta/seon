@@ -16,9 +16,10 @@ function.
 | dragon | edge (`ns/fn`) | declared variant | handled by, as data |
 |---|---|---|---|
 | Datahike or the store refuses a write (a bad transaction, LMDB full or failing) | `seon.writer/writer-one` | the request's answer `{:ok false :error msg}` | the caller of the write: an agent's `transact!` throws it into its own eval (an `:err` item); root's callers read `:ok` |
-| The model's HTTP call (connect, TLS, timeout, a non-200) | `seon.model/http-post` | `:seon.model/provider-error` | `seon.turn/act!` returns it; `seon.turn/work!` ends the attempt `:error` with its message |
+| The model's HTTP call (connect, TLS, timeout, a non-200), made by root's `:model` effect lanes | `seon.model/http-post` | `:seon.model/provider-error` | the `:model` owner answers it to the asking agent; `seon.turn/act!` returns it; `seon.turn/work!` ends the attempt `:error` with its message |
 | An agent's authored contract does not compile | `seon.contract/arm!` | `:seon.contract/invalid` | `seon.repl/admit` puts it on the reply item (`:contract-error`); `seon.program/load-src!` reports it as a load error |
 | Program code from the db does not load (a source that throws, a missing alias target) | `seon.program/load-src!`, `seon.program/aliases!` | `:seon.program/error` (`{:ns :message}`) | root and the fork server put load errors in their view and events; an agent's `:load-errors` |
+| The filesystem refuses a write-back (`:file` effect) | `seon.fx/write-file` | `:seon.fx/io-error` | the asker's `my.fx/call` answer, recorded as `:seon.fx/*` on its branch |
 | An interrupt or a timeout stops a running form (SIGUSR1, SIGALRM) | `seon.intr/run` | ex-info `{:interrupted true}` or `{:timeout-ms n}` | `seon.repl/eval-code` answers the form `interrupted`/`eval-error` and goes on |
 
 ## Entrant boundaries (a defect becomes a recorded error map)
@@ -28,6 +29,7 @@ function.
 | the agent's REPL: reading and evaluating an agent's form | `seon.repl/eval-code` | the form's error as an `:err` reply item (the one error map in `seon/error`) |
 | the agent's request handler | `seon.repl/agent-step` | `err` + `done` on the request |
 | a test run, in the test child of an agent | `seon.agent/run-tests-forked` | an `:error` report in the run |
+| an effect lane performing a request (lane FX1) | `seon.fx/lane-proc` | `:seon.fx/defect` as the outcome: its asker is always answered |
 | every root proc | Flow's error channel, read by root's error reader | `:root-errors` in the api's view, with the error map |
 
 ## Dragons met without a catch (the edge answers data)
@@ -43,3 +45,12 @@ function.
 | An agent past its heap bound | Jolt's heap ceiling (`seon.lib/heap-cap!`) | `OutOfMemoryError` in the form: an `:err` item |
 | A forked process holding its parent's LMDB env and connections (physics: fork shares handles) | `seon.db/after-fork!` | forgotten, not closed; the agent opens the store itself |
 | Datahike refuses an agent's own write (its run-ahead apply) | `datahike.writer/apply!` (the library's edge) | the exception as its answer; `seon.agent/transact!` throws its message into the agent's eval (an `:err` item) |
+
+## Contracts over host objects are proved by deftests, never by generation
+
+The census gate (`bin/check census`) runs `malli.generator/check` only on the pure
+namespaces' contracts. A contract over a host binding (a pid, a file descriptor, a signal
+number, a socket, a connection) is never handed generated arguments: a generated pid passed
+to `kill(2)` is a real signal to a real process, a generated fd closes someone's socket.
+Those functions are proved by their deftests and the end-to-end checks, which call them with
+the values the system really holds.

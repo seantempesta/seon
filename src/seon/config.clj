@@ -50,3 +50,17 @@
   "Entity ids each agent process may mint on its own branch (a block per agent, from the
   store's highest id at boot): ids stay unique store-wide with no shared counter (L1's lease)."
   (dial "SEON_EID_LEASE" 100000))
+
+(def FX-BUF
+  "Requests one effect owner holds queued (its in-port and its priority queue). Each agent
+  has at most one synchronous effect in flight, so beyond the live agents only async
+  sends queue; at the bound stand-ins park (back-pressure). Lane FX1."
+  (dial "SEON_FX_BUF" 1024))
+(def FX-DIRECT
+  "Experiment (lane FX1): an effect owner answers straight to the asker's stand-in by id
+  ([agent :in]) instead of through the api's :back. Off by default."
+  (= "1" (System/getenv "SEON_FX_DIRECT")))
+(def MODEL-LANES
+  "Model calls in flight at once, cluster-wide (the :model owner's lanes). Lane FX1."
+  (dial "SEON_MODEL_LANES" 8))
+

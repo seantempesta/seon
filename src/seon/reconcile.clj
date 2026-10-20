@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
             [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm]
-            [datahike.api :as d] [clojure.string :as str]))
+            [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow]))
 
 (def default-max-turns
   "Turns an attempt may take when its task sets no :seon.config.agent/max-turns."
@@ -328,12 +328,6 @@
   {:malli/schema [:=> [:cat :seon.reconcile/state :seon.attempt/id :seon.reconcile/step [:sequential :any]] [:tuple :seon.reconcile/state :map]]}
   [st aid step tx] (request st aid step {:op :write :req {:op :tx :branch :db :tx-data (vec tx)}}))
 
-(defn- provider-for
-  "The provider an attempt's env asks for: the proc's provider, its model the task's when set."
-  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/env] :seon.model/provider]}
-  [st env]
-  (cond-> (:provider st) (and (:model env) (= :openai-compat (:kind (:provider st)))) (assoc :model (:model env))))
-
 (defn- start
   "Begin action act's flight. Answers [st outputs]."
   {:malli/schema [:=> [:cat :seon.reconcile/state :seon.reconcile/action] [:tuple :seon.reconcile/state [:vector :map]]]}
@@ -402,10 +396,13 @@
                  (one (write (assoc-in st [:flights aid :agent] ag) aid :started
                              (task/attempt-start-tx aid (:task act) (:boot st) ag (:env act) (System/currentTimeMillis))))
                  (done st))
-      :started (one (request st aid :worked
+      ;; an outside agent works this attempt (seon.entrance): no turn loop; it hands it back
+      :started (if (= "outside" (get-in act [:env :model]))
+                 (done st)
+                 (one (request st aid :worked
                              {:op :eval :id agent
-                              :forms (pr-str (list 'seon.turn/work! (list 'quote {:task (:task act) :attempt aid :max-turns (get-in act [:env :max-turns])
-                                                                                    :provider (provider-for st (:env act))})))}))
+                              :forms (pr-str (list 'seon.turn/work! (list 'quote (cond-> {:task (:task act) :attempt aid :max-turns (get-in act [:env :max-turns])}
+                                                                                     (get-in act [:env :model]) (assoc :model (get-in act [:env :model]))))))})))
       ;; the turn loop answered: died (no live agent), or judge it from measured facts
       :worked (if (= -1 (:id (first r)))
                 (dead st (str (:printed (first r))))
@@ -437,19 +434,24 @@
 (defn reconciler-proc
   "The reconciler. In :main (main's commits, a sliding buffer of one) and :answers (the
   api's answers to its requests). Out :to-api (its requests, as {:op :request ...}).
-  Args: :boot (this root's boot id), :provider (the model provider attempts use)."
+  Args: :boot (this root's boot id)."
   {:malli/schema :seon.step/step-fn}
-  ([] {:params {:boot "root's boot id" :provider "the attempts' model provider"}
+  ([] {:params {:boot "root's boot id" :judge "outside agents' attempts to judge (external)"}
        :ins {:main "main's commits" :answers "the api's answers"} :outs {:to-api "requests"}
        :workload :io
        :ping-map-fn (fn [st] {:seen (:seen st 0) :t (some-> (:db st) :max-tx) :flights (count (:flights st)) :pending (count (:pending st))})})
-  ([args] (assoc args :seen 0 :rid 0 :flights {} :pending {}))
+  ([args] (assoc (dissoc args :judge) :seen 0 :rid 0 :flights {} :pending {} ::flow/in-ports {:judge (:judge args)}))
   ([st _] st)
   ([st in m]
    (case in
      :main (let [st (assoc st :db (:db m) :seen (inc (:seen st)))
                  [st outs] (pass st)]
              [st {:to-api (into [{:op :stat :k :main-seen-us :v (/ (- (sock/now-ns) (:ns m)) 1000.0)}] outs)}])
+     ;; an outside agent handed its attempt back: judged as a turn loop's end is
+     :judge (let [{:keys [attempt task env agent]} m
+                  st (assoc-in st [:flights attempt] {:act {:op :spawn :attempt attempt :task task :env env} :agent agent})
+                  [st o] (request st attempt :tested {:op :tests :id agent :timeout-ms 30000})]
+              [st {:to-api [o]}])
      :answers (let [[aid step] (get-in st [:pending (:tag m)])
                     st (update st :pending dissoc (:tag m))
                     [st outs] (if aid (advance st aid step (:r m)) [st []])

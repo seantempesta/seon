@@ -22,12 +22,12 @@
   only root's merge! advances main."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
-            [seon.sock :as sock] [seon.wire :as wire] [seon.fork-server :as fs] [seon.agent-proc :as ap]
+            [seon.sock :as sock] [seon.wire :as wire] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.reconcile :as reconcile] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.task :as task] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
-            [seon.turn] [seon.fixtures] [my.task] [my.turn] [my.branch] [clojure.core.async.flow :as flow] [clojure.test]
+            [seon.turn] [seon.fixtures] [my.fx] [my.task] [my.turn] [my.branch] [clojure.core.async.flow :as flow] [clojure.test]
             [taoensso.trove :as trove]))
 
 
@@ -111,7 +111,8 @@
          (assoc-in [:agents id] {:branch branch :lease lease})
          (assoc-in [:agent-procs id] {:proc agent-launcher
                                       :args {:id id :fd r :branch branch :from from
-                                             :to-writer (:to-writer st) :back (:back st) :events (:events st)}
+                                             :to-writer (:to-writer st) :back (:back st) :events (:events st)
+                                             :fx-kinds (:fx-kinds st)}
                                       :chan-opts {:in {:buf-or-n cfg/AGENT-BUF}}})
          (assoc-in [:view :agents id] (cond-> {:branch branch :status :spawning :task task :pid nil
                                                :forked-ms nil :mem-mb nil :evals [] :tests nil}
@@ -171,7 +172,7 @@
         (reply! st p (no-agent op (str "no live agent " id)))
         (let [[st rid] (rid! st)
               msg (case op
-                    :eval (cond-> {:op :eval :forms (:forms m)} (:timeout-ms m) (assoc :timeout-ms (:timeout-ms m)))
+                    :eval (cond-> {:op :eval :forms (:forms m)} (:timeout-ms m) (assoc :timeout-ms (:timeout-ms m)) (:origin m) (assoc :origin (:origin m)))
                     (:tests :merge-tests) {:op :tests :timeout-ms (:timeout-ms m)}
                     :stats {:op :stats}
                     :ping {:op :ping}
@@ -468,7 +469,9 @@
         [wake-r wake] (sock/socketpair)
         events-in (a/chan (a/sliding-buffer 8192))
         chans {:ext (a/chan 1024) :back (a/chan 4096) :to-writer (a/chan cfg/WRITER-BUF)
-               :server-ev (a/chan 4096) :reg (a/chan (* 4 cfg/MAX-AGENTS)) :stop-ch (a/promise-chan)}
+               :server-ev (a/chan 4096) :reg (a/chan (* 4 cfg/MAX-AGENTS)) :stop-ch (a/promise-chan)
+               ;; outside agents' attempts handed back for judgement (seon.entrance)
+               :judge (a/chan 64)}
         view {:agents {} :writer {:tx-count 0} :stats {}
               :server {:agents-forked 0 :pid pid :status :up :restarts 0}
               :store {:backend backend :path path :recovered? (boolean recovered?)
@@ -484,6 +487,10 @@
                     [[:api :to-fs] [:fork-server :ext]]
                     [[:writer :to-flusher] [:flusher :in]]]
         root-procs-p (promise)
+        ;; every effect kind's owner and lanes (seon.fx, lane FX1); any proc reaches an owner
+        ;; by its id [:fx/<kind> :in]; the model provider is only root's (the agents never hold the key)
+        fx-kinds (fx/kinds provider)
+        fx-procs (fx/procs fx-kinds (:back chans))
         root-procs
             {:api {:proc (flow/process #'api-proc)
                    ;; room for every answer the writer can owe while the api is not reading
@@ -491,6 +498,7 @@
                            :args {:wake wake :view view :ext (:ext chans) :back (:back chans) :graph graph-p
                                   :lease-base (pdb/lease-base conn)
                                   :root-procs root-procs-p :root-conns root-conns
+                                  :fx-kinds (set (map #(keyword "fx" (name %)) (keys fx-kinds)))
                                   :reg (:reg chans) :to-writer (:to-writer chans) :events events-in}}
                      :writer {:proc (flow/process #'writer/writer-proc)
                               :args {:conn conn :cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
@@ -502,7 +510,8 @@
                      :reconciler {:proc (flow/process #'reconcile/reconciler-proc)
                                   ;; a reconciler reads main's latest db: a sliding buffer of one
                                   :chan-opts {:main {:buf-or-n (a/sliding-buffer 1)}}
-                                  :args {:boot boot :provider provider}}}
+                                  :args {:boot boot :judge (:judge chans)}}}
+        root-procs (merge root-procs fx-procs)
         _ (deliver root-procs-p root-procs)
         g (flow/create-flow {:procs root-procs :conns root-conns :stop-timeout-ms 10000})
         _ (deliver graph-p g)
@@ -521,7 +530,7 @@
                                             (recur))))))))
                  (.setDaemon true) (.start))
         sys (merge chans {:cfg store-cfg :conn conn :graph g :wake wake :wake-r wake-r :t0 t0
-                          :owned-store (when-not given path)
+                          :owned-store (when-not given path) :boot boot
                           :events-in events-in :events-mult (a/mult events-in) :errors errors})
         sys (assoc sys :reader (start-reader! sys))]
     (flow/resume g)
@@ -591,11 +600,19 @@
 
 (defn submit!
   "Send forms (a string) to the agent; a promise of the reply vector, one map per form.
-  opts {:timeout-ms n}: each form is bounded at n ms."
+  opts {:timeout-ms n}: each form is bounded at n ms; {:origin :outside|:ui}: who asked,
+  recorded with each evaluation."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id :string] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :string [:maybe :map]] :seon.host/promise]]}
   ([sys agent-id forms-string] (submit! sys agent-id forms-string nil))
-  ([sys agent-id forms-string {:keys [timeout-ms]}]
-   (call! sys (cond-> {:op :eval :id agent-id :forms forms-string} timeout-ms (assoc :timeout-ms timeout-ms)))))
+  ([sys agent-id forms-string {:keys [timeout-ms origin]}]
+   (call! sys (cond-> {:op :eval :id agent-id :forms forms-string} timeout-ms (assoc :timeout-ms timeout-ms) origin (assoc :origin origin)))))
+
+(defn judge!
+  "Hand an outside agent's attempt to the reconciler for judgement, as a turn loop's end
+  is: proofs in a fork, the branch read, the agent retired. attempt {:attempt :task :env
+  :agent}. nil."
+  {:malli/schema [:=> [:cat :seon.root/sys :map] :nil]}
+  [sys attempt] (a/>!! (:judge sys) attempt) nil)
 
 (defn run-tests!
   "The agent forks itself and runs its deftests in the child; a promise of

@@ -16,6 +16,7 @@ echo "== contracts"; run contracts | grep -E ":contracted|:uncontracted|:result"
 # ("bit operation not supported for: class clojure.lang.BigInt", a runtime finding)
 echo "== census (no [:fn] without :gen; mg/check on every pure contract)"
 (cd "$ROOT" && HOME=$ROOT/target/home JOLT_PWD=$ROOT "$ROOT/target/jolt/jolt" -m seon.check census 2>&1 | grep -E ":generated|:failed \[\]|:result")
+echo "== fx (an effect from an agent through its owner proc)"; run fx 200 | grep -E ":unknown|:test-fork"
 echo "== admit"; run admit | tail -1
 echo "== record"; run record | tail -1
 echo "== smoke";  run smoke | grep -E "^merge|^killed|spawned|ready"

@@ -1,0 +1,173 @@
+(ns seon.fx
+  "Effects (lane FX1, notes/option3-FX1-effects.md). Every outside effect kind has ONE
+  owner proc in root behind a bounded channel, and `lanes` performer procs:
+
+    agent --socket--> stand-in --:fx/<kind>--> owner --:work--> lane (performs)
+    agent <--socket-- stand-in <--api :back--- owner <--:done-- lane
+
+  The owner admits (concurrency = its lanes; priority and budget are request attributes,
+  rate and budget counters its live state), queues by priority, and replies {:dest :r}
+  on the api's :back, the route the writer's answers already take. A lane performs one
+  request with the kind's perform Var (the interop edge: it returns its declared error as
+  data) and is the entrant boundary for a defect in it. Nothing here writes a branch: the
+  asker records the outcome in its own recording transaction."
+  (:refer-clojure :exclude [defn defn-])
+  (:require [seon.contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
+            [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
+
+(defn port "The stand-in's out-port to kind's owner." {:malli/schema [:=> [:cat :keyword] :keyword]}
+  [kind] (keyword "fx" (name kind)))
+
+(defn- error {:malli/schema [:=> [:cat :keyword :string :map] :map]}
+  [type message data]
+  (merge {:seon.error/type type :seon.error/operation 'seon.fx/call :seon.error/message message} data))
+
+;; ---- performers: the interop edges, one Var per kind ------------------------------------
+
+(defn echo "The stand-in effect: answers the request as its value." {:malli/schema [:=> [:cat :map] :map]}
+  [req] {:value (:req req)})
+
+(defn write-file
+  "Write-back: the text to path (staged beside it, then renamed, so a reader sees the old
+  or the new file). Answers {:value {:bytes n}} or :seon.fx/io-error."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [path text]} :req}]
+  (try
+    (let [tmp (str path ".fx-" (lib/c-getpid))]
+      (spit tmp text)
+      (.renameTo (java.io.File. tmp) (java.io.File. ^String path))
+      {:value {:bytes (count text)}})
+    (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path path}))))
+
+;; ---- the owner -----------------------------------------------------------------------
+
+(defn- admit
+  "What the owner does with a queued request now: :run, :wait (no free lane), or the
+  refusal (the request's budget is spent; spend is this proc's live counter)."
+  {:malli/schema [:=> [:cat :map :map] [:or [:enum :run :wait] :map]]}
+  [st {:keys [budget budget-key]}]
+  (cond
+    (and budget (>= (get-in st [:spent budget-key] 0) budget))
+    (error :seon.fx/budget-spent "the request's budget is spent" {:budget budget :spent (get-in st [:spent budget-key])})
+    (>= (:busy st) (:lanes st)) :wait
+    :else :run))
+
+(defn- reply!
+  "The outcome to its asker. Through the api's :back (the writer's answer route), or with
+  cfg/FX-DIRECT straight to the asker's stand-in by its id: [agent :in]."
+  {:malli/schema [:=> [:cat :seon.host/volatile :map :map] :nil]}
+  [o dest r]
+  (if (and cfg/FX-DIRECT (:agent dest))
+    (step/out! o [(:agent dest) :in] {:op :write :msg (assoc r :op (:op dest) :k (:k dest))})
+    (step/out! o :out {:dest dest :r r})))
+
+(defn- dispatch
+  "Take queued requests in priority order while lanes are free; a refused one is answered
+  at once. Answers st."
+  {:malli/schema [:=> [:cat :map :seon.host/volatile] :map]}
+  [st o]
+  (loop [st st]
+    (if-let [[qk m] (first (:queue st))]
+      (let [d (admit st m)]
+        (cond
+          (= :wait d) st
+          (= :run d) (do (step/out! o :to-lanes (assoc m :taken-ns (lib/now-ns)))
+                         (recur (-> st (update :queue dissoc qk) (update :busy inc))))
+          :else (do (reply! o (:dest m) (assoc d :seon.fx/kind (:kind st)))
+                    (recur (update st :queue dissoc qk)))))
+      st)))
+
+(defn- bound
+  "The owner's queue holds at most cfg/FX-BUF requests; at the bound it reads only :done
+  (Flow's input filter), so stand-ins park on :in: back-pressure to the asking agent."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st] (assoc st ::flow/input-filter (if (>= (count (:queue st)) cfg/FX-BUF) #(not= :in %) identity)))
+
+(defn owner-proc
+  "The owner of one effect kind. In :in (the stand-ins' requests {:req :dest :prio
+  :budget :budget-key :agent}, addressed by id; cfg/FX-BUF), :done (the lanes'
+  outcomes). Out :to-lanes (its performers' shared channel), :out (the api's :back:
+  {:dest :r})."
+  {:malli/schema :seon.step/step-fn}
+  ([] {:params {:kind "the effect kind" :lanes "performers, its concurrency"}
+       :ins {:in "requests, addressed [:fx/<kind> :in] by any proc" :done "its lanes' outcomes"} :outs {}
+       ;; admission and routing only: never blocks, never computes long
+       :workload :io
+       :ping-map-fn (fn [st] (-> (select-keys st [:kind :lanes :busy :done]) (assoc :queued (count (:queue st)) :spent (:spent st))))})
+  ([args] (assoc (select-keys args [:kind :lanes]) :busy 0 :done 0 :seq 0 :queue (sorted-map) :spent {}
+                 ::flow/out-ports {:to-lanes (:work args) :out (:back args)}))
+  ([st _] st)
+  ([st in m]
+   (let [o (volatile! {})]
+     (if (nil? m)
+       [st nil]
+       (case in
+         :in (let [n (inc (:seq st))]
+               [(bound (dispatch (-> st (assoc :seq n) (assoc-in [:queue [(- (:prio m 0)) n]] (assoc m :in-ns (lib/now-ns)))) o)) @o])
+         :done (let [{:keys [dest outcome budget-key cost]} m]
+                 (reply! o dest outcome)
+                 [(bound (dispatch (cond-> (-> st (update :busy dec) (update :done inc))
+                              budget-key (update-in [:spent budget-key] (fnil + 0) (or cost 1)))
+                            o))
+                  @o]))))))
+
+(defn lane-proc
+  "One performer of an effect kind: takes a request from its owner's shared channel,
+  performs it with the kind's Var, and gives the owner the outcome (with its timing).
+  The entrant boundary for a defect in the perform Var: the defect is the outcome, as an
+  error map, so its asker is always answered."
+  {:malli/schema :seon.step/step-fn}
+  ([] {:params {:perform "the kind's perform Var"} :ins {} :outs {}
+       ;; the effect blocks this lane's thread, and only this lane's
+       :workload :io
+       :ping-map-fn (fn [st] (select-keys st [:n]))})
+  ([args] {:perform (:perform args) :kind (:kind args) :ctx (:ctx args) :n 0
+           :owner (:owner args) ::flow/in-ports {:work (:work args)}})
+  ([st _] st)
+  ([st _ m]
+   (if (nil? m)
+     [st nil]
+     (let [t0 (lib/now-ns)
+           r (try ((:perform st) (assoc m :ctx (:ctx st)))
+                  (catch Throwable e (error :seon.fx/defect (or (ex-message e) (str (type e))) {})))
+           t1 (lib/now-ns)
+           outcome (assoc r :seon.fx/kind (:kind st) :seon.fx/queue-us (quot (- (:taken-ns m) (:in-ns m)) 1000)
+                          :seon.fx/us (quot (- t1 t0) 1000))]
+       [(update st :n inc) {[(:owner st) :done] [(cond-> {:dest (:dest m) :outcome outcome :budget-key (:budget-key m)}
+                                     (:cost r) (assoc :cost (:cost r)))]}]))))
+
+(defn model
+  "The model call (seon.model/complete) under root's provider (:ctx, which names the API
+  key's environment variable; root alone reads it); a request's :model overrides the
+  provider's model. Answers {:value completion :cost tokens} or the provider error."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{:keys [req ctx]}]
+  (let [p (cond-> (:provider ctx) (and (:model req) (= :openai-compat (:kind (:provider ctx)))) (assoc :model (:model req)))
+        c (model/complete p (dissoc req :model))]
+    (if (:seon.error/type c) c {:value c :cost (+ (:prompt-tokens c) (:completion-tokens c))})))
+
+(defn kinds
+  "Every effect kind root runs: its perform Var, its lanes (its concurrency) and the
+  context only root holds (the model provider)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [provider]
+  {:echo {:perform #'echo :lanes 1}
+   :file {:perform #'write-file :lanes 1}
+   :model {:perform #'model :lanes cfg/MODEL-LANES :ctx {:provider provider}}})
+
+(defn procs
+  "The owner and lane procs of every kind, for the root graph. Any proc reaches an owner
+  by its id, [:fx/<kind> :in]; back is the api's :back channel. Answers {pid def}."
+  {:malli/schema [:=> [:cat :map :seon.host/chan] :map]}
+  [kinds back]
+  (reduce-kv
+    (fn [acc kind {:keys [perform lanes ctx]}]
+      (let [work (a/chan lanes) owner (keyword "fx" (name kind))]
+        (-> acc
+            (assoc owner {:proc (flow/process #'owner-proc)
+                          :chan-opts {:in {:buf-or-n cfg/FX-BUF} :done {:buf-or-n (* 2 lanes)}}
+                          :args {:kind kind :lanes lanes :work work :back back}})
+            (into (for [i (range lanes)]
+                    [(keyword (str "fx." (name kind)) (str i))
+                     {:proc (flow/process #'lane-proc) :args {:kind kind :perform perform :ctx ctx :work work :owner owner}}])))))
+    {} kinds))

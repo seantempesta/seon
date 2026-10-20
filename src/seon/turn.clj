@@ -17,7 +17,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.set :as set]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
-            [seon.proofs :as proofs] [seon.context :as context] [seon.model :as model]
+            [seon.proofs :as proofs] [seon.context :as context]
             [seon.harvest :as harvest] [my.branch :as branch]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: the task and
@@ -78,18 +78,22 @@
 (defn- act!
   "One model turn: the context of what was observed to the model, the reply's forms through
   the one REPL path, the turn's facts on the branch. Answers the loop state after it, or the
-  provider error."
-  {:malli/schema [:=> [:cat :map :map :seon.model/provider] [:or :map :seon.model/provider-error]]}
-  [{:keys [turn tokens last-items max-turns merge? attempt] :as st} {:keys [run results unmerged] :as obs} provider]
+  provider error. The model call is an effect (my.fx :model, lane FX1): root's model owner
+  admits, performs and answers it; the API key never enters this process."
+  {:malli/schema [:=> [:cat :map :map [:maybe :string]] [:or :map :map]]}
+  [{:keys [turn tokens last-items max-turns merge? attempt] :as st} {:keys [run results unmerged] :as obs} model-name]
   (let [t (:task obs)
         proofs (:proofs (:seon.task/accumulated t))
         block (context/current-state (agent/db) t {:results results :turn turn :max-turns max-turns
                                                    :reds (proofs/red-reports run proofs) :last-items last-items
                                                    :unmerged (when merge? unmerged)})
         t1 (System/nanoTime)
-        c (model/complete provider {:messages (context/messages block) :task (:seon.task/id t) :turn turn})]
-    (if (:seon.error/type c)
-      c
+        r (agent/fx! :model (cond-> {:messages (context/messages block) :task (:seon.task/id t) :turn turn}
+                              model-name (assoc :model model-name))
+                     {})
+        c (:value r)]
+    (if (:seon.error/type r)
+      r
       (let [items (repl/eval-string (reply->source (:text c)))
             used (+ (:prompt-tokens c) (:completion-tokens c))]
         (agent/transact! [{:seon.turn/id (str attempt "/" turn) :seon.turn/attempt attempt :seon.turn/n turn
@@ -100,14 +104,28 @@
         (cond-> (assoc st :turn (inc turn) :tokens (+ tokens used) :last-items items)
           merge? (update :merge-turns inc))))))
 
+(defn context-block
+  "The current-state block of task, as the model sees it on this branch now (the proofs run
+  again): what an outside agent working the task reads. It also makes this process work
+  task as attempt, so the my.* verbs act on it."
+  {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id] :string]}
+  [task attempt]
+  (swap! agent/state assoc :turn {:task task :attempt attempt})
+  (let [{:keys [run results unmerged] :as obs} (observe task #{})
+        t (:task obs)]
+    (:content (second (context/messages (context/current-state (agent/db) t {:results results :turn 0 :max-turns 1
+                                                                             :reds (proofs/red-reports run (:proofs (:seon.task/accumulated t)))
+                                                                             :last-items [] :unmerged unmerged}))))))
+
 (defn work!
-  "Work task `task` as attempt `attempt` with `provider`, at most max-turns model calls.
+  "Work task `task` as attempt `attempt` (the model `model` when set, else root's), at most
+  max-turns model calls.
   Answers the end ({:outcome :turns :model-calls :tokens :ms}); the same end is written on
   the branch."
-  {:malli/schema [:=> [:cat [:map [:task :seon.task/id] [:attempt :seon.attempt/id] [:provider :seon.model/provider]
+  {:malli/schema [:=> [:cat [:map [:task :seon.task/id] [:attempt :seon.attempt/id] [:model {:optional true} :string]
                              [:max-turns pos-int?]]]
                   :seon.turn/end]}
-  [{:keys [task attempt provider max-turns]}]
+  [{:keys [task attempt model max-turns]}]
   (swap! agent/state assoc :turn {:task task :attempt attempt})
   (let [t0-task (task/task (agent/db) task)
         merge? (= :merge (:seon.task/kind t0-task))
@@ -128,5 +146,5 @@
           stop (end! st (:outcome stop) (:reason stop))
           hairy (end! st :merge-failed (:reason hairy))
           (>= (:turn st) max-turns) (end! st :cap (r/refusals-text refusals))
-          :else (let [st' (act! st obs provider)]
+          :else (let [st' (act! st obs model)]
                   (if (:seon.error/type st') (end! st :error (:seon.error/message st')) (recur st'))))))))

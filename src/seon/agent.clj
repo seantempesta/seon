@@ -117,6 +117,10 @@
       (cond
         (= m :dead) (lib/c-exit 0)
         (and (= op (:op m)) (= k (:k m))) m
+        ;; Flow's ping reaches a waiting agent too: health while an effect is in flight
+        (= :ping (:op m)) (do (send! {:op :pong :status :waiting :count (:n @state 0) :held 0
+                                      :state {:evals (:n @state) :waiting-for op}})
+                              (recur))
         :else (do (swap! state update :pending conj m) (recur))))))
 
 
@@ -148,6 +152,62 @@
         (when (>= (- now since) (* 1000000 cfg/FLUSH-MS)) (commit!))
         (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
           (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r))))))))
+
+;; ---- effects (seon.fx, lane FX1): root's owner procs, through the stand-in -------------
+
+(def ^:dynamic *fx-stub*
+  "Inside a test (a fork of this agent) no effect leaves the process: a test that needs
+  one binds this to a fn of [kind req] answering the outcome, an injected value."
+  nil)
+
+(defn- fx-record!
+  "The outcome joins this eval request's recording transaction (the asker records)."
+  {:malli/schema [:=> [:cat :int :keyword :map] :any]}
+  [k kind r]
+  (swap! state assoc-in [:defs [:fx k]]
+         [(cond-> {:seon.fx/id (str (name (:id @state)) "-" (lib/c-getpid) "-fx" k) :seon.fx/kind kind
+                   :seon.fx/status (if (:seon.error/type r) :error :ok)
+                   :seon.fx/us (long (:seon.fx/us r 0)) :seon.fx/queue-us (long (:seon.fx/queue-us r 0))}
+            (:cost r) (assoc :seon.fx/cost (long (:cost r)))
+            (:seon.error/type r) (assoc :seon.fx/error (str (:seon.error/type r) ": " (:seon.error/message r))))]))
+
+(defn- fx-test
+  "An effect asked inside a test fork: the stub's outcome, or the declared refusal."
+  {:malli/schema [:=> [:cat :keyword :map] :map]}
+  [kind req]
+  (if *fx-stub*
+    (*fx-stub* kind req)
+    {:seon.error/type :seon.fx/in-test :seon.error/operation 'seon.fx/call :seon.fx/kind kind
+     :seon.error/message "an effect inside a test does not leave the test's process: bind seon.agent/*fx-stub*"}))
+
+(defn fx!
+  "The effect kind with req, through root's owner proc, answered here: its outcome
+  {:value ...} or its declared error. Recorded with this eval request. No lock: an
+  interrupt may end the wait; the outcome then arrives later as an async one does."
+  {:malli/schema [:=> [:cat :keyword :map :map] :map]}
+  [kind req opts]
+  (if (= :test (:mode @state))
+    (fx-test kind req)
+    (let [k (:tx-seq (swap! state update :tx-seq inc))
+          _ (swap! state update :fx-pending (fnil assoc {}) k kind)
+          _ (when (= :dead (send! (merge opts {:op :fx :k k :kind kind :req req}))) (lib/c-exit 0))
+          m (await-op! :fx-reply k)
+          r (dissoc m :op :k)]
+      (swap! state update :fx-pending dissoc k)
+      (fx-record! k kind r)
+      r)))
+
+(defn fx-send!
+  "The effect kind with req, started: answers its key k at once. The outcome arrives as a
+  message {:from :fx :k k :kind kind :body outcome} ((messages)), recorded then."
+  {:malli/schema [:=> [:cat :keyword :map :map] [:or :int :map]]}
+  [kind req opts]
+  (if (= :test (:mode @state))
+    (fx-test kind req)
+    (let [k (:tx-seq (swap! state update :tx-seq inc))]
+      (when (= :dead (send! (merge opts {:op :fx :k k :kind kind :req req}))) (lib/c-exit 0))
+      (swap! state update :fx-pending (fnil assoc {}) k kind)
+      k)))
 
 ;; ---- merging main into this branch (seon.merge; lane M1) -------------------------------
 
@@ -307,6 +367,13 @@
   [m]
   (case (:op m)
     :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:timeout-ms m) 30000)) :mem-mb (mem-mb)}]
+    ;; an async effect's outcome (fx-send!): a message to this agent, recorded
+    :fx-reply (let [kind (get-in @state [:fx-pending (:k m)])
+                    r (dissoc m :op :k)]
+                (swap! state (fn [s] (-> s (update :fx-pending dissoc (:k m))
+                                         (update :inbox (fnil conj []) {:from :fx :k (:k m) :kind kind :body r}))))
+                (fx-record! (:k m) kind r)
+                nil)
     ;; root asks this agent to merge main into its branch (it owns the branch's writes)
     :merge-main [{:op :merged-main :id (:id m) :result (merge-main! (:data-attrs m #{}))}]
     :clone (do (clone! m) nil)
@@ -349,7 +416,7 @@
                   ;; the clone opens the store itself, on its own branch, with its own lease
                   (pdb/after-fork! (:cfg r) (:lease r))
                   (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn c :rd (wire/reader c) :mode :agent :tx-seq 0
-                         :pending clojure.lang.PersistentQueue/EMPTY :mem-at nil
+                         :pending clojure.lang.PersistentQueue/EMPTY :mem-at nil :fx-pending {}
                          :store-conn (d/connect (assoc (:cfg r) :branch (:branch m))))
                   (swap! state assoc :db @(:store-conn @state)))
                 (hello! t0 {:cloned-from parent})
@@ -372,6 +439,8 @@
   (lib/heap-cap! (+ (lib/bytes-in-heap) heap-extra-bytes))
   ;; this agent owns its branch's writes: it opens the store itself (seon.db/after-fork!)
   (pdb/after-fork! cfg lease)
+  ;; the model's API key is root's alone (its :model owner calls the model; lane FX1)
+  (doseq [v (distinct (remove nil? [(System/getenv "SEON_AI_API_KEY_ENV") "DEEPSEEK_API_KEY"]))] (lib/c-unsetenv v))
   (let [nsx (make-ns! id)
         intr-ok (interrupt-self-test)
         c (sock/conn fd)
