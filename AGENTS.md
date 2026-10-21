@@ -90,12 +90,13 @@ The order of the tasks is the order of the work: **delete first, then foundation
 
    The system records all of it: the task, the attempt, every eval (origin `:outside`), the context you read, and the judgment. That record is replayable like any agent's. Where the context lacked what you needed, the output was noise, a tool was missing or the judge was wrong, that stage's problem is a task. Platform code (`seon.*`) moves into this flow as the self-improvement loop lands; until then do its code in your worktree and still work its task through the door.
 1. **Take one task.** For foundation work, open a worktree: `bin/worktree <task-name>`. Work only there and only on that task's files. Never edit the main tree, another lane's files, or anything outside the task. Never run `git checkout`, `restore`, `stash` or `reset` on paths you don't own.
-2. **Research the existing code first, end to end, before writing anything.**
+2. **Learn, plan, act, in that order** (owner, 2026-10-21). First research the existing code end to end, before writing anything; then write the plan; then build.
    - Read the task's plan, DECISIONS, `docs/DRAGONS.md`, and the code it touches with its callers and its tests.
    - Read the dependency (Jolt, Datahike, Flow, malli) before working around it.
    - Ask: is this code already scheduled for deletion or replacement (`../notes/PLAN-v2.md`, other tasks' plans)? If so, stop and tell root.
    - Write what you found into the task's plan: the cause, with file:line evidence.
    - If the premise is wrong, stop and send the evidence to root.
+   - **Plan:** write the plan before code: the changes file by file, what each deletes, the risks, how each is proved, the estimates, the landing order. For a change to a dependency (Jolt, Chez, Datahike, Flow) or a design rule, send root the plan and wait for its approval before building. Work the dependency's own way: read how its authors designed it, and fix within that design, never with a hack around it.
 3. **Estimate before measuring.**
    - Derive what the work must cost: what N counts, how many passes, the unit costs from `seon.cost/units`.
    - Write the estimate as a cost proof (`seon.cost/proof`) for anything whose input grows.
