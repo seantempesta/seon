@@ -615,7 +615,7 @@
         ]
     (flow/resume g)
     ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is
-    @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (into (task/boot-tx boot max-running) [(cfg/facts config)])}})
+    @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (into (task/boot-tx boot max-running) [(cfg/facts config cfg/sources)])}})
     sys))
 
 ;; ====================================================================================

@@ -9,8 +9,10 @@
   - the checkout (`SEON_CHECKOUT`, which bin/env exports for the binary, else `JOLT_PWD`,
     which `jolt run` callers set), where the file and the checkout-relative paths live;
   - the profile (`SEON_PROFILE`, default `:default`), handed to aero's `#profile`;
-  - every override, through aero's `#env` in the file itself, so the file is the one list of
-    what can be set.
+  - overrides: aero's `#env` in the file itself; the checkout's own `config/local.edn`
+    (gitignored; bin/worktree writes its ports); the command line's `--config FILE` and
+    `--set :ns/key=edn` (every mode of the binary; taken out of the mode's args). Later layers
+    win, key by key; `sources` names the layer of each key.
 
   The file is read once, when this namespace loads (root's boot: every process of the
   platform is root or forked from it, so agents and the fork server hold the same value and
@@ -23,7 +25,7 @@
   A foundational namespace, below seon.contract (which reads the guarantees dial here): its
   functions carry contracts in their metadata and are armed at boot."
   (:require [aero.core :as aero] [malli.core :as m] [malli.registry :as mr] [clojure.edn :as edn]
-            [clojure.java.io :as io] [clojure.string :as str] [datahike.api :as d]))
+            [clojure.java.io :as io] [clojure.string :as str] [datahike.api :as d] [jolt.scheme :as scm]))
 
 ;; ---- where: the checkout and the profile (the loader's own two environment reads) ----------
 
@@ -116,9 +118,97 @@
   [p prof dir]
   (resolved (aero/read-config p {:profile prof ::checkout dir})))
 
+(defn- refuse!
+  {:malli/schema [:=> [:cat :qualified-symbol :string] :nil]}
+  [op msg] (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation op :seon.error/message msg})))
+
+;; ---- the layers: the shipped file, the checkout's own file, the command line ------------------
+;; Owner, 2026-10-21: "Hand out different edn config files that each agent can load and control
+;; separately or do command line overrides." Later layers win, key by key; the merged map is
+;; validated once, and every key remembers the layer it came from (`sources`).
+
+(defn local-path
+  "The checkout's own config (gitignored; bin/worktree writes it with the worktree's ports)."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [dir] (str dir "/config/local.edn"))
+
+(defn argv
+  "This process's command line as the OS gave it (Chez's command-line): the one place the
+  loader reads it, so --config and --set apply to every mode."
+  {:malli/schema [:=> [:cat] [:vector :string]]}
+  []
+  (let [l (scm/eval-string "(command-line)")]
+    (mapv #(scm/call "list-ref" l %) (range (scm/call "length" l)))))
+
+(defn parse-set
+  "--set's argument `:ns/key=edn` as [key value], or the refusal naming it."
+  {:malli/schema [:=> [:cat :string] [:tuple :qualified-keyword :any]]}
+  [s]
+  (let [i (str/index-of s "=")
+        k (when i (try (edn/read-string (subs s 0 i)) (catch Exception _ nil)))
+        v (when i (try [(edn/read-string (subs s (inc i)))] (catch Exception _ nil)))]
+    (if (and (qualified-keyword? k) v)
+      [k (first v)]
+      (refuse! 'seon.config/parse-set (str "--set " s ": expected :ns/key=<edn value>")))))
+
+(defn overrides
+  "The command line's config overrides, in order, and the rest of it:
+  {:layers [[source map-or-path] ...] :rest [arg ...]}. `--config FILE` is a layer read
+  from FILE; `--set :k=v` one key."
+  {:malli/schema [:=> [:cat [:sequential :string]] [:map [:layers vector?] [:rest [:vector :string]]]]}
+  [args]
+  (loop [[a b & more :as as] (seq args) acc {:layers [] :rest []}]
+    (cond
+      (empty? as) acc
+      (and (= "--config" a) b) (recur more (update acc :layers conj [(str "--config " b) b]))
+      (and (= "--set" a) b) (recur more (update acc :layers conj ["--set" (into {} [(parse-set b)])]))
+      (#{"--config" "--set"} a) (refuse! 'seon.config/overrides (str a " needs an argument"))
+      :else (recur (rest as) (update acc :rest conj a)))))
+
+(defn without-overrides
+  "args with --config and --set (and their arguments) taken out: what a mode reads."
+  {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]}
+  [args] (:rest (overrides args)))
+
+(defn- read-layer
+  "One file layer read with aero under prof, #seon/checkout resolving under dir; nil values
+  are not stated (absent at this layer)."
+  {:malli/schema [:=> [:cat :string :keyword :string] :map]}
+  [p prof dir]
+  (into {} (remove (comp nil? val)) (aero/read-config p {:profile prof ::checkout dir})))
+
+(defn layered
+  "The config of the layers [[source map] ...] (later wins, key by key), validated once:
+  {:config :sources}, :sources naming the layer each key came from."
+  {:malli/schema [:=> [:cat [:sequential [:tuple :string :map]]] [:map [:config :seon.config/config] [:sources :seon.config/sources]]]}
+  [layers]
+  (let [m (reduce (fn [m [_ l]] (merge m l)) {} layers)
+        c (resolved m)]
+    {:config c
+     :sources (into {} (for [[src l] layers [k v] l :when (some? v)] [k src]))}))
+
+(defn load-layers
+  "The layers this process reads: the shipped file, the checkout's config/local.edn when it
+  exists, then the command line's --config files and --set keys, in order."
+  {:malli/schema [:=> [:cat :string :keyword [:sequential :string]] [:vector [:tuple :string :map]]]}
+  [dir prof args]
+  (let [local (local-path dir)]
+    (into (cond-> [["resources/seon/config/default.edn" (read-layer (path dir) prof dir)]]
+            (.exists (io/file local)) (conj ["config/local.edn" (read-layer local prof dir)]))
+          (for [[src x] (:layers (overrides args))]
+            [src (if (string? x) (read-layer x prof dir) x)]))))
+
+(def ^:private loaded
+  (let [dir (checkout)] (layered (load-layers dir (profile) (argv)))))
+
 (def config
-  "This process's config: the checkout's file, read once at load under its profile."
-  (let [dir (checkout)] (read-file (path dir) (profile) dir)))
+  "This process's config: every layer, read once at load (root's boot; agents are forked
+  holding it)."
+  (:config loaded))
+
+(def sources
+  "Which layer each key of the config came from."
+  (:sources loaded))
 
 (defn value
   "Key k of the config. A key the schema does not declare, or an optional key that is
@@ -160,10 +250,10 @@
 ;; ---- the facts on main ------------------------------------------------------------------------
 
 (defn facts
-  "Config c as the facts of main's root entity, written with root's boot fact (platform
-  records: never carried by a merge in either direction)."
-  {:malli/schema [:=> [:cat :seon.config/config] :map]}
-  [c] (assoc c :seon.root/id :root))
+  "Config c and its sources as the facts of main's root entity, written with root's boot fact
+  (platform records: never carried by a merge in either direction)."
+  {:malli/schema [:=> [:cat :seon.config/config :seon.config/sources] :map]}
+  [c srcs] (assoc c :seon.root/id :root :seon.config/sources (pr-str srcs)))
 
 (defn secret
   "The value of the environment variable named var-name (a credential, e.g. the model's key,
@@ -179,3 +269,9 @@
   [db]
   (when-let [e (d/q '[:find ?e . :where [?e :seon.root/id :root]] db)]
     (let [r (d/pull db (keys-declared) e)] (when (seq r) r))))
+
+(defn sources-from-db
+  "Which layer each key of the config root wrote on db came from."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.config/sources]]}
+  [db]
+  (some-> (d/q '[:find ?s . :where [?e :seon.root/id :root] [?e :seon.config/sources ?s]] db) edn/read-string))

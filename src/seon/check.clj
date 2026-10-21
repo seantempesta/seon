@@ -691,13 +691,15 @@
                              (in-ns 'agent.a2) (transact! [{:note/text \"b's unmerged note\" :note/agent :b}]) (app.m1/f2 1)"))
         cl @(c/clone! sys k {:branch :dur-clone})
         _ (await-status sys [(:id cl)] #{:idle} 5000)
-        t-clone (get-in (c/state sys) [:agents (:id cl) :t])
+        ev (c/events sys)
         _ (out! "clone " (:id cl) ": " (p1 (:id cl) "(transact! [{:note/text \"the clone's note\" :note/agent :clone}]) (count (q '[:find ?n :where [?n :note/text]]))"))
-        ;; an agent's write is answered when applied and committed when the agent is idle
-        ;; (its run-ahead writer): the kill below waits for the clone's commit, the fact that
-        ;; its write is in the store, rather than racing it (a kill between the answer and
-        ;; the commit loses the write by design)
-        _ (loop [] (when (= t-clone (get-in (c/state sys) [:agents (:id cl) :t])) (Thread/sleep 2) (recur)))
+        ;; an agent's write is answered when applied, committed when the agent is idle (its
+        ;; run-ahead writer) and durable at root's next flush: the kill below waits for the
+        ;; clone's commit event, then for a flush after it (a :flush? write's answer comes after
+        ;; its flush, which covers the commit the writer was told of first), rather than
+        ;; racing them (a kill in between loses the write by design)
+        _ (loop [] (let [e (clojure.core.async/<!! ev)] (when-not (and (= :commit (:type e)) (= (:id cl) (:agent e))) (recur))))
+        _ @(c/transact-main! sys [] {:flush? true})
         st (c/state sys {:datoms true})
         expect {:main-datoms (get-in st [:main :datoms]) :main-t (get-in st [:main :t])}]
     (spit (str path ".expect.edn") (pr-str expect))
@@ -1165,10 +1167,15 @@
     (lib/c-exit (if (:ok res) 0 1))))
 
 (defn root-serve
-  "A root with its entrance on 127.0.0.1:port (seon.entrance), until stdin closes: what an
-  outside agent's MCP server (target/seon mcp PORT) talks to."
-  [port]
-  (let [sys (c/start! {})]
+  "A root with its entrance on 127.0.0.1:(:seon.config.root/entrance-port) (seon.entrance),
+  until stdin closes: what an outside agent's MCP server (target/seon mcp) talks to. A
+  checkout whose config names no entrance port (0) serves none, and says so."
+  []
+  (let [port (seon.config/value :seon.config.root/entrance-port)
+        _ (when (zero? port)
+            (out! "ROOT REFUSED: :seon.config.root/entrance-port is 0 (no entrance); bin/worktree --ports writes config/local.edn with this checkout's ports")
+            (lib/c-exit 1))
+        sys (c/start! {})]
     (seon.entrance/serve! sys port)
     (out! "ROOT LISTENING " port)
     (loop [] (when (read-line) (recur)))
@@ -1198,7 +1205,7 @@
               {"jsonrpc" "2.0" "id" 4 "method" "tools/call" "params" {"name" "seon_eval" "arguments" {"agent" (name a) "code" "(def outside-x 41) (inc outside-x)"}}}
               {"jsonrpc" "2.0" "id" 5 "method" "tools/call" "params" {"name" "seon_eval" "arguments" {"agent" "root" "code" "(count (:agents (c/state sys)))"}}}]
         t0 (lib/now-ns)
-        r (clojure.java.shell/sh "./seon" "mcp" (str port) :in (clojure.string/join "\n" (map clojure.data.json/write-str msgs)))
+        r (clojure.java.shell/sh "./seon" "mcp" "--set" (str ":seon.config.root/entrance-port=" port) :in (clojure.string/join "\n" (map clojure.data.json/write-str msgs)))
         ms (lib/ms-since t0)
         answers (into {} (for [l (clojure.string/split-lines (:out r)) :when (clojure.string/starts-with? l "{")
                                :let [j (clojure.data.json/read-str l)]] [(get j "id") j]))
@@ -1334,7 +1341,10 @@
     (out! (if seeded? "SEED OK" "SEED FAILED (the store existed)"))
     (lib/c-exit (if seeded? 0 1))))
 
-(defn -main [& [mode n & more]]
+(defn -main [& args]
+  ;; --config FILE and --set :k=v are the config's (seon.config reads them from the command
+  ;; line); the mode reads the rest
+  (let [[mode n & more] (seon.config/without-overrides args)]
   (case mode
     "seed" (seed (Long/parseLong (or n "2000")))
     "dur-bench-write" (dur-bench-write n (Long/parseLong (first more)))
@@ -1365,12 +1375,12 @@
     "problems" (problems-check)
     "threads" (threads-check)
     "branch-cost" (branch-cost (Long/parseLong n))
-    "root" (root-serve (Long/parseLong n))
-    "mcp" (do (seon.mcp/serve! (Long/parseLong n)) (lib/c-exit 0))
+    "root" (root-serve)
+    "mcp" (do (seon.mcp/serve! (seon.config/value :seon.config.root/entrance-port)) (lib/c-exit 0))
     "mcp-proof" (mcp-proof)
     "hotreload" (hotreload)
     "swarm" (swarm (Long/parseLong (or n "100")))
     "soak" (soak (Long/parseLong (or n "50")) (Long/parseLong (or (first more) "60")) (some-> (second more) Long/parseLong))
     "mem" (mem (Long/parseLong (or n "100")) 3)
     "web" (web-serve (Long/parseLong (or n "6")) more)
-    (smoke)))
+    (smoke))))

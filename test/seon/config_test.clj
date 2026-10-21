@@ -127,8 +127,9 @@
         child (keyword (str (name (:branch cfg)) "-a1"))
         c (assoc config/config :seon.config.agent/max-running 6)]
     (is (nil? (config/from-db @conn)))
-    (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6) [(config/facts c)])})
+    (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6) [(config/facts c {:seon.config.web/port "--set"})])})
     (is (= c (config/from-db @conn)))
+    (is (= {:seon.config.web/port "--set"} (config/sources-from-db @conn)))
     ;; the reconciler's root read sees the same dials
     (is (= {:boot "boot-1" :max-running 6 :max-merging (config/value :seon.config.merge/max-running)} (task/root @conn)))
     ;; a branch made from main holds them too (what an agent forked onto it reads)
@@ -166,3 +167,38 @@
     ;; the analyzer does find them: the loader's own three (checkout, profile, secret)
     (is (= #{'seon.config} (set (map first refs))))
     (is (= '#{(defn checkout) (defn profile) (defn secret)} (set (map second refs))))))
+
+;; ---- layers: the checkout's local.edn, --config, --set ---------------------------------------
+
+(deftest the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
+  (let [o (config/overrides ["scale" "100" "--set" ":seon.config.web/port=7791" "--config" "x.edn" "more"])]
+    (is (= ["scale" "100" "more"] (:rest o)))
+    (is (= [["--set" {:seon.config.web/port 7791}] ["--config x.edn" "x.edn"]] (:layers o))))
+  (is (= ["root"] (config/without-overrides ["root" "--set" ":seon.config.root/entrance-port=7898"]))))
+
+(deftest a-bad-set-refuses-naming-it
+  (doseq [bad ["port=1" ":seon.config.web/port" "seon.config.web/port=1" ":seon.config.web/port=("]]
+    (is (= :seon.config/refused (:seon.error/type (refused #(config/parse-set bad)))) bad))
+  (is (= :seon.config/refused (:seon.error/type (refused #(config/overrides ["--set"]))))))
+
+(deftest later-layers-win-key-by-key-and-name-their-source
+  (let [ls (config/load-layers (config/checkout) :default
+                               ["--config" (str dir "/local-ports.edn") "--set" ":seon.config.web/port=7999"])
+        {c :config srcs :sources} (config/layered ls)]
+    (is (= 7910 (:seon.config.root/entrance-port c)))
+    (is (= 7999 (:seon.config.web/port c)))
+    (is (= (str "--config " dir "/local-ports.edn") (srcs :seon.config.root/entrance-port)))
+    (is (= "--set" (srcs :seon.config.web/port)))
+    (is (= "resources/seon/config/default.edn" (srcs :seon.config.root/max-agents)))
+    (is (= (set (keys c)) (set (keys srcs))))))
+
+(deftest an-override-is-validated-by-the-same-schemas
+  (is (= [{:key :seon.config.web/port :problem :invalid :value "-1"}]
+         (:seon.config/problems (refused #(config/layered (config/load-layers (config/checkout) :default ["--set" ":seon.config.web/port=-1"]))))))
+  (is (= :unknown-key
+         (:problem (first (:seon.config/problems (refused #(config/layered (config/load-layers (config/checkout) :default ["--set" ":seon.config.web/porrt=1"])))))))))
+
+(deftest no-port-is-listened-on-unless-the-config-says-so
+  (let [c (:config (config/layered [(first (config/load-layers (config/checkout) :default []))]))]
+    (is (= 0 (:seon.config.web/port c)))
+    (is (= 0 (:seon.config.root/entrance-port c)))))
