@@ -821,6 +821,11 @@
   [sys agent-id]
   (write! sys {:op :branch-info :branch (:branch (agent-entry sys agent-id))}))
 
+(defn effect!
+  "Root's own effect: kind with req through its owner proc. A promise of its outcome."
+  {:malli/schema [:=> [:cat :seon.root/sys :keyword :map] :seon.host/promise]}
+  [sys kind req] (call! sys {:op :fx :kind kind :req req}))
+
 (defn transact-main!
   "Root's own write to main. A promise. opts {:flush? true}: answered only after the
   group flush that makes it durable (for a write an outside effect follows)."

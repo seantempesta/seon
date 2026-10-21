@@ -134,9 +134,10 @@
   "The next generation (docs/source.md#the-next-generation): commit of the repository at
   repo built as <:seon.config.source/generations-dir>/<commit>, a worktree of it with this
   checkout's submodule repos at the commit's pins and its target/ cloned (bin/worktree --at),
-  then bin/build seon there, niced, under the one build lock. The build runs in that tree's
-  own environment (bin/env), never this root's checkout. A tree already there is built again
-  (Jolt's caches make an unchanged build cheap). Answers {:value {:commit :checkout :binary
+  then bin/build seon there, niced. The build runs in that tree's own environment (bin/env),
+  never this root's checkout. A tree already there is built again (Jolt's caches make an
+  unchanged build cheap). Only what cannot load in place needs it (a Jolt, Chez or dependency
+  pin, deps.edn, native code): a merge loads in place (seon.program/load-changes!). Answers {:value {:commit :checkout :binary
   :ms}}, or :seon.fx/io-error naming the step and its log (<checkout>.build.log)."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [repo commit]} :req}]
@@ -153,8 +154,7 @@
     (.mkdirs (java.io.File. (str (cfg/value :seon.config.source/generations-dir))))
     (or (when-not (.exists (java.io.File. dir))
           (step "bin/worktree --at" [(str from "/bin/worktree") "--at" dir commit repo]))
-        (step "bin/build seon" ["nice" "-n" "15" "/usr/bin/lockf" "-k" (cfg/value :seon.config.source/build-lock)
-                                (str dir "/bin/build") "seon"])
+        (step "bin/build seon" ["nice" "-n" "15" (str dir "/bin/build") "seon"])
         {:value {:commit commit :checkout dir :binary (str dir "/target/seon") :ms (lib/ms-since t0)}})))
 ;; ---- the owner -----------------------------------------------------------------------
 

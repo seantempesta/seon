@@ -50,7 +50,6 @@
   [:seon.config.source/committer-name :seon.config.source/committer-name]
   [:seon.config.source/committer-email :seon.config.source/committer-email]
   [:seon.config.source/generations-dir :seon.config.source/generations-dir]
-  [:seon.config.source/build-lock :seon.config.source/build-lock]
   [:seon.config.source/test-results-dir :seon.config.source/test-results-dir]
   ;; effects and the model
   [:seon.config.fx/buf :seon.config.fx/buf]

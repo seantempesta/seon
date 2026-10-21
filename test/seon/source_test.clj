@@ -178,18 +178,17 @@
                    'x.z-support/k)
         "a namespace required from a later file is analyzed first, and its alias reads ::z/k")))
 
-(deftest a-new-generation-is-built-and-resumed-on-the-store
-  ;; task seon.source/the-next-generation-runs-from-the-merges-commit, the loop's whole turn
+(deftest a-restart-catches-up-and-a-new-generation-resumes
+  ;; BUILD plan P5 (task seon.source/the-next-generation-runs-from-the-merges-commit),
   ;; through the path the owner uses: bin/root starts a root on a clone of this checkout
   ;; (Seon's own source as main's program, its store under this test's directory); through
-  ;; its entrance, the loop's task redefines seon.fixtures/generation 1 -> 2 and merges
-  ;; (seon.e2e/loop-turn!); the reconciler commits it on the clone's jolt/seon-merges and the
-  ;; :build effect builds that commit, recording the generation on main; `bin/root next`
-  ;; stops the root and starts the generation's binary resuming the same store and main,
-  ;; where (seon.fixtures/generation) answers 2. Declared long, bound 300 s: the build is
-  ;; bin/build seon in the generation's worktree under the one build lock (40-48 s warm,
-  ;; longer while another lane holds the lock), plus two boots (~1 s each) and the loop's
-  ;; run (~10 s).
+  ;; its entrance two loop turns merge seon.fixtures/generation 1 -> 2 and a new
+  ;; seon.fixtures/generations, each live in place. Root is SIGKILLed and the same binary,
+  ;; older than both merges, started on the same store and main: it catches up at boot
+  ;; (seon.program/load-all!). Then the cold-start path: my.root/build! builds main's last
+  ;; merges commit (seon.fx/build, bin/build seon in the generation's worktree) and
+  ;; `bin/root next` starts it on the same store and main. Declared long, bound 300 s: two
+  ;; turns (~14 s each), three boots (~3 s each with the import) and one build (~25-60 s).
   (let [dir (scratch-dir "nextgen")
         tree (str dir "/tree")
         port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
@@ -199,22 +198,32 @@
                                       :in (str (pr-str {:op :eval :agent "root" :code code}) "\n"))
                              a (try (clojure.edn/read-string {:default tagged-literal} (:out r)) (catch Exception _ nil))]
                          (some-> a :items first :printed clojure.edn/read-string)))
+        pids (fn [] (str/split (str/trim (slurp (str dir "/runs/root.pids"))) #" "))
         cloned (sh/sh "git" "clone" "-q" "--local" here tree)
         started (root! "start" "--set" (str ":seon.config.source/root=" (pr-str tree)))]
     (try
       (is (zero? (:exit cloned)) (:err cloned))
       (is (zero? (:exit started)) (str (:out started) (:err started)))
-      (let [turn (ask "(seon.e2e/loop-turn! sys)")
-            sha (:commit turn)
-            gen (:generation turn)]
-        (is (re-matches #"[0-9a-f]{40}" (str sha)) (str "the merge is committed: " (pr-str turn)))
-        (is (= sha (:commit gen)) "the generation built is the merges commit")
-        (is (nil? (:error gen)) (str "and it built: " (:error gen)))
-        (is (.canExecute (java.io.File. (str (:binary gen)))) "its binary exists")
-        (let [nxt (root! "next")
-              after (ask "[(seon.fixtures/generation) (:commit (my.root/generation sys))]")]
+      (let [t1 (ask "(seon.e2e/loop-turn! sys)")
+            t2 (ask "(seon.e2e/loop-turn! sys :loop-2)")
+            args (ask "(my.root/resume-args sys)")]
+        (is (= [2 2] [(:root t1) (:root t2)]) (str "each merge live in place: " (pr-str [t1 t2])))
+        (is (= 2 (count (:commits t2))) "two merges committed")
+        (let [[holder pid] (pids)]
+          (sh/sh "kill" "-9" pid)
+          (while (zero? (:exit (sh/sh "kill" "-0" pid))) (Thread/sleep 50))
+          ;; bin/root's holder of the dead root's stdin
+          (sh/sh "kill" holder))
+        (let [restarted (apply root! "start" args)]
+          (is (zero? (:exit restarted)) (str (:out restarted) (:err restarted)))
+          (is (= [2 [1 2]] (ask "[(seon.fixtures/generation) (seon.fixtures/generations)]"))
+              "the binary older than both merges runs both, caught up at boot on the same main"))
+        (let [g (ask "(my.root/build! sys)")
+              nxt (root! "next")]
+          (is (nil? (:error g)) (str "the generation built: " (pr-str g)))
           (is (zero? (:exit nxt)) (str (:out nxt) (:err nxt)))
-          (is (= [2 sha] after) "the new generation runs the merged change, resumed on main holding its generation")))
+          (is (= [2 [1 2] (:commit g)] (ask "[(seon.fixtures/generation) (seon.fixtures/generations) (:commit (my.root/generation sys))]"))
+              "the new generation runs both, resumed on main holding its generation")))
       (finally
         (root! "stop")
         (doseq [g (.listFiles (java.io.File. (str dir "/runs/generations")))]
@@ -266,3 +275,60 @@
         (is (= (str (subs text 0 (- (count text) 2)) "\n :seon.attempt/refusal [:map [:seon.error/message :string]]}\n") out))
         (is (= (assoc (edn/read-string text) :seon.attempt/refusal [:map [:seon.error/message :string]])
                (edn/read-string out)))))))
+
+;; ---- a merge loads in place (BUILD plan P4) ---------------------------------------------
+
+(def ^:private mm-text
+  "(ns app.mm-src)\n\n(defmacro twice [x] `(* 2 ~x))\n\n(defn f [y] (twice y))\n\n(defprotocol Sized (size [x]))\n\n(defrecord Box [n] Sized (size [_] n))\n\n(defn g [n] (size (->Box n)))\n\n(defn box? [x] (instance? Box x))\n")
+
+(defn- hold!
+  "This process holding namespace nsym's text compiled, as a binary built from it does."
+  [nsym text]
+  (remove-ns nsym)
+  (let [db (empty-db)]
+    (is (= [] (:errors (program/load-all! (d/db-with db (source/text-tx db nsym text nil))))))))
+
+(defn- held-main
+  "main with text imported from path as the binary's own source, held by this process."
+  [nsym text path]
+  (hold! nsym text)
+  (let [db (empty-db)] (d/db-with db (source/import-tx db {path text}))))
+
+(defn- merge-loaded
+  "main after a branch from it records forms (evaluated here, as the agent's REPL does, then
+  this process holds the text again: the agent was another process) and merges, and the
+  errors of loading that merge here (seon.program/load-changes!, as root and the fork server
+  do)."
+  [main nsym text & forms]
+  (let [branch (apply pt/record main forms)
+        _ (hold! nsym text)
+        r (pm/three-way (pm/program main #{}) (pm/program branch #{}) (pm/program main #{}))
+        rep (d/with main (pm/apply-tx main (into {} (for [[k [_ o]] (:ours r)] [k o]))))]
+    [(:db-after rep) (program/load-changes! (:db-after rep) (pdb/report->tx rep))]))
+
+(deftest a-merge-to-imported-source-loads-in-place
+  (let [main (held-main 'app.pt-src pt-text "src/app/pt_src.clj")
+        [_ errs] (merge-loaded main 'app.pt-src pt-text 'app.pt-src "(defn add [a b] (+ a b 100))")]
+    (is (= [] errs))
+    (is (= 106 ((resolve 'app.pt-src/twice) 3)) "the binary's compiled caller reaches the merged definition")))
+
+(deftest a-changed-macro-reloads-the-forms-it-expanded-in
+  (let [main (held-main 'app.mm-src mm-text "src/app/mm_src.clj")
+        f (fn [] ((resolve 'app.mm-src/f) 2))]
+    (is (= 4 (f)))
+    (let [[_ errs] (merge-loaded main 'app.mm-src mm-text 'app.mm-src "(defmacro twice [x] `(* 3 ~x))")]
+      (is (= [] errs))
+      (is (= 6 (f)) "f, compiled against the old expansion and held by the binary, is reloaded"))))
+
+(deftest a-merged-protocol-keeps-its-records
+  (let [main (held-main 'app.mm-src mm-text "src/app/mm_src.clj")
+        [_ errs] (merge-loaded main 'app.mm-src mm-text 'app.mm-src "(defprotocol Sized \"How big a thing is.\" (size [x]))")]
+    (is (= [] errs))
+    (is (= 5 ((resolve 'app.mm-src/g) 5)) "Box dispatches through the redefined protocol (Jolt needs no reload of its record)")))
+
+(deftest a-merged-record-is-the-one-its-callers-see
+  (let [main (held-main 'app.mm-src mm-text "src/app/mm_src.clj")
+        [_ errs] (merge-loaded main 'app.mm-src mm-text 'app.mm-src "(defrecord Box [n] Sized (size [_] (inc n)))")]
+    (is (= [] errs))
+    (is (= 6 ((resolve 'app.mm-src/g) 5)) "the new record")
+    (is (true? ((resolve 'app.mm-src/box?) ((resolve 'app.mm-src/->Box) 1))) "an instance? test held by the binary sees the redefined record")))

@@ -414,10 +414,16 @@
   (some-> (when (task/eid db :seon.root/id :root) (:seon.root/quiescent (d/pull db [:seon.root/quiescent] [:seon.root/id :root])))
           sedn/decode))
 
+(defn last-commit
+  "The merges commit of db's last merged attempt (the write-back's sha), or nil."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :string]]}
+  [db]
+  (some->> (d/q '[:find ?t ?c :where [?e :seon.attempt/commit ?c] [?e :seon.attempt/merged-t ?t]] db) (sort-by first) last second))
+
 (defn generation
   "The next generation on db: the last merges commit the :build effect built or refused
-  ({:commit :checkout :binary :ms} or {:commit :ms :error}, written by the reconciler proc),
-  or nil."
+  ({:commit :checkout :binary :ms} or {:commit :ms :error}, written by my.root/build!), or
+  nil."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.root/generation]]}
   [db]
   (some-> (when (task/eid db :seon.root/id :root) (:seon.root/generation (d/pull db [:seon.root/generation] [:seon.root/id :root])))
@@ -633,20 +639,14 @@
                      (one (request st aid :committed
                                    {:op :fx :kind :git :req {:dir (:root (:source st)) :branch (:branch (:source st)) :files files
                                                              :message (source/commit-message members)}}))))
-      ;; the sha on each merged attempt, then the next generation built from it (:build)
+      ;; the sha on each merged attempt; the merge already runs where main's program runs
+      ;; (seon.program/load-changes!), so nothing is built (BUILD plan P4)
       :committed (let [sha (get-in r [:value :sha])
                        m (cond sha {:seon.attempt/commit sha}
                                (contract/error? r) {:seon.attempt/commit-error (:seon.error/message r)})]
                    (if m
-                     (one (write (assoc-in st [:flights aid :commit] sha) aid (if sha :commit-recorded :done)
-                                 (vec (for [{:keys [attempt]} (:members (:writeback f))] (assoc m :seon.attempt/id attempt)))))
-                     (done st)))
-      :commit-recorded (one (request st aid :built {:op :fx :kind :build :req {:repo (:root (:source st)) :commit (:commit f)}}))
-      ;; the generation on main's root entity, built or refused: bin/root next starts its binary
-      :built (one (write st aid :done [{:seon.root/id :root
-                                        :seon.root/generation (sedn/encode (if (contract/error? r)
-                                                                          {:commit (:commit f) :ms (/ (:seon.fx/us r 0) 1000.0) :error (:seon.error/message r)}
-                                                                          (:value r)))}])))))
+                     (one (write st aid :done (vec (for [{:keys [attempt]} (:members (:writeback f))] (assoc m :seon.attempt/id attempt)))))
+                     (done st))))))
 
 (defn- quiet
   "Report quiescence positively, once per quiet spell: when no flight is in the air and no

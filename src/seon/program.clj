@@ -360,7 +360,11 @@
                   next-order)
         lead (or lead (some #(:form/lead (d/entity db %)) superseded))
         f (form-tid id)
-        dtids (concat (for [{v :var} defs] (var-tid v))
+        ;; a var main already has is named by its entity: Datahike allocates a tempid first
+        ;; seen as a ref (:form/defines) before the map that upserts it, and a form defining
+        ;; two existing vars (a protocol, a record) then conflicts
+        vid (fn [s] (or (eid db :var/name s) (var-tid s)))
+        dtids (concat (for [{v :var} defs] (vid v))
                       (for [{:keys [multi dispatch]} methods] (str "method " (method-key multi dispatch)))
                       (for [{:keys [protocol type]} impls] (str "impl " (impl-key protocol type)))
                       (when ns-form? [(ns-tid ns)]))
@@ -370,17 +374,17 @@
            [(cond-> {:db/id f :form/id id :form/src src :form/ns (ns-tid ns) :form/order order}
               lead (assoc :form/lead lead)
               (seq dtids) (assoc :form/defines (vec dtids))
-              (seq declares) (assoc :form/declares (mapv var-tid declares))
+              (seq declares) (assoc :form/declares (mapv vid declares))
               (seq refs) (assoc :form/refs (vec refs))
               (seq requires) (assoc :form/requires (vec requires))
               (seq banned) (assoc :form/banned (vec banned))
               (seq inline-defs) (assoc :form/inline-defs (vec inline-defs))
               (seq timeouts) (assoc :form/timeouts (vec timeouts))
               (seq catches) (assoc :form/catches (vec catches)))]
-           (for [s declares] {:db/id (var-tid s) :var/name s :var/ns (ns-tid (symbol (namespace s)))})
+           (for [s declares] {:db/id (vid s) :var/name s :var/ns (ns-tid (symbol (namespace s)))})
            (for [{v :var :keys [kind contract doc]} defs
                  :let [e (eid db :var/name v) old (when e (d/entity db e))]
-                 tx (into [(cond-> {:db/id (var-tid v) :var/name v :var/ns (ns-tid (symbol (namespace v))) :var/form f :var/kind kind}
+                 tx (into [(cond-> {:db/id (vid v) :var/name v :var/ns (ns-tid (symbol (namespace v))) :var/form f :var/kind kind}
                              contract (assoc :var/contract contract) doc (assoc :var/doc doc))]
                           (for [[a x] [[:var/contract contract] [:var/doc doc]]
                                 :let [o (get old a)] :when (and (some? o) (nil? x))]
@@ -478,21 +482,71 @@
            (by-id id)))))
 
 ;; ---- loading ---------------------------------------------------------------------------
-;; A namespace imported from a file (seon.source: it has an :ns/file) is the running
-;; generation's own code, compiled into this binary. Main's facts for it are the next
-;; generation's source, written back and built: root and the fork server (load-all!,
-;; load-changes!) never evaluate them. An agent runs its branch's changes to it like any
-;; program's (load-diff!: every form but the imported text the binary already holds).
+;; A form imported from a source tree (seon.source: :form/source) is the running binary's
+;; own code, compiled in. Every other form of main runs where main's program runs: a merge
+;; loads in place, in root, the fork server (so every agent forked after it inherits it
+;; compiled) and an agent that merges main (BUILD plan P4). A binary's own form is
+;; evaluated again only where a changed macro expanded (`dependents`) or a changed schema
+;; reaches its contract (`schema-dependents`).
 
-(defn- compiled?
-  "Was namespace nsym imported from a file on db (the binary holds it compiled)?"
-  {:malli/schema [:=> [:cat :seon.host/db :symbol] :boolean]}
-  [db nsym] (some? (:ns/file (d/entity db [:ns/name nsym]))))
+(declare schema-changes load-forms!)
 
-(defn- loadable
-  "The form rows of forms that this process evaluates: none of a compiled namespace's."
+(defn- held?
+  "Does this binary hold form row f compiled (imported from the source tree it was built from)?"
+  {:malli/schema [:=> [:cat :seon.host/db :map] :boolean]}
+  [db f] (boolean (:form/source (d/entity db (:e f)))))
+
+(defn- requiring
+  "The form entities of namespace nsym and of every namespace a form requires it from: where
+  its macros expand (an expansion leaves no reference). One pass over the requires."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] [:sequential :int]]}
+  [db nsym]
+  (for [n (into #{nsym} (for [dt (d/datoms db :aevt :form/requires) :when (= nsym (:v dt))]
+                          (:ns/name (:form/ns (d/entity db (:e dt))))))
+        :let [ne (:db/id (d/entity db [:ns/name n]))] :when ne
+        dt (d/datoms db :avet :form/ns ne)]
+    (:e dt)))
+
+(defn dependents
+  "The live forms of db, none of changed (form rows), that expanded a macro changed defines,
+  and theirs, and on: the forms of its namespace and of the namespaces requiring it (v1's
+  declaration-reload-rule, clj-reload's model). A protocol or a type needs none on Jolt: a
+  record's dispatch and an instance? test reach the redefinition (seon.source-test).
+  Cost: nothing unless a macro changed; then its namespaces' forms."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] [:vector :map]]}
-  [db forms] (filterv #(not (compiled? db (:ns %))) forms))
+  [db changed]
+  (loop [front (vec changed) seen (set (map :id changed)) out []]
+    (if-let [[f & more] (seq front)]
+      (let [es (distinct (for [[k s] (:defines f)
+                               :when (and (= :var k) (= :macro (:var/kind (d/entity db [:var/name s]))))
+                               e (requiring db (symbol (namespace s)))]
+                           e))
+            new (into [] (comp (filter #(live? db %)) (map #(form-row db %)) (remove (comp seen :id))) es)]
+        (recur (into (vec more) new) (into seen (map :id) new) (into out new)))
+      out)))
+
+(defn- names
+  "The qualified keywords a schema or contract form names."
+  {:malli/schema [:=> [:cat :any] [:set :qualified-keyword]]}
+  [form] (set (filter qualified-keyword? (tree-seq coll? seq form))))
+
+(defn schema-dependents
+  "The live forms of db defining a contracted var whose contract names one of keys, or a
+  schema that names one, and on (the binary's schema forms with db's changes): the forms
+  that re-arm against the changed schemas. Nothing when keys is empty."
+  {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-keyword]] [:vector :map]]}
+  [db keys]
+  (if (empty? keys)
+    []
+    (let [named (into {} (for [[k f] (merge contract/forms (schema-changes db))] [k (names f)]))
+          reached (loop [r keys]
+                    (let [r' (into r (for [[k ns] named :when (and (not (r k)) (some r ns))] k))]
+                      (if (= r r') r (recur r'))))]
+      (vec (distinct (for [dt (d/datoms db :aevt :var/contract)
+                           :when (some reached (names (edn/read-string (:v dt))))
+                           :let [fe (:db/id (:var/form (d/entity db (:e dt))))]
+                           :when (and fe (live? db fe))]
+                       (form-row db fe)))))))
 
 (defn ensure-ns!
   "The namespace, created with clojure.core and clojure.test's assertions referred when it
@@ -580,42 +634,59 @@
              :when (and e (= (:e f) (form-of db e)))]
          [k (:id f)])))
 
+(defn- load!
+  "Load changed (form rows this binary does not hold), the forms a changed macro expanded
+  in (dependents) and the forms whose contracts the changed schema keys reach
+  (schema-dependents), in load order. Answers the errors."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map] [:set :qualified-keyword]] [:vector :seon.program/error]]}
+  [db changed schema-keys]
+  (load-forms! db (vec (vals (into {} (map (juxt :id identity))
+                                   (concat changed (dependents db changed) (schema-dependents db schema-keys)))))))
+
 (defn load-all!
-  "Load db's program: every live form, in load order. Answers {:loaded n :errors [...]}."
+  "Load db's program where this binary runs: every live form it does not hold, with what
+  they reach (load!). Answers {:loaded n :errors [...]}."
   {:malli/schema [:=> [:cat :seon.host/db] :seon.program/load-report]}
   [db]
-  (let [forms (loadable db (live-forms db))]
-    {:loaded (count forms) :errors (load-forms! db forms)}))
+  (let [forms (filterv #(not (held? db %)) (live-forms db))]
+    {:loaded (count forms) :errors (load! db forms (set (keys (schema-changes db))))}))
 
 (defn load-diff!
   "Make this process run db-to's program where it holds db-from's: each live form db-to
-  has that db-from had not is loaded, in load order (but imported source text, which the
-  binary holds compiled), and each definition db-from had that db-to has none of is
-  removed. Answers the load errors."
+  has that db-from had not is loaded (but the binary's own), with what it reaches (load!),
+  and each definition db-from had that db-to has none of is removed. Answers the load
+  errors."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.program/error]]}
   [db-from db-to]
   (let [from (set (map :id (live-forms db-from)))
-        to-defs (definitions db-to)]
+        to-defs (definitions db-to)
+        sc-from (schema-changes db-from)]
     (doseq [k (keys (definitions db-from)) :when (not (contains? to-defs k))] (remove-definition! k))
-    (load-forms! db-to (remove #(or (from (:id %)) (:form/source (d/entity db-to (:e %)))) (live-forms db-to)))))
+    (load! db-to (filterv #(not (or (from (:id %)) (held? db-to %))) (live-forms db-to))
+           (set (for [[k v] (schema-changes db-to) :when (not= v (get sc-from k))] k)))))
 
 (defn load-changes!
   "Load what resolved tx-data ops change, read against db (after them): each definition
-  they leave pointing to no form is removed, and each live form they assert is loaded, in
-  load order. Answers the error maps (empty when all loaded)."
+  they leave pointing to no form is removed, and each live form they assert (but the
+  binary's own) is loaded, with what it reaches (load!: where a changed macro expanded, and
+  the contracts a changed schema entry reaches). Answers the error
+  maps (empty when all loaded)."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.db/op]] [:vector :seon.program/error]]}
   [db ops]
   (let [ptr (set def-attrs)
         added (set (for [[op e a] ops :when (and (= op :db/add) (ptr a))] e))]
     (doseq [[op e a] ops
             :when (and (= op :db/retract) (ptr a) (not (added e)))
-            :let [x (d/entity db e)]
-            :when (not (some->> (or (:var/name x) (:method/multi x)) namespace symbol (compiled? db)))]
+            :let [x (d/entity db e)]]
       (cond (:var/name x) (remove-definition! [:var (:var/name x)])
             (:method/key x) (remove-definition! (into [:method] (read-string (:method/key x))))))
-    (load-forms! db (loadable db (vec (for [[op e a] ops
-                                         :when (and (= op :db/add) (= a :form/src) (live? db e))]
-                                     (form-row db e)))))))
+    (load! db (vec (for [[op e a] ops
+                         :when (and (= op :db/add) (= a :form/src) (live? db e))
+                         :let [f (form-row db e)] :when (not (held? db f))]
+                     f))
+           (set (for [[op e a] ops :when (and (= op :db/add) (= a :schema/form))
+                      :let [x (d/entity db e)] :when (not (:schema/source x))]
+                  (:schema/key x))))))
 
 ;; ---- reach: which tests a change reaches ----------------------------------------------
 
