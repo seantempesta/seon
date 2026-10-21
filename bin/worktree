@@ -19,7 +19,8 @@
 #   `git -C ../next-NAME submodule update` (no network; the repos are local);
 # - jolt's own nested submodules (vendor/*) are APFS clones of the main tree's (the build copies them);
 # - target/ is an APFS clone of the main tree's (blocks shared until written; chez and jolt stay
-#   fresh, so `bin/build seon` is the only build needed);
+#   fresh, so `bin/build seon` is the only build needed), without Jolt's compile caches: every
+#   checkout shares main's target/cache (bin/env);
 # - runs (stores) default to its own target/runs.
 # Builds run niced, in parallel (no lock). Landing: when its bin/check is green, its commits are
 # cherry-picked (or merged) onto main by explicit paths; the worktree never edits the main tree.
@@ -50,11 +51,19 @@ setup() {
   # target/: an APFS clone (copy-on-write) of the builds, not of the runs: a store is opened by
   # its path, so a cloned target/runs/store fails every root here ("Store identity mismatch:
   # connecting to wrong database"), target/check/ is the source tree's record, not this one's,
-  # and target/tmp/ holds tests' scratch (a generation a test builds lives there)
+  # and target/tmp/ holds tests' scratch (a generation a test builds lives there); nor of the
+  # compile caches: target/cache is the one shared copy, and target/home/.jolt's caches are
+  # what a checkout held before it was shared (bin/env)
   if [[ -d $MAIN/target ]]; then
-    mkdir -p "$WT/target"
+    mkdir -p "$WT/target/home/.jolt"
     for e in "$MAIN"/target/*(N); do
-      [[ ${e:t} == (runs|check|tmp) ]] || cp -cR "$e" "$WT/target/"
+      [[ ${e:t} == (runs|check|tmp|cache|home) ]] || cp -cR "$e" "$WT/target/"
+    done
+    for e in "$MAIN"/target/home/*(ND); do
+      [[ ${e:t} == .jolt ]] || cp -cR "$e" "$WT/target/home/"
+    done
+    for e in "$MAIN"/target/home/.jolt/*(ND); do
+      [[ ${e:t} == (aot-cache|build-cache|runtime-cache) ]] || cp -cR "$e" "$WT/target/home/.jolt/"
     done
   fi
 }

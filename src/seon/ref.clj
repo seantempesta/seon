@@ -10,9 +10,11 @@
             [clojure.string :as str] [clojure.java.io :as io] [datahike.api :as d] [seon.config :as cfg]))
 
 (def roots
-  "The checkout's top-level entries (docs, src, AGENTS.md, ...), read when this namespace
-  loads: the bases a path is cited from."
-  (into #{} (remove #(str/starts-with? % ".")) (.list (io/file (cfg/checkout)))))
+  "The checkout's top-level entries (docs, src, AGENTS.md, ...), read at first use: the bases
+  a path is cited from. A delay, so compiling this namespace lists nothing: Jolt's compile
+  cache keys a namespace by what its compile read, and the listing (it differs between
+  checkouts: runs/, .jolt/) would key it, and its dependents, per checkout."
+  (delay (into #{} (remove #(str/starts-with? % ".")) (.list (io/file (cfg/checkout))))))
 
 ;; ---- the scan: blocks, then the inlines of the blocks that hold prose ---------------------
 
@@ -329,7 +331,7 @@
   {:malli/schema [:=> [:cat :string] [:maybe :map]]}
   [span]
   (let [cut (reduce (fn [m s] (if-let [i (str/index-of span s)] (min m i) m)) (count span) ["/" "#" ":"])]
-    (if (contains? roots (subs span 0 cut))
+    (if (contains? @roots (subs span 0 cut))
       (when-not (or (str/index-of span " ") (str/index-of span "\t"))
         (if-let [cited (line-citation span)]
           {:seon.ref/path cited :seon.ref/problem-kind :line-reference}
