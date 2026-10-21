@@ -289,7 +289,7 @@
     (testing "the agent page's panel is the text it read, as is, and one copy of it"
       (let [ctxv (#'p/context-of nil {:seon.attempt/task "t/x"} {:evals [{:tag :ret :form "(+ 1 2)" :printed "3"} read]})]
         (is (= :why (first (keys ctxv))) "no task on a db: why, not a rebuild"))
-      (let [[_ conn] (seon.db/create! 50)
+      (let [[_ conn] (seon.db/test-branch!)
             db (d/db-with @conn (seon.task/create-tx @conn [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "p"}]))
             work {:tag :ret :form "(+ 1 2)" :printed "3"}
             ctxv (#'p/context-of db {:seon.attempt/task "t/x"} {:evals [work read work]})
