@@ -16,6 +16,12 @@
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.program :as program] [seon.schema.datahike :as sd]
             [datahike.api :as d] [malli.registry :as mr] [clojure.edn :as edn]))
 
+(defn form-text
+  "Schema form v as an entry's EDN text: printed as the resources are written (a namespaced
+  map's keys in full), no print limits."
+  {:malli/schema [:=> [:cat :any] :string]}
+  [v] (binding [*print-namespace-maps* false] (program/pr-edn v)))
+
 (defn- imported-keys
   "The keys of every schema resource as db imported it (its :schema.file/text)."
   {:malli/schema [:=> [:cat :seon.host/db] [:set :qualified-keyword]]}
@@ -122,8 +128,7 @@
   in the tx-data, so the branch can store its facts at once."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :any] [:or [:map [:tx :seon.db/tx-data] [:registration :seon.schema/registration]] :seon.schema/registration-refused]]}
   [db k v]
-  ;; printed as the resources are written: a namespaced map's keys in full
-  (let [text (binding [*print-namespace-maps* false] (program/pr-edn v))]
+  (let [text (form-text v)]
     (if-not (program/edn-value? v)
       (refused k :unreadable "a schema form is EDN data: it must print and read back equal")
       (let [r (compiled k (assoc (population (changes db)) k v))]
@@ -137,6 +142,16 @@
                          (:schema/source e) (conj [:db/retract (:db/id e) :schema/source true]))
                        (new-declarations db (:declarations r)))
              :registration {:seon.schema/key k :seon.schema/definition v}}))))))
+
+(defn declarations-tx
+  "The Datahike declarations db's schema population needs and db does not hold as declared
+  (a merge that carries a schema change carries its attribute)."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.schema/declaration]]}
+  [db]
+  (let [c (changes db)]
+    (if (and (empty? (:put c)) (empty? (:removed c)))
+      []
+      (new-declarations db (sd/declarations (contract/registry-of (population c)))))))
 
 (defn removal
   "Remove schema k from db's program: {:tx tx-data}, or the refusal when the population
