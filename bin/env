@@ -12,3 +12,6 @@ export JOLT_LMDB_LIB
 # here and resolves its #seon/checkout paths (the probe library, system.edn, the tasks) under it.
 # (not JOLT_PWD: Jolt resolves a child process's relative path, ./seon, against it)
 export SEON_CHECKOUT=${SEON_CHECKOUT:-$ROOT}
+# Jolt's compile cache (~/.jolt) per checkout, as bin/build and bin/test already have it: a root
+# or a check compiles agents' code into this checkout's target/home, never a cache other lanes share
+export HOME=$ROOT/target/home

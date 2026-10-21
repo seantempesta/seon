@@ -202,3 +202,8 @@
   (let [c (:config (config/layered [(first (config/load-layers (config/checkout) :default []))]))]
     (is (= 0 (:seon.config.web/port c)))
     (is (= 0 (:seon.config.root/entrance-port c)))))
+
+(deftest the-loader-reads-the-command-line-as-the-process-has-it
+  (binding [*command-line-args* '("ports" "--set" ":seon.config.web/port=7998")]
+    (is (= ["ports" "--set" ":seon.config.web/port=7998"] (config/argv)))
+    (is (= 7998 (:seon.config.web/port (:config (config/layered (config/load-layers (config/checkout) :default (config/argv)))))))))

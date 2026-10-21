@@ -3,3 +3,4 @@
 .jolt/
 .cache/
 runs/
+/config/local.edn

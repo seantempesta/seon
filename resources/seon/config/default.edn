@@ -16,6 +16,11 @@
 ;; - #profile selects by SEON_PROFILE (default :default); :deepseek runs agents on DeepSeek.
 ;; - Machine-dependent values are derived at load, never shipped: #seon/checkout "p" is p under
 ;;   the checkout this process runs from (SEON_CHECKOUT, else JOLT_PWD).
+;; - Layers (owner, 2026-10-21: "hand out different edn config files ... or do command line
+;;   overrides"): this file, then the checkout's own config/local.edn (gitignored; bin/ports
+;;   writes its ports), then the command line's --config FILE and --set :ns/key=edn. Later
+;;   layers win key by key; the merged map is validated once; seon.config/sources (and the
+;;   :seon.config/sources fact on main) names the layer each key came from.
 {;; ==== root and its procs ====================================================================
 
  ;; Unit: live agents. Root holds a socket (two descriptors) per agent and raises its open-file
@@ -48,6 +53,9 @@
  ;; Where kept runs live (owner, 2026-10-21: runs are kept, "a perfect record frozen in time").
  ;; bin/root exports SEON_RUNS (<this tree>/runs).
  :seon.config.root/runs-dir #or [#env SEON_RUNS #seon/checkout "runs"]
+ ;; Scratch files a check or a run makes (never /tmp, which every checkout shares): beside the
+ ;; store, so each check run's live under its own out dir (bin/check sets SEON_STORE).
+ :seon.config.root/tmp-dir #join [#ref [:seon.config.root/store-path] ".tmp"]
  ;; The one store (owner, 2026-10-21: one store, many branches, as in production): created
  ;; when missing; every root works on its own main, a branch of the store's seed. bin/check
  ;; sets SEON_STORE to its run's store.
@@ -157,9 +165,14 @@
  ;; DeepSeek's thinking mode (:enabled | :disabled) and effort (:low | :medium | :high) are
  ;; optional keys, absent here: the provider's own default. State them to choose, e.g.
  ;;   :seon.config.ai/thinking :disabled   :seon.config.ai/reasoning-effort :low
- ;; Unit: model calls in flight at once, cluster-wide (the :model owner's lanes). Lane FX1.
- ;; At the bound turns queue in the owner (by priority).
- :seon.config.ai/lanes 8
+ ;; Unit: model calls in flight at once, cluster-wide: our admission cap, the :model owner's
+ ;; lanes (lane FX1). At the bound turns queue in the owner, by priority. Our choice, small:
+ ;; eight is twice the attempts running at once (:seon.config.agent/max-running 4), so a
+ ;; merge's or a judge's call never waits behind the work, while a runaway loop spends at most
+ ;; eight calls' tokens at a time. The provider's own ceiling, per account across all keys
+ ;; (api-docs.deepseek.com/quick_start/rate_limit, read 2026-10-21): 2,500 concurrent for
+ ;; deepseek-flash, 500 for deepseek-v4-pro; far above this, so the cap is ours, not theirs.
+ :seon.config.ai/max-in-flight 8
  ;; Unit: tokens per second the provider admits, cluster-wide: the :model owner's token bucket
  ;; (lane R3; AIMD on a 429). 0: no bucket.
  :seon.config.ai/rate 0
@@ -200,10 +213,18 @@
 
  ;; ==== the web, the guarantees, the native probe ==============================================
 
- ;; Unit: TCP port on 127.0.0.1 (lane W2). bin/root takes it as its second argument; each
- ;; worktree's root runs on its own. 0 serves nothing; a taken port leaves the web proc
- ;; {:listening false} on the health line and boot goes on.
- :seon.config.web/port #long #or [#env SEON_WEB_PORT 7777]
+ ;; Unit: TCP port on 127.0.0.1 (lane W2). 0 (the shipped value): no dashboard. A checkout's
+ ;; own config/local.edn names its port (bin/ports writes it: the main tree 7777, worktree k
+ ;; 7901+10k, from one registry), so no two checkouts share one (owner, 2026-10-21). bin/check
+ ;; and bin/test set SEON_WEB_PORT=0, which local.edn honours, so check steps listen on nothing.
+ ;; A taken port leaves the web proc {:listening false} on the health line and boot goes on.
+ :seon.config.web/port #long #or [#env SEON_WEB_PORT 0]
+ ;; Unit: TCP port on 127.0.0.1: root's entrance (seon.entrance), which bin/mcp and outside
+ ;; agents reach. 0 (the shipped value): `seon root` refuses to serve. config/local.edn names
+ ;; the checkout's own (main 7888, worktree k 7900+10k).
+ ;; bin/root PORT WEB, bin/mcp PORT and the mcp check set SEON_ENTRANCE_PORT, which local.edn
+ ;; honours (until a built binary's top-level code sees its argv, so --set can say it).
+ :seon.config.root/entrance-port #long #or [#env SEON_ENTRANCE_PORT 0]
  ;; app.css and datastar.js, read per request so a style edit shows on reload.
  :seon.config.web/public-dir #seon/checkout "resources/public"
  ;; Unit: +hhmm. Jolt has no time zones: clocks on the page add this offset (`date +%z`).

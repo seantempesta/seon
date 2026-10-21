@@ -25,7 +25,7 @@
   A foundational namespace, below seon.contract (which reads the guarantees dial here): its
   functions carry contracts in their metadata and are armed at boot."
   (:require [aero.core :as aero] [malli.core :as m] [malli.registry :as mr] [clojure.edn :as edn]
-            [clojure.java.io :as io] [clojure.string :as str] [datahike.api :as d] [jolt.scheme :as scm]))
+            [clojure.java.io :as io] [clojure.string :as str] [datahike.api :as d]))
 
 ;; ---- where: the checkout and the profile (the loader's own two environment reads) ----------
 
@@ -133,12 +133,11 @@
   [dir] (str dir "/config/local.edn"))
 
 (defn argv
-  "This process's command line as the OS gave it (Chez's command-line): the one place the
-  loader reads it, so --config and --set apply to every mode."
+  "This process's command line, as *command-line-args* holds it while namespaces load (a
+  `jolt run`, and a built binary since Jolt's jolt/argv): the one place the loader reads it,
+  so --config and --set apply to every mode."
   {:malli/schema [:=> [:cat] [:vector :string]]}
-  []
-  (let [l (scm/eval-string "(command-line)")]
-    (mapv #(scm/call "list-ref" l %) (range (scm/call "length" l)))))
+  [] (vec *command-line-args*))
 
 (defn parse-set
   "--set's argument `:ns/key=edn` as [key value], or the refusal naming it."

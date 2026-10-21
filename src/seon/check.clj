@@ -1065,7 +1065,7 @@
   (let [sys (c/start! {:datoms 2000})
         a (c/spawn! sys {:task "fx" :branch :fx1})
         _ (await-status sys [a] #{:idle} 5000)
-        dir (str "/tmp/fx1-" (lib/c-getpid))
+        dir (str (seon.config/value :seon.config.root/tmp-dir) "/fx1-" (lib/c-getpid))
         _ (.mkdirs (java.io.File. dir))
         ev (fn [code] (let [r @(c/submit! sys a code)] (last r)))
         ;; per call, timed inside the agent: (loop n) of the form, µs each
@@ -1142,8 +1142,8 @@
         pids (fn [] (set (keys (flow/ping (:graph sys) :timeout-ms 2000))))
         booted (pids)
         expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/model}
-                     (for [i (range (seon.config/value :seon.config.ai/lanes))] (keyword "fx.model" (str i))))
-        dir (str "/tmp/seon-system-" (lib/c-getpid))
+                     (for [i (range (seon.config/value :seon.config.ai/max-in-flight))] (keyword "fx.model" (str i))))
+        dir (str (seon.config/value :seon.config.root/tmp-dir) "/seon-system-" (lib/c-getpid))
         _ (.mkdirs (java.io.File. dir))
         decl (clojure.edn/read-string (slurp (seon.config/value :seon.config.root/system-path)))
         write! (fn [nm d] (let [f (str dir "/" nm ".edn")] (spit f (pr-str d)) f))
@@ -1213,7 +1213,7 @@
               {"jsonrpc" "2.0" "id" 4 "method" "tools/call" "params" {"name" "seon_eval" "arguments" {"agent" (name a) "code" "(def outside-x 41) (inc outside-x)"}}}
               {"jsonrpc" "2.0" "id" 5 "method" "tools/call" "params" {"name" "seon_eval" "arguments" {"agent" "root" "code" "(count (:agents (c/state sys)))"}}}]
         t0 (lib/now-ns)
-        r (clojure.java.shell/sh "./seon" "mcp" "--set" (str ":seon.config.root/entrance-port=" port) :in (clojure.string/join "\n" (map clojure.data.json/write-str msgs)))
+        r (clojure.java.shell/sh "env" (str "SEON_ENTRANCE_PORT=" port) "./seon" "mcp" :in (clojure.string/join "\n" (map clojure.data.json/write-str msgs)))
         ms (lib/ms-since t0)
         answers (into {} (for [l (clojure.string/split-lines (:out r)) :when (clojure.string/starts-with? l "{")
                                :let [j (clojure.data.json/read-str l)]] [(get j "id") j]))
@@ -1271,7 +1271,7 @@
   it O(branches) per spawn: 15 ms at 1,000). A store of its own, the last resort: the
   roster must start empty for the growth to show."
   [n]
-  (let [path (str "/tmp/seon-branch-cost-" (lib/c-getpid))
+  (let [path (str (seon.config/value :seon.config.root/tmp-dir) "/seon-branch-cost-" (lib/c-getpid))
         {conn :conn} (seon.db/open! :lmdb path 2000 :db)
         times (vec (for [k (range (quot n 100))]
                      (let [t0 (lib/now-ns)]
@@ -1384,6 +1384,8 @@
     "threads" (threads-check)
     "branch-cost" (branch-cost (Long/parseLong n))
     "root" (root-serve)
+    ;; this checkout's ports as the config resolves them, "ENTRANCE WEB" (bin/ports)
+    "ports" (do (println (seon.config/value :seon.config.root/entrance-port) (seon.config/value :seon.config.web/port)) (lib/c-exit 0))
     "mcp" (do (seon.mcp/serve! (seon.config/value :seon.config.root/entrance-port)) (lib/c-exit 0))
     "mcp-proof" (mcp-proof)
     "hotreload" (hotreload)

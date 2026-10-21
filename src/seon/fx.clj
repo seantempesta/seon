@@ -206,7 +206,7 @@
   [provider]
   {:echo {:perform #'echo :lanes 1}
    :file {:perform #'write-file :lanes 1}
-   :model {:perform #'model :lanes (cfg/value :seon.config.ai/lanes) :ctx {:provider provider} :rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))}})
+   :model {:perform #'model :lanes (cfg/value :seon.config.ai/max-in-flight) :ctx {:provider provider} :rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))}})
 
 (defn procs
   "The owner and lane procs of every kind, for the root graph. Any proc reaches an owner
