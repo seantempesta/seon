@@ -34,8 +34,8 @@
          (-> (select-keys r [:type :message :expected :actual :got]) (assoc :test (test-symbol var))))))
 
 (defn run-errors
-  "The errors of run that name no test: the run itself failed (it timed out and was killed,
-  its fork died, a namespace did not load), so every test reads as not run. Their messages."
+  "The errors of run that name no test: the run itself failed (its fork died before any
+  test started, a namespace did not load), so every test reads as not run. Their messages."
   {:malli/schema [:=> [:cat [:map [:reports [:sequential :map]]]] [:vector :string]]}
   [run]
   (vec (for [{:keys [type var message]} (:reports run)
