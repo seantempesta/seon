@@ -105,8 +105,9 @@ The order of the tasks is the order of the work: **delete first, then foundation
    - Compare each measurement with its estimate.
    - A ratio past 3× either way is a finding: explain it before going on.
    - Say plainly what was not measured.
-7. **Prove it whole:** `bin/test`, then `bin/check` in your worktree. `bin/check` fails when any step fails, keeps each step's output and the stores under `target/check/<time>/`, and is the bar.
-8. **Report to root:** commits, proofs (red → green), numbers against estimates, what you deleted, what's left. Root cherry-picks onto main by explicit paths, runs `bin/check` there, and closes the task.
+7. **If you touched what the owner sees (the dashboard, a render, the context), have it verified by eye.** Run your worktree's own root on its own ports (`bin/root ENTRANCE WEB`; every worktree can run one), then launch a Haiku or Sonnet subagent with the built-in browser. Its job: compare the page and the context against the system's facts read through the door. Is every number real? Does anything mislead? Does it show what is going on? It reports what is wrong or useless, with screenshots. Fix what it finds, or file it.
+8. **Prove it whole:** `bin/test`, then `bin/check` in your worktree. `bin/check` fails when any step fails, keeps each step's output and the stores under `target/check/<time>/`, and is the bar.
+9. **Report to root:** commits, proofs (red → green), numbers against estimates, what you deleted, what's left. Root cherry-picks onto main by explicit paths, runs `bin/check` there, and closes the task.
 
 ## Look at the running system, as a Seon agent sees it
 
@@ -141,6 +142,11 @@ Tell root; root orders it among the rest. Mined problems (`my.root/problems`) be
   - A proc answers every request it took, even when its step throws.
 - **Deleting a record:** a store, a branch, a log, history. Runs are kept. Reclaiming space is an explicit owner act.
 - **A cut that drops instead of eliding.** Every cut says what it omitted and how to read the rest. Storage keeps the exact value; renders budget it.
+- **A clipping function** (owner, 2026-10-21): no `clip`, `subs`, `take n` or hand-made truncation anywhere output is made for a person or a model. Output gets better in exactly two ways:
+  - a general improvement to the one printer (`seon.print`), which every value benefits from;
+  - a render function declared on the value's schema (`:seon.render/ai` for the model's context, `:seon.render/html` for the page), written when we know that output needs focus.
+
+  Refinement of output is ongoing work: when you see poor output, file it or fix it this way.
 - **The same check in several places,** or a second producer of the same view. One owner per fact, one function per rule.
 - **Redefining instead of defining.** No `alter-var-root`, `intern`, `with-redefs` or stub-by-rebinding. Tests get a forked environment holding exactly their definitions.
 - **Text standing in for structure.** No regex over code. Ask the compiler, the reader or the db.
