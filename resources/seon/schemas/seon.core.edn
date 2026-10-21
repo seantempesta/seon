@@ -27,10 +27,6 @@
  ;; the program as facts
  :seon.program/error [:map [:ns :symbol] [:message [:maybe :string]]]
  :seon.program/load-report [:map [:loaded nat-int?] [:errors [:vector :seon.program/error]]]
- ;; how names resolve in a program namespace (seon.program/ns-env): its ns form's aliases,
- ;; refers and requires, then its alias facts
- :seon.program/env [:map [:own :symbol] [:aliases [:map-of :symbol :symbol]] [:refers [:map-of :symbol :symbol]]
-                    [:all [:vector :symbol]] [:requires [:vector :symbol]]]
  ;; processes: the step-fn contract (seon.step)
  :seon.step/describe [:map
                       [:workload [:enum :io :mixed :compute]]

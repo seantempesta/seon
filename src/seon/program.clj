@@ -432,6 +432,19 @@
            (by-id id)))))
 
 ;; ---- loading ---------------------------------------------------------------------------
+;; A namespace imported from a file (seon.source: it has an :ns/file) is the running
+;; generation's own code, compiled into this binary: main's facts for it are the next
+;; generation's source, written back and built, never evaluated here.
+
+(defn- compiled?
+  "Was namespace nsym imported from a file on db (the binary holds it compiled)?"
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] :boolean]}
+  [db nsym] (some? (:ns/file (d/entity db [:ns/name nsym]))))
+
+(defn- loadable
+  "The form rows of forms that this process evaluates: none of a compiled namespace's."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] [:vector :map]]}
+  [db forms] (filterv #(not (compiled? db (:ns %))) forms))
 
 (defn ensure-ns!
   "The namespace, created with clojure.core and clojure.test's assertions referred when it
@@ -491,7 +504,7 @@
   "Load db's program: every live form, in load order. Answers {:loaded n :errors [...]}."
   {:malli/schema [:=> [:cat :seon.host/db] :seon.program/load-report]}
   [db]
-  (let [forms (live-forms db)]
+  (let [forms (loadable db (live-forms db))]
     {:loaded (count forms) :errors (load-forms! forms)}))
 
 (defn load-diff!
@@ -502,8 +515,11 @@
   [db-from db-to]
   (let [from (set (map :id (live-forms db-from)))
         to-defs (definitions db-to)]
-    (doseq [k (keys (definitions db-from)) :when (not (contains? to-defs k))] (remove-definition! k))
-    (load-forms! (remove #(from (:id %)) (live-forms db-to)))))
+    (doseq [k (keys (definitions db-from)) :when (not (contains? to-defs k))
+            :let [nsym (case (first k) :ns (second k) (symbol (namespace (second k))))]
+            :when (not (compiled? db-to nsym))]
+      (remove-definition! k))
+    (load-forms! (loadable db-to (remove #(from (:id %)) (live-forms db-to))))))
 
 (defn load-changes!
   "Load what resolved tx-data ops change, read against db (after them): each definition
@@ -515,12 +531,13 @@
         added (set (for [[op e a] ops :when (and (= op :db/add) (ptr a))] e))]
     (doseq [[op e a] ops
             :when (and (= op :db/retract) (ptr a) (not (added e)))
-            :let [x (d/entity db e)]]
+            :let [x (d/entity db e)]
+            :when (not (some->> (or (:var/name x) (:method/multi x)) namespace symbol (compiled? db)))]
       (cond (:var/name x) (remove-definition! [:var (:var/name x)])
             (:method/key x) (remove-definition! (into [:method] (read-string (:method/key x))))))
-    (load-forms! (vec (for [[op e a] ops
-                            :when (and (= op :db/add) (= a :form/src) (live? db e))]
-                        (form-row db e))))))
+    (load-forms! (loadable db (vec (for [[op e a] ops
+                                         :when (and (= op :db/add) (= a :form/src) (live? db e))]
+                                     (form-row db e)))))))
 
 ;; ---- reach: which tests a change reaches ----------------------------------------------
 

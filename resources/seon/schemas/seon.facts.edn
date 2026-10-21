@@ -10,7 +10,7 @@
  ;; the exact text as written, and the whitespace and comments before it in its file
  :form/src :string
  :form/lead :string
- :form/ns :seon.db/ref
+ :form/ns [:and {:seon.db/index true} :seon.db/ref]
  ;; its place among its namespace's forms (a file's order; a new form after all others)
  :form/order :int
  :form/defines [:set :seon.db/ref]

@@ -38,18 +38,12 @@
      ":refused lists what keeps you from done beyond your red proofs: :regression (green on main, red here: your change broke it),"
      ":stray-red (a red test that is no task's proof), :contract-gap (a function you defined without a :malli/schema),"
      ":unmerged, :no-proofs. :test-run is the test run itself failing (a timeout, a dead fork): no test result is real until it runs."
-     ":flagged are definitions on your branch with no recorded source: they will not merge until you evaluate their defn again."
      ":your-last-reply says what happened to your reply: cut at the token limit, or delimiters the reader repaired."]))
 
 (defn source-of
   "The recorded source of var sym on db (the text of the form that last defined it), or nil."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :string]]}
   [db sym] (d/q '[:find ?s . :in $ ?v :where [?e :var/name ?v] [?e :var/form ?f] [?f :form/src ?s]] db sym))
-
-(defn flagged
-  "The definitions on db with no recorded source (:var/flagged): they do not merge."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector :qualified-symbol]]}
-  [db] (vec (sort-by str (d/q '[:find [?n ...] :where [?e :var/flagged true] [?e :var/name ?n]] db))))
 
 (defn resolve-ref
   "A reference resolved: its source (from the db) when it is program, else its doc (from
@@ -110,10 +104,10 @@
   "The current-state block of task t as data: proofs with their status, red assertions and
   source; what else the done rule refuses (regressions, stray reds, contract gaps), and a
   test run that failed as a whole; resolved references; the measured evidence it starts
-  from; the branch's unmerged entries (base, ours, theirs) and flagged definitions; what
+  from; the branch's unmerged entries (base, ours, theirs); what
   happened to the last reply; the last evaluations; turns left."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds last-items turn max-turns unmerged truncated? refusals run-errors source repairs flagged]}]
+  [db t {:keys [results reds last-items turn max-turns unmerged truncated? refusals run-errors source repairs]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         refs (r/references (str plan "\n" (:seon.task/instructions t)))]
     (cond-> {:task (assoc (select-keys t [:seon.task/id :seon.task/kind :seon.task/instructions])
@@ -131,7 +125,6 @@
       (seq (refused (vec refusals) (vec reds))) (assoc :refused (refused (vec refusals) (vec reds)))
       (seq run-errors) (assoc :test-run {:failed (vec run-errors)})
       (last-reply truncated? source (vec repairs)) (assoc :your-last-reply (last-reply truncated? source (vec repairs)))
-      (seq flagged) (assoc :flagged (vec (sort-by str flagged)))
       (:seon.task/evidence t) (assoc :evidence (:seon.task/evidence t))
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
       (seq last-items) (assoc :last-evals (mapv (fn [it] (cond-> {:form (:form it)}

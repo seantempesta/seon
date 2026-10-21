@@ -13,7 +13,7 @@
   asker records the outcome in its own recording transaction."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
-            [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
+            [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.java.shell :as sh] [clojure.string :as str]))
 
 (defn port "The stand-in's out-port to kind's owner." {:malli/schema [:=> [:cat :keyword] :keyword]}
   [kind] (keyword "fx" (name kind)))
@@ -41,6 +41,61 @@
       (.renameTo (java.io.File. tmp) (java.io.File. ^String path))
       {:value {:bytes (count text)}})
     (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path path}))))
+
+;; Seon's own source: the program read from the tree a generation was built from, and
+;; main's merged forms committed for the next one (seon.source). Never the working tree:
+;; reading is read-only, and a commit is git's plumbing on a ref, so no checkout moves.
+
+(defn read-source
+  "The text of every .clj file under root's dirs (relative paths, e.g. src/seon/fx.clj),
+  sorted by path. Answers {:value {path text}} or :seon.fx/io-error."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [root dirs]} :req}]
+  (try
+    (let [base (.getCanonicalPath (java.io.File. ^String root))]
+      {:value (into (sorted-map)
+                    (for [d dirs
+                          f (file-seq (java.io.File. (str base "/" d)))
+                          :let [p (.getCanonicalPath ^java.io.File f)]
+                          :when (and (.isFile ^java.io.File f) (.endsWith p ".clj"))]
+                      [(subs p (inc (count base))) (slurp f)]))})
+    (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path root}))))
+
+(defn- git!
+  "git in dir with args (an env prefix first when given), its trimmed output; a failure
+  throws its stderr (read-source and git-commit answer it as :seon.fx/io-error)."
+  {:malli/schema [:=> [:cat [:maybe :string] :string [:sequential :string] [:maybe :string]] :string]}
+  [index dir args in]
+  (let [cmd (concat (when index ["env" (str "GIT_INDEX_FILE=" index)]) ["git" "-C" dir] args)
+        r (if in (apply sh/sh (concat cmd [:in in])) (apply sh/sh cmd))]
+    (when-not (zero? (:exit r))
+      (throw (ex-info (str "git " (first args) ": " (str/trim (str (:err r) (:out r)))) {})))
+    (str/trim (:out r))))
+
+(defn git-commit
+  "Commit files ({relative path text}) on branch of the repository at dir, with message,
+  through git's plumbing: blobs, a tree from the branch's own with the files replaced, a
+  commit whose parent is the branch head, and the ref moved only from that head. No
+  working tree or checkout is touched, so main and every lane's files stay as they are.
+  Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing to write),
+  or :seon.fx/io-error."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [dir branch files message]} :req}]
+  (if (empty? files)
+    {:value {:sha nil :files 0}}
+    (try
+      (let [parent (git! nil dir ["rev-parse" "--verify" (str "refs/heads/" branch)] nil)
+            gp (git! nil dir ["rev-parse" "--git-path" (str "seon-index-" (lib/c-getpid))] nil)
+            index (if (str/starts-with? gp "/") gp (str dir "/" gp))]
+        (try
+          (git! index dir ["read-tree" parent] nil)
+          (doseq [[path text] (sort files)]
+            (git! index dir ["update-index" "--add" "--cacheinfo" (str "100644," (git! nil dir ["hash-object" "-w" "--stdin"] text) "," path)] nil))
+          (let [sha (git! nil dir ["commit-tree" (git! index dir ["write-tree"] nil) "-p" parent "-m" message] nil)]
+            (git! nil dir ["update-ref" (str "refs/heads/" branch) sha parent] nil)
+            {:value {:sha sha :files (count files)}})
+          (finally (.delete (java.io.File. ^String index)))))
+      (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path dir})))))
 
 ;; ---- the owner -----------------------------------------------------------------------
 
@@ -209,6 +264,8 @@
   [provider]
   {:echo {:perform #'echo :lanes 1}
    :file {:perform #'write-file :lanes 1}
+   :source {:perform #'read-source :lanes 1}
+   :git {:perform #'git-commit :lanes 1}
    :model {:perform #'model :lanes cfg/MODEL-LANES :ctx {:provider provider} :rate (when (pos? cfg/MODEL-RATE) cfg/MODEL-RATE)}})
 
 (defn procs

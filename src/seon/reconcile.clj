@@ -596,7 +596,7 @@
         end (pull-end db aid)
         mp (pm/program main #{})
         unc (into #{} (for [[[k sym] e] (pm/program db #{})
-                            :when (and (= :var k) (= :fn (:kind e)) (nil? (:contract e)) (not (:flagged e)) (not= e (get mp [k sym])))]
+                            :when (and (= :var k) (= :fn (:kind e)) (nil? (:contract e)) (not= e (get mp [k sym])))]
                         sym))
         plan (:seon.task/plan (task/task db id))]
     (into (cas-tx aid :running :ended

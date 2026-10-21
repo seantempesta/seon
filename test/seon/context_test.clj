@@ -101,11 +101,7 @@
         block (context/current-state db t {:turn 1 :max-turns 4 :source text :repairs repairs})]
     (is (seq repairs) "the reader repaired the extra close")
     (is (= [{:near ":cat :int] :int]} [x] (* 2 x))," :dropped ")" :inserted ","}] (:repaired (:your-last-reply block)))
-        "what was dropped, what replaced it, and the code it was near; the prose made comments is no repair")
-    (testing "flagged definitions are named"
-      (let [db2 (d/db-with db [{:var/name 'demo/h :var/ns [:ns/name 'demo] :var/flagged true}])]
-        (is (= ['demo/h] (context/flagged db2)))
-        (is (= ['demo/h] (:flagged (context/current-state db2 t {:turn 1 :max-turns 4 :flagged (context/flagged db2)}))))))))
+        "what was dropped, what replaced it, and the code it was near; the prose made comments is no repair")))
 
 (deftest only-program-tests-judge
   ;; a deftest in a scratch namespace never merges, so it never judges the branch

@@ -9,7 +9,7 @@
   it (:lead), and what follows the last form (:tail), so the forms written back in their
   order are the file, byte for byte."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.program :as program] [jolt.analyzer] [jolt.host]))
+  (:require [seon.contract :refer [defn defn-]] [seon.program :as program] [datahike.api :as d] [clojure.string :as str] [jolt.analyzer] [jolt.host]))
 
 (defn- line-starts
   "The offset in text where each line starts."
@@ -104,6 +104,60 @@
   (let [{:keys [accounts tail]} (accounts nsym text)
         tx (vec (mapcat #(program/account-tx db % (:order %)) accounts))]
     (cond-> tx
-      (or file (seq tail)) (conj (cond-> {:db/id (str "ns " nsym) :ns/name nsym}
-                                   file (assoc :ns/file file)
-                                   (seq tail) (assoc :ns/tail tail))))))
+      ;; a file's tail is kept even when empty: no newline at its end is part of the file
+      (or file (seq tail)) (conj (cond-> {:db/id (str "ns " nsym) :ns/name nsym :ns/tail tail}
+                                   file (assoc :ns/file file))))))
+
+(defn file-ns
+  "The namespace a file's text declares: the name of its first form when that is an ns
+  form, or nil."
+  {:malli/schema [:=> [:cat :string] [:maybe :symbol]]}
+  [text]
+  (let [form (binding [*ns* (the-ns 'user)] (read {:eof nil} (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. text))))]
+    (when (and (seq? form) (= 'ns (first form)) (symbol? (second form))) (second form))))
+
+(defn import-tx
+  "The facts of files ({relative path text}, each a namespace's file) as program on db, in
+  path order: each file's forms with their exact text and the compiler's account
+  (text-tx), its namespace carrying the file. A file with no ns form is no namespace's
+  and is left out."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] :seon.db/tx-data]}
+  [db files]
+  (vec (for [[path text] (sort files) :let [nsym (file-ns text)] :when nsym op (text-tx db nsym text path)] op)))
+
+(defn source-nss
+  "The namespaces on db imported from a file (they carry :ns/file), sorted."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :symbol]]}
+  [db] (vec (sort (d/q '[:find [?n ...] :where [?e :ns/file] [?e :ns/name ?n]] db))))
+
+(defn file-text
+  "Namespace nsym's file as db holds it: its live forms in their order, each after its
+  lead (a form recorded at a REPL has none: a blank line, or nothing before the first),
+  then the text after its last form (a newline when it has none)."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] :string]}
+  [db nsym]
+  (let [ne (:e (first (d/datoms db :avet :ns/name nsym)))
+        fs (sort-by :order (for [dt (d/datoms db :avet :form/ns ne) :when (program/live? db (:e dt))] (program/form-row db (:e dt))))]
+    (str (apply str (map-indexed (fn [i f] (str (or (:lead f) (if (zero? i) "" "\n\n")) (:src f))) fs))
+         (or (:ns/tail (d/entity db ne)) "\n"))))
+
+(defn files
+  "{relative path text} of the namespaces nss that db holds a file for (file-text)."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :symbol]] [:map-of :string :string]]}
+  [db nss]
+  (into (sorted-map) (for [n nss :let [p (:ns/file (d/entity db [:ns/name n]))] :when p] [p (file-text db n)])))
+
+(defn changed-nss
+  "The namespaces whose forms a merge's changes (seon.merge/three-way's :ours) add,
+  change or remove, sorted."
+  {:malli/schema [:=> [:cat :seon.merge/changes] [:vector :symbol]]}
+  [changes]
+  (vec (sort (distinct (for [[[k] [a b]] changes :when (= :form k)] (:ns (or b a)))))))
+
+(defn commit-message
+  "The merges commit's message, from the facts of what merged: each member's task and
+  attempt."
+  {:malli/schema [:=> [:cat [:sequential [:map [:task :any] [:attempt :string]]]] :string]}
+  [members]
+  (str "Seon merge: " (str/join ", " (map (comp str :task) members)) "\n\n"
+       (str/join "\n" (for [{:keys [task attempt]} members] (str "attempt " attempt " (task " task ")"))) "\n"))
