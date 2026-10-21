@@ -8,10 +8,15 @@
 
 (defn- db-with-program []
   (let [db @(second (pdb/test-branch!))]
-    (d/db-with db [{:db/id "ns" :ns/name 'demo}
-                   {:var/name 'demo/f :var/ns "ns" :var/src "(defn f \"Doubles.\" [x] (* 2 x))"}
-                   {:var/name 'demo-test/f-test :var/ns "ns" :var/src "(deftest f-test (is (= 4 (f 2))))"}
-                   {:var/name 'demo-test/g-test :var/ns "ns" :var/src "(deftest g-test (is (= 1 (g))))"}])))
+    ;; recorded definitions, each its form (seon.program's facts), written as data
+    (d/db-with db (vec (mapcat (fn [[v src]]
+                                 [{:db/id (str v) :var/name v :var/ns (str "ns " (namespace v)) :var/form (str "form " v)}
+                                  {:db/id (str "form " v) :form/id (str v) :form/src src :form/ns (str "ns " (namespace v)) :form/order 0
+                                   :form/defines [(str v)]}
+                                  {:db/id (str "ns " (namespace v)) :ns/name (symbol (namespace v))}])
+                               '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))"]
+                                 [demo-test/f-test "(deftest f-test (is (= 4 (f 2))))"]
+                                 [demo-test/g-test "(deftest g-test (is (= 1 (g))))"]])))))
 
 (deftest each-thing-is-said-once
   (let [db (db-with-program)
@@ -95,11 +100,7 @@
     (is (seq repairs) "the reader repaired the extra close")
     (is (= [{:near {:line 3 :column 60 :text "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x)),"} :dropped ")" :inserted ","}]
            (:repaired (:your-last-reply block)))
-        "what was dropped, what replaced it, and where: its line and column, and the whole line; the prose made comments is no repair")
-    (testing "flagged definitions are named"
-      (let [db2 (d/db-with db [{:var/name 'demo/h :var/ns [:ns/name 'demo] :var/flagged true}])]
-        (is (= ['demo/h] (context/flagged db2)))
-        (is (= ['demo/h] (:flagged (context/current-state db2 t {:turn 1 :max-turns 4 :flagged (context/flagged db2)}))))))))
+        "what was dropped, what replaced it, and where: its line and column, and the whole line; the prose made comments is no repair")))
 
 (deftest only-program-tests-judge
   ;; a deftest in a scratch namespace never merges, so it never judges the branch

@@ -178,7 +178,7 @@
         _ (await-status sys [a] #{:idle} 5000)
         r1 @(c/submit! sys a "(+ 1 2) (in-ns 'app.m0) (defn f3 [x] (* 3 x)) (/ 1 0)")
         r2 @(c/submit! sys a "(count (my.db/q '[:find ?e :where [?e :seon.cluster.eval/agent ?a] [?a :seon.agent/id :a1]]))
-                               (my.db/q '[:find ?s . :where [?e :var/name app.m0/f3] [?e :var/src ?s]])")
+                               (my.db/q '[:find ?s . :where [?e :var/name app.m0/f3] [?e :var/form ?f] [?f :form/src ?s]])")
         ok (and (= 4 (count r1)) (= "4" (:printed (first r2))) (re-find #"f3" (str (:printed (second r2)))))]
     (pprint {:first (mapv #(select-keys % [:tag :printed :record :recorded]) r1) :second (mapv :printed r2)})
     (out! (if ok "RECORD OK" "RECORD FAILED"))
@@ -217,7 +217,7 @@
         r2 @(c/submit! sys a "(Thread/sleep 2500) :awake")
         _ (clojure.core.async/>!! (:back sys) {:op :writer :tx-count 1 :batch-ms 1 :n-tx "not a number" :commits 1})
         r3 @(c/submit! sys b "(spit \"/dev/stderr\" \"D2 boom: the agent writes its last words\\n\" :append true) (seon.lib/c-exit 3)")
-        _ (doseq [tx (seon.fixtures/program-txs problem-specs)] @(c/transact-main! sys tx))
+        _ (doseq [tx (seon.fixtures/program-txs @(:conn sys) problem-specs)] @(c/transact-main! sys tx))
         ds (mapv #(assoc % :seon.task/config {:seon.config.agent/max-turns 1})
                  (remove #(= :merge (:seon.task/kind %)) (seon.fixtures/decls problem-specs 'problems nil)))
         _ (my.root/create! sys ds)
@@ -1183,7 +1183,7 @@
   (let [sys (c/start! {:datoms 2000})
         pids (fn [] (set (keys (flow/ping (:graph sys) :timeout-ms 2000))))
         booted (pids)
-        expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/model}
+        expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/source :fx.source/0 :fx/git :fx.git/0 :fx/model}
                      (for [i (range (seon.config/value :seon.config.ai/max-in-flight))] (keyword "fx.model" (str i))))
         dir (str (:agents-dir (:store (c/state sys))) "/system") ; this root's own run dir
         _ (.mkdirs (java.io.File. dir))
@@ -1368,7 +1368,7 @@
       (let [specs (case k "calc" seon.fixtures/calc "swarm" (seon.fixtures/swarm-specs (Long/parseLong (or (second more) "12"))))
             tns (symbol k)
             ds (seon.fixtures/decls specs tns nil)]
-        (doseq [tx (seon.fixtures/program-txs specs)] @(c/transact-main! sys tx))
+        (doseq [tx (seon.fixtures/program-txs @(:conn sys) specs)] @(c/transact-main! sys tx))
         (my.root/create! sys ds)
         (my.root/run! sys (mapv #(seon.task/task-id tns (:seon.task/name %)) ds))))
     (out! "WEB http://127.0.0.1:" (seon.config/value :seon.config.web/port) "/ " (count ids) " agents")

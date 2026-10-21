@@ -6,6 +6,7 @@
             [datahike.api :as d] [clojure.core.async :as a]
             [seon.contract :as contract] [seon.db :as pdb] [seon.error :as err] [seon.agent :as agent]
             [seon.repl :as repl] [seon.proofs :as proofs] [seon.root :as root] [seon.agent-proc :as ap]
+            [seon.reconcile :as rec] [seon.sock :as sock]
             [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.cost :as cost]))
 
 (defn- refusal [op v]
@@ -49,6 +50,42 @@
         (let [[_ tx] (err/flush-tx (reduce err/fold {} (for [i (range 7)] (occ (refusal 'app/f i) :a9 4000))) @conn)]
           (d/transact conn tx)
           (is (= 1012 (:seon.error/count (err/record @conn s)))))))))
+
+;; ---- a repeated defect is not a write (task seon.error/a-repeated-defect-writes-nothing) ------
+
+(deftest a-written-signature-is-not-written-again
+  ;; the window's write is one entity per signature that CHANGED (a-storm-is-one-write-per-window);
+  ;; a signature already on main whose only change is one more occurrence is the same fact,
+  ;; counted in the observer's fold: transacting its count is what made 41,709 commits in 70 s
+  (let [[_ conn] (pdb/test-branch!)
+        f (reduce err/fold {} (for [i (range 3)] (occ (refusal 'app/f i) :a1 (+ 1000 i))))
+        [f tx] (err/flush-tx f @conn)]
+    (is (= 1 (count tx)) "the first occurrence writes the signature")
+    (d/transact conn {:tx-data tx})
+    (let [[_ tx2] (err/flush-tx (reduce err/fold f (for [i (range 1000)] (occ (refusal 'app/f i) :a1 (+ 2000 i)))) @conn)]
+      (is (= [] tx2) "1,000 more occurrences of a written signature change no fact"))))
+
+(deftest a-defect-in-the-reconciler-does-not-feed-itself
+  ;; root's path in miniature: the reconciler proc's step throws on a commit (root's entity
+  ;; with no boot fact, what a refused boot left), the api folds the thrown error and writes
+  ;; it to main as one commit, and that commit is the reconciler's next input. A step that
+  ;; throws leaves the proc's state as it was, so it fails on every commit it is handed.
+  ;; Main's commits over ten rounds are the first record, and no more.
+  (let [[_ conn] (pdb/test-branch!)
+        _ (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/quiescent "{:t 1, :stuck []}"}]})
+        t0 (:max-tx @conn)
+        st (rec/reconciler-proc {:boot "boot-1"})
+        round (fn [f i]
+                (let [db @conn
+                      e (try (rec/reconciler-proc st :main {:t (:max-tx db) :ops [] :db db :ns (sock/now-ns)}) nil
+                             (catch Throwable e e))
+                      f (err/fold f (err/occurrence (agent/error-map e) :platform {} (+ 5000 i)))
+                      [f tx] (err/flush-tx f db)]
+                  (when (seq tx) (d/transact conn {:tx-data tx}))
+                  f))]
+    (is (= ['seon.task/entity-value] (map #(get-in % [:example :seon.error/operation]) (vals (reduce round {} (range 10)))))
+        "the step fails in the task owner's contract, each round")
+    (is (<= (- (:max-tx @conn) t0) 1) "ten failing commits, one record")))
 
 ;; ---- eval errors: the error map as data, on the branch, and counted across agents ------
 

@@ -138,6 +138,23 @@
  ;; At the bound the task is observed stuck (a fact naming its cause and what it blocks).
  :seon.config.task/budget 2
 
+ ;; ==== Seon's own source ======================================================================
+
+ ;; Unit: path. The repository whose source is the program (lane LOOP, resources/seon/tasks/
+ ;; seon.source.edn): main imports its dirs at boot when it holds none of them, and each merge
+ ;; that changes them is written to their files and committed on :seon.config.source/branch.
+ ;; Absent (shipped): no source is imported and nothing is written. A run that wants it states
+ ;; it on its command line (--set :seon.config.source/root="<dir>") or in config/local.edn.
+ ;; Unit: paths under the root, read in this order.
+ :seon.config.source/dirs ["src"]
+ ;; Unit: branch. Merges are committed here, never on main and never pushed (owner).
+ :seon.config.source/branch "jolt/seon-merges"
+ ;; Unit: a git identity. Seon authors and commits its merges (the message names the merged
+ ;; tasks and attempts). Stated here because a root's HOME is its checkout's target/home, which
+ ;; holds no git identity (bin/check loop, 2026-10-21: "Author identity unknown").
+ :seon.config.source/committer-name "Seon"
+ :seon.config.source/committer-email "seon@localhost"
+
  ;; ==== effects and the model ==================================================================
 
  ;; Unit: requests one effect owner holds queued (its in-port and its priority queue). Each

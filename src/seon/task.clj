@@ -110,7 +110,8 @@
      max-turns (assoc :seon.config.agent/max-turns max-turns))])
 
 (defn boot-tx
-  "Root's boot: its id for this process lifetime and its max-running dial."
+  "Root's boot: its id for this process lifetime and its max-running dial (merges at once,
+  :seon.config.merge/max-running, is written with the config in force, seon.config/facts)."
   {:malli/schema [:=> [:cat :string pos-int?] [:vector :map]]}
   [boot max-running]
   [{:seon.root/id :root :seon.root/boot boot :seon.config.agent/max-running max-running}])

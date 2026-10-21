@@ -8,7 +8,7 @@
             [seon.task :as task]
             [seon.reconcile :as r]
             [seon.template :as tpl] [seon.problems :as problems] [seon.sock :as sock] [clojure.edn] [seon.contract :as contract]
-            [clojure.string :as str] [clojure.set]))
+            [clojure.string :as str] [clojure.set] [seon.config :as cfg]))
 
 (defn- empty-db [] @(second (pdb/test-branch!)))
 
@@ -23,7 +23,7 @@
 (defn- attempt
   "An attempt fact of task nm: status, plus members (results as {test status}; conflicts
   as :seon.merge/conflict values; unmerged as printed keys)."
-  [nm n status & {:keys [boot model results outcome conflicts unmerged] :or {boot "boot-1"}}]
+  [nm n status & {:keys [boot model results outcome conflicts unmerged changed] :or {boot "boot-1"}}]
   (let [id (str "demo/" nm) aid (str id "#" n)]
     (into (task/attempt-start-tx aid id boot (keyword (str "a-" nm n))
                                  {:branch (task/default-branch id) :model model :max-turns r/default-max-turns} 1000)
@@ -31,7 +31,8 @@
              results (assoc :seon.attempt/results (vec (for [[t s] results] {:seon.proof/test t :seon.proof/status s})))
              outcome (assoc :seon.attempt/outcome outcome)
              conflicts (assoc :seon.attempt/conflicts (task/conflict-members conflicts))
-             unmerged (assoc :seon.attempt/unmerged unmerged))])))
+             unmerged (assoc :seon.attempt/unmerged unmerged)
+             changed (assoc :seon.attempt/changed changed))])))
 
 (defn- db-of
   "A main db: decls written, the ids in `released` released (all when :all), root's boot,
@@ -245,6 +246,22 @@
       (concat done-work (attempt "x-merge" 1 :merged)) ["demo/y-merge"])
     (testing "work tasks are not queued"
       (is (= ["demo/x" "demo/y" "demo/z"] (map :task (r/reconcile (mdb three))))))))
+
+(deftest boot-records-merge-max-running-one
+  ;; DECISIONS: merge trains stay off (one merge at a time) until the train's combined test run
+  ;; and the par-200 hang are fixed; the dial in force is a fact on main a person can read
+  (let [db (d/db-with (empty-db) (into (task/boot-tx "boot-1" 4) (cfg/facts cfg/config {})))]
+    (is (= 1 r/default-max-merging))
+    (is (= {:boot "boot-1" :max-running 4 :max-merging 1} (task/root db)) "both dials are recorded at boot")))
+
+(deftest two-ready-disjoint-merges-run-one-at-a-time-by-default
+  ;; x and y change disjoint definitions: a train could take both, but the dial is 1
+  (let [two [(decl "x") (decl "y")]
+        extra (concat (attempt "x" 1 :done :changed #{"[:var app.m/x]"}) (attempt "y" 1 :done :changed #{"[:var app.m/y]"}))]
+    (is (= ["demo/x-merge"] (map :task (filter #(= :spawn (:op %)) (r/reconcile (mdb two :extra extra))))))
+    (testing "a train is turned on by writing the fact"
+      (is (= ["demo/x-merge" "demo/y-merge"]
+             (map :task (filter #(= :spawn (:op %)) (r/reconcile (mdb two :extra (concat extra [{:seon.root/id :root :seon.config.merge/max-running 8}]))))))))))
 
 (deftest unmerged-refuses-done
   (is (= [{:op :attach :attempt "demo/a#1" :task "demo/a"

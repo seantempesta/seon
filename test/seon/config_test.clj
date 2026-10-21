@@ -70,7 +70,7 @@
 (deftest the-shipped-file-validates-under-every-profile
   (doseq [p [:default :deepseek]]
     (let [c (config/read-file (config/path (config/checkout)) p (config/checkout))]
-      (is (= (set (keys c)) (set (remove #{:seon.config.ai/thinking :seon.config.ai/reasoning-effort :seon.config.root/main} (config/keys-declared)))) p)))
+      (is (= (set (keys c)) (set (remove #{:seon.config.ai/thinking :seon.config.ai/reasoning-effort :seon.config.root/main :seon.config.source/root} (config/keys-declared)))) p)))
   (is (= :scripted (:seon.config.ai/provider (config/read-file (config/path (config/checkout)) :default (config/checkout)))))
   (is (= :openai-compat (:seon.config.ai/provider (config/read-file (config/path (config/checkout)) :deepseek (config/checkout))))))
 

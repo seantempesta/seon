@@ -15,7 +15,8 @@
     wrap-print    the value through the one value printer (seon.print)
     wrap-caught   the error also as the one error map
     wrap-cost     per-form µs, allocated bytes and costliest functions, around the per-form eval fn
-    wrap-record   a def in a program namespace becomes a fact on this branch (transact!)
+    wrap-record   each form's compiler account (its definitions, references) becomes facts on
+                  this branch as it runs (seon.program, transact!)
   In-process values ride a response under keyword keys (:repl/value, :repl/ex) until a
   middleware turns them into answer keys. The requests and answers are in-process maps:
   root's request arrives as a value ({:op :eval :id :forms ...}, a frame on the agent's
@@ -26,7 +27,7 @@
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract] [clojure.edn] [my.db] [my.agent]
-            [seon.program :as program] [seon.lib :as lib] [seon.print :as print] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
+            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
             [jolt.ffi :as ffi]))
 
 (defchecked ^:private chunk-writer [:=> [:cat :seon.host/fn] :seon.host/writer] @#'jolt.nrepl/chunk-writer)
@@ -211,24 +212,50 @@
                                      (seq fns) (assoc "seon/fns" (pr-str (mapv (fn [c] (update c :ms #(/ (Math/round (* % 1000.0)) 1000.0))) fns)))))
                                m))))))))
 
+(defn- ns-form?
+  "Does form's head resolve, in nsx, to clojure.core/ns (resolution, as the compiler does)?"
+  {:malli/schema [:=> [:cat :any :seon.host/namespace] :boolean]}
+  [form nsx]
+  (boolean (and (seq? form) (symbol? (first form)) (= #'clojure.core/ns (ns-resolve nsx (first form))))))
+
 (defn wrap-record
-  "What a form leaves that is program becomes a fact on this branch (agent mode), as a
-  REPL session leaves it (seon.program/recording): an `ns` form, a new namespace `in-ns`
-  entered, a def, each in any namespace but a scratch one. The record joins the request's
-  recording transaction, the last record of a var or namespace winning."
+  "What a form leaves that is program becomes facts on this branch (agent mode) as it runs
+  (seon.program): the compiler's account of the form (jolt.analyzer/*unit-tap* around its
+  eval, and a readback of the vars it set), applied at once through the run-ahead writer
+  (seon.agent/transact!), so the next form of the request already reads it. An `ns` form, a
+  definition, a declaration or a change to a namespace's environment, in any namespace but
+  a scratch one. The answer carries the vars it set in any namespace, scratch ones included
+  (:repl/defined, for admission), and what it recorded (\"seon/recorded\")."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
-    (h (around-reply req
-         (fn [m]
-           (if-let [[what tx] (when (and (= :agent (:mode @agent/state)) (contains? m :repl/value))
-                                (program/recording (agent/db) (:repl/form m) (:repl/src m) (:repl/value m)))]
-             (do (if contract/record?
-                   ;; an in-ns joins the ns form of the same request, never replaces it
-                   (swap! agent/state assoc-in [:defs (if (program/in-ns-form? (:repl/form m)) [:in-ns what] what)] tx)
-                   (agent/transact! tx))
-                 (assoc m "seon/recorded" (str what)))
-             m))))))
+    (let [last (volatile! nil)
+          ef (:repl/eval-fn req eval)]
+      (h (-> req
+             (assoc :repl/eval-fn
+                    (fn [form]
+                      (let [acc (volatile! {:nodes [] :before {}})
+                            ns0 *ns*
+                            nsf? (ns-form? form ns0)]
+                        (vreset! last nil)
+                        (try (binding [jolt.analyzer/*unit-tap* (program/tap acc)] (ef form))
+                             (finally (vreset! last (assoc @acc :ns (ns-name ns0) :ns-form? nsf? :ns-after (ns-name *ns*))))))))
+             (around-reply
+               (fn [m]
+                 (let [l (when (or (contains? m :repl/value) (contains? m :repl/ex)) @last)
+                       ;; Clojure's ns puts the name's metadata on the namespace; Jolt's drops it
+                       ;; (jolt/ns-meta is the fix at its cause)
+                       md (when (:ns-form? l) (not-empty (dissoc (meta (second (:repl/form m))) :line :column)))
+                       _ (when md (alter-meta! (the-ns (:ns-after l)) merge md))
+                       acct (when (and l (= :agent (:mode @agent/state)) (:repl/src m))
+                              (program/account (assoc l :src (:repl/src m) :ran? (contains? m :repl/value))))]
+                   (when l (vreset! last nil))
+                   (if acct
+                     (do (when contract/record? (agent/transact! (program/record-tx (agent/db) acct)))
+                         (assoc m "seon/recorded" (pr-str (vec (concat (map :var (:defs acct))
+                                                                       (when (:ns-form? acct) [(:ns acct)]))))
+                                :repl/defined (mapv :var (:defs acct))))
+                     (cond-> m l (assoc :repl/defined (program/set-vars l))))))))))))
 
 (defn- admit
   "Admit a definition by its contract (G1's proto.agent/admit!, Seon's rule): a function var
@@ -252,20 +279,20 @@
                                      :uncontracted (vec (sort-by str u)) :count (count u)}])})))))
 
 (defn wrap-admit
-  "A def's var is admitted by its contract (admit): armed, or a growing warning."
+  "Each var a form defined (wrap-record's :repl/defined) is admitted by its contract
+  (admit): armed, or a growing warning."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
     (h (around-reply req
          (fn [m]
-           (let [v (:repl/value m)]
-             (if (and (var? v) (program/def-form? (:repl/form m)))
-               (merge m (admit v))
-               m)))))))
+           (reduce (fn [m s] (if-let [v (find-var s)] (merge m (admit v)) m)) m (:repl/defined m)))))))
 
 (def middleware
-  "Outermost first. Answers pass innermost first: cost, record, admit, caught, print."
-  [wrap-print wrap-caught wrap-admit wrap-record wrap-cost])
+  "Outermost first. Answers pass innermost first: record, cost, admit, caught, print. The
+  eval fn is record's around cost's around eval, so an eval's cost is the eval's (with the
+  compiler's tap in it, as part of compiling)."
+  [wrap-print wrap-caught wrap-admit wrap-cost wrap-record])
 
 (defn handler
   {:malli/schema [:function [:=> [:cat] :seon.host/fn] [:=> [:cat [:sequential :seon.host/fn]] :seon.host/fn]]}
@@ -340,6 +367,7 @@
   on its branch: root is told ({:op :unrecorded}) and records it as a problem on main."
   {:malli/schema [:=> [:cat :seon.agent/items [:maybe :keyword]] :seon.agent/items]}
   [items origin]
+  ;; the effects asked during the request (seon.agent/fx-record!) join its recording
   (let [defs (into [] (mapcat val) (:defs @agent/state))]
     (swap! agent/state dissoc :defs)
     (when (and contract/record? (= :agent (:mode @agent/state)) (seq items))
