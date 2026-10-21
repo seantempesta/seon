@@ -51,6 +51,8 @@ step() {
 
 echo "== seed (the one store every step branches from)"; step seed "" run seed 2000
 echo "== dragons"; step dragons "" "$ROOT/bin/dragons"
+echo "== lmdb-kill (a writer SIGKILLed inside a txn while this process holds the env; the next writes commit: robust locks)"
+step lmdb-kill "" "$ROOT/target/lmdb-kill" "$OUT/lmdb-kill.mdb"
 echo "== contracts"; step contracts ":contracted|:uncontracted|:result" run contracts
 echo "== census (no [:fn] without :gen; mg/check on every pure contract, in the release binary)"
 # in K shards at once, each a process checking every Kth contracted var (seon.check/census);
