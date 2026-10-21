@@ -58,8 +58,15 @@ git -C "$WT" submodule status | while read -r line; do
   fi
 done
 
-# target/: an APFS clone (copy-on-write)
-[[ -d $MAIN/target ]] && cp -cR "$MAIN/target" "$WT/target"
+# target/: an APFS clone (copy-on-write) of the builds, not of the runs: a store is opened by
+# its path, so a cloned target/runs/store fails every root here ("Store identity mismatch:
+# connecting to wrong database"), and target/check/ is the source tree's record, not this one's
+if [[ -d $MAIN/target ]]; then
+  mkdir -p "$WT/target"
+  for e in "$MAIN"/target/*(N); do
+    [[ ${e:t} == (runs|check) ]] || cp -cR "$e" "$WT/target/"
+  done
+fi
 
 print "worktree $WT on $BR (from $BASE)"
 print "  build:  cd $WT && nice -n 15 /usr/bin/lockf -k ~/src/seon-jolt/build.lock bin/build seon"
