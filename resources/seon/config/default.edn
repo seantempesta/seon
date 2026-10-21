@@ -191,8 +191,10 @@
  ;; Unit: completion tokens, reasoning included. Provenance: seon.model's default-max-tokens
  ;; (2,048) before this file. At the bound the reply is cut (:truncated?), or
  ;; the reasoning ate the reply (:seon.model/reasoning-ate-reply). v1 ships 65,536 for Flash
- ;; with thinking on (its 4,096 and 8,192 starved reasoning): raise it with thinking.
- :seon.config.ai/max-tokens #long #or [#env SEON_AI_MAX_TOKENS 2048]
+ ;; with thinking on (its 4,096 and 8,192 starved reasoning). Ported 2026-10-21 after the first
+ ;; DeepSeek agent on Seon's own code: two refinement attempts answered empty, reasoning took all
+ ;; 2,048. Billed by use, so the ceiling costs nothing unspent.
+ :seon.config.ai/max-tokens #long #or [#env SEON_AI_MAX_TOKENS 65536]
  ;; DeepSeek's thinking mode (:enabled | :disabled) and effort (:low | :medium | :high) are
  ;; optional keys, absent here: the provider's own default. State them to choose, e.g.
  ;;   :seon.config.ai/thinking :disabled   :seon.config.ai/reasoning-effort :low

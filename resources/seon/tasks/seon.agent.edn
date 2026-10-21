@@ -4,4 +4,8 @@
   :seon.task/proofs #{seon.procs-test/a-turn-is-committed-before-its-model-call}}
  {:seon.task/name "a-process-says-what-it-is"
   :seon.task/plan "In Activity Monitor and ps, every process a root forks (the fork server, its standby, each agent, clone and test child) shows the root's own command line, ./seon root PORT, so the owner can't tell a root from an agent or which checkout it belongs to (2026-10-21: \"I'm seeing spammed seon processes again\"; 14 processes across five checkouts, all named alike). Each process names itself by role and checkout when it starts, e.g. \"seon fork-server (next-wiki)\", \"seon agent a3 (next-wiki)\": on macOS by rewriting its argv area in place (what setproctitle does), so ps shows it; and the same name is a fact on its entity. Part of the process pillar (AGENTS). Proof: after spawning an agent, ps -o command= for each pid names its role."
-  :seon.task/kind :work}]
+  :seon.task/kind :work}
+ {:seon.task/name "an-agent-works-in-its-source-root"
+  :seon.task/plan "Found by the first DeepSeek agent on Seon's own code (2026-10-21): `(slurp \"src/seon/reconcile.clj\")` and `(slurp \"test/seon/reconcile_test.clj\")` throw FileNotFoundException in an agent, because the agent process's working directory is the binary's `target/`, not the program's source root (`:seon.config.source/root`). A programmer at a REPL in a project expects relative paths to resolve against the project. Correct: an agent forked for a root with a source root resolves relative paths against that root (its working directory, set where the fork server forks it, `seon.fork-server`), so reading the files the program came from works as at any Clojure REPL; writing still goes through the effect owner."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.agent-test/a-relative-path-reads-from-the-source-root}}]
