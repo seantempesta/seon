@@ -116,9 +116,10 @@
     (.close sock)))
 
 (defn serve!
-  "Listen on 127.0.0.1:port: the accept loop and each connection on edge threads (blocking
-  accept and reads). Answers the server socket."
-  {:malli/schema [:=> [:cat :seon.root/sys pos-int?] :any]}
+  "Listen on 127.0.0.1:port (0: a free port the kernel picks; read it with .getLocalPort):
+  the accept loop and each connection on edge threads (blocking accept and reads). Answers
+  the server socket."
+  {:malli/schema [:=> [:cat :seon.root/sys nat-int?] :any]}
   [sys port]
   (let [ss (java.net.ServerSocket. port 50 (java.net.InetAddress/getByName "127.0.0.1"))]
     (doto (Thread. (fn [] (loop [] (let [s (.accept ss)]

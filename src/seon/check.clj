@@ -1061,7 +1061,7 @@
   (let [sys (c/start! {:datoms 2000})
         a (c/spawn! sys {:task "fx" :branch :fx1})
         _ (await-status sys [a] #{:idle} 5000)
-        dir (str "/tmp/fx1-" (lib/c-getpid))
+        dir (str (:agents-dir (:store (c/state sys))) "/fx1") ; this root's own run dir, kept with the store
         _ (.mkdirs (java.io.File. dir))
         ev (fn [code] (let [r @(c/submit! sys a code)] (last r)))
         ;; per call, timed inside the agent: (loop n) of the form, µs each
@@ -1117,7 +1117,7 @@
         booted (pids)
         expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/model}
                      (for [i (range seon.config/MODEL-LANES)] (keyword "fx.model" (str i))))
-        dir (str "/tmp/seon-system-" (lib/c-getpid))
+        dir (str (:agents-dir (:store (c/state sys))) "/system") ; this root's own run dir
         _ (.mkdirs (java.io.File. dir))
         decl (clojure.edn/read-string (slurp seon.system/path))
         write! (fn [nm d] (let [f (str dir "/" nm ".edn")] (spit f (pr-str d)) f))
@@ -1171,8 +1171,8 @@
   evaluations are recorded with origin :outside (the agent's on its branch, root's on main)."
   []
   (let [sys (c/start! {:datoms 2000})
-        port (+ 20000 (mod (lib/c-getpid) 20000))
-        _ (seon.entrance/serve! sys port)
+        ;; port 0: the kernel picks a free one, so two lanes' proofs never collide
+        port (.getLocalPort ^java.net.ServerSocket (seon.entrance/serve! sys 0))
         a (c/spawn! sys {:task "mcp" :branch :mcp1})
         _ (await-status sys [a] #{:idle} 5000)
         msgs [{"jsonrpc" "2.0" "id" 1 "method" "initialize" "params" {"protocolVersion" "2024-11-05"}}
@@ -1240,7 +1240,7 @@
   it O(branches) per spawn: 15 ms at 1,000). A store of its own, the last resort: the
   roster must start empty for the growth to show."
   [n]
-  (let [path (str "/tmp/seon-branch-cost-" (lib/c-getpid))
+  (let [path (str (System/getProperty "user.dir") "/runs/branch-cost-" (lib/c-getpid)) ; this tree's runs, not the shared /tmp
         {conn :conn} (seon.db/open! :lmdb path 2000 :db)
         times (vec (for [k (range (quot n 100))]
                      (let [t0 (lib/now-ns)]
