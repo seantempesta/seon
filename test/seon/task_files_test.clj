@@ -88,3 +88,13 @@
     (is (seq files))
     (is (= [] (vec (for [[ns-sym ds] files :when (:seon.error/type ds)] ns-sym))) "every file reads")
     (is (not (:seon.error/type (task/load-tx (empty-db) files))) "and loads")))
+
+(deftest a-file-task-reaches-main-through-its-merge-task
+  ;; task seon.task/a-file-task-reaches-main: a work task loaded from its task file is
+  ;; followed by its merge task, as seon.template/with-merge gives e2e's tasks, so a done
+  ;; task's change reaches main (v1: a single task is followed by a merge task)
+  (let [db (empty-db)
+        db (d/db-with db (task/load-tx db {'demo (task/file-declarations 'demo file-a)}))
+        merge-of (fn [id] (d/q '[:find ?m . :in $ ?w :where [?t :seon.task/id ?w] [?mt :seon.task/needs ?t] [?mt :seon.task/kind :merge] [?mt :seon.task/id ?m]] db id))]
+    (is (some? (merge-of "demo/parse")) "parse's merge task needs parse")
+    (is (some? (merge-of "demo/index")) "and index's")))
