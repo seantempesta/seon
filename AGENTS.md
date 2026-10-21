@@ -53,7 +53,7 @@ Every need is met by one of these. If one doesn't fit, stop and say so; never ro
 - **An error is data**, flowing to whoever can fix it. A defect holds its message (per key) until the code is fixed. A typed error goes to the requester, agent or task that can act on it.
 
 **A mechanism is built once, as a pillar, and reused everywhere.**
-- Before building anything that waits, retries, admits, holds, spawns, watches a process, answers a request or reads config, find its one implementation (`docs/patterns.md` names each pillar and its owner).
+- Before building anything that waits, retries, admits, holds, spawns, watches a process, answers a request or reads config, find its one implementation: the wiki section where that mechanism lives states the pattern and names its one implementation and owner.
 - If it doesn't exist, its owner builds it; nobody builds a second one.
 
 **Get out of an agent's way.**
@@ -109,7 +109,7 @@ The order is **delete first, then foundations, then fixes**. Anything shared by 
 - Lanes waiting on a dependency read and plan; they run nothing heavy and keep nothing running.
 
 ### Learn, then plan, then act
-1. **What exists, written into the plan.** Find the relevant wiki sections (`docs/README.md` is the map; the patterns page first), the task files and the code, so nothing is built twice. Then:
+1. **What exists, written into the plan.** Find the relevant wiki sections (`docs/README.md` is the map; a patterns page first), the task files and the code, so nothing is built twice. Then:
    - write the sections' addresses into the task as `:seon.task/docs`, and the vars and files as `:seon.task/refs`, so every later step's context pulls exactly them;
    - state the differences in the plan: where a section and the code disagree, and what this task changes relative to what the sections say. Those differences are the wiki edits this task owes.
 2. **What v1 did.** Read `~/src/seon` for the same problem: code, decisions, research, reverts, read-only. Port the best parts onto our pillars, and name the mistakes you are not repeating.
@@ -138,7 +138,7 @@ The order is **delete first, then foundations, then fixes**. Anything shared by 
 - **Where this is going:** a landing queue on the one root that merges main into each candidate, runs what it reaches on the merged result, and batches disjoint candidates. All builds, tests and checks become tasks on that root, admitted by workload, with results reused by digest. Seon's own merges get the same gate, and `:behind` fires only when main's change touches what the branch changes or reaches.
 
 ### Learn as we go, so we never start from zero
-- **Each landing's lesson goes into the wiki in the same commit**, written by root: a `docs/patterns.md` section (the problem, the idiom, its "Not this") naming the vars it concerns. The next task touching those vars gets it in its context automatically.
+- **Each landing's lesson goes into the wiki in the same commit**, written by root: it rewrites the section where the problem lives (the idiom, its "Not this", the vars it concerns) and links every other section with the same problem to it. The next task touching any of them gets it in its context automatically.
 - **A failed attempt's cause stays on its task** for the next attempt.
 - **A problem outside your task is filed as a task**, never fixed in passing, never just mentioned.
   - Its plan states what you saw exactly, the cause (file:line), what correct looks like, and what it replaces.
@@ -171,11 +171,12 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
   - `` `name` `` or a link pulls its doc;
   - ` ```name``` ` pulls its code.
 - **A healthy wiki** (owner, 2026-10-21: "a healthy wiki with good separation of topics and well linked so agents can get refs and know if they want to read more"):
+  - **Patterns live in the topic sections, linked, never in a catch-all file** (owner, 2026-10-21: "patterns embedded into the wiki in different sections and linked so that we pull together and understand disparate problems that can be unified in a fix"). A pattern's home is the section where its problem lives: the idiom, its "Not this", its one implementation. Every section with the same problem links to that home, and the home links back to each, so pulling one shows the others, and one fix can unify them.
   - **One home per concept.** A var or mechanism is described in one section; other pages link to it instead of re-explaining it.
   - **Every section leads with one sentence that stands alone.** That sentence is what an agent sees at summary depth and decides by; then the body; then links to related sections.
   - **Everything is linked.** Every section is reachable from the map, every page links its neighbours, and nothing is orphaned or duplicated.
   - **Sections state the current truth by topic.** A change rewrites the section it concerns; nothing is a dated log.
-- **Landing a change updates its section in the same commit,** and a pillar's owner writes its patterns section.
+- **Landing a change updates its section in the same commit,** and a pillar's owner writes the section where its pillar lives.
 - **Before landing, read your task's context through the door** and confirm it pulls what the task needs. `bin/check docs` goes red on a dangling reference, a missing var or a section older than its code.
 
 ## 7. The machine
