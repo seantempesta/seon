@@ -274,7 +274,7 @@
   (let [top {:seon.config.ai/provider (:kind p) :seon.config.ai/script (:script p) :seon.config.ai/model (:model p)
              :seon.config.ai/max-tokens (:max-tokens p)
              :seon.config.ai/thinking (:thinking p) :seon.config.ai/reasoning-effort (:reasoning-effort p)}
-        c (into (dissoc c :seon.config.ai/thinking :seon.config.ai/reasoning-effort) (filter (comp some? val)) top)
+        c (into c (filter (comp some? val)) top)
         prov (get-in c [:seon.config.ai/models (:seon.config.ai/model c) :seon.ai.model/provider])
         wire (into {} (filter (comp some? val)) {:seon.config.ai/base-url (:base-url p) :seon.config.ai/api-key-variable (:api-key-env p)})]
     (if (and prov (seq wire)) (update-in c [:seon.config.ai/providers prov] merge wire) c)))
