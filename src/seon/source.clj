@@ -158,7 +158,7 @@
   [path text]
   (into [{:schema.file/path path :schema.file/text text}]
         (for [[k v] (sort-by (comp str key) (edn/read-string text))]
-          {:schema/key k :schema/form (program/pr-edn v) :schema/file path :schema/source true})))
+          {:schema/key k :schema/form (binding [*print-namespace-maps* false] (program/pr-edn v)) :schema/file path :schema/source true})))
 
 (defn import-tx
   "The facts of files ({relative path text}) as program on db: each namespace's file's forms

@@ -45,10 +45,9 @@
                  :else false)))
 
 (defn pr-edn
-  "v printed as EDN that reads back (no print limits, no metadata, a namespaced map's keys in
-  full, as the schema resources are written)."
+  "v printed as EDN that reads back (no print limits, no metadata)."
   {:malli/schema [:=> [:cat :any] :string]}
-  [v] (binding [*print-length* nil *print-level* nil *print-meta* false *print-namespace-maps* false] (pr-str v)))
+  [v] (binding [*print-length* nil *print-level* nil *print-meta* false] (pr-str v)))
 
 (defn var-kind
   "What a defined var holds now: :fn (a function, which needs a contract), :test, :macro or

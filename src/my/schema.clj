@@ -47,7 +47,8 @@
   program. A new or changed attribute's declaration comes with it."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :any :boolean] [:or [:map [:tx :seon.db/tx-data] [:registration :seon.schema/registration]] :seon.schema/registration-refused]]}
   [db k v scratch?]
-  (let [text (program/pr-edn v)
+  ;; printed as the resources are written: a namespaced map's keys in full
+  (let [text (binding [*print-namespace-maps* false] (program/pr-edn v))
         decls (if (program/edn-value? v)
                 (judged db k (assoc (merge contract/forms (program/schema-changes db)) k (edn/read-string text)))
                 (refused k :unreadable "a schema form is EDN data: it must print and read back equal"))]
