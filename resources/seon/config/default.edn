@@ -304,16 +304,19 @@
  ;; shows before any one deepens (lane P1).
  :seon.config.render/context-budget 16000
  ;; Unit: tokens one turn's evaluations show the model, each an equal share, every cut naming
- ;; the form that reads its rest. Provenance: seon.context's literal last-evals-budget (6000).
- :seon.config.render/evals-budget 6000
+ ;; the form that reads its rest. Provenance: seon.context's literal last-evals-budget (6000),
+ ;; raised 2026-10-21: a live agent reading four Datahike functions a turn got ~1500 tokens each,
+ ;; read past each cut by hand, then re-read them; a turn's reads are ~3-6k tokens a function.
+ :seon.config.render/evals-budget 24000
  ;; Unit: tokens of earlier turns (each the model's reply and what its forms evaluated to) the
  ;; model reads before the current state, whole turns, the newest kept first; the task's first
  ;; context always stays. 0 shows only the last turn. Provenance (owner, 2026-10-21, after a live
  ;; agent re-read the same Datahike source every other turn because each context showed only
- ;; the previous turn): a REPL keeps its scrollback. 128000 holds a 40-turn attempt's ~3k-token
- ;; turns and is an eighth of DeepSeek's 1048576-token window; the history only grows at its
- ;; end, so the provider's prompt cache serves it.
- :seon.config.render/history-budget 128000
+ ;; the previous turn): a REPL keeps its scrollback. 256000 holds ~10 full turns at the evals
+ ;; budget (more when turns read less) and is a quarter of DeepSeek's 1048576-token window; the
+ ;; history only grows at its end, so the provider's prompt cache serves it (cache-hit input is
+ ;; ~2% of a miss).
+ :seon.config.render/history-budget 256000
 
  ;; ==== the web, the guarantees, the native probe ==============================================
 
