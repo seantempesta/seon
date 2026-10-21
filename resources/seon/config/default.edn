@@ -86,8 +86,12 @@
  :seon.config.store/eid-lease 100000
  ;; Unit: bytes. LMDB's map size, the store's largest size. At the bound LMDB refuses the
  ;; write (MDB_MAP_FULL, a :seon.writer/refused answer). Provenance: the store's first
- ;; default (1 GiB, seon.db's SEON_LMDB_MB); not derived from a measured store size.
- :seon.config.store/lmdb-map-bytes 1073741824
+ ;; default was 1 GiB (seon.db's SEON_LMDB_MB); on 2026-10-21 the standing root's kept store
+ ;; reached 747 MB and two agents died on Datahike's fatal-commit-error while recording. The map
+ ;; is address space, not memory or disk: without MDB_WRITEMAP (the flags are MDB_NOSYNC) the
+ ;; file grows only as it is used, so LMDB's guidance is a map as large as the store may ever
+ ;; grow. 64 GiB.
+ :seon.config.store/lmdb-map-bytes 68719476736
  ;; Unit: children per index node. A commit rewrites the nodes it touched, so smaller nodes
  ;; mean fewer bytes printed and written per commit. Provenance: dev/dur.clj measured 512 -> 64
  ;; cut a small commit 27 -> 16 ms with fsync, before the node emitter.
