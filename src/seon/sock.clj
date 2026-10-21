@@ -14,7 +14,7 @@
     collection). docs/DRAGONS.md, \"Physics\".
   - The socket's buffer is the bounded channel: a full buffer makes the sender wait."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [jolt.ffi :as ffi] [seon.lib :as lib] [konserve.jolt.fasl :as codec]))
+  (:require [seon.contract :refer [defn defn-]] [jolt.ffi :as ffi] [seon.lib :as lib] [konserve.jolt.fasl :as codec] [seon.config :as config]))
 
 (ffi/load-library)
 
@@ -52,9 +52,8 @@
   [] (c-clock-ns 8))
 
 (def BUF
-  "Each socket's send and receive buffer, bytes (T1: 1 MB makes a 1 MB reply cost what
-  the ring's did)."
-  (Long/parseLong (or (System/getenv "SEON_SOCK_BUF") "1048576")))
+  "Each socket's send and receive buffer, bytes (:seon.config.agent/sock-buf-bytes)."
+  (config/value :seon.config.agent/sock-buf-bytes))
 
 (defn- set-int-opt! {:malli/schema [:=> [:cat :seon.lib/fd :int :int] :int]}
   [fd opt v]

@@ -199,7 +199,7 @@
                          ;; says it forked (a descriptor only in flight may be lost)
                          (:fd m) (assoc-in [:in-flight (:agent m)] (:fd m))
                          (= :tx (:op m)) (update :log conj m))]
-                [(if (>= (count (:log st)) cfg/STANDBY-EVERY) (request-standby st) st) nil]))
+                [(if (>= (count (:log st)) (cfg/value :seon.config.root/standby-every)) (request-standby st) st) nil]))
      :ext (if (= :shutdown (:op m))
             (let [{:keys [pid reader]} st]
               (some-> pid (lib/c-kill 9))

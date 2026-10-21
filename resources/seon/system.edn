@@ -31,11 +31,11 @@
                :args {:boot :bind/boot :judge :bind/judge}}
   ;; root's web (lane W2): the render proc renders what changed into patches per view
   ;; (:compute, never waits); the web proc owns the listener and the tabs (:io). Port:
-  ;; 127.0.0.1 only; the dial SEON_WEB_PORT overrides it; 0 serves nothing
+  ;; 127.0.0.1 only, :seon.config.web/port; 0 serves nothing
   :render {:proc seon.render.proc/render-proc
            :args {:events-mult :bind/events-mult :graph :bind/graph :system :bind/system}}
   :web {:proc seon.web/web-proc
-        :args {:port 7777}}}
+        :args {:port :bind/web-port}}}
  :fx
  {:echo {:perform seon.fx/echo :lanes 1}
   :file {:perform seon.fx/write-file :lanes 1}

@@ -45,7 +45,6 @@
 ;; fsync, before the node emitter). LMDB runs MDB_NOSYNC and the writer syncs the env
 ;; once per commit (sync!), so a commit is one drive flush, not one per node.
 
-(def ^:private BF 64)
 (def ^:private MDB_NOSYNC 0x10000)
 
 (defn store-cfg
@@ -54,11 +53,11 @@
   [backend path]
   {:store (cond-> {:backend backend :path path :id (hasch/uuid path)
                    :default-serializer :FaslSerializer}
-            (= backend :lmdb) (assoc :lmdb {:flags MDB_NOSYNC :map-size (* 1048576 (Long/parseLong (or (System/getenv "SEON_LMDB_MB") "1024")))})
+            (= backend :lmdb) (assoc :lmdb {:flags MDB_NOSYNC :map-size (cfg/value :seon.config.store/lmdb-map-bytes)})
             (= backend :file) (assoc :config {:defer-immutable-sync? true}))
    :schema-flexibility :write :keep-history? false
    :writer writer-cfg
-   :index-config {:branching-factor BF}})
+   :index-config {:branching-factor (cfg/value :seon.config.store/branching-factor)}})
 
 (defn sync!
   "Make every commit so far durable: one env sync for LMDB (MDB_NOSYNC); the filestore
@@ -196,7 +195,7 @@
 (defn lease-base
   "The first entity id past every branch head of the store: agents' leases start here."
   {:malli/schema [:=> [:cat :seon.host/conn] :int]}
-  [conn] (+ cfg/EID-LEASE (max (:max-eid @conn) (#'datahike.writing/roster-max-eid (:store @conn)))))
+  [conn] (+ (cfg/value :seon.config.store/eid-lease) (max (:max-eid @conn) (#'datahike.writing/roster-max-eid (:store @conn)))))
 
 (defn head
   "Branch b's committed value, read from the store (another process may have committed it)."

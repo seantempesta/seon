@@ -1,4 +1,5 @@
-# bin/env — sourced by bin/test and bin/check: where the runtime finds its native libraries.
+# bin/env — sourced by bin/test, bin/check and bin/root: where the runtime finds its native
+# libraries and its checkout.
 # LMDB: konserve.jolt.lmdb-ffi loads JOLT_LMDB_LIB (Homebrew's lmdb, or the prototypes' build).
 ROOT=${ROOT:-$(cd "$(dirname "$0")/.." && pwd)}
 if [ -z "${JOLT_LMDB_LIB:-}" ]; then
@@ -7,4 +8,6 @@ if [ -z "${JOLT_LMDB_LIB:-}" ]; then
   done
 fi
 export JOLT_LMDB_LIB
-export SEON_PROBE_LIB=${SEON_PROBE_LIB:-$ROOT/target/lib/libprobe.dylib}
+# The checkout this process runs from: seon.config reads resources/seon/config/default.edn
+# here and resolves its #seon/checkout paths (the probe library, system.edn, the tasks) under it.
+export JOLT_PWD=${JOLT_PWD:-$ROOT}

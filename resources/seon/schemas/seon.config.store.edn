@@ -1,0 +1,6 @@
+;; The durable store (new in next; :seon.config.store/flush-ms is the owner's 2026-10-20 name).
+{:seon.config.store/backend [:enum {:seon.config/unit "backend" :description "The durable store's konserve backend."} :lmdb :file]
+ :seon.config.store/flush-ms [:int {:min 0 :seon.config/unit "ms" :description "How long a committed write may stay unflushed; recovery restores to the last flush."}]
+ :seon.config.store/eid-lease [:int {:min 1 :seon.config/unit "entity ids" :description "Entity ids each agent may mint on its own branch (a block per agent)."}]
+ :seon.config.store/lmdb-map-bytes [:int {:min 1048576 :seon.config/unit "bytes" :description "LMDB's map size: the store's largest size; a write past it is refused."}]
+ :seon.config.store/branching-factor [:int {:min 4 :seon.config/unit "children" :description "Index node branching factor: a commit rewrites the nodes it touched."}]}

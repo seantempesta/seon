@@ -7,7 +7,7 @@
   From proto/flow f2-final proto.control (lane F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.sock :as sock] [seon.step :as step]
-            [seon.config :as cfg] [jolt.async.remote :as remote] [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
+            [jolt.async.remote :as remote] [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
 
 (defn- to-proc!
   "Send m to the agent's process: onto the end's :out (its writer pump frames it). While a
@@ -38,6 +38,12 @@
 
 (defn- busy {:malli/schema [:=> [:cat :map] [:enum :busy :idle]]}
   [st] (if (seq (:inflight st)) :busy :idle))
+
+(def stop-bound-ms
+  "How long an agent may take to exit after :stop before it is SIGKILLed. A fence, not a
+  config key (FENCES finding 3: a clock standing in for the exit event); it goes with
+  seon.root/shutdown-and-death-are-dataflow."
+  2000)
 
 (defn- await-dead
   "Wait (bounded) on the end's :in for its close (the process is gone): true, or false
@@ -228,7 +234,7 @@
      ::flow/stop (do (when-not (:dead? st)
                        (when-not (:stop-sent st)
                          (if (:pid st) (to-proc! st {:op :stop}) (hang-up! st)))
-                       (when-not (await-dead (:in (:end st)) cfg/STOP-BOUND-MS)
+                       (when-not (await-dead (:in (:end st)) stop-bound-ms)
                          (some-> (:pid st) (lib/c-kill 9))
                          (hang-up! st)
                          (await-dead (:in (:end st)) 5000)))

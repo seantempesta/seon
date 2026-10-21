@@ -121,7 +121,7 @@
   plain caller compiled against a contracted function reaches its check. Prints the counts
   and exits 0 only when all hold."
   []
-  (let [boot (contract/instrument! '[seon.contract seon.profile seon.print seon.print.select seon.print.emit])
+  (let [boot (contract/instrument! '[seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])
         nss (platform-nss)
         vs (for [n nss v (vals (ns-interns n)) :when (contract/contract v)] v)
         at-def (filter #(= :definition (:seon.contract/checked-at (meta %))) vs)
@@ -497,10 +497,12 @@
   "n agents under a random mix of everything for secs: evals with transact!, tests,
   gated merges, merge-main!, clones, interrupts, kills (and respawns), and one fork
   server kill. Checks: no request hangs, no unexpected error, replicas agree with the
-  writer, and root's memory over time."
-  [n secs]
+  writer, and root's memory over time. fs-kill-every: nil, one fork server kill at half
+  time; 0, none; k, one every k seconds, each restart giving a ready agent within 5 s
+  (`soak N SECS [K]`; it prints root's PID first, for whoever watches it)."
+  [n secs fs-kill-every]
   (let [sys (c/start! {:datoms 2000})
-        _ (some-> (System/getenv "SOAK_PIDFILE") (spit (str (lib/c-getpid))))
+        _ (out! "PID " (lib/c-getpid))
         t-end (+ (lib/now-ns) (* secs 1000000000))
         live (atom (vec (pmap (fn [i] (c/spawn! sys {:task (str "soak " i)})) (range n))))
         _ (await-status sys @live #{:idle} 20000)
@@ -538,12 +540,12 @@
                                  (recur))))
         workers (vec (for [_ (range (min 16 n))] (future (worker))))
         tracer (future (loop [k 0] (when (< (lib/now-ns) t-end)
-                                     (when (if-let [e (System/getenv "SOAK_FS_KILL_EVERY")]
-                                             (and (pos? k) (zero? (mod k (Long/parseLong e))))
-                                             (and (= k (quot secs 2)) (not (System/getenv "SOAK_NO_FS_KILL"))))
+                                     (when (if fs-kill-every
+                                             (and (pos? fs-kill-every) (pos? k) (zero? (mod k fs-kill-every)))
+                                             (= k (quot secs 2)))
                                        (lib/c-kill (get-in (c/state sys) [:server :pid]) 9) (bump! :fork-server-kill)
                                        ;; each restart must give a ready agent within 5 s
-                                       (when (System/getenv "SOAK_FS_KILL_EVERY")
+                                       (when (and fs-kill-every (pos? fs-kill-every))
                                          (Thread/sleep 50)
                                          (let [pid (try (c/spawn! sys {:task "after fs kill"}) (catch Throwable e e))]
                                            (if (and (keyword? pid) (await-status sys [pid] #{:idle} 5000))
@@ -605,8 +607,7 @@
                                       (if (and (= :seon.merge/behind (:seon.error/type mr)) (< k 20)) (recur (inc k)) [mm mr])))]
                       (swap! log conj {:k k :agent id :generation generation :eval ok-eval
                                        :merged (:merged? mr) :conflicts (count (:conflicts mm))
-                                       :red (when (:tests mr) (pos? (+ (:fail (:tests mr) 0) (:error (:tests mr) 0))))
-                                       :reports (when (System/getenv "SWARM_DEBUG") (take 2 (:reports mr)))})
+                                       :red (when (:tests mr) (pos? (+ (:fail (:tests mr) 0) (:error (:tests mr) 0))))})
                       (c/kill! sys id)
                       (when (and (not (:merged? mr)) (< generation 4)) (attempt k (inc generation))))))
         _ (doall (pmap (fn [i] (attempt (mod i modules) 0)) (range n)))
@@ -615,8 +616,7 @@
         fresh (c/spawn! sys {:task "check main"})
         _ (await-status sys [fresh] #{:idle} 5000)
         proofs @(c/run-tests! sys fresh)
-        l @log
-        _ (when (System/getenv "SWARM_DEBUG") (doseq [e (sort-by (juxt :k :generation) l)] (prn e)))]
+        l @log]
     (pprint {:agents-started (count l) :modules modules :wall-ms (lib/r2 wall)
              :merged (count (filter :merged l)) :conflicted (count (filter #(pos? (:conflicts %)) l))
              :refused-red (count (filter :red l))
@@ -969,7 +969,7 @@
      and after resume all 20,000 arrive, in order, then its reply.
   2. A saturated writer: the writer proc is paused while n agents transact (their own
      branches: all answered) and root writes main n times (held). The writer's
-     in-port (SEON_WRITER_BUF) fills, then the agent procs' puts park; resume completes
+     in-port (:seon.config.root/writer-buf) fills, then the agent procs' puts park; resume completes
      every transaction. Root's memory before/after is reported (a parked put is a parked
      fiber)."
   [n]
@@ -1010,7 +1010,7 @@
                 :writer-paused-holds-all (zero? answered-while-paused)
                 :writer-resumed-completes-all (= n ok)}]
     (pprint {:flood {:arrived (:noise st) :ordered (:noise-ordered st) :reply (:printed (second r)) :arrived-while-paused while-paused :status-while-paused busy :drain-ms (lib/r2 drain-ms)}
-             :writer {:agents n :writer-buf (System/getenv "SEON_WRITER_BUF") :answered-while-paused answered-while-paused
+             :writer {:agents n :writer-buf (seon.config/value :seon.config.root/writer-buf) :answered-while-paused answered-while-paused
                       :root-real-mb {:before mb0 :writer-saturated mb1} :resume->all-done-ms (lib/r2 resume-ms) :ok ok
                       :agents-ok agents-ok :not-ok (frequencies (remove :ok rs))}
              :checks checks})
@@ -1095,6 +1095,28 @@
   ([st _] st)
   ([st _ m] [(cond-> st (some? m) (update :got inc)) nil]))
 
+(defn config-check
+  "The config as data on main (lane CONFIG): root's boot writes the config in force on
+  main's root entity; an agent, forked holding the same config and reading no environment,
+  reads the same facts from its own branch's db. Verdict CONFIG OK / CONFIG FAILED."
+  []
+  (let [sys (c/start! {:datoms 2000})
+        main (seon.config/from-db @(:conn sys))
+        expected (seon.config/with-provider seon.config/config (seon.config/provider seon.config/config))
+        a (c/spawn! sys {:task "reads the config"})
+        _ (await-status sys [a] #{:idle} 5000)
+        r @(c/submit! sys a "[(count (seon.config/from-db (db))) (hash (seon.config/from-db (db))) (hash seon.config/config)]")
+        [n h own] (some-> (first r) :printed clojure.edn/read-string)
+        checks {:main-holds-the-config-in-force (= expected main)
+                :every-declared-key-the-config-holds (= (count seon.config/config) (count main) n)
+                :the-agent-reads-it-from-its-branch (= (hash main) h)
+                :the-agent-was-forked-holding-it (= (hash seon.config/config) own)}
+        ok (every? true? (vals checks))]
+    (pprint {:keys (count main) :agent-reply (:printed (first r)) :checks checks})
+    (out! (if ok "CONFIG OK" "CONFIG FAILED"))
+    (c/stop! sys)
+    (lib/c-exit (if ok 0 1))))
+
 (defn system-check
   "Root's procs from resources/seon/system.edn: boot reaches the hand map's running set;
   apply! after adding or removing one proc in the file touches only that proc; an unchanged
@@ -1104,10 +1126,10 @@
         pids (fn [] (set (keys (flow/ping (:graph sys) :timeout-ms 2000))))
         booted (pids)
         expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/model}
-                     (for [i (range seon.config/MODEL-LANES)] (keyword "fx.model" (str i))))
+                     (for [i (range (seon.config/value :seon.config.ai/lanes))] (keyword "fx.model" (str i))))
         dir (str "/tmp/seon-system-" (lib/c-getpid))
         _ (.mkdirs (java.io.File. dir))
-        decl (clojure.edn/read-string (slurp seon.system/path))
+        decl (clojure.edn/read-string (slurp (seon.config/value :seon.config.root/system-path)))
         write! (fn [nm d] (let [f (str dir "/" nm ".edn")] (spit f (pr-str d)) f))
         probe (fn [tag] {:proc 'seon.check/probe-proc :args {:tag tag}})
         f1 (write! "add" (assoc-in decl [:procs :probe] (probe "one")))
@@ -1266,7 +1288,7 @@
        "\n(frequencies (map #(mod % 7) (range " (* 100 (inc i)) ")))"))
 
 (defn web-serve
-  "Root with its web (seon.web, lane W2) on 127.0.0.1:SEON_WEB_PORT (default 7777) until
+  "Root with its web (seon.web, lane W2) on 127.0.0.1:(:seon.config.web/port) until
   stdin closes: n agents spawned by hand, each evaluating a definition, a proof and a cost
   proof (every third one red), then running its tests (`light`: one evaluation each, for
   the size sweep); with `calc` the six-task graph and with `swarm m` m tasks over shared
@@ -1286,16 +1308,17 @@
         (doseq [tx (seon.fixtures/program-txs specs)] @(c/transact-main! sys tx))
         (my.root/create! sys ds)
         (my.root/run! sys (mapv #(seon.task/task-id tns (:seon.task/name %)) ds))))
-    (out! "WEB http://127.0.0.1:" (or (System/getenv "SEON_WEB_PORT") "7777") "/ " (count ids) " agents")
+    (out! "WEB http://127.0.0.1:" (seon.config/value :seon.config.web/port) "/ " (count ids) " agents")
     (loop [] (when (read-line) (recur)))
     (c/stop! sys)
     (lib/c-exit 0)))
 
 (defn seed
-  "bin/check's one store: created at SEON_STORE and seeded with about n datoms on :db, before
-  any step boots; each step's root then works on a branch of it (seon.db/open!)."
+  "bin/check's one store: created at :seon.config.root/store-path (bin/check sets SEON_STORE)
+  and seeded with about n datoms on :db, before any step boots; each step's root then works on
+  a branch of it (seon.db/open!)."
   [n]
-  (let [path (System/getenv "SEON_STORE")
+  (let [path (seon.config/value :seon.config.root/store-path)
         t0 (lib/now-ns)
         {:keys [seeded? conn]} (seon.db/open! :lmdb path n :db)
         ms (lib/r2 (lib/ms-since t0))
@@ -1332,6 +1355,7 @@
     "rtt" (rtt)
     "fx" (fx (Long/parseLong (or n "1000")))
     "system" (system-check)
+    "config" (config-check)
     "problems" (problems-check)
     "threads" (threads-check)
     "branch-cost" (branch-cost (Long/parseLong n))
@@ -1340,7 +1364,7 @@
     "mcp-proof" (mcp-proof)
     "hotreload" (hotreload)
     "swarm" (swarm (Long/parseLong (or n "100")))
-    "soak" (soak (Long/parseLong (or n "50")) (Long/parseLong (or (first more) "60")))
+    "soak" (soak (Long/parseLong (or n "50")) (Long/parseLong (or (first more) "60")) (some-> (second more) Long/parseLong))
     "mem" (mem (Long/parseLong (or n "100")) 3)
     "web" (web-serve (Long/parseLong (or n "6")) more)
     (smoke)))

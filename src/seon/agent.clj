@@ -20,13 +20,6 @@
 ;; :id :branch :fd :conn :db :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
 (defonce state (atom nil))
 
-;; collect-trip-bytes in an agent: Chez's default scales with the parent heap (E10); a
-;; small trip keeps an agent's garbage, and so its private pages, small
-(def trip-bytes (* 1048576 (Long/parseLong (or (System/getenv "SEON_TRIP_MB") "4"))))
-
-;; An agent's heap may grow this far beyond what it inherited; past it an allocation
-;; throws OutOfMemoryError (an :err item), so a runaway agent cannot take the machine.
-(def heap-extra-bytes (* 1048576 (Long/parseLong (or (System/getenv "SEON_AGENT_HEAP_MB") "1024"))))
 
 ;; ---- the socket to root: values in frames (root's end is a jolt.async.remote end) ------
 ;; This side reads and writes its socket itself, on its one thread, with no pumps: an agent
@@ -123,7 +116,7 @@
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
       (let [now (lib/now-ns)
             since (:dirty-at (swap! state #(-> % (assoc :db (:db-after r)) (update :dirty-at (fn [t] (or t now))))))]
-        (when (>= (- now since) (* 1000000 cfg/FLUSH-MS)) (commit!))
+        (when (>= (- now since) (* 1000000 (cfg/value :seon.config.store/flush-ms))) (commit!))
         (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
           (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r))))))))
 
@@ -476,13 +469,14 @@
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone
   (sock/clofork! fd)
-  (lib/set-trip! trip-bytes)
-  (lib/heap-cap! (+ (lib/bytes-in-heap) heap-extra-bytes))
+  ;; the config this process was forked holding (root read it; an agent reads no environment)
+  (lib/set-trip! (cfg/value :seon.config.agent/trip-bytes))
+  (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)))
   (stderr-to-file! (stderr-path (pdb/agents-dir cfg) id))
   ;; this agent owns its branch's writes: it opens the store itself (seon.db/after-fork!)
   (pdb/after-fork! cfg lease)
   ;; the model's API key is root's alone (its :model owner calls the model; lane FX1)
-  (doseq [v (distinct (remove nil? [(System/getenv "SEON_AI_API_KEY_ENV") "DEEPSEEK_API_KEY"]))] (lib/c-unsetenv v))
+  (lib/c-unsetenv (cfg/value :seon.config.ai/api-key-variable))
   (let [nsx (make-ns! id)
         intr-ok (interrupt-self-test)
         c (sock/conn fd)

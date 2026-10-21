@@ -5,7 +5,7 @@
   proto.lib (itself e13.lib, trimmed)."
   (:refer-clojure :exclude [defn defn-])
   (:require [jolt.ffi :as ffi] [jolt.scheme :as scm] [clojure.string :as str]
-            [seon.contract :refer [defn defn- defchecked]]))
+            [seon.contract :refer [defn defn- defchecked]] [seon.config :as config]))
 
 (def ^:private c-schemas
   "Malli schemas of C types, for contracts derived from an FFI declaration (G1's proto.lib)."
@@ -21,11 +21,8 @@
     `(defchecked ~sym [:=> ~(into [:cat] (mapv c-schemas args)) ~(c-schemas ret)] ~init)))
 
 (ffi/load-library)
-(defmacro ^:private probe-lib-default
-  "Where bin/build puts native/probe.c's library, read when this namespace compiles (a
-  built binary carries the path)."
-  [] (str (or (System/getenv "JOLT_PWD") ".") "/target/lib/libprobe.dylib"))
-(ffi/load-library (or (System/getenv "SEON_PROBE_LIB") (probe-lib-default)))
+;; native/probe.c's library (bin/build native): :seon.config.native/probe-lib
+(ffi/load-library (config/value :seon.config.native/probe-lib))
 
 (defc c-fork "fork" [] :int)
 (defc c-exit "_exit" [:int] :void)

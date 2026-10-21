@@ -13,27 +13,31 @@
 
   A foundational namespace, like seon.contract (which calls it for refusals): its functions
   carry contracts in their metadata and are armed at boot."
-  (:require [seon.print.select :as select]))
+  (:require [seon.print.select :as select] [seon.config :as config]))
 
 (def budgets
   "Tokens each kind of shown value may spend: a reply's value (Seon's shipped agent dial),
   a value shown inside another (a refused argument, a test's expected and actual, ex-data),
   a form echoed back, and the whole context block (breadth first, so every section shows
-  before any one deepens)."
-  {:reply 6144 :part 256 :form 600 :context 16000})
+  before any one deepens). The config's :seon.config.render.agent/token-budget and
+  :seon.config.render/{part,form,context}-budget."
+  {:reply (config/value :seon.config.render.agent/token-budget) :part (config/value :seon.config.render/part-budget)
+   :form (config/value :seon.config.render/form-budget) :context (config/value :seon.config.render/context-budget)})
 
 (def default-budget (:reply budgets))
 
 (defn print-value
   "`v` printed under opts (all optional): :handle, the result symbol cuts read through
-  (result/h3; none: a cut says what it omitted and names no form); :budget tokens (default-budget); :max-depth (8); :width (72); :outputs, a
+  (result/h3; none: a cut says what it omitted and names no form); :budget tokens (default-budget); :max-depth
+  (:seon.config.render.agent/max-depth); :width (:seon.config.render/width); :outputs, a
   subset of #{:text :hiccup} (#{:text}). Answers {:text :tokens :truncated? :elisions :cuts}
   plus :html (hiccup) when asked, or the insufficient-budget refusal (an error map) when the
   budget cannot show the value's first part."
   {:malli/schema [:function [:=> [:cat :any] :seon.print/result] [:=> [:cat :any :seon.print/opts] :seon.print/result]]}
   ([v] (print-value v {}))
   ([v {:keys [handle budget max-depth width outputs]
-       :or {budget default-budget max-depth 8 width 72 outputs #{:text}}}]
+       :or {budget default-budget max-depth (config/value :seon.config.render.agent/max-depth)
+            width (config/value :seon.config.render/width) outputs #{:text}}}]
    ;; without a handle a cut names no form (its reader would hold no such result)
    (select/show v {:handle handle :budget budget :max-depth max-depth :width width :outputs outputs})))
 

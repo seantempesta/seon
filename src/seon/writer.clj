@@ -195,7 +195,7 @@
 (defn- drain {:malli/schema [:=> [:cat :seon.host/chan :seon.writer/request] [:vector :seon.writer/request]]}
   [ch m]
   (loop [acc [m] k 1]
-    (if (< k cfg/WRITER-BATCH)
+    (if (< k (cfg/value :seon.config.root/writer-batch))
       (if-let [y (a/poll! ch)] (recur (conj acc y) (inc k)) acc)
       acc)))
 

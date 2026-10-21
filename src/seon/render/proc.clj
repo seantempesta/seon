@@ -26,7 +26,8 @@
   (:require [seon.contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str] [clojure.edn :as edn]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.ai :as ai]
-            [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.context :as context] [seon.print :as print]))
+            [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.context :as context] [seon.print :as print]
+            [seon.config :as config]))
 
 (def SAMPLE-MS "The sampler's beat: health pings and the tiles' series." 500)
 (def EVENT-CAP "Events the stream keeps." 60)
@@ -154,6 +155,7 @@
      :tasks (:tasks st {}) :attempts (:attempts st {}) :task-rows (:task-rows st {}) :agent-attempt (:agent-attempt st {})
      :series (:series st {}) :events (:events st [])
      :web (:web-sample st {})
+     :config (:config st)
      :now-ms now-ms}))
 
 ;;; --- main --------------------------------------------------------------------------------
@@ -195,6 +197,8 @@
     (let [tasks (task/tasks db) attempts (task/attempts db)]
       (assoc st :main {:t (:max-tx db) :datoms (count (d/datoms db :eavt)) :vars (count (d/datoms db :aevt :var/name))}
              :main-db db :tasks tasks :attempts attempts
+             ;; the config in force, as root wrote it on main's root entity (one pull)
+             :config (config/from-db db)
              ;; the problems recorded on main (D2's one read; ~2.7 ms, costs the problems)
              :recorded (problems/report db)
              :task-rows (task-rows tasks attempts (reconcile/index db))

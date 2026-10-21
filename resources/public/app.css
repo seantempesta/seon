@@ -442,3 +442,13 @@ table.tasks td .warn { color: var(--warning); } table.tasks .ok { color: var(--s
 .blocking { color: var(--error); font-size: 10px; } .allowed { color: var(--text-400); font-size: 10px; font-style: italic; }
 .judged ul { list-style: none; margin: 2px 0 0; padding: 0; font-size: 10.5px; }
 .problems header { display: flex; gap: 12px; align-items: baseline; }
+
+/* the config in force (seon.render.ui/config-panel): every key, its value whole */
+.tile.config { max-height: none; overflow: visible; }
+.cfg-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px 18px; }
+dl.cfg { margin: 0; font-size: 10.5px; display: flex; flex-direction: column; gap: 2px; }
+dl.cfg .cfg-area { color: var(--text-400); text-transform: uppercase; letter-spacing: .1em; font-size: 9.5px; margin-top: 4px; }
+dl.cfg > div { display: flex; gap: 8px; justify-content: space-between; align-items: baseline; }
+dl.cfg dt { color: var(--text-300); }
+dl.cfg dd { margin: 0; text-align: right; overflow-wrap: anywhere; min-width: 0; }
+dl.cfg dd code { color: var(--text-100); }

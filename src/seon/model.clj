@@ -14,7 +14,7 @@
   Root loads the HTTP transport and JSON before it forks anything, so every agent holds them
   compiled."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [jolt.http.core :as http] [clojure.data.json :as json]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [jolt.http.core :as http] [clojure.data.json :as json] [seon.config :as config]))
 
 (defn estimate-tokens
   "Tokens of text, estimated at 4 characters a token (the stand-in's usage)."
@@ -57,8 +57,8 @@
       (catch Throwable e (provider-error (str "transport: " (or (ex-message e) (str (type e)))) nil)))))
 
 (def default-max-tokens
-  "A reply's token budget when the provider sets no :max-tokens."
-  2048)
+  "A reply's token budget when the provider sets no :max-tokens: :seon.config.ai/max-tokens."
+  (config/value :seon.config.ai/max-tokens))
 
 (defn request-body
   "The chat-completions request (data, before JSON) for request under an :openai-compat
@@ -107,7 +107,7 @@
   {:malli/schema [:=> [:cat :seon.model/provider :seon.model/request]
                   [:or :seon.model/completion :seon.model/failure]]}
   [{:keys [base-url api-key-env timeout-ms max-tokens] :or {timeout-ms 120000} :as provider} request]
-  (let [key (System/getenv api-key-env)]
+  (let [key (config/secret api-key-env)]
     (if (str/blank? key)
       (provider-error (str "the environment variable " api-key-env " is not set") nil)
       (let [t0 (System/nanoTime)
