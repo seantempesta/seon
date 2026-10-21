@@ -102,7 +102,12 @@
  :seon.config.agent/max-running 4
  ;; Unit: turns an attempt may take when its task sets none (a task's own
  ;; :seon.config.agent/max-turns wins). At the bound the attempt ends and the done rule judges it.
- :seon.config.agent/max-turns 8
+ ;; Provenance: v1's live runs measured turns-to-green median 14-40, run 11's p90 32
+ ;; (2026-10-18); R4's DeepSeek runs p90 6 with good context. 8 cut ordinary attempts below
+ ;; v1's median (owner, 2026-10-21: "8 turn cap? wtf? make sensible defaults!"), so the bound
+ ;; sits above the measured p90. Tokens are the paid resource; task
+ ;; seon.fences/budgets-are-data-and-spend-is-measured makes them the budget.
+ :seon.config.agent/max-turns 40
  ;; Unit: messages in each agent channel's buffer (v1's :seon.config.agent/inbox-size 64).
  ;; Small on purpose: a full channel pushes back on its sender (the reader leaves frames in
  ;; the socket).
