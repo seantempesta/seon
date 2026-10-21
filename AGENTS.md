@@ -105,8 +105,11 @@ All work is a task in `resources/seon/tasks/<owning-ns>.edn`, loaded with `my.ro
 
 The order is **delete first, then foundations, then fixes**. Anything shared by several tasks (an interface, a schema, a pillar's API) lands first as its own small contract task.
 
-### At most three lanes, on disjoint work
-- Root starts a lane only when its write set doesn't overlap any running lane's.
+### Every ready task runs now, in parallel
+Owner, 2026-10-21 ("get rid of all of it"): no lane cap, no locks, no waiting.
+- Root launches every ready task whose write set doesn't overlap a running lane's, at once; the only limit is file overlap. Live agents get real tasks at the same time, never held until prerequisites land: a failure is data, and its fix lands in parallel.
+- A lane writes its own proofs first from the task's plan; root does not write them for it. Plan-before-code is only for design questions (a new mechanism, a format, a cross-owner change); a clear fix is just done.
+- Root rebuilds main as part of every landing, so a worktree made from main never reads config with a stale binary.
 - Each lane works in its own worktree (`bin/worktree NAME`: `../next-NAME` on `jolt/NAME`, submodules at their pins, `target/` cloned).
 - Lanes waiting on a dependency read and plan; they run nothing heavy and keep nothing running.
 
