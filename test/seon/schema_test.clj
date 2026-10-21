@@ -79,3 +79,13 @@
     (is (= ":seon.attempt/pulled" (second printed)))
     (is (nil? (d/q '[:find ?e . :where [?e :schema/key :seon.attempt/pulled]] db)) "its entry is retracted on the branch")
     (is (= #{:seon.attempt/pulled} (:removed (schema/changes db))))))
+
+(deftest a-registration-counts-the-stored-values-it-refuses
+  ;; task seon.schema/a-registration-counts-the-stored-values-it-refuses (v1's
+  ;; seon.db/registration-check, ported later by the owner's ruling of 2026-10-21): a
+  ;; registration that narrows a stored attribute answers how many stored values its new
+  ;; form refuses, so the agent sees what its change would break before it merges
+  (let [db (d/db-with (main-db) [{:seon.attempt/id "a#1" :seon.attempt/status :merged}
+                                 {:seon.attempt/id "a#2" :seon.attempt/status :running}])
+        r (schema/registration db :seon.attempt/status [:and {:seon.db/index true} [:enum :running :ended]])]
+    (is (= {:checked 2 :refused 1} (:seon.schema.usage/check (:registration r))))))
