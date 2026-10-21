@@ -138,3 +138,16 @@
     (is (= "A step returns its state and outputs. It never blocks."
            (:seon.ref/lead (shown "docs/flow.md#step"))) "doc depth: the section's lead")
     (is (clojure.string/includes? (str (shown "docs/flow.md#stop")) "Then the graph is gone.") "code depth: the section whole")))
+
+(deftest a-cited-file-is-read-on-demand
+  ;; task seon.ref/files-namespaces-and-symbols-are-plain-markdown (owner, 2026-10-21): a
+  ;; cited file outside the stored wiki is read and shown when the context is built, never
+  ;; stored; three backticks show it whole
+  (let [db (db-with-program)
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f"
+                                               :seon.task/plan "Read ```bin/env``` first."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+        block (context/current-state db (task/task db "demo/f") {:results {} :reds [] :turn 0 :max-turns 4})]
+    (is (clojure.string/includes? (str block) "export SEON_CHECKOUT") "the file's text, read on demand")
+    (is (empty? (d/q '[:find ?e :where [?e :seon.section/address ?a] [(clojure.string/starts-with? ?a "bin/")]] db))
+        "and nothing stored for it")))
