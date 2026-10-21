@@ -867,6 +867,7 @@
         held-state (= :paused (:status (c/agent-health sys a)))
         _ (c/resume-agent! sys a)
         r1 (deref p1 3000 :hang) r2 (deref p2 3000 :hang)
+        declared-running (c/declared-threads sys)
         st (c/stop! sys)
         checks {:every-stop-exited (every? #(and (true? (get-in % [:stop :graph])) (zero? (get-in % [:stop :agents-left])) (empty? (:left %))) rows)
                 :every-cycle-worked (every? #(and (:ready %) (:ok %) (= #{:running} (:health %))) rows)
@@ -874,7 +875,7 @@
                 :pause-holds (and (= :held held) (true? held-state) (= :paused (:status paused-health)))
                 :resume-releases-in-order (and (= "1" (:printed (second r1))) (= "2" (:printed (first r2))))
                 :final-stop (true? (:graph st))}]
-    (pprint {:threads {:declared-running (c/declared-threads sys) :declared-stopped (c/declared-threads)}
+    (pprint {:threads {:declared-running declared-running :declared-stopped (c/declared-threads)}
              :cycles (mapv #(select-keys % [:cycle :boot-ms :running :stopped :left :health]) rows)
              :stop-ms (lib/summ (map #(get-in % [:stop :ms]) rows))
              :gc (lib/gc-stats) :gc-sweepers (lib/gc-sweepers! -1)
