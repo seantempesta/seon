@@ -122,6 +122,9 @@
                                                                 (str "its branch's program did not load in " ns ": " message) {:ns ns})}))
                  (step/out! o :events (step/event {:type :ready :agent id :start-ms (:start-ms m)}))
                  (cond-> st (:cloned-from m) (assoc :pid (:pid m))))
+      ;; its eval's record could not be written on its branch (its entity ids are spent):
+      ;; the typed error is recorded on main as its problem
+      :unrecorded (do (step/out! o :to-api {:op :problem :class :agent :agent id :error (:error m)}) st)
       :fd-ready (send-fd! st (:k m) (get-in st [:inflight (:k m) :pass-fd]))
       :branch-me (let [{:keys [branch lease]} (get-in st [:inflight (:k m)])]
                    (step/out! o :to-writer {:op :clone-branch :from (:branch st) :branch branch :lease lease

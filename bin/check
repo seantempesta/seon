@@ -87,6 +87,8 @@ EXPECT=137 step durable-write "" run durable-write durable; step durable-read ""
 echo "== window (SEON_FLUSH_MS=1000: answered unflushed, flushed within the window; :flush? waits)"
 EXPECT=137 step window-write "" env SEON_FLUSH_MS=1000 zsh -c "cd '$ROOT/target' && ./seon window-write window"
 step window-read "" env SEON_FLUSH_MS=1000 zsh -c "cd '$ROOT/target' && ./seon window-read window"
+echo "== lease (SEON_EID_LEASE=50: an agent past its block of entity ids is refused, typed; the next agent's ids are never minted)"
+step lease "" env SEON_EID_LEASE=50 zsh -c "cd '$ROOT/target' && ./seon lease"
 echo "== swarm $N"; step swarm ":merged|:tasks-done|:fresh" run swarm $N
 echo "== tasks: calc (6-task graph, cancel), scenarios (conflict, semantic, hairy, newns, sibling), swarm 20 over 5 shared vars"
 step e2e-calc "" run e2e calc

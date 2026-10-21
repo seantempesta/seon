@@ -691,7 +691,11 @@
                              (in-ns 'agent.a2) (transact! [{:note/text \"b's unmerged note\" :note/agent :b}]) (app.m1/f2 1)"))
         cl @(c/clone! sys k {:branch :dur-clone})
         _ (await-status sys [(:id cl)] #{:idle} 5000)
+        ;; the clone answers before it commits (run-ahead): the kill waits for its commit
+        ;; event, the fact that its note is on its branch in the store
+        evs (c/events sys)
         _ (out! "clone " (:id cl) ": " (p1 (:id cl) "(transact! [{:note/text \"the clone's note\" :note/agent :clone}]) (count (q '[:find ?n :where [?n :note/text]]))"))
+        _ (loop [] (let [e (clojure.core.async/<!! evs)] (when-not (and (= :commit (:type e)) (= (:id cl) (:agent e))) (recur))))
         st (c/state sys {:datoms true})
         expect {:main-datoms (get-in st [:main :datoms]) :main-t (get-in st [:main :t])}]
     (spit (str path ".expect.edn") (pr-str expect))
@@ -1291,6 +1295,39 @@
     (c/stop! sys)
     (lib/c-exit 0)))
 
+(defn lease
+  "Run with SEON_EID_LEASE=50: agent a writes 60 new entities in one transaction, past its
+  lease: refused with :seon.db/lease-spent, nothing applied. A refused transaction keeps the
+  ids it reserved (Datahike's store counter), so a's lease is spent: its next write is
+  refused too, and the record of its evals, which cannot be written on its branch, is
+  recorded on main as its problem. Agent b, the next lease, writes 10: its ids lie past a's
+  lease, never shared."
+  []
+  (let [sys (c/start! {})
+        [a b] (mapv #(c/spawn! sys {:task %}) ["past its lease" "the next lease"])
+        _ (await-status sys [a b] #{:idle} 5000)
+        notes (fn [tag n] (str "(transact! (vec (for [i (range " n ")] {:note/text (str \"" tag "\" i)})))"))
+        r-past (first @(c/submit! sys a (notes "a" 60)))
+        r-count (first @(c/submit! sys a "(count (q '[:find ?n :where [?n :note/text]]))"))
+        r-next (first @(c/submit! sys a (notes "a" 1)))
+        stats @(c/agent-stats! sys a)
+        _ @(c/submit! sys b (notes "b" 10))
+        b-min (read-string (:printed (first @(c/submit! sys b "(q '[:find (min ?n) . :where [?n :note/text]])"))))
+        ;; parks on main's commits until root has recorded a's unrecorded evals (no deadline)
+        lease-q '[:find ?c . :where [?e :seon.error/type :seon.db/lease-spent] [?e :seon.error/count ?c]]
+        recorded (d/q lease-q (seon.e2e/await-db sys #(d/q lease-q %)))
+        spent? #(and (= :err (:tag %)) (re-find #"entity ids are spent" (str (:printed %))))
+        ok (and (spent? r-past) (= "0" (:printed r-count)) (spent? r-next)
+                (= 50 (get-in stats [:ids :of])) (pos-int? recorded)
+                (< (get-in stats [:ids :used] 0) 50)
+                (>= b-min (+ (get-in stats [:ids :from]) 50)))]
+    (out! "past its lease: " (select-keys r-past [:tag :printed]) "\n  error: " (:err r-past))
+    (out! "after the refusal a's notes: " (:printed r-count) "; its next write: " (select-keys r-next [:tag :printed]) "; its ids " (:ids stats))
+    (out! "a's unrecorded evals, recorded on main: " recorded "; b's lowest id " b-min)
+    (out! (if ok "LEASE OK" "LEASE FAILED"))
+    (c/stop! sys)
+    (lib/c-exit (if ok 0 1))))
+
 (defn seed
   "bin/check's one store: created at SEON_STORE and seeded with about n datoms on :db, before
   any step boots; each step's root then works on a branch of it (seon.db/open!)."
@@ -1329,6 +1366,7 @@
     "admit" (admit)
     "record" (record)
     "orphan" (orphan)
+    "lease" (lease)
     "rtt" (rtt)
     "fx" (fx (Long/parseLong (or n "1000")))
     "system" (system-check)
