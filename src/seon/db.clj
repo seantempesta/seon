@@ -165,8 +165,7 @@
 (defn open!
   "Root's main on the durable store at path. A store that does not exist is created and
   seeded with about n datoms on :db; main (a branch name) is made from :db's head when the
-  store has no such branch, or recovered when it has; either way main gains the attributes
-  this build's schema adds. Answers {:cfg (naming main) :conn
+  store has no such branch, or recovered when it has. Answers {:cfg (naming main) :conn
   :recovered? (main existed) :seeded? (this call made the store)}."
   {:malli/schema [:=> [:cat [:enum :lmdb :file] :string :int :seon.db/branch] :seon.db/open]}
   [backend path n main]
@@ -176,15 +175,10 @@
       (d/create-database cfg)
       (let [conn (d/connect cfg)] (seed! conn n) (when-not (= :db main) (d/release conn))))
     (let [[conn existed?] (open-main! cfg main)
-          cfg (cond-> cfg (not= :db main) (assoc :branch main))
-          ;; a kept store was made by an earlier build: the attributes this build's schema
-          ;; adds are added to main (an attribute it already holds is left as it is)
-          have (set (d/q '[:find [?i ...] :where [_ :db/ident ?i]] @conn))
-          added (vec (remove #(have (:db/ident %)) schema))]
-      (when (seq added) (d/transact conn {:tx-data added}))
-      ;; durable before root runs: the seed, the new branch or the added attributes (an
-      ;; fsync, ~5-10 ms); a recovered main that gained nothing wrote nothing
-      (when-not (and exists? existed? (empty? added)) (sync! cfg))
+          cfg (cond-> cfg (not= :db main) (assoc :branch main))]
+      ;; durable before root runs: the seed or the new branch (an fsync, ~5-10 ms); a
+      ;; recovered main wrote nothing
+      (when-not (and exists? existed?) (sync! cfg))
       {:cfg cfg :conn conn :recovered? (and exists? existed?) :seeded? (not exists?)})))
 
 (defn after-fork!

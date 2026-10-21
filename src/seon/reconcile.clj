@@ -14,18 +14,6 @@
   "Turns an attempt may take when its task sets no :seon.config.agent/max-turns."
   8)
 
-(def default-max-tokens
-  "Model tokens (prompt plus completion, as the provider counts them) an attempt may spend
-  when its task sets no :seon.config.agent/max-tokens: its budget. T5 real run 3's work
-  attempts spent 14k-70k tokens over 8 turns; 200k leaves a turn cap, not the budget, to end
-  an ordinary attempt."
-  200000)
-
-(defn max-tokens
-  "Task t's token budget per attempt."
-  {:malli/schema [:=> [:cat :seon.task/own] pos-int?]}
-  [t] (or (:seon.config.agent/max-tokens t) default-max-tokens))
-
 (def default-max-running
   "Parallel attempts when root's boot set no :seon.config.agent/max-running."
   4)
@@ -612,13 +600,11 @@
                         sym))
         plan (:seon.task/plan (task/task db id))]
     (into (cas-tx aid :running :ended
-                    ;; what the agent measured, from its end; with no end there is no spend to record
-                    (merge (task/end-members (cond-> {:outcome (:outcome end :no-end) :results results :uncontracted unc
+                    (merge (task/end-members (cond-> {:outcome (:outcome end :error) :turns (:turns end 0) :model-calls (:turns end 0)
+                                               :tokens (:tokens end 0) :ms 0.0 :results results :uncontracted unc
                                                :conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
                                                :unmerged (mapv #(pr-str (:key %)) (pm/unmerged db (pm/program db #{})))
                                                :changed changed}
-                                        (:turns end) (assoc :turns (:turns end) :model-calls (:turns end))
-                                        (:tokens end) (assoc :tokens (:tokens end))
                                         (:reason end) (assoc :reason (:reason end))
                                         (not (:outcome end)) (assoc :reason "the agent wrote no end"))
                                       (System/currentTimeMillis) (or base-t (:max-tx main)))

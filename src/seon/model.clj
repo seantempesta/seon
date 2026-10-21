@@ -44,7 +44,7 @@
   (let [t0 (System/nanoTime)
         text ((resolve script) request)]
     {:text text :prompt-tokens (reduce + (map (comp estimate-tokens :content) (:messages request)))
-     :completion-tokens (estimate-tokens text) :estimated? true :ms (/ (- (System/nanoTime) t0) 1e6)}))
+     :completion-tokens (estimate-tokens text) :ms (/ (- (System/nanoTime) t0) 1e6)}))
 
 (defn- body-text
   "A read response's whole body as text: its buffered bytes, or every piece its pull yields
@@ -99,7 +99,7 @@
   reasoning and cache-hit tokens) and ms; or the declared failure: no content at all, or an
   empty content beside non-empty reasoning (:seon.model/reasoning-ate-reply: thinking spent
   the budget of max-tokens)."
-  {:malli/schema [:=> [:cat :map number? [:maybe :int]] [:or :seon.model/reply :seon.model/failure]]}
+  {:malli/schema [:=> [:cat :map number? [:maybe :int]] [:or :seon.model/completion :seon.model/failure]]}
   [j ms max-tokens]
   (let [msg (get-in j [:choices 0 :message])
         text (:content msg)
@@ -118,10 +118,7 @@
                         (:completion_tokens u) (assoc :completion-tokens (long (:completion_tokens u)))
                         max-tokens (assoc :max-tokens max-tokens)))
       (string? text)
-      ;; the provider's own count, or none: an absent usage is absent, never 0
-      (cond-> {:text text :ms ms}
-        (:prompt_tokens u) (assoc :prompt-tokens (long (:prompt_tokens u)))
-        (:completion_tokens u) (assoc :completion-tokens (long (:completion_tokens u)))
+      (cond-> {:text text :prompt-tokens (long (:prompt_tokens u 0)) :completion-tokens (long (:completion_tokens u 0)) :ms ms}
         (get-in j [:choices 0 :finish_reason]) (assoc :finish-reason (str (get-in j [:choices 0 :finish_reason])))
         (string? (:model j)) (assoc :model (:model j))
         (and (string? reasoning) (not (str/blank? reasoning))) (assoc :reasoning reasoning)
@@ -152,7 +149,7 @@
 (defn parse-reply
   "A 200 reply's body text as the completion: a stream of server-sent events, or one
   chat-completion JSON document."
-  {:malli/schema [:=> [:cat :string number? [:maybe :int]] [:or :seon.model/reply :seon.model/failure]]}
+  {:malli/schema [:=> [:cat :string number? [:maybe :int]] [:or :seon.model/completion :seon.model/failure]]}
   [body ms max-tokens]
   (reply-of (if (str/starts-with? (str/triml body) "data:") (sse-reply body) (json/read-str body :key-fn keyword))
             ms max-tokens))
@@ -180,12 +177,7 @@
           (not= 200 (:status r)) (provider-error (str "HTTP " (:status r)) (:status r)
                                                  (cond-> {:body (:body r)}
                                                    (retry-after-ms (:headers r)) (assoc :retry-after-ms (retry-after-ms (:headers r)))))
-          :else (let [c (parse-reply (:body r) ms (or max-tokens default-max-tokens))]
-                  ;; no usage from the provider: the spend is estimated from the text, and says so
-                  (if (or (:seon.error/type c) (and (:prompt-tokens c) (:completion-tokens c)))
-                    c
-                    (assoc c :prompt-tokens (or (:prompt-tokens c) (reduce + (map (comp estimate-tokens :content) (:messages request))))
-                           :completion-tokens (or (:completion-tokens c) (estimate-tokens (:text c))) :estimated? true))))))))
+          :else (parse-reply (:body r) ms (or max-tokens default-max-tokens)))))))
 
 (defn complete
   "The model's reply to request under provider."

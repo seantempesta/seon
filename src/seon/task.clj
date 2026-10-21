@@ -118,12 +118,9 @@
   "The observed members of an attempt's end (proto.agents/end), as attributes."
   {:malli/schema [:=> [:cat :seon.turn/end :int :int] :map]}
   [{:keys [outcome turns model-calls tokens results uncontracted reason conflicts unmerged changed]} end-ms basis-t]
-  (cond-> {:seon.attempt/outcome outcome :seon.attempt/basis-t basis-t :seon.attempt/end-ms end-ms
+  (cond-> {:seon.attempt/outcome outcome :seon.attempt/basis-t basis-t :seon.attempt/turns turns :seon.attempt/model-calls model-calls
+           :seon.attempt/tokens tokens :seon.attempt/end-ms end-ms
            :seon.attempt/results (vec (for [[t s] results] {:seon.proof/test t :seon.proof/status s}))}
-    ;; what the agent measured, only when it did (an attempt with no end has no turns or spend)
-    turns (assoc :seon.attempt/turns turns)
-    model-calls (assoc :seon.attempt/model-calls model-calls)
-    tokens (assoc :seon.attempt/tokens tokens)
     (seq uncontracted) (assoc :seon.attempt/uncontracted (vec uncontracted))
     (seq conflicts) (assoc :seon.attempt/conflicts (conflict-members conflicts))
     (seq unmerged) (assoc :seon.attempt/unmerged (vec unmerged))
@@ -142,7 +139,7 @@
   [:seon.task/id :seon.task/ns :seon.task/name :seon.task/plan :seon.task/instructions :seon.task/proofs
    :seon.task/branch :seon.task/model :seon.task/execution :seon.task/problem
    :seon.task/kind :seon.task/evidence :seon.task/generation :seon.task/budget :seon.task/stuck
-   :seon.config.agent/max-turns :seon.config.agent/max-tokens :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns
+   :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns
    {:seon.task/needs [:seon.task/id]}])
 
 (defn- task-value

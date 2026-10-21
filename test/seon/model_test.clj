@@ -44,19 +44,3 @@
   (let [r (model/complete {:kind :openai-compat :base-url "http://127.0.0.1:1" :model "m" :api-key-env "HOME"}
                           {:messages [{:role "user" :content "x"}] :task "t/x" :turn 0})]
     (is (= :seon.model/transport (:seon.error/type r)) (pr-str r))))
-
-(deftest a-reply-without-usage-records-no-tokens
-  (let [c (model/parse-reply (json/write-str {:choices [{:message {:content "(+ 1 2)"} :finish_reason "stop"}]}) 3.0 2048)]
-    (is (= "(+ 1 2)" (:text c)))
-    (is (not-any? #(contains? c %) [:prompt-tokens :completion-tokens]) "the provider counted nothing: absent, never 0"))
-  (let [port (+ 20000 (rand-int 20000))
-        server (adapter/run-server
-                (fn [_] {:status 200 :headers {"Content-Type" "text/event-stream"}
-                         :body (str (chunk-line {:choices [{:delta {:content "(+ 1 2)"} :finish_reason "stop"}]}) "data: [DONE]\n\n")})
-                {:port port :host "127.0.0.1" :strategy :fibers})]
-    (try
-      (let [r (model/complete {:kind :openai-compat :base-url (str "http://127.0.0.1:" port) :model "m" :api-key-env "HOME"}
-                              {:messages [{:role "user" :content "add one and two, please"}] :task "t/x" :turn 0})]
-        (is (true? (:estimated? r)) "the call's spend is an estimate, and says so")
-        (is (= [6 2] ((juxt :prompt-tokens :completion-tokens) r)) "estimated from the text: 23 and 7 characters at 4 a token"))
-      (finally (adapter/stop-server server {:drain-timeout-ms 0})))))

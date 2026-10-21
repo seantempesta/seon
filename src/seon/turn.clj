@@ -78,7 +78,7 @@
   the error that ended it and the turns' waste, as data: lane D2), and the branch committed
   (a turn's end commits the agent's run-ahead writes)."
   {:malli/schema [:=> [:cat :map :seon.attempt/outcome [:maybe :string] [:maybe :map]] :seon.turn/end]}
-  [{:keys [turn tokens tokens-estimated t0 attempt log]} outcome reason error]
+  [{:keys [turn tokens t0 attempt log]} outcome reason error]
   (harvest/harvest!)
   (let [waste (learn/summary (learn/waste (or log []) (learn/final-symbols (or log []))))]
     (agent/transact! [(cond-> {:seon.end/attempt attempt :seon.end/outcome outcome :seon.end/turns turn :seon.end/tokens tokens}
@@ -88,7 +88,6 @@
   (agent/commit!)
   (cond-> {:outcome outcome :turns turn :model-calls turn :tokens tokens :results {} :uncontracted #{}
            :ms (/ (- (System/nanoTime) t0) 1e6)}
-    tokens-estimated (assoc :tokens-estimated true)
     reason (assoc :reason reason)))
 
 (defn- observed
@@ -108,7 +107,7 @@
   provider error. The model call is an effect (my.fx :model, lane FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
   {:malli/schema [:=> [:cat :map :map [:maybe :string]] [:or :map :map]]}
-  [{:keys [turn tokens max-turns max-tokens merge? attempt] :as st} {:keys [results unmerged tests-ms] :as obs} model-name]
+  [{:keys [turn tokens max-turns merge? attempt] :as st} {:keys [results unmerged tests-ms] :as obs} model-name]
   (let [t (:task obs)
         proofs (:proofs (:seon.task/accumulated t))
         db (agent/db)
@@ -122,10 +121,9 @@
         messages (context/messages block)
         context-ms (ms-since t0)
         t1 (System/nanoTime)
-        ;; the attempt's token budget: root's :model owner counts its spend and refuses past it
         r (agent/fx! :model (cond-> {:messages messages :task (:seon.task/id t) :turn turn}
                               model-name (assoc :model model-name))
-                     {:budget max-tokens :budget-key attempt})
+                     {})
         model-ms (ms-since t1)
         c (:value r)]
     (if (:seon.error/type r)
@@ -154,7 +152,6 @@
                                                              :record-ms (ms-since t3)}
                                                       tests-ms (assoc :tests-ms tests-ms)))}])
         (cond-> (-> (assoc st :turn (inc turn) :tokens (+ tokens used) :truncated? (boolean (:truncated? c))
-                           :tokens-estimated (or (:tokens-estimated st) (boolean (:estimated? c)))
                            :source text :repairs repairs)
                     ;; what this turn's block showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
@@ -196,11 +193,10 @@
   (let [{:keys [gaps-before]} (begin! task attempt)
         t0-task (task/task (agent/db) task)
         merge? (= :merge (:seon.task/kind t0-task))
-        dials (r/dials t0-task)
-        max-tokens (r/max-tokens t0-task)]
+        dials (r/dials t0-task)]
     (when merge? (branch/merge-main!))
     (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (System/nanoTime) :attempt attempt
-               :max-turns max-turns :max-tokens max-tokens :merge? merge? :gaps-before gaps-before}]
+               :max-turns max-turns :merge? merge? :gaps-before gaps-before}]
       (let [{:keys [refusals unmerged] :as obs} (observe task (:gaps-before st))
             stop (get-in @agent/state [:turn :stop])
             hairy (when merge? (r/hairy (merge dials {:conflicts unmerged :task (:task obs) :merge-turns (:merge-turns st)})))]
@@ -213,13 +209,6 @@
           (empty? refusals) (end! st :green nil nil)
           stop (end! st (:outcome stop) (:reason stop) nil)
           hairy (end! st :merge-failed (:reason hairy) nil)
-          (>= (:turn st) max-turns) (end! st :cap (str (:turn st) " of " max-turns " turns, " (:tokens st) " of " max-tokens
-                                                       " tokens spent; still refused: " (r/refusals-text refusals)) nil)
+          (>= (:turn st) max-turns) (end! st :cap (r/refusals-text refusals) nil)
           :else (let [st' (act! st obs model)]
-                  (cond
-                    ;; root's :model owner refused the call: the attempt's tokens are spent
-                    (= :seon.fx/budget-spent (:seon.error/type st'))
-                    (end! st :cap (str (:spent st' (:tokens st)) " of " max-tokens " tokens spent (the attempt's budget), "
-                                       (:turn st) " turns; still refused: " (r/refusals-text refusals)) nil)
-                    (:seon.error/type st') (end! st :error (:seon.error/message st') st')
-                    :else (recur st'))))))))
+                  (if (:seon.error/type st') (end! st :error (:seon.error/message st') st') (recur st'))))))))

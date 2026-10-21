@@ -81,9 +81,6 @@
  :seon.task/declared :string
  ;; config dials are attributes of the task, by their own names
  :seon.config.agent/max-turns [:int {:min 1}]
- ;; the model tokens (prompt and completion, as the provider counts them) one attempt may
- ;; spend: its budget; root's :model owner counts the spend and refuses past it
- :seon.config.agent/max-tokens [:int {:min 1}]
  :seon.config.merge/max-conflicts :int
  :seon.config.merge/max-merge-turns :int
  :seon.task/task-fact [:map {:seon.db/attributes true}
@@ -98,7 +95,6 @@
                           [:seon.task/budget {:optional true} :seon.task/budget] [:seon.task/stuck {:optional true} :seon.task/stuck]
                           [:seon.task/declared {:optional true} :seon.task/declared]
                           [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
-                          [:seon.config.agent/max-tokens {:optional true} :seon.config.agent/max-tokens]
                           [:seon.config.merge/max-conflicts {:optional true} :seon.config.merge/max-conflicts]
                           [:seon.config.merge/max-merge-turns {:optional true} :seon.config.merge/max-merge-turns]]
  ;; ---- the attempt and its proof results (observed by root) ----
@@ -113,7 +109,7 @@
  :seon.attempt/branch :keyword
  :seon.attempt/model :string
  :seon.attempt/max-turns :int
- :seon.attempt/outcome [:enum :green :red :waiting :cap :sent-back :merge-failed :error :no-end]
+ :seon.attempt/outcome [:enum :green :red :waiting :cap :sent-back :merge-failed :error]
  :seon.attempt/reason :string
  :seon.attempt/turns :int
  :seon.attempt/model-calls :int

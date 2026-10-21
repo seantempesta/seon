@@ -3,7 +3,6 @@
 ;; shape differs from the stored one (needs as ids, results as a map, conflicts as a vector) the
 ;; map entry carries its schema inline.
 {:seon.task/config [:map {:closed true} [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
-                    [:seon.config.agent/max-tokens {:optional true} :seon.config.agent/max-tokens]
                     [:seon.config.merge/max-conflicts {:optional true} nat-int?]
                     [:seon.config.merge/max-merge-turns {:optional true} nat-int?]]
  :seon.task/need-ids [:set :seon.task/id]
@@ -30,7 +29,6 @@
                  [:seon.task/model {:optional true} :seon.task/model]
                  [:seon.task/problem {:optional true} :seon.task/problem]
                  [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
-                 [:seon.config.agent/max-tokens {:optional true} :seon.config.agent/max-tokens]
                  [:seon.task/kind :seon.task/kind]
                  [:seon.task/evidence {:optional true} :seon.task/evidence]
                  [:seon.task/generation {:optional true} :seon.task/generation]
@@ -130,29 +128,20 @@
                                         [:thinking {:optional true} [:enum :enabled :disabled]]
                                         [:reasoning-effort {:optional true} [:enum :low :medium :high]]]]]
  :seon.model/request [:map [:messages [:vector :seon.model/message]] [:task :seon.task/id] [:turn :int]]
- ;; tokens as the provider counted them; :estimated? when it sent no usage (then estimated from the text)
  :seon.model/completion [:map [:text :string] [:prompt-tokens :int] [:completion-tokens :int] [:ms number?]
-                         [:estimated? {:optional true} :boolean]
                          [:truncated? {:optional true} :boolean]
                          ;; what the call cost beyond them, when the provider says (lane D2)
                          [:reasoning-tokens {:optional true} :int] [:cache-hit-tokens {:optional true} :int]
                          ;; how the reply stopped (the provider's finish_reason), the model that made it, its reasoning
                          [:finish-reason {:optional true} :string] [:model {:optional true} :string] [:reasoning {:optional true} :string]]
- ;; a reply as the provider sent it: its tokens only when it counted them (seon.model/reply-of)
- :seon.model/reply [:map [:text :string] [:ms number?] [:prompt-tokens {:optional true} :int] [:completion-tokens {:optional true} :int]
-                    [:truncated? {:optional true} :boolean] [:reasoning-tokens {:optional true} :int] [:cache-hit-tokens {:optional true} :int]
-                    [:finish-reason {:optional true} :string] [:model {:optional true} :string] [:reasoning {:optional true} :string]]
  :seon.model/provider-error [:map [:seon.error/type [:= :seon.model/provider-error]]
                              [:seon.error/operation :qualified-symbol] [:seon.error/message :string]
                              [:status {:optional true} :int] [:body {:optional true} :string]]
  ;; ---- the turn loop's end, as the agent writes it on its branch ----
- ;; turns, model calls, tokens and ms are what the agent measured: absent when it wrote no end
- ;; (outcome :no-end), never a stand-in 0; :tokens-estimated when a reply carried no usage
  :seon.turn/end [:map {:closed true}
-                 [:outcome :seon.attempt/outcome] [:turns {:optional true} :int] [:model-calls {:optional true} :int]
-                 [:tokens {:optional true} :int] [:tokens-estimated {:optional true} :boolean]
+                 [:outcome :seon.attempt/outcome] [:turns :int] [:model-calls :int] [:tokens :int]
                  [:results :seon.proof/results] [:uncontracted [:set :qualified-symbol]]
-                 [:reason {:optional true} :string] [:ms {:optional true} number?]
+                 [:reason {:optional true} :string] [:ms number?]
                  [:conflicts {:optional true} [:vector :seon.merge/conflict]]
                  [:unmerged {:optional true} [:vector :string]]
                  [:changed {:optional true} [:set :string]]]}
