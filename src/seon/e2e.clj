@@ -1,19 +1,35 @@
 (ns seon.e2e
   "Tasks end to end with real agent processes (lanes R1 and M1's proto.agents.e2e): the
-  six-task graph with a cancel, a root restart, n parallel tasks, the merge scenarios and a
-  swarm over shared definitions. bin/check runs them as modes of target/seon:
-    calc | resume DIR | resume2 DIR | par N | scenario conflict|semantic|hairy|newns|sibling [model] | swarm N M | model add|calc
-  Prints one EDN line per phase; the last line is the run's numbers and its verdict."
+  six-task graph with a cancel, a root restart, n parallel tasks, the merge scenarios, a
+  swarm over shared definitions, and a task that always fails ending stuck. bin/check runs
+  them as modes of target/seon:
+    calc | resume DIR | resume2 DIR | par N | scenario conflict|semantic|hairy|newns|sibling [model] | swarm N M | model add|calc | stuck
+  Each run ends on what the system observes (the reconciler's quiescence report, or a fact
+  on main), never on a deadline. Prints one EDN line per phase; the last line is the run's
+  numbers and its verdict."
   (:require [seon.root :as c] [my.root :as root] [seon.task :as task] [seon.reconcile :as r]
             [seon.fixtures :as fx] [datahike.api :as d] [seon.lib :as lib] [clojure.string :as str]))
 
 (defn- now [] (System/currentTimeMillis))
 (defn- db [sys] @(:conn sys))
 
-(defn- wait-until
-  "Poll (pred) every 50 ms until true or ms pass; answers whether it held."
-  [pred ms]
-  (let [end (+ (now) ms)] (loop [] (cond (pred) true (> (now) end) false :else (do (Thread/sleep 250) (recur))))))
+(defn await-db
+  "Main's first db value (now or after a later commit) for which (pred db) holds: a watch
+  on main's connection runs pred once per commit. No deadline, no polling."
+  [sys pred]
+  (let [p (promise) k (keyword "seon.e2e" (str "await-" (random-uuid)))
+        a (:wrapped-atom (:conn sys))]
+    (add-watch a k (fn [_ _ _ db] (when (pred db) (deliver p db))))
+    (let [db @(:conn sys)] (when (pred db) (deliver p db)))
+    (let [db @p] (remove-watch a k) db)))
+
+(defn await-quiet
+  "The reconciler's quiescence report ({:t :stuck}) for main at or after t: nothing runs,
+  nothing is left to judge, nothing is ready. Waits as long as work goes on."
+  [sys t]
+  (r/quiescent (await-db sys #(when-let [q (r/quiescent %)] (>= (:t q) t)))))
+
+(defn- main-t [sys] (:max-tx (db sys)))
 
 (defn summary
   "Per task: execution, done, attempts as [id status outcome turns tokens], problem."
@@ -52,11 +68,6 @@
      :root-real-mb (lib/r2 (lib/real-mb)) :writer (:writer (c/state sys))
      :root-errors (vec (take 3 (:root-errors (c/state sys))))}))
 
-(defn- settled? [sys]
-  (let [idx (r/index (db sys)) ts (:tasks idx)]
-    (and (seq ts) (empty? (r/running idx))
-         (every? (fn [[id t]] (or (r/done? idx id) (#{:held :cancelled} (:seon.task/execution t)))) ts))))
-
 (defn- fresh [sys forms]
   (let [ag (c/spawn! sys {})]
     (Thread/sleep 300)
@@ -75,12 +86,13 @@
     (println :create (select-keys (root/create! sys ds) [:ok :datoms]))
     (root/run! sys ids)
     ;; neg sleeps 8 s on its first turn: cancel it while its agent runs
-    (wait-until #(some (fn [aid] (str/starts-with? aid "calc/neg#")) (r/running (r/index (db sys)))) 20000)
+    (await-db sys #(some (fn [aid] (str/starts-with? aid "calc/neg#")) (r/running (r/index %))))
     (Thread/sleep 300)
     (println :cancel-neg (select-keys (root/cancel! sys ["calc/neg"]) [:ok]))
     (let [merges ["calc/add-merge" "calc/twice-merge" "calc/square-merge" "calc/sum-sq-merge"]
-          done? (wait-until #(let [idx (r/index (db sys))] (every? (fn [id] (r/done? idx id)) merges)) 60000)
-          _ (Thread/sleep 500)
+          q (await-quiet sys (main-t sys))
+          _ (println :quiescent q)
+          done? (let [idx (r/index (db sys))] (every? (fn [id] (r/done? idx id)) merges))
           blocked (r/blocked-by (r/index (db sys)) "calc/abs")
           reused (agents-reused (db sys))
           fresh-r (fresh sys "(app.calc/sum-sq 3 4)\n(count (my.db/q '[:find ?e :where [?e :seon.turn/id]]))")]
@@ -88,7 +100,8 @@
       (doseq [[id s] (summary (db sys))] (println :task id s))
       (println :numbers (numbers sys t0))
       (c/stop! sys)
-      (verdict (and done? (= #{"calc/neg-merge"} blocked) (empty? reused) (= "25" (first fresh-r)) (= "0" (second fresh-r)))))))
+      (verdict (and done? (= #{"calc/neg-merge"} blocked) (empty? reused) (= "25" (first fresh-r)) (= "0" (second fresh-r))
+                    (= [{:task "calc/neg" :cause "cancelled" :blocks ["calc/abs" "calc/abs-merge" "calc/neg-merge"]}] (:stuck q)))))))
 
 (defn resume
   "Phase 1 of a restart: calc on a durable store; root SIGKILLs itself mid-run."
@@ -98,8 +111,7 @@
     (seed! sys fx/calc)
     (root/create! sys ds)
     (root/run! sys (mapv #(task/task-id 'calc (:seon.task/name %)) ds))
-    (wait-until #(r/done? (r/index (db sys)) "calc/add-merge") 30000)
-    (wait-until #(seq (r/running (r/index (db sys)))) 10000)
+    (await-db sys #(let [idx (r/index %)] (and (r/done? idx "calc/add-merge") (seq (r/running idx)))))
     (println :running-at-kill (r/running (r/index (db sys))))
     (flush)
     (lib/c-kill (lib/c-getpid) 9)))
@@ -110,7 +122,8 @@
   (let [t0 (now)
         sys (c/start! {:datoms 300 :max-running 2 :path path})
         _ (println :recovered (get-in (c/state sys) [:store :recovered-branches]))
-        ok (wait-until #(let [idx (r/index (db sys))] (every? (fn [id] (r/done? idx id)) (map (fn [n] (str "calc/" n "-merge")) ["add" "twice" "square" "sum-sq" "neg" "abs"]))) 90000)]
+        _ (println :quiescent (await-quiet sys (main-t sys)))
+        ok (let [idx (r/index (db sys))] (every? (fn [id] (r/done? idx id)) (map (fn [n] (str "calc/" n "-merge")) ["add" "twice" "square" "sum-sq" "neg" "abs"])))]
     (doseq [[id s] (summary (db sys))] (println :task id s))
     (println :numbers (numbers sys t0))
     (c/stop! sys)
@@ -127,8 +140,9 @@
     (root/create! sys ds)
     (let [t1 (now)
           _ (root/run! sys (mapv #(task/task-id 'par (:seon.task/name %)) ds))
+          q (await-quiet sys (main-t sys))
           ;; a cheap observer: count the :merged status datoms (no pull of every attempt)
-          ok (wait-until #(= n (count (filter (fn [dt] (= :merged (:v dt))) (d/datoms (db sys) :aevt :seon.attempt/status)))) 180000)]
+          ok (and (empty? (:stuck q)) (= n (count (filter (fn [dt] (= :merged (:v dt))) (d/datoms (db sys) :aevt :seon.attempt/status)))))]
       (println :all-merged? ok :release-to-all-merged-ms (- (now) t1))
       (println :not-merged (into {} (remove (comp :done val)) (summary (db sys))))
       (let [d (db sys) t (System/nanoTime)] (r/reconcile d) (println :reconcile-ms (/ (- (System/nanoTime) t) 1e6)))
@@ -149,8 +163,7 @@
     (println :create (select-keys (root/create! sys (mapv #(assoc % :seon.task/config {:seon.config.agent/max-turns 4}) ds)) [:ok]))
     (println :after (select-keys @(c/transact-main! sys (vec (for [[m n] after] [:db/add [:seon.task/id (str tns "/" m)] :seon.task/needs [:seon.task/id (str tns "/" n)]]))) [:ok]))
     (root/run! sys (mapv #(task/task-id tns (:seon.task/name %)) ds))
-    (println :settled? (wait-until #(settled? sys) 120000))
-    (Thread/sleep 300)
+    (println :quiescent (await-quiet sys (main-t sys)))
     (let [d (db sys)
           fresh-r (fresh sys check)]
       (doseq [[id s] (summary d)] (println :task id s))
@@ -171,11 +184,12 @@
     (root/create! sys ds)
     (let [t1 (now)
           _ (root/run! sys (mapv #(task/task-id 'sw (:seon.task/name %)) ds))
-          ok (wait-until #(settled? sys) 300000)
+          q (await-quiet sys (main-t sys))
+          ok (empty? (:stuck q))
           d (db sys)
           not-done (into {} (remove (comp :done val)) (summary d))
           fresh-r (fresh sys "(mapv #(% 100) [app.sw/v0 app.sw/v1 app.sw/v2 app.sw/v3 app.sw/v4])")]
-      (println :settled? ok :release-to-settled-ms (- (now) t1) :not-done not-done)
+      (println :quiet-stuck (:stuck q) :release-to-quiet-ms (- (now) t1) :not-done not-done)
       (println :agents-reused (agents-reused d) :merges (merge-counts d) :fresh-agent fresh-r)
       (println :numbers (numbers sys t0))
       (c/stop! sys)
@@ -195,12 +209,51 @@
     (seed! sys specs)
     (root/create! sys (mapv #(assoc % :seon.task/config {:seon.config.agent/max-turns 4}) ds))
     (root/run! sys ids)
-    (let [ok (wait-until #(let [d (db sys)] (let [idx (r/index d)] (every? (fn [id] (or (r/done? idx id) (= :held (get-in idx [:tasks id :seon.task/execution])))) ids))) 300000)]
+    (let [q (await-quiet sys (main-t sys))
+          _ (println :quiescent q)
+          ok (let [idx (r/index (db sys))] (every? #(r/done? idx %) ids))]
       (doseq [[id s] (summary (db sys))] (println :task id s))
       (println :fresh-agent (fresh sys (if (= which "add") "(app.calc/add 1 2)" "[(app.calc/add 1 2) (app.calc/sum-sq 3 4) (app.calc/abs -5)]")))
       (println :numbers (numbers sys t0))
       (c/stop! sys)
       (verdict ok))))
+
+(defn always-wrong
+  "The stand-in for a model that never gets it right: every reply defines app.calc/add as
+  subtraction (inv1's repro: add always wrong, with twice needing it)."
+  {:malli/schema [:=> [:cat :seon.model/request] :string]}
+  [_]
+  "add is subtraction, surely.\n```clojure\n(in-ns 'app.calc)\n(defn add {:malli/schema [:=> [:cat :int :int] :int]} [a b] (- a b))\n```\n")
+
+(defn stuck
+  "A task that always fails ends observed stuck: add (always wrong) attaches refinement
+  chains until its budget is spent, then the reconciler records the stuck fact (cause and
+  what it blocks: twice, needing add) and reports quiescence; this run returns on that
+  report, with no deadline. Verdict: one stuck root, the last chain's implement, blocking
+  twice and its merge; nothing held; no agent reused."
+  []
+  (let [t0 (now)
+        specs (vec (take 2 fx/calc))
+        sys (c/start! {:datoms 300 :max-running 2 :provider {:kind :scripted :script 'seon.e2e/always-wrong}})
+        ds (mapv #(assoc % :seon.task/config {:seon.config.agent/max-turns 2}) (fx/decls specs 'calc nil))
+        ids (mapv #(task/task-id 'calc (:seon.task/name %)) ds)]
+    (seed! sys specs)
+    (println :create (select-keys (root/create! sys ds) [:ok]))
+    (root/run! sys ids)
+    (let [q (await-quiet sys (main-t sys))
+          t-quiet (now)
+          d (db sys)
+          ends (keep :seon.attempt/end-ms (vals (task/attempts d)))
+          [row & more] (:stuck q)]
+      (doseq [[id s] (summary d)] (println :task id s))
+      (println :stuck (:stuck q))
+      (println :quiet-after-last-end-ms (- t-quiet (apply max 0 ends)) :problems-stuck (count (get-in (root/problems sys) [:classes :stuck :rows])))
+      (println :numbers (numbers sys t0))
+      (c/stop! sys)
+      (verdict (and (nil? more) (= "calc/add-r2-implement" (:task row))
+                    (= ["calc/add-r2-merge" "calc/add-r2-test" "calc/twice" "calc/twice-merge"] (:blocks row))
+                    (not-any? #(= :held (:seon.task/execution %)) (vals (task/tasks d)))
+                    (empty? (agents-reused d)))))))
 
 (defn run
   "One e2e mode; answers whether it passed."
@@ -229,4 +282,5 @@
                                               " (seon.program/reaching-tests (seon.agent/db) #{'app.newns/triple})]")
                                     ["[9 (inc 1) [a b] true 1 [1 1 0 0] false #{app.newns-test/triple-test}]"])))
     "swarm" (swarm (parse-long (first args)) (parse-long (or (second args) "8")))
-    "model" (model-run (first args))))
+    "model" (model-run (first args))
+    "stuck" (stuck)))

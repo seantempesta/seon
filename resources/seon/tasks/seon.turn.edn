@@ -1,0 +1,8 @@
+[{:seon.task/name "a-form-has-a-time-bound"
+  :seon.task/plan "inv1/audit A: seon.turn passes no per-form bound (repl/eval-string), so a model's infinite loop hangs an attempt forever. Pass the bound (a dial) in act!; the interrupt is the named dragon seon.intr/run."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.turn-test/an-endless-form-is-interrupted-and-recorded}}
+ {:seon.task/name "a-turn-records-what-it-saw-and-spent"
+  :seon.task/plan "inv2/audit C #6: no turn records the context the model saw, the raw reply and finish_reason, or where its time went (4-15 s gaps in real3 had to be traced by hand). Record per turn: the exact messages sent, the reply's finish_reason, model and reasoning, and the split as the agent saw it: context render, model round trip, evals, record, tests. The dashboard's agent page shows the recorded context, not a second producer (render/proc.clj:275-293, audit B #11)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.turn-test/a-turn-records-its-context-reply-and-time-split}}]

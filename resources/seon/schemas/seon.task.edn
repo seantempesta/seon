@@ -4,8 +4,7 @@
 ;; map entry carries its schema inline.
 {:seon.task/config [:map {:closed true} [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
                     [:seon.config.merge/max-conflicts {:optional true} nat-int?]
-                    [:seon.config.merge/max-merge-turns {:optional true} nat-int?]
-                    [:seon.config.merge/max-attach {:optional true} nat-int?]]
+                    [:seon.config.merge/max-merge-turns {:optional true} nat-int?]]
  :seon.task/need-ids [:set :seon.task/id]
  :seon.task/declaration [:map {:closed true}
                          [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
@@ -18,7 +17,8 @@
                          [:seon.task/config {:optional true} :seon.task/config]
                          [:seon.task/kind {:optional true} :seon.task/kind]
                          [:seon.task/evidence {:optional true} :seon.task/evidence]
-                         [:seon.task/generation {:optional true} :seon.task/generation]]
+                         [:seon.task/generation {:optional true} :seon.task/generation]
+                         [:seon.task/budget {:optional true} :seon.task/budget]]
  ;; a task as the reconciler reads it (needs as ids)
  :seon.task/own [:map
                  [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
@@ -31,7 +31,9 @@
                  [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
                  [:seon.task/kind :seon.task/kind]
                  [:seon.task/evidence {:optional true} :seon.task/evidence]
-                 [:seon.task/generation {:optional true} :seon.task/generation]]
+                 [:seon.task/generation {:optional true} :seon.task/generation]
+                 [:seon.task/budget {:optional true} :seon.task/budget]
+                 [:seon.task/stuck {:optional true} :seon.task/stuck]]
  ;; its plan and proofs accumulated along :needs (derived by the reader)
  :seon.task/task [:and {:seon.render/html seon.render.ui/task-box} :seon.task/own [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]
  ;; the environment an attempt runs in; desired (the task's) = observed (the attempt's), or restart
@@ -57,11 +59,15 @@
                         [:seon.attempt/unmerged {:optional true} [:vector :string]]
                         [:seon.attempt/changed {:optional true} [:set :string]]]
  ;; ---- the done rule and the reconciler's answer ----
- :seon.reconcile/merge-dials [:map [:max-conflicts nat-int?] [:max-merge-turns nat-int?] [:max-attach nat-int?]]
+ :seon.reconcile/merge-dials [:map [:max-conflicts nat-int?] [:max-merge-turns nat-int?]]
+ ;; a released task not done at quiescence: a root cause (its stuck fact, or cancelled or held)
+ ;; and the released tasks it blocks, transitively
+ :seon.reconcile/stuck-row [:map {:closed true} [:task :seon.task/id] [:cause :string]
+                            [:attempt {:optional true} :seon.attempt/id] [:blocks [:vector :seon.task/id]]]
  :seon.reconcile/view [:map [:tasks [:map-of :seon.task/id :seon.task/task]] [:attempts :map] [:root :map]]
  ;; the reconciler proc's state, and the steps of a flight
  :seon.reconcile/state [:map [:db :seon.host/db] [:boot :string]
-                        [:rid :int] [:flights :map] [:pending :map]]
+                        [:rid :int] [:flights :map] [:pending :map] [:quiet {:optional true} :boolean]]
  ;; the incremental reconciler's index of main (lane R3's seon.reconcile/index): desired and
  ;; observed state by id, the derived needs, depths and claims, and the sets the actions read.
  ;; Its parts agree with each other (every id in a set is an attempt it holds), which a
@@ -102,7 +108,9 @@
                          [:merge-train [:map {:closed true} [:op [:= :merge-train]] [:attempt :seon.attempt/id]
                                         [:members [:vector [:map {:closed true} [:attempt :seon.attempt/id] [:task :seon.task/id]]]]]]
                          [:accept [:map {:closed true} [:op [:= :accept]] [:attempt :seon.attempt/id] [:task :seon.task/id]]]
-                         [:attach [:map {:closed true} [:op [:= :attach]] [:attempt :seon.attempt/id] [:task :seon.task/id]]]
+                         ;; a failure with budget left: a refinement chain attaches (seon.template/attach-tx)
+                         [:attach [:map {:closed true} [:op [:= :attach]] [:attempt :seon.attempt/id] [:task :seon.task/id]
+                                   [:problem {:optional true} :string]]]
                          [:bail [:map {:closed true} [:op [:= :bail]] [:attempt :seon.attempt/id] [:task :seon.task/id]
                                  [:problem :string]]]
                          [:close [:map {:closed true} [:op [:= :close]] [:attempt :seon.attempt/id]]]

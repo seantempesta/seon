@@ -1,0 +1,20 @@
+[{:seon.task/name "a-proc-answers-every-request-it-took"
+  :seon.task/plan "Audits A, C #2, #16: a step that throws loses the request it took (Flow's step catch, jolt stdlib flow/impl.clj:488, keeps the old state and drops outputs), so callers grew deadlines with fake fallbacks ({} from root/state after 5 s, nil from web after 10 s, :timeout from fs-call!; root.clj:626,638,663,818, web.clj:130-136) and render re-asks after 2 s (render/proc.clj:76-85). The writer's catch answers only the current request and drops the queued batch (writer.clj:184-187). Each proc's entrant boundary answers every pending request with the one error map; then the deadlines and fallbacks are deleted and callers park on the reply."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.procs-test/a-throwing-step-answers-every-pending-request
+                      seon.procs-test/root-state-never-answers-an-empty-system}}
+ {:seon.task/name "no-head-of-line-blocking"
+  :seon.task/plan "Audit D F1 (reproduced): one busy agent plus one chatty agent stalled root's whole api ~25 s while health said :running: the api writes [agent :in] with Flow's blocking send (agent_proc.clj:19, 64 slots + 1 MB socket). The api never blocks on one agent (the stand-in holds overflow in its state and admits what fits); health reports progress (the oldest unanswered request), not liveness."
+  :seon.task/kind :work
+  :seon.task/needs #{"seon.root/a-proc-answers-every-request-it-took"}
+  :seon.task/proofs #{seon.procs-test/a-busy-agent-never-stalls-another}}
+ {:seon.task/name "shutdown-and-death-are-dataflow"
+  :seon.task/plan "Audits A #2-3,#6-8, D F3-F5,F8: shutdown is four nested time bounds and two SIGKILL ladders with nothing recorded (root.clj:806-848, agent_proc.clj:42-56); child death is seen only by a 100 ms idle poll in the fork server (fork_server.clj:92-93), so deaths during a commit stream and after a failover are lost and a promoted server leaves a zombie. Child death is an event (kqueue EVFILT_PROC / SIGCHLD self-pipe in the fork server's poll); a death is recorded at socket EOF, its exit status added when known; spawn and clone are refused while closing; root parks on the drain; an agent that does not drain is a recorded problem; the conn and LMDB env belong to the writer."
+  :seon.task/kind :work
+  :seon.task/needs #{"seon.root/a-proc-answers-every-request-it-took"}
+  :seon.task/proofs #{seon.procs-test/a-death-is-recorded-at-once-and-its-status-added
+                      seon.procs-test/shutdown-drains-without-a-kill}}
+ {:seon.task/name "one-clock"
+  :seon.task/plan "Audit A #13-16: the stall timer is a go block started inside the api's step (root.clj:449-457), the rate bucket a callback take! that forks an OS thread per pending tick in Jolt (fx.clj:93-104), the dashboard beat a raw thread (render/proc.clj:49-64). One declared :clock proc emits ticks on bounded channels; the stall and rate dials are named dragons."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.procs-test/the-clock-is-the-only-time-source}}]

@@ -1,0 +1,13 @@
+[{:seon.task/name "drivers-leave-src"
+  :seon.task/plan "Audit E: the release binary's -main lives in the check driver (check.clj:1275, 1,312 lines with 9 bench modes bin/check never runs); production root requires seon.fixtures and defaults to the scripted test model (root.clj:30,509,541). seon.main holds -main and the root/web/mcp entry points; seon.e2e and seon.fixtures move to test/ (or a :check alias); benches to bench/. About -680 lines from src/. After the in-flight lanes land (their files overlap)."
+  :seon.task/kind :work
+  :seon.task/needs #{"seon.program/definitions-from-the-compiler" "seon.reconcile/stuck-is-observed-data"}
+  :seon.task/proofs #{seon.main-test/root-boots-without-test-fixtures}}
+ {:seon.task/name "dead-code-goes"
+  :seon.task/plan "Audit E: no callers: db/diff-ops (db.clj:146), intr/running? (:136), lib/sigmask, unblock-signals!, alarm-in!, current-memory (lib.clj:225-251), root/stop-agent!, freeze!, thaw! (root.clj:802-815), schema.datahike/decode-edn (:232); 13 unreferenced schema keys; :stop-ch (root.clj:555,847); test/r3/{admit,bench_inc,bench_rec} (174 lines) and r3/oracle's unused 85 lines; Also the second REPL (entrance/root-eval: root's evals go through seon.repl/handler) and the time-keyed caches agent/mem-mb and render/ordered."
+  :seon.task/kind :work
+  :seon.task/needs #{"seon.main/drivers-leave-src"}
+  :seon.task/proofs #{seon.main-test/root-evals-go-through-the-one-repl}}
+ {:seon.task/name "forks-live-in-one-place"
+  :seon.task/plan "The submodule URLs in .gitmodules point into experiment directories (jolt/, e14/chez-share, libs/{datahike,konserve,jolt-overlay,crypto}, e4/pss-a, e9/jolt-fressian, l1/wt/malli inside the 30 GB l1/), so the ~100 GB of old experiments (l1, l2, pf1, r4, r5, fx1, proto, scratch, perf, l3, x1, e*) cannot be removed without breaking `git submodule update` and clones of next/. Make ~/src/seon-jolt/forks/<name>.git one bare mirror per fork holding every jolt/* and upstream/* branch (git clone --mirror from today's source, then verify each pinned commit is present: git -C forks/<name>.git cat-file -e <sha>), repoint .gitmodules and `git submodule sync`, prove a fresh `git clone --recurse-submodules` of next/ builds (bin/build seon) and bin/check is green. Then the owner deletes the experiment directories (an explicit owner act; list them with sizes). This is also the move plan's precondition (forks pushable from one place)."
+  :seon.task/kind :work}]

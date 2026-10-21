@@ -1,0 +1,68 @@
+#!/bin/zsh
+# bin/worktree NAME [BASE]    a worktree of next/ at ../next-NAME on branch jolt/NAME (from BASE, default main)
+# bin/worktree --remove NAME  remove that worktree and its submodule worktrees (the branch is kept)
+#
+# A lane that changes shared foundations works here, so its unfinished work never breaks other
+# lanes' builds and runs. On Jolt this is safe: a process loads only from its own JOLT_PWD and its
+# own target/ (no shared VM), so two worktrees never mix code.
+#
+# What it sets up, so the worktree builds and tests on its own at once:
+# - each submodule of reference-code/ is a worktree of the main tree's submodule repo, detached at
+#   the pinned commit: objects are shared, `git status` is clean, a pin bump on main is taken with
+#   `git -C ../next-NAME submodule update` (no network; the repos are local);
+# - jolt's own nested submodules (vendor/*) are APFS clones of the main tree's (the build copies them);
+# - target/ is an APFS clone of the main tree's (blocks shared until written; chez and jolt stay
+#   fresh, so `bin/build seon` is the only build needed);
+# - runs (stores) default to its own target/runs.
+# Builds still take the one build lock. Landing: when its bin/check is green, its commits are
+# cherry-picked (or merged) onto main by explicit paths; the worktree never edits the main tree.
+set -eu
+MAIN=$(cd "$(dirname "$0")/.." && pwd)
+die() { print -u2 "worktree: $*"; exit 1; }
+
+if [[ ${1:-} == --remove ]]; then
+  NAME=${2:-}; [[ -n $NAME ]] || die "usage: bin/worktree --remove NAME"
+  WT=$(dirname "$MAIN")/next-$NAME
+  [[ -d $WT ]] || die "no worktree at $WT"
+  for sub in $(git -C "$MAIN" config -f .gitmodules --get-regexp 'submodule\..*\.path' | awk '{print $2}'); do
+    [[ -e $WT/$sub/.git ]] && git -C "$MAIN/$sub" worktree remove --force "$WT/$sub" 2>/dev/null || true
+  done
+  git -C "$MAIN" worktree remove --force "$WT"
+  print "removed $WT (branch jolt/$NAME kept)"
+  exit 0
+fi
+
+NAME=${1:-}; BASE=${2:-main}
+[[ -n $NAME && $NAME != seon* ]] || die "usage: bin/worktree NAME [BASE] (a name not starting with seon)"
+WT=$(dirname "$MAIN")/next-$NAME
+BR=jolt/$NAME
+[[ ! -e $WT ]] || die "$WT exists"
+
+git -C "$MAIN" worktree add -q -b "$BR" "$WT" "$BASE"
+
+# submodules: worktrees of the main tree's submodule repos at the pinned commits
+git -C "$WT" submodule status | while read -r line; do
+  sha=${${line#[-+ U]}%% *}; sub=${${line#*[0-9a-f] }%% *}
+  rmdir "$WT/$sub" 2>/dev/null || true
+  git -C "$MAIN/$sub" worktree add -q --detach "$WT/$sub" "$sha"
+  # nested submodules (jolt's vendor/*): clones of the main tree's checked-out copies
+  if [[ -f $MAIN/$sub/.gitmodules ]]; then
+    for nested in $(git -C "$MAIN/$sub" config -f .gitmodules --get-regexp 'submodule\..*\.path' | awk '{print $2}'); do
+      [[ -d $MAIN/$sub/$nested ]] || continue
+      rm -rf "$WT/$sub/$nested"; mkdir -p "$(dirname "$WT/$sub/$nested")"
+      cp -cR "$MAIN/$sub/$nested" "$WT/$sub/$nested"
+      # a plain copy for the build: its .git points at the main tree's module store by a
+      # relative path that does not exist from here
+      rm -rf "$WT/$sub/$nested/.git"
+    done
+  fi
+done
+
+# target/: an APFS clone (copy-on-write)
+[[ -d $MAIN/target ]] && cp -cR "$MAIN/target" "$WT/target"
+
+print "worktree $WT on $BR (from $BASE)"
+print "  build:  cd $WT && nice -n 15 /usr/bin/lockf -k ~/src/seon-jolt/build.lock bin/build seon"
+print "  test:   bin/test; bin/check (stores under $WT/target/check/<time>/runs)"
+print "  land:   when bin/check is green, cherry-pick onto main by explicit paths"
+print "  remove: $MAIN/bin/worktree --remove $NAME"

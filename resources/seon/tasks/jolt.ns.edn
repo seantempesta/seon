@@ -1,0 +1,4 @@
+[{:seon.task/name "ns-keeps-its-metadata"
+  :seon.task/plan "Found by lane AGENTS working as a Seon agent (2026-10-21), and earlier by N1: Jolt's (ns ^:scratch foo) does not attach :scratch (or any metadata) to the namespace, so the \"declared ^:scratch\" namespace seon.program describes cannot be declared from the REPL; only seon.agent/make-ns! sets it, through alter-meta! (agent.clj:350), and seon.program/recording reapplies ns metadata as a stopgap (program.clj:125). On the JVM, (meta (find-ns 'foo)) holds the ns form's metadata. Fix in our Jolt fork's ns macro / host/chez/ns.ss (a jolt/<topic> branch): the ns form's metadata (and docstring, attr-map) lands on the namespace; then the stopgap and make-ns!'s alter-meta! go (every definition happens once)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.program-test/a-scratch-ns-declared-at-the-repl-stays-scratch}}]

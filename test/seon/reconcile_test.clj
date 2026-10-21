@@ -7,7 +7,7 @@
             [seon.db :as pdb]
             [seon.task :as task]
             [seon.reconcile :as r]
-            [seon.template :as tpl]
+            [seon.template :as tpl] [seon.problems :as problems] [seon.sock :as sock] [clojure.edn]
             [clojure.string :as str] [clojure.set]))
 
 (defn- empty-db []
@@ -120,23 +120,26 @@
     ;; green: a work task is accepted on its branch
     (attempt "a" 1 :ended :outcome :green :results {(t "a") :pass (t "b") :fail})
     [{:op :accept :attempt "demo/a#1" :task "demo/a"}]
-    ;; its proof red: bail to root
+    ;; its proof red: a refinement chain attaches (the budget has room)
     (attempt "a" 1 :ended :outcome :cap :results {(t "a") :fail})
-    [{:op :bail :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended cap: proof-red demo-test/a-test"}]
+    [{:op :attach :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended cap: proof-red demo-test/a-test"}]
     ;; its proof never ran
     (attempt "a" 1 :ended :outcome :green :results {})
-    [{:op :bail :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended green: proof-red demo-test/a-test"}]
+    [{:op :attach :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended green: proof-red demo-test/a-test"}]
     ;; b needs a, so b carries a's proof (accumulated along :needs): red there is b's own red
     (concat (merged "a") (attempt "b" 1 :ended :outcome :green :results {(t "a") :fail (t "b") :pass}))
-    [{:op :bail :attempt "demo/b#1" :task "demo/b" :problem "attempt demo/b#1 ended green: proof-red demo-test/a-test"}
+    [{:op :attach :attempt "demo/b#1" :task "demo/b" :problem "attempt demo/b#1 ended green: proof-red demo-test/a-test"}
      {:op :spawn :task "demo/c" :attempt "demo/c#1"
       :env {:branch :task-demo-c :model nil :max-turns r/default-max-turns}}]
     ;; a stray red: a red test that is no task's proof
     (attempt "a" 1 :ended :outcome :green :results {(t "a") :pass 'demo-test/other :error})
-    [{:op :bail :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended green: stray-red demo-test/other"}]
+    [{:op :attach :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended green: stray-red demo-test/other"}]
     ;; its agent died
     (attempt "a" 1 :dead)
-    [{:op :bail :attempt "demo/a#1" :task "demo/a" :problem "its agent died"}]))
+    [{:op :attach :attempt "demo/a#1" :task "demo/a" :problem "its agent died"}]
+    ;; budget spent (declared 0): bail, which makes the task stuck
+    (concat (attempt "a" 1 :ended :outcome :cap :results {(t "a") :fail}) [{:seon.task/id "demo/a" :seon.task/budget 0}])
+    [{:op :bail :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended cap: proof-red demo-test/a-test"}]))
 
 (deftest an-ended-attempt-of-a-cancelled-task-is-closed
   (is (= [{:op :close :attempt "demo/a#1"}]
@@ -169,7 +172,7 @@
                             [{:seon.attempt/id "demo/y#1" :seon.attempt/basis-t basis}]))]
     (is (= {:op :accept :attempt "demo/y#1" :task "demo/y"}
            (first (r/reconcile (db-of two :extra (concat merged-x (y 50)))))))
-    (is (= :bail (:op (first (r/reconcile (db-of two :extra (concat merged-x (y 150))))))))))
+    (is (= :attach (:op (first (r/reconcile (db-of two :extra (concat merged-x (y 150))))))))))
 
 (deftest contracts-are-checked
   ;; dev/test.clj arms every contract before the tests run: a call outside its contract is
@@ -247,7 +250,7 @@
       (is (= ["demo/x" "demo/y" "demo/z"] (map :task (r/reconcile (mdb three))))))))
 
 (deftest unmerged-refuses-done
-  (is (= [{:op :bail :attempt "demo/a#1" :task "demo/a"
+  (is (= [{:op :attach :attempt "demo/a#1" :task "demo/a"
            :problem "attempt demo/a#1 ended green: unmerged [:var app/f]"}]
          (r/reconcile (db-of diamond :extra (attempt "a" 1 :ended :outcome :green :results {(t "a") :pass}
                                                      :unmerged ["[:var app/f]"]))))))
@@ -271,7 +274,8 @@
                                ;; the plan as the failed merge's agent improved it (root's judge carried it to main)
                                (task/plan-tx "demo/a-merge" "Make a true. Learned: main's f now decrements.")))
         acts (r/reconcile db)]
-    (is (= [{:op :attach :attempt "demo/a-merge#1" :task "demo/a-merge"}] acts))
+    (is (= [{:op :attach :attempt "demo/a-merge#1" :task "demo/a-merge"
+             :problem "attempt demo/a-merge#1 ended cap: proof-red demo-test/a-test; unmerged [:var app/f]"}] acts))
     (let [db' (d/db-with db (tpl/attach-tx db (first acts)))
           ids ["demo/a-r1-design" "demo/a-r1-implement" "demo/a-r1-test" "demo/a-r1-merge"]
           ts (mapv #(task/task db' %) ids)]
@@ -288,7 +292,8 @@
           (is (every? #(clojure.set/subset? (:proofs (:seon.task/accumulated failed)) (:proofs (:seon.task/accumulated %))) ts))
           (is (every? #(str/includes? (:plan (:seon.task/accumulated %)) "Learned: main's f now decrements.") ts))
           (is (every? #(str/includes? (:plan (:seon.task/accumulated %)) "Make a true.") ts)))
-        (is (every? #(= {:from "demo/a-merge#1" :conflicts [conflict-f] :unmerged ["[:var app/f]"] :red [(t "a")]}
+        (is (every? #(= {:from "demo/a-merge#1" :conflicts [conflict-f] :unmerged ["[:var app/f]"] :red [(t "a")]
+                         :problem "attempt demo/a-merge#1 ended cap: proof-red demo-test/a-test; unmerged [:var app/f]"}
                         (:seon.task/evidence %)) ts)))
       (testing "the failed merge is cancelled and closed; its dependent needs the new merge"
         (is (= :cancelled (:seon.task/execution (task/task db' "demo/a-merge"))))
@@ -299,11 +304,57 @@
                  :env {:branch (:seon.task/branch (first ts)) :model nil :max-turns r/default-max-turns}}]
                (r/reconcile db')))))))
 
-(deftest attach-stops-at-max-attach
-  (let [db (mdb [(decl "a")] :extra (concat (attempt "a" 1 :done)
-                                             [{:seon.task/id "demo/a-merge" :seon.task/generation 2}]
-                                             (attempt "a-merge" 1 :ended :outcome :cap :results {(t "a") :fail})))]
-    (is (= [:bail] (map :op (r/reconcile db))))))
+(deftest a-capped-attempt-attaches-a-refinement-not-a-hold
+  ;; inv1's repro: add always wrong, twice needing it. add's failure cancels add and its
+  ;; merge (the rest of its branch's chain) and twice needs the new merge
+  (let [db (mdb [(decl "add") (decl "twice" :needs ["add"])]
+                :extra (attempt "add" 1 :ended :outcome :cap :results {(t "add") :fail}))
+        [act :as acts] (r/reconcile db)
+        db' (d/db-with db (tpl/attach-tx db act))]
+    (is (= [:attach] (map :op acts)))
+    (is (= [:cancelled :cancelled] (map #(:seon.task/execution (task/task db' %)) ["demo/add" "demo/add-merge"])))
+    (is (= #{"demo/add-r1-merge"} (:seon.task/needs (task/task db' "demo/twice"))))
+    (is (= 1 (:seon.task/generation (task/task db' "demo/add-r1-design"))))
+    (is (= "attempt demo/add#1 ended cap: proof-red demo-test/add-test" (:problem (:seon.task/evidence (task/task db' "demo/add-r1-design")))))
+    (is (= [{:op :spawn :task "demo/add-r1-design" :attempt "demo/add-r1-design#1"
+             :env {:branch :task-demo-add-r1 :model nil :max-turns r/default-max-turns}}]
+           (r/reconcile db')))
+    (testing "a chain task's own failure refines from the same stem, one generation on"
+      (let [db2 (d/db-with db' (concat (attempt "add-r1-design" 1 :done)
+                                       (attempt "add-r1-implement" 1 :ended :outcome :cap :results {(t "add") :fail})))
+            [act2] (r/reconcile db2)
+            db3 (d/db-with db2 (tpl/attach-tx db2 act2))]
+        (is (= :attach (:op act2)))
+        (is (= #{"demo/add-r2-merge"} (:seon.task/needs (task/task db3 "demo/twice"))))
+        (is (= [:cancelled :cancelled :cancelled]
+               (map #(:seon.task/execution (task/task db3 %)) ["demo/add-r1-implement" "demo/add-r1-test" "demo/add-r1-merge"])))
+        (is (= 2 (:seon.task/generation (task/task db3 "demo/add-r2-design"))))))))
+
+(deftest a-spent-budget-is-a-stuck-fact-naming-what-it-blocks
+  (let [db (mdb [(decl "add") (decl "twice" :needs ["add"])]
+                :extra (concat [{:seon.task/id "demo/add" :seon.task/generation 2}]
+                               (attempt "add" 1 :ended :outcome :cap :results {(t "add") :fail})))
+        idx (r/index db)
+        [act :as acts] (r/actions idx)]
+    (is (= [{:op :bail :attempt "demo/add#1" :task "demo/add" :problem "attempt demo/add#1 ended cap: proof-red demo-test/add-test"}] acts))
+    (let [db' (d/db-with db (concat (task/status-tx db "demo/add#1" :ended :bailed {})
+                                    (r/stuck-tx idx "demo/add#1" "demo/add" (:problem act))))
+          idx' (r/index db')
+          blocked ["demo/add-merge" "demo/twice" "demo/twice-merge"]]
+      (testing "the release stays the owner's; the stuck fact names the cause and what it blocks"
+        (is (= :running (:seon.task/execution (task/task db' "demo/add"))))
+        (is (= {:attempt "demo/add#1" :cause (:problem act) :blocks blocked} (:seon.task/stuck (task/task db' "demo/add")))))
+      (testing "nothing is relaunched, nothing waits unexplained"
+        (is (= [] (r/actions idx')))
+        (is (= [{:task "demo/add" :cause (:problem act) :attempt "demo/add#1" :blocks blocked}] (r/stuck idx'))))
+      (testing "the problems read lists it, open, with its evidence"
+        (is (= [{:task "demo/add" :attempt "demo/add#1" :open? true :blocks blocked}]
+               (mapv #(select-keys % [:task :attempt :open? :blocks]) (get-in (problems/report db') [:classes :stuck :rows]))))))))
+
+(deftest stuck-names-cancelled-and-held-roots
+  (let [db (db-of diamond :extra (concat (merged "a") (task/execution-tx ["demo/b"] :cancelled) (task/execution-tx ["demo/c"] :held)))]
+    (is (= [{:task "demo/b" :cause "cancelled" :blocks ["demo/d"]} {:task "demo/c" :cause "held" :blocks ["demo/d"]}]
+           (r/stuck (r/index db))))))
 
 (deftest hairy-rule
   (let [t {:seon.task/accumulated {:plan "Use `app/g` and `app/f`." :proofs #{'app.proofs/a-test}}}
@@ -318,3 +369,37 @@
       [(c 'app/z :deleted-by-them)] 0 nil
       [(c 'app.proofs/a-test :deleted-by-them)] 0 :deleted-by-them-referenced
       [(c 'app/f :both-modified)] 3 :merge-turns)))
+
+(deftest quiescence-is-reported-when-nothing-can-move
+  ;; the reconciler proc's own steps over real commits: a stuck task and its dependents, nothing live
+  (let [db (mdb [(decl "add") (decl "twice" :needs ["add"])]
+                :extra (concat [{:seon.task/id "demo/add" :seon.task/generation 2}]
+                               (attempt "add" 1 :bailed)
+                               (r/stuck-tx (r/index (mdb [(decl "add") (decl "twice" :needs ["add"])])) "demo/add#1" "demo/add" "capped")))
+        commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
+        step (fn [st db ops] (let [[st outs] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns (sock/now-ns)})] [st (:to-api outs)]))
+        report-in (fn [outs] (some #(some-> (get-in % [:req :req :tx-data 0 :seon.root/quiescent]) clojure.edn/read-string) outs))
+        [st outs] (step (r/reconciler-proc {:boot "boot-1"}) db [])
+        report (report-in outs)
+        blocked ["demo/add-merge" "demo/twice" "demo/twice-merge"]]
+    (testing "nothing to start, nothing in flight: one positive report, naming the stuck root and what it blocks"
+      (is (empty? (:flights st)))
+      (is (= {:t (:max-tx db) :stuck [{:task "demo/add" :cause "capped" :attempt "demo/add#1" :blocks blocked}]} report))
+      (is (:quiet st)))
+    (let [[db2 ops2] (commit db [{:seon.root/id :root :seon.root/quiescent (pr-str report)}])
+          [st2 outs2] (step st db2 ops2)]
+      (testing "the report's own commit (root only) makes no second report; main holds it"
+        (is (:quiet st2))
+        (is (nil? (report-in outs2)))
+        (is (= report (r/quiescent db2))))
+      (testing "a commit touching tasks ends the spell: nothing can move still, so it is reported again at the new t"
+        (let [[db3 ops3] (commit db2 [{:seon.task/id "demo/twice" :seon.task/plan "Make twice true, again."}])
+              [_ outs3] (step st2 db3 ops3)]
+          (is (= (:max-tx db3) (:t (report-in outs3))))))
+      (testing "work to start is not quiet: unsticking add starts it, and no report goes out"
+        (let [[db4 ops4] (commit db2 [[:db/retract [:seon.task/id "demo/add"] :seon.task/stuck
+                                       (:seon.task/stuck (d/pull db2 [:seon.task/stuck] [:seon.task/id "demo/add"]))]])
+              [st4 outs4] (step st2 db4 ops4)]
+          (is (= ["demo/add"] (keep #(get-in % [:req :opts :task]) outs4)))
+          (is (not (:quiet st4)))
+          (is (nil? (report-in outs4))))))))

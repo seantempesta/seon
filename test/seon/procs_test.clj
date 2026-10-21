@@ -55,10 +55,10 @@
 (deftest reconciler
   (let [[_ conn] (pdb/create! 100)
         st (#'reconcile/reconciler-proc {:boot "b" :provider {:kind :scripted :script 'seon.fixtures/reply}})]
-    (testing "a main commit with no tasks: the reconciler reads it and asks nothing"
+    (testing "a main commit with no tasks: the reconciler reads it and starts nothing (quiescence: seon.reconcile-test)"
       (let [[st outs] (step #'reconcile/reconciler-proc st :main {:t 7 :ops [] :db @conn :ns (sock/now-ns)})]
         (is (= 1 (:seen st)))
-        (is (= [:main-seen-us] (map :k (:to-api outs))))
+        (is (= :main-seen-us (:k (first (:to-api outs)))))
         (is (empty? (:flights st)))))
     (testing "an answer nobody asked for changes nothing"
       (let [[st2 outs] (step #'reconcile/reconciler-proc st :answers {:tag 99 :r {:ok true}})]

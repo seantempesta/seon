@@ -1,0 +1,10 @@
+[{:seon.task/name "a-failure-attaches-a-refinement"
+  :seon.task/plan "Lane AGENTS (in flight). inv1: on any failed attempt the reconciler writes :seon.task/execution :held over the owner's release (:bail, reconcile.clj:366-384, :523-524; merge-train refusal :617-619), nothing re-releases it, and its dependents wait forever with no record. DECISIONS: nothing is held for release or relaunched; a failure attaches new tasks worked by new agents from the improved plan and the evidence. Attach a refinement chain until the task's declared budget (:seon.task/budget, replacing :max-attach) is spent."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.reconcile-test/a-capped-attempt-attaches-a-refinement-not-a-hold}}
+ {:seon.task/name "stuck-is-observed-data"
+  :seon.task/plan "When the budget is spent the task is observed stuck: a derived :seon.task/stuck fact names the attempt, its cause and the tasks it blocks; problem class :stuck; the reconciler reports quiescence positively (:seon.root/quiescent). The harness (t5/src/t5/run.clj) and e2e end on quiescence and print the stuck rows: their time limits and settled? polling go (owner: a timeout that ends a run is a fence)."
+  :seon.task/kind :work
+  :seon.task/needs #{"seon.reconcile/a-failure-attaches-a-refinement"}
+  :seon.task/proofs #{seon.reconcile-test/a-spent-budget-is-a-stuck-fact-naming-what-it-blocks
+                      seon.reconcile-test/quiescence-is-reported-when-nothing-can-move}}]

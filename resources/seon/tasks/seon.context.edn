@@ -1,4 +1,21 @@
 [{:seon.task/name "a-contract-gap-is-fixed-not-repeated"
   :seon.task/plan "Mined from T5 real run 3: t5.refusal/describe capped at 6 turns refused for contract-gap on helpers (t5.refusal/bounds, describe*, join-or) and t5.edit/forms's waste lists contract gaps on skip-char-lit, skip-coll, ...: agents define helpers without :malli/schema and keep doing it after the done rule refuses. Read what the context shows an agent after a :contract-gap refusal (seon.context/current-state, the uncontracted warnings from seon.repl/admit) and make the fix obvious at the producer: name each uncontracted var with the one-line form that contracts it. Done when a scripted agent that leaves a helper uncontracted fixes it on its next turn from the context alone."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.context-test/a-contract-gap-names-each-var-and-its-fix}}]
+  :seon.task/proofs #{seon.context-test/a-contract-gap-names-each-var-and-its-fix}}
+ {:seon.task/name "the-agent-sees-what-the-judge-sees"
+  :seon.task/plan "Lane AGENTS. Audit B #1-3,#5: observe computes the done rule's refusals but the context never shows them (turn.clj:85-87, context.clj:61-88); test-run errors with no :var vanish (proofs.clj:21-26: a timeout or dead test fork reads as :none); the reader's repairs are dropped (turn.clj:43) though the prompt promises them; flagged definitions are invisible. An agent can loop to its cap with every visible proof green. Build the context from observe's whole map; tests run program namespaces and proofs only, never scratch (agent.clj:270-273)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.context-test/a-refusal-and-a-run-error-reach-the-context
+                      seon.context-test/a-repair-is-shown-next-turn}}
+ {:seon.task/name "last-evals-fold-and-are-budgeted"
+  :seon.task/plan "Lane AGENTS. inv3: every measured context overrun is last-evals. forgive/open turn 2: 117 items, 8 distinct forms, 1 distinct error, 4.1k tokens; edit/forms last turn: 259 items, 11 distinct, 101k tokens uncut; (pp/pprint (code-of 10000)) x3 = 10.7k tokens of :out with no budget. Fold identical form+answer to one item with :times n; each item an equal share of the budget; :out behind a handle; failures as {:assert form :got value} (:actual repeats :expected today, 36% of failure text); show red proofs' program callees one level."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.context-test/repeated-evals-fold-and-every-item-fits-its-share
+                      seon.context-test/a-failure-reads-as-assert-and-got}}
+ {:seon.task/name "the-standard-repl-tools"
+  :seon.task/plan "Owner: \"do whatever is the standard REPL experience for clojure but adapt all code to be optimized for jolt.\" Jolt's clojure.repl has doc, find-doc, apropos, dir, demunge; no source, source-fn or pst (stdlib/clojure/repl.clj: image-baked vars carry no :file); *1 and *e are always nil (seon.repl/eval-code never sets them). source reads the live var's definition text (kept at definition by the compiler events) and :file/:line sources embedded in the binary for platform and library code (Jolt jolt/repl-source); doc adds a bounded see-also (contract, callers, callees, reaching tests, tasks, branch vs main) from the db value; *1 *2 *3 *e per session replace the result/hN interns (repl.clj:108); the prompt's two lines teach them. Subsumes seon.repl/source-at-the-repl."
+  :seon.task/kind :work
+  :seon.task/needs #{"seon.program/definitions-from-the-compiler"}
+  :seon.task/proofs #{seon.repl-test/source-shows-the-exact-definition-mid-request
+                      seon.repl-test/doc-names-callers-callees-and-reaching-tests
+                      seon.repl-test/star-1-and-star-e-hold-the-last-value-and-error}}]

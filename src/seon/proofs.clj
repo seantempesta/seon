@@ -33,6 +33,15 @@
              :when (and (#{:fail :error} type) (tests (test-symbol var)))]
          (-> (select-keys r [:type :message :expected :actual]) (assoc :test (test-symbol var))))))
 
+(defn run-errors
+  "The errors of run that name no test: the run itself failed (it timed out and was killed,
+  its fork died, a namespace did not load), so every test reads as not run. Their messages."
+  {:malli/schema [:=> [:cat [:map [:reports [:sequential :map]]]] [:vector :string]]}
+  [run]
+  (vec (for [{:keys [type var message]} (:reports run)
+             :when (and (= :error type) (nil? (test-symbol var)))]
+         (or message "an error with no message"))))
+
 (def max-assertions
   "Failing assertions a red test keeps in its attempt's facts (the first ones)."
   8)

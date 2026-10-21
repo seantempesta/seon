@@ -138,9 +138,9 @@
 (def ^:private task-pull
   [:seon.task/id :seon.task/ns :seon.task/name :seon.task/plan :seon.task/instructions :seon.task/proofs
    :seon.task/branch :seon.task/model :seon.task/execution :seon.task/problem
-   :seon.task/kind :seon.task/evidence :seon.task/generation
+   :seon.task/kind :seon.task/evidence :seon.task/generation :seon.task/budget :seon.task/stuck
    :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns
-   :seon.config.merge/max-attach {:seon.task/needs [:seon.task/id]}])
+   {:seon.task/needs [:seon.task/id]}])
 
 (defn- task-value
   "A pulled task's own members (needs as a set of ids, proofs a set)."
@@ -149,7 +149,8 @@
   (cond-> (-> t (update :seon.task/needs #(set (map :seon.task/id %)))
               (update :seon.task/proofs set)
               (update :seon.task/kind #(or % :work)))
-    (:seon.task/evidence t) (update :seon.task/evidence edn/read-string)))
+    (:seon.task/evidence t) (update :seon.task/evidence edn/read-string)
+    (:seon.task/stuck t) (update :seon.task/stuck edn/read-string)))
 
 (defn- accumulate
   "Task id's accumulated plan and proofs over its needs (owner, 2026-10-20: a task
@@ -269,9 +270,8 @@
 (def ^:private stated-attributes
   "The task attributes a declaration states (its members, config flattened), as stored."
   [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
-   :seon.task/kind :seon.task/evidence :seon.task/generation
-   :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns
-   :seon.config.merge/max-attach])
+   :seon.task/kind :seon.task/evidence :seon.task/generation :seon.task/budget
+   :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
 
 (defn- file-refusal
   {:malli/schema [:=> [:cat :symbol :string] :map]}

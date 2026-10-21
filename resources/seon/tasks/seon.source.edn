@@ -1,0 +1,16 @@
+[{:seon.task/name "seon-source-is-the-program"
+  :seon.task/plan "Lane LOOP. A typed load effect reads next/src/** with Jolt's reader (exact text, positions, file order) and the analyzer (analysis only), so seon.* and my.* namespaces have form/var/ref facts on main and agents can change platform functions on their branches like any program code. The compiled binary is the running generation; main's facts are the next generation's source."
+  :seon.task/kind :work
+  :seon.task/needs #{"seon.program/definitions-from-the-compiler"}
+  :seon.task/proofs #{seon.source-test/importing-src-records-every-form-exactly}}
+ {:seon.task/name "merged-forms-write-back-exactly"
+  :seon.task/plan "A typed file effect writes main's merged program back to its files: each namespace's file is its ns form and its forms in recorded order, exact text; untouched forms byte-identical. Proof of fidelity: import src, write back with no merge, zero diff (on a copy of the tree, never the live tree)."
+  :seon.task/kind :work
+  :seon.task/needs #{"seon.source/seon-source-is-the-program"}
+  :seon.task/proofs #{seon.source-test/import-then-write-back-is-a-zero-diff
+                      seon.source-test/a-merged-change-rewrites-only-its-form}}
+ {:seon.task/name "merges-are-committed-and-run-next"
+  :seon.task/plan "A git commit effect commits written files on branch jolt/seon-merges of next/ (never main, never pushed), its message naming the merged tasks and attempts from facts; the asker records the sha. The next generation: build, root restarted on the same store (resume), the merged fix running. The first full loop: a task changes a seon.* function, merges, is written, committed, rebuilt, and the new root runs it."
+  :seon.task/kind :work
+  :seon.task/needs #{"seon.source/merged-forms-write-back-exactly"}
+  :seon.task/proofs #{seon.source-test/a-merge-is-committed-on-the-merges-branch}}]

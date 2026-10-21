@@ -29,5 +29,6 @@ LMDB (`liblmdb`; `bin/env` finds it, or set `JOLT_LMDB_LIB`).
 - `native/` — `probe.c` (Mach memory accounting), built into `target/lib`
 - `src/`, `web/`, `resources/` — the platform, arriving by need (see each README)
 - `test/` — deftests; `test/build/` holds the build's smoke binary
-- `docs/` — `SCAFFOLD.md` (state of this repo), `forks.md` (provenance), `vocabulary.md` (the words)
-- `CLAUDE.md` — the laws (draft), `BAGGAGE.md` — what we left behind
+- `docs/` — `forks.md` (provenance), `vocabulary.md` (the words), `DRAGONS.md` (the named catch sites)
+- `AGENTS.md` — how work is handed out and done; `resources/seon/tasks/` — the work itself, as task files
+- `BAGGAGE.md` — what we left behind, and why
