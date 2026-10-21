@@ -265,3 +265,18 @@
             :seon.ref/below [{:seon.ref/address "demo.calc/add" :seon.ref/heading "add"}] :seon.ref/depth :doc}
            (by "demo.calc")) "a namespace: its docstring and publics")
     (is (:unresolved (by "docs/nowhere.md")) "a file that is not there says so")))
+
+(deftest an-agent-reads-its-conversation-so-far
+  ;; a live DeepSeek agent re-read the same Datahike source every other turn because each
+  ;; context showed only the previous turn's evaluations (2026-10-21); a REPL keeps its scrollback
+  (let [turns [{:context "C0" :reply "R0" :evals "E0"} {:reply "R1" :evals "E1"} {:reply "R2" :evals "E2"}]
+        ms (context/messages {:task "t"} turns)]
+    (is (= ["system" "user" "assistant" "user" "assistant" "user" "assistant" "user"] (mapv :role ms))
+        "the first context, then each turn's reply and what its forms evaluated to, then the current state")
+    (is (= ["C0" "R0" "E0" "R1" "E1" "R2"] (mapv :content (subvec ms 1 7))) "every earlier turn, in order")
+    (is (str/starts-with? (:content (peek ms)) "E2") "the last turn's evaluations lead the current state")
+    (is (str/includes? (:content (peek ms)) "The current state") "the current state follows them"))
+  (testing "the history budget keeps whole turns, the newest always"
+    (let [turns [{:reply (apply str (repeat 400 "a")) :evals ""} {:reply "R1" :evals "E1"} {:reply "R2" :evals "E2"}]]
+      (is (= ["R1" "R2"] (mapv :reply (#'context/kept-turns turns 10))) "an older turn past the budget is left out whole")
+      (is (= ["R2"] (mapv :reply (#'context/kept-turns turns 0))) "the newest stays at budget 0"))))

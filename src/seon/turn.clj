@@ -116,7 +116,7 @@
                                                   :last-items (last-evals)
                                                   :unmerged (when merge? unmerged) :truncated? (:truncated? st)
                                                   :source (:source st) :repairs (:repairs st [])}))
-        messages (context/messages block)
+        messages (context/messages block (:turns st []))
         context-ms (ms-since t0)
         t1 (System/nanoTime)
         r (agent/fx! :model (cond-> {:messages messages :task (:seon.task/id t) :turn turn}
@@ -136,7 +136,7 @@
         ;; what the model read (the user message: the system prompt is seon.context/system-prompt),
         ;; what it answered and how it stopped, and where the turn's time went as this agent saw it
         (agent/transact! [(cond-> {:seon.turn/id (str attempt "/" turn) :seon.turn/attempt attempt :seon.turn/n turn
-                                   :seon.turn/origin :model :seon.turn/context (:content (second messages))
+                                   :seon.turn/origin :model :seon.turn/context (:content (peek messages))
                                    :seon.turn/reply (:text c) :seon.turn/forms (count items)
                                    :seon.turn/errors (count (filter #(= :err (:tag %)) items))
                                    :seon.turn/red (count (remove #(= :pass (val %)) (select-keys results proofs)))
@@ -151,6 +151,9 @@
                                                       tests-ms (assoc :tests-ms tests-ms)))}])
         (cond-> (-> (assoc st :turn (inc turn) :tokens (+ tokens used) :truncated? (boolean (:truncated? c))
                            :source text :repairs repairs)
+                    ;; the conversation so far, as a REPL keeps its scrollback: the next turn reads it
+                    (update :turns (fnil conj []) (cond-> {:reply (:text c) :evals (context/evaluations-text items)}
+                                                    (empty? (:turns st)) (assoc :context (:content (peek messages)))))
                     ;; what this turn's block showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
                                                  :shown {'seon.context/resolve-ref (set (map :symbol (:references block)))

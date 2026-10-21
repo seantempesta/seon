@@ -120,8 +120,8 @@
 ;; ---- the last evaluations: folded, each an equal share --------------------------------
 
 (def last-evals-budget
-  "Tokens the last evaluations spend together: each folded item gets an equal share."
-  6000)
+  "Tokens one turn's evaluations spend together, each folded item an equal share: the config's."
+  (cfg/value :seon.config.render/evals-budget))
 
 (defn fold-evals
   "items (one turn's evaluations, in order, as (my.turn/evals) holds them) with identical
@@ -249,13 +249,48 @@
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
       (seq last-items) (assoc :last-evals (fold-evals last-items)))))
 
+(defn evaluations-text
+  "One turn's evaluations (as (my.turn/evals) holds them) as the model reads them: folded, each
+  an equal share of the evals budget."
+  {:malli/schema [:=> [:cat [:sequential :map]] :string]}
+  [items] (str "Your evaluations:\n" (transcript (fold-evals items))))
+
+(defn- kept-turns
+  "The earlier turns the history budget keeps, whole, in order: the newest always, then older
+  ones while they fit. A turn costs its reply's and its evaluations' tokens (4 characters a
+  token, as seon.model/estimate-tokens)."
+  {:malli/schema [:=> [:cat [:vector [:map [:reply :string] [:evals :string]]] :int] [:vector :map]]}
+  [turns budget]
+  (let [cost #(quot (+ (count (:reply %)) (count (:evals %))) 4)
+        [newest & older] (rseq turns)]
+    (->> older
+         (reduce (fn [[kept spent] t] (let [s (+ spent (cost t))] (if (<= s budget) [(conj kept t) s] (reduced [kept spent]))))
+                 [[newest] (cost newest)])
+         first rseq vec)))
+
 (defn messages
-  "The model request's messages for the block: the system prompt, then the block printed
-  by the one value printer under the context's budget, breadth first: every section shows
-  before any one deepens, and each cut names the form that reads its rest."
-  {:malli/schema [:=> [:cat :map] [:vector :seon.model/message]]}
-  [block]
-  [{:role "system" :content system-prompt}
-   {:role "user" :content (cond-> (print/text (dissoc block :last-evals) (- (:context print/budgets) last-evals-budget))
-                            (:last-evals block) (str "\n\nYour last evaluations:\n"
-                                                     (transcript (:last-evals block))))}])
+  "The model request's messages: the system prompt; then the conversation so far, as a REPL
+  keeps its scrollback (the first turn's context, then each earlier turn's reply and what its
+  forms evaluated to, whole turns within the history budget, the newest kept); then the current
+  block printed by the one value printer under the context's budget, breadth first, each cut
+  naming the form that reads its rest. turns: [{:context :reply :evals}] of this attempt, oldest
+  first (:context only on the first)."
+  {:malli/schema [:function [:=> [:cat :map] [:vector :seon.model/message]]
+                  [:=> [:cat :map [:vector :map]] [:vector :seon.model/message]]]}
+  ([block] (messages block []))
+  ([block turns]
+   (let [current (cond-> (print/text (dissoc block :last-evals) (- (:context print/budgets) last-evals-budget))
+                   (and (empty? turns) (:last-evals block))
+                   (str "\n\nYour last evaluations:\n" (transcript (:last-evals block))))
+         kept (when (seq turns) (kept-turns (vec turns) (cfg/value :seon.config.render/history-budget)))
+         dropped (- (count turns) (count kept))]
+     (if (empty? turns)
+       [{:role "system" :content system-prompt} {:role "user" :content current}]
+       (into [{:role "system" :content system-prompt}
+              {:role "user" :content (cond-> (:context (first turns))
+                                       (pos? dropped) (str "\n\n;; " dropped " earlier turns are left out here (the history budget); (my.turn/evals) holds the last turn's"))}]
+             (concat
+               (mapcat (fn [[t nxt]] (cond-> [{:role "assistant" :content (:reply t)}]
+                                       nxt (conj {:role "user" :content (:evals t)})))
+                       (partition-all 2 1 kept))
+               [{:role "user" :content (str (:evals (peek kept)) "\n\nThe current state:\n" current)}]))))))

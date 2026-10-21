@@ -522,10 +522,24 @@
   [checkout path]
   (let [parts (str/split path #"/")]
     (when (and (= "reference-code" (first parts)) (second parts))
-      (let [dot-git (io/file checkout "reference-code" (second parts) ".git")
-            gitdir (if (.isFile dot-git) (io/file (str/trim (subs (slurp dot-git) (count "gitdir:")))) dot-git)
-            head (io/file gitdir "HEAD")]
-        (when (.isFile head) (str/trim (slurp head)))))))
+      (let [sub (io/file checkout "reference-code" (second parts))
+            dot-git (io/file sub ".git")
+            ;; git writes a submodule's gitdir relative to the submodule's own directory
+            named (when (.isFile dot-git) (io/file (str/trim (subs (slurp dot-git) (count "gitdir:")))))
+            gitdir (cond (nil? named) dot-git (.isAbsolute named) named :else (io/file sub (str named)))
+            head (io/file gitdir "HEAD")
+            ;; a worktree's refs live in its common dir (git's commondir file, relative to gitdir)
+            common (let [f (io/file gitdir "commondir")] (if (.isFile f) (io/file gitdir (str/trim (slurp f))) gitdir))
+            ;; a symbolic HEAD (a branch checked out) names its ref: the loose ref file, else packed-refs
+            resolve (fn [ref] (or (some #(let [f (io/file % ref)] (when (.isFile f) (str/trim (slurp f)))) [gitdir common])
+                                  (some #(let [f (io/file % "packed-refs")]
+                                           (when (.isFile f)
+                                             (some (fn [l] (let [[sha r] (str/split l #" ")] (when (= r ref) sha)))
+                                                   (str/split-lines (slurp f)))))
+                                        [gitdir common])))]
+        (when (.isFile head)
+          (let [h (str/trim (slurp head))]
+            (if (str/starts-with? h "ref: ") (resolve (subs h 5)) h)))))))
 
 (defn file-view
   "File path of the checkout as depth shows it, read now: a Markdown file by the one parse and

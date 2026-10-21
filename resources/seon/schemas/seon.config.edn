@@ -75,6 +75,8 @@
   [:seon.config.render/part-budget :seon.config.render/part-budget]
   [:seon.config.render/form-budget :seon.config.render/form-budget]
   [:seon.config.render/context-budget :seon.config.render/context-budget]
+  [:seon.config.render/evals-budget :seon.config.render/evals-budget]
+  [:seon.config.render/history-budget :seon.config.render/history-budget]
   ;; the web, the guarantees, the native probe
   [:seon.config.web/port :seon.config.web/port]
   [:seon.config.root/entrance-port :seon.config.root/entrance-port]
