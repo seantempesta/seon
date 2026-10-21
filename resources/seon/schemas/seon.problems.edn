@@ -65,7 +65,7 @@
  :seon.error/entry [:map [:signature :seon.error/signature] [:class :seon.error/class] [:count pos-int?]
                     [:agents [:set :keyword]] [:first-ms :int] [:last-ms :int] [:example :map]
                     [:form [:maybe :string]] [:last-agent [:maybe :keyword]] [:last-task [:maybe :string]]
-                    [:dirty? :boolean] [:base {:optional true} :int]]
+                    [:dirty? :boolean] [:pending? {:optional true} :boolean] [:base {:optional true} :int]]
  ;; the fold in the observer's state: cause -> its running entry
  :seon.error/fold [:map-of [:vector :any] :seon.error/entry]
  ;; what an agent sends root with its commit: its occurrences since the last commit, folded

@@ -85,14 +85,17 @@
   [st o] (-> st (update ::errors (fnil err/fold {}) o) (assoc ::errors-dirty true)))
 
 (defn- flush-problems
-  "The signatures folded since the last write, written to main as one transaction, when
-  none is in flight (its answer releases the next): a storm costs one write per window."
+  "The signatures folded and not yet written, written to main as one transaction, when none
+  is in flight (its answer releases the next); a repeat of a written signature writes
+  nothing (seon.error/flush-tx)."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile] :seon.root/api-state]}
   [st o]
   (if (and (::errors-dirty st) (not (::errors-flight st)) (not (:writer-closed st)) (not (:closing st)))
     (let [[f tx] (err/flush-tx (::errors st) (some-> (:conn st) deref))]
-      (step/out! o :to-writer {:op :tx :branch :db :tx-data tx :dest {:errors-flushed true}})
-      (assoc st ::errors f ::errors-dirty false ::errors-flight true))
+      (if (seq tx)
+        (do (step/out! o :to-writer {:op :tx :branch :db :tx-data tx :dest {:errors-flushed true}})
+            (assoc st ::errors f ::errors-dirty false ::errors-flight true))
+        (assoc st ::errors f ::errors-dirty false)))
     st))
 
 (defn- proc-sym
@@ -307,6 +310,7 @@
             (step/out! o :to-fs (assoc (:req m) :rid rid))
             (pend st rid p :fs nil))
       :state (reply! st p (:view st))
+      :errors (reply! st p (::errors st {}))
       :shutdown (assoc st :shutdown-p p)
       st)))
 
@@ -702,6 +706,12 @@
 
 (defn stats "The raw counters and windows." {:malli/schema [:=> [:cat :seon.root/sys] [:maybe :map]]}
   [sys] (:stats (deref (call! sys {:op :state}) 5000 {})))
+
+(defn errors
+  "The api's fold of the errors it saw (seon.error/fold): the true counts, including repeats
+  of written signatures that main does not hold."
+  {:malli/schema [:=> [:cat :seon.root/sys] :seon.error/fold]}
+  [sys] (deref (call! sys {:op :errors}) 5000 {}))
 
 (defn events
   "A fresh tap of every event {:type :spawned|:ready|:reply|:tx|:merged|:tests|:killed|:ended|:dead ...}."
