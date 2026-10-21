@@ -1,6 +1,6 @@
 # AGENTS.md: how we build Seon
 
-Seon is where many agents do real work, each in its own process on its own branch, and the good changes accrete into one program that gets smaller, faster and more certain as it grows. This is the one document on how we work, for every Claude lane and every Seon agent.
+Seon is where many agents do real work, each in its own process on its own branch, and the good changes accrete into one program that gets smaller, faster and more certain as it grows. This is the one document on how we work, for every Claude lane and every Seon agent. **One process for both** (owner, 2026-10-21: "a self reinforcing system where agents learn from each other be it claude agents or seon agents … everything linked to the same processes we will be using internally, not complex one offs"): the same tasks, the same door, the same context built by the same parser from the same wiki, and lessons landing in the same sections. Nothing is a Claude-only format or a one-off mechanism.
 
 The reasons live elsewhere:
 - decisions: `../notes/DECISIONS.md`;
@@ -99,7 +99,7 @@ All work is a task in `resources/seon/tasks/<owning-ns>.edn`, loaded with `my.ro
 - `:seon.task/plan`: what exists (file:line), what v1 did, the cause, what it replaces and deletes;
 - `:seon.task/proofs`: the deftests and cost proofs that say it is done;
 - `:seon.task/needs`: what must land first;
-- `:seon.task/refs`: the vars and files it touches, as data. These pull in the wiki sections that describe them, and they are its write set.
+- references, derived, never hand-kept: the plan's own citations (links to wiki sections, backticked names, line citations), read by the one parser (v1's `seon.ref`) and stored on the task, as v1's `:seon.task/references` were. They pull those sections and that code into the task's context, and the names it changes are its write set.
 
 The order is **delete first, then foundations, then fixes**. Anything shared by several tasks (an interface, a schema, a pillar's API) lands first as its own small contract task.
 
@@ -110,7 +110,7 @@ The order is **delete first, then foundations, then fixes**. Anything shared by 
 
 ### Learn, then plan, then act
 1. **What exists, written into the plan.** Find the relevant wiki sections (`docs/README.md` is the map; the section where your problem lives states its pattern and links the others like it), the task files and the code, so nothing is built twice. Then:
-   - write the sections' addresses into the task as `:seon.task/docs`, and the vars and files as `:seon.task/refs`, so every later step's context pulls exactly them;
+   - cite them in the plan (a link to each section, the vars in backticks), so the parser makes them the task's references and every later step's context pulls exactly them;
    - state the differences in the plan: where a section and the code disagree, and what this task changes relative to what the sections say. Those differences are the wiki edits this task owes.
 2. **What v1 did.** Read `~/src/seon` for the same problem: code, decisions, research, reverts, read-only. Port the best parts onto our pillars, and name the mistakes you are not repeating.
 3. **The field's best known way.** Don't trust a design made in five minutes. Research it: the web, and Gemini Flash through `../bin/agy-agent` as a searcher. Verify what it says.
@@ -164,20 +164,20 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
 
 ## 6. The docs are a wiki, and the system's memory
 
-- **Pages:** `docs/<topic>.md`, one concept per page. `docs/README.md` is a map of the topics, not a file list, so a research step can find what's relevant. A section is addressed `topic#slug` and has a `Describes:` EDN line naming its vars, attrs and files. The docs are mirrored in the database with real references.
-- **References are data:** `:seon/docs` on a definition, `:seon.task/docs` and `:seon.task/refs` on a task. The context pulls the describing sections in automatically.
+- **Pages:** `docs/<topic>.md`, one concept per page. `docs/README.md` is a map of the topics, not a file list, so a research step can find what's relevant. A section is addressed `topic#slug`. The docs are mirrored in the database, their references resolved by the parser.
+- **References are what the text cites, read by one parser** (v1's `seon.ref`, no declared lists): a link reaches a section, a backticked name reaches a var, a `file.clj:263` citation reaches its file. A docstring's citations are its definition's references, a plan's are its task's, a section's are its own; the context pulls them in automatically, and a section's backlinks say who cites it.
 - **Depth follows the delimiter** (v1's `seon.ref`):
   - a bare name pulls its summary;
   - `` `name` `` or a link pulls its doc;
   - ` ```name``` ` pulls its code.
 - **A healthy wiki** (owner, 2026-10-21: "a healthy wiki with good separation of topics and well linked so agents can get refs and know if they want to read more"):
-  - **Patterns live in the topic sections, linked, never in a catch-all file** (owner, 2026-10-21: "patterns embedded into the wiki in different sections and linked so that we pull together and understand disparate problems that can be unified in a fix"). A pattern's home is the section where its problem lives: the idiom, its "Not this", its one implementation. Every section with the same problem links to that home, and the home links back to each, so pulling one shows the others, and one fix can unify them.
-  - **One home per concept.** A var or mechanism is described in one section; other pages link to it instead of re-explaining it.
-  - **Every section leads with one sentence that stands alone.** That sentence is what an agent sees at summary depth and decides by; then the body; then links to related sections.
+  - **Patterns live in the topic sections, linked, never in a catch-all file** (owner, 2026-10-21: "patterns embedded into the wiki in different sections and linked so that we pull together and understand disparate problems that can be unified in a fix"). A pattern's home is the section where its problem lives: the idiom, its "Not this", its one implementation cited at code depth. Every section with the same problem links to that home with an ordinary link; its backlinks are its instances, so pulling one shows the others, and one fix can unify them.
+  - **One home per concept.** A var or mechanism is explained in one section, the one that cites it at code depth (` ```name``` `); others cite it at summary or doc depth and link there instead of re-explaining it.
+  - **Every section leads with one sentence that stands alone.** At summary depth an agent sees a section's heading and that sentence (as in v1), and decides by it whether to read on; then the body; then links to related sections.
   - **Everything is linked.** Every section is reachable from the map, every page links its neighbours, and nothing is orphaned or duplicated.
   - **Sections state the current truth by topic.** A change rewrites the section it concerns; nothing is a dated log.
 - **Landing a change updates its section in the same commit,** and a pillar's owner writes the section where its pillar lives.
-- **Before landing, read your task's context through the door** and confirm it pulls what the task needs. `bin/check docs` goes red on a dangling reference, a missing var or a section older than its code.
+- **Before landing, read your task's context through the door** and confirm it pulls what the task needs. `bin/check docs` goes red on a reference that doesn't resolve, or a section older than the code it cites.
 
 ## 7. The machine
 
