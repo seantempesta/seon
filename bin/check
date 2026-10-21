@@ -1,8 +1,13 @@
 #!/bin/zsh
 # bin/check [N] — the platform's end-to-end checks on target/seon (bin/build seon), each a
-# mode of seon.check (proto/flow f2-final's smoke.sh): smoke, program, robust, lifecycle,
-# backpressure, hotreload, drain, orphan, durable, swarm N, scale N (default N = 100).
+# mode of seon.check: dragons, contracts, census, fx, system, mcp, threads, admit, record,
+# problems, smoke, program, robust, lifecycle, backpressure, hotreload, drain, orphan,
+# durable, window, swarm N, e2e tasks and scenarios, resume, scale N (default N = 100).
 # bin/check MODE [ARGS] runs one mode.
+#
+# Every step's exit status counts (a mode answers 0 only when its own proof holds), its
+# whole output is kept in target/check/<time>/<step>.log, a failing step's store is kept,
+# and the script ends with the failed steps named and exits non-zero when any failed.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 . "$ROOT/bin/env"
 S=$ROOT/target/seon
@@ -10,39 +15,79 @@ S=$ROOT/target/seon
 run() { (cd "$ROOT/target" && ./seon "$@" 2>&1) }
 if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then run "$@"; exit $?; fi
 N=${1:-100}
-echo "== dragons"; "$ROOT/bin/dragons" | tail -1
-echo "== contracts"; run contracts | grep -E ":contracted|:uncontracted|:result"
+OUT=$ROOT/target/check/$(date +%Y%m%dT%H%M%S)
+mkdir -p "$OUT"
+# every root a step boots keeps its store here, beside the step's output
+export SEON_RUNS=$OUT/runs
+FAILED=()
+
+# step NAME FILTER CMD...: run CMD, keep its output, show the lines FILTER (a grep -E
+# pattern; empty: the last line) selects, and record NAME as failed when CMD's exit status
+# is not the expected one: 0, or EXPECT for a step that ends by design otherwise (a root
+# that SIGKILLs itself, 137, so the next step can prove the store recovered).
+step() {
+  local name=$1 filter=$2; shift 2
+  local log=$OUT/$name.log expect=${EXPECT:-0}
+  "$@" > "$log" 2>&1
+  local st=$?
+  if [[ -n $filter ]]; then grep -E "$filter" "$log"; else tail -1 "$log"; fi
+  if (( st != expect )); then FAILED+=("$name (exit $st, expected $expect, $log)"); echo "FAILED $name (exit $st, expected $expect)"; fi
+  return 0
+}
+
+echo "== dragons"; step dragons "" "$ROOT/bin/dragons"
+echo "== contracts"; step contracts ":contracted|:uncontracted|:result" run contracts
 echo "== census (no [:fn] without :gen; mg/check on every pure contract, in the release binary)"
-run census | grep -E ":generated|:failed \[\]|:result"
-echo "== fx (an effect from an agent through its owner proc)"; run fx 200 | grep -E ":unknown|:test-fork"
-echo "== system (root's procs from resources/seon/system.edn; apply! touches only what changed)"; run system | tail -1
-echo "== mcp (an outside MCP client evals in an agent and as root; both recorded :outside)"; run mcp-proof | tail -1
-echo "== threads (the fork server, an agent and its clone stay single-threaded: no GC sweepers where we fork)"; run threads | tail -1
-echo "== admit"; run admit | tail -1
-echo "== record"; run record | tail -1
-echo "== problems (each class provoked, then read back from main by my.root/problems)"; (export SEON_STALL_MS=1000; run problems | tail -1)
-echo "== smoke";  run smoke | grep -E "^merge|^killed|spawned|ready"
-echo "== program"; run program | tail -1
-echo "== robust"; run robust | tail -1
-echo "== lifecycle (start!/stop! x10 in one process; pause/resume)"; run lifecycle 10 | grep -E ":threads |false|LIFECYCLE" | tr -s " \n" " "; echo
-echo "== backpressure"; run backpressure 200 | tail -1
-echo "== hotreload"; run hotreload | tail -1
-echo "== drain"; run drain 32 | tail -1
+step census ":generated|:failed \[\]|:result" run census
+echo "== fx (an effect from an agent through its owner proc)"; step fx ":unknown|:test-fork" run fx 200
+echo "== system (root's procs from resources/seon/system.edn; apply! touches only what changed)"; step system "" run system
+echo "== mcp (an outside MCP client evals in an agent and as root; both recorded :outside)"; step mcp "" run mcp-proof
+echo "== threads (the fork server, an agent and its clone stay single-threaded: no GC sweepers where we fork)"; step threads "" run threads
+echo "== admit"; step admit "" run admit
+echo "== record"; step record "" run record
+echo "== problems (each class provoked, then read back from main by my.root/problems)"; step problems "" env SEON_STALL_MS=1000 zsh -c "cd '$ROOT/target' && ./seon problems"
+echo "== smoke"; step smoke "^merge|^killed|spawned|ready" run smoke
+echo "== program"; step program "" run program
+echo "== robust"; step robust "" run robust
+echo "== lifecycle (start!/stop! x10 in one process; pause/resume)"; step lifecycle "LIFECYCLE" run lifecycle 10
+echo "== backpressure"; step backpressure "" run backpressure 200
+echo "== hotreload"; step hotreload "" run hotreload
+echo "== drain"; step drain "" run drain 32
+
 echo "== orphan (root dies under busy agents, a clone and a test child)"
-PIDS=$(run orphan | sed -n 's/^PIDS //p'); sleep 1
-LEFT=$(for p in ${=PIDS}; do kill -0 $p 2>/dev/null && echo $p; done)
-if [[ -z $PIDS ]]; then echo "FAIL no pids"; elif [[ -n $LEFT ]]; then echo "FAIL left running: $LEFT"; kill -9 ${=LEFT}; else echo "PASS none of $PIDS outlived root"; fi
+run orphan > "$OUT/orphan.log" 2>&1
+PIDS=$(sed -n 's/^PIDS //p' "$OUT/orphan.log")
+# the orphans are given until their parent's death reaches them: each is asked once a
+# second for up to 5 s, and a survivor past that is the failure
+LEFT=$PIDS
+for i in 1 2 3 4 5; do
+  LEFT=$(for p in ${=PIDS}; do kill -0 $p 2>/dev/null && echo $p; done)
+  [[ -z $LEFT ]] && break
+  sleep 1
+done
+if [[ -z $PIDS ]]; then echo "FAIL no pids"; FAILED+=("orphan (no pids, $OUT/orphan.log)")
+elif [[ -n $LEFT ]]; then echo "FAIL left running: $LEFT"; kill -9 ${=LEFT}; FAILED+=("orphan (left running: $LEFT)")
+else echo "PASS none of $PIDS outlived root"; fi
+
+# stores a step makes live under $OUT and are kept: a failing one is the evidence
 echo "== durable (root writes a store and SIGKILLs itself; a new root recovers it)"
-D=$(mktemp -d /tmp/seon-durable.XXXXXX)
-run durable-write $D/store | tail -1; run durable-read $D/store | tail -1; rm -rf "$D"
+EXPECT=137 step durable-write "" run durable-write "$OUT/durable.store"; step durable-read "" run durable-read "$OUT/durable.store"
 echo "== window (SEON_FLUSH_MS=1000: answered unflushed, flushed within the window; :flush? waits)"
-D=$(mktemp -d /tmp/seon-window.XXXXXX)
-(export SEON_FLUSH_MS=1000; run window-write $D/store | tail -2; run window-read $D/store | tail -1); rm -rf "$D"
-echo "== swarm $N"; run swarm $N | grep -E ":merged|:tasks-done|:fresh"
-echo "== tasks: calc (6-task graph, cancel), scenarios (conflict, semantic, hairy, newns: new namespaces at the REPL, sibling: a helper in dependency order), swarm 20 over 5 shared vars"
-run e2e calc | tail -1
-for k in conflict semantic hairy newns sibling; do run e2e scenario $k | tail -1; done
-run e2e swarm 20 8 | tail -1
-D=$(mktemp -d /tmp/seon-resume.XXXXXX)
-echo "== resume (root SIGKILLed mid-graph; a new root finishes it)"; run e2e resume $D/s > /dev/null; run e2e resume2 $D/s | tail -1; rm -rf "$D"
-echo "== scale $N"; run scale $N | grep -E ":all-ok|:spawn->all|:end-to-end|:control-real-mb|:all-killed"
+EXPECT=137 step window-write "" env SEON_FLUSH_MS=1000 zsh -c "cd '$ROOT/target' && ./seon window-write '$OUT/window.store'"
+step window-read "" env SEON_FLUSH_MS=1000 zsh -c "cd '$ROOT/target' && ./seon window-read '$OUT/window.store'"
+echo "== swarm $N"; step swarm ":merged|:tasks-done|:fresh" run swarm $N
+echo "== tasks: calc (6-task graph, cancel), scenarios (conflict, semantic, hairy, newns, sibling), swarm 20 over 5 shared vars"
+step e2e-calc "" run e2e calc
+for k in conflict semantic hairy newns sibling; do step e2e-$k "" run e2e scenario $k; done
+step e2e-swarm "" run e2e swarm 20 8
+echo "== resume (root SIGKILLed mid-graph; a new root finishes it)"
+run e2e resume "$OUT/resume.store" > "$OUT/resume1.log" 2>&1; step resume "" run e2e resume2 "$OUT/resume.store"
+echo "== scale $N"; step scale ":all-ok|:spawn->all|:end-to-end|:control-real-mb|:all-killed" run scale $N
+
+echo
+if (( ${#FAILED} )); then
+  echo "CHECK FAILED: ${#FAILED} step(s)"; for f in $FAILED; do echo "  $f"; done
+  echo "outputs: $OUT"
+  exit 1
+fi
+echo "CHECK OK (outputs: $OUT)"

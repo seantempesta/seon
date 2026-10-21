@@ -170,8 +170,12 @@
   error map, so its asker is always answered."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:perform "the kind's perform Var"} :ins {} :outs {}
-       ;; the effect blocks this lane's thread, and only this lane's
-       :workload :io
+       ;; the effect blocks in native IO (an HTTP read, a file write). Jolt runs :io procs
+       ;; on fibers bound to their carrier thread for life, and a blocking FFI call pins the
+       ;; carrier, stranding every other fiber placed on it (inv2: replies 4-15 s late).
+       ;; :mixed gives each lane its own thread: the declared workload is true, and the
+       ;; lane count already bounds the threads
+       :workload :mixed
        :ping-map-fn (fn [st] (select-keys st [:n]))})
   ([args] {:perform (:perform args) :kind (:kind args) :ctx (:ctx args) :n 0
            :owner (:owner args) ::flow/in-ports {:work (:work args)}})

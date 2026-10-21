@@ -513,10 +513,13 @@
   (lib/ignore-sigpipe!)
   (when-not log? (trove/set-log-fn! nil))
   (let [t0 (lib/now-ns)
-        ;; agents write their own branches, so the store is shared: a durable store, at a
-        ;; fresh directory of this root's own (deleted by stop!) when none is given
+        ;; agents write their own branches, so the store is shared: a durable store, given or
+        ;; a new run directory under SEON_RUNS (<cwd>/runs). It is never deleted: a run is a
+        ;; record frozen in time (owner, 2026-10-21); bin/check gives each check run its own
         given (or path (System/getenv "SEON_STORE"))
-        path (or given (str (or (System/getenv "SEON_STORE_ROOT") "/tmp") "/seon-store-" (random-uuid)))
+        path (or given (str (or (System/getenv "SEON_RUNS") (str (System/getProperty "user.dir") "/runs"))
+                            "/" (.format (java.text.SimpleDateFormat. "yyyyMMdd'T'HHmmss") (java.util.Date.))
+                            "-" (subs (str (random-uuid)) 0 8)))
         backend (or backend (some-> (System/getenv "SEON_BACKEND") keyword) :lmdb)
         {store-cfg :cfg conn :conn recovered? :recovered?} (pdb/open! backend path datoms)
         ;; each agent's stderr goes to a file here (seon.agent/stderr-path), read at its death
@@ -593,7 +596,7 @@
                                             (recur))))))))
                  (.setDaemon true) (.start))
         sys (merge chans {:cfg store-cfg :conn conn :graph g :t0 t0
-                          :owned-store (when-not given path) :boot boot
+                          :store-path path :boot boot
                           :bindings bindings
                           :events-in events-in :events-mult events-mult :errors errors})
         ]
@@ -847,11 +850,9 @@
       (a/put! (:stop-ch sys) true)
       (some-> ^Thread (:errors sys) (.join 5000))
       (a/close! (:events-in sys))
-      ;; a store this root made for itself goes with it
-      (when-let [p (:owned-store sys)]
-        (d/release (:conn sys))
-        (klmdb/close-env! p)
-        (clojure.java.shell/sh "rm" "-rf" p (str p "-agents")))
+      ;; the store is released and kept, whoever gave its path
+      (d/release (:conn sys))
+      (when (= :lmdb (:backend (:store (:cfg sys)))) (klmdb/close-env! (:store-path sys)))
       {:stopped true :drained drained :graph graph :agents-left 0 :ms (lib/r2 (lib/ms-since t0))})))
 
 
