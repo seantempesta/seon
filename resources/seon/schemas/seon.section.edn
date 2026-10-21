@@ -1,0 +1,35 @@
+;; The wiki as data (seon.docs, task seon.docs/docs-are-data-in-the-store): a section entity
+;; per heading of docs/*.md, as one parse (seon.ref/parse) reads it. Its references are what
+;; its own text cites (sections by link, vars by name), so a section's backlinks are who cites
+;; it. Stored shapes; the Datahike attributes are derived from :seon.section/fact.
+{;; the section's address, path#anchor as seon.ref/parse writes it (docs/flow.md#idioms)
+ :seon.section/address [:and {:seon.db/identity true} :string]
+ :seon.section/heading :string
+ ;; the heading's next block when it is a paragraph: what summary depth shows
+ :seon.section/lead :string
+ ;; the section's own text: the lines after its heading, up to the next heading of any level
+ :seon.section/text :string
+ ;; the enclosing section
+ :seon.section/parent :seon.db/ref
+ ;; what its own text cites and resolves to: a section (a link) or a var (a name)
+ :seon.section/references [:set :seon.db/ref]
+ :seon.section/fact [:map {:seon.db/attributes true}
+                     [:seon.section/address :seon.section/address]
+                     [:seon.section/heading :seon.section/heading]
+                     [:seon.section/lead {:optional true} :seon.section/lead]
+                     [:seon.section/text {:optional true} :seon.section/text]
+                     [:seon.section/parent {:optional true} :seon.section/parent]
+                     [:seon.section/references {:optional true} :seon.section/references]]
+ ;; a section as one parse reads it, before it is stored: its fact's values, its parent's
+ ;; address, and the citations of its own text
+ :seon.section/parsed [:map {:closed true}
+                       [:seon.section/address :seon.section/address]
+                       [:seon.section/heading :seon.section/heading]
+                       [:seon.section/lead {:optional true} :seon.section/lead]
+                       [:seon.section/text {:optional true} :seon.section/text]
+                       [:seon.ref/parent {:optional true} :seon.ref/address]
+                       [:seon.ref/citations [:vector :seon.ref/citation]]]
+ ;; a link (or a cited path#anchor) that reaches no section: the load is refused, naming it
+ :seon.docs/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.docs/refused]]
+                                            [:seon.ref/address :seon.ref/address]
+                                            [:seon.section/address :seon.section/address]]]}

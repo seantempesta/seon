@@ -1,0 +1,65 @@
+(ns seon.docs-test
+  "The wiki as data in the store (task seon.docs/docs-are-data-in-the-store): a section entity
+  per heading, written only where a section changed; its references are what its own text
+  cites, so its backlinks are who cites it."
+  (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
+            [datahike.api :as d]
+            [seon.db :as pdb]
+            [seon.docs :as docs]))
+
+(defn- empty-db [] @(second (pdb/test-branch!)))
+
+(def ^:private flow
+  "# Flow\n\nFlow runs procs.\n\n## Idioms\n\nPark on a channel, as ```app.m0/f0``` does.\n\n## Quiet\n\nCount messages, with `app.m0/f1`.\n")
+
+(def ^:private async
+  "# Async\n\nAsync is channels.\n\n## Waiting\n\nWait by parking, as [idioms](flow.md#idioms) says.\n")
+
+(def ^:private pages {"demo/flow.md" flow "demo/async.md" async})
+
+(defn- load-pages
+  "db after loading pages (path -> text) as the demo wiki."
+  [db pages]
+  (let [tx (docs/load-tx db "demo" pages)]
+    (is (vector? tx) (str "the load is refused: " (:seon.error/message tx)))
+    (d/db-with db tx)))
+
+(deftest an-unchanged-page-writes-nothing
+  (let [db (load-pages (empty-db) pages)]
+    (is (= "Count messages, with `app.m0/f1`." (:seon.section/text (docs/section db "demo/flow.md#quiet")))
+        "the first load wrote each section")
+    (is (= "demo/flow.md#flow" (:seon.section/parent (docs/section db "demo/flow.md#idioms"))))
+    (is (= [] (docs/load-tx db "demo" pages)) "loading the same pages again writes nothing")))
+
+(deftest a-changed-section-rewrites-only-itself
+  (let [db (load-pages (empty-db) pages)
+        quiet (:db/id (d/pull db [:db/id] [:seon.section/address "demo/flow.md#quiet"]))
+        edited (assoc pages "demo/flow.md" (str/replace flow "Count messages" "Count every message"))
+        tx (docs/load-tx db "demo" edited)]
+    (is (seq tx) "the changed section is written")
+    (is (= #{quiet} (into #{} (map #(if (map? %) (:db/id %) (second %))) tx))
+        "the load states only the changed section")
+    (is (= "Count every message, with `app.m0/f1`."
+           (:seon.section/text (docs/section (d/db-with db tx) "demo/flow.md#quiet"))))))
+
+(deftest a-link-to-no-section-is-refused-by-name
+  (let [db (load-pages (empty-db) pages)
+        r (docs/load-tx db "demo" (assoc pages "demo/async.md" (str/replace async "flow.md#idioms" "flow.md#nowhere")))]
+    (is (= :seon.docs/refused (:seon.error/type r)))
+    (is (= "demo/flow.md#nowhere" (:seon.ref/address r)) "the refusal names the link")
+    (is (= "demo/async.md#waiting" (:seon.section/address r)) "and the section that makes it")
+    (is (str/includes? (:seon.error/message r) "demo/flow.md#nowhere"))))
+
+(deftest backlinks-are-a-sections-instances
+  (let [quiet "# Quiet\n\nQuiet is the absence of messages.\n\n## Counting\n\nCount as the [idiom](flow.md#idioms) does, by `app.m0/f0`.\n"
+        db (load-pages (empty-db) (assoc pages "demo/quiet.md" quiet))]
+    (is (= ["demo/async.md#waiting" "demo/quiet.md#counting"] (docs/backlinks db "demo/flow.md#idioms"))
+        "a section's backlinks are the sections that link to it")
+    (is (= ["demo/flow.md#idioms" "demo/quiet.md#counting"] (docs/backlinks db 'app.m0/f0))
+        "a var's backlinks are the sections that cite it")
+    (is (= ["demo/flow.md#idioms"] (docs/homes db 'app.m0/f0)) "its home is the section citing it at code depth")
+    (testing "a link to a page with no anchor reaches the page's first section"
+      (let [db (load-pages db (assoc pages "demo/quiet.md" (str/replace quiet "flow.md#idioms" "flow.md")))]
+        (is (= ["demo/quiet.md#counting"] (docs/backlinks db "demo/flow.md#flow")))
+        (is (= ["demo/async.md#waiting"] (docs/backlinks db "demo/flow.md#idioms")) "the dropped link is retracted")))))
