@@ -7,7 +7,7 @@
             [seon.db :as pdb]
             [seon.task :as task]
             [seon.reconcile :as r]
-            [seon.template :as tpl] [seon.problems :as problems] [seon.sock :as sock] [clojure.edn]
+            [seon.template :as tpl] [seon.problems :as problems] [seon.sock :as sock] [clojure.edn] [seon.fx]
             [clojure.string :as str] [clojure.set]))
 
 (defn- empty-db [] @(second (pdb/test-branch!)))
@@ -400,3 +400,37 @@
           (is (= ["demo/add"] (keep #(get-in % [:req :opts :task]) outs4)))
           (is (not (:quiet st4)))
           (is (nil? (report-in outs4))))))))
+
+(deftest an-attempt-with-no-end-records-no-fake-spend
+  ;; FENCES #23-25: an agent that wrote no end measured nothing; its attempt says so
+  (let [main (db-of [(decl "a")] :extra (attempt "a" 1 :running))
+        tx (#'r/judge-tx {:db main :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:attempt "demo/a#1" :task "demo/a"}} {(t "a") :fail} {:db main} #{})
+        end (apply merge (filter map? tx))]
+    (is (= :no-end (:seon.attempt/outcome end)) "the outcome names what happened")
+    (is (= "the agent wrote no end" (:seon.attempt/reason end)))
+    (is (not-any? #(contains? end %) [:seon.attempt/turns :seon.attempt/tokens :seon.attempt/model-calls])
+        "no turns, no tokens: unknown is absent, never 0"))
+  (let [main (db-of [(decl "a")] :extra (attempt "a" 1 :running))
+        branch (d/db-with main [{:seon.end/attempt "demo/a#1" :seon.end/outcome :cap :seon.end/turns 3 :seon.end/tokens 4100}])
+        end (apply merge (filter map? (#'r/judge-tx {:db main :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:attempt "demo/a#1" :task "demo/a"}} {(t "a") :fail} {:db branch} #{})))]
+    (is (= [:cap 3 3 4100] ((juxt :seon.attempt/outcome :seon.attempt/turns :seon.attempt/model-calls :seon.attempt/tokens) end))
+        "with an end, what the agent measured")))
+
+(deftest an-attempt-ends-cap-when-its-token-budget-is-spent
+  (testing "the budget is the task's, in tokens, else the default"
+    (is (= r/default-max-tokens (r/max-tokens (task/task (db-of [(decl "a")]) "demo/a"))))
+    (is (= 5000 (r/max-tokens (task/task (db-of [(assoc (decl "a") :seon.task/config {:seon.config.agent/max-tokens 5000})]) "demo/a")))))
+  (testing "root's :model owner counts each attempt's spend and refuses the call past it"
+    (let [owner (#'seon.fx/owner-proc {:kind :model :lanes 1 :work nil :back nil})
+          ask (fn [st k] (#'seon.fx/owner-proc st :in {:req {:k k} :dest {:agent :a1 :op :fx-reply :k k} :budget 5000 :budget-key "demo/a#1"}))
+          [st _] (ask owner 1)
+          [st _] (#'seon.fx/owner-proc st :done {:dest {:agent :a1 :op :fx-reply :k 1} :outcome {:value 1} :budget-key "demo/a#1" :cost 4800})
+          [st o] (ask st 2)
+          _ (is (seq (:to-lanes o)) "4800 of 5000: the next call runs")
+          [st _] (#'seon.fx/owner-proc st :done {:dest {:agent :a1 :op :fx-reply :k 2} :outcome {:value 1} :budget-key "demo/a#1" :cost 900})
+          [st o] (ask st 3)
+          r (:r (first (:out o)))]
+      (is (= [:seon.fx/budget-spent 5000 5700] ((juxt :seon.error/type :budget :spent) r)) "5700 of 5000: refused, naming both")
+      (testing "a call whose cost nobody measured adds nothing (no stand-in 1)"
+        (let [[st2 _] (#'seon.fx/owner-proc st :done {:dest {:agent :a1 :op :fx-reply :k 9} :outcome {:value 1} :budget-key "demo/b#1"})]
+          (is (nil? (get-in st2 [:spent "demo/b#1"]))))))))

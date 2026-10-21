@@ -75,7 +75,8 @@
   [st {:keys [budget-key cost est outcome]}]
   (let [limited? (= :seon.model/rate-limited (:seon.error/type outcome))]
     (cond-> (-> st (update :busy dec) (update :done inc))
-      budget-key (update-in [:spent budget-key] (fnil + 0) (or cost 1))
+      ;; the spend grows by what the call cost; a cost nobody measured is not counted as one
+      (and budget-key cost) (update-in [:spent budget-key] (fnil + 0) cost)
       (:bucket st) (update :bucket (fn [b] (-> b (update :tokens + (- (or est 0) (or cost 0)))
                                                (assoc :per-ms (if limited?
                                                                 (max (/ (:rate-ms b) 64) (/ (:per-ms b) 2))

@@ -73,7 +73,9 @@
         starts (delay (line-starts code))
         eval-fn (:repl/eval-fn req eval)
         ;; the form's budget of work (engine ticks): the request's, else the dial for an
-        ;; agent's model and an outside agent; root's own platform requests run unbounded
+        ;; agent's model and an outside agent; root's own platform requests run unbounded.
+        ;; Only here, in an agent process: a tick budget borrows Chez's engine timer, which
+        ;; on a fiber is the scheduler's preemption clock, so it never arms in root (FLOWLAB-2)
         ticks (let [t (or (get req "seon/ticks")
                           (when (#{"model" "outside" "ui"} (get req "seon/origin")) cfg/FORM-TICKS))]
                 (when (and t (pos? t)) t))
