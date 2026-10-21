@@ -174,9 +174,10 @@
           [_ outs] (#'fx/owner-proc (assoc st :busy 1) :done {:dest {:agent :a5 :op :fx-reply :k 1} :outcome outcome})
           pr (first (filter #(= :problem (:op %)) (:out outs)))]
       (is (= [:effect :a5 :seon.model/rate-limited] [(:class pr) (:agent pr) (:seon.error/type (:error pr))]))))
-  (testing "HTTP 429 is produced as :seon.model/rate-limited (the variant seon.fx/settle halves the rate on)"
-    (is (= :seon.model/rate-limited (:seon.error/type (#'model/provider-error "HTTP 429: too many" 429))))
-    (is (= :seon.model/provider-error (:seon.error/type (#'model/provider-error "HTTP 500: oops" 500))))))
+  (testing "HTTP 429 is produced as :seon.model/rate-limited (transient: the :model owner keeps the request), its body whole"
+    (let [e (#'model/provider-error "HTTP 429" 429 {:body "too many" :retry-after-ms 2000})]
+      (is (= [:seon.model/rate-limited 429 "too many" 2000] ((juxt :seon.error/type :status :body :retry-after-ms) e))))
+    (is (= :seon.model/provider-error (:seon.error/type (#'model/provider-error "HTTP 500" 500 {:body "oops"}))))))
 
 ;; ---- the read -----------------------------------------------------------------------------
 
@@ -286,8 +287,8 @@
 (def ^:private req {:messages [{:role "user" :content "hi"}] :task "t/a" :turn 0})
 
 (deftest the-request-sets-thinking-only-when-the-provider-does
-  (is (= {:model "deepseek-flash" :messages (:messages req) :max_tokens 2048 :temperature 0 :stream false}
-         (model/request-body deepseek req)) "absent: the provider's default, and max-tokens 2048")
+  (is (= {:model "deepseek-flash" :messages (:messages req) :max_tokens 2048 :temperature 0 :stream true :stream_options {:include_usage true}}
+         (model/request-body deepseek req)) "absent: the provider's default, and max-tokens 2048; streamed with its usage")
   (is (= {:type "disabled"} (:thinking (model/request-body (assoc deepseek :thinking :disabled) req))))
   (is (= ["high" 512] ((juxt :reasoning_effort :max_tokens) (model/request-body (assoc deepseek :reasoning-effort :high :max-tokens 512) req))))
   (is (contract/valid? :seon.model/provider (assoc deepseek :thinking :enabled :reasoning-effort :low))))
@@ -299,7 +300,8 @@
                                   :usage {:prompt_tokens 100 :completion_tokens 40 :prompt_cache_hit_tokens 64
                                           :completion_tokens_details {:reasoning_tokens 30}}})
                                12.5 2048)]
-      (is (= {:text "(+ 1 2)" :prompt-tokens 100 :completion-tokens 40 :reasoning-tokens 30 :cache-hit-tokens 64 :ms 12.5} c))))
+      (is (= {:text "(+ 1 2)" :prompt-tokens 100 :completion-tokens 40 :reasoning-tokens 30 :cache-hit-tokens 64 :ms 12.5
+              :reasoning "think"} c))))
   (testing "an empty content beside reasoning: thinking spent the budget"
     (let [e (model/parse-reply (clojure.data.json/write-str
                                  {:choices [{:message {:content "" :reasoning_content "long thoughts"}}]
