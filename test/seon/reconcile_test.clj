@@ -89,13 +89,11 @@
                                          (task/execution-tx ["demo/b"] :cancelled)))]
     (is (= [{:op :kill :attempt "demo/b#1" :reason :cancelled}] (r/reconcile db)))
     (is (= #{"demo/b" "demo/c"} (r/blocked-by (r/index db) "demo/d")))
-    (is (= [["demo/b#1" :cancelled]] (r/to-kill (r/index db))))
     ;; killed: nothing restarts it, and d stays blocked once c merges
     (let [db (d/db-with db (concat (task/status-tx db "demo/b#1" :running :killed {})
                                    (task/status-tx db "demo/c#1" :running :merged {})))]
       (is (= [] (r/reconcile db)))
-      (is (= #{"demo/b"} (r/blocked-by (r/index db) "demo/d")))
-      (is (= [] (r/should-run (r/index db)))))))
+      (is (= #{"demo/b"} (r/blocked-by (r/index db) "demo/d"))))))
 
 (deftest held-kills-without-restart
   (let [db (db-of [(decl "x")] :extra (concat (attempt "x" 1 :running) (task/execution-tx ["demo/x"] :held)))]

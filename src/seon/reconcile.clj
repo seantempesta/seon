@@ -450,17 +450,6 @@
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:set :seon.task/id]]}
   [idx id] (into #{} (remove #(idx-done? idx %)) (get-in idx [:tasks id :seon.task/needs])))
 
-(defn should-run
-  "Tasks that should have an attempt running and have none, in start order (dependency
-  depth, then id); max-running is not applied here."
-  {:malli/schema [:=> [:cat :seon.reconcile/index] [:vector :seon.task/id]]}
-  [idx] (mapv second (:ready idx)))
-
-(defn to-kill
-  "Live attempts to stop, with why: [[attempt-id reason]]."
-  {:malli/schema [:=> [:cat :seon.reconcile/index] [:vector [:tuple :seon.attempt/id :keyword]]]}
-  [idx] (vec (sort-by first (:kill idx))))
-
 ;; ---- what an attempt's agent wrote on its branch ----
 
 (defn pull-end
