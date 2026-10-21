@@ -137,6 +137,15 @@
     (concat (attempt "a" 1 :ended :outcome :cap :results {(t "a") :fail}) [{:seon.task/id "demo/a" :seon.task/budget 0}])
     [{:op :bail :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended cap: proof-red demo-test/a-test"}]))
 
+(deftest an-attempt-with-no-end-records-no-fake-spend
+  ;; task seon.fences/budgets-are-data-and-spend-is-measured: the agent wrote no end (it died
+  ;; or was killed before end!), so its turns, tokens and time are unknown: absent, never 0
+  (let [db (db-of diamond :extra (attempt "a" 1 :running))
+        tx (#'r/judge-tx {:db db :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:attempt "demo/a#1" :task "demo/a"}} {} {:db db} #{})
+        ended (first (filter #(and (map? %) (= "demo/a#1" (:seon.attempt/id %)) (:seon.attempt/outcome %)) tx))]
+    (is (= :no-end (:seon.attempt/outcome ended)))
+    (is (= #{} (set (filter #{:seon.attempt/turns :seon.attempt/model-calls :seon.attempt/tokens :seon.attempt/ms} (keys ended)))))))
+
 (deftest an-ended-attempt-of-a-cancelled-task-is-closed
   (is (= [{:op :close :attempt "demo/a#1"}]
          (r/reconcile (db-of diamond :extra (concat (attempt "a" 1 :ended :outcome :green :results {(t "a") :pass})
