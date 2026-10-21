@@ -196,6 +196,11 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
 - **Full checks:** one at a time (`bin/check` takes the check lock and runs niced). Iterate with single modes.
 - **Never flood it.** Anything that can make threads or processes starts at n ≤ 100 under `nice -n 15`. Watch `ps -M -p PID | wc -l`, and kill your own process past 200 threads. One experiment at a time.
 - **A process that must outlive your tool call** is double-forked, which `bin/root` does. The tool host kills a background task's whole process tree when the task stops or its agent exits.
+- **Disk stays bounded** (owner, 2026-10-21: "cleanup shit we aren't using anymore and build in rules so this doesn't get out of control"; the tree had reached 261 GB):
+  - a lane's worktree is removed in the landing that merges it (`bin/worktree --remove NAME`, run by root after the merge; the branch stays in git);
+  - a lane's scratch lives inside its worktree (`target/`, `runs/`) and goes with it; nobody creates a new top-level directory in `~/src/seon-jolt` (the fork repositories `docs/forks.md` lists, `notes/`, `bin/` and the worktrees are the only ones);
+  - what is kept is what git and the store record (commits, task facts, notes); build output, compile caches and finished experiments' stores are regenerable and are deleted when their checkout or experiment ends;
+  - root prunes each checkout's `target/check/` to its last three runs at each landing.
 - **Leave nothing running when you finish,** and say so in your report. Kill only PIDs you started; never `pkill` or `killall`. Delete only paths you created.
 - **Your scratch:** under your worktree (`target/`, `runs/`) or a folder named for your lane. The session scratch folder is shared.
 - **Git in a worktree:**
