@@ -95,3 +95,16 @@
     (remove-ns 'x.schema-load)
     (is (= [] (program/load-diff! main branch)))
     (is (= :refused ((resolve 'x.schema-load/status-of) :refused)) "its contract accepts the branch's :refused")))
+
+(deftest a-merged-schema-change-re-arms-the-contracts-naming-it
+  ;; BUILD plan P4: main's change to a schema reaches the code already loaded where main's
+  ;; program runs (root, the fork server): each contracted var whose contract names it, or a
+  ;; schema naming it, is loaded again against the changed population
+  (let [main (pt/record (main-db) 'x.schema-arm "(defn status-of {:malli/schema [:=> [:cat :seon.attempt/status] :keyword]} [s] s)")
+        status-of (fn [s] ((resolve 'x.schema-arm/status-of) s))
+        _ (remove-ns 'x.schema-arm)
+        _ (is (= [] (:errors (program/load-all! main))) "main's program loaded, its contracts armed")
+        _ (is (thrown? Exception (status-of :refused)) "the built schema refuses :refused")
+        rep (d/with main (:tx (schema/registration main :seon.attempt/status (read-string refused-status) false)))]
+    (is (= [] (program/load-changes! (:db-after rep) (pdb/report->tx rep))))
+    (is (= :refused (status-of :refused)) "re-armed against main's :seon.attempt/status")))

@@ -161,14 +161,18 @@
 (defn- form-tid {:malli/schema [:=> [:cat :string] :string]} [id] (str "form " id))
 
 (defn- def-ref
-  "The entity map naming definition k (an upsert by its identity), with its tempid."
-  {:malli/schema [:=> [:cat :seon.merge/def-key] :map]}
-  [[kind a b]]
-  (case kind
-    :var {:db/id (str "var " a) :var/name a :var/ns (ns-tid (symbol (namespace a)))}
-    :method (let [k (program/method-key a b)] {:db/id (str "method " k) :method/key k :method/multi a :method/dispatch b})
-    :impl (let [k (program/impl-key a b)] {:db/id (str "impl " k) :impl/key k :impl/protocol a :impl/type b})
-    :ns {:db/id (ns-tid a) :ns/name a}))
+  "The entity map naming definition k on db: its entity when db has it, else an upsert by
+  its identity with its tempid (Datahike allocates a tempid first seen as a ref, in
+  :form/defines, before the map that upserts it, and a form defining two existing
+  definitions, a protocol or a record, then conflicts)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/def-key] :map]}
+  [db [kind a b :as k]]
+  (cond-> (case kind
+            :var {:db/id (str "var " a) :var/name a :var/ns (ns-tid (symbol (namespace a)))}
+            :method (let [k (program/method-key a b)] {:db/id (str "method " k) :method/key k :method/multi a :method/dispatch b})
+            :impl (let [k (program/impl-key a b)] {:db/id (str "impl " k) :impl/key k :impl/protocol a :impl/type b})
+            :ns {:db/id (ns-tid a) :ns/name a})
+    (def-entity db k) (assoc :db/id (def-entity db k))))
 
 (def ^:private pointer {:var :var/form :method :method/form :impl :impl/form :ns :ns/form})
 
@@ -182,16 +186,16 @@
         (into [{:db/id (ns-tid ns) :ns/name ns}
                (cond-> {:db/id (form-tid id) :form/id id :form/src src :form/ns (ns-tid ns) :form/order order}
                  lead (assoc :form/lead lead)
-                 (seq defines) (assoc :form/defines (mapv (comp :db/id def-ref) defines))
-                 (seq declares) (assoc :form/declares (mapv #(str "var " %) declares))
+                 (seq defines) (assoc :form/defines (mapv #(:db/id (def-ref db %)) defines))
+                 (seq declares) (assoc :form/declares (mapv #(:db/id (def-ref db [:var %])) declares))
                  (seq refs) (assoc :form/refs (vec refs))
                  (seq requires) (assoc :form/requires (vec requires))
                  (seq banned) (assoc :form/banned (vec banned))
                  (seq inline-defs) (assoc :form/inline-defs (vec inline-defs))
                  (seq timeouts) (assoc :form/timeouts (vec timeouts))
                  (seq catches) (assoc :form/catches (vec catches)))]
-              (concat (map def-ref defines)
-                      (for [s declares] (def-ref [:var s]))))))))
+              (concat (map #(def-ref db %) defines)
+                      (for [s declares] (def-ref db [:var s]))))))))
 
 (defn- set-def-tx
   {:malli/schema [:=> [:cat :seon.host/db :any [:maybe :map]] :seon.db/tx-data]}
@@ -205,7 +209,7 @@
                 (:contract content) (assoc :var/contract (:contract content))
                 (:doc content) (assoc :var/doc (:doc content))
                 (:file content) (assoc :ns/file (:file content))))]
-    (into (if content [(merge (def-ref k) now) {:db/id (form-tid (:form content)) :form/id (:form content)}] [])
+    (into (if content [(merge (def-ref db k) now) {:db/id (form-tid (:form content)) :form/id (:form content)}] [])
           (for [a attrs :let [old (get x a)] :when (and (some? old) (not (contains? now a)))]
             [:db/retract e a (if (#{:var/form :ns/form :method/form :impl/form} a) (:db/id old) old)]))))
 

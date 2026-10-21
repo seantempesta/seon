@@ -266,3 +266,60 @@
         (is (= (str (subs text 0 (- (count text) 2)) "\n :seon.attempt/refusal [:map [:seon.error/message :string]]}\n") out))
         (is (= (assoc (edn/read-string text) :seon.attempt/refusal [:map [:seon.error/message :string]])
                (edn/read-string out)))))))
+
+;; ---- a merge loads in place (BUILD plan P4) ---------------------------------------------
+
+(def ^:private mm-text
+  "(ns app.mm-src)\n\n(defmacro twice [x] `(* 2 ~x))\n\n(defn f [y] (twice y))\n\n(defprotocol Sized (size [x]))\n\n(defrecord Box [n] Sized (size [_] n))\n\n(defn g [n] (size (->Box n)))\n\n(defn box? [x] (instance? Box x))\n")
+
+(defn- hold!
+  "This process holding namespace nsym's text compiled, as a binary built from it does."
+  [nsym text]
+  (remove-ns nsym)
+  (let [db (empty-db)]
+    (is (= [] (:errors (program/load-all! (d/db-with db (source/text-tx db nsym text nil))))))))
+
+(defn- held-main
+  "main with text imported from path as the binary's own source, held by this process."
+  [nsym text path]
+  (hold! nsym text)
+  (let [db (empty-db)] (d/db-with db (source/import-tx db {path text}))))
+
+(defn- merge-loaded
+  "main after a branch from it records forms (evaluated here, as the agent's REPL does, then
+  this process holds the text again: the agent was another process) and merges, and the
+  errors of loading that merge here (seon.program/load-changes!, as root and the fork server
+  do)."
+  [main nsym text & forms]
+  (let [branch (apply pt/record main forms)
+        _ (hold! nsym text)
+        r (pm/three-way (pm/program main #{}) (pm/program branch #{}) (pm/program main #{}))
+        rep (d/with main (pm/apply-tx main (into {} (for [[k [_ o]] (:ours r)] [k o]))))]
+    [(:db-after rep) (program/load-changes! (:db-after rep) (pdb/report->tx rep))]))
+
+(deftest a-merge-to-imported-source-loads-in-place
+  (let [main (held-main 'app.pt-src pt-text "src/app/pt_src.clj")
+        [_ errs] (merge-loaded main 'app.pt-src pt-text 'app.pt-src "(defn add [a b] (+ a b 100))")]
+    (is (= [] errs))
+    (is (= 106 ((resolve 'app.pt-src/twice) 3)) "the binary's compiled caller reaches the merged definition")))
+
+(deftest a-changed-macro-reloads-the-forms-it-expanded-in
+  (let [main (held-main 'app.mm-src mm-text "src/app/mm_src.clj")
+        f (fn [] ((resolve 'app.mm-src/f) 2))]
+    (is (= 4 (f)))
+    (let [[_ errs] (merge-loaded main 'app.mm-src mm-text 'app.mm-src "(defmacro twice [x] `(* 3 ~x))")]
+      (is (= [] errs))
+      (is (= 6 (f)) "f, compiled against the old expansion and held by the binary, is reloaded"))))
+
+(deftest a-merged-protocol-keeps-its-records
+  (let [main (held-main 'app.mm-src mm-text "src/app/mm_src.clj")
+        [_ errs] (merge-loaded main 'app.mm-src mm-text 'app.mm-src "(defprotocol Sized \"How big a thing is.\" (size [x]))")]
+    (is (= [] errs))
+    (is (= 5 ((resolve 'app.mm-src/g) 5)) "Box dispatches through the redefined protocol (Jolt needs no reload of its record)")))
+
+(deftest a-merged-record-is-the-one-its-callers-see
+  (let [main (held-main 'app.mm-src mm-text "src/app/mm_src.clj")
+        [_ errs] (merge-loaded main 'app.mm-src mm-text 'app.mm-src "(defrecord Box [n] Sized (size [_] (inc n)))")]
+    (is (= [] errs))
+    (is (= 6 ((resolve 'app.mm-src/g) 5)) "the new record")
+    (is (true? ((resolve 'app.mm-src/box?) ((resolve 'app.mm-src/->Box) 1))) "an instance? test held by the binary sees the redefined record")))
