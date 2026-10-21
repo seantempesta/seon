@@ -76,7 +76,7 @@ Every need is met by one of these. If one doesn't fit, stop and say so; never ro
 - **Durability is continuous group commit.** A write is answered when committed in memory. One followed by an outside effect waits for the sync that covers it.
 - **Every definition happens once, where it is defined.**
   - Behaviour varies through the environment (a forked process holding exactly its definitions) or through data.
-  - Never `intern`, `alter-var-root`, `with-redefs` or stub-by-rebinding. That is judged from the compiler's facts, never from text.
+  - `intern`, `alter-var-root` and `with-redefs` are code smells (owner, 2026-10-21: "intern isn't banned it's a code smell"). A legitimate use builds vars programmatically in a namespace you own, where no definition form exists (a REPL harness, a test environment), and its docstring says why. Filling a gap in another namespace (a library's, Jolt's stdlib) is fixed in that namespace's owner instead. Stub-by-rebinding is replaced by a test environment that holds the stub's definition.
 - **Results are reused by input digest.** A test's result is keyed by the digest of everything it reaches, a check step's by its build's source, a build's by its sources. Unchanged inputs are never run again.
   - Content-keyed reuse is allowed for units measured as expensive; no other caches, and never one keyed by time.
 - **Estimates are proofs.** A function whose input grows carries a cost proof. An overrun, or growth steeper than the work needs, is red.

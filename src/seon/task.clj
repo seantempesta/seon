@@ -8,7 +8,7 @@
   them) and the one reader (pull shapes for the reconciler and the agent). From lanes R1
   and M1's proto.agents.task; the attributes are derived from resources/seon/schemas (lane D1)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn] [seon.merge :as pm]
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn] [seon.merge :as pm] [seon.edn :as sedn]
             [seon.print :as print] [seon.ref :as ref]))
 
 ;; ---- identity --------------------------------------------------------------------
@@ -88,7 +88,7 @@
                           (assoc :db/id id :seon.task/id id :seon.task/execution :held)
                           (update :seon.task/branch #(or % (default-branch id))))
                 (seq needs) (assoc :seon.task/needs (mapv #(if (new %) % [:seon.task/id %]) needs))
-                evidence (assoc :seon.task/evidence (binding [*print-length* nil *print-level* nil] (pr-str evidence)))
+                evidence (assoc :seon.task/evidence (sedn/encode evidence))
                 (seq config) (merge config)
                 true (merge (references-of decl))))
             ids decls))))
@@ -174,8 +174,8 @@
   (cond-> (-> t (update :seon.task/needs #(set (map :seon.task/id %)))
               (update :seon.task/proofs set)
               (update :seon.task/kind #(or % :work)))
-    (:seon.task/evidence t) (update :seon.task/evidence edn/read-string)
-    (:seon.task/stuck t) (update :seon.task/stuck edn/read-string)))
+    (:seon.task/evidence t) (update :seon.task/evidence sedn/decode)
+    (:seon.task/stuck t) (update :seon.task/stuck sedn/decode)))
 
 (defn- accumulate
   "Task id's accumulated plan and proofs over its needs (owner, 2026-10-20: a task
@@ -234,12 +234,7 @@
       unmerged (assoc :seon.attempt/unmerged (vec (sort unmerged)))
       (:seon.attempt/changed a) (update :seon.attempt/changed set)
       conflicts (assoc :seon.attempt/conflicts
-                       (vec (sort-by (comp str :key)
-                                     (for [c conflicts]
-                                       (cond-> {:key (edn/read-string (:seon.merge/key c)) :kind (:seon.merge/kind c)}
-                                         (:seon.merge/base c) (assoc :base (edn/read-string (:seon.merge/base c)))
-                                         (:seon.merge/ours c) (assoc :ours (edn/read-string (:seon.merge/ours c)))
-                                         (:seon.merge/theirs c) (assoc :theirs (edn/read-string (:seon.merge/theirs c)))))))))))
+                       (vec (sort-by (comp str :key) (map pm/conflict-value conflicts)))))))
 
 (defn attempts
   "Every attempt on db, by id."
@@ -332,7 +327,7 @@
         want (cond-> (merge (dissoc decl :seon.task/ns :seon.task/name :seon.task/config :seon.task/needs) (:seon.task/config decl)
                             (references-of decl))
                true (update :seon.task/branch #(or % (default-branch id)))
-               (:seon.task/evidence decl) (update :seon.task/evidence #(binding [*print-length* nil *print-level* nil] (pr-str %))))
+               (:seon.task/evidence decl) (update :seon.task/evidence sedn/encode))
         old-needs (set (map :seon.task/id (:seon.task/needs now)))
         new-needs (set (:seon.task/needs decl))]
     (vec (concat
@@ -358,12 +353,12 @@
           stored (into {} (d/q '[:find ?id ?s :where [?e :seon.task/declared ?s] [?e :seon.task/id ?id]] db))
           all (tasks db)
           new (vec (for [[id d] decls :when (not (all id))] d))
-          changed (vec (for [[id d] decls :when (and (all id) (not= d (some-> (stored id) edn/read-string)))] [id d]))
+          changed (vec (for [[id d] decls :when (and (all id) (not= d (some-> (stored id) sedn/decode)))] [id d]))
           removed (vec (for [[id _] stored :when (and (not (decls id)) (owners (:seon.task/ns (all id))))] id))
           missing (seq (for [[_ d] decls n (:seon.task/needs d) :when (not (or (decls n) (all n)))] n))
           graph (merge (into {} (for [[id t] all] [id (:seon.task/needs t)]))
                        (into {} (for [[id d] decls] [id (set (:seon.task/needs d))])))
-          declared (fn [id d] {:seon.task/id id :seon.task/declared (binding [*print-length* nil *print-level* nil] (pr-str d))})]
+          declared (fn [id d] {:seon.task/id id :seon.task/declared (sedn/encode d)})]
       (cond
         missing (file-refusal (first owners) (str "needs name no task: " (str/join ", " missing)))
         (cycle-in graph) (file-refusal (first owners) (str "needs form a cycle through " (cycle-in graph)))

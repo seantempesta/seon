@@ -20,9 +20,9 @@ export HOME=$ROOT/target/home
 # No key holds a checkout's path, and entries are published by temp+rename. One directory in the main
 # tree's target/, found from git's common dir so a worktree anywhere (bin/worktree --at DIR too)
 # names the same absolute path.
-SEON_MAIN=$(cd "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
-JOLT_BUILD_CACHE_DIR=${JOLT_BUILD_CACHE_DIR:-$SEON_MAIN/target/cache/build}
-JOLT_RUNTIME_CACHE_DIR=${JOLT_RUNTIME_CACHE_DIR:-$SEON_MAIN/target/cache/runtime}
-JOLT_CACHE_DIR=${JOLT_CACHE_DIR:-$SEON_MAIN/target/cache/aot}
+MAIN_TREE=$(cd "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
+JOLT_BUILD_CACHE_DIR=${JOLT_BUILD_CACHE_DIR:-$MAIN_TREE/target/cache/build}
+JOLT_RUNTIME_CACHE_DIR=${JOLT_RUNTIME_CACHE_DIR:-$MAIN_TREE/target/cache/runtime}
+JOLT_CACHE_DIR=${JOLT_CACHE_DIR:-$MAIN_TREE/target/cache/aot}
 JOLT_CACHE_GENERATIONS=${JOLT_CACHE_GENERATIONS:-4}
 export JOLT_BUILD_CACHE_DIR JOLT_RUNTIME_CACHE_DIR JOLT_CACHE_DIR JOLT_CACHE_GENERATIONS

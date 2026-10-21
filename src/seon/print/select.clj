@@ -711,12 +711,12 @@
 (defn show
   "`value` selected under `opts` and emitted: `{:text :tokens :truncated? :elisions :cuts}` plus
   `:html` (hiccup) when `outputs` holds `:hiccup`, or the insufficient-budget refusal.
-  opts: `:handle` (a `result/…` symbol cuts read through), `:budget` tokens, `:max-depth`, `:width`,
+  opts: `:handle` (what cuts read through: a `result/…` symbol, or a form that reads the value), `:budget` tokens, `:max-depth`, `:width`,
   `:outputs`. A value whose metadata holds `:seon.print/full true` prints whole, and
   `:seon.print/budget n` raises its own budget."
   {:malli/schema [:=> [:cat :any :seon.print/opts] :seon.print/result]}
   [value {:keys [handle budget max-depth width outputs]}]
-  (let [requery (if (and (qualified-symbol? handle) (= "result" (namespace handle)))
+  (let [requery (if (or (and (qualified-symbol? handle) (= "result" (namespace handle))) (seq? handle))
                   {:seon.print/requery-id handle}
                   {:seon.print/requery-refusal "the value has no result handle"})
         own (when (instance? clojure.lang.IMeta value) (:seon.print/budget (meta value)))

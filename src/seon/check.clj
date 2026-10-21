@@ -121,7 +121,7 @@
   plain caller compiled against a contracted function reaches its check. Prints the counts
   and exits 0 only when all hold."
   []
-  (let [boot (contract/instrument! '[seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])
+  (let [boot (contract/instrument! '[seon.edn seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])
         nss (platform-nss)
         vs (for [n nss v (vals (ns-interns n)) :when (contract/contract v)] v)
         at-def (filter #(= :definition (:seon.contract/checked-at (meta %))) vs)
@@ -367,9 +367,10 @@
         r4 @(c/submit! sys b "(+ 1")
         c4 (check "a read error is one :err item" (= :read (get-in (first r4) [:err :phase])) (short-items r4))
         _ @(c/submit! sys x "(ns app.spin (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (deftest spins (loop [] (recur)))")
-        t5 @(c/run-tests! sys x 1000)
-        c5 (check "a test that never ends is killed at its bound; the agent lives"
-                  (and (= 1 (:error t5)) (= "2" (:printed (first @(c/submit! sys x "(+ 1 1)")))))
+        t5 @(c/run-tests! sys x 1000000000)
+        c5 (check "a test that never ends stops at its tick budget, naming the test; the agent lives"
+                  (and (= 1 (:error t5)) (= "2" (:printed (first @(c/submit! sys x "(+ 1 1)"))))
+                       (= [:seon.test/ticks-spent "#'app.spin/spins"] ((juxt :seon.error/type :var) (first (:reports t5)))))
                   (select-keys t5 [:error :reports :ms]))
         _ @(c/submit! sys x "(in-ns 'app.spin) (ns-unmap 'app.spin 'spins) (deftest exits (System/exit 7))")
         t6 @(c/run-tests! sys x)
@@ -379,7 +380,7 @@
         r9 @(c/submit! sys b "(count (vec (range 300000000))) (+ 5 5)")
         c8 (check "an agent past its heap bound gets OutOfMemoryError as an :err item and lives"
                   (and (= :err (:tag (first r9))) (= "10" (:printed (second r9)))) (short-items r9))
-        r11 @(c/submit! sys b "(def kept 7) (loop [] (recur)) (+ kept 1)" {:timeout-ms 300})
+        r11 @(c/submit! sys b "(def kept 7) (loop [] (recur)) (+ kept 1)" {:ticks 1000000000})
         p12 (c/submit! sys b "(reduce + (range)) :next")
         _ (Thread/sleep 200)
         _ (c/interrupt! sys b)
@@ -389,8 +390,9 @@
         c11 (check "root's interrupt! stops the running request; the agent's next request runs"
                    (and (vector? r12) (= "interrupted by root" (:printed (first r12))) (= 1 (count r12)) (= ":next" (:printed (first r12b))))
                    (if (vector? r12) (short-items r12) r12))
-        c10 (check "a form past its timeout is interrupted; the agent keeps its state and goes on"
-                   (and (re-find #"timed out" (str (:printed (second r11)))) (= "8" (:printed (nth r11 2)))) (short-items r11))
+        c10 (check "a form past its tick budget is stopped, a typed error naming its ticks; the agent keeps its state and goes on"
+                   (and (= :seon.repl/ticks-spent (get-in (second r11) [:err :seon.error/type]))
+                        (<= 1000000000 (get-in (second r11) [:err :ticks])) (= "8" (:printed (nth r11 2)))) (short-items r11))
         r10 @(c/submit! sys x "(println \"hello from\" (:id (my.agent/whoami))) (def busy (future (loop [] (recur))))")
         t10 @(c/run-tests! sys x)
         c9 (check "printed output comes back as :out; a busy thread blocks the test fork instead of breaking it"
@@ -403,10 +405,10 @@
         r7 @(c/submit! sys b "(+ 3 4)")
         y (c/spawn! sys {:task "after the fork server died"})
         ready? (await-status sys [y] #{:idle} 5000)
-        r8 @(c/submit! sys y "(count (q '[:find ?v :where [?v :var/name]])) (loop [] (recur)) :after" {:timeout-ms 200})
-        c7 (check "the fork server dies: agents keep working, a new server forks the next agent (whose time bound works)"
+        r8 @(c/submit! sys y "(count (q '[:find ?v :where [?v :var/name]])) (loop [] (recur)) :after" {:ticks 1000000000})
+        c7 (check "the fork server dies: agents keep working, a new server forks the next agent (whose tick budget works)"
                   (and (= "7" (:printed (first r7))) ready? (= "360" (:printed (first r8)))
-                       (re-find #"timed out" (str (:printed (second r8)))) (= ":after" (:printed (nth r8 2))))
+                       (= :seon.repl/ticks-spent (get-in (second r8) [:err :seon.error/type])) (= ":after" (:printed (nth r8 2))))
                   [(:server (c/state sys)) (short-items r7) (short-items r8)])
         all [c1 c2 c3 c4 c5 c6 c8 c9 c10 c11 c7]]
     (out! (count (filter true? all)) "/" (count all) " robustness checks pass")
@@ -489,122 +491,6 @@
       (out! (if ok "SCALE OK" "SCALE FAILED"))
       (lib/c-exit (if ok 0 1)))))
 
-(defn mem
-  "Real memory per agent, per method.md: the system-wide free-page drop across n agents
-  (minus root's own growth), against the agents' own page counts (snp + private)."
-  [n rounds]
-  (let [sys (c/start! {:datoms 2000})]
-    (doseq [r (range rounds)]
-      (Thread/sleep 500)
-      (let [m0 (lib/sysmem) c0 (lib/real-mb)
-            ids (vec (pmap (fn [i] (c/spawn! sys {:task (str "mem " i)})) (range n)))
-            _ (await-status sys ids #{:idle} 30000)
-            _ (Thread/sleep 500)
-            m1 (lib/sysmem) c1 (lib/real-mb)
-            idle-mb (vec (keep #(get-in (c/state sys) [:agents % :mem-mb]) ids))
-            _ (doall (pmap #(deref (c/submit! sys % "(ns app.scale (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* x 2)) (deftest t (is (= 4 (f 2)))) (transact! [{:note/text \"m\"}]) (count (q '[:find ?v :where [?v :var/name]]))")) ids))
-            _ (doall (pmap #(deref (c/run-tests! sys %)) ids))
-            _ (Thread/sleep 1100)
-            _ (doall (pmap #(deref (c/submit! sys % "(+ 1 1)")) ids))
-            m2 (lib/sysmem) c2 (lib/real-mb)
-            work-mb (vec (keep #(get-in (c/state sys) [:agents % :mem-mb]) ids))
-            _ (doseq [id ids] (c/kill! sys id))
-            _ (await-status sys ids #{:killed} 10000)
-            _ (Thread/sleep 1000)
-            m3 (lib/sysmem)
-            per (fn [a b ca cb] (lib/r2 (/ (- (- (:free-mb a) (:free-mb b)) (- cb ca)) n)))]
-        (pprint {:round r :agents n :load (clojure.string/trim (:out (clojure.java.shell/sh "uptime")))
-                 :idle {:system-mb-per-agent (per m0 m1 c0 c1) :agent-own-mb (lib/summ idle-mb) :root-growth-mb (lib/r2 (- c1 c0))}
-                 :after-work {:system-mb-per-agent (per m0 m2 c0 c2) :agent-own-mb (lib/summ work-mb) :root-growth-mb (lib/r2 (- c2 c0))}
-                 :returned-on-kill-mb-per-agent (lib/r2 (/ (- (:free-mb m3) (:free-mb m2)) n))})))
-    (c/stop! sys)
-    (lib/c-exit 0)))
-
-(defn soak
-  "n agents under a random mix of everything for secs: evals with transact!, tests,
-  gated merges, merge-main!, clones, interrupts, kills (and respawns), and one fork
-  server kill. Checks: no request hangs, no unexpected error, replicas agree with the
-  writer, and root's memory over time. fs-kill-every: nil, one fork server kill at half
-  time; 0, none; k, one every k seconds, each restart giving a ready agent within 5 s
-  (`soak N SECS [K]`; it prints root's PID first, for whoever watches it)."
-  [n secs fs-kill-every]
-  (let [sys (c/start! {:datoms 2000})
-        _ (out! "PID " (lib/c-getpid))
-        t-end (+ (lib/now-ns) (* secs 1000000000))
-        live (atom (vec (pmap (fn [i] (c/spawn! sys {:task (str "soak " i)})) (range n))))
-        _ (await-status sys @live #{:idle} 20000)
-        counts (atom {})
-        bump! (fn [k] (swap! counts update k (fnil inc 0)))
-        hangs (atom []) surprises (atom [])
-        wait (fn [label p ms] (let [v (deref p ms ::hang)] (when (= v ::hang) (swap! hangs conj label)) v))
-        pick (fn [] (let [v @live] (when (seq v) (rand-nth v))))
-        live? (fn [id] (#{:idle :busy} (get-in (c/state sys) [:agents id :status])))
-        mem-trace (atom [])
-        actions
-        {:eval (fn [id] (let [r (wait [:eval id] (c/submit! sys id (str "(defn g [x] (* x " (rand-int 100) ")) (g 3) (transact! [{:note/text \"soak\" :note/agent " id "}])")) 30000)]
-                          (when (and (vector? r) (live? id) (some #(and (= :err (:tag %)) (not= "agent died" (:printed %))) r))
-                            (swap! surprises conj [:eval id (mapv :printed r)]))))
-         :test (fn [id] (wait [:deftest id] (c/submit! sys id "(deftest g-test (is (number? (g 2))))") 30000)
-                 (let [r (wait [:tests id] (c/run-tests! sys id) 30000)]
-                   (when (and (map? r) (live? id) (pos? (+ (:fail r 0) (:error r 0))) (not (re-find #"died" (str (:reports r)))))
-                     (swap! surprises conj [:tests id r]))))
-         :merge (fn [id] (wait [:merge id] (c/merge! sys id) 30000))
-         :merge-main (fn [id] (wait [:merge-main id] (c/merge-main! sys id) 30000))
-         :clone (fn [id] (when (< (count @live) (* 2 n))
-                           (let [r (wait [:clone id] (c/clone! sys id) 30000)]
-                             (when (:ok r) (swap! live conj (:id r))))))
-         :interrupt (fn [id] (let [r (wait [:interrupt id] (c/submit! sys id "(loop [] (recur))" {:timeout-ms 50}) 30000)]
-                               (when (and (vector? r) (live? id) (not (re-find #"timed out|agent died" (str (:printed (first r))))))
-                                 (swap! surprises conj [:interrupt id (mapv :printed r)]))))
-         :kill (fn [id] (when (> (count @live) (quot n 2))
-                          (c/kill! sys id) (swap! live (fn [v] (vec (remove #{id} v))))
-                          (swap! live conj (c/spawn! sys {:task "respawned"}))))}
-        weights [:eval :eval :eval :eval :test :test :merge :merge-main :clone :interrupt :kill]
-        worker (fn [] (loop [] (when (< (lib/now-ns) t-end)
-                                 (when-let [id (pick)]
-                                   (let [a (rand-nth weights)]
-                                     (if (live? id) (do ((actions a) id) (bump! a)) (Thread/sleep 5))))
-                                 (recur))))
-        workers (vec (for [_ (range (min 16 n))] (future (worker))))
-        tracer (future (loop [k 0] (when (< (lib/now-ns) t-end)
-                                     (when (if fs-kill-every
-                                             (and (pos? fs-kill-every) (pos? k) (zero? (mod k fs-kill-every)))
-                                             (= k (quot secs 2)))
-                                       (lib/c-kill (get-in (c/state sys) [:server :pid]) 9) (bump! :fork-server-kill)
-                                       ;; each restart must give a ready agent within 5 s
-                                       (when (and fs-kill-every (pos? fs-kill-every))
-                                         (Thread/sleep 50)
-                                         (let [pid (try (c/spawn! sys {:task "after fs kill"}) (catch Throwable e e))]
-                                           (if (and (keyword? pid) (await-status sys [pid] #{:idle} 5000))
-                                             (do (bump! :fs-restart-ready) (c/kill! sys pid))
-                                             (swap! hangs conj [:fs-restart k (get-in (c/state sys) [:server])])))))
-                                     (swap! mem-trace conj [k (lib/r2 (lib/real-mb)) (count @live) (get-in (c/state sys) [:writer :tx-count]) (lib/nthreads)])
-                                     (Thread/sleep 1000) (recur (inc k)))))
-        _ (doseq [w workers] @w)
-        _ @tracer
-        _ (Thread/sleep 1000)
-        st (c/state sys)
-        ids (vec (filter live? @live))
-        agree (vec (for [id (take 20 ids)
-                         :let [local (some-> (first @(c/submit! sys id "(count (d/datoms (db) :eavt))")) :printed Long/parseLong)
-                               w @(c/branch-info sys id)]]
-                     [id local (:datoms w) (get-in (c/state sys) [:agents id :mismatch])]))
-        fs (c/fs-call! sys {:op :stats})
-        main-datoms (count (d/datoms @(:conn sys) :eavt))
-        statuses (frequencies (map :status (vals (:agents st))))
-        ok (and (empty? @hangs) (empty? @surprises) (every? (fn [[_ l w]] (= l w)) agree)
-                (= (:datoms fs) main-datoms) (zero? (:mismatch fs)))]
-    (pprint {:agents-at-start n :secs secs :actions @counts :statuses statuses
-             :hangs @hangs :surprises (take 10 @surprises)
-             :dead-why (frequencies (for [[_ a] (:agents st) :when (= :dead (:status a))] [(:error a) (:exit a)]))
-             :replicas-agree (every? (fn [[_ l w]] (= l w)) agree) :agree-sample (take 5 agree)
-             :fork-server {:datoms (:datoms fs) :main-datoms main-datoms :mismatch (:mismatch fs) :mem-mb (:mem-mb fs)}
-             :server (:server st) :writer (:writer st)
-             :root-mem-trace (vec (take-nth (max 1 (quot secs 12)) @mem-trace))
-             :result (if ok :SOAK-OK :SOAK-FAILED)})
-    (c/stop! sys)
-    (lib/c-exit (if ok 0 1))))
-
 (defn swarm
   "n agents work main's tasks at once. Agent i takes module k = i mod modules: it rewrites
   app.mK/f1 in REPL terms (recorded on its branch), adds a proof, marks the task done,
@@ -651,24 +537,6 @@
              :tasks-done-on-main done
              :fresh-agent-runs-all-merged-proofs (select-keys proofs [:test :pass :fail :error])
              :writer (:writer (c/state sys)) :main (:main (c/state sys))})
-    (c/stop! sys)
-    (lib/c-exit 0)))
-
-(defn rtt
-  "Round trips through the whole path (submit! -> :agents proc -> ring -> agent eval ->
-  ring -> reader -> proc -> promise), sequential, one live agent: eval, eval + q,
-  eval + transact!, and a fresh clone."
-  []
-  (let [sys (c/start! {:datoms 2000})
-        a (c/spawn! sys {:task "rtt"})
-        _ (await-status sys [a] #{:idle} 5000)
-        time-it (fn [n f] (dotimes [_ 20] (f)) (lib/summ (vec (for [_ (range n)] (let [t0 (lib/now-ns)] (f) (/ (- (lib/now-ns) t0) 1e3))))))
-        r {:eval-us (time-it 500 #(deref (c/submit! sys a "(+ 1 2)")))
-           :eval+q-us (time-it 300 #(deref (c/submit! sys a "(q '[:find ?d . :in $ ?v :where [?e :var/name ?v] [?e :var/doc ?d]] 'app.m0/f1)")))
-           :eval+transact-us (time-it 300 #(deref (c/submit! sys a "(transact! [{:note/text \"r\"}])")))
-           :tests-us (time-it 100 #(deref (c/run-tests! sys a)))
-           :clone-us (time-it 50 #(let [r @(c/clone! sys a)] (c/kill! sys (:id r))))}]
-    (pprint (assoc r :load (clojure.string/trim (:out (clojure.java.shell/sh "uptime")))))
     (c/stop! sys)
     (lib/c-exit 0)))
 
@@ -813,40 +681,6 @@
 
 ;; ---- durability numbers ----------------------------------------------------------------
 
-(defn dur-bench-write
-  "A fresh store at path seeded with about n datoms (a store of its own, the last resort:
-  this measures a store's creation and seed, and its bytes alone); then one agent's sequential
-  eval + transact! round trips (the commit latency), and the store's bytes."
-  [path n]
-  (let [t0 (lib/now-ns)
-        sys (c/start! {:datoms n :path path})
-        boot-ms (lib/ms-since t0)
-        a (c/spawn! sys {:task "commit latency"})
-        _ (await-status sys [a] #{:idle} 10000)
-        time-it (fn [k f] (dotimes [_ 20] (f)) (lib/summ (vec (for [_ (range k)] (let [t0 (lib/now-ns)] (f) (/ (- (lib/now-ns) t0) 1e3))))))
-        r {:n n :datoms (get-in (c/state sys {:datoms true}) [:main :datoms]) :create+seed-ms (lib/r2 boot-ms)
-           :store-bytes-after-seed (dir-bytes path)
-           :eval+transact-us (time-it 200 #(deref (c/submit! sys a "(transact! [{:note/text \"r\"}])")))
-           :eval-us (time-it 200 #(deref (c/submit! sys a "(+ 1 2)")))
-           :store-bytes (dir-bytes path)
-           :store (:store (c/state sys {:datoms true}))}]
-    (pprint r)
-    (c/stop! sys)
-    (lib/c-exit 0)))
-
-(defn dur-bench-read
-  "Restart on the store at path (dur-bench-write's, its own): how long recovery takes, by stage."
-  [path]
-  (let [t0 (lib/now-ns)
-        sys (c/start! {:datoms 0 :path path})
-        st (c/state sys)]
-    (pprint {:boot-ms (lib/r2 (lib/ms-since t0)) :main (:main st) :store (:store st) :program (get-in st [:boot :program :ms])
-             :store-bytes (dir-bytes path)})
-    (c/stop! sys)
-    (lib/c-exit 0)))
-
-;; ---- lifecycle (lane F1): strict start, pause, stop ---------------------------------
-
 (defn- alive? [pid] (zero? (lib/c-kill pid 0)))
 
 (defn lifecycle
@@ -919,43 +753,6 @@
 
 ;; ---- delivery (lane F2): main's commits to the reconciler, messages to agents ------
 
-(defn deliver-check
-  "k commits to main, one at a time: each reaches the :reconciler (commit -> seen, one
-  way, e11's shared clock). Then one message to all n agents, k times (encoded once,
-  written to every ring): message -> agent has it, p50/p95. And the writer's throughput
-  (m main commits in flight) with no reconciler work."
-  [n]
-  (let [k 200 m 2000
-        sys (c/start! {:datoms 2000})
-        ids (vec (pmap (fn [i] (c/spawn! sys {:task (str "deliver " i)})) (range n)))
-        _ (await-status sys ids #{:idle} 20000)
-        thru (fn [label]
-               (let [t0 (lib/now-ns)
-                     ps (mapv #(c/transact-main! sys [{:note/text (str label %) :note/agent :thru}]) (range m))]
-                 (run! deref ps)
-                 (lib/r2 (/ m (/ (- (lib/now-ns) t0) 1e9)))))
-        tx-per-s (thru "t")
-        seen0 (count (:main-seen-us (c/stats sys)))
-        _ (dotimes [i k] @(c/transact-main! sys [{:note/text (str "w" i) :note/agent :deliver}]) (Thread/sleep 1))
-        _ (Thread/sleep 50)
-        seen (drop seen0 (:main-seen-us (c/stats sys)))
-        lat (vec (for [i (range k)]
-                   (let [before (count (:msg-us (c/stats sys)))]
-                     (c/send-message! sys ids {:i i})
-                     (loop [j 0] (when (and (< (count (:msg-us (c/stats sys))) (+ before n)) (< j 4000))
-                                   (Thread/sleep 0 200000) (recur (inc j))))
-                     (count (:msg-us (c/stats sys))))))
-        st (c/stats sys)
-        took (first @(c/submit! sys (first ids) "(count (messages))"))]
-    (pprint {:agents n :commits k :commit->reconciler-us (lib/summ (vec seen))
-             :messages k :all-delivered (= (* k n) (count (:msg-us st))) :message->agent-us (lib/summ (:msg-us st))
-             :first-agent-inbox (:printed took) :writer-tx-per-s tx-per-s
-             :load (clojure.string/trim (:out (clojure.java.shell/sh "uptime")))})
-    (c/stop! sys)
-    (lib/c-exit 0)))
-
-;; ---- drain (lane F2): shutdown under load loses nothing accepted -------------------
-
 (defn drain
   "n agents each transact in a loop, and root's own writes stream in, when stop! is
   called. Every request the entrance accepted is answered; every :ok write is in the
@@ -991,34 +788,6 @@
     (lib/c-exit (if (every? true? (vals checks)) 0 1))))
 
 ;; ---- writers (lane F2): group commit at 1/8/32/256 concurrent writers --------------
-
-(defn writers
-  "Writer throughput and per-write latency with w agents each running k transact! in a
-  loop at once (one write in flight per agent), w in ws, on a branch of the one store
-  (store, mem or lmdb, is kept for the command line: every root's store is LMDB)."
-  [store ws]
-  (let [sys (c/start! {:datoms 2000})
-        maxw (apply max ws)
-        ids (vec (pmap (fn [i] (c/spawn! sys {:task (str "w" i)})) (range maxw)))
-        _ (await-status sys ids #{:idle} 30000)
-        _ (run! deref (mapv #(c/submit! sys % "(transact! [{:note/text \"warm\"}])") ids))
-        rows (vec (for [w ws]
-                    (let [k (max 20 (quot 4000 w))
-                          s0 (c/stats sys)
-                          t0 (lib/now-ns)
-                          rs (mapv #(c/submit! sys % (str "(let [xs (vec (for [i (range " k ")] (let [t0 (System/nanoTime)] (transact! [{:note/text (str \"n\" i)}]) (/ (- (System/nanoTime) t0) 1000.0))))] (let [v (vec (sort xs)) c (count v)] [(v (quot c 2)) (v (int (* 0.95 c)))])))"))
-                                   (take w ids))
-                          lats (mapv #(read-string (:printed (first @%))) rs)
-                          secs (/ (- (lib/now-ns) t0) 1e9)
-                          s1 (c/stats sys)
-                          b (- (:batches s1 0) (:batches s0 0)) tx (- (:batched-tx s1 0) (:batched-tx s0 0))]
-                      {:writers w :tx (* w k) :tx-per-s (lib/r2 (/ (* w k) secs)) :write-us-p50 (lib/r2 (lib/percentile (map first lats) 0.5)) :write-us-p95 (lib/r2 (lib/percentile (map second lats) 0.5))
-                       :tx-per-batch (lib/r2 (/ (double tx) (max 1 b))) :commits (- (:commits s1 0) (:commits s0 0))})))]
-    (pprint {:store store :rows rows :load (clojure.string/trim (:out (clojure.java.shell/sh "uptime")))})
-    (c/stop! sys)
-    (lib/c-exit 0)))
-
-;; ---- back-pressure (lane F1) ------------------------------------------------------
 
 (defn backpressure
   "1. Across the ring: an agent floods root with 20,000 messages while its proc is paused.
@@ -1081,7 +850,11 @@
 
 (defn hotreload
   "Redefine the :reconciler proc's step-fn Var while root runs (alter-var-root, as a defn
-  at the REPL would): its next step runs the new code, with no update! and no restart."
+  at the REPL would): its next step runs the new code, with no update! and no restart.
+  And a platform function redefined as a merge loads it (its defn evaluated in its
+  namespace) reaches a compiled platform caller on its next call, not through a proc's Var:
+  a direct-linked call reads the var's linked binding, which every redefinition writes
+  through (BUILD plan P3)."
   []
   (let [sys (c/start! {:datoms 2000})
         hits (atom 0)
@@ -1091,11 +864,32 @@
                           (fn [f] (fn ([] (f)) ([a] (f a)) ([st tr] (f st tr)) ([st in m] (swap! hits inc) (f st in m)))))
         _ (dotimes [i 3] @(c/transact-main! sys [{:note/text (str "after" i)}]))
         _ (loop [k 0] (when (and (zero? @hits) (< k 200)) (Thread/sleep 5) (recur (inc k))))
-        ok (pos? @hits)]
-    (alter-var-root #'seon.reconcile/reconciler-proc (constantly old))
-    (println {:redefined-step-ran @hits :health (:reconciler (c/health sys))})
+        health (:reconciler (c/health sys))
+        _ (alter-var-root #'seon.reconcile/reconciler-proc (constantly old))
+        _ (c/stop! sys)
+        ;; seon.edn/encode: a one-arity plain defn, the shape a direct-linked build may
+        ;; splice, called by the compiled seon.program/method-key
+        old-encode @#'seon.edn/encode
+        before (seon.program/method-key 'a/b "x")
+        _ (binding [*ns* (the-ns 'seon.edn)]
+            (eval (read-string "(defn encode \"redefined\" {:malli/schema [:=> [:cat :any] :string]} [v] \"redefined\")")))
+        after (seon.program/method-key 'a/b "x")
+        _ (alter-var-root #'seon.edn/encode (constantly old-encode))
+        ok (and (pos? @hits) (= "[a/b \"x\"]" before) (= "redefined" after))]
+    (println {:redefined-step-ran @hits :health health
+              :compiled-caller {:before before :after-redefining-its-callee after}})
     (out! (if ok "HOTRELOAD OK" "HOTRELOAD FAIL"))
-    (c/stop! sys)
+    (lib/c-exit (if ok 0 1))))
+
+(defn inference
+  "The release binary keeps a nil test that whole-program inference must not fold
+  (jolt.ns/whole-program-inference-keeps-nil-checks): seon.ref/line-citation of `path:N`,
+  whose `to` is nil, answers the path, as it does uncompiled."
+  []
+  (let [cite (#'seon.ref/line-citation "src/a.clj:50")
+        ok (= "src/a.clj" cite)]
+    (println {:line-citation cite})
+    (out! (if ok "INFERENCE OK" "INFERENCE FAIL"))
     (lib/c-exit (if ok 0 1))))
 
 (defn fx
@@ -1307,23 +1101,6 @@
     (out! (if ok "THREADS OK" "THREADS FAIL"))
     (lib/c-exit (if ok 0 1))))
 
-(defn branch-cost
-  "The writer's :spawn on a fresh LMDB store, n times (seon.db/branch?, then d/branch!):
-  ms per 100, flat in the number of branches (d/branches, which folds the roster, made
-  it O(branches) per spawn: 15 ms at 1,000). A store of its own, the last resort: the
-  roster must start empty for the growth to show."
-  [n]
-  (let [path (str (System/getProperty "user.dir") "/runs/branch-cost-" (lib/c-getpid)) ; this tree's runs, not the shared /tmp
-        {conn :conn} (seon.db/open! :lmdb path 2000 :db)
-        times (vec (for [k (range (quot n 100))]
-                     (let [t0 (lib/now-ns)]
-                       (dotimes [i 100] (seon.db/branch? conn (keyword (str "b" k "-" i))) (d/branch! conn :db (keyword (str "b" k "-" i))))
-                       (lib/r2 (lib/ms-since t0)))))]
-    (println {:ms-per-100 times :branches (count (d/branches conn))})
-    (d/release conn)
-    (clojure.java.shell/sh "rm" "-rf" path)
-    (lib/c-exit 0)))
-
 (defn units
   "The unit table measured on this binary at 1k, 10k and 100k units, and the 10k row as
   seon.cost/units' literal (ns and bytes per unit)."
@@ -1334,46 +1111,6 @@
     (out! "{" (clojure.string/join "\n "
                 (for [[k ms] rows :let [{:keys [ns bytes]} (second ms)]]
                   (str k " {:ns " (lib/r2 ns) " :bytes " (lib/r2 bytes) " :what " (pr-str (:what (cost/unit-benches k))) "}"))) "}")
-    (lib/c-exit 0)))
-
-(defn- web-agent-forms
-  "What a hand-spawned agent of the web demo evaluates: a definition, a proof, a cost proof
-  (green, or red for every third agent: a body that copies its map per row) and a value."
-  [i id]
-  (str "(defn index-by {:malli/schema [:=> [:cat [:sequential :map]] :map]} [rows] "
-       (if (zero? (mod i 3))
-         "(reduce (fn [m r] (assoc (into {} m) (:id r) r)) {} rows))"
-         "(persistent! (reduce (fn [m r] (assoc! m (:id r) r)) (transient {}) rows)))")
-       "\n(defn rows {:malli/schema [:=> [:cat :int] :any]} [n] [(vec (for [k (range n)] {:id k}))])"
-       "\n(deftest index-by-test (is (= {1 {:id 1}} (index-by [{:id 1}]))))"
-       "\n(deftest index-by-cost (seon.cost/proof {:of 'agent." (name id) "/index-by :input 'agent." (name id) "/rows"
-       " :n \"rows\" :work \"one pass: one assoc! per row\" :growth :linear :per-n {:ns 300.0} :sizes [100 1000 10000]}))"
-       "\n(frequencies (map #(mod % 7) (range " (* 100 (inc i)) ")))"))
-
-(defn web-serve
-  "Root with its web (seon.web, lane W2) on 127.0.0.1:(:seon.config.web/port) until
-  stdin closes: n agents spawned by hand, each evaluating a definition, a proof and a cost
-  proof (every third one red), then running its tests (`light`: one evaluation each, for
-  the size sweep); with `calc` the six-task graph and with `swarm m` m tasks over shared
-  definitions, worked by agents the reconciler starts (the scripted model)."
-  [n more]
-  (let [sys (c/start! {:datoms 2000 :max-running 4})
-        ids (vec (for [i (range n)] (c/spawn! sys {:task (str "index rows by id, within a linear cost estimate (#" i ")")})))]
-    (await-status sys ids #{:idle} 10000)
-    (if (= "light" (first more))
-      ;; for the size sweep: one evaluation each, no test forks
-      (doall (pmap (fn [[i id]] @(c/submit! sys id (str "(frequencies (map #(mod % 7) (range " (* 10 (inc i)) ")))"))) (map-indexed vector ids)))
-      (doall (pmap (fn [[i id]] @(c/submit! sys id (web-agent-forms i id)) @(c/run-tests! sys id)) (map-indexed vector ids))))
-    (when-let [k (#{"calc" "swarm"} (first more))]
-      (let [specs (case k "calc" seon.fixtures/calc "swarm" (seon.fixtures/swarm-specs (Long/parseLong (or (second more) "12"))))
-            tns (symbol k)
-            ds (seon.fixtures/decls specs tns nil)]
-        (doseq [tx (seon.fixtures/program-txs @(:conn sys) specs)] @(c/transact-main! sys tx))
-        (my.root/create! sys ds)
-        (my.root/run! sys (mapv #(seon.task/task-id tns (:seon.task/name %)) ds))))
-    (out! "WEB http://127.0.0.1:" (seon.config/value :seon.config.web/port) "/ " (count ids) " agents")
-    (loop [] (when (read-line) (recur)))
-    (c/stop! sys)
     (lib/c-exit 0)))
 
 (defn lease
@@ -1481,8 +1218,6 @@
   (let [[mode n & more] (seon.config/without-overrides args)]
   (case mode
     "seed" (seed (Long/parseLong (or n "2000")))
-    "dur-bench-write" (dur-bench-write n (Long/parseLong (first more)))
-    "dur-bench-read" (dur-bench-read n)
     "durable-write" (durable-write n)
     "durable-read" (durable-read n)
     "window-write" (window-write n)
@@ -1490,9 +1225,7 @@
     "scale" (scale (Long/parseLong (or n "100")))
     "robust" (robust)
     "lifecycle" (lifecycle (Long/parseLong (or n "10")))
-    "deliver" (deliver-check (Long/parseLong (or n "32")))
     "drain" (drain (Long/parseLong (or n "32")))
-    "writers" (writers (or n "mem") (mapv #(Long/parseLong %) (or (seq more) ["1" "8" "32" "256"])))
     "backpressure" (backpressure (Long/parseLong (or n "200")))
     "program" (program)
     "contracts" (contracts)
@@ -1503,23 +1236,19 @@
     "record" (record)
     "orphan" (orphan)
     "lease" (lease)
-    "rtt" (rtt)
     "fx" (fx (Long/parseLong (or n "1000")))
     "system" (system-check)
     "config" (config-check)
     "problems" (problems-check)
     "threads" (threads-check)
     "threads-declared" (threads-declared (Long/parseLong (or n "3")))
-    "branch-cost" (branch-cost (Long/parseLong n))
     "root" (root-serve)
     ;; this checkout's ports as the config resolves them, "ENTRANCE WEB" (bin/ports)
     "ports" (do (println (seon.config/value :seon.config.root/entrance-port) (seon.config/value :seon.config.web/port)) (lib/c-exit 0))
     "mcp" (do (seon.mcp/serve! (seon.config/value :seon.config.root/entrance-port)) (lib/c-exit 0))
     "mcp-proof" (mcp-proof)
     "hotreload" (hotreload)
+    "inference" (inference)
     "swarm" (swarm (Long/parseLong (or n "100")))
-    "soak" (soak (Long/parseLong (or n "50")) (Long/parseLong (or (first more) "60")) (some-> (second more) Long/parseLong))
-    "mem" (mem (Long/parseLong (or n "100")) 3)
-    "web" (web-serve (Long/parseLong (or n "6")) more)
     "idle" (idle (Long/parseLong (or n "5000")))
     (smoke))))

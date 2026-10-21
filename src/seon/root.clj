@@ -275,8 +275,8 @@
         (reply! st p (no-agent op (gone id (str "no live agent " id))))
         (let [[st rid] (rid! st)
               msg (case op
-                    :eval (cond-> {:op :eval :forms (:forms m)} (:timeout-ms m) (assoc :timeout-ms (:timeout-ms m)) (:origin m) (assoc :origin (:origin m)))
-                    (:tests :merge-tests) {:op :tests :timeout-ms (:timeout-ms m)}
+                    :eval (cond-> {:op :eval :forms (:forms m)} (:ticks m) (assoc :ticks (:ticks m)) (:origin m) (assoc :origin (:origin m)))
+                    (:tests :merge-tests) (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m)))
                     :stats {:op :stats}
                     :ping {:op :ping}
                     :merge-main {:op :merge-main :data-attrs (:data-attrs m)})]
@@ -287,10 +287,6 @@
                    dest (case (:op req) :merge-main {:merge-main (:agent req) :rid rid} :merge {:merged (:agent req) :rid rid} {:rid rid})]
                (step/out! o :to-writer (assoc (dissoc req :agent) :dest dest))
                (-> (pend st rid p (:op req) nil) (update :writes (fnil conj #{}) rid)))
-      :stop (if (get-in st [:agents id])
-              (let [[st rid] (rid! st)]
-                (to-agent (pend st rid p :stop id) id {:op :drain :rid rid}))
-              (reply! st p {:stopped true :agent id :already true}))
       :kill (cond-> (if (get-in st [:agents id])
                       ;; :ended when root stops it because its attempt ended (the reconciler says so)
                       (-> st (set-agent id {:status (if (:ended m) :ended :killed)}) (to-agent id {:op :kill}))
@@ -600,7 +596,7 @@
         config (-> (cfg/with-provider cfg/config provider) (assoc :seon.config.agent/max-running max-running))
         program (program/load-all! @conn)
         program-ms (lib/ms-since t1)
-        contracts (contract/instrument! '[seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])
+        contracts (contract/instrument! '[seon.edn seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])
         _ (warm! conn)
         _ (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
         _ (lib/static!)
@@ -613,7 +609,7 @@
         ;; every event, for the API's taps (seon.root/events) and the render proc's (W2)
         events-mult (a/mult events-in)
         chans {:ext (a/chan 1024) :back (a/chan 4096) :to-writer (a/chan (cfg/value :seon.config.root/writer-buf))
-               :server-ev (a/chan 4096) :stop-ch (a/promise-chan)
+               :server-ev (a/chan 4096)
                ;; outside agents' attempts handed back for judgement (seon.entrance)
                :judge (a/chan 64)}
         view {:agents {} :writer {:tx-count 0} :stats {}
@@ -740,12 +736,13 @@
 
 (defn submit!
   "Send forms (a string) to the agent; a promise of the reply vector, one map per form.
-  opts {:timeout-ms n}: each form is bounded at n ms; {:origin :outside|:ui}: who asked,
-  recorded with each evaluation."
+  opts {:ticks n}: each form stops after n engine ticks of work (an outside or ui origin
+  takes :seon.config.agent/form-ticks by default); {:origin :outside|:ui}: who asked, recorded
+  with each evaluation."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id :string] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :string [:maybe :map]] :seon.host/promise]]}
   ([sys agent-id forms-string] (submit! sys agent-id forms-string nil))
-  ([sys agent-id forms-string {:keys [timeout-ms origin]}]
-   (call! sys (cond-> {:op :eval :id agent-id :forms forms-string} timeout-ms (assoc :timeout-ms timeout-ms) origin (assoc :origin origin)))))
+  ([sys agent-id forms-string {:keys [ticks origin]}]
+   (call! sys (cond-> {:op :eval :id agent-id :forms forms-string} ticks (assoc :ticks ticks) origin (assoc :origin origin)))))
 
 (defn judge!
   "Hand an outside agent's attempt to the reconciler for judgement, as a turn loop's end
@@ -756,10 +753,10 @@
 
 (defn run-tests!
   "The agent forks itself and runs its deftests in the child; a promise of
-  {:pass :fail :error :reports [...]}."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :int] :seon.host/promise]]}
-  ([sys agent-id] (run-tests! sys agent-id 30000))
-  ([sys agent-id timeout-ms] (call! sys {:op :tests :id agent-id :timeout-ms timeout-ms})))
+  {:pass :fail :error :reports [...]} (the run is bounded by its work: :seon.config.agent/test-ticks)."
+  {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id pos-int?] :seon.host/promise]]}
+  ([sys agent-id] (call! sys {:op :tests :id agent-id}))
+  ([sys agent-id ticks] (call! sys {:op :tests :id agent-id :ticks ticks})))
 
 (defn agent-stats! "A promise of the agent's numbers now." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
   [sys agent-id] (call! sys {:op :stats :id agent-id}))
@@ -791,7 +788,7 @@
        (not (:branch ag)) (doto (promise) (deliver (refused 'seon.root/merge! (str "no agent " agent-id) {:merged? false})))
        (not gate?) (write! sys {:op :merge :branch (:branch ag) :agent agent-id :data-attrs data-attrs})
        (#{:dead :killed :ended} (:status ag)) (doto (promise) (deliver (refused 'seon.root/merge! "agent not running, so its tests cannot run; merge with {:gate? false}" {:merged? false})))
-       :else (call! sys {:op :merge-tests :id agent-id :merge-branch (:branch ag) :data-attrs data-attrs :timeout-ms 30000})))))
+       :else (call! sys {:op :merge-tests :id agent-id :merge-branch (:branch ag) :data-attrs data-attrs})))))
 
 (defn merge-main!
   "git merge main, on the agent's branch (seon.merge): main's changes since the merge base
@@ -823,6 +820,11 @@
 (defn branch-info "The writer's view of an agent's branch: {:datoms :t :log}. A promise." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
   [sys agent-id]
   (write! sys {:op :branch-info :branch (:branch (agent-entry sys agent-id))}))
+
+(defn effect!
+  "Root's own effect: kind with req through its owner proc. A promise of its outcome."
+  {:malli/schema [:=> [:cat :seon.root/sys :keyword :map] :seon.host/promise]}
+  [sys kind req] (call! sys {:op :fx :kind kind :req req}))
 
 (defn transact-main!
   "Root's own write to main. A promise. opts {:flush? true}: answered only after the
@@ -875,21 +877,6 @@
   ([sys agent-id] (agent-ping sys agent-id 1000))
   ([sys agent-id ms] (let [r (deref (call! sys {:op :ping :id agent-id}) ms :unknown)] (if (and (map? r) (:status r)) r :unknown))))
 
-(defn stop-agent!
-  "Flow's stop for one agent: it exits after the requests before the stop; root awaits
-  its death, SIGKILLs past seon.agent-proc/stop-bound-ms. Answers {:stopped true ...} or :timeout."
-  {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :any]}
-  [sys agent-id]
-  (let [p (call! sys {:op :stop :id agent-id})]
-    (if (= ::late (deref p ap/stop-bound-ms ::late))
-      (do (kill! sys agent-id) (deref p 5000 :timeout))
-      @p)))
-
-(defn freeze! "SIGSTOP the agent's process. nil." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
-  [sys agent-id] (some-> (:pid (agent-entry sys agent-id)) (lib/c-kill lib/SIGSTOP)) nil)
-(defn thaw! "SIGCONT the agent's process. nil." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
-  [sys agent-id] (some-> (:pid (agent-entry sys agent-id)) (lib/c-kill lib/SIGCONT)) nil)
-
 (defn fs-call! "Ask the fork server for {:op :stats} or {:op :static}." {:malli/schema [:=> [:cat :seon.root/sys :seon.root/request] :any]}
   [sys msg] (deref (call! sys {:op :fs :req msg}) 30000 :timeout))
 
@@ -920,7 +907,6 @@
       (a/>!! (:back sys) {:op :kill-all}))
     (let [drained (deref p 15000 :timeout)
           graph (flow/stop (:graph sys))]
-      (a/put! (:stop-ch sys) true)
       (some-> ^Thread (:errors sys) (.join 5000))
       (a/close! (:events-in sys))
       ;; the store is released and kept, whoever gave its path

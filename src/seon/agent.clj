@@ -259,6 +259,10 @@
     (cond-> {:type (:type m) :var var :message (:message m)}
       (not= :pass (:type m)) (assoc :expected (print/text (:expected m) (:part print/budgets))
                                     :actual (print/text (:actual m) (:part print/budgets)))
+      ;; what the assertion evaluated to: clojure.test reports a failed (is (pred a b)) as
+      ;; (not (pred a' b')), so its second element; the agent reads it beside the assertion
+      (and (= :fail (:type m)) (seq? (:actual m)) (= 'not (first (:actual m))))
+      (assoc :got (print/text (second (:actual m)) (:part print/budgets)))
       (contract/valid? :seon.cost/report cost) (assoc :cost cost))))
 
 (defn test-namespaces
@@ -272,14 +276,20 @@
 
 (defn- run-tests-here
   "clojure.test over test-namespaces of the branch, with the branch's schemas in effect (malli's
-  dynamic registry bound to seon.program/schema-registry, as the agent's REPL binds it);
-  answers report data."
-  {:malli/schema [:=> [:cat] :seon.test/result]}
-  []
+  dynamic registry bound to seon.program/schema-registry, as the agent's REPL binds it), the
+  whole run within ticks engine ticks of work: answers report data. Each test var is written
+  to w as it starts ({:started v}), so the agent can name the test a death interrupted; a run
+  past its ticks stops with the typed :seon.test/ticks-spent naming the test that was running."
+  {:malli/schema [:=> [:cat :int pos-int?] :seon.test/result]}
+  [w ticks]
   (let [reports (atom [])
+        started (atom nil)
         orig t/report
         nss (test-namespaces (db))
-        counts (binding [t/report (fn [m]
+        r (try (binding [t/report (fn [m]
+                                    (when (= :begin-test-var (:type m))
+                                      (reset! started (str (:var m)))
+                                      (lib/write-line! w (pr-str {:started @started})))
                                     (when (#{:pass :fail :error} (:type m))
                                       (swap! reports conj (test-report m (some-> (first t/*testing-vars*) str))))
                                     (orig m))
@@ -287,25 +297,38 @@
                          mr/*registry* (program/schema-registry (program/schema-changes (db)))]
                  ;; test-ns tests the vars interned now (Jolt's run-tests also runs its
                  ;; registry, which keeps a test after ns-unmap)
-                 (apply merge-with + {:test 0 :pass 0 :fail 0 :error 0}
-                        (map #(select-keys (t/test-ns %) [:test :pass :fail :error]) nss)))]
-    {:pass (:pass counts 0) :fail (:fail counts 0) :error (:error counts 0) :test (:test counts 0)
-     :reports @reports}))
+                 (jolt.host/run-interruptible (jolt.host/make-interrupt) #(doseq [nsx nss] (t/test-ns nsx)) ticks)
+                 nil)
+               (catch Throwable e
+                 (if-let [n (:jolt/ticks-spent (ex-data e))]
+                   (contract/error :seon.test/ticks-spent 'seon.agent/run-tests-forked
+                                   (str "the test run spent its budget of " ticks " engine ticks (work done, not time)"
+                                        (when @started (str " in " @started)) ": a test that never ends, or more work than the run allows")
+                                   (cond-> {:ticks n :budget ticks} @started (assoc :test @started)))
+                   (throw e))))
+        reports (cond-> @reports
+                  r (conj (cond-> {:type :error :message (:seon.error/message r) :seon.error/type (:seon.error/type r)
+                                   :ticks (:ticks r) :budget ticks}
+                            @started (assoc :var @started))))
+        counts (frequencies (map :type reports))]
+    {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
+     :reports reports}))
 
 (defn- ffi-status
-  "Reap the test child (killing it first when kill?); answers its decoded exit status."
-  {:malli/schema [:=> [:cat :seon.lib/pid :boolean] :seon.lib/exit-status]}
-  [pid kill?]
-  (when kill? (lib/c-kill pid 9))
+  "Reap the test child; answers its decoded exit status."
+  {:malli/schema [:=> [:cat :seon.lib/pid] :seon.lib/exit-status]}
+  [pid]
   (let [b (ffi/alloc 4)]
     (lib/c-waitpid pid b 0)
     (lib/decode-status (ffi/read b :int))))
 
 (defn run-tests-forked
-  "Fork this agent; the child runs the tests and writes one EDN line on a pipe. A child
-  that does not answer in timeout-ms is killed."
-  {:malli/schema [:=> [:cat :int] :seon.test/result]}
-  [timeout-ms]
+  "Fork this agent; the child runs the tests within ticks engine ticks of work, writing
+  each test var as it starts and then one EDN line of its result on a pipe. The agent reads
+  the pipe to its end: no clock; the child ends by finishing, by its budget, or by dying
+  (then the last test it started is named)."
+  {:malli/schema [:=> [:cat pos-int?] :seon.test/result]}
+  [ticks]
   (let [[r w] (lib/pipe) t0 (lib/now-ns) pid (lib/safe-fork 1000)]
     (cond
       (= pid -2)
@@ -314,32 +337,32 @@
            :reports [{:type :error :message "cannot fork the tests: another thread of this agent stayed busy for 1 s (a running future?)"}]})
       (zero? pid)
       (do (lib/c-close r)
-          ;; die with the agent: it kills this child at the bound; if the agent dies itself,
-          ;; the engine timer sees this process re-parented and exits (no watcher thread).
-          ;; The agent's socket is FD_CLOFORK: this child does not hold it.
+          ;; the run ends by its budget; if the agent dies first, the next write to the
+          ;; pipe ends this child (EPIPE). The agent's socket is FD_CLOFORK: not held here.
           (lib/set-trip! (* 16 1048576))
           (swap! state assoc :mode :test :evaluating false)
-          (let [agent-pid (lib/c-getppid)
-                res (try (lib/run-bounded (fn [] (not= agent-pid (lib/c-getppid))) (fn [] (lib/c-exit 0)) run-tests-here)
+          (let [res (try (run-tests-here w ticks)
                          (catch Throwable e {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]}))]
             (lib/write-line! w (pr-str res)))
           (lib/c-exit 0))
       :else
       (do (lib/c-close w)
           (let [rd (lib/line-reader r)
-                deadline (+ t0 (* timeout-ms 1000000))
-                line (loop []
-                       (let [left (quot (- deadline (lib/now-ns)) 1000000)]
-                         (if (<= left 0)
-                           :timeout
-                           (let [ls (rd (min left 1000))]
-                             (cond (= ls :eof) :eof (seq ls) (first ls) :else (recur))))))
-                st (ffi-status pid (keyword? line))]
+                [line started] (loop [started nil]
+                                 (let [ls (rd -1)]
+                                   (if (= ls :eof)
+                                     [nil started]
+                                     (let [ms (map read-string ls)
+                                           res (first (remove :started ms))]
+                                       (if res
+                                         [res started]
+                                         (recur (or (:started (last ms)) started)))))))
+                st (ffi-status pid)]
             (lib/c-close r)
-            (assoc (cond
-                     (string? line) (read-string line)
-                     (= line :timeout) {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (str "tests timed out after " timeout-ms " ms; killed")}]}
-                     :else {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (str "test process died: " st)}]})
+            (assoc (or line
+                       {:pass 0 :fail 0 :error 1
+                        :reports [(cond-> {:type :error :message (str "test process died: " st (when started (str " while " started " ran")))}
+                                    started (assoc :var started))]})
                    :ms (lib/ms-since t0) :pid pid :exit st))))))
 
 ;; ---- the loop ----------------------------------------------------------------------
@@ -357,6 +380,9 @@
       (refer 'my.db)
       (refer 'my.agent)
       (refer 'clojure.repl :only '[doc])
+      ;; interned because Jolt's clojure.repl lacks source-fn and source (its vars carry no file and line to read), and an agent reads source from its branch's db
+      (doseq [s '[source-fn source] :let [v (ns-resolve 'my.agent s)]]
+        (intern (find-ns 'clojure.repl) (with-meta s (select-keys (meta v) [:macro])) @v))
       (alias 'd 'datahike.api)
       (alias 'str 'clojure.string))
     nsx))
@@ -380,7 +406,7 @@
   {:malli/schema [:=> [:cat :seon.wire/seon-msg] [:maybe [:vector :seon.wire/seon-msg]]]}
   [m]
   (case (:op m)
-    :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:timeout-ms m) 30000)) :mem-mb (mem-mb)}]
+    :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))) :mem-mb (mem-mb)}]
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
     :fx-reply (let [kind (get-in @state [:fx-pending (:k m)])
                     r (dissoc m :op :k)]
@@ -462,7 +488,7 @@
                 ((:serve @state)))
               (lib/c-exit 0))
             :else
-            (do (ffi-status pid1 false)
+            (do (ffi-status pid1)
                 (sock/close! fd)
                 (send! {:op :cloned :k k :clone (:agent m)}))))))))
 

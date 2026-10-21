@@ -34,12 +34,6 @@
   (try (read-all text nsym)
        (catch Throwable _ nil)))
 
-(defn read-one
-  "The first form of text, written in namespace nsym (nil when it has none)."
-  {:malli/schema [:=> [:cat :string :symbol] :any]}
-  [text nsym]
-  (e/parse-string text (opts nsym)))
-
 ;; ---- the forgiving reader: a model's reply as source (idea 8) ----------------------------
 ;;
 ;; A model's reply mixes prose and code. `forgive` makes it source a REPL reads: prose
@@ -200,10 +194,3 @@
   (let [r (scan reply false)
         r (if (pos? (:delimiters r)) (scan reply true) r)]
     (select-keys r [:text :repairs])))
-
-(defn unforgive
-  "The reply forgive was given, from its answer: each repair undone, last first."
-  {:malli/schema [:=> [:cat [:map [:text :string] [:repairs [:vector [:map [:at :int] [:dropped :string] [:inserted :string]]]]]] :string]}
-  [{:keys [text repairs]}]
-  (reduce (fn [t {:keys [at dropped inserted]}] (str (subs t 0 at) dropped (subs t (+ at (count inserted)))))
-          text (rseq repairs)))

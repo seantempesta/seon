@@ -23,11 +23,11 @@
   out; a tab that opened or fell behind gets a keyframe composed here from the retained
   fragments, rendering nothing."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str] [clojure.edn :as edn]
+  (:require [seon.contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.ai :as ai]
             [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.context :as context] [seon.print :as print]
-            [seon.config :as config]))
+            [seon.config :as config] [seon.edn :as sedn]))
 
 (def EVENT-CAP "Events the stream keeps." 60)
 (def SERIES-CAP "Points a sparkline keeps: the newest changes (a writer batch, a fork, a main commit)." 60)
@@ -266,34 +266,19 @@
     (with-meta (vec (take-last HISTORY-CAP (sort-by key rows))) {:total (count rows)})))
 
 (defn- context-of
-  "The current-state block the agent's model reads, rebuilt now from root's view (its
-  attempt's results, its last test run, its newest evaluations) and printed as the turn
-  prints it, or why there is none."
+  "The context the agent's reader last got, exactly as recorded on db (seon.context/recorded:
+  a model turn's message or an outside read), or why there is none."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :map] :map] :map]}
   [db attempt ag]
-  (let [tid (:seon.attempt/task attempt)
-        t (when (and db tid) (task/task db tid))]
+  (let [r (when (and db attempt) (context/recorded db (:seon.attempt/id attempt)))]
     (cond
       (nil? attempt) {:why (str "no attempt on main: spawned by hand"
                                 (when (:task ag) (str " with the description \"" (:task ag) "\""))
                                 ", not for a task, so no model works it and there is no current-state block;"
                                 " its REPL and evaluations are above. A task's agent is started by the reconciler"
                                 " (my.root/run! sys [task-id]) or attached through root's entrance ({:op :attach :task id}).")}
-      (nil? t) {:why (str "task " tid " is not on its branch yet")}
-      :else
-      (if-let [read (last (filter ui/context-read? (:evals ag)))]
-        ;; it reads its context through the door: the text it last read, as is (one text)
-        {:text (:out read) :tokens (ai/tokens (or (:out read) "")) :from :door}
-      (let [block (context/current-state db t {:results (:seon.attempt/results attempt {})
-                                               :reds (vec (for [r (get-in ag [:tests :reports]) :when (not= :pass (:type r))]
-                                                            (assoc (select-keys r [:message :expected :actual]) :test (:var r))))
-                                               ;; a context read is not an evaluation of its work
-                                               :last-items (vec (take-last 3 (remove ui/context-read? (:evals ag))))
-                                               :turn (or (:seon.attempt/turns attempt) 0)
-                                               :max-turns (get-in attempt [:seon.attempt/env :max-turns] 0)})
-            ;; printed exactly as the turn prints it for the model (seon.context/messages)
-            text (:content (second (context/messages block)))]
-        {:text text :tokens (ai/tokens text)})))))
+      (nil? r) {:why (str "no context read yet in attempt " (:seon.attempt/id attempt))}
+      :else {:text (:text r) :tokens (ai/tokens (:text r)) :origin (:origin r) :turn (:turn r)})))
 
 (defn- zoom-value
   "The agent page's value (:seon.render/agent-page) for agent id, and the zoom's state with
@@ -308,7 +293,7 @@
         rows (reduce (fn [rows [eid r]]
                        (if (contains? rows eid)
                          rows
-                         (assoc rows eid (h/html (:seon.render/html (ui/history-row (if (string? r) (edn/read-string r) r) {:seon.render/budget 400}))))))
+                         (assoc rows eid (h/html (:seon.render/html (ui/history-row (if (string? r) (sedn/decode r) r) {:seon.render/budget 400}))))))
                      (select-keys (:rows z {}) (map first records)) records)
         ctx-key [(:t z) (:seon.attempt/id attempt) (:seon.attempt/turns attempt) (:tests ag)]
         ;; a new context read is a new evaluation of the agent's
