@@ -3,16 +3,20 @@
 - one Markdown parse of any text: a plan, a doc page, a docstring;
 - the delimiter picks the depth: a bare word that names a real entity is its summary; one backtick or a link is its doc; three or more backticks is its code; two backticks is a literal and never a reference;
 - a name cited several times is shown once, at its strongest depth;
-- line citations (`src/seon/writer.clj:263`) resolve to their file;
+- a line citation (`src/seon/writer.clj:263`) is v1's shape: its candidate carries the file path, so the file is a reference, plus `:seon.ref/problem-kind :line-reference` (owner, 2026-10-21); whether that is red is `the-wiki-stays-true-and-healthy`'s call;
 - a section's summary is its heading plus its lead's first sentence (v1 `lead-sentence`, `section-view`).
-Resolve names against next/'s program facts (`:var/name`), not v1's `:seon.fn/sym`. Drop v1's cache, sci and embedding hooks. Markdown on Jolt: the only Markdown library in awesome-jolt renders HTML and gives no tree, so write the minimum exact scanner (headings outside fences, code spans with their backtick width, links), proven by v1's ported tests.
+Resolve names against next/'s program facts (`:var/name`), not v1's `:seon.fn/sym`. Drop v1's cache, sci and embedding hooks. Markdown on Jolt: the only Markdown library in awesome-jolt renders HTML and gives no tree, so write the minimum exact scanner for the CommonMark subset the rule needs (ATX headings with GitHub-style anchors, fenced code blocks of ``` or ~~~, code spans by CommonMark's equal-length backtick rule, inline links, paragraph boundaries for leads), proven by v1's ported tests and by CommonMark spec examples for that subset as table rows. One parse returns the value `docs-are-data-in-the-store` will store: sections (address, heading, lead, parent) and citations (what, depth, line).
 Replaces `seon.reconcile/references` (backtick-only) everywhere: the context's current-state, `hairy` and the docs check. Read first: what v1 did here (above); there is no declared reference list or key anywhere (no `Describes` line, no hand-kept task reference keys, no `:pattern-of`); references are only what text cites."
   :seon.task/kind :work
   :seon.task/proofs #{seon.ref-test/one-text-gives-names-paths-and-line-citations-by-one-rule
                       seon.ref-test/the-delimiter-picks-the-depth
                       seon.ref-test/a-literal-and-fenced-code-are-not-references
                       seon.ref-test/a-bare-word-is-a-reference-only-when-it-names-something
-                      seon.ref-test/a-name-is-shown-once-at-its-strongest-depth}}
+                      seon.ref-test/a-name-is-shown-once-at-its-strongest-depth
+                      seon.ref-test/a-line-citation-is-its-file-marked-line-reference
+                      seon.ref-test/commonmark-examples-for-the-subset
+                      seon.ref-test/a-section-summary-is-its-heading-and-leads-first-sentence
+                      seon.ref-test/one-parse-costs-one-pass}}
  {:seon.task/name "docs-are-data-in-the-store"
   :seon.task/plan "The wiki (next/docs/*.md) is loaded into the store as data, written only where a page's digest changed, like task files (`seon.task/load-tx`): a section entity per heading with its address `topic#slug`, title, lead, own text and parent; its references are what its text cites, read by the one reader (`one-reference-reader`): links become refs to sections, cited names refs to var entities, file citations refs to file entities. A section's backlinks are who cites it, so a pattern's home knows its instances by its backlinks, with no extra key. A var's home is the section that cites it at code depth. Docs merge as data (a doc change on a branch merges like any other). Loaded at boot and on demand (`my.root/load-docs!`)."
   :seon.task/kind :work

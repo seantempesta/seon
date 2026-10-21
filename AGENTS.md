@@ -174,7 +174,7 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
 ## 6. The docs are a wiki, and the system's memory
 
 - **Pages:** `docs/<topic>.md`, one concept per page. `docs/README.md` is a map of the topics, not a file list, so a research step can find what's relevant. A section is addressed `topic#slug`. The docs are mirrored in the database, their references resolved by the parser.
-- **References are what the text cites, read by one parser** (v1's `seon.ref`, no declared lists): a link reaches a section, a backticked name reaches a var, a `file.clj:263` citation reaches its file. A docstring's citations are its definition's references, a plan's are its task's, a section's are its own; the context pulls them in automatically, and a section's backlinks say who cites it.
+- **References are what the text cites, read by one parser** (v1's `seon.ref`, no declared lists): a link reaches a section, a backticked name reaches a var, a `file.clj:263` citation reaches its file and is marked `:line-reference` (v1's shape: line numbers go stale, so prefer citing the var). A docstring's citations are its definition's references, a plan's are its task's, a section's are its own; the context pulls them in automatically, and a section's backlinks say who cites it.
 - **Depth follows the delimiter** (v1's `seon.ref`):
   - a bare name pulls its summary;
   - `` `name` `` or a link pulls its doc;
