@@ -17,8 +17,8 @@
 (defn seed-tx
   "Transactions of an example program sized by n (the test store's and the check store's
   seed, never a root's own): n/110 namespaces (none below 110), each one tx of the
-  namespace and its 20 functions (each a form and its var: 11 datoms, so about 2n datoms
-  in all), then one tx of a task referring to two of its vars."
+  namespace and its 20 contracted functions (each a form and its var: 12 datoms, so about
+  2n datoms in all), then one tx of a task referring to two of its vars."
   {:malli/schema [:=> [:cat :int] [:sequential :seon.db/tx-data]]}
   [n]
   (let [nns (quot n 110)]
@@ -26,11 +26,11 @@
               (let [nsym (symbol (str "app.m" k))]
                 [(into [{:db/id "ns" :ns/name nsym :ns/doc (str "Module " k " of the example program.")}]
                        (for [i (range 20)
-                             :let [src (str "(defn f" i " [x] (+ x " i "))")]
+                             :let [src (str "(defn f" i " {:malli/schema [:=> [:cat :int] :int]} [x] (+ x " i "))")]
                              e [{:db/id (str "form " i) :form/id (str nsym "/f" i) :form/src src :form/ns "ns" :form/order i
                                  :form/defines [(str "var " i)]}
                                 {:db/id (str "var " i) :var/name (symbol (str nsym) (str "f" i)) :var/ns "ns" :var/doc (str "f" i " of module " k)
-                                 :var/form (str "form " i) :var/kind :fn :var/arity 1}]]
+                                 :var/form (str "form " i) :var/kind :fn :var/contract "[:=> [:cat :int] :int]" :var/arity 1}]]
                          e))
                  [{:task/name (keyword (str "app.m" k) "tidy") :task/plan (str "Tidy module " k ": name every value by its schema.")
                    :task/status :held :task/refs [[:var/name (symbol (str nsym) "f0")] [:var/name (symbol (str nsym) "f1")]]}]]))
