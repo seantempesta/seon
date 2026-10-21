@@ -80,6 +80,18 @@
   (d/transact conn {:tx-data schema})
   (doseq [tx (seed-tx n)] (d/transact conn {:tx-data tx})))
 
+(defn- install-missing!
+  "Transact the attributes of `schema` the db under conn lacks, in one transaction, and
+  answer how many: a kept store seeded before an attribute existed gains it when a root
+  opens it (Datahike accepts new attribute definitions at any time). Nothing missing
+  writes nothing."
+  {:malli/schema [:=> [:cat :seon.host/conn] :int]}
+  [conn]
+  (let [have (d/schema @conn)
+        missing (vec (remove #(contains? have (:db/ident %)) schema))]
+    (when (seq missing) (d/transact conn {:tx-data missing}))
+    (count missing)))
+
 ;; ---- one store, many branches, as in production (owner, 2026-10-21) ------------
 ;; A store holds one seed on :db. Every root works on a main of its own, a branch of :db
 ;; (production's root works on :db itself; each check step, each run, each test on a
@@ -181,10 +193,11 @@
       (d/create-database cfg)
       (let [conn (d/connect cfg)] (seed! conn n) (when-not (= :db main) (d/release conn))))
     (let [[conn existed?] (open-main! cfg main)
+          added (install-missing! conn)
           cfg (cond-> cfg (not= :db main) (assoc :branch main))]
-      ;; durable before root runs: the seed or the new branch (an fsync, ~5-10 ms); a
-      ;; recovered main wrote nothing
-      (when-not (and exists? existed?) (sync! cfg))
+      ;; durable before root runs: the seed, the new branch or the added attributes (an
+      ;; fsync, ~5-10 ms); a recovered main with its schema whole wrote nothing
+      (when-not (and exists? existed? (zero? added)) (sync! cfg))
       {:cfg cfg :conn conn :recovered? (and exists? existed?) :seeded? (not exists?)})))
 
 (defn lease!

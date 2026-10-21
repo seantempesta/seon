@@ -626,8 +626,10 @@
                           :events-in events-in :events-mult events-mult :errors errors})
         ]
     (flow/resume g)
-    ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is
-    @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (into (task/boot-tx boot max-running) (cfg/facts config cfg/sources))}})
+    ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is; a root
+    ;; whose boot fact was refused cannot start anything, so its refusal ends the boot
+    (let [r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (into (task/boot-tx boot max-running) (cfg/facts config cfg/sources))}})]
+      (when-not (:ok r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r (:error r))) r))))
     sys))
 
 ;; ====================================================================================
