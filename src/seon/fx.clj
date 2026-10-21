@@ -69,11 +69,11 @@
     (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path root}))))
 
 (defn- git!
-  "git in dir with args (an env prefix first when given), its trimmed output; a failure
-  throws its stderr (read-source and git-commit answer it as :seon.fx/io-error)."
-  {:malli/schema [:=> [:cat [:maybe :string] :string [:sequential :string] [:maybe :string]] :string]}
-  [index dir args in]
-  (let [cmd (concat (when index ["env" (str "GIT_INDEX_FILE=" index)]) ["git" "-C" dir] args)
+  "git in dir with args, under the environment variables env adds ({name value}), its
+  trimmed output; a failure throws its stderr (git-commit answers it as :seon.fx/io-error)."
+  {:malli/schema [:=> [:cat [:map-of :string :string] :string [:sequential :string] [:maybe :string]] :string]}
+  [env dir args in]
+  (let [cmd (concat (when (seq env) (cons "env" (for [[k v] (sort env)] (str k "=" v)))) ["git" "-C" dir] args)
         r (if in (apply sh/sh (concat cmd [:in in])) (apply sh/sh cmd))]
     (when-not (zero? (:exit r))
       (throw (ex-info (str "git " (first args) ": " (str/trim (str (:err r) (:out r)))) {})))
@@ -94,16 +94,20 @@
     (try
       (let [ref (str "refs/heads/" branch)
             have? (zero? (:exit (sh/sh "git" "-C" dir "rev-parse" "--verify" "--quiet" ref)))
-            parent (git! nil dir ["rev-parse" "--verify" (if have? ref "HEAD")] nil)
-            gp (git! nil dir ["rev-parse" "--git-path" (str "seon-index-" (lib/c-getpid))] nil)
+            parent (git! {} dir ["rev-parse" "--verify" (if have? ref "HEAD")] nil)
+            gp (git! {} dir ["rev-parse" "--git-path" (str "seon-index-" (lib/c-getpid))] nil)
             index (if (str/starts-with? gp "/") gp (str dir "/" gp))]
         (try
-          (git! index dir ["read-tree" parent] nil)
+          (git! {"GIT_INDEX_FILE" index} dir ["read-tree" parent] nil)
           (doseq [[path text] (sort files)]
-            (git! index dir ["update-index" "--add" "--cacheinfo" (str "100644," (git! nil dir ["hash-object" "-w" "--stdin"] text) "," path)] nil))
-          (let [sha (git! nil dir ["commit-tree" (git! index dir ["write-tree"] nil) "-p" parent "-m" message] nil)]
+            (git! {"GIT_INDEX_FILE" index} dir ["update-index" "--add" "--cacheinfo" (str "100644," (git! {} dir ["hash-object" "-w" "--stdin"] text) "," path)] nil))
+          ;; Seon is the committer and author of its merges (the config's identity): a
+          ;; root's HOME is its checkout's target/home, which holds no git identity
+          (let [who (cfg/value :seon.config.source/committer-name) mail (cfg/value :seon.config.source/committer-email)
+                sha (git! {"GIT_AUTHOR_NAME" who "GIT_AUTHOR_EMAIL" mail "GIT_COMMITTER_NAME" who "GIT_COMMITTER_EMAIL" mail}
+                          dir ["commit-tree" (git! {"GIT_INDEX_FILE" index} dir ["write-tree"] nil) "-p" parent "-m" message] nil)]
             ;; only from the head read above; a new branch only if none appeared meanwhile
-            (git! nil dir ["update-ref" ref sha (if have? parent "0000000000000000000000000000000000000000")] nil)
+            (git! {} dir ["update-ref" ref sha (if have? parent "0000000000000000000000000000000000000000")] nil)
             {:value {:sha sha :files (count files)}})
           (finally (.delete (java.io.File. ^String index)))))
       (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path dir})))))

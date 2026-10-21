@@ -6,7 +6,7 @@
   performer. Never the live tree: write-back and commits go to a copy under target/."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.shell :as sh]
-            [clojure.string :as str]
+            [clojure.string :as str] [seon.config :as config]
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.fx :as fx]
@@ -125,11 +125,12 @@
 
 (deftest a-merge-is-committed-on-the-merges-branch
   (let [tree (scratch-dir "git")
+        ;; the base commit is the test's own; the tree holds no identity of its own, as a
+        ;; root's checkout has none under its HOME (target/home)
         _ (do (git tree "init" "-q" "-b" "main")
-              (git tree "config" "user.email" "seon@localhost") (git tree "config" "user.name" "seon")
               (.mkdirs (java.io.File. (str tree "/src/app")))
               (spit (str tree "/src/app/pt_src.clj") pt-text)
-              (git tree "add" "src") (git tree "commit" "-q" "-m" "base"))
+              (git tree "add" "src") (git tree "-c" "user.name=test" "-c" "user.email=test@localhost" "commit" "-q" "-m" "base"))
         main-sha (git tree "rev-parse" "main")
         [main2 ours] (merged (main-with-file) 'app.pt-src "(defn twice [x] (* 2 x))")
         files (source/files main2 (source/changed-nss ours))
@@ -148,6 +149,10 @@
     (is (= (get files "src/app/pt_src.clj") (str (git tree "show" (str (get-in r [:value :sha]) ":src/app/pt_src.clj")) "\n")) "the merged text is what was committed")
     (is (= ["src/app/pt_src.clj"] (str/split-lines (git tree "diff" "--name-only" "main" (get-in r [:value :sha])))) "only the merged file")
     (is (str/includes? (git tree "log" "-1" "--format=%B" (get-in r [:value :sha])) "app.pt/twice#1") "the message names the attempt")
+    (is (= (str (config/value :seon.config.source/committer-name) " <" (config/value :seon.config.source/committer-email) "> "
+                (config/value :seon.config.source/committer-name) " <" (config/value :seon.config.source/committer-email) ">")
+           (git tree "log" "-1" "--format=%an <%ae> %cn <%ce>" (get-in r [:value :sha])))
+        "Seon authors and commits its merges, by the config's identity, whatever HOME holds")
     (testing "a refused commit is the declared error, never a throw"
       (is (= :seon.fx/io-error (:seon.error/type (fx/git-commit {:req {:dir (str tree "/nope") :branch "jolt/seon-merges" :files files :message msg}}))))))
   (is (= {:value {:sha nil :files 0}} (fx/git-commit {:req {:dir "/nonexistent" :branch "b" :files {} :message "m"}}))

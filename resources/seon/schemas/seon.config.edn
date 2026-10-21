@@ -45,6 +45,8 @@
   [:seon.config.source/root {:optional true} :seon.config.source/root]
   [:seon.config.source/dirs :seon.config.source/dirs]
   [:seon.config.source/branch :seon.config.source/branch]
+  [:seon.config.source/committer-name :seon.config.source/committer-name]
+  [:seon.config.source/committer-email :seon.config.source/committer-email]
   ;; effects and the model
   [:seon.config.fx/buf :seon.config.fx/buf]
   [:seon.config.ai/provider :seon.config.ai/provider]
