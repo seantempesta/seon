@@ -369,6 +369,8 @@
       ;; whose answer goes back to the proc as data
       :request (ext-op st o (assoc (:req m) :p {:route (:route m) :tag (:tag m)}))
       :clone-failed (to-agent st (:agent m) {:op :failed :error (:error m)})
+      ;; the web proc's listener, when it changes (seon.web)
+      :web (view! st assoc :web (select-keys m [:listening :port :error]))
       :ended (end-agent st o m)
       :writer (view! st (fn [v] (-> v (assoc-in [:writer :tx-count] (:tx-count m))
                                     (update-in [:writer :batch-ms] lib/push-window (:batch-ms m) 200)
@@ -894,9 +896,10 @@
   ([sys]
    (let [procs (vals (:procs @(get-in sys [:bindings :system])))
          mixed (count (filter #(= :mixed (or (:workload (spi/describe (:proc %))) :mixed)) procs))
-         ;; the web proc's listener, when it bound its port: ring-chez-adapter's acceptor and
-         ;; its connection sweeper, each a future (a thread of Jolt's agent pool)
-         web? (true? (get-in (flow/ping-proc (:graph sys) :web) [::flow/state :listening]))]
+         ;; the web proc's listener, when it bound its port (its :web event in root's view):
+         ;; ring-chez-adapter's acceptor and its connection sweeper, each a future (a thread
+         ;; of Jolt's agent pool; task seon.web/web-server-threads-are-joined-at-stop)
+         web? (true? (get-in (state sys) [:web :listening]))]
      (update (declared-threads) :roster merge
              (cond-> {"async-mixed" mixed "seon-flow-errors" 1 "seon-fs-events" 1 "seon-render-sampler" 1}
                web? (assoc "clojure-agent-pool" 2))))))
