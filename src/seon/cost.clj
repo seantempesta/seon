@@ -281,14 +281,14 @@
                    :f (fn [s] (edn/read-string s)) :per-char true}
    :pr-str/char {:what "pr-str, per character printed (a vector of integers)" :setup #(vector (vec (range (quot % 6))))
                  :f (fn [v] (pr-str v)) :per-char true}
-   ;; a pull from an in-memory Datahike db (lane D2: every read of facts is pulls)
+   ;; a pull from a branch of the in-memory test store (lane D2: every read of facts is pulls)
    :db/pull {:what "d/pull of one attribute of an entity, by entity id (per pull)"
-             :setup (fn [n] (let [[_ conn] (pdb/create! 0)]
+             :setup (fn [n] (let [[_ conn] (pdb/test-branch!)]
                               (d/transact conn (vec (for [i (range n)] {:note/text (str "n" i) :note/agent :u})))
                               [(d/db conn) (mapv :e (d/datoms (d/db conn) :aevt :note/text))]))
              :f (fn [db es] (reduce (fn [a e] (d/pull db [:note/text] e) a) 0 es))}
    :db/pull-attr {:what "each attribute of a d/pull beyond its first (per attribute)"
-                  :setup (fn [n] (let [[_ conn] (pdb/create! 0)]
+                  :setup (fn [n] (let [[_ conn] (pdb/test-branch!)]
                                    (d/transact conn [{:note/text "x" :note/agent :u}])
                                    [(d/db conn) (first (map :e (d/datoms (d/db conn) :aevt :note/text))) n]))
                   :f (fn [db e n] (dotimes [_ n] (d/pull db [:note/text :note/agent] e)))
@@ -337,5 +337,9 @@
    :pr-str/char {:ns 61.9 :bytes 25.67 :what "pr-str, per character printed (a vector of integers)"}
    ;; lane D2, source mode, load 3, 2026-10-20, at 2k: a pull is 21 us and 28 KB, each further
    ;; attribute 9.7 us and 13 KB (a finding: the pull's own allocation, like seon.task/eid's seek)
-   :db/pull {:ns 16139.9 :bytes 22828.77 :what "d/pull of one attribute of an entity, by entity id (per pull)"}
-   :db/pull-attr {:ns 6055.3 :bytes 7628.21 :what "each attribute of a d/pull beyond its first (per attribute)"}})
+   ;; lane STORES, 2026-10-21, load 8, at 10k, three runs: measured on a branch of the seeded test
+   ;; store (seon.db/test-branch!: ~2,000 datoms beside the setup's) instead of an empty store,
+   ;; a pull 21 us and 24.6 KB, each further attribute 11.3-15.1 us and 11.6 KB: pull-attr's one
+   ;; entity sat in a one-level index before, the seed makes it the two levels real dbs have
+   :db/pull {:ns 21200.3 :bytes 24612.49 :what "d/pull of one attribute of an entity, by entity id (per pull)"}
+   :db/pull-attr {:ns 11801.8 :bytes 11576.64 :what "each attribute of a d/pull beyond its first (per attribute)"}})

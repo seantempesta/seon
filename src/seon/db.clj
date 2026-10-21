@@ -36,10 +36,6 @@
 ;; fewer per connection; src/proto/f1_bench.clj).
 (def writer-cfg {:backend :sync})
 
-(defn mem-cfg {:malli/schema [:=> [:cat] :seon.db/cfg]}
-  [] {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false
-                  :writer writer-cfg})
-
 ;; ---- the durable store ----------------------------------------------------------
 ;; konserve on Jolt (libs/konserve): LMDB (konserve.jolt.lmdb) or the POSIX filestore,
 ;; holding E4a's real index nodes, one content-addressed node per key. Branching factor
@@ -77,15 +73,84 @@
   (d/transact conn {:tx-data schema})
   (doseq [tx (seed-tx n)] (d/transact conn {:tx-data tx})))
 
-(defn create!
-  "A fresh in-memory database seeded with about n datoms. Answers [cfg conn]."
-  {:malli/schema [:=> [:cat :int] [:tuple :seon.db/cfg :seon.host/conn]]}
-  [n]
-  (let [cfg (mem-cfg)]
-    (d/create-database cfg)
-    (let [conn (d/connect cfg)]
-      (seed! conn n)
-      [cfg conn])))
+;; ---- one store, many branches, as in production (owner, 2026-10-21) ------------
+;; A store holds one seed on :db. Every root works on a main of its own, a branch of :db
+;; (production's root works on :db itself; each check step, each run, each test on a
+;; branch), and its agents' and tasks' branches are named under that main, so roots
+;; sharing a store never share a branch. A branch is one pointer write (~1 ms measured,
+;; 2026-10-21) where a fresh seeded store was ~200 ms and ~2 MB.
+
+(defn main-branch
+  "The branch the root holding cfg works on as its main: cfg's :branch, :db when none."
+  {:malli/schema [:=> [:cat :seon.db/cfg] :seon.db/branch]}
+  [cfg] (:branch cfg :db))
+
+(defn conn-main
+  "The main of the root holding conn (its connection to main): the branch conn is on."
+  {:malli/schema [:=> [:cat :seon.host/conn] :seon.db/branch]}
+  [conn] (main-branch (:config @conn)))
+
+(defn on-main
+  "Branch b of the root whose main is `main`, as the store names it: :db names main itself;
+  on :db (production) b is b; on any other main b is qualified by main's name (:smoke-x/agent-1).
+  Idempotent."
+  {:malli/schema [:=> [:cat :seon.db/branch :seon.db/branch] :seon.db/branch]}
+  [main b]
+  (cond (= :db b) main
+        (or (= :db main) (= main b) (= (name main) (namespace b))) b
+        :else (keyword (name main) (if (namespace b) (str (namespace b) "." (name b)) (name b)))))
+
+(defn of-main
+  "The branches of the store held under main, by the names its root gives them (on-main undone),
+  main itself left out."
+  {:malli/schema [:=> [:cat :seon.db/branch [:set :seon.db/branch]] [:vector :seon.db/branch]]}
+  [main branches]
+  (vec (sort (for [b branches
+                   :when (if (= :db main) (and (nil? (namespace b)) (not= :db b)) (= (name main) (namespace b)))]
+               (if (= :db main) b (keyword (name b)))))))
+
+(defn branch?
+  "Does the store hold branch b? Its head key exists exactly when the branch does
+  (datahike.roster), an O(1) read; d/branches folds the whole roster, O(branches)."
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch] :boolean]}
+  [conn b] (boolean (k/exists? (:store @conn) b {:sync? true})))
+
+(defn- open-main!
+  "main on the store of cfg, whose :db exists: made from :db's head when the store has no
+  such branch (one pointer write). Answers [conn existed?]."
+  {:malli/schema [:=> [:cat :seon.db/cfg :seon.db/branch] [:tuple :seon.host/conn :boolean]]}
+  [cfg main]
+  (let [seed-conn (d/connect cfg)
+        existed? (or (= :db main) (branch? seed-conn main))]
+    (when-not existed? (d/branch! seed-conn :db main))
+    (if (= :db main)
+      [seed-conn existed?]
+      (let [conn (d/connect (assoc cfg :branch main))] (d/release seed-conn) [conn existed?]))))
+
+(defn agents-dir
+  "Where the agents of the root holding cfg keep their stderr (seon.agent/stderr-path):
+  <store path>-agents/<main>, or nil for a store with no path (in memory)."
+  {:malli/schema [:=> [:cat :seon.db/cfg] [:maybe :string]]}
+  [cfg] (when-let [p (get-in cfg [:store :path])] (str p "-agents/" (name (main-branch cfg)))))
+
+(def ^:private test-store
+  "This process's one in-memory store for tests and cost setups, seeded once on :db
+  (bin/test makes it on first use): each test takes a branch of it (test-branch!)."
+  (delay (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false
+                        :writer writer-cfg}]
+           (d/create-database cfg)
+           (let [conn (d/connect cfg)] (seed! conn 2000) (d/release conn))
+           cfg)))
+
+(defn test-branch!
+  "A fresh branch of the test store (its seed: the schema and about 2,000 datoms of the
+  example program), for one test: [cfg conn], cfg naming the branch. What the test writes
+  stays on its branch."
+  {:malli/schema [:=> [:cat] [:tuple :seon.db/cfg :seon.host/conn]]}
+  []
+  (let [cfg (assoc @test-store :branch (keyword (str "test-" (random-uuid))))
+        [conn _] (open-main! (dissoc cfg :branch) (:branch cfg))]
+    [cfg conn]))
 
 (defn preload!
   "Read every node of db's indexes, so this process holds the whole db in its heap and
@@ -97,17 +162,23 @@
   (count (d/datoms db :eavt)))
 
 (defn open!
-  "The durable database at path: recovered when the store exists, else created and
-  seeded with about n datoms. Answers {:cfg :conn :recovered? bool}."
-  {:malli/schema [:=> [:cat [:enum :lmdb :file] :string :int] :seon.db/open]}
-  [backend path n]
+  "Root's main on the durable store at path. A store that does not exist is created and
+  seeded with about n datoms on :db; main (a branch name) is made from :db's head when the
+  store has no such branch, or recovered when it has. Answers {:cfg (naming main) :conn
+  :recovered? (main existed) :seeded? (this call made the store)}."
+  {:malli/schema [:=> [:cat [:enum :lmdb :file] :string :int :seon.db/branch] :seon.db/open]}
+  [backend path n main]
   (let [cfg (store-cfg backend path)
         exists? (posix/exists? (if (= backend :lmdb) (str path "/data.mdb") path))]
-    (when-not exists? (d/create-database cfg))
-    (let [conn (d/connect cfg)]
-      (when-not exists? (seed! conn n))
-      (sync! cfg)
-      {:cfg cfg :conn conn :recovered? exists?})))
+    (when-not exists?
+      (d/create-database cfg)
+      (let [conn (d/connect cfg)] (seed! conn n) (when-not (= :db main) (d/release conn))))
+    (let [[conn existed?] (open-main! cfg main)
+          cfg (cond-> cfg (not= :db main) (assoc :branch main))]
+      ;; durable before root runs: the seed or the new branch (an fsync, ~5-10 ms); a
+      ;; recovered main wrote nothing
+      (when-not (and exists? existed?) (sync! cfg))
+      {:cfg cfg :conn conn :recovered? (and exists? existed?) :seeded? (not exists?)})))
 
 (defn after-fork!
   "Make this forked process (an agent, a clone) open the store itself: an LMDB env and the
@@ -125,12 +196,6 @@
   "The first entity id past every branch head of the store: agents' leases start here."
   {:malli/schema [:=> [:cat :seon.host/conn] :int]}
   [conn] (+ cfg/EID-LEASE (max (:max-eid @conn) (#'datahike.writing/roster-max-eid (:store @conn)))))
-
-(defn branch?
-  "Does the store hold branch b? Its head key exists exactly when the branch does
-  (datahike.roster), an O(1) read; d/branches folds the whole roster, O(branches)."
-  {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch] :boolean]}
-  [conn b] (boolean (k/exists? (:store @conn) b {:sync? true})))
 
 (defn head
   "Branch b's committed value, read from the store (another process may have committed it)."
@@ -151,9 +216,9 @@
   "The db at the merge base of branch and main (git's merge-base over Datahike's commit
   graph): the branch point, the branch head root last merged, or the main head last
   merged into the branch."
-  {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch] :seon.host/db]}
-  [conn branch]
-  (d/commit-as-db conn (d/merge-base conn branch :db)))
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch :seon.db/branch] :seon.host/db]}
+  [conn main branch]
+  (d/commit-as-db conn (d/merge-base conn branch main)))
 
 ;; ---- tx-data that replays exactly -----------------------------------------------
 ;; Seon's Datahike fork issues entity ids from one store-wide counter, so ids are unique

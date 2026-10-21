@@ -11,9 +11,7 @@
   "recording's arguments for one `ns` form on a branch whose db holds n definitions."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :any :any :string :any]]}
   [n]
-  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}
-        _ (d/create-database cfg)
-        db (d/db-with (d/db-with @(d/connect cfg) pdb/schema)
+  (let [db (d/db-with @(second (pdb/test-branch!))
                       (into [{:db/id "ns" :ns/name 'app.pc}]
                             (for [i (range n)] {:var/name (symbol "app.pc" (str "f" i)) :var/ns "ns" :var/src (str "(defn f" i " [x] x)")})))
         form (read-string ns-src)]
