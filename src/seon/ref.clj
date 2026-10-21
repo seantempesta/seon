@@ -447,26 +447,35 @@
     {:seon.ref/sections (sections path blocks line-count)
      :seon.ref/citations (into [] (keep #(candidate path %)) spans)}))
 
+(defn shown
+  "Section s (an address, heading, lead or opening, and the sections below it as address and
+  heading) as depth shows it: at :summary its heading and its lead's first sentence; at :doc
+  its lead (or opening block) and the sections below; at :code s whole. With no lead it
+  answers :no-lead at :summary and :doc. One rule for a section parsed now and a section the
+  store holds."
+  {:malli/schema [:=> [:cat :map :seon.ref/depth] :seon.ref/view]}
+  [s depth]
+  (let [{:seon.ref/keys [lead opening below]} s
+        head (select-keys s [:seon.ref/address :seon.ref/heading])]
+    (if (= :code depth)
+      s
+      (cond-> (case depth
+                :summary (cond-> head lead (assoc :seon.ref/summary (lead-sentence lead)))
+                :doc (cond-> (assoc head :seon.ref/below (vec below))
+                       lead (assoc :seon.ref/lead lead)
+                       opening (assoc :seon.ref/opening opening)))
+        (nil? lead) (assoc :seon.ref/problem-kind :no-lead)))))
+
 (defn view
-  "The section at address in a parsed document as depth shows it: at :summary its heading and
-  its lead's first sentence; at :doc its lead (or opening block) and the sections below; at
-  :code the section whole. With no lead it answers :no-lead at :summary and :doc. nil when
-  no section has that address."
+  "The section at address in a parsed document as depth shows it (`shown`), its sections below
+  the ones whose parent it is. nil when no section has that address."
   {:malli/schema [:=> [:cat :seon.ref/document :seon.ref/address :seon.ref/depth] [:maybe :seon.ref/view]]}
   [{:seon.ref/keys [sections]} address depth]
   (when-let [s (first (filter #(= address (:seon.ref/address %)) sections))]
-    (let [{:seon.ref/keys [lead opening]} s
-          shown (select-keys s [:seon.ref/address :seon.ref/heading])]
-      (if (= :code depth)
-        s
-        (cond-> (case depth
-                  :summary (cond-> shown lead (assoc :seon.ref/summary (lead-sentence lead)))
-                  :doc (cond-> (assoc shown :seon.ref/below (into [] (comp (filter #(= address (:seon.ref/parent %)))
-                                                                           (map #(select-keys % [:seon.ref/address :seon.ref/heading])))
-                                                                  sections))
-                         lead (assoc :seon.ref/lead lead)
-                         opening (assoc :seon.ref/opening opening)))
-          (nil? lead) (assoc :seon.ref/problem-kind :no-lead))))))
+    (shown (assoc s :seon.ref/below (into [] (comp (filter #(= address (:seon.ref/parent %)))
+                                                   (map #(select-keys % [:seon.ref/address :seon.ref/heading])))
+                                          sections))
+           depth)))
 
 ;; ---- resolution ---------------------------------------------------------------------------
 
