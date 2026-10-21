@@ -3,15 +3,9 @@
   tick, AIMD on a rate-limit outcome, priority by chain progress. Plain step-fn calls."
   (:require [clojure.test :refer [deftest is testing]] [seon.fx :as fx]))
 
-(defn- owner
-  {:malli/schema [:=> [:cat :int [:maybe :int]] :map]}
-  [lanes rate] (fx/owner-proc {:kind :model :lanes lanes :rate rate :work nil :back nil}))
-(defn- req
-  {:malli/schema [:=> [:cat :int :int :* :any] :map]}
-  [k est & {:as more}] (merge {:req {:k k} :est est :dest {:agent :a1 :op :fx-reply :k k}} more))
-(defn- ran
-  {:malli/schema [:=> [:cat :map] [:sequential :any]]}
-  [o] (map #(get-in % [:req :k]) (:to-lanes o)))
+(defn- owner [lanes rate] (fx/owner-proc {:kind :model :lanes lanes :rate rate :work nil :back nil}))
+(defn- req [k est & {:as more}] (merge {:req {:k k} :est est :dest {:agent :a1 :op :fx-reply :k k}} more))
+(defn- ran [o] (map #(get-in % [:req :k]) (:to-lanes o)))
 
 (deftest a-request-waits-on-the-bucket-and-a-tick-admits-it
   (let [[st o] (fx/owner-proc (owner 8 1000) :in (req 1 900))
