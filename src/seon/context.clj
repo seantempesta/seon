@@ -59,7 +59,7 @@
   (let [v (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))))
         src (source-of db sym)]
     (cond-> {:symbol sym}
-      (nil? v) (assoc :unresolved true)
+      (nil? v) (assoc :unresolved true :problem (:unresolved ref/problem-messages))
       src (assoc :source src)
       (and (nil? src) (some-> v meta :doc)) (assoc :doc (:doc (meta v))))))
 

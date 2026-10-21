@@ -470,7 +470,11 @@
 
 ;; ---- resolution ---------------------------------------------------------------------------
 
-(defn- names-something?
+(def problem-messages
+  "What each problem kind means and what the agent does about it (v1's seon.ref)."
+  {:unresolved "This resolves to nothing on your branch; its operations read what does exist. What the task intends for it is its plan's to say. To mention a name that does not exist, as text and not a reference, wrap it in two backticks: ``ns/name`` or ``:ns/key``."})
+
+(defn names-something?
   "Does citation c name something on db: a var by its :var/name, a registered schema key, a
   file of the checkout?"
   {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :boolean]}
