@@ -195,7 +195,7 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
 
 ## 7. The machine
 
-- **Builds:** `nice -n 15 /usr/bin/lockf -k ~/src/seon-jolt/build.lock bin/build`. Every process on a store must use the same LMDB build (`target/lib/liblmdb.dylib`, robust locks); stop a store's processes before a build that changes it.
+- **Builds:** `nice -n 15 bin/build`, in parallel, no lock (owner, 2026-10-21: "WTF is there a build lock?"; one machine-wide lock queued every lane's build single-file on an 18-core, 128 GB machine where a build peaks under ~2 GB; each worktree builds into its own `target/`, so builds share no mutable state). Every process on a store must use the same LMDB build (`target/lib/liblmdb.dylib`, robust locks); stop a store's processes before a build that changes it.
 - **Full checks:** one at a time (`bin/check` takes the check lock and runs niced). Iterate with single modes.
 - **Never flood it.** Anything that can make threads or processes starts at n ≤ 100 under `nice -n 15`. Watch `ps -M -p PID | wc -l`, and kill your own process past 200 threads. One experiment at a time.
 - **A process that must outlive your tool call** is double-forked, which `bin/root` does. The tool host kills a background task's whole process tree when the task stops or its agent exits.
