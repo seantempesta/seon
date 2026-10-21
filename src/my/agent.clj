@@ -7,7 +7,8 @@
     (send-message tos body)   body to the agents tos (ids), delivered by root
     (source sym)              the recorded source of a definition, printed (also clojure.repl/source, source-fn)"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context]
+            [clojure.java.io :as io] [clojure.string :as str]))
 
 (defn $ "The live value of an earlier result, by handle (:h3)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
@@ -18,12 +19,26 @@
 (defn send-message "Send body to the agents tos (ids); root delivers it by id. nil." {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
   [tos body] (agent/send-message tos body))
 
+(defn- file-source
+  "The text of the form at var v's :file and :line on the classpath (Clojure's clojure.repl/source-fn
+  reads it the same way: a library's vars carry both), or nil."
+  {:malli/schema [:=> [:cat :any] [:maybe :string]]}
+  [v]
+  (let [{:keys [file line]} (meta v)]
+    (when-let [r (and file line (io/resource file))]
+      (let [text (slurp r)
+            off (reduce (fn [i _] (inc (str/index-of text "\n" i))) 0 (range (dec line)))]
+        (second (read+string {:read-cond :allow} (java.io.PushbackReader. (java.io.StringReader. (subs text off)))))))))
+
 (defn source-fn
-  "The source this branch records for the var sym names (the text of the form that last defined it), or nil: clojure.repl/source-fn."
+  "The source of the var sym names, or nil: clojure.repl/source-fn. What this branch records for
+  it (the text of the form that last defined it, so an agent's own redefinitions show), else the
+  form at its :file and :line (a library's)."
   {:malli/schema [:=> [:cat :symbol] [:maybe :string]]}
   [sym]
   (when-let [v (resolve sym)]
-    (context/source-of (agent/db) (symbol (str (ns-name (:ns (meta v)))) (str (:name (meta v)))))))
+    (or (context/source-of (agent/db) (symbol (str (ns-name (:ns (meta v)))) (str (:name (meta v)))))
+        (file-source v))))
 
 (defmacro source
   "Print the recorded source of the definition named by sym (as clojure.repl/source does)."

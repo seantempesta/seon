@@ -6,10 +6,14 @@
 (deftest source-answers-a-platform-var-from-the-program
   ;; task seon.repl/source-reads-the-program: clojure.repl's source and source-fn, as at any
   ;; Clojure REPL, answer the text of the form that defined a var the binary holds compiled
-  (let [[fn-item src-item] (at/in-agent ["(clojure.repl/source-fn 'seon.reconcile/stuck)"
-                                         "(do (require '[clojure.repl :refer [source]]) (source seon.reconcile/stuck))"])]
+  ;; and, as Clojure's does, a library var's form read from its :file and :line (a live agent
+  ;; spent all 8 turns on (source datahike.connector/connect), 2026-10-21)
+  (let [[fn-item src-item lib-item] (at/in-agent ["(clojure.repl/source-fn 'seon.reconcile/stuck)"
+                                                  "(do (require '[clojure.repl :refer [source]]) (source seon.reconcile/stuck))"
+                                                  "(do (require 'datahike.connector) (clojure.repl/source-fn 'datahike.connector/connect))"])]
     (is (str/includes? (:printed fn-item) "(defn stuck") (:printed fn-item))
-    (is (str/includes? (str (:out src-item)) "(defn stuck") (str src-item))))
+    (is (str/includes? (str (:out src-item)) "(defn stuck") (str src-item))
+    (is (str/includes? (:printed lib-item) "(defn connect") (:printed lib-item))))
 
 (defn- outcome [ticks thunk]
   (try {:value (intr/run ticks thunk)} (catch Throwable e {:error e})))
