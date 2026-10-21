@@ -453,7 +453,7 @@
   its lead (or opening block) and the sections below; at :code s whole. With no lead it
   answers :no-lead at :summary and :doc. One rule for a section parsed now and a section the
   store holds."
-  {:malli/schema [:=> [:cat :map :seon.ref/depth] :seon.ref/view]}
+  {:malli/schema [:=> [:cat :seon.ref/view :seon.ref/depth] :seon.ref/view]}
   [s depth]
   (let [{:seon.ref/keys [lead opening below]} s
         head (select-keys s [:seon.ref/address :seon.ref/heading])]
