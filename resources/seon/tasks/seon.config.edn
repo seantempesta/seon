@@ -28,4 +28,7 @@
                       seon.config-test/later-layers-win-key-by-key-and-name-their-source
                       seon.config-test/an-override-is-validated-by-the-same-schemas
                       seon.config-test/no-port-is-listened-on-unless-the-config-says-so
-                      seon.config-test/the-loader-reads-the-command-line-as-the-process-has-it}}]
+                      seon.config-test/the-loader-reads-the-command-line-as-the-process-has-it
+                      seon.config-test/a-setting-resolves-task-then-model-then-provider-then-config
+                      seon.config-test/a-setting-set-nowhere-is-refused-not-nil
+                      seon.config-test/the-manifest-is-validated-and-written-as-entities-on-main}}]

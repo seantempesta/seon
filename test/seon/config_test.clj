@@ -118,7 +118,8 @@
             :max-tokens (config/value :seon.config.ai/max-tokens) :thinking :disabled}
            p))
     ;; the facts say what a run handed another provider really used
-    (is (= p (config/provider (config/with-provider config/config p))))))
+    (is (= p (config/provider (config/with-provider config/config p))))
+    (is (= "https://example.test" (:base-url (config/provider (config/with-provider config/config (assoc p :base-url "https://example.test"))))))))
 
 ;; ---- facts on main, read from the db -------------------------------------------------------
 
@@ -127,7 +128,7 @@
         child (keyword (str (name (:branch cfg)) "-a1"))
         c (assoc config/config :seon.config.agent/max-running 6)]
     (is (nil? (config/from-db @conn)))
-    (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6) [(config/facts c {:seon.config.web/port "--set"})])})
+    (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6) (config/facts c {:seon.config.web/port "--set"}))})
     (is (= c (config/from-db @conn)))
     (is (= {:seon.config.web/port "--set"} (config/sources-from-db @conn)))
     ;; the reconciler's root read sees the same dials
@@ -207,3 +208,32 @@
   (binding [*command-line-args* '("ports" "--set" ":seon.config.web/port=7998")]
     (is (= ["ports" "--set" ":seon.config.web/port=7998"] (config/argv)))
     (is (= 7998 (:seon.config.web/port (:config (config/layered (config/load-layers (config/checkout) :default (config/argv)))))))))
+
+;; ---- the resolver: task -> model -> provider -> config ------------------------------------------
+
+(deftest a-setting-resolves-task-then-model-then-provider-then-config
+  (let [c (-> config/config
+              (assoc-in [:seon.config.ai/providers "deepseek" :seon.config.ai/max-in-flight] 5)
+              (assoc-in [:seon.config.ai/models "deepseek-v4-pro" :seon.config.ai/max-in-flight] 2))
+        r #(config/resolve-in c {:seon.config.ai/max-in-flight "--set"} :seon.config.ai/max-in-flight %)]
+    (is (= {:value 7 :source [:task]} (r {:task {:seon.config.ai/max-in-flight 7} :model "deepseek-v4-pro"})))
+    (is (= {:value 2 :source [:model "deepseek-v4-pro"]} (r {:model "deepseek-v4-pro"})))
+    (is (= {:value 5 :source [:provider "deepseek"]} (r {})))
+    (is (= {:value 8 :source [:config "--set"]}
+           (config/resolve-in config/config {:seon.config.ai/max-in-flight "--set"} :seon.config.ai/max-in-flight {}))))
+  (is (= {:value "https://api.deepseek.com" :source [:provider "deepseek"]} (config/resolve :seon.config.ai/base-url)))
+  (is (= [:config "resources/seon/config/default.edn"] (:source (config/resolve :seon.config.root/max-agents)))))
+
+(deftest a-setting-set-nowhere-is-refused-not-nil
+  (is (= :seon.config/refused (:seon.error/type (refused #(config/resolve :seon.config.ai/thinking {:model "deepseek-flash"})))))
+  (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.nope/x))))))
+
+(deftest the-manifest-is-validated-and-written-as-entities-on-main
+  (is (= #{"deepseek-flash" "deepseek-v4-pro"} (set (keys (:seon.config.ai/models config/config)))))
+  (is (= :invalid (:problem (first (:seon.config/problems
+                                    (refused #(config/resolved (assoc-in config/config [:seon.config.ai/models "deepseek-flash" :seon.ai.model/input-usd-per-mtok] "cheap"))))))))
+  (let [[cfg conn] (pdb/test-branch!)]
+    (d/transact conn {:tx-data (config/facts config/config config/sources)})
+    (is (= 0.15 (d/q '[:find ?p . :where [?m :seon.ai.model/id "deepseek-flash"] [?m :seon.ai.model/input-usd-per-mtok ?p]] @conn)))
+    (is (= "DEEPSEEK_API_KEY" (d/q '[:find ?v . :where [?p :seon.ai.model/provider-id "deepseek"] [?p :seon.config.ai/api-key-variable ?v]] @conn)))
+    (is (= config/config (config/from-db @conn)))))

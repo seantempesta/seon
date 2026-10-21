@@ -24,6 +24,7 @@
 
   A foundational namespace, below seon.contract (which reads the guarantees dial here): its
   functions carry contracts in their metadata and are armed at boot."
+  (:refer-clojure :exclude [resolve])
   (:require [aero.core :as aero] [malli.core :as m] [malli.registry :as mr] [clojure.edn :as edn]
             [clojure.java.io :as io] [clojure.string :as str] [datahike.api :as d]))
 
@@ -209,50 +210,91 @@
   "Which layer each key of the config came from."
   (:sources loaded))
 
+;; ---- reading a setting: the one resolver ------------------------------------------------------
+;; Owner, 2026-10-21: settings are per model, per provider and per task; "a pillar and not just
+;; a hack": every reader resolves through `resolve-in` (task -> model -> its provider -> the
+;; config's own key), and the door shows each value with where it came from.
+
+(defn resolve-in
+  "Setting k in config c (its layer sources srcs) for ctx {:task m :model id}: the task's or
+  agent's own settings (a :seon.task/config map), then the model's entry (default
+  :seon.config.ai/model), then that model's provider's, then c's own key. Answers {:value
+  :source}, :source one of [:task], [:model id], [:provider id], [:config layer]. A key set
+  nowhere is a defect of the caller: the refusal names it (absent is never nil)."
+  {:malli/schema [:=> [:cat :map :map :qualified-keyword :seon.config/context] :seon.config/resolved]}
+  [c srcs k {:keys [task model]}]
+  (let [m (or model (:seon.config.ai/model c))
+        me (get-in c [:seon.config.ai/models m])
+        p (:seon.ai.model/provider me)
+        pe (get-in c [:seon.config.ai/providers p])]
+    (cond
+      (contains? task k) {:value (get task k) :source [:task]}
+      (contains? me k) {:value (get me k) :source [:model m]}
+      (contains? pe k) {:value (get pe k) :source [:provider p]}
+      (contains? c k) {:value (get c k) :source [:config (get srcs k "resources/seon/config/default.edn")]}
+      :else (refuse! 'seon.config/resolve (str k " is set nowhere: not by the task, the model " m ", its provider "
+                                               p " or the config (declared keys: seon.config/keys-declared)")))))
+
+(defn resolve
+  "Setting k for ctx ({:task m :model id}; default {}) in this process's config: {:value
+  :source} (resolve-in)."
+  {:malli/schema [:function [:=> [:cat :qualified-keyword] :seon.config/resolved]
+                  [:=> [:cat :qualified-keyword :seon.config/context] :seon.config/resolved]]}
+  ([k] (resolve k {}))
+  ([k ctx] (resolve-in config sources k ctx)))
+
 (defn value
-  "Key k of the config. A key the schema does not declare, or an optional key that is
-  absent, is a defect of the caller: the refusal names it (absent is never nil)."
-  {:malli/schema [:=> [:cat :qualified-keyword] :any]}
-  [k]
-  (let [v (get config k ::absent)]
-    (if (= ::absent v)
-      (throw (ex-info (str k " is not in the config (declared keys: seon.config/keys-declared)")
-                      {:seon.error/type :seon.config/refused :seon.error/operation 'seon.config/value
-                       :seon.error/message (str k " is not in the config")}))
-      v)))
+  "Setting k's value for ctx (resolve), the read every reader makes."
+  {:malli/schema [:function [:=> [:cat :qualified-keyword] :any] [:=> [:cat :qualified-keyword :seon.config/context] :any]]}
+  ([k] (value k {}))
+  ([k ctx] (:value (resolve k ctx))))
 
 ;; ---- the model provider, as the config states it --------------------------------------------
 
 (defn provider
-  "The model provider config c names (:seon.config.ai/*): the scripted stand-in, or the
-  OpenAI-compatible endpoint with the NAME of its key's environment variable (never the key)."
+  "The model provider config c names (:seon.config.ai/*, resolved for its model): the
+  scripted stand-in, or the OpenAI-compatible endpoint with the NAME of its key's
+  environment variable (never the key)."
   {:malli/schema [:=> [:cat :seon.config/config] :seon.model/provider]}
   [c]
-  (case (:seon.config.ai/provider c)
-    :scripted {:kind :scripted :script (:seon.config.ai/script c)}
-    :openai-compat (cond-> {:kind :openai-compat :base-url (:seon.config.ai/base-url c) :model (:seon.config.ai/model c)
-                            :api-key-env (:seon.config.ai/api-key-variable c) :max-tokens (:seon.config.ai/max-tokens c)}
-                     (:seon.config.ai/thinking c) (assoc :thinking (:seon.config.ai/thinking c))
-                     (:seon.config.ai/reasoning-effort c) (assoc :reasoning-effort (:seon.config.ai/reasoning-effort c)))))
+  (let [v #(:value (resolve-in c {} % {}))]
+    (case (:seon.config.ai/provider c)
+      :scripted {:kind :scripted :script (:seon.config.ai/script c)}
+      :openai-compat (cond-> {:kind :openai-compat :base-url (v :seon.config.ai/base-url) :model (:seon.config.ai/model c)
+                              :api-key-env (v :seon.config.ai/api-key-variable) :max-tokens (v :seon.config.ai/max-tokens)}
+                       (:seon.config.ai/thinking c) (assoc :thinking (:seon.config.ai/thinking c))
+                       (:seon.config.ai/reasoning-effort c) (assoc :reasoning-effort (:seon.config.ai/reasoning-effort c))))))
 
 (defn with-provider
   "Config c stating provider p (a provider handed to root's start! in place of the file's):
-  the facts root writes say what the run really used."
+  the facts root writes say what the run really used (an endpoint p names is its model's
+  provider's)."
   {:malli/schema [:=> [:cat :seon.config/config :seon.model/provider] :seon.config/config]}
   [c p]
-  (let [ai {:seon.config.ai/provider (:kind p) :seon.config.ai/script (:script p) :seon.config.ai/base-url (:base-url p)
-            :seon.config.ai/model (:model p) :seon.config.ai/api-key-variable (:api-key-env p)
-            :seon.config.ai/max-tokens (:max-tokens p)
-            :seon.config.ai/thinking (:thinking p) :seon.config.ai/reasoning-effort (:reasoning-effort p)}]
-    (into (dissoc c :seon.config.ai/thinking :seon.config.ai/reasoning-effort) (filter (comp some? val)) ai)))
+  (let [top {:seon.config.ai/provider (:kind p) :seon.config.ai/script (:script p) :seon.config.ai/model (:model p)
+             :seon.config.ai/max-tokens (:max-tokens p)
+             :seon.config.ai/thinking (:thinking p) :seon.config.ai/reasoning-effort (:reasoning-effort p)}
+        c (into (dissoc c :seon.config.ai/thinking :seon.config.ai/reasoning-effort) (filter (comp some? val)) top)
+        prov (get-in c [:seon.config.ai/models (:seon.config.ai/model c) :seon.ai.model/provider])
+        wire (into {} (filter (comp some? val)) {:seon.config.ai/base-url (:base-url p) :seon.config.ai/api-key-variable (:api-key-env p)})]
+    (if (and prov (seq wire)) (update-in c [:seon.config.ai/providers prov] merge wire) c)))
 
 ;; ---- the facts on main ------------------------------------------------------------------------
 
 (defn facts
-  "Config c and its sources as the facts of main's root entity, written with root's boot fact
-  (platform records: never carried by a merge in either direction)."
-  {:malli/schema [:=> [:cat :seon.config/config :seon.config/sources] :map]}
-  [c srcs] (assoc c :seon.root/id :root :seon.config/sources (pr-str srcs)))
+  "Config c and its sources as facts on main (platform records: never carried by a merge in
+  either direction): main's root entity holding every key (the manifest as EDN text), and an
+  entity per provider and per model (:seon.ai.model/provider-id, :seon.ai.model/id)."
+  {:malli/schema [:=> [:cat :seon.config/config :seon.config/sources] [:vector :map]]}
+  [c srcs]
+  (into [(assoc c :seon.root/id :root :seon.config/sources (pr-str srcs)
+                :seon.config.ai/providers (pr-str (:seon.config.ai/providers c))
+                :seon.config.ai/models (pr-str (:seon.config.ai/models c)))]
+        (concat (for [[id p] (:seon.config.ai/providers c)]
+                  (-> (select-keys p [:seon.config.ai/base-url :seon.config.ai/api-key-variable :seon.ai.model/output-token-wire-key])
+                      (assoc :seon.ai.model/provider-id id)))
+                (for [[id m] (:seon.config.ai/models c)]
+                  (-> (dissoc m :seon.config.ai/max-in-flight :seon.config.ai/max-tokens) (assoc :seon.ai.model/id id))))))
 
 (defn secret
   "The value of the environment variable named var-name (a credential, e.g. the model's key,
@@ -267,7 +309,11 @@
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :map]]}
   [db]
   (when-let [e (d/q '[:find ?e . :where [?e :seon.root/id :root]] db)]
-    (let [r (d/pull db (keys-declared) e)] (when (seq r) r))))
+    (let [r (d/pull db (keys-declared) e)]
+      (when (seq r)
+        (cond-> r
+          (string? (:seon.config.ai/providers r)) (update :seon.config.ai/providers edn/read-string)
+          (string? (:seon.config.ai/models r)) (update :seon.config.ai/models edn/read-string))))))
 
 (defn sources-from-db
   "Which layer each key of the config root wrote on db came from."

@@ -148,15 +148,9 @@
  :seon.config.ai/provider #keyword #or [#env SEON_AI_PROVIDER #profile {:default "scripted" :deepseek "openai-compat"}]
  ;; The scripted stand-in's reply function (provider :scripted): replies by task.
  :seon.config.ai/script seon.fixtures/reply
- ;; Unit: URL; /chat/completions is appended (v1's :seon.config.ai/endpoint named the whole URL).
- :seon.config.ai/base-url #or [#env SEON_AI_BASE_URL "https://api.deepseek.com"]
  ;; Unit: the provider's own model name. Provenance: v1 owner ruling 2026-09-10, deepseek-flash
  ;; is the default for every agent.
  :seon.config.ai/model #or [#env SEON_AI_MODEL "deepseek-flash"]
- ;; Unit: the NAME of an environment variable. Never the credential: root's :model owner reads
- ;; the key at the call, it never becomes a datom, and every agent unsets this variable at its
- ;; birth (the key is root's alone).
- :seon.config.ai/api-key-variable #or [#env SEON_AI_API_KEY_ENV "DEEPSEEK_API_KEY"]
  ;; Unit: completion tokens, reasoning included. Provenance: seon.model's default-max-tokens
  ;; (2,048) before this file. At the bound the reply is cut (:truncated?), or
  ;; the reasoning ate the reply (:seon.model/reasoning-ate-reply). v1 ships 65,536 for Flash
@@ -173,6 +167,51 @@
  ;; (api-docs.deepseek.com/quick_start/rate_limit, read 2026-10-21): 2,500 concurrent for
  ;; deepseek-flash, 500 for deepseek-v4-pro; far above this, so the cap is ours, not theirs.
  :seon.config.ai/max-in-flight 8
+
+ ;; ---- the model manifest (v1's config/default.edn initialization rows, ported for the models
+ ;; we use). A setting resolves task -> model -> its provider -> this file's top-level key
+ ;; (seon.config/resolve, the one way code reads a setting); root writes each provider and model
+ ;; as an entity on main (platform records). A model or provider states a setting by its
+ ;; :seon.config.* key to override the top-level one for itself.
+ :seon.config.ai/providers
+ {"deepseek"
+  {;; Unit: URL; /chat/completions is appended (v1's :seon.config.ai/endpoint named the whole URL).
+   :seon.config.ai/base-url #or [#env SEON_AI_BASE_URL "https://api.deepseek.com"]
+   ;; Unit: the NAME of an environment variable. Never the credential: root's :model owner reads
+   ;; the key at the call, it never becomes a datom, and every agent unsets this variable at its
+   ;; birth (the key is root's alone).
+   :seon.config.ai/api-key-variable #or [#env SEON_AI_API_KEY_ENV "DEEPSEEK_API_KEY"]
+   ;; the request field the completion budget is sent in (v1)
+   :seon.ai.model/output-token-wire-key "max_tokens"}}
+ ;; Prices: USD per million tokens, off-peak; peak (01:00-04:00 and 06:00-10:00 UTC, weekdays,
+ ;; not Chinese public holidays) is twice. Read 2026-10-21 from
+ ;; api-docs.deepseek.com/quick_start/pricing. Concurrency ceilings: the provider's, per account
+ ;; across all keys, read 2026-10-21 from api-docs.deepseek.com/quick_start/rate_limit; our own
+ ;; cap is :seon.config.ai/max-in-flight.
+ :seon.config.ai/models
+ {"deepseek-flash"
+  {:seon.ai.model/provider "deepseek"
+   ;; DeepSeek-V4.1-Flash-1017; the legacy names deepseek-v4-flash(-vision-exp) route here
+   :seon.ai.model/version "DeepSeek-V4.1-Flash-1017"
+   :seon.ai.model/context-window-tokens 1048576
+   :seon.ai.model/max-output-tokens 393216
+   :seon.ai.model/input-usd-per-mtok 0.15
+   :seon.ai.model/cached-input-usd-per-mtok 0.003
+   :seon.ai.model/output-usd-per-mtok 0.6
+   :seon.ai.model/thinking-dials #{:enabled :disabled}
+   :seon.ai.model/provider-max-in-flight 2500
+   :seon.ai.model/source "api-docs.deepseek.com/quick_start/pricing and /rate_limit, read 2026-10-21"}
+  "deepseek-v4-pro"
+  {:seon.ai.model/provider "deepseek"
+   :seon.ai.model/version "DeepSeek-V4-Pro-0813"
+   :seon.ai.model/context-window-tokens 1048576
+   :seon.ai.model/max-output-tokens 393216
+   :seon.ai.model/input-usd-per-mtok 0.66
+   :seon.ai.model/cached-input-usd-per-mtok 0.022
+   :seon.ai.model/output-usd-per-mtok 1.98
+   :seon.ai.model/thinking-dials #{:enabled :disabled}
+   :seon.ai.model/provider-max-in-flight 500
+   :seon.ai.model/source "api-docs.deepseek.com/quick_start/pricing and /rate_limit, read 2026-10-21"}}
  ;; Unit: tokens per second the provider admits, cluster-wide: the :model owner's token bucket
  ;; (lane R3; AIMD on a 429). 0: no bucket.
  :seon.config.ai/rate 0
