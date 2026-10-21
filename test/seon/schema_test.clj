@@ -7,6 +7,8 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.agent :as agent]
+            [seon.program :as program]
+            [seon.program-test :as pt]
             [seon.db :as pdb]
             [seon.repl :as repl]
             [seon.schema :as schema]
@@ -87,5 +89,18 @@
   ;; form refuses, so the agent sees what its change would break before it merges
   (let [db (d/db-with (main-db) [{:seon.attempt/id "a#1" :seon.attempt/status :merged}
                                  {:seon.attempt/id "a#2" :seon.attempt/status :running}])
-        r (schema/registration db :seon.attempt/status [:and {:seon.db/index true} [:enum :running :ended]])]
+        r (schema/registration db :seon.attempt/status [:and {:seon.db/index true} [:enum :running :ended]] false)]
     (is (= {:checked 2 :refused 1} (:seon.schema.usage/check (:registration r))))))
+
+(deftest a-loaded-form-compiles-against-its-dbs-schemas
+  ;; found by the live demonstration (2026-10-21): the merge agent loaded the work branch's
+  ;; (defn status-of {:malli/schema [:=> [:cat :seon.attempt/status] ...]}) with the built
+  ;; registry, so its proof erred on :refused. A process loading a db's forms (an agent's
+  ;; merge of main, root and the fork server after a merge) compiles them against that db's
+  ;; schemas
+  (let [main (main-db)
+        branch (d/db-with main (:tx (schema/registration main :seon.attempt/status (read-string refused-status) false)))
+        branch (pt/record branch 'x.schema-load "(defn status-of {:malli/schema [:=> [:cat :seon.attempt/status] :keyword]} [s] s)")]
+    (remove-ns 'x.schema-load)
+    (is (= [] (program/load-diff! main branch)))
+    (is (= :refused ((resolve 'x.schema-load/status-of) :refused)) "its contract accepts the branch's :refused")))

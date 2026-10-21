@@ -158,7 +158,7 @@
 
 (defn- registered
   "db after registering form v as schema k on it, as my.schema/register! does."
-  [db k v] (d/db-with db (:tx (schema/registration db k v))))
+  [db k v] (d/db-with db (:tx (schema/registration db k v (= "user" (namespace k))))))
 
 (deftest a-schema-entry-merges-per-key
   ;; task seon.source/schemas-are-part-of-the-program: a schema entry is a program key,

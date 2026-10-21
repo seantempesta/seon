@@ -24,7 +24,8 @@
   - A file is read form by form and analyzed without running (`analyze-facts`), so the
     platform's own source has the same facts (seon.source)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [jolt.ir :as ir] [jolt.analyzer]))
+  (:require [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [jolt.ir :as ir] [jolt.analyzer]
+            [seon.schema :as schema] [malli.registry :as mr]))
 
 (defn scratch-ns?
   "Is namespace nsx scratch (never program): `user`, or declared ^:scratch."
@@ -526,10 +527,15 @@
     (catch Throwable e {:ns ns :message (or (ex-message e) (str (type e)))})))
 
 (defn- load-forms!
-  "Load form rows in load order; answers the errors."
-  {:malli/schema [:=> [:cat [:sequential :map]] [:vector :seon.program/error]]}
-  [forms]
-  (into [] (keep load-form!) (load-order forms)))
+  "Load form rows of db in load order, compiling against db's schemas (malli's dynamic
+  registry bound to seon.schema/branch-registry: a merged or registered schema is in effect
+  for the code that names it); answers the errors. Nothing to load reads no schemas."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] [:vector :seon.program/error]]}
+  [db forms]
+  (if (seq forms)
+    (binding [mr/*registry* (schema/branch-registry db)]
+      (into [] (keep load-form!) (load-order forms)))
+    []))
 
 (defn- remove-definition!
   "Make this process hold no definition for program key k (a var unmapped, a method
@@ -557,7 +563,7 @@
   {:malli/schema [:=> [:cat :seon.host/db] :seon.program/load-report]}
   [db]
   (let [forms (loadable db (live-forms db))]
-    {:loaded (count forms) :errors (load-forms! forms)}))
+    {:loaded (count forms) :errors (load-forms! db forms)}))
 
 (defn load-diff!
   "Make this process run db-to's program where it holds db-from's: each live form db-to
@@ -569,7 +575,7 @@
   (let [from (set (map :id (live-forms db-from)))
         to-defs (definitions db-to)]
     (doseq [k (keys (definitions db-from)) :when (not (contains? to-defs k))] (remove-definition! k))
-    (load-forms! (remove #(or (from (:id %)) (:form/source (d/entity db-to (:e %)))) (live-forms db-to)))))
+    (load-forms! db-to (remove #(or (from (:id %)) (:form/source (d/entity db-to (:e %)))) (live-forms db-to)))))
 
 (defn load-changes!
   "Load what resolved tx-data ops change, read against db (after them): each definition
@@ -585,7 +591,7 @@
             :when (not (some->> (or (:var/name x) (:method/multi x)) namespace symbol (compiled? db)))]
       (cond (:var/name x) (remove-definition! [:var (:var/name x)])
             (:method/key x) (remove-definition! (into [:method] (read-string (:method/key x))))))
-    (load-forms! (loadable db (vec (for [[op e a] ops
+    (load-forms! db (loadable db (vec (for [[op e a] ops
                                          :when (and (= op :db/add) (= a :form/src) (live? db e))]
                                      (form-row db e)))))))
 

@@ -6,7 +6,15 @@
   carries it per key, and write-back rewrites only its entry of its resource (seon.source).
   Platform code compiled into the binary keeps the built schemas until the next generation."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.agent :as agent] [seon.schema :as schema]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.agent :as agent] [seon.schema :as schema] [seon.program :as program]))
+
+(defn- scratch-key?
+  "Is k in a scratch namespace of this process (seon.program/scratch-ns?: `user`, or declared
+  ^:scratch): seen at the REPL, no program (owner, 2026-10-21)."
+  {:malli/schema [:=> [:cat :qualified-keyword] :boolean]}
+  [k]
+  (let [n (find-ns (symbol (namespace k)))]
+    (or (= "user" (namespace k)) (boolean (and n (program/scratch-ns? n))))))
 
 (defn register!
   "Register form v as schema k on this agent's branch. Answers {:seon.schema/key k
@@ -23,7 +31,7 @@
   ```"
   {:malli/schema [:=> [:cat :qualified-keyword :any] [:or :seon.schema/registration :seon.schema/registration-refused]]}
   [k v]
-  (let [r (schema/registration (agent/db) k v)]
+  (let [r (schema/registration (agent/db) k v (scratch-key? k))]
     (if (contract/error? r)
       r
       (do (agent/transact! (:tx r)) (:registration r)))))

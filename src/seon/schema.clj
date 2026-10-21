@@ -11,16 +11,19 @@
   - `changes`: what the branch's entries change against the binary's forms;
   - `branch-registry`: the registry an evaluation on the branch binds, so the code it
     defines next and every schema naming a changed key see the change;
-  - `registration`, `removal`: the tx-data of a change, or the refusal as data."
+  - `registration`, `removal`: the tx-data of a change, or the refusal as data.
+
+  It reads no program namespace (seon.program binds `branch-registry` when it loads a db's
+  forms), so it depends on seon.contract, the Datahike derivation and the db alone."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.program :as program] [seon.schema.datahike :as sd]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.schema.datahike :as sd]
             [datahike.api :as d] [malli.registry :as mr] [clojure.edn :as edn]))
 
 (defn form-text
   "Schema form v as an entry's EDN text: printed as the resources are written (a namespaced
   map's keys in full), no print limits."
   {:malli/schema [:=> [:cat :any] :string]}
-  [v] (binding [*print-namespace-maps* false] (program/pr-edn v)))
+  [v] (binding [*print-length* nil *print-level* nil *print-meta* false *print-namespace-maps* false] (pr-str v)))
 
 (defn- imported-keys
   "The keys of every schema resource as db imported it (its :schema.file/text)."
@@ -91,14 +94,6 @@
   (try (let [reg (contract/registry-of forms)] {:registry reg :declarations (sd/declarations reg)})
        (catch Exception e (refused k (if (:seon.schema/reason (ex-data e)) :unstorable :invalid) (or (ex-message e) (str (type e)))))))
 
-(defn- scratch-key?
-  "Is k in a scratch namespace (`user`, or one this process declares ^:scratch): seen at the
-  REPL, no program (owner, 2026-10-21)."
-  {:malli/schema [:=> [:cat :qualified-keyword] :boolean]}
-  [k]
-  (let [n (find-ns (symbol (namespace k)))]
-    (or (= "user" (namespace k)) (boolean (and n (program/scratch-ns? n))))))
-
 (defn- new-key-file
   "The resource a new key k goes to: the one holding most keys of k's namespace on db (ties
   by path), else <schemas-dir>/<namespace>.edn (owner, 2026-10-21)."
@@ -112,30 +107,38 @@
       (key (first (sort-by (fn [[f n]] [(- n) f]) counts)))
       (str contract/schemas-dir "/" (namespace k) ".edn"))))
 
-(defn- new-declarations
+(defn new-declarations
   "The declarations db's Datahike schema does not hold as declared."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.schema/declaration]] [:vector :seon.schema/declaration]]}
   [db declarations]
   (let [have (d/schema db)]
     (filterv (fn [dcl] (not= dcl (select-keys (get have (:db/ident dcl)) (keys dcl)))) declarations)))
 
+(defn- read-back
+  "text read as EDN, or ::unreadable."
+  {:malli/schema [:=> [:cat :string] :any]}
+  [text]
+  ;; interop edge: the EDN reader throws on what printed as no EDN (a function object)
+  (try (edn/read-string text) (catch Exception _ ::unreadable)))
+
 (defn registration
   "Register form v as schema k on db's program: {:tx tx-data :registration {:seon.schema/key k
   :seon.schema/definition v}}, judged against the whole population (the binary's forms with
-  db's changes and this one): refused as data when v does not read back as EDN, does not
-  compile, or declares an attribute Datahike cannot store. The entry keeps its resource, or
-  takes new-key-file's; a scratch key gets none. A new or changed attribute's declaration is
-  in the tx-data, so the branch can store its facts at once."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :any] [:or [:map [:tx :seon.db/tx-data] [:registration :seon.schema/registration]] :seon.schema/registration-refused]]}
-  [db k v]
+  db's changes and this one): refused as data when v does not read back as EDN equal to
+  itself, does not compile, or declares an attribute Datahike cannot store. The entry keeps
+  its resource, or takes new-key-file's; a scratch key (scratch?: its namespace is `user` or
+  ^:scratch in the registering process) gets none. A new or changed attribute's declaration
+  is in the tx-data, so the branch can store its facts at once."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :any :boolean] [:or [:map [:tx :seon.db/tx-data] [:registration :seon.schema/registration]] :seon.schema/registration-refused]]}
+  [db k v scratch?]
   (let [text (form-text v)]
-    (if-not (program/edn-value? v)
+    (if-not (= v (read-back text))
       (refused k :unreadable "a schema form is EDN data: it must print and read back equal")
       (let [r (compiled k (assoc (population (changes db)) k v))]
         (if (contract/error? r)
           r
           (let [e (entry db k)
-                file (cond (scratch-key? k) nil
+                file (cond scratch? nil
                            (:schema/file e) (:schema/file e)
                            :else (new-key-file db k))]
             {:tx (into (cond-> [(cond-> {:schema/key k :schema/form text} file (assoc :schema/file file))]
