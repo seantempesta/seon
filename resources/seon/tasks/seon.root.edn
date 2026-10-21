@@ -17,4 +17,8 @@
  {:seon.task/name "one-clock"
   :seon.task/plan "Audit A #13-16: the stall timer is a go block started inside the api's step (root.clj:449-457), the rate bucket a callback take! that forks an OS thread per pending tick in Jolt (fx.clj:93-104), the dashboard beat a raw thread (render/proc.clj:49-64). One declared :clock proc emits ticks on bounded channels; the stall and rate dials are named dragons."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.procs-test/the-clock-is-the-only-time-source}}]
+  :seon.task/proofs #{seon.procs-test/the-clock-is-the-only-time-source}}
+ {:seon.task/name "root-threads-are-a-known-number"
+  :seon.task/plan "bin/check lifecycle (10 start!/stop! cycles in one process) went red once on main (2026-10-21, 0b9df34, load ~8 with six lanes building): root's OS threads 25,25,25,26,26,29,29,29,29,29 against its bound of +2. Three reruns passed but drift the same way: 26->28, 25->27, flat 31. Steps then a plateau: a pool growing to a size that varies by run, not a leak per cycle. A thread count should be known: name each thread root starts (flow procs by workload, the fork-server reader, the flusher, the web/MCP listeners, any executor pool) and the number each owner owns, so the check asserts the exact count after each cycle instead of a growth bound. Find which pool grows and why its size depends on the run (lazy growth under contention?); fix it to a declared size, or record it as a declared, bounded pool."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.root-test/root-threads-are-what-root-declares}}]

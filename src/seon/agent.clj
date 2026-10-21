@@ -205,13 +205,14 @@
   [data-attrs]
   (commit!)
   (let [conn (:store-conn @state)
-        main (pdb/head conn :db)
+        main-b (pdb/main-branch (:cfg @state))
+        main (pdb/head conn main-b)
         head @conn
-        r (pm/three-way (pm/program (pdb/branch-base conn (:branch @state)) data-attrs) (pm/program head data-attrs) (pm/program main data-attrs))]
+        r (pm/three-way (pm/program (pdb/branch-base conn main-b (:branch @state)) data-attrs) (pm/program head data-attrs) (pm/program main data-attrs))]
     (if (empty? (:theirs r))
       {:ok true :applied [] :conflicts [] :t (:max-tx head)}
       (let [theirs (pm/program main data-attrs)
-            rep (d/merge-db conn #{:db} (into (pm/apply-tx head (into {} (for [k (:apply r)] [k (get theirs k)])))
+            rep (d/merge-db conn #{main-b} (into (pm/apply-tx head (into {} (for [k (:apply r)] [k (get theirs k)])))
                                               (pm/unmerged-tx head (:conflicts r) (:max-tx main))))
             ops (pdb/report->tx rep)
             errs (program/load-changes! (:db-after rep) ops)]
@@ -406,10 +407,10 @@
 ;; ---- stderr: a file per agent, its tail read by root when the agent dies -------------
 
 (defn stderr-path
-  "Where agent id's stderr goes: <store path>-agents/<id>.err (root makes the directory at
-  boot and removes it with a store it owns), or nil for a store with no path (in memory)."
+  "Where agent id's stderr goes: <dir>/<id>.err, dir its root's (seon.db/agents-dir: root
+  makes it at boot), or nil for a store with no path (in memory)."
   {:malli/schema [:=> [:cat [:maybe :string] :keyword] [:maybe :string]]}
-  [store-path id] (when store-path (str store-path "-agents/" (name id) ".err")))
+  [dir id] (when dir (str dir "/" (name id) ".err")))
 
 (defn- stderr-to-file!
   "This process's stderr (fd 2: what Chez, the runtime and native code print) into the
@@ -451,7 +452,7 @@
                 (let [c (sock/conn fd)]
                   ;; the clone opens the store itself, on its own branch, with its own lease
                   (pdb/after-fork! (:cfg r) (:lease r))
-                  (stderr-to-file! (stderr-path (get-in r [:cfg :store :path]) (:agent m)))
+                  (stderr-to-file! (stderr-path (pdb/agents-dir (:cfg r)) (:agent m)))
                   (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn c :mode :agent :tx-seq 0
                          :pending clojure.lang.PersistentQueue/EMPTY :mem-at nil :fx-pending {}
                          :store-conn (d/connect (assoc (:cfg r) :branch (:branch m))))
@@ -474,7 +475,7 @@
   (sock/clofork! fd)
   (lib/set-trip! trip-bytes)
   (lib/heap-cap! (+ (lib/bytes-in-heap) heap-extra-bytes))
-  (stderr-to-file! (stderr-path (get-in cfg [:store :path]) id))
+  (stderr-to-file! (stderr-path (pdb/agents-dir cfg) id))
   ;; this agent owns its branch's writes: it opens the store itself (seon.db/after-fork!)
   (pdb/after-fork! cfg lease)
   ;; the model's API key is root's alone (its :model owner calls the model; lane FX1)

@@ -7,9 +7,7 @@
             [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent]))
 
 (defn- db-with-program []
-  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}
-        _ (d/create-database cfg)
-        db (d/db-with @(d/connect cfg) pdb/schema)]
+  (let [db @(second (pdb/test-branch!))]
     (d/db-with db [{:db/id "ns" :ns/name 'demo}
                    {:var/name 'demo/f :var/ns "ns" :var/src "(defn f \"Doubles.\" [x] (* 2 x))"}
                    {:var/name 'demo-test/f-test :var/ns "ns" :var/src "(deftest f-test (is (= 4 (f 2))))"}

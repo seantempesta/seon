@@ -156,7 +156,7 @@
                                     :agent-attempt {:a2 {:seon.attempt/status :done}}))))))
 
 (deftest observed-task-states
-  (let [[_ conn] (seon.db/create! 50)
+  (let [[_ conn] (seon.db/test-branch!)
         db @conn
         tasks {"t/a" {:seon.task/execution :running :seon.task/needs #{} :seon.task/accumulated {:proofs #{'p/x}}} "t/b" {:seon.task/execution :running :seon.task/needs #{"t/a"}}
                "t/c" {:seon.task/execution :cancelled :seon.task/needs #{}}}

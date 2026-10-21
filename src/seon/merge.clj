@@ -43,7 +43,7 @@
 
 (defn- platform-record? {:malli/schema [:=> [:cat :keyword] :boolean]} [k]
   (let [n (namespace k)]
-    (and (or (= "seon" n) (str/starts-with? n "seon.")) (not (carried-platform-attrs k)))))
+    (and (some? n) (or (= "seon" n) (str/starts-with? n "seon.")) (not (carried-platform-attrs k)))))
 
 (defn- data-attr-set
   "The data attributes of db that data-attrs (a set, or :all) names."

@@ -1,0 +1,18 @@
+#!/bin/zsh
+# bin/ports   this checkout's own ports, "ENTRANCE WEB": the main tree (next/) has 7888 7777, the
+# owner's; each worktree (next-NAME) has its own block from ../worktree-ports (one line per
+# worktree, "NAME K"; entrance 7900+10K, web 7901+10K), allocated once under a lock. No two
+# checkouts share a port, so every lane can run its own root beside the owner's.
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+NAME=${ROOT:t}
+if [[ $NAME == next ]]; then print "7888 7777"; exit 0; fi
+REG=${ROOT:h}/worktree-ports
+K=$(/usr/bin/lockf -k "$REG.lock" zsh -c '
+  touch "$1"
+  k=$(awk -v n="$2" "\$1==n {print \$2}" "$1")
+  if [[ -z $k ]]; then
+    k=$(awk "BEGIN{m=-1} {if (\$2>m) m=\$2} END{print m+1}" "$1")
+    print "$2 $k" >> "$1"
+  fi
+  print $k' _ "$REG" "$NAME")
+print "$((7900 + 10*K)) $((7901 + 10*K))"
