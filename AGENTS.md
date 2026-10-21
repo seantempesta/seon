@@ -67,7 +67,7 @@ This is not a traditional program with a scheduler, timers and callers that wait
 - **No guards or fences.** Do the right thing. Name every outside-world failure point in `DRAGONS.md`, with its one edge function and its declared error. Nothing else catches.
 - **No added caches.** A content-keyed cache is allowed only for a unit measured as expensive.
 - **Effects go through owner procs** (`my.fx/call`, `my.fx/send`). The asker records the outcome on its own branch.
-- **Durability is batched,** with a flush window of 10 ms by default. A write that is followed by an effect outside the database waits for its flush.
+- **Durability is continuous group commit** (owner, 2026-10-21): the flusher takes everything unflushed and syncs once, then again; commits arriving during a sync share the next one. A write is answered when committed in memory; one followed by an effect outside the database waits for the sync that covers it (`docs/patterns.md#continuous-group-commit`).
 - **Every definition happens once, where it is defined (owner, 2026-10-21).** Behaviour varies through the environment (a forked process holding exactly the definitions it needs, e.g. a test's own stubs as real definitions) or through data (arguments, config facts), never by mutating a shared var. Program code does not call `intern` or `alter-var-root` (judged at the done rule from the compiler's resolved references, never by text); the platform arms contracts at definition, not after.
 - **Estimates are proofs.** A function whose input grows carries a cost proof: an overrun, or growth steeper than the work needs, is red like any failing test. Every contracted call is counted (`seon.profile`), and every eval records its costliest functions.
 - **Tests run by reach digest:** only tests reaching a change run, and results are shared by digest. Only good tests: real assertions, sensitive to mutation, not timing-only.
@@ -117,13 +117,13 @@ The order of the tasks is the order of the work: **delete first, then foundation
    - Compare each measurement with its estimate.
    - A ratio past 3× either way is a finding: explain it before going on.
    - Say plainly what was not measured.
-7. **If you touched what the owner sees (the dashboard, a render, the context), have it verified by eye.** Run your worktree's own root on its own ports (`bin/root ENTRANCE WEB`; every worktree can run one), then launch a Haiku or Sonnet subagent with the built-in browser. Its job: compare the page and the context against the system's facts read through the door. Is every number real? Does anything mislead? Does it show what is going on? It reports what is wrong or useless, with screenshots. Fix what it finds, or file it.
+7. **If you touched what the owner sees (the dashboard, a render, the context), have it verified by eye.** Run your worktree's own root (`bin/root start`, on its own ports from `bin/ports`), then launch a Haiku or Sonnet subagent with the built-in browser. Its job: compare the page and the context against the system's facts read through the door. Is every number real? Does anything mislead? Does it show what is going on? It reports what is wrong or useless, with screenshots. Fix what it finds, or file it.
 8. **Prove it whole:** `bin/test`, then `bin/check` in your worktree. `bin/check` fails when any step fails, keeps each step's output and the stores under `target/check/<time>/`, and is the bar.
 9. **Report to root:** commits, proofs (red → green), numbers against estimates, what you deleted, what's left. Root cherry-picks onto main by explicit paths, runs `bin/check` there, and closes the task.
 
 ## Look at the running system, as a Seon agent sees it
 
-A standing root runs at `bin/root 7888` (its store kept under `runs/`; the dashboard on 7777). Reach it through the **`seon` MCP server** (`bin/mcp 7888`, registered in `.mcp.json`). Its tools:
+Each checkout runs its own standing root: `bin/root start` (its store kept under `runs/`, on the checkout's ports from `bin/ports`; the owner's main tree is 7888 with the dashboard on 7777). Reach it through the **`seon` MCP server** (`bin/mcp`, which defaults to your checkout's entrance). Its tools:
 - `seon_agents`: agents, and tasks with their blocked-by;
 - `seon_eval`: evaluate in an agent's own REPL, exactly the path a Seon agent's forms take, recorded `:outside`; or as `root`;
 - `seon_context`: what the agent's model would read now;
