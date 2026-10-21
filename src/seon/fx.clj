@@ -13,7 +13,7 @@
   asker records the outcome in its own recording transaction."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
-            [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.java.shell :as sh] [clojure.string :as str] [jolt.ffi :as ffi]))
+            [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.java.shell :as sh] [clojure.string :as str] [jolt.ffi :as ffi] [jolt.deps :as deps]))
 
 (defn port "The stand-in's out-port to kind's owner." {:malli/schema [:=> [:cat :keyword] :keyword]}
   [kind] (keyword "fx" (name kind)))
@@ -112,6 +112,30 @@
           (finally (.delete (java.io.File. ^String index)))))
       (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path dir})))))
 
+;; Dependencies: fetching is an outside-world effect with one owner (the PKG plan), and
+;; the resolver is Jolt's own: no resolver of ours.
+
+(defn resolve-deps
+  "Resolve a deps map ({lib coordinate}: :mvn/version, :git/sha or :local/root) with
+  `jolt.deps/resolve-deps`, which fetches into the checkout's shared caches. Answers
+  {:value {:roots [absolute source roots]}} or :seon.fx/unresolved {:deps [the libs that
+  did not resolve] :unresolved Jolt's {:coord :version :detail}}."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [deps]} :req}]
+  (try
+    (let [r (deps/resolve-deps deps ".")
+          ;; Jolt resolves a :local/root that is not there to its (absent) src path; tools.deps
+          ;; refuses it (task jolt.deps/a-missing-local-root-is-unresolved moves this into Jolt)
+          gone (for [[lib {:keys [local/root]}] (:libs r) :when (and root (not (.exists (java.io.File. ^String root))))]
+                 {:coord lib :detail (str ":local/root " root " does not exist")})]
+      (if (seq gone)
+        (error :seon.fx/unresolved "a :local/root dependency does not exist" {:deps (vec (map :coord gone)) :unresolved (vec gone)})
+        {:value {:roots (:roots r)}}))
+    (catch Throwable e
+      (let [u (:unresolved (ex-data e))]
+        (error :seon.fx/unresolved (or (ex-message e) (str (type e)))
+               {:deps (vec (or (seq (map :coord u)) (keys deps))) :unresolved (vec u)})))))
+
 (defn build
   "The next generation (docs/source.md#the-next-generation): commit of the repository at
   repo built as <:seon.config.source/generations-dir>/<commit>, a worktree of it with this
@@ -138,7 +162,6 @@
         (step "bin/build seon" ["nice" "-n" "15" "/usr/bin/lockf" "-k" (cfg/value :seon.config.source/build-lock)
                                 (str dir "/bin/build") "seon"])
         {:value {:commit commit :checkout dir :binary (str dir "/target/seon") :ms (lib/ms-since t0)}})))
-
 ;; ---- the owner -----------------------------------------------------------------------
 
 (defn refill
