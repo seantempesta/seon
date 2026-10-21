@@ -114,3 +114,10 @@
     (alter-meta! (find-ns 'ctx-scratch-ns) assoc :scratch true)
     (let [db (d/db-with (db-with-program) [{:ns/name 'ctx-prog-ns} {:ns/name 'ctx-scratch-ns} {:ns/name 'user}])]
       (is (= ['ctx-prog-ns] (mapv ns-name (agent/test-namespaces db)))))))
+
+(deftest an-unresolved-citation-says-what-to-do
+  ;; task seon.task/a-task-cites-what-it-needs: a name the plan cites that resolves to
+  ;; nothing tells the agent what that means and what to do, not only that it is unresolved
+  (let [r (context/resolve-ref (db-with-program) 'demo/nowhere)]
+    (is (:unresolved r))
+    (is (string? (:problem r)) "a message beside the name")))

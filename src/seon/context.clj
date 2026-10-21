@@ -1,12 +1,12 @@
 (ns seon.context
   "The agent's context, rendered live each turn from its task and what it references:
   the current-state block (task plan and instructions, the proofs with their red
-  assertions and source, every backticked fully qualified symbol resolved to its doc and
+  assertions and source, every var the task's text cites (seon.ref/references) resolved to its doc and
   source, the last evaluations), printed through the one value printer (seon.print). Nothing is stored:
   the next turn renders again from the branch's db."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d]
-            [seon.print :as print] [seon.reconcile :as r]))
+            [seon.print :as print] [seon.ref :as ref]))
 
 (def system-prompt
   "What every model is told once per turn: how to answer and which verbs exist."
@@ -53,7 +53,7 @@
   (let [v (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))))
         src (source-of db sym)]
     (cond-> {:symbol sym}
-      (nil? v) (assoc :unresolved true)
+      (nil? v) (assoc :unresolved true :problem (:unresolved ref/problem-messages))
       src (assoc :source src)
       (and (nil? src) (some-> v meta :doc)) (assoc :doc (:doc (meta v))))))
 
@@ -117,7 +117,8 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
   [db t {:keys [results reds last-items turn max-turns unmerged truncated? refusals run-errors source repairs]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
-        refs (r/references (str plan "\n" (:seon.task/instructions t)))]
+        refs (into [] (comp (map :seon.ref/name) (filter qualified-symbol?))
+                   (ref/references db (str plan "\n" (:seon.task/instructions t))))]
     (cond-> {:task (assoc (select-keys t [:seon.task/id :seon.task/kind :seon.task/instructions])
                           ;; the plan as it accumulated along :needs (prerequisites first)
                           :seon.task/plan plan)

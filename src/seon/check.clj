@@ -258,7 +258,7 @@
   calls them with generated arguments. Every other function touches a host object (a
   socket, a process, the store) and is never called with random arguments: a generated pid
   handed to kill(2) is a real signal."
-  '#{seon.merge seon.reconcile seon.template seon.proofs seon.task seon.step})
+  '#{seon.merge seon.reconcile seon.template seon.proofs seon.task seon.step seon.ref})
 
 (def ^:private pure-fns
   "Pure functions in namespaces that are otherwise host code (seon.lib binds libc: never
