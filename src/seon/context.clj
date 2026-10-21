@@ -167,7 +167,8 @@
 
 (defn- refused
   "The done rule's refusals as the agent reads them, beyond its own red proofs (shown with
-  the proofs): a red test names its failures, a contract gap its var."
+  the proofs): a red test names its failures, a contract gap its var, a design step that
+  has not improved its plan the call that does."
   {:malli/schema [:=> [:cat [:vector :seon.reconcile/refusal] [:vector :map]] [:vector :map]]}
   [refusals reds]
   (let [rs (remove #(= :proof-red (:refusal %)) refusals)
@@ -181,6 +182,8 @@
                (:regression :stray-red) (cond-> {:refusal refusal :test symbol}
                                           (seq (filter #(= symbol (:test %)) reds))
                                           (assoc :failures (mapv failure (filter #(= symbol (:test %)) reds))))
+               :no-design {:refusal refusal :unchanged :seon.task/plan
+                           :do '(my.task/update! :seon.task/plan str "\n\n" "<what the implement step must do>")}
                {:refusal refusal}))
            (when (seq gaps) [{:refusal :contract-gap :vars gaps}])
            (when (seq unmerged) [{:refusal :unmerged :keys unmerged}])))))

@@ -61,13 +61,16 @@
   proofs of merged tasks, red here); a stray red (a red test that is no task's open
   proof); a contract gap (a function the attempt defined without a contract); an
   unmerged entry on the branch (a merge conflict not resolved). A :design task readies
-  the interface for its implement step, so its own proofs may stay red."
+  the interface and plan for its implement step, so its own proofs may stay red, and it is
+  refused :no-design until its plan differs from the one its attempt began with (or that
+  one is unknown)."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/refusal]]}
-  [{:keys [proofs results main-green allowed-red uncontracted unmerged kind]}]
+  [{:keys [proofs results main-green allowed-red uncontracted unmerged kind plan plan-before]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))
         design? (= :design kind)]
     (vec (concat
            (when (and (empty? proofs) (not design?)) [{:refusal :no-proofs}])
+           (when (and design? (or (nil? plan-before) (= plan plan-before))) [{:refusal :no-design}])
            (when-not design?
              (for [p (sort-by str proofs) :when (not= :pass (get results p :none))] {:refusal :proof-red :symbol p}))
            (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t))] {:refusal :regression :symbol t})
