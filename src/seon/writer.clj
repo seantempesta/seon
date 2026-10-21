@@ -27,7 +27,7 @@
   {:malli/schema [:=> [:cat :seon.writer/state :seon.db/branch :seon.merge/data-attrs] [:tuple :seon.host/db :seon.merge/result]]}
   [{:keys [conn]} b data-attrs]
   (let [head (pdb/head conn b)]
-    [head (pm/three-way (pm/program (pdb/branch-base conn b) data-attrs) (pm/program head data-attrs) (pm/program @conn data-attrs))]))
+    [head (pm/three-way (pm/program (pdb/branch-base conn (pdb/conn-main conn) b) data-attrs) (pm/program head data-attrs) (pm/program @conn data-attrs))]))
 
 (defn- refused
   "The writer refusing a request, as the one error map (:seon.writer/refused) with the
@@ -133,6 +133,12 @@
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.writer/request] :seon.writer/state]}
   [st o {:keys [op dest] :as m}]
   (let [conn (:conn st)
+        main (pdb/conn-main conn)
+        ;; every branch named in a request is root's name for it, under root's main
+        m (cond-> m
+            (:branch m) (update :branch #(pdb/on-main main %))
+            (:from m) (update :from #(pdb/on-main main %))
+            (:branches m) (update :branches #(mapv (fn [b] (pdb/on-main main b)) %)))
         exists? (fn [b] (pdb/branch? conn b))
         reply (fn [st r] (answer o dest r) st)]
     (case op
@@ -142,7 +148,7 @@
       ;; the branch itself and owns its writes (run-ahead, committed by the agent)
       :spawn (let [{:keys [agent branch]} m
                    resumed? (exists? branch)]
-               (when-not resumed? (d/branch! conn :db branch))
+               (when-not resumed? (d/branch! conn main branch))
                (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :ns (:ns m) :fd (:fd m)
                                               :cfg (:cfg st) :lease (:lease m) :resumed resumed?})
                (reply st {:ok true :t (:max-tx @conn) :resumed resumed?}))
@@ -163,9 +169,9 @@
       ;; root's read of a branch (or main): its committed value from the store; :base-t is
       ;; main's t at the branch's merge base (what of main it holds)
       :branch-db (reply st (cond
-                             (= :db (:branch m)) {:ok true :db @conn}
+                             (= main (:branch m)) {:ok true :db @conn}
                              (exists? (:branch m)) {:ok true :db (pdb/head conn (:branch m))
-                                                    :base-t (:max-tx (pdb/branch-base conn (:branch m)))}
+                                                    :base-t (:max-tx (pdb/branch-base conn main (:branch m)))}
                              :else (refused (str "no branch " (:branch m)) {})))
       :branch-info (reply st (if (exists? (:branch m))
                                (let [h (pdb/head conn (:branch m))] {:ok true :datoms (count (d/datoms h :eavt)) :t (:max-tx h)})

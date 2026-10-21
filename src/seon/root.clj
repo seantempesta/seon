@@ -176,7 +176,8 @@
         id (keyword (str "a" n))
         ;; the entity ids this agent mints on its branch (its own block: L1's lease)
         lease (+ (:lease-base st) (* n cfg/EID-LEASE))
-        branch (or branch (keyword (str "agent-" n)))
+        ;; named under root's main, so roots sharing a store never share a branch (seon.db/on-main)
+        branch (pdb/on-main (pdb/conn-main (:conn st)) (or branch (keyword (str "agent-" n))))
         [r a] (sock/socketpair)
         ;; fiber pumps: an end costs no thread of its own (root may run a thousand agents)
         end (remote/open r {:codec {:encode codec/encode :decode codec/decode} :pump :fiber :buf cfg/AGENT-BUF})]
@@ -204,7 +205,7 @@
         died (when-not (or rid killed?)
                (contract/error :seon.agent/died 'seon.root/api-proc (str "agent " (name agent) " died" (exit-text (:exit v)))
                                {:agent agent :pid (or pid (:pid v)) :exit (:exit v)
-                                :stderr (stderr-tail (agent/stderr-path (get-in st [:view :store :path]) agent))
+                                :stderr (stderr-tail (agent/stderr-path (get-in st [:view :store :agents-dir]) agent))
                                 :last-op (some-> (:running v) (select-keys [:form :since-ms]) (assoc :kind :eval))}))
         e (or died (gone agent "agent stopped"))]
     (step/out! o :events (step/event {:type (if killed? :killed :dead) :agent agent}))
@@ -239,7 +240,7 @@
                              (assoc-in [:procs :api] (get-in sys [:procs :api])))
                    r (flow/update! @(:graph st) {:procs (merge (:procs built) (:agent-procs st)) :conns (:conns built)})]
                (reply! (assoc st :system built) p (select-keys r [:started :stopped :kept :lost :ms])))
-      :spawn (let [opts (:opts m)
+      :spawn (let [opts (cond-> (:opts m) (:branch (:opts m)) (update :branch #(pdb/on-main (pdb/conn-main (:conn st)) %)))
                    holder (and (:branch opts)
                                (some (fn [[aid a]] (when (and (= (:branch opts) (:branch a)) (not (:ended-ms a))
                                                               (not (#{:dead :killed} (:status a))))
@@ -476,16 +477,20 @@
 
 (defn- warm!
   "Run, before the fork server is forked, every code path agents and the server take,
-  so forked children inherit it compiled."
+  so forked children inherit it compiled, over a definition and a task of its own (no seed
+  needed). Answers what its reads found."
   {:malli/schema [:=> [:cat :seon.host/conn] :any]}
   [conn]
-  (let [db @conn]
+  ;; a definition and a task of warm!'s own, on a value never committed: boot needs no seed
+  (let [db (d/db-with @conn [{:db/id "ns" :ns/name 'seon.warm :ns/doc "warm"}
+                              {:db/id "v" :var/name 'seon.warm/f :var/ns "ns" :var/doc "warm" :var/src "(defn f [x] x)" :var/arity 1}
+                              {:task/name :seon.warm/tidy :task/plan "warm" :task/status :held :task/refs ["v"]}])]
     (dotimes [_ 3]
-      (d/q '[:find ?n . :in $ ?v :where [?e :var/name ?v] [?e :var/doc ?n]] db 'app.m0/f1)
+      (d/q '[:find ?n . :in $ ?v :where [?e :var/name ?v] [?e :var/doc ?n]] db 'seon.warm/f)
       (d/q '[:find (count ?e) . :where [?e :var/name]] db)
       (d/q '[:find [?n ...] :where [?e :ns/name ?n]] db)
-      (d/pull db '[*] [:var/name 'app.m0/f1])
-      (d/pull db '[:task/name {:task/refs [:var/name]}] [:task/name :app.m0/tidy])
+      (d/pull db '[*] [:var/name 'seon.warm/f])
+      (d/pull db '[:task/name {:task/refs [:var/name]}] [:task/name :seon.warm/tidy])
       (d/db-with db [{:note/text "warm" :note/agent :warm}])
       (d/with db [{:note/text "warm" :note/agent :warm}])
       (sock/frame {:op :reply :items [{:id 1 :printed "x" :ms 0.1}]})
@@ -498,37 +503,48 @@
         (eval '(defn warm-f [x] (* 2 x)))
         (eval '(deftest warm-t (is (= 4 (warm-f 2)))))
         (binding [clojure.test/*test-out* (java.io.StringWriter.)] (clojure.test/run-tests nsx)))
-      (remove-ns 'seon.warm))))
+      (remove-ns 'seon.warm))
+    ;; what the reads above found: its own definition and task, so they ran real paths
+    {:doc (d/q '[:find ?n . :in $ ?v :where [?e :var/name ?v] [?e :var/doc ?n]] db 'seon.warm/f)
+     :task (d/pull db '[:task/name {:task/refs [:var/name]}] [:task/name :seon.warm/tidy])}))
 
 (declare call!)
 
 (defn start!
-  "Boot the control process, the fork server and the root graph. opts:
-  {:datoms n :path dir (durable) :backend :lmdb|:file :log? true
+  "Boot the control process, the fork server and the root graph on its main, a branch of
+  the one store (owner, 2026-10-21: one store, many branches, as in production). opts:
+  {:path dir (the store; default SEON_STORE, else <SEON_RUNS>/store, created when missing,
+   holding the schema and, given :datoms n, about n datoms of an example program on :db; a
+   root holds no program it was not given) :main branch (root's main; default SEON_MAIN, else a new
+   branch <SEON_RUN or run>-<time>-<id> of :db; :db is production's main; an existing
+   branch is recovered) :backend :lmdb|:file :log? true
    :max-running n (parallel attempts) :provider p (the attempts' model; default the
    stand-in seon.fixtures/reply, or DeepSeek from SEON_AI_* when SEON_AI_PROVIDER is
    openai-compat)}."
   {:malli/schema [:=> [:cat :map] :seon.root/sys]}
-  [{:keys [datoms log? path backend max-running provider] :or {datoms 2000 max-running reconcile/default-max-running}}]
+  [{:keys [datoms log? path main backend max-running provider] :or {datoms 0 max-running reconcile/default-max-running}}]
   (lib/ignore-sigpipe!)
   (when-not log? (trove/set-log-fn! nil))
   (let [t0 (lib/now-ns)
-        ;; agents write their own branches, so the store is shared: a durable store, given or
-        ;; a new run directory under SEON_RUNS (<cwd>/runs). It is never deleted: a run is a
-        ;; record frozen in time (owner, 2026-10-21); bin/check gives each check run its own
-        given (or path (System/getenv "SEON_STORE"))
-        path (or given (str (or (System/getenv "SEON_RUNS") (str (System/getProperty "user.dir") "/runs"))
-                            "/" (.format (java.text.SimpleDateFormat. "yyyyMMdd'T'HHmmss") (java.util.Date.))
-                            "-" (subs (str (random-uuid)) 0 8)))
+        ;; agents write their own branches, so the store is shared: the one durable store
+        ;; (bin/check's run, the kept runs store, a test's), never deleted: a run is a record
+        ;; frozen in time (owner, 2026-10-21). This root works on its own main, a branch of
+        ;; the store's seed, and names its agents' branches under it
+        stamp (.format (java.text.SimpleDateFormat. "yyyyMMdd'T'HHmmss") (java.util.Date.))
+        path (or path (System/getenv "SEON_STORE")
+                 (str (or (System/getenv "SEON_RUNS") (str (System/getProperty "user.dir") "/runs")) "/store"))
+        main (or main (some-> (System/getenv "SEON_MAIN") keyword)
+                 (keyword (str (or (System/getenv "SEON_RUN") "run") "-" stamp "-" (subs (str (random-uuid)) 0 8))))
         backend (or backend (some-> (System/getenv "SEON_BACKEND") keyword) :lmdb)
-        {store-cfg :cfg conn :conn recovered? :recovered?} (pdb/open! backend path datoms)
+        {store-cfg :cfg conn :conn recovered? :recovered?} (pdb/open! backend path datoms main)
         ;; each agent's stderr goes to a file here (seon.agent/stderr-path), read at its death
-        _ (.mkdirs (java.io.File. (str path "-agents")))
+        agents-dir (pdb/agents-dir store-cfg)
+        _ (.mkdirs (java.io.File. agents-dir))
         open-ms (lib/ms-since t0)
         t-pre (lib/now-ns)
         _ (pdb/preload! @conn)
         preload-ms (lib/ms-since t-pre)
-        recovered (if recovered? (vec (sort (disj (d/branches conn) :db))) [])
+        recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
         load-ms (lib/ms-since t0)
         t1 (lib/now-ns)
         ;; this root's boot id (attempts of an earlier boot are reaped); its fact is written
@@ -560,7 +576,7 @@
                :judge (a/chan 64)}
         view {:agents {} :writer {:tx-count 0} :stats {}
               :server {:agents-forked 0 :pid pid :status :up :restarts 0}
-              :store {:backend backend :path path :recovered? (boolean recovered?)
+              :store {:backend backend :path path :main main :agents-dir agents-dir :recovered? (boolean recovered?)
                       :recovered-branches recovered :open-ms (lib/r2 open-ms) :preload-ms (lib/r2 preload-ms)}
               :boot {:load-ms (lib/r2 load-ms) :program (assoc program :ms (lib/r2 program-ms))
                      :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :guarantees (if contract/on? :on :off)}}

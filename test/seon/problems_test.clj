@@ -27,7 +27,7 @@
 (defn- occ [e agent ms] (err/occurrence e :eval {:agent agent :task "t/a" :form "(f 1)"} ms))
 
 (deftest a-storm-is-one-write-per-window
-  (let [[_ conn] (pdb/create! 0)
+  (let [[_ conn] (pdb/test-branch!)
         f (reduce err/fold {} (concat (for [i (range 1000)] (occ (refusal 'app/f i) (if (even? i) :a1 :a2) (+ 1000 i)))
                                      (for [i (range 10)] (occ (refusal 'app/g i) :a3 (+ 5000 i)))))
         [f tx] (err/flush-tx f @conn)
@@ -126,7 +126,7 @@
         _ (.mkdirs (java.io.File. (str dir "-agents")))
         _ (spit (str dir "-agents/a1.err") (str (apply str (repeat 3000 "x")) "\nChez: out of memory\n"))
         p (promise)
-        st (-> (api {:store {:path dir} :agents {:a1 {:status :busy :pid 77 :task "t/x" :running {:form "(work!)" :since-ms 5}}}})
+        st (-> (api {:store {:path dir :agents-dir (str dir "-agents")} :agents {:a1 {:status :busy :pid 77 :task "t/x" :running {:form "(work!)" :since-ms 5}}}})
                (assoc-in [:agents :a1] {:branch :b1}) (assoc-in [:pending 3] {:p p :kind :eval :agent :a1}))
         ;; the api's end of an agent (its graph's update! is the api's, not this test's)
         end (fn [st m] (let [o (volatile! {}) st (#'root/end-agent st o m)] [(dissoc (#'root/flush-problems st o) :seon.root/update) @o]))
@@ -184,7 +184,7 @@
   "A main db with n recorded errors, n red attempts and n dead attempts over a task each,
   plus k clean tasks with green attempts (the program the read must not cost)."
   [n k]
-  (let [[_ conn] (pdb/create! 0)
+  (let [[_ conn] (pdb/test-branch!)
         f (reduce err/fold {} (for [i (range n)] (err/occurrence {:seon.error/type :seon.agent/eval-error :seon.error/operation 'seon.repl/eval-code
                                                                   :seon.error/message (str "Unable to resolve symbol: s" (char (+ 97 (mod i 26))) i) :class "x"}
                                                                  :eval {:agent :a1 :task "t/x0"} 100)))
@@ -240,7 +240,7 @@
         (is (= [{:key [:var 'app/f] :kind :both-modified}] (get-in m [:evidence :conflicts])))
         (is (= :seon.merge/behind (get-in m [:error :seon.error/type])))))
     (testing "a task whose evidence names a problem answers it: mining files no duplicate"
-      (let [[_ c] (pdb/create! 0)
+      (let [[_ c] (pdb/test-branch!)
             _ (d/transact c (vec (d/datoms db :eavt)))
             db2 db
             sig (:signature (first (get-in r [:classes :eval :rows])))
@@ -321,7 +321,7 @@
 (deftest another-tasks-unfinished-proof-is-not-a-problem
   ;; T5's real run: one attempt's run reports every program test, so 210 rows named other
   ;; tasks' proofs not done yet (allowed reds); only the task's own proofs are its problems
-  (let [[_ conn] (pdb/create! 0)]
+  (let [[_ conn] (pdb/test-branch!)]
     (d/transact conn [{:seon.task/id "t/a" :seon.task/ns 't :seon.task/name "a" :seon.task/plan "p" :seon.task/execution :running
                        :seon.task/branch :b :seon.task/kind :work :seon.task/proofs #{'app.t/a-test}}])
     (d/transact conn [{:seon.attempt/id "t/a#1" :seon.attempt/task [:seon.task/id "t/a"] :seon.attempt/boot "b" :seon.attempt/agent :a1

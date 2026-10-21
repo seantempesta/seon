@@ -8,10 +8,7 @@
             [seon.db :as pdb]
             [seon.task :as task]))
 
-(defn- empty-db []
-  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}]
-    (d/create-database cfg)
-    (-> @(d/connect cfg) (d/db-with pdb/schema))))
+(defn- empty-db [] @(second (pdb/test-branch!)))
 
 (def ^:private file-a
   "[{:seon.task/name \"parse\" :seon.task/plan \"Parse the rows.\" :seon.task/proofs #{demo-test/parse-test}}

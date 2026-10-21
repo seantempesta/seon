@@ -6,8 +6,13 @@
 # bin/check MODE [ARGS] runs one mode.
 #
 # Every step's exit status counts (a mode answers 0 only when its own proof holds), its
-# whole output is kept in target/check/<time>/<step>.log, a failing step's store is kept,
-# and the script ends with the failed steps named and exits non-zero when any failed.
+# whole output is kept in target/check/<time>/<step>.log, and the script ends with the
+# failed steps named and exits non-zero when any failed.
+#
+# One store, many branches, as in production (owner, 2026-10-21): the run seeds one store,
+# target/check/<time>/store, and every root a step boots works on a branch of it named for
+# the step (SEON_RUN: <step>-<time>-<id>); the recovery steps (durable, window, resume) kill
+# and reopen that same store on the same branch. The store is kept, every branch with it.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # one full check at a time on this machine, every lane's (each boots ~34 roots and up to 100
 # agents): a full run takes the check lock and runs niced; a single mode does not
@@ -22,8 +27,8 @@ if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then run "$@"; exit $?; fi
 N=${1:-100}
 OUT=$ROOT/target/check/$(date +%Y%m%dT%H%M%S)
 mkdir -p "$OUT"
-# every root a step boots keeps its store here, beside the step's output
-export SEON_RUNS=$OUT/runs
+# the one store of this run: every step's root works on a branch of its seed
+export SEON_STORE=$OUT/store
 FAILED=()
 
 # step NAME FILTER CMD...: run CMD, keep its output, show the lines FILTER (a grep -E
@@ -33,13 +38,14 @@ FAILED=()
 step() {
   local name=$1 filter=$2; shift 2
   local log=$OUT/$name.log expect=${EXPECT:-0}
-  "$@" > "$log" 2>&1
+  SEON_RUN=$name "$@" > "$log" 2>&1
   local st=$?
   if [[ -n $filter ]]; then grep -E "$filter" "$log"; else tail -1 "$log"; fi
   if (( st != expect )); then FAILED+=("$name (exit $st, expected $expect, $log)"); echo "FAILED $name (exit $st, expected $expect)"; fi
   return 0
 }
 
+echo "== seed (the one store every step branches from)"; step seed "" run seed 2000
 echo "== dragons"; step dragons "" "$ROOT/bin/dragons"
 echo "== contracts"; step contracts ":contracted|:uncontracted|:result" run contracts
 echo "== census (no [:fn] without :gen; mg/check on every pure contract, in the release binary)"
@@ -60,7 +66,7 @@ echo "== hotreload"; step hotreload "" run hotreload
 echo "== drain"; step drain "" run drain 32
 
 echo "== orphan (root dies under busy agents, a clone and a test child)"
-run orphan > "$OUT/orphan.log" 2>&1
+SEON_RUN=orphan run orphan > "$OUT/orphan.log" 2>&1
 (( $? == 0 )) || { echo "FAILED orphan (no test child)"; FAILED+=("orphan (no test child, $OUT/orphan.log)") }
 PIDS=$(sed -n 's/^PIDS //p' "$OUT/orphan.log")
 # the orphans are given until their parent's death reaches them: each is asked once a
@@ -75,12 +81,12 @@ if [[ -z $PIDS ]]; then echo "FAIL no pids"; FAILED+=("orphan (no pids, $OUT/orp
 elif [[ -n $LEFT ]]; then echo "FAIL left running: $LEFT"; kill -9 ${=LEFT}; FAILED+=("orphan (left running: $LEFT)")
 else echo "PASS none of $PIDS outlived root"; fi
 
-# stores a step makes live under $OUT and are kept: a failing one is the evidence
-echo "== durable (root writes a store and SIGKILLs itself; a new root recovers it)"
-EXPECT=137 step durable-write "" run durable-write "$OUT/durable.store"; step durable-read "" run durable-read "$OUT/durable.store"
+# the recovery steps kill root and reopen the one store on the branch it worked on
+echo "== durable (root writes its branch and SIGKILLs itself; a new root reopens the store and recovers it)"
+EXPECT=137 step durable-write "" run durable-write durable; step durable-read "" run durable-read durable
 echo "== window (SEON_FLUSH_MS=1000: answered unflushed, flushed within the window; :flush? waits)"
-EXPECT=137 step window-write "" env SEON_FLUSH_MS=1000 zsh -c "cd '$ROOT/target' && ./seon window-write '$OUT/window.store'"
-step window-read "" env SEON_FLUSH_MS=1000 zsh -c "cd '$ROOT/target' && ./seon window-read '$OUT/window.store'"
+EXPECT=137 step window-write "" env SEON_FLUSH_MS=1000 zsh -c "cd '$ROOT/target' && ./seon window-write window"
+step window-read "" env SEON_FLUSH_MS=1000 zsh -c "cd '$ROOT/target' && ./seon window-read window"
 echo "== swarm $N"; step swarm ":merged|:tasks-done|:fresh" run swarm $N
 echo "== tasks: calc (6-task graph, cancel), scenarios (conflict, semantic, hairy, newns, sibling), swarm 20 over 5 shared vars"
 step e2e-calc "" run e2e calc
@@ -88,10 +94,11 @@ for k in conflict semantic hairy newns sibling; do step e2e-$k "" run e2e scenar
 step e2e-swarm "" run e2e swarm 20 8
 echo "== stuck (add always wrong: refinement chains until its budget is spent, then a stuck fact naming what it blocks; the run ends on quiescence)"; step e2e-stuck ":stuck|quiet-after" run e2e stuck
 echo "== resume (root SIGKILLed mid-graph; a new root finishes it)"
-run e2e resume "$OUT/resume.store" > "$OUT/resume1.log" 2>&1; step resume "" run e2e resume2 "$OUT/resume.store"
+SEON_RUN=resume1 run e2e resume resume > "$OUT/resume1.log" 2>&1; step resume "" run e2e resume2 resume
 echo "== scale $N"; step scale ":all-ok|:spawn->all|:end-to-end|:control-real-mb|:all-killed|^SCALE " run scale $N
 
 echo
+echo "store: $(du -sk "$OUT/store" | cut -f1) KB, one seed and $(ls "$OUT/store-agents" | wc -l | tr -d ' ') roots' mains"
 if (( ${#FAILED} )); then
   echo "CHECK FAILED: ${#FAILED} step(s)"; for f in $FAILED; do echo "  $f"; done
   echo "outputs: $OUT"

@@ -37,7 +37,7 @@
 (defn load!
   "A fresh in-memory main holding n work tasks (2n tasks) and their attempts; answers conn."
   [n max-running]
-  (let [[_ conn] (pdb/create! 0)
+  (let [[_ conn] (pdb/test-branch!)
         ds (decls n)]
     (d/transact conn {:tx-data (task/boot-tx boot max-running)})
     (doseq [part (partition-all 400 ds)]
