@@ -25,7 +25,9 @@
 
 (def merge-dials
   "The merge dials' defaults, when the task sets none (:seon.config.merge/*)."
-  {:max-conflicts 3 :max-merge-turns 2 :max-attach 2})
+  {:max-conflicts 3 :max-merge-turns 2})
+
+(def default-budget "Refinement chains a task's failures may attach, undeclared." 2)
 
 (defn dials
   "Task t's merge dials: its own :seon.config.merge/* over the defaults."
@@ -188,6 +190,7 @@
   [v t]
   (let [id (:seon.task/id t) as (get-in v [:attempts id])]
     (and (= :running (:seon.task/execution t))
+         (nil? (:seon.task/stuck t))
          (not (done-in? v id))
          (empty? (blocked-in v id))
          (not-any? #(or (live? v %) (#{:ended :dead} (:seon.attempt/status %))) as))))
@@ -249,17 +252,18 @@
                  (cond
                    (not= :running (:seon.task/execution t)) {:op :close :attempt aid}
                    (= :dead (:seon.attempt/status a))
-                   {:op :bail :attempt aid :task id :problem (str "its agent died" (some->> (:seon.attempt/reason a) (str ": ")))}
+                   {:op (if (< (:seon.task/generation t 0) (:seon.task/budget t default-budget)) :attach :bail)
+                    :attempt aid :task id :problem (str "its agent died" (some->> (:seon.attempt/reason a) (str ": ")))}
                    :else
                    (let [rs (done-refusals (done-input v id (:seon.attempt/results a {}) (:seon.attempt/uncontracted a #{})
                                                        (:seon.attempt/unmerged a []) (:seon.attempt/basis-t a)))]
                      (cond
                        (and (empty? rs) merge?) {:op :merge :attempt aid :task id}
                        (empty? rs) {:op :accept :attempt aid :task id}
-                       ;; a failed merge: new tasks attach through :needs, each a new agent
-                       (and merge? (< (:seon.task/generation t 0) (:max-attach (dials t)))) {:op :attach :attempt aid :task id}
+                       ;; a failed attempt: new tasks attach through :needs, each a new agent, while
+                       ;; the budget lasts; spent, the task is stuck (bail)
                        :else
-                       {:op :bail :attempt aid :task id
+                       {:op (if (< (:seon.task/generation t 0) (:seon.task/budget t default-budget)) :attach :bail) :attempt aid :task id
                         :problem (str "attempt " aid " ended " (name (:seon.attempt/outcome a :error))
                                       (some->> (:seon.attempt/reason a) (str " (") (#(str % ")")))
                                       ": " (refusals-text rs))}))))
