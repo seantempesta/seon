@@ -25,8 +25,9 @@
 (def default-budget (:reply budgets))
 
 (defn print-value
-  "`v` printed under opts (all optional): :handle, the result symbol cuts read through
-  (result/h3; none: a cut says what it omitted and names no form); :budget tokens (default-budget); :max-depth (8); :width (72); :outputs, a
+  "`v` printed under opts (all optional): :handle, what cuts read through: the result
+  symbol (result/h3) or a form that reads v ((nth (my.turn/evals) 3)); none: a cut says
+  what it omitted and names no form; :budget tokens (default-budget); :max-depth (8); :width (72); :outputs, a
   subset of #{:text :hiccup} (#{:text}). Answers {:text :tokens :truncated? :elisions :cuts}
   plus :html (hiccup) when asked, or the insufficient-budget refusal (an error map) when the
   budget cannot show the value's first part."

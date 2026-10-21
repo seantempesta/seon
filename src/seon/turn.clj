@@ -29,9 +29,14 @@
   [] (get-in @agent/state [:turn :task]))
 
 (defn last-evals
-  "The items of this process's last model turn (form, printed value or error, output)."
+  "The items of this process's last model turn, in order: each one's form, printed value or
+  error, output, and its live value (:value) while this process holds it."
   {:malli/schema [:=> [:cat] [:vector :map]]}
-  [] (vec (map #(select-keys % [:id :tag :form :printed :out :handle]) (get-in @agent/state [:turn :evals]))))
+  []
+  (let [rs (:results @agent/state)]
+    (mapv (fn [it] (cond-> (select-keys it [:id :tag :form :printed :out :handle])
+                     (contains? rs (:handle it)) (assoc :value (get rs (:handle it)))))
+          (get-in @agent/state [:turn :evals]))))
 
 (defn request-stop!
   "A verb ends the loop after this turn's forms: :waiting (my.turn/wait) or :sent-back."
@@ -87,17 +92,14 @@
   provider error. The model call is an effect (my.fx :model, lane FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
   {:malli/schema [:=> [:cat :map :map [:maybe :string]] [:or :map :map]]}
-  [{:keys [turn tokens last-items max-turns merge? attempt] :as st} {:keys [results unmerged] :as obs} model-name]
+  [{:keys [turn tokens max-turns merge? attempt] :as st} {:keys [results unmerged] :as obs} model-name]
   (let [t (:task obs)
         proofs (:proofs (:seon.task/accumulated t))
         db (agent/db)
         block (context/current-state db t (merge (observed db obs)
                                                  {:results results :turn turn :max-turns max-turns
-                                                  ;; each value with a live result: the context prints it again within its share
-                                                  :last-items (mapv #(if-let [h (:handle %)]
-                                                                       (let [rs (:results @agent/state)] (if (contains? rs h) (assoc % :value (get rs h)) %))
-                                                                       %)
-                                                                    last-items)
+                                                  ;; the last turn's items as (my.turn/evals) answers them: the transcript's cuts read through it
+                                                  :last-items (last-evals)
                                                   :unmerged (when merge? unmerged) :truncated? (:truncated? st)
                                                   :source (:source st) :repairs (:repairs st [])}))
         t1 (System/nanoTime)
@@ -117,7 +119,7 @@
                            :seon.turn/red (count (remove #(= :pass (val %)) (select-keys results proofs)))
                            :seon.turn/ms (long (/ (- (System/nanoTime) t1) 1e6)) :seon.turn/tokens used}]
                            (:truncated? c) (conj {:seon.turn/id (str attempt "/" turn) :seon.turn/truncated true})))
-        (cond-> (-> (assoc st :turn (inc turn) :tokens (+ tokens used) :last-items items :truncated? (boolean (:truncated? c))
+        (cond-> (-> (assoc st :turn (inc turn) :tokens (+ tokens used) :truncated? (boolean (:truncated? c))
                            :source text :repairs repairs)
                     ;; what this turn's block showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
@@ -153,7 +155,7 @@
         merge? (= :merge (:seon.task/kind t0-task))
         dials (r/dials t0-task)]
     (when merge? (branch/merge-main!))
-    (loop [st {:turn 0 :tokens 0 :last-items [] :merge-turns 0 :t0 (System/nanoTime) :attempt attempt
+    (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (System/nanoTime) :attempt attempt
                :max-turns max-turns :merge? merge? :gaps-before (harvest/uncontracted (agent/db))}]
       (let [{:keys [refusals unmerged] :as obs} (observe task (:gaps-before st))
             stop (get-in @agent/state [:turn :stop])

@@ -69,6 +69,19 @@
       (is (= (list 'drop (:seon.render.data/next-offset c) 'result/h7) (:seon.print/continuation c)) (pr-str c))
       (is (= 5000 (+ (:seon.render.data/next-offset c) (:seon.print/omitted c))) "shown + omitted is the whole"))))
 
+(deftest a-cut-reads-its-rest-through-a-form-handle
+  ;; a value read by a form rather than held by a result var (one of the last turn's evals):
+  ;; every cut names that form, and the form reads exactly the rest
+  (let [it {:form "(pp (code-of 3))" :out (apply str (repeat 400 "line 3 of output\n"))}
+        evals [{} {} {} it]
+        h '(nth (my.turn/evals) 3)
+        {:keys [text cuts]} (seon/print-value it {:handle h :budget 60})
+        c (first cuts)]
+    (is (= (list 'subs (list 'get-in h [:out]) (:seon.render.data/next-offset c)) (:seon.print/continuation c)) (pr-str c))
+    (is (re-find #"\(subs \(get-in \(nth \(my.turn/evals\) 3\) \[:out\]\) \d+\)" text) text)
+    (is (= (:out it) (str (:seon.print/prefix c) (subs (get-in (nth evals 3) [:out]) (:seon.render.data/next-offset c))))
+        "the form reads exactly the rest")))
+
 (deftest a-refused-argument-is-shown-by-the-one-printer
   ;; seon.contract's refusal shows the offending value within the part budget, cut the printer's way
   (let [f (seon.contract/checked 'seon.print-test/takes-an-int [:=> [:cat :int] :int] inc)

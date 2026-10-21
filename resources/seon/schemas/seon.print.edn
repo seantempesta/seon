@@ -1,6 +1,6 @@
 ;; The one value printer (seon.print): its options, its answer, and the internal shapes its
 ;; allotter (seon.print.select) and emitter (seon.print.emit) pass between their functions.
-{:seon.print/opts [:map [:handle {:optional true} [:maybe :symbol]] [:budget {:optional true} pos-int?]
+{:seon.print/opts [:map [:handle {:optional true} [:maybe [:or :symbol [:sequential :any]]]] [:budget {:optional true} pos-int?]
                    [:max-depth {:optional true} pos-int?] [:width {:optional true} nat-int?]
                    [:outputs {:optional true} [:set [:enum :text :hiccup]]]]
  :seon.print/answer [:map [:text :string] [:tokens nat-int?] [:truncated? :boolean] [:elisions nat-int?]

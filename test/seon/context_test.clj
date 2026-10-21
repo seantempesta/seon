@@ -4,7 +4,8 @@
   proof is not shown again, a merge task's plan stays its own."
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.task :as task] [seon.context :as context] [seon.print :as print]
-            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent]))
+            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent]
+            [seon.print.select :as select] [clojure.string :as str] [clojure.walk :as walk]))
 
 (defn- db-with-program []
   (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}
@@ -95,8 +96,9 @@
         {:keys [text repairs]} (reader/forgive reply)
         block (context/current-state db t {:turn 1 :max-turns 4 :source text :repairs repairs})]
     (is (seq repairs) "the reader repaired the extra close")
-    (is (= [{:near ":cat :int] :int]} [x] (* 2 x))," :dropped ")" :inserted ","}] (:repaired (:your-last-reply block)))
-        "what was dropped, what replaced it, and the code it was near; the prose made comments is no repair")
+    (is (= [{:line 3 :code (nth (str/split-lines text) 2) :dropped ")" :inserted ","}] (:repaired (:your-last-reply block)))
+        "what was dropped, what replaced it, and its line; the prose made comments is no repair")
+    (is (str/ends-with? (nth (str/split-lines text) 2) "(* 2 x)),") "the line is the repaired definition's")
     (testing "flagged definitions are named"
       (let [db2 (d/db-with db [{:var/name 'demo/h :var/ns [:ns/name 'demo] :var/flagged true}])]
         (is (= ['demo/h] (context/flagged db2)))
@@ -125,9 +127,10 @@
                       [{:db/id "c" :ns/name 'ctx-calc}
                        {:var/name 'ctx-calc/square :var/ns "c" :var/src "(defn square \"Squares x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))"}
                        {:db/id "ct" :ns/name 'ctx-calc-test}
-                       {:var/name 'ctx-calc-test/square-test :var/ns "ct" :var/src "(deftest square-test (is (= 9 (square 3))))"}])
+                       {:var/name 'ctx-calc-test/square-test :var/ns "ct" :var/src "(deftest square-test (is (= 9 (square 3))))"}
+                       {:var/name 'ctx-calc-test/empty-test :var/ns "ct" :var/src "(deftest empty-test (square 3))"}])
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'ctx :seon.task/name "sq" :seon.task/plan "p"
-                                               :seon.task/proofs #{'ctx-calc-test/square-test 'ctx-calc-test/cube-test}}]))
+                                               :seon.task/proofs #{'ctx-calc-test/square-test 'ctx-calc-test/cube-test 'ctx-calc-test/empty-test}}]))
         ;; the test child's report of the failing assertion, as clojure.test makes it
         rep (agent/test-report {:type :fail :expected '(= 9 (square 3)) :actual '(not (= 9 6))} "#'ctx-calc-test/square-test")
         block (context/current-state db (task/task db "ctx/sq")
@@ -140,35 +143,47 @@
            (:calls (by 'ctx-calc-test/square-test)))
         "the program function the red proof calls, at summary level")
     (is (= {:test 'ctx-calc-test/cube-test :status :undefined} (by 'ctx-calc-test/cube-test))
-        "a proof not written yet says so")))
+        "a proof not written yet says so")
+    (is (= :no-assertions (:status (by 'ctx-calc-test/empty-test))) "a proof that ran and asserted nothing says so")
+    (let [b (context/current-state db (task/task db "ctx/sq") {:results {} :turn 1 :max-turns 4 :run-errors ["tests timed out"]})]
+      (is (= {'ctx-calc-test/square-test :not-run 'ctx-calc-test/empty-test :not-run 'ctx-calc-test/cube-test :undefined}
+             (into {} (map (juxt :test :status)) (:proofs b)))
+          "when the run failed as a whole, a written proof did not run"))))
 
 (defn- evals
   "n evaluations cycling over k distinct forms, each answering a large value and printing
   a large output (inv3's edit/forms: 259 items, 11 distinct)."
   [n k]
-  (vec (for [i (range n) :let [j (mod i k)]]
-         {:id i :tag :ret :form (str "(code-of " j ")") :handle (keyword (str "h" j))
-          :printed (pr-str (vec (range (* 2000 (inc j))))) :value (vec (range (* 2000 (inc j))))
-          :out (apply str (repeat 400 (str "line " j " of pprint output\n")))})))
+  (let [kinds (vec (for [j (range k) :let [v (vec (range (* 2000 (inc j))))]]
+                     {:tag :ret :form (str "(code-of " j ")") :handle (keyword (str "h" j))
+                      :printed (print/text v) :value v
+                      :out (apply str (repeat 400 (str "line " j " of pprint output\n")))}))]
+    (vec (for [i (range n)] (assoc (nth kinds (mod i k)) :id i)))))
 
 (deftest repeated-evals-fold-and-every-item-fits-its-share
   (let [db (db-with-program)
         t (task-f db)
-        tokens #(long (/ (count %) 3.2))
         text-of (fn [items] (:content (second (context/messages (context/current-state db t {:turn 1 :max-turns 4 :last-items items})))))]
     (testing "259 items, 11 distinct: 11 folded items whose times sum to 259"
-      (let [le (context/last-evals (evals 259 11))]
+      (let [le (context/fold-evals (evals 259 11))]
         (is (= 11 (count le)))
-        (is (= 259 (reduce + (map #(:times % 1) le))))
-        (is (= [24 24 24 24 24 24 23 23 23 23 23] (mapv :times le)) "259 = 6x24 + 5x23")
-        (testing "each within its equal share, its value's cut naming its handle, its output's the form that reads it"
-          (let [share (quot context/last-evals-budget 11)]
-            (is (every? #(<= (tokens (str (:form %) (:value %) (:out %))) (+ share 16)) le))
-            (is (= 'result/h10 (:handle (last le))))
-            (is (re-find #"more chars: \(:out \(nth \(my.turn/evals\) 10\)\)" (:out (last le))))))))
-    (testing "the whole context stays inside its budget at 259 items and at 10x that"
-      (let [a (text-of (evals 259 11)) b (text-of (evals 2590 11))]
-        (is (<= (tokens a) (:context print/budgets)))
-        (is (<= (tokens b) (:context print/budgets)))
-        (is (re-find #";; 24x" a))
-        (is (re-find #"=> \[0 1 2" a))))))
+        (is (= (range 11) (map :k le)) "each folded item is the first of its kind")
+        (is (= [24 24 24 24 24 24 23 23 23 23 23] (mapv :times le)) "259 = 6x24 + 5x23")))
+    (testing "the whole context stays inside its budget at 259 items and at 10x that, every distinct item shown"
+      (doseq [n [259 2590]]
+        (let [items (evals n 11) text (text-of items)]
+          (is (<= (select/estimate text) (:context print/budgets)) (str n " items"))
+          (is (every? #(str/includes? text (str "\"(code-of " % ")\"")) (range 11)) "no item starves another")
+          (is (str/includes? text (str ";; " (count (filter #(= "(code-of 0)" (:form %)) items)) "x, the same form and answer"))))))
+    (testing "each item within its equal share; every cut's form reads exactly the rest from (my.turn/evals)"
+      (let [items (evals 259 11)
+            shown (context/shown-evals (context/fold-evals items))
+            share (quot context/last-evals-budget 11)]
+        (is (every? #(<= (:tokens %) share) shown))
+        (is (= 22 (count (mapcat :cuts shown))) "each of 11 items cuts its value and its output")
+        (doseq [c (mapcat :cuts shown)
+                :let [f (:seon.print/continuation c)
+                      rest ((eval (list 'fn '[items] (walk/postwalk-replace {'(my.turn/evals) 'items} f))) items)
+                      whole (get-in items (into [(nth (:seon.print/requery-id c) 2)] (:seon.render.data/path c)))]]
+          (is (= (:seon.render.data/next-offset c) (- (count whole) (count rest))) (pr-str f))
+          (is (= (seq whole) (seq (concat (take (:seon.render.data/next-offset c) whole) rest))) (pr-str f)))))))
