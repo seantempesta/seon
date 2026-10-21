@@ -72,11 +72,23 @@
      :attached-tasks (count (filter #(pos? (:seon.task/generation % 0)) (vals ts)))
      :model-calls-in-merges (reduce + (map #(:seon.attempt/model-calls % 0) merge-as))}))
 
+(defn turns-per-merged-task
+  "Turns spent per task that reached main on d: for each task with a :merged attempt (a
+  merge task, 0 turns of its own), the turns of every attempt of the other tasks on its
+  branch (the work it merged), averaged; nil when none merged."
+  [d]
+  (let [ts (task/tasks d)
+        by-task (group-by :seon.attempt/task (vals (task/attempts d)))
+        merged (filter #(some (comp #{:merged} :seon.attempt/status) (by-task %)) (keys ts))
+        work (fn [id] (for [[wid w] ts :when (and (not= wid id) (= (:seon.task/branch w) (:seon.task/branch (ts id)))) a (by-task wid)] a))]
+    (when (seq merged)
+      (lib/r2 (/ (double (reduce + (for [id merged a (concat (work id) (by-task id))] (:seon.attempt/turns a 0)))) (count merged))))))
+
 (defn- numbers [sys t0]
   (let [as (vals (task/attempts (db sys)))
         merged (filter #(= :merged (:seon.attempt/status %)) as)]
     {:wall-ms (- (now) t0) :attempts (count as) :merged (count merged)
-     :turns-per-merged-task (when (seq merged) (lib/r2 (/ (double (reduce + (map #(:seon.attempt/turns % 0) merged))) (count merged))))
+     :turns-per-merged-task (turns-per-merged-task (db sys))
      :model-calls (reduce + (map #(:seon.attempt/model-calls % 0) as))
      :tokens (reduce + (map #(:seon.attempt/tokens % 0) as))
      :root-real-mb (lib/r2 (lib/real-mb)) :writer (:writer (c/state sys))
@@ -322,6 +334,34 @@
                     (not-any? #(= :held (:seon.task/execution %)) (vals (task/tasks d)))
                     (empty? (agents-reused d)))))))
 
+(def ^:private expectations
+  "Each scenario's check form, run by a fresh agent on what main runs, and what it must
+  print (one string per form). :model is the verdict of a real model's run when it differs:
+  what the task's plan and proofs ask of any correct solution, where the check above also
+  asserts the stand-in's own extras."
+  {:conflict {:check "(app.m/f 41)" :expect ["42"]}
+   :semantic {:check "[(app.m/scale 3) (app.m/six)]" :expect ["[9 6]"]}
+   :hairy {:check "(mapv #(% 10) [app.m/f1 app.m/f2 app.m/f3 app.m/f4])" :expect ["[11 12 13 14]"]}
+   :sibling {:check "[(app.s/f 1) (app.s/g 10)]" :expect ["[2 30]"]}
+   ;; main runs the new namespaces as written: the function, data still data, the var still
+   ;; dynamic, the test (its :refer) passing, user's def absent, and the test reaching triple
+   :newns {:check (str "[(app.newns/triple 3) app.newns/ops app.newns/syms"
+                       " (:dynamic (meta #'app.newns/*depth*)) (binding [app.newns/*depth* 1] app.newns/*depth*)"
+                       " ((juxt :test :pass :fail :error) (binding [clojure.test/*test-out* (java.io.StringWriter.)] (clojure.test/test-ns 'app.newns-test)))"
+                       " (some? (resolve 'user/scratch-x))"
+                       " (seon.program/reaching-tests (seon.agent/db) #{'app.newns/triple})]")
+           :expect ["[9 (inc 1) [a b] true 1 [1 1 0 0] false #{app.newns-test/triple-test}]"]
+           ;; the plan asks for triple and a passing test that refers it
+           :model {:check (str "(let [r (binding [clojure.test/*test-out* (java.io.StringWriter.)] (clojure.test/test-ns 'app.newns-test))]"
+                               " [(app.newns/triple 3) (pos? (:pass r)) (zero? (+ (:fail r) (:error r)))])")
+                   :expect ["[9 true true]"]}}})
+
+(defn expectation
+  "Scenario k's {:check :expect}; model? is a real model's run."
+  [k model?]
+  (let [e (get expectations k)]
+    (select-keys (if model? (merge e (:model e)) e) [:check :expect])))
+
 (defn run
   "One e2e mode; answers whether it passed."
   [mode args]
@@ -331,21 +371,9 @@
     "resume2" (resume2 (first args))
     "par" (par (parse-long (first args)))
     "scenario" (let [k (keyword (first args))
-                     pv (when (= "model" (second args)) (model-provider))]
-                 (case k
-                   :conflict (scenario k pv "(app.m/f 41)" ["42"])
-                   :semantic (scenario k pv "[(app.m/scale 3) (app.m/six)]" ["[9 6]"])
-                   :hairy (scenario k pv "(mapv #(% 10) [app.m/f1 app.m/f2 app.m/f3 app.m/f4])" ["[11 12 13 14]"])
-                   ;; main runs the new namespaces as written: the function, data still data,
-                   ;; the var still dynamic, the test (its :refer) passing, user's def absent,
-                   ;; and the test reaching triple
-                   :sibling (scenario k pv "[(app.s/f 1) (app.s/g 10)]" ["[2 30]"])
-                   :newns (scenario k pv (str "[(app.newns/triple 3) app.newns/ops app.newns/syms"
-                                              " (:dynamic (meta #'app.newns/*depth*)) (binding [app.newns/*depth* 1] app.newns/*depth*)"
-                                              " ((juxt :test :pass :fail :error) (binding [clojure.test/*test-out* (java.io.StringWriter.)] (clojure.test/test-ns 'app.newns-test)))"
-                                              " (some? (resolve 'user/scratch-x))"
-                                              " (seon.program/reaching-tests (seon.agent/db) #{'app.newns/triple})]")
-                                    ["[9 (inc 1) [a b] true 1 [1 1 0 0] false #{app.newns-test/triple-test}]"])))
+                     model? (= "model" (second args))
+                     {:keys [check expect]} (expectation k model?)]
+                 (scenario k (when model? (model-provider)) check expect))
     "swarm" (swarm (parse-long (first args)) (parse-long (or (second args) "8")))
     "model" (model-run (first args))
     "stuck" (stuck)

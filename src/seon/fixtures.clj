@@ -6,7 +6,7 @@
   redefines its function). The proofs namespace sorts after the subjects, so a boot that
   loads main's program in name order loads a subject before its proof."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.template :as tpl] [seon.source :as source]))
+  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.template :as tpl] [seon.source :as source] [seon.reader :as reader]))
 
 (def calc
   "The six-task graph: add; twice and square need add; sum-sq needs both; neg (slow on
@@ -60,6 +60,13 @@
     [subjects
      (if (seq proofs) (source/text-tx db 'app.proofs (str/join "\n" proofs) nil) [])]))
 
+(defn- proof-vars
+  "The vars a spec's proof calls: the qualified symbols its form holds outside app.proofs."
+  {:malli/schema [:=> [:cat :map] [:vector :qualified-symbol]]}
+  [spec]
+  (->> (tree-seq coll? seq (reader/read-text (:proof spec) 'app.proofs))
+       (filter qualified-symbol?) (remove #(= "app.proofs" (namespace %))) distinct vec))
+
 (defn decls
   "Task declarations for specs, in task namespace tns, with model env: each work task
   followed by its merge task (seon.template/with-merge)."
@@ -69,7 +76,7 @@
     (vec (for [{:keys [name needs] :as s} specs :when name]
            (cond-> {:seon.task/ns tns :seon.task/name name
                     :seon.task/plan (or (:plan s)
-                                        (str "Make `" (:ns s 'app.calc) "/" name "` pass its proof `app.proofs/" name "-test`."
+                                        (str "Make " (str/join ", " (map #(str "`" % "`") (proof-vars s))) " pass its proof `app.proofs/" name "-test`."
                                              (when (seq needs) (str " It may use " (str/join ", " (map #(str "`app.calc/" % "`") needs)) "."))))
                     :seon.task/proofs (or (:proofs s) #{(symbol "app.proofs" (str name "-test"))})}
              (seq needs) (assoc :seon.task/needs (set (map #(str tns "/" %) needs)))
