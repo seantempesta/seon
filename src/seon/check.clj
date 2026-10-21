@@ -1081,7 +1081,11 @@
 
 (defn hotreload
   "Redefine the :reconciler proc's step-fn Var while root runs (alter-var-root, as a defn
-  at the REPL would): its next step runs the new code, with no update! and no restart."
+  at the REPL would): its next step runs the new code, with no update! and no restart.
+  And a platform function redefined as a merge loads it (its defn evaluated in its
+  namespace) reaches a compiled platform caller on its next call, not through a proc's Var:
+  a direct-linked call reads the var's linked binding, which every redefinition writes
+  through, and a contracted definition is never spliced into its callers (BUILD plan P3).
   []
   (let [sys (c/start! {:datoms 2000})
         hits (atom 0)
@@ -1091,11 +1095,29 @@
                           (fn [f] (fn ([] (f)) ([a] (f a)) ([st tr] (f st tr)) ([st in m] (swap! hits inc) (f st in m)))))
         _ (dotimes [i 3] @(c/transact-main! sys [{:note/text (str "after" i)}]))
         _ (loop [k 0] (when (and (zero? @hits) (< k 200)) (Thread/sleep 5) (recur (inc k))))
-        ok (pos? @hits)]
+        old-edn @#'seon.program/pr-edn
+        before (seon.program/method-key 'a/b "x")
+        _ (binding [*ns* (the-ns 'seon.program)]
+            (eval (read-string "(defn pr-edn \"redefined\" {:malli/schema [:=> [:cat :any] :string]} [v] \"redefined\")")))
+        after (seon.program/method-key 'a/b "x")
+        ok (and (pos? @hits) (= "[a/b \"x\"]" before) (= "redefined" after))]
     (alter-var-root #'seon.reconcile/reconciler-proc (constantly old))
-    (println {:redefined-step-ran @hits :health (:reconciler (c/health sys))})
+    (alter-var-root #'seon.program/pr-edn (constantly old-edn))
+    (println {:redefined-step-ran @hits :health (:reconciler (c/health sys))
+              :compiled-caller {:before before :after-redefining-its-callee after}})
     (out! (if ok "HOTRELOAD OK" "HOTRELOAD FAIL"))
     (c/stop! sys)
+    (lib/c-exit (if ok 0 1))))
+
+(defn inference
+  "The release binary keeps a nil test that whole-program inference must not fold
+  (jolt.ns/whole-program-inference-keeps-nil-checks): seon.ref/line-citation of `path:N`,
+  whose `to` is nil, answers the path, as it does uncompiled."
+  []
+  (let [cite (#'seon.ref/line-citation "src/a.clj:50")
+        ok (= "src/a.clj" cite)]
+    (println {:line-citation cite})
+    (out! (if ok "INFERENCE OK" "INFERENCE FAIL"))
     (lib/c-exit (if ok 0 1))))
 
 (defn fx
@@ -1517,6 +1539,7 @@
     "mcp" (do (seon.mcp/serve! (seon.config/value :seon.config.root/entrance-port)) (lib/c-exit 0))
     "mcp-proof" (mcp-proof)
     "hotreload" (hotreload)
+    "inference" (inference)
     "swarm" (swarm (Long/parseLong (or n "100")))
     "soak" (soak (Long/parseLong (or n "50")) (Long/parseLong (or (first more) "60")) (some-> (second more) Long/parseLong))
     "mem" (mem (Long/parseLong (or n "100")) 3)
