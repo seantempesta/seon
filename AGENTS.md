@@ -44,7 +44,7 @@ When you feel it, stop and ask three questions:
 
 ## The pillars: everything is data flowing through the system (owner, 2026-10-21)
 
-**If nothing has changed, we do nothing** (owner, 2026-10-21). No proc steps, renders, pings, flushes or polls on an idle system; work exists only because data changed.
+**If nothing has changed, we do nothing** (owner, 2026-10-21). No proc steps, renders, pings, flushes or polls on an idle system; work exists only because data changed. **The system is reactive:** a proc reports its own problems as facts when they happen and its changes as events; nothing pings to ask whether it is healthy. Health is the absence of open problem facts.
 
 This is not a traditional program with a scheduler, timers and callers that wait. Data flows: a fact is written, a commit flows to whoever reads it, a message lands on a queue, a proc runs because work arrived and parks when there is none. Every need is met by one of these pillars. If a need seems not to fit one, stop and say so; never route around them.
 
