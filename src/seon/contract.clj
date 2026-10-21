@@ -65,13 +65,18 @@
 
 ;; ---- the registry ------------------------------------------------------------------
 
+(def schemas-dir
+  "Where the platform's schema resources live, relative to the checkout: the files the
+  build compiles in, and the schema resources seon.source imports and writes back."
+  "resources/seon/schemas")
+
 (clojure.core/defn schema-forms
   "Every named schema form of the platform: the maps in resources/seon/schemas/*.edn,
   read when this namespace compiles (the build host has the directory; a built binary
   carries the forms)."
   {:malli/schema [:=> [:cat] [:map-of :qualified-keyword :any]]}
   []
-  (let [dir (io/file (config/checkout) "resources/seon/schemas")]
+  (let [dir (io/file (config/checkout) schemas-dir)]
     (reduce merge {} (for [f (sort-by #(.getName %) (file-seq dir))
                            :when (.endsWith (.getName f) ".edn")]
                        (edn/read-string (slurp f))))))

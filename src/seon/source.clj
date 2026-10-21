@@ -7,9 +7,15 @@
 
   `read-forms` keeps every character: each form's text, the whitespace and comments before
   it (:lead), and what follows the last form (:tail), so the forms written back in their
-  order are the file, byte for byte."
+  order are the file, byte for byte.
+
+  A schema resource (an .edn file under resources/seon/schemas) is program too: each entry
+  is a `:schema/key` entity with its form as EDN text, and the file's text as imported is
+  the base its write-back edits, entry by entry, with rewrite-clj (v1's `schema-file-text`):
+  every other byte as it was."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.program :as program] [datahike.api :as d] [clojure.string :as str] [jolt.analyzer] [jolt.host]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.program :as program] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn]
+            [rewrite-clj.zip :as z] [rewrite-clj.node :as node] [rewrite-clj.parser :as parser] [jolt.analyzer] [jolt.host]))
 
 (defn- line-starts
   "The offset in text where each line starts."
@@ -139,25 +145,46 @@
   (let [form (binding [*ns* (the-ns 'user)] (read {:eof nil} (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. text))))]
     (:requires (program/unit-account (analyze nsym form)))))
 
+(defn schema-resource?
+  "Is the relative path a schema resource: an .edn file under seon.contract/schemas-dir?"
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [path] (and (str/starts-with? path (str contract/schemas-dir "/")) (str/ends-with? path ".edn")))
+
+(defn schema-tx
+  "The facts of one schema resource's text at path: the file with its text (write-back's
+  base), and each entry as a :schema/key entity with its form, its file, and :schema/source
+  (the binary holds it)."
+  {:malli/schema [:=> [:cat :string :string] :seon.db/tx-data]}
+  [path text]
+  (into [{:schema.file/path path :schema.file/text text}]
+        (for [[k v] (sort-by (comp str key) (edn/read-string text))]
+          {:schema/key k :schema/form (program/pr-edn v) :schema/file path :schema/source true})))
+
 (defn import-tx
-  "The facts of files ({relative path text}, each a namespace's file) as program on db: each
-  file's forms with their exact text and the compiler's account (text-tx), its namespace
-  carrying the file. Files are analyzed in the order loading them would take, each after
-  the files it requires (ties by path), so a namespace the process never loaded is set up
-  before a file that requires it. A file with no ns form is no namespace's and is left out."
+  "The facts of files ({relative path text}) as program on db: each namespace's file's forms
+  with their exact text and the compiler's account (text-tx), its namespace carrying the
+  file, and each schema resource's entries (schema-tx). Files are analyzed in the order
+  loading them would take, each after the files it requires (ties by path), so a namespace
+  the process never loaded is set up before a file that requires it. Any other file (no ns
+  form, not a schema resource) is left out."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] :seon.db/tx-data]}
   [db files]
-  (let [by-ns (into {} (for [[path text] files :let [nsym (file-ns text)] :when nsym] [nsym [path text]]))
+  (let [by-ns (into {} (for [[path text] files :when (str/ends-with? path ".clj") :let [nsym (file-ns text)] :when nsym] [nsym [path text]]))
         reqs (into {} (for [[nsym [_ text]] by-ns] [nsym (file-requires nsym text)]))]
-    (vec (for [nsym (program/topo (keys by-ns) #(reqs %) #(first (by-ns %)))
-               :let [[path text] (by-ns nsym)]
-               op (text-tx db nsym text path)]
-           op))))
+    (vec (concat (for [nsym (program/topo (vec (keys by-ns)) #(reqs %) #(first (by-ns %)))
+                       :let [[path text] (by-ns nsym)]
+                       op (text-tx db nsym text path)]
+                   op)
+                 (for [[path text] (sort-by key files) :when (schema-resource? path) op (schema-tx path text)] op)))))
 
-(defn source-nss
-  "The namespaces on db imported from a file (they carry :ns/file), sorted."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector :symbol]]}
-  [db] (vec (sort (d/q '[:find [?n ...] :where [?e :ns/file] [?e :ns/name ?n]] db))))
+(defn source-files
+  "The files db holds as program: each imported namespace's file (:ns/file) and each schema
+  resource (imported, or named by an entry's :schema/file), as sorted relative paths."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :string]]}
+  [db]
+  (vec (sort (into #{} (concat (map :v (d/datoms db :aevt :ns/file))
+                               (map :v (d/datoms db :aevt :schema.file/path))
+                               (map :v (d/datoms db :aevt :schema/file)))))))
 
 (defn file-text
   "Namespace nsym's file as db holds it: its live forms in their order, each after its
@@ -170,18 +197,141 @@
     (str (apply str (map-indexed (fn [i f] (str (or (:lead f) (if (zero? i) "" "\n\n")) (:src f))) fs))
          (or (:ns/tail (d/entity db ne)) "\n"))))
 
-(defn files
-  "{relative path text} of the namespaces nss that db holds a file for (file-text)."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :symbol]] [:map-of :string :string]]}
-  [db nss]
-  (into (sorted-map) (for [n nss :let [p (:ns/file (d/entity db [:ns/name n]))] :when p] [p (file-text db n)])))
+;; ---- a schema resource, entry by entry (v1 seon.cluster.source: same-value?, relaid,
+;; schema-entry-edit, schema-file-text; rewrite-clj keeps every node it is not told to change)
 
-(defn changed-nss
-  "The namespaces whose forms a merge's changes (seon.merge/three-way's :ours) add,
-  change or remove, sorted."
-  {:malli/schema [:=> [:cat :seon.merge/changes] [:vector :symbol]]}
-  [changes]
-  (vec (sort (distinct (for [[[k] [a b]] changes :when (= :form k)] (:ns (or b a)))))))
+(defn- same-value?
+  "Whether the nodes a and b read as the same value (a node with no value, such as a comment,
+  is never the same)."
+  {:malli/schema [:=> [:cat :any :any] :boolean]}
+  [a b]
+  (and (node/sexpr-able? a) (node/sexpr-able? b) (= (node/sexpr a) (node/sexpr b))))
+
+(defn- relaid
+  "value (a parsed value node) in the layout of old, the value it replaces: a part reading as
+  before keeps its node, and a collection of the same kind keeps its whitespace and comments
+  between items, recursively, an added item taking the last separator; any other part is
+  value's. Reads as value."
+  {:malli/schema [:=> [:cat :any :any] :any]}
+  [old value]
+  (cond
+    (same-value? old value) old
+    (and (= (node/tag old) (node/tag value)) (#{:vector :list :map :set} (node/tag value)))
+    (let [children (vec (node/children old))
+          at (vec (keep-indexed (fn [i n] (when-not (node/whitespace-or-comment? n) i)) children))
+          items (vec (remove node/whitespace-or-comment? (node/children value)))
+          gaps (mapv (fn [[a b]] (subvec children (inc a) b)) (partition 2 1 at))
+          gap #(get gaps % (or (peek gaps) [(node/spaces 1)]))]
+      (if (empty? at)
+        value
+        (node/replace-children
+         old
+         (-> (subvec children 0 (first at))
+             (into (mapcat (fn [i item]
+                             (cons (if (< i (count at)) (relaid (children (at i)) item) item)
+                                   (when (< i (dec (count items))) (gap i))))
+                           (range) items))
+             (into (subvec children (inc (peek at))))))))
+    :else value))
+
+(defn- schema-entry-edit
+  "children (a schema resource map node's children) with k's entry set to form (EDN text):
+  its value replaced in the old value's layout (relaid), its entry and the whitespace before
+  it removed when form is nil, or, for a new k, an entry inserted before the first greater key
+  when the keys are sorted, else appended, separated as the file's last two entries are.
+  prefix is the map's namespace qualifier."
+  {:malli/schema [:=> [:cat [:vector :any] [:maybe :string] :qualified-keyword [:maybe :string]] [:vector :any]]}
+  [children prefix k form]
+  (let [significant (vec (keep-indexed (fn [i n] (when-not (node/whitespace-or-comment? n) i)) children))
+        keys-at (vec (take-nth 2 significant))
+        key-of #(node/sexpr (nth children %))
+        at (some #(when (= k (key-of %)) %) keys-at)
+        after-key #(some (fn [i] (when (> i %) i)) significant)
+        value-node #(parser/parse-string form)
+        entry #(vector (node/keyword-node (if (= prefix (namespace k)) (keyword (name k)) k)) (node/spaces 1) (value-node))
+        ;; the gap before the last entry, from its last comment on (a comment ends its line)
+        separator (if (< 1 (count keys-at))
+                    (let [gap (subvec children (inc (after-key (peek (pop keys-at)))) (peek keys-at))
+                          c (last (keep-indexed (fn [i n] (when (node/comment? n) i)) gap))]
+                      (if c (into [(node/newlines 1)] (subvec gap (inc c))) gap))
+                    [(node/spaces 1)])
+        splice (fn [from to nodes] (into (into (subvec children 0 from) nodes) (subvec children to)))]
+    (cond
+      (and at form) (assoc children (after-key at) (relaid (nth children (after-key at)) (value-node)))
+      at (let [before (last (filter #(< % at) significant))
+               value (after-key at)]
+           (if before
+             (splice (inc before) (inc value) [])
+             (splice at (or (after-key value) (count children)) [])))
+      (nil? form) children
+      (empty? keys-at) (splice 0 0 (entry))
+      :else (let [ks (map key-of keys-at)
+                  greater (when (= ks (sort ks)) (some #(when (pos? (compare (key-of %) k)) %) keys-at))]
+              (if greater
+                (splice greater greater (into (entry) separator))
+                (let [end (inc (last significant))] (splice end end (into separator (entry)))))))))
+
+(defn schema-file-text
+  "text, one schema resource's EDN map (plain or namespaced), with each [k form] of edits
+  applied (schema-entry-edit; a nil form removes k); every other node keeps its text."
+  {:malli/schema [:=> [:cat :string [:sequential [:tuple :qualified-keyword [:maybe :string]]]] :string]}
+  [text edits]
+  (let [outer (z/find (z/of-string text) z/right #(#{:map :namespaced-map} (z/tag %)))
+        [m prefix] (if (= :namespaced-map (z/tag outer))
+                     [(z/find (z/down outer) z/right #(= :map (z/tag %))) (:prefix (z/node (z/down outer)))]
+                     [outer nil])
+        children (reduce (fn [children [k form]] (schema-entry-edit children prefix k form))
+                         (vec (node/children (z/node m))) edits)]
+    (z/root-string (z/replace m (node/replace-children (z/node m) children)))))
+
+(defn schema-resource-text
+  "The schema resource at path as db holds it: its imported text (an empty map for a new
+  file) with every entry db holds for it whose form differs from the text's set, every key
+  the text holds that db no longer does removed, and new keys added (schema-file-text)."
+  {:malli/schema [:=> [:cat :seon.host/db :string] :string]}
+  [db path]
+  (let [fe (:e (first (d/datoms db :avet :schema.file/path path)))
+        base (if fe (:schema.file/text (d/entity db fe)) "{}\n")
+        held (edn/read-string base)
+        now (into {} (for [dt (d/datoms db :avet :schema/file path) :let [x (d/entity db (:e dt))]]
+                       [(:schema/key x) (:schema/form x)]))
+        edits (concat (for [[k form] (sort-by (comp str key) now)
+                            :when (not= (edn/read-string form) (get held k ::absent))]
+                        [k form])
+                      (for [k (sort-by str (keys held)) :when (not (contains? now k))] [k nil]))]
+    (if (seq edits) (schema-file-text base (vec edits)) base)))
+
+(defn- ns-of-file
+  "The namespace db imported from the file at path, or nil."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :symbol]]}
+  [db path] (d/q '[:find ?n . :in $ ?p :where [?e :ns/file ?p] [?e :ns/name ?n]] db path))
+
+(defn files
+  "{relative path text} of the files at paths that db holds as program: a namespace's file
+  (file-text) or a schema resource (schema-resource-text)."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :string]] [:map-of :string :string]]}
+  [db paths]
+  (into (sorted-map)
+        (for [p paths
+              :let [text (if (schema-resource? p)
+                           (schema-resource-text db p)
+                           (some->> (ns-of-file db p) (file-text db)))]
+              :when text]
+          [p text])))
+
+(defn changed-files
+  "The files a merge's changes (seon.merge/three-way's :ours) touch, as db (after them) holds
+  them: the file of each namespace whose forms they add, change or remove, and the resource of
+  each schema entry they change; sorted relative paths."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/changes] [:vector :string]]}
+  [db changes]
+  (vec (sort (distinct (for [[[k] [a b]] changes
+                             :let [p (case k
+                                       :form (:ns/file (d/entity db [:ns/name (:ns (or b a))]))
+                                       :schema (:file (or b a))
+                                       nil)]
+                             :when p]
+                         p)))))
 
 (defn commit-message
   "The merges commit's message, from the facts of what merged: each member's task and

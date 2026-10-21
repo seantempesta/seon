@@ -616,9 +616,9 @@
       ;; files after the train, committed on the merges branch (:git), the sha recorded on
       ;; each merged attempt (the self-improvement loop: the next generation builds it)
       :trained (let [merged (keep (fn [[m x]] (when (:merged? x) [m x])) (map vector (:members act) (:results r)))
-                     nss (vec (sort (distinct (mapcat (comp :nss second) merged))))
-                     back? (and (:source st) (seq nss))]
-                 (one (write (cond-> st back? (assoc-in [:flights aid :writeback] {:nss nss :members (mapv first merged)}))
+                     paths (vec (sort (distinct (mapcat (comp :files second) merged))))
+                     back? (and (:source st) (seq paths))]
+                 (one (write (cond-> st back? (assoc-in [:flights aid :writeback] {:files paths :members (mapv first merged)}))
                              aid (if back? :landed :done)
                            (vec (mapcat (fn [{:keys [attempt task]} r]
                                           (let [problem (str "merge refused: " (:seon.error/message r))]
@@ -633,8 +633,8 @@
                                                           (stuck-tx (:idx st) attempt task problem)))))
                                         (:members act) (:results r))))))
       :landed (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))
-      :main-read (let [{:keys [nss members]} (:writeback f)
-                       files (source/files (:db r) nss)]
+      :main-read (let [{:keys [members] paths :files} (:writeback f)
+                       files (source/files (:db r) paths)]
                    (if (empty? files)
                      (done st)
                      (one (request st aid :committed

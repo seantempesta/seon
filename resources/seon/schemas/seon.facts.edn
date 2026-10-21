@@ -57,6 +57,20 @@
  :impl/protocol :qualified-symbol
  :impl/type :string
  :impl/form :seon.db/ref
+ ;; A SCHEMA ENTRY of a schema resource (resources/seon/schemas/*.edn) is program too
+ ;; (seon.source; v1: the program is entities, schemas among them): its key, its form as
+ ;; EDN text, the resource it is written back to, and whether the binary holds it (imported
+ ;; from the tree a generation was built from; an entry an agent registers or a merge
+ ;; carries never does). The resource's text as imported is the base write-back edits.
+ :schema/key [:and {:seon.db/identity true} :qualified-keyword]
+ :schema/form :string
+ :schema/file [:and {:seon.db/index true} :string]
+ :schema/source :boolean
+ :schema.file/path [:and {:seon.db/identity true} :string]
+ :schema.file/text :string
+ :seon.db/schema-fact [:map {:seon.db/attributes true} [:schema/key :schema/key] [:schema/form :schema/form]
+                        [:schema/file :schema/file] [:schema/source {:optional true} :schema/source]]
+ :seon.db/schema-file-fact [:map {:seon.db/attributes true} [:schema.file/path :schema.file/path] [:schema.file/text :schema.file/text]]
  :seon.db/form-fact [:map {:seon.db/attributes true}
                       [:form/id :form/id] [:form/src :form/src] [:form/ns :form/ns] [:form/order :form/order]
                       [:form/lead {:optional true} :form/lead] [:form/defines {:optional true} :form/defines]

@@ -30,7 +30,7 @@
   {:malli/schema [:=> [:cat :any] :string]}
   [v] (binding [*print-length* nil *print-level* nil *print-meta* false] (pr-str v)))
 
-(def ^:private program-ns-attrs #{"form" "var" "ns" "method" "impl" "db" "db.install" "db.type" "db.cardinality" "db.unique"})
+(def ^:private program-ns-attrs #{"form" "var" "ns" "method" "impl" "schema" "schema.file" "db" "db.install" "db.type" "db.cardinality" "db.unique"})
 
 (def ^:private carried-platform-attrs
   "The platform attributes (seon.*) a branch carries: the task content an agent may improve
