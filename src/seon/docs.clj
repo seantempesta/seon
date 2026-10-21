@@ -170,6 +170,22 @@
                          (:seon.ref/citations (ref/parse path text)))]
          a)))
 
+(defn view
+  "Section address as the store holds it, shown at depth by the one rule (seon.ref/shown): its
+  lead is the stored lead, the sections below are those whose parent it is (in the order the
+  wiki was written), and at :code its own text whole. nil when main holds no such section."
+  {:malli/schema [:=> [:cat :seon.host/db :string :seon.ref/depth] [:maybe :seon.ref/view]]}
+  [db address depth]
+  (when-let [e (task/eid db :seon.section/address address)]
+    (let [{:seon.section/keys [heading lead text]} (d/pull db [:seon.section/heading :seon.section/lead :seon.section/text] e)
+          below (for [c (sort (d/q '[:find [?c ...] :in $ ?p :where [?c :seon.section/parent ?p]] db e))
+                      :let [s (d/pull db [:seon.section/address :seon.section/heading] c)]]
+                  {:seon.ref/address (:seon.section/address s) :seon.ref/heading (:seon.section/heading s)})]
+      (ref/shown (cond-> {:seon.ref/address address :seon.ref/heading heading :seon.ref/below (vec below)}
+                   lead (assoc :seon.ref/lead lead)
+                   (and text (= :code depth)) (assoc :seon.ref/text text))
+                 depth))))
+
 (defn pages
   "The wiki pages under dir of the checkout (docs by default), read: {path text}, each path
   relative to the checkout (docs/flow.md)."

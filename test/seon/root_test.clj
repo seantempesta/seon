@@ -24,12 +24,14 @@
   ;; importing src and test runs each test file's ns form, and seon.print-test's requires
   ;; fipp.engine, which needs Jolt's stdlib clojure.core.rrb-vector; a binary finds only
   ;; what it compiled. The root boots, imports, and exits when its stdin (empty) closes.
-  ;; Its store: target/root-test-store, one kept store whose every boot is a new branch.
+  ;; Its store: target/runs/root-test-store, one kept store whose every boot is a new
+  ;; branch, under runs/ so a worktree's clone of target/ leaves it out (bin/worktree: a
+  ;; store's identity is its path, so a cloned one refuses every boot in the worktree).
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         {:keys [exit out err]} (sh/sh "env" "SEON_WEB_PORT=0" "./seon" "root"
                                       "--set" (str ":seon.config.source/root=" (pr-str checkout))
                                       "--set" ":seon.config.source/dirs=[\"src\" \"test\"]"
-                                      "--set" (str ":seon.config.root/store-path=" (pr-str (str checkout "/target/root-test-store")))
+                                      "--set" (str ":seon.config.root/store-path=" (pr-str (str checkout "/target/runs/root-test-store")))
                                       :in "" :dir "target")]
     (is (= 0 exit) "the root boots with src and test imported")
     (is (str/includes? out "ROOT LISTENING") "and listens")

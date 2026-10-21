@@ -2,11 +2,11 @@
   "The agent's context, rendered live each turn from its task and what it references:
   the current-state block (task plan and instructions, the proofs with their red
   assertions and source, every var the task's text cites (seon.ref/references) resolved to its doc and
-  source, the last evaluations), printed through the one value printer (seon.print). Nothing is stored:
+  source, every wiki section it cites shown at the depth its delimiter asks (seon.docs/view), the last evaluations), printed through the one value printer (seon.print). Nothing is stored:
   the next turn renders again from the branch's db."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d]
-            [seon.print :as print] [seon.ref :as ref]))
+            [seon.print :as print] [seon.ref :as ref] [seon.docs :as docs]))
 
 (def system-prompt
   "What every model is told once per turn: how to answer and which verbs exist."
@@ -56,6 +56,15 @@
       (nil? v) (assoc :unresolved true :problem (:unresolved ref/problem-messages))
       src (assoc :source src)
       (and (nil? src) (some-> v meta :doc)) (assoc :doc (:doc (meta v))))))
+
+(defn- cited-section
+  "Section address of the wiki as the citation asks to see it, from main's sections; a
+  citation that reaches no section says so, as an unresolved name does."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :map]}
+  [db {:seon.ref/keys [path anchor depth]}]
+  (let [a (str path "#" anchor)]
+    (or (some-> (docs/view db a depth) (assoc :seon.ref/depth depth))
+        {:seon.ref/address a :unresolved true :problem (:unresolved ref/problem-messages)})))
 
 (defn- failure
   "A failing assertion as the agent reads it: what was expected and what happened (the
@@ -117,8 +126,9 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
   [db t {:keys [results reds last-items turn max-turns unmerged truncated? refusals run-errors source repairs]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
-        refs (into [] (comp (map :seon.ref/name) (filter qualified-symbol?))
-                   (ref/references db (str plan "\n" (:seon.task/instructions t))))]
+        cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
+        refs (into [] (comp (map :seon.ref/name) (filter qualified-symbol?)) cites)
+        sections (into [] (comp (filter #(and (:seon.ref/path %) (:seon.ref/anchor %))) (map #(cited-section db %))) cites)]
     (cond-> {:task (assoc (select-keys t [:seon.task/id :seon.task/kind :seon.task/instructions])
                           ;; the plan as it accumulated along :needs (prerequisites first)
                           :seon.task/plan plan)
@@ -133,6 +143,7 @@
                               (assoc :failures (mapv failure (filter #(= p (:test %)) reds))))))
              ;; a reference already shown as a proof is not shown twice
              :references (mapv #(resolve-ref db %) (remove (set proofs) refs))}
+      (seq sections) (assoc :sections sections)
       (seq (refused (vec refusals) (vec reds))) (assoc :refused (refused (vec refusals) (vec reds)))
       (seq run-errors) (assoc :test-run {:failed (vec run-errors)})
       (last-reply truncated? source (vec repairs)) (assoc :your-last-reply (last-reply truncated? source (vec repairs)))

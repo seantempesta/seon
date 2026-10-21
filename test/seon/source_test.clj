@@ -220,3 +220,15 @@
         (doseq [g (.listFiles (java.io.File. (str dir "/runs/generations")))]
           (sh/sh (str here "/bin/worktree") "--remove-at" (.getPath g)))
         (sh/sh "rm" "-rf" dir)))))
+
+(deftest a-schema-file-round-trips-through-the-program
+  ;; task seon.source/schemas-are-part-of-the-program: a schema resource is program data
+  ;; like a source file (v1: the program is entities: functions, tests, schemas), so an
+  ;; agent can change it on its branch and the merge writes it back; imported then written
+  ;; back unchanged, it is the same text
+  (let [path "resources/seon/schemas/seon.task.edn"
+        text (slurp (str here "/" path))
+        db (empty-db)
+        db (d/db-with db (source/import-tx db {path text}))
+        out (source/files db (source/source-nss db))]
+    (is (= text (get out path)) "the schema file, byte for byte")))
