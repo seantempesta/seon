@@ -265,16 +265,6 @@
   {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch] :seon.host/db]}
   [conn b] (d/branch-as-db (:store @conn) b))
 
-(defn diff-ops
-  "Explicit-id tx-data turning db `from` into db `to` (retractions first, so an
-  attribute's new value replaces its old one in net-change). O(datoms of both)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] :seon.db/resolved-tx]}
-  [from to]
-  (let [ds (fn [db] (into #{} (map (fn [dt] [(:e dt) (:a dt) (:v dt)])) (d/datoms db :eavt)))
-        a (ds from) b (ds to)]
-    (into (vec (for [[e at v] a :when (not (b [e at v]))] [:db/retract e at v]))
-          (for [[e at v] b :when (not (a [e at v]))] [:db/add e at v]))))
-
 (defn branch-base
   "The db at the merge base of branch and main (git's merge-base over Datahike's commit
   graph): the branch point, the branch head root last merged, or the main head last

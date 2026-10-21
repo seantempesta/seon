@@ -141,7 +141,6 @@
   (do (scm/eval-string
         "(define (proto-active-threads) (#%$top-level-value '$active-threads))
          (define (proto-bytes-allocated) (sstats-bytes (statistics)))
-         (define (proto-current-memory) (current-memory-bytes))
          (define (proto-bytes-in-heap) (bytes-allocated))
          (define (proto-collections) (collections))
          (define (proto-static!) (collect (collect-maximum-generation) 'static))
@@ -253,37 +252,9 @@
 
 (def ^:private linux? (.startsWith (str (System/getProperty "os.name")) "Linux"))
 (def SIGUSR1 "Root's interrupt: 30 on macOS, 10 on Linux." (if linux? 10 30))
-(def SIGALRM 14)
-(def SIGSTOP "Stop the process: 17 on macOS, 19 on Linux." (if linux? 19 17))
-(def SIGCONT "Continue the process: 19 on macOS, 18 on Linux." (if linux? 18 19))
-
-(defn sigmask
-  "This thread's blocked-signal mask (macOS: a 32-bit set), for diagnosis."
-  {:malli/schema [:=> [:cat] :int]}
-  []
-  (scm/eval-string "(let ([old (sa-foreign-alloc 128)]) (c-pthread-sigmask jolt-sig-block-how 0 old) (let ([v (foreign-ref 'unsigned-32 old 0)]) (sa-foreign-free old) v))"))
-
-(defn unblock-signals!
-  "Unblock sigs on this thread. A process forked from a thread Jolt created inherits that
-  thread's mask, so an agent unblocks the signals it is driven by."
-  {:malli/schema [:=> [:cat [:sequential :int]] :any]}
-  [sigs]
-  (scm/eval-string (str "(c-pthread-sigmask jolt-sig-unblock-how (jolt-make-sigset '(" (clojure.string/join " " sigs) ")) 0)")))
-
-(defc c-setitimer "setitimer" [:int :pointer :pointer] :int)
-
-(defn alarm-in!
-  "Deliver SIGALRM to this process after ms (ITIMER_REAL); 0 disarms."
-  {:malli/schema [:=> [:cat :int] :int]}
-  [ms]
-  (let [b (ffi/alloc 32)]            ; struct itimerval: {interval, value}, timeval = {long sec; int usec; pad}
-    (ffi/write b :long 0) (ffi/write (+ b 8) :int 0)
-    (ffi/write (+ b 16) :long (quot ms 1000)) (ffi/write (+ b 24) :int (* 1000 (mod ms 1000)))
-    (c-setitimer 0 b ffi/null)))
 
 (defchecked active-threads [:=> [:cat] :int] (scm/proc "proto-active-threads"))
 (defchecked bytes-allocated [:=> [:cat] :int] (scm/proc "proto-bytes-allocated"))
-(defchecked current-memory [:=> [:cat] :int] (scm/proc "proto-current-memory"))
 (defchecked bytes-in-heap [:=> [:cat] :int] (scm/proc "proto-bytes-in-heap"))
 (defchecked collections [:=> [:cat] :int] (scm/proc "proto-collections"))
 (defchecked static! [:=> [:cat] :any] (scm/proc "proto-static!"))
