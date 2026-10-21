@@ -18,6 +18,7 @@
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :fd :conn :db :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
+;; :schema-registry (seon.repl: the branch's schema population, by seon.schema/change-key)
 (defonce state (atom nil))
 
 

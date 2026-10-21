@@ -26,7 +26,7 @@
   is answered once the eval has stopped. Seon's platform ops (tests, stats, clone,
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract] [clojure.edn] [my.db] [my.agent]
+  (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract] [clojure.edn] [my.db] [my.agent] [my.schema] [seon.schema :as schema] [malli.registry :as mr]
             [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
             [jolt.ffi :as ffi]))
 
@@ -257,6 +257,34 @@
                                 :repl/defined (mapv :var (:defs acct))))
                      (cond-> m l (assoc :repl/defined (program/set-vars l))))))))))))
 
+(defn- branch-registry
+  "The registry this agent's evaluation binds (seon.schema/branch-registry of its branch's
+  db): the population with the schemas its branch changed, so what it defines next compiles
+  against them; empty when no branch is held (root, a scratch session) or nothing changed.
+  Reused while the branch's schema entries are unchanged (seon.schema/change-key): measured
+  13 ms to derive with one registration, 0.5 ms to key."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (if-let [db (:db @agent/state)]
+    (let [k (schema/change-key db)
+          held (:schema-registry @agent/state)]
+      (if (= k (:key held))
+        (:registry held)
+        (let [r (schema/branch-registry db)]
+          (swap! agent/state assoc :schema-registry {:key k :registry r})
+          r)))
+    {}))
+
+(defn wrap-registry
+  "Each form evaluates with malli's dynamic registry bound to its branch's population
+  (branch-registry), read before the form: a schema the previous form registered is in
+  effect for this one."
+  {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
+  [h]
+  (fn [req]
+    (let [ef (:repl/eval-fn req eval)]
+      (h (assoc req :repl/eval-fn (fn [form] (binding [mr/*registry* (branch-registry)] (ef form))))))))
+
 (defn- admit
   "Admit a definition by its contract (G1's proto.agent/admit!, Seon's rule): a function var
   with :malli/schema is armed and leaves the agent's uncontracted set; one without joins
@@ -286,13 +314,16 @@
   (fn [req]
     (h (around-reply req
          (fn [m]
-           (reduce (fn [m s] (if-let [v (find-var s)] (merge m (admit v)) m)) m (:repl/defined m)))))))
+           ;; arming compiles the contract: against the branch's population, as its eval did
+           (binding [mr/*registry* (if (seq (:repl/defined m)) (branch-registry) {})]
+             (reduce (fn [m s] (if-let [v (find-var s)] (merge m (admit v)) m)) m (:repl/defined m))))))))
 
 (def middleware
   "Outermost first. Answers pass innermost first: record, cost, admit, caught, print. The
-  eval fn is record's around cost's around eval, so an eval's cost is the eval's (with the
-  compiler's tap in it, as part of compiling)."
-  [wrap-print wrap-caught wrap-admit wrap-cost wrap-record])
+  eval fn is the registry's binding around record's around cost's around eval, so an eval's
+  cost is the eval's (with the compiler's tap in it, as part of compiling); keying the
+  branch's registry, read before each form, is not the form's (0.7 ms measured)."
+  [wrap-print wrap-caught wrap-admit wrap-cost wrap-record wrap-registry])
 
 (defn handler
   {:malli/schema [:function [:=> [:cat] :seon.host/fn] [:=> [:cat [:sequential :seon.host/fn]] :seon.host/fn]]}

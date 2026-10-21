@@ -81,9 +81,11 @@
                            :when (.endsWith (.getName f) ".edn")]
                        (edn/read-string (slurp f))))))
 
-(clojure.core/defn- compile-all
+(clojure.core/defn registry-of
   "A registry whose every named form is compiled once (names resolve to the compiled
-  schema of their own name, compiled on first reference)."
+  schema of their own name, compiled on first reference). A form that does not compile
+  (malli's :malli.core/invalid-schema, an unresolvable name among them) throws malli's
+  ex-info."
   {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :seon.host/registry]}
   [forms]
   (let [compiled (volatile! {})
@@ -106,8 +108,13 @@
   [] (list 'quote (schema-forms)))
 
 (def forms (baked-forms))
-(def registry (compile-all forms))
-(def options {:registry registry})
+(def registry (registry-of forms))
+
+(def options
+  "What every contract compiles against: the built registry, under malli's dynamic registry,
+  so an evaluation that binds malli.registry/*registry* (an agent's REPL, to its branch's
+  schemas: seon.schema/branch-registry) compiles against that population instead."
+  {:registry (mr/composite-registry (mr/dynamic-registry) registry)})
 
 (clojure.core/defn schema
   "The compiled schema of a form or a registered name, in the platform registry."
