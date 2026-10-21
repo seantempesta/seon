@@ -380,7 +380,7 @@
       (refer 'my.db)
       (refer 'my.agent)
       (refer 'clojure.repl :only '[doc])
-      ;; Jolt's clojure.repl has no source (an image-baked var has no :file): the REPL's own, from the branch's db
+      ;; interned because Jolt's clojure.repl lacks source-fn and source (its vars carry no file and line to read), and an agent reads source from its branch's db
       (doseq [s '[source-fn source] :let [v (ns-resolve 'my.agent s)]]
         (intern (find-ns 'clojure.repl) (with-meta s (select-keys (meta v) [:macro])) @v))
       (alias 'd 'datahike.api)
