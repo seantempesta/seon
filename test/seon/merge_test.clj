@@ -9,7 +9,10 @@
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.merge :as pm]
-            [seon.program :as program]))
+            [seon.program :as program]
+            [my.schema :as schema]
+            [seon.source :as source]
+            [clojure.string :as str]))
 
 (defn- empty-db [] @(second (pdb/test-branch!)))
 
@@ -150,3 +153,36 @@
         r (pm/three-way (pm/program base :all) (pm/program o :all) (pm/program base :all))]
     (is (= #{[:datum 900 :note/text] [:datum 900 :note/agent]} (set (keys (:ours r)))))
     (is (empty? (:ours (pm/three-way (pm/program base #{}) (pm/program o #{}) (pm/program base #{})))))))
+
+(def ^:private facts-path "resources/seon/schemas/seon.facts.edn")
+
+(defn- registered
+  "db after registering form v as schema k on it, as my.schema/register! does."
+  [db k v] (d/db-with db (:tx (schema/registration db k v (= "user" (namespace k))))))
+
+(deftest a-schema-entry-merges-per-key
+  ;; task seon.source/schemas-are-part-of-the-program: a schema entry is a program key,
+  ;; [:schema k], merged like a var (v1's [:seon.schema/key k] identity), and the merge's
+  ;; changed resource is written back with only its entry changed
+  (let [text (slurp facts-path)
+        main (let [db (empty-db)] (d/db-with db (source/import-tx db {facts-path text})))
+        status [:and {:seon.db/index true} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed :refused]]
+        ours (-> main (registered :seon.attempt/status status) (registered :user/qty :int))
+        theirs (registered main :seon.attempt/pid [:int {:min 1}])
+        prog #(pm/program % #{})
+        r (pm/three-way (prog main) (prog ours) (prog theirs))]
+    (is (= [[:schema :seon.attempt/status]] (keys (:ours r)))
+        "the branch's change is its key; a scratch key is no program")
+    (is (= {:form (binding [*print-namespace-maps* false] (program/pr-edn status)) :file facts-path} (second (get (:ours r) [:schema :seon.attempt/status]))))
+    (is (= [[:schema :seon.attempt/pid]] (:apply r)) "a key only the other side changed applies")
+    (is (= [] (:conflicts r)) "different keys of one resource do not conflict")
+    (testing "one key changed two ways conflicts at its key"
+      (let [r2 (pm/three-way (prog main) (prog ours) (prog (registered main :seon.attempt/status [:enum :running])))]
+        (is (= [[:schema :seon.attempt/status] :both-modified] ((juxt :key :kind) (first (:conflicts r2)))))))
+    (testing "merged into main: the entry is main's, no longer the binary's, and write-back changes only its bytes"
+      (let [main2 (d/db-with main (pm/apply-tx main (into {} (for [[k [_ o]] (:ours r)] [k o]))))
+            status-line " :seon.attempt/status [:and {:seon.db/index true} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed]]"]
+        (is (= #{:seon.attempt/status} (set (keys (program/schema-changes main2)))))
+        (is (= [facts-path] (source/changed-files main2 (:ours r))))
+        (is (= {facts-path (str/replace text status-line (str/replace status-line ":closed]]" ":closed :refused]]"))}
+               (source/files main2 (source/changed-files main2 (:ours r)))))))))

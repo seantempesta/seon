@@ -54,8 +54,9 @@
 ;; reading is read-only, and a commit is git's plumbing on a ref, so no checkout moves.
 
 (defn read-source
-  "The text of every .clj file under root's dirs (relative paths, e.g. src/seon/fx.clj),
-  sorted by path. Answers {:value {path text}} or :seon.fx/io-error."
+  "The text of every .clj and .edn file under root's dirs (relative paths, e.g.
+  src/seon/fx.clj, resources/seon/schemas/seon.facts.edn), sorted by path. Answers {:value
+  {path text}} or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [root dirs]} :req}]
   (try
@@ -64,7 +65,7 @@
                     (for [d dirs
                           f (file-seq (java.io.File. (str base "/" d)))
                           :let [p (.getCanonicalPath ^java.io.File f)]
-                          :when (and (.isFile ^java.io.File f) (.endsWith p ".clj"))]
+                          :when (and (.isFile ^java.io.File f) (or (.endsWith p ".clj") (.endsWith p ".edn")))]
                       [(subs p (inc (count base))) (slurp f)]))})
     (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path root}))))
 

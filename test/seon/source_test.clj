@@ -6,7 +6,7 @@
   performer. Never the live tree: write-back and commits go to a copy under target/."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.shell :as sh]
-            [clojure.string :as str] [seon.config :as config]
+            [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.fx :as fx]
@@ -70,7 +70,7 @@
 (deftest import-then-write-back-is-a-zero-diff
   (let [files (src-files)
         db (imported files)
-        out (source/files db (source/source-nss db))
+        out (source/files db (source/source-files db))
         copy (scratch-dir "zero")]
     (is (= (set (keys files)) (set (keys out))) "every file written back")
     (doseq [[path text] files] (is (= text (get out path)) path))
@@ -97,16 +97,16 @@
 
 (deftest a-merged-change-rewrites-only-its-form
   (let [main (main-with-file)]
-    (is (= {"src/app/pt_src.clj" pt-text} (source/files main ['app.pt-src])))
+    (is (= {"src/app/pt_src.clj" pt-text} (source/files main ["src/app/pt_src.clj"])))
     (let [[main2 ours] (merged main 'app.pt-src "(defn twice [x] (* 2 x))")]
-      (is (= ['app.pt-src] (source/changed-nss ours)))
+      (is (= ["src/app/pt_src.clj"] (source/changed-files main2 ours)))
       (is (= {"src/app/pt_src.clj" (str/replace pt-text "(defn twice\n  [x]\n  (add x x))" "(defn twice [x] (* 2 x))")}
-             (source/files main2 (source/changed-nss ours)))
+             (source/files main2 (source/changed-files main2 ours)))
           "the redefined form in its place, its lead kept; every other byte as it was"))
     (testing "a new form goes after the last, a blank line before it"
       (let [[main2 ours] (merged main 'app.pt-src "(defn thrice [x] (* 3 x))")]
         (is (= (str pt-text "\n(defn thrice [x] (* 3 x))\n")
-               (get (source/files main2 (source/changed-nss ours)) "src/app/pt_src.clj")))))))
+               (get (source/files main2 (source/changed-files main2 ours)) "src/app/pt_src.clj")))))))
 
 (deftest an-agent-runs-its-branchs-change-to-imported-source
   (let [main (main-with-file)
@@ -133,7 +133,7 @@
               (git tree "add" "src") (git tree "-c" "user.name=test" "-c" "user.email=test@localhost" "commit" "-q" "-m" "base"))
         main-sha (git tree "rev-parse" "main")
         [main2 ours] (merged (main-with-file) 'app.pt-src "(defn twice [x] (* 2 x))")
-        files (source/files main2 (source/changed-nss ours))
+        files (source/files main2 (source/changed-files main2 ours))
         msg (source/commit-message [{:task :app.pt/twice :attempt "app.pt/twice#1"}])
         r (fx/git-commit {:req {:dir tree :branch "jolt/seon-merges" :files files :message msg}})]
     (is (re-matches #"[0-9a-f]{40}" (str (get-in r [:value :sha]))) (pr-str r))
@@ -141,7 +141,7 @@
     (is (= main-sha (git tree "rev-parse" "jolt/seon-merges~1")) "its parent: the commit the tree checks out")
     (testing "the next merge's commit follows the last"
       (let [[main3 ours3] (merged main2 'app.pt-src "(def limit 4)")
-            r2 (fx/git-commit {:req {:dir tree :branch "jolt/seon-merges" :files (source/files main3 (source/changed-nss ours3)) :message msg}})]
+            r2 (fx/git-commit {:req {:dir tree :branch "jolt/seon-merges" :files (source/files main3 (source/changed-files main3 ours3)) :message msg}})]
         (is (= (get-in r [:value :sha]) (git tree "rev-parse" "jolt/seon-merges~1")))
         (is (= (get-in r2 [:value :sha]) (git tree "rev-parse" "jolt/seon-merges")))
         (is (str/includes? (git tree "show" "jolt/seon-merges:src/app/pt_src.clj") "(def limit 4)"))))
@@ -230,5 +230,39 @@
         text (slurp (str here "/" path))
         db (empty-db)
         db (d/db-with db (source/import-tx db {path text}))
-        out (source/files db (source/source-nss db))]
+        out (source/files db (source/source-files db))]
     (is (= text (get out path)) "the schema file, byte for byte")))
+
+(def ^:private facts-path "resources/seon/schemas/seon.facts.edn")
+
+(deftest a-changed-schema-entry-rewrites-only-itself
+  ;; task seon.source/schemas-are-part-of-the-program: write-back rewrites only the changed
+  ;; entries of a schema resource (v1's schema-file-text over rewrite-clj), every other byte
+  ;; as it was: a replaced value in its old layout, a removed entry with its line, a new key
+  ;; after the last entry, separated as the file's entries are
+  (let [text (slurp (str here "/" facts-path))
+        db (empty-db)
+        db (d/db-with db (source/import-tx db {facts-path text}))
+        status-line " :seon.attempt/status [:and {:seon.db/index true} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed]]"
+        edit (fn [tx] (get (source/files (d/db-with db tx) [facts-path]) facts-path))]
+    (is (str/includes? text status-line) "the fixture line is the file's")
+    (testing "every schema resource imported and written back unchanged is the same text"
+      (let [dir (java.io.File. (str here "/resources/seon/schemas"))
+            files (into {} (for [f (.listFiles dir) :when (str/ends-with? (.getName f) ".edn")]
+                             [(str "resources/seon/schemas/" (.getName f)) (slurp f)]))
+            db (empty-db)
+            db (d/db-with db (source/import-tx db files))]
+        (is (= 21 (count files)))
+        (is (= files (source/files db (source/source-files db))))))
+    (testing "a replaced value: only its changed part"
+      (is (= (str/replace text status-line (str/replace status-line ":closed]]" ":closed :refused]]"))
+             (edit [{:schema/key :seon.attempt/status
+                     :schema/form "[:and {:seon.db/index true} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed :refused]]"}]))))
+    (testing "a removed entry takes its line"
+      (is (= (str/replace text "\n :seon.attempt/pid :int" "")
+             (edit [[:db/retractEntity [:schema/key :seon.attempt/pid]]]))))
+    (testing "a new key after the last entry, read back as written"
+      (let [out (edit [{:schema/key :seon.attempt/refusal :schema/form "[:map [:seon.error/message :string]]" :schema/file facts-path}])]
+        (is (= (str (subs text 0 (- (count text) 2)) "\n :seon.attempt/refusal [:map [:seon.error/message :string]]}\n") out))
+        (is (= (assoc (edn/read-string text) :seon.attempt/refusal [:map [:seon.error/message :string]])
+               (edn/read-string out)))))))

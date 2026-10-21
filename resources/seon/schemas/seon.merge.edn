@@ -7,6 +7,7 @@
                    [:tuple [:= :impl] :qualified-symbol :string]
                    [:tuple [:= :ns] :symbol]
                    [:tuple [:= :form] :string]
+                   [:tuple [:= :schema] :qualified-keyword]
                    [:tuple [:= :datum] :int :keyword]
                    [:tuple [:= :datum] :int :keyword :any]]
  ;; a definition's key: what a form defines
@@ -23,6 +24,8 @@
  :seon.merge/entry [:map [:form {:optional true} :string] [:kind {:optional true} :keyword]
                      [:contract {:optional true} :string] [:doc {:optional true} :string] [:file {:optional true} :string]
                      [:src {:optional true} :string]]
+ ;; a schema entry's content: its form as EDN text and the resource it is written back to
+ :seon.merge/schema-entry [:map [:form :string] [:file :string]]
  :seon.merge/program [:map-of :seon.merge/program-key :any]
  :seon.merge/changes [:map-of :seon.merge/program-key [:tuple :any :any]]
  :seon.merge/conflict-kind [:enum :both-modified :both-added :deleted-by-us :deleted-by-them]
