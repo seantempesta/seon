@@ -14,11 +14,11 @@ owns the concept. A new concept gets its word here before it appears in code.
 | **root graph** | that one Flow graph, changed in place by `flow/update!` | `seon.root/start!` |
 | **api** | root's entrance proc: callers' reply promises, routing by request id | `seon.root/api-proc` |
 | **writer** | root's writes to main (group commit), `d/branch!`, and every merge into main | `seon.writer/writer-proc` |
-| **run-ahead write** | an agent's own write on its own branch: applied at once, committed when idle, at a turn's end or within the flush window | `seon.agent/transact!`, `seon.agent/commit!`, `datahike.writer/apply!` |
+| **run-ahead write** | an agent's own write on its own branch: applied at once, committed when idle or at a turn's end, and synced by the next group commit | `seon.agent/transact!`, `seon.agent/commit!`, `datahike.writer/apply!` |
 | **lease** | the block of entity ids an agent process mints on its branch | `seon.config/EID-LEASE`, `seon.db/after-fork!` |
 | **group commit** | one Datahike commit per branch per writer step | `seon.writer/commit-batch` |
-| **flush window** | every write is answered when committed in memory; one group flush within `FLUSH-MS` makes it durable; `:flush?` waits for it | `seon.writer/flusher-proc`, `seon.config/FLUSH-MS` |
-| **flusher** | the proc that times the flush window and asks the writer to flush | `seon.writer/flusher-proc` |
+| **group commit** | every write is answered when committed in memory; the flusher syncs everything unflushed at once, then again, so commits arriving during a sync share the next one; `:flush?` waits for the sync that covers it | `seon.writer/flusher-proc` |
+| **flusher** | the proc that syncs everything unflushed, continuously, with no window | `seon.writer/flusher-proc` |
 | **fork server** | the single-threaded process holding main's db value that forks agents | `seon.fork-server` |
 | **standby** | a fork of the fork server, promoted when the server dies (root never forks after boot) | `seon.fork-server/promote` |
 | **reconciler** | the proc that sees main's commits through a sliding buffer of one | `seon.reconcile` |

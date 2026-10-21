@@ -11,7 +11,7 @@ The reasons live elsewhere:
 
 ## 1. What we are building
 
-**The goal: the recursive self-improvement loop, as one working system.** Agents work tasks, merges land, the merged code is written to disk and runs next. One system, never separate agents fighting over the machine.
+**The goal: `next/` becomes the replacement for Seon, and stays tiny and performant** (owner, 2026-10-21). Its code, its docs and wiki, its door (MCP) and everything else improve toward that one system. At its heart is the recursive self-improvement loop: agents work tasks, merges land, and the merged code is written to disk and runs next. One system, never separate agents fighting over the machine.
 
 The first version ran overnight and was a live, measured system by morning. Keep its spirit:
 - **Run, then right, then fast; measure each step.** A working slice beats a design document.
@@ -133,7 +133,16 @@ The order is **delete first, then foundations, then fixes**. Anything shared by 
 - **Branches live hours.** Merge main into yours after every landing.
 - **While iterating, run only what your change reaches:** single check modes and the tests that touch it. Never a full check per edit.
 - **To land:** merge main into your branch, then prove the merged result. Report the commits, proofs red → green, numbers against estimates, what you deleted, the check's `target/check/<time>/` path, and that nothing of yours is running.
-- **Root lands** by merging the branch, never by copying files over newer changes. Root reads main's check to its last line before landing or starting anything else.
+- **Root lands** by merging the branch, never by copying files over newer changes, and reads main's check to its last line before landing or starting anything else.
+  - Every stage's exit status decides the next: no pipe hides a failure (`setopt pipefail`, output to a log), and a check counts only if the build before it succeeded and the binary's time moved.
+  - A conflict is resolved by copying each side's lines, never retyping; the lines after `>>>>>>>` may belong to both sides; each resolved file's forms must balance as its parents' do.
+- **Root's gate, before approving any plan, format, key or rule** (owner, 2026-10-21, after root approved several inventions it should have caught). Root answers from evidence and shows the owner:
+  1. Which existing mechanism does this: ours, v1's or the dependency's?
+  2. What did v1 do here?
+  3. What is the field's best known way?
+  4. Does it add a format, key, layer or rule? If so, why can't the existing one do it?
+
+  No evidence, no approval. One decision at a time.
 - **Submodule pin bumps** happen only in root's landings, never in a lane's merge.
 - **Where this is going:** a landing queue on the one root that merges main into each candidate, runs what it reaches on the merged result, and batches disjoint candidates. All builds, tests and checks become tasks on that root, admitted by workload, with results reused by digest. Seon's own merges get the same gate, and `:behind` fires only when main's change touches what the branch changes or reaches.
 
@@ -181,7 +190,7 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
 
 ## 7. The machine
 
-- **Builds:** `nice -n 15 /usr/bin/lockf -k ~/src/seon-jolt/build.lock bin/build`.
+- **Builds:** `nice -n 15 /usr/bin/lockf -k ~/src/seon-jolt/build.lock bin/build`. Every process on a store must use the same LMDB build (`target/lib/liblmdb.dylib`, robust locks); stop a store's processes before a build that changes it.
 - **Full checks:** one at a time (`bin/check` takes the check lock and runs niced). Iterate with single modes.
 - **Never flood it.** Anything that can make threads or processes starts at n ≤ 100 under `nice -n 15`. Watch `ps -M -p PID | wc -l`, and kill your own process past 200 threads. One experiment at a time.
 - **A process that must outlive your tool call** is double-forked, which `bin/root` does. The tool host kills a background task's whole process tree when the task stops or its agent exits.
@@ -189,7 +198,7 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
 - **Your scratch:** under your worktree (`target/`, `runs/`) or a folder named for your lane. The session scratch folder is shared.
 - **Git in a worktree:**
   - `git -C` on your own checkout only;
-  - never `git submodule` commands that rewrite shared modules (`sync`, `absorbgitdirs`, `update --init`);
+  - never `git submodule` in a worktree: it rewrites the module config every checkout shares (it happened twice). After merging main, `bin/worktree --sync NAME` (run from the main tree) moves your submodules to their pins;
   - never bare `git stash`;
   - never `checkout`, `restore` or `reset` on paths you don't own;
   - commit explicit paths;

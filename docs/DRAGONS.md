@@ -121,4 +121,3 @@ same store opens again. The system limit is `sysctl kern.sysv.semmni` (87381 her
 store per run is nothing. Removing a set (`ipcrm -s ID`) while no process has its store open
 is safe; LMDB makes a new one at the next open.
 
-Describes: {:files ["native/lmdb_kill.c" "bin/build" "bin/env"]}

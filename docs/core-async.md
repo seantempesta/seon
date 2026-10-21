@@ -61,4 +61,3 @@ Closing and nil:
 - **Quiet:** core.async alone cannot see it. Count messages (see [flow](flow.md#idioms-for-seon)).
 - **Until THREADS' fix lands:** don't leave `put!`/`take!` pending (that rules out fixed-tap mults, pub/sub, `put!` callbacks), and use `pipeline-async` (go) rather than `pipeline` when threads matter.
 
-Describes: {:files ["reference-code/jolt/host/chez/java/async.ss" "reference-code/jolt/host/chez/java/fibers-async.ss" "reference-code/jolt/host/chez/fibers.ss" "reference-code/jolt/stdlib/clojure/core/async.clj"]}

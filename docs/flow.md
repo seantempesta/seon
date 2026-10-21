@@ -80,4 +80,3 @@ Paths are under `reference-code/jolt/stdlib/clojure/core/async/`: `flow.clj` (th
 - **Quiet:** Flow can't see it, because channels are opaque and ping misses procs inside a step. Count messages: +1 when promised (outputs, injects, answers owed by an edge, a step in progress), −1 when taken. Zero is quiet. A stall is named from each queue's fill, its capacity, its writer, and its reader's read set or hold (R6, `flowlab/kit.clj`).
 - **Never** let a step block on another proc (hazard 1). Make every slow wait a message and a park.
 
-Describes: {:files ["reference-code/jolt/stdlib/clojure/core/async/flow.clj" "reference-code/jolt/stdlib/clojure/core/async/flow/impl.clj" "reference-code/jolt/stdlib/clojure/core/async/flow/spi.clj" "reference-code/jolt/stdlib/clojure/core/async/flow/impl/graph.clj" "reference-code/jolt/stdlib/clojure/core/async/impl/dispatch.clj"]}
