@@ -852,7 +852,7 @@
   And a platform function redefined as a merge loads it (its defn evaluated in its
   namespace) reaches a compiled platform caller on its next call, not through a proc's Var:
   a direct-linked call reads the var's linked binding, which every redefinition writes
-  through, and a contracted definition is never spliced into its callers (BUILD plan P3)."
+  through (BUILD plan P3)."
   []
   (let [sys (c/start! {:datoms 2000})
         hits (atom 0)
@@ -862,18 +862,21 @@
                           (fn [f] (fn ([] (f)) ([a] (f a)) ([st tr] (f st tr)) ([st in m] (swap! hits inc) (f st in m)))))
         _ (dotimes [i 3] @(c/transact-main! sys [{:note/text (str "after" i)}]))
         _ (loop [k 0] (when (and (zero? @hits) (< k 200)) (Thread/sleep 5) (recur (inc k))))
-        old-edn @#'seon.program/pr-edn
+        health (:reconciler (c/health sys))
+        _ (alter-var-root #'seon.reconcile/reconciler-proc (constantly old))
+        _ (c/stop! sys)
+        ;; seon.edn/encode: a one-arity plain defn, the shape a direct-linked build may
+        ;; splice, called by the compiled seon.program/method-key
+        old-encode @#'seon.edn/encode
         before (seon.program/method-key 'a/b "x")
-        _ (binding [*ns* (the-ns 'seon.program)]
-            (eval (read-string "(defn pr-edn \"redefined\" {:malli/schema [:=> [:cat :any] :string]} [v] \"redefined\")")))
+        _ (binding [*ns* (the-ns 'seon.edn)]
+            (eval (read-string "(defn encode \"redefined\" {:malli/schema [:=> [:cat :any] :string]} [v] \"redefined\")")))
         after (seon.program/method-key 'a/b "x")
+        _ (alter-var-root #'seon.edn/encode (constantly old-encode))
         ok (and (pos? @hits) (= "[a/b \"x\"]" before) (= "redefined" after))]
-    (alter-var-root #'seon.reconcile/reconciler-proc (constantly old))
-    (alter-var-root #'seon.program/pr-edn (constantly old-edn))
-    (println {:redefined-step-ran @hits :health (:reconciler (c/health sys))
+    (println {:redefined-step-ran @hits :health health
               :compiled-caller {:before before :after-redefining-its-callee after}})
     (out! (if ok "HOTRELOAD OK" "HOTRELOAD FAIL"))
-    (c/stop! sys)
     (lib/c-exit (if ok 0 1))))
 
 (defn inference
