@@ -15,7 +15,7 @@
   every other byte as it was."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.program :as program] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn]
-            [rewrite-clj.zip :as z] [rewrite-clj.node :as node] [rewrite-clj.parser :as parser] [jolt.analyzer] [jolt.host]))
+            [rewrite-clj.zip :as z] [rewrite-clj.node :as node] [rewrite-clj.parser :as parser] [jolt.analyzer] [jolt.host] [seon.schema.datahike :as sd]))
 
 (defn- line-starts
   "The offset in text where each line starts."
@@ -158,7 +158,7 @@
   [path text]
   (into [{:schema.file/path path :schema.file/text text}]
         (for [[k v] (sort-by (comp str key) (edn/read-string text))]
-          {:schema/key k :schema/form (binding [*print-namespace-maps* false] (program/pr-edn v)) :schema/file path :schema/source true})))
+          {:schema/key k :schema/form (binding [*print-namespace-maps* false] (sd/encode-edn v)) :schema/file path :schema/source true})))
 
 (defn import-tx
   "The facts of files ({relative path text}) as program on db: each namespace's file's forms
@@ -296,7 +296,7 @@
         now (into {} (for [dt (d/datoms db :avet :schema/file path) :let [x (d/entity db (:e dt))]]
                        [(:schema/key x) (:schema/form x)]))
         edits (concat (for [[k form] (sort-by (comp str key) now)
-                            :when (not= (edn/read-string form) (get held k ::absent))]
+                            :when (not= (sd/decode-edn form) (get held k ::absent))]
                         [k form])
                       (for [k (sort-by str (keys held)) :when (not (contains? now k))] [k nil]))]
     (if (seq edits) (schema-file-text base (vec edits)) base)))

@@ -10,6 +10,7 @@
             [seon.db :as pdb]
             [seon.merge :as pm]
             [seon.program :as program]
+            [seon.schema.datahike :as sd]
             [my.schema :as schema]
             [seon.source :as source]
             [clojure.string :as str]))
@@ -173,7 +174,7 @@
         r (pm/three-way (prog main) (prog ours) (prog theirs))]
     (is (= [[:schema :seon.attempt/status]] (keys (:ours r)))
         "the branch's change is its key; a scratch key is no program")
-    (is (= {:form (binding [*print-namespace-maps* false] (program/pr-edn status)) :file facts-path} (second (get (:ours r) [:schema :seon.attempt/status]))))
+    (is (= {:form (binding [*print-namespace-maps* false] (sd/encode-edn status)) :file facts-path} (second (get (:ours r) [:schema :seon.attempt/status]))))
     (is (= [[:schema :seon.attempt/pid]] (:apply r)) "a key only the other side changed applies")
     (is (= [] (:conflicts r)) "different keys of one resource do not conflict")
     (testing "one key changed two ways conflicts at its key"

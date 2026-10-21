@@ -44,11 +44,6 @@
                  (coll? v) (every? edn-value? v)
                  :else false)))
 
-(defn pr-edn
-  "v printed as EDN that reads back (no print limits, no metadata)."
-  {:malli/schema [:=> [:cat :any] :string]}
-  [v] (binding [*print-length* nil *print-level* nil *print-meta* false] (pr-str v)))
-
 (defn var-kind
   "What a defined var holds now: :fn (a function, which needs a contract), :test, :macro or
   :value (G1's)."
@@ -172,7 +167,7 @@
                            (when (banned s) (vswap! acc update :banned conj s))
                            (vswap! acc update :refs conj s))
          :host-static (vswap! acc update :refs conj (symbol (str (:class n)) (str (:member n))))
-         :try (vswap! acc update :catches into (map pr-edn) (catches n))
+         :try (vswap! acc update :catches into (map sd/encode-edn) (catches n))
          :invoke (when (and (= 'clojure.core/deref (invoked n)) (= 3 (count (:args n))))
                    (vswap! acc update :timeouts conj 'clojure.core/deref))
          nil)
@@ -245,8 +240,8 @@
   {:malli/schema [:=> [:cat [:maybe :seon.host/var] :map] [:maybe :string]]}
   [v d]
   (if-let [c (some-> v meta :malli/schema)]
-    (pr-edn c)
-    (some-> (get (:meta d) :malli/schema) unquote-form pr-edn)))
+    (sd/encode-edn c)
+    (some-> (get (:meta d) :malli/schema) unquote-form sd/encode-edn)))
 
 (defn- def-kind
   "A defined var's kind: from the live var when it is bound, else from the compiler's
@@ -304,7 +299,7 @@
                   (vec (for [{:keys [multi dispatch]} (:methods a)
                              :let [mv (when (and nsx (symbol? multi)) (ns-resolve nsx multi))]
                              :when (var? mv)]
-                         {:multi (symbol mv) :dispatch (pr-edn dispatch)})))
+                         {:multi (symbol mv) :dispatch (sd/encode-edn dispatch)})))
         impls (when (or ran? (nil? before)) (vec (distinct (:impls a))))]
     (when (and nsx (not (scratch-ns? nsx)) (not (:scratch ns-meta))
                (or ns-form? (seq defs) (seq declares) (seq methods) (seq impls) (:env? a)))
@@ -324,12 +319,12 @@
 (defn method-key
   "A method's identity: [multi dispatch], printed."
   {:malli/schema [:=> [:cat :qualified-symbol :string] :string]}
-  [multi dispatch] (pr-edn [multi dispatch]))
+  [multi dispatch] (sd/encode-edn [multi dispatch]))
 
 (defn impl-key
   "A protocol extension's identity: [protocol type], printed."
   {:malli/schema [:=> [:cat :qualified-symbol :string] :string]}
-  [protocol type] (pr-edn [protocol type]))
+  [protocol type] (sd/encode-edn [protocol type]))
 
 (def ^:private def-attrs
   "Each definition kind's form pointer."

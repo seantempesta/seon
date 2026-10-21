@@ -6,10 +6,10 @@
   stop). `reconciler-proc` is the root proc that runs it on main's commits and carries the
   actions out as requests to the api, each action's facts written by the writer."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.edn :as edn] [seon.sock :as sock] [seon.step :as step]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
             [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm] [seon.source :as source]
             [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
-            [seon.config :as cfg]))
+            [seon.config :as cfg] [seon.schema.datahike :as sd]))
 
 (def default-max-turns
   "Turns an attempt may take when its task sets no :seon.config.agent/max-turns: the config's."
@@ -372,11 +372,6 @@
                   :attempt (str id "#" (inc (count (get-in idx [:by-task id]))))})]
     (vec (concat reaps kills judged train spawns))))
 
-(defn- edn-text
-  "x as stored EDN (no print limits: its producer bounded it)."
-  {:malli/schema [:=> [:cat :any] :string]}
-  [x] (binding [*print-length* nil *print-level* nil *print-meta* false] (pr-str x)))
-
 ;; ---- stuck: observed, never held ------------------------------------------------------
 
 (defn blocks
@@ -410,14 +405,14 @@
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.attempt/id :seon.task/id :string] [:vector :map]]}
   [idx aid id problem]
   [{:seon.task/id id :seon.task/problem problem
-    :seon.task/stuck (edn-text {:attempt aid :cause problem :blocks (blocks idx id)})}])
+    :seon.task/stuck (sd/encode-edn {:attempt aid :cause problem :blocks (blocks idx id)})}])
 
 (defn quiescent
   "Main's last quiescence report on db ({:t :stuck}, written by the reconciler proc), or nil."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.root/quiescent]]}
   [db]
   (some-> (when (task/eid db :seon.root/id :root) (:seon.root/quiescent (d/pull db [:seon.root/quiescent] [:seon.root/id :root])))
-          edn/read-string))
+          sd/decode-edn))
 
 (defn generation
   "The next generation on db: the last merges commit the :build effect built or refused
@@ -426,7 +421,7 @@
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.root/generation]]}
   [db]
   (some-> (when (task/eid db :seon.root/id :root) (:seon.root/generation (d/pull db [:seon.root/generation] [:seon.root/id :root])))
-          edn/read-string))
+          sd/decode-edn))
 
 ;; ---- queries, over one index (list it once: (index db)) -----------------------------
 
@@ -460,14 +455,14 @@
   (let [e (d/q '[:find ?e . :in $ ?a :where [?e :seon.end/attempt ?a]] db aid)]
     (if e
       (let [m (d/pull db [:seon.end/outcome :seon.end/reason :seon.end/turns :seon.end/tokens :seon.end/error :seon.end/waste] e)]
-        (into {} (for [[k v] m] [(keyword (name k)) (if (#{:seon.end/error :seon.end/waste} k) (edn/read-string v) v)])))
+        (into {} (for [[k v] m] [(keyword (name k)) (if (#{:seon.end/error :seon.end/waste} k) (sd/decode-edn v) v)])))
       {})))
 
 (defn- error-text
   "Error map e as an attempt's stored error (:seon.attempt/error): the one error map, its
   protocol members (a test count, :ok, :merged?) left out."
   {:malli/schema [:=> [:cat :map] :string]}
-  [e] (edn-text (dissoc e :pass :fail :error :reports :merged? :ok :tx :applied :conflicts)))
+  [e] (sd/encode-edn (dissoc e :pass :fail :error :reports :merged? :ok :tx :applied :conflicts)))
 
 ;; ---- the reconciler proc: actions carried out as requests, every answer as data ----------
 ;; Root's executor (R1's proto.agents.root, a thread per attempt) as one step-fn: main's
@@ -558,10 +553,10 @@
                     ;; the problems measured at its end (lane D2): red assertions, cost verdicts,
                     ;; the error that ended it, its waste
                     (cond-> {}
-                      (seq (:failures run-problems)) (assoc :seon.attempt/failures (edn-text (:failures run-problems)))
-                      (seq (:costs run-problems)) (assoc :seon.attempt/costs (edn-text (:costs run-problems)))
+                      (seq (:failures run-problems)) (assoc :seon.attempt/failures (sd/encode-edn (:failures run-problems)))
+                      (seq (:costs run-problems)) (assoc :seon.attempt/costs (sd/encode-edn (:costs run-problems)))
                       (:error end) (assoc :seon.attempt/error (error-text (:error end)))
-                      (seq (:waste end)) (assoc :seon.attempt/waste (edn-text (:waste end))))))
+                      (seq (:waste end)) (assoc :seon.attempt/waste (sd/encode-edn (:waste end))))))
             (when (and plan (not= plan (:seon.task/plan (task/task main id)))) (task/plan-tx id plan)))))
 
 (defn- advance
@@ -649,7 +644,7 @@
       :commit-recorded (one (request st aid :built {:op :fx :kind :build :req {:repo (:root (:source st)) :commit (:commit f)}}))
       ;; the generation on main's root entity, built or refused: bin/root next starts its binary
       :built (one (write st aid :done [{:seon.root/id :root
-                                        :seon.root/generation (edn-text (if (contract/error? r)
+                                        :seon.root/generation (sd/encode-edn (if (contract/error? r)
                                                                           {:commit (:commit f) :ms (/ (:seon.fx/us r 0) 1000.0) :error (:seon.error/message r)}
                                                                           (:value r)))}])))))
 
@@ -666,7 +661,7 @@
           fact {:t (:t st) :stuck (stuck (:idx st))}]
       [(-> st (assoc :rid rid :quiet true :quiescent fact) (assoc-in [:pending rid] [nil :ignored]))
        [{:op :request :route [:reconciler :answers] :tag rid
-         :req {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/quiescent (edn-text fact)}]}}}]])))
+         :req {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/quiescent (sd/encode-edn fact)}]}}}]])))
 
 (defn- pass
   "Reconcile main's latest db and start each action whose attempt is not in flight; spawns

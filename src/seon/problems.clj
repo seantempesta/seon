@@ -19,12 +19,10 @@
     :stuck                          a task whose failures spent its budget: its root cause and
                                     the released tasks it blocks (seon.reconcile/stuck-tx)"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [clojure.edn :as edn]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.merge :as pm] [seon.schema.datahike :as sd]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def attempt-classes [:red :cost :merge :dead :error :waste])
-
-(defn- edn-of {:malli/schema [:=> [:cat [:maybe :string]] :any]} [s] (some-> s edn/read-string))
 
 (defn- es
   "The entities carrying attribute a (its aevt index: only the entities that have it)."
@@ -38,7 +36,7 @@
   {:malli/schema [:=> [:cat :seon.host/db] [:map [:signature :map] [:from :map]]]}
   [db]
   (reduce (fn [acc {:keys [e v]}]
-            (let [ev (edn-of v)
+            (let [ev (some-> v sd/decode-edn)
                   id (:seon.task/id (d/pull db [:seon.task/id] e))]
               (cond-> acc
                 (:signature ev) (update-in [:signature (:signature ev)] (fnil conj []) id)
@@ -54,7 +52,7 @@
   (let [r (d/pull db '[*] e)
         s (:seon.error/signature r)
         op (:seon.error/operation r)
-        ex (edn-of (:seon.error/example r))]
+        ex (some-> (:seon.error/example r) sd/decode-edn)]
     (cond-> {:class (:seon.error/class r) :signature s :type (:seon.error/type r) :operation op :message (:seon.error/message r)
              :count (:seon.error/count r) :agents (:seon.error/agents r 0)
              :first-ms (:seon.error/first-ms r) :last-ms (:seon.error/last-ms r)
@@ -75,15 +73,6 @@
    {:seon.attempt/task [:db/id :seon.task/id :seon.task/ns :seon.task/proofs]}
    {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
-(defn- conflict
-  "A stored merge entry as :seon.merge/conflict (its EDN members read)."
-  {:malli/schema [:=> [:cat :map] :seon.merge/conflict]}
-  [c]
-  (cond-> {:key (edn-of (:seon.merge/key c)) :kind (:seon.merge/kind c)}
-    (:seon.merge/base c) (assoc :base (edn-of (:seon.merge/base c)))
-    (:seon.merge/ours c) (assoc :ours (edn-of (:seon.merge/ours c)))
-    (:seon.merge/theirs c) (assoc :theirs (edn-of (:seon.merge/theirs c)))))
-
 (defn- task-done?
   "Has task id an attempt merged or accepted (one avet seek, then its attempts)?"
   {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
@@ -98,7 +87,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :map :int] :seon.problems/row]}
   [db ans e]
   (let [t (d/pull db [:seon.task/id :seon.task/ns :seon.task/stuck :seon.task/proofs] e)
-        {:keys [attempt cause blocks] :as s} (edn-of (:seon.task/stuck t))
+        {:keys [attempt cause blocks] :as s} (some-> (:seon.task/stuck t) sd/decode-edn)
         end-ms (some-> attempt (as-> a (d/pull db [:seon.attempt/end-ms] [:seon.attempt/id a])) :seon.attempt/end-ms)]
     {:task (:seon.task/id t) :attempt attempt :cause cause :blocks blocks :open? (not (task-done? db e))
      :owner-ns (:seon.task/ns t) :producer nil :proofs (vec (sort-by str (:seon.task/proofs t)))
@@ -112,7 +101,7 @@
         aid (:seon.attempt/id p)
         te (get-in p [:seon.attempt/task :db/id])
         status (:seon.attempt/status p)
-        conflicts (mapv conflict (:seon.attempt/conflicts p))
+        conflicts (mapv pm/conflict-value (:seon.attempt/conflicts p))
         unmerged (vec (sort (:seon.attempt/unmerged p)))
         base {:attempt aid :task (get-in p [:seon.attempt/task :seon.task/id]) :agent (:seon.attempt/agent p) :status status
               :outcome (:seon.attempt/outcome p) :reason (:seon.attempt/reason p) :end-ms (:seon.attempt/end-ms p)
@@ -123,10 +112,10 @@
         ;; is a regression, the attempt's refusal reason; another task's proof not green yet is
         ;; an allowed red. Both stay in the attempt's facts as evidence, never problem rows.
         own (set (get-in p [:seon.attempt/task :seon.task/proofs]))
-        failures (select-keys (edn-of (:seon.attempt/failures p)) own)
-        costs (select-keys (edn-of (:seon.attempt/costs p)) own)
-        err (edn-of (:seon.attempt/error p))
-        waste (edn-of (:seon.attempt/waste p))
+        failures (select-keys (some-> (:seon.attempt/failures p) sd/decode-edn) own)
+        costs (select-keys (some-> (:seon.attempt/costs p) sd/decode-edn) own)
+        err (some-> (:seon.attempt/error p) sd/decode-edn)
+        waste (some-> (:seon.attempt/waste p) sd/decode-edn)
         merge? (or (seq conflicts) (seq unmerged) (= :behind status) (= :merge-failed (:outcome base))
                    (some-> err :seon.error/type namespace #{"seon.merge" "seon.writer"}))]
     (cond-> {}

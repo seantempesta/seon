@@ -28,7 +28,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract] [clojure.edn] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
             [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
-            [jolt.ffi :as ffi]))
+            [jolt.ffi :as ffi] [seon.schema.datahike :as sd]))
 
 (defchecked ^:private chunk-writer [:=> [:cat :seon.host/fn] :seon.host/writer] @#'jolt.nrepl/chunk-writer)
 (defchecked ^:private ex-class-strings [:=> [:cat :seon.host/throwable [:maybe :keyword]] [:tuple :string [:maybe :string]]] @#'jolt.nrepl/ex-class-strings)
@@ -384,10 +384,9 @@
   [id run items t-basis]
   (conj (vec (for [it items :when (:id it)]
                {:seon.cluster.eval/id (str run "/" (:id it)) :seon.cluster.eval/agent "agent"
-                :seon.cluster.eval/record (binding [*print-length* nil *print-level* nil *print-meta* false]
-                                            (pr-str (cond-> (select-keys it [:tag :form :out :ms :alloc-bytes :fns :origin])
+                :seon.cluster.eval/record (sd/encode-edn (cond-> (select-keys it [:tag :form :out :ms :alloc-bytes :fns :origin])
                                                       (= :ret (:tag it)) (assoc :shown (:printed it))
-                                                      (= :err (:tag it)) (assoc :error (or (:err it) (:printed it))))))}))
+                                                      (= :err (:tag it)) (assoc :error (or (:err it) (:printed it)))))}))
         (cond-> {:db/id "agent" :seon.agent/id id} t-basis (assoc :seon.agent/answered-t t-basis))))
 
 (defn- record!
