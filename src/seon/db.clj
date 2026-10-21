@@ -14,12 +14,6 @@
   seon.schema.datahike; lane D1): one source of truth with the contracts."
   (sd/declarations contract/registry))
 
-(def observation-attrs
-  "Attributes of observations (evaluations, the agent's answered t): data on the branch
-  that recorded them, never carried by a merge (G1's proto.db/observation-attrs, derived by
-  attribute namespace from the schema)."
-  (into #{} (comp (map :db/ident) (filter #(#{"seon.cluster.eval" "seon.agent"} (namespace %)))) schema))
-
 (defn seed-tx
   "Transactions for about n datoms: per namespace, one tx of the namespace and its 20
   vars (5 datoms each), then one tx of a task referring to two of its vars."

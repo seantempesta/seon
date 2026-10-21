@@ -52,6 +52,7 @@ When you feel it, stop and ask three questions:
 
 ## Laws (short; the reasons are in DECISIONS)
 
+- **One store, many branches, as in production** (owner, 2026-10-21). Tests, checks and runs take a branch of one seeded store. A separate store is a last resort (a backup, a deep debug) and says why where it is made.
 - **Contracts on every function.** Malli contracts are armed from the definition, and every contract must generate (`mg/check` runs in `bin/check`).
 - **No guards or fences.** Do the right thing. Name every outside-world failure point in `DRAGONS.md`, with its one edge function and its declared error. Nothing else catches.
 - **No added caches.** A content-keyed cache is allowed only for a unit measured as expensive.
@@ -105,8 +106,9 @@ The order of the tasks is the order of the work: **delete first, then foundation
    - Compare each measurement with its estimate.
    - A ratio past 3× either way is a finding: explain it before going on.
    - Say plainly what was not measured.
-7. **Prove it whole:** `bin/test`, then `bin/check` in your worktree. `bin/check` fails when any step fails, keeps each step's output and the stores under `target/check/<time>/`, and is the bar.
-8. **Report to root:** commits, proofs (red → green), numbers against estimates, what you deleted, what's left. Root cherry-picks onto main by explicit paths, runs `bin/check` there, and closes the task.
+7. **If you touched what the owner sees (the dashboard, a render, the context), have it verified by eye.** Run your worktree's own root on its own ports (`bin/root ENTRANCE WEB`; every worktree can run one), then launch a Haiku or Sonnet subagent with the built-in browser. Its job: compare the page and the context against the system's facts read through the door. Is every number real? Does anything mislead? Does it show what is going on? It reports what is wrong or useless, with screenshots. Fix what it finds, or file it.
+8. **Prove it whole:** `bin/test`, then `bin/check` in your worktree. `bin/check` fails when any step fails, keeps each step's output and the stores under `target/check/<time>/`, and is the bar.
+9. **Report to root:** commits, proofs (red → green), numbers against estimates, what you deleted, what's left. Root cherry-picks onto main by explicit paths, runs `bin/check` there, and closes the task.
 
 ## Look at the running system, as a Seon agent sees it
 
@@ -131,6 +133,12 @@ When you hit something outside your task, don't fix it in passing and don't just
 
 Tell root; root orders it among the rest. Mined problems (`my.root/problems`) become tasks the same way.
 
+## The docs are a wiki, and always true (owner, 2026-10-21)
+
+- `docs/<topic>.md`, one concept per page, indexed in `docs/README.md`. A section is addressed `topic#heading-slug` and ends with a `Describes:` line naming its vars, attrs and files as EDN.
+- Reference docs as data: `{:seon/docs ["merge#behind"]}` on a definition, `:seon.task/docs` on a task. The context pulls the named sections in, so explain a thing once in the wiki and point at it.
+- A change that makes a section wrong updates it in the same commit. `bin/check docs` goes red on a dangling reference, a named var or attr that doesn't exist, or a section older than the code it describes. (Tasks: `resources/seon/tasks/seon.docs.edn`.)
+
 ## Mistakes we have made, and do not repeat
 
 - **A timeout, deadline, sleep or retry standing in for a dependency.** Flows depend on each other through channels that park. "Never came" is an observed, recorded fact (stuck, stalled, dead), never a clock that ends a run.
@@ -141,11 +149,19 @@ Tell root; root orders it among the rest. Mined problems (`my.root/problems`) be
   - A proc answers every request it took, even when its step throws.
 - **Deleting a record:** a store, a branch, a log, history. Runs are kept. Reclaiming space is an explicit owner act.
 - **A cut that drops instead of eliding.** Every cut says what it omitted and how to read the rest. Storage keeps the exact value; renders budget it.
+- **A clipping function** (owner, 2026-10-21): no `clip`, `subs`, `take n` or hand-made truncation anywhere output is made for a person or a model. Output gets better in exactly two ways:
+  - a general improvement to the one printer (`seon.print`), which every value benefits from;
+  - a render function declared on the value's schema (`:seon.render/ai` for the model's context, `:seon.render/html` for the page), written when we know that output needs focus.
+
+  Refinement of output is ongoing work: when you see poor output, file it or fix it this way.
 - **The same check in several places,** or a second producer of the same view. One owner per fact, one function per rule.
 - **Redefining instead of defining.** No `alter-var-root`, `intern`, `with-redefs` or stub-by-rebinding. Tests get a forked environment holding exactly their definitions.
 - **Text standing in for structure.** No regex over code. Ask the compiler, the reader or the db.
 - **A measurement that disturbs itself:** a meter that counts its own reads, a watchdog counted as work. And a number accepted without an estimate.
 - **A check that cannot fail.** A pipeline that drops exit codes, an assertion on a value's type, a test gated off. If it cannot go red, it proves nothing.
+  - A check that only prints is the same mistake: smoke, scale, fx and orphan printed `:pass 0` for a day and stayed "green" (2026-10-21). Every mode ends on its own verdict (`X OK` / `X FAILED`) and exit status.
+  - When you change a rule (what judges, what merges, what is program), run the whole `bin/check` and read every step that touches it, not just the ones that go red.
+- **Landing on a check nobody read.** Root cherry-picked a lane's commits, started `bin/check`, and moved on: main went red in three steps and silently empty in four (2026-10-21). Root lands, then reads the check to its last line before launching or landing anything else; a lane reports its `target/check/<time>/` path with the result.
 - **A cache keyed by time,** or any cache not measured as necessary.
 - **Shared-tree accidents:** one lane's checkout discarding another's work. Own your files, use your worktree, commit early.
 

@@ -1,9 +1,11 @@
 #!/bin/zsh
-# bin/root [PORT]   a standing root with its entrance on 127.0.0.1:PORT (default 7888), until
+# bin/root [PORT [WEB]]   a standing root with its entrance on 127.0.0.1:PORT (default 7888) and
+# its dashboard on WEB (default 7777; each worktree runs its own root on its own ports), until
 # stdin closes: the running system that outside agents (Claude lanes, an owner at a terminal)
 # reach through bin/mcp or `printf '{:op :agents}\n' | nc -w 5 127.0.0.1 PORT`. Its store is
-# a run kept under SEON_RUNS (<next>/runs); it also serves the dashboard on 7777.
+# a run kept under SEON_RUNS (<this tree>/runs).
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 . "$ROOT/bin/env"
 export SEON_RUNS=${SEON_RUNS:-$ROOT/runs}
+export SEON_WEB_PORT=${2:-${SEON_WEB_PORT:-7777}}
 cd "$ROOT/target" && exec ./seon root ${1:-7888}

@@ -21,7 +21,7 @@
   ours and theirs as data, until the branch's content for its key changes or it is
   resolved (`resolve-tx`). Every function here is pure over db values."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [clojure.edn :as edn] [seon.db :as pdb]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [clojure.edn :as edn] [clojure.string :as str]))
 
 (def var-attrs
   "The attributes of a recorded definition that are its content."
@@ -32,7 +32,18 @@
   {:malli/schema [:=> [:cat :any] :string]}
   [v] (binding [*print-length* nil *print-level* nil *print-meta* false] (pr-str v)))
 
-(def ^:private program-ns-attrs #{"var" "ns" "seon.merge" "db" "db.install" "db.type" "db.cardinality" "db.unique"})
+(def ^:private program-ns-attrs #{"var" "ns" "db" "db.install" "db.type" "db.cardinality" "db.unique"})
+
+(def ^:private carried-platform-attrs
+  "The platform attributes (seon.*) a branch carries: the task content an agent may improve
+  (my.task/update!). Every other seon.* attribute is a platform record (root's boot and
+  quiescence, recorded errors, attempts, observations) written where it happened and never
+  carried, so main writing one never puts a branch behind."
+  #{:seon.task/plan :seon.task/instructions})
+
+(defn- platform-record? {:malli/schema [:=> [:cat :keyword] :boolean]} [k]
+  (let [n (namespace k)]
+    (and (or (= "seon" n) (str/starts-with? n "seon.")) (not (carried-platform-attrs k)))))
 
 (defn- data-attr-set
   "The data attributes of db that data-attrs (a set, or :all) names."
@@ -41,7 +52,7 @@
   (if (= :all data-attrs)
     (into #{} (for [[k v] (d/schema db)
                     :when (and (keyword? k) (map? v) (:db/valueType v)
-                               (not (program-ns-attrs (namespace k))) (not (pdb/observation-attrs k)))]
+                               (not (program-ns-attrs (namespace k))) (not (platform-record? k)))]
                 k))
     data-attrs))
 

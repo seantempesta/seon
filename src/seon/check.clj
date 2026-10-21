@@ -25,15 +25,17 @@
         tasks {:a1 "square numbers" :a2 "count the program's vars" :a3 "write a note about app.m0/f1"}
         ids (mapv (fn [[_ task]] (c/spawn! sys {:task task})) (sort tasks))
         _ (out! "spawned " ids ", ready: " (await-status sys ids #{:idle} 5000))
-        programs {(ids 0) "(defn sq [x] (* x x))
+        ;; each agent works in a program namespace of its own: scratch (agent.*) never
+        ;; merges, so its tests never judge
+        programs {(ids 0) "(ns app.sq (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn sq {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))
                            (deftest sq-test (is (= 144 (sq 12))))
                            (transact! [{:note/text \"sq is defined\" :note/agent :a1}])
                            (sq 12)"
-                  (ids 1) "(defn n-vars [] (count (q '[:find ?v :where [?v :var/name]])))
-                           (deftest n-vars-test (is (= 360 (n-vars))) (is (pos? (n-vars))))
+                  (ids 1) "(ns app.census (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn n-vars {:malli/schema [:=> [:cat] :int]} [] (count (q '[:find ?v :where [?v :var/name]])))
+                           (deftest n-vars-test (is (< 360 (n-vars))) (is (some #{'app.census/n-vars} (q '[:find [?v ...] :where [_ :var/name ?v]]))))
                            (transact! [{:note/text (str \"the program has \" (n-vars) \" vars\") :note/agent :a2}])
                            (n-vars)"
-                  (ids 2) "(defn doc-of [v] (q '[:find ?d . :in $ ?v :where [?e :var/name ?v] [?e :var/doc ?d]] v))
+                  (ids 2) "(ns app.docs (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn doc-of {:malli/schema [:=> [:cat :symbol] [:maybe :string]]} [v] (q '[:find ?d . :in $ ?v :where [?e :var/name ?v] [?e :var/doc ?d]] v))
                            (deftest doc-test (is (= \"f1 adds 1 to x\" (doc-of 'app.m0/f1)))
                              (transact! [{:var/name 'app.m0/f1 :var/doc \"changed inside a test\"}])
                              (is (= \"changed inside a test\" (doc-of 'app.m0/f1))))
@@ -73,7 +75,7 @@
         t-clone (lib/now-ns)
         cl @(c/clone! sys (ids 2) {:task "a3's clone"})
         _ (out! "clone " (ids 2) " -> " cl " in " (lib/r2 (lib/ms-since t-clone)) " ms; the clone says: "
-                (short-items @(c/submit! sys (:id cl) "(whoami) (swap! memo update :seen inc) (doc-of 'app.m0/f1)"))
+                (short-items @(c/submit! sys (:id cl) "(my.agent/whoami) (swap! memo update :seen inc) (doc-of 'app.m0/f1)"))
                 "; the parent still has " (:printed (first @(c/submit! sys (ids 2) "@memo"))))
         ;; merge main forward into a1's branch (git merge main): it now sees a3's notes too
         mm @(c/merge-main! sys (ids 0))
@@ -93,7 +95,12 @@
     (out! "\nstate:")
     (pprint (-> st (update :agents (fn [ags] (into (sorted-map) (for [[k v] ags] [k (-> v (dissoc :evals) (update :tests #(some-> % (dissoc :reports))))]))))))
     (c/stop! sys)
-    (lib/c-exit 0)))
+    ;; each agent's tests ran and passed; a1 and a3 merged (their tests judging); a2 is refused (its conflict, or the merged doc-test it now fails)
+    (let [ok (and (every? (fn [id] (let [t (tests id)] (and (pos? (:pass t)) (zero? (+ (:fail t) (:error t)))))) ids)
+                  (:merged? m1) (:merged? m3) (:merged? m3b) (pos? (get-in m1 [:tests :pass] 0))
+                  (not (:merged? m2)))]
+      (out! (if ok "SMOKE OK" "SMOKE FAILED"))
+      (lib/c-exit (if ok 0 1)))))
 
 ;; ---- contracts (lane G1, proto/core 9f5100a proto.smoke/contracts) --------------------
 
@@ -351,12 +358,12 @@
                   (mapv #(count (:printed %)) r3))
         r4 @(c/submit! sys b "(+ 1")
         c4 (check "a read error is one :err item" (= :read (get-in (first r4) [:err :phase])) (short-items r4))
-        _ @(c/submit! sys x "(deftest spins (loop [] (recur)))")
+        _ @(c/submit! sys x "(ns app.spin (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (deftest spins (loop [] (recur)))")
         t5 @(c/run-tests! sys x 1000)
         c5 (check "a test that never ends is killed at its bound; the agent lives"
                   (and (= 1 (:error t5)) (= "2" (:printed (first @(c/submit! sys x "(+ 1 1)")))))
                   (select-keys t5 [:error :reports :ms]))
-        _ @(c/submit! sys x "(ns-unmap *ns* 'spins) (deftest exits (System/exit 7))")
+        _ @(c/submit! sys x "(in-ns 'app.spin) (ns-unmap 'app.spin 'spins) (deftest exits (System/exit 7))")
         t6 @(c/run-tests! sys x)
         c6 (check "a test that kills its process is an error; the agent lives"
                   (and (= 1 (:error t6)) (= "3" (:printed (first @(c/submit! sys x "(+ 1 2)")))))
@@ -376,7 +383,7 @@
                    (if (vector? r12) (short-items r12) r12))
         c10 (check "a form past its timeout is interrupted; the agent keeps its state and goes on"
                    (and (re-find #"timed out" (str (:printed (second r11)))) (= "8" (:printed (nth r11 2)))) (short-items r11))
-        r10 @(c/submit! sys x "(println \"hello from\" (:id (whoami))) (def busy (future (loop [] (recur))))")
+        r10 @(c/submit! sys x "(println \"hello from\" (:id (my.agent/whoami))) (def busy (future (loop [] (recur))))")
         t10 @(c/run-tests! sys x)
         c9 (check "printed output comes back as :out; a busy thread blocks the test fork instead of breaking it"
                   (and (= "hello from :a3\n" (:out (first r10))) (= 1 (:error t10))
@@ -413,7 +420,7 @@
         work (fn [id]
                (let [k (subs (name id) 1)
                      t1 (lib/now-ns)
-                     r @(c/submit! sys id (str "(defn f [x] (* x " k "))
+                     r @(c/submit! sys id (str "(ns app.s" k " (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* x " k "))
                                                 (deftest f-test (is (= (* 2 " k ") (f 2))))
                                                 (transact! [{:note/text \"hi from " k "\" :note/agent " id "}])
                                                 (f 21)"))
@@ -428,7 +435,7 @@
         st (c/state sys)
         mem1 (lib/sysmem)
         agent-mb (keep #(get-in st [:agents % :mem-mb]) ids)
-        merged (mapv #(deref (c/merge! sys %)) (take 10 ids))
+        merged (mapv (fn [id] @(c/merge-main! sys id) @(c/merge! sys id)) (take 10 ids)) ; as a merge task does: main first
         notes (count (main-q sys '[:find ?n :where [?n :note/text]]))
         fs (c/fs-call! sys {:op :stats})
         _ (doseq [id ids] (c/kill! sys id))
@@ -450,7 +457,10 @@
              :all-killed killed? :all-ended (every? #(get-in (c/state sys) [:agents % :ended-ms]) ids)
              :root-os-threads {:boot th-boot :all-ready th-ready :after-work th-work :after-kill th-end}})
     (c/stop! sys)
-    (lib/c-exit 0)))
+    ;; every agent's eval and its test passed; the 10 merges went in
+    (let [ok (and ready? (every? :ok results) (every? :merged? merged) killed?)]
+      (out! (if ok "SCALE OK" "SCALE FAILED"))
+      (lib/c-exit (if ok 0 1)))))
 
 (defn mem
   "Real memory per agent, per method.md: the system-wide free-page drop across n agents
@@ -465,7 +475,7 @@
             _ (Thread/sleep 500)
             m1 (lib/sysmem) c1 (lib/real-mb)
             idle-mb (vec (keep #(get-in (c/state sys) [:agents % :mem-mb]) ids))
-            _ (doall (pmap #(deref (c/submit! sys % "(defn f [x] (* x 2)) (deftest t (is (= 4 (f 2)))) (transact! [{:note/text \"m\"}]) (count (q '[:find ?v :where [?v :var/name]]))")) ids))
+            _ (doall (pmap #(deref (c/submit! sys % "(ns app.scale (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* x 2)) (deftest t (is (= 4 (f 2)))) (transact! [{:note/text \"m\"}]) (count (q '[:find ?v :where [?v :var/name]]))")) ids))
             _ (doall (pmap #(deref (c/run-tests! sys %)) ids))
             _ (Thread/sleep 1100)
             _ (doall (pmap #(deref (c/submit! sys % "(+ 1 1)")) ids))
@@ -646,13 +656,15 @@
         _ (await-status sys [(:id cl)] #{:idle} 5000)
         _ (c/submit! sys a "(loop [] (recur))")
         _ (c/submit! sys (:id cl) "(loop [] (recur))")
-        _ @(c/submit! sys b "(deftest forever (loop [] (recur)))")
+        _ @(c/submit! sys b "(ns app.forever (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (deftest forever (loop [] (recur)))")
         _ (c/run-tests! sys b 600000)
         _ (Thread/sleep 300)
         pids (keep #(get-in (c/state sys) [:agents % :pid]) [a b (:id cl)])
         test-child (:out (clojure.java.shell/sh "pgrep" "-P" (str (get-in (c/state sys) [:agents b :pid]))))]
     (out! "PIDS " (clojure.string/join " " (concat pids [(get-in (c/state sys) [:server :pid])] (clojure.string/split-lines test-child))))
-    (lib/c-exit 0)))
+    ;; without a running test child there is nothing to prove about it
+    (when (clojure.string/blank? test-child) (out! "NO TEST CHILD"))
+    (lib/c-exit (if (clojure.string/blank? test-child) 1 0))))
 
 ;; ---- durability: the whole system restarts and recovers ------------------------------
 
@@ -1053,7 +1065,7 @@
            :send-us (per "(my.fx/send :echo {:x i})" n)
            :inbox (:printed (ev "(count (filter #(= :fx (:from %)) (messages)))"))
            :unknown (:printed (ev "(:seon.error/type (my.fx/call :nope {}))"))
-           :test-fork (do (ev "(deftest fx-in-test (is (= :seon.fx/in-test (:seon.error/type (my.fx/call :echo {:x 1}))))
+           :test-fork (do (ev "(ns app.fx (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (deftest fx-in-test (is (= :seon.fx/in-test (:seon.error/type (my.fx/call :echo {:x 1}))))
                                 (is (= {:value 7} (binding [seon.agent/*fx-stub* (fn [_ _] {:value 7})] (my.fx/call :echo {:x 1})))))")
                           (select-keys @(c/run-tests! sys a) [:pass :fail :error]))
            :file-text (slurp (str dir "/b.txt"))}
@@ -1066,7 +1078,11 @@
                    :owner-ping ping :load (clojure.string/trim (:out (clojure.java.shell/sh "uptime")))))
     (clojure.java.shell/sh "rm" "-rf" dir)
     (c/stop! sys)
-    (lib/c-exit 0)))
+    ;; the effect answered, its unknown kind is a typed error, and inside the test fork a
+    ;; call is refused unless stubbed (both assertions ran and passed)
+    (let [ok (and (= ":seon.fx/unknown-kind" (:unknown r)) (= {:pass 2 :fail 0 :error 0} (:test-fork r)))]
+      (out! (if ok "FX OK" "FX FAILED"))
+      (lib/c-exit (if ok 0 1)))))
 
 (defn probe-proc
   "A declared test proc (the system check): counts what arrives on :in, reports it in ping."
@@ -1187,7 +1203,7 @@
   (let [sys (c/start! {:datoms 2000})
         a (c/spawn! sys {:task "threads" :branch :threads1})
         _ (await-status sys [a] #{:idle} 5000)
-        _ @(c/submit! sys a "(deftest t-one (is (= 2 (inc 1)))) (dotimes [i 200] (vec (range 10000))) (System/gc) :ok")
+        _ @(c/submit! sys a "(ns app.one (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (deftest t-one (is (= 2 (inc 1)))) (dotimes [i 200] (vec (range 10000))) (System/gc) :ok")
         tests (select-keys @(c/run-tests! sys a) [:pass :fail :error])
         cl (:id @(c/clone! sys a {}))
         _ (await-status sys [cl] #{:idle} 5000)

@@ -131,6 +131,16 @@
     (is (empty? (:theirs (tw base observed))))
     (is (seq (:theirs (tw base (with base (var-tx "f" "(dec x)"))))))))
 
+(deftest platform-records-never-put-a-branch-behind
+  ;; root's records on main (boot, quiescence, recorded errors) are platform records: with
+  ;; all data merged (the writer's :all) they change no key a branch carries; the task
+  ;; content an agent may improve (my.task/update!) is carried
+  (let [rooted (with base [{:seon.root/id :root :seon.root/quiescent "{:t 9 :stuck []}"}])
+        tasked (with base [{:seon.task/id "t/x" :seon.task/plan "better"}])
+        p #(pm/program % :all)]
+    (is (empty? (:theirs (pm/three-way (p base) (p base) (p rooted)))))
+    (is (some (fn [[k]] (= [:datum :seon.task/plan] [(first k) (nth k 2)])) (:ours (pm/three-way (p base) (p tasked) (p base)))))))
+
 (deftest declared-data-merges-by-key
   ;; the data part, used by core's generic merge (every non-program, non-observation attribute)
   (let [o (with base [{:db/id 900 :note/text "n" :note/agent :a1}])
