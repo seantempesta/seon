@@ -102,6 +102,7 @@ The order of the tasks is the order of the work: **delete first, then foundation
 1. **Take one task.** For foundation work, open a worktree: `bin/worktree <task-name>`. Work only there and only on that task's files. Never edit the main tree, another lane's files, or anything outside the task. Never run `git checkout`, `restore`, `stash` or `reset` on paths you don't own.
 2. **Learn, plan, act, in that order** (owner, 2026-10-21). First research the existing code end to end, before writing anything; then write the plan; then build.
    - Read the task's plan, DECISIONS, `docs/DRAGONS.md`, and the code it touches with its callers and its tests.
+   - **Read what Seon v1 did first** (owner, 2026-10-21: "always be checking what we did in ~/src/seon and learning from it, not repeating the mistakes"). For the same problem, find v1's code (`~/src/seon/src`, `test`), its decisions and research (`~/src/seon/docs`, `config/default.edn`, the schemas) and what went wrong (its research notes, reverts, rejected designs). Port the best parts onto our pillars; drop its layers; name the mistakes you are not repeating. Every plan says what v1 did and what you take from it. Read only: never write in `~/src/seon`.
    - Read the dependency (Jolt, Datahike, Flow, malli) before working around it.
    - Ask: is this code already scheduled for deletion or replacement (`../notes/PLAN-v2.md`, other tasks' plans)? If so, stop and tell root.
    - Write what you found into the task's plan: the cause, with file:line evidence.
