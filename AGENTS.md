@@ -143,6 +143,7 @@ Tell root; root orders it among the rest. Mined problems (`my.root/problems`) be
 
 ## Mistakes we have made, and do not repeat
 
+- **A clock or timer deciding anything** (owner, 2026-10-21: "no clocks or timers … running and pausing based on workload"). Procs run on queued work and park without it; batches follow the queue; runs end on the message count reaching zero; runaway work is bounded by work done (allocation, steps), never elapsed time. Measure time, never act on it.
 - **A timeout, deadline, sleep or retry standing in for a dependency.** Flows depend on each other through channels that park. "Never came" is an observed, recorded fact (stuck, stalled, dead), never a clock that ends a run.
 - **A gate by the shape of a form or a list of kinds.** Record what actually happened: the compiler's events, the runtime's state. The proofs and the merge judge.
 - **A swallowed error, an ignored answer, a fake default.**
