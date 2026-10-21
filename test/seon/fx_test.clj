@@ -1,7 +1,7 @@
 (ns seon.fx-test
   "The effect owner and lane step-fns as plain functions (no graph): admission by lanes,
   priority order, budget refusal, the queue bound, and a lane answering a defect."
-  (:require [clojure.test :refer [deftest is testing]] [seon.fx :as fx] [seon.config :as cfg]
+  (:require [clojure.test :refer [deftest is testing]] [jolt.deps] [seon.fx :as fx] [seon.config :as cfg]
             [clojure.core.async.flow :as flow]))
 
 (defn- owner [lanes] (fx/owner-proc {:kind :t :lanes lanes :work nil :back nil}))
