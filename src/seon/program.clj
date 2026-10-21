@@ -236,12 +236,15 @@
                    (:var d)))))
 
 (defn- contract-text
-  "A def's declared :malli/schema as text: from the live var, else from its metadata form."
+  "A def's declared :malli/schema as text: the live var's when it is plain data (a schema var a
+  form names, resolved), else the form as written (it holds a function or a compiled schema, whose
+  value is no data: the authored contract is kept as data)."
   {:malli/schema [:=> [:cat [:maybe :seon.host/var] :map] [:maybe :string]]}
   [v d]
-  (if-let [c (some-> v meta :malli/schema)]
-    (sedn/encode c)
-    (some-> (get (:meta d) :malli/schema) unquote-form sedn/encode)))
+  (let [c (some-> v meta :malli/schema)]
+    (if (and (some? c) (edn-value? c))
+      (sedn/encode c)
+      (some-> (get (:meta d) :malli/schema) unquote-form sedn/encode))))
 
 (defn- def-kind
   "A defined var's kind: from the live var when it is bound, else from the compiler's

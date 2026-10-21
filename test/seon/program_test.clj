@@ -59,6 +59,15 @@
                (update (var-row db 'app.pt-new/twice) :var/form dissoc :form/order)))
         (is (= '#{clojure.string/join clojure.core/*} (set (d/q '[:find [?r ...] :where [?v :var/name app.pt-new/twice] [?v :var/form ?f] [?f :form/refs ?r]] db)))
             "s/join resolved through the alias, * to clojure.core's")))
+    (testing "a contract holding a function is recorded as written, so it reads back as data"
+      ;; a live agent's (defn ... {:malli/schema [:=> [:cat [:fn pos?]] :int]} ...) was recorded
+      ;; from the evaluated value, #object[...], and every later agent on that branch died
+      ;; reading it (seon.program/schema-dependents, 2026-10-21)
+      (let [src "(defn half {:malli/schema [:=> [:cat [:fn pos?]] :int]} [x] (quot x 2))"
+            db (record db 'app.pt-new src)
+            c (:var/contract (var-row db 'app.pt-new/half))]
+        (is (= "[:=> [:cat [:fn pos?]] :int]" c))
+        (is (= '[:=> [:cat [:fn pos?]] :int] (clojure.edn/read-string c)))))
     (testing "in-ns alone is no program: nothing was defined"
       (is (nil? (eval-account 'user "(in-ns 'app.pt-other)"))))))
 
