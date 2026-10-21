@@ -132,6 +132,3 @@
          (finally
            (swap! stack (fn [s] (doall (remove #(identical? % e) s))))
            (when timeout-ms (arm-alarm!))))))
-
-(defn running? {:malli/schema [:=> [:cat] :boolean]}
-  [] (boolean (seq @stack)))

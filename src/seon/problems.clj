@@ -23,7 +23,6 @@
 
 (def counted-classes [:platform :eval :agent :effect])
 (def attempt-classes [:red :cost :merge :dead :error :waste])
-(def task-classes [:stuck])
 
 (defn- edn-of {:malli/schema [:=> [:cat [:maybe :string]] :any]} [s] (some-> s edn/read-string))
 
