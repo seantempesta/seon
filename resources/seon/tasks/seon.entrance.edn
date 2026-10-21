@@ -11,4 +11,8 @@
   :seon.task/kind :work
   :seon.task/needs #{"seon.entrance/inspect-a-kept-run" "seon.repl/eval-record-keeps-a-failing-form-whole"}
   :seon.task/proofs #{seon.entrance-test/a-replayed-agent-reproduces-its-recorded-results
-                      seon.entrance-test/a-divergence-on-replay-is-recorded}}]
+                      seon.entrance-test/a-divergence-on-replay-is-recorded}}
+ {:seon.task/name "reading-the-context-is-recorded"
+  :seon.task/plan "Owner: \"how can we record this (don't code up a shitload of code around a harness, just make it so this is easy to do in whatever form we end up in)\". An outside agent working a task through the entrance (attach, context, eval, done) is already recorded by the system: the attempt on main, each eval on the agent's branch with origin :outside, the judgment at done. The one step missing is reading the context: seon.entrance's :context op returns the current-state block and records nothing. Record it as a turn on the agent's branch (origin :outside, the exact text returned), the same shape as a model turn, so an outside session reads, replays and mines exactly like a Seon agent's attempt. A few lines in the entrance; no harness."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.entrance-test/a-context-read-is-a-recorded-turn}}]

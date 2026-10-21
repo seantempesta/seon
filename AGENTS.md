@@ -81,6 +81,12 @@ The order of the tasks is the order of the work: **delete first, then foundation
 
 ## How to work a task (every lane, every agent)
 
+0. **Work it as a Seon agent would** (owner, 2026-10-21: "build the task and load it and use the context system to make sure every step is the same; fix problems at each stage"):
+   - write your task's entry in its task file and load it into the standing root (`(my.root/load-tasks! sys "<dir>")` through `seon_eval` as root);
+   - `seon_attach` to it, read `seon_context` before each step, and evaluate through the agent (`seon_eval`);
+   - finish with `seon_done`, so the judge does exactly what it does for a Seon agent.
+
+   The system records all of it: the task, the attempt, every eval (origin `:outside`), the context you read, and the judgment. That record is replayable like any agent's. Where the context lacked what you needed, the output was noise, a tool was missing or the judge was wrong, that stage's problem is a task. Platform code (`seon.*`) moves into this flow as the self-improvement loop lands; until then do its code in your worktree and still work its task through the door.
 1. **Take one task.** For foundation work, open a worktree: `bin/worktree <task-name>`. Work only there and only on that task's files. Never edit the main tree, another lane's files, or anything outside the task. Never run `git checkout`, `restore`, `stash` or `reset` on paths you don't own.
 2. **Research the existing code first, end to end, before writing anything.**
    - Read the task's plan, DECISIONS, `docs/DRAGONS.md`, and the code it touches with its callers and its tests.
