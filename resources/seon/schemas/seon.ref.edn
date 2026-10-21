@@ -5,7 +5,8 @@
  ;; what a citation asks to be shown at, picked by its delimiter: a bare word its summary, one
  ;; backtick or a link its doc, three or more backticks its code
  :seon.ref/depth [:enum :summary :doc :code]
- :seon.ref/name [:or :qualified-symbol :qualified-keyword]
+ ;; a qualified symbol or keyword, or a simple symbol naming a namespace
+ :seon.ref/name [:or :qualified-symbol :qualified-keyword :symbol]
  ;; a path based at the checkout's top level (docs/flow.md), and a heading anchor in it
  :seon.ref/path :string
  :seon.ref/anchor :string
@@ -76,4 +77,9 @@
                  [:seon.ref/lead {:optional true} :string]
                  [:seon.ref/opening {:optional true} :string]
                  [:seon.ref/below {:optional true} [:vector [:map [:seon.ref/address :seon.ref/address] [:seon.ref/heading :string]]]]
+                 ;; a section's lines at code depth, or a file's whole text; the line count of a file
+                 ;; that is not Markdown; the revision a reference-code file is pinned at
+                 [:seon.ref/text {:optional true} :string]
+                 [:seon.ref/lines {:optional true} nat-int?]
+                 [:seon.ref/pin {:optional true} :string]
                  [:seon.ref/problem-kind {:optional true} :seon.ref/problem-kind]]}

@@ -151,3 +151,18 @@
     (is (clojure.string/includes? (str block) "export SEON_CHECKOUT") "the file's text, read on demand")
     (is (empty? (d/q '[:find ?e :where [?e :seon.section/address ?a] [(clojure.string/starts-with? ?a "bin/")]] db))
         "and nothing stored for it")))
+
+(deftest a-cited-namespace-and-a-reference-code-file-show-what-they-are
+  ;; task seon.ref/files-namespaces-and-symbols-are-plain-markdown: a namespace shows its
+  ;; docstring and publics, a reference-code file the revision it is pinned at
+  (let [db (d/db-with (db-with-program) [{:db/id "ns" :ns/name 'demo.calc :ns/doc "Adds. More."} {:var/name 'demo.calc/add :var/ns "ns"}])
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "n"
+                                               :seon.task/plan "Read `demo.calc` then `reference-code/malli/README.md` and `docs/nowhere.md`."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+        block (context/current-state db (task/task db "demo/n") {:results {} :reds [] :turn 0 :max-turns 4})
+        by (into {} (map (juxt :seon.ref/address identity)) (:sections block))]
+    (is (= 40 (count (:seon.ref/pin (first (filter #(clojure.string/starts-with? (:seon.ref/address %) "reference-code/malli/README.md") (:sections block)))))) "the pinned revision, looked up")
+    (is (= {:seon.ref/address "demo.calc" :seon.ref/heading "demo.calc" :seon.ref/lead "Adds. More."
+            :seon.ref/below [{:seon.ref/address "demo.calc/add" :seon.ref/heading "add"}] :seon.ref/depth :doc}
+           (by "demo.calc")) "a namespace: its docstring and publics")
+    (is (:unresolved (by "docs/nowhere.md")) "a file that is not there says so")))
