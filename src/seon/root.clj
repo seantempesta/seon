@@ -666,7 +666,7 @@
         (update :store merge (pdb/map-use (:cfg sys))
                 (when batches (cond-> {:batches batches :commits commits}
                                 ;; main's transactions per group commit (>= 1)
-                                (and commits (pos? commits)) (assoc :tx-per-commit (lib/r2 (/ (double (or batched-tx 0)) commits)))))))))
+                                (and commits (pos? commits)) (assoc :tx-per-commit (lib/r2 (/ (double (or batched-tx 0)) commits))))))))))
 
 (defn stats "The raw counters and windows." {:malli/schema [:=> [:cat :seon.root/sys] [:maybe :map]]}
   [sys] (:stats (deref (call! sys {:op :state}) 5000 {})))
