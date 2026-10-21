@@ -1085,7 +1085,7 @@
   And a platform function redefined as a merge loads it (its defn evaluated in its
   namespace) reaches a compiled platform caller on its next call, not through a proc's Var:
   a direct-linked call reads the var's linked binding, which every redefinition writes
-  through, and a contracted definition is never spliced into its callers (BUILD plan P3).
+  through, and a contracted definition is never spliced into its callers (BUILD plan P3)."
   []
   (let [sys (c/start! {:datoms 2000})
         hits (atom 0)
