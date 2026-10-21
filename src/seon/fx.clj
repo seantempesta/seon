@@ -225,7 +225,7 @@
             d (admit st m now)]
         (cond
           (= :wait d) (wake-later st m now)
-          (= :run d) (do (step/out! o :to-lanes (assoc m :taken-ns (lib/now-ns)))
+          (= :run d) (do (step/out! o :to-lanes (assoc m :taken-ns (lib/now-ns) ::qk qk))
                          (recur (cond-> (-> st (update :queue dissoc qk) (update :busy inc))
                                   (:bucket st) (update :bucket #(update (refill % now) :tokens - (or (:est m) 0))))))
           :else (do (reply! o (:dest m) (assoc d :seon.fx/kind (:kind st)))
@@ -265,13 +265,22 @@
        (case in
          :in (let [n (inc (:seq st))]
                [(bound (dispatch (-> st (assoc :seq n) (assoc-in [:queue [(- (:prio m 0)) n]] (assoc m :in-ns (lib/now-ns)))) o)) @o])
-         :done (do (reply! o (:dest m) (:outcome m))
+         :done (let [limited? (= :seon.model/rate-limited (:seon.error/type (:outcome m)))]
+                 (when-not limited? (reply! o (:dest m) (:outcome m)))
                    ;; root counts every failed effect across agents (seon.error, class :effect);
                    ;; the asker records its own outcome on its branch
                    (when (:seon.error/type (:outcome m))
                      (step/out! o :out {:op :problem :class :effect :error (dissoc (:outcome m) :seon.fx/us :seon.fx/queue-us)
                                         :agent (get-in m [:dest :agent])}))
-                   [(bound (dispatch (settle st m) o)) @o])
+                   (let [st (settle st m)
+                         st (if (and limited? (:request m))
+                              (let [r (:request m)
+                                    qk (or (::qk r) [(- (:prio r 0)) (inc (:seq st))])]
+                                (cond-> (-> st (assoc :seq (max (:seq st) (if (vector? qk) (second qk) 0)))
+                                            (assoc-in [:queue qk] (dissoc r :taken-ns ::qk)))
+                                  (:bucket st) (update :bucket assoc :tokens 0.0)))
+                              st)]
+                     [(bound (dispatch st o)) @o]))
          :tick [(bound (dispatch (dissoc st :tick-due) o)) @o])))))
 
 (defn lane-proc
@@ -300,7 +309,7 @@
            t1 (lib/now-ns)
            outcome (assoc r :seon.fx/kind (:kind st) :seon.fx/queue-us (quot (- (:taken-ns m) (:in-ns m)) 1000)
                           :seon.fx/us (quot (- t1 t0) 1000))]
-       [(update st :n inc) {[(:owner st) :done] [(cond-> {:dest (:dest m) :outcome outcome :budget-key (:budget-key m) :est (:est m 0)}
+       [(update st :n inc) {[(:owner st) :done] [(cond-> {:dest (:dest m) :request m :outcome outcome :budget-key (:budget-key m) :est (:est m 0)}
                                      (:cost r) (assoc :cost (:cost r)))]}]))))
 
 (defn model
