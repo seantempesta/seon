@@ -4,7 +4,7 @@
   proof is not shown again, a merge task's plan stays its own."
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.task :as task] [seon.context :as context] [seon.print :as print]
-            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent]))
+            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs]))
 
 (defn- db-with-program []
   (let [db @(second (pdb/test-branch!))]
@@ -121,3 +121,20 @@
   (let [r (context/resolve-ref (db-with-program) 'demo/nowhere)]
     (is (:unresolved r))
     (is (string? (:problem r)) "a message beside the name")))
+
+(def ^:private wiki-page
+  "# Flow\n\nFlow runs procs.\n\n## Step\n\nA step returns its state and outputs. It never blocks.\n\n## Stop\n\nStop awaits each proc's exit. Then the graph is gone.\n")
+
+(deftest a-task-context-pulls-what-its-plan-cites-at-that-depth
+  ;; task seon.docs/a-task-cites-what-it-needs: a section the plan cites reaches the
+  ;; context at the depth its delimiter asks for, read from the sections main holds
+  (let [db (db-with-program)
+        db (d/db-with db (docs/load-tx db "docs" {"docs/flow.md" wiki-page}))
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f"
+                                               :seon.task/plan "Read `docs/flow.md#step`, and ```docs/flow.md#stop``` whole."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+        block (context/current-state db (task/task db "demo/f") {:results {} :reds [] :turn 0 :max-turns 4})
+        shown (into {} (map (juxt :seon.ref/address identity)) (:sections block))]
+    (is (= "A step returns its state and outputs. It never blocks."
+           (:seon.ref/lead (shown "docs/flow.md#step"))) "doc depth: the section's lead")
+    (is (clojure.string/includes? (str (shown "docs/flow.md#stop")) "Then the graph is gone.") "code depth: the section whole")))
