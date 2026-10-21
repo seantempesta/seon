@@ -280,18 +280,26 @@
   (let [tid (:seon.attempt/task attempt)
         t (when (and db tid) (task/task db tid))]
     (cond
-      (nil? attempt) {:why "it works no task (spawned by hand, not by the reconciler): its model has no context"}
+      (nil? attempt) {:why (str "no attempt on main: spawned by hand"
+                                (when (:task ag) (str " with the description \"" (:task ag) "\""))
+                                ", not for a task, so no model works it and there is no current-state block;"
+                                " its REPL and evaluations are above. A task's agent is started by the reconciler"
+                                " (my.root/run! sys [task-id]) or attached through root's entrance ({:op :attach :task id}).")}
       (nil? t) {:why (str "task " tid " is not on its branch yet")}
       :else
+      (if-let [read (last (filter ui/context-read? (:evals ag)))]
+        ;; it reads its context through the door: the text it last read, as is (one text)
+        {:text (:out read) :tokens (ai/tokens (or (:out read) "")) :from :door}
       (let [block (context/current-state db t {:results (:seon.attempt/results attempt {})
                                                :reds (vec (for [r (get-in ag [:tests :reports]) :when (not= :pass (:type r))]
                                                             (assoc (select-keys r [:message :expected :actual]) :test (:var r))))
-                                               :last-items (vec (take-last 3 (:evals ag)))
+                                               ;; a context read is not an evaluation of its work
+                                               :last-items (vec (take-last 3 (remove ui/context-read? (:evals ag))))
                                                :turn (or (:seon.attempt/turns attempt) 0)
                                                :max-turns (get-in attempt [:seon.attempt/env :max-turns] 0)})
             ;; printed exactly as the turn prints it for the model (seon.context/messages)
             text (:content (second (context/messages block)))]
-        {:text text :tokens (ai/tokens text)}))))
+        {:text text :tokens (ai/tokens text)})))))
 
 (defn- zoom-value
   "The agent page's value (:seon.render/agent-page) for agent id, and the zoom's state with

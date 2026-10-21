@@ -136,9 +136,9 @@
   [{:keys [events events-seen]}]
   (vec (concat
          (for [e (take 8 events)]
-           (str (ui/clock (:at-ms e)) " " (kn (:type e)) " " (if (:agent e) (kn (:agent e)) "root")
+           (str (ui/clock (:at-ms e)) " " (if (:ended-as e) (str "ended " (kn (:ended-as e))) (kn (:type e))) " " (if (:agent e) (kn (:agent e)) "root")
                 (case (:type e)
-                  :reply (let [r (last (:items e))] (str " " (line (:form r) 12) " => " (line (:printed r) 12)))
+                  :reply (let [r (last (:items e))] (str " " (line (:form r) 20) " => " (line (:printed r) 20)))
                   :tests (str " " (:pass e 0) "/" (+ (:pass e 0) (:fail e 0) (:error e 0)))
                   :merged (if (get-in e [:result :merged?]) " into main" " refused")
                   "")))

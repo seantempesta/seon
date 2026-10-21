@@ -6,7 +6,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.render.proc :as p]
-            [seon.web.html :as h] [seon.db] [seon.reconcile]))
+            [seon.web.html :as h] [seon.db] [seon.reconcile] [seon.task] [datahike.api :as d]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -271,3 +271,35 @@
       (is (str/includes? html "+139 more: older evaluations, recorded on its branch"))))
   (testing "nothing capped, nothing said"
     (is (not (str/includes? (h/html (:seon.render/html (ui/history-list {:rows ["<li>r</li>"] :total 1} {}))) "more")))))
+
+(deftest a-context-read-is-shown-once
+  (let [ctx (str "{:turn \"1 of 8\" :refused [{:refusal :contract-gap :vars [" (str/join " " (for [i (range 360)] (str "app.m/f" i))) "]}]}")
+        read {:id 0 :tag :ret :form "(print (seon.turn/context-block \"t/x\" \"t/x#1\"))" :printed "nil" :out ctx :origin :context}
+        card (h/html (:seon.render/html (ui/agent-card {:id :a14 :status :idle :evals [read]} {})))
+        row (h/html (:seon.render/html (ui/history-row read {})))]
+    (testing "a card and a history row refer to the block; they never print it again"
+      (is (str/includes? card "read its current-state block"))
+      (is (str/includes? card "href=\"/agent/a14#z-context\""))
+      (is (not (str/includes? card "app.m/f359")))
+      (is (str/includes? row "read its current-state block"))
+      (is (not (str/includes? row "app.m/f359"))))
+    (testing "the stream says what happened"
+      (is (str/includes? (h/html (:seon.render/html (ui/event-row {:type :reply :agent :a14 :at-ms 0 :items [read]} {})))
+                         "read its current-state block")))
+    (testing "the agent page's panel is the text it read, as is, and one copy of it"
+      (let [ctxv (#'p/context-of nil {:seon.attempt/task "t/x"} {:evals [{:tag :ret :form "(+ 1 2)" :printed "3"} read]})]
+        (is (= :why (first (keys ctxv))) "no task on a db: why, not a rebuild"))
+      (let [[_ conn] (seon.db/create! 50)
+            db (d/db-with @conn (seon.task/create-tx @conn [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "p"}]))
+            work {:tag :ret :form "(+ 1 2)" :printed "3"}
+            ctxv (#'p/context-of db {:seon.attempt/task "t/x"} {:evals [work read work]})
+            rebuilt (#'p/context-of db {:seon.attempt/task "t/x"} {:evals [work]})]
+        (is (= {:text ctx :from :door} (select-keys ctxv [:text :from])) "the text it read, as is")
+        (is (= 1 (count (re-seq #"app.m/f359" (:text ctxv)))) "one copy")
+        (is (nil? (:from rebuilt)) "no read: rebuilt from main's facts")
+        (is (str/includes? (:text rebuilt) ":last-evals"))))))
+
+(deftest a-hand-spawned-agent-says-why-it-has-no-context
+  (let [{:keys [why]} (#'p/context-of nil nil {:task "index rows by id (#0)"})]
+    (is (str/includes? why "spawned by hand with the description \"index rows by id (#0)\""))
+    (is (str/includes? why "(my.root/run! sys [task-id])") "how an agent gets a context")))

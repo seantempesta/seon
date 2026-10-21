@@ -90,9 +90,10 @@
               {:items (mapv #(select-keys % [:tag :form :printed :out :recorded :handle])
                             @(c/submit! sys ag (:code req) {:origin :outside}))})
       ;; the block's text as the model reads it: printed to the agent's output, not as a
-      ;; value (a value comes back as a string literal, escaped, under the reply's budget)
+      ;; value (a value comes back as a string literal, escaped, under the reply's budget);
+      ;; recorded with origin :context, a context read, which renders refer to, not repeat
       :context (if-let [{:keys [task attempt]} (attempt-of sys ag)]
-                 (let [it (last @(c/submit! sys ag (pr-str (list 'print (list 'seon.turn/context-block task attempt))) {:origin :outside}))]
+                 (let [it (last @(c/submit! sys ag (pr-str (list 'print (list 'seon.turn/context-block task attempt))) {:origin :context}))]
                    (if (= :err (:tag it)) {:error (:printed it)} {:context (:out it)}))
                  {:error (str ag " works no task: attach one first")})
       :attach (attach! sys (:task req))

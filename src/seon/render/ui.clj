@@ -17,7 +17,7 @@
   invents one."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [clojure.walk]
-            [seon.render :as render] [seon.print :as print] [seon.web.html :as h] [seon.reader :as reader]))
+            [seon.render :as render] [seon.print :as print] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader]))
 
 ;;; --- small formatting helpers -------------------------------------------------
 
@@ -142,6 +142,21 @@
         (clojure.walk/postwalk (fn [x] (if (and (vector? x) (= :details (first x)) (map? (second x))) (assoc-in x [1 :open] true) x))
                                (if (and (vector? hic) (map? (second hic))) (update hic 1 dissoc :id) hic)))
       [:code {:class "printed"} (prose txt budget opts)])))
+
+(defn context-read?
+  "Is evaluation e a context read: an outside agent reading its current-state block through
+  root's entrance (origin :context; seon.entrance)? Its output is the block itself."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [e] (and (map? e) (= :context (:origin e))))
+
+(defn context-ref
+  "A context read, shown as what it is: a reference to the block it read (on the agent's
+  page, its context panel shows that text as is), never the block again."
+  {:malli/schema [:=> [:cat :map [:maybe :string]] :any]}
+  [e href]
+  (let [n (select/estimate (or (:out e) ""))]
+    [:span {:class "ctxref"} "read its current-state block · ≈" (str n) " tokens · "
+     [:a {:href (str (or href "") "#z-context")} "its context panel shows it"]]))
 
 ;;; --- status -------------------------------------------------------------------
 
@@ -467,9 +482,11 @@
      (when-not (str/blank? (:form e)) [:code {:class "form"} (prose (:form e) 28 {:one-line? true :href href})])
      [:div {:class "out"}
       [:span {:class "arrow"} (if err? "✕" "⇒")]
-      (if (and newest? (not err?))
+      (cond
+        (and (context-read? e) (not err?)) (context-ref e href)
+        (and newest? (not err?))
         [:div {:class "printed seon"} (value-html txt 120 (:handle e) {:href href})]
-        [:code {:class "printed"} (prose txt 50 {:href href})])]
+        :else [:code {:class "printed"} (prose txt 50 {:href href})])]
      [:div {:class "meta"}
       [:span (ms-str (:ms e))] (alloc-span (:alloc-bytes e))
       (when (:origin e) [:span {:class "origin"} (kname (:origin e))])
@@ -548,11 +565,13 @@
   [ev]
   (case (:type ev)
     :reply (let [items (:items ev) r (last items)]
+             (if (context-read? r)
+               (str "read its current-state block · ≈" (select/estimate (or (:out r) "")) " tokens")
              (str (when (> (count items) 1) (str (count items) " forms · "))
                   (let [n (count (filter #(= :err (:tag %)) items))] (when (pos? n) (str n " error" (when (> n 1) "s") " · ")))
                   (when-not (str/blank? (:form r)) (str (:text (print/prose (:form r) 12 {:one-line? true})) " ⇒ "))
                   (:text (print/prose (:printed r) 22 {:one-line? true}))
-                  (when (:ms r) (str " · " (ms-str (:ms r))))))
+                  (when (:ms r) (str " · " (ms-str (:ms r)))))))
     :commit (str (kname (:branch ev)) " t " (:t ev) (when (:txs ev) (str " · " (:txs ev) " tx")))
     :merged (let [r (:result ev)]
               (if (false? (:merged? r))
@@ -853,9 +872,10 @@
      [:li {:class (str "hr tag-" (kname (or (:tag e) :ret)))}
       [:div {:class "hf"} [:code (prose (:form e) 400)]]
       [:div {:class "hv"} [:span {:class "arrow"} (if err? "✕" "⇒")]
-       (if err? [:code {:class "printed"} (prose txt 200)]
-           [:div {:class "printed seon"} (value-html txt (or (:seon.render/budget env) 600) (:handle e) {})])]
-      (when (seq (:out e)) [:pre {:class "out"} (prose (:out e) 200)])
+       (cond err? [:code {:class "printed"} (prose txt 200)]
+             (context-read? e) (context-ref e nil)
+             :else [:div {:class "printed seon"} (value-html txt (or (:seon.render/budget env) 600) (:handle e) {})])]
+      (when (and (seq (:out e)) (not (context-read? e))) [:pre {:class "out"} (prose (:out e) 200)])
       [:div {:class "meta"}
        [:span (ms-str (:ms e))] (alloc-span (:alloc-bytes e))
        [:span {:class "origin"} (kname (or (:origin e) :agent))]
@@ -913,8 +933,10 @@
   [{:keys [text tokens why from]} _]
   {:seon.render/html
    [:section {:id "z-context" :class "box"}
-    (kicker "context" (if text (str "≈" tokens " tokens · its model's current-state block, rebuilt now from main's facts and its last test run"
+    (kicker "context" (if text (str "≈" tokens " tokens · its model's current-state block"
+                                    (when-not (= :door from) ", rebuilt now from main's facts and its last test run")
                                     (case from
+                                      :door " · the text it last read through root's entrance, as is"
                                       :main-gone " · read on main (its branch is gone)"
                                       :main " · read on main (its branch has no commit this page has read)"
                                       nil))
