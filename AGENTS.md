@@ -44,6 +44,8 @@ When you feel it, stop and ask three questions:
 
 ## The pillars: everything is data flowing through the system (owner, 2026-10-21)
 
+**If nothing has changed, we do nothing** (owner, 2026-10-21). No proc steps, renders, pings, flushes or polls on an idle system; work exists only because data changed.
+
 This is not a traditional program with a scheduler, timers and callers that wait. Data flows: a fact is written, a commit flows to whoever reads it, a message lands on a queue, a proc runs because work arrived and parks when there is none. Every need is met by one of these pillars. If a need seems not to fit one, stop and say so; never route around them.
 
 - **A value.** State is immutable Datahike values with structural sharing, in one store with many branches. Each process owns its connection: agents own their branch, root owns main. A record is a fact; history is kept.
