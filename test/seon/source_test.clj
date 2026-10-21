@@ -177,3 +177,15 @@
     (is (contains? (set (d/q '[:find [?r ...] :where [?v :var/name x.unloaded-test/q-test] [?v :var/form ?f] [?f :form/refs ?r]] db))
                    'x.z-support/k)
         "a namespace required from a later file is analyzed first, and its alias reads ::z/k")))
+
+(deftest a-schema-file-round-trips-through-the-program
+  ;; task seon.source/schemas-are-part-of-the-program: a schema resource is program data
+  ;; like a source file (v1: the program is entities: functions, tests, schemas), so an
+  ;; agent can change it on its branch and the merge writes it back; imported then written
+  ;; back unchanged, it is the same text
+  (let [path "resources/seon/schemas/seon.task.edn"
+        text (slurp (str here "/" path))
+        db (empty-db)
+        db (d/db-with db (source/import-tx db {path text}))
+        out (source/files db (source/source-nss db))]
+    (is (= text (get out path)) "the schema file, byte for byte")))
