@@ -16,7 +16,7 @@ function.
 | dragon | edge (`ns/fn`) | declared variant | handled by, as data |
 |---|---|---|---|
 | Datahike or the store refuses a write (a bad transaction, LMDB full or failing) | `seon.writer/writer-one` | `:seon.writer/refused` (the one error map, with `:ok false`) | the caller of the write: an agent's `transact!` throws it into its own eval (an `:err` item); root's callers read `:ok` and `:seon.error/message` |
-| The model's HTTP call (connect, TLS, timeout, a non-200), made by root's `:model` effect lanes | `seon.model/http-post` | `:seon.model/provider-error`, or `:seon.model/rate-limited` for HTTP 429 | the `:model` owner answers it to the asking agent; `seon.turn/act!` returns it; `seon.turn/work!` ends the attempt `:error` with its message |
+| The model's HTTP call (connect, TLS, the socket dying mid-stream), made by root's `:model` effect lanes; streamed over SSE with no clock (a reasoning reply streams for minutes) | `seon.model/http-post` | `:seon.model/transport` (the connection failed or dropped); a non-200 is `:seon.model/provider-error` with the whole body, or `:seon.model/rate-limited` for HTTP 429 with its Retry-After (`seon.model/complete`) | the `:model` owner answers it to the asking agent (a 429 is kept and retried after its wait); `seon.turn/act!` returns it; `seon.turn/work!` ends the attempt `:error` with its message |
 | An agent's authored contract does not compile | `seon.contract/arm!` | `:seon.contract/invalid` | `seon.repl/admit` puts it on the reply item (`:contract-error`); `seon.program/load-form!` reports it as a load error |
 | An agent mints past its block of entity ids (its lease, `seon.config/EID-LEASE`; Datahike's `next-eid` refuses at the ceiling `seon.db/lease!` set) | `seon.agent/transact!` (`seon.db/lease-spent`); for the record of its evals, `seon.repl/record!` | `:seon.db/lease-spent` (`:lease :ceiling :entity-id`; nothing applied, and a refused transaction keeps the ids it reserved, so the lease stays spent) | the agent's eval (an `:err` item); a record of its evals it cannot write goes to root (`{:op :unrecorded}`) and is recorded on main as its problem |
 | Program code from the db does not load (a form that throws: a missing require target, a reference to a var main does not hold) | `seon.program/load-form!` | `:seon.program/error` (`{:ns :message}`) | root and the fork server put load errors in their view and events; an agent's `:load-errors` |
@@ -31,7 +31,8 @@ function.
 | A task file a person wrote does not read as one EDN vector of declarations | `seon.task/file-declarations` | `:seon.task/refused` (the one error map, naming the file) | `seon.task/load-tx` answers the refusal; `my.root/load-tasks!` returns it and writes nothing |
 | A `--set :ns/key=edn` a person typed on the command line does not read as EDN | `seon.config/parse-set` | `:seon.config/refused` (thrown, naming the argument) | boot is refused: the process exits with the refusal before any mode runs |
 | The web listener cannot bind its port (taken, refused) | `seon.web/web-proc` | `{:listening false :error message}` in the `:web` proc's state | its ping shows it on the dashboard's health line; boot goes on without the web |
-| An interrupt or a timeout stops a running form (SIGUSR1, SIGALRM) | `seon.intr/run` | ex-info `{:interrupted true}` or `{:timeout-ms n}` | `seon.repl/eval-code` answers the form `interrupted`/`eval-error` and goes on |
+| An interrupt or a tick budget stops a running form (root's SIGUSR1; Jolt's `run-interruptible` past its ticks, `:seon.config.agent/form-ticks`: work done, never time) | `seon.intr/run` | ex-info `{:interrupted true}`, or the typed `:seon.repl/ticks-spent` `{:ticks :budget}` | `seon.repl/eval-code` answers the form `interrupted` or its typed error and goes on |
+| A proof run that does more work than its tick budget (`:seon.config.agent/test-ticks`; Jolt's `run-interruptible`) | `seon.agent/run-tests-here` | `:seon.test/ticks-spent` `{:ticks :budget :test}`, naming the test that was running | an `:error` report in the run; the turn's context shows it as the test run failing |
 
 ## Entrant boundaries (a defect becomes a recorded error map)
 
@@ -55,7 +56,7 @@ function.
 | An agent's stderr file cannot be made (a store with no path) | `seon.agent/stderr-to-file!` | stderr stays where it was; a death records no tail |
 | A dead agent's stderr file is gone or empty | `seon.root/stderr-tail` | nil |
 | The fork server dies | `seon.fork-server/fork-server-proc` (EOF of its events) | its standby is promoted (`:server-down`, `:server-up`) |
-| A test never ends or kills its process | `seon.agent/run-tests-forked` | killed at its bound; an `:error` report |
+| A test never ends or kills its process | `seon.agent/run-tests-forked` | a test past the run's tick budget stops (`seon.agent/run-tests-here`); a death ends the pipe, and the agent reads it to its end (no clock) and names the last test started: an `:error` report |
 | An agent past its heap bound | Jolt's heap ceiling (`seon.lib/heap-cap!`) | `OutOfMemoryError` in the form: an `:err` item |
 | A forked process holding its parent's LMDB env and connections (physics: fork shares handles) | `seon.db/after-fork!` | forgotten, not closed; the agent opens the store itself |
 | Datahike refuses an agent's own write (its run-ahead apply) | `datahike.writer/apply!` (the library's edge) | the exception as its answer; `seon.agent/transact!` throws its message into the agent's eval (an `:err` item) |

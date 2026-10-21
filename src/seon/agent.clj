@@ -485,7 +485,7 @@
                 ((:serve @state)))
               (lib/c-exit 0))
             :else
-            (do (ffi-status pid1 false)
+            (do (ffi-status pid1)
                 (sock/close! fd)
                 (send! {:op :cloned :k k :clone (:agent m)}))))))))
 
