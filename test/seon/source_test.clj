@@ -157,3 +157,17 @@
       (is (= :seon.fx/io-error (:seon.error/type (fx/git-commit {:req {:dir (str tree "/nope") :branch "jolt/seon-merges" :files files :message msg}}))))))
   (is (= {:value {:sha nil :files 0}} (fx/git-commit {:req {:dir "/nonexistent" :branch "b" :files {} :message "m"}}))
       "nothing to write commits nothing"))
+
+(deftest a-file-whose-namespace-is-not-loaded-imports
+  ;; task seon.source/the-tests-are-part-of-the-program: a root imports test/ whose
+  ;; namespaces its binary never loaded (proofs live there), so the analyzer reads a
+  ;; form's aliases from the file's own ns form, not from a loaded namespace
+  (let [files {"test/x/unloaded_test.clj"
+               "(ns x.unloaded-test (:require [clojure.test :refer [deftest is]] [datahike.api :as d]))\n\n(defn q [db] (d/q '[:find ?e :where [?e :a]] db))\n\n(deftest q-test (is (= #{} (q nil))))\n"}
+        db (empty-db)
+        tx (source/import-tx db files)
+        db (d/db-with db tx)]
+    (is (= 3 (count (d/q '[:find ?f :where [?f :form/src]] db))) "the ns form and both definitions")
+    (is (contains? (set (d/q '[:find [?r ...] :where [?v :var/name x.unloaded-test/q] [?v :var/form ?f] [?f :form/refs ?r]] db))
+                   'datahike.api/q)
+        "an alias resolved through the file's own ns form")))
