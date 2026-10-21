@@ -70,4 +70,4 @@ agent, the dashboard and the context read it there. The dashboard shows it throu
 schema's declared render, `seon.render.ui/config-panel`. `bin/check config` proves that an
 agent reads it from its branch.
 
-```seon.config/facts``` writes the config on main; ```seon.config/from-db``` and ```seon.config/sources-from-db``` read it back; `seon.render.ui/config-panel` shows it on the dashboard.
+```seon.config/facts``` writes the config on main; ```seon.config/from-db``` reads it back; `seon.render.ui/config-panel` shows it on the dashboard.

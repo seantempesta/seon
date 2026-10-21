@@ -51,15 +51,22 @@
     (is (= "demo/async.md#waiting" (:seon.section/address r)) "and the section that makes it")
     (is (str/includes? (:seon.error/message r) "demo/flow.md#nowhere"))))
 
+(defn- backlinks
+  "The addresses of the sections whose text cites target (a section's address or a var's name), sorted."
+  [db target]
+  (let [e (if (string? target)
+            (d/q '[:find ?e . :in $ ?a :where [?e :seon.section/address ?a]] db target)
+            (d/q '[:find ?e . :in $ ?n :where [?e :var/name ?n]] db target))]
+    (vec (sort (when e (d/q '[:find [?a ...] :in $ ?t :where [?s :seon.section/references ?t] [?s :seon.section/address ?a]] db e))))))
+
 (deftest backlinks-are-a-sections-instances
   (let [quiet "# Quiet\n\nQuiet is the absence of messages.\n\n## Counting\n\nCount as the [idiom](flow.md#idioms) does, by `app.m0/f0`.\n"
         db (load-pages (empty-db) (assoc pages "demo/quiet.md" quiet))]
-    (is (= ["demo/async.md#waiting" "demo/quiet.md#counting"] (docs/backlinks db "demo/flow.md#idioms"))
+    (is (= ["demo/async.md#waiting" "demo/quiet.md#counting"] (backlinks db "demo/flow.md#idioms"))
         "a section's backlinks are the sections that link to it")
-    (is (= ["demo/flow.md#idioms" "demo/quiet.md#counting"] (docs/backlinks db 'app.m0/f0))
+    (is (= ["demo/flow.md#idioms" "demo/quiet.md#counting"] (backlinks db 'app.m0/f0))
         "a var's backlinks are the sections that cite it")
-    (is (= ["demo/flow.md#idioms"] (docs/homes db 'app.m0/f0)) "its home is the section citing it at code depth")
     (testing "a link to a page with no anchor reaches the page's first section"
       (let [db (load-pages db (assoc pages "demo/quiet.md" (str/replace quiet "flow.md#idioms" "flow.md")))]
-        (is (= ["demo/quiet.md#counting"] (docs/backlinks db "demo/flow.md#flow")))
-        (is (= ["demo/async.md#waiting"] (docs/backlinks db "demo/flow.md#idioms")) "the dropped link is retracted")))))
+        (is (= ["demo/quiet.md#counting"] (backlinks db "demo/flow.md#flow")))
+        (is (= ["demo/async.md#waiting"] (backlinks db "demo/flow.md#idioms")) "the dropped link is retracted")))))
