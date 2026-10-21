@@ -14,7 +14,7 @@
   Root loads the HTTP transport and JSON before it forks anything, so every agent holds them
   compiled."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.config :as cfg] [clojure.string :as str] [jolt.http.core :as http] [clojure.data.json :as json]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [jolt.http.core :as http] [clojure.data.json :as json]))
 
 (defn estimate-tokens
   "Tokens of text, estimated at 4 characters a token (the stand-in's usage)."
@@ -58,18 +58,18 @@
 
 (defn- http-post
   "POST body (a JSON string) to url with headers and read the reply until the server ends
-  it: {:status :body :headers} (body text). The connect is bounded by connect-ms; no clock
-  bounds the reply (a reasoning model streams for minutes), the socket's own death ends it.
-  The interop edge, the named dragon seon.model/http-post: a connect or socket failure is
-  :seon.model/transport."
-  {:malli/schema [:=> [:cat :string [:vector [:tuple :string :string]] :string pos-int?]
+  it: {:status :body :headers} (body text). No clock bounds the connect or the reply (a
+  reasoning model streams for minutes): the OS's own connect failure or the socket's death
+  ends it. The interop edge, the named dragon seon.model/http-post: a connect or socket
+  failure is :seon.model/transport."
+  {:malli/schema [:=> [:cat :string [:vector [:tuple :string :string]] :string]
                   [:or [:map [:status :int] [:body :string] [:headers :any]] :seon.model/failure]]}
-  [url headers body connect-ms]
+  [url headers body]
   (let [u (try (http/parse-url url) (catch Throwable e e))]
     (if (instance? Throwable u)
       (provider-error (str "the provider's URL does not parse: " url) nil {})
       (try
-        (let [s (http/connect-stream (http/tget u :host) (http/effective-port u) (= "https" (http/tget u :protocol)) false nil connect-ms)]
+        (let [s (http/connect-stream (http/tget u :host) (http/effective-port u) (= "https" (http/tget u :protocol)) false nil nil)]
           (try
             (http/s-write s (http/build-request "POST" u headers body))
             (let [r (http/read-response s nil "POST" nil true true)]
@@ -163,15 +163,14 @@
 (defn- openai-compat
   {:malli/schema [:=> [:cat :seon.model/provider :seon.model/request]
                   [:or :seon.model/completion :seon.model/failure]]}
-  [{:keys [base-url api-key-env connect-ms max-tokens] :or {connect-ms cfg/MODEL-CONNECT-MS} :as provider} request]
+  [{:keys [base-url api-key-env max-tokens] :as provider} request]
   (let [key (System/getenv api-key-env)]
     (if (str/blank? key)
       (provider-error (str "the environment variable " api-key-env " is not set") nil {})
       (let [t0 (System/nanoTime)
             r (http-post (str (str/replace base-url #"/+$" "") "/chat/completions")
                          [["Authorization" (str "Bearer " key)] ["Content-Type" "application/json"] ["Accept" "text/event-stream"]]
-                         (json/write-str (request-body provider request))
-                         connect-ms)
+                         (json/write-str (request-body provider request)))
             ms (/ (- (System/nanoTime) t0) 1e6)]
         (cond
           (:seon.error/type r) r

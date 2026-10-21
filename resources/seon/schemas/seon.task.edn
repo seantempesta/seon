@@ -122,7 +122,7 @@
  :seon.model/provider [:multi {:dispatch :kind}
                        [:scripted [:map [:kind [:= :scripted]] [:script :qualified-symbol]]]
                        [:openai-compat [:map [:kind [:= :openai-compat]] [:base-url :string] [:model :string]
-                                        [:api-key-env :string] [:connect-ms {:optional true} pos-int?]
+                                        [:api-key-env :string]
                                         [:max-tokens {:optional true} pos-int?]
                                         ;; DeepSeek's thinking mode and effort; absent: the provider's default
                                         [:thinking {:optional true} [:enum :enabled :disabled]]
