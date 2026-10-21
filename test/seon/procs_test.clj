@@ -123,6 +123,48 @@
             [_ _] (step #'root/api-proc st :from-writer {:dest {:rid rid} :r {:ok true}})]
         (is (= {:ok true} @p))))))
 
+;; ---- task seon.root/a-proc-answers-every-request-it-took (census #2) ----------------------
+
+(defn- api-state []
+  (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                    :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))}))
+
+(defn- answer "What p was answered, or :unanswered." [p] (if (realized? p) @p :unanswered))
+
+(deftest a-throwing-step-answers-every-pending-request
+  ;; Flow's step catch keeps the old state and drops the outputs; its error message carries the
+  ;; message the step took (::flow/msg), which root's error reader forwards as :msg
+  (let [st (api-state)]
+    (testing "the api's own step threw on {:op :state}: its caller is answered the defect, not left waiting"
+      (let [p (promise)]
+        (step #'root/api-proc st :back {:op :error :pid :api :message "boom" :msg {:op :state :p p}})
+        (is (= :seon.root/proc-defect (:seon.error/type (answer p))))))
+    (testing "the writer threw on a request the api sent it: the api answers that request's caller by its rid"
+      (let [p (promise)
+            [st outs] (step #'root/api-proc st :ext {:op :write :req {:op :tx :branch :db :tx-data []} :p p})
+            sent (first (:to-writer outs))]
+        (step #'root/api-proc st :back {:op :error :pid :writer :message "boom" :msg sent})
+        (is (= :seon.root/proc-defect (:seon.error/type (answer p))))
+        (is (= "boom" (:seon.error/message (answer p))))))))
+
+(defn- answering-sys
+  "A sys whose entrance answers every request with r (a stand-in for the api), on a branch of
+  the test store."
+  [r]
+  (let [[cfg conn] (pdb/test-branch!) ext (a/chan 4)]
+    (a/go-loop [] (when-let [m (a/<! ext)] (deliver (:p m) r) (recur)))
+    {:ext ext :cfg cfg :conn conn :graph nil}))
+
+(deftest root-state-never-answers-an-empty-system
+  ;; "Unknown is not {}": what the api answers is what the caller gets; a defect stays a defect
+  (let [e (seon.contract/error :seon.root/proc-defect 'seon.root/api-proc "boom" {:pid :api})
+        sys (answering-sys e)]
+    (testing "state: the defect, not a view decorated around it"
+      (is (= e (root/state sys))))
+    (testing "errors: the defect, not an empty fold"
+      (is (= e (root/errors sys))))
+    (a/close! (:ext sys))))
+
 (deftest the-step-loop-runs-flows-contract-in-one-thread
   ;; a counter step-fn run by seon.step/run-loop over an in-memory transport
   (let [step-fn (fn ([] {:workload :io :ping-map-fn (fn [s] {:n (:n s)})})
