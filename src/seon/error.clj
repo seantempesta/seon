@@ -13,7 +13,7 @@
     commit; root folds those as occurrences of class :eval.
   Nothing here files tasks or resolves errors: they are mined by hand (root, owner)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [clojure.edn :as edn]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.edn :as sedn]))
 
 ;; ---- the signature ----------------------------------------------------------------------
 
@@ -96,7 +96,7 @@
   [db s]
   (when-let [e (d/q '[:find ?e . :in $ ?s :where [?e :seon.error/signature ?s]] db s)]
     (cond-> (dissoc (d/pull db '[*] e) :db/id)
-      true (update :seon.error/example #(some-> % edn/read-string)))))
+      true (update :seon.error/example #(some-> % sedn/decode)))))
 
 (defn flush-tx
   "The window's write: one entity per signature not yet written by this observer, its count
@@ -122,7 +122,7 @@
                      last-task (assoc :seon.error/last-task last-task)
                      first?
                      (merge (select-keys example [:seon.error/type :seon.error/operation :seon.error/message])
-                            {:seon.error/example (binding [*print-length* nil *print-level* nil] (pr-str example))}
+                            {:seon.error/example (sedn/encode example)}
                             (when form {:seon.error/form form})))])]
     [(into f (map first) flushed) (mapv second flushed)]))
 

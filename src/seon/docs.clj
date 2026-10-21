@@ -148,28 +148,6 @@
         (:seon.section/references s) (update :seon.section/references
                                              #(into #{} (map (fn [r] (or (:seon.section/address r) (:var/name r)))) %))))))
 
-(defn backlinks
-  "The addresses of the sections whose text cites target (a section's address or a var's
-  name), sorted: a pattern's home knows its instances this way, with no key of its own."
-  {:malli/schema [:=> [:cat :seon.host/db [:or :string :qualified-symbol]] [:vector :string]]}
-  [db target]
-  (let [e (if (string? target) (task/eid db :seon.section/address target) (task/eid db :var/name target))]
-    (if e
-      (vec (sort (d/q '[:find [?a ...] :in $ ?t :where [?s :seon.section/references ?t] [?s :seon.section/address ?a]] db e)))
-      [])))
-
-(defn homes
-  "The sections citing var name at code depth (three backticks): its home, one when the wiki
-  is healthy. Read from its backlinks' own text by the one parse; no stored depth."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :string]]}
-  [db name]
-  (vec (for [a (backlinks db name)
-             :let [path (subs a 0 (str/index-of a "#"))
-                   text (:seon.section/text (section db a) "")]
-             :when (some #(and (= name (:seon.ref/name %)) (= :code (:seon.ref/depth %)))
-                         (:seon.ref/citations (ref/parse path text)))]
-         a)))
-
 (defn view
   "Section address as the store holds it, shown at depth by the one rule (seon.ref/shown): its
   lead is the stored lead, the sections below are those whose parent it is (in the order the

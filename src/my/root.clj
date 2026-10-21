@@ -3,7 +3,7 @@
   the reconciler proc does the rest. Each takes root's system (seon.root/start!)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [seon.config :as config]
-            [seon.reconcile :as reconcile] [seon.program :as program] [seon.db :as pdb] [seon.template :as tpl]))
+            [seon.reconcile :as reconcile] [seon.edn :as sedn] [seon.db :as pdb] [seon.template :as tpl]))
 
 (defn create!
   "Write task declarations as held tasks. Answers the writer's answer, or the refusal."
@@ -117,7 +117,7 @@
           g (if (:seon.error/type r)
               {:commit commit :ms (/ (:seon.fx/us r 0) 1000.0) :error (:seon.error/message r)}
               (:value r))]
-      @(root/transact-main! sys [{:seon.root/id :root :seon.root/generation (program/pr-edn g)}])
+      @(root/transact-main! sys [{:seon.root/id :root :seon.root/generation (sedn/encode g)}])
       g)))
 
 (defn next-generation

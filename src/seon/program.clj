@@ -25,7 +25,7 @@
     platform's own source has the same facts (seon.source)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [jolt.ir :as ir] [jolt.analyzer]
-            [seon.schema.datahike :as sd] [malli.registry :as mr] [clojure.edn :as edn]))
+            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [clojure.edn :as edn] [seon.error :as error]))
 
 (defn scratch-ns?
   "Is namespace nsx scratch (never program): `user`, or declared ^:scratch."
@@ -43,11 +43,6 @@
                  (map? v) (every? (fn [[k x]] (and (edn-value? k) (edn-value? x))) v)
                  (coll? v) (every? edn-value? v)
                  :else false)))
-
-(defn pr-edn
-  "v printed as EDN that reads back (no print limits, no metadata)."
-  {:malli/schema [:=> [:cat :any] :string]}
-  [v] (binding [*print-length* nil *print-level* nil *print-meta* false] (pr-str v)))
 
 (defn var-kind
   "What a defined var holds now: :fn (a function, which needs a contract), :test, :macro or
@@ -172,7 +167,7 @@
                            (when (banned s) (vswap! acc update :banned conj s))
                            (vswap! acc update :refs conj s))
          :host-static (vswap! acc update :refs conj (symbol (str (:class n)) (str (:member n))))
-         :try (vswap! acc update :catches into (map pr-edn) (catches n))
+         :try (vswap! acc update :catches into (map sedn/encode) (catches n))
          :invoke (when (and (= 'clojure.core/deref (invoked n)) (= 3 (count (:args n))))
                    (vswap! acc update :timeouts conj 'clojure.core/deref))
          nil)
@@ -245,8 +240,8 @@
   {:malli/schema [:=> [:cat [:maybe :seon.host/var] :map] [:maybe :string]]}
   [v d]
   (if-let [c (some-> v meta :malli/schema)]
-    (pr-edn c)
-    (some-> (get (:meta d) :malli/schema) unquote-form pr-edn)))
+    (sedn/encode c)
+    (some-> (get (:meta d) :malli/schema) unquote-form sedn/encode)))
 
 (defn- def-kind
   "A defined var's kind: from the live var when it is bound, else from the compiler's
@@ -304,7 +299,7 @@
                   (vec (for [{:keys [multi dispatch]} (:methods a)
                              :let [mv (when (and nsx (symbol? multi)) (ns-resolve nsx multi))]
                              :when (var? mv)]
-                         {:multi (symbol mv) :dispatch (pr-edn dispatch)})))
+                         {:multi (symbol mv) :dispatch (sedn/encode dispatch)})))
         impls (when (or ran? (nil? before)) (vec (distinct (:impls a))))]
     (when (and nsx (not (scratch-ns? nsx)) (not (:scratch ns-meta))
                (or ns-form? (seq defs) (seq declares) (seq methods) (seq impls) (:env? a)))
@@ -324,12 +319,12 @@
 (defn method-key
   "A method's identity: [multi dispatch], printed."
   {:malli/schema [:=> [:cat :qualified-symbol :string] :string]}
-  [multi dispatch] (pr-edn [multi dispatch]))
+  [multi dispatch] (sedn/encode [multi dispatch]))
 
 (defn impl-key
   "A protocol extension's identity: [protocol type], printed."
   {:malli/schema [:=> [:cat :qualified-symbol :string] :string]}
-  [protocol type] (pr-edn [protocol type]))
+  [protocol type] (sedn/encode [protocol type]))
 
 (def ^:private def-attrs
   "Each definition kind's form pointer."
@@ -713,3 +708,36 @@
         (recur (into (vec more) (map first) new) (into seen (map first) new)
                (into tests (comp (filter #(= :test (second %))) (map first)) callers)))
       tests)))
+
+(def tree-readers
+  "The host vars that read files: a test whose reached forms reference one reads the
+  checkout's tree, so its reach digest covers the whole tree (reach-digests)."
+  '#{clojure.core/slurp clojure.core/file-seq})
+
+(defn reach-digests
+  "{test var -> reach digest} of db's tests (task seon.program/tests-run-by-reach): the
+  digest of the test's name, inputs' :env (what has no program facts), its own form, its
+  namespace's forms that define no var (the ns form, fixtures), and every live form their
+  references reach (a var to the form that last defined it; a defined multimethod's methods
+  and protocol's extensions), with inputs' :tree when a reached form references a
+  tree-reader. A test's digest moves exactly when a form it reaches does, so it is the
+  inverse of reaching-tests. Cost: the live forms read once and digested once, then per
+  test its closure."
+  {:malli/schema [:=> [:cat :seon.host/db [:map [:env :string] [:tree :string]]] [:map-of :qualified-symbol :string]]}
+  [db {:keys [env tree]}]
+  (let [forms (live-forms db)
+        by-def (fn [kind] (reduce (fn [m f] (reduce (fn [m [k s]] (if (= k kind) (update m s (fnil conj []) (:id f)) m)) m (:defines f))) {} forms))
+        var-form (into {} (for [[s ids] (by-def :var)] [s (peek ids)]))
+        methods (by-def :method) impls (by-def :impl)
+        by-id (into {} (map (juxt :id identity)) forms)
+        digest (into {} (for [f forms] [(:id f) (error/digest (str (:ns f) "\n" (:src f)))]))
+        edges (fn [f] (concat (keep var-form (:refs f))
+                              (for [[k s] (:defines f) :when (= :var k) id (concat (methods s) (impls s))] id)))
+        plain (group-by :ns (filter #(not-any? (fn [[k]] (= :var k)) (:defines %)) forms))]
+    (into {} (for [f forms [k t] (:defines f) :when (and (= :var k) (= :test (:var/kind (d/entity db [:var/name t]))))
+                   :let [reached (loop [front (into [(:id f)] (map :id) (plain (:ns f))) seen #{}]
+                                   (if-let [[id & more] (seq front)]
+                                     (if (seen id) (recur more seen) (recur (into (vec more) (edges (by-id id))) (conj seen id)))
+                                     seen))
+                         reads? (some #(some tree-readers (:refs (by-id %))) reached)]]
+               [t (error/digest (apply str t "\n" env "\n" (when reads? tree) (sort (map digest reached))))]))))

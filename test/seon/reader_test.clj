@@ -42,6 +42,12 @@
     "(str \"a" "(str \"a\")")
   (is (= [{:at 7 :dropped ")" :inserted ","}] (:repairs (reader/forgive "(+ 1 2))")))))
 
+(defn- unforgive
+  "The reply forgive was given, from its answer: each repair undone, last first."
+  [{:keys [text repairs]}]
+  (reduce (fn [t {:keys [at dropped inserted]}] (str (subs t 0 at) dropped (subs t (+ at (count inserted)))))
+          text (rseq repairs)))
+
 (def texts
   "Replies the laws are checked over: prose, fences, strings, characters, comments and
   every way a delimiter goes wrong."
@@ -53,7 +59,7 @@
 
 (defn- laws-hold? [t]
   (let [r (reader/forgive t)]
-    (and (= t (reader/unforgive r))
+    (and (= t (unforgive r))
          (= {:text (:text r) :repairs []} (reader/forgive (:text r))))))
 
 (deftest forgiving-forgiven-text-changes-nothing
@@ -63,7 +69,7 @@
 
 (deftest the-repairs-account-for-every-change
   (doseq [t texts]
-    (is (= t (reader/unforgive (reader/forgive t))) (pr-str t))))
+    (is (= t (unforgive (reader/forgive t))) (pr-str t))))
 
 (deftest the-laws-hold-over-generated-replies
   (let [piece (gen/elements ["(" ")" "[" "]" "{" "}" "\"" "\\" ";" "\n" " " "  " "a" "x/y" "1" "#" "'" ":k" "I'll "

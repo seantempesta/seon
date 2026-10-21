@@ -21,7 +21,7 @@
 # - target/ is an APFS clone of the main tree's (blocks shared until written; chez and jolt stay
 #   fresh, so `bin/build seon` is the only build needed);
 # - runs (stores) default to its own target/runs.
-# Builds still take the one build lock. Landing: when its bin/check is green, its commits are
+# Builds run niced, in parallel (no lock). Landing: when its bin/check is green, its commits are
 # cherry-picked (or merged) onto main by explicit paths; the worktree never edits the main tree.
 set -eu
 MAIN=$(cd "$(dirname "$0")/.." && pwd)
@@ -140,7 +140,7 @@ MCP
 git -C "$WT" update-index --skip-worktree .mcp.json
 
 print "worktree $WT on $BR (from $BASE)"
-print "  build:  cd $WT && nice -n 15 /usr/bin/lockf -k ~/src/seon-jolt/build.lock bin/build seon"
+print "  build:  cd $WT && nice -n 15 bin/build seon"
 print "  test:   bin/test; bin/check (one store per run, $WT/target/check/<time>/store, each step a branch)"
 print "  root:   bin/root (start | status | stop), on this worktree's own ports: $PORTS"
 print "  land:   when bin/check is green, cherry-pick onto main by explicit paths"
