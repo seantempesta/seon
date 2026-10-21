@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [clojure.edn :as edn] [seon.sock :as sock] [seon.step :as step]
             [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm]
-            [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.reader :as reader]))
+            [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]))
 
 (def default-max-turns
   "Turns an attempt may take when its task sets no :seon.config.agent/max-turns."
@@ -76,58 +76,6 @@
            (for [s (sort-by str uncontracted)] {:refusal :contract-gap :symbol s})
            (for [k (sort unmerged)] {:refusal :unmerged :key k})))))
 
-(defn- path
-  "span as a path reference, or nil, by the rule that tells a path from a symbol: no
-  whitespace, and an anchor (#heading), more than one /, or an extension after its last
-  / (`docs/DRAGONS.md#physics`, `src/seon/repl.clj`; `app.calc/add` is a symbol)."
-  {:malli/schema [:=> [:cat :string] [:maybe [:map [:kind [:= :path]] [:path :string] [:anchor {:optional true} :string]]]]}
-  [span]
-  (let [[p a] (str/split span #"#" 2)
-        last-part (peek (str/split (or p "") #"/" -1))]
-    (when (and (seq p) (not (re-find #"\s" span)) (not (#{\: \( \[ \{ \' \@ \^} (first span)))
-               (or (some? a) (< 1 (count (re-seq #"/" p))) (and (str/includes? p "/") (str/includes? last-part "."))))
-      (cond-> {:kind :path :path p} (seq a) (assoc :anchor a)))))
-
-(defn reference
-  "What one backticked span names, by one rule: a path (see path), else what edamame reads
-  from it (seon.reader, nothing evaluated): one keyword is {:kind :keyword}; one qualified
-  symbol {:kind :symbol}; one form {:kind :form} with the qualified symbols it names; else
-  (prose, an unqualified name, a literal, text that does not read) nil."
-  {:malli/schema [:=> [:cat :string]
-                  [:maybe [:map [:kind [:enum :symbol :keyword :path :form]] [:symbol {:optional true} :qualified-symbol]
-                           [:keyword {:optional true} :keyword] [:path {:optional true} :string] [:anchor {:optional true} :string]
-                           [:form {:optional true} :any] [:symbols {:optional true} [:vector :qualified-symbol]]]]]}
-  [span]
-  (or (path span)
-      (let [forms (reader/read-text span 'user)
-            [x & more] forms]
-        (when (and (seq forms) (empty? more))
-          (cond (keyword? x) {:kind :keyword :keyword x}
-                (qualified-symbol? x) {:kind :symbol :symbol x}
-                (coll? x) {:kind :form :form x
-                           :symbols (vec (distinct (filter qualified-symbol? (tree-seq coll? seq x))))})))))
-
-(defn spans
-  "The backticked spans of Markdown text outside ``` fenced blocks, in order."
-  {:malli/schema [:=> [:cat [:maybe :string]] [:vector :string]]}
-  [text]
-  (let [prose (str/join "\n" (:out (reduce (fn [{:keys [in?] :as st} l]
-                                              (if (str/starts-with? (str/triml l) "```")
-                                                (update st :in? not)
-                                                (cond-> st (not in?) (update :out conj l))))
-                                            {:in? false :out []} (str/split-lines (or text "")))))]
-    (mapv second (re-seq #"`([^`\n]+)`" prose))))
-
-(defn references
-  "The vars text references: each qualified symbol a backticked span names, alone or in a
-  form (reference), in order, once each. Keywords, paths and prose are not vars."
-  {:malli/schema [:=> [:cat [:maybe :string]] [:vector :qualified-symbol]]}
-  [text]
-  (vec (distinct (for [s (spans text)
-                       :let [r (reference s)]
-                       sym (case (:kind r) :symbol [(:symbol r)] :form (:symbols r) [])]
-                   sym))))
-
 (defn hairy
   "Is a merge too hairy to keep resolving, from measured facts: more conflicts than the
   dial; main deleted a var the task's plan or proofs reference; more model turns without
@@ -139,7 +87,7 @@
                   [:maybe [:map [:rule [:enum :too-many-conflicts :deleted-by-them-referenced :merge-turns]] [:reason :string]]]]}
   [{:keys [conflicts task merge-turns max-conflicts max-merge-turns]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated task)
-        refs (into (set proofs) (references plan))
+        refs (into (set proofs) (ref/names plan))
         deleted (for [{:keys [key kind]} conflicts
                       :when (and (= kind :deleted-by-them) (= :var (first key)) (refs (second key)))]
                   (second key))]
