@@ -202,7 +202,7 @@
       (is (str/includes? html "href=\"/agent/a1\" title=\"the whole on this page\"")))
     (testing "ten evaluations, six shown: the card says four more are on its page"
       (is (str/includes? html "+4 more: earlier evaluations on its page") "open, the newest six")
-      (is (str/includes? html "+9 more: ⤢ shows six, its page every one") "closed, the newest one")
+      (is (str/includes? html "+9 more: earlier; ⤢ shows the newest 6, its page all 10") "closed, the newest one")
       (is (str/includes? html ">10<") "the evals count is all of them")))
   (testing "a cut's count is exact"
     (let [s (long-text 300)

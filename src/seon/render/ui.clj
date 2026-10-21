@@ -390,7 +390,8 @@
     [:td [:span {:class (str "pill s-" (kname status))} (kname status)]]
     [:td (str (or turns "–"))] [:td (group3 tokens)]
     [:td {:title (str reason)} (kname outcome)]
-    [:td (if (and start-ms end-ms) (group3 (- end-ms start-ms)) "–")]]})
+    [:td {:title "the attempt's wall time, start to end: its fork, every turn (model, evaluations, test runs in forks) and its end; its agent's page shows where it went"}
+     (if (and start-ms end-ms) (group3 (- end-ms start-ms)) "–")]]})
 
 (defn tile-fx
   "The effect owners (FX1): each kind's lanes, busy and done, its queue, and what was
@@ -535,7 +536,7 @@
       (if last-e
         [:ol {:class "evals"} (map-indexed (fn [i e] (eval-row e (zero? i) href)) (reverse (take-last 6 evals)))
          ;; closed, the card shows the newest; open (⤢), the newest six
-         (when-let [m (print/more total 1 "⤢ shows six, its page every one")] [:li {:class "more muted closed"} m])
+         (when-let [m (print/more total 1 (str "earlier; ⤢ shows the newest " (min 6 (count evals)) ", its page all " total))] [:li {:class "more muted closed"} m])
          (when-let [m (print/more total (min 6 (count evals)) "earlier evaluations on its page")] [:li {:class "more muted opened"} m])]
         [:ol {:class "evals empty"} [:li {:class "ev"} [:span {:class "muted"} "no evaluations yet"]]])
       (test-dots (:tests ag))
