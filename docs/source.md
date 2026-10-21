@@ -29,3 +29,7 @@ The reconciler asks for the write-back after a train lands: it reads main, compu
 Not automated yet (task `seon.source/the-next-generation-runs-from-the-merges-commit`). Proven by hand on 2026-10-21: the commit `bin/check loop` made (seon.fixtures/generation 1 -> 2) was built in a copy of the worktree, and that binary's root, resumed on the run's kept store, answered 2 with main still holding the merged attempt and its sha.
 
 ```seon.e2e/loop-run``` is the turn `bin/check loop` runs; ```seon.fixtures/generation``` is the function it changes.
+
+## Dependencies
+
+Fetching a library is an outside-world effect with one owner, like write-back: the `:deps` effect kind, performed by ```seon.fx/resolve-deps```, which passes a deps map (`{lib {:mvn/version "..."}}`, `:git/sha` or `:local/root`) to Jolt's own `jolt.deps/resolve-deps` (no resolver of ours) and answers `{:value {:roots [absolute source roots]}}`, or `:seon.fx/unresolved` naming the libraries that did not resolve (see `DRAGONS.md`). It writes only the checkout's shared caches (`.m2`, gitlibs, `.cpcache` under `HOME`), so a second resolve of the same map is a cache hit that needs no network. The asker records the outcome and decides what to load; `add-deps` and `sync-deps` at the REPL, and checksums, are later Jolt steps (the PKG plan, step one). Related: the other kinds in ```seon.fx/kinds```.

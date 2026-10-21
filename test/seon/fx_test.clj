@@ -81,3 +81,10 @@
     (let [bad (fx/resolve-deps {:req {:deps {'nowhere/nothing {:local/root (str d "/missing")}}}})]
       (is (= :seon.fx/unresolved (:seon.error/type bad)) "a dependency that cannot be resolved is its typed error")
       (is (contains? (set (:deps bad)) 'nowhere/nothing) "naming it"))))
+
+(deftest a-missing-local-root-fails-in-jolts-resolver
+  ;; task jolt.deps/a-missing-local-root-is-unresolved: red until Jolt's own resolver refuses it
+  (let [d (scratch-dir)
+        r (try (jolt.deps/resolve-deps {'nowhere/nothing {:local/root (str d "/missing")}} ".") nil
+               (catch Throwable e (ex-data e)))]
+    (is (contains? (set (map :coord (:unresolved r))) 'nowhere/nothing))))
