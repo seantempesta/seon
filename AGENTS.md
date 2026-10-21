@@ -170,7 +170,11 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
   - a bare name pulls its summary;
   - `` `name` `` or a link pulls its doc;
   - ` ```name``` ` pulls its code.
-- **Explain once and link.**
+- **A healthy wiki** (owner, 2026-10-21: "a healthy wiki with good separation of topics and well linked so agents can get refs and know if they want to read more"):
+  - **One home per concept.** A var or mechanism is described in one section; other pages link to it instead of re-explaining it.
+  - **Every section leads with one sentence that stands alone.** That sentence is what an agent sees at summary depth and decides by; then the body; then links to related sections.
+  - **Everything is linked.** Every section is reachable from the map, every page links its neighbours, and nothing is orphaned or duplicated.
+  - **Sections state the current truth by topic.** A change rewrites the section it concerns; nothing is a dated log.
 - **Landing a change updates its section in the same commit,** and a pillar's owner writes its patterns section.
 - **Before landing, read your task's context through the door** and confirm it pulls what the task needs. `bin/check docs` goes red on a dangling reference, a missing var or a section older than its code.
 
