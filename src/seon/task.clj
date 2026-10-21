@@ -117,12 +117,12 @@
   [{:seon.root/id :root :seon.root/boot boot :seon.config.agent/max-running max-running}])
 
 (defn attempt-start-tx
-  "An attempt begins: root observed it spawn its agent."
-  {:malli/schema [:=> [:cat :seon.attempt/id :seon.task/id :string :keyword :seon.task/env :int] [:vector :map]]}
-  [aid task boot agent {:keys [branch model max-turns]} start-ms]
+  "An attempt begins: root observed it spawn its agent, given the task's accumulated plan."
+  {:malli/schema [:=> [:cat :seon.attempt/id :seon.task/id :string :keyword :seon.task/env :int :seon.task/plan] [:vector :map]]}
+  [aid task boot agent {:keys [branch model max-turns]} start-ms plan]
   [(cond-> {:seon.attempt/id aid :seon.attempt/task [:seon.task/id task] :seon.attempt/status :running
             :seon.attempt/boot boot :seon.attempt/agent agent :seon.attempt/start-ms start-ms
-            :seon.attempt/branch branch :seon.attempt/max-turns max-turns}
+            :seon.attempt/branch branch :seon.attempt/max-turns max-turns :seon.attempt/plan plan}
      model (assoc :seon.attempt/model model))])
 
 (defn status-tx
@@ -177,7 +177,7 @@
     (:seon.task/evidence t) (update :seon.task/evidence sedn/decode)
     (:seon.task/stuck t) (update :seon.task/stuck sedn/decode)))
 
-(defn- accumulate
+(defn accumulate
   "Task id's accumulated plan and proofs over its needs (owner, 2026-10-20: a task
   inherits its prerequisites' plan and proofs and adds its own, so a refinement only
   tightens): {:plan text :proofs set}. own: id -> own task value."
@@ -215,7 +215,7 @@
   [:seon.attempt/id {:seon.attempt/task [:seon.task/id]} :seon.attempt/status :seon.attempt/boot :seon.attempt/agent
    :seon.attempt/pid :seon.attempt/start-ms :seon.attempt/end-ms :seon.attempt/branch :seon.attempt/model
    :seon.attempt/max-turns :seon.attempt/outcome :seon.attempt/reason :seon.attempt/turns :seon.attempt/model-calls
-   :seon.attempt/tokens :seon.attempt/merged-t :seon.attempt/basis-t :seon.attempt/uncontracted
+   :seon.attempt/tokens :seon.attempt/merged-t :seon.attempt/basis-t :seon.attempt/plan :seon.attempt/uncontracted
    :seon.attempt/unmerged :seon.attempt/changed
    {:seon.attempt/results [:seon.proof/test :seon.proof/status]}
    {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])

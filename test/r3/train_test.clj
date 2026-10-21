@@ -17,7 +17,7 @@
     (d/transact conn {:tx-data (task/create-tx @conn ds)})
     (d/transact conn {:tx-data (task/execution-tx (mapv #(task/task-id 't (:seon.task/name %)) ds) :running)})
     (doseq [[nm ks] changes :let [id (str "t/" nm)]]
-      (d/transact conn {:tx-data (into (task/attempt-start-tx (str id "#1") id boot :a {:branch (task/default-branch id) :model nil :max-turns 8} 0)
+      (d/transact conn {:tx-data (into (task/attempt-start-tx (str id "#1") id boot :a {:branch (task/default-branch id) :model nil :max-turns 8} 0 "p")
                                        [(cond-> {:seon.attempt/id (str id "#1") :seon.attempt/status :done}
                                           ks (assoc :seon.attempt/changed (vec ks)))])}))
     conn))
@@ -25,7 +25,7 @@
 (defn- spawned [acts] (set (for [a acts :when (= :spawn (:op a))] (:task a))))
 
 (defn- start-merge! [conn id status]
-  (d/transact conn {:tx-data (into (task/attempt-start-tx (str id "#1") id boot :m {:branch (task/default-branch (subs id 0 (- (count id) 6))) :model nil :max-turns 8} 0)
+  (d/transact conn {:tx-data (into (task/attempt-start-tx (str id "#1") id boot :m {:branch (task/default-branch (subs id 0 (- (count id) 6))) :model nil :max-turns 8} 0 "p")
                                    [{:seon.attempt/id (str id "#1") :seon.attempt/status status
                                      :seon.attempt/results [{:seon.proof/test (symbol "t" (str (subs id 2 (- (count id) 6)) "-test")) :seon.proof/status :pass}]}])}))
 

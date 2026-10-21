@@ -188,6 +188,9 @@
  :seon.attempt/commit :string
  :seon.attempt/commit-error :string
  :seon.attempt/basis-t :int
+ ;; the task's accumulated plan as the attempt began (seon.task/accumulate): a design step is
+ ;; done only when the plan differs from it (seon.reconcile/done-refusals :no-design)
+ :seon.attempt/plan :seon.task/plan
  :seon.attempt/uncontracted [:set :qualified-symbol]
  :seon.proof/test :qualified-symbol
  :seon.proof/status [:enum :pass :fail :error :none]
@@ -210,6 +213,7 @@
                              [:seon.attempt/turns {:optional true} :seon.attempt/turns] [:seon.attempt/model-calls {:optional true} :seon.attempt/model-calls]
                              [:seon.attempt/tokens {:optional true} :seon.attempt/tokens] [:seon.attempt/merged-t {:optional true} :seon.attempt/merged-t]
                              [:seon.attempt/basis-t {:optional true} :seon.attempt/basis-t]
+                             [:seon.attempt/plan {:optional true} :seon.attempt/plan]
                              [:seon.attempt/uncontracted {:optional true} :seon.attempt/uncontracted]
                              [:seon.attempt/results {:optional true} :seon.attempt/results]
                              [:seon.attempt/conflicts {:optional true} :seon.attempt/conflicts]

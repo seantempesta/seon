@@ -16,7 +16,7 @@
 (defn- env [id] {:branch (task/default-branch (clojure.string/replace id #"-merge$" "")) :model nil :max-turns (seon.config/value :seon.config.agent/max-turns)})
 
 (defn- attempt [aid id status extra]
-  (into (task/attempt-start-tx aid id boot :a0 (env id) 0)
+  (into (task/attempt-start-tx aid id boot :a0 (env id) 0 "p")
         [(merge {:seon.attempt/id aid :seon.attempt/status status} extra)]))
 
 (defn- results [k] [{:seon.proof/test (symbol "app.proofs" (str "p" k "-test")) :seon.proof/status :pass}])

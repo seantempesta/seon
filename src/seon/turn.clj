@@ -30,13 +30,16 @@
 
 (defn- begin!
   "This process works task as attempt: the turn state, begun once per attempt with the
-  program's contract gaps as they stood (the attempt answers only for gaps it adds). The
-  turn loop and an outside agent's context read begin it the same way."
+  program's contract gaps as they stood (the attempt answers only for gaps it adds) and the
+  task's accumulated plan as the branch held it (a design step answers for improving it).
+  The turn loop and an outside agent's context read begin it the same way."
   {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id] :map]}
   [task attempt]
   (if (= attempt (get-in @agent/state [:turn :attempt]))
     (:turn @agent/state)
-    (:turn (swap! agent/state assoc :turn {:task task :attempt attempt :gaps-before (harvest/uncontracted (agent/db))}))))
+    (let [db (agent/db)]
+      (:turn (swap! agent/state assoc :turn {:task task :attempt attempt :gaps-before (harvest/uncontracted db)
+                                             :plan-before (:plan (:seon.task/accumulated (task/task db task)))})))))
 
 (defn last-evals
   "The items of this process's last model turn, in order: each one's form, printed value or
@@ -61,8 +64,8 @@
   "What a turn starts from, measured now: the proofs run in a fork of this agent, the
   branch's new contract gaps and unmerged entries, the done rule over them, and the task as
   the branch holds it (its plan may have improved)."
-  {:malli/schema [:=> [:cat :seon.task/id [:set :qualified-symbol]] :map]}
-  [id gaps-before]
+  {:malli/schema [:=> [:cat :seon.task/id [:set :qualified-symbol] :seon.task/plan] :map]}
+  [id gaps-before plan-before]
   (let [t0 (System/nanoTime)
         run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks))
         tests-ms (ms-since t0)
@@ -71,7 +74,7 @@
         unc (set/difference (harvest/uncontracted db) gaps-before)
         unmerged (branch/unmerged)]
     {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :task (task/task db id)
-     :refusals (r/done-refusals (r/done-input (r/index db) id results unc (mapv #(pr-str (:key %)) unmerged) nil))}))
+     :refusals (r/done-refusals (r/done-input (r/index db) id results unc (mapv #(pr-str (:key %)) unmerged) nil plan-before))}))
 
 (defn- end!
   "The attempt's end: the live runtime staged onto the branch, the end written there (with
@@ -168,8 +171,8 @@
   on it."
   {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id] :string]}
   [task attempt]
-  (let [{:keys [gaps-before]} (begin! task attempt)
-        {:keys [results unmerged tests-ms] :as obs} (observe task gaps-before)
+  (let [{:keys [gaps-before plan-before]} (begin! task attempt)
+        {:keys [results unmerged tests-ms] :as obs} (observe task gaps-before plan-before)
         db (agent/db)
         t0 (System/nanoTime)
         text (:content (second (context/messages (context/current-state db (:task obs) (merge (observed db obs)
@@ -191,14 +194,14 @@
                              [:max-turns pos-int?]]]
                   :seon.turn/end]}
   [{:keys [task attempt model max-turns]}]
-  (let [{:keys [gaps-before]} (begin! task attempt)
+  (let [{:keys [gaps-before plan-before]} (begin! task attempt)
         t0-task (task/task (agent/db) task)
         merge? (= :merge (:seon.task/kind t0-task))
         dials (r/dials t0-task)]
     (when merge? (branch/merge-main!))
     (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (System/nanoTime) :attempt attempt
                :max-turns max-turns :merge? merge? :gaps-before gaps-before}]
-      (let [{:keys [refusals unmerged] :as obs} (observe task (:gaps-before st))
+      (let [{:keys [refusals unmerged] :as obs} (observe task (:gaps-before st) plan-before)
             stop (get-in @agent/state [:turn :stop])
             hairy (when merge? (r/hairy (merge dials {:conflicts unmerged :task (:task obs) :merge-turns (:merge-turns st)})))]
         (cond
