@@ -4,8 +4,8 @@
   proto.control's writer (lane F2; writer design A, notes/option3-F1-flow.md section 4)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
-            [seon.program :as program] [seon.merge :as pm] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
-            [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
+            [seon.program :as program] [seon.merge :as pm] [seon.source :as source] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
+            [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
 (defn- main-commit
   "Main moved to t: the fork server's replica gets the commit (FIFO with fork requests),
@@ -39,8 +39,10 @@
   "Why branch head (its three-way r against main) cannot merge into main now (lane M1), or
   nil: main's program (and declared data) changed since the branch's merge base
   (:seon.merge/behind: a merge task merges main first); the branch has unmerged entries
-  (:seon.merge/unmerged); it carries an uncontracted function (:seon.merge/uncontracted:
-  contracts decide what is admitted)."
+  (:seon.merge/unmerged); its program calls intern, alter-var-root, eval or load-string,
+  or defines inside a function body (:seon.merge/mutation, seon.merge/mutations); it
+  carries an uncontracted function (:seon.merge/uncontracted: contracts decide what is
+  admitted)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/result] [:maybe :map]]}
   [main head r]
   (let [unmerged (pm/unmerged head (pm/program head #{}))
@@ -58,6 +60,13 @@
       (contract/error :seon.merge/unmerged 'seon.writer/merge-branch
                       (str "the branch has " (count unmerged) " unmerged entr(ies)")
                       {:merged? false :tx (:max-tx main) :unmerged (mapv :key unmerged)})
+      (seq (pm/mutations main (:ours r)))
+      (let [ms (pm/mutations main (:ours r))]
+        (contract/error :seon.merge/mutation 'seon.writer/merge-branch
+                        (str "the branch's program " (str/join "; " (for [m ms] (str (pr-str (:defines m))
+                                                                                    (if (:call m) (str " calls " (:call m)) (str " defines " (:inline-def m) " inside a function body"))))))
+                        {:merged? false :tx (:max-tx main) :mutations ms
+                         :seon.error/fix "Every definition happens once, where it is defined: vary behaviour through arguments or the environment, and define at the top level, not inside a function."}))
       (seq uncontracted)
       (contract/error :seon.merge/uncontracted 'seon.writer/merge-branch
                       (str "the branch carries " (count uncontracted) " function(s) without a contract")
@@ -96,7 +105,8 @@
             ops (pdb/report->tx rep)]
         [(main-commit st o t ops (:db-after rep))
          {:tx t :datoms (count ops)
-          :results (mapv #(or (:refusal %) {:merged? true :tx t :keys (count (:ours (:r %)))}) (:members judged))}]))))
+          ;; :files, the source files (namespaces' and schema resources') its changes touch: what a write-back rewrites
+          :results (mapv #(or (:refusal %) {:merged? true :tx t :keys (count (:ours (:r %))) :files (source/changed-files (:db-after rep) (:ours (:r %)))}) (:members judged))}]))))
 
 (defn- merge-branch
   "Merge the branch into main (git: only a branch that contains main's head; lane M1): a
@@ -189,13 +199,14 @@
       (other-op (commit-batch st o) o m))
     (catch Throwable e
       ;; an interop edge (Datahike) refused: the request's answer is the error, as data
-      (answer o (:dest m) (refused (step/error-msg e) {:merged? false}))
+      ;; with the store's map use: a full map (MDB_MAP_FULL) shows itself against its size
+      (answer o (:dest m) (refused (step/error-msg e) (cond-> {:merged? false} (pdb/map-use (:cfg st)) (assoc :store (pdb/map-use (:cfg st))))))
       (dissoc st :pend))))
 
 (defn- drain {:malli/schema [:=> [:cat :seon.host/chan :seon.writer/request] [:vector :seon.writer/request]]}
   [ch m]
   (loop [acc [m] k 1]
-    (if (< k cfg/WRITER-BATCH)
+    (if (< k (cfg/value :seon.config.root/writer-batch))
       (if-let [y (a/poll! ch)] (recur (conj acc y) (inc k)) acc)
       acc)))
 
@@ -208,7 +219,7 @@
   {:op :writer :tx-count :p50-ms :commits}), :main (main's commits), :events.
   A closed :in is the end of the flow: everything taken is committed and flushed, then
   {:op :drained} goes out. Answers leave when their batch is committed; the flusher's
-  window makes them durable (config FLUSH-MS), a :flush? request before its answer."
+  window makes them durable (seon.db/flush-ms), a :flush? request before its answer."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:conn "main's connection" :cfg "the store config" :to-writer "its in-port channel"}
        :outs {:to-fork-server "commits and forks, FIFO" :to-api "answers {:dest :r}" :main "main's commits"
@@ -247,13 +258,15 @@
                 :else (assoc st :dirty dirty))
            n-tx (count (filter #(= :tx (:op %)) reqs))
            st (-> st (update :tx-count + n-tx) (update :batches inc))]
-       (when (seq reqs)
-         (step/out! o :to-api {:op :writer :tx-count (:tx-count st) :batch-ms (lib/ms-since t0) :n-tx n-tx :commits commits}))
+       ;; what changed, to root's view: a batch, or a flush (its count is shown, never pinged)
+       (when (or (seq reqs) flush-now?)
+         (step/out! o :to-api {:op :writer :tx-count (:tx-count st) :batch-ms (lib/ms-since t0) :n-tx n-tx :commits commits
+                               :flushes (:flushes st 0)}))
        [st @o]))))
 
 (defn flusher-proc
   "The group flush's clock: told once that the store is dirty ({:op :dirty :since ns}), it
-  waits out the rest of the flush window (config FLUSH-MS) and asks the writer to flush
+  waits out the rest of the flush window (seon.db/flush-ms) and asks the writer to flush
   ({:op :flush} on the writer's in-port). The wait blocks only this proc; notices that
   queued meanwhile are covered by the one flush."
   {:malli/schema :seon.step/step-fn}

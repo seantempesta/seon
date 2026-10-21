@@ -1,7 +1,7 @@
 (ns seon.fx-test
   "The effect owner and lane step-fns as plain functions (no graph): admission by lanes,
   priority order, budget refusal, the queue bound, and a lane answering a defect."
-  (:require [clojure.test :refer [deftest is testing]] [seon.fx :as fx] [seon.config :as cfg]
+  (:require [clojure.test :refer [deftest is testing]] [jolt.deps] [seon.fx :as fx] [seon.config :as cfg]
             [clojure.core.async.flow :as flow]))
 
 (defn- owner [lanes] (fx/owner-proc {:kind :t :lanes lanes :work nil :back nil}))
@@ -25,7 +25,7 @@
     (is (= :seon.fx/budget-spent (get-in (first (:out o)) [:r :seon.error/type])))))
 
 (deftest owner-stops-reading-at-its-bound
-  (let [st (reduce (fn [st k] (first (fx/owner-proc st :in (req k)))) (owner 0) (range cfg/FX-BUF))]
+  (let [st (reduce (fn [st k] (first (fx/owner-proc st :in (req k)))) (owner 0) (range (cfg/value :seon.config.fx/buf)))]
     (is (false? ((::flow/input-filter st) :in)))
     (is (true? ((::flow/input-filter st) :done)))))
 
@@ -35,3 +35,56 @@
         out (first (get o [:fx/t :done]))]
     (is (= :seon.fx/defect (get-in out [:outcome :seon.error/type])))
     (is (= {:agent :a1 :op :fx-reply :k 1} (:dest out)))))
+
+;; ---- write-back answers what happened (audit FENCES #21) ------------------------------
+
+(defn- scratch-dir []
+  (let [d (str (System/getProperty "user.dir") "/target/tmp/fx-test-" (random-uuid))]
+    (.mkdirs (java.io.File. d))
+    d))
+
+(deftest a-failed-rename-is-an-io-error-and-leaves-no-tmp
+  (let [d (scratch-dir)
+        target (str d "/occupied")
+        _ (.mkdirs (java.io.File. (str target "/inside")))
+        r (fx/write-file {:req {:path target :text "text"}})]
+    (is (= :seon.fx/io-error (:seon.error/type r)) "renaming over a non-empty directory fails, and says so")
+    (is (pos? (:errno r)) "with rename(2)'s errno")
+    (is (= target (:path r)))
+    (is (not (.exists (java.io.File. ^String (:tmp r)))) "the staged file is removed")
+    (is (= ["occupied"] (vec (.list (java.io.File. d)))) "nothing else is left beside it"))
+  (let [r (fx/write-file {:req {:path "/nonexistent-dir/x.clj" :text "text"}})]
+    (is (= :seon.fx/io-error (:seon.error/type r)) "a missing directory: the stage itself fails")))
+
+(deftest a-write-back-answers-the-bytes-on-disk
+  (let [d (scratch-dir)
+        p (str d "/f.clj")
+        text "(def s \"héllo — world\")\n"
+        r (fx/write-file {:req {:path p :text text}})]
+    (is (= {:value {:bytes (.length (java.io.File. p)) :path p}} r))
+    (is (= (+ (count text) 1 2) (get-in r [:value :bytes])) "bytes on disk, not characters: e-acute 2, em dash 3")
+    (is (= text (slurp p)))
+    (is (= ["f.clj"] (vec (.list (java.io.File. d)))) "no staged file left")))
+
+(deftest a-dependency-is-resolved-through-its-owner
+  ;; task seon.fx/a-dependency-is-fetched-through-its-owner (the PKG plan, owner-approved):
+  ;; the :deps performer resolves a deps map with Jolt's own jolt.deps and answers the roots
+  ;; to load from, or its one typed error naming what did not resolve; no network here (a
+  ;; :local/root library made in this test's scratch dir)
+  (let [d (scratch-dir)
+        lib (str d "/tinylib")
+        _ (.mkdirs (java.io.File. (str lib "/src/tiny")))
+        _ (spit (str lib "/deps.edn") "{:paths [\"src\"]}")
+        _ (spit (str lib "/src/tiny/core.clj") "(ns tiny.core)\n(defn hello [] :hi)\n")
+        r (fx/resolve-deps {:req {:deps {'tiny/tiny {:local/root lib}}}})]
+    (is (some #(= (str lib "/src") %) (get-in r [:value :roots])) "the library's absolute source root")
+    (let [bad (fx/resolve-deps {:req {:deps {'nowhere/nothing {:local/root (str d "/missing")}}}})]
+      (is (= :seon.fx/unresolved (:seon.error/type bad)) "a dependency that cannot be resolved is its typed error")
+      (is (contains? (set (:deps bad)) 'nowhere/nothing) "naming it"))))
+
+(deftest a-missing-local-root-fails-in-jolts-resolver
+  ;; task jolt.deps/a-missing-local-root-is-unresolved: red until Jolt's own resolver refuses it
+  (let [d (scratch-dir)
+        r (try (jolt.deps/resolve-deps {'nowhere/nothing {:local/root (str d "/missing")}} ".") nil
+               (catch Throwable e (ex-data e)))]
+    (is (contains? (set (map :coord (:unresolved r))) 'nowhere/nothing))))

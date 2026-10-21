@@ -1,0 +1,268 @@
+(ns seon.source-test
+  "Seon's own source is the program (the self-improvement loop, owner 2026-10-21): next/src
+  read through the :source effect's performer, every form recorded with the compiler's
+  account and its exact text, written back byte for byte, a merged change rewriting only
+  its form, and the written files committed on the merges branch through the :git effect's
+  performer. Never the live tree: write-back and commits go to a copy under target/."
+  (:require [clojure.test :refer [deftest is testing]]
+            [clojure.java.shell :as sh]
+            [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
+            [datahike.api :as d]
+            [seon.db :as pdb]
+            [seon.fx :as fx]
+            [seon.merge :as pm]
+            [seon.program :as program]
+            [seon.source :as source]
+            [seon.program-test :as pt]))
+
+(defn- empty-db [] @(second (pdb/test-branch!)))
+
+(def ^:private here (System/getProperty "user.dir"))
+
+(defn- src-files
+  "next/src as the :source effect reads it: {relative path text}."
+  []
+  (let [r (fx/read-source {:req {:root here :dirs ["src"]}})]
+    (is (map? (:value r)) (pr-str r))
+    (:value r)))
+
+(defn- scratch-dir
+  "A new empty directory under target/ (the live tree is never written)."
+  [label]
+  (let [d (str here "/target/tmp/source-test-" label "-" (random-uuid))]
+    (.mkdirs (java.io.File. d))
+    d))
+
+(defn- imported
+  "Main's db with every file of next/src imported; its namespaces are this process's (the
+  running generation), so each form is analyzed, never run."
+  [files]
+  (doseq [n (keep #(source/file-ns (val %)) files)] (require n))
+  (let [db (empty-db)] (d/db-with db (source/import-tx db files))))
+
+(deftest importing-src-records-every-form-exactly
+  (let [files (src-files)
+        db (imported files)
+        forms-of (fn [nsym] (d/q '[:find ?id ?src :in $ ?n :where [?ns :ns/name ?n] [?f :form/ns ?ns] [?f :form/id ?id] [?f :form/src ?src]] db nsym))]
+    (is (< 40 (count files)) "every source file (seon.* and my.*)")
+    (testing "every file: one namespace with its file, one form per form read, each form's text exact"
+      (doseq [[path text] files
+              :let [nsym (source/file-ns text) read (:forms (source/read-forms 'user text))]]
+        (is (= path (d/q '[:find ?p . :in $ ?n :where [?e :ns/name ?n] [?e :ns/file ?p]] db nsym)) path)
+        (is (= (count read) (count (forms-of nsym))) path)
+        (is (= (frequencies (map :src read)) (frequencies (map second (forms-of nsym)))) path)))
+    (testing "definitions from the compiler, pointing to their forms"
+      (let [row (fn [sym] (d/pull db '[:var/kind :var/contract {:var/form [:form/src :form/refs]}] [:var/name sym]))]
+        (is (str/starts-with? (get-in (row 'seon.program/load-order) [:var/form :form/src]) "(defn load-order\n"))
+        (is (= :fn (:var/kind (row 'seon.program/load-order))))
+        (is (= "[:=> [:cat [:sequential :map]] [:vector :map]]" (:var/contract (row 'seon.program/load-order))))
+        (is (contains? (set (get-in (row 'seon.program/load-order) [:var/form :form/refs])) 'seon.program/topo)
+            "a reference resolved by the compiler")
+        (is (= :macro (:var/kind (row 'seon.contract/defn))))
+        (is (= :value (:var/kind (row 'seon.program/banned))))
+        (is (= '[:fn :fn] (mapv #(:var/kind (row %)) '[seon.source/read-forms my.fx/call])))))
+    (testing "the platform's own namespaces are not loaded from main: the binary is the running generation"
+      (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! db))
+          "load-all! loads the test store's example program, and none of the namespaces imported from files")
+      (is (= [] (program/load-changes! db (vec (for [dt (d/datoms db :aevt :form/src)] [:db/add (:e dt) :form/src (:v dt)]))))
+          "and so does load-changes!"))))
+
+(deftest import-then-write-back-is-a-zero-diff
+  (let [files (src-files)
+        db (imported files)
+        out (source/files db (source/source-files db))
+        copy (scratch-dir "zero")]
+    (is (= (set (keys files)) (set (keys out))) "every file written back")
+    (doseq [[path text] files] (is (= text (get out path)) path))
+    (testing "through the :file effect's performer, onto a copy: diff -r finds nothing (README.md is no program)"
+      (doseq [[path text] out]
+        (.mkdirs (.getParentFile (java.io.File. (str copy "/" path))))
+        (is (= {:value {:bytes (.length (java.io.File. (str here "/" path))) :path (str copy "/" path)}}
+               (fx/write-file {:req {:path (str copy "/" path) :text text}}))))
+      (let [r (sh/sh "diff" "-r" "-x" "*.md" (str here "/src") (str copy "/src"))]
+        (is (= [0 ""] [(:exit r) (:out r)]))))))
+
+(def ^:private pt-text
+  "(ns app.pt-src\n  \"A fixture file.\")\n\n;; adds\n(defn add [a b] (+ a b))\n\n(defn twice\n  [x]\n  (add x x))\n\n(def limit 3)\n")
+
+(defn- main-with-file []
+  (let [db (empty-db)] (d/db-with db (source/import-tx db {"src/app/pt_src.clj" pt-text}))))
+
+(defn- merged
+  "main after a branch from it records forms (as the agent's REPL does) and merges."
+  [main & forms]
+  (let [branch (apply pt/record main forms)
+        r (pm/three-way (pm/program main #{}) (pm/program branch #{}) (pm/program main #{}))]
+    [(d/db-with main (pm/apply-tx main (into {} (for [[k [_ o]] (:ours r)] [k o])))) (:ours r)]))
+
+(deftest a-merged-change-rewrites-only-its-form
+  (let [main (main-with-file)]
+    (is (= {"src/app/pt_src.clj" pt-text} (source/files main ["src/app/pt_src.clj"])))
+    (let [[main2 ours] (merged main 'app.pt-src "(defn twice [x] (* 2 x))")]
+      (is (= ["src/app/pt_src.clj"] (source/changed-files main2 ours)))
+      (is (= {"src/app/pt_src.clj" (str/replace pt-text "(defn twice\n  [x]\n  (add x x))" "(defn twice [x] (* 2 x))")}
+             (source/files main2 (source/changed-files main2 ours)))
+          "the redefined form in its place, its lead kept; every other byte as it was"))
+    (testing "a new form goes after the last, a blank line before it"
+      (let [[main2 ours] (merged main 'app.pt-src "(defn thrice [x] (* 3 x))")]
+        (is (= (str pt-text "\n(defn thrice [x] (* 3 x))\n")
+               (get (source/files main2 (source/changed-files main2 ours)) "src/app/pt_src.clj")))))))
+
+(deftest an-agent-runs-its-branchs-change-to-imported-source
+  (let [main (main-with-file)
+        branch (pt/record main 'app.pt-src "(defn twice [x] (* 2 x))")]
+    (remove-ns 'app.pt-src)
+    (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! main))
+        "main's imported text is the binary's: never evaluated (the example program is)")
+    (is (= [] (program/load-diff! main branch)))
+    (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
+    (is (nil? (resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again")))
+
+(defn- git [dir & args]
+  (let [r (apply sh/sh "git" "-C" dir args)]
+    (is (zero? (:exit r)) (str args " " (:err r)))
+    (str/trim (:out r))))
+
+(deftest a-merge-is-committed-on-the-merges-branch
+  (let [tree (scratch-dir "git")
+        ;; the base commit is the test's own; the tree holds no identity of its own, as a
+        ;; root's checkout has none under its HOME (target/home)
+        _ (do (git tree "init" "-q" "-b" "main")
+              (.mkdirs (java.io.File. (str tree "/src/app")))
+              (spit (str tree "/src/app/pt_src.clj") pt-text)
+              (git tree "add" "src") (git tree "-c" "user.name=test" "-c" "user.email=test@localhost" "commit" "-q" "-m" "base"))
+        main-sha (git tree "rev-parse" "main")
+        [main2 ours] (merged (main-with-file) 'app.pt-src "(defn twice [x] (* 2 x))")
+        files (source/files main2 (source/changed-files main2 ours))
+        msg (source/commit-message [{:task :app.pt/twice :attempt "app.pt/twice#1"}])
+        r (fx/git-commit {:req {:dir tree :branch "jolt/seon-merges" :files files :message msg}})]
+    (is (re-matches #"[0-9a-f]{40}" (str (get-in r [:value :sha]))) (pr-str r))
+    (is (= (get-in r [:value :sha]) (git tree "rev-parse" "jolt/seon-merges")) "the merges branch, made at HEAD, holds the commit")
+    (is (= main-sha (git tree "rev-parse" "jolt/seon-merges~1")) "its parent: the commit the tree checks out")
+    (testing "the next merge's commit follows the last"
+      (let [[main3 ours3] (merged main2 'app.pt-src "(def limit 4)")
+            r2 (fx/git-commit {:req {:dir tree :branch "jolt/seon-merges" :files (source/files main3 (source/changed-files main3 ours3)) :message msg}})]
+        (is (= (get-in r [:value :sha]) (git tree "rev-parse" "jolt/seon-merges~1")))
+        (is (= (get-in r2 [:value :sha]) (git tree "rev-parse" "jolt/seon-merges")))
+        (is (str/includes? (git tree "show" "jolt/seon-merges:src/app/pt_src.clj") "(def limit 4)"))))
+    (is (= main-sha (git tree "rev-parse" "main")) "main never moves")
+    (is (= (get files "src/app/pt_src.clj") (str (git tree "show" (str (get-in r [:value :sha]) ":src/app/pt_src.clj")) "\n")) "the merged text is what was committed")
+    (is (= ["src/app/pt_src.clj"] (str/split-lines (git tree "diff" "--name-only" "main" (get-in r [:value :sha])))) "only the merged file")
+    (is (str/includes? (git tree "log" "-1" "--format=%B" (get-in r [:value :sha])) "app.pt/twice#1") "the message names the attempt")
+    (is (= (str (config/value :seon.config.source/committer-name) " <" (config/value :seon.config.source/committer-email) "> "
+                (config/value :seon.config.source/committer-name) " <" (config/value :seon.config.source/committer-email) ">")
+           (git tree "log" "-1" "--format=%an <%ae> %cn <%ce>" (get-in r [:value :sha])))
+        "Seon authors and commits its merges, by the config's identity, whatever HOME holds")
+    (testing "a refused commit is the declared error, never a throw"
+      (is (= :seon.fx/io-error (:seon.error/type (fx/git-commit {:req {:dir (str tree "/nope") :branch "jolt/seon-merges" :files files :message msg}}))))))
+  (is (= {:value {:sha nil :files 0}} (fx/git-commit {:req {:dir "/nonexistent" :branch "b" :files {} :message "m"}}))
+      "nothing to write commits nothing"))
+
+(deftest a-file-whose-namespace-is-not-loaded-imports
+  ;; task seon.source/the-tests-are-part-of-the-program: a root imports test/ whose
+  ;; namespaces its binary never loaded (proofs live there), so the analyzer reads a
+  ;; form's aliases from the file's own ns form, not from a loaded namespace
+  (let [files {"test/x/unloaded_test.clj"
+               "(ns x.unloaded-test (:require [clojure.test :refer [deftest is]] [datahike.api :as d] [x.z-support :as z]))\n\n(defn q [db] (d/q '[:find ?e :where [?e :a]] db))\n\n(deftest q-test (is (= #{} (q nil))) (is (= ::z/k (z/k))))\n"
+               ;; required by the file before it in path order, and never loaded
+               "test/x/z_support.clj" "(ns x.z-support)\n\n(defn k [] ::k)\n"}
+        db (empty-db)
+        tx (source/import-tx db files)
+        db (d/db-with db tx)]
+    (is (= 3 (count (d/q '[:find ?f :where [?n :ns/name x.unloaded-test] [?f :form/ns ?n] [?f :form/source true]] db)))
+        "the ns form and both definitions (the test store's seed holds forms of its own)")
+    (is (contains? (set (d/q '[:find [?r ...] :where [?v :var/name x.unloaded-test/q] [?v :var/form ?f] [?f :form/refs ?r]] db))
+                   'datahike.api/q)
+        "an alias resolved through the file's own ns form")
+    (is (contains? (set (d/q '[:find [?r ...] :where [?v :var/name x.unloaded-test/q-test] [?v :var/form ?f] [?f :form/refs ?r]] db))
+                   'x.z-support/k)
+        "a namespace required from a later file is analyzed first, and its alias reads ::z/k")))
+
+(deftest a-new-generation-is-built-and-resumed-on-the-store
+  ;; task seon.source/the-next-generation-runs-from-the-merges-commit, the loop's whole turn
+  ;; through the path the owner uses: bin/root starts a root on a clone of this checkout
+  ;; (Seon's own source as main's program, its store under this test's directory); through
+  ;; its entrance, the loop's task redefines seon.fixtures/generation 1 -> 2 and merges
+  ;; (seon.e2e/loop-turn!); the reconciler commits it on the clone's jolt/seon-merges and the
+  ;; :build effect builds that commit, recording the generation on main; `bin/root next`
+  ;; stops the root and starts the generation's binary resuming the same store and main,
+  ;; where (seon.fixtures/generation) answers 2. Declared long, bound 300 s: the build is
+  ;; bin/build seon in the generation's worktree under the one build lock (40-48 s warm,
+  ;; longer while another lane holds the lock), plus two boots (~1 s each) and the loop's
+  ;; run (~10 s).
+  (let [dir (scratch-dir "nextgen")
+        tree (str dir "/tree")
+        port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
+        env ["env" (str "SEON_RUNS=" dir "/runs") (str "SEON_ENTRANCE_PORT=" port) "SEON_WEB_PORT=0"]
+        root! (fn [& args] (apply sh/sh (concat env [(str here "/bin/root")] args)))
+        ask (fn [code] (let [r (sh/sh "nc" "-w" "600" "127.0.0.1" (str port)
+                                      :in (str (pr-str {:op :eval :agent "root" :code code}) "\n"))
+                             a (try (clojure.edn/read-string {:default tagged-literal} (:out r)) (catch Exception _ nil))]
+                         (some-> a :items first :printed clojure.edn/read-string)))
+        cloned (sh/sh "git" "clone" "-q" "--local" here tree)
+        started (root! "start" "--set" (str ":seon.config.source/root=" (pr-str tree)))]
+    (try
+      (is (zero? (:exit cloned)) (:err cloned))
+      (is (zero? (:exit started)) (str (:out started) (:err started)))
+      (let [turn (ask "(seon.e2e/loop-turn! sys)")
+            sha (:commit turn)
+            gen (:generation turn)]
+        (is (re-matches #"[0-9a-f]{40}" (str sha)) (str "the merge is committed: " (pr-str turn)))
+        (is (= sha (:commit gen)) "the generation built is the merges commit")
+        (is (nil? (:error gen)) (str "and it built: " (:error gen)))
+        (is (.canExecute (java.io.File. (str (:binary gen)))) "its binary exists")
+        (let [nxt (root! "next")
+              after (ask "[(seon.fixtures/generation) (:commit (my.root/generation sys))]")]
+          (is (zero? (:exit nxt)) (str (:out nxt) (:err nxt)))
+          (is (= [2 sha] after) "the new generation runs the merged change, resumed on main holding its generation")))
+      (finally
+        (root! "stop")
+        (doseq [g (.listFiles (java.io.File. (str dir "/runs/generations")))]
+          (sh/sh (str here "/bin/worktree") "--remove-at" (.getPath g)))
+        (sh/sh "rm" "-rf" dir)))))
+
+(deftest a-schema-file-round-trips-through-the-program
+  ;; task seon.source/schemas-are-part-of-the-program: a schema resource is program data
+  ;; like a source file (v1: the program is entities: functions, tests, schemas), so an
+  ;; agent can change it on its branch and the merge writes it back; imported then written
+  ;; back unchanged, it is the same text
+  (let [path "resources/seon/schemas/seon.task.edn"
+        text (slurp (str here "/" path))
+        db (empty-db)
+        db (d/db-with db (source/import-tx db {path text}))
+        out (source/files db (source/source-files db))]
+    (is (= text (get out path)) "the schema file, byte for byte")))
+
+(def ^:private facts-path "resources/seon/schemas/seon.facts.edn")
+
+(deftest a-changed-schema-entry-rewrites-only-itself
+  ;; task seon.source/schemas-are-part-of-the-program: write-back rewrites only the changed
+  ;; entries of a schema resource (v1's schema-file-text over rewrite-clj), every other byte
+  ;; as it was: a replaced value in its old layout, a removed entry with its line, a new key
+  ;; after the last entry, separated as the file's entries are
+  (let [text (slurp (str here "/" facts-path))
+        db (empty-db)
+        db (d/db-with db (source/import-tx db {facts-path text}))
+        status-line " :seon.attempt/status [:and {:seon.db/index true} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed]]"
+        edit (fn [tx] (get (source/files (d/db-with db tx) [facts-path]) facts-path))]
+    (is (str/includes? text status-line) "the fixture line is the file's")
+    (testing "every schema resource imported and written back unchanged is the same text"
+      (let [dir (java.io.File. (str here "/resources/seon/schemas"))
+            files (into {} (for [f (.listFiles dir) :when (str/ends-with? (.getName f) ".edn")]
+                             [(str "resources/seon/schemas/" (.getName f)) (slurp f)]))
+            db (empty-db)
+            db (d/db-with db (source/import-tx db files))]
+        (is (= 21 (count files)))
+        (is (= files (source/files db (source/source-files db))))))
+    (testing "a replaced value: only its changed part"
+      (is (= (str/replace text status-line (str/replace status-line ":closed]]" ":closed :refused]]"))
+             (edit [{:schema/key :seon.attempt/status
+                     :schema/form "[:and {:seon.db/index true} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed :refused]]"}]))))
+    (testing "a removed entry takes its line"
+      (is (= (str/replace text "\n :seon.attempt/pid :int" "")
+             (edit [[:db/retractEntity [:schema/key :seon.attempt/pid]]]))))
+    (testing "a new key after the last entry, read back as written"
+      (let [out (edit [{:schema/key :seon.attempt/refusal :schema/form "[:map [:seon.error/message :string]]" :schema/file facts-path}])]
+        (is (= (str (subs text 0 (- (count text) 2)) "\n :seon.attempt/refusal [:map [:seon.error/message :string]]}\n") out))
+        (is (= (assoc (edn/read-string text) :seon.attempt/refusal [:map [:seon.error/message :string]])
+               (edn/read-string out)))))))

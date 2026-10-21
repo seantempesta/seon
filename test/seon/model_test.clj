@@ -30,7 +30,7 @@
                 {:port port :host "127.0.0.1" :strategy :fibers})]
     (try
       (let [r (model/complete {:kind :openai-compat :base-url (str "http://127.0.0.1:" port) :model "deepseek-flash"
-                               :api-key-env "HOME"}
+                               :api-key-env "HOME" :max-tokens 2048}
                               {:messages [{:role "user" :content "square?"}] :task "t/sq" :turn 0})]
         (is (true? (:stream @seen)) "the request asks for a stream")
         (is (= {:include_usage true} (:stream_options @seen)) "with its usage")
@@ -41,6 +41,6 @@
       (finally (adapter/stop-server server {:drain-timeout-ms 0})))))
 
 (deftest a-dropped-connection-is-a-transport-failure
-  (let [r (model/complete {:kind :openai-compat :base-url "http://127.0.0.1:1" :model "m" :api-key-env "HOME"}
+  (let [r (model/complete {:kind :openai-compat :base-url "http://127.0.0.1:1" :model "m" :api-key-env "HOME" :max-tokens 2048}
                           {:messages [{:role "user" :content "x"}] :task "t/x" :turn 0})]
     (is (= :seon.model/transport (:seon.error/type r)) (pr-str r))))

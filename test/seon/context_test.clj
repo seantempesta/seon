@@ -4,15 +4,20 @@
   proof is not shown again, a merge task's plan stays its own."
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.task :as task] [seon.context :as context] [seon.print :as print]
-            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent]
+            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs]
             [seon.print.select :as select] [clojure.string :as str] [clojure.walk :as walk]))
 
 (defn- db-with-program []
   (let [db @(second (pdb/test-branch!))]
-    (d/db-with db [{:db/id "ns" :ns/name 'demo}
-                   {:var/name 'demo/f :var/ns "ns" :var/src "(defn f \"Doubles.\" [x] (* 2 x))"}
-                   {:var/name 'demo-test/f-test :var/ns "ns" :var/src "(deftest f-test (is (= 4 (f 2))))"}
-                   {:var/name 'demo-test/g-test :var/ns "ns" :var/src "(deftest g-test (is (= 1 (g))))"}])))
+    ;; recorded definitions, each its form (seon.program's facts), written as data
+    (d/db-with db (vec (mapcat (fn [[v src]]
+                                 [{:db/id (str v) :var/name v :var/ns (str "ns " (namespace v)) :var/form (str "form " v)}
+                                  {:db/id (str "form " v) :form/id (str v) :form/src src :form/ns (str "ns " (namespace v)) :form/order 0
+                                   :form/defines [(str v)]}
+                                  {:db/id (str "ns " (namespace v)) :ns/name (symbol (namespace v))}])
+                               '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))"]
+                                 [demo-test/f-test "(deftest f-test (is (= 4 (f 2))))"]
+                                 [demo-test/g-test "(deftest g-test (is (= 1 (g))))"]])))))
 
 (deftest each-thing-is-said-once
   (let [db (db-with-program)
@@ -71,7 +76,7 @@
     (testing "every refusal but the task's own red proof (shown with the proofs), each with what explains it"
       (is (= [{:refusal :regression :test 'demo-test/g-test :failures [{:assert "(= 1 (g))" :got "(= 1 0)"}]}
               {:refusal :stray-red :test 'user/scratch-test}
-              {:refusal :contract-gap :var 'demo/helper}]
+              {:refusal :contract-gap :vars ['demo/helper]}]
              (:refused block))))
     (testing "a run that failed as a whole is said, not read as tests not run"
       (is (= {:failed ["tests timed out after 30000 ms; killed"]} (:test-run block)))
@@ -94,13 +99,9 @@
         {:keys [text repairs]} (reader/forgive reply)
         block (context/current-state db t {:turn 1 :max-turns 4 :source text :repairs repairs})]
     (is (seq repairs) "the reader repaired the extra close")
-    (is (= [{:line 3 :code (nth (str/split-lines text) 2) :dropped ")" :inserted ","}] (:repaired (:your-last-reply block)))
-        "what was dropped, what replaced it, and its line; the prose made comments is no repair")
-    (is (str/ends-with? (nth (str/split-lines text) 2) "(* 2 x)),") "the line is the repaired definition's")
-    (testing "flagged definitions are named"
-      (let [db2 (d/db-with db [{:var/name 'demo/h :var/ns [:ns/name 'demo] :var/flagged true}])]
-        (is (= ['demo/h] (context/flagged db2)))
-        (is (= ['demo/h] (:flagged (context/current-state db2 t {:turn 1 :max-turns 4 :flagged (context/flagged db2)}))))))))
+    (is (= [{:near {:line 3 :column 60 :text "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x)),"} :dropped ")" :inserted ","}]
+           (:repaired (:your-last-reply block)))
+        "what was dropped, what replaced it, and where: its line and column, and the whole line; the prose made comments is no repair")))
 
 (deftest only-program-tests-judge
   ;; a deftest in a scratch namespace never merges, so it never judges the branch
@@ -122,11 +123,14 @@
     (eval '(ns ctx-calc-test (:require [clojure.test :refer [deftest is]] [ctx-calc :refer [square]])))
     (eval '(deftest square-test (is (= 9 (square 3))))))
   (let [db (d/db-with (db-with-program)
-                      [{:db/id "c" :ns/name 'ctx-calc}
-                       {:var/name 'ctx-calc/square :var/ns "c" :var/src "(defn square \"Squares x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))"}
-                       {:db/id "ct" :ns/name 'ctx-calc-test}
-                       {:var/name 'ctx-calc-test/square-test :var/ns "ct" :var/src "(deftest square-test (is (= 9 (square 3))))"}
-                       {:var/name 'ctx-calc-test/empty-test :var/ns "ct" :var/src "(deftest empty-test (square 3))"}])
+                      (vec (mapcat (fn [[v src]]
+                                     [{:db/id (str v) :var/name v :var/ns (str "ns " (namespace v)) :var/form (str "form " v)}
+                                      {:db/id (str "form " v) :form/id (str v) :form/src src :form/ns (str "ns " (namespace v)) :form/order 0
+                                       :form/defines [(str v)]}
+                                      {:db/id (str "ns " (namespace v)) :ns/name (symbol (namespace v))}])
+                                   '[[ctx-calc/square "(defn square \"Squares x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))"]
+                                     [ctx-calc-test/square-test "(deftest square-test (is (= 9 (square 3))))"]
+                                     [ctx-calc-test/empty-test "(deftest empty-test (square 3))"]])))
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'ctx :seon.task/name "sq" :seon.task/plan "p"
                                                :seon.task/proofs #{'ctx-calc-test/square-test 'ctx-calc-test/cube-test 'ctx-calc-test/empty-test}}]))
         ;; the test child's report of the failing assertion, as clojure.test makes it
@@ -209,3 +213,55 @@
     (is (<= (select/estimate c1) (:context print/budgets)))
     (is (<= (- (select/estimate c2) (select/estimate c1)) 16) "reading a context of a context adds nothing")
     (is (= 1 (count (context/shown-evals (context/fold-evals [(item c0) (item c0)])))) "a repeated read is one item")))
+
+(deftest an-unresolved-citation-says-what-to-do
+  ;; task seon.task/a-task-cites-what-it-needs: a name the plan cites that resolves to
+  ;; nothing tells the agent what that means and what to do, not only that it is unresolved
+  (let [r (context/resolve-ref (db-with-program) 'demo/nowhere)]
+    (is (:unresolved r))
+    (is (string? (:problem r)) "a message beside the name")))
+
+(def ^:private wiki-page
+  "# Flow\n\nFlow runs procs.\n\n## Step\n\nA step returns its state and outputs. It never blocks.\n\n## Stop\n\nStop awaits each proc's exit. Then the graph is gone.\n")
+
+(deftest a-task-context-pulls-what-its-plan-cites-at-that-depth
+  ;; task seon.docs/a-task-cites-what-it-needs: a section the plan cites reaches the
+  ;; context at the depth its delimiter asks for, read from the sections main holds
+  (let [db (db-with-program)
+        db (d/db-with db (docs/load-tx db "docs" {"docs/flow.md" wiki-page}))
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f"
+                                               :seon.task/plan "Read `docs/flow.md#step`, and ```docs/flow.md#stop``` whole."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+        block (context/current-state db (task/task db "demo/f") {:results {} :reds [] :turn 0 :max-turns 4})
+        shown (into {} (map (juxt :seon.ref/address identity)) (:sections block))]
+    (is (= "A step returns its state and outputs. It never blocks."
+           (:seon.ref/lead (shown "docs/flow.md#step"))) "doc depth: the section's lead")
+    (is (clojure.string/includes? (str (shown "docs/flow.md#stop")) "Then the graph is gone.") "code depth: the section whole")))
+
+(deftest a-cited-file-is-read-on-demand
+  ;; task seon.ref/files-namespaces-and-symbols-are-plain-markdown (owner, 2026-10-21): a
+  ;; cited file outside the stored wiki is read and shown when the context is built, never
+  ;; stored; three backticks show it whole
+  (let [db (db-with-program)
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f"
+                                               :seon.task/plan "Read ```bin/env``` first."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+        block (context/current-state db (task/task db "demo/f") {:results {} :reds [] :turn 0 :max-turns 4})]
+    (is (clojure.string/includes? (str block) "export SEON_CHECKOUT") "the file's text, read on demand")
+    (is (empty? (d/q '[:find ?e :where [?e :seon.section/address ?a] [(clojure.string/starts-with? ?a "bin/")]] db))
+        "and nothing stored for it")))
+
+(deftest a-cited-namespace-and-a-reference-code-file-show-what-they-are
+  ;; task seon.ref/files-namespaces-and-symbols-are-plain-markdown: a namespace shows its
+  ;; docstring and publics, a reference-code file the revision it is pinned at
+  (let [db (d/db-with (db-with-program) [{:db/id "ns" :ns/name 'demo.calc :ns/doc "Adds. More."} {:var/name 'demo.calc/add :var/ns "ns"}])
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "n"
+                                               :seon.task/plan "Read `demo.calc` then `reference-code/malli/README.md` and `docs/nowhere.md`."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+        block (context/current-state db (task/task db "demo/n") {:results {} :reds [] :turn 0 :max-turns 4})
+        by (into {} (map (juxt :seon.ref/address identity)) (:sections block))]
+    (is (= 40 (count (:seon.ref/pin (first (filter #(clojure.string/starts-with? (:seon.ref/address %) "reference-code/malli/README.md") (:sections block)))))) "the pinned revision, looked up")
+    (is (= {:seon.ref/address "demo.calc" :seon.ref/heading "demo.calc" :seon.ref/lead "Adds. More."
+            :seon.ref/below [{:seon.ref/address "demo.calc/add" :seon.ref/heading "add"}] :seon.ref/depth :doc}
+           (by "demo.calc")) "a namespace: its docstring and publics")
+    (is (:unresolved (by "docs/nowhere.md")) "a file that is not there says so")))

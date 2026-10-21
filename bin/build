@@ -1,10 +1,11 @@
 #!/bin/sh
 # bin/build — the runtime from the pinned sources: Chez (our fork) -> Jolt (our fork)
 # -> target/hello (a binary that requires Datahike and opens an in-memory db), then
-# target/lib/libprobe.dylib (native/probe.c) and target/seon (the platform, -main seon.check).
+# target/lib/libprobe.dylib (native/probe.c), target/lib/liblmdb.dylib (LMDB, robust locks)
+# and target/seon (the platform, -main seon.check).
 #
 #   bin/build            every step; chez and jolt are skipped when their output matches their pin
-#   bin/build chez|jolt|hello|native|seon   one step (and the steps before it when their output is missing)
+#   bin/build chez|jolt|hello|native|lmdb|seon   one step (and the steps before it when their output is missing)
 #   BUILD_FORCE=1 bin/build     rebuild every step
 #
 # Everything is written under target/; nothing is installed outside it. Dependency
@@ -98,9 +99,32 @@ build_native() {
   cc -O2 -shared -o "$T/lib/libprobe.dylib" "$ROOT/native/probe.c" || die "native build failed"
 }
 
+# LMDB from ../vendor-c/lmdb (mdb.master3, the branch konserve.jolt.lmdb-ffi binds), built
+# with MDB_USE_ROBUST: on macOS LMDB otherwise locks with POSIX semaphores, and a process
+# SIGKILLed inside a write txn leaves the writer lock held for every process that has the env
+# open (measured 2026-10-21; docs/DRAGONS.md#lmdb-robust-locks). Robust, it uses SysV
+# semaphores with SEM_UNDO: the kernel releases a dead holder's lock. target/lmdb-kill
+# (native/lmdb_kill.c) is its proof, a bin/check step.
+LMDB_SRC=$ROOT/../vendor-c/lmdb/libraries/liblmdb
+build_lmdb() {
+  [ -f "$LMDB_SRC/mdb.c" ] || die "missing LMDB source at $LMDB_SRC (git clone https://github.com/LMDB/lmdb -b mdb.master3)"
+  pin="$(git -C "$LMDB_SRC" rev-parse HEAD) robust"
+  if fresh lmdb "$pin" && [ -f "$T/lib/liblmdb.dylib" ]; then say "lmdb up to date ($pin)"; return; fi
+  mkdir -p "$T/lib"
+  say "lmdb: $LMDB_SRC at $pin -> target/lib/liblmdb.dylib (MDB_USE_ROBUST)"
+  cc -shared -O2 -g -pthread -DMDB_USE_ROBUST -install_name @rpath/liblmdb.dylib -o "$T/lib/liblmdb.dylib" \
+    "$LMDB_SRC/mdb.c" "$LMDB_SRC/midl.c" "$LMDB_SRC/module.c" > "$T/lmdb-build.log" 2>&1 || die "lmdb build failed; see target/lmdb-build.log"
+  cc -O2 -I"$LMDB_SRC" -o "$T/lmdb-kill" "$ROOT/native/lmdb_kill.c" "$T/lib/liblmdb.dylib" -Wl,-rpath,"$T/lib" ||
+    die "lmdb-kill (native/lmdb_kill.c) build failed"
+  echo "$pin" > "$T/lmdb.stamp"
+}
+
 build_seon() {
   [ -x "$JOLT" ] || build_jolt
   [ -f "$T/lib/libprobe.dylib" ] || build_native
+  # as chez and jolt: built when missing (bin/build lmdb rebuilds it on a pin change); a
+  # generation's worktree (seon.fx/build) holds its checkout's build, not ../vendor-c
+  [ -f "$T/lib/liblmdb.dylib" ] || build_lmdb
   . "$ROOT/bin/env"
   # Jolt's compile cache keys a namespace by its source and its dependencies' sources, not by
   # the files a macro reads at expansion: seon.contract/defn compiles each contract against
@@ -125,7 +149,8 @@ case $STEP in
   jolt) build_jolt ;;
   hello) build_hello ;;
   native) build_native ;;
+  lmdb) build_lmdb ;;
   seon) build_seon ;;
-  all) build_chez; build_jolt; build_hello; build_native; build_seon ;;
-  *) die "unknown step $STEP (chez | jolt | hello | native | seon | all)" ;;
+  all) build_chez; build_jolt; build_hello; build_native; build_lmdb; build_seon ;;
+  *) die "unknown step $STEP (chez | jolt | hello | native | lmdb | seon | all)" ;;
 esac

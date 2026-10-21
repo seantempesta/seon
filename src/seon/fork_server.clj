@@ -110,7 +110,8 @@
                 (let [m (sock/recv! c)]
                   (if (= m :eof)
                     (a/>!! ev-ch {:ev :eof :pid pid})
-                    (do (a/>!! ev-ch m) (recur))))))))
+                    (do (a/>!! ev-ch m) (recur)))))))
+          "seon-fs-events")
     (.setDaemon true) (.start)))
 
 (defn fork-server
@@ -199,7 +200,7 @@
                          ;; says it forked (a descriptor only in flight may be lost)
                          (:fd m) (assoc-in [:in-flight (:agent m)] (:fd m))
                          (= :tx (:op m)) (update :log conj m))]
-                [(if (>= (count (:log st)) cfg/STANDBY-EVERY) (request-standby st) st) nil]))
+                [(if (>= (count (:log st)) (cfg/value :seon.config.root/standby-every)) (request-standby st) st) nil]))
      :ext (if (= :shutdown (:op m))
             (let [{:keys [pid reader]} st]
               (some-> pid (lib/c-kill 9))

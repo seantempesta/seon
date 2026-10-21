@@ -27,10 +27,6 @@
  ;; the program as facts
  :seon.program/error [:map [:ns :symbol] [:message [:maybe :string]]]
  :seon.program/load-report [:map [:loaded nat-int?] [:errors [:vector :seon.program/error]]]
- ;; how names resolve in a program namespace (seon.program/ns-env): its ns form's aliases,
- ;; refers and requires, then its alias facts
- :seon.program/env [:map [:own :symbol] [:aliases [:map-of :symbol :symbol]] [:refers [:map-of :symbol :symbol]]
-                    [:all [:vector :symbol]] [:requires [:vector :symbol]]]
  ;; processes: the step-fn contract (seon.step)
  :seon.step/describe [:map
                       [:workload [:enum :io :mixed :compute]]
@@ -82,7 +78,7 @@
  :seon.system/decl [:map [:procs [:map-of :keyword [:map [:proc :qualified-symbol] [:args {:optional true} :map] [:chan-opts {:optional true} :map]]]]
                     [:fx {:optional true} [:map-of :keyword :map]] [:conns [:vector [:tuple [:tuple :keyword :keyword] [:tuple :keyword :keyword]]]]]
  :seon.root/spawn-opts [:maybe [:map [:branch {:optional true} :seon.db/branch] [:task {:optional true} [:maybe :string]]]]
- :seon.root/health [:or {:seon.render/html seon.render.ui/health-cell} [:= :unknown] [:map [:status :keyword]]]
+ :seon.root/health [:or [:= :unknown] [:map [:status :keyword]]]
  ;; contracts (seon.contract, from G1)
  :seon.contract/arm-result [:enum :armed :unchanged :off :uncontracted]
  :seon.contract/invalid [:and :seon.error/base [:map [:seon.error/type [:enum :seon.contract/invalid]] [:seon.contract/var :qualified-symbol]]]

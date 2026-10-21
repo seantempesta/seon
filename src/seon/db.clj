@@ -6,7 +6,7 @@
   (BAGGAGE.md)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-] :as contract] [seon.schema.datahike :as sd] [seon.config :as cfg]
-            [datahike.connections] [datahike.writing] [hasch.core :as hasch] [datahike.api :as d] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
+            [datahike.connections] [datahike.writing] [datahike.db.transaction :as dbt] [hasch.core :as hasch] [datahike.api :as d] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
             [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix]))
 
 (def schema
@@ -15,18 +15,23 @@
   (sd/declarations contract/registry))
 
 (defn seed-tx
-  "Transactions for about n datoms of an example program (the test store's and the check
-  store's seed, never a root's own): per namespace, one tx of the namespace and its 20
-  vars (5 datoms each), then one tx of a task referring to two of its vars. None below 110."
+  "Transactions of an example program sized by n (the test store's and the check store's
+  seed, never a root's own): n/110 namespaces (none below 110), each one tx of the
+  namespace and its 20 contracted functions (each a form and its var: 12 datoms, so about
+  2n datoms in all), then one tx of a task referring to two of its vars."
   {:malli/schema [:=> [:cat :int] [:sequential :seon.db/tx-data]]}
   [n]
   (let [nns (quot n 110)]
     (mapcat (fn [k]
               (let [nsym (symbol (str "app.m" k))]
                 [(into [{:db/id "ns" :ns/name nsym :ns/doc (str "Module " k " of the example program.")}]
-                       (for [i (range 20)]
-                         {:var/name (symbol (str nsym) (str "f" i)) :var/ns "ns" :var/doc (str "f" i " of module " k)
-                          :var/src (str "(defn f" i " [x] (+ x " i "))") :var/arity 1}))
+                       (for [i (range 20)
+                             :let [src (str "(defn f" i " {:malli/schema [:=> [:cat :int] :int]} [x] (+ x " i "))")]
+                             e [{:db/id (str "form " i) :form/id (str nsym "/f" i) :form/src src :form/ns "ns" :form/order i
+                                 :form/defines [(str "var " i)]}
+                                {:db/id (str "var " i) :var/name (symbol (str nsym) (str "f" i)) :var/ns "ns" :var/doc (str "f" i " of module " k)
+                                 :var/form (str "form " i) :var/kind :fn :var/contract "[:=> [:cat :int] :int]" :var/arity 1}]]
+                         e))
                  [{:task/name (keyword (str "app.m" k) "tidy") :task/plan (str "Tidy module " k ": name every value by its schema.")
                    :task/status :held :task/refs [[:var/name (symbol (str nsym) "f0")] [:var/name (symbol (str nsym) "f1")]]}]]))
             (range nns))))
@@ -45,8 +50,14 @@
 ;; fsync, before the node emitter). LMDB runs MDB_NOSYNC and the writer syncs the env
 ;; once per commit (sync!), so a commit is one drive flush, not one per node.
 
-(def ^:private BF 64)
 (def ^:private MDB_NOSYNC 0x10000)
+
+(def flush-ms
+  "How long a committed write may stay unflushed, ms (owner 2026-10-20: every write is
+  answered when committed in memory, and one group flush within this window makes it
+  durable). Not a config key: owner 2026-10-21, no clock decides anything; it goes when the
+  flush runs on the writer's workload. root's start! takes :flush-ms for the window check."
+  10)
 
 (defn store-cfg
   "Datahike config for the durable store at path; backend :lmdb (default) or :file."
@@ -54,11 +65,11 @@
   [backend path]
   {:store (cond-> {:backend backend :path path :id (hasch/uuid path)
                    :default-serializer :FaslSerializer}
-            (= backend :lmdb) (assoc :lmdb {:flags MDB_NOSYNC :map-size (* 1048576 (Long/parseLong (or (System/getenv "SEON_LMDB_MB") "1024")))})
+            (= backend :lmdb) (assoc :lmdb {:flags MDB_NOSYNC :map-size (cfg/value :seon.config.store/lmdb-map-bytes)})
             (= backend :file) (assoc :config {:defer-immutable-sync? true}))
    :schema-flexibility :write :keep-history? false
    :writer writer-cfg
-   :index-config {:branching-factor BF}})
+   :index-config {:branching-factor (cfg/value :seon.config.store/branching-factor)}})
 
 (defn sync!
   "Make every commit so far durable: one env sync for LMDB (MDB_NOSYNC); the filestore
@@ -73,6 +84,18 @@
   [conn n]
   (d/transact conn {:tx-data schema})
   (doseq [tx (seed-tx n)] (d/transact conn {:tx-data tx})))
+
+(defn- install-missing!
+  "Transact the attributes of `schema` the db under conn lacks, in one transaction, and
+  answer how many: a kept store seeded before an attribute existed gains it when a root
+  opens it (Datahike accepts new attribute definitions at any time). Nothing missing
+  writes nothing."
+  {:malli/schema [:=> [:cat :seon.host/conn] :int]}
+  [conn]
+  (let [have (d/schema @conn)
+        missing (vec (remove #(contains? have (:db/ident %)) schema))]
+    (when (seq missing) (d/transact conn {:tx-data missing}))
+    (count missing)))
 
 ;; ---- one store, many branches, as in production (owner, 2026-10-21) ------------
 ;; A store holds one seed on :db. Every root works on a main of its own, a branch of :db
@@ -175,28 +198,67 @@
       (d/create-database cfg)
       (let [conn (d/connect cfg)] (seed! conn n) (when-not (= :db main) (d/release conn))))
     (let [[conn existed?] (open-main! cfg main)
+          added (install-missing! conn)
           cfg (cond-> cfg (not= :db main) (assoc :branch main))]
-      ;; durable before root runs: the seed or the new branch (an fsync, ~5-10 ms); a
-      ;; recovered main wrote nothing
-      (when-not (and exists? existed?) (sync! cfg))
+      ;; durable before root runs: the seed, the new branch or the added attributes (an
+      ;; fsync, ~5-10 ms); a recovered main with its schema whole wrote nothing
+      (when-not (and exists? existed? (zero? added)) (sync! cfg))
       {:cfg cfg :conn conn :recovered? (and exists? existed?) :seeded? (not exists?)})))
+
+(defn lease!
+  "Make this process mint the store's entity ids from its lease: from lease, up to (not
+  including) lease + EID-LEASE; past it a transaction is refused (lease-spent), never
+  minting the next agent's ids. nil."
+  {:malli/schema [:=> [:cat :seon.db/cfg :int] :nil]}
+  [cfg lease]
+  (.put ^java.util.concurrent.ConcurrentHashMap @#'datahike.writing/eid-allocators
+        (get-in cfg [:store :id]) (java.util.concurrent.atomic.AtomicLong. lease))
+  (dbt/set-eid-ceiling! (get-in cfg [:store :id]) (+ lease (cfg/value :seon.config.store/eid-lease))))
 
 (defn after-fork!
   "Make this forked process (an agent, a clone) open the store itself: an LMDB env and the
   connections inherited from its parent must not be used across fork(), so they are
   forgotten (not closed: they are the parent's), and the store's entity-id allocator starts
-  at this process's lease. Physics, not a guard: fork shares the parent's handles."
+  at this process's lease and stops at its end (lease!). Physics, not a guard: fork shares
+  the parent's handles."
   {:malli/schema [:=> [:cat :seon.db/cfg :int] :any]}
   [cfg lease]
   (swap! @#'konserve.jolt.lmdb/envs dissoc (get-in cfg [:store :path]))
   (reset! datahike.connections/*connections* {})
-  (.put ^java.util.concurrent.ConcurrentHashMap @#'datahike.writing/eid-allocators
-        (get-in cfg [:store :id]) (java.util.concurrent.atomic.AtomicLong. lease)))
+  (lease! cfg lease))
+
+(defn lease-spent
+  "The typed refusal :seon.db/lease-spent when x (what a transaction answered) is Datahike's
+  refusal to mint past this process's ceiling (after-fork!), for the agent whose lease
+  starts at lease; else nil."
+  {:malli/schema [:=> [:cat :any [:maybe :int]] [:maybe :seon.db/lease-spent]]}
+  [x lease]
+  (let [d (ex-data x)]
+    (when (and lease (= :entity-id/lease-spent (:error d)))
+      (contract/error :seon.db/lease-spent 'seon.agent/transact!
+                      (str "this agent's entity ids are spent: its lease is " (cfg/value :seon.config.store/eid-lease) " ids from " lease)
+                      {:lease lease :ceiling (:ceiling d) :entity-id (:entity-id d)
+                       :seon.error/fix "Write fewer new entities in this agent (retract or reuse), or raise :seon.config.store/eid-lease for the run (--set); the transaction was not applied."}))))
+
+(defn lease-use
+  "How much of the lease starting at lease db's branch has minted: {:from :used :of}."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :int]] [:maybe [:map [:from :int] [:used :int] [:of :int]]]]}
+  [db lease]
+  (when lease {:from lease :used (max 0 (- (:max-eid db) lease)) :of (cfg/value :seon.config.store/eid-lease)}))
+
+(defn map-use
+  "The LMDB store's use of its map: {:used-bytes (data.mdb's length: LMDB grows the file as it
+  uses pages) :map-bytes}, or nil for another backend."
+  {:malli/schema [:=> [:cat :seon.db/cfg] [:maybe [:map [:used-bytes :int] [:map-bytes :int]]]]}
+  [cfg]
+  (when (= :lmdb (get-in cfg [:store :backend]))
+    {:used-bytes (.length (java.io.File. (str (get-in cfg [:store :path]) "/data.mdb")))
+     :map-bytes (get-in cfg [:store :lmdb :map-size])}))
 
 (defn lease-base
   "The first entity id past every branch head of the store: agents' leases start here."
   {:malli/schema [:=> [:cat :seon.host/conn] :int]}
-  [conn] (+ cfg/EID-LEASE (max (:max-eid @conn) (#'datahike.writing/roster-max-eid (:store @conn)))))
+  [conn] (+ (cfg/value :seon.config.store/eid-lease) (max (:max-eid @conn) (#'datahike.writing/roster-max-eid (:store @conn)))))
 
 (defn head
   "Branch b's committed value, read from the store (another process may have committed it)."

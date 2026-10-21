@@ -14,19 +14,14 @@
   referred into its namespace. From proto/flow f2-final proto.agent (lane F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
-            [clojure.string :as str] [jolt.ffi :as ffi] [seon.program :as program] [seon.intr :as intr] [clojure.repl]))
+            [clojure.string :as str] [jolt.ffi :as ffi] [seon.program :as program] [seon.intr :as intr] [clojure.repl]
+            [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :fd :conn :db :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
+;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 (defonce state (atom nil))
 
-;; collect-trip-bytes in an agent: Chez's default scales with the parent heap (E10); a
-;; small trip keeps an agent's garbage, and so its private pages, small
-(def trip-bytes (* 1048576 (Long/parseLong (or (System/getenv "SEON_TRIP_MB") "4"))))
-
-;; An agent's heap may grow this far beyond what it inherited; past it an allocation
-;; throws OutOfMemoryError (an :err item), so a runaway agent cannot take the machine.
-(def heap-extra-bytes (* 1048576 (Long/parseLong (or (System/getenv "SEON_AGENT_HEAP_MB") "1024"))))
 
 ;; ---- the socket to root: values in frames (root's end is a jolt.async.remote end) ------
 ;; This side reads and writes its socket itself, on its one thread, with no pumps: an agent
@@ -120,10 +115,12 @@
       (swap! state assoc :db (:db-after r))
       {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
     (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data})]
+      ;; past this process's block of entity ids: the typed refusal, nothing applied
+      (when-let [e (and (not (map? r)) (pdb/lease-spent r (:lease @state)))] (throw (ex-info (:seon.error/message e) e)))
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
       (let [now (lib/now-ns)
             since (:dirty-at (swap! state #(-> % (assoc :db (:db-after r)) (update :dirty-at (fn [t] (or t now))))))]
-        (when (>= (- now since) (* 1000000 cfg/FLUSH-MS)) (commit!))
+        (when (>= (- now since) (* 1000000 pdb/flush-ms)) (commit!))
         (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
           (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r))))))))
 
@@ -223,9 +220,6 @@
 
 ;; ---- evaluation -----------------------------------------------------------------
 
-(def ^:private message-chars
-  "An exception's message is kept to this many characters in its error map."
-  2000)
 
 (defn error-map
   "A form's exception as the one error map: its ex-data when that already is one (a
@@ -237,7 +231,7 @@
   (if (contract/error? (ex-data e))
     (ex-data e)
     (let [m (or (ex-message e) (str (type e)))]
-      (contract/error :seon.agent/eval-error 'seon.repl/eval-code (subs m 0 (min message-chars (count m)))
+      (contract/error :seon.agent/eval-error 'seon.repl/eval-code m
                       (cond-> {:class (str (type e))}
                         (ex-data e) (assoc :data (print/text (ex-data e) (:part print/budgets))))))))
 
@@ -281,10 +275,11 @@
           (keep find-ns (sort (d/q '[:find [?n ...] :where [_ :ns/name ?n]] db)))))
 
 (defn- run-tests-here
-  "clojure.test over test-namespaces of the branch, the whole run within ticks engine ticks
-  of work: answers report data. Each test var is written to w as it starts ({:started v}),
-  so the agent can name the test a death interrupted; a run past its ticks stops with the
-  typed :seon.test/ticks-spent naming the test that was running."
+  "clojure.test over test-namespaces of the branch, with the branch's schemas in effect (malli's
+  dynamic registry bound to seon.program/schema-registry, as the agent's REPL binds it), the
+  whole run within ticks engine ticks of work: answers report data. Each test var is written
+  to w as it starts ({:started v}), so the agent can name the test a death interrupted; a run
+  past its ticks stops with the typed :seon.test/ticks-spent naming the test that was running."
   {:malli/schema [:=> [:cat :int pos-int?] :seon.test/result]}
   [w ticks]
   (let [reports (atom [])
@@ -298,7 +293,8 @@
                                     (when (#{:pass :fail :error} (:type m))
                                       (swap! reports conj (test-report m (some-> (first t/*testing-vars*) str))))
                                     (orig m))
-                         t/*test-out* (java.io.StringWriter.)]
+                         t/*test-out* (java.io.StringWriter.)
+                         mr/*registry* (program/schema-registry (program/schema-changes (db)))]
                  ;; test-ns tests the vars interned now (Jolt's run-tests also runs its
                  ;; registry, which keeps a test after ns-unmap)
                  (jolt.host/run-interruptible (jolt.host/make-interrupt) #(doseq [nsx nss] (t/test-ns nsx)) ticks)
@@ -407,7 +403,7 @@
   {:malli/schema [:=> [:cat :seon.wire/seon-msg] [:maybe [:vector :seon.wire/seon-msg]]]}
   [m]
   (case (:op m)
-    :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:ticks m) cfg/TEST-TICKS)) :mem-mb (mem-mb)}]
+    :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))) :mem-mb (mem-mb)}]
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
     :fx-reply (let [kind (get-in @state [:fx-pending (:k m)])
                     r (dissoc m :op :k)]
@@ -420,6 +416,7 @@
     :clone (do (clone! m) nil)
     :stats [{:op :stats :id (:id m) :result {:mem-mb (mem-mb true) :t (:max-tx (db)) :pid (lib/c-getpid)
                                               :results (count (:results @state)) :evals (:n @state)
+                                              :ids (pdb/lease-use (db) (:lease @state))
                                               :heap-mb (lib/r2 (/ (lib/bytes-in-heap) 1048576.0))}}]
     ;; a message (lane F2): it waits in :inbox until the agent's code takes it ((messages));
     ;; root hears that it arrived
@@ -480,7 +477,7 @@
                   ;; the clone opens the store itself, on its own branch, with its own lease
                   (pdb/after-fork! (:cfg r) (:lease r))
                   (stderr-to-file! (stderr-path (pdb/agents-dir (:cfg r)) (:agent m)))
-                  (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn c :mode :agent :tx-seq 0
+                  (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn c :mode :agent :tx-seq 0 :lease (:lease r)
                          :pending clojure.lang.PersistentQueue/EMPTY :mem-at nil :fx-pending {}
                          :store-conn (d/connect (assoc (:cfg r) :branch (:branch m))))
                   (swap! state assoc :db @(:store-conn @state)))
@@ -500,13 +497,14 @@
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone
   (sock/clofork! fd)
-  (lib/set-trip! trip-bytes)
-  (lib/heap-cap! (+ (lib/bytes-in-heap) heap-extra-bytes))
+  ;; the config this process was forked holding (root read it; an agent reads no environment)
+  (lib/set-trip! (cfg/value :seon.config.agent/trip-bytes))
+  (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)))
   (stderr-to-file! (stderr-path (pdb/agents-dir cfg) id))
   ;; this agent owns its branch's writes: it opens the store itself (seon.db/after-fork!)
   (pdb/after-fork! cfg lease)
   ;; the model's API key is root's alone (its :model owner calls the model; lane FX1)
-  (doseq [v (distinct (remove nil? [(System/getenv "SEON_AI_API_KEY_ENV") "DEEPSEEK_API_KEY"]))] (lib/c-unsetenv v))
+  (lib/c-unsetenv (cfg/value :seon.config.ai/api-key-variable))
   (let [nsx (make-ns! id)
         intr-ok (interrupt-self-test)
         c (sock/conn fd)
@@ -516,7 +514,7 @@
     (let [load-errors (when resumed (program/load-diff! db0 @store-conn))]
      ;; a resumed branch whose program does not load runs main's for what failed: its errors
      ;; go to root with its hello (recorded problems), never dropped (T5b: a stub ran silently)
-     (reset! state {:id id :branch branch :fd fd :conn c :db @store-conn :store-conn store-conn :cfg cfg :results {} :n 0
+     (reset! state {:id id :branch branch :fd fd :conn c :db @store-conn :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
                    :load-errors (vec load-errors)
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
                    :ns nsx :nss #{(ns-name nsx)} :interrupt-ok intr-ok :serve serve}))))

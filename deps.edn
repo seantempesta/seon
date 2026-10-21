@@ -36,6 +36,10 @@
         ;; reading source as data (seon.reader: analysis, references, the forgiving reader);
         ;; the version malli already brings
         borkdude/edamame {:mvn/version "1.4.32"}
+        ;; editing a schema resource entry by entry, every other byte kept (seon.source's
+        ;; write-back, v1's schema-file-text; owner 2026-10-21, the SCHEMAS plan)
+        rewrite-clj/rewrite-clj {:mvn/version "1.2.51"}
+        org.clojure/tools.reader {:mvn/version "1.5.2"}
         ;; root's system declaration (resources/seon/system.edn): #env, #profile, #include
         aero/aero {:mvn/version "1.1.6"}
         fipp/fipp {:mvn/version "0.6.29"}

@@ -19,11 +19,11 @@
   [tos body] (agent/send-message tos body))
 
 (defn source-of
-  "The source this branch records for the definition sym (:var/src), or nil."
+  "The source this branch records for the definition sym (the text of the form that last defined it), or nil."
   {:malli/schema [:=> [:cat :symbol] [:maybe :string]]}
   [sym]
   (let [sym (if (namespace sym) sym (symbol (str (ns-name *ns*)) (name sym)))]
-    (d/q '[:find ?s . :in $ ?v :where [?e :var/name ?v] [?e :var/src ?s]] (agent/db) sym)))
+    (d/q '[:find ?s . :in $ ?v :where [?e :var/name ?v] [?e :var/form ?f] [?f :form/src ?s]] (agent/db) sym)))
 
 (defmacro source
   "Print the recorded source of the definition named by sym (as clojure.repl/source does)."

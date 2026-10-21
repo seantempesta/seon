@@ -6,12 +6,7 @@
   redefines its function). The proofs namespace sorts after the subjects, so a boot that
   loads main's program in name order loads a subject before its proof."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.template :as tpl]))
-
-(defn- var-tx
-  {:malli/schema [:=> [:cat :any :symbol :string :string :keyword] :map]}
-  [ns-ref ns-sym nm src kind]
-  {:var/name (symbol (str ns-sym) nm) :var/ns ns-ref :var/src src})
+  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.template :as tpl] [seon.source :as source] [seon.reader :as reader]))
 
 (def calc
   "The six-task graph: add; twice and square need add; sum-sq needs both; neg (slow on
@@ -54,16 +49,23 @@
           :proof (str "(deftest " (par-name k) "-test (is (= " (+ 10 k) " (app.par/" (par-name k) " 10))))")})))
 
 (defn program-txs
-  "Two transactions writing the program of specs on main: the subjects (a spec's :stub
-  under its :var, else its task :name), then the proofs."
-  {:malli/schema [:=> [:cat [:vector :map]] [:vector [:vector :map]]]}
-  [specs]
-  (let [nss (distinct (map #(:ns % 'app.calc) specs))]
-    [(into (vec (for [n (conj (vec nss) 'app.proofs)] {:db/id (str n) :ns/name n}))
-           (for [{:keys [stub] :as s} specs :when stub :let [n (:ns s 'app.calc)]]
-             (var-tx (str n) n (or (:var s) (:name s)) stub :fn)))
-     (vec (for [{:keys [name proof]} specs :when proof]
-            (var-tx [:ns/name 'app.proofs] 'app.proofs (str name "-test") proof :test)))]))
+  "Two transactions writing the program of specs on main (db): the subjects (each spec's
+  :stub in its :ns), then the proofs (app.proofs), each namespace's text analyzed as a file
+  is (seon.source/text-tx)."
+  {:malli/schema [:=> [:cat :seon.host/db [:vector :map]] [:vector :seon.db/tx-data]]}
+  [db specs]
+  (let [by-ns (group-by #(:ns % 'app.calc) (filter :stub specs))
+        subjects (vec (mapcat (fn [[n ss]] (source/text-tx db n (str/join "\n" (map :stub ss)) nil)) (sort-by (comp str key) by-ns)))
+        proofs (keep :proof specs)]
+    [subjects
+     (if (seq proofs) (source/text-tx db 'app.proofs (str/join "\n" proofs) nil) [])]))
+
+(defn- proof-vars
+  "The vars a spec's proof calls: the qualified symbols its form holds outside app.proofs."
+  {:malli/schema [:=> [:cat :map] [:vector :qualified-symbol]]}
+  [spec]
+  (->> (tree-seq coll? seq (reader/read-text (:proof spec) 'app.proofs))
+       (filter qualified-symbol?) (remove #(= "app.proofs" (namespace %))) distinct vec))
 
 (defn decls
   "Task declarations for specs, in task namespace tns, with model env: each work task
@@ -74,13 +76,21 @@
     (vec (for [{:keys [name needs] :as s} specs :when name]
            (cond-> {:seon.task/ns tns :seon.task/name name
                     :seon.task/plan (or (:plan s)
-                                        (str "Make `" (:ns s 'app.calc) "/" name "` pass its proof `app.proofs/" name "-test`."
+                                        (str "Make " (str/join ", " (map #(str "`" % "`") (proof-vars s))) " pass its proof `app.proofs/" name "-test`."
                                              (when (seq needs) (str " It may use " (str/join ", " (map #(str "`app.calc/" % "`") needs)) "."))))
                     :seon.task/proofs (or (:proofs s) #{(symbol "app.proofs" (str name "-test"))})}
              (seq needs) (assoc :seon.task/needs (set (map #(str tns "/" %) needs)))
              model (assoc :seon.task/model model))))))
 
 ;; ---- merge scenarios (M1): two tasks on overlapping definitions -----------------------
+
+(defn generation
+  "Which generation of Seon's own source this binary was built from: the loop's subject
+  (seon.e2e/loop-run). A task redefines it on its branch, the merge is written back and
+  committed on the merges branch, and the binary built from that commit answers the new
+  value."
+  {:malli/schema [:=> [:cat] :int]}
+  [] 1)
 
 (defn- defn1 {:malli/schema [:=> [:cat :string :string] :string]} [nm body]
   (str "(defn " nm " {:malli/schema [:=> [:cat :int] :int]} [x] " body ")"))
@@ -136,6 +146,15 @@
                                                   "(deftest triple-test (is (= 9 (triple 3))))"
                                                   "(in-ns 'user)"
                                                   "(def scratch-x 41)"]))]}}
+   :loop {:specs [{:name "gen" :ns 'seon.fixtures :proofs #{'app.proofs/gen-test} :proof "(deftest gen-test (is (= 2 (seon.fixtures/generation))))"
+                   :plan "Seon's own source is the program: make `seon.fixtures/generation` answer 2, so its proof `app.proofs/gen-test` passes."}]
+          :after {}
+          :replies {"gen" [(fenced "The next generation of Seon's own source."
+                                   (str "(in-ns 'seon.fixtures)\n"
+                                        "(defn generation\n  \"Which generation of Seon's own source this binary was built from: the loop's subject\n"
+                                        "  (seon.e2e/loop-run). A task redefines it on its branch, the merge is written back and\n"
+                                        "  committed on the merges branch, and the binary built from that commit answers the new\n"
+                                        "  value.\"\n  {:malli/schema [:=> [:cat] :int]}\n  [] 2)"))]}}
    :hairy {:specs (into [{:name "a" :ns 'app.m :var "f1" :stub (defn1 "f1" "0") :proofs #{'app.proofs/a-test}
                           :proof "(deftest a-test (is (= [2 3 4 5] [(app.m/f1 1) (app.m/f2 1) (app.m/f3 1) (app.m/f4 1)])))"}
                          {:name "b" :ns 'app.m :proofs #{'app.proofs/b-test}

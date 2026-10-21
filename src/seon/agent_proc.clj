@@ -7,7 +7,7 @@
   From proto/flow f2-final proto.control (lane F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.sock :as sock] [seon.step :as step]
-            [seon.config :as cfg] [jolt.async.remote :as remote] [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
+            [jolt.async.remote :as remote] [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
 
 (defn- to-proc!
   "Send m to the agent's process: onto the end's :out (its writer pump frames it). While a
@@ -39,6 +39,20 @@
 (defn- busy {:malli/schema [:=> [:cat :map] [:enum :busy :idle]]}
   [st] (if (seq (:inflight st)) :busy :idle))
 
+(def stall-ms
+  "Silence, ms, after which a busy agent is observed stalled once (a recorded fact, never an
+  end; lane D2). A guessed tolerance (FENCES finding 5) and a clock (owner 2026-10-21: no
+  clocks decide anything), so not a config key; it goes with
+  seon.fences/a-stall-is-past-the-requests-own-bound. root's start! takes :stall-ms (the
+  problems check provokes a stall at 1,000). 0: no check."
+  30000)
+
+(def stop-bound-ms
+  "How long an agent may take to exit after :stop before it is SIGKILLed. A fence, not a
+  config key (FENCES finding 3: a clock standing in for the exit event); it goes with
+  seon.root/shutdown-and-death-are-dataflow."
+  2000)
+
 (defn- await-dead
   "Wait (bounded) on the end's :in for its close (the process is gone): true, or false
   past ms."
@@ -69,10 +83,10 @@
                       true (update :inflight assoc rid (select-keys m [:kind :branch :new :merge-branch :data-attrs :pass-fd :lease]))
                       ;; what root last asked of it, for a stall or a death (seon.agent/last-op)
                       true (assoc :last-op (cond-> {:kind kind :since-ms (System/currentTimeMillis)}
-                                             (string? (:forms msg)) (assoc :form (let [f (:forms msg)] (if (> (count f) 200) (str (subs f 0 200) " …") f)))))
+                                             (string? (:forms msg)) (assoc :form (:forms msg))))
                       (= kind :ping) (update :pings conj rid))]
              [st {:to-api [(status st (cond-> {:status :busy}
-                                        (= kind :eval) (assoc :running {:form (let [f (:forms msg)] (if (> (count f) 200) (str (subs f 0 200) " …") f))
+                                        (= kind :eval) (assoc :running {:form (:forms msg)
                                                                         :since-ms (System/currentTimeMillis)})))]}]))
     :write [(cond-> (to-proc! st (:msg m)) (= :fx-reply (:op (:msg m))) (update :fx-out (fnil dec 1))) nil]
     ;; root's stall check (seon.root's timer): a request in flight, no frame from the agent
@@ -122,6 +136,9 @@
                                                                 (str "its branch's program did not load in " ns ": " message) {:ns ns})}))
                  (step/out! o :events (step/event {:type :ready :agent id :start-ms (:start-ms m)}))
                  (cond-> st (:cloned-from m) (assoc :pid (:pid m))))
+      ;; its eval's record could not be written on its branch (its entity ids are spent):
+      ;; the typed error is recorded on main as its problem
+      :unrecorded (do (step/out! o :to-api {:op :problem :class :agent :agent id :error (:error m)}) st)
       :fd-ready (send-fd! st (:k m) (get-in st [:inflight (:k m) :pass-fd]))
       :branch-me (let [{:keys [branch lease]} (get-in st [:inflight (:k m)])]
                    (step/out! o :to-writer {:op :clone-branch :from (:branch st) :branch branch :lease lease
@@ -228,7 +245,7 @@
      ::flow/stop (do (when-not (:dead? st)
                        (when-not (:stop-sent st)
                          (if (:pid st) (to-proc! st {:op :stop}) (hang-up! st)))
-                       (when-not (await-dead (:in (:end st)) cfg/STOP-BOUND-MS)
+                       (when-not (await-dead (:in (:end st)) stop-bound-ms)
                          (some-> (:pid st) (lib/c-kill 9))
                          (hang-up! st)
                          (await-dead (:in (:end st)) 5000)))

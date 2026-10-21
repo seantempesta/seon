@@ -34,3 +34,6 @@
 	path = reference-code/malli
 	url = /Users/sean/src/seon-jolt/l1/wt/malli
 	branch = jolt/main
+[submodule "reference-code/awesome-jolt"]
+	path = reference-code/awesome-jolt
+	url = https://github.com/jlt-commons/awesome-jolt

@@ -14,11 +14,11 @@ owns the concept. A new concept gets its word here before it appears in code.
 | **root graph** | that one Flow graph, changed in place by `flow/update!` | `seon.root/start!` |
 | **api** | root's entrance proc: callers' reply promises, routing by request id | `seon.root/api-proc` |
 | **writer** | root's writes to main (group commit), `d/branch!`, and every merge into main | `seon.writer/writer-proc` |
-| **run-ahead write** | an agent's own write on its own branch: applied at once, committed when idle, at a turn's end or within the flush window | `seon.agent/transact!`, `seon.agent/commit!`, `datahike.writer/apply!` |
-| **lease** | the block of entity ids an agent process mints on its branch | `seon.config/EID-LEASE`, `seon.db/after-fork!` |
+| **run-ahead write** | an agent's own write on its own branch: applied at once, committed when idle or at a turn's end, and synced by the next group commit | `seon.agent/transact!`, `seon.agent/commit!`, `datahike.writer/apply!` |
+| **lease** | the block of entity ids an agent process mints on its branch | `:seon.config.store/eid-lease`, `seon.db/after-fork!` |
 | **group commit** | one Datahike commit per branch per writer step | `seon.writer/commit-batch` |
-| **flush window** | every write is answered when committed in memory; one group flush within `FLUSH-MS` makes it durable; `:flush?` waits for it | `seon.writer/flusher-proc`, `seon.config/FLUSH-MS` |
-| **flusher** | the proc that times the flush window and asks the writer to flush | `seon.writer/flusher-proc` |
+| **group commit** | every write is answered when committed in memory; the flusher syncs everything unflushed at once, then again, so commits arriving during a sync share the next one; `:flush?` waits for the sync that covers it | `seon.writer/flusher-proc` |
+| **flusher** | the proc that syncs everything unflushed, continuously, with no window | `seon.writer/flusher-proc` |
 | **fork server** | the single-threaded process holding main's db value that forks agents | `seon.fork-server` |
 | **standby** | a fork of the fork server, promoted when the server dies (root never forks after boot) | `seon.fork-server/promote` |
 | **reconciler** | the proc that sees main's commits through a sliding buffer of one | `seon.reconcile` |
@@ -26,7 +26,7 @@ owns the concept. A new concept gets its word here before it appears in code.
 | **stand-in** | an agent's proc in root: owns root's end of its socket and its process | `seon.agent-proc/agent-proc` |
 | **edge reader** | a thread doing one blocking read and feeding one proc's in-port (physics) | `seon.root/start-reader!` |
 | **run-loop** | the step-fn contract run on one thread, lifecycle as messages | `seon.step/run-loop` |
-| **dial** | a configured number, read once | `seon.config` |
+| **dial** | a config key: one documented value in `resources/seon/config/default.edn` (unit, provenance, bound), validated by its `seon.config.*` schema, read once at boot and written as facts on main | `seon.config`, `seon.config/from-db` |
 
 ## The REPL (nREPL's words)
 
@@ -47,18 +47,19 @@ owns the concept. A new concept gets its word here before it appears in code.
 | **registry** | the named schemas, data in `resources/seon/schemas/*.edn` | `seon.contract/registry` |
 | **refusal** | a contract's failure, thrown as the one error map (`:seon.error/type`) | `seon.contract/refusal` |
 | **admit** | an agent's def armed by its contract, or warned (the uncontracted set grows) | `seon.repl/wrap-admit` |
-| **guarantees** | `SEON_GUARANTEES`: on, `contracts` (no recording), `off` | `seon.contract/on?`, `record?` |
+| **guarantees** | `:seon.config.contract/guarantees` (`SEON_GUARANTEES`): `:on`, `:contracts` (no recording), `:off` | `seon.contract/on?`, `record?` |
 
 ## Data (Datahike's and git's words)
 
 | word | meaning | owner |
 |---|---|---|
 | **main**, **branch**, **merge base**, **merge main**, **conflict** | git's words over Datahike branches | `seon.writer`, `seon.db` |
-| **program** | the definitions held as facts (`:var/src`), loaded where main or a branch changes them | `seon.program` |
+| **program** | the forms held as facts (`:form/src`, each definition pointing to the form that last made it, from the compiler), loaded where main or a branch changes them | `seon.program` |
 | **store** | konserve under Datahike (LMDB, or the filestore), jfasl node codec | `seon.db` |
 | **entity schema** | a Malli map with `{:seon.db/attributes true}`; its members are Datahike attributes | `seon.schema.datahike/declarations` |
 | **recording** | an eval request's evaluations (on its agent entity, one EDN `:seon.cluster.eval/record` each) and its defs, written by the agent on its own branch | `seon.repl/record-tx` |
 | **observation** | data on the branch that observed it (evaluations, answered t), never carried by a merge | `seon.db/observation-attrs` |
+| **generation** | a build of Seon's own source: the running binary is one, and the next is the merges commit built by the `:build` effect, recorded on main (`:seon.root/generation`) and started on the same store by `bin/root next` ([source](source.md#the-next-generation)) | `seon.fx/build`, `my.root/next-generation` |
 
 ## Tasks (TASK-CHAIN's words; lanes R1 and M1)
 
@@ -75,10 +76,11 @@ owns the concept. A new concept gets its word here before it appears in code.
 | **reconciler** | the pure function of main's db to actions, and the proc that carries them out | `seon.reconcile/reconcile`, `reconciler-proc` |
 | **flight** | one action carried out as a chain of requests and answers in the reconciler proc | `seon.reconcile/advance` |
 | **turn loop** | inside an agent: observe, then end or act (context to the model, forms through the REPL path) | `seon.turn/work!` |
-| **three-way** | git's merge of program maps (base, ours, theirs) keyed `[:var sym]` | `seon.merge/three-way` |
+| **three-way** | git's merge of program maps (base, ours, theirs) keyed `[:var sym]`, `[:form id]`, `[:schema k]` (a schema entry) | `seon.merge/three-way` |
 | **unmerged entry** | a conflict kept on the branch (base, ours, theirs) until re-defn or `resolve!` | `seon.merge/unmerged` |
 | **harvest** | staging the live runtime onto the branch (unmaps, plain defs as values, aliases) | `seon.harvest/harvest!` |
 | **dragon** | a place where the outside world can fail us, met by one named edge | `docs/DRAGONS.md` |
+| **section** | one heading of a wiki page as an entity on main: address `path#anchor`, heading, lead, own text, parent, and references (what its own text cites); its backlinks are who cites it | `seon.docs/load-tx` |
 
 ## Agent-facing verbs (`my.*`)
 

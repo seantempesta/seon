@@ -9,7 +9,7 @@
   and M1's proto.agents.task; the attributes are derived from resources/seon/schemas (lane D1)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn] [seon.merge :as pm]
-            [seon.print :as print]))
+            [seon.print :as print] [seon.ref :as ref]))
 
 ;; ---- identity --------------------------------------------------------------------
 
@@ -31,6 +31,29 @@
   [id] (keyword (str "task-" (str/replace id #"[^A-Za-z0-9-]" "-"))))
 
 ;; ---- the writer ------------------------------------------------------------------
+
+(defn- cited-text
+  "The text a declaration cites from: its plan and its instructions."
+  {:malli/schema [:=> [:cat :seon.task/declaration] :string]}
+  [decl] (str (:seon.task/plan decl) "\n" (:seon.task/instructions decl)))
+
+(defn- references-of
+  "The :seon.task/references a declaration states: the names its text cites (seon.ref/names),
+  derived and never authored; absent when it cites none."
+  {:malli/schema [:=> [:cat :seon.task/declaration] :map]}
+  [decl]
+  (let [ns (set (ref/names (cited-text decl)))] (if (seq ns) {:seon.task/references ns} {})))
+
+(defn citation-problems
+  "Each citation of decls' text that resolves to nothing on db, as {:task :name :problem
+  :unresolved}: answered beside the write, never a refusal (docs/references.md)."
+  {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.task/declaration]] [:vector :map]]}
+  [db decls]
+  (vec (for [decl decls
+             c (ref/references db (cited-text decl))
+             :when (not (ref/names-something? db c))]
+         {:task (task-id (:seon.task/ns decl) (:seon.task/name decl))
+          :name (or (:seon.ref/name c) (:seon.ref/path c)) :problem :unresolved})))
 
 (defn- cycle-in
   "A task id on a needs cycle among decls (plus the needs already on main, which cannot
@@ -66,7 +89,8 @@
                           (update :seon.task/branch #(or % (default-branch id))))
                 (seq needs) (assoc :seon.task/needs (mapv #(if (new %) % [:seon.task/id %]) needs))
                 evidence (assoc :seon.task/evidence (binding [*print-length* nil *print-level* nil] (pr-str evidence)))
-                (seq config) (merge config)))
+                (seq config) (merge config)
+                true (merge (references-of decl))))
             ids decls))))
 
 (defn execution-tx
@@ -86,7 +110,8 @@
      max-turns (assoc :seon.config.agent/max-turns max-turns))])
 
 (defn boot-tx
-  "Root's boot: its id for this process lifetime and its max-running dial."
+  "Root's boot: its id for this process lifetime and its max-running dial (merges at once,
+  :seon.config.merge/max-running, is written with the config in force, seon.config/facts)."
   {:malli/schema [:=> [:cat :string pos-int?] [:vector :map]]}
   [boot max-running]
   [{:seon.root/id :root :seon.root/boot boot :seon.config.agent/max-running max-running}])
@@ -270,7 +295,7 @@
 (def ^:private stated-attributes
   "The task attributes a declaration states (its members, config flattened), as stored."
   [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
-   :seon.task/kind :seon.task/evidence :seon.task/generation :seon.task/budget
+   :seon.task/kind :seon.task/evidence :seon.task/generation :seon.task/budget :seon.task/references
    :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
 
 (defn- file-refusal
@@ -304,7 +329,8 @@
   [db id decl]
   (let [e (eid db :seon.task/id id)
         now (d/pull db (conj stated-attributes {:seon.task/needs [:seon.task/id]}) e)
-        want (cond-> (merge (dissoc decl :seon.task/ns :seon.task/name :seon.task/config :seon.task/needs) (:seon.task/config decl))
+        want (cond-> (merge (dissoc decl :seon.task/ns :seon.task/name :seon.task/config :seon.task/needs) (:seon.task/config decl)
+                            (references-of decl))
                true (update :seon.task/branch #(or % (default-branch id)))
                (:seon.task/evidence decl) (update :seon.task/evidence #(binding [*print-length* nil *print-level* nil] (pr-str %))))
         old-needs (set (map :seon.task/id (:seon.task/needs now)))

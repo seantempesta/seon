@@ -22,18 +22,14 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [ring-chez.adapter :as adapter]
-            [seon.lib :as lib] [seon.contract :as contract] [seon.render.ui :as ui] [seon.web.html :as h]))
+            [seon.lib :as lib] [seon.contract :as contract] [seon.config :as config] [seon.render.ui :as ui] [seon.web.html :as h]))
 
 ;;; --- the files it serves ------------------------------------------------------------
 
-(defmacro ^:private checkout-public
-  "resources/public's absolute path in the checkout this binary was built from."
-  [] (.getAbsolutePath (java.io.File. "resources/public")))
-
 (def public-dir
-  "Where app.css and datastar.js are read: SEON_WEB_PUBLIC, else the checkout's
-  resources/public (read per request, so a style edit shows on reload)."
-  (or (System/getenv "SEON_WEB_PUBLIC") (checkout-public)))
+  "Where app.css and datastar.js are read (:seon.config.web/public-dir; read per request, so
+  a style edit shows on reload)."
+  (config/value :seon.config.web/public-dir))
 
 ;;; --- SSE framing ------------------------------------------------------------------------
 
@@ -79,7 +75,7 @@
      seon.root/clone! seon.root/interrupt! seon.root/kill!})
 
 (defn- live? {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
-  [a] (boolean (and a (not (#{:dead :killed} (:status a))))))
+  [a] (boolean (and a (not (#{:dead :killed :ended} (:status a))))))
 
 (defn requests
   "A UI call as root's requests: [[req target-agent] ...]. index {agent {:pid :branch
@@ -235,6 +231,7 @@
   {:malli/schema [:=> [:cat :map :seon.host/volatile :map] :map]}
   [st o m]
   (case (:op m)
+    :listener (do (step-out o :to-api {:op :web :listening (boolean (:listening st)) :port (:port st) :error (:error st)}) st)
     :open (let [k (inc (:next st 0))
                 st (-> st (assoc :next k) (assoc-in [:tabs k] {:ch (:ch m) :view (:view m)}) (update :stale conj k))]
             (step-out o :to-render (views-msg st))
@@ -290,8 +287,8 @@
     st))
 
 (defn web-proc
-  "Root's web proc (see the namespace doc). Args :port (127.0.0.1 only; system.edn says
-  7777, the dial SEON_WEB_PORT overrides it; 0: no listener). A listener that cannot bind is data in
+  "Root's web proc (see the namespace doc). Args :port (127.0.0.1 only; system.edn binds
+  :seon.config.web/port; 0: no listener). A listener that cannot bind is data in
   its ping (:listening false :error), never a failed boot."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:port "the port on 127.0.0.1 (0: none)"}
@@ -303,10 +300,13 @@
                               :stale (count (:stale st)) :patches (:patches st 0) :calls (:calls st 0)
                               :bytes (:bytes st 0) :error (:error st)})})
   ([args]
-   (let [port (or (some-> (System/getenv "SEON_WEB_PORT") parse-long) (:port args))
+   (let [port (:port args)
          http (a/chan 256)
          st {:port port :http http :tabs {} :stale #{} :waiting {} :bytes 0 :index {}
-             ::flow/in-ports {:http http}}]
+             ::flow/in-ports {:http http}}
+         ;; whether it listens is an event to the api's view (its first message, on its own
+         ;; in-port: init has no outputs), never a ping (owner, 2026-10-21)
+         _ (a/put! http {:op :listener})]
      (if (and port (pos? port))
        (let [server (try (adapter/run-server (handler http) {:port port :host "127.0.0.1" :strategy :fibers
                                                              :keep-alive-timeout-ms 600000 :write-timeout-ms 60000})

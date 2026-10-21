@@ -15,7 +15,7 @@
         ;; room for every answer the writer can owe while the api is not reading
         :chan-opts {:from-writer {:buf-or-n :bind/api-from-writer-buf}}
         :args {:view :bind/view :ext :bind/ext :back :bind/back :graph :bind/graph
-               :lease-base :bind/lease-base :system :bind/system :conn :bind/conn
+               :lease-base :bind/lease-base :system :bind/system :conn :bind/conn :stall-ms :bind/stall-ms
                :to-writer :bind/to-writer :events :bind/events}}
   :writer {:proc seon.writer/writer-proc
            :args {:conn :bind/conn :cfg :bind/store-cfg :durable? :bind/durable?
@@ -28,17 +28,22 @@
   ;; buffer, back-pressure on the writer if it lags
   :reconciler {:proc seon.reconcile/reconciler-proc
                :chan-opts {:main {:buf-or-n :bind/reconciler-buf}}
-               :args {:boot :bind/boot :judge :bind/judge}}
+               :args {:boot :bind/boot :judge :bind/judge :source :bind/source}}
   ;; root's web (lane W2): the render proc renders what changed into patches per view
   ;; (:compute, never waits); the web proc owns the listener and the tabs (:io). Port:
-  ;; 127.0.0.1 only; the dial SEON_WEB_PORT overrides it; 0 serves nothing
+  ;; 127.0.0.1 only, :seon.config.web/port; 0 serves nothing
   :render {:proc seon.render.proc/render-proc
            :args {:events-mult :bind/events-mult :graph :bind/graph :system :bind/system}}
   :web {:proc seon.web/web-proc
-        :args {:port 7777}}}
+        :args {:port :bind/web-port}}}
  :fx
  {:echo {:perform seon.fx/echo :lanes 1}
   :file {:perform seon.fx/write-file :lanes 1}
+  :source {:perform seon.fx/read-source :lanes 1}
+  :git {:perform seon.fx/git-commit :lanes 1}
+  :deps {:perform seon.fx/resolve-deps :lanes 1}
+  ;; the next generation: bin/build seon of the merges commit, ~45 s under the build lock
+  :build {:perform seon.fx/build :lanes 1}
   ;; the model provider is only root's: the agents never hold the key
   :model {:perform seon.fx/model :lanes :bind/model-lanes :ctx {:provider :bind/provider} :rate :bind/model-rate}}
  :conns

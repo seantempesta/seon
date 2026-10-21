@@ -14,7 +14,7 @@
   Root loads the HTTP transport and JSON before it forks anything, so every agent holds them
   compiled."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [jolt.http.core :as http] [clojure.data.json :as json]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [jolt.http.core :as http] [clojure.data.json :as json] [seon.config :as config]))
 
 (defn estimate-tokens
   "Tokens of text, estimated at 4 characters a token (the stand-in's usage)."
@@ -77,18 +77,14 @@
             (finally (http/s-close s))))
         (catch Throwable e (transport-error (or (ex-message e) (str (type e))) {:url url}))))))
 
-(def default-max-tokens
-  "A reply's token budget when the provider sets no :max-tokens."
-  2048)
-
 (defn request-body
   "The chat-completions request (data, before JSON) for request under an :openai-compat
-  provider, streamed with its usage: its model, the messages, its :max-tokens (default-max-tokens), and DeepSeek's
+  provider, streamed with its usage: its model, the messages, its :max-tokens, and DeepSeek's
   thinking mode and effort only when the provider sets them (absent: the provider's own
   default)."
   {:malli/schema [:=> [:cat :seon.model/provider :seon.model/request] :map]}
   [{:keys [model max-tokens thinking reasoning-effort]} request]
-  (cond-> {:model model :messages (:messages request) :max_tokens (or max-tokens default-max-tokens)
+  (cond-> {:model model :messages (:messages request) :max_tokens max-tokens
            ;; streamed: the reply arrives as it is made, so no clock has to guess its length
            :temperature 0 :stream true :stream_options {:include_usage true}}
     thinking (assoc :thinking {:type (name thinking)})
@@ -164,7 +160,7 @@
   {:malli/schema [:=> [:cat :seon.model/provider :seon.model/request]
                   [:or :seon.model/completion :seon.model/failure]]}
   [{:keys [base-url api-key-env max-tokens] :as provider} request]
-  (let [key (System/getenv api-key-env)]
+  (let [key (config/secret api-key-env)]
     (if (str/blank? key)
       (provider-error (str "the environment variable " api-key-env " is not set") nil {})
       (let [t0 (System/nanoTime)
@@ -177,7 +173,7 @@
           (not= 200 (:status r)) (provider-error (str "HTTP " (:status r)) (:status r)
                                                  (cond-> {:body (:body r)}
                                                    (retry-after-ms (:headers r)) (assoc :retry-after-ms (retry-after-ms (:headers r)))))
-          :else (parse-reply (:body r) ms (or max-tokens default-max-tokens)))))))
+          :else (parse-reply (:body r) ms max-tokens))))))
 
 (defn complete
   "The model's reply to request under provider."

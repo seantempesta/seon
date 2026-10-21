@@ -33,6 +33,7 @@
                  [:seon.task/evidence {:optional true} :seon.task/evidence]
                  [:seon.task/generation {:optional true} :seon.task/generation]
                  [:seon.task/budget {:optional true} :seon.task/budget]
+                 [:seon.task/references {:optional true} :seon.task/references]
                  [:seon.task/stuck {:optional true} :seon.task/stuck]]
  ;; its plan and proofs accumulated along :needs (derived by the reader)
  :seon.task/task [:and {:seon.render/html seon.render.ui/task-box} :seon.task/own [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]
@@ -83,7 +84,7 @@
                         [:ready [:set [:tuple :int :seon.task/id]]] [:ready-key :map]
                         [:live [:set :seon.attempt/id]] [:reap [:set :seon.attempt/id]] [:kill [:map-of :seon.attempt/id :keyword]]
                         [:judge [:set :seon.attempt/id]] [:merging [:set :seon.attempt/id]]]
- :seon.reconcile/step [:enum :ignored :done :spawned :started :worked :tested :read :diffed :merged :trained]
+ :seon.reconcile/step [:enum :ignored :done :spawned :started :worked :tested :read :diffed :merged :trained :landed :main-read :committed :commit-recorded :built]
  ;; a task and an attempt as Datahike pulls them (the readers' inputs)
  :seon.task/pulled [:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                     [:seon.task/plan :seon.task/plan] [:seon.task/execution [:enum :held :running :cancelled]]
@@ -123,7 +124,7 @@
                        [:scripted [:map [:kind [:= :scripted]] [:script :qualified-symbol]]]
                        [:openai-compat [:map [:kind [:= :openai-compat]] [:base-url :string] [:model :string]
                                         [:api-key-env :string]
-                                        [:max-tokens {:optional true} pos-int?]
+                                        [:max-tokens pos-int?]
                                         ;; DeepSeek's thinking mode and effort; absent: the provider's default
                                         [:thinking {:optional true} [:enum :enabled :disabled]]
                                         [:reasoning-effort {:optional true} [:enum :low :medium :high]]]]]

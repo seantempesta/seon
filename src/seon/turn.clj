@@ -64,7 +64,7 @@
   {:malli/schema [:=> [:cat :seon.task/id [:set :qualified-symbol]] :map]}
   [id gaps-before]
   (let [t0 (System/nanoTime)
-        run (agent/run-tests-forked cfg/TEST-TICKS)
+        run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks))
         tests-ms (ms-since t0)
         results (proofs/results run)
         db (agent/db)
@@ -92,14 +92,12 @@
 
 (defn- observed
   "The context inputs observe's map holds, beyond the proofs' results: every refusal of the
-  done rule, the failing assertions of each test it names, the run's own errors, the
-  branch's flagged definitions."
+  done rule, the failing assertions of each test it names, the run's own errors."
   {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
   [db {:keys [run refusals task]}]
   (let [proofs (:proofs (:seon.task/accumulated task))
         named (into (set proofs) (keep :symbol) refusals)]
-    {:refusals refusals :reds (proofs/red-reports run named) :run-errors (proofs/run-errors run)
-     :flagged (context/flagged db)}))
+    {:refusals refusals :reds (proofs/red-reports run named) :run-errors (proofs/run-errors run)}))
 
 (defn- act!
   "One model turn: the context of what was observed to the model, the reply's forms through

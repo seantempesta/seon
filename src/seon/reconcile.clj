@@ -7,30 +7,31 @@
   actions out as requests to the api, each action's facts written by the writer."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [clojure.edn :as edn] [seon.sock :as sock] [seon.step :as step]
-            [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm]
-            [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.reader :as reader]))
+            [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm] [seon.source :as source]
+            [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
+            [seon.config :as cfg]))
 
 (def default-max-turns
-  "Turns an attempt may take when its task sets no :seon.config.agent/max-turns."
-  8)
+  "Turns an attempt may take when its task sets no :seon.config.agent/max-turns: the config's."
+  (cfg/value :seon.config.agent/max-turns))
 
 (def default-max-running
-  "Parallel attempts when root's boot set no :seon.config.agent/max-running."
-  4)
+  "Parallel attempts when main's root entity states no :seon.config.agent/max-running: the config's."
+  (cfg/value :seon.config.agent/max-running))
 
 (def default-max-merging
-  "Merge attempts at once when root's boot set no :seon.config.merge/max-running. They run
-  together only when the definitions they change are disjoint (a merge train); 1 is git's
-  one-at-a-time merge queue."
-  8)
+  "Merge attempts at once when main's root entity states no :seon.config.merge/max-running:
+  the config's (1: merge trains stay off, DECISIONS). They run together only when the
+  definitions they change are disjoint (a merge train); 1 is git's one-at-a-time merge queue."
+  (cfg/value :seon.config.merge/max-running))
 
 (def merge-dials
-  "The merge dials' defaults, when the task sets none (:seon.config.merge/*)."
-  {:max-conflicts 3 :max-merge-turns 2})
+  "The merge dials' defaults, when the task sets none (:seon.config.merge/*): the config's."
+  {:max-conflicts (cfg/value :seon.config.merge/max-conflicts) :max-merge-turns (cfg/value :seon.config.merge/max-merge-turns)})
 
 (def default-budget
-  "Refinement chains a task's failures may attach when it declares no :seon.task/budget."
-  2)
+  "Refinement chains a task's failures may attach when it declares no :seon.task/budget: the config's."
+  (cfg/value :seon.config.task/budget))
 
 (defn refine?
   "Has task t budget left for one more refinement chain (its generation below its budget)?"
@@ -76,58 +77,6 @@
            (for [s (sort-by str uncontracted)] {:refusal :contract-gap :symbol s})
            (for [k (sort unmerged)] {:refusal :unmerged :key k})))))
 
-(defn- path
-  "span as a path reference, or nil, by the rule that tells a path from a symbol: no
-  whitespace, and an anchor (#heading), more than one /, or an extension after its last
-  / (`docs/DRAGONS.md#physics`, `src/seon/repl.clj`; `app.calc/add` is a symbol)."
-  {:malli/schema [:=> [:cat :string] [:maybe [:map [:kind [:= :path]] [:path :string] [:anchor {:optional true} :string]]]]}
-  [span]
-  (let [[p a] (str/split span #"#" 2)
-        last-part (peek (str/split (or p "") #"/" -1))]
-    (when (and (seq p) (not (re-find #"\s" span)) (not (#{\: \( \[ \{ \' \@ \^} (first span)))
-               (or (some? a) (< 1 (count (re-seq #"/" p))) (and (str/includes? p "/") (str/includes? last-part "."))))
-      (cond-> {:kind :path :path p} (seq a) (assoc :anchor a)))))
-
-(defn reference
-  "What one backticked span names, by one rule: a path (see path), else what edamame reads
-  from it (seon.reader, nothing evaluated): one keyword is {:kind :keyword}; one qualified
-  symbol {:kind :symbol}; one form {:kind :form} with the qualified symbols it names; else
-  (prose, an unqualified name, a literal, text that does not read) nil."
-  {:malli/schema [:=> [:cat :string]
-                  [:maybe [:map [:kind [:enum :symbol :keyword :path :form]] [:symbol {:optional true} :qualified-symbol]
-                           [:keyword {:optional true} :keyword] [:path {:optional true} :string] [:anchor {:optional true} :string]
-                           [:form {:optional true} :any] [:symbols {:optional true} [:vector :qualified-symbol]]]]]}
-  [span]
-  (or (path span)
-      (let [forms (reader/read-text span 'user)
-            [x & more] forms]
-        (when (and (seq forms) (empty? more))
-          (cond (keyword? x) {:kind :keyword :keyword x}
-                (qualified-symbol? x) {:kind :symbol :symbol x}
-                (coll? x) {:kind :form :form x
-                           :symbols (vec (distinct (filter qualified-symbol? (tree-seq coll? seq x))))})))))
-
-(defn spans
-  "The backticked spans of Markdown text outside ``` fenced blocks, in order."
-  {:malli/schema [:=> [:cat [:maybe :string]] [:vector :string]]}
-  [text]
-  (let [prose (str/join "\n" (:out (reduce (fn [{:keys [in?] :as st} l]
-                                              (if (str/starts-with? (str/triml l) "```")
-                                                (update st :in? not)
-                                                (cond-> st (not in?) (update :out conj l))))
-                                            {:in? false :out []} (str/split-lines (or text "")))))]
-    (mapv second (re-seq #"`([^`\n]+)`" prose))))
-
-(defn references
-  "The vars text references: each qualified symbol a backticked span names, alone or in a
-  form (reference), in order, once each. Keywords, paths and prose are not vars."
-  {:malli/schema [:=> [:cat [:maybe :string]] [:vector :qualified-symbol]]}
-  [text]
-  (vec (distinct (for [s (spans text)
-                       :let [r (reference s)]
-                       sym (case (:kind r) :symbol [(:symbol r)] :form (:symbols r) [])]
-                   sym))))
-
 (defn hairy
   "Is a merge too hairy to keep resolving, from measured facts: more conflicts than the
   dial; main deleted a var the task's plan or proofs reference; more model turns without
@@ -139,7 +88,7 @@
                   [:maybe [:map [:rule [:enum :too-many-conflicts :deleted-by-them-referenced :merge-turns]] [:reason :string]]]]}
   [{:keys [conflicts task merge-turns max-conflicts max-merge-turns]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated task)
-        refs (into (set proofs) (references plan))
+        refs (into (set proofs) (ref/names plan))
         deleted (for [{:keys [key kind]} conflicts
                       :when (and (= kind :deleted-by-them) (= :var (first key)) (refs (second key)))]
                   (second key))]
@@ -470,6 +419,15 @@
   (some-> (when (task/eid db :seon.root/id :root) (:seon.root/quiescent (d/pull db [:seon.root/quiescent] [:seon.root/id :root])))
           edn/read-string))
 
+(defn generation
+  "The next generation on db: the last merges commit the :build effect built or refused
+  ({:commit :checkout :binary :ms} or {:commit :ms :error}, written by the reconciler proc),
+  or nil."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.root/generation]]}
+  [db]
+  (some-> (when (task/eid db :seon.root/id :root) (:seon.root/generation (d/pull db [:seon.root/generation] [:seon.root/id :root])))
+          edn/read-string))
+
 ;; ---- queries, over one index (list it once: (index db)) -----------------------------
 
 (defn reconcile
@@ -596,7 +554,7 @@
         end (pull-end db aid)
         mp (pm/program main #{})
         unc (into #{} (for [[[k sym] e] (pm/program db #{})
-                            :when (and (= :var k) (= :fn (:kind e)) (nil? (:contract e)) (not (:flagged e)) (not= e (get mp [k sym])))]
+                            :when (and (= :var k) (= :fn (:kind e)) (nil? (:contract e)) (not= e (get mp [k sym])))]
                         sym))
         plan (:seon.task/plan (task/task db id))]
     (into (cas-tx aid :running :ended
@@ -656,13 +614,21 @@
       :read (one (request (assoc-in st [:flights aid :branch-db] r) aid :diffed
                           {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}}))
       ;; every attempt is a new agent: none is reused
-      :diffed (let [[st o1] (request st aid :ignored {:op :kill :id agent})
+      ;; root stops it because its attempt ended: its view says :ended, not :killed
+      :diffed (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
                     [st o2] (write st aid :done (judge-tx st f (:results f) (:branch-db f) (into #{} (map pr-str) (:ours r))))]
                 [st [o1 o2]])
       ;; each member's answer, as one write: merged at the train's t, behind (its merge task
       ;; runs again, a new agent), or refused: a failed attempt like any other (a refinement
       ;; chain while the budget lasts, else stuck)
-      :trained (one (write st aid :done
+      ;; the merged members' namespaces that are Seon's own source are written back: main's
+      ;; files after the train, committed on the merges branch (:git), the sha recorded on
+      ;; each merged attempt (the self-improvement loop: the next generation builds it)
+      :trained (let [merged (keep (fn [[m x]] (when (:merged? x) [m x])) (map vector (:members act) (:results r)))
+                     paths (vec (sort (distinct (mapcat (comp :files second) merged))))
+                     back? (and (:source st) (seq paths))]
+                 (one (write (cond-> st back? (assoc-in [:flights aid :writeback] {:files paths :members (mapv first merged)}))
+                             aid (if back? :landed :done)
                            (vec (mapcat (fn [{:keys [attempt task]} r]
                                           (let [problem (str "merge refused: " (:seon.error/message r))]
                                             (cond
@@ -674,7 +640,29 @@
                                                     {:seon.attempt/id attempt :seon.attempt/error (error-text r)})
                                               :else (into (cas-tx attempt :ended :bailed {:seon.attempt/error (error-text r)})
                                                           (stuck-tx (:idx st) attempt task problem)))))
-                                        (:members act) (:results r))))))))
+                                        (:members act) (:results r))))))
+      :landed (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))
+      :main-read (let [{:keys [members] paths :files} (:writeback f)
+                       files (source/files (:db r) paths)]
+                   (if (empty? files)
+                     (done st)
+                     (one (request st aid :committed
+                                   {:op :fx :kind :git :req {:dir (:root (:source st)) :branch (:branch (:source st)) :files files
+                                                             :message (source/commit-message members)}}))))
+      ;; the sha on each merged attempt, then the next generation built from it (:build)
+      :committed (let [sha (get-in r [:value :sha])
+                       m (cond sha {:seon.attempt/commit sha}
+                               (contract/error? r) {:seon.attempt/commit-error (:seon.error/message r)})]
+                   (if m
+                     (one (write (assoc-in st [:flights aid :commit] sha) aid (if sha :commit-recorded :done)
+                                 (vec (for [{:keys [attempt]} (:members (:writeback f))] (assoc m :seon.attempt/id attempt)))))
+                     (done st)))
+      :commit-recorded (one (request st aid :built {:op :fx :kind :build :req {:repo (:root (:source st)) :commit (:commit f)}}))
+      ;; the generation on main's root entity, built or refused: bin/root next starts its binary
+      :built (one (write st aid :done [{:seon.root/id :root
+                                        :seon.root/generation (edn-text (if (contract/error? r)
+                                                                          {:commit (:commit f) :ms (/ (:seon.fx/us r 0) 1000.0) :error (:seon.error/message r)}
+                                                                          (:value r)))}])))))
 
 (defn- quiet
   "Report quiescence positively, once per quiet spell: when no flight is in the air and no

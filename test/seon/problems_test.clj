@@ -6,6 +6,7 @@
             [datahike.api :as d] [clojure.core.async :as a]
             [seon.contract :as contract] [seon.db :as pdb] [seon.error :as err] [seon.agent :as agent]
             [seon.repl :as repl] [seon.proofs :as proofs] [seon.root :as root] [seon.agent-proc :as ap]
+            [seon.reconcile :as rec] [seon.sock :as sock]
             [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.cost :as cost]))
 
 (defn- refusal [op v]
@@ -42,13 +43,57 @@
       (is (= [1000 1999] [(:seon.error/first-ms r) (:seon.error/last-ms r)])))
     (testing "an unchanged window writes nothing"
       (is (= [] (second (err/flush-tx f @conn)))))
-    (testing "counts are absolute across windows, and a new observer adds to the stored count"
+    (testing "a written signature's later occurrences count in the fold, not on main; a new observer adds to the stored count"
       (let [[f tx] (err/flush-tx (reduce err/fold f (for [i (range 5)] (occ (refusal 'app/f i) :a1 3000))) @conn)]
-        (d/transact conn tx)
-        (is (= 1005 (:seon.error/count (err/record @conn s))))
+        (is (= [] tx))
+        (is (= 1005 (:count (get f (err/cause (refusal 'app/f 0))))) "the fold holds the true count")
+        (is (= 1000 (:seon.error/count (err/record @conn s))) "main still holds the written one")
+        (testing "the next write that has a signature to write carries the pending count"
+          (let [[_ tx] (err/flush-tx (err/fold f (occ (refusal 'app/h 0) :a1 3500)) @conn)]
+            (is (= #{1005 1} (set (map :seon.error/count tx))))))
         (let [[_ tx] (err/flush-tx (reduce err/fold {} (for [i (range 7)] (occ (refusal 'app/f i) :a9 4000))) @conn)]
           (d/transact conn tx)
-          (is (= 1012 (:seon.error/count (err/record @conn s)))))))))
+          (is (= 1007 (:seon.error/count (err/record @conn s)))))))))
+
+;; ---- a repeated defect is not a write (task seon.error/a-repeated-defect-writes-nothing) ------
+
+(deftest a-written-signature-is-not-written-again
+  ;; the window's write is one entity per signature that CHANGED (a-storm-is-one-write-per-window);
+  ;; a signature already on main whose only change is one more occurrence is the same fact,
+  ;; counted in the observer's fold: transacting its count is what made 41,709 commits in 70 s
+  (let [[_ conn] (pdb/test-branch!)
+        f (reduce err/fold {} (for [i (range 3)] (occ (refusal 'app/f i) :a1 (+ 1000 i))))
+        [f tx] (err/flush-tx f @conn)]
+    (is (= 1 (count tx)) "the first occurrence writes the signature")
+    (d/transact conn {:tx-data tx})
+    (let [[_ tx2] (err/flush-tx (reduce err/fold f (for [i (range 1000)] (occ (refusal 'app/f i) :a1 (+ 2000 i)))) @conn)]
+      (is (= [] tx2) "1,000 more occurrences of a written signature change no fact")
+      (let [f (reduce err/fold f (for [i (range 1000)] (occ (refusal 'app/f i) :a1 (+ 2000 i))))]
+        (is (= [3 1003] [(get-in (problems/report @conn) [:classes :eval :rows 0 :count])
+                         (get-in (problems/report @conn f) [:classes :eval :rows 0 :count])])
+            "the report reads the true count from the fold")))))
+
+(deftest a-defect-in-the-reconciler-does-not-feed-itself
+  ;; root's path in miniature: the reconciler proc's step throws on a commit (root's entity
+  ;; with no boot fact, what a refused boot left), the api folds the thrown error and writes
+  ;; it to main as one commit, and that commit is the reconciler's next input. A step that
+  ;; throws leaves the proc's state as it was, so it fails on every commit it is handed.
+  ;; Main's commits over ten rounds are the first record, and no more.
+  (let [[_ conn] (pdb/test-branch!)
+        _ (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/quiescent "{:t 1, :stuck []}"}]})
+        t0 (:max-tx @conn)
+        st (rec/reconciler-proc {:boot "boot-1"})
+        round (fn [f i]
+                (let [db @conn
+                      e (try (rec/reconciler-proc st :main {:t (:max-tx db) :ops [] :db db :ns (sock/now-ns)}) nil
+                             (catch Throwable e e))
+                      f (err/fold f (err/occurrence (agent/error-map e) :platform {} (+ 5000 i)))
+                      [f tx] (err/flush-tx f db)]
+                  (when (seq tx) (d/transact conn {:tx-data tx}))
+                  f))]
+    (is (= ['seon.task/entity-value] (map #(get-in % [:example :seon.error/operation]) (vals (reduce round {} (range 10)))))
+        "the step fails in the task owner's contract, each round")
+    (is (<= (- (:max-tx @conn) t0) 1) "ten failing commits, one record")))
 
 ;; ---- eval errors: the error map as data, on the branch, and counted across agents ------
 
@@ -106,20 +151,18 @@
 
 (defn- writes [outs] (vec (keep #(when (= :tx (:op %)) (:tx-data %)) (:to-writer outs))))
 
-(deftest a-platform-error-is-counted-once-per-window
+(deftest a-platform-error-is-written-once
   (let [msg {:op :error :pid :api :message "class java.lang.String cannot be cast to java.lang.Number (17)" :data nil}
         [st o1] (step (api) :back msg)
         [w] (writes o1)
         rid (get-in (first (:to-writer o1)) [:dest])
         [st outs] (reduce (fn [[st acc] _] (let [[st o] (step st :back msg)] [st (into acc (writes o))])) [st []] (range 500))
         _ (is (= [] outs) "one write in flight at a time: the storm only folds")
-        [_ o3] (step st :from-writer {:dest rid :r {:ok true :t 9}})
-        [w2] (writes o3)]
+        [_ o3] (step st :from-writer {:dest rid :r {:ok true :t 9}})]
     (is (= 1 (:seon.error/count (first w))))
     (is (= :platform (:seon.error/class (first w))))
     (is (= 'seon.root/api-proc (:seon.error/operation (first w))) "the failed proc is the producer")
-    (is (= 1 (count w2)) "the answered write is followed by one write carrying the whole storm")
-    (is (= 501 (:seon.error/count (first w2))))))
+    (is (= [] (writes o3)) "the answered write is followed by nothing: 500 repeats of a written signature are counted in the fold")))
 
 (deftest an-agent-death-is-recorded-with-its-cause
   (let [dir (str (System/getProperty "java.io.tmpdir") "/d2-death-" (System/nanoTime))
@@ -283,12 +326,12 @@
 
 ;; ---- the model call: thinking mode as a provider field, its cost and its empty reply as data ----
 
-(def ^:private deepseek {:kind :openai-compat :base-url "https://api.example" :model "deepseek-flash" :api-key-env "NONE"})
+(def ^:private deepseek {:kind :openai-compat :base-url "https://api.example" :model "deepseek-flash" :api-key-env "NONE" :max-tokens 2048})
 (def ^:private req {:messages [{:role "user" :content "hi"}] :task "t/a" :turn 0})
 
 (deftest the-request-sets-thinking-only-when-the-provider-does
   (is (= {:model "deepseek-flash" :messages (:messages req) :max_tokens 2048 :temperature 0 :stream true :stream_options {:include_usage true}}
-         (model/request-body deepseek req)) "absent: the provider's default, and max-tokens 2048; streamed with its usage")
+         (model/request-body deepseek req)) "thinking absent: the provider's default; max-tokens the provider's; streamed with its usage")
   (is (= {:type "disabled"} (:thinking (model/request-body (assoc deepseek :thinking :disabled) req))))
   (is (= ["high" 512] ((juxt :reasoning_effort :max_tokens) (model/request-body (assoc deepseek :reasoning-effort :high :max-tokens 512) req))))
   (is (contract/valid? :seon.model/provider (assoc deepseek :thinking :enabled :reasoning-effort :low))))

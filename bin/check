@@ -1,7 +1,7 @@
 #!/bin/zsh
 # bin/check [N] — the platform's end-to-end checks on target/seon (bin/build seon), each a
-# mode of seon.check: dragons, contracts, census, fx, system, mcp, threads, admit, record,
-# problems, smoke, program, robust, lifecycle, backpressure, hotreload, drain, orphan,
+# mode of seon.check: dragons, contracts, census, fx, config, system, mcp, threads, admit, record,
+# problems, smoke, program, robust, lifecycle, backpressure, hotreload, drain, idle, orphan,
 # durable, window, swarm N, e2e tasks and scenarios, resume, scale N (default N = 100).
 # bin/check MODE [ARGS] runs one mode.
 #
@@ -14,12 +14,16 @@
 # the step (SEON_RUN: <step>-<time>-<id>); the recovery steps (durable, window, resume) kill
 # and reopen that same store on the same branch. The store is kept, every branch with it.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-# one full check at a time on this machine, every lane's (each boots ~34 roots and up to 100
-# agents): a full run takes the check lock and runs niced; a single mode does not
-if [[ -z ${SEON_CHECK_LOCKED:-} && ( -z ${1:-} || ${1} =~ ^[0-9]+$ ) ]]; then
-  SEON_CHECK_LOCKED=1 exec nice -n 15 /usr/bin/lockf -k "$ROOT/../check.lock" "$0" "$@"
+# a full run is niced; full runs from different worktrees run in parallel (no lock: each
+# uses its own stores under its run directory and kernel-assigned ports; owner, 2026-10-21)
+if [[ -z ${SEON_CHECK_NICED:-} && ( -z ${1:-} || ${1} =~ ^[0-9]+$ ) ]]; then
+  SEON_CHECK_NICED=1 exec nice -n 15 "$0" "$@"
 fi
 . "$ROOT/bin/env"
+# a check's roots serve no dashboard: system.edn's :web :port 7777 is the owner's, and a
+# step's root that found it free took it (the owner's browser then showed a throwaway check
+# root). A run that wants one names its port: SEON_WEB_PORT=7790 bin/check web
+export SEON_WEB_PORT=${SEON_WEB_PORT:-0}
 S=$ROOT/target/seon
 [[ -x $S ]] || { echo "check: no target/seon; run bin/build seon" >&2; exit 1 }
 run() { (cd "$ROOT/target" && ./seon "$@" 2>&1) }
@@ -47,23 +51,38 @@ step() {
 
 echo "== seed (the one store every step branches from)"; step seed "" run seed 2000
 echo "== dragons"; step dragons "" "$ROOT/bin/dragons"
+echo "== lmdb-kill (a writer SIGKILLed inside a txn while this process holds the env; the next writes commit: robust locks)"
+step lmdb-kill "" "$ROOT/target/lmdb-kill" "$OUT/lmdb-kill.mdb"
 echo "== contracts"; step contracts ":contracted|:uncontracted|:result" run contracts
 echo "== census (no [:fn] without :gen; mg/check on every pure contract, in the release binary)"
-step census ":generated|:failed \[\]|:result" run census
+# in K shards at once, each a process checking every Kth contracted var (seon.check/census);
+# each shard's exit status counts. K = 4 until the config file holds it (lane CONFIG).
+K=4; CP=()
+for i in $(seq 0 $((K-1))); do run census $i/$K > "$OUT/census-$i.log" 2>&1 & CP+=($!); done
+for i in $(seq 0 $((K-1))); do
+  wait ${CP[$((i+1))]}; st=$?
+  grep -E ":generated|:failed \[\]|:result" "$OUT/census-$i.log"
+  (( st == 0 )) || { FAILED+=("census-$i (exit $st, expected 0, $OUT/census-$i.log)"); echo "FAILED census-$i (exit $st, expected 0)"; }
+done
 echo "== fx (an effect from an agent through its owner proc)"; step fx ":unknown|:test-fork|^FX " run fx 200
+echo "== config (the config in force as facts on main; an agent reads them from its branch)"; step config "" run config
 echo "== system (root's procs from resources/seon/system.edn; apply! touches only what changed)"; step system "" run system
 echo "== mcp (an outside MCP client evals in an agent and as root; both recorded :outside)"; step mcp "" run mcp-proof
 echo "== threads (the fork server, an agent and its clone stay single-threaded: no GC sweepers where we fork)"; step threads "" run threads
 echo "== admit"; step admit "" run admit
 echo "== record"; step record "" run record
-echo "== problems (each class provoked, then read back from main by my.root/problems)"; step problems "" env SEON_STALL_MS=1000 zsh -c "cd '$ROOT/target' && ./seon problems"
+echo "== problems (each class provoked, then read back from main by my.root/problems)"; step problems "" run problems
 echo "== smoke"; step smoke "^merge|^killed|spawned|ready|^SMOKE " run smoke
 echo "== program"; step program "" run program
 echo "== robust"; step robust "" run robust
-echo "== lifecycle (start!/stop! x10 in one process; pause/resume)"; step lifecycle "LIFECYCLE" run lifecycle 10
+# no web listener: the adapter's acceptor and sweeper outlive stop! (task seon.web.edn
+# web-server-threads-are-joined-at-stop), so root's exact thread count is checked without it
+echo "== lifecycle (start!/stop! x10 in one process, root's threads exactly as declared; pause/resume)"; step lifecycle "LIFECYCLE" env SEON_WEB_PORT=0 zsh -c "cd '$ROOT/target' && ./seon lifecycle 10"
 echo "== backpressure"; step backpressure "" run backpressure 200
 echo "== hotreload"; step hotreload "" run hotreload
 echo "== drain"; step drain "" run drain 32
+echo "== idle (no beat: an idle root with a tab open steps nothing; a spawn and a commit still reach the tab)"
+step idle ":steps-at-idle|:bytes-at-idle|reached-tab|^IDLE " env SEON_WEB_PORT=$((20000 + $$ % 20000)) zsh -c "cd '$ROOT/target' && ./seon idle 5000"
 
 echo "== orphan (root dies under busy agents, a clone and a test child)"
 SEON_RUN=orphan run orphan > "$OUT/orphan.log" 2>&1
@@ -84,14 +103,18 @@ else echo "PASS none of $PIDS outlived root"; fi
 # the recovery steps kill root and reopen the one store on the branch it worked on
 echo "== durable (root writes its branch and SIGKILLs itself; a new root reopens the store and recovers it)"
 EXPECT=137 step durable-write "" run durable-write durable; step durable-read "" run durable-read durable
-echo "== window (SEON_FLUSH_MS=1000: answered unflushed, flushed within the window; :flush? waits)"
-EXPECT=137 step window-write "" env SEON_FLUSH_MS=1000 zsh -c "cd '$ROOT/target' && ./seon window-write window"
-step window-read "" env SEON_FLUSH_MS=1000 zsh -c "cd '$ROOT/target' && ./seon window-read window"
+echo "== window (root's :flush-ms 1000: answered unflushed, flushed within the window; :flush? waits)"
+EXPECT=137 step window-write "" run window-write window
+step window-read "" run window-read window
+echo "== lease (eid-lease 50: an agent past its block of entity ids is refused, typed; the next agent's ids are never minted)"
+step lease "" run lease --set :seon.config.store/eid-lease=50
 echo "== swarm $N"; step swarm ":merged|:tasks-done|:fresh" run swarm $N
 echo "== tasks: calc (6-task graph, cancel), scenarios (conflict, semantic, hairy, newns, sibling), swarm 20 over 5 shared vars"
 step e2e-calc "" run e2e calc
 for k in conflict semantic hairy newns sibling; do step e2e-$k "" run e2e scenario $k; done
 step e2e-swarm "" run e2e swarm 20 8
+echo "== loop (Seon's own source is main's program: a task changes seon.fixtures/generation, its merge is written back, committed on a clone's jolt/seon-merges and that commit built)"
+step e2e-loop ":source|:commits|:generation|^NEXT|LOOP" run e2e loop "$OUT/loop" --set ":seon.config.source/generations-dir=\"$OUT/loop/generations\""
 echo "== stuck (add always wrong: refinement chains until its budget is spent, then a stuck fact naming what it blocks; the run ends on quiescence)"; step e2e-stuck ":stuck|quiet-after" run e2e stuck
 echo "== resume (root SIGKILLed mid-graph; a new root finishes it)"
 SEON_RUN=resume1 run e2e resume resume > "$OUT/resume1.log" 2>&1; step resume "" run e2e resume2 resume

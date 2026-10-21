@@ -15,22 +15,23 @@
     wrappers and their compiled validators copy-on-write.
   - `arm!` is the same for one var: an agent's `defn` with `:malli/schema` metadata is
     armed when it is defined, and main's program when it loads.
-  - `SEON_GUARANTEES=off` (read once, at load) installs no wrapper and no recording
-    transaction: the same binary measured with the guarantees off; `=contracts` arms the
-    wrappers without the recording transaction."
+  - `:seon.config.contract/guarantees :off` (the config, read once at load) installs no
+    wrapper and no recording transaction: the same binary measured with the guarantees off;
+    `:contracts` arms the wrappers without the recording transaction."
   (:refer-clojure :exclude [defn defn-])
   (:require [malli.core :as m] [malli.registry :as mr] [clojure.edn :as edn]
-            [clojure.java.io :as io] [clojure.string :as str] [seon.profile :as profile] [seon.print :as print]))
+            [clojure.java.io :as io] [clojure.string :as str] [seon.profile :as profile] [seon.print :as print]
+            [seon.config :as config]))
 
 (def on?
-  "Are the contracts on in this process (SEON_GUARANTEES, read once at load)? off: no
-  wrapper and no recording; contracts: wrappers, no recording transaction (for measuring
-  the two apart); anything else: both."
-  (not= "off" (System/getenv "SEON_GUARANTEES")))
+  "Are the contracts on in this process (:seon.config.contract/guarantees)? :off: no
+  wrapper and no recording; :contracts: wrappers, no recording transaction (for measuring
+  the two apart); :on: both."
+  (not= :off (config/value :seon.config.contract/guarantees)))
 
 (def record?
-  "Does each eval request write its recording transaction (SEON_GUARANTEES on)?"
-  (not (#{"off" "contracts"} (System/getenv "SEON_GUARANTEES"))))
+  "Does each eval request write its recording transaction (:seon.config.contract/guarantees :on)?"
+  (= :on (config/value :seon.config.contract/guarantees)))
 
 ;; ---- the predicate pack: host objects with no data form ------------------------------
 ;; Named predicate schemas (malli simple schemas), so a contract names them like any
@@ -64,20 +65,27 @@
 
 ;; ---- the registry ------------------------------------------------------------------
 
+(def schemas-dir
+  "Where the platform's schema resources live, relative to the checkout: the files the
+  build compiles in, and the schema resources seon.source imports and writes back."
+  "resources/seon/schemas")
+
 (clojure.core/defn schema-forms
   "Every named schema form of the platform: the maps in resources/seon/schemas/*.edn,
   read when this namespace compiles (the build host has the directory; a built binary
   carries the forms)."
   {:malli/schema [:=> [:cat] [:map-of :qualified-keyword :any]]}
   []
-  (let [dir (io/file (or (System/getenv "JOLT_PWD") ".") "resources/seon/schemas")]
+  (let [dir (io/file (config/checkout) schemas-dir)]
     (reduce merge {} (for [f (sort-by #(.getName %) (file-seq dir))
                            :when (.endsWith (.getName f) ".edn")]
                        (edn/read-string (slurp f))))))
 
-(clojure.core/defn- compile-all
+(clojure.core/defn registry-of
   "A registry whose every named form is compiled once (names resolve to the compiled
-  schema of their own name, compiled on first reference)."
+  schema of their own name, compiled on first reference). A form that does not compile
+  (malli's :malli.core/invalid-schema, an unresolvable name among them) throws malli's
+  ex-info."
   {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :seon.host/registry]}
   [forms]
   (let [compiled (volatile! {})
@@ -100,8 +108,13 @@
   [] (list 'quote (schema-forms)))
 
 (def forms (baked-forms))
-(def registry (compile-all forms))
-(def options {:registry registry})
+(def registry (registry-of forms))
+
+(def options
+  "What every contract compiles against: the built registry, under malli's dynamic registry,
+  so an evaluation that binds malli.registry/*registry* (an agent's REPL, to its branch's
+  schemas: seon.program/schema-registry) compiles against that population instead."
+  {:registry (mr/composite-registry (mr/dynamic-registry) registry)})
 
 (clojure.core/defn schema
   "The compiled schema of a form or a registered name, in the platform registry."
