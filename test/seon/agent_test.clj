@@ -36,10 +36,14 @@
 (deftest a-relative-path-reads-from-the-source-root
   ;; task seon.agent/an-agent-works-in-its-source-root: a program file is read by the path
   ;; it has in its repository, as at any Clojure REPL started in the project
-  (let [[rel abs] (in-agent ["(count (slurp \"src/seon/reconcile.clj\"))"
-                             (str "(count (slurp " (pr-str (.getCanonicalPath (java.io.File. "src/seon/reconcile.clj"))) "))")])]
+  (let [[rel abs wrote] (in-agent ["(count (slurp \"src/seon/reconcile.clj\"))"
+                                   (str "(count (slurp " (pr-str (.getCanonicalPath (java.io.File. "src/seon/reconcile.clj"))) "))")
+                                   "(do (spit \"src/seon/written_by_an_agent.clj\" \"(ns x)\") (slurp \"src/seon/written_by_an_agent.clj\"))"])]
     (is (not= :err (:tag rel)) "the relative path reads")
-    (is (= (:printed abs) (:printed rel)) "and is the source root's file")))
+    (is (= (:printed abs) (:printed rel)) "and is the source root's file")
+    ;; an agent's direct edit of the shared source root stopped root's next boot (2026-10-21)
+    (is (= "\"(ns x)\"" (:printed wrote)) "the agent writes and reads back its own file")
+    (is (not (.exists (java.io.File. "src/seon/written_by_an_agent.clj"))) "the source root never sees it")))
 
 (defn- started "The line the child writes as test var v starts." {:malli/schema [:=> [:cat :string] :string]}
   [v] (pr-str {:seon.test/started v}))
