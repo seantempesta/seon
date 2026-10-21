@@ -37,18 +37,18 @@
   (let [[c conn] (pdb/test-branch!)
         sid (get-in c [:store :id])
         lease (pdb/lease-base conn)
-        ceiling (+ lease cfg/EID-LEASE)
+        ceiling (+ lease (cfg/value :seon.config.store/eid-lease))
         notes (fn [n tag] (vec (for [i (range n)] {:note/text (str tag i)})))]
     (try
       (pdb/lease! c lease)
-      (let [r1 (dw/apply! conn {:tx-data (notes (- cfg/EID-LEASE 2) "a")})
+      (let [r1 (dw/apply! conn {:tx-data (notes (- (cfg/value :seon.config.store/eid-lease) 2) "a")})
             before (:db-after r1)
             r2 (dw/apply! conn {:tx-data (notes 5 "b")})
             e (pdb/lease-spent r2 lease)]
         (testing "the lease mints up to its end"
           (is (map? r1))
           (is (= (- ceiling 2) (:max-eid before)))
-          (is (= {:from lease :used (- cfg/EID-LEASE 2) :of cfg/EID-LEASE} (pdb/lease-use before lease))))
+          (is (= {:from lease :used (- (cfg/value :seon.config.store/eid-lease) 2) :of (cfg/value :seon.config.store/eid-lease)} (pdb/lease-use before lease))))
         (testing "past it the transaction is refused with the typed error, nothing applied"
           (is (not (map? r2)))
           (is (= :seon.db/lease-spent (:seon.error/type e)))
@@ -69,7 +69,7 @@
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)]
     (try
       (let [{:keys [used-bytes map-bytes]} (pdb/map-use cfg)]
-        (is (= (* 1048576 cfg/LMDB-MB) map-bytes))
+        (is (= (cfg/value :seon.config.store/lmdb-map-bytes) map-bytes))
         (is (< 0 used-bytes map-bytes))
         (d/transact conn [{:note/text (apply str (repeat 100000 "x"))}])
         (pdb/sync! cfg)
@@ -83,7 +83,7 @@
   (let [[c conn] (pdb/test-branch!)
         sid (get-in c [:store :id])
         lease (pdb/lease-base conn)
-        ceiling (+ lease cfg/EID-LEASE)
+        ceiling (+ lease (cfg/value :seon.config.store/eid-lease))
         theirs (+ ceiling 10)
         new-id (fn [r] (d/q '[:find ?e . :in $ ?t :where [?e :note/text ?t]] (:db-after r) "mine"))]
     (try

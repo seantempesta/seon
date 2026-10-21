@@ -2,7 +2,7 @@
   "Root's verbs on tasks (lanes R1 and M1's proto.agents.root): write desired state on main;
   the reconciler proc does the rest. Each takes root's system (seon.root/start!)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.problems :as problems] [clojure.java.io :as io]))
+  (:require [seon.contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.problems :as problems] [clojure.java.io :as io] [seon.config :as config]))
 
 (defn create!
   "Write task declarations as held tasks. Answers the writer's answer, or the refusal."
@@ -22,10 +22,10 @@
   [sys ids] @(root/transact-main! sys (task/execution-tx ids :cancelled)))
 
 (defn task-files
-  "The task files under dir (resources/seon/tasks in this checkout by default), read:
+  "The task files under dir (:seon.config.root/tasks-dir by default), read:
   {owning-ns declarations or refusal}. A file's name is its owning namespace."
   {:malli/schema [:function [:=> [:cat] [:map-of :symbol :any]] [:=> [:cat :string] [:map-of :symbol :any]]]}
-  ([] (task-files (str (or (System/getenv "JOLT_PWD") ".") "/resources/seon/tasks")))
+  ([] (task-files (config/value :seon.config.root/tasks-dir)))
   ([dir]
    (into (sorted-map)
          (for [f (sort-by #(.getName %) (or (seq (.listFiles (io/file dir))) []))

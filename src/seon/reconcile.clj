@@ -8,29 +8,30 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [clojure.edn :as edn] [seon.sock :as sock] [seon.step :as step]
             [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm]
-            [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]))
+            [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
+            [seon.config :as cfg]))
 
 (def default-max-turns
-  "Turns an attempt may take when its task sets no :seon.config.agent/max-turns."
-  8)
+  "Turns an attempt may take when its task sets no :seon.config.agent/max-turns: the config's."
+  (cfg/value :seon.config.agent/max-turns))
 
 (def default-max-running
-  "Parallel attempts when root's boot set no :seon.config.agent/max-running."
-  4)
+  "Parallel attempts when main's root entity states no :seon.config.agent/max-running: the config's."
+  (cfg/value :seon.config.agent/max-running))
 
 (def default-max-merging
-  "Merge attempts at once when root's boot set no :seon.config.merge/max-running. They run
-  together only when the definitions they change are disjoint (a merge train); 1 is git's
-  one-at-a-time merge queue."
-  8)
+  "Merge attempts at once when main's root entity states no :seon.config.merge/max-running:
+  the config's (1: merge trains stay off, DECISIONS). They run together only when the
+  definitions they change are disjoint (a merge train); 1 is git's one-at-a-time merge queue."
+  (cfg/value :seon.config.merge/max-running))
 
 (def merge-dials
-  "The merge dials' defaults, when the task sets none (:seon.config.merge/*)."
-  {:max-conflicts 3 :max-merge-turns 2})
+  "The merge dials' defaults, when the task sets none (:seon.config.merge/*): the config's."
+  {:max-conflicts (cfg/value :seon.config.merge/max-conflicts) :max-merge-turns (cfg/value :seon.config.merge/max-merge-turns)})
 
 (def default-budget
-  "Refinement chains a task's failures may attach when it declares no :seon.task/budget."
-  2)
+  "Refinement chains a task's failures may attach when it declares no :seon.task/budget: the config's."
+  (cfg/value :seon.config.task/budget))
 
 (defn refine?
   "Has task t budget left for one more refinement chain (its generation below its budget)?"

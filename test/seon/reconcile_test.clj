@@ -7,7 +7,7 @@
             [seon.db :as pdb]
             [seon.task :as task]
             [seon.reconcile :as r]
-            [seon.template :as tpl] [seon.problems :as problems] [seon.sock :as sock] [clojure.edn]
+            [seon.template :as tpl] [seon.problems :as problems] [seon.sock :as sock] [clojure.edn] [seon.contract :as contract]
             [clojure.string :as str] [clojure.set]))
 
 (defn- empty-db [] @(second (pdb/test-branch!)))
@@ -400,3 +400,26 @@
           (is (= ["demo/add"] (keep #(get-in % [:req :opts :task]) outs4)))
           (is (not (:quiet st4)))
           (is (nil? (report-in outs4))))))))
+
+(def ^:private held-why "branch :demo/a is held by live agent a9")
+
+(deftest a-refused-spawn-writes-a-refused-attempt
+  ;; root refuses the spawn (the branch is held, or too many live agents): the refusal is
+  ;; the attempt, written on main, and the next pass starts the task again
+  (let [db (db-of [(decl "a")])
+        [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1"}) :main {:t (:max-tx db) :ops [] :db db :ns (sock/now-ns)})
+        asked (first (filter #(= :spawn (get-in % [:req :op])) (:to-api outs)))
+        refusal (contract/error :seon.root/refused 'seon.root/spawn! held-why {:branch :demo/a :agent :a9})
+        [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r refusal})
+        written (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= :write (get-in % [:req :op])) (:to-api outs2))))
+        attempt (first (filter #(= "demo/a#1" (:seon.attempt/id %)) written))]
+    (is (some? asked) "the first pass asks for the spawn")
+    (is (= :refused (:seon.attempt/status attempt)) "the refusal is written as the attempt")
+    (is (= held-why (:seon.attempt/reason attempt)) "with root's reason")
+    (is (= [(spawn "a" 2)] (r/reconcile (d/db-with db written))) "the next pass starts the task again")))
+
+(deftest quiescence-names-a-task-that-cannot-start
+  ;; a refused attempt is a root cause at quiescence, naming what it blocks
+  (let [db (db-of [(decl "a") (decl "b" :needs ["a"])]
+                  :extra (concat (attempt "a" 1 :refused) [{:seon.attempt/id "demo/a#1" :seon.attempt/reason held-why}]))]
+    (is (= [{:task "demo/a" :cause held-why :attempt "demo/a#1" :blocks ["demo/b"]}] (r/stuck (r/index db))))))

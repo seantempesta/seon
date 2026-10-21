@@ -8,11 +8,11 @@
   path proto reaches: a plain value, a result handle, a budget and a width. Render pairs,
   databases, routes, cursors, the core printer's fallback text and the stored artifacts
   stay behind (notes BAGGAGE (proto/BAGGAGE.md))."
-  (:require [seon.print.emit :as emit]))
+  (:require [seon.print.emit :as emit] [seon.config :as config]))
 
 ;;; Tokens (Seon's `seon.ai.tokens`, shipped prior): the one sizer.
 
-(def ^:private chars-per-token 3.2)
+(def ^:private chars-per-token (config/value :seon.config.ai/chars-per-token-prior))
 
 (defn estimate
   "Estimated tokens of `text`."
@@ -26,10 +26,12 @@
   [tokens]
   (long (Math/floor (* tokens chars-per-token))))
 
-;;; Allocation dials (Seon's shipped `:seon.config.render.agent/*`).
+;;; Allocation dials (the config's `:seon.config.render.agent/*`, ported from Seon's).
 
 (def ^:private dials
-  {:whole-width 24 :max-name 256 :max-number-digits 32 :sort-bound 64})
+  {:whole-width (config/value :seon.config.render.agent/whole-width) :max-name (config/value :seon.config.render.agent/max-name)
+   :max-number-digits (config/value :seon.config.render.agent/max-number-digits)
+   :sort-bound (config/value :seon.config.render.agent/sort-bound)})
 
 (def ^:private profile-id :seon.render.profile/agent)
 

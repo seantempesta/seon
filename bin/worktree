@@ -89,9 +89,25 @@ if [[ -d $MAIN/target ]]; then
   done
 fi
 
+# its own ports (config/local.edn, from the one registry) and its own MCP server: .mcp.json names
+# this worktree's bin/mcp, which reaches this worktree's root (kept out of git status)
+PORTS=$("$WT/bin/ports")
+cat > "$WT/.mcp.json" <<MCP
+{
+  "mcpServers": {
+    "seon": {
+      "type": "stdio",
+      "command": "$WT/bin/mcp",
+      "args": []
+    }
+  }
+}
+MCP
+git -C "$WT" update-index --skip-worktree .mcp.json
+
 print "worktree $WT on $BR (from $BASE)"
 print "  build:  cd $WT && nice -n 15 /usr/bin/lockf -k ~/src/seon-jolt/build.lock bin/build seon"
 print "  test:   bin/test; bin/check (one store per run, $WT/target/check/<time>/store, each step a branch)"
-print "  root:   bin/root (start | status | stop), on this worktree's own ports: $("$WT/bin/ports")"
+print "  root:   bin/root (start | status | stop), on this worktree's own ports: $PORTS"
 print "  land:   when bin/check is green, cherry-pick onto main by explicit paths"
 print "  remove: $MAIN/bin/worktree --remove $NAME"

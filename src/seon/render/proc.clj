@@ -26,7 +26,8 @@
   (:require [seon.contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str] [clojure.edn :as edn]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.ai :as ai]
-            [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.context :as context] [seon.print :as print]))
+            [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.context :as context] [seon.print :as print]
+            [seon.config :as config]))
 
 (def EVENT-CAP "Events the stream keeps." 60)
 (def SERIES-CAP "Points a sparkline keeps: the newest changes (a writer batch, a fork, a main commit)." 60)
@@ -141,6 +142,7 @@
      :events (:events st []) :events-seen (:ev-seq st 0)
      :web {:tabs (:tabs st 0)}
      :retire-ms RETIRE-MS
+     :config (:config st)
      :now-ms now-ms}))
 
 ;;; --- main --------------------------------------------------------------------------------
@@ -185,6 +187,8 @@
              ;; one point per main commit this proc read
              :datoms-series (vec (take-last SERIES-CAP (conj (:datoms-series st []) (double n))))
              :main-db db :tasks tasks :attempts attempts
+             ;; the config in force, as root wrote it on main's root entity (one pull)
+             :config (config/from-db db)
              ;; the problems recorded on main (D2's one read; ~2.7 ms, costs the problems)
              :recorded (problems/report db)
              :task-rows (task-rows tasks attempts (reconcile/index db))

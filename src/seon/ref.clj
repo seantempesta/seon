@@ -7,18 +7,12 @@
   paragraph boundaries) in one pass over the text."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.reader :as reader]
-            [clojure.string :as str] [clojure.java.io :as io] [datahike.api :as d]))
-
-(defmacro ^:private baked-roots
-  "The checkout's top-level entries, read when this namespace compiles (as seon.contract
-  bakes the schema forms): a span whose first segment is one of them is a path."
-  []
-  (into #{} (remove #(str/starts-with? % "."))
-        (.list (io/file (or (System/getenv "JOLT_PWD") ".")))))
+            [clojure.string :as str] [clojure.java.io :as io] [datahike.api :as d] [seon.config :as cfg]))
 
 (def roots
-  "The checkout's top-level entries (docs, src, AGENTS.md, ...): the bases a path is cited from."
-  (baked-roots))
+  "The checkout's top-level entries (docs, src, AGENTS.md, ...), read when this namespace
+  loads: the bases a path is cited from."
+  (into #{} (remove #(str/starts-with? % ".")) (.list (io/file (cfg/checkout)))))
 
 ;; ---- the scan: blocks, then the inlines of the blocks that hold prose ---------------------
 
@@ -483,7 +477,7 @@
   [db {:seon.ref/keys [name path]}]
   (boolean (cond (symbol? name) (seq (d/datoms db :avet :var/name name))
                  (keyword? name) (contains? contract/forms name)
-                 :else (.isFile (io/file path)))))
+                 :else (.isFile (io/file (cfg/checkout) path)))))
 
 (defn- alias-form?
   "Is citation c a qualified symbol whose namespace part names no namespace on db or in this

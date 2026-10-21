@@ -101,6 +101,8 @@ All work is a task in `resources/seon/tasks/<owning-ns>.edn`, loaded with `my.ro
 - `:seon.task/needs`: what must land first;
 - references, derived, never hand-kept: the plan's own citations (links to wiki sections, backticked names, line citations), read by the one parser (v1's `seon.ref`) and stored on the task, as v1's `:seon.task/references` were. They pull those sections and that code into the task's context, and the names it changes are its write set.
 
+**A lane's brief is its task** (owner, 2026-10-21: process, not whim). Root writes everything a lane needs into the task entry (the plan with its citations, the proofs, the needs) and into the wiki sections it cites; the brief only names the task, its worktree, and how to read its context. What a lane learns goes back into the task or the section it concerns, never only into a report, so the next agent's context carries it without anyone choosing to read it.
+
 The order is **delete first, then foundations, then fixes**. Anything shared by several tasks (an interface, a schema, a pillar's API) lands first as its own small contract task.
 
 ### At most three lanes, on disjoint work

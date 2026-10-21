@@ -17,7 +17,7 @@ open http://127.0.0.1:7777/
 - `./seon web N light` gives each agent one evaluation only, with no test forks (for the size sweep).
 - `./seon web N calc` or `./seon web N swarm M` adds tasks the reconciler works, with real
   attempt agents and the scripted model.
-- It serves until stdin closes. The port is `SEON_WEB_PORT` (default 7777), on 127.0.0.1 only.
+- It serves until stdin closes. The port is `:seon.config.web/port` (7777; `SEON_WEB_PORT` overrides it through the config file), on 127.0.0.1 only.
   A port that cannot be bound shows as data in the `:web` proc's health (`:listening false :error`).
 - Every root boot serves it. That includes checks and tests: the first root gets the port and
   later ones report `:listening false`.
