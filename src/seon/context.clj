@@ -33,12 +33,23 @@
      "Your branch sees only its own changes. A merge task's branch has main merged in: its :unmerged entries"
      "each show :base, :ours and :theirs. Resolve one by re-defining the var with the content both sides need,"
      "or (my.branch/resolve! 'ns/var :theirs) / (my.branch/resolve! 'ns/var) to keep yours; (my.branch/unmerged) lists them."
-     ":evidence, when present, is what a failed merge measured: its conflicts and red proofs."]))
+     ":evidence, when present, is why an earlier attempt failed (:problem) and what it measured: conflicts, red proofs."
+     "Every section is measured now, by the same judge that decides done:"
+     ":refused lists what keeps you from done beyond your red proofs: :regression (green on main, red here: your change broke it),"
+     ":stray-red (a red test that is no task's proof), :contract-gap (a function you defined without a :malli/schema),"
+     ":unmerged, :no-proofs. :test-run is the test run itself failing (a timeout, a dead fork): no test result is real until it runs."
+     ":flagged are definitions on your branch with no recorded source: they will not merge until you evaluate their defn again."
+     ":your-last-reply says what happened to your reply: cut at the token limit, or delimiters the reader repaired."]))
 
 (defn source-of
   "The recorded source of var sym on db (:var/src), or nil."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :string]]}
   [db sym] (d/q '[:find ?s . :in $ ?v :where [?e :var/name ?v] [?e :var/src ?s]] db sym))
+
+(defn flagged
+  "The definitions on db with no recorded source (:var/flagged): they do not merge."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :qualified-symbol]]}
+  [db] (vec (sort-by str (d/q '[:find [?n ...] :where [?e :var/flagged true] [?e :var/name ?n]] db))))
 
 (defn resolve-ref
   "A reference resolved: its source (from the db) when it is program, else its doc (from
@@ -58,12 +69,51 @@
   {:malli/schema [:=> [:cat :map] :map]}
   [r] (cond-> (select-keys r [:expected :actual]) (:message r) (assoc :message (:message r))))
 
+(defn- refused
+  "The done rule's refusals as the agent reads them, beyond its own red proofs (shown with
+  the proofs): a red test names its failures, a contract gap its var."
+  {:malli/schema [:=> [:cat [:vector :seon.reconcile/refusal] [:vector :map]] [:vector :map]]}
+  [refusals reds]
+  (vec (for [{:keys [refusal symbol key]} refusals :when (not= :proof-red refusal)]
+         (case refusal
+           (:regression :stray-red) (cond-> {:refusal refusal :test symbol}
+                                      (seq (filter #(= symbol (:test %)) reds))
+                                      (assoc :failures (mapv failure (filter #(= symbol (:test %)) reds))))
+           :contract-gap {:refusal refusal :var symbol}
+           :unmerged {:refusal refusal :key key}
+           {:refusal refusal}))))
+
+(defn- near
+  "The code around position at of text: its line, at most 30 characters either side."
+  {:malli/schema [:=> [:cat :string :int] :string]}
+  [text at]
+  (let [at (min at (count text))
+        start (if (pos? at) (inc (or (str/last-index-of text "\n" (dec at)) -1)) 0)
+        end (or (str/index-of text "\n" at) (count text))]
+    (str/trim (subs text (max start (- at 30)) (min end (+ at 30))))))
+
+(defn last-reply
+  "What happened to the agent's last reply: cut at the token limit, and each delimiter the
+  reader repaired (what it dropped or inserted, and the code near it in source, the reply
+  as the reader gave it to the REPL), or nil."
+  {:malli/schema [:=> [:cat [:maybe :boolean] [:maybe :string] [:vector :map]] [:maybe :map]]}
+  [truncated? source repairs]
+  (let [rs (for [{:keys [at dropped inserted]} repairs :when (not= ";; " inserted)]
+             (cond-> {:near (near (or source "") at)}
+               (seq dropped) (assoc :dropped dropped)
+               (seq inserted) (assoc :inserted inserted)))]
+    (cond-> nil
+      truncated? (assoc :cut "at the model's token limit: what followed the cut was lost. Answer with less: one change at a time.")
+      (seq rs) (assoc :repaired (vec rs)))))
+
 (defn current-state
   "The current-state block of task t as data: proofs with their status, red assertions and
-  source; resolved references; the measured evidence it starts from; the branch's
-  unmerged entries (base, ours, theirs); the last evaluations; turns left."
+  source; what else the done rule refuses (regressions, stray reds, contract gaps), and a
+  test run that failed as a whole; resolved references; the measured evidence it starts
+  from; the branch's unmerged entries (base, ours, theirs) and flagged definitions; what
+  happened to the last reply; the last evaluations; turns left."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds last-items turn max-turns unmerged truncated?]}]
+  [db t {:keys [results reds last-items turn max-turns unmerged truncated? refusals run-errors source repairs flagged]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         refs (r/references (str plan "\n" (:seon.task/instructions t)))]
     (cond-> {:task (assoc (select-keys t [:seon.task/id :seon.task/kind :seon.task/instructions])
@@ -78,7 +128,10 @@
                               (assoc :failures (mapv failure (filter #(= p (:test %)) reds))))))
              ;; a reference already shown as a proof is not shown twice
              :references (mapv #(resolve-ref db %) (remove (set proofs) refs))}
-      truncated? (assoc :your-last-reply "was cut at the model's token limit: what followed the cut was lost. Answer with less: one change at a time.")
+      (seq (refused (vec refusals) (vec reds))) (assoc :refused (refused (vec refusals) (vec reds)))
+      (seq run-errors) (assoc :test-run {:failed (vec run-errors)})
+      (last-reply truncated? source (vec repairs)) (assoc :your-last-reply (last-reply truncated? source (vec repairs)))
+      (seq flagged) (assoc :flagged (vec (sort-by str flagged)))
       (:seon.task/evidence t) (assoc :evidence (:seon.task/evidence t))
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
       (seq last-items) (assoc :last-evals (mapv (fn [it] (cond-> {:form (:form it)}

@@ -34,14 +34,6 @@
   [outcome reason]
   (:turn (swap! agent/state assoc-in [:turn :stop] (cond-> {:outcome outcome} reason (assoc :reason reason)))))
 
-(defn reply->source
-  "The reply as Clojure source, through the forgiving reader (seon.reader/forgive): prose,
-  fenced or not, becomes comments and unbalanced delimiters are repaired, so the REPL
-  evaluates only the reply's code."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [text]
-  (:text (reader/forgive text)))
-
 (defn- observe
   "What a turn starts from, measured now: the proofs run in a fork of this agent, the
   branch's new contract gaps and unmerged entries, the done rule over them, and the task as
@@ -73,18 +65,31 @@
            :ms (/ (- (System/nanoTime) t0) 1e6)}
     reason (assoc :reason reason)))
 
+(defn- observed
+  "The context inputs observe's map holds, beyond the proofs' results: every refusal of the
+  done rule, the failing assertions of each test it names, the run's own errors, the
+  branch's flagged definitions."
+  {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
+  [db {:keys [run refusals task]}]
+  (let [proofs (:proofs (:seon.task/accumulated task))
+        named (into (set proofs) (keep :symbol) refusals)]
+    {:refusals refusals :reds (proofs/red-reports run named) :run-errors (proofs/run-errors run)
+     :flagged (context/flagged db)}))
+
 (defn- act!
   "One model turn: the context of what was observed to the model, the reply's forms through
   the one REPL path, the turn's facts on the branch. Answers the loop state after it, or the
   provider error. The model call is an effect (my.fx :model, lane FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
   {:malli/schema [:=> [:cat :map :map [:maybe :string]] [:or :map :map]]}
-  [{:keys [turn tokens last-items max-turns merge? attempt] :as st} {:keys [run results unmerged] :as obs} model-name]
+  [{:keys [turn tokens last-items max-turns merge? attempt] :as st} {:keys [results unmerged] :as obs} model-name]
   (let [t (:task obs)
         proofs (:proofs (:seon.task/accumulated t))
-        block (context/current-state (agent/db) t {:results results :turn turn :max-turns max-turns
-                                                   :reds (proofs/red-reports run proofs) :last-items last-items
-                                                   :unmerged (when merge? unmerged) :truncated? (:truncated? st)})
+        db (agent/db)
+        block (context/current-state db t (merge (observed db obs)
+                                                 {:results results :turn turn :max-turns max-turns :last-items last-items
+                                                  :unmerged (when merge? unmerged) :truncated? (:truncated? st)
+                                                  :source (:source st) :repairs (:repairs st [])}))
         t1 (System/nanoTime)
         r (agent/fx! :model (cond-> {:messages (context/messages block) :task (:seon.task/id t) :turn turn}
                               model-name (assoc :model model-name))
@@ -92,7 +97,8 @@
         c (:value r)]
     (if (:seon.error/type r)
       r
-      (let [items (repl/eval-string (reply->source (:text c)))
+      (let [{:keys [text repairs]} (reader/forgive (:text c))
+            items (repl/eval-string text)
             used (+ (:prompt-tokens c) (:completion-tokens c))]
         (agent/transact! (cond-> [{:seon.turn/id (str attempt "/" turn) :seon.turn/attempt attempt :seon.turn/n turn
                            :seon.turn/reply (:text c) :seon.turn/forms (count items)
@@ -100,7 +106,8 @@
                            :seon.turn/red (count (remove #(= :pass (val %)) (select-keys results proofs)))
                            :seon.turn/ms (long (/ (- (System/nanoTime) t1) 1e6)) :seon.turn/tokens used}]
                            (:truncated? c) (conj {:seon.turn/id (str attempt "/" turn) :seon.turn/truncated true})))
-        (cond-> (-> (assoc st :turn (inc turn) :tokens (+ tokens used) :last-items items :truncated? (boolean (:truncated? c)))
+        (cond-> (-> (assoc st :turn (inc turn) :tokens (+ tokens used) :last-items items :truncated? (boolean (:truncated? c))
+                           :source text :repairs repairs)
                     ;; what this turn's block showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
                                                  :shown {'seon.context/resolve-ref (set (map :symbol (:references block)))
@@ -115,11 +122,11 @@
   {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id] :string]}
   [task attempt]
   (swap! agent/state assoc :turn {:task task :attempt attempt})
-  (let [{:keys [run results unmerged] :as obs} (observe task #{})
-        t (:task obs)]
-    (:content (second (context/messages (context/current-state (agent/db) t {:results results :turn 0 :max-turns 1
-                                                                             :reds (proofs/red-reports run (:proofs (:seon.task/accumulated t)))
-                                                                             :last-items [] :unmerged unmerged}))))))
+  (let [{:keys [results unmerged] :as obs} (observe task #{})
+        db (agent/db)]
+    (:content (second (context/messages (context/current-state db (:task obs) (merge (observed db obs)
+                                                                                     {:results results :turn 0 :max-turns 1
+                                                                                      :last-items [] :unmerged unmerged})))))))
 
 (defn work!
   "Work task `task` as attempt `attempt` (the model `model` when set, else root's), at most

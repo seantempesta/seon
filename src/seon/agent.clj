@@ -266,17 +266,22 @@
                                     :actual (print/text (:actual m) (:part print/budgets)))
       (contract/valid? :seon.cost/report cost) (assoc :cost cost))))
 
+(defn test-namespaces
+  "The namespaces whose tests judge a branch: every program namespace of db holding tests
+  (main's, merged proofs among them, and the ones this agent created). Scratch namespaces
+  (user, ^:scratch) never merge, so their tests never judge."
+  {:malli/schema [:=> [:cat :seon.host/db] [:sequential :seon.host/namespace]]}
+  [db]
+  (filter (fn [nsx] (and (not (program/scratch-ns? nsx)) (some (comp :test meta) (vals (ns-interns nsx)))))
+          (keep find-ns (sort (d/q '[:find [?n ...] :where [_ :ns/name ?n]] db)))))
+
 (defn- run-tests-here
-  "clojure.test over every namespace this agent evaluated in; answers report data."
+  "clojure.test over test-namespaces of the branch; answers report data."
   {:malli/schema [:=> [:cat] :seon.test/result]}
   []
   (let [reports (atom [])
         orig t/report
-        ;; this agent's namespaces, and every program namespace holding tests: merged
-        ;; proofs are regression tests for every agent
-        prog (d/q '[:find [?n ...] :where [_ :ns/name ?n]] (db))
-        nss (keep find-ns (into (set (:nss @state))
-                                (filter (fn [n] (some->> (find-ns n) ns-interns vals (some (comp :test meta))))) prog))
+        nss (test-namespaces (db))
         counts (binding [t/report (fn [m]
                                     (when (#{:pass :fail :error} (:type m))
                                       (swap! reports conj (test-report m (some-> (first t/*testing-vars*) str))))
