@@ -13,4 +13,9 @@
   :seon.task/plan "A git commit effect commits written files on branch jolt/seon-merges of next/ (never main, never pushed), its message naming the merged tasks and attempts from facts; the asker records the sha. The next generation: build, root restarted on the same store (resume), the merged fix running. The first full loop: a task changes a seon.* function, merges, is written, committed, rebuilt, and the new root runs it."
   :seon.task/kind :work
   :seon.task/needs #{"seon.source/merged-forms-write-back-exactly"}
-  :seon.task/proofs #{seon.source-test/a-merge-is-committed-on-the-merges-branch}}]
+  :seon.task/proofs #{seon.source-test/a-merge-is-committed-on-the-merges-branch}}
+ {:seon.task/name "the-next-generation-runs-from-the-merges-commit"
+  :seon.task/plan "Lane LOOP proved the first full turn by hand (2026-10-21): bin/check loop committed ce00b59 on its clone's jolt/seon-merges (seon.fixtures/generation 1 -> 2, one line), the file from that commit built in an APFS copy of the worktree (bin/build seon, 44 s), and that binary's root, resumed on the run's kept store (SEON_STORE), answered (seon.fixtures/generation) = 2 with main still holding the merged attempt and its sha. Automate it as the loop's last stage: a typed :build effect (a worktree of the merges branch with the pinned submodules, bin/build seon under the build lock, the binary's path or the build's error) and root's restart on the same store as an owner act recorded on main (the generation: commit sha, binary, boot). Also: main's source is imported only when main holds none, so commits made to the tree outside Seon (a lane's) are not seen by a resumed store; importing the tree's new commit should arrive as a merge into main like any branch (its changes since the imported commit), so agents' merged forms and the owner's edits meet in one three-way."
+  :seon.task/kind :work
+  :seon.task/needs #{"seon.source/merges-are-committed-and-run-next"}
+  :seon.task/proofs #{seon.source-test/a-new-generation-is-built-and-resumed-on-the-store}}]
