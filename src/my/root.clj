@@ -3,7 +3,7 @@
   the reconciler proc does the rest. Each takes root's system (seon.root/start!)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [seon.config :as config]
-            [seon.reconcile :as reconcile] [seon.db :as pdb]))
+            [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl]))
 
 (defn create!
   "Write task declarations as held tasks. Answers the writer's answer, or the refusal."
@@ -27,15 +27,23 @@
 
 (defn task-files
   "The task files under dir (:seon.config.root/tasks-dir by default), read:
-  {owning-ns declarations or refusal}. A file's name is its owning namespace."
+  {owning-ns declarations or refusal}. A file's name is its owning namespace. Each work
+  task is followed by its merge task (seon.template/with-merge, over all files, so a need
+  on another file's work task is a need on its merge), derived here and never written in
+  a file."
   {:malli/schema [:function [:=> [:cat] [:map-of :symbol :any]] [:=> [:cat :string] [:map-of :symbol :any]]]}
   ([] (task-files (config/value :seon.config.root/tasks-dir)))
   ([dir]
-   (into (sorted-map)
-         (for [f (sort-by #(.getName %) (or (seq (.listFiles (io/file dir))) []))
-               :let [n (.getName f)] :when (.endsWith n ".edn")
-               :let [ns-sym (symbol (subs n 0 (- (count n) 4)))]]
-           [ns-sym (task/file-declarations ns-sym (slurp f))]))))
+   (let [read (into (sorted-map)
+                    (for [f (sort-by #(.getName %) (or (seq (.listFiles (io/file dir))) []))
+                          :let [n (.getName f)] :when (.endsWith n ".edn")
+                          :let [ns-sym (symbol (subs n 0 (- (count n) 4)))]]
+                      [ns-sym (task/file-declarations ns-sym (slurp f))]))
+         refused (into {} (filter (comp :seon.error/type val)) read)]
+     (if (seq refused)
+       read
+       (merge (zipmap (keys read) (repeat []))
+              (group-by :seon.task/ns (tpl/with-merge (into [] cat (vals read)))))))))
 
 (defn load-tasks!
   "Reconcile the task files into main (seon.task/load-tx): new entries created held, changed
