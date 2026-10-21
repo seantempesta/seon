@@ -13,7 +13,7 @@
   asker records the outcome in its own recording transaction."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
-            [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
+            [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.java.shell :as sh] [clojure.string :as str] [jolt.ffi :as ffi]))
 
 (defn port "The stand-in's out-port to kind's owner." {:malli/schema [:=> [:cat :keyword] :keyword]}
   [kind] (keyword "fx" (name kind)))
@@ -31,16 +31,86 @@
   [req] {:value (:req req)})
 
 (defn write-file
-  "Write-back: the text to path (staged beside it, then renamed, so a reader sees the old
-  or the new file). Answers {:value {:bytes n}} or :seon.fx/io-error."
+  "Write-back: the text to path, staged beside it and renamed over it (rename(2)), so a
+  reader sees the old or the new file. Answers {:value {:bytes n :path path}}, n the path's
+  size on disk after the rename, or :seon.fx/io-error {:path :tmp :errno :message} (errno
+  absent when the stage itself failed) with the staged file removed."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [path text]} :req}]
+  (let [tmp (str path ".fx-" (lib/c-getpid))
+        staged (try (spit tmp text) nil
+                    (catch Throwable e
+                      (.delete (java.io.File. tmp))
+                      (error :seon.fx/io-error (str "staging " tmp ": " (or (ex-message e) (str (type e)))) {:path path :tmp tmp})))]
+    (or staged
+        (let [[r errno] (lib/c-rename tmp path)]
+          (if (zero? r)
+            {:value {:bytes (.length (java.io.File. ^String path)) :path path}}
+            (do (.delete (java.io.File. tmp))
+                (error :seon.fx/io-error (str "rename " tmp " -> " path ": " (ffi/errno-message errno)) {:path path :tmp tmp :errno errno})))))))
+
+;; Seon's own source: the program read from the tree a generation was built from, and
+;; main's merged forms committed for the next one (seon.source). Never the working tree:
+;; reading is read-only, and a commit is git's plumbing on a ref, so no checkout moves.
+
+(defn read-source
+  "The text of every .clj file under root's dirs (relative paths, e.g. src/seon/fx.clj),
+  sorted by path. Answers {:value {path text}} or :seon.fx/io-error."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [root dirs]} :req}]
   (try
-    (let [tmp (str path ".fx-" (lib/c-getpid))]
-      (spit tmp text)
-      (.renameTo (java.io.File. tmp) (java.io.File. ^String path))
-      {:value {:bytes (count text)}})
-    (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path path}))))
+    (let [base (.getCanonicalPath (java.io.File. ^String root))]
+      {:value (into (sorted-map)
+                    (for [d dirs
+                          f (file-seq (java.io.File. (str base "/" d)))
+                          :let [p (.getCanonicalPath ^java.io.File f)]
+                          :when (and (.isFile ^java.io.File f) (.endsWith p ".clj"))]
+                      [(subs p (inc (count base))) (slurp f)]))})
+    (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path root}))))
+
+(defn- git!
+  "git in dir with args, under the environment variables env adds ({name value}), its
+  trimmed output; a failure throws its stderr (git-commit answers it as :seon.fx/io-error)."
+  {:malli/schema [:=> [:cat [:map-of :string :string] :string [:sequential :string] [:maybe :string]] :string]}
+  [env dir args in]
+  (let [cmd (concat (when (seq env) (cons "env" (for [[k v] (sort env)] (str k "=" v)))) ["git" "-C" dir] args)
+        r (if in (apply sh/sh (concat cmd [:in in])) (apply sh/sh cmd))]
+    (when-not (zero? (:exit r))
+      (throw (ex-info (str "git " (first args) ": " (str/trim (str (:err r) (:out r)))) {})))
+    (str/trim (:out r))))
+
+(defn git-commit
+  "Commit files ({relative path text}) on branch of the repository at dir, with message,
+  through git's plumbing: blobs, a tree from the branch's own with the files replaced, a
+  commit whose parent is the branch head (a branch not there yet starts at dir's HEAD, the
+  commit the running generation's tree checks out), and the ref moved only from that head. No
+  working tree or checkout is touched, so main and every lane's files stay as they are.
+  Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing to write),
+  or :seon.fx/io-error."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [dir branch files message]} :req}]
+  (if (empty? files)
+    {:value {:sha nil :files 0}}
+    (try
+      (let [ref (str "refs/heads/" branch)
+            have? (zero? (:exit (sh/sh "git" "-C" dir "rev-parse" "--verify" "--quiet" ref)))
+            parent (git! {} dir ["rev-parse" "--verify" (if have? ref "HEAD")] nil)
+            gp (git! {} dir ["rev-parse" "--git-path" (str "seon-index-" (lib/c-getpid))] nil)
+            index (if (str/starts-with? gp "/") gp (str dir "/" gp))]
+        (try
+          (git! {"GIT_INDEX_FILE" index} dir ["read-tree" parent] nil)
+          (doseq [[path text] (sort files)]
+            (git! {"GIT_INDEX_FILE" index} dir ["update-index" "--add" "--cacheinfo" (str "100644," (git! {} dir ["hash-object" "-w" "--stdin"] text) "," path)] nil))
+          ;; Seon is the committer and author of its merges (the config's identity): a
+          ;; root's HOME is its checkout's target/home, which holds no git identity
+          (let [who (cfg/value :seon.config.source/committer-name) mail (cfg/value :seon.config.source/committer-email)
+                sha (git! {"GIT_AUTHOR_NAME" who "GIT_AUTHOR_EMAIL" mail "GIT_COMMITTER_NAME" who "GIT_COMMITTER_EMAIL" mail}
+                          dir ["commit-tree" (git! {"GIT_INDEX_FILE" index} dir ["write-tree"] nil) "-p" parent "-m" message] nil)]
+            ;; only from the head read above; a new branch only if none appeared meanwhile
+            (git! {} dir ["update-ref" ref sha (if have? parent "0000000000000000000000000000000000000000")] nil)
+            {:value {:sha sha :files (count files)}})
+          (finally (.delete (java.io.File. ^String index)))))
+      (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path dir})))))
 
 ;; ---- the owner -----------------------------------------------------------------------
 
@@ -206,6 +276,8 @@
   [provider]
   {:echo {:perform #'echo :lanes 1}
    :file {:perform #'write-file :lanes 1}
+   :source {:perform #'read-source :lanes 1}
+   :git {:perform #'git-commit :lanes 1}
    :model {:perform #'model :lanes (cfg/value :seon.config.ai/max-in-flight) :ctx {:provider provider} :rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))}})
 
 (defn procs

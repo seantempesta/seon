@@ -6,7 +6,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.task :as task]))
+            [seon.task :as task] [my.root :as root]))
 
 (defn- empty-db [] @(second (pdb/test-branch!)))
 
@@ -80,3 +80,11 @@
     (is (= :seon.task/refused
            (refusal-of db "[{:seon.task/name \"x\" :seon.task/plan \"p\" :seon.task/needs #{\"demo/nope\"}}]"))
         "a need that names no task")))
+
+(deftest the-shipped-task-files-load
+  ;; task seon.task/the-shipped-task-files-load: every file in the shipped task directory
+  ;; reads and loads onto a test branch with no refusal
+  (let [files (root/task-files)]
+    (is (seq files))
+    (is (= [] (vec (for [[ns-sym ds] files :when (:seon.error/type ds)] ns-sym))) "every file reads")
+    (is (not (:seon.error/type (task/load-tx (empty-db) files))) "and loads")))

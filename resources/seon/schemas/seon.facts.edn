@@ -1,27 +1,81 @@
 ;; The program facts seon.db writes (lane D1's proto.db.facts.edn) (namespaces, vars, the example task and note) and the
 ;; recording transaction of each eval request, as entity schemas. Stored shapes; the Datahike
 ;; schema is derived from them (seon.schema.datahike/declarations).
-{;; ---- the program ----
+{;; ---- the program, as the compiler knows it (seon.program; inv4's design) ----
+ ;; A FORM is the unit of reproduction: main evaluates forms, write-back writes them. Each
+ ;; definition (var, multimethod method, protocol extension, namespace) points to the form
+ ;; that last made it; what a form defines, declares and references comes from Jolt's
+ ;; analyzer (jolt.analyzer/*unit-tap*, or analysis-only for a file), never from text.
+ :form/id [:and {:seon.db/identity true} :string]
+ ;; the exact text as written, and the whitespace and comments before it in its file
+ :form/src :string
+ :form/lead :string
+ ;; the form is the text of a source tree a generation was built from (seon.source's import):
+ ;; the binary holds it compiled, so no process evaluates it; a form an agent or a merge
+ ;; makes never carries it
+ :form/source :boolean
+ :form/ns [:and {:seon.db/index true} :seon.db/ref]
+ ;; its place among its namespace's forms (a file's order; a new form after all others)
+ :form/order :int
+ :form/defines [:set :seon.db/ref]
+ :form/declares [:set :seon.db/ref]
+ ;; the vars it references, resolved by the compiler (clojure.core's left out): callers are
+ ;; one AVET seek
+ :form/refs [:set {:seon.db/index true} :qualified-symbol]
+ ;; the namespaces its require/use calls name
+ :form/requires [:set :symbol]
+ ;; references to clojure.core/intern, alter-var-root, eval, load-string, and definitions
+ ;; inside a function body: judged at merge (every definition happens once)
+ :form/banned [:set :qualified-symbol]
+ :form/inline-defs [:set :qualified-symbol]
+ ;; the calls it bounds by a clock (deref with a timeout; Thread/sleep and core.async's
+ ;; timeout are in its refs), and its catch clauses as EDN {:class name ("*" for a catch-all)
+ ;; :answers :constant|:rethrows|:expr}: the facts the fence detectors query
+ :form/timeouts [:set {:seon.db/index true} :qualified-symbol]
+ :form/catches [:set :string]
  :ns/name [:and {:seon.db/identity true} :symbol]
  :ns/doc :string
- ;; the namespace's ns form as written (requires, refers, aliases, :refer-clojure)
- :ns/src :string
+ :ns/form :seon.db/ref
+ ;; the file it was imported from, relative to the source tree's root (seon.source)
+ :ns/file :string
+ ;; the text after its file's last form
+ :ns/tail :string
  :var/name [:and {:seon.db/identity true} :symbol]
  :var/ns :seon.db/ref
+ :var/form :seon.db/ref
  :var/doc :string
- :var/src :string
  :var/arity :int
- ;; what a recorded def holds (:fn :test :macro :value) and its contract, as text
+ ;; what a defined var holds (:fn :test :macro :value :multi :protocol :protocol-fn :type
+ ;; :ctor) and its declared contract, as text
  :var/kind :keyword
  :var/contract :string
- ;; the metadata the definition declared on its var (^:dynamic, ^:private, ...), as EDN
- :var/meta :string
- :seon.db/ns-fact [:map {:seon.db/attributes true} [:ns/name :ns/name] [:ns/doc {:optional true} :ns/doc] [:ns/src {:optional true} :ns/src]]
+ :method/key [:and {:seon.db/identity true} :string]
+ :method/multi :qualified-symbol
+ :method/dispatch :string
+ :method/form :seon.db/ref
+ :impl/key [:and {:seon.db/identity true} :string]
+ :impl/protocol :qualified-symbol
+ :impl/type :string
+ :impl/form :seon.db/ref
+ :seon.db/form-fact [:map {:seon.db/attributes true}
+                      [:form/id :form/id] [:form/src :form/src] [:form/ns :form/ns] [:form/order :form/order]
+                      [:form/lead {:optional true} :form/lead] [:form/defines {:optional true} :form/defines]
+                      [:form/declares {:optional true} :form/declares] [:form/refs {:optional true} :form/refs]
+                      [:form/requires {:optional true} :form/requires] [:form/banned {:optional true} :form/banned]
+                      [:form/inline-defs {:optional true} :form/inline-defs] [:form/source {:optional true} :form/source]
+                      [:form/timeouts {:optional true} :form/timeouts] [:form/catches {:optional true} :form/catches]]
+ :seon.db/ns-fact [:map {:seon.db/attributes true} [:ns/name :ns/name] [:ns/doc {:optional true} :ns/doc]
+                    [:ns/form {:optional true} :ns/form] [:ns/file {:optional true} :ns/file] [:ns/tail {:optional true} :ns/tail]]
  :seon.db/var-fact [:map {:seon.db/attributes true}
-                     [:var/name :var/name] [:var/ns {:optional true} :var/ns] [:var/doc {:optional true} :var/doc]
-                     [:var/src {:optional true} :var/src] [:var/arity {:optional true} :var/arity]
-                     [:var/kind {:optional true} :var/kind] [:var/contract {:optional true} :var/contract]
-                     [:var/meta {:optional true} :var/meta]]
+                     [:var/name :var/name] [:var/ns {:optional true} :var/ns] [:var/form {:optional true} :var/form]
+                     [:var/doc {:optional true} :var/doc] [:var/arity {:optional true} :var/arity]
+                     [:var/kind {:optional true} :var/kind] [:var/contract {:optional true} :var/contract]]
+ :seon.db/method-fact [:map {:seon.db/attributes true}
+                        [:method/key :method/key] [:method/multi :method/multi] [:method/dispatch :method/dispatch]
+                        [:method/form {:optional true} :method/form]]
+ :seon.db/impl-fact [:map {:seon.db/attributes true}
+                      [:impl/key :impl/key] [:impl/protocol :impl/protocol] [:impl/type :impl/type]
+                      [:impl/form {:optional true} :impl/form]]
  ;; ---- the example program's task and note ----
  :task/name [:and {:seon.db/identity true} :keyword]
  :task/plan :string
@@ -114,6 +168,10 @@
  :seon.attempt/model-calls :int
  :seon.attempt/tokens :int
  :seon.attempt/merged-t :int
+ ;; the merges-branch commit holding the source files a merge rewrote (seon.source, the
+ ;; :git effect), or why the commit was refused; recorded by its asker, the reconciler
+ :seon.attempt/commit :string
+ :seon.attempt/commit-error :string
  :seon.attempt/basis-t :int
  :seon.attempt/uncontracted [:set :qualified-symbol]
  :seon.proof/test :qualified-symbol
@@ -141,7 +199,9 @@
                              [:seon.attempt/results {:optional true} :seon.attempt/results]
                              [:seon.attempt/conflicts {:optional true} :seon.attempt/conflicts]
                              [:seon.attempt/unmerged {:optional true} :seon.attempt/unmerged]
-                             [:seon.attempt/changed {:optional true} :seon.attempt/changed]]
+                             [:seon.attempt/changed {:optional true} :seon.attempt/changed]
+                             [:seon.attempt/commit {:optional true} :seon.attempt/commit]
+                             [:seon.attempt/commit-error {:optional true} :seon.attempt/commit-error]]
  :seon.proof/proof-fact [:map {:seon.db/attributes true} [:seon.proof/test :seon.proof/test] [:seon.proof/status :seon.proof/status]]
  ;; ---- root's boot and dials (main) ----
  :seon.root/id [:and {:seon.db/identity true} :keyword]
@@ -150,9 +210,14 @@
  ;; judge, nothing is ready; :stuck names each released task not done, with its root cause and
  ;; what it blocks (seon.reconcile/stuck)
  :seon.root/quiescent [:map {:seon.db/edn true} [:t :int] [:stuck [:vector :seon.reconcile/stuck-row]]]
+ ;; Seon's own source imported at boot as main's program (seon.source): the tree, its files and
+ ;; forms, how long reading, analysing and transacting took, or why it was refused
+ :seon.root/source [:map {:seon.db/edn true} [:root :string] [:files :int] [:forms :int] [:ms number?]
+                    [:error {:optional true} :string]]
  :seon.root/root-fact [:map {:seon.db/attributes true}
                           [:seon.root/id :seon.root/id] [:seon.root/boot :seon.root/boot]
                           [:seon.root/quiescent {:optional true} :seon.root/quiescent]
+                          [:seon.root/source {:optional true} :seon.root/source]
                           [:seon.config.agent/max-running {:optional true} :seon.config.agent/max-running]
                           [:seon.config.merge/max-running {:optional true} :seon.config.merge/max-running]]
  ;; ---- written by an agent on its own branch; they reach main with its merge ----
@@ -194,8 +259,6 @@
                      [:seon.fx/us :seon.fx/us] [:seon.fx/queue-us :seon.fx/queue-us]
                      [:seon.fx/cost {:optional true} :seon.fx/cost] [:seon.fx/error {:optional true} :seon.fx/error]]
  ;; ---- the program merge's facts (lane D1's proto.merge.facts.edn) ----
-:var/flagged :boolean
- :ns/alias [:set :string]
  :seon.merge/key [:any {:seon.db/index true :seon.db/edn true}]
  :seon.merge/kind :keyword
  :seon.merge/base [:any {:seon.db/edn true}]
@@ -203,7 +266,6 @@
  :seon.merge/theirs [:any {:seon.db/edn true}]
  :seon.merge/main-t :int
  :seon.merge/resolved? :boolean
- :seon.merge/var-flag-fact [:map {:seon.db/attributes true} [:var/flagged :var/flagged] [:ns/alias {:optional true} :ns/alias]]
  :seon.merge/entry-fact [:map {:seon.db/attributes true}
                           [:seon.merge/key :seon.merge/key] [:seon.merge/kind :seon.merge/kind]
                           [:seon.merge/base {:optional true} :seon.merge/base] [:seon.merge/ours {:optional true} :seon.merge/ours]

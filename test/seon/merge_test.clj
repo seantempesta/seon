@@ -1,33 +1,41 @@
 (ns seon.merge-test
   "The program merge (seon.merge, in core) over db values: the three-way case table,
   identity by content (identical definitions on two branches merge clean whatever their
-  entity ids), an unmap merging as a delete, the latest redefinition winning, flagged defs
-  staying local, scratch data and observations never merging, unmerged entries derived
-  from the branch, and behind meaning main's program moved."
+  entity ids and places), an unmap merging as a delete of the definition and of the form
+  it leaves dead, the latest redefinition winning, scratch data and observations never
+  merging, unmerged entries derived from the branch, and behind meaning main's program
+  moved."
   (:require [clojure.test :refer [deftest is are testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.merge :as pm]))
+            [seon.merge :as pm]
+            [seon.program :as program]))
 
 (defn- empty-db [] @(second (pdb/test-branch!)))
 
 (defn- defn-src [nm body] (str "(defn " nm " {:malli/schema [:=> [:cat :int] :int]} [x] " body ")"))
 
-(defn- var-tx
-  "A recorded definition of app/nm (as seon.program/record-tx writes it)."
-  [nm body]
-  [{:db/id "app" :ns/name 'app}
-   {:var/name (symbol "app" nm) :var/ns "app" :var/src (defn-src nm body) :var/kind :fn
-    :var/contract "[:=> [:cat :int] :int]"}])
+(defn- fid [nm body] (str "app/" (defn-src nm body)))
 
-(defn- with [db & txs] (reduce d/db-with db txs))
+(defn- var-tx
+  "A recorded definition of app/nm (as seon.program/record-tx writes it): a fn of the db."
+  [nm body]
+  (fn [db]
+    (program/record-tx db {:id (fid nm body) :src (defn-src nm body) :ns 'app :ns-form? false
+                           :defs [{:var (symbol "app" nm) :kind :fn :contract "[:=> [:cat :int] :int]"}]
+                           :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}})))
+
+(defn- with [db & txs] (reduce (fn [db t] (d/db-with db (if (fn? t) (t db) t))) db txs))
 
 (def base (with (empty-db) (var-tx "f" "x") (var-tx "g" "x") (var-tx "h" "x")))
 
-(defn- unmap [nm] [[:db/retractEntity [:var/name (symbol "app" nm)]]])
+(defn- unmap [nm]
+  (fn [db] (let [e (:db/id (d/entity db [:var/name (symbol "app" nm)]))]
+             [[:db/retract e :var/form (:db/id (:var/form (d/entity db e)))]])))
 
 (defn- tw [o t] (pm/three-way (pm/program base #{}) (pm/program o #{}) (pm/program t #{})))
 (defn- vk [nm] [:var (symbol "app" nm)])
+(defn- defs-of "The definition keys among ks (a form's own key follows its definition)." [ks] (filterv #(not= :form (first %)) ks))
 
 (deftest three-way-cases
   (testing "o = t: nothing to do (identical change, both deleted)"
@@ -36,24 +44,24 @@
       (with base (unmap "f")) (with base (unmap "f"))
       (with base (var-tx "n" "1")) (with base (var-tx "n" "1"))))
   (testing "o = b: theirs applies (add, modify, delete)"
-    (are [t k] (= [k] (:apply (tw base t)))
+    (are [t k] (= [k] (defs-of (:apply (tw base t))))
       (with base (var-tx "n" "1")) (vk "n")
       (with base (var-tx "f" "(dec x)")) (vk "f")
       (with base (unmap "g")) (vk "g")))
   (testing "t = b: ours kept, nothing applied, and it is an ours-change"
     (let [r (tw (with base (var-tx "f" "(dec x)")) base)]
-      (is (empty? (:apply r))) (is (empty? (:conflicts r))) (is (= [(vk "f")] (keys (:ours r))))))
+      (is (empty? (:apply r))) (is (empty? (:conflicts r))) (is (= [(vk "f")] (defs-of (keys (:ours r)))))))
   (testing "conflicts carry their kind, base, ours and theirs"
-    (are [o t kind] (= [kind] (map :kind (:conflicts (tw o t))))
+    (are [o t kind] (= [kind] (map :kind (filter #(= :var (first (:key %))) (:conflicts (tw o t)))))
       (with base (var-tx "f" "(inc x)")) (with base (var-tx "f" "(dec x)")) :both-modified
       (with base (var-tx "n" "1")) (with base (var-tx "n" "2")) :both-added
       (with base (unmap "f")) (with base (var-tx "f" "(dec x)")) :deleted-by-us
       (with base (var-tx "f" "(inc x)")) (with base (unmap "f")) :deleted-by-them)
     (let [c (first (:conflicts (tw (with base (var-tx "f" "(inc x)")) (with base (var-tx "f" "(dec x)")))))]
       (is (= (vk "f") (:key c)))
-      (is (= (defn-src "f" "x") (:src (:base c))))
-      (is (= (defn-src "f" "(inc x)") (:src (:ours c))))
-      (is (= (defn-src "f" "(dec x)") (:src (:theirs c)))))))
+      (is (= (fid "f" "x") (:form (:base c))))
+      (is (= (fid "f" "(inc x)") (:form (:ours c))))
+      (is (= (fid "f" "(dec x)") (:form (:theirs c)))))))
 
 (deftest identical-defs-on-two-branches-merge-clean
   ;; one side makes an unrelated entity first, so app/n gets a different entity id on each
@@ -66,21 +74,23 @@
   (let [ours (with base (unmap "g"))
         r (tw ours base)
         main' (d/db-with base (pm/apply-tx base (into {} (for [[k [_ o]] (:ours r)] [k o]))))]
-    (is (= {(vk "g") [(get (pm/program base #{}) (vk "g")) nil]} (:ours r)))
-    (is (nil? (d/q '[:find ?e . :where [?e :var/name app/g]] main')))
-    (is (= [:deleted-by-us] (map :kind (:conflicts (tw ours (with base (var-tx "g" "(dec x)")))))))))
+    (is (= #{(vk "g") [:form (fid "g" "x")]} (set (keys (:ours r)))) "the definition, and the form it leaves dead")
+    (is (nil? (program/source-of main' 'app/g)))
+    (is (nil? (d/entity main' [:form/id (fid "g" "x")])) "the form is retracted on main")
+    (is (= [:deleted-by-us] (map :kind (filter #(= :var (first (:key %))) (:conflicts (tw ours (with base (var-tx "g" "(dec x)"))))))))))
 
 (deftest latest-redefinition-wins
   (let [ours (with base (var-tx "f" "1") (var-tx "f" "2") (var-tx "f" "3"))]
-    (is (= (defn-src "f" "3") (:src (second (get (:ours (tw ours base)) (vk "f"))))))))
+    (is (= (fid "f" "3") (:form (second (get (:ours (tw ours base)) (vk "f"))))))
+    (is (= [(defn-src "f" "3")] (for [[[k] [_ o]] (:ours (tw ours base)) :when (and (= :form k) o)] (:src o)))
+        "only the last form is live: each redefinition superseded the one before")))
 
-(deftest flagged-defs-stay-local
-  (testing "a flagged def maps to its base entry: never an ours-change, never a conflict"
-    (let [ours (with base [{:db/id "app" :ns/name 'app} {:var/name 'app/counter :var/ns "app" :var/src "(def counter (atom 0))" :var/kind :value :var/flagged true}])
-          theirs (with base [{:db/id "app" :ns/name 'app} {:var/name 'app/counter :var/ns "app" :var/src "(def counter 7)" :var/kind :value}])]
-      (is (empty? (:ours (tw ours base))))
-      (is (= [(vk "counter")] (:apply (tw ours theirs))))
-      (is (empty? (:conflicts (tw ours theirs)))))))
+(deftest a-form-s-place-does-not-make-it-another
+  (let [o (with base [{:note/text "first"}] (var-tx "n" "(* 2 x)"))
+        t (with base (var-tx "n" "(* 2 x)"))]
+    (is (not= (get-in (pm/program o #{}) [[:form (fid "n" "(* 2 x)")] :order])
+              (get-in (pm/program t #{}) [[:form (fid "n" "(* 2 x)")] :order])))
+    (is (= {:apply [] :conflicts []} (select-keys (tw o t) [:apply :conflicts])))))
 
 (deftest scratch-and-observations-never-merge
   (let [ours (with base [{:note/text "scratch" :note/agent :a1}
@@ -90,17 +100,13 @@
     (is (= (pm/program base #{}) (pm/program ours #{})))
     (is (empty? (:ours (tw ours base))))))
 
-(deftest aliases-are-program-facts
-  (let [ours (with base [[:db/add [:ns/name 'app] :ns/alias "[str clojure.string]"]])
-        r (tw ours base)]
-    (is (= {[:alias 'app 'str] [nil 'clojure.string]} (:ours r)))
-    (is (= [:both-added] (map :kind (:conflicts (tw ours (with base [[:db/add [:ns/name 'app] :ns/alias "[str clojure.set]"]]))))))))
-
 (deftest apply-tx-sets-each-key
   (let [p (pm/program (with base (var-tx "f" "(dec x)") (var-tx "n" "1") (unmap "h")) #{})
-        db' (d/db-with base (pm/apply-tx base (select-keys p [(vk "f") (vk "n")])))
+        db' (d/db-with base (pm/apply-tx base (select-keys p [(vk "f") (vk "n") [:form (fid "f" "(dec x)")] [:form (fid "n" "1")]])))
         db'' (d/db-with db' (pm/apply-tx db' {(vk "h") nil}))]
     (is (= (select-keys p [(vk "f") (vk "n")]) (select-keys (pm/program db' #{}) [(vk "f") (vk "n")])))
+    (is (= "(defn n {:malli/schema [:=> [:cat :int] :int]} [x] 1)" (program/source-of db' 'app/n))
+        "a definition and its form set together")
     (is (not (contains? (pm/program db'' #{}) (vk "h"))))))
 
 (deftest unmerged-entry-derivation
@@ -113,7 +119,7 @@
       ;; written, ours unchanged: unmerged
       b1 [(vk "f")]
       ;; re-defn of the var: resolved by derivation
-      (d/db-with b1 (var-tx "f" "(+ x 0)")) []
+      (with b1 (var-tx "f" "(+ x 0)")) []
       ;; resolve! keeping ours: marked
       (d/db-with b1 (pm/resolve-tx b1 (vk "f"))) [])
     (is (= 42 (:main-t (first (pm/entries b1)))))

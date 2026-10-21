@@ -1,39 +1,30 @@
 (ns seon.program
-  "The program is entities. A namespace and its definitions are facts, and each process runs
-  the program its db holds:
-  - an agent records what it evaluates as a REPL session leaves it (owner, 2026-10-20:
-    \"We should be able to create new namespaces period. Just like a REPL.\"): an `ns` form,
-    an `in-ns` or a first def makes its namespace program, unless the namespace is scratch
-    (`user`, or declared ^:scratch). The `ns` form is kept as written (:ns/src), and each
-    def as the exact text the agent wrote (:var/src) with its var's metadata (:var/meta);
-  - root and the fork server load main's program at boot and every change main's commits
-    make, namespaces in dependency order, so an agent forked after a merge inherits the
-    merged code compiled and loads nothing;
-  - an agent loads what reaches its branch from main (merge-main!).
-  Source is evaluated natively in its namespace (Jolt compiles it); it is read for analysis
-  (dependency order, reach) by seon.reader, never evaluated there."
+  "The program is entities, as the compiler knows it (owner, 2026-10-21: \"I don't want
+  regex's I want to know exactly what something is\"; inv4's design).
+
+  A FORM is the unit of reproduction: its exact text, its namespace and its place. Every
+  definition (a var, a multimethod's method, a protocol extension, a namespace) points to
+  the form that last made it, and what a form defines, declares, references and requires
+  is what Jolt's analyzer said while compiling it (jolt.analyzer/*unit-tap*: every
+  top-level unit, after analysis, before it runs), with a readback after the run telling
+  which vars it actually set. Nothing here reads a form's text to learn what it is.
+
+  - An agent records each form it evaluates in a program namespace as it runs (seon.repl's
+    wrap-record, applied at once through the run-ahead writer): a form that defines or
+    declares something, an `ns` form, or one that changes a namespace's environment
+    (require, use, alias, refer, import). A namespace is program unless scratch (`user`, an
+    agent's own, or declared ^:scratch).
+  - A form whose every definition now points to a later form is superseded: it is no part
+    of the program (`live-forms`), and the form that replaced it takes its place.
+  - Root and the fork server load main's live forms at boot and every change main's
+    commits make, in load order (namespaces in dependency order; within one, the forms'
+    order, each after the earliest form that interns a var it references), so an agent
+    forked after a merge inherits the merged code compiled. An agent loads what reaches
+    its branch from main (merge-main!).
+  - A file is read form by form and analyzed without running (`analyze-facts`), so the
+    platform's own source has the same facts (seon.source)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [seon.reader :as reader]))
-
-(def ^:private def-heads '#{def defn defn- defmacro defonce deftest defmulti defrecord deftype defprotocol})
-
-(defn def-form?
-  "A top-level form that defines a var: (defn f ...), (deftest t ...), ..."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [form]
-  (and (seq? form) (symbol? (first form)) (contains? def-heads (symbol (name (first form))))))
-
-(defn ns-form?
-  "An `ns` form: (ns name ...)."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [form]
-  (and (seq? form) (= 'ns (first form)) (symbol? (second form))))
-
-(defn in-ns-form?
-  "An `in-ns` form: (in-ns 'name)."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [form]
-  (and (seq? form) (= 'in-ns (first form))))
+  (:require [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [jolt.ir :as ir] [jolt.analyzer]))
 
 (defn scratch-ns?
   "Is namespace nsx scratch (never program): `user`, or declared ^:scratch."
@@ -57,161 +48,459 @@
   {:malli/schema [:=> [:cat :any] :string]}
   [v] (binding [*print-length* nil *print-level* nil *print-meta* false] (pr-str v)))
 
-(defn- tid
-  "The tempid of namespace nsym's entity within one transaction."
-  {:malli/schema [:=> [:cat :symbol] :string]}
-  [nsym] (str "ns " nsym))
-
-;; ---- recording: what an evaluation leaves that is program --------------------------
-
 (defn var-kind
-  "What a defined var holds, as recorded: :fn (a function, which needs a contract), :test,
-  :macro or :value (G1's)."
+  "What a defined var holds now: :fn (a function, which needs a contract), :test, :macro or
+  :value (G1's)."
   {:malli/schema [:=> [:cat :seon.host/var] [:enum :fn :test :macro :value]]}
   [v]
   (let [m (meta v)]
     (cond (:test m) :test (:macro m) :macro (contract/function-var? v) :fn :else :value)))
 
-(def ^:private host-meta
-  "Var metadata the runtime derives (where it was read, its name, its arglists) or that
-  has its own fact (:doc, the contract): not part of :var/meta."
-  [:ns :name :file :line :column :end-line :end-column :arglists :doc :malli/schema :test])
+;; ---- the compiler's account of one form ------------------------------------------------
 
-(defn var-meta
-  "The metadata a definition declared on var v (^:dynamic, ^:private, ^{:k v} ...), the
-  EDN values of it, as a sorted map."
-  {:malli/schema [:=> [:cat :seon.host/var] :map]}
-  [v]
-  (into (sorted-map) (for [[k x] (apply dissoc (meta v) host-meta) :when (and (edn-value? k) (edn-value? x))] [k x])))
+(def banned
+  "The clojure.core vars program code does not call (owner, 2026-10-21: every definition
+  happens once; loading code is an effect)."
+  '#{clojure.core/intern clojure.core/alter-var-root clojure.core/eval clojure.core/load-string})
+
+(def ^:private env-calls
+  "The clojure.core functions whose call at a form's top changes its namespace's environment."
+  '#{clojure.core/require clojure.core/use clojure.core/alias clojure.core/refer clojure.core/__import
+     clojure.core/refer-clojure-register!})
+
+(defn- vsym
+  "The var a :var, :the-var or :def node names."
+  {:malli/schema [:=> [:cat :map] :qualified-symbol]}
+  [n] (symbol (str (:ns n)) (str (:name n))))
+
+(defn- datum
+  "A node's literal value: a constant or a quoted form; ::expr otherwise."
+  {:malli/schema [:=> [:cat :map] :any]}
+  [n] (case (:op n) :const (:val n) :quote (:form n) ::expr))
+
+(defn- invoked
+  "The var an :invoke node calls, or nil."
+  {:malli/schema [:=> [:cat :map] [:maybe :qualified-symbol]]}
+  [n] (let [f (:fn n)] (when (and (= :invoke (:op n)) (= :var (:op f))) (vsym f))))
+
+(defn- unquote-form
+  "(quote x) -> x; anything else as it is."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [x] (if (and (seq? x) (= 'quote (first x))) (second x) x))
+
+(defn- libs
+  "The namespaces a require/use spec names: a symbol, [lib & opts], or a prefix list."
+  {:malli/schema [:=> [:cat :any] [:sequential :symbol]]}
+  [spec]
+  (cond (symbol? spec) [spec]
+        (and (vector? spec) (symbol? (first spec)) (or (= 1 (count spec)) (keyword? (second spec)))) [(first spec)]
+        (and (sequential? spec) (symbol? (first spec)))
+        (for [s (rest spec) :let [sn (if (sequential? s) (first s) s)] :when (symbol? sn)]
+          (symbol (str (first spec) "." sn)))
+        :else []))
+
+(defn- def-info
+  "A :def node at a form's top as the account keeps it: the var, how its init is made, and
+  its declared metadata forms."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [n]
+  (let [init (:init n)
+        f (when init (invoked init))
+        f (if (= 'clojure.core/assoc f) (some-> (first (:args init)) invoked) f)]
+    {:var (vsym n) :meta (if (map? (:meta n)) (:meta n) {}) :declare? (boolean (or (:no-init n) (nil? init)))
+     :init (cond (nil? init) nil (= :fn (:op init)) :fn :else f)}))
+
+(defn- tail
+  "The node whose value a node answers: through do and let to their last expression."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [n] (case (:op n) :do (tail (:ret n)) :let (tail (:body n)) n))
+
+(defn- answers
+  "What a handler answers, from its tail: :constant (a literal or quoted form), :rethrows
+  (a throw), else :expr."
+  {:malli/schema [:=> [:cat :map] [:enum :constant :rethrows :expr]]}
+  [n] (case (:op (tail n)) (:const :quote) :constant :throw :rethrows :expr))
+
+(defn- clause-class
+  "The class name a catch clause's test names (Jolt lowers each clause for class C to a
+  test calling clojure.core/__catch-broad? with C's name), or nil."
+  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  [test]
+  (let [found (volatile! nil)]
+    ((fn walk [n]
+       (when (and (nil? @found) (= 'clojure.core/__catch-broad? (invoked n)))
+         (vreset! found (str (datum (first (:args n))))))
+       (ir/reduce-ir-children (fn [_ c] (walk c)) nil n))
+     test)
+    @found))
+
+(defn- catches
+  "A :try node's catch clauses, in order, each {:class name (\"*\" for a catch-all) :answers
+  kind}: read from Jolt's lowering of the clauses (one dispatch: an if per class, a
+  catch-all's handler last, else a rethrow)."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [n]
+  (loop [d (some-> (:catch-body n) tail) acc []]
+    (cond (nil? d) acc
+          (and (= :if (:op d)) (clause-class (:test d))) (recur (tail (:else d)) (conj acc {:class (clause-class (:test d)) :answers (answers (:then d))}))
+          (= :throw (:op d)) acc
+          :else (conj acc {:class "*" :answers (answers d)}))))
+
+(defn unit-account
+  "What the compiler says one analyzed top-level node does, from its IR by resolved var
+  identity: the vars it defines at its top (:defs, each def-info) and inside a function body
+  (:inline-defs), its multimethod methods ({:multi sym-as-written :dispatch value}) and
+  protocol extensions ({:protocol sym :type name}), the multimethods it sets up, the vars and
+  host statics (Class/member) it references (:refs), the banned vars it references, the
+  calls it bounds by a clock (:timeouts: deref with a timeout), its catch clauses
+  (:catches, each {:class :answers}), the namespaces it requires, and whether it changes its
+  namespace's environment (:env?)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [node]
+  (let [acc (volatile! {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :banned #{} :requires #{} :env? false
+                        :timeouts #{} :catches #{}})]
+    ((fn walk [n in-fn?]
+       (case (:op n)
+         :def (if in-fn?
+                (vswap! acc update :inline-defs conj (vsym n))
+                (vswap! acc update :defs conj (def-info n)))
+         :defmacro (if in-fn?
+                     (vswap! acc update :inline-defs conj (vsym n))
+                     (vswap! acc update :defs conj {:var (vsym n) :meta {} :macro? true :init :fn}))
+         (:var :the-var) (let [s (vsym n)]
+                           (when (banned s) (vswap! acc update :banned conj s))
+                           (vswap! acc update :refs conj s))
+         :host-static (vswap! acc update :refs conj (symbol (str (:class n)) (str (:member n))))
+         :try (vswap! acc update :catches into (map pr-edn) (catches n))
+         :invoke (when (and (= 'clojure.core/deref (invoked n)) (= 3 (count (:args n))))
+                   (vswap! acc update :timeouts conj 'clojure.core/deref))
+         nil)
+       (case (:op n)
+         :invoke (when-not in-fn?
+                   (let [f (invoked n) args (:args n)]
+                     (case f
+                       clojure.core/defmethod-setup
+                       (vswap! acc update :methods conj {:multi (datum (first args)) :dispatch (datum (second args))})
+                       clojure.core/register-method
+                       (vswap! acc update :impls conj {:type (str (datum (first args))) :protocol (symbol (str (datum (second args))))})
+                       clojure.core/defmulti-setup
+                       (vswap! acc update :multis conj (datum (first args)))
+                       (when (env-calls f)
+                         (vswap! acc assoc :env? true)
+                         (when ('#{clojure.core/require clojure.core/use} f)
+                           (vswap! acc update :requires into (mapcat (comp libs unquote-form datum)) args))))))
+         nil)
+       (let [in-fn? (or in-fn? (#{:fn :defmacro} (:op n)))]
+         (ir/reduce-ir-children (fn [_ c] (walk c in-fn?)) nil n)))
+     node false)
+    @acc))
+
+(defn- merge-accounts
+  "The accounts of a form's units as one."
+  {:malli/schema [:=> [:cat [:sequential :map]] :map]}
+  [as]
+  (reduce (fn [a b] (merge-with (fn [x y] (if (boolean? x) (or x y) (into x y))) a b))
+          {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :banned #{} :requires #{} :env? false
+           :timeouts #{} :catches #{}}
+          as))
+
+(defn root-of
+  "Var sym's root now (identity is what the readback compares): ::unbound when it has none."
+  {:malli/schema [:=> [:cat :qualified-symbol] :any]}
+  [sym]
+  (if-let [v (find-var sym)] (if (bound? v) (.getRawRoot v) ::unbound) ::unbound))
+
+(defn tap
+  "A unit tap (bind jolt.analyzer/*unit-tap* to it around an eval) collecting into acc, a
+  volatile of {:nodes [node ...] :before {var root}}: each analyzed unit, and the root each
+  var it defines at its top held before the unit ran (the readback compares it after). The
+  tap runs inside the eval, so it calls no contracted function: an eval's costliest
+  functions are its own (seon.profile)."
+  {:malli/schema [:=> [:cat :seon.host/volatile] :seon.host/fn]}
+  [acc]
+  (fn [_form node]
+    (let [before (volatile! (:before @acc))]
+      ((fn walk [n]
+         (when-not (#{:fn :defmacro} (:op n))
+           (when (#{:def :defmacro} (:op n))
+             (let [s (symbol (str (:ns n)) (str (:name n))) v (find-var s)]
+               (vswap! before assoc s (if (and v (bound? v)) (.getRawRoot v) ::unbound))))
+           (ir/reduce-ir-children (fn [_ c] (walk c)) nil n)))
+       node)
+      (vswap! acc (fn [m] (-> m (update :nodes conj node) (assoc :before @before))))
+      nil)))
+
+(defn set-vars
+  "The vars an evaluated form set (readback: their root changed while it ran), from its
+  tap's nodes and roots before, in any namespace, scratch ones included."
+  {:malli/schema [:=> [:cat :map] [:vector :qualified-symbol]]}
+  [{:keys [nodes before]}]
+  (vec (distinct (for [n nodes d (:defs (unit-account n))
+                       :when (or (:macro? d) (not (identical? (get before (:var d)) (root-of (:var d)))))]
+                   (:var d)))))
+
+(defn- contract-text
+  "A def's declared :malli/schema as text: from the live var, else from its metadata form."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/var] :map] [:maybe :string]]}
+  [v d]
+  (if-let [c (some-> v meta :malli/schema)]
+    (pr-edn c)
+    (some-> (get (:meta d) :malli/schema) unquote-form pr-edn)))
+
+(defn- def-kind
+  "A defined var's kind: from the live var when it is bound, else from the compiler's
+  account of its definition. A function a form defines beside a type is that type's
+  constructor (:ctor), and needs no contract of its own."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/var] :map :boolean :boolean] :keyword]}
+  [v d multi? types?]
+  (let [m (merge (:meta d) (some-> v meta))]
+    (cond (or (:macro? d) (:macro m)) :macro
+          (contains? m :test) :test
+          (or multi? (and v (bound? v) (instance? clojure.lang.MultiFn @v))) :multi
+          (contains? m :protocol) :protocol-fn
+          (= 'clojure.core/make-protocol (:init d)) :protocol
+          (= 'clojure.core/make-deftype-ctor (:init d)) :type
+          (and v (bound? v)) (cond (not (fn? @v)) :value
+                                   types? :ctor
+                                   (:dynamic m) :value
+                                   :else :fn)
+          (#{:fn 'seon.contract/checked} (:init d)) (if types? :ctor :fn)
+          :else :value)))
+
+(defn- form-id
+  "A form's identity: its namespace and exact text (an imported file's repeated text adds
+  its occurrence)."
+  {:malli/schema [:=> [:cat :symbol :string :int] :string]}
+  [nsym src k]
+  (str nsym "/" (Long/toHexString (hash (str nsym "\n" src))) "-" (count src) (when (pos? k) (str "#" k))))
+
+(defn account
+  "The program account of one top-level form, or nil when it is none of the program's.
+  opts: :nodes (each analyzed unit's node; or :units, their unit-accounts), :src (its exact text), :ns (the namespace
+  it was evaluated in), :ns-after (where it left the REPL), :ns-form? (it is an `ns` form:
+  its head resolves to clojure.core/ns), :before (readback: var -> root before; nil for an
+  analysis without running: every top-level def counts), :ran? (the form returned; a form
+  that threw records only the vars it set), :ns-meta (an ns form's name's metadata: Jolt's
+  ns drops it, jolt/ns-meta), :lead, :order, :k (occurrence of its text)."
+  {:malli/schema [:=> [:cat :map] [:maybe :map]]}
+  [{:keys [nodes units src ns ns-after ns-form? ns-meta before ran? lead order k] :or {k 0}}]
+  (let [units (or units (map unit-account nodes))
+        nsym (if ns-form? ns-after ns)
+        nsx (find-ns nsym)
+        a (merge-accounts units)
+        types? (boolean (some #(= 'clojure.core/make-deftype-ctor (:init %)) (:defs a)))
+        set? (fn [{v :var :as d}] (or (nil? before) (not (identical? (get before v) (root-of v))) (:macro? d)))
+        defs (vec (for [d (:defs a)
+                        :let [v (find-var (:var d))
+                              multi? (contains? (:multis a) (:var d))]
+                        :when (and (not (and (:declare? d) (not multi?))) (set? d))]
+                    (cond-> {:var (:var d) :kind (def-kind v d multi? types?)}
+                      (contract-text v d) (assoc :contract (contract-text v d))
+                      (string? (or (some-> v meta :doc) (get (:meta d) :doc))) (assoc :doc (or (some-> v meta :doc) (get (:meta d) :doc))))))
+        declares (into #{} (comp (filter :declare?) (map :var) (remove (set (map :var defs)))
+                                 (remove #(contains? (:multis a) %))) (:defs a))
+        methods (when (or ran? (nil? before))
+                  (vec (for [{:keys [multi dispatch]} (:methods a)
+                             :let [mv (when (and nsx (symbol? multi)) (ns-resolve nsx multi))]
+                             :when (var? mv)]
+                         {:multi (symbol mv) :dispatch (pr-edn dispatch)})))
+        impls (when (or ran? (nil? before)) (vec (distinct (:impls a))))]
+    (when (and nsx (not (scratch-ns? nsx)) (not (:scratch ns-meta))
+               (or ns-form? (seq defs) (seq declares) (seq methods) (seq impls) (:env? a)))
+      (cond-> {:id (form-id nsym src k) :src src :ns nsym :ns-form? (boolean ns-form?)
+               :defs defs :declares declares :methods (or methods []) :impls (or impls [])
+               :refs (:refs a) :requires (:requires a) :banned (:banned a) :inline-defs (:inline-defs a)
+               :timeouts (:timeouts a) :catches (:catches a)}
+        lead (assoc :lead lead)
+        order (assoc :order order)))))
+
+;; ---- the account as facts ---------------------------------------------------------------
+
+(defn- ns-tid {:malli/schema [:=> [:cat :symbol] :string]} [nsym] (str "ns " nsym))
+(defn- var-tid {:malli/schema [:=> [:cat :symbol] :string]} [sym] (str "var " sym))
+(defn- form-tid {:malli/schema [:=> [:cat :string] :string]} [id] (str "form " id))
+
+(defn method-key
+  "A method's identity: [multi dispatch], printed."
+  {:malli/schema [:=> [:cat :qualified-symbol :string] :string]}
+  [multi dispatch] (pr-edn [multi dispatch]))
+
+(defn impl-key
+  "A protocol extension's identity: [protocol type], printed."
+  {:malli/schema [:=> [:cat :qualified-symbol :string] :string]}
+  [protocol type] (pr-edn [protocol type]))
+
+(def ^:private def-attrs
+  "Each definition kind's form pointer."
+  [:var/form :method/form :impl/form :ns/form])
+
+(defn- form-of
+  "The form entity definition entity e points to, or nil."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :int]]}
+  [db e] (some #(:db/id (get (d/entity db e) %)) def-attrs))
+
+(defn- eid {:malli/schema [:=> [:cat :seon.host/db :keyword :any] [:maybe :int]]}
+  [db a v] (:e (first (d/datoms db :avet a v))))
+
+(defn account-tx
+  "The facts of a form's account on db: the form (keeping its order when it is already
+  there, else taking the place of the forms it supersedes, else after every form: order
+  next-order), each definition pointing to it, and the forms it supersedes retracted (each
+  whose every definition it redefines). A var's contract or doc the redefinition no longer
+  has is retracted."
+  {:malli/schema [:=> [:cat :seon.host/db :map :int] :seon.db/tx-data]}
+  [db {:keys [id src lead ns ns-form? defs declares methods impls refs requires banned inline-defs timeouts catches order]} next-order]
+  (let [fe (eid db :form/id id)
+        dkeys (concat (for [{v :var} defs] [:var/name v])
+                      (for [{:keys [multi dispatch]} methods] [:method/key (method-key multi dispatch)])
+                      (for [{:keys [protocol type]} impls] [:impl/key (impl-key protocol type)])
+                      (when ns-form? [[:ns/name ns]]))
+        des (set (keep (fn [[a v]] (eid db a v)) dkeys))
+        olds (disj (set (keep #(form-of db %) des)) fe nil)
+        superseded (filterv (fn [o] (every? #(contains? des (:db/id %)) (:form/defines (d/entity db o)))) olds)
+        order (or (when fe (:form/order (d/entity db fe)))
+                  order
+                  (when (seq superseded) (apply min (map #(:form/order (d/entity db %)) superseded)))
+                  next-order)
+        lead (or lead (some #(:form/lead (d/entity db %)) superseded))
+        f (form-tid id)
+        dtids (concat (for [{v :var} defs] (var-tid v))
+                      (for [{:keys [multi dispatch]} methods] (str "method " (method-key multi dispatch)))
+                      (for [{:keys [protocol type]} impls] (str "impl " (impl-key protocol type)))
+                      (when ns-form? [(ns-tid ns)]))
+        nss (into #{ns} (map #(symbol (namespace (:var %)))) defs)]
+    (vec (concat
+           (for [n nss] {:db/id (ns-tid n) :ns/name n})
+           [(cond-> {:db/id f :form/id id :form/src src :form/ns (ns-tid ns) :form/order order}
+              lead (assoc :form/lead lead)
+              (seq dtids) (assoc :form/defines (vec dtids))
+              (seq declares) (assoc :form/declares (mapv var-tid declares))
+              (seq refs) (assoc :form/refs (vec refs))
+              (seq requires) (assoc :form/requires (vec requires))
+              (seq banned) (assoc :form/banned (vec banned))
+              (seq inline-defs) (assoc :form/inline-defs (vec inline-defs))
+              (seq timeouts) (assoc :form/timeouts (vec timeouts))
+              (seq catches) (assoc :form/catches (vec catches)))]
+           (for [s declares] {:db/id (var-tid s) :var/name s :var/ns (ns-tid (symbol (namespace s)))})
+           (for [{v :var :keys [kind contract doc]} defs
+                 :let [e (eid db :var/name v) old (when e (d/entity db e))]
+                 tx (into [(cond-> {:db/id (var-tid v) :var/name v :var/ns (ns-tid (symbol (namespace v))) :var/form f :var/kind kind}
+                             contract (assoc :var/contract contract) doc (assoc :var/doc doc))]
+                          (for [[a x] [[:var/contract contract] [:var/doc doc]]
+                                :let [o (get old a)] :when (and (some? o) (nil? x))]
+                            [:db/retract e a o]))]
+             tx)
+           (for [{:keys [multi dispatch]} methods :let [k (method-key multi dispatch)]]
+             {:db/id (str "method " k) :method/key k :method/multi multi :method/dispatch dispatch :method/form f})
+           (for [{:keys [protocol type]} impls :let [k (impl-key protocol type)]]
+             {:db/id (str "impl " k) :impl/key k :impl/protocol protocol :impl/type type :impl/form f})
+           (when ns-form? [{:db/id (ns-tid ns) :ns/form f}])
+           (for [o superseded] [:db/retractEntity o])))))
 
 (defn record-tx
-  "The facts of a def evaluated in a program namespace: its namespace, the exact text the
-  agent wrote (src), kind, declared contract (as text), docstring and declared metadata
-  (:var/meta, EDN), so main runs what the branch ran. An attribute the redefinition no
-  longer has is retracted (db: the branch). G1's proto.program/record-tx."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/var :string] :seon.db/tx-data]}
-  [db the-var src]
-  (let [m (meta the-var) nsym (ns-name (:ns m)) vsym (symbol (str nsym) (str (:name m)))
-        c (contract/contract the-var)
-        um (var-meta the-var)
-        now (cond-> {:var/name vsym :var/ns (tid nsym) :var/src src :var/kind (var-kind the-var)}
-              c (assoc :var/contract (pr-edn c))
-              (string? (:doc m)) (assoc :var/doc (:doc m))
-              (seq um) (assoc :var/meta (pr-edn um)))
-        e (d/q '[:find ?e . :in $ ?v :where [?e :var/name ?v]] db vsym)
-        old (when e (d/pull db [:var/contract :var/doc :var/meta] e))]
-    (into [{:db/id (tid nsym) :ns/name nsym} now]
-          (for [a [:var/contract :var/doc :var/meta] :let [v (get old a)] :when (and (some? v) (not (contains? now a)))]
-            [:db/retract e a v]))))
+  "The facts of a form's account recorded on this branch's db: account-tx, a new form after
+  every form so far (its order: the branch's next transaction)."
+  {:malli/schema [:=> [:cat :seon.host/db :map] :seon.db/tx-data]}
+  [db acct] (account-tx db acct (inc (:max-tx db))))
 
-(defn record-ns-tx
-  "The facts of an `ns` form evaluated on this branch: its namespace and the form as
-  written (src). Its cost is the form's, never the program's."
-  {:malli/schema [:=> [:cat :symbol :string] :seon.db/tx-data]}
-  [nsym src]
-  [{:db/id (tid nsym) :ns/name nsym :ns/src src}])
+;; ---- the live program ----------------------------------------------------------------
 
-(defn recording
-  "What evaluating form (written as src) left in this REPL that is program, as [what
-  tx-data], or nil: an `ns` form's namespace and text; a namespace new to db that `in-ns`
-  entered; a def's var. A scratch namespace leaves nothing. value: what the form evaluated
-  to. Clojure's `ns` puts the name's metadata on the namespace; Jolt's drops it, so it is
-  put here (jolt/ns-meta is the fix at its cause)."
-  {:malli/schema [:=> [:cat :seon.host/db :any [:maybe :string] :any] [:maybe [:tuple :symbol :seon.db/tx-data]]]}
-  [db form src value]
-  (cond
-    (and (ns-form? form) src (find-ns (second form)))
-    (let [nsym (second form) nsx (find-ns nsym)]
-      (when-let [m (not-empty (dissoc (meta nsym) :line :column))] (alter-meta! nsx merge m))
-      (when-not (scratch-ns? nsx) [nsym (record-ns-tx nsym src)]))
+(defn live?
+  "Is form entity e part of the program: it defines nothing (a text form: a declare, a
+  require, a comment kept from its file), or some definition it made still points to it."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
+  [db e]
+  (let [ds (:form/defines (d/entity db e))]
+    (or (empty? ds) (boolean (some #(= e (form-of db (:db/id %))) ds)))))
 
-    (in-ns-form? form)
-    (let [nsym (ns-name value)]
-      (when-not (or (scratch-ns? value) (d/q '[:find ?e . :in $ ?n :where [?e :ns/name ?n]] db nsym))
-        [nsym [{:db/id (tid nsym) :ns/name nsym}]]))
+(defn form-row
+  "Form entity e as the loader and the merge read it."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
+  [db e]
+  (let [f (d/entity db e)
+        def-key (fn [x] (cond (:var/name x) [:var (:var/name x)]
+                              (:method/key x) (into [:method] (read-string (:method/key x)))
+                              (:impl/key x) (into [:impl] (read-string (:impl/key x)))
+                              (:ns/name x) [:ns (:ns/name x)]))]
+    (cond-> {:e e :id (:form/id f) :src (:form/src f) :ns (:ns/name (:form/ns f)) :order (:form/order f)
+             :defines (into #{} (keep def-key) (:form/defines f))
+             :declares (into #{} (map :var/name) (:form/declares f))
+             :refs (set (:form/refs f)) :requires (set (:form/requires f))
+             :banned (set (:form/banned f)) :inline-defs (set (:form/inline-defs f))
+             :timeouts (set (:form/timeouts f)) :catches (set (:form/catches f))}
+      (:form/lead f) (assoc :lead (:form/lead f)))))
 
-    (and (var? value) (def-form? form) src)
-    (when-not (scratch-ns? (:ns (meta value)))
-      [(symbol value) (record-tx db value src)])))
+(defn live-forms
+  "Every live form of db, as form-row. Cost: the program's forms and their definitions,
+  read once."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :map]]}
+  [db]
+  (vec (for [dt (d/datoms db :aevt :form/id) :when (live? db (:e dt))] (form-row db (:e dt)))))
 
-;; ---- names: how a namespace's source resolves -----------------------------------------
+(defn source-of
+  "The exact text of the form that last defined var sym on db, or nil."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :string]]}
+  [db sym]
+  (some-> (eid db :var/name sym) (#(d/entity db %)) :var/form :form/src))
 
-(defn- expand-libspec
-  "One :require/:use spec as libs: a symbol, a vector [lib & opts], or a prefix list
-  (prefix lib-or-[lib & opts] ...)."
-  {:malli/schema [:=> [:cat :any] [:sequential [:map [:ns :symbol] [:opts :map]]]]}
-  [spec]
-  (let [lib (fn [s opts] {:ns s :opts (apply hash-map opts)})]
-    (cond (symbol? spec) [(lib spec nil)]
-          (and (vector? spec) (or (= 1 (count spec)) (keyword? (second spec)))) [(lib (first spec) (rest spec))]
-          (sequential? spec) (for [s (rest spec)
-                                   :let [[sn & opts] (if (sequential? s) s [s])]]
-                               (lib (symbol (str (first spec) "." sn)) opts))
-          :else [])))
+;; ---- load order ----------------------------------------------------------------------
 
-(defn libspecs
-  "The libs an ns form names in :require and :use, as written: {:ns :as :refer} each, :refer
-  a vector of symbols or :all (:use refers all unless :only)."
-  {:malli/schema [:=> [:cat :any] [:vector [:map [:ns :symbol] [:as {:optional true} :symbol] [:refer {:optional true} :any]]]]}
-  [form]
-  (vec (for [clause (drop 2 form)
-             :when (and (sequential? clause) (#{:require :use} (first clause)))
-             spec (rest clause) :when (not (keyword? spec))
-             {:keys [ns opts]} (expand-libspec spec)]
-         (cond-> {:ns ns}
-           (:as opts) (assoc :as (:as opts))
-           (= :use (first clause)) (assoc :refer (or (:only opts) :all))
-           (:refer opts) (assoc :refer (:refer opts))))))
+(defn- topo
+  "nodes in dependency order: each after the nodes among them it needs (deps), the rest in
+  the order of k; a cycle is broken at the node first by k. One visit per node and edge."
+  {:malli/schema [:=> [:cat [:sequential :any] :seon.host/fn :seon.host/fn] [:vector :any]]}
+  [nodes deps k]
+  (let [in? (set nodes)]
+    (:order (reduce (fn visit [st n]
+                      (if (or ((:seen st) n) (not (in? n)))
+                        st
+                        (update (reduce visit (update st :seen conj n) (sort-by k (deps n))) :order conj n)))
+                    {:seen #{} :order []}
+                    (sort-by k nodes)))))
 
-(defn ns-env
-  "How names resolve in namespace nsym: its ns form's aliases and refers, then its alias
-  facts (\"[a target]\"). {:own :aliases {a target} :refers {s target} :all [target ...]}."
-  {:malli/schema [:=> [:cat :symbol :any [:sequential :string]] :seon.program/env]}
-  [nsym ns-form alias-strs]
-  (let [libs (when (ns-form? ns-form) (libspecs ns-form))]
-    {:own nsym
-     :aliases (into (into {} (for [{:keys [ns as]} libs :when as] [as ns]))
-                    (for [s alias-strs :let [[a target] (read-string s)]] [a target]))
-     :refers (into {} (for [{:keys [ns refer]} libs :when (sequential? refer) s refer] [s ns]))
-     :all (vec (for [{:keys [ns refer]} libs :when (= :all refer)] ns))
-     :requires (vec (distinct (map :ns libs)))}))
-
-(defn names-in
-  "The definitions among names that form's symbols name, resolved in env (an unqualified
-  symbol: its own namespace's var, else a refer; a qualified one: its namespace or alias).
-  Static: a var reached only through eval, resolve or a macro's expansion is not seen."
-  {:malli/schema [:=> [:cat :seon.program/env [:set :qualified-symbol] :any] [:set :qualified-symbol]]}
-  [{:keys [own aliases refers all]} names form]
-  (into #{} (keep (fn [s]
-                    (let [q (if-let [sn (namespace s)]
-                              (symbol (str (get aliases (symbol sn) sn)) (name s))
-                              (let [mine (symbol (str own) (name s))]
-                                (cond (names mine) mine
-                                      (refers s) (symbol (str (refers s)) (name s))
-                                      :else (some #(let [q (symbol (str %) (name s))] (when (names q) q)) all))))]
-                      (when (and q (names q)) q))))
-        (filter symbol? (tree-seq coll? seq form))))
-
-(defn- ns-src-of
-  {:malli/schema [:=> [:cat :seon.host/db :symbol] [:maybe :string]]}
-  [db nsym] (d/q '[:find ?s . :in $ ?n :where [?e :ns/name ?n] [?e :ns/src ?s]] db nsym))
-
-(defn env-of
-  "Namespace nsym's name environment as db records it (one lookup)."
-  {:malli/schema [:=> [:cat :seon.host/db :symbol] :seon.program/env]}
-  [db nsym]
-  (ns-env nsym (some-> (ns-src-of db nsym) (reader/read-one nsym))
-          (d/q '[:find [?a ...] :in $ ?n :where [?e :ns/name ?n] [?e :ns/alias ?a]] db nsym)))
-
-(defn- test-form?
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [form] (boolean (and (seq? form) (symbol? (first form)) (= "deftest" (name (first form))))))
+(defn load-order
+  "forms (form rows) in the order to load them: namespaces in dependency order (after each
+  namespace among them that their forms require or whose vars they reference; ties by
+  name), and within a namespace by order, each form after the earliest form among them
+  that interns (defines or declares) a var it references. A file's own order is kept: it
+  already loads. Cost: one pass over the forms and their references."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:vector :map]]}
+  [forms]
+  (let [by-id (into {} (map (juxt :id identity)) forms)
+        interns (reduce (fn [m f]
+                          (reduce (fn [m s] (update m s (fn [g] (if (and g (<= (:order (by-id g)) (:order f))) g (:id f)))))
+                                  m (concat (keep (fn [[k s]] (when (= :var k) s)) (:defines f)) (:declares f))))
+                        {} forms)
+        by-ns (group-by :ns forms)
+        nss (vec (keys by-ns))
+        ns-deps (into {} (for [[n fs] by-ns]
+                           [n (into (set (mapcat :requires fs))
+                                    (for [f fs r (:refs f) :let [g (interns r)] :when g] (:ns (by-id g))))]))
+        deps (fn [f] (for [r (:refs f) :let [g (interns r)] :when (and g (not= g (:id f)) (= (:ns f) (:ns (by-id g))))] g))]
+    (vec (for [n (topo nss #(disj (ns-deps %) %) str)
+               id (topo (map :id (by-ns n)) #(deps (by-id %)) #(:order (by-id %)))]
+           (by-id id)))))
 
 ;; ---- loading ---------------------------------------------------------------------------
+;; A namespace imported from a file (seon.source: it has an :ns/file) is the running
+;; generation's own code, compiled into this binary. Main's facts for it are the next
+;; generation's source, written back and built: root and the fork server (load-all!,
+;; load-changes!) never evaluate them. An agent runs its branch's changes to it like any
+;; program's (load-diff!: every form but the imported text the binary already holds).
+
+(defn- compiled?
+  "Was namespace nsym imported from a file on db (the binary holds it compiled)?"
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] :boolean]}
+  [db nsym] (some? (:ns/file (d/entity db [:ns/name nsym]))))
+
+(defn- loadable
+  "The form rows of forms that this process evaluates: none of a compiled namespace's."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] [:vector :map]]}
+  [db forms] (filterv #(not (compiled? db (:ns %))) forms))
 
 (defn ensure-ns!
   "The namespace, created with clojure.core and clojure.test's assertions referred when it
-  is new (a definition seeded on main with no ns form)."
+  is new (a namespace with no ns form)."
   {:malli/schema [:=> [:cat :symbol] :seon.host/namespace]}
   [ns-sym]
   (or (find-ns ns-sym)
@@ -221,162 +510,102 @@
           (refer 'clojure.test :only '[deftest is are testing]))
         n)))
 
-(defn- err
-  {:malli/schema [:=> [:cat :symbol :string :seon.host/throwable] :seon.program/error]}
-  [nsym what e] {:ns nsym :message (str what (or (ex-message e) (str (type e))))})
+(defn- load-form!
+  "Evaluate one form row in its namespace, and arm the contracted functions it defines
+  (seon.contract/arm!). Answers nil, or an error map."
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.program/error]]}
+  [{:keys [ns src defines]}]
+  (try
+    (binding [*ns* (ensure-ns! ns)]
+      (eval (read-string src)))
+    (some (fn [[k s]]
+            (when-let [v (and (= :var k) (find-var s))]
+              (let [r (contract/arm! v)]
+                (when (contract/error? r) {:ns ns :message (:seon.error/message r)}))))
+          defines)
+    (catch Throwable e {:ns ns :message (or (ex-message e) (str (type e)))})))
 
-(defn aliases!
-  "Give each namespace of nsyms the aliases db records for it (:ns/alias \"[a target]\"),
-  requiring the target first, so a definition that uses an alias loads (lane M1, core patch
-  04). Answers the error maps of targets that could not be required."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :symbol]] [:vector :seon.program/error]]}
-  [db nsyms]
-  (vec (for [n (distinct nsyms)
-             s (d/q '[:find [?s ...] :in $ ?n :where [?e :ns/name ?n] [?e :ns/alias ?s]] db n)
-             :let [[a target] (read-string s)
-                   e (try (when-not (find-ns target) (require target))
-                          (binding [*ns* (ensure-ns! n)] (alias a target))
-                          nil
-                          (catch Throwable e (err n (str "alias " s ": ") e)))]
-             :when e]
-         e)))
+(defn- load-forms!
+  "Load form rows in load order; answers the errors."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:vector :seon.program/error]]}
+  [forms]
+  (into [] (keep load-form!) (load-order forms)))
 
-(defn load-ns!
-  "Declare namespace nsym as db holds it: created (ensure-ns!), its ns form evaluated as
-  written (its requires, refers and aliases), then its alias facts. Answers the errors."
-  {:malli/schema [:=> [:cat :seon.host/db :symbol] [:vector :seon.program/error]]}
-  [db nsym]
-  (let [nsx (ensure-ns! nsym)
-        e (when-let [src (ns-src-of db nsym)]
-            (try (binding [*ns* nsx] (eval (read-string src))) nil
-                 (catch Throwable e (err nsym "ns form: " e))))]
-    (into (if e [e] []) (aliases! db [nsym]))))
+(defn- remove-definition!
+  "Make this process hold no definition for program key k (a var unmapped, a method
+  removed)."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [[kind a b]]
+  (case kind
+    :var (when-let [n (find-ns (symbol (namespace a)))] (ns-unmap n (symbol (name a))))
+    :method (when-let [v (find-var a)] (when (instance? clojure.lang.MultiFn @v) (remove-method @v (read-string b))))
+    nil))
 
-(defn load-src!
-  "Evaluate one var's source in its namespace and arm its contract (seon.contract/arm!):
-  answers nil, or an error map (G1's proto.program/load-src!)."
-  {:malli/schema [:=> [:cat :symbol :string] [:maybe :seon.program/error]]}
-  [ns-sym src]
-  (let [v (try (binding [*ns* (ensure-ns! ns-sym)] (eval (read-string src)))
-               (catch Throwable e {:ns ns-sym :message (or (ex-message e) (str (type e)))}))]
-    (cond
-      (and (map? v) (:ns v) (contains? v :message)) v
-      (var? v) (let [r (contract/arm! v)]
-                 (when (contract/error? r) {:ns ns-sym :message (:seon.error/message r)}))
-      :else nil)))
-
-(defn- topo
-  "nodes in dependency order: each after the nodes among them it needs (deps), ties and
-  cycles broken by name. One visit per node and edge."
-  {:malli/schema [:=> [:cat [:sequential :symbol] :seon.host/fn] [:vector :symbol]]}
-  [nodes deps]
-  (let [in? (set nodes)]
-    (:order (reduce (fn visit [st n]
-                      (if (or ((:seen st) n) (not (in? n)))
-                        st
-                        (update (reduce visit (update st :seen conj n) (sort-by str (deps n))) :order conj n)))
-                    {:seen #{} :order []}
-                    (sort-by str nodes)))))
-
-(defn load-order
-  "The order to load namespaces nss and definitions rows ([sym src]) of db in: namespaces in
-  dependency order (after every namespace among them that their ns form requires or their
-  definitions name), each declared and then its definitions, those in dependency order among
-  themselves; tests after every other definition (a test may name its subject fully
-  qualified). Answers [[:ns nsym] | [:var sym src] ...]. Cost: one read per row and one
-  lookup per namespace, never the rest of the program."
-  {:malli/schema [:=> [:cat :seon.host/db [:set :symbol] [:sequential [:tuple :qualified-symbol :string]]]
-                  [:vector [:or [:tuple [:= :ns] :symbol] [:tuple [:= :var] :qualified-symbol :string]]]]}
-  [db nss rows]
-  (let [all-ns (into (set nss) (map (comp symbol namespace first)) rows)
-        envs (into {} (for [n all-ns] [n (env-of db n)]))
-        names (set (map first rows))
-        defs (into {} (for [[v src] rows :let [n (symbol (namespace v))]]
-                        [v {:src src :form (reader/read-one src n)}]))
-        uses (into {} (for [[v {:keys [form]}] defs] [v (disj (names-in (envs (symbol (namespace v))) names form) v)]))
-        named (reduce (fn [m [v us]] (update m (symbol (namespace v)) (fnil into #{}) (map (comp symbol namespace)) us)) {} uses)
-        order (topo (vec all-ns) (fn [n] (into (set (:requires (envs n))) (named n))))
-        by-ns (group-by (comp symbol namespace) (keys defs))
-        vars (fn [n tests?] (for [v (topo (filterv #(= tests? (test-form? (:form (defs %)))) (by-ns n)) #(uses %))]
-                              [:var v (:src (defs v))]))]
-    (vec (concat (mapcat (fn [n] (concat (when (nss n) [[:ns n]]) (vars n false))) order)
-                 (mapcat #(vars % true) order)))))
-
-(defn- load-steps!
-  "Carry out load-order's steps; answers the errors."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:vector :seon.program/error]]}
-  [db steps]
-  (reduce (fn [errs [k x src]]
-            (case k
-              :ns (into errs (load-ns! db x))
-              :var (if-let [e (load-src! (symbol (namespace x)) src)] (conj errs e) errs)))
-          [] steps))
+(defn- definitions
+  "{program key -> form id} of db's definitions that point to a form."
+  {:malli/schema [:=> [:cat :seon.host/db] :map]}
+  [db]
+  (into {} (for [f (live-forms db) k (:defines f) :let [e (case (first k) :var (eid db :var/name (second k))
+                                                             :method (eid db :method/key (method-key (second k) (nth k 2)))
+                                                             :impl (eid db :impl/key (impl-key (second k) (nth k 2)))
+                                                             :ns (eid db :ns/name (second k)))]
+             :when (and e (= (:e f) (form-of db e)))]
+         [k (:id f)])))
 
 (defn load-all!
-  "Load db's program: every namespace declared (load-ns!), then every definition, in
-  load-order. Answers {:loaded n :errors [...]}."
+  "Load db's program: every live form, in load order. Answers {:loaded n :errors [...]}."
   {:malli/schema [:=> [:cat :seon.host/db] :seon.program/load-report]}
   [db]
-  (let [rows (vec (d/q '[:find ?v ?src :where [?e :var/name ?v] [?e :var/src ?src]] db))
-        nss (set (d/q '[:find [?n ...] :where [_ :ns/name ?n]] db))]
-    {:loaded (count rows) :errors (load-steps! db (load-order db nss rows))}))
-
-(defn load-changes!
-  "Load what resolved tx-data ops change, read against db (after them): unmap every var
-  whose :var/name they retract, declare each namespace whose ns form or aliases they assert,
-  and load each :var/src they assert, in load-order. Answers the error maps (empty when all
-  loaded)."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.db/op]] [:vector :seon.program/error]]}
-  [db ops]
-  (doseq [[op _ a v] ops
-          :when (and (= op :db/retract) (= a :var/name) (symbol? v))
-          :let [n (some-> (namespace v) symbol find-ns)]
-          :when n]
-    (ns-unmap n (symbol (name v))))
-  (let [nss (set (for [[op e a _] ops :when (and (= op :db/add) (#{:ns/src :ns/alias} a))] (:ns/name (d/entity db e))))
-        rows (vec (for [[op e a src] ops
-                        :when (and (= op :db/add) (= a :var/src))
-                        :let [v (d/q '[:find ?v . :in $ ?e :where [?e :var/name ?v]] db e)]
-                        :when v]
-                    [v src]))]
-    (load-steps! db (load-order db nss rows))))
+  (let [forms (loadable db (live-forms db))]
+    {:loaded (count forms) :errors (load-forms! forms)}))
 
 (defn load-diff!
-  "Make this process run db-to's program where it holds db-from's: each namespace whose
-  ns form differs is declared again, and each definition whose recorded content differs is
-  loaded (or unmapped when db-to has none), in load-order. An agent resuming a kept branch
-  was forked holding main's program. Answers the load errors."
+  "Make this process run db-to's program where it holds db-from's: each live form db-to
+  has that db-from had not is loaded, in load order (but imported source text, which the
+  binary holds compiled), and each definition db-from had that db-to has none of is
+  removed. Answers the load errors."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.program/error]]}
   [db-from db-to]
-  (let [srcs (fn [db] (into {} (d/q '[:find ?v ?s :where [?e :var/name ?v] [?e :var/src ?s]] db)))
-        nsrcs (fn [db] (into {} (d/q '[:find ?n ?s :where [?e :ns/name ?n] [?e :ns/src ?s]] db)))
-        from (srcs db-from) to (srcs db-to)
-        nfrom (nsrcs db-from) nto (nsrcs db-to)]
-    (doseq [[v _] from :when (not (contains? to v))
-            :let [n (find-ns (symbol (namespace v)))] :when n]
-      (ns-unmap n (symbol (name v))))
-    (load-steps! db-to (load-order db-to
-                                   (set (for [[n s] nto :when (not= s (get nfrom n))] n))
-                                   (vec (for [[v src] to :when (not= src (get from v))] [v src]))))))
+  (let [from (set (map :id (live-forms db-from)))
+        to-defs (definitions db-to)]
+    (doseq [k (keys (definitions db-from)) :when (not (contains? to-defs k))] (remove-definition! k))
+    (load-forms! (remove #(or (from (:id %)) (:form/source (d/entity db-to (:e %)))) (live-forms db-to)))))
+
+(defn load-changes!
+  "Load what resolved tx-data ops change, read against db (after them): each definition
+  they leave pointing to no form is removed, and each live form they assert is loaded, in
+  load order. Answers the error maps (empty when all loaded)."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.db/op]] [:vector :seon.program/error]]}
+  [db ops]
+  (let [ptr (set def-attrs)
+        added (set (for [[op e a] ops :when (and (= op :db/add) (ptr a))] e))]
+    (doseq [[op e a] ops
+            :when (and (= op :db/retract) (ptr a) (not (added e)))
+            :let [x (d/entity db e)]
+            :when (not (some->> (or (:var/name x) (:method/multi x)) namespace symbol (compiled? db)))]
+      (cond (:var/name x) (remove-definition! [:var (:var/name x)])
+            (:method/key x) (remove-definition! (into [:method] (read-string (:method/key x))))))
+    (load-forms! (loadable db (vec (for [[op e a] ops
+                                         :when (and (= op :db/add) (= a :form/src) (live? db e))]
+                                     (form-row db e)))))))
 
 ;; ---- reach: which tests a change reaches ----------------------------------------------
 
 (defn reaching-tests
-  "The program's tests on db whose definition reaches one of syms (fully qualified var
-  names): walked backwards once over the definitions each recorded :var/src names, resolved
-  as its namespace resolves them (its own vars, its ns form's refers and aliases, its alias
-  facts). Static (names-in). Cost: the program's definitions and references, read once."
+  "The program's tests on db that reach one of syms (fully qualified var names): from each
+  var, the forms that reference it (one AVET seek), their definitions, and on. Cost: the
+  reached definitions, never the rest of the program."
   {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-symbol]] [:set :qualified-symbol]]}
   [db syms]
-  (let [rows (d/q '[:find ?v ?s :where [?e :var/name ?v] [?e :var/src ?s]] db)
-        names (into #{} (map first) rows)
-        envs (into {} (for [n (distinct (map (comp symbol namespace first) rows))] [n (env-of db n)]))
-        forms (into {} (for [[v src] rows] [v (reader/read-one src (symbol (namespace v)))]))
-        back (reduce (fn [m [v form]]
-                       (reduce #(update %1 %2 (fnil conj #{}) v) m (disj (names-in (envs (symbol (namespace v))) names form) v)))
-                     {} forms)
-        reached (loop [front (vec (filter names syms)) seen (set (filter names syms))]
-                  (if-let [[x & more] (seq front)]
-                    (let [ns (remove seen (get back x))] (recur (into (vec more) ns) (into seen ns)))
-                    seen))]
-    (into #{} (filter #(test-form? (forms %))) reached)))
+  (loop [front (vec syms) seen (set syms) tests #{}]
+    (if-let [[x & more] (seq front)]
+      (let [callers (for [dt (d/datoms db :avet :form/refs x)
+                          :when (live? db (:e dt))
+                          dv (:form/defines (d/entity db (:e dt)))
+                          :let [v (:var/name dv)]
+                          :when (and v (= (:e dt) (:db/id (:var/form dv))))]
+                      [v (:var/kind dv)])
+            new (remove (comp seen first) callers)]
+        (recur (into (vec more) (map first) new) (into seen (map first) new)
+               (into tests (comp (filter #(= :test (second %))) (map first)) callers)))
+      tests)))

@@ -7,7 +7,7 @@
   actions out as requests to the api, each action's facts written by the writer."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [clojure.edn :as edn] [seon.sock :as sock] [seon.step :as step]
-            [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm]
+            [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm] [seon.source :as source]
             [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
             [seon.config :as cfg]))
 
@@ -545,7 +545,7 @@
         end (pull-end db aid)
         mp (pm/program main #{})
         unc (into #{} (for [[[k sym] e] (pm/program db #{})
-                            :when (and (= :var k) (= :fn (:kind e)) (nil? (:contract e)) (not (:flagged e)) (not= e (get mp [k sym])))]
+                            :when (and (= :var k) (= :fn (:kind e)) (nil? (:contract e)) (not= e (get mp [k sym])))]
                         sym))
         plan (:seon.task/plan (task/task db id))]
     (into (cas-tx aid :running :ended
@@ -612,7 +612,14 @@
       ;; each member's answer, as one write: merged at the train's t, behind (its merge task
       ;; runs again, a new agent), or refused: a failed attempt like any other (a refinement
       ;; chain while the budget lasts, else stuck)
-      :trained (one (write st aid :done
+      ;; the merged members' namespaces that are Seon's own source are written back: main's
+      ;; files after the train, committed on the merges branch (:git), the sha recorded on
+      ;; each merged attempt (the self-improvement loop: the next generation builds it)
+      :trained (let [merged (keep (fn [[m x]] (when (:merged? x) [m x])) (map vector (:members act) (:results r)))
+                     nss (vec (sort (distinct (mapcat (comp :nss second) merged))))
+                     back? (and (:source st) (seq nss))]
+                 (one (write (cond-> st back? (assoc-in [:flights aid :writeback] {:nss nss :members (mapv first merged)}))
+                             aid (if back? :landed :done)
                            (vec (mapcat (fn [{:keys [attempt task]} r]
                                           (let [problem (str "merge refused: " (:seon.error/message r))]
                                             (cond
@@ -624,7 +631,21 @@
                                                     {:seon.attempt/id attempt :seon.attempt/error (error-text r)})
                                               :else (into (cas-tx attempt :ended :bailed {:seon.attempt/error (error-text r)})
                                                           (stuck-tx (:idx st) attempt task problem)))))
-                                        (:members act) (:results r))))))))
+                                        (:members act) (:results r))))))
+      :landed (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))
+      :main-read (let [{:keys [nss members]} (:writeback f)
+                       files (source/files (:db r) nss)]
+                   (if (empty? files)
+                     (done st)
+                     (one (request st aid :committed
+                                   {:op :fx :kind :git :req {:dir (:root (:source st)) :branch (:branch (:source st)) :files files
+                                                             :message (source/commit-message members)}}))))
+      :committed (let [sha (get-in r [:value :sha])
+                       m (cond sha {:seon.attempt/commit sha}
+                               (contract/error? r) {:seon.attempt/commit-error (:seon.error/message r)})]
+                   (if m
+                     (one (write st aid :done (vec (for [{:keys [attempt]} (:members (:writeback f))] (assoc m :seon.attempt/id attempt)))))
+                     (done st))))))
 
 (defn- quiet
   "Report quiescence positively, once per quiet spell: when no flight is in the air and no

@@ -28,7 +28,7 @@
   ;; buffer, back-pressure on the writer if it lags
   :reconciler {:proc seon.reconcile/reconciler-proc
                :chan-opts {:main {:buf-or-n :bind/reconciler-buf}}
-               :args {:boot :bind/boot :judge :bind/judge}}
+               :args {:boot :bind/boot :judge :bind/judge :source :bind/source}}
   ;; root's web (lane W2): the render proc renders what changed into patches per view
   ;; (:compute, never waits); the web proc owns the listener and the tabs (:io). Port:
   ;; 127.0.0.1 only, :seon.config.web/port; 0 serves nothing
@@ -39,6 +39,8 @@
  :fx
  {:echo {:perform seon.fx/echo :lanes 1}
   :file {:perform seon.fx/write-file :lanes 1}
+  :source {:perform seon.fx/read-source :lanes 1}
+  :git {:perform seon.fx/git-commit :lanes 1}
   ;; the model provider is only root's: the agents never hold the key
   :model {:perform seon.fx/model :lanes :bind/model-lanes :ctx {:provider :bind/provider} :rate :bind/model-rate}}
  :conns

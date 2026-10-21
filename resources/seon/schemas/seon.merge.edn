@@ -1,13 +1,28 @@
 ;; The program merge's named schemas (lane M1's proto.merge.edn).
 {:seon.merge/data-attrs [:or [:= :all] [:set :keyword]]
+ ;; a definition (var, multimethod method, protocol extension, namespace), a form (the
+ ;; unit main evaluates), or a datum of declared data
  :seon.merge/program-key [:or [:tuple [:= :var] :qualified-symbol]
+                   [:tuple [:= :method] :qualified-symbol :any]
+                   [:tuple [:= :impl] :qualified-symbol :string]
                    [:tuple [:= :ns] :symbol]
-                   [:tuple [:= :alias] :symbol :symbol]
+                   [:tuple [:= :form] :string]
                    [:tuple [:= :datum] :int :keyword]
                    [:tuple [:= :datum] :int :keyword :any]]
- :seon.merge/entry [:map [:src {:optional true} :string] [:kind {:optional true} :keyword]
-                     [:contract {:optional true} :string] [:doc {:optional true} :string] [:meta {:optional true} :string]
-                     [:flagged {:optional true} true?]]
+ ;; a definition's key: what a form defines
+ :seon.merge/def-key [:or [:tuple [:= :var] :qualified-symbol]
+                      [:tuple [:= :method] :qualified-symbol :string]
+                      [:tuple [:= :impl] :qualified-symbol :string]
+                      [:tuple [:= :ns] :symbol]]
+ ;; a form's content: its namespace, text, place and what the compiler said it does
+ :seon.merge/form [:map [:ns :symbol] [:src :string] [:order :int] [:lead {:optional true} :string]
+                   [:defines [:set :any]] [:declares [:set :qualified-symbol]] [:refs [:set :qualified-symbol]]
+                   [:requires [:set :symbol]] [:banned [:set :qualified-symbol]] [:inline-defs [:set :qualified-symbol]]
+                   [:timeouts {:optional true} [:set :qualified-symbol]] [:catches {:optional true} [:set :string]]]
+ ;; a definition's content: the form that last made it (its id and text), and a var's kind and contract
+ :seon.merge/entry [:map [:form {:optional true} :string] [:kind {:optional true} :keyword]
+                     [:contract {:optional true} :string] [:doc {:optional true} :string] [:file {:optional true} :string]
+                     [:src {:optional true} :string]]
  :seon.merge/program [:map-of :seon.merge/program-key :any]
  :seon.merge/changes [:map-of :seon.merge/program-key [:tuple :any :any]]
  :seon.merge/conflict-kind [:enum :both-modified :both-added :deleted-by-us :deleted-by-them]
@@ -18,6 +33,10 @@
                             [:main-t :int] [:resolved? :boolean]]
  :seon.merge/result [:map [:ours :seon.merge/changes] [:theirs :seon.merge/changes]
                       [:apply [:vector :seon.merge/program-key]] [:conflicts [:vector :seon.merge/conflict]]]
+ ;; a branch whose program calls intern, alter-var-root, eval or load-string, or defines inside a
+ ;; function body (seon.merge/mutations), refused at merge
+ :seon.merge/mutation [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/mutation]] [:merged? false?]
+                                               [:mutations [:vector [:map [:form :string] [:ns :symbol] [:defines [:vector :any]]]]]]]
  :seon.merge/behind [:and :seon.error/base [:map [:seon.error/type [:enum :seon.merge/behind]]
                                              [:merged? false?] [:behind pos-int?]]]
  :seon.merge/unmerged [:and :seon.error/base [:map [:seon.error/type [:enum :seon.merge/unmerged]]

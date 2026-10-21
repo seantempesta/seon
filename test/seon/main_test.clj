@@ -6,7 +6,7 @@
             [seon.db :as pdb] [seon.root :as root]))
 
 (defn- program-datoms [db]
-  (vec (mapcat #(d/datoms db :aevt %) [:ns/name :var/name :task/name])))
+  (vec (mapcat #(d/datoms db :aevt %) [:ns/name :form/id :var/name :task/name])))
 
 (defn- fresh-store
   "A fresh store on disk of this test's own, the last resort: what is proved is what a

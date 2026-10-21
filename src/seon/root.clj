@@ -23,7 +23,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
-            [seon.writer :as writer] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
+            [seon.writer :as writer] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
@@ -295,6 +295,14 @@
               p (reply! p {:killed id}))
       :message (let [msg {:op :message :from (:from m :root) :body (:body m) :ns (sock/now-ns)}]
                  (reduce #(to-agent %1 %2 {:op :write :msg msg}) st (:to m)))
+      ;; an effect asked by root itself or a root proc (the reconciler's write-back): to its
+      ;; kind's owner, answered by rid like the writer's answers
+      :fx (let [owner (keyword "fx" (name (:kind m)))]
+            (if (contains? (system/fx-owners (get-in st [:system :procs])) owner)
+              (let [[st rid] (rid! st)]
+                (step/out! o [owner :in] {:req (:req m) :prio 0 :dest {:rid rid}})
+                (pend st rid p :fx nil))
+              (reply! st p (contract/error :seon.fx/unknown-kind 'seon.fx/call (str "no effect kind " (:kind m))))))
       :fs (let [[st rid] (rid! st)]
             (step/out! o :to-fs (assoc (:req m) :rid rid))
             (pend st rid p :fs nil))
@@ -492,7 +500,8 @@
   [conn]
   ;; a definition and a task of warm!'s own, on a value never committed: boot needs no seed
   (let [db (d/db-with @conn [{:db/id "ns" :ns/name 'seon.warm :ns/doc "warm"}
-                              {:db/id "v" :var/name 'seon.warm/f :var/ns "ns" :var/doc "warm" :var/src "(defn f [x] x)" :var/arity 1}
+                              {:db/id "f" :form/id "seon.warm/f" :form/src "(defn f [x] x)" :form/ns "ns" :form/order 0 :form/defines ["v"]}
+                              {:db/id "v" :var/name 'seon.warm/f :var/ns "ns" :var/doc "warm" :var/form "f" :var/arity 1}
                               {:task/name :seon.warm/tidy :task/plan "warm" :task/status :held :task/refs ["v"]}])]
     (dotimes [_ 3]
       (d/q '[:find ?n . :in $ ?v :where [?e :var/name ?v] [?e :var/doc ?n]] db 'seon.warm/f)
@@ -519,6 +528,22 @@
 
 (declare call!)
 
+(defn- import-source!
+  "Main's program gets Seon's own source (seon.source): root's dirs read through the
+  :source effect, every form analyzed (the running generation's namespaces, never run), one
+  transaction on main; what happened is root's :seon.root/source fact. Answers it."
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [sys {:keys [root dirs]}]
+  (let [t0 (lib/now-ns)
+        r @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs}})
+        w (when-let [files (:value r)]
+            @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (source/import-tx @(:conn sys) files)}}))
+        fact (cond-> {:root root :files (count (:value r)) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (lib/ms-since t0)}
+               (contract/error? r) (assoc :error (:seon.error/message r))
+               (and w (not (:ok w))) (assoc :error (:seon.error/message w)))]
+    @(call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/source (pr-str fact)}]}})
+    fact))
+
 (defn start!
   "Boot the control process, the fork server and the root graph on its main, a branch of
   the one store (owner, 2026-10-21: one store, many branches, as in production). opts:
@@ -527,12 +552,16 @@
    :main branch (root's main; an existing branch is recovered; :db is production's main)
    :backend :lmdb|:file :log? true :max-running n (parallel attempts) :provider p (the
    attempts' model) :flush-ms and :stall-ms (fences, seon.db/flush-ms and
-   seon.agent-proc/stall-ms, for the checks that move them)}. What opts leave out is the config's: :seon.config.root/store-path,
+   seon.agent-proc/stall-ms, for the checks that move them) :source s}. s: Seon's own source
+   is the program, {:root dir :dirs [\"src\"] :branch \"jolt/seon-merges\"}: main imports root's
+   dirs at boot when it holds none of them (seon.source), and each merge that changes them
+   is committed on branch (the reconciler's write-back); absent, the config's
+   :seon.config.source/* (no :seon.config.source/root: no source). What opts leave out is the config's: :seon.config.root/store-path,
   :seon.config.root/main (absent: a new branch <:seon.config.root/run-name>-<time>-<id> of
   :db), :seon.config.store/backend, :seon.config.agent/max-running and the provider of
   :seon.config.ai/*. The config in force is written on main's root entity."
   {:malli/schema [:=> [:cat :map] :seon.root/sys]}
-  [{:keys [datoms log? path main backend max-running provider flush-ms stall-ms] :or {datoms 0}}]
+  [{:keys [datoms log? path main backend max-running provider flush-ms stall-ms source] :or {datoms 0}}]
   (lib/ignore-sigpipe!)
   (when-not log? (trove/set-log-fn! nil))
   (let [t0 (lib/now-ns)
@@ -560,6 +589,8 @@
         ;; this root's boot id (attempts of an earlier boot are reaped); its fact is written
         ;; through the writer once the graph runs, and that commit is the reconciler's first pass
         boot (str (random-uuid))
+        source (or source (when-let [r (get cfg/config :seon.config.source/root)]
+                            {:root r :dirs (cfg/value :seon.config.source/dirs) :branch (cfg/value :seon.config.source/branch)}))
         provider (or provider (cfg/provider cfg/config))
         ;; the config in force, written on main's root entity with the boot fact
         config (-> (cfg/with-provider cfg/config provider) (assoc :seon.config.agent/max-running max-running))
@@ -594,7 +625,7 @@
                         {:view view :graph graph-p :lease-base (pdb/lease-base conn)
                          :system root-procs-p :events events-in :events-mult events-mult
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
-                         :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider
+                         :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
                          :flush-ms (or flush-ms pdb/flush-ms) :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf)
                          :model-lanes (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
@@ -630,6 +661,8 @@
     ;; whose boot fact was refused cannot start anything, so its refusal ends the boot
     (let [r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (into (task/boot-tx boot max-running) (cfg/facts config cfg/sources))}})]
       (when-not (:ok r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r (:error r))) r))))
+    (when (and source (empty? (source/source-nss @conn)))
+      (import-source! sys source))
     sys))
 
 ;; ====================================================================================
