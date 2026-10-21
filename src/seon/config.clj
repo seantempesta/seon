@@ -84,9 +84,13 @@
 
 (def GC-SWEEPERS
   "Unit: threads, Chez's parallel-collector sweepers in root, fixed at boot right after the
-  fork server is forked (seon.lib/gc-sweepers!; our Chez's (cs)collect_sweepers). Provenance:
-  lane THREADS, 2026-10-21: unfixed, Chez kept one per thread a collection found waiting, so
-  root's count drifted with load (0, 5, 15 across identical runs). At the bound: a collection
-  with more threads waiting gives the extra threads' areas to these n, it starts no other.
-  Not read from the environment; for lane CONFIG: key :seon.config.root/gc-sweepers."
-  4)
+  fork server is forked (seon.lib/gc-sweepers!; our Chez's (cs)collect_sweepers). 0: root
+  collects on the thread that triggers it. Provenance: lane THREADS, 2026-10-21. Unfixed,
+  Chez kept one per thread a collection found waiting, so root's count drifted with load (0,
+  5, 15 across identical runs). A/B at 0/2/4/8 (load 7-8, 3 runs of scale 100, 1 lifecycle
+  10 each): GC real time the same at every n (scale 204-241 / 211-229 / 208-219 / 215-221 ms
+  over ~140 collections of ~1.5 ms; lifecycle 360 / 369 / 376 / 366 ms over ~510), GC CPU
+  rising with n (205-227 at 0, 238-248 at 8), wall time within noise, threads 37 / 39 / 41 /
+  45. Root's collections are small young ones; sweepers only pay for heaps far bigger. At
+  the bound: none. For lane CONFIG: key :seon.config.root/gc-sweepers."
+  0)

@@ -469,6 +469,7 @@
              :control-real-mb (lib/r2 (lib/real-mb)) :fork-server (select-keys fs [:mem-mb :os-threads :active-threads :mismatch :datoms])
              :writer (:writer st) :merged (count (filter :merged? merged)) :main-notes notes
              :all-killed killed? :all-ended (every? #(get-in (c/state sys) [:agents % :ended-ms]) ids)
+             :gc (lib/gc-stats) :gc-sweepers (lib/gc-sweepers! -1)
              :root-threads {:declared (c/declared-threads sys) :os (lib/nthreads)
                             :diff {:boot th-boot :all-ready th-ready :after-work th-work :after-kill th-end}}})
     (c/stop! sys)
@@ -876,6 +877,7 @@
     (pprint {:threads {:declared-running (c/declared-threads sys) :declared-stopped (c/declared-threads)}
              :cycles (mapv #(select-keys % [:cycle :boot-ms :running :stopped :left :health]) rows)
              :stop-ms (lib/summ (map #(get-in % [:stop :ms]) rows))
+             :gc (lib/gc-stats) :gc-sweepers (lib/gc-sweepers! -1)
              :checks checks})
     (out! (if (every? true? (vals checks)) "LIFECYCLE OK" "LIFECYCLE FAIL"))
     (lib/c-exit (if (every? true? (vals checks)) 0 1))))

@@ -69,7 +69,8 @@ Two rules of the OS and Chez that no code may "fix" by adding a thread or a chec
   agent. The real fix is a Chez atfork handler that resets the sweepers (RC1's "next (b)").
   Root, which does hold threads, fixes its sweepers at boot, right after the fork server is
   forked: `seon.lib/gc-sweepers!` (our Chez's `(cs)collect_sweepers`, branch
-  `jolt/gc-sweepers`) starts `SEON_GC_SWEEPERS` and no collection starts another.
+  `jolt/gc-sweepers`) fixes them at `seon.config/GC-SWEEPERS`, 0 (measured: sweepers did
+  not shorten root's small collections), and no collection starts one.
   Unfixed, Chez kept one per thread a collection found waiting, so root's thread count
   drifted by load (0, 5, 15 sweepers across identical runs; lane THREADS).
 - **On macOS, a descriptor in flight by SCM_RIGHTS can be discarded when other unix

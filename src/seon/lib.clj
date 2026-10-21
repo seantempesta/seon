@@ -200,6 +200,16 @@
   {:malli/schema [:=> [:cat :int] :int]}
   [n] (collect-sweepers* n))
 
+(defchecked ^:private gc-stats* [:=> [:cat] [:vector :int]]
+  (scm/eval-string "(lambda () (let ([s (statistics)] [ms (lambda (t) (+ (* 1000 (time-second t)) (quotient (time-nanosecond t) 1000000)))])
+                                  (jolt-vector (sstats-gc-count s) (ms (sstats-gc-real s)) (ms (sstats-gc-cpu s)))))"))
+
+(defn gc-stats
+  "This process's collections so far: {:count n :real-ms :cpu-ms} (Chez's statistics;
+  :cpu-ms sums every sweeper's CPU)."
+  {:malli/schema [:=> [:cat] [:map [:count :int] [:real-ms :int] [:cpu-ms :int]]]}
+  [] (let [[c r u] (gc-stats*)] {:count c :real-ms r :cpu-ms u}))
+
 (defn fiber-carriers
   "The fiber carrier threads Jolt runs (or will run, before the first fiber): its pool size."
   {:malli/schema [:=> [:cat] :int]}
