@@ -5,4 +5,8 @@
  {:seon.task/name "a-small-transaction-costs-its-datoms"
   :seon.task/plan "Measured 2026-10-21: d/with of one 5-datom definition record costs 221-233 us and 148-162 KB, flat in program size (100-10k vars). Estimate from the work: ~15 index inserts at ~1.3 us (seon.cost/units :sorted/assoc) = 20-30 us. ~10x: find Datahike's per-transaction overhead on Jolt (tx report, schema checks, index wrappers) with seon.profile, and fix it in our fork."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.task-cost-test/a-definition-record-costs-its-datoms}}]
+  :seon.task/proofs #{seon.task-cost-test/a-definition-record-costs-its-datoms}}
+ {:seon.task/name "a-kept-store-opens-from-any-path"
+  :seon.task/plan "A store's identity is (hasch/uuid path) (seon.db/store-cfg, db.clj:64) and Datahike also keeps the original path inside the stored config, so a copied or moved store does not open (store-identity-mismatch), and a branch's config taken from (:config @conn) points back at the original path (seen 2026-10-21 copying t5/out/real3.store). Runs are kept records: they must open wherever they are copied or archived. Record the identity once in the store at creation and read it back on open; never derive it from where the store happens to be."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.db-test/a-copied-store-opens-at-its-new-path}}]
