@@ -164,6 +164,13 @@
  ;; Unit: path. The one build lock every build takes (AGENTS.md section 7: lockf on it), so a
  ;; generation's build waits for a lane's and the machine runs one build at a time.
  :seon.config.source/build-lock #seon/checkout "../build.lock"
+ ;; Unit: path. Test results by reach digest (task seon.program/tests-run-by-reach; owner
+ ;; 2026-10-21: "incremental tests even across worktrees based on test digest"): one directory
+ ;; beside the build lock, shared by every checkout and worktree, one <digest>.edn per result,
+ ;; written temp-then-rename. A digest covers everything its result depends on, so a result
+ ;; from any checkout is valid in every other. A checkout's store (runs/store) is its own, so
+ ;; the store cannot hold them. SEON_TEST_RESULTS moves it (a check's own run).
+ :seon.config.source/test-results-dir #or [#env SEON_TEST_RESULTS #seon/checkout "../test-results"]
 
  ;; ==== effects and the model ==================================================================
 

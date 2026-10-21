@@ -14,6 +14,8 @@
             [seon.program :as program]
             [seon.merge :as pm]
             [seon.source :as source]
+            [clojure.java.shell :as sh]
+            [test-runner :as runner]
             [jolt.analyzer]))
 
 (defn- empty-db [] @(second (pdb/test-branch!)))
@@ -212,3 +214,68 @@
                                                         (pm/program (record base 'app.pt-inl "(when true (def top-level-ok 1))") #{})
                                                         (pm/program base #{})))))
         "a definition nested anywhere at a form's top is fine")))
+
+;; ---- tests run by reach (task seon.program/tests-run-by-reach) ---------------------------
+
+(def ^:private calc-tests '#{app.pt-calc-test/add-test app.pt-calc-test/sum3-test app.pt-calc-test/neg-test})
+
+(defn- calc-db []
+  (apply record (empty-db) (concat calc-srcs ['app.pt-calc-test "(deftest neg-test (is (= -1 (app.pt-calc/neg 1))))"])))
+
+(defn- scratch-dir [label]
+  (let [d (str (System/getProperty "user.dir") "/target/tmp/reach-" label "-" (random-uuid))]
+    (.mkdirs (java.io.File. d))
+    d))
+
+(deftest a-changed-function-changes-the-digests-of-exactly-the-tests-reaching-it
+  (let [db (calc-db)
+        before (select-keys (program/reach-digests db {:env "e" :tree "t"}) calc-tests)
+        db' (record db 'app.pt-calc "(defn add [a b] (+ b a))")
+        after (select-keys (program/reach-digests db' {:env "e" :tree "t"}) calc-tests)]
+    (is (= calc-tests (set (keys before))) "every test has a digest")
+    (is (= 3 (count (set (vals before)))) "each test its own")
+    (is (= (program/reaching-tests db' '#{app.pt-calc/add})
+           (set (for [[t d] after :when (not= d (before t))] t)))
+        "add changed: exactly the tests reaching it moved (sum3-test through sum3), neg-test kept its digest")
+    (is (not= before (select-keys (program/reach-digests db {:env "e2" :tree "t"}) calc-tests))
+        "the inputs without program facts are in every digest")))
+
+(deftest a-second-run-with-nothing-changed-runs-nothing
+  (let [db (calc-db)
+        dir (scratch-dir "results")
+        digests (select-keys (program/reach-digests db {:env "e" :tree "t"}) calc-tests)
+        first-plan (runner/plan digests dir)
+        ran (binding [clojure.test/*test-out* (java.io.StringWriter.)] (runner/run-vars! (:run first-plan) digests dir))
+        second-plan (runner/plan digests dir)]
+    (is (= calc-tests (set (:run first-plan))) "nothing recorded: every test runs")
+    (is (= {:pass 1 :fail 0 :error 0} (select-keys (ran 'app.pt-calc-test/add-test) [:pass :fail :error])))
+    (is (= [] (:run second-plan)) "the second run runs nothing")
+    (is (= calc-tests (set (keys (:reused second-plan)))) "and reports every result reused")
+    (is (= (digests 'app.pt-calc-test/neg-test) (:digest ((:reused second-plan) 'app.pt-calc-test/neg-test))))))
+
+(defn- checkout!
+  "A git checkout at a new directory holding files ({relative path text}), all added."
+  [label files]
+  (let [d (scratch-dir label)]
+    (doseq [[p t] files] (.mkdirs (.getParentFile (java.io.File. (str d "/" p)))) (spit (str d "/" p) t))
+    (sh/sh "git" "-C" d "init" "-q")
+    (sh/sh "git" "-C" d "add" ".")
+    d))
+
+(deftest a-result-recorded-in-one-checkout-is-reused-in-another
+  (let [files {"deps.edn" "{}" "resources/seon/schemas/x.edn" "{:x :int}" "src/app/a.clj" "(ns app.a)" "docs/a.md" "# a"}
+        a (checkout! "a" files)
+        b (checkout! "b" files)
+        dir (scratch-dir "shared")
+        db (calc-db)
+        in-a (runner/inputs a)
+        da (select-keys (program/reach-digests db in-a) calc-tests)]
+    (is (= in-a (runner/inputs b)) "the same content at another path: the same inputs")
+    (binding [clojure.test/*test-out* (java.io.StringWriter.)] (runner/run-vars! (:run (runner/plan da dir)) da dir))
+    (is (= [] (:run (runner/plan (select-keys (program/reach-digests db (runner/inputs b)) calc-tests) dir)))
+        "checkout b reuses every result checkout a recorded")
+    (spit (str b "/docs/a.md") "# a, edited")
+    (is (= (:env in-a) (:env (runner/inputs b))) "prose is no input of a test that reads no files")
+    (spit (str b "/resources/seon/schemas/x.edn") "{:x :string}")
+    (is (= calc-tests (set (:run (runner/plan (select-keys (program/reach-digests db (runner/inputs b)) calc-tests) dir))))
+        "a changed schema resource is an input of every test")))

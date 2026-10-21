@@ -25,7 +25,7 @@
     platform's own source has the same facts (seon.source)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [jolt.ir :as ir] [jolt.analyzer]
-            [seon.schema.datahike :as sd] [malli.registry :as mr] [clojure.edn :as edn]))
+            [seon.schema.datahike :as sd] [malli.registry :as mr] [clojure.edn :as edn] [seon.error :as error]))
 
 (defn scratch-ns?
   "Is namespace nsx scratch (never program): `user`, or declared ^:scratch."
@@ -642,3 +642,36 @@
         (recur (into (vec more) (map first) new) (into seen (map first) new)
                (into tests (comp (filter #(= :test (second %))) (map first)) callers)))
       tests)))
+
+(def tree-readers
+  "The host vars that read files: a test whose reached forms reference one reads the
+  checkout's tree, so its reach digest covers the whole tree (reach-digests)."
+  '#{clojure.core/slurp clojure.core/file-seq})
+
+(defn reach-digests
+  "{test var -> reach digest} of db's tests (task seon.program/tests-run-by-reach): the
+  digest of the test's name, inputs' :env (what has no program facts), its own form, its
+  namespace's forms that define no var (the ns form, fixtures), and every live form their
+  references reach (a var to the form that last defined it; a defined multimethod's methods
+  and protocol's extensions), with inputs' :tree when a reached form references a
+  tree-reader. A test's digest moves exactly when a form it reaches does, so it is the
+  inverse of reaching-tests. Cost: the live forms read once and digested once, then per
+  test its closure."
+  {:malli/schema [:=> [:cat :seon.host/db [:map [:env :string] [:tree :string]]] [:map-of :qualified-symbol :string]]}
+  [db {:keys [env tree]}]
+  (let [forms (live-forms db)
+        by-def (fn [kind] (reduce (fn [m f] (reduce (fn [m [k s]] (if (= k kind) (update m s (fnil conj []) (:id f)) m)) m (:defines f))) {} forms))
+        var-form (into {} (for [[s ids] (by-def :var)] [s (peek ids)]))
+        methods (by-def :method) impls (by-def :impl)
+        by-id (into {} (map (juxt :id identity)) forms)
+        digest (into {} (for [f forms] [(:id f) (error/digest (str (:ns f) "\n" (:src f)))]))
+        edges (fn [f] (concat (keep var-form (:refs f))
+                              (for [[k s] (:defines f) :when (= :var k) id (concat (methods s) (impls s))] id)))
+        plain (group-by :ns (filter #(not-any? (fn [[k]] (= :var k)) (:defines %)) forms))]
+    (into {} (for [f forms [k t] (:defines f) :when (and (= :var k) (= :test (:var/kind (d/entity db [:var/name t]))))
+                   :let [reached (loop [front (into [(:id f)] (map :id) (plain (:ns f))) seen #{}]
+                                   (if-let [[id & more] (seq front)]
+                                     (if (seen id) (recur more seen) (recur (into (vec more) (edges (by-id id))) (conj seen id)))
+                                     seen))
+                         reads? (some #(some tree-readers (:refs (by-id %))) reached)]]
+               [t (error/digest (apply str t "\n" env "\n" (when reads? tree) (sort (map digest reached))))]))))
