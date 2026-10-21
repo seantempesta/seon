@@ -28,6 +28,9 @@ if [[ ${1:-} == --remove ]]; then
     [[ -e $WT/$sub/.git ]] && git -C "$MAIN/$sub" worktree remove --force "$WT/$sub" 2>/dev/null || true
   done
   git -C "$MAIN" worktree remove --force "$WT"
+  # its port block (bin/ports) is free again
+  REG=$(dirname "$MAIN")/worktree-ports
+  [[ -f $REG ]] && /usr/bin/lockf -k "$REG.lock" zsh -c 'grep -v "^$2 " "$1" > "$1.new"; mv "$1.new" "$1"' _ "$REG" "next-$NAME"
   print "removed $WT (branch jolt/$NAME kept)"
   exit 0
 fi

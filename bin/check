@@ -14,8 +14,6 @@
 # the step (SEON_RUN: <step>-<time>-<id>); the recovery steps (durable, window, resume) kill
 # and reopen that same store on the same branch. The store is kept, every branch with it.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-# a check's roots listen on no dashboard port (the owner's 7777 and every lane's stay theirs)
-export SEON_WEB_PORT=${SEON_WEB_PORT:-0}
 # one full check at a time on this machine, every lane's (each boots ~34 roots and up to 100
 # agents): a full run takes the check lock and runs niced; a single mode does not
 if [[ -z ${SEON_CHECK_LOCKED:-} && ( -z ${1:-} || ${1} =~ ^[0-9]+$ ) ]]; then
