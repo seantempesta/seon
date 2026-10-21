@@ -20,13 +20,9 @@
 ;; :id :branch :fd :conn :db :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
 (defonce state (atom nil))
 
-;; collect-trip-bytes in an agent: Chez's default scales with the parent heap (E10); a
-;; small trip keeps an agent's garbage, and so its private pages, small
-(def trip-bytes (* 1048576 (Long/parseLong (or (System/getenv "SEON_TRIP_MB") "4"))))
-
-;; An agent's heap may grow this far beyond what it inherited; past it an allocation
-;; throws OutOfMemoryError (an :err item), so a runaway agent cannot take the machine.
-(def heap-extra-bytes (* 1048576 (Long/parseLong (or (System/getenv "SEON_AGENT_HEAP_MB") "1024"))))
+;; an agent's collect-trip and its heap's room to grow (seon.config, with their reasons)
+(def trip-bytes (* 1048576 cfg/TRIP-MB))
+(def heap-extra-bytes (* 1048576 cfg/AGENT-HEAP-MB))
 
 ;; ---- the socket to root: values in frames (root's end is a jolt.async.remote end) ------
 ;; This side reads and writes its socket itself, on its one thread, with no pumps: an agent
@@ -120,6 +116,8 @@
       (swap! state assoc :db (:db-after r))
       {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
     (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data})]
+      ;; past this process's block of entity ids: the typed refusal, nothing applied
+      (when-let [e (and (not (map? r)) (pdb/lease-spent r (:lease @state)))] (throw (ex-info (:seon.error/message e) e)))
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
       (let [now (lib/now-ns)
             since (:dirty-at (swap! state #(-> % (assoc :db (:db-after r)) (update :dirty-at (fn [t] (or t now))))))]
@@ -396,6 +394,7 @@
     :clone (do (clone! m) nil)
     :stats [{:op :stats :id (:id m) :result {:mem-mb (mem-mb true) :t (:max-tx (db)) :pid (lib/c-getpid)
                                               :results (count (:results @state)) :evals (:n @state)
+                                              :ids (pdb/lease-use (db) (:lease @state))
                                               :heap-mb (lib/r2 (/ (lib/bytes-in-heap) 1048576.0))}}]
     ;; a message (lane F2): it waits in :inbox until the agent's code takes it ((messages));
     ;; root hears that it arrived
@@ -456,7 +455,7 @@
                   ;; the clone opens the store itself, on its own branch, with its own lease
                   (pdb/after-fork! (:cfg r) (:lease r))
                   (stderr-to-file! (stderr-path (pdb/agents-dir (:cfg r)) (:agent m)))
-                  (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn c :mode :agent :tx-seq 0
+                  (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn c :mode :agent :tx-seq 0 :lease (:lease r)
                          :pending clojure.lang.PersistentQueue/EMPTY :mem-at nil :fx-pending {}
                          :store-conn (d/connect (assoc (:cfg r) :branch (:branch m))))
                   (swap! state assoc :db @(:store-conn @state)))
@@ -492,7 +491,7 @@
     (let [load-errors (when resumed (program/load-diff! db0 @store-conn))]
      ;; a resumed branch whose program does not load runs main's for what failed: its errors
      ;; go to root with its hello (recorded problems), never dropped (T5b: a stub ran silently)
-     (reset! state {:id id :branch branch :fd fd :conn c :db @store-conn :store-conn store-conn :cfg cfg :results {} :n 0
+     (reset! state {:id id :branch branch :fd fd :conn c :db @store-conn :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
                    :load-errors (vec load-errors)
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
                    :ns nsx :nss #{(ns-name nsx)} :interrupt-ok intr-ok :serve serve}))))

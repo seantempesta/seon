@@ -273,11 +273,17 @@
 (defn census
   "The census gate: no [:fn pred] schema without :gen anywhere in the registry or a
   contract, and every contract whose arguments generate and whose namespace is pure passes
-  malli.generator/check (100 runs each). Prints the counts; exits 0 only when both hold."
-  []
-  (let [nss (platform-nss)
-        vs (for [n nss v (vals (ns-interns n)) :when (contract/contract v)] v)
-        no-gen (vec (concat (for [[k f] contract/forms :when (seq (fn-without-gen f))] k)
+  malli.generator/check (100 runs each). Prints the counts and the contracts it checked;
+  exits 0 only when both hold. With shard \"I/K\" (0 <= I < K) it censuses only the
+  contracted vars at positions I, I+K, ... of the platform's contracted vars sorted by
+  symbol (the registry's own forms in shard 0), so K shards in K processes check exactly
+  what one run does. By var, not namespace: seon.reconcile alone holds 36 of the 82
+  checked contracts, so a namespace split cannot go below its share."
+  [& [shard]]
+  (let [[i k] (if shard (mapv #(Long/parseLong %) (clojure.string/split shard #"/")) [0 1])
+        vs (keep-indexed #(when (= i (mod %1 k)) %2)
+                         (sort-by symbol (for [n (platform-nss) v (vals (ns-interns n)) :when (contract/contract v)] v)))
+        no-gen (vec (concat (when (zero? i) (for [[k f] contract/forms :when (seq (fn-without-gen f))] k))
                             (for [v vs :when (seq (fn-without-gen (contract/contract v)))] (symbol v))))
         ;; its arguments generate (every arity's input)
         generates? (fn [v] (try (let [s (m/deref (contract/schema (contract/contract v)))]
@@ -289,9 +295,10 @@
         pure (filter #(and (or (pure-nss (ns-name (:ns (meta %)))) (pure-fns (symbol %)))
                            (not= :seon.step/step-fn (contract/contract %)) (generates? %)) vs)
         checked (for [v pure
-                      :let [r (try (mg/check (m/deref (contract/schema (contract/contract v))) @v {:registry contract/registry :num-tests 100 :seed 42})
+                      :let [t0 (System/nanoTime)
+                            r (try (mg/check (m/deref (contract/schema (contract/contract v))) @v {:registry contract/registry :num-tests 100 :seed 42})
                                (catch Throwable e {:smallest :threw :seed (ex-message e)}))]]
-                  [(symbol v) r])
+                  [(symbol v) r (lib/r2 (/ (- (System/nanoTime) t0) 1e6))])
         ;; malli could not generate an [:and ...] argument (such-that): not generated, not failed
         such-that (set (for [[sym r] checked :when (= ":malli.generator/such-that-failure" (:seed r))] sym))
         checked (remove (comp such-that first) checked)
@@ -300,8 +307,9 @@
                              (let [c (:check (first (:errors r)))]
                                {:smallest (:smallest c) :problem (some-> (:malli.core/result c) ex-message)}))]))
         ok (and (empty? no-gen) (empty? failed))]
-    (pprint {:contracts (count vs) :fn-without-gen no-gen
+    (pprint {:shard [i k] :contracts (count vs) :fn-without-gen no-gen
              :generated-and-checked (count checked) :failed failed
+             :checked (vec (sort (map first checked))) :ms (into (sorted-map) (map (juxt first #(nth % 2))) checked) :such-that (vec (sort such-that))
              :not-generated (count (remove generates? vs))
              :result (if ok :CENSUS-OK :CENSUS-FAILED)})
     (lib/c-exit (if ok 0 1))))
@@ -691,7 +699,11 @@
                              (in-ns 'agent.a2) (transact! [{:note/text \"b's unmerged note\" :note/agent :b}]) (app.m1/f2 1)"))
         cl @(c/clone! sys k {:branch :dur-clone})
         _ (await-status sys [(:id cl)] #{:idle} 5000)
+        ;; the clone answers before it commits (run-ahead): the kill waits for its commit
+        ;; event, the fact that its note is on its branch in the store
+        evs (c/events sys)
         _ (out! "clone " (:id cl) ": " (p1 (:id cl) "(transact! [{:note/text \"the clone's note\" :note/agent :clone}]) (count (q '[:find ?n :where [?n :note/text]]))"))
+        _ (loop [] (let [e (clojure.core.async/<!! evs)] (when-not (and (= :commit (:type e)) (= (:id cl) (:agent e))) (recur))))
         st (c/state sys {:datoms true})
         expect {:main-datoms (get-in st [:main :datoms]) :main-t (get-in st [:main :t])}]
     (spit (str path ".expect.edn") (pr-str expect))
@@ -1049,7 +1061,7 @@
   (let [sys (c/start! {:datoms 2000})
         a (c/spawn! sys {:task "fx" :branch :fx1})
         _ (await-status sys [a] #{:idle} 5000)
-        dir (str "/tmp/fx1-" (lib/c-getpid))
+        dir (str (:agents-dir (:store (c/state sys))) "/fx1") ; this root's own run dir, kept with the store
         _ (.mkdirs (java.io.File. dir))
         ev (fn [code] (let [r @(c/submit! sys a code)] (last r)))
         ;; per call, timed inside the agent: (loop n) of the form, µs each
@@ -1105,7 +1117,7 @@
         booted (pids)
         expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/source :fx.source/0 :fx/git :fx.git/0 :fx/model}
                      (for [i (range seon.config/MODEL-LANES)] (keyword "fx.model" (str i))))
-        dir (str "/tmp/seon-system-" (lib/c-getpid))
+        dir (str (:agents-dir (:store (c/state sys))) "/system") ; this root's own run dir
         _ (.mkdirs (java.io.File. dir))
         decl (clojure.edn/read-string (slurp seon.system/path))
         write! (fn [nm d] (let [f (str dir "/" nm ".edn")] (spit f (pr-str d)) f))
@@ -1159,8 +1171,8 @@
   evaluations are recorded with origin :outside (the agent's on its branch, root's on main)."
   []
   (let [sys (c/start! {:datoms 2000})
-        port (+ 20000 (mod (lib/c-getpid) 20000))
-        _ (seon.entrance/serve! sys port)
+        ;; port 0: the kernel picks a free one, so two lanes' proofs never collide
+        port (.getLocalPort ^java.net.ServerSocket (seon.entrance/serve! sys 0))
         a (c/spawn! sys {:task "mcp" :branch :mcp1})
         _ (await-status sys [a] #{:idle} 5000)
         msgs [{"jsonrpc" "2.0" "id" 1 "method" "initialize" "params" {"protocolVersion" "2024-11-05"}}
@@ -1228,7 +1240,7 @@
   it O(branches) per spawn: 15 ms at 1,000). A store of its own, the last resort: the
   roster must start empty for the growth to show."
   [n]
-  (let [path (str "/tmp/seon-branch-cost-" (lib/c-getpid))
+  (let [path (str (System/getProperty "user.dir") "/runs/branch-cost-" (lib/c-getpid)) ; this tree's runs, not the shared /tmp
         {conn :conn} (seon.db/open! :lmdb path 2000 :db)
         times (vec (for [k (range (quot n 100))]
                      (let [t0 (lib/now-ns)]
@@ -1291,6 +1303,39 @@
     (c/stop! sys)
     (lib/c-exit 0)))
 
+(defn lease
+  "Run with SEON_EID_LEASE=50: agent a writes 60 new entities in one transaction, past its
+  lease: refused with :seon.db/lease-spent, nothing applied. A refused transaction keeps the
+  ids it reserved (Datahike's store counter), so a's lease is spent: its next write is
+  refused too, and the record of its evals, which cannot be written on its branch, is
+  recorded on main as its problem. Agent b, the next lease, writes 10: its ids lie past a's
+  lease, never shared."
+  []
+  (let [sys (c/start! {})
+        [a b] (mapv #(c/spawn! sys {:task %}) ["past its lease" "the next lease"])
+        _ (await-status sys [a b] #{:idle} 5000)
+        notes (fn [tag n] (str "(transact! (vec (for [i (range " n ")] {:note/text (str \"" tag "\" i)})))"))
+        r-past (first @(c/submit! sys a (notes "a" 60)))
+        r-count (first @(c/submit! sys a "(count (q '[:find ?n :where [?n :note/text]]))"))
+        r-next (first @(c/submit! sys a (notes "a" 1)))
+        stats @(c/agent-stats! sys a)
+        _ @(c/submit! sys b (notes "b" 10))
+        b-min (read-string (:printed (first @(c/submit! sys b "(q '[:find (min ?n) . :where [?n :note/text]])"))))
+        ;; parks on main's commits until root has recorded a's unrecorded evals (no deadline)
+        lease-q '[:find ?c . :where [?e :seon.error/type :seon.db/lease-spent] [?e :seon.error/count ?c]]
+        recorded (d/q lease-q (seon.e2e/await-db sys #(d/q lease-q %)))
+        spent? #(and (= :err (:tag %)) (re-find #"entity ids are spent" (str (:printed %))))
+        ok (and (spent? r-past) (= "0" (:printed r-count)) (spent? r-next)
+                (= 50 (get-in stats [:ids :of])) (pos-int? recorded)
+                (< (get-in stats [:ids :used] 0) 50)
+                (>= b-min (+ (get-in stats [:ids :from]) 50)))]
+    (out! "past its lease: " (select-keys r-past [:tag :printed]) "\n  error: " (:err r-past))
+    (out! "after the refusal a's notes: " (:printed r-count) "; its next write: " (select-keys r-next [:tag :printed]) "; its ids " (:ids stats))
+    (out! "a's unrecorded evals, recorded on main: " recorded "; b's lowest id " b-min)
+    (out! (if ok "LEASE OK" "LEASE FAILED"))
+    (c/stop! sys)
+    (lib/c-exit (if ok 0 1))))
+
 (defn seed
   "bin/check's one store: created at SEON_STORE and seeded with about n datoms on :db, before
   any step boots; each step's root then works on a branch of it (seon.db/open!)."
@@ -1323,12 +1368,13 @@
     "backpressure" (backpressure (Long/parseLong (or n "200")))
     "program" (program)
     "contracts" (contracts)
-    "census" (census)
+    "census" (census n)
     "units" (units)
     "e2e" (lib/c-exit (if (seon.e2e/run n more) 0 1))
     "admit" (admit)
     "record" (record)
     "orphan" (orphan)
+    "lease" (lease)
     "rtt" (rtt)
     "fx" (fx (Long/parseLong (or n "1000")))
     "system" (system-check)

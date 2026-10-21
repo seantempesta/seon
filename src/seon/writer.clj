@@ -199,7 +199,8 @@
       (other-op (commit-batch st o) o m))
     (catch Throwable e
       ;; an interop edge (Datahike) refused: the request's answer is the error, as data
-      (answer o (:dest m) (refused (step/error-msg e) {:merged? false}))
+      ;; with the store's map use: a full map (MDB_MAP_FULL) shows itself against its size
+      (answer o (:dest m) (refused (step/error-msg e) (cond-> {:merged? false} (pdb/map-use (:cfg st)) (assoc :store (pdb/map-use (:cfg st))))))
       (dissoc st :pend))))
 
 (defn- drain {:malli/schema [:=> [:cat :seon.host/chan :seon.writer/request] [:vector :seon.writer/request]]}

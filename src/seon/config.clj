@@ -63,6 +63,22 @@
   store's highest id at boot): ids stay unique store-wide with no shared counter (L1's lease)."
   (dial "SEON_EID_LEASE" 100000))
 
+(def LMDB-MB
+  "The LMDB map (the most the one store may hold, in MB): runs are kept and every check step,
+  run and agent is a branch of one store, so it fills over time; the writer's refusal and
+  (seon.root/state) :store show its use against it (seon.db/map-use)."
+  (dial "SEON_LMDB_MB" 1024))
+
+(def TRIP-MB
+  "An agent's collect-trip (MB): Chez's default scales with the parent's heap (E10); a small
+  trip keeps an agent's garbage, and so its private pages, small."
+  (dial "SEON_TRIP_MB" 4))
+
+(def AGENT-HEAP-MB
+  "How far (MB) an agent's heap may grow beyond what it inherited; past it an allocation throws
+  OutOfMemoryError (an :err item), so a runaway agent cannot take the machine."
+  (dial "SEON_AGENT_HEAP_MB" 1024))
+
 (def FX-BUF
   "Requests one effect owner holds queued (its in-port and its priority queue). Each agent
   has at most one synchronous effect in flight, so beyond the live agents only async

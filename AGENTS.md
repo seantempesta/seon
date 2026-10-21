@@ -44,6 +44,8 @@ When you feel it, stop and ask three questions:
 
 ## The pillars: everything is data flowing through the system (owner, 2026-10-21)
 
+**If nothing has changed, we do nothing** (owner, 2026-10-21). No proc steps, renders, pings, flushes or polls on an idle system; work exists only because data changed. **The system is reactive:** a proc reports its own problems as facts when they happen and its changes as events; nothing pings to ask whether it is healthy. Health is the absence of open problem facts.
+
 This is not a traditional program with a scheduler, timers and callers that wait. Data flows: a fact is written, a commit flows to whoever reads it, a message lands on a queue, a proc runs because work arrived and parks when there is none. Every need is met by one of these pillars. If a need seems not to fit one, stop and say so; never route around them.
 
 - **A value.** State is immutable Datahike values with structural sharing, in one store with many branches. Each process owns its connection: agents own their branch, root owns main. A record is a fact; history is kept.
@@ -52,6 +54,8 @@ This is not a traditional program with a scheduler, timers and callers that wait
 - **A process.** Agents are forked OS processes, isolated, each on its own branch, speaking messages to its stand-in proc.
 - **A render.** Every view, the model's context included, is a render declared on the value's schema, over the one printer.
 - **An error is data** that flows to whoever can fix it: a defect holds its message until the code is fixed; a typed error goes to the requester, agent or task that can act on it.
+
+**A mechanism is built once, as a pillar, and reused everywhere** (owner, 2026-10-21: "simple and extremely well built code that we reuse everywhere because it's a pillar and not just a hack"). Before building anything that waits, retries, admits, holds, spawns, watches a process, answers a request or reads config, find its one implementation (`docs/patterns.md`, or ask root who owns it) and use it. If it doesn't exist yet, its owner builds it; you don't build a second one. Before building a pillar: read the research (`../notes/option3-RESEARCH-async.md`, `docs/core-async.md`, `docs/flow.md`) and prove the approach in a REPL at n ≤ 100.
 
 **Routing around a pillar** (each of these happened on 2026-10-21): a timer, sleep, poll, deadline or retry instead of a queue; a fallback default instead of an error fact; a new runner, manager or wrapper beside the reconciler and procs; a store per test instead of a branch; an env var instead of a config fact; text or regex instead of the compiler's facts; a script's line order instead of `:needs`; an OS thread instead of a fiber; stdin as a process's lifecycle instead of a fact or message.
 
@@ -63,7 +67,7 @@ This is not a traditional program with a scheduler, timers and callers that wait
 - **No guards or fences.** Do the right thing. Name every outside-world failure point in `DRAGONS.md`, with its one edge function and its declared error. Nothing else catches.
 - **No added caches.** A content-keyed cache is allowed only for a unit measured as expensive.
 - **Effects go through owner procs** (`my.fx/call`, `my.fx/send`). The asker records the outcome on its own branch.
-- **Durability is batched,** with a flush window of 10 ms by default. A write that is followed by an effect outside the database waits for its flush.
+- **Durability is continuous group commit** (owner, 2026-10-21): the flusher takes everything unflushed and syncs once, then again; commits arriving during a sync share the next one. A write is answered when committed in memory; one followed by an effect outside the database waits for the sync that covers it (`docs/patterns.md#continuous-group-commit`).
 - **Every definition happens once, where it is defined (owner, 2026-10-21).** Behaviour varies through the environment (a forked process holding exactly the definitions it needs, e.g. a test's own stubs as real definitions) or through data (arguments, config facts), never by mutating a shared var. Program code does not call `intern` or `alter-var-root` (judged at the done rule from the compiler's resolved references, never by text); the platform arms contracts at definition, not after.
 - **Estimates are proofs.** A function whose input grows carries a cost proof: an overrun, or growth steeper than the work needs, is red like any failing test. Every contracted call is counted (`seon.profile`), and every eval records its costliest functions.
 - **Tests run by reach digest:** only tests reaching a change run, and results are shared by digest. Only good tests: real assertions, sensitive to mutation, not timing-only.
@@ -83,6 +87,7 @@ All work, ours and Seon's agents', is a **task** in a task file: `resources/seon
 - `:seon.task/plan`: the research, with file:line, what exists, what it replaces, what gets deleted;
 - `:seon.task/proofs`: the deftests, cost proofs included, that say it is done;
 - `:seon.task/needs`: the tasks that must land first.
+- `:seon.task/refs`: the vars and files the task touches, as data (qualified symbols and paths), never left to be parsed out of the plan's prose; they pull in the wiki sections that describe them.
 
 The order of the tasks is the order of the work: **delete first, then foundations, then fixes**, so nothing is fixed and then deleted. Root writes and orders the tasks (from audits, mined problems and the owner's words), hands each to one lane, and lands its work. A lane may refine its task's plan as it learns, never its proofs' intent without root.
 
@@ -97,6 +102,7 @@ The order of the tasks is the order of the work: **delete first, then foundation
 1. **Take one task.** For foundation work, open a worktree: `bin/worktree <task-name>`. Work only there and only on that task's files. Never edit the main tree, another lane's files, or anything outside the task. Never run `git checkout`, `restore`, `stash` or `reset` on paths you don't own.
 2. **Learn, plan, act, in that order** (owner, 2026-10-21). First research the existing code end to end, before writing anything; then write the plan; then build.
    - Read the task's plan, DECISIONS, `docs/DRAGONS.md`, and the code it touches with its callers and its tests.
+   - **Read what Seon v1 did first** (owner, 2026-10-21: "always be checking what we did in ~/src/seon and learning from it, not repeating the mistakes"). For the same problem, find v1's code (`~/src/seon/src`, `test`), its decisions and research (`~/src/seon/docs`, `config/default.edn`, the schemas) and what went wrong (its research notes, reverts, rejected designs). Port the best parts onto our pillars; drop its layers; name the mistakes you are not repeating. Every plan says what v1 did and what you take from it. Read only: never write in `~/src/seon`.
    - Read the dependency (Jolt, Datahike, Flow, malli) before working around it.
    - Ask: is this code already scheduled for deletion or replacement (`../notes/PLAN-v2.md`, other tasks' plans)? If so, stop and tell root.
    - Write what you found into the task's plan: the cause, with file:line evidence.
@@ -113,13 +119,13 @@ The order of the tasks is the order of the work: **delete first, then foundation
    - Compare each measurement with its estimate.
    - A ratio past 3× either way is a finding: explain it before going on.
    - Say plainly what was not measured.
-7. **If you touched what the owner sees (the dashboard, a render, the context), have it verified by eye.** Run your worktree's own root on its own ports (`bin/root ENTRANCE WEB`; every worktree can run one), then launch a Haiku or Sonnet subagent with the built-in browser. Its job: compare the page and the context against the system's facts read through the door. Is every number real? Does anything mislead? Does it show what is going on? It reports what is wrong or useless, with screenshots. Fix what it finds, or file it.
+7. **If you touched what the owner sees (the dashboard, a render, the context), have it verified by eye.** Run your worktree's own root (`bin/root start`, on its own ports from `bin/ports`), then launch a Haiku or Sonnet subagent with the built-in browser. Its job: compare the page and the context against the system's facts read through the door. Is every number real? Does anything mislead? Does it show what is going on? It reports what is wrong or useless, with screenshots. Fix what it finds, or file it.
 8. **Prove it whole:** `bin/test`, then `bin/check` in your worktree. `bin/check` fails when any step fails, keeps each step's output and the stores under `target/check/<time>/`, and is the bar.
 9. **Report to root:** commits, proofs (red → green), numbers against estimates, what you deleted, what's left. Root cherry-picks onto main by explicit paths, runs `bin/check` there, and closes the task.
 
 ## Look at the running system, as a Seon agent sees it
 
-A standing root runs at `bin/root 7888` (its store kept under `runs/`; the dashboard on 7777). Reach it through the **`seon` MCP server** (`bin/mcp 7888`, registered in `.mcp.json`). Its tools:
+Each checkout runs its own standing root: `bin/root start` (its store kept under `runs/`, on the checkout's ports from `bin/ports`; the owner's main tree is 7888 with the dashboard on 7777). Reach it through the **`seon` MCP server** (`bin/mcp`, which defaults to your checkout's entrance). Its tools:
 - `seon_agents`: agents, and tasks with their blocked-by;
 - `seon_eval`: evaluate in an agent's own REPL, exactly the path a Seon agent's forms take, recorded `:outside`; or as `root`;
 - `seon_context`: what the agent's model would read now;
@@ -144,6 +150,8 @@ Tell root; root orders it among the rest. Mined problems (`my.root/problems`) be
 
 - `docs/<topic>.md`, one concept per page, indexed in `docs/README.md`. A section is addressed `topic#heading-slug` and ends with a `Describes:` line naming its vars, attrs and files as EDN.
 - Reference docs as data: `{:seon/docs ["merge#behind"]}` on a definition, `:seon.task/docs` on a task. The context pulls the named sections in, so explain a thing once in the wiki and point at it.
+- **Every lane keeps the wiki true for what it builds** (owner, 2026-10-21). Landing a change includes its wiki section (new or updated, with a `Describes:` line naming the real vars), and a pillar's owner writes its `docs/patterns.md` section.
+- **Every lane checks its own context.** Before landing, read your task's context through the door (`seon_context`, or `(seon.context/…)` as root) and confirm it pulls the sections and code the task needs and nothing that misleads; what's missing or wrong is a task for the context or the page.
 - A change that makes a section wrong updates it in the same commit. `bin/check docs` goes red on a dangling reference, a named var or attr that doesn't exist, or a section older than the code it describes. (Tasks: `resources/seon/tasks/seon.docs.edn`.)
 
 ## Mistakes we have made, and do not repeat
@@ -177,9 +185,13 @@ Tell root; root orders it among the rest. Mined problems (`my.root/problems`) be
 
 - **Builds:** run as `nice -n 15 /usr/bin/lockf -k ~/src/seon-jolt/build.lock bin/build`, which pins the patched Chez via `JOLT_CHEZ`.
 - **Probes and timings:** probes run under `nice -n 10`. No timed runs while load is above ~20.
+- **A process that must outlive your tool call** (a standing root, a server) must be re-parented to PID 1: a double fork. **Start your root with `bin/root`** (start | status | stop): detached, on your checkout's own ports (`bin/ports`), log in runs/root.log; `bin/mcp` reaches it. The tool host kills a background task's whole process tree when the task is stopped or its agent exits; nohup or setsid alone don't help. (ISOLATION, 2026-10-21.)
+- **Ports are config, never literals:** don't bind 7777 or 7888 (the owner's root and dashboard). A check's root listens on nothing; your worktree's own ports come from its config/local.edn.
+- **Your own scratch:** temp files and logs go under your worktree (`target/` or `runs/`) or a subfolder named after your lane; the session scratch folder is shared by every lane, and one lane overwrote another's log there (2026-10-21).
 - **One full check at a time:** `bin/check` takes `~/src/seon-jolt/check.lock` and runs niced. Iterate with single modes.
 - **Never flood the machine** (2026-10-21: two experiments made 7,500 and 5,900 threads and drove load to 982). Anything that can make threads or processes starts at n ≤ 100, under `nice -n 15`; watch `ps -M -p PID | wc -l` while it runs and kill your own process past 200 threads. One experiment process at a time.
 - **Hygiene:** kill only your own PIDs, delete only paths you created, install nothing system-wide.
+- **Leave nothing running when you finish:** `bin/root stop` and stop anything else you started before you report; your report says nothing of yours is still running.
 - **Secrets:** never printed. DeepSeek is the default model; check the context before any paid call.
 
 ## The bar for "done"

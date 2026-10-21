@@ -1,13 +1,49 @@
 #!/bin/zsh
-# bin/root [PORT [WEB]]   a standing root with its entrance on 127.0.0.1:PORT (default 7888) and
-# its dashboard on WEB (default 7777; each worktree runs its own root on its own ports), until
-# stdin closes: the running system that outside agents (Claude lanes, an owner at a terminal)
-# reach through bin/mcp or `printf '{:op :agents}\n' | nc -w 5 127.0.0.1 PORT`. It runs on a
-# branch of the one kept store, <SEON_RUNS>/store (<this tree>/runs/store): each boot a new main
-# run-<time>-<id> of the store's seed (SEON_MAIN=<branch> resumes one; SEON_MAIN=db is
-# production's main), its agents' and tasks' branches named under it.
+# bin/root [start|stop|status]   this checkout's standing root, on this checkout's own ports
+# (bin/ports): its entrance (reached by bin/mcp, or `printf '{:op :agents}\n' | nc -w 5 127.0.0.1
+# PORT`) and its dashboard. `start` (the default) runs it detached: double-forked so it is
+# re-parented to PID 1, because the tool host kills a background task's whole process tree when
+# the task stops or its agent exits (ISOLATION, 2026-10-21). It runs until `bin/root stop` closes
+# its stdin. Its output: runs/root.log; its pids: runs/root.pids ("TAIL ROOT").
+# bin/root PORT WEB   runs one in the foreground, until stdin closes (what `start` runs).
+#
+# It runs on a branch of the one kept store, <SEON_RUNS>/store (<this tree>/runs/store): each
+# boot a new main run-<time>-<id> of the store's seed (SEON_MAIN=<branch> resumes one;
+# SEON_MAIN=db is production's main), its agents' and tasks' branches named under it.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 . "$ROOT/bin/env"
 export SEON_RUNS=${SEON_RUNS:-$ROOT/runs}
-export SEON_WEB_PORT=${2:-${SEON_WEB_PORT:-7777}}
-cd "$ROOT/target" && exec ./seon root ${1:-7888}
+if [[ ${1:-} =~ ^[0-9]+$ ]]; then
+  export SEON_WEB_PORT=${2:-0}
+  cd "$ROOT/target" && exec ./seon root $1
+fi
+mkdir -p "$SEON_RUNS"
+PIDS=$SEON_RUNS/root.pids LOG=$SEON_RUNS/root.log
+read PORT WEB <<< "$("$ROOT/bin/ports")"
+running() { [[ -f $PIDS ]] && read T R < "$PIDS" && kill -0 $R 2>/dev/null }
+case ${1:-start} in
+  status)
+    if running; then read T R < "$PIDS"; print "root $R up: entrance $PORT, dashboard http://127.0.0.1:$WEB/"
+    else print "no root running for $ROOT (ports $PORT $WEB)"; exit 1; fi ;;
+  stop)
+    running || { print "no root running"; exit 0 }
+    read T R < "$PIDS"
+    kill $T                                    # its stdin closes: root stops cleanly
+    while kill -0 $R 2>/dev/null; do sleep 0.2; done
+    rm -f "$PIDS"; print "root $R stopped" ;;
+  start)
+    if running; then "$0" status; exit 0; fi
+    : > "$LOG"
+    rm -f "$PIDS"
+    perl -MPOSIX -e 'exit 0 if fork; POSIX::setsid(); exit 0 if fork;
+      open STDIN,"<","/dev/null"; open STDOUT,">>",$ARGV[0]; open STDERR,">&STDOUT";
+      exec "/bin/sh","-c",q{tail -f /dev/null | "$2" "$3" "$4" & R=$!; T=$(pgrep -P $$ -x tail); echo "$T $R" > "$1"; wait $R},
+        "sh", @ARGV[1..4]' "$LOG" "$PIDS" "$0" "$PORT" "$WEB"
+    # the root's own facts end the wait: its listening line, or its death
+    until [[ -f $PIDS ]]; do sleep 0.1; done
+    read T R < "$PIDS"
+    until grep -q "ROOT LISTENING" "$LOG" || ! kill -0 $R 2>/dev/null; do sleep 0.2; done
+    if kill -0 $R 2>/dev/null; then "$0" status
+    else print -u2 "root failed to start; its log:"; tail -20 "$LOG" >&2; exit 1; fi ;;
+  *) print -u2 "usage: bin/root [start|stop|status] | bin/root PORT WEB"; exit 2 ;;
+esac
