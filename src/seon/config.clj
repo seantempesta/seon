@@ -26,7 +26,7 @@
   functions carry contracts in their metadata and are armed at boot."
   (:refer-clojure :exclude [resolve])
   (:require [aero.core :as aero] [malli.core :as m] [malli.registry :as mr] [clojure.edn :as edn]
-            [clojure.java.io :as io] [clojure.string :as str] [datahike.api :as d]))
+            [clojure.java.io :as io] [clojure.string :as str] [datahike.api :as d] [seon.edn :as sedn]))
 
 ;; ---- where: the checkout and the profile (the loader's own two environment reads) ----------
 
@@ -111,13 +111,6 @@
     (if (m/validate config-schema m)
       m
       (let [r (refusal m)] (throw (ex-info (:seon.error/message r) r))))))
-
-(defn read-file
-  "The config file at p read with aero under profile, the checkout dir resolving
-  #seon/checkout: resolved and validated (or the refusal, thrown)."
-  {:malli/schema [:=> [:cat :string :keyword :string] :seon.config/config]}
-  [p prof dir]
-  (resolved (aero/read-config p {:profile prof ::checkout dir})))
 
 (defn- refuse!
   {:malli/schema [:=> [:cat :qualified-symbol :string] :nil]}
@@ -316,10 +309,4 @@
   (when-let [e (d/q '[:find ?e . :where [?e :seon.root/id :root]] db)]
     (let [r (d/pull db (keys-declared) e)]
       (when (seq r)
-        (reduce (fn [m k] (if (contains? m k) (update m k edn/read-string) m)) r edn-keys)))))
-
-(defn sources-from-db
-  "Which layer each key of the config root wrote on db came from."
-  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.config/sources]]}
-  [db]
-  (some-> (d/q '[:find ?s . :where [?e :seon.root/id :root] [?e :seon.config/sources ?s]] db) edn/read-string))
+        (reduce (fn [m k] (if (contains? m k) (update m k sedn/decode) m)) r edn-keys)))))

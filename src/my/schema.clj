@@ -7,7 +7,7 @@
   Platform code compiled into the binary keeps the built schemas until the next generation."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.agent :as agent] [seon.program :as program]
-            [datahike.api :as d] [clojure.edn :as edn]))
+            [datahike.api :as d] [seon.edn :as sedn]))
 
 (defn- refused
   "The registration-refused error for k: why, and the message of what refused it."
@@ -48,9 +48,9 @@
   {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :any :boolean] [:or [:map [:tx :seon.db/tx-data] [:registration :seon.schema/registration]] :seon.schema/registration-refused]]}
   [db k v scratch?]
   ;; printed as the resources are written: a namespaced map's keys in full
-  (let [text (binding [*print-namespace-maps* false] (program/pr-edn v))
+  (let [text (binding [*print-namespace-maps* false] (sedn/encode v))
         decls (if (program/edn-value? v)
-                (judged db k (assoc (merge contract/forms (program/schema-changes db)) k (edn/read-string text)))
+                (judged db k (assoc (merge contract/forms (program/schema-changes db)) k (sedn/decode text)))
                 (refused k :unreadable "a schema form is EDN data: it must print and read back equal"))]
     (if (contract/error? decls)
       decls

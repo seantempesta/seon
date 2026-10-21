@@ -129,12 +129,12 @@ build_seon() {
   # Jolt's compile cache keys a namespace by its source and its dependencies' sources, not by
   # the files a macro reads at expansion: seon.contract/defn compiles each contract against
   # resources/seon/schemas/*.edn. When those change, every seon.* and my.* artifact is stale,
-  # so drop them (and the build cache) before building (R3's finding, 2026-10-20).
+  # so drop them before building (R3's finding, 2026-10-20). The build-unit cache is keyed by the
+  # emitted unit text, expansion included, and is shared by every checkout: never cleared here.
   stamp=$(cat "$ROOT"/resources/seon/schemas/*.edn | shasum | cut -c1-16)
   if [ "$(cat "$T/schemas.stamp" 2>/dev/null)" != "$stamp" ]; then
-    say "seon: schema files changed; clearing seon.* and my.* compile-cache artifacts"
+    say "seon: schema files changed; clearing seon.* and my.* AOT artifacts"
     find "$T/home/.jolt/aot-cache" -type f \( -name 'seon.*' -o -name 'my.*' \) -delete 2>/dev/null
-    rm -rf "$T/home/.jolt/build-cache"
     echo "$stamp" > "$T/schemas.stamp"
   fi
   say "seon: jolt build -m seon.check -> target/seon"

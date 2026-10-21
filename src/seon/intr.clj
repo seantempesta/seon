@@ -102,6 +102,3 @@
                :else (throw ex))))
          (finally
            (swap! stack (fn [s] (doall (remove #(identical? % e) s))))))))
-
-(defn running? {:malli/schema [:=> [:cat] :boolean]}
-  [] (boolean (seq @stack)))

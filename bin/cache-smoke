@@ -1,0 +1,35 @@
+#!/bin/sh
+# bin/cache-smoke [--build WT]   the build caches are shared by every checkout (docs/source.md).
+#
+# Always: bin/env, sourced under two different checkouts (this one and the main tree), names the
+# same absolute JOLT_BUILD_CACHE_DIR and JOLT_RUNTIME_CACHE_DIR, outside either checkout's HOME.
+# With --build WT: WT (another worktree whose seon target is already built) builds its source
+# after this checkout filled the shared cache; its build must report at most five units compiled
+# (`compile app units (4/305 compiled)` measured: the units whose text names the checkout's own
+# target/ directory, a Jolt matter, ~1.6 s); every other unit is a hit. WT's own cache copy is emptied first, so only the
+# shared directory can answer.
+set -eu
+HERE=$(cd "$(dirname "$0")/.." && pwd)
+MAIN=$(cd "$(git -C "$HERE" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
+fail() { echo "cache-smoke: FAIL $*" >&2; exit 1; }
+
+envof() { ( ROOT=$1; . "$HERE/bin/env"; printf '%s\n' "${JOLT_BUILD_CACHE_DIR:-}" "${JOLT_RUNTIME_CACHE_DIR:-}" ); }
+a=$(envof "$HERE"); b=$(envof "$MAIN")
+[ "$(echo "$a" | grep -c .)" = 2 ] || fail "bin/env does not export both cache dirs: [$a]"
+[ "$a" = "$b" ] || fail "caches differ between checkouts: [$a] vs [$b]"
+for d in $a; do
+  case $d in /*) ;; *) fail "not an absolute shared path: [$d]";; esac
+  case $d in "$HERE"/*|"$MAIN/target/home"/*) fail "inside a checkout's own HOME: $d";; esac
+done
+echo "cache-smoke: env ok ($(echo "$a" | head -1))"
+
+[ "${1:-}" = --build ] || exit 0
+WT=$(cd "$2" && pwd)
+rm -rf "$WT/target/home/.jolt/build-cache" "$WT/target/home/.jolt/runtime-cache"
+log=$WT/target/cache-smoke-build.log
+( cd "$WT" && JOLT_BUILD_PROFILE=1 nice -n 15 bin/build seon ) > "$log" 2>&1 ||
+  { tail -20 "$log" >&2; fail "build failed"; }
+grep -h 'compile app units' "$WT/target/seon-build.log" "$log" | tail -1
+grep -hq 'compile app units ([0-5]/[0-9]* compiled)' "$WT/target/seon-build.log" "$log" ||
+  fail "units were compiled in $WT instead of hit"
+echo "cache-smoke: build ok"

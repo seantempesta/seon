@@ -287,10 +287,6 @@
                    dest (case (:op req) :merge-main {:merge-main (:agent req) :rid rid} :merge {:merged (:agent req) :rid rid} {:rid rid})]
                (step/out! o :to-writer (assoc (dissoc req :agent) :dest dest))
                (-> (pend st rid p (:op req) nil) (update :writes (fnil conj #{}) rid)))
-      :stop (if (get-in st [:agents id])
-              (let [[st rid] (rid! st)]
-                (to-agent (pend st rid p :stop id) id {:op :drain :rid rid}))
-              (reply! st p {:stopped true :agent id :already true}))
       :kill (cond-> (if (get-in st [:agents id])
                       ;; :ended when root stops it because its attempt ended (the reconciler says so)
                       (-> st (set-agent id {:status (if (:ended m) :ended :killed)}) (to-agent id {:op :kill}))
@@ -600,7 +596,7 @@
         config (-> (cfg/with-provider cfg/config provider) (assoc :seon.config.agent/max-running max-running))
         program (program/load-all! @conn)
         program-ms (lib/ms-since t1)
-        contracts (contract/instrument! '[seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])
+        contracts (contract/instrument! '[seon.edn seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])
         _ (warm! conn)
         _ (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
         _ (lib/static!)
@@ -613,7 +609,7 @@
         ;; every event, for the API's taps (seon.root/events) and the render proc's (W2)
         events-mult (a/mult events-in)
         chans {:ext (a/chan 1024) :back (a/chan 4096) :to-writer (a/chan (cfg/value :seon.config.root/writer-buf))
-               :server-ev (a/chan 4096) :stop-ch (a/promise-chan)
+               :server-ev (a/chan 4096)
                ;; outside agents' attempts handed back for judgement (seon.entrance)
                :judge (a/chan 64)}
         view {:agents {} :writer {:tx-count 0} :stats {}
@@ -876,21 +872,6 @@
   ([sys agent-id] (agent-ping sys agent-id 1000))
   ([sys agent-id ms] (let [r (deref (call! sys {:op :ping :id agent-id}) ms :unknown)] (if (and (map? r) (:status r)) r :unknown))))
 
-(defn stop-agent!
-  "Flow's stop for one agent: it exits after the requests before the stop; root awaits
-  its death, SIGKILLs past seon.agent-proc/stop-bound-ms. Answers {:stopped true ...} or :timeout."
-  {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :any]}
-  [sys agent-id]
-  (let [p (call! sys {:op :stop :id agent-id})]
-    (if (= ::late (deref p ap/stop-bound-ms ::late))
-      (do (kill! sys agent-id) (deref p 5000 :timeout))
-      @p)))
-
-(defn freeze! "SIGSTOP the agent's process. nil." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
-  [sys agent-id] (some-> (:pid (agent-entry sys agent-id)) (lib/c-kill lib/SIGSTOP)) nil)
-(defn thaw! "SIGCONT the agent's process. nil." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
-  [sys agent-id] (some-> (:pid (agent-entry sys agent-id)) (lib/c-kill lib/SIGCONT)) nil)
-
 (defn fs-call! "Ask the fork server for {:op :stats} or {:op :static}." {:malli/schema [:=> [:cat :seon.root/sys :seon.root/request] :any]}
   [sys msg] (deref (call! sys {:op :fs :req msg}) 30000 :timeout))
 
@@ -921,7 +902,6 @@
       (a/>!! (:back sys) {:op :kill-all}))
     (let [drained (deref p 15000 :timeout)
           graph (flow/stop (:graph sys))]
-      (a/put! (:stop-ch sys) true)
       (some-> ^Thread (:errors sys) (.join 5000))
       (a/close! (:events-in sys))
       ;; the store is released and kept, whoever gave its path

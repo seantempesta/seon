@@ -23,10 +23,9 @@
   - `:seon.db/ref` is a reference (entity id, tempid, lookup ref or nested map); `[:set X]`
     is cardinality many.
   - A map with `{:seon.db/attributes true}` declares its members as attributes.
-  - `{:seon.db/edn true}` on any schema stores its value as EDN text (`encode-edn`)."
+  - `{:seon.db/edn true}` on any schema stores its value as EDN text (`seon.edn/encode`)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn- error error?]] [malli.core :as m] [malli.registry :as mr]
-            [clojure.edn :as edn]))
+  (:require [seon.contract :refer [defn defn- error error?]] [malli.core :as m] [malli.registry :as mr]))
 
 (def type->datahike
   "Malli scalar type to Datahike value type (Seon's `malli-type->datahike-type`, with the
@@ -218,18 +217,3 @@
   [compiled property]
   (let [found (some #(get % property) (chain-properties compiled))]
     (when (qualified-symbol? found) found)))
-
-;; ---- the EDN text slot ------------------------------------------------------------
-;; A `{:seon.db/edn true}` attribute holds its value as the text `encode-edn` prints. Seon
-;; canonicalised order and escaped unreadable identifiers (`storage-data`); proto stores what
-;; its callers always printed, so this is that print and `edn/read-string`.
-
-(defn encode-edn
-  "`v` as EDN text that reads back: no print limits, no metadata."
-  {:malli/schema [:=> [:cat :any] :string]}
-  [v] (binding [*print-length* nil *print-level* nil *print-meta* false] (pr-str v)))
-
-(defn decode-edn
-  "The value `encode-edn` printed."
-  {:malli/schema [:=> [:cat :string] :any]}
-  [s] (edn/read-string s))
