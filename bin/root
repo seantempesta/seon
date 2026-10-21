@@ -7,9 +7,11 @@
 # closes its stdin. ARGS go to the root (`--set :seon.config.source/root=\"DIR\"`, ...). Its
 # output: runs/root.log; its pids: runs/root.pids ("TAIL ROOT").
 # `next` restarts the next generation (owner, 2026-10-21; docs/source.md#the-next-generation):
-# it asks the running root for the generation main records (my.root/next-generation: the merges
-# commit's built tree and the arguments resuming this root's store and main), stops the root,
-# and starts that tree's binary on them. A process never replaces itself: bin/root owns it.
+# it asks the running root for the generation main records (my.root/next-generation: the tree
+# my.root/build! built from the last merges commit, and the arguments resuming this root's store
+# and main), stops the root, and starts that tree's binary on them. A process never replaces
+# itself: bin/root owns it. Only what cannot load in place needs a new binary (a pin, deps.edn,
+# native code); a merge loads in place, and a restart catches up on main at boot.
 # bin/root run CHECKOUT PORT WEB [ARGS]   one root of CHECKOUT's build in the foreground, until
 # stdin closes (what `start` and `next` run).
 #

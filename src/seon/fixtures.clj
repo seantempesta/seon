@@ -155,6 +155,15 @@
                                         "  (seon.e2e/loop-run). A task redefines it on its branch, the merge is written back and\n"
                                         "  committed on the merges branch, and the binary built from that commit answers the new\n"
                                         "  value.\"\n  {:malli/schema [:=> [:cat] :int]}\n  [] 2)"))]}}
+   ;; the loop's second turn (seon.source-test: a restart catches up on two merges); its proof
+   ;; resolves the new var when it runs (the proof is compiled before the var exists)
+   :loop-2 {:specs [{:name "gens" :ns 'seon.fixtures :proofs #{'app.proofs/gens-test} :proof "(deftest gens-test (is (= [1 2] ((resolve 'seon.fixtures/generations)))))"
+                     :plan "Seon's own source is the program: define `seon.fixtures/generations`, the generations so far, so its proof `app.proofs/gens-test` passes."}]
+            :after {}
+            :replies {"gens" [(fenced "The generations so far."
+                                      (str "(in-ns 'seon.fixtures)\n"
+                                           "(defn generations\n  \"The generations of Seon's own source so far: the loop's second subject.\"\n"
+                                           "  {:malli/schema [:=> [:cat] [:vector :int]]}\n  [] [1 2])"))]}}
    :hairy {:specs (into [{:name "a" :ns 'app.m :var "f1" :stub (defn1 "f1" "0") :proofs #{'app.proofs/a-test}
                           :proof "(deftest a-test (is (= [2 3 4 5] [(app.m/f1 1) (app.m/f2 1) (app.m/f3 1) (app.m/f4 1)])))"}
                          {:name "b" :ns 'app.m :proofs #{'app.proofs/b-test}

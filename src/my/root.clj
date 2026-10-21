@@ -3,7 +3,7 @@
   the reconciler proc does the rest. Each takes root's system (seon.root/start!)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [seon.config :as config]
-            [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl]))
+            [seon.reconcile :as reconcile] [seon.program :as program] [seon.db :as pdb] [seon.template :as tpl]))
 
 (defn create!
   "Write task declarations as held tasks. Answers the writer's answer, or the refusal."
@@ -89,19 +89,42 @@
   {:malli/schema [:=> [:cat :seon.root/sys] [:maybe :seon.root/generation]]}
   [sys] (reconcile/generation @(:conn sys)))
 
+(defn resume-args
+  "The root arguments (bin/root start ARGS) that resume this root's store and main, Seon's
+  source at source-root (its tree's own, by default): a restart catches up on main's merges
+  where it boots (seon.program/load-all!)."
+  {:malli/schema [:function [:=> [:cat :seon.root/sys] [:vector :string]] [:=> [:cat :seon.root/sys [:maybe :string]] [:vector :string]]]}
+  ([sys] (resume-args sys (get-in sys [:bindings :source :root])))
+  ([sys source-root]
+   (into [] (mapcat (fn [[k v]] ["--set" (str k "=" (pr-str v))]))
+         (cond-> [[:seon.config.root/store-path (:store-path sys)]
+                  [:seon.config.root/main (name (pdb/conn-main (:conn sys)))]
+                  [:seon.config.source/dirs (config/value :seon.config.source/dirs)]
+                  [:seon.config.source/branch (config/value :seon.config.source/branch)]
+                  [:seon.config.source/generations-dir (config/value :seon.config.source/generations-dir)]]
+           source-root (conj [:seon.config.source/root source-root])))))
+
+(defn build!
+  "Build the next generation from main's last merges commit, for what cannot load in place
+  (a Jolt, Chez or dependency pin, deps.edn, native code; a merge loads in place:
+  seon.program/load-changes!). Waits for the :build effect (seon.fx/build), records what it
+  answered on main (:seon.root/generation) and answers it: what `bin/root next` starts. nil
+  when no merge was committed."
+  {:malli/schema [:=> [:cat :seon.root/sys] [:maybe :seon.root/generation]]}
+  [sys]
+  (when-let [commit (reconcile/last-commit @(:conn sys))]
+    (let [r @(root/effect! sys :build {:repo (get-in sys [:bindings :source :root]) :commit commit})
+          g (if (:seon.error/type r)
+              {:commit commit :ms (/ (:seon.fx/us r 0) 1000.0) :error (:seon.error/message r)}
+              (:value r))]
+      @(root/transact-main! sys [{:seon.root/id :root :seon.root/generation (program/pr-edn g)}])
+      g)))
+
 (defn next-generation
   "What `bin/root next` starts (docs/source.md#the-next-generation): [checkout & args], the
-  built generation's tree and the root arguments that resume this root's store and main in
-  it, Seon's source now its tree; nil when no generation is built."
+  built generation's tree and the arguments that resume this root's store and main in it,
+  Seon's source now its tree; nil when no generation is built (my.root/build!)."
   {:malli/schema [:=> [:cat :seon.root/sys] [:maybe [:vector :string]]]}
   [sys]
   (when-let [{:keys [checkout]} (let [g (generation sys)] (when (:binary g) g))]
-    (into [checkout]
-          (mapcat (fn [[k v]] ["--set" (str k "=" (pr-str v))]))
-          [[:seon.config.root/store-path (:store-path sys)]
-           [:seon.config.root/main (name (pdb/conn-main (:conn sys)))]
-           [:seon.config.source/root checkout]
-           [:seon.config.source/dirs (config/value :seon.config.source/dirs)]
-           [:seon.config.source/branch (config/value :seon.config.source/branch)]
-           [:seon.config.source/generations-dir (config/value :seon.config.source/generations-dir)]
-           [:seon.config.source/build-lock (config/value :seon.config.source/build-lock)]])))
+    (into [checkout] (resume-args sys checkout))))

@@ -419,10 +419,16 @@
   (some-> (when (task/eid db :seon.root/id :root) (:seon.root/quiescent (d/pull db [:seon.root/quiescent] [:seon.root/id :root])))
           edn/read-string))
 
+(defn last-commit
+  "The merges commit of db's last merged attempt (the write-back's sha), or nil."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :string]]}
+  [db]
+  (some->> (d/q '[:find ?t ?c :where [?e :seon.attempt/commit ?c] [?e :seon.attempt/merged-t ?t]] db) (sort-by first) last second))
+
 (defn generation
   "The next generation on db: the last merges commit the :build effect built or refused
-  ({:commit :checkout :binary :ms} or {:commit :ms :error}, written by the reconciler proc),
-  or nil."
+  ({:commit :checkout :binary :ms} or {:commit :ms :error}, written by my.root/build!), or
+  nil."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.root/generation]]}
   [db]
   (some-> (when (task/eid db :seon.root/id :root) (:seon.root/generation (d/pull db [:seon.root/generation] [:seon.root/id :root])))

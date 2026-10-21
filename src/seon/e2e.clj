@@ -212,14 +212,17 @@
   :commits [[attempt sha]] :commit-errors [[attempt message]] :turn-ms (release to quiet) :spans [[attempt start end] ms
   from release]
   :root (seon.fixtures/generation in root) :agent (in an agent forked after the merge)
-  :quiescent q}."
-  [sys]
-  (let [{:keys [specs]} (get fx/scenarios :loop)
-        ds (fx/decls specs 'loop nil)]
+  :quiescent q}. k: the scenario (fixtures/scenarios), :loop by default; :loop-2 is the
+  second turn."
+  ([sys] (loop-turn! sys :loop))
+  ([sys k]
+  (let [{:keys [specs]} (get fx/scenarios k)
+        tns (symbol (name k))
+        ds (fx/decls specs tns nil)]
     (seed! sys specs)
     (println :create (select-keys (root/create! sys (mapv #(assoc % :seon.task/config {:seon.config.agent/max-turns 2}) ds)) [:ok]))
     (let [t0 (now)
-          _ (root/run! sys (mapv #(task/task-id 'loop (:seon.task/name %)) ds))
+          _ (root/run! sys (mapv #(task/task-id tns (:seon.task/name %)) ds))
           q (quiet! sys)
           turn-ms (- (now) t0)
           d (db sys)
@@ -230,7 +233,7 @@
        :spans (vec (sort (for [[a s e] (d/q '[:find ?a ?s ?e :where [?x :seon.attempt/id ?a] [?x :seon.attempt/start-ms ?s] [?x :seon.attempt/end-ms ?e]] d)]
                            [a (- s t0) (- e t0)])))
        :root (seon.fixtures/generation) :agent (first (fresh sys "(seon.fixtures/generation)"))
-       :quiescent q})))
+       :quiescent q}))))
 
 (defn loop-run
   "The self-improvement loop, first turn: root boots on a clone of this repository (its

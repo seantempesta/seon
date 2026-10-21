@@ -178,18 +178,17 @@
                    'x.z-support/k)
         "a namespace required from a later file is analyzed first, and its alias reads ::z/k")))
 
-(deftest a-new-generation-is-built-and-resumed-on-the-store
-  ;; task seon.source/the-next-generation-runs-from-the-merges-commit, the loop's whole turn
+(deftest a-restart-catches-up-and-a-new-generation-resumes
+  ;; BUILD plan P5 (task seon.source/the-next-generation-runs-from-the-merges-commit),
   ;; through the path the owner uses: bin/root starts a root on a clone of this checkout
   ;; (Seon's own source as main's program, its store under this test's directory); through
-  ;; its entrance, the loop's task redefines seon.fixtures/generation 1 -> 2 and merges
-  ;; (seon.e2e/loop-turn!); the reconciler commits it on the clone's jolt/seon-merges and the
-  ;; :build effect builds that commit, recording the generation on main; `bin/root next`
-  ;; stops the root and starts the generation's binary resuming the same store and main,
-  ;; where (seon.fixtures/generation) answers 2. Declared long, bound 300 s: the build is
-  ;; bin/build seon in the generation's worktree under the one build lock (40-48 s warm,
-  ;; longer while another lane holds the lock), plus two boots (~1 s each) and the loop's
-  ;; run (~10 s).
+  ;; its entrance two loop turns merge seon.fixtures/generation 1 -> 2 and a new
+  ;; seon.fixtures/generations, each live in place. Root is SIGKILLed and the same binary,
+  ;; older than both merges, started on the same store and main: it catches up at boot
+  ;; (seon.program/load-all!). Then the cold-start path: my.root/build! builds main's last
+  ;; merges commit (seon.fx/build, bin/build seon in the generation's worktree) and
+  ;; `bin/root next` starts it on the same store and main. Declared long, bound 300 s: two
+  ;; turns (~14 s each), three boots (~3 s each with the import) and one build (~25-60 s).
   (let [dir (scratch-dir "nextgen")
         tree (str dir "/tree")
         port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
@@ -199,22 +198,32 @@
                                       :in (str (pr-str {:op :eval :agent "root" :code code}) "\n"))
                              a (try (clojure.edn/read-string {:default tagged-literal} (:out r)) (catch Exception _ nil))]
                          (some-> a :items first :printed clojure.edn/read-string)))
+        pids (fn [] (str/split (str/trim (slurp (str dir "/runs/root.pids"))) #" "))
         cloned (sh/sh "git" "clone" "-q" "--local" here tree)
         started (root! "start" "--set" (str ":seon.config.source/root=" (pr-str tree)))]
     (try
       (is (zero? (:exit cloned)) (:err cloned))
       (is (zero? (:exit started)) (str (:out started) (:err started)))
-      (let [turn (ask "(seon.e2e/loop-turn! sys)")
-            sha (:commit turn)
-            gen (:generation turn)]
-        (is (re-matches #"[0-9a-f]{40}" (str sha)) (str "the merge is committed: " (pr-str turn)))
-        (is (= sha (:commit gen)) "the generation built is the merges commit")
-        (is (nil? (:error gen)) (str "and it built: " (:error gen)))
-        (is (.canExecute (java.io.File. (str (:binary gen)))) "its binary exists")
-        (let [nxt (root! "next")
-              after (ask "[(seon.fixtures/generation) (:commit (my.root/generation sys))]")]
+      (let [t1 (ask "(seon.e2e/loop-turn! sys)")
+            t2 (ask "(seon.e2e/loop-turn! sys :loop-2)")
+            args (ask "(my.root/resume-args sys)")]
+        (is (= [2 2] [(:root t1) (:root t2)]) (str "each merge live in place: " (pr-str [t1 t2])))
+        (is (= 2 (count (:commits t2))) "two merges committed")
+        (let [[holder pid] (pids)]
+          (sh/sh "kill" "-9" pid)
+          (while (zero? (:exit (sh/sh "kill" "-0" pid))) (Thread/sleep 50))
+          ;; bin/root's holder of the dead root's stdin
+          (sh/sh "kill" holder))
+        (let [restarted (apply root! "start" args)]
+          (is (zero? (:exit restarted)) (str (:out restarted) (:err restarted)))
+          (is (= [2 [1 2]] (ask "[(seon.fixtures/generation) (seon.fixtures/generations)]"))
+              "the binary older than both merges runs both, caught up at boot on the same main"))
+        (let [g (ask "(my.root/build! sys)")
+              nxt (root! "next")]
+          (is (nil? (:error g)) (str "the generation built: " (pr-str g)))
           (is (zero? (:exit nxt)) (str (:out nxt) (:err nxt)))
-          (is (= [2 sha] after) "the new generation runs the merged change, resumed on main holding its generation")))
+          (is (= [2 [1 2] (:commit g)] (ask "[(seon.fixtures/generation) (seon.fixtures/generations) (:commit (my.root/generation sys))]"))
+              "the new generation runs both, resumed on main holding its generation")))
       (finally
         (root! "stop")
         (doseq [g (.listFiles (java.io.File. (str dir "/runs/generations")))]
