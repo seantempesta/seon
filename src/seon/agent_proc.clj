@@ -69,10 +69,10 @@
                       true (update :inflight assoc rid (select-keys m [:kind :branch :new :merge-branch :data-attrs :pass-fd :lease]))
                       ;; what root last asked of it, for a stall or a death (seon.agent/last-op)
                       true (assoc :last-op (cond-> {:kind kind :since-ms (System/currentTimeMillis)}
-                                             (string? (:forms msg)) (assoc :form (let [f (:forms msg)] (if (> (count f) 200) (str (subs f 0 200) " …") f)))))
+                                             (string? (:forms msg)) (assoc :form (:forms msg))))
                       (= kind :ping) (update :pings conj rid))]
              [st {:to-api [(status st (cond-> {:status :busy}
-                                        (= kind :eval) (assoc :running {:form (let [f (:forms msg)] (if (> (count f) 200) (str (subs f 0 200) " …") f))
+                                        (= kind :eval) (assoc :running {:form (:forms msg)
                                                                         :since-ms (System/currentTimeMillis)})))]}]))
     :write [(cond-> (to-proc! st (:msg m)) (= :fx-reply (:op (:msg m))) (update :fx-out (fnil dec 1))) nil]
     ;; root's stall check (seon.root's timer): a request in flight, no frame from the agent

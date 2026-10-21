@@ -23,7 +23,7 @@
   {:malli/schema [:=> [:cat :seon.root/sys] :map]}
   [sys]
   (let [db @(:conn sys) idx (r/index db)]
-    {:agents (into (sorted-map) (for [[id a] (:agents (c/state sys)) :when (not (#{:dead :killed} (:status a)))]
+    {:agents (into (sorted-map) (for [[id a] (:agents (c/state sys)) :when (not (#{:dead :killed :ended} (:status a)))]
                                   [id (select-keys a [:branch :status :task])]))
      :tasks (into (sorted-map) (for [[id t] (task/tasks db)]
                                  [id (cond-> {:execution (:seon.task/execution t) :done (r/done? idx id) :blocked-by (r/blocked-by idx id)}
@@ -89,8 +89,12 @@
               {:items (root-eval sys (:code req))}
               {:items (mapv #(select-keys % [:tag :form :printed :out :recorded :handle])
                             @(c/submit! sys ag (:code req) {:origin :outside}))})
+      ;; the block's text as the model reads it: printed to the agent's output, not as a
+      ;; value (a value comes back as a string literal, escaped, under the reply's budget);
+      ;; recorded with origin :context, a context read, which renders refer to, not repeat
       :context (if-let [{:keys [task attempt]} (attempt-of sys ag)]
-                 {:context (:printed (last @(c/submit! sys ag (pr-str (list 'seon.turn/context-block task attempt)) {:origin :outside})))}
+                 (let [it (last @(c/submit! sys ag (pr-str (list 'print (list 'seon.turn/context-block task attempt))) {:origin :context}))]
+                   (if (= :err (:tag it)) {:error (:printed it)} {:context (:out it)}))
                  {:error (str ag " works no task: attach one first")})
       :attach (attach! sys (:task req))
       :done (if-let [{:keys [attempt task env]} (attempt-of sys ag)]

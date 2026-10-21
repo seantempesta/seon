@@ -248,8 +248,10 @@
                 :else (assoc st :dirty dirty))
            n-tx (count (filter #(= :tx (:op %)) reqs))
            st (-> st (update :tx-count + n-tx) (update :batches inc))]
-       (when (seq reqs)
-         (step/out! o :to-api {:op :writer :tx-count (:tx-count st) :batch-ms (lib/ms-since t0) :n-tx n-tx :commits commits}))
+       ;; what changed, to root's view: a batch, or a flush (its count is shown, never pinged)
+       (when (or (seq reqs) flush-now?)
+         (step/out! o :to-api {:op :writer :tx-count (:tx-count st) :batch-ms (lib/ms-since t0) :n-tx n-tx :commits commits
+                               :flushes (:flushes st 0)}))
        [st @o]))))
 
 (defn flusher-proc

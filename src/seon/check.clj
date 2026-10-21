@@ -1375,6 +1375,55 @@
     (out! "after the refusal a's notes: " (:printed r-count) "; its next write: " (select-keys r-next [:tag :printed]) "; its ids " (:ids stats))
     (out! "a's unrecorded evals, recorded on main: " recorded "; b's lowest id " b-min)
     (out! (if ok "LEASE OK" "LEASE FAILED"))
+
+(defn idle
+  "An idle root steps nothing (owner, 2026-10-21: no beat; health is what flows): root
+  boots and settles (the reconciler's quiescence), a tab opens on its dashboard (an SSE
+  feed on SEON_WEB_PORT) and receives its page; then every root proc's Flow step count is
+  read at the two ends of a window of window-ms with nothing happening, and must not move.
+  Then a change reaches the tab: an agent spawned and a commit to main each grow what the
+  tab received. The wait is the measurement (that nothing happens), not a dependency."
+  [window-ms]
+  (let [port (Long/parseLong (or (System/getenv "SEON_WEB_PORT") "7777"))
+        sys (c/start! {:datoms 300})
+        _ (seon.e2e/await-quiet sys 0)
+        received (atom 0)
+        sock (java.net.Socket. "127.0.0.1" (int port))
+        _ (doto (.getOutputStream sock)
+            (.write (.getBytes (str "GET /feed?view=root HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: text/event-stream\r\n\r\n") "UTF-8"))
+            (.flush))
+        ;; the tab: an edge reader counting the bytes its feed sends
+        in (.getInputStream sock)
+        _ (doto (Thread. (fn [] (let [buf (byte-array 8192)]
+                                  (loop [] (let [n (try (.read in buf) (catch Exception _ -1))]
+                                             (when (pos? n) (swap! received + n) (recur)))))))
+            (.setDaemon true) (.start))
+        await-more (fn [n0 ms] (let [deadline (+ (lib/now-ns) (* ms 1000000))]
+                                 (loop [] (cond (> @received n0) true
+                                                (> (lib/now-ns) deadline) false
+                                                :else (do (Thread/sleep 5) (recur))))))
+        opened (await-more 0 10000)
+        ;; the page's own first passes (the tab's views, its keyframe) settle first
+        _ (Thread/sleep 1000)
+        ;; root's declared procs and its effect owners (their lanes step only when given work)
+        decl (seon.system/read-decl seon.system/path)
+        pids (sort-by str (concat (keys (:procs decl)) (for [k (keys (:fx decl))] (keyword "fx" (name k)))))
+        counts (fn [] (into (sorted-map) (for [pid pids] [pid (some-> (flow/ping-proc (:graph sys) pid :timeout-ms 1000) ::flow/count)])))
+        b0 @received c0 (counts)
+        _ (Thread/sleep window-ms)
+        c1 (counts) b1 @received
+        moved (into (sorted-map) (for [[pid n] c1 :when (not= n (get c0 pid))] [pid [(get c0 pid) n]]))
+        n-spawn @received
+        a (c/spawn! sys {:task "idle check"})
+        spawned (await-more n-spawn 10000)
+        n-commit @received
+        _ @(c/transact-main! sys [{:db/id "n" :ns/name 'idle.check}])
+        committed (await-more n-commit 10000)
+        ok (and opened (empty? moved) (= b0 b1) spawned committed)]
+    (pprint {:window-ms window-ms :procs (count pids) :steps-at-idle moved :bytes-at-idle (- b1 b0)
+             :tab-opened opened :spawn-reached-tab spawned :commit-reached-tab committed :agent a})
+    (out! (if ok "IDLE OK" "IDLE FAILED"))
+    (.close sock)
     (c/stop! sys)
     (lib/c-exit (if ok 0 1))))
 
@@ -1432,4 +1481,5 @@
     "soak" (soak (Long/parseLong (or n "50")) (Long/parseLong (or (first more) "60")))
     "mem" (mem (Long/parseLong (or n "100")) 3)
     "web" (web-serve (Long/parseLong (or n "6")) more)
+    "idle" (idle (Long/parseLong (or n "5000")))
     (smoke)))

@@ -1,7 +1,7 @@
 #!/bin/zsh
 # bin/check [N] — the platform's end-to-end checks on target/seon (bin/build seon), each a
 # mode of seon.check: dragons, contracts, census, fx, system, mcp, threads, admit, record,
-# problems, smoke, program, robust, lifecycle, backpressure, hotreload, drain, orphan,
+# problems, smoke, program, robust, lifecycle, backpressure, hotreload, drain, idle, orphan,
 # durable, window, swarm N, e2e tasks and scenarios, resume, scale N (default N = 100).
 # bin/check MODE [ARGS] runs one mode.
 #
@@ -78,6 +78,8 @@ echo "== lifecycle (start!/stop! x10 in one process, root's threads exactly as d
 echo "== backpressure"; step backpressure "" run backpressure 200
 echo "== hotreload"; step hotreload "" run hotreload
 echo "== drain"; step drain "" run drain 32
+echo "== idle (no beat: an idle root with a tab open steps nothing; a spawn and a commit still reach the tab)"
+step idle ":steps-at-idle|:bytes-at-idle|reached-tab|^IDLE " env SEON_WEB_PORT=$((20000 + $$ % 20000)) zsh -c "cd '$ROOT/target' && ./seon idle 5000"
 
 echo "== orphan (root dies under busy agents, a clone and a test child)"
 SEON_RUN=orphan run orphan > "$OUT/orphan.log" 2>&1

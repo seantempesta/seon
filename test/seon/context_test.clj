@@ -70,7 +70,7 @@
     (testing "every refusal but the task's own red proof (shown with the proofs), each with what explains it"
       (is (= [{:refusal :regression :test 'demo-test/g-test :failures [{:expected "(= 1 (g))" :actual "(not (= 1 0))"}]}
               {:refusal :stray-red :test 'user/scratch-test}
-              {:refusal :contract-gap :var 'demo/helper}]
+              {:refusal :contract-gap :vars ['demo/helper]}]
              (:refused block))))
     (testing "a run that failed as a whole is said, not read as tests not run"
       (is (= {:failed ["tests timed out after 30000 ms; killed"]} (:test-run block)))
@@ -93,8 +93,9 @@
         {:keys [text repairs]} (reader/forgive reply)
         block (context/current-state db t {:turn 1 :max-turns 4 :source text :repairs repairs})]
     (is (seq repairs) "the reader repaired the extra close")
-    (is (= [{:near ":cat :int] :int]} [x] (* 2 x))," :dropped ")" :inserted ","}] (:repaired (:your-last-reply block)))
-        "what was dropped, what replaced it, and the code it was near; the prose made comments is no repair")
+    (is (= [{:near {:line 3 :column 60 :text "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x)),"} :dropped ")" :inserted ","}]
+           (:repaired (:your-last-reply block)))
+        "what was dropped, what replaced it, and where: its line and column, and the whole line; the prose made comments is no repair")
     (testing "flagged definitions are named"
       (let [db2 (d/db-with db [{:var/name 'demo/h :var/ns [:ns/name 'demo] :var/flagged true}])]
         (is (= ['demo/h] (context/flagged db2)))

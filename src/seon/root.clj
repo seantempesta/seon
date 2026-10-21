@@ -138,7 +138,8 @@
   [st f & args] (apply update st :view f args))
 
 (defn- set-agent
-  "Merge m into agent id's view entry. A :killed agent stays :killed."
+  "Merge m into agent id's view entry. A stopped agent stays stopped: :killed (a kill) or
+  :ended (root stopped it because its attempt ended)."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.agent/id :map] :seon.root/api-state]}
   [st id m]
   (if (get-in st [:view :agents id])
@@ -146,7 +147,7 @@
                (fn [a] (let [a' (cond-> (merge a (dissoc m :ready :evals-add))
                                   (and (:ready m) (= :spawning (:status a))) (assoc :status :idle)
                                   (:evals-add m) (update :evals #(vec (take-last 20 (into (or % []) (:evals-add m))))))]
-                         (if (and (= :killed (:status a)) (not (#{:killed :dead} (:status a')))) (assoc a' :status :killed) a'))))
+                         (if (and (#{:killed :ended} (:status a)) (not (#{:killed :ended :dead} (:status a')))) (assoc a' :status (:status a)) a'))))
       ;; the agents with an eval in flight: the stall check's set
       (contains? m :running) (update ::busy (fnil (if (:running m) conj disj) #{}) id))
     st))
@@ -200,7 +201,9 @@
   [st o {:keys [agent rid pid inflight]}]
   (let [{:keys [branch]} (get-in st [:agents agent])
         v (get-in st [:view :agents agent])
-        killed? (= :killed (:status v))
+        ;; stopped by root: a kill, or the end of its attempt (:ended); else it died
+        stopped (#{:killed :ended} (:status v))
+        killed? (some? stopped)
         ;; neither stopped by root nor killed: a death, with what root saw of it (lane D2)
         died (when-not (or rid killed?)
                (contract/error :seon.agent/died 'seon.root/api-proc (str "agent " (name agent) " died" (exit-text (:exit v)))
@@ -208,7 +211,7 @@
                                 :stderr (stderr-tail (agent/stderr-path (get-in st [:view :store :agents-dir]) agent))
                                 :last-op (some-> (:running v) (select-keys [:form :since-ms]) (assoc :kind :eval))}))
         e (or died (gone agent "agent stopped"))]
-    (step/out! o :events (step/event {:type (if killed? :killed :dead) :agent agent}))
+    (step/out! o :events (step/event {:type (or stopped :dead) :agent agent}))
     (let [st (cond
                (nil? died) st
                ;; the exit status is known (reaped first), or never will be (a clone): now
@@ -218,7 +221,7 @@
           st (reduce (fn [st r] (deliver-rid st r (no-agent (get-in st [:pending r :kind]) e))) st inflight)
           st (cond-> st rid (deliver-rid rid {:stopped true :agent agent}))]
       (-> st (update :agents dissoc agent) (update :agent-procs dissoc agent) (assoc ::update true)
-          (set-agent agent {:status (if killed? :killed :dead) :ended-ms (System/currentTimeMillis) :running nil})))))
+          (set-agent agent {:status (or stopped :dead) :ended-ms (System/currentTimeMillis) :running nil})))))
 
 (defn- rid! {:malli/schema [:=> [:cat :seon.root/api-state] [:tuple :seon.root/api-state :int]]}
   [st] (let [r (inc (:rid st))] [(assoc st :rid r) r]))
@@ -243,7 +246,7 @@
       :spawn (let [opts (cond-> (:opts m) (:branch (:opts m)) (update :branch #(pdb/on-main (pdb/conn-main (:conn st)) %)))
                    holder (and (:branch opts)
                                (some (fn [[aid a]] (when (and (= (:branch opts) (:branch a)) (not (:ended-ms a))
-                                                              (not (#{:dead :killed} (:status a))))
+                                                              (not (#{:dead :killed :ended} (:status a))))
                                                      aid))
                                      (get-in st [:view :agents])))]
                (cond
@@ -286,7 +289,8 @@
                 (to-agent (pend st rid p :stop id) id {:op :drain :rid rid}))
               (reply! st p {:stopped true :agent id :already true}))
       :kill (cond-> (if (get-in st [:agents id])
-                      (-> st (set-agent id {:status :killed}) (to-agent id {:op :kill}))
+                      ;; :ended when root stops it because its attempt ended (the reconciler says so)
+                      (-> st (set-agent id {:status (if (:ended m) :ended :killed)}) (to-agent id {:op :kill}))
                       st)
               p (reply! p {:killed id}))
       :message (let [msg {:op :message :from (:from m :root) :body (:body m) :ns (sock/now-ns)}]
@@ -326,7 +330,7 @@
     (:ev m)
     (case (:ev m)
       :forked (do (step/out! o :events (step/event {:type :spawned :agent (:agent m) :pid (:pid m) :fork-ms (:fork-ms m)}))
-                  (when (= :killed (get-in st [:view :agents (:agent m) :status])) (lib/c-kill (:pid m) 9))
+                  (when (#{:killed :ended} (get-in st [:view :agents (:agent m) :status])) (lib/c-kill (:pid m) 9))
                   (-> st (set-agent (:agent m) {:pid (:pid m)})
                       (view! update-in [:server :agents-forked] (fnil inc 0))
                       (view! update-in [:stats :fork-ms] lib/push-window (:fork-ms m) 500)
@@ -373,6 +377,7 @@
       :web (view! st assoc :web (select-keys m [:listening :port :error]))
       :ended (end-agent st o m)
       :writer (view! st (fn [v] (-> v (assoc-in [:writer :tx-count] (:tx-count m))
+                                    (assoc-in [:writer :flushes] (:flushes m 0))
                                     (update-in [:writer :batch-ms] lib/push-window (:batch-ms m) 200)
                                     (update-in [:writer :recent] #(lib/push-window % [(lib/now-ns) (:n-tx m)] 2000))
                                     (update-in [:stats :batches] (fnil inc 0))
@@ -385,7 +390,9 @@
       :error (let [e (if (contract/error? (:data m))
                        (:data m)
                        (contract/error :seon.root/proc-defect (proc-sym st (:pid m)) (or (:message m) "a defect with no message") {:pid (:pid m)}))]
+               ;; the view keeps the newest 20 and counts them all (renders say how many it left)
                (-> (view! st update :root-errors (fnil #(vec (take-last 20 (conj % %2))) []) (merge {:pid (:pid m) :message (:message m)} (:data m)))
+                   (view! update :root-errors-total (fnil inc 0))
                    (problem (err/occurrence e :platform {} (System/currentTimeMillis)))))
       ;; an agent's eval errors since its last commit (seon.error/note), counted across agents
       :errors (let [task (get-in st [:view :agents (:agent m) :task])]
@@ -657,13 +664,15 @@
         (assoc :main (cond-> {:t (:max-tx db)} datoms (assoc :datoms (count (d/datoms db :eavt)))))
         (update :server assoc :lag-ms (lib/p50 lag-ms) :fork-ms-p50 (lib/p50 fork-ms))
         (update :store merge (pdb/map-use (:cfg sys))
-                (when batches {:batches batches :commits commits :tx-per-batch (lib/r2 (/ (double (or batched-tx 0)) batches))}))))))
+                (when batches (cond-> {:batches batches :commits commits}
+                                ;; main's transactions per group commit (>= 1)
+                                (and commits (pos? commits)) (assoc :tx-per-commit (lib/r2 (/ (double (or batched-tx 0)) commits)))))))))
 
 (defn stats "The raw counters and windows." {:malli/schema [:=> [:cat :seon.root/sys] [:maybe :map]]}
   [sys] (:stats (deref (call! sys {:op :state}) 5000 {})))
 
 (defn events
-  "A fresh tap of every event {:type :spawned|:ready|:reply|:tx|:merged|:tests|:killed|:dead ...}."
+  "A fresh tap of every event {:type :spawned|:ready|:reply|:tx|:merged|:tests|:killed|:ended|:dead ...}."
   {:malli/schema [:=> [:cat :seon.root/sys] :seon.host/chan]}
   [sys]
   (let [c (a/chan (a/sliding-buffer 1024))] (a/tap (:events-mult sys) c) c))
@@ -739,7 +748,7 @@
      (cond
        (not (:branch ag)) (doto (promise) (deliver (refused 'seon.root/merge! (str "no agent " agent-id) {:merged? false})))
        (not gate?) (write! sys {:op :merge :branch (:branch ag) :agent agent-id :data-attrs data-attrs})
-       (#{:dead :killed} (:status ag)) (doto (promise) (deliver (refused 'seon.root/merge! "agent not running, so its tests cannot run; merge with {:gate? false}" {:merged? false})))
+       (#{:dead :killed :ended} (:status ag)) (doto (promise) (deliver (refused 'seon.root/merge! "agent not running, so its tests cannot run; merge with {:gate? false}" {:merged? false})))
        :else (call! sys {:op :merge-tests :id agent-id :merge-branch (:branch ag) :data-attrs data-attrs :timeout-ms 30000})))))
 
 (defn merge-main!
@@ -752,7 +761,7 @@
   ([sys agent-id] (merge-main! sys agent-id {}))
   ([sys agent-id {:keys [data-attrs] :or {data-attrs :all}}]
    (let [ag (agent-entry sys agent-id)]
-     (if (or (nil? ag) (#{:dead :killed} (:status ag)))
+     (if (or (nil? ag) (#{:dead :killed :ended} (:status ag)))
        (doto (promise) (deliver (refused 'seon.root/merge-main! (str "no live agent " agent-id) {:ok false :applied [] :conflicts []})))
        ;; the agent owns its branch's writes: it merges main itself
        (call! sys {:op :merge-main :id agent-id :data-attrs data-attrs})))))
@@ -888,8 +897,8 @@
   The timer starts at the first timeout and the io poller at the first socket wait (an
   agent's), so a root has both once its first agent runs.
   With a running sys, also one thread per :mixed proc of its declaration (Flow runs :io
-  procs, agents' stand-ins included, on the carriers), its three edge readers (Flow's
-  error channel, the fork server's socket, the render proc's sampler) and, while the web
+  procs, agents' stand-ins included, on the carriers), its two edge readers (Flow's
+  error channel, the fork server's socket) and, while the web
   proc listens, the web server's acceptor and sweeper."
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :seon.root/sys] :map]]}
   ([] {:roster {"main" 1 "jolt-shutdown" 1 "jolt-timer" 1 "jolt-io-poller" 1 "jolt-carrier" (lib/fiber-carriers)}
@@ -902,7 +911,7 @@
          ;; of Jolt's agent pool; task seon.web/web-server-threads-are-joined-at-stop)
          web? (true? (get-in (state sys) [:web :listening]))]
      (update (declared-threads) :roster merge
-             (cond-> {"async-mixed" mixed "seon-flow-errors" 1 "seon-fs-events" 1 "seon-render-sampler" 1}
+             (cond-> {"async-mixed" mixed "seon-flow-errors" 1 "seon-fs-events" 1}
                web? (assoc "clojure-agent-pool" 2))))))
 
 (defn threads
