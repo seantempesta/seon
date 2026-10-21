@@ -54,7 +54,9 @@
                  t0 (lib/now-ns)
                  pid (if (= 1 act) (lib/c-fork) -1)]
              (cond
+               ;; the agent works in the program's source root, as a REPL started in a project does
                (zero? pid) (do (sock/close! (:fd (:conn st))) (sock/close-pending-fds! (:conn st))
+                               (some-> (get cfg/config :seon.config.source/root) lib/c-chdir)
                                (repl/run! fd m (:db st) (:ns m)))
                (neg? pid) (do (sock/close! fd) [st {:ev [{:ev :fork-failed :agent (:agent m) :active-threads act}]}])
                :else [(do (sock/close! fd) st) {:ev (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid

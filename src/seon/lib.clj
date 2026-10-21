@@ -29,6 +29,7 @@
 (defc c-fork "fork" [] :int)
 (defc c-exit "_exit" [:int] :void)
 (defc c-getpid "getpid" [] :int)
+(defc c-chdir "chdir" [:string] :int)
 (defc c-getppid "getppid" [] :int)
 (defc c-waitpid "waitpid" [:int :pointer :int] :int {:blocking true})
 (defc c-waitpid-nb "waitpid" [:int :pointer :int] :int)

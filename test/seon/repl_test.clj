@@ -1,7 +1,15 @@
 (ns seon.repl-test
-  "A form is bounded by the work it does, never by a clock: seon.intr/run under a tick
-  budget (Jolt's run-interruptible, jolt/tick-budget)."
-  (:require [clojure.test :refer [deftest is]] [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]))
+  "An agent's REPL answers: asked of an agent in a root of its own (seon.agent-test/in-agent), and a form bounded by the work it does, never by a clock (seon.intr/run under a tick budget)."
+  (:require [clojure.test :refer [deftest is]] [clojure.string :as str] [seon.agent-test :as at]
+            [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]))
+
+(deftest source-answers-a-platform-var-from-the-program
+  ;; task seon.repl/source-reads-the-program: clojure.repl's source and source-fn, as at any
+  ;; Clojure REPL, answer the text of the form that defined a var the binary holds compiled
+  (let [[fn-item src-item] (at/in-agent ["(clojure.repl/source-fn 'seon.reconcile/stuck)"
+                                         "(do (require '[clojure.repl :refer [source]]) (source seon.reconcile/stuck))"])]
+    (is (str/includes? (:printed fn-item) "(defn stuck") (:printed fn-item))
+    (is (str/includes? (str (:out src-item)) "(defn stuck") (str src-item))))
 
 (defn- outcome [ticks thunk]
   (try {:value (intr/run ticks thunk)} (catch Throwable e {:error e})))
