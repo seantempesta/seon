@@ -77,6 +77,14 @@
 
 ;; ---- merge scenarios (M1): two tasks on overlapping definitions -----------------------
 
+(defn generation
+  "Which generation of Seon's own source this binary was built from: the loop's subject
+  (seon.e2e/loop-run). A task redefines it on its branch, the merge is written back and
+  committed on the merges branch, and the binary built from that commit answers the new
+  value."
+  {:malli/schema [:=> [:cat] :int]}
+  [] 1)
+
 (defn- defn1 {:malli/schema [:=> [:cat :string :string] :string]} [nm body]
   (str "(defn " nm " {:malli/schema [:=> [:cat :int] :int]} [x] " body ")"))
 
@@ -131,6 +139,15 @@
                                                   "(deftest triple-test (is (= 9 (triple 3))))"
                                                   "(in-ns 'user)"
                                                   "(def scratch-x 41)"]))]}}
+   :loop {:specs [{:name "gen" :ns 'seon.fixtures :proofs #{'app.proofs/gen-test} :proof "(deftest gen-test (is (= 2 (seon.fixtures/generation))))"
+                   :plan "Seon's own source is the program: make `seon.fixtures/generation` answer 2, so its proof `app.proofs/gen-test` passes."}]
+          :after {}
+          :replies {"gen" [(fenced "The next generation of Seon's own source."
+                                   (str "(in-ns 'seon.fixtures)\n"
+                                        "(defn generation\n  \"Which generation of Seon's own source this binary was built from: the loop's subject\n"
+                                        "  (seon.e2e/loop-run). A task redefines it on its branch, the merge is written back and\n"
+                                        "  committed on the merges branch, and the binary built from that commit answers the new\n"
+                                        "  value.\"\n  {:malli/schema [:=> [:cat] :int]}\n  [] 2)"))]}}
    :hairy {:specs (into [{:name "a" :ns 'app.m :var "f1" :stub (defn1 "f1" "0") :proofs #{'app.proofs/a-test}
                           :proof "(deftest a-test (is (= [2 3 4 5] [(app.m/f1 1) (app.m/f2 1) (app.m/f3 1) (app.m/f4 1)])))"}
                          {:name "b" :ns 'app.m :proofs #{'app.proofs/b-test}

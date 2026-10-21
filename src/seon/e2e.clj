@@ -4,11 +4,12 @@
   swarm over shared definitions, and a task that always fails ending stuck. bin/check runs
   them as modes of target/seon:
     calc | resume DIR | resume2 DIR | par N | scenario conflict|semantic|hairy|newns|sibling [model] | swarm N M | model add|calc | stuck
+    | loop DIR (the self-improvement loop's first turn, on a clone of this repository under DIR)
   Each run ends on what the system observes (the reconciler's quiescence report, or a fact
   on main), never on a deadline. Prints one EDN line per phase; the last line is the run's
   numbers and its verdict."
   (:require [seon.root :as c] [my.root :as root] [seon.task :as task] [seon.reconcile :as r]
-            [seon.fixtures :as fx] [datahike.api :as d] [seon.lib :as lib] [clojure.string :as str]))
+            [seon.fixtures :as fx] [datahike.api :as d] [seon.lib :as lib] [clojure.string :as str] [clojure.java.shell :as sh]))
 
 (defn- now [] (System/currentTimeMillis))
 (defn- db [sys] @(:conn sys))
@@ -172,6 +173,52 @@
       (c/stop! sys)
       (verdict (and (empty? (agents-reused d)) (= expect fresh-r))))))
 
+(defn loop-run
+  "The self-improvement loop, first turn: root boots on a clone of this repository (its
+  committed HEAD, under the run's directory: never the live tree) with Seon's own source as
+  main's program; a task redefines a platform function (seon.fixtures/generation, 1 -> 2)
+  on its branch, its merge task lands it, and the reconciler writes main's file back and
+  commits it on the clone's jolt/seon-merges. Passes when the commit holds exactly that
+  form's change and the merged attempt records its sha. The next generation (building that
+  commit) is the caller's: it prints the clone and the sha."
+  [dir]
+  (let [t0 (now)
+        repo (.getParent (java.io.File. (System/getProperty "user.dir")))
+        tree (str dir "/tree")
+        git (fn [& args] (let [r (apply sh/sh "git" "-C" tree args)] (str/trim (str (:out r) (:err r)))))
+        cloned (sh/sh "git" "clone" "-q" "--local" repo tree)
+        head (git "rev-parse" "HEAD")
+        sys (c/start! {:datoms 300 :max-running 2 :source {:root tree :dirs ["src"] :branch "jolt/seon-merges"}})
+        src (some-> (d/q '[:find ?s . :where [?e :seon.root/source ?s]] (db sys)) read-string)
+        {:keys [specs]} (get fx/scenarios :loop)
+        ds (fx/decls specs 'loop nil)]
+    (println :clone (:exit cloned) tree :head head)
+    (println :source src)
+    (seed! sys specs)
+    (println :create (select-keys (root/create! sys (mapv #(assoc % :seon.task/config {:seon.config.agent/max-turns 2}) ds)) [:ok]))
+    (root/run! sys (mapv #(task/task-id 'loop (:seon.task/name %)) ds))
+    (println :quiescent (await-quiet sys (main-t sys)))
+    (let [d (db sys)
+          commits (d/q '[:find ?a ?c :where [?e :seon.attempt/commit ?c] [?e :seon.attempt/id ?a]] d)
+          errors (d/q '[:find ?a ?m :where [?e :seon.attempt/commit-error ?m] [?e :seon.attempt/id ?a]] d)
+          sha (second (first commits))
+          files (when sha (git "diff" "--name-only" head sha))
+          diff (when sha (git "diff" "-U0" head sha "--" "src/seon/fixtures.clj"))
+          changed (when diff (filterv #(and (#{\+ \-} (first %)) (not (str/starts-with? % "+++")) (not (str/starts-with? % "---"))) (str/split-lines diff)))
+          ok (and (zero? (:exit cloned)) src (nil? (:error src)) (< 1000 (:forms src))
+                  (= 1 (count commits)) (empty? errors)
+                  (= "src/seon/fixtures.clj" files)
+                  (= ["-  [] 1)" "+  [] 2)"] changed)
+                  (= head (git "rev-parse" "jolt/seon-merges~1"))
+                  (= head (git "rev-parse" "HEAD")))]
+      (doseq [[id s] (summary d)] (println :task id s))
+      (println :commits commits :commit-errors errors :files files :changed changed)
+      (println :numbers (numbers sys t0))
+      (println "NEXT" tree sha)
+      (c/stop! sys)
+      (println (if ok "LOOP OK" "LOOP FAILED"))
+      ok)))
+
 (defn swarm
   "n tasks over 5 shared definitions, max-running m: every conflict resolved by a merge
   agent or ended in attached tasks; no agent reused."
@@ -283,4 +330,5 @@
                                     ["[9 (inc 1) [a b] true 1 [1 1 0 0] false #{app.newns-test/triple-test}]"])))
     "swarm" (swarm (parse-long (first args)) (parse-long (or (second args) "8")))
     "model" (model-run (first args))
-    "stuck" (stuck)))
+    "stuck" (stuck)
+    "loop" (loop-run (first args))))
