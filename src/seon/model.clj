@@ -40,18 +40,21 @@
 
 (defn- http-post
   "POST body (a JSON string) to url with headers; answers {:status :body} (body text).
-  The interop edge: a transport failure is the provider error."
-  {:malli/schema [:=> [:cat :string [:vector [:tuple :string :string]] :string pos-int?]
+  No clock decides the call (owner, 2026-10-21): no whole-call deadline, no read
+  inactivity bound, no connect bound; the reply ends when the server ends it, and a peer
+  that vanishes is the OS's to detect. The interop edge: a transport failure is the
+  provider error."
+  {:malli/schema [:=> [:cat :string [:vector [:tuple :string :string]] :string]
                   [:or [:map [:status :int] [:body :string]] :seon.model/failure]]}
-  [url headers body timeout-ms]
+  [url headers body]
   (let [parse-url http/parse-url tget http/tget port http/effective-port connect http/connect-stream
         build http/build-request write http/s-write read-response http/read-response close http/s-close]
     (try
       (let [u (parse-url url)
-            s (connect (tget u :host) (port u) (= "https" (tget u :protocol)) false timeout-ms 10000)]
+            s (connect (tget u :host) (port u) (= "https" (tget u :protocol)) false 0 nil)]
         (try
           (write s (build "POST" u headers body))
-          (let [r (read-response s (+ (System/currentTimeMillis) timeout-ms) "POST")]
+          (let [r (read-response s nil "POST")]
             {:status (:status r) :body (String. ^bytes (:body r) "UTF-8")})
           (finally (close s))))
       (catch Throwable e (provider-error (str "transport: " (or (ex-message e) (str (type e)))) nil)))))
@@ -106,15 +109,14 @@
 (defn- openai-compat
   {:malli/schema [:=> [:cat :seon.model/provider :seon.model/request]
                   [:or :seon.model/completion :seon.model/failure]]}
-  [{:keys [base-url api-key-env timeout-ms max-tokens] :or {timeout-ms 120000} :as provider} request]
+  [{:keys [base-url api-key-env max-tokens] :as provider} request]
   (let [key (config/secret api-key-env)]
     (if (str/blank? key)
       (provider-error (str "the environment variable " api-key-env " is not set") nil)
       (let [t0 (System/nanoTime)
             r (http-post (str (str/replace base-url #"/+$" "") "/chat/completions")
                          [["Authorization" (str "Bearer " key)] ["Content-Type" "application/json"] ["Accept" "application/json"]]
-                         (json/write-str (request-body provider request))
-                         timeout-ms)
+                         (json/write-str (request-body provider request)))
             ms (/ (- (System/nanoTime) t0) 1e6)]
         (cond
           (:seon.error/type r) r
