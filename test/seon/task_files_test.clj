@@ -37,7 +37,7 @@
   (let [db (load-text (empty-db) file-a)
         idx (task/task db "demo/index")]
     (is (= :held (:seon.task/execution idx)))
-    (is (= #{"demo/parse"} (:seon.task/needs idx)))
+    (is (= #{"demo/parse-merge"} (:seon.task/needs idx)) "a need on a work task is a need on its merge")
     (is (= "One pass." (:seon.task/instructions idx)))
     (is (some? (d/q '[:find ?s . :where [?e :seon.task/id "demo/index"] [?e :seon.task/declared ?s]] db)))))
 

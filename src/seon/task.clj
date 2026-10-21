@@ -290,7 +290,9 @@
 ;; learned since (the improved plan) stays; a changed entry writes what it states and
 ;; retracts what it dropped; an entry no file declares any more is cancelled and forgets its
 ;; declaration, so declaring it again revives it. Execution is root's (my.root/run!), except
-;; that revival.
+;; that revival. Each work task also gets its merge task (seon.template/with-merge), derived at
+;; load and never written in the file, so a done task's change reaches main; it is declared,
+;; changed and cancelled with its work task.
 
 (def ^:private stated-attributes
   "The task attributes a declaration states (its members, config flattened), as stored."
@@ -353,7 +355,10 @@
   [db files]
   (if-let [r (first (filter :seon.error/type (vals files)))]
     r
-    (let [decls (into {} (for [ds (vals files) d ds] [(task-id (:seon.task/ns d) (:seon.task/name d)) d]))
+    (let [;; each work task is followed by its merge task (seon.template/with-merge: the one
+          ;; derivation; resolved at the call because seon.template requires this namespace)
+          decls (into {} (for [d ((requiring-resolve 'seon.template/with-merge) (into [] cat (vals files)))]
+                           [(task-id (:seon.task/ns d) (:seon.task/name d)) d]))
           owners (set (keys files))
           stored (into {} (d/q '[:find ?id ?s :where [?e :seon.task/declared ?s] [?e :seon.task/id ?id]] db))
           all (tasks db)
