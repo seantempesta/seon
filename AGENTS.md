@@ -52,6 +52,7 @@ When you feel it, stop and ask three questions:
 
 ## Laws (short; the reasons are in DECISIONS)
 
+- **Only documented config** (owner, 2026-10-21). A limit, bound, dial or default is a key in the config file, with its unit, provenance and what happens at the bound, and a `seon.config.*` schema. No literals in code, no `System/getenv` outside the config loader.
 - **One store, many branches, as in production** (owner, 2026-10-21). Tests, checks and runs take a branch of one seeded store. A separate store is a last resort (a backup, a deep debug) and says why where it is made.
 - **Contracts on every function.** Malli contracts are armed from the definition, and every contract must generate (`mg/check` runs in `bin/check`).
 - **No guards or fences.** Do the right thing. Name every outside-world failure point in `DRAGONS.md`, with its one edge function and its declared error. Nothing else catches.
@@ -169,6 +170,8 @@ Tell root; root orders it among the rest. Mined problems (`my.root/problems`) be
 
 - **Builds:** run as `nice -n 15 /usr/bin/lockf -k ~/src/seon-jolt/build.lock bin/build`, which pins the patched Chez via `JOLT_CHEZ`.
 - **Probes and timings:** probes run under `nice -n 10`. No timed runs while load is above ~20.
+- **One full check at a time:** `bin/check` takes `~/src/seon-jolt/check.lock` and runs niced. Iterate with single modes.
+- **Never flood the machine** (2026-10-21: two experiments made 7,500 and 5,900 threads and drove load to 982). Anything that can make threads or processes starts at n ≤ 100, under `nice -n 15`; watch `ps -M -p PID | wc -l` while it runs and kill your own process past 200 threads. One experiment process at a time.
 - **Hygiene:** kill only your own PIDs, delete only paths you created, install nothing system-wide.
 - **Secrets:** never printed. DeepSeek is the default model; check the context before any paid call.
 
