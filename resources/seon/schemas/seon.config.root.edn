@@ -10,7 +10,6 @@
  :seon.config.root/runs-dir [:string {:min 1 :seon.config/unit "path" :description "Where kept runs live (never deleted)."}]
  :seon.config.root/store-path [:string {:min 1 :seon.config/unit "path" :description "The one store every root works in, on its own main branch."}]
  :seon.config.root/main [:string {:min 1 :seon.config/unit "branch" :description "Root's main branch; absent: a new branch of :db each boot."}]
- :seon.config.root/tmp-dir [:string {:min 1 :seon.config/unit "path" :description "Scratch files of a check or a run (never the shared /tmp)."}]
  :seon.config.root/run-name [:string {:min 1 :seon.config/unit "name" :description "The prefix of a new main's branch name."}]
  :seon.config.root/system-path [:string {:min 1 :seon.config/unit "path" :description "Root's system declaration (system.edn), read with aero."}]
  :seon.config.root/tasks-dir [:string {:min 1 :seon.config/unit "path" :description "The task files my.root/task-files reads."}]

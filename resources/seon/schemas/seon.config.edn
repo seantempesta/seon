@@ -22,7 +22,6 @@
   [:seon.config.root/store-path :seon.config.root/store-path]
   [:seon.config.root/main {:optional true} :seon.config.root/main]
   [:seon.config.root/run-name :seon.config.root/run-name]
-  [:seon.config.root/tmp-dir :seon.config.root/tmp-dir]
   [:seon.config.root/system-path :seon.config.root/system-path]
   [:seon.config.root/tasks-dir :seon.config.root/tasks-dir]
   ;; the store

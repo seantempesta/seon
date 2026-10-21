@@ -59,9 +59,6 @@
  ;; Where kept runs live (owner, 2026-10-21: runs are kept, "a perfect record frozen in time").
  ;; bin/root exports SEON_RUNS (<this tree>/runs).
  :seon.config.root/runs-dir #or [#env SEON_RUNS #seon/checkout "runs"]
- ;; Scratch files a check or a run makes (never /tmp, which every checkout shares): beside the
- ;; store, so each check run's live under its own out dir (bin/check sets SEON_STORE).
- :seon.config.root/tmp-dir #join [#ref [:seon.config.root/store-path] ".tmp"]
  ;; The one store (owner, 2026-10-21: one store, many branches, as in production): created
  ;; when missing; every root works on its own main, a branch of the store's seed. bin/check
  ;; sets SEON_STORE to its run's store.
