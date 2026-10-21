@@ -477,16 +477,20 @@
 
 (defn- warm!
   "Run, before the fork server is forked, every code path agents and the server take,
-  so forked children inherit it compiled."
+  so forked children inherit it compiled, over a definition and a task of its own (no seed
+  needed). Answers what its reads found."
   {:malli/schema [:=> [:cat :seon.host/conn] :any]}
   [conn]
-  (let [db @conn]
+  ;; a definition and a task of warm!'s own, on a value never committed: boot needs no seed
+  (let [db (d/db-with @conn [{:db/id "ns" :ns/name 'seon.warm :ns/doc "warm"}
+                              {:db/id "v" :var/name 'seon.warm/f :var/ns "ns" :var/doc "warm" :var/src "(defn f [x] x)" :var/arity 1}
+                              {:task/name :seon.warm/tidy :task/plan "warm" :task/status :held :task/refs ["v"]}])]
     (dotimes [_ 3]
-      (d/q '[:find ?n . :in $ ?v :where [?e :var/name ?v] [?e :var/doc ?n]] db 'app.m0/f1)
+      (d/q '[:find ?n . :in $ ?v :where [?e :var/name ?v] [?e :var/doc ?n]] db 'seon.warm/f)
       (d/q '[:find (count ?e) . :where [?e :var/name]] db)
       (d/q '[:find [?n ...] :where [?e :ns/name ?n]] db)
-      (d/pull db '[*] [:var/name 'app.m0/f1])
-      (d/pull db '[:task/name {:task/refs [:var/name]}] [:task/name :app.m0/tidy])
+      (d/pull db '[*] [:var/name 'seon.warm/f])
+      (d/pull db '[:task/name {:task/refs [:var/name]}] [:task/name :seon.warm/tidy])
       (d/db-with db [{:note/text "warm" :note/agent :warm}])
       (d/with db [{:note/text "warm" :note/agent :warm}])
       (sock/frame {:op :reply :items [{:id 1 :printed "x" :ms 0.1}]})
@@ -499,22 +503,26 @@
         (eval '(defn warm-f [x] (* 2 x)))
         (eval '(deftest warm-t (is (= 4 (warm-f 2)))))
         (binding [clojure.test/*test-out* (java.io.StringWriter.)] (clojure.test/run-tests nsx)))
-      (remove-ns 'seon.warm))))
+      (remove-ns 'seon.warm))
+    ;; what the reads above found: its own definition and task, so they ran real paths
+    {:doc (d/q '[:find ?n . :in $ ?v :where [?e :var/name ?v] [?e :var/doc ?n]] db 'seon.warm/f)
+     :task (d/pull db '[:task/name {:task/refs [:var/name]}] [:task/name :seon.warm/tidy])}))
 
 (declare call!)
 
 (defn start!
   "Boot the control process, the fork server and the root graph on its main, a branch of
   the one store (owner, 2026-10-21: one store, many branches, as in production). opts:
-  {:path dir (the store; default SEON_STORE, else <SEON_RUNS>/store, created and seeded with
-   :datoms n on :db when missing) :main branch (root's main; default SEON_MAIN, else a new
+  {:path dir (the store; default SEON_STORE, else <SEON_RUNS>/store, created when missing,
+   holding the schema and, given :datoms n, about n datoms of an example program on :db; a
+   root holds no program it was not given) :main branch (root's main; default SEON_MAIN, else a new
    branch <SEON_RUN or run>-<time>-<id> of :db; :db is production's main; an existing
    branch is recovered) :backend :lmdb|:file :log? true
    :max-running n (parallel attempts) :provider p (the attempts' model; default the
    stand-in seon.fixtures/reply, or DeepSeek from SEON_AI_* when SEON_AI_PROVIDER is
    openai-compat)}."
   {:malli/schema [:=> [:cat :map] :seon.root/sys]}
-  [{:keys [datoms log? path main backend max-running provider] :or {datoms 2000 max-running reconcile/default-max-running}}]
+  [{:keys [datoms log? path main backend max-running provider] :or {datoms 0 max-running reconcile/default-max-running}}]
   (lib/ignore-sigpipe!)
   (when-not log? (trove/set-log-fn! nil))
   (let [t0 (lib/now-ns)

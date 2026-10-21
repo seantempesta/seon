@@ -1140,7 +1140,7 @@
   "A root with its entrance on 127.0.0.1:port (seon.entrance), until stdin closes: what an
   outside agent's MCP server (target/seon mcp PORT) talks to."
   [port]
-  (let [sys (c/start! {:datoms 2000})]
+  (let [sys (c/start! {})]
     (seon.entrance/serve! sys port)
     (out! "ROOT LISTENING " port)
     (loop [] (when (read-line) (recur)))

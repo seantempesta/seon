@@ -15,11 +15,12 @@
   (sd/declarations contract/registry))
 
 (defn seed-tx
-  "Transactions for about n datoms: per namespace, one tx of the namespace and its 20
-  vars (5 datoms each), then one tx of a task referring to two of its vars."
+  "Transactions for about n datoms of an example program (the test store's and the check
+  store's seed, never a root's own): per namespace, one tx of the namespace and its 20
+  vars (5 datoms each), then one tx of a task referring to two of its vars. None below 110."
   {:malli/schema [:=> [:cat :int] [:sequential :seon.db/tx-data]]}
   [n]
-  (let [nns (max 1 (quot n 110))]
+  (let [nns (quot n 110)]
     (mapcat (fn [k]
               (let [nsym (symbol (str "app.m" k))]
                 [(into [{:db/id "ns" :ns/name nsym :ns/doc (str "Module " k " of the example program.")}]
