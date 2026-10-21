@@ -9,7 +9,7 @@
   on main), never on a deadline. Prints one EDN line per phase; the last line is the run's
   numbers and its verdict."
   (:require [seon.root :as c] [my.root :as root] [seon.task :as task] [seon.reconcile :as r]
-            [seon.fixtures :as fx] [datahike.api :as d] [seon.lib :as lib] [clojure.string :as str] [seon.config] [clojure.java.shell :as sh]))
+            [seon.fixtures :as fx] [datahike.api :as d] [seon.lib :as lib] [clojure.string :as str] [clojure.edn :as edn] [seon.config] [clojure.java.shell :as sh]))
 
 (defn- now [] (System/currentTimeMillis))
 (defn- db [sys] @(:conn sys))
@@ -130,11 +130,24 @@
           done? (let [idx (r/index (db sys))] (every? (fn [id] (r/done? idx id)) merges))
           blocked (r/blocked-by (r/index (db sys)) "calc/abs")
           reused (agents-reused (db sys))
-          fresh-r (fresh sys "(app.calc/sum-sq 3 4)\n(count (my.db/q '[:find ?e :where [?e :seon.turn/id]]))")]
-      (println :done-all? done? :abs-blocked-by blocked :agents-reused reused :fresh-agent fresh-r)
+          fresh-r (fresh sys "(app.calc/sum-sq 3 4)\n(count (my.db/q '[:find ?e :where [?e :seon.turn/id]]))")
+          ;; square's branch records what its model read each turn and where the time went;
+          ;; the second turn read its first answer's failure as the assertion and what it got
+          ;; (square was (twice x), and twice is still its stub on square's branch: 0)
+          sq-db (:db @(c/branch-db sys (task/default-branch "calc/square")))
+          sq-turns (sort-by first (d/q '[:find ?n ?c ?s :where [?e :seon.turn/n ?n] [?e :seon.turn/origin :model]
+                                         [?e :seon.turn/context ?c] [?e :seon.turn/split ?s]] sq-db))
+          read-failure? (and (= 2 (count sq-turns))
+                             (str/includes? (second (second sq-turns)) ":assert \"(= 9 (app.calc/square 3))\"")
+                             (str/includes? (second (second sq-turns)) ":got \"(= 9 0)\"")
+                             (every? #(every? (set (keys (edn/read-string (nth % 2)))) [:tests-ms :context-ms :model-ms :eval-ms :record-ms]) sq-turns))]
+      (println :done-all? done? :abs-blocked-by blocked :agents-reused reused :fresh-agent fresh-r
+               :square-turns (count sq-turns) :square-read-its-failure? read-failure?
+               :square-splits (mapv #(edn/read-string (nth % 2)) sq-turns))
+      (when-not read-failure? (println :square-second-context (second (second sq-turns))))
       (doseq [[id s] (summary (db sys))] (println :task id s))
       (println :numbers (numbers sys t0))
-      (verdict! sys (and done? (= #{"calc/neg-merge"} blocked) (empty? reused) (= "25" (first fresh-r)) (= "0" (second fresh-r))
+      (verdict! sys (and done? (= #{"calc/neg-merge"} blocked) (empty? reused) (= "25" (first fresh-r)) (= "0" (second fresh-r)) read-failure?
                     (= [{:task "calc/neg" :cause "cancelled" :blocks ["calc/abs" "calc/abs-merge" "calc/neg-merge"]}] (:stuck q)))))))
 
 (defn resume

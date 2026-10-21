@@ -118,6 +118,16 @@
  ;; agent). Provenance: T1, 1 MB makes a 1 MB reply cost what the ring's did. At the bound a
  ;; writer waits for the reader (frames are never dropped).
  :seon.config.agent/sock-buf-bytes 1048576
+ ;; Unit: engine ticks (procedure calls and loop back-edges: work done, never time) one form
+ ;; an agent's model or an outside agent sends may run (Jolt's run-interruptible tick budget).
+ ;; Provenance: lane AGENTS, measured on Jolt 2026-10-21: a tight loop ~4e9 ticks/s, an
+ ;; allocating one ~7.5e8, so this stops a runaway form after ~5-25 s of work. At the bound
+ ;; the form answers the typed :seon.repl/ticks-spent and the request goes on. 0: none.
+ :seon.config.agent/form-ticks 20000000000
+ ;; Unit: engine ticks one proof run (every test of the branch, in its fork) may run. Larger
+ ;; than a form's: cost proofs measure large sizes. At the bound the run stops with
+ ;; :seon.test/ticks-spent naming the test that was running. 0: none.
+ :seon.config.agent/test-ticks 200000000000
 
  ;; ==== merges and refinement ==================================================================
 

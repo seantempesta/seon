@@ -286,18 +286,16 @@
     (testing "the stream says what happened"
       (is (str/includes? (h/html (:seon.render/html (ui/event-row {:type :reply :agent :a14 :at-ms 0 :items [read]} {})))
                          "read its current-state block")))
-    (testing "the agent page's panel is the text it read, as is, and one copy of it"
+    (testing "the agent page's panel is the text it read, as recorded (seon.context/recorded), and one copy of it"
       (let [ctxv (#'p/context-of nil {:seon.attempt/task "t/x"} {:evals [{:tag :ret :form "(+ 1 2)" :printed "3"} read]})]
-        (is (= :why (first (keys ctxv))) "no task on a db: why, not a rebuild"))
+        (is (= :why (first (keys ctxv))) "no db: why, not a rebuild"))
       (let [[_ conn] (seon.db/test-branch!)
-            db (d/db-with @conn (seon.task/create-tx @conn [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "p"}]))
-            work {:tag :ret :form "(+ 1 2)" :printed "3"}
-            ctxv (#'p/context-of db {:seon.attempt/task "t/x"} {:evals [work read work]})
-            rebuilt (#'p/context-of db {:seon.attempt/task "t/x"} {:evals [work]})]
-        (is (= {:text ctx :from :door} (select-keys ctxv [:text :from])) "the text it read, as is")
+            db (d/db-with @conn [{:seon.turn/id "t/x#1/read-1" :seon.turn/attempt "t/x#1" :seon.turn/n 1
+                                  :seon.turn/origin :outside :seon.turn/context ctx}])
+            ctxv (#'p/context-of db {:seon.attempt/id "t/x#1" :seon.attempt/task "t/x"} {:evals [read]})]
+        (is (= {:text ctx :origin :outside} (select-keys ctxv [:text :origin])) "the text it read, as is")
         (is (= 1 (count (re-seq #"app.m/f359" (:text ctxv)))) "one copy")
-        (is (nil? (:from rebuilt)) "no read: rebuilt from main's facts")
-        (is (str/includes? (:text rebuilt) ":last-evals"))))))
+        (is (:why (#'p/context-of db {:seon.attempt/id "t/x#2" :seon.attempt/task "t/x"} {:evals []})) "an attempt that read nothing says why")))))
 
 (deftest a-hand-spawned-agent-says-why-it-has-no-context
   (let [{:keys [why]} (#'p/context-of nil nil {:task "index rows by id (#0)"})]

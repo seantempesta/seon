@@ -367,9 +367,10 @@
         r4 @(c/submit! sys b "(+ 1")
         c4 (check "a read error is one :err item" (= :read (get-in (first r4) [:err :phase])) (short-items r4))
         _ @(c/submit! sys x "(ns app.spin (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (deftest spins (loop [] (recur)))")
-        t5 @(c/run-tests! sys x 1000)
-        c5 (check "a test that never ends is killed at its bound; the agent lives"
-                  (and (= 1 (:error t5)) (= "2" (:printed (first @(c/submit! sys x "(+ 1 1)")))))
+        t5 @(c/run-tests! sys x 1000000000)
+        c5 (check "a test that never ends stops at its tick budget, naming the test; the agent lives"
+                  (and (= 1 (:error t5)) (= "2" (:printed (first @(c/submit! sys x "(+ 1 1)"))))
+                       (= [:seon.test/ticks-spent "#'app.spin/spins"] ((juxt :seon.error/type :var) (first (:reports t5)))))
                   (select-keys t5 [:error :reports :ms]))
         _ @(c/submit! sys x "(in-ns 'app.spin) (ns-unmap 'app.spin 'spins) (deftest exits (System/exit 7))")
         t6 @(c/run-tests! sys x)
@@ -379,7 +380,7 @@
         r9 @(c/submit! sys b "(count (vec (range 300000000))) (+ 5 5)")
         c8 (check "an agent past its heap bound gets OutOfMemoryError as an :err item and lives"
                   (and (= :err (:tag (first r9))) (= "10" (:printed (second r9)))) (short-items r9))
-        r11 @(c/submit! sys b "(def kept 7) (loop [] (recur)) (+ kept 1)" {:timeout-ms 300})
+        r11 @(c/submit! sys b "(def kept 7) (loop [] (recur)) (+ kept 1)" {:ticks 1000000000})
         p12 (c/submit! sys b "(reduce + (range)) :next")
         _ (Thread/sleep 200)
         _ (c/interrupt! sys b)
@@ -389,8 +390,9 @@
         c11 (check "root's interrupt! stops the running request; the agent's next request runs"
                    (and (vector? r12) (= "interrupted by root" (:printed (first r12))) (= 1 (count r12)) (= ":next" (:printed (first r12b))))
                    (if (vector? r12) (short-items r12) r12))
-        c10 (check "a form past its timeout is interrupted; the agent keeps its state and goes on"
-                   (and (re-find #"timed out" (str (:printed (second r11)))) (= "8" (:printed (nth r11 2)))) (short-items r11))
+        c10 (check "a form past its tick budget is stopped, a typed error naming its ticks; the agent keeps its state and goes on"
+                   (and (= :seon.repl/ticks-spent (get-in (second r11) [:err :seon.error/type]))
+                        (<= 1000000000 (get-in (second r11) [:err :ticks])) (= "8" (:printed (nth r11 2)))) (short-items r11))
         r10 @(c/submit! sys x "(println \"hello from\" (:id (my.agent/whoami))) (def busy (future (loop [] (recur))))")
         t10 @(c/run-tests! sys x)
         c9 (check "printed output comes back as :out; a busy thread blocks the test fork instead of breaking it"
@@ -403,10 +405,10 @@
         r7 @(c/submit! sys b "(+ 3 4)")
         y (c/spawn! sys {:task "after the fork server died"})
         ready? (await-status sys [y] #{:idle} 5000)
-        r8 @(c/submit! sys y "(count (q '[:find ?v :where [?v :var/name]])) (loop [] (recur)) :after" {:timeout-ms 200})
-        c7 (check "the fork server dies: agents keep working, a new server forks the next agent (whose time bound works)"
+        r8 @(c/submit! sys y "(count (q '[:find ?v :where [?v :var/name]])) (loop [] (recur)) :after" {:ticks 1000000000})
+        c7 (check "the fork server dies: agents keep working, a new server forks the next agent (whose tick budget works)"
                   (and (= "7" (:printed (first r7))) ready? (= "360" (:printed (first r8)))
-                       (re-find #"timed out" (str (:printed (second r8)))) (= ":after" (:printed (nth r8 2))))
+                       (= :seon.repl/ticks-spent (get-in (second r8) [:err :seon.error/type])) (= ":after" (:printed (nth r8 2))))
                   [(:server (c/state sys)) (short-items r7) (short-items r8)])
         all [c1 c2 c3 c4 c5 c6 c8 c9 c10 c11 c7]]
     (out! (count (filter true? all)) "/" (count all) " robustness checks pass")

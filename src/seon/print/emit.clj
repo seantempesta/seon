@@ -58,7 +58,7 @@
   `(subs … n)` for characters; nil without a requery symbol."
   {:malli/schema [:=> [:cat :map] :any]}
   [{:seon.print/keys [requery-id elision-unit] path :seon.render.data/path next-offset :seon.render.data/next-offset}]
-  (when (symbol? requery-id)
+  (when (or (symbol? requery-id) (seq? requery-id))
     (let [target (path-form requery-id (vec path))
           offset (or next-offset 0)]
       (cond (zero? offset) target
@@ -92,7 +92,7 @@
   [{:seon.print/keys [requery-id requery-refusal omitted elision-unit prefix bound-by]
     supplied :seon.print/continuation profile-id :seon.render.profile/id path :seon.render.data/path
     next-offset :seon.render.data/next-offset total :seon.render.data/total}]
-  (let [requery-form (when (symbol? requery-id)
+  (let [requery-form (when (or (symbol? requery-id) (seq? requery-id))
                        (let [form (path-form requery-id (vec (or path [])))]
                          (if (seq? form) form (list 'get-in form []))))]
     (cond-> {:seon.print/face :seon.print/elided}
@@ -107,7 +107,7 @@
       (some? requery-id) (assoc :seon.print/requery-id requery-id)
       requery-form (assoc :seon.print/requery-form requery-form)
       (some? supplied) (assoc :seon.print/continuation supplied)
-      (and (nil? supplied) (symbol? requery-id))
+      (and (nil? supplied) (or (symbol? requery-id) (seq? requery-id)))
       (assoc :seon.print/continuation (continuation {:seon.print/requery-id requery-id :seon.print/elision-unit elision-unit
                                                      :seon.render.data/path (or path [])
                                                      :seon.render.data/next-offset next-offset}))
