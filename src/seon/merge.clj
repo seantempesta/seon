@@ -12,6 +12,9 @@
     definition: the form that last made it ({:form id}), and a var's kind, contract and doc.
     Conflicts are per definition: two branches that redefine one var differently conflict
     there, whatever else their forms carry;
+  - `[:schema k]` -> a schema entry of a resource ({:form text :file path}; seon.source
+    imports them, my.schema/register! changes them); an entry with no resource (a scratch
+    key) is no program;
   - `[:datum e a]` (cardinality one) / `[:datum e a v]` (many) -> a value of a data
     attribute the caller declares (`data-attrs`: a set, or :all for every attribute that
     is neither program, observation nor merge bookkeeping). Entity ids are store-wide
@@ -30,7 +33,7 @@
   {:malli/schema [:=> [:cat :any] :string]}
   [v] (binding [*print-length* nil *print-level* nil *print-meta* false] (pr-str v)))
 
-(def ^:private program-ns-attrs #{"form" "var" "ns" "method" "impl" "db" "db.install" "db.type" "db.cardinality" "db.unique"})
+(def ^:private program-ns-attrs #{"form" "var" "ns" "method" "impl" "schema" "schema.file" "db" "db.install" "db.type" "db.cardinality" "db.unique"})
 
 (def ^:private carried-platform-attrs
   "The platform attributes (seon.*) a branch carries: the task content an agent may improve
@@ -91,8 +94,10 @@
                    dt (d/datoms db :aevt a)]
                (if (= :db.cardinality/many (get-in schema [a :db/cardinality]))
                  [[:datum (:e dt) a (:v dt)] true]
-                 [[:datum (:e dt) a] (:v dt)]))]
-    (into {} (concat (for [f forms] [[:form (:id f)] (dissoc f :e :id)]) defs data))))
+                 [[:datum (:e dt) a] (:v dt)]))
+        schemas (for [dt (d/datoms db :aevt :schema/file) :let [x (d/entity db (:e dt))]]
+                  [[:schema (:schema/key x)] {:form (:schema/form x) :file (:v dt)}])]
+    (into {} (concat (for [f forms] [[:form (:id f)] (dissoc f :e :id)]) defs schemas data))))
 
 (defn- same?
   "Is content a the same as b for key k: a form's place does not make it another form."
@@ -214,19 +219,34 @@
             (some? old) [[:db/retract e a old]]
             :else []))))
 
+(defn- set-schema-tx
+  "tx-data making schema entry k hold content on db: upserted by its key, no longer the
+  binary's (:schema/source retracted), or retracted."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword [:maybe :seon.merge/schema-entry]] :seon.db/tx-data]}
+  [db k content]
+  (let [e (:e (first (d/datoms db :avet :schema/key k)))]
+    (cond (nil? content) (if e [[:db/retractEntity e]] [])
+          :else (cond-> [{:schema/key k :schema/form (:form content) :schema/file (:file content)}]
+                  (and e (:schema/source (d/entity db e))) (conj [:db/retract e :schema/source true])))))
+
 (defn apply-tx
   "tx-data making each key of m ({key content}, nil content: absent) hold its content on
   db: forms upserted by id (or retracted), definitions pointed at their forms by identity
-  (entity ids never matter), data by entity id."
+  (entity ids never matter), schema entries by key with the Datahike declarations their
+  population needs, data by entity id."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :seon.merge/program-key :any]] :seon.db/tx-data]}
   [db m]
-  (vec (distinct
-         (mapcat (fn [[k content]]
-                   (case (first k)
-                     :form (set-form-tx db (second k) content)
-                     (:var :method :impl :ns) (set-def-tx db k content)
-                     :datum (set-datum-tx db k content)))
-                 (sort-by (comp pr-edn key) m)))))
+  (let [tx (vec (distinct
+                  (mapcat (fn [[k content]]
+                            (case (first k)
+                              :form (set-form-tx db (second k) content)
+                              (:var :method :impl :ns) (set-def-tx db k content)
+                              :schema (set-schema-tx db (second k) content)
+                              :datum (set-datum-tx db k content)))
+                          (sort-by (comp pr-edn key) m))))]
+    (if (some #(= :schema (ffirst %)) m)
+      (let [db' (d/db-with db tx)] (into tx (program/schema-declarations db (program/schema-registry (program/schema-changes db')))))
+      tx)))
 
 ;; ---- unmerged entries (git's index stages 1, 2, 3), on the branch ------------------------
 

@@ -307,10 +307,25 @@
     (cond-> {:seon.ref/path (if h (subs s 0 h) s)}
       (and h (< (inc h) (count s))) (assoc :seon.ref/anchor (subs s (inc h))))))
 
+(defn- namespace-name?
+  "Is s one dotted simple symbol (letters, digits, - and _ in dot-separated segments, the first
+  a letter): what a namespace is called?"
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [^String s]
+  (let [n (count s)]
+    (boolean (and (str/index-of s ".") (Character/isLetter (.charAt s 0))
+                  (loop [i 0 prev \.]
+                    (if (= i n)
+                      (not= \. prev)
+                      (let [c (.charAt s i)]
+                        (and (or (Character/isLetterOrDigit c) (= \- c) (= \_ c) (and (= \. c) (not= \. prev)))
+                             (recur (inc i) c)))))))))
+
 (defn- span-candidate
   "A code span or prose word read as a based path (its first segment one of the checkout's
   top-level entries), a line citation, a name (exactly one qualified symbol or keyword, as
-  written, not ending in *), or nil: prose or code."
+  written, not ending in *), a namespace (one dotted simple symbol, resolve-only: a reference
+  only when it names a namespace, v1's rule), or nil: prose or code."
   {:malli/schema [:=> [:cat :string] [:maybe :map]]}
   [span]
   (let [cut (reduce (fn [m s] (if-let [i (str/index-of span s)] (min m i) m)) (count span) ["/" "#" ":"])]
@@ -319,11 +334,14 @@
         (if-let [cited (line-citation span)]
           {:seon.ref/path cited :seon.ref/problem-kind :line-reference}
           (based span)))
-      ;; a qualified name as written holds a / and no space: only such a span is read
-      (when (and (str/index-of span "/") (not (str/index-of span " ")) (not (str/index-of span "\t")) (not (str/ends-with? span "*")))
-        (let [[x & more] (reader/read-text span 'user)]
-          (when (and (nil? more) (or (qualified-symbol? x) (qualified-keyword? x)) (= span (str x)))
-            {:seon.ref/name x}))))))
+      ;; a namespace as written is a dotted simple symbol; a qualified name holds a / and no
+      ;; space: only such a span is read
+      (if-not (str/index-of span "/")
+        (when (namespace-name? span) {:seon.ref/name (symbol span) :seon.ref/resolve-only true})
+        (when (and (not (str/index-of span " ")) (not (str/index-of span "\t")) (not (str/ends-with? span "*")))
+          (let [[x & more] (reader/read-text span 'user)]
+            (when (and (nil? more) (or (qualified-symbol? x) (qualified-keyword? x)) (= span (str x)))
+              {:seon.ref/name x})))))))
 
 (defn- link-candidate
   "A link destination as a candidate: one with a scheme (https:, mailto:) is no reference; an
@@ -477,6 +495,61 @@
                                           sections))
            depth)))
 
+;; ---- namespaces and files, read when pulled (never stored) --------------------------------
+
+(defn namespace-view
+  "Namespace nsym as depth shows it, by the one rule `shown`: its address is its name, its lead
+  its docstring and the sections below it its public vars (those of the db, else of the loaded
+  namespace). nil when neither db nor process holds it."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol :seon.ref/depth] [:maybe :seon.ref/view]]}
+  [db nsym depth]
+  (let [e (:e (first (d/datoms db :avet :ns/name nsym)))
+        loaded (find-ns nsym)]
+    (when (or e loaded)
+      (let [doc (if e (:ns/doc (d/pull db [:ns/doc] e)) (:doc (meta loaded)))
+            vars (if e
+                   (d/q '[:find [?n ...] :in $ ?ns :where [?v :var/ns ?ns] [?v :var/name ?n]] db e)
+                   (map #(symbol (str nsym) (str %)) (keys (ns-publics loaded))))]
+        (shown (cond-> {:seon.ref/address (str nsym) :seon.ref/heading (str nsym)
+                        :seon.ref/below (mapv (fn [v] {:seon.ref/address (str v) :seon.ref/heading (name v)}) (sort vars))}
+                 doc (assoc :seon.ref/lead doc))
+               depth)))))
+
+(defn- pin
+  "The revision a reference-code submodule at path is checked out at (what the checkout pins,
+  looked up from the submodule's git directory), or nil for any other path."
+  {:malli/schema [:=> [:cat :string :string] [:maybe :string]]}
+  [checkout path]
+  (let [parts (str/split path #"/")]
+    (when (and (= "reference-code" (first parts)) (second parts))
+      (let [dot-git (io/file checkout "reference-code" (second parts) ".git")
+            gitdir (if (.isFile dot-git) (io/file (str/trim (subs (slurp dot-git) (count "gitdir:")))) dot-git)
+            head (io/file gitdir "HEAD")]
+        (when (.isFile head) (str/trim (slurp head)))))))
+
+(defn file-view
+  "File path of the checkout as depth shows it, read now: a Markdown file by the one parse and
+  the one rule (`view`, anchor or else its first section; at :code the section's lines), any
+  other file by its address and line count, the text whole at :code. A file of reference-code
+  carries the revision it is pinned at. nil when there is no such file or no such anchor."
+  {:malli/schema [:=> [:cat :string :string [:maybe :string] :seon.ref/depth] [:maybe :seon.ref/view]]}
+  [checkout path anchor depth]
+  (let [f (io/file checkout path)]
+    (when (.isFile f)
+      (let [text (slurp f)
+            doc (when (str/ends-with? path ".md") (parse path text))
+            secs (:seon.ref/sections doc)
+            address (if anchor (str path "#" anchor) (:seon.ref/address (first secs)))
+            v (if (seq secs)
+                (some-> (view doc address depth)
+                        (cond-> (= :code depth)
+                          (as-> v (let [s (first (filter #(= address (:seon.ref/address %)) secs))]
+                                    (assoc v :seon.ref/text (str/join "\n" (subvec (vec (str/split-lines text)) (dec (:seon.ref/line s)) (:seon.ref/end-line s))))))))
+                (when-not anchor
+                  (cond-> {:seon.ref/address path :seon.ref/heading path :seon.ref/lines (count (str/split-lines text))}
+                    (= :code depth) (assoc :seon.ref/text text))))]
+        (some-> v (cond-> (pin checkout path) (assoc :seon.ref/pin (pin checkout path))))))))
+
 ;; ---- resolution ---------------------------------------------------------------------------
 
 (def problem-messages
@@ -484,11 +557,12 @@
   {:unresolved "This resolves to nothing on your branch; its operations read what does exist. What the task intends for it is its plan's to say. To mention a name that does not exist, as text and not a reference, wrap it in two backticks: ``ns/name`` or ``:ns/key``."})
 
 (defn names-something?
-  "Does citation c name something on db: a var by its :var/name, a registered schema key, a
-  file of the checkout?"
+  "Does citation c name something on db: a var by its :var/name, a namespace by its :ns/name
+  or as loaded, a registered schema key, a file of the checkout?"
   {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :boolean]}
   [db {:seon.ref/keys [name path]}]
-  (boolean (cond (symbol? name) (seq (d/datoms db :avet :var/name name))
+  (boolean (cond (qualified-symbol? name) (seq (d/datoms db :avet :var/name name))
+                 (symbol? name) (or (seq (d/datoms db :avet :ns/name name)) (find-ns name))
                  (keyword? name) (contains? contract/forms name)
                  :else (.isFile (io/file (cfg/checkout) path)))))
 
@@ -497,7 +571,7 @@
   process, and no var? Then it is an alias form (`str/join`): code, not a reference."
   {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :boolean]}
   [db {:seon.ref/keys [name]}]
-  (let [nsym (when (symbol? name) (symbol (namespace name)))]
+  (let [nsym (when (qualified-symbol? name) (symbol (namespace name)))]
     (boolean (and nsym (empty? (d/datoms db :avet :ns/name nsym)) (nil? (find-ns nsym))
                   (empty? (d/datoms db :avet :var/name name))))))
 

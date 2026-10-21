@@ -105,8 +105,8 @@
             ops (pdb/report->tx rep)]
         [(main-commit st o t ops (:db-after rep))
          {:tx t :datoms (count ops)
-          ;; :nss, the namespaces whose forms it changed: the source files a write-back rewrites
-          :results (mapv #(or (:refusal %) {:merged? true :tx t :keys (count (:ours (:r %))) :nss (source/changed-nss (:ours (:r %)))}) (:members judged))}]))))
+          ;; :files, the source files (namespaces' and schema resources') its changes touch: what a write-back rewrites
+          :results (mapv #(or (:refusal %) {:merged? true :tx t :keys (count (:ours (:r %))) :files (source/changed-files (:db-after rep) (:ours (:r %)))}) (:members judged))}]))))
 
 (defn- merge-branch
   "Merge the branch into main (git: only a branch that contains main's head; lane M1): a

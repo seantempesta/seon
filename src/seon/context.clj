@@ -2,11 +2,11 @@
   "The agent's context, rendered live each turn from its task and what it references:
   the current-state block (task plan and instructions, the proofs with their red
   assertions and source, every var the task's text cites (seon.ref/references) resolved to its doc and
-  source, every wiki section it cites shown at the depth its delimiter asks (seon.docs/view), the last evaluations), printed through the one value printer (seon.print). Nothing is stored:
+  source, every wiki section, file and namespace it cites shown at the depth its delimiter asks (seon.docs/view, seon.ref/file-view, seon.ref/namespace-view), the last evaluations), printed through the one value printer (seon.print). Nothing is stored:
   the next turn renders again from the branch's db."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d]
-            [seon.print :as print] [seon.ref :as ref] [seon.docs :as docs]))
+            [seon.print :as print] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg]))
 
 (def system-prompt
   "What every model is told once per turn: how to answer and which verbs exist."
@@ -29,6 +29,7 @@
      "LOOSE (a third of the estimate or less) is not red. Its failure message prints measured/estimate per size."
      "Verbs: (my.task/current) your task; (my.task/update! :seon.task/plan f & args) improve your plan;"
      "(my.task/send-back! reason counterexample) when the task is impossible;"
+     "(my.schema/register! k form) changes a schema (resources/seon/schemas) on your branch, as defn changes a function: your next forms see it;"
      "(my.turn/wait) to stop and wait for root."
      "Your branch sees only its own changes. A merge task's branch has main merged in: its :unmerged entries"
      "each show :base, :ours and :theirs. Resolve one by re-defining the var with the content both sides need,"
@@ -57,13 +58,17 @@
       src (assoc :source src)
       (and (nil? src) (some-> v meta :doc)) (assoc :doc (:doc (meta v))))))
 
-(defn- cited-section
-  "Section address of the wiki as the citation asks to see it, from main's sections; a
-  citation that reaches no section says so, as an unresolved name does."
+(defn- cited-view
+  "What citation c asks to see, at its depth: a wiki section from main's sections, else a file of
+  the checkout read now (never stored), else a namespace; a citation that reaches nothing says
+  so, as an unresolved name does."
   {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :map]}
-  [db {:seon.ref/keys [path anchor depth]}]
-  (let [a (str path "#" anchor)]
-    (or (some-> (docs/view db a depth) (assoc :seon.ref/depth depth))
+  [db {:seon.ref/keys [name path anchor depth]}]
+  (let [a (or (some-> name str) (str path (when anchor (str "#" anchor))))]
+    (or (some-> (if name
+                  (ref/namespace-view db name depth)
+                  (or (when anchor (docs/view db a depth)) (ref/file-view (cfg/checkout) path anchor depth)))
+                (assoc :seon.ref/depth depth))
         {:seon.ref/address a :unresolved true :problem (:unresolved ref/problem-messages)})))
 
 (defn- failure
@@ -128,7 +133,9 @@
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
         refs (into [] (comp (map :seon.ref/name) (filter qualified-symbol?)) cites)
-        sections (into [] (comp (filter #(and (:seon.ref/path %) (:seon.ref/anchor %))) (map #(cited-section db %))) cites)]
+        sections (into [] (comp (filter #(or (simple-symbol? (:seon.ref/name %)) (and (:seon.ref/path %) (not (:seon.ref/problem-kind %)))))
+                                (map #(cited-view db %)))
+                       cites)]
     (cond-> {:task (assoc (select-keys t [:seon.task/id :seon.task/kind :seon.task/instructions])
                           ;; the plan as it accumulated along :needs (prerequisites first)
                           :seon.task/plan plan)

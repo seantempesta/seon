@@ -22,6 +22,7 @@
  :seon.merge/uncontracted [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/uncontracted]]
                                                   [:merged? false?] [:uncontracted [:vector :qualified-symbol]]]]
  :seon.fx/io-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/io-error]]]]
+ :seon.fx/unresolved [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/unresolved]] [:deps [:vector :symbol]] [:unresolved [:vector :map]]]]
  :seon.fx/budget-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/budget-spent]]]]
  :seon.fx/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/defect]]]]
  :seon.fx/unknown-kind [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/unknown-kind]]]]

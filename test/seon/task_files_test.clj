@@ -93,8 +93,16 @@
   ;; task seon.task/a-file-task-reaches-main: a work task loaded from its task file is
   ;; followed by its merge task, as seon.template/with-merge gives e2e's tasks, so a done
   ;; task's change reaches main (v1: a single task is followed by a merge task)
-  (let [db (empty-db)
-        db (d/db-with db (task/load-tx db {'demo (task/file-declarations 'demo file-a)}))
-        merge-of (fn [id] (d/q '[:find ?m . :in $ ?w :where [?t :seon.task/id ?w] [?mt :seon.task/needs ?t] [?mt :seon.task/kind :merge] [?mt :seon.task/id ?m]] db id))]
-    (is (some? (merge-of "demo/parse")) "parse's merge task needs parse")
-    (is (some? (merge-of "demo/index")) "and index's")))
+  (let [dir (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-task-files-" (random-uuid))) (.mkdirs))
+        _ (spit (java.io.File. dir "demo.edn") file-a)
+        load! (fn [db] (d/db-with db (task/load-tx db (root/task-files (str dir)))))
+        db (load! (empty-db))
+        merge-of (fn [db id] (d/q '[:find ?m . :in $ ?w :where [?t :seon.task/id ?w] [?mt :seon.task/needs ?t] [?mt :seon.task/kind :merge] [?mt :seon.task/id ?m]] db id))]
+    (is (some? (merge-of db "demo/parse")) "parse's merge task needs parse")
+    (is (some? (merge-of db "demo/index")) "and index's")
+    (is (= #{"demo/parse-merge"} (:seon.task/needs (task/task db "demo/index"))) "a need on a work task is a need on its merge")
+    (is (= [] (task/load-tx db (root/task-files (str dir)))) "an unchanged file writes nothing")
+    (spit (java.io.File. dir "demo.edn") "[{:seon.task/name \"parse\" :seon.task/plan \"Parse the rows.\" :seon.task/proofs #{demo-test/parse-test}}]")
+    (let [db (load! db)]
+      (is (= :cancelled (:seon.task/execution (task/task db "demo/index-merge"))) "a removed work task cancels its merge task")
+      (is (= :held (:seon.task/execution (task/task db "demo/parse-merge")))))))
