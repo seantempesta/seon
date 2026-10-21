@@ -178,16 +178,17 @@
 (defn tile-agents
   "The swarm: one cell per agent colored by status (a cell flashes when its agent
   evaluates; clicking one zooms the agent), a status bar and the counts.
-  input {:cells [[id status evals-seen] ...] in grid order, :off agents ended long ago and
-  left off the grid}."
+  input {:cells [[id status evals-seen] ...] in grid order, :off agents ended more than
+  :retire-ms ago and left off the grid}."
   {:malli/schema [:=> [:cat :map :seon.render/env] :seon.render/out]}
-  [{:keys [cells off]} _]
+  [{:keys [cells off retire-ms]} _]
   (let [freq (frequencies (map second cells))
         alive (reduce + 0 (map val (remove (comp ended-statuses key) freq)))
         order (concat status-order (sort-by str (remove (set status-order) (keys freq))))]
     {:seon.render/html
      [:section {:id "t-agents" :class "tile"}
-      (kicker "agents" (str (count cells) " on the grid" (when (pos? (or off 0)) (str " · +" off " ended earlier, off it"))))
+      (kicker "agents" (str (count cells) " on the grid"
+                            (when (pos? (or off 0)) (str " · +" off " ended over " (quot (or retire-ms 0) 1000) " s ago, off it"))))
       [:div {:class "big"} [:span {:class "num"} (str alive)] [:span {:class "unit"} "live"]]
       [:div {:class "swarm"}
        (for [[id st n] cells]
@@ -241,13 +242,13 @@
   [{:keys [main series]} _]
   {:seon.render/html
    [:section {:id "t-main" :class (str "tile pulse-" (mod (or (:merges main) 0) 2))}
-    (kicker "main" "t advances with every write to main: merges, tasks, attempts")
+    (kicker "main" "every write to main moves t")
     [:div {:class "big"} [:span {:class "num"} (group3 (:datoms main))] [:span {:class "unit"} "datoms"]]
     (sparkline (:datoms series) "tone-success")
     [:dl {:class "kv"}
      [:div [:dt "t"] [:dd (group3 (:t main))]]
      [:div [:dt "merges"] [:dd (group3 (:merges main 0))]]
-     [:div {:title "main's program as facts"} [:dt "vars"] [:dd (group3 (:vars main))]]]]})
+     [:div {:title "definitions on main now: its :var/name facts (boot loaded those with source; tasks' merges add more)"} [:dt "vars"] [:dd (group3 (:vars main))]]]]})
 
 (defn health-cell
   "One proc's health, as Flow observes it (its ping-map-fn): a dot by status and its own
@@ -310,7 +311,7 @@
   {:malli/schema [:=> [:cat :any] :string]}
   [st]
   (case st
-    :held "held: loaded, not released; (my.root/run! sys [id]) releases it"
+    :held "held: declared in a task file and loaded (load-tasks! creates every task held), not yet released by root or the owner, who order the work; (my.root/run! sys [id]) releases it"
     :blocked "blocked: a task it needs is not done (its blocked-by)"
     :open "open: released, no attempt running yet"
     :running "running: an attempt works it now"
@@ -346,7 +347,7 @@
       [:div {:class "states"}
        [:span [:b (str (count rows))] " tasks"]
        (for [k task-state-order :let [n (get freq k 0)] :when (pos? n)]
-         [:span {:class (str "pill s-" (name k))} (str (name k) " " n)])
+         [:span {:class (str "pill s-" (name k)) :title (state-title k)} (str (name k) " " n)])
        [:span {:class "muted" :title "model tokens spent by every attempt"} (str (group3 tokens) " tokens")]]
       (when-let [w (seq (waiting-on rows))]
         [:p {:class "waiting" :title "the tasks blocked tasks wait on, each once, the one holding most up first"}
@@ -364,7 +365,9 @@
                [:td (if ag [:a {:href (str "/agent/" (dom-id ag)) :title (str "its newest attempt, " (get-in r [:newest :seon.attempt/id]))} id] id)]
                [:td [:span {:class (str "pill s-" (name (:state r))) :title (state-title (:state r))} (name (:state r))]]
                [:td (if (seq (:blocked-by r)) [:span {:class "warn"} (str/join " " (sort (:blocked-by r)))] [:span {:class "muted"} "–"])]
-               [:td {:title "its own proofs green / red on its newest attempt; other tasks' reds are allowed"}
+               [:td {:title (str "its own proofs green / red on its newest attempt"
+                                 (when-let [a (get-in r [:newest :seon.attempt/id])] (str ", " a))
+                                 "; allowed red: other tasks' proofs red on that attempt's branch (not done yet), which do not block it")}
                 (if (pos? (+ (:green r) (:red r)))
                   (list [:span {:class "ok"} (str (:green r) " ✓")] (when (pos? (:red r)) [:span {:class "bad"} (str " " (:red r) " ✕")])
                         (when (pos? (:allowed-red r 0)) [:span {:class "muted"} (str " · " (:allowed-red r) " allowed red")]))
@@ -426,7 +429,7 @@
       [:p {:class "muted"} "no proc has thrown"])
     [:dl {:class "kv"}
      [:div {:title "boot: open the store, load main's program, arm contracts, fork the fork server"} [:dt "boot"] [:dd (ms-str (:load-ms boot))]]
-     [:div {:title "main's program loaded at boot"} [:dt "program"] [:dd (str (get-in boot [:program :loaded] "–") " namespaces")]]
+     [:div {:title "definitions of main's program loaded at boot (seon.program/load-all!: :var/name facts with source)"} [:dt "program"] [:dd (str (get-in boot [:program :loaded] "–") " defs")]]
      [:div [:dt "contracts"] [:dd (str (get-in boot [:contracts :armed] "–") " armed")]]
      [:div [:dt "store"] [:dd (kname (:backend store))]]
      [:div {:title "commits per group flush"} [:dt "tx/batch"] [:dd (fmt1 (:tx-per-batch store))]]]]})
@@ -439,7 +442,8 @@
     [:div {:class "tests none"} [:span {:class "label"} "tests"] [:span {:class "muted"} "not run"]]
     (let [{:keys [pass fail error reports]} tests
           total (+ (or pass 0) (or fail 0) (or error 0))]
-      [:div {:class (str "tests " (if (pos? (+ (or fail 0) (or error 0))) "red" "green"))}
+      [:div {:class (str "tests " (if (pos? (+ (or fail 0) (or error 0))) "red" "green"))
+             :title "its last test run: every test of its branch's program, other tasks' proofs included; its task is judged on its own proofs (its page labels each red blocking or allowed)"}
        [:span {:class "label"} "tests"]
        [:span {:class "dots"}
         (if (seq reports)
@@ -534,7 +538,10 @@
          (when-let [m (print/more total 1 "⤢ shows six, its page every one")] [:li {:class "more muted closed"} m])
          (when-let [m (print/more total (min 6 (count evals)) "earlier evaluations on its page")] [:li {:class "more muted opened"} m])]
         [:ol {:class "evals empty"} [:li {:class "ev"} [:span {:class "muted"} "no evaluations yet"]]])
-      (test-dots (:tests ag))]}))
+      (test-dots (:tests ag))
+      ;; its attempt passed the done rule, so every red above is another task's proof
+      (when (and (:ended-as ag) (pos? (+ (get-in ag [:tests :fail] 0) (get-in ag [:tests :error] 0))))
+        [:p {:class "muted allowed"} (str "its attempt ended " (kname (:ended-as ag)) ": its own proofs passed; these reds are other tasks' proofs, allowed")])]}))
 
 (defn card-shell
   "One whole agent card around its body's slot: appended to the grid once, when the agent
@@ -749,7 +756,7 @@
      :seon.render/units
      (into [(u "problems" (:problems sys []) `tile-problems)
             (u "t-agents" {:cells (mapv (fn [id] (let [a (get agents id)] [id (shown-status (ended-as a id agent-attempt)) (count (:evals a))])) order)
-                           :off (- (count agents) (count order))} `tile-agents)
+                           :off (- (count agents) (count order)) :retire-ms (:retire-ms sys)} `tile-agents)
             (u "t-writer" {:writer writer :series (select-keys series [:tx]) :health (get health :writer)} `tile-writer)
             (u "t-server" {:server server :series (select-keys series [:fork]) :health (get health :fork-server)} `tile-server)
             (u "t-main" {:main main :series (select-keys series [:datoms])} `tile-main)

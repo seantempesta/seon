@@ -245,8 +245,8 @@
     (is (str/includes? (h/html (:seon.render/html (ui/events-count {:kept 60 :seen 112} {})))
                        "60 kept of 112 since root's boot · 52 older not kept")))
   (testing "agents ended long ago leave the grid; the tile counts them"
-    (is (str/includes? (h/html (:seon.render/html (ui/tile-agents {:cells [[:a1 :idle 0]] :off 12} {})))
-                       "1 on the grid · +12 ended earlier, off it")))
+    (is (str/includes? (h/html (:seon.render/html (ui/tile-agents {:cells [[:a1 :idle 0]] :off 12 :retire-ms 90000} {})))
+                       "1 on the grid · +12 ended over 90 s ago, off it")))
   (testing "a held task's pill says what holding means and how to release it"
     (is (str/includes? (ui/state-title :held) "(my.root/run! sys [id])"))))
 
@@ -303,3 +303,16 @@
   (let [{:keys [why]} (#'p/context-of nil nil {:task "index rows by id (#0)"})]
     (is (str/includes? why "spawned by hand with the description \"index rows by id (#0)\""))
     (is (str/includes? why "(my.root/run! sys [task-id])") "how an agent gets a context")))
+
+(deftest the-tiles-explain-their-numbers
+  (testing "an ended card's reds are said to be other tasks' proofs"
+    (let [html (h/html (:seon.render/html (ui/agent-card {:id :a6 :status :killed :ended-as :merged :evals []
+                                                          :tests {:pass 2 :fail 7 :error 0}} {})))]
+      (is (str/includes? html "its attempt ended merged: its own proofs passed; these reds are other tasks' proofs, allowed"))))
+  (testing "the count pills say what each state is; held says why"
+    (let [html (h/html (:seon.render/html (ui/tile-tasks {:rows {"t/a" {:state :held :blocked-by #{} :green 0 :red 0 :proofs 1 :attempts 0 :tokens 0}}
+                                                          :attempts {}} {})))]
+      (is (re-find #"pill s-held\" title=\"held: declared in a task file" html))))
+  (testing "boot's program count is definitions, and the agents tile names its retire window"
+    (is (str/includes? (h/html (:seon.render/html (ui/tile-errors {:root-errors [] :boot {:program {:loaded 360}} :store {}} {}))) "360 defs"))
+    (is (str/includes? (h/html (:seon.render/html (ui/tile-agents {:cells [] :off 3 :retire-ms 90000} {}))) "+3 ended over 90 s ago, off it"))))

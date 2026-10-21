@@ -154,6 +154,7 @@
      :tasks (:tasks st {}) :attempts (:attempts st {}) :task-rows (:task-rows st {}) :agent-attempt (:agent-attempt st {})
      :series (:series st {}) :events (:events st []) :events-seen (:ev-seq st 0)
      :web (:web-sample st {})
+     :retire-ms RETIRE-MS
      :now-ms now-ms}))
 
 ;;; --- main --------------------------------------------------------------------------------
