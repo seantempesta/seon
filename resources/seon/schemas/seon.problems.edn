@@ -78,6 +78,8 @@
  ;; one clojure.test report as the test child keeps it (seon.agent/test-report)
  :seon.test/report [:map [:type :keyword] [:var {:optional true} [:maybe :string]] [:message {:optional true} [:maybe :string]]
                     [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]
+                    ;; a failed (is (pred ...)): what (pred ...) evaluated to, without clojure.test's (not ...)
+                    [:got {:optional true} :string]
                     [:cost {:optional true} :seon.cost/report]]
  :seon.attempt/failures [:map-of {:seon.db/edn true} :qualified-symbol [:vector :seon.problems/assertion]]
  ;; a cost proof's measured rows and verdict per test (seon.cost/proof's report)

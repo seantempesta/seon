@@ -22,13 +22,13 @@
                                                :seon.task/proofs #{'demo-test/f-test 'demo-test/g-test}}]))
         t (task/task db "demo/f")
         block (context/current-state db t {:results {'demo-test/f-test :pass 'demo-test/g-test :fail}
-                                           :reds [{:test 'demo-test/g-test :type :fail :message nil :expected "(= 1 (g))" :actual "(not (= 1 0))"}]
+                                           :reds [{:test 'demo-test/g-test :type :fail :message nil :expected "(= 1 (g))" :actual "(not (= 1 0))" :got "(= 1 0)"}]
                                            :turn 0 :max-turns 4})
         by (into {} (map (juxt :test identity)) (:proofs block))]
     (is (= {:test 'demo-test/f-test :status :pass} (by 'demo-test/f-test)) "a passing proof is its status")
     (is (string? (:source (by 'demo-test/g-test))) "a red proof shows its source")
-    (is (= [{:expected "(= 1 (g))" :actual "(not (= 1 0))"}] (:failures (by 'demo-test/g-test)))
-        "a failure is what was expected and what happened")
+    (is (= [{:assert "(= 1 (g))" :got "(= 1 0)"}] (:failures (by 'demo-test/g-test)))
+        "a failure is the assertion and what it evaluated to")
     (is (= ['demo/f] (mapv :symbol (:references block))) "a proof named in the plan is not shown again as a reference")
     (is (nil? (:doc (first (:references block)))) "a program reference's source already holds its doc")))
 
@@ -65,12 +65,12 @@
         ;; contract gap; the run named one failing assertion of each red test
         refusals [{:refusal :proof-red :symbol 'demo-test/f-test} {:refusal :regression :symbol 'demo-test/g-test}
                   {:refusal :stray-red :symbol 'user/scratch-test} {:refusal :contract-gap :symbol 'demo/helper}]
-        reds [{:test 'demo-test/g-test :type :fail :expected "(= 1 (g))" :actual "(not (= 1 0))"}]
+        reds [{:test 'demo-test/g-test :type :fail :expected "(= 1 (g))" :actual "(not (= 1 0))" :got "(= 1 0)"}]
         block (context/current-state db t {:results {'demo-test/f-test :fail 'demo-test/g-test :fail} :reds reds
                                            :refusals refusals :turn 1 :max-turns 4
                                            :run-errors ["tests timed out after 30000 ms; killed"]})]
     (testing "every refusal but the task's own red proof (shown with the proofs), each with what explains it"
-      (is (= [{:refusal :regression :test 'demo-test/g-test :failures [{:expected "(= 1 (g))" :actual "(not (= 1 0))"}]}
+      (is (= [{:refusal :regression :test 'demo-test/g-test :failures [{:assert "(= 1 (g))" :got "(= 1 0)"}]}
               {:refusal :stray-red :test 'user/scratch-test}
               {:refusal :contract-gap :var 'demo/helper}]
              (:refused block))))
@@ -114,3 +114,61 @@
     (alter-meta! (find-ns 'ctx-scratch-ns) assoc :scratch true)
     (let [db (d/db-with (db-with-program) [{:ns/name 'ctx-prog-ns} {:ns/name 'ctx-scratch-ns} {:ns/name 'user}])]
       (is (= ['ctx-prog-ns] (mapv ns-name (agent/test-namespaces db)))))))
+
+(deftest a-failure-reads-as-assert-and-got
+  (binding [*ns* *ns*]
+    (eval '(ns ctx-calc))
+    (eval '(defn square "Squares x." {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x)))
+    (eval '(ns ctx-calc-test (:require [clojure.test :refer [deftest is]] [ctx-calc :refer [square]])))
+    (eval '(deftest square-test (is (= 9 (square 3))))))
+  (let [db (d/db-with (db-with-program)
+                      [{:db/id "c" :ns/name 'ctx-calc}
+                       {:var/name 'ctx-calc/square :var/ns "c" :var/src "(defn square \"Squares x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))"}
+                       {:db/id "ct" :ns/name 'ctx-calc-test}
+                       {:var/name 'ctx-calc-test/square-test :var/ns "ct" :var/src "(deftest square-test (is (= 9 (square 3))))"}])
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'ctx :seon.task/name "sq" :seon.task/plan "p"
+                                               :seon.task/proofs #{'ctx-calc-test/square-test 'ctx-calc-test/cube-test}}]))
+        ;; the test child's report of the failing assertion, as clojure.test makes it
+        rep (agent/test-report {:type :fail :expected '(= 9 (square 3)) :actual '(not (= 9 6))} "#'ctx-calc-test/square-test")
+        block (context/current-state db (task/task db "ctx/sq")
+                                     {:results {'ctx-calc-test/square-test :fail} :turn 1 :max-turns 4
+                                      :reds (proofs/red-reports {:reports [rep]} #{'ctx-calc-test/square-test})})
+        by (into {} (map (juxt :test identity)) (:proofs block))]
+    (is (= [{:assert "(= 9 (square 3))" :got "(= 9 6)"}] (:failures (by 'ctx-calc-test/square-test)))
+        "the assertion once, and what it evaluated to")
+    (is (= [{:var 'ctx-calc/square :arglists '([x]) :contract [:=> [:cat :int] :int] :doc "Squares x."}]
+           (:calls (by 'ctx-calc-test/square-test)))
+        "the program function the red proof calls, at summary level")
+    (is (= {:test 'ctx-calc-test/cube-test :status :undefined} (by 'ctx-calc-test/cube-test))
+        "a proof not written yet says so")))
+
+(defn- evals
+  "n evaluations cycling over k distinct forms, each answering a large value and printing
+  a large output (inv3's edit/forms: 259 items, 11 distinct)."
+  [n k]
+  (vec (for [i (range n) :let [j (mod i k)]]
+         {:id i :tag :ret :form (str "(code-of " j ")") :handle (keyword (str "h" j))
+          :printed (pr-str (vec (range (* 2000 (inc j))))) :value (vec (range (* 2000 (inc j))))
+          :out (apply str (repeat 400 (str "line " j " of pprint output\n")))})))
+
+(deftest repeated-evals-fold-and-every-item-fits-its-share
+  (let [db (db-with-program)
+        t (task-f db)
+        tokens #(long (/ (count %) 3.2))
+        text-of (fn [items] (:content (second (context/messages (context/current-state db t {:turn 1 :max-turns 4 :last-items items})))))]
+    (testing "259 items, 11 distinct: 11 folded items whose times sum to 259"
+      (let [le (context/last-evals (evals 259 11))]
+        (is (= 11 (count le)))
+        (is (= 259 (reduce + (map #(:times % 1) le))))
+        (is (= [24 24 24 24 24 24 23 23 23 23 23] (mapv :times le)) "259 = 6x24 + 5x23")
+        (testing "each within its equal share, its value's cut naming its handle, its output's the form that reads it"
+          (let [share (quot context/last-evals-budget 11)]
+            (is (every? #(<= (tokens (str (:form %) (:value %) (:out %))) (+ share 16)) le))
+            (is (= 'result/h10 (:handle (last le))))
+            (is (re-find #"more chars: \(:out \(nth \(my.turn/evals\) 10\)\)" (:out (last le))))))))
+    (testing "the whole context stays inside its budget at 259 items and at 10x that"
+      (let [a (text-of (evals 259 11)) b (text-of (evals 2590 11))]
+        (is (<= (tokens a) (:context print/budgets)))
+        (is (<= (tokens b) (:context print/budgets)))
+        (is (re-find #";; 24x" a))
+        (is (re-find #"=> \[0 1 2" a))))))

@@ -28,6 +28,11 @@
   {:malli/schema [:=> [:cat] [:maybe :seon.task/id]]}
   [] (get-in @agent/state [:turn :task]))
 
+(defn last-evals
+  "The items of this process's last model turn (form, printed value or error, output)."
+  {:malli/schema [:=> [:cat] [:vector :map]]}
+  [] (vec (map #(select-keys % [:id :tag :form :printed :out :handle]) (get-in @agent/state [:turn :evals]))))
+
 (defn request-stop!
   "A verb ends the loop after this turn's forms: :waiting (my.turn/wait) or :sent-back."
   {:malli/schema [:=> [:cat [:enum :waiting :sent-back] [:maybe :string]] :map]}
@@ -87,7 +92,12 @@
         proofs (:proofs (:seon.task/accumulated t))
         db (agent/db)
         block (context/current-state db t (merge (observed db obs)
-                                                 {:results results :turn turn :max-turns max-turns :last-items last-items
+                                                 {:results results :turn turn :max-turns max-turns
+                                                  ;; each value with a live result: the context prints it again within its share
+                                                  :last-items (mapv #(if-let [h (:handle %)]
+                                                                       (let [rs (:results @agent/state)] (if (contains? rs h) (assoc % :value (get rs h)) %))
+                                                                       %)
+                                                                    last-items)
                                                   :unmerged (when merge? unmerged) :truncated? (:truncated? st)
                                                   :source (:source st) :repairs (:repairs st [])}))
         t1 (System/nanoTime)
@@ -99,6 +109,7 @@
       r
       (let [{:keys [text repairs]} (reader/forgive (:text c))
             items (repl/eval-string text)
+            _ (swap! agent/state assoc-in [:turn :evals] items)
             used (+ (:prompt-tokens c) (:completion-tokens c))]
         (agent/transact! (cond-> [{:seon.turn/id (str attempt "/" turn) :seon.turn/attempt attempt :seon.turn/n turn
                            :seon.turn/reply (:text c) :seon.turn/forms (count items)

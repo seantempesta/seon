@@ -31,7 +31,7 @@
   [run tests]
   (vec (for [{:keys [type var] :as r} (:reports run)
              :when (and (#{:fail :error} type) (tests (test-symbol var)))]
-         (-> (select-keys r [:type :message :expected :actual]) (assoc :test (test-symbol var))))))
+         (-> (select-keys r [:type :message :expected :actual :got]) (assoc :test (test-symbol var))))))
 
 (defn run-errors
   "The errors of run that name no test: the run itself failed (it timed out and was killed,

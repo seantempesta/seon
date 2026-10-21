@@ -264,6 +264,10 @@
     (cond-> {:type (:type m) :var var :message (:message m)}
       (not= :pass (:type m)) (assoc :expected (print/text (:expected m) (:part print/budgets))
                                     :actual (print/text (:actual m) (:part print/budgets)))
+      ;; what the assertion evaluated to: clojure.test reports a failed (is (pred a b)) as
+      ;; (not (pred a' b')), so its second element; the agent reads it beside the assertion
+      (and (= :fail (:type m)) (seq? (:actual m)) (= 'not (first (:actual m))))
+      (assoc :got (print/text (second (:actual m)) (:part print/budgets)))
       (contract/valid? :seon.cost/report cost) (assoc :cost cost))))
 
 (defn test-namespaces

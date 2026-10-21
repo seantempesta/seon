@@ -6,7 +6,7 @@
   the next turn renders again from the branch's db."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d]
-            [seon.print :as print] [seon.reconcile :as r]))
+            [seon.print :as print] [seon.reconcile :as r] [seon.reader :as reader]))
 
 (def system-prompt
   "What every model is told once per turn: how to answer and which verbs exist."
@@ -39,7 +39,11 @@
      ":stray-red (a red test that is no task's proof), :contract-gap (a function you defined without a :malli/schema),"
      ":unmerged, :no-proofs. :test-run is the test run itself failing (a timeout, a dead fork): no test result is real until it runs."
      ":flagged are definitions on your branch with no recorded source: they will not merge until you evaluate their defn again."
-     ":your-last-reply says what happened to your reply: cut at the token limit, or delimiters the reader repaired."]))
+     ":your-last-reply says what happened to your reply: cut at the token limit, or delimiters the reader repaired."
+     "A red proof shows each failure as :assert (as written) and :got (what it evaluated to), and :calls, the program"
+     "functions it calls (arglists, contract, doc). :status :undefined is a proof not written yet."
+     "Your last evaluations follow the block as a REPL transcript; a value cut short names the handle that reads it whole,"
+     "and (my.turn/evals) holds the last turn's forms, values and output in full."]))
 
 (defn source-of
   "The recorded source of var sym on db (:var/src), or nil."
@@ -64,10 +68,84 @@
       (and (nil? src) (some-> v meta :doc)) (assoc :doc (:doc (meta v))))))
 
 (defn- failure
-  "A failing assertion as the agent reads it: what was expected and what happened (the
-  message only when it says something)."
+  "A failing assertion as the agent reads it (the test AI render): the assertion as written
+  and what it evaluated to, (= 9 (square 3)) got (= 9 6), never the assertion twice; the
+  message only when it says something."
   {:malli/schema [:=> [:cat :map] :map]}
-  [r] (cond-> (select-keys r [:expected :actual]) (:message r) (assoc :message (:message r))))
+  [r]
+  (cond-> {:assert (:expected r) :got (or (:got r) (:actual r))}
+    (:message r) (assoc :message (:message r))))
+
+(defn callees
+  "The program functions proof p calls directly (one level), each at summary level: its
+  arglists, contract and doc, never its body. Read from p's source by the reader and
+  resolved in p's namespace; a var is program when db holds it."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :map]]}
+  [db p]
+  (let [nsx (find-ns (symbol (namespace p)))
+        src (source-of db p)]
+    (if-not (and nsx src)
+      []
+      (vec (for [sym (distinct (filter symbol? (tree-seq coll? seq (reader/read-text src (ns-name nsx)))))
+                 :let [v (ns-resolve nsx sym)]
+                 :when (and (var? v) (not (:test (meta v))))
+                 :let [q (symbol (str (ns-name (:ns (meta v)))) (str (:name (meta v))))]
+                 :when (and (not= q p) (d/q '[:find ?e . :in $ ?n :where [?e :var/name ?n]] db q))]
+             (cond-> {:var q}
+               (:arglists (meta v)) (assoc :arglists (:arglists (meta v)))
+               (:malli/schema (meta v)) (assoc :contract (:malli/schema (meta v)))
+               (:doc (meta v)) (assoc :doc (:doc (meta v)))))))))
+
+;; ---- the last evaluations: folded, each an equal share --------------------------------
+
+(def last-evals-budget
+  "Tokens the last evaluations spend together: each folded item gets an equal share."
+  6000)
+
+(defn fold-evals
+  "items (one turn's evaluations, in order) with identical form and answer folded into the
+  first: [{:k index-of-the-first :item it :times n}], in first-seen order. One pass."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:vector [:map [:k :int] [:item :map] [:times pos-int?]]]]}
+  [items]
+  (let [{:keys [order by]} (reduce (fn [{:keys [order by] :as acc} [k it]]
+                                     (let [key [(:form it) (:tag it) (:printed it) (:out it)]]
+                                       (if (by key)
+                                         (update-in acc [:by key :times] inc)
+                                         {:order (conj order key) :by (assoc by key {:k k :item it :times 1})})))
+                                   {:order [] :by {}} (map-indexed vector items))]
+    (mapv by order)))
+
+(defn- clip
+  "Text s within n characters; past them it says how many more and the form that reads them."
+  {:malli/schema [:=> [:cat :string :int :string] :string]}
+  [s n reader]
+  (if (<= (count s) n) s (str (subs s 0 (max 0 n)) " …" (- (count s) n) " more chars: " reader)))
+
+(defn last-evals
+  "One turn's evaluations as the agent reads them: identical form and answer folded (:times
+  n), each folded item an equal share of last-evals-budget (a quarter for its form, half for
+  its value, a quarter for its output). A value with a live result is printed again within
+  its share, its cuts reading through its handle; output past its share says how much more
+  and the form that reads it whole ((my.turn/evals) holds the turn's items)."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:vector :map]]}
+  [items]
+  (let [folded (fold-evals items)
+        share (max 32 (quot last-evals-budget (max 1 (count folded))))
+        chars #(long (* 3.2 %))]
+    (vec (for [{:keys [k item times]} folded
+               :let [{:keys [form tag printed out handle]} item
+                     rd (fn [field] (str "(" field " (nth (my.turn/evals) " k "))"))
+                     h (when handle (symbol "result" (name handle)))
+                     vshare (if (seq out) (quot share 2) (quot (* 3 share) 4))]]
+           (cond-> {:form (clip (or form "") (chars (quot share 4)) (rd :form))}
+             (> times 1) (assoc :times times)
+             (= :ret tag) (assoc :value (if (contains? item :value)
+                                          (let [pv (print/print-value (:value item) {:handle h :budget (max 16 vshare)})]
+                                            (or (:text pv) (clip (or printed "") (chars vshare) (rd :printed))))
+                                          (clip (or printed "") (chars vshare) (rd :printed))))
+             h (assoc :handle h)
+             (= :err tag) (assoc :error (clip (or printed "") (chars vshare) (rd :printed)))
+             (seq out) (assoc :out (clip out (chars (quot share 4)) (rd :out))))))))
 
 (defn- refused
   "The done rule's refusals as the agent reads them, beyond its own red proofs (shown with
@@ -120,12 +198,16 @@
                           ;; the plan as it accumulated along :needs (prerequisites first)
                           :seon.task/plan plan)
              :turn (str (inc turn) " of " max-turns)
-             ;; a passing proof is its status; a red or unrun one shows its source and failures
-             :proofs (vec (for [p (sort-by str proofs) :let [st (get results p :none)]]
+             ;; a passing proof is its status; a red or unrun one shows its source, its failures
+             ;; and the program functions it calls; one not defined yet says so
+             :proofs (vec (for [p (sort-by str proofs)
+                                :let [src (source-of db p)
+                                      st (get results p (if src :none :undefined))
+                                      fs (filter #(= p (:test %)) reds)]]
                             (cond-> {:test p :status st}
-                              (not= :pass st) (assoc :source (source-of db p))
-                              (seq (filter #(= p (:test %)) reds))
-                              (assoc :failures (mapv failure (filter #(= p (:test %)) reds))))))
+                              (and src (not= :pass st)) (assoc :source src)
+                              (seq fs) (assoc :failures (mapv failure fs))
+                              (and src (not= :pass st) (seq (callees db p))) (assoc :calls (callees db p)))))
              ;; a reference already shown as a proof is not shown twice
              :references (mapv #(resolve-ref db %) (remove (set proofs) refs))}
       (seq (refused (vec refusals) (vec reds))) (assoc :refused (refused (vec refusals) (vec reds)))
@@ -134,11 +216,18 @@
       (seq flagged) (assoc :flagged (vec (sort-by str flagged)))
       (:seon.task/evidence t) (assoc :evidence (:seon.task/evidence t))
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
-      (seq last-items) (assoc :last-evals (mapv (fn [it] (cond-> {:form (:form it)}
-                                                           (= :ret (:tag it)) (assoc :value (:printed it))
-                                                           (= :err (:tag it)) (assoc :error (:printed it))
-                                                           (:out it) (assoc :out (:out it))))
-                                                last-items)))))
+      (seq last-items) (assoc :last-evals (last-evals last-items)))))
+
+(defn- transcript
+  "The last evaluations as a REPL transcript: each form, its value (=> ...) or error (!! ...),
+  its output, how many times it repeated, and the handle that reads its value whole."
+  {:malli/schema [:=> [:cat [:vector :map]] :string]}
+  [evals]
+  (str/join "\n" (for [{:keys [form times value handle error out]} evals]
+                   (str (when times (str ";; " times "x\n")) form
+                        (when out (str "\n;; out: " (str/replace out "\n" "\n;; ")))
+                        (when value (str "\n=> " value (when handle (str "    ;; whole: " handle))))
+                        (when error (str "\n!! " error))))))
 
 (defn messages
   "The model request's messages for the block: the system prompt, then the block printed
@@ -147,4 +236,6 @@
   {:malli/schema [:=> [:cat :map] [:vector :seon.model/message]]}
   [block]
   [{:role "system" :content system-prompt}
-   {:role "user" :content (print/text block (:context print/budgets))}])
+   {:role "user" :content (cond-> (print/text (dissoc block :last-evals) (- (:context print/budgets) last-evals-budget))
+                            (:last-evals block) (str "\n\nYour last evaluations (folded; each within its share):\n"
+                                                     (transcript (:last-evals block))))}])
