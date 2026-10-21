@@ -12,10 +12,7 @@
             [seon.program :as program]
             [seon.harvest :as harvest]))
 
-(defn- empty-db []
-  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}]
-    (d/create-database cfg)
-    (d/db-with @(d/connect cfg) pdb/schema)))
+(defn- empty-db [] @(second (pdb/test-branch!)))
 
 (defn- ev
   "Evaluate src (one form) as the REPL does, in namespace nsym: [form value]."

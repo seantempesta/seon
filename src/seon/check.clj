@@ -689,14 +689,16 @@
 (defn- dir-bytes [path] (reduce + (map #(.length %) (filter #(.isFile %) (file-seq (java.io.File. path))))))
 
 (defn durable-write
-  "Phase 1 (a process of its own): boot on a fresh store at path, then
+  "Phase 1 (a process of its own): boot on main branch nm of the one store (made from its
+  seed), then
   a merges a new f1 (gated), b commits unmerged facts and a recorded defn on its branch,
   c's clone commits on a branch of a branch. Root then exits WITHOUT stop! (SIGKILL of
   itself): nothing but the store survives."
-  [path]
+  [nm]
   (let [t0 (lib/now-ns)
-        sys (c/start! {:datoms 2000 :path path})
-        _ (out! "fresh store booted in " (lib/r2 (lib/ms-since t0)) " ms: " (:store (c/state sys)))
+        sys (c/start! {:main (keyword nm)})
+        path (str (:store-path sys) "." nm)
+        _ (out! "fresh branch booted in " (lib/r2 (lib/ms-since t0)) " ms: " (:store (c/state sys)))
         [a b k] (mapv #(c/spawn! sys {:task % :branch %2}) ["make f1 multiply" "unmerged work" "parent"] [:dur-a :dur-b :dur-c])
         _ (await-status sys [a b k] #{:idle} 5000)
         p1 (fn [id forms] (mapv (juxt :printed :recorded) @(c/submit! sys id forms)))
@@ -711,16 +713,16 @@
         st (c/state sys {:datoms true})
         expect {:main-datoms (get-in st [:main :datoms]) :main-t (get-in st [:main :t])}]
     (spit (str path ".expect.edn") (pr-str expect))
-    (out! "phase 1 done: " expect "; store " (dir-bytes path) " bytes; killing root (no stop!)")
+    (out! "phase 1 done: " expect "; store " (dir-bytes (:store-path sys)) " bytes; killing root (no stop!)")
     (lib/c-kill (lib/c-getpid) 9)))
 
 (defn durable-read
-  "Phase 2 (a new process): boot on the same store and check main, the program, the
-  branches and agents' committed work came back; resume b and merge it now."
-  [path]
-  (let [expect (read-string (slurp (str path ".expect.edn")))
-        t0 (lib/now-ns)
-        sys (c/start! {:datoms 2000 :path path})
+  "Phase 2 (a new process): reopen the same store on the same main and check main, the
+  program, the branches and agents' committed work came back; resume b and merge it now."
+  [nm]
+  (let [t0 (lib/now-ns)
+        sys (c/start! {:main (keyword nm)})
+        expect (read-string (slurp (str (:store-path sys) "." nm ".expect.edn")))
         boot-ms (lib/r2 (lib/ms-since t0))
         st (c/state sys {:datoms true})
         _ (out! "recovered in " boot-ms " ms: " (:store st) " main " (:main st))
@@ -757,13 +759,14 @@
     (lib/c-exit (if ok 0 1))))
 
 (defn window-write
-  "Phase 1 of the flush-window check (run with SEON_FLUSH_MS=1000): a fresh LMDB store. A is
+  "Phase 1 of the flush-window check (run with SEON_FLUSH_MS=1000): main branch nm of the one
+  store. A is
   written and the window passes: flushed. B is answered committed and unflushed (the
   writer's flush count does not move before its answer). C is written with :flush? (an
   outside effect follows): its answer comes after its flush (the count moved). D is answered
   unflushed, and root SIGKILLs itself at once."
-  [path]
-  (let [sys (c/start! {:datoms 200 :path path})
+  [nm]
+  (let [sys (c/start! {:main (keyword nm)})
         flushes #(:flushes (::flow/state (flow/ping-proc (:graph sys) :writer :timeout-ms 1000)))
         t (fn [p] (let [t0 (lib/now-ns) r @p] [(:ok r) (lib/r2 (lib/ms-since t0))]))
         a (t (c/transact-main! sys [{:note/text "A" :note/agent :window}]))
@@ -780,10 +783,10 @@
     (lib/c-kill (lib/c-getpid) 9)))
 
 (defn window-read
-  "Phase 2: the store after root's crash holds A, B and C. (D is there too: a process crash
+  "Phase 2: the store reopened on main nm after root's crash holds A, B and C. (D is there too: a process crash
   keeps what LMDB handed the kernel; only a machine crash loses the open window.)"
-  [path]
-  (let [sys (c/start! {:datoms 200 :path path})
+  [nm]
+  (let [sys (c/start! {:main (keyword nm)})
         notes (set (main-q sys '[:find [?t ...] :where [?n :note/agent :window] [?n :note/text ?t]]))
         ok (every? notes ["A" "B" "C"])]
     (out! "after the crash: " (sort notes))
@@ -794,7 +797,8 @@
 ;; ---- durability numbers ----------------------------------------------------------------
 
 (defn dur-bench-write
-  "A fresh store at path seeded with about n datoms; then one agent's sequential
+  "A fresh store at path seeded with about n datoms (a store of its own, the last resort:
+  this measures a store's creation and seed, and its bytes alone); then one agent's sequential
   eval + transact! round trips (the commit latency), and the store's bytes."
   [path n]
   (let [t0 (lib/now-ns)
@@ -814,7 +818,7 @@
     (lib/c-exit 0)))
 
 (defn dur-bench-read
-  "Restart on the store at path: how long recovery takes, by stage."
+  "Restart on the store at path (dur-bench-write's, its own): how long recovery takes, by stage."
   [path]
   (let [t0 (lib/now-ns)
         sys (c/start! {:datoms 0 :path path})
@@ -938,8 +942,7 @@
   called. Every request the entrance accepted is answered; every :ok write is in the
   store afterwards (durable: reopened in a fresh connection), and nothing is left running."
   [n]
-  (let [dir (str "/tmp/seon-drain-" (random-uuid))
-        sys (c/start! {:datoms 2000 :path dir})
+  (let [sys (c/start! {:datoms 2000})
         ids (vec (pmap (fn [i] (c/spawn! sys {:task (str "drain " i)})) (range n)))
         _ (await-status sys ids #{:idle} 20000)
         pids (vec (keep #(get-in (c/state sys) [:agents % :pid]) ids))
@@ -954,8 +957,7 @@
         refused-main (count (filter #(= "root stopped" (:seon.error/message %)) mr))
         eval-done (count (filter #(= ":done" (:printed (second %))) evr))
         eval-other (frequencies (map #(if (vector? %) (:printed (last %)) %) evr))
-        cfg (seon.db/store-cfg :lmdb dir)
-        conn (d/connect cfg)
+        conn (d/connect (:cfg sys))
         main-notes (d/q '[:find (count ?e) . :where [?e :note/agent :root]] @conn)
         left (filter #(zero? (lib/c-kill % 0)) (cons fs-pid pids))
         checks {:every-request-answered (and (not-any? #{:hang} evr) (not-any? #{:hang} mr))
@@ -964,7 +966,6 @@
                 :nothing-left-running (empty? left)
                 :graph-stopped (true? (:graph st))}]
     (d/release conn)
-    (clojure.java.shell/sh "rm" "-rf" dir)
     (pprint {:agents n :stop st :main {:ok ok-main :refused-after-close refused-main :stored main-notes}
              :evals {:done eval-done :other eval-other} :left (vec left) :checks checks})
     (out! (if (every? true? (vals checks)) "DRAIN OK" "DRAIN FAIL"))
@@ -974,9 +975,10 @@
 
 (defn writers
   "Writer throughput and per-write latency with w agents each running k transact! in a
-  loop at once (one write in flight per agent), w in ws. store: mem or lmdb."
+  loop at once (one write in flight per agent), w in ws, on a branch of the one store
+  (store, mem or lmdb, is kept for the command line: every root's store is LMDB)."
   [store ws]
-  (let [sys (c/start! (cond-> {:datoms 2000} (= store "lmdb") (assoc :path (str "/tmp/seon-writers-" (random-uuid)))))
+  (let [sys (c/start! {:datoms 2000})
         maxw (apply max ws)
         ids (vec (pmap (fn [i] (c/spawn! sys {:task (str "w" i)})) (range maxw)))
         _ (await-status sys ids #{:idle} 30000)
@@ -1177,7 +1179,7 @@
   "A root with its entrance on 127.0.0.1:port (seon.entrance), until stdin closes: what an
   outside agent's MCP server (target/seon mcp PORT) talks to."
   [port]
-  (let [sys (c/start! {:datoms 2000})]
+  (let [sys (c/start! {})]
     (seon.entrance/serve! sys port)
     (out! "ROOT LISTENING " port)
     (loop [] (when (read-line) (recur)))
@@ -1262,10 +1264,11 @@
 (defn branch-cost
   "The writer's :spawn on a fresh LMDB store, n times (seon.db/branch?, then d/branch!):
   ms per 100, flat in the number of branches (d/branches, which folds the roster, made
-  it O(branches) per spawn: 15 ms at 1,000)."
+  it O(branches) per spawn: 15 ms at 1,000). A store of its own, the last resort: the
+  roster must start empty for the growth to show."
   [n]
   (let [path (str "/tmp/seon-branch-cost-" (lib/c-getpid))
-        {conn :conn} (seon.db/open! :lmdb path 2000)
+        {conn :conn} (seon.db/open! :lmdb path 2000 :db)
         times (vec (for [k (range (quot n 100))]
                      (let [t0 (lib/now-ns)]
                        (dotimes [i 100] (seon.db/branch? conn (keyword (str "b" k "-" i))) (d/branch! conn :db (keyword (str "b" k "-" i))))
@@ -1327,8 +1330,23 @@
     (c/stop! sys)
     (lib/c-exit 0)))
 
+(defn seed
+  "bin/check's one store: created at SEON_STORE and seeded with about n datoms on :db, before
+  any step boots; each step's root then works on a branch of it (seon.db/open!)."
+  [n]
+  (let [path (System/getenv "SEON_STORE")
+        t0 (lib/now-ns)
+        {:keys [seeded? conn]} (seon.db/open! :lmdb path n :db)
+        ms (lib/r2 (lib/ms-since t0))
+        datoms (count (d/datoms @conn :eavt))]
+    (d/release conn)
+    (out! "seeded " path " (" datoms " datoms) in " ms " ms; " (dir-bytes path) " bytes")
+    (out! (if seeded? "SEED OK" "SEED FAILED (the store existed)"))
+    (lib/c-exit (if seeded? 0 1))))
+
 (defn -main [& [mode n & more]]
   (case mode
+    "seed" (seed (Long/parseLong (or n "2000")))
     "dur-bench-write" (dur-bench-write n (Long/parseLong (first more)))
     "dur-bench-read" (dur-bench-read n)
     "durable-write" (durable-write n)

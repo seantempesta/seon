@@ -104,9 +104,9 @@
                     (= [{:task "calc/neg" :cause "cancelled" :blocks ["calc/abs" "calc/abs-merge" "calc/neg-merge"]}] (:stuck q)))))))
 
 (defn resume
-  "Phase 1 of a restart: calc on a durable store; root SIGKILLs itself mid-run."
-  [path]
-  (let [sys (c/start! {:datoms 300 :max-running 2 :path path})
+  "Phase 1 of a restart: calc on main branch nm of the one store; root SIGKILLs itself mid-run."
+  [nm]
+  (let [sys (c/start! {:datoms 300 :max-running 2 :main (keyword nm)})
         ds (fx/decls fx/calc 'calc nil)]
     (seed! sys fx/calc)
     (root/create! sys ds)
@@ -117,10 +117,10 @@
     (lib/c-kill (lib/c-getpid) 9)))
 
 (defn resume2
-  "Phase 2: a new root on the store reaps the lost attempts and finishes the graph."
-  [path]
+  "Phase 2: a new root on the same store and main nm reaps the lost attempts and finishes the graph."
+  [nm]
   (let [t0 (now)
-        sys (c/start! {:datoms 300 :max-running 2 :path path})
+        sys (c/start! {:datoms 300 :max-running 2 :main (keyword nm)})
         _ (println :recovered (get-in (c/state sys) [:store :recovered-branches]))
         _ (println :quiescent (await-quiet sys (main-t sys)))
         ok (let [idx (r/index (db sys))] (every? (fn [id] (r/done? idx id)) (map (fn [n] (str "calc/" n "-merge")) ["add" "twice" "square" "sum-sq" "neg" "abs"])))]
