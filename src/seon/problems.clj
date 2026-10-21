@@ -154,11 +154,17 @@
 (defn report
   "Every problem recorded on main db, by class: {:t :classes {class {:n :rows}}}. Counted
   classes' :n is their occurrences and their rows run by count; attempt classes' :n is
-  their rows, newest first."
-  {:malli/schema [:=> [:cat :seon.host/db] :seon.problems/report]}
-  [db]
+  their rows, newest first. With an observer's fold (seon.error/fold), a recorded error's
+  count is the true one: a repeat of a written signature is counted in the fold and not
+  yet on main."
+  {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.problems/report]
+                  [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}
+  ([db] (report db {}))
+  ([db fold]
   (let [ans (answers db)
-        errors (group-by :class (map #(error-row db ans %) (es db :seon.error/signature)))
+        live (into {} (map (fn [{:keys [signature base] n :count}] [signature (+ (or base 0) n)])) (vals fold))
+        errors (group-by :class (map #(let [r (error-row db ans %)] (update r :count max (get live (:signature r) 0)))
+                                     (es db :seon.error/signature)))
         attempts (into (sorted-set)
                        (concat (mapcat #(es db %) [:seon.attempt/failures :seon.attempt/costs :seon.attempt/error :seon.attempt/waste
                                                    :seon.attempt/conflicts :seon.attempt/unmerged])
@@ -170,4 +176,4 @@
                                 [c {:n (reduce + 0 (map :count rows)) :rows rows}]))
                      (into {} (for [c attempt-classes :let [rows (vec (sort-by #(- (or (:end-ms %) 0)) (get by-class c)))]]
                                 [c {:n (count rows) :rows rows}]))
-                     {:stuck {:n (count stuck) :rows (vec (sort-by #(- (or (:at-ms %) 0)) stuck))}})}))
+                     {:stuck {:n (count stuck) :rows (vec (sort-by #(- (or (:at-ms %) 0)) stuck))}})})))

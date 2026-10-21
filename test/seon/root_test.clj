@@ -18,3 +18,19 @@
     (is (= 3 (count (:running res)) (count (:stopped res))))
     (is (= [{} {} {}] (:running res)))
     (is (= [{} {} {}] (:stopped res)))))
+
+(deftest a-root-binary-requires-a-library-it-did-not-compile
+  ;; task jolt.ns/a-built-binary-requires-a-stdlib-namespace-it-did-not-compile: a root
+  ;; importing src and test runs each test file's ns form, and seon.print-test's requires
+  ;; fipp.engine, which needs Jolt's stdlib clojure.core.rrb-vector; a binary finds only
+  ;; what it compiled. The root boots, imports, and exits when its stdin (empty) closes.
+  ;; Its store: target/root-test-store, one kept store whose every boot is a new branch.
+  (let [checkout (.getCanonicalPath (java.io.File. "."))
+        {:keys [exit out err]} (sh/sh "env" "SEON_WEB_PORT=0" "./seon" "root"
+                                      "--set" (str ":seon.config.source/root=" (pr-str checkout))
+                                      "--set" ":seon.config.source/dirs=[\"src\" \"test\"]"
+                                      "--set" (str ":seon.config.root/store-path=" (pr-str (str checkout "/target/root-test-store")))
+                                      :in "" :dir "target")]
+    (is (= 0 exit) "the root boots with src and test imported")
+    (is (str/includes? out "ROOT LISTENING") "and listens")
+    (is (not (str/includes? (str out err) "Could not locate")) "every required library located")))

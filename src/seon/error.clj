@@ -67,11 +67,13 @@
 
 (defn fold-entry
   "Signature entry r (nil the first time) after occurrence o: count, agents, last time,
-  last agent and task; the first example and form kept."
+  last agent and task; the first example and form kept. A signature already written (it
+  has a :base) only counts: :pending? says the count is not yet on main, :dirty? (a fact
+  to write) is set only by a signature not yet written."
   {:malli/schema [:=> [:cat [:maybe :seon.error/entry] :seon.error/occurrence] :seon.error/entry]}
   [r {:keys [cause error class agent task form n first-ms ms]}]
   (if r
-    (cond-> (-> r (update :count + n) (assoc :last-ms (max ms (:last-ms r)) :dirty? true))
+    (cond-> (-> r (update :count + n) (assoc :last-ms (max ms (:last-ms r))) (assoc (if (:base r) :pending? :dirty?) true))
       agent (-> (update :agents conj agent) (assoc :last-agent agent))
       task (assoc :last-task task))
     {:signature (digest (pr-str cause)) :class class :count n :agents (if agent #{agent} #{}) :first-ms first-ms :last-ms ms
@@ -84,7 +86,7 @@
   [f o] (update f (:cause o) fold-entry o))
 
 (defn dirty?
-  "Has f a signature folded since its last write?"
+  "Has f a signature to write (one not yet written)?"
   {:malli/schema [:=> [:cat :map] :boolean]}
   [f] (boolean (some :dirty? (vals f))))
 
@@ -97,20 +99,22 @@
       true (update :seon.error/example #(some-> % edn/read-string)))))
 
 (defn flush-tx
-  "The window's write: one entity per signature that changed, its count absolute (the
-  count stored when this observer first wrote it, read once, plus everything it folded
-  since: a db value that lags this observer's own writes never undercounts). A
-  signature's first record carries its type, operation, message, class and first example.
-  db nil (no main to read): counts start at 0. Answers [f' tx]."
+  "The window's write: one entity per signature not yet written by this observer, its count
+  absolute (the count stored when this observer first wrote it, read once, plus everything
+  it folded since). A signature already written is not written again for a repeat: its
+  count lives in the fold, and is made durable by the next write that has a signature to
+  write anyway. A signature's first record carries its type, operation, message, class and
+  first example. db nil (no main to read): counts start at 0. Answers [f' tx]."
   {:malli/schema [:=> [:cat :map [:maybe :seon.host/db]] [:tuple :map [:vector :map]]]}
   [f db]
-  (let [flushed (for [[c {:keys [signature class agents first-ms last-ms example form base last-agent last-task] folded :count :as r}] f
-                      :when (:dirty? r)
+  (let [write? (dirty? f)
+        flushed (for [[c {:keys [signature class agents first-ms last-ms example form base last-agent last-task] folded :count :as r}] f
+                      :when (or (:dirty? r) (and write? (:pending? r)))
                       :let [stored (when (and db (not base)) (record db signature))
                             first? (and (nil? base) (nil? stored))
                             base (or base (:seon.error/count stored 0))
                             n-agents (max (count agents) (:seon.error/agents stored 0))]]
-                  [[c (assoc r :dirty? false :base base)]
+                  [[c (assoc r :dirty? false :pending? false :base base)]
                    (cond-> {:seon.error/signature signature :seon.error/class class :seon.error/count (+ base folded)
                             :seon.error/agents n-agents :seon.error/last-ms last-ms
                             :seon.error/first-ms (or (:seon.error/first-ms stored) first-ms)}
