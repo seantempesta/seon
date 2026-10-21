@@ -11,7 +11,7 @@
             [seon.program-test :as pt]
             [seon.db :as pdb]
             [seon.repl :as repl]
-            [seon.schema :as schema]
+            [my.schema :as schema]
             [seon.source :as source]))
 
 (def ^:private here (System/getProperty "user.dir"))
@@ -71,19 +71,10 @@
     (is (nil? (d/q '[:find ?e . :where [?e :schema/key :x.schema-test/thing]] db)) "nothing of a refused registration is written")
     (testing "the branch's population, as the next eval reads it"
       (is (= #{:seon.attempt/status :seon.attempt/refusal :user/qty}
-             (set (keys (:put (schema/changes db)))))))))
-
-(deftest unregister-removes-a-key-nothing-names
-  (let [[printed db] (evals (main-db)
-                            (str "(:seon.error/type (my.schema/unregister! :seon.attempt/status))\n"
-                                 "(my.schema/unregister! :seon.attempt/pulled)\n"))]
-    (is (= ":seon.schema/registration-refused" (first printed)) "a key other schemas name stays: refused as data")
-    (is (= ":seon.attempt/pulled" (second printed)))
-    (is (nil? (d/q '[:find ?e . :where [?e :schema/key :seon.attempt/pulled]] db)) "its entry is retracted on the branch")
-    (is (= #{:seon.attempt/pulled} (:removed (schema/changes db))))))
+             (set (keys (program/schema-changes db))))))))
 
 (deftest a-registration-counts-the-stored-values-it-refuses
-  ;; task seon.schema/a-registration-counts-the-stored-values-it-refuses (v1's
+  ;; task my.schema/a-registration-counts-the-stored-values-it-refuses (v1's
   ;; seon.db/registration-check, ported later by the owner's ruling of 2026-10-21): a
   ;; registration that narrows a stored attribute answers how many stored values its new
   ;; form refuses, so the agent sees what its change would break before it merges

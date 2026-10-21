@@ -14,7 +14,7 @@
   the base its write-back edits, entry by entry, with rewrite-clj (v1's `schema-file-text`):
   every other byte as it was."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.program :as program] [seon.schema :as schema] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.program :as program] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn]
             [rewrite-clj.zip :as z] [rewrite-clj.node :as node] [rewrite-clj.parser :as parser] [jolt.analyzer] [jolt.host]))
 
 (defn- line-starts
@@ -158,7 +158,7 @@
   [path text]
   (into [{:schema.file/path path :schema.file/text text}]
         (for [[k v] (sort-by (comp str key) (edn/read-string text))]
-          {:schema/key k :schema/form (schema/form-text v) :schema/file path :schema/source true})))
+          {:schema/key k :schema/form (program/pr-edn v) :schema/file path :schema/source true})))
 
 (defn import-tx
   "The facts of files ({relative path text}) as program on db: each namespace's file's forms

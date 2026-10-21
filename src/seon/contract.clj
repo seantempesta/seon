@@ -113,7 +113,7 @@
 (def options
   "What every contract compiles against: the built registry, under malli's dynamic registry,
   so an evaluation that binds malli.registry/*registry* (an agent's REPL, to its branch's
-  schemas: seon.schema/branch-registry) compiles against that population instead."
+  schemas: seon.program/schema-registry) compiles against that population instead."
   {:registry (mr/composite-registry (mr/dynamic-registry) registry)})
 
 (clojure.core/defn schema

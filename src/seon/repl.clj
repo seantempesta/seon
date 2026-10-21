@@ -26,7 +26,7 @@
   is answered once the eval has stopped. Seon's platform ops (tests, stats, clone,
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract] [clojure.edn] [my.db] [my.agent] [my.schema] [seon.schema :as schema] [malli.registry :as mr]
+  (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract] [clojure.edn] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
             [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
             [jolt.ffi :as ffi]))
 
@@ -258,19 +258,18 @@
                      (cond-> m l (assoc :repl/defined (program/set-vars l))))))))))))
 
 (defn- branch-registry
-  "The registry this agent's evaluation binds (seon.schema/branch-registry of its branch's
-  db): the population with the schemas its branch changed, so what it defines next compiles
-  against them; empty when no branch is held (root, a scratch session) or nothing changed.
-  Reused while the branch's schema entries are unchanged (seon.schema/change-key): measured
-  13 ms to derive with one registration, 0.5 ms to key."
+  "The registry this agent's evaluation binds (seon.program/schema-registry of its branch's
+  schema changes), so what it defines next compiles against them; empty when no branch is
+  held (root, a scratch session). Reused while the changes are equal: keying is 0.7 ms,
+  compiling the population 5 ms."
   {:malli/schema [:=> [:cat] :any]}
   []
   (if-let [db (:db @agent/state)]
-    (let [k (schema/change-key db)
+    (let [k (program/schema-changes db)
           held (:schema-registry @agent/state)]
       (if (= k (:key held))
         (:registry held)
-        (let [r (schema/branch-registry db)]
+        (let [r (program/schema-registry k)]
           (swap! agent/state assoc :schema-registry {:key k :registry r})
           r)))
     {}))

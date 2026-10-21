@@ -26,7 +26,7 @@
   ours and theirs as data, until the branch's content for its key changes or it is
   resolved (`resolve-tx`). Every function here is pure over db values."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [clojure.edn :as edn] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program] [seon.schema :as schema]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [clojure.edn :as edn] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program]))
 
 (defn- pr-edn
   "v printed as EDN that reads back (no print limits, no metadata)."
@@ -245,7 +245,7 @@
                               :datum (set-datum-tx db k content)))
                           (sort-by (comp pr-edn key) m))))]
     (if (some #(= :schema (ffirst %)) m)
-      (into tx (schema/declarations-tx (d/db-with db tx)))
+      (let [db' (d/db-with db tx)] (into tx (program/schema-declarations db (program/schema-registry (program/schema-changes db')))))
       tx)))
 
 ;; ---- unmerged entries (git's index stages 1, 2, 3), on the branch ------------------------

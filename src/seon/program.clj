@@ -25,7 +25,7 @@
     platform's own source has the same facts (seon.source)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [jolt.ir :as ir] [jolt.analyzer]
-            [seon.schema :as schema] [malli.registry :as mr]))
+            [seon.schema.datahike :as sd] [malli.registry :as mr] [clojure.edn :as edn]))
 
 (defn scratch-ns?
   "Is namespace nsx scratch (never program): `user`, or declared ^:scratch."
@@ -45,9 +45,10 @@
                  :else false)))
 
 (defn pr-edn
-  "v printed as EDN that reads back (no print limits, no metadata)."
+  "v printed as EDN that reads back (no print limits, no metadata, a namespaced map's keys in
+  full, as the schema resources are written)."
   {:malli/schema [:=> [:cat :any] :string]}
-  [v] (binding [*print-length* nil *print-level* nil *print-meta* false] (pr-str v)))
+  [v] (binding [*print-length* nil *print-level* nil *print-meta* false *print-namespace-maps* false] (pr-str v)))
 
 (defn var-kind
   "What a defined var holds now: :fn (a function, which needs a contract), :test, :macro or
@@ -526,14 +527,41 @@
           defines)
     (catch Throwable e {:ns ns :message (or (ex-message e) (str (type e)))})))
 
+;; ---- schema entries: the program's schemas (seon.source imports them, my.schema/register!
+;; changes them, seon.merge carries them per key) ----------------------------------------
+
+(defn schema-changes
+  "{k form} of db's schema entries the binary does not hold (no :schema/source: registered
+  or merged), against seon.contract/forms. Two passes over the entries' datoms."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :qualified-keyword :any]]}
+  [db]
+  (let [src (into #{} (map :e) (d/datoms db :aevt :schema/source))]
+    (into {} (for [dt (d/datoms db :aevt :schema/key) :when (not (src (:e dt)))]
+               [(:v dt) (edn/read-string (:schema/form (d/entity db (:e dt))))]))))
+
+(defn schema-registry
+  "The registry an evaluation on db binds as malli.registry/*registry*: the binary's forms
+  with changes (schema-changes) recompiled whole, since a schema naming a changed key keeps
+  the old one compiled in; empty (the built registry answers) when nothing changed."
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :any]}
+  [changes] (if (empty? changes) {} (contract/registry-of (merge contract/forms changes))))
+
+(defn schema-declarations
+  "The Datahike declarations registry reg derives that db does not hold as declared (a
+  registration or merge of a schema carries its attribute, so its facts can be stored)."
+  {:malli/schema [:=> [:cat :seon.host/db :any] [:vector :seon.schema/declaration]]}
+  [db reg]
+  (let [have (d/schema db)]
+    (filterv (fn [dcl] (not= dcl (select-keys (get have (:db/ident dcl)) (keys dcl)))) (sd/declarations reg))))
+
 (defn- load-forms!
   "Load form rows of db in load order, compiling against db's schemas (malli's dynamic
-  registry bound to seon.schema/branch-registry: a merged or registered schema is in effect
-  for the code that names it); answers the errors. Nothing to load reads no schemas."
+  registry bound to schema-registry: a merged or registered schema is in effect for the
+  code that names it); answers the errors. Nothing to load reads no schemas."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] [:vector :seon.program/error]]}
   [db forms]
   (if (seq forms)
-    (binding [mr/*registry* (schema/branch-registry db)]
+    (binding [mr/*registry* (schema-registry (schema-changes db))]
       (into [] (keep load-form!) (load-order forms)))
     []))
 
