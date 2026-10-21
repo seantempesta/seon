@@ -40,7 +40,7 @@ function.
 | a test run, in the test child of an agent | `seon.agent/run-tests-forked` | an `:error` report in the run |
 | an effect lane performing a request (lane FX1) | `seon.fx/lane-proc` | `:seon.fx/defect` as the outcome: its asker is always answered |
 | one outside connection's request (seon.entrance, line EDN) | `seon.entrance/serve-connection!` | the request's answer `{:error :data}`; the connection goes on |
-| every root proc | Flow's error channel, read by root's error reader | `:root-errors` in the api's view, with the error map; counted by signature on main (`seon.error`, class `:platform`, lane D2) |
+| every root proc | Flow's error channel, read by root's error reader | `:root-errors` in the api's view, with the error map; written once per signature on main, repeats counted in the api's fold (`seon.error/flush-tx`; `my.root/problems` reads both); a repeat of a written signature writes nothing, or the error's own record would be the next commit it fails on |
 
 ## Dragons met without a catch (the edge answers data)
 
