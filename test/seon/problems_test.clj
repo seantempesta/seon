@@ -329,8 +329,8 @@
 (def ^:private req {:messages [{:role "user" :content "hi"}] :task "t/a" :turn 0})
 
 (deftest the-request-sets-thinking-only-when-the-provider-does
-  (is (= {:model "deepseek-flash" :messages (:messages req) :max_tokens 2048 :temperature 0 :stream false}
-         (model/request-body deepseek req)) "absent: the provider's default, and max-tokens 2048")
+  (is (= {:model "deepseek-flash" :messages (:messages req) :max_tokens (seon.config/value :seon.config.ai/max-tokens) :temperature 0 :stream false}
+         (model/request-body deepseek req)) "absent: the provider's default, and the config's max-tokens")
   (is (= {:type "disabled"} (:thinking (model/request-body (assoc deepseek :thinking :disabled) req))))
   (is (= ["high" 512] ((juxt :reasoning_effort :max_tokens) (model/request-body (assoc deepseek :reasoning-effort :high :max-tokens 512) req))))
   (is (contract/valid? :seon.model/provider (assoc deepseek :thinking :enabled :reasoning-effort :low))))
