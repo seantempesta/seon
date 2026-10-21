@@ -110,7 +110,8 @@
                 (let [m (sock/recv! c)]
                   (if (= m :eof)
                     (a/>!! ev-ch {:ev :eof :pid pid})
-                    (do (a/>!! ev-ch m) (recur))))))))
+                    (do (a/>!! ev-ch m) (recur)))))))
+          "seon-fs-events")
     (.setDaemon true) (.start)))
 
 (defn fork-server

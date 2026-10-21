@@ -118,7 +118,7 @@
             ms (/ (- (System/nanoTime) t0) 1e6)]
         (cond
           (:seon.error/type r) r
-          (not= 200 (:status r)) (provider-error (str "HTTP " (:status r) ": " (subs (:body r) 0 (min 300 (count (:body r))))) (:status r))
+          (not= 200 (:status r)) (provider-error (str "HTTP " (:status r) ": " (:body r)) (:status r))
           :else (parse-reply (:body r) ms (or max-tokens default-max-tokens)))))))
 
 (defn complete

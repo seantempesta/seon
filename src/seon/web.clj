@@ -75,7 +75,7 @@
      seon.root/clone! seon.root/interrupt! seon.root/kill!})
 
 (defn- live? {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
-  [a] (boolean (and a (not (#{:dead :killed} (:status a))))))
+  [a] (boolean (and a (not (#{:dead :killed :ended} (:status a))))))
 
 (defn requests
   "A UI call as root's requests: [[req target-agent] ...]. index {agent {:pid :branch
@@ -231,6 +231,7 @@
   {:malli/schema [:=> [:cat :map :seon.host/volatile :map] :map]}
   [st o m]
   (case (:op m)
+    :listener (do (step-out o :to-api {:op :web :listening (boolean (:listening st)) :port (:port st) :error (:error st)}) st)
     :open (let [k (inc (:next st 0))
                 st (-> st (assoc :next k) (assoc-in [:tabs k] {:ch (:ch m) :view (:view m)}) (update :stale conj k))]
             (step-out o :to-render (views-msg st))
@@ -302,7 +303,10 @@
    (let [port (:port args)
          http (a/chan 256)
          st {:port port :http http :tabs {} :stale #{} :waiting {} :bytes 0 :index {}
-             ::flow/in-ports {:http http}}]
+             ::flow/in-ports {:http http}}
+         ;; whether it listens is an event to the api's view (its first message, on its own
+         ;; in-port: init has no outputs), never a ping (owner, 2026-10-21)
+         _ (a/put! http {:op :listener})]
      (if (and port (pos? port))
        (let [server (try (adapter/run-server (handler http) {:port port :host "127.0.0.1" :strategy :fibers
                                                              :keep-alive-timeout-ms 600000 :write-timeout-ms 60000})

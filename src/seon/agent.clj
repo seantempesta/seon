@@ -113,6 +113,8 @@
       (swap! state assoc :db (:db-after r))
       {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
     (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data})]
+      ;; past this process's block of entity ids: the typed refusal, nothing applied
+      (when-let [e (and (not (map? r)) (pdb/lease-spent r (:lease @state)))] (throw (ex-info (:seon.error/message e) e)))
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
       (let [now (lib/now-ns)
             since (:dirty-at (swap! state #(-> % (assoc :db (:db-after r)) (update :dirty-at (fn [t] (or t now))))))]
@@ -216,9 +218,6 @@
 
 ;; ---- evaluation -----------------------------------------------------------------
 
-(def ^:private message-chars
-  "An exception's message is kept to this many characters in its error map."
-  2000)
 
 (defn error-map
   "A form's exception as the one error map: its ex-data when that already is one (a
@@ -230,7 +229,7 @@
   (if (contract/error? (ex-data e))
     (ex-data e)
     (let [m (or (ex-message e) (str (type e)))]
-      (contract/error :seon.agent/eval-error 'seon.repl/eval-code (subs m 0 (min message-chars (count m)))
+      (contract/error :seon.agent/eval-error 'seon.repl/eval-code m
                       (cond-> {:class (str (type e))}
                         (ex-data e) (assoc :data (print/text (ex-data e) (:part print/budgets))))))))
 
@@ -389,6 +388,7 @@
     :clone (do (clone! m) nil)
     :stats [{:op :stats :id (:id m) :result {:mem-mb (mem-mb true) :t (:max-tx (db)) :pid (lib/c-getpid)
                                               :results (count (:results @state)) :evals (:n @state)
+                                              :ids (pdb/lease-use (db) (:lease @state))
                                               :heap-mb (lib/r2 (/ (lib/bytes-in-heap) 1048576.0))}}]
     ;; a message (lane F2): it waits in :inbox until the agent's code takes it ((messages));
     ;; root hears that it arrived
@@ -449,7 +449,7 @@
                   ;; the clone opens the store itself, on its own branch, with its own lease
                   (pdb/after-fork! (:cfg r) (:lease r))
                   (stderr-to-file! (stderr-path (pdb/agents-dir (:cfg r)) (:agent m)))
-                  (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn c :mode :agent :tx-seq 0
+                  (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn c :mode :agent :tx-seq 0 :lease (:lease r)
                          :pending clojure.lang.PersistentQueue/EMPTY :mem-at nil :fx-pending {}
                          :store-conn (d/connect (assoc (:cfg r) :branch (:branch m))))
                   (swap! state assoc :db @(:store-conn @state)))
@@ -486,7 +486,7 @@
     (let [load-errors (when resumed (program/load-diff! db0 @store-conn))]
      ;; a resumed branch whose program does not load runs main's for what failed: its errors
      ;; go to root with its hello (recorded problems), never dropped (T5b: a stub ran silently)
-     (reset! state {:id id :branch branch :fd fd :conn c :db @store-conn :store-conn store-conn :cfg cfg :results {} :n 0
+     (reset! state {:id id :branch branch :fd fd :conn c :db @store-conn :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
                    :load-errors (vec load-errors)
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
                    :ns nsx :nss #{(ns-name nsx)} :interrupt-ok intr-ok :serve serve}))))

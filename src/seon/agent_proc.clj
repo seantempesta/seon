@@ -83,10 +83,10 @@
                       true (update :inflight assoc rid (select-keys m [:kind :branch :new :merge-branch :data-attrs :pass-fd :lease]))
                       ;; what root last asked of it, for a stall or a death (seon.agent/last-op)
                       true (assoc :last-op (cond-> {:kind kind :since-ms (System/currentTimeMillis)}
-                                             (string? (:forms msg)) (assoc :form (let [f (:forms msg)] (if (> (count f) 200) (str (subs f 0 200) " …") f)))))
+                                             (string? (:forms msg)) (assoc :form (:forms msg))))
                       (= kind :ping) (update :pings conj rid))]
              [st {:to-api [(status st (cond-> {:status :busy}
-                                        (= kind :eval) (assoc :running {:form (let [f (:forms msg)] (if (> (count f) 200) (str (subs f 0 200) " …") f))
+                                        (= kind :eval) (assoc :running {:form (:forms msg)
                                                                         :since-ms (System/currentTimeMillis)})))]}]))
     :write [(cond-> (to-proc! st (:msg m)) (= :fx-reply (:op (:msg m))) (update :fx-out (fnil dec 1))) nil]
     ;; root's stall check (seon.root's timer): a request in flight, no frame from the agent
@@ -136,6 +136,9 @@
                                                                 (str "its branch's program did not load in " ns ": " message) {:ns ns})}))
                  (step/out! o :events (step/event {:type :ready :agent id :start-ms (:start-ms m)}))
                  (cond-> st (:cloned-from m) (assoc :pid (:pid m))))
+      ;; its eval's record could not be written on its branch (its entity ids are spent):
+      ;; the typed error is recorded on main as its problem
+      :unrecorded (do (step/out! o :to-api {:op :problem :class :agent :agent id :error (:error m)}) st)
       :fd-ready (send-fd! st (:k m) (get-in st [:inflight (:k m) :pass-fd]))
       :branch-me (let [{:keys [branch lease]} (get-in st [:inflight (:k m)])]
                    (step/out! o :to-writer {:op :clone-branch :from (:branch st) :branch branch :lease lease

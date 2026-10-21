@@ -1,6 +1,10 @@
 #!/bin/zsh
 # bin/worktree NAME [BASE]    a worktree of next/ at ../next-NAME on branch jolt/NAME (from BASE, default main)
 # bin/worktree --remove NAME  remove that worktree and its submodule worktrees (the branch is kept)
+# bin/worktree --sync NAME    move that worktree's submodules to the pins its branch records (after
+#                             merging main), by `git -C` on its own submodule checkouts only. Never
+#                             run `git submodule` in a worktree: it rewrites the module config every
+#                             checkout shares (core.worktree), and main's submodules break.
 #
 # A lane that changes shared foundations works here, so its unfinished work never breaks other
 # lanes' builds and runs. On Jolt this is safe: a process loads only from its own JOLT_PWD and its
@@ -20,6 +24,20 @@ set -eu
 MAIN=$(cd "$(dirname "$0")/.." && pwd)
 die() { print -u2 "worktree: $*"; exit 1; }
 
+if [[ ${1:-} == --sync ]]; then
+  NAME=${2:-}; [[ -n $NAME ]] || die "usage: bin/worktree --sync NAME"
+  WT=$(dirname "$MAIN")/next-$NAME
+  [[ -d $WT ]] || die "no worktree at $WT"
+  git -C "$WT" ls-tree HEAD reference-code/ | while read -r mode type sha sub; do
+    [[ $type == commit ]] || continue
+    [[ -e $WT/$sub/.git ]] || continue
+    cur=$(git -C "$WT/$sub" rev-parse HEAD)
+    [[ $cur == $sha ]] && continue
+    git -C "$WT/$sub" checkout -q --detach "$sha" && print "$sub: ${cur:0:8} -> ${sha:0:8}"
+  done
+  exit 0
+fi
+
 if [[ ${1:-} == --remove ]]; then
   NAME=${2:-}; [[ -n $NAME ]] || die "usage: bin/worktree --remove NAME"
   WT=$(dirname "$MAIN")/next-$NAME
@@ -28,9 +46,9 @@ if [[ ${1:-} == --remove ]]; then
     [[ -e $WT/$sub/.git ]] && git -C "$MAIN/$sub" worktree remove --force "$WT/$sub" 2>/dev/null || true
   done
   git -C "$MAIN" worktree remove --force "$WT"
-  # free its port block (bin/ports): never reused while the worktree exists, freed with it
+  # its port block (bin/ports) is free again
   REG=$(dirname "$MAIN")/worktree-ports
-  [[ -f $REG ]] && /usr/bin/lockf -k "$REG.lock" zsh -c 'grep -v "^$2 " "$1" > "$1.tmp"; mv "$1.tmp" "$1"' _ "$REG" "next-$NAME"
+  [[ -f $REG ]] && /usr/bin/lockf -k "$REG.lock" zsh -c 'grep -v "^$2 " "$1" > "$1.new"; mv "$1.new" "$1"' _ "$REG" "next-$NAME"
   print "removed $WT (branch jolt/$NAME kept)"
   exit 0
 fi
@@ -61,8 +79,15 @@ git -C "$WT" submodule status | while read -r line; do
   fi
 done
 
-# target/: an APFS clone (copy-on-write)
-[[ -d $MAIN/target ]] && cp -cR "$MAIN/target" "$WT/target"
+# target/: an APFS clone (copy-on-write) of the builds, not of the runs: a store is opened by
+# its path, so a cloned target/runs/store fails every root here ("Store identity mismatch:
+# connecting to wrong database"), and target/check/ is the source tree's record, not this one's
+if [[ -d $MAIN/target ]]; then
+  mkdir -p "$WT/target"
+  for e in "$MAIN"/target/*(N); do
+    [[ ${e:t} == (runs|check) ]] || cp -cR "$e" "$WT/target/"
+  done
+fi
 
 # its own ports (config/local.edn, from the one registry) and its own MCP server: .mcp.json names
 # this worktree's bin/mcp, which reaches this worktree's root (kept out of git status)

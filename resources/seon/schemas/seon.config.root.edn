@@ -13,4 +13,5 @@
  :seon.config.root/tmp-dir [:string {:min 1 :seon.config/unit "path" :description "Scratch files of a check or a run (never the shared /tmp)."}]
  :seon.config.root/run-name [:string {:min 1 :seon.config/unit "name" :description "The prefix of a new main's branch name."}]
  :seon.config.root/system-path [:string {:min 1 :seon.config/unit "path" :description "Root's system declaration (system.edn), read with aero."}]
- :seon.config.root/tasks-dir [:string {:min 1 :seon.config/unit "path" :description "The task files my.root/task-files reads."}]}
+ :seon.config.root/tasks-dir [:string {:min 1 :seon.config/unit "path" :description "The task files my.root/task-files reads."}]
+ :seon.config.root/gc-sweepers [:int {:min 0 :seon.config/unit "threads" :description "Chez parallel-collector sweepers in root, fixed at boot after the fork server is forked; 0: collect on the triggering thread."}]}

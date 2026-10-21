@@ -13,7 +13,7 @@
 
   A foundational namespace, like seon.contract (which calls it for refusals): its functions
   carry contracts in their metadata and are armed at boot."
-  (:require [seon.print.select :as select] [seon.config :as config]))
+  (:require [clojure.string :as str] [seon.print.select :as select] [seon.config :as config]))
 
 (def budgets
   "Tokens each kind of shown value may spend: a reply's value (Seon's shipped agent dial),
@@ -49,3 +49,94 @@
   ([v budget]
    (let [r (print-value v {:budget budget})]
      (or (:text r) (:seon.error/message r)))))
+
+;;; Prose: text read as itself (a message, a form's source, a plan, a printed value), not as
+;;; a string literal. The same sizer as the printer; the same rule for a cut: it says what
+;;; it omitted and how to read the rest.
+
+(def ^:private chars-per-token
+  "The printer's sizer (seon.print.select/estimate): characters a token holds."
+  3.2)
+
+(defn- lines-after
+  "Lines that begin in s after offset: each line break at or past it starts one, and the
+  offset itself starts one when it sits at a line's start."
+  {:malli/schema [:=> [:cat :string nat-int?] nat-int?]}
+  [^String s at]
+  (loop [i (long at) n (if (and (< at (count s)) (or (zero? at) (= \newline (.charAt s (dec at))))) 1 0)]
+    (let [j (.indexOf s "\n" (int i))]
+      (if (or (neg? j) (>= (inc j) (count s))) n (recur (inc j) (inc n))))))
+
+(defn- break-at
+  "Where a cut of s that may keep `room` characters ends: after the last line break in the
+  room's second half, else after the last space in its final quarter, else at the room."
+  {:malli/schema [:=> [:cat :string nat-int?] nat-int?]}
+  [^String s room]
+  (let [nl (.lastIndexOf s "\n" (int (dec room)))
+        sp (.lastIndexOf s " " (int (dec room)))]
+    (cond (and (pos? room) (>= nl (quot room 2))) (inc nl)
+          (and (pos? room) (>= sp (- room (quot room 4)))) (inc sp)
+          :else room)))
+
+(defn- source-offset
+  "Where in s the character at offset at of s's one-line reading (str/trim of every
+  whitespace run as one space) is."
+  {:malli/schema [:=> [:cat :string nat-int?] nat-int?]}
+  [^String s at]
+  (let [n (count s)
+        ws? #(Character/isWhitespace (.charAt s (int %)))]
+    (loop [i (long (loop [i 0] (if (and (< i n) (ws? i)) (recur (inc i)) i))) c 0]
+      (cond (or (>= c at) (>= i n)) i
+            (ws? i) (recur (loop [j i] (if (and (< j n) (ws? j)) (recur (inc j)) j)) (inc c))
+            :else (recur (inc i) (inc c))))))
+
+(defn cut-words
+  "The words of a prose cut: `…+N chars` and, when lines begin in what it omitted, `in M
+  more lines`, then the form that reads the rest when there is one."
+  {:malli/schema [:=> [:cat nat-int? nat-int? :any] :string]}
+  [omitted lines continuation]
+  (str "…+" omitted " chars" (when (pos? lines) (str " in " lines " more line" (when (not= 1 lines) "s")))
+       (when continuation (str " " (pr-str continuation)))))
+
+(defn prose
+  "s as prose under budget tokens, shown as itself (unquoted). It fits: s whole. It does
+  not: the longest prefix the budget holds with room for the cut, ended at a line break or
+  else a space in its final quarter, then the cut (`cut-words`): how many characters it
+  omitted and in how many more lines, and, with opts :source (a form that answers the whole
+  text), `(subs source offset)`, the form that reads the rest. A cut after a line break
+  stands on its own line, after a space follows it. opts :one-line? reads every whitespace run as one space first (a
+  table cell, a stream row); its cut's :offset and :omitted are then the source's (what
+  the form reads), and :shown the one line's.
+  Answers {:text :shown :truncated?}, and a cut's :omitted :lines :offset and :continuation."
+  {:malli/schema [:function [:=> [:cat [:maybe :string] pos-int?] :seon.print/prose]
+                  [:=> [:cat [:maybe :string] pos-int? :seon.print/prose-opts] :seon.print/prose]]}
+  ([s budget] (prose s budget {}))
+  ([s budget {:keys [source one-line?]}]
+   (let [whole (or s "")
+         ^String s (cond-> whole one-line? (-> (str/replace #"\s+" " ") str/trim))
+         cap (long (Math/floor (* budget chars-per-token)))
+         total (count s)]
+     (if (<= total cap)
+       {:text s :shown s :truncated? false}
+       (let [form (fn [at] (when source (list 'subs source at)))
+             ;; the cut's words at their widest (every character omitted) bound its room
+             room (max 0 (- cap 1 (count (cut-words (count whole) (lines-after whole 0) (form (count whole))))))
+             at (break-at s (min room total))
+             shown (subs s 0 at)
+             ;; in the source's own offsets: what (subs source at) reads
+             at (if one-line? (source-offset whole at) at)
+             omitted (- (count whole) at)
+             lines (lines-after whole at)
+             cont (form at)
+             words (cut-words omitted lines cont)]
+         (cond-> {:text (if (str/ends-with? shown "\n") (str shown words) (str shown (when-not (or (empty? shown) (str/ends-with? shown " ")) " ") words))
+                  :shown shown :truncated? true :omitted omitted :lines lines :offset at}
+           cont (assoc :continuation cont)))))))
+
+(defn more
+  "What a bounded list leaves: nil when its shown members are all of total, else `+N more`
+  and, with where (the form or place that has them all), where they are."
+  {:malli/schema [:=> [:cat nat-int? nat-int? [:maybe :string]] [:maybe :string]]}
+  [total shown where]
+  (when (> total shown)
+    (str "+" (- total shown) " more" (when where (str ": " where)))))

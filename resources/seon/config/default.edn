@@ -49,6 +49,12 @@
  ;; Unit: main commits. The fork server forks a fresh standby after this many, bounding the
  ;; log of commits a promoted standby is sent. Provenance: f2-final.
  :seon.config.root/standby-every 256
+ ;; Unit: threads, Chez's parallel-collector sweepers in root, fixed at boot right after the
+ ;; fork server is forked (seon.lib/gc-sweepers!). 0: root collects on the thread that triggers
+ ;; it. Provenance: lane THREADS, 2026-10-21: unfixed, Chez kept one per thread a collection
+ ;; found waiting, so root's count drifted with load (0, 5, 15 across identical runs); A/B at
+ ;; 0/2/4/8 gave the same GC real time, GC CPU rising with n, threads 37/39/41/45. At the bound: none.
+ :seon.config.root/gc-sweepers 0
 
  ;; Where kept runs live (owner, 2026-10-21: runs are kept, "a perfect record frozen in time").
  ;; bin/root exports SEON_RUNS (<this tree>/runs).

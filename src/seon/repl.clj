@@ -335,14 +335,21 @@
 
 (defn- record!
   "Record items (with the defs their forms recorded) on this branch through the agent's
-  write path; origin (:outside, :ui) says who asked, when not the agent itself. Answers items."
+  write path; origin (:outside, :ui) says who asked, when not the agent itself. Answers items.
+  When the agent's entity ids are spent (:seon.db/lease-spent) the record cannot be written
+  on its branch: root is told ({:op :unrecorded}) and records it as a problem on main."
   {:malli/schema [:=> [:cat :seon.agent/items [:maybe :keyword]] :seon.agent/items]}
   [items origin]
   (let [defs (into [] (mapcat val) (:defs @agent/state))]
     (swap! agent/state dissoc :defs)
     (when (and contract/record? (= :agent (:mode @agent/state)) (seq items))
-      (agent/transact! (into defs (record-tx (:id @agent/state) (str (name (:id @agent/state)) "-" (lib/c-getpid) "-" (lib/now-ns))
-                                             (cond->> items origin (mapv #(assoc % :origin origin))) (:max-tx (agent/db))))))
+      (try
+        (agent/transact! (into defs (record-tx (:id @agent/state) (str (name (:id @agent/state)) "-" (lib/c-getpid) "-" (lib/now-ns))
+                                               (cond->> items origin (mapv #(assoc % :origin origin))) (:max-tx (agent/db)))))
+        (catch clojure.lang.ExceptionInfo e
+          (if (= :seon.db/lease-spent (:seon.error/type (ex-data e)))
+            (agent/send! {:op :unrecorded :error (ex-data e) :forms (count items)})
+            (throw e)))))
     items))
 
 (defn eval-string
@@ -366,8 +373,10 @@
     (fn [m]
       (vswap! answers conj m)
       (when (some #{"done"} (get m "status"))
-        (let [items (fold @answers identity)]
-          (when (= "eval" (get req "op")) (record! items (some-> (get req "seon/origin") keyword)))
+        ;; who asked travels with the items, to root's view as to the record
+        (let [origin (some-> (get req "seon/origin") keyword)
+              items (cond->> (fold @answers identity) origin (mapv #(assoc % :origin origin)))]
+          (when (= "eval" (get req "op")) (record! items nil))
           (agent/send! {:op :reply :id (:id req) :items items :t (:max-tx (agent/db)) :mem-mb (agent/mem-mb)}))))))
 
 (defn- eval-request

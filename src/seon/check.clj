@@ -413,17 +413,31 @@
     (c/stop! sys)
     (lib/c-exit (if (every? true? all) 0 1))))
 
+(defn thread-diff
+  "Where measured threads (seon.root/threads) differ from declared ones
+  (seon.root/declared-threads): {} when they are exactly what is declared, else each
+  differing name with [declared measured], :gc-sweepers likewise, and :os when the OS
+  counts threads beyond the roster and the sweepers."
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [decl got]
+  (let [names (into (set (keys (:roster decl))) (keys (:roster got)))
+        roster (into {} (for [n names :let [d (get-in decl [:roster n] 0) g (get-in got [:roster n] 0)] :when (not= d g)] [n [d g]]))
+        expect-os (+ (reduce + 0 (vals (:roster got))) (:gc-sweepers got))]
+    (cond-> roster
+      (not= (:gc-sweepers decl) (:gc-sweepers got)) (assoc :gc-sweepers [(:gc-sweepers decl) (:gc-sweepers got)])
+      (not= expect-os (:os got)) (assoc :os [expect-os (:os got)]))))
+
 ;; ---- scale ------------------------------------------------------------------------
 
 (defn scale [n]
   (let [sys (c/start! {:datoms 2000})
         mem0 (lib/sysmem)
-        th-boot (lib/nthreads)
+        th-boot (thread-diff (c/declared-threads sys) (c/threads))
         t0 (lib/now-ns)
         ids (vec (pmap (fn [i] (c/spawn! sys {:task (str "scale " i)})) (range n)))
         ready? (await-status sys ids #{:idle} 20000)
         t-ready (lib/ms-since t0)
-        th-ready (lib/nthreads)
+        th-ready (thread-diff (c/declared-threads sys) (c/threads))
         _ (out! "ready " ready? " in " (lib/r2 t-ready) " ms: " (frequencies (map #(get-in (c/state sys) [:agents % :status]) ids)))
         work (fn [id]
                (let [k (subs (name id) 1)
@@ -439,7 +453,7 @@
                   :eval-ms (/ (- t2 t1) 1e6) :tests-ms (/ (- t3 t2) 1e6)}))
         results (vec (pmap work ids))
         t-done (lib/ms-since t0)
-        th-work (lib/nthreads)
+        th-work (thread-diff (c/declared-threads sys) (c/threads))
         st (c/state sys)
         mem1 (lib/sysmem)
         agent-mb (keep #(get-in st [:agents % :mem-mb]) ids)
@@ -451,7 +465,7 @@
         ;; kill! marks :killed at once; the process is gone when root has retired it
         _ (loop [k 0] (when (and (not-every? #(get-in (c/state sys) [:agents % :ended-ms]) ids) (< k 1000)) (Thread/sleep 10) (recur (inc k))))
         mem2 (do (Thread/sleep 500) (lib/sysmem))
-        th-end (lib/nthreads)]
+        th-end (thread-diff (c/declared-threads sys) (c/threads))]
     (pprint {:agents n :all-ready ready? :all-ok (count (filter :ok results))
              :spawn->all-ready-ms (lib/r2 t-ready) :end-to-end-ms (lib/r2 t-done)
              :start-ms (lib/summ (keep #(get-in st [:agents % :forked-ms]) ids))
@@ -463,10 +477,15 @@
              :control-real-mb (lib/r2 (lib/real-mb)) :fork-server (select-keys fs [:mem-mb :os-threads :active-threads :mismatch :datoms])
              :writer (:writer st) :merged (count (filter :merged? merged)) :main-notes notes
              :all-killed killed? :all-ended (every? #(get-in (c/state sys) [:agents % :ended-ms]) ids)
-             :root-os-threads {:boot th-boot :all-ready th-ready :after-work th-work :after-kill th-end}})
+             :gc (lib/gc-stats) :gc-sweepers (lib/gc-sweepers! -1)
+             :root-threads {:declared (c/declared-threads sys) :os (lib/nthreads)
+                            :diff {:boot th-boot :all-ready th-ready :after-work th-work :after-kill th-end}}})
     (c/stop! sys)
     ;; every agent's eval and its test passed; the 10 merges went in
-    (let [ok (and ready? (every? :ok results) (every? :merged? merged) killed?)]
+    ;; and root's threads exactly as declared once agents run (at boot Jolt's io poller has not
+    ;; started yet: it starts at the first socket wait, an agent's)
+    (let [ok (and ready? (every? :ok results) (every? :merged? merged) killed?
+                  (every? empty? [th-ready th-work th-end]))]
       (out! (if ok "SCALE OK" "SCALE FAILED"))
       (lib/c-exit (if ok 0 1)))))
 
@@ -833,7 +852,8 @@
 (defn lifecycle
   "n cycles of start! -> 3 agents work -> stop! in ONE process. Each stop! must answer
   with every proc exited (:graph true) and no agent or fork-server process left, and root's
-  thread count must come back to where it was after the first cycle. Then pause/resume:
+  threads must be exactly what it declares (seon.root/declared-threads) while running and
+  after every stop!, by name and by the OS's count. Then pause/resume:
   a paused agent's request is held (no answer), and answered after resume, in order."
   [n]
   (let [rows (vec (for [i (range n)]
@@ -844,12 +864,13 @@
                           ready? (await-status sys ids #{:idle} 5000)
                           ok? (every? #(= "4" (:printed (first @(c/submit! sys % "(+ 2 2)")))) ids)
                           health (c/health sys)
+                          running (thread-diff (c/declared-threads sys) (c/threads))
                           pids (vec (cons (get-in (c/state sys) [:server :pid]) (keep #(get-in (c/state sys) [:agents % :pid]) ids)))
                           st (c/stop! sys)
                           left (filter alive? pids)]
                       {:cycle i :ready ready? :ok ok? :boot-ms (lib/r2 boot-ms) :stop st :left (vec left)
-                       :health (set (map #(if (map? %) (:status %) %) (vals health))) :threads (lib/nthreads)})))
-        th (map :threads rows)
+                       :health (set (map #(if (map? %) (:status %) %) (vals health)))
+                       :running running :stopped (thread-diff (c/declared-threads) (c/threads))})))
         sys (c/start! {:datoms 2000})
         a (c/spawn! sys {:task "paused"})
         _ (await-status sys [a] #{:idle} 5000)
@@ -862,18 +883,39 @@
         held-state (= :paused (:status (c/agent-health sys a)))
         _ (c/resume-agent! sys a)
         r1 (deref p1 3000 :hang) r2 (deref p2 3000 :hang)
+        declared-running (c/declared-threads sys)
         st (c/stop! sys)
         checks {:every-stop-exited (every? #(and (true? (get-in % [:stop :graph])) (zero? (get-in % [:stop :agents-left])) (empty? (:left %))) rows)
                 :every-cycle-worked (every? #(and (:ready %) (:ok %) (= #{:running} (:health %))) rows)
-                :threads-flat (<= (- (apply max (rest th)) (second th)) 2)
+                :threads-declared (every? #(and (empty? (:running %)) (empty? (:stopped %))) rows)
                 :pause-holds (and (= :held held) (true? held-state) (= :paused (:status paused-health)))
                 :resume-releases-in-order (and (= "1" (:printed (second r1))) (= "2" (:printed (first r2))))
                 :final-stop (true? (:graph st))}]
-    (pprint {:cycles (mapv #(select-keys % [:cycle :boot-ms :threads :left :health]) rows)
+    (pprint {:threads {:declared-running declared-running :declared-stopped (c/declared-threads)}
+             :cycles (mapv #(select-keys % [:cycle :boot-ms :running :stopped :left :health]) rows)
              :stop-ms (lib/summ (map #(get-in % [:stop :ms]) rows))
+             :gc (lib/gc-stats) :gc-sweepers (lib/gc-sweepers! -1)
              :checks checks})
     (out! (if (every? true? (vals checks)) "LIFECYCLE OK" "LIFECYCLE FAIL"))
     (lib/c-exit (if (every? true? (vals checks)) 0 1))))
+
+(defn threads-declared
+  "n cycles of start! -> 3 agents evaluate -> stop! in one process; after the evals and
+  after each stop!, root's threads against what it declares (thread-diff, {} when exact).
+  The last line is the EDN {:running [diff ..] :stopped [diff ..]} that
+  seon.root-test/root-threads-are-what-root-declares reads."
+  [n]
+  (let [rows (vec (for [_ (range n)]
+                    (let [sys (c/start! {:datoms 2000})
+                          ids (mapv #(c/spawn! sys {:task (str "td " %)}) (range 3))
+                          _ (await-status sys ids #{:idle} 5000)
+                          _ (mapv #(deref (c/submit! sys % "(+ 2 2)")) ids)
+                          running (thread-diff (c/declared-threads sys) (c/threads))]
+                      (c/stop! sys)
+                      {:running running :stopped (thread-diff (c/declared-threads) (c/threads))})))]
+    (pprint {:declared (c/declared-threads) :measured (c/threads)})
+    (out! (pr-str {:running (mapv :running rows) :stopped (mapv :stopped rows)}))
+    (lib/c-exit (if (every? #(and (empty? (:running %)) (empty? (:stopped %))) rows) 0 1))))
 
 ;; ---- delivery (lane F2): main's commits to the reconciler, messages to agents ------
 
@@ -1065,7 +1107,7 @@
   (let [sys (c/start! {:datoms 2000})
         a (c/spawn! sys {:task "fx" :branch :fx1})
         _ (await-status sys [a] #{:idle} 5000)
-        dir (str (seon.config/value :seon.config.root/tmp-dir) "/fx1-" (lib/c-getpid))
+        dir (str (:agents-dir (:store (c/state sys))) "/fx1") ; this root's own run dir, kept with the store
         _ (.mkdirs (java.io.File. dir))
         ev (fn [code] (let [r @(c/submit! sys a code)] (last r)))
         ;; per call, timed inside the agent: (loop n) of the form, µs each
@@ -1143,7 +1185,7 @@
         booted (pids)
         expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/model}
                      (for [i (range (seon.config/value :seon.config.ai/max-in-flight))] (keyword "fx.model" (str i))))
-        dir (str (seon.config/value :seon.config.root/tmp-dir) "/seon-system-" (lib/c-getpid))
+        dir (str (:agents-dir (:store (c/state sys))) "/system") ; this root's own run dir
         _ (.mkdirs (java.io.File. dir))
         decl (clojure.edn/read-string (slurp (seon.config/value :seon.config.root/system-path)))
         write! (fn [nm d] (let [f (str dir "/" nm ".edn")] (spit f (pr-str d)) f))
@@ -1202,8 +1244,8 @@
   evaluations are recorded with origin :outside (the agent's on its branch, root's on main)."
   []
   (let [sys (c/start! {:datoms 2000})
-        port (+ 20000 (mod (lib/c-getpid) 20000))
-        _ (seon.entrance/serve! sys port)
+        ;; port 0: the kernel picks a free one, so two lanes' proofs never collide
+        port (.getLocalPort ^java.net.ServerSocket (seon.entrance/serve! sys 0))
         a (c/spawn! sys {:task "mcp" :branch :mcp1})
         _ (await-status sys [a] #{:idle} 5000)
         msgs [{"jsonrpc" "2.0" "id" 1 "method" "initialize" "params" {"protocolVersion" "2024-11-05"}}
@@ -1271,7 +1313,7 @@
   it O(branches) per spawn: 15 ms at 1,000). A store of its own, the last resort: the
   roster must start empty for the growth to show."
   [n]
-  (let [path (str (seon.config/value :seon.config.root/tmp-dir) "/seon-branch-cost-" (lib/c-getpid))
+  (let [path (str (System/getProperty "user.dir") "/runs/branch-cost-" (lib/c-getpid)) ; this tree's runs, not the shared /tmp
         {conn :conn} (seon.db/open! :lmdb path 2000 :db)
         times (vec (for [k (range (quot n 100))]
                      (let [t0 (lib/now-ns)]
@@ -1334,6 +1376,90 @@
     (c/stop! sys)
     (lib/c-exit 0)))
 
+(defn lease
+  "Run with --set :seon.config.store/eid-lease=50: agent a writes 60 new entities in one transaction, past its
+  lease: refused with :seon.db/lease-spent, nothing applied. A refused transaction keeps the
+  ids it reserved (Datahike's store counter), so a's lease is spent: its next write is
+  refused too, and the record of its evals, which cannot be written on its branch, is
+  recorded on main as its problem. Agent b, the next lease, writes 10: its ids lie past a's
+  lease, never shared."
+  []
+  (let [sys (c/start! {})
+        [a b] (mapv #(c/spawn! sys {:task %}) ["past its lease" "the next lease"])
+        _ (await-status sys [a b] #{:idle} 5000)
+        notes (fn [tag n] (str "(transact! (vec (for [i (range " n ")] {:note/text (str \"" tag "\" i)})))"))
+        r-past (first @(c/submit! sys a (notes "a" 60)))
+        r-count (first @(c/submit! sys a "(count (q '[:find ?n :where [?n :note/text]]))"))
+        r-next (first @(c/submit! sys a (notes "a" 1)))
+        stats @(c/agent-stats! sys a)
+        _ @(c/submit! sys b (notes "b" 10))
+        b-min (read-string (:printed (first @(c/submit! sys b "(q '[:find (min ?n) . :where [?n :note/text]])"))))
+        ;; parks on main's commits until root has recorded a's unrecorded evals (no deadline)
+        lease-q '[:find ?c . :where [?e :seon.error/type :seon.db/lease-spent] [?e :seon.error/count ?c]]
+        recorded (d/q lease-q (seon.e2e/await-db sys #(d/q lease-q %)))
+        spent? #(and (= :err (:tag %)) (re-find #"entity ids are spent" (str (:printed %))))
+        ok (and (spent? r-past) (= "0" (:printed r-count)) (spent? r-next)
+                (= 50 (get-in stats [:ids :of])) (pos-int? recorded)
+                (< (get-in stats [:ids :used] 0) 50)
+                (>= b-min (+ (get-in stats [:ids :from]) 50)))]
+    (out! "past its lease: " (select-keys r-past [:tag :printed]) "\n  error: " (:err r-past))
+    (out! "after the refusal a's notes: " (:printed r-count) "; its next write: " (select-keys r-next [:tag :printed]) "; its ids " (:ids stats))
+    (out! "a's unrecorded evals, recorded on main: " recorded "; b's lowest id " b-min)
+    (out! (if ok "LEASE OK" "LEASE FAILED"))
+    (c/stop! sys)
+    (lib/c-exit (if ok 0 1))))
+
+(defn idle
+  "An idle root steps nothing (owner, 2026-10-21: no beat; health is what flows): root
+  boots and settles (the reconciler's quiescence), a tab opens on its dashboard (an SSE
+  feed on SEON_WEB_PORT) and receives its page; then every root proc's Flow step count is
+  read at the two ends of a window of window-ms with nothing happening, and must not move.
+  Then a change reaches the tab: an agent spawned and a commit to main each grow what the
+  tab received. The wait is the measurement (that nothing happens), not a dependency."
+  [window-ms]
+  (let [port (seon.config/value :seon.config.web/port)
+        sys (c/start! {:datoms 300})
+        _ (seon.e2e/await-quiet sys 0)
+        received (atom 0)
+        sock (java.net.Socket. "127.0.0.1" (int port))
+        _ (doto (.getOutputStream sock)
+            (.write (.getBytes (str "GET /feed?view=root HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: text/event-stream\r\n\r\n") "UTF-8"))
+            (.flush))
+        ;; the tab: an edge reader counting the bytes its feed sends
+        in (.getInputStream sock)
+        _ (doto (Thread. (fn [] (let [buf (byte-array 8192)]
+                                  (loop [] (let [n (try (.read in buf) (catch Exception _ -1))]
+                                             (when (pos? n) (swap! received + n) (recur)))))))
+            (.setDaemon true) (.start))
+        await-more (fn [n0 ms] (let [deadline (+ (lib/now-ns) (* ms 1000000))]
+                                 (loop [] (cond (> @received n0) true
+                                                (> (lib/now-ns) deadline) false
+                                                :else (do (Thread/sleep 5) (recur))))))
+        opened (await-more 0 10000)
+        ;; the page's own first passes (the tab's views, its keyframe) settle first
+        _ (Thread/sleep 1000)
+        ;; root's declared procs and its effect owners (their lanes step only when given work)
+        decl (seon.system/read-decl seon.system/path)
+        pids (sort-by str (concat (keys (:procs decl)) (for [k (keys (:fx decl))] (keyword "fx" (name k)))))
+        counts (fn [] (into (sorted-map) (for [pid pids] [pid (some-> (flow/ping-proc (:graph sys) pid :timeout-ms 1000) ::flow/count)])))
+        b0 @received c0 (counts)
+        _ (Thread/sleep window-ms)
+        c1 (counts) b1 @received
+        moved (into (sorted-map) (for [[pid n] c1 :when (not= n (get c0 pid))] [pid [(get c0 pid) n]]))
+        n-spawn @received
+        a (c/spawn! sys {:task "idle check"})
+        spawned (await-more n-spawn 10000)
+        n-commit @received
+        _ @(c/transact-main! sys [{:db/id "n" :ns/name 'idle.check}])
+        committed (await-more n-commit 10000)
+        ok (and opened (empty? moved) (= b0 b1) spawned committed)]
+    (pprint {:window-ms window-ms :procs (count pids) :steps-at-idle moved :bytes-at-idle (- b1 b0)
+             :tab-opened opened :spawn-reached-tab spawned :commit-reached-tab committed :agent a})
+    (out! (if ok "IDLE OK" "IDLE FAILED"))
+    (.close sock)
+    (c/stop! sys)
+    (lib/c-exit (if ok 0 1))))
+
 (defn seed
   "bin/check's one store: created at :seon.config.root/store-path (bin/check sets SEON_STORE)
   and seeded with about n datoms on :db, before any step boots; each step's root then works on
@@ -1376,12 +1502,14 @@
     "admit" (admit)
     "record" (record)
     "orphan" (orphan)
+    "lease" (lease)
     "rtt" (rtt)
     "fx" (fx (Long/parseLong (or n "1000")))
     "system" (system-check)
     "config" (config-check)
     "problems" (problems-check)
     "threads" (threads-check)
+    "threads-declared" (threads-declared (Long/parseLong (or n "3")))
     "branch-cost" (branch-cost (Long/parseLong n))
     "root" (root-serve)
     ;; this checkout's ports as the config resolves them, "ENTRANCE WEB" (bin/ports)
@@ -1393,4 +1521,5 @@
     "soak" (soak (Long/parseLong (or n "50")) (Long/parseLong (or (first more) "60")) (some-> (second more) Long/parseLong))
     "mem" (mem (Long/parseLong (or n "100")) 3)
     "web" (web-serve (Long/parseLong (or n "6")) more)
+    "idle" (idle (Long/parseLong (or n "5000")))
     (smoke))))

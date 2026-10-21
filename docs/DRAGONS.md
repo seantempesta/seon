@@ -18,6 +18,7 @@ function.
 | Datahike or the store refuses a write (a bad transaction, LMDB full or failing) | `seon.writer/writer-one` | `:seon.writer/refused` (the one error map, with `:ok false`) | the caller of the write: an agent's `transact!` throws it into its own eval (an `:err` item); root's callers read `:ok` and `:seon.error/message` |
 | The model's HTTP call (connect, TLS, timeout, a non-200), made by root's `:model` effect lanes | `seon.model/http-post` | `:seon.model/provider-error`, or `:seon.model/rate-limited` for HTTP 429 | the `:model` owner answers it to the asking agent; `seon.turn/act!` returns it; `seon.turn/work!` ends the attempt `:error` with its message |
 | An agent's authored contract does not compile | `seon.contract/arm!` | `:seon.contract/invalid` | `seon.repl/admit` puts it on the reply item (`:contract-error`); `seon.program/load-src!` reports it as a load error |
+| An agent mints past its block of entity ids (its lease, `seon.config/EID-LEASE`; Datahike's `next-eid` refuses at the ceiling `seon.db/lease!` set) | `seon.agent/transact!` (`seon.db/lease-spent`); for the record of its evals, `seon.repl/record!` | `:seon.db/lease-spent` (`:lease :ceiling :entity-id`; nothing applied, and a refused transaction keeps the ids it reserved, so the lease stays spent) | the agent's eval (an `:err` item); a record of its evals it cannot write goes to root (`{:op :unrecorded}`) and is recorded on main as its problem |
 | Program code from the db does not load (a source or ns form that throws, a missing alias target) | `seon.program/load-src!`, `seon.program/load-ns!`, `seon.program/aliases!` | `:seon.program/error` (`{:ns :message}`) | root and the fork server put load errors in their view and events; an agent's `:load-errors` |
 | The filesystem refuses a write-back (`:file` effect) | `seon.fx/write-file` | `:seon.fx/io-error` | the asker's `my.fx/call` answer, recorded as `:seon.fx/*` on its branch |
 | Root's entrance is not listening (the MCP server's one request: connect, write, read) | `seon.mcp/request!` | the tool's text `{:error ...}` | the outside agent reads it as the tool's answer |
@@ -54,6 +55,7 @@ function.
 | An agent past its heap bound | Jolt's heap ceiling (`seon.lib/heap-cap!`) | `OutOfMemoryError` in the form: an `:err` item |
 | A forked process holding its parent's LMDB env and connections (physics: fork shares handles) | `seon.db/after-fork!` | forgotten, not closed; the agent opens the store itself |
 | Datahike refuses an agent's own write (its run-ahead apply) | `datahike.writer/apply!` (the library's edge) | the exception as its answer; `seon.agent/transact!` throws its message into the agent's eval (an `:err` item) |
+| A process dies inside an LMDB write txn while other processes hold the store's env open (a root SIGKILLed mid-commit, a crash check) | LMDB's own writer lock, built robust (`bin/build lmdb`, below) | the kernel releases the dead holder's lock (SysV `SEM_UNDO`); the txn is lost, the next writer commits |
 
 ## Physics: who may run threads
 
@@ -68,6 +70,12 @@ Two rules of the OS and Chez that no code may "fix" by adding a thread or a chec
   (`seon.sock`), and only root, which never forks after boot, holds `jolt.async.remote`
   ends with pumps. `bin/check threads` counts the OS threads of the fork server and of an
   agent. The real fix is a Chez atfork handler that resets the sweepers (RC1's "next (b)").
+  Root, which does hold threads, fixes its sweepers at boot, right after the fork server is
+  forked: `seon.lib/gc-sweepers!` (our Chez's `(cs)collect_sweepers`, branch
+  `jolt/gc-sweepers`) fixes them at `seon.config/GC-SWEEPERS`, 0 (measured: sweepers did
+  not shorten root's small collections), and no collection starts one.
+  Unfixed, Chez kept one per thread a collection found waiting, so root's thread count
+  drifted by load (0, 5, 15 sweepers across identical runs; lane THREADS).
 - **On macOS, a descriptor in flight by SCM_RIGHTS can be discarded when other unix
   sockets close**, so the sender keeps its copy until the receiver confirms (the fork
   server's `:in-flight`, a clone's socket kept until `:cloned`). A descriptor rides a frame
@@ -94,3 +102,23 @@ a function first called on two threads at once can be missed from `touched`. Roo
 are approximate and nothing reads them as proof. A measurement nested inside another (a
 cost proof run inside an eval form) restarts the epoch, so the outer form records only the
 calls after it.
+
+## LMDB robust locks
+
+On macOS, LMDB locks with POSIX semaphores unless built with `MDB_USE_ROBUST` (`mdb.c`:193).
+Those are not robust: a process SIGKILLed inside a write transaction leaves the writer lock
+held, and every other process with the env open (root always has its store open) blocks on
+its next write, forever. Measured 2026-10-21 by `target/lmdb-kill` (`native/lmdb_kill.c`):
+with the POSIX build the next writer and the holder both block; with the robust build both
+commit and the killed transaction is gone. `bin/build lmdb` builds `target/lib/liblmdb.dylib`
+robust from `../vendor-c/lmdb` (stamped with its commit), `bin/env` points `JOLT_LMDB_LIB`
+at it, and `bin/check`'s `lmdb-kill` step proves it. Every process on a store must load the
+same build: the lock scheme is part of the lock file's format.
+
+The robust build uses SysV semaphores, which outlive their processes: each store path keeps
+one semaphore set (two semaphores, keyed by the lock file) after its last process exits.
+See them with `ipcs -s` (LMDB's are mode `--ra-ra-r--`, owner you); one is reused when the
+same store opens again. The system limit is `sysctl kern.sysv.semmni` (87381 here), so one
+store per run is nothing. Removing a set (`ipcrm -s ID`) while no process has its store open
+is safe; LMDB makes a new one at the next open.
+

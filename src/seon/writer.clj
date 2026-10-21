@@ -189,7 +189,8 @@
       (other-op (commit-batch st o) o m))
     (catch Throwable e
       ;; an interop edge (Datahike) refused: the request's answer is the error, as data
-      (answer o (:dest m) (refused (step/error-msg e) {:merged? false}))
+      ;; with the store's map use: a full map (MDB_MAP_FULL) shows itself against its size
+      (answer o (:dest m) (refused (step/error-msg e) (cond-> {:merged? false} (pdb/map-use (:cfg st)) (assoc :store (pdb/map-use (:cfg st))))))
       (dissoc st :pend))))
 
 (defn- drain {:malli/schema [:=> [:cat :seon.host/chan :seon.writer/request] [:vector :seon.writer/request]]}
@@ -247,8 +248,10 @@
                 :else (assoc st :dirty dirty))
            n-tx (count (filter #(= :tx (:op %)) reqs))
            st (-> st (update :tx-count + n-tx) (update :batches inc))]
-       (when (seq reqs)
-         (step/out! o :to-api {:op :writer :tx-count (:tx-count st) :batch-ms (lib/ms-since t0) :n-tx n-tx :commits commits}))
+       ;; what changed, to root's view: a batch, or a flush (its count is shown, never pinged)
+       (when (or (seq reqs) flush-now?)
+         (step/out! o :to-api {:op :writer :tx-count (:tx-count st) :batch-ms (lib/ms-since t0) :n-tx n-tx :commits commits
+                               :flushes (:flushes st 0)}))
        [st @o]))))
 
 (defn flusher-proc

@@ -657,7 +657,8 @@
       :read (one (request (assoc-in st [:flights aid :branch-db] r) aid :diffed
                           {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}}))
       ;; every attempt is a new agent: none is reused
-      :diffed (let [[st o1] (request st aid :ignored {:op :kill :id agent})
+      ;; root stops it because its attempt ended: its view says :ended, not :killed
+      :diffed (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
                     [st o2] (write st aid :done (judge-tx st f (:results f) (:branch-db f) (into #{} (map pr-str) (:ours r))))]
                 [st [o1 o2]])
       ;; each member's answer, as one write: merged at the train's t, behind (its merge task

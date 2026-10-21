@@ -23,7 +23,7 @@
   {:malli/schema [:=> [:cat :seon.root/sys] :map]}
   [sys]
   (let [db @(:conn sys) idx (r/index db)]
-    {:agents (into (sorted-map) (for [[id a] (:agents (c/state sys)) :when (not (#{:dead :killed} (:status a)))]
+    {:agents (into (sorted-map) (for [[id a] (:agents (c/state sys)) :when (not (#{:dead :killed :ended} (:status a)))]
                                   [id (select-keys a [:branch :status :task])]))
      :tasks (into (sorted-map) (for [[id t] (task/tasks db)]
                                  [id (cond-> {:execution (:seon.task/execution t) :done (r/done? idx id) :blocked-by (r/blocked-by idx id)}
@@ -89,8 +89,12 @@
               {:items (root-eval sys (:code req))}
               {:items (mapv #(select-keys % [:tag :form :printed :out :recorded :handle])
                             @(c/submit! sys ag (:code req) {:origin :outside}))})
+      ;; the block's text as the model reads it: printed to the agent's output, not as a
+      ;; value (a value comes back as a string literal, escaped, under the reply's budget);
+      ;; recorded with origin :context, a context read, which renders refer to, not repeat
       :context (if-let [{:keys [task attempt]} (attempt-of sys ag)]
-                 {:context (:printed (last @(c/submit! sys ag (pr-str (list 'seon.turn/context-block task attempt)) {:origin :outside})))}
+                 (let [it (last @(c/submit! sys ag (pr-str (list 'print (list 'seon.turn/context-block task attempt))) {:origin :context}))]
+                   (if (= :err (:tag it)) {:error (:printed it)} {:context (:out it)}))
                  {:error (str ag " works no task: attach one first")})
       :attach (attach! sys (:task req))
       :done (if-let [{:keys [attempt task env]} (attempt-of sys ag)]
@@ -116,13 +120,16 @@
     (.close sock)))
 
 (defn serve!
-  "Listen on 127.0.0.1:port: the accept loop and each connection on edge threads (blocking
-  accept and reads). Answers the server socket."
-  {:malli/schema [:=> [:cat :seon.root/sys pos-int?] :any]}
+  "Listen on 127.0.0.1:port (0: a free port the kernel picks; read it with .getLocalPort):
+  the accept loop and each connection on edge threads (blocking accept and reads). Answers
+  the server socket."
+  {:malli/schema [:=> [:cat :seon.root/sys nat-int?] :any]}
   [sys port]
   (let [ss (java.net.ServerSocket. port 50 (java.net.InetAddress/getByName "127.0.0.1"))]
-    (doto (Thread. (fn [] (loop [] (let [s (.accept ss)]
-                                     (doto (Thread. (fn [] (serve-connection! sys s))) (.setDaemon true) (.start))
-                                     (recur)))))
+    (doto (Thread. ^Runnable (fn [] (loop [] (let [s (.accept ss)]
+                                                (doto (Thread. ^Runnable (fn [] (serve-connection! sys s)) "seon-entrance-conn")
+                                                  (.setDaemon true) (.start))
+                                                (recur))))
+                   "seon-entrance-accept")
       (.setDaemon true) (.start))
     ss))
