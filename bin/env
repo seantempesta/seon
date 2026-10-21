@@ -18,7 +18,7 @@ export HOME=$ROOT/target/home
 # published by temp+rename (docs/source.md). One directory in the main tree's target/, found from
 # git's common dir so a worktree anywhere (bin/worktree --at DIR too) names the same absolute path.
 # (The AOT cache stays per checkout until its keys are path-free: the J2/P2 phases.)
-SEON_MAIN=$(cd "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
-JOLT_BUILD_CACHE_DIR=${JOLT_BUILD_CACHE_DIR:-$SEON_MAIN/target/cache/build}
-JOLT_RUNTIME_CACHE_DIR=${JOLT_RUNTIME_CACHE_DIR:-$SEON_MAIN/target/cache/runtime}
+MAIN_TREE=$(cd "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
+JOLT_BUILD_CACHE_DIR=${JOLT_BUILD_CACHE_DIR:-$MAIN_TREE/target/cache/build}
+JOLT_RUNTIME_CACHE_DIR=${JOLT_RUNTIME_CACHE_DIR:-$MAIN_TREE/target/cache/runtime}
 export JOLT_BUILD_CACHE_DIR JOLT_RUNTIME_CACHE_DIR
