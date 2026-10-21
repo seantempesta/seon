@@ -27,6 +27,8 @@ Keep that. Concretely:
    - a cache that slowed every miss;
    - a flush per eval.
 6. **Parallel and owned.** Work is split into lanes that each own their files, report with commits and numbers, and never touch another lane's tree. Root integrates. A lane that finds its plan's premise wrong stops and sends it back with the evidence.
+   - **A lane that changes shared foundations works in its own worktree** (owner, 2026-10-21): `bin/worktree NAME` makes `../next-NAME` on branch `jolt/NAME`, with each submodule a worktree at its pinned commit and `target/` an APFS clone, so it builds (`bin/build seon`) and tests at once and its half-done work never breaks another lane. On Jolt this is safe: each process loads only its own `JOLT_PWD` and `target/`.
+   - It lands only green work: `bin/check` green in the worktree, then commits cherry-picked onto main by explicit paths. It never edits the main tree; builds still take the one build lock; `bin/worktree --remove NAME` cleans up (the branch is kept).
 7. **Small.** About 10k lines of our own code. When something grows, ask what else should be carrying it. Every addition names what it replaces.
 
 ## Get out of the way (owner, 2026-10-20)
