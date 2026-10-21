@@ -2,7 +2,8 @@
   "Root's verbs on tasks (lanes R1 and M1's proto.agents.root): write desired state on main;
   the reconciler proc does the rest. Each takes root's system (seon.root/start!)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [seon.config :as config]))
+  (:require [seon.contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [seon.config :as config]
+            [seon.reconcile :as reconcile] [seon.db :as pdb]))
 
 (defn create!
   "Write task declarations as held tasks. Answers the writer's answer, or the refusal."
@@ -73,3 +74,26 @@
   the problems, not the program."
   {:malli/schema [:=> [:cat :seon.root/sys] :seon.problems/report]}
   [sys] (problems/report @(:conn sys) (root/errors sys)))
+
+(defn generation
+  "The next generation on main (seon.reconcile/generation): the last merges commit built,
+  {:commit :checkout :binary :ms}, or why its build was refused; nil before any."
+  {:malli/schema [:=> [:cat :seon.root/sys] [:maybe :seon.root/generation]]}
+  [sys] (reconcile/generation @(:conn sys)))
+
+(defn next-generation
+  "What `bin/root next` starts (docs/source.md#the-next-generation): [checkout & args], the
+  built generation's tree and the root arguments that resume this root's store and main in
+  it, Seon's source now its tree; nil when no generation is built."
+  {:malli/schema [:=> [:cat :seon.root/sys] [:maybe [:vector :string]]]}
+  [sys]
+  (when-let [{:keys [checkout]} (let [g (generation sys)] (when (:binary g) g))]
+    (into [checkout]
+          (mapcat (fn [[k v]] ["--set" (str k "=" (pr-str v))]))
+          [[:seon.config.root/store-path (:store-path sys)]
+           [:seon.config.root/main (name (pdb/conn-main (:conn sys)))]
+           [:seon.config.source/root checkout]
+           [:seon.config.source/dirs (config/value :seon.config.source/dirs)]
+           [:seon.config.source/branch (config/value :seon.config.source/branch)]
+           [:seon.config.source/generations-dir (config/value :seon.config.source/generations-dir)]
+           [:seon.config.source/build-lock (config/value :seon.config.source/build-lock)]])))
