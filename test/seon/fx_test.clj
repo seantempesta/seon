@@ -65,3 +65,19 @@
     (is (= (+ (count text) 1 2) (get-in r [:value :bytes])) "bytes on disk, not characters: e-acute 2, em dash 3")
     (is (= text (slurp p)))
     (is (= ["f.clj"] (vec (.list (java.io.File. d)))) "no staged file left")))
+
+(deftest a-dependency-is-resolved-through-its-owner
+  ;; task seon.fx/a-dependency-is-fetched-through-its-owner (the PKG plan, owner-approved):
+  ;; the :deps performer resolves a deps map with Jolt's own jolt.deps and answers the roots
+  ;; to load from, or its one typed error naming what did not resolve; no network here (a
+  ;; :local/root library made in this test's scratch dir)
+  (let [d (scratch-dir)
+        lib (str d "/tinylib")
+        _ (.mkdirs (java.io.File. (str lib "/src/tiny")))
+        _ (spit (str lib "/deps.edn") "{:paths [\"src\"]}")
+        _ (spit (str lib "/src/tiny/core.clj") "(ns tiny.core)\n(defn hello [] :hi)\n")
+        r (fx/resolve-deps {:req {:deps {'tiny/tiny {:local/root lib}}}})]
+    (is (some #(= (str lib "/src") %) (get-in r [:value :roots])) "the library's absolute source root")
+    (let [bad (fx/resolve-deps {:req {:deps {'nowhere/nothing {:local/root (str d "/missing")}}}})]
+      (is (= :seon.fx/unresolved (:seon.error/type bad)) "a dependency that cannot be resolved is its typed error")
+      (is (contains? (set (:deps bad)) 'nowhere/nothing) "naming it"))))
