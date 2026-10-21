@@ -14,6 +14,8 @@
 # the step (SEON_RUN: <step>-<time>-<id>); the recovery steps (durable, window, resume) kill
 # and reopen that same store on the same branch. The store is kept, every branch with it.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# a check's roots listen on no dashboard port (the owner's 7777 and every lane's stay theirs)
+export SEON_WEB_PORT=${SEON_WEB_PORT:-0}
 # one full check at a time on this machine, every lane's (each boots ~34 roots and up to 100
 # agents): a full run takes the check lock and runs niced; a single mode does not
 if [[ -z ${SEON_CHECK_LOCKED:-} && ( -z ${1:-} || ${1} =~ ^[0-9]+$ ) ]]; then
@@ -49,7 +51,15 @@ echo "== seed (the one store every step branches from)"; step seed "" run seed 2
 echo "== dragons"; step dragons "" "$ROOT/bin/dragons"
 echo "== contracts"; step contracts ":contracted|:uncontracted|:result" run contracts
 echo "== census (no [:fn] without :gen; mg/check on every pure contract, in the release binary)"
-step census ":generated|:failed \[\]|:result" run census
+# in K shards at once, each a process checking every Kth contracted var (seon.check/census);
+# each shard's exit status counts. K = 4 until the config file holds it (lane CONFIG).
+K=4; CP=()
+for i in $(seq 0 $((K-1))); do run census $i/$K > "$OUT/census-$i.log" 2>&1 & CP+=($!); done
+for i in $(seq 0 $((K-1))); do
+  wait ${CP[$((i+1))]}; st=$?
+  grep -E ":generated|:failed \[\]|:result" "$OUT/census-$i.log"
+  (( st == 0 )) || { FAILED+=("census-$i (exit $st, expected 0, $OUT/census-$i.log)"); echo "FAILED census-$i (exit $st, expected 0)"; }
+done
 echo "== fx (an effect from an agent through its owner proc)"; step fx ":unknown|:test-fork|^FX " run fx 200
 echo "== config (the config in force as facts on main; an agent reads them from its branch)"; step config "" run config
 echo "== system (root's procs from resources/seon/system.edn; apply! touches only what changed)"; step system "" run system

@@ -273,11 +273,17 @@
 (defn census
   "The census gate: no [:fn pred] schema without :gen anywhere in the registry or a
   contract, and every contract whose arguments generate and whose namespace is pure passes
-  malli.generator/check (100 runs each). Prints the counts; exits 0 only when both hold."
-  []
-  (let [nss (platform-nss)
-        vs (for [n nss v (vals (ns-interns n)) :when (contract/contract v)] v)
-        no-gen (vec (concat (for [[k f] contract/forms :when (seq (fn-without-gen f))] k)
+  malli.generator/check (100 runs each). Prints the counts and the contracts it checked;
+  exits 0 only when both hold. With shard \"I/K\" (0 <= I < K) it censuses only the
+  contracted vars at positions I, I+K, ... of the platform's contracted vars sorted by
+  symbol (the registry's own forms in shard 0), so K shards in K processes check exactly
+  what one run does. By var, not namespace: seon.reconcile alone holds 36 of the 82
+  checked contracts, so a namespace split cannot go below its share."
+  [& [shard]]
+  (let [[i k] (if shard (mapv #(Long/parseLong %) (clojure.string/split shard #"/")) [0 1])
+        vs (keep-indexed #(when (= i (mod %1 k)) %2)
+                         (sort-by symbol (for [n (platform-nss) v (vals (ns-interns n)) :when (contract/contract v)] v)))
+        no-gen (vec (concat (when (zero? i) (for [[k f] contract/forms :when (seq (fn-without-gen f))] k))
                             (for [v vs :when (seq (fn-without-gen (contract/contract v)))] (symbol v))))
         ;; its arguments generate (every arity's input)
         generates? (fn [v] (try (let [s (m/deref (contract/schema (contract/contract v)))]
@@ -289,9 +295,10 @@
         pure (filter #(and (or (pure-nss (ns-name (:ns (meta %)))) (pure-fns (symbol %)))
                            (not= :seon.step/step-fn (contract/contract %)) (generates? %)) vs)
         checked (for [v pure
-                      :let [r (try (mg/check (m/deref (contract/schema (contract/contract v))) @v {:registry contract/registry :num-tests 100 :seed 42})
+                      :let [t0 (System/nanoTime)
+                            r (try (mg/check (m/deref (contract/schema (contract/contract v))) @v {:registry contract/registry :num-tests 100 :seed 42})
                                (catch Throwable e {:smallest :threw :seed (ex-message e)}))]]
-                  [(symbol v) r])
+                  [(symbol v) r (lib/r2 (/ (- (System/nanoTime) t0) 1e6))])
         ;; malli could not generate an [:and ...] argument (such-that): not generated, not failed
         such-that (set (for [[sym r] checked :when (= ":malli.generator/such-that-failure" (:seed r))] sym))
         checked (remove (comp such-that first) checked)
@@ -300,8 +307,9 @@
                              (let [c (:check (first (:errors r)))]
                                {:smallest (:smallest c) :problem (some-> (:malli.core/result c) ex-message)}))]))
         ok (and (empty? no-gen) (empty? failed))]
-    (pprint {:contracts (count vs) :fn-without-gen no-gen
+    (pprint {:shard [i k] :contracts (count vs) :fn-without-gen no-gen
              :generated-and-checked (count checked) :failed failed
+             :checked (vec (sort (map first checked))) :ms (into (sorted-map) (map (juxt first #(nth % 2))) checked) :such-that (vec (sort such-that))
              :not-generated (count (remove generates? vs))
              :result (if ok :CENSUS-OK :CENSUS-FAILED)})
     (lib/c-exit (if ok 0 1))))
@@ -1362,7 +1370,7 @@
     "backpressure" (backpressure (Long/parseLong (or n "200")))
     "program" (program)
     "contracts" (contracts)
-    "census" (census)
+    "census" (census n)
     "units" (units)
     "e2e" (lib/c-exit (if (seon.e2e/run n more) 0 1))
     "admit" (admit)

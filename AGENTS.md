@@ -42,13 +42,20 @@ When you feel it, stop and ask three questions:
 - **Is this recording what happened, or judging it?** Record it. The proofs and the merge judge it, not a filter in the middle.
 - **What breaks if the check isn't there?** If the answer is "nothing we've observed", don't add it. If something real breaks, fix that thing at its cause.
 
-## The model (everything is one of these)
+## The pillars: everything is data flowing through the system (owner, 2026-10-21)
 
-- **A process.** Agents are forked OS processes: half a millisecond, a megabyte or two, isolated, and memory returned on exit. Root holds threads; anything that forks stays single-threaded.
-- **A Flow proc.** Every component is a step-fn proc with an id, the same verbs (send, ping, pause, resume, stop, restart via `update!`) and bounded channels. Procs are declared in `resources/seon/system.edn` and started explicitly. Ordering is dataflow.
-- **A task.** All work is task entities with `:needs`, a plan and proofs that accumulate. Desired state lives on attributes, and observed state is facts. One React-like reconciler closes the gap, and it costs only what changed. Merge is a task.
-- **A value.** State is immutable Datahike values with structural sharing. Each process owns its connection: agents own their branch, and root owns main. Cost follows what changed: tx reports, digests, shared nodes.
-- **A render.** Every view, the model's context included, is a render declared by a schema. Renders are incremental, and HTML patches go out through Datastar. UI actions are evals.
+**If nothing has changed, we do nothing** (owner, 2026-10-21). No proc steps, renders, pings, flushes or polls on an idle system; work exists only because data changed. **The system is reactive:** a proc reports its own problems as facts when they happen and its changes as events; nothing pings to ask whether it is healthy. Health is the absence of open problem facts.
+
+This is not a traditional program with a scheduler, timers and callers that wait. Data flows: a fact is written, a commit flows to whoever reads it, a message lands on a queue, a proc runs because work arrived and parks when there is none. Every need is met by one of these pillars. If a need seems not to fit one, stop and say so; never route around them.
+
+- **A value.** State is immutable Datahike values with structural sharing, in one store with many branches. Each process owns its connection: agents own their branch, root owns main. A record is a fact; history is kept.
+- **A Flow proc and its channels.** Every component is a step-fn proc, declared as data (`resources/seon/system.edn`), with bounded channels. A dependency is a channel a proc parks on; back-pressure is a full channel; ordering is dataflow; the end of a run is the message count reaching zero. Procs run on fibers; a blocking foreign call gets a declared thread.
+- **A task.** All work is task entities: desired state on attributes, observed state as facts, `:needs` between them. One reconciler closes the gap and costs only what changed. Merges, checks and builds are tasks; an OS child is an effect owned by a proc, and its exit is a fact.
+- **A process.** Agents are forked OS processes, isolated, each on its own branch, speaking messages to its stand-in proc.
+- **A render.** Every view, the model's context included, is a render declared on the value's schema, over the one printer.
+- **An error is data** that flows to whoever can fix it: a defect holds its message until the code is fixed; a typed error goes to the requester, agent or task that can act on it.
+
+**Routing around a pillar** (each of these happened on 2026-10-21): a timer, sleep, poll, deadline or retry instead of a queue; a fallback default instead of an error fact; a new runner, manager or wrapper beside the reconciler and procs; a store per test instead of a branch; an env var instead of a config fact; text or regex instead of the compiler's facts; a script's line order instead of `:needs`; an OS thread instead of a fiber; stdin as a process's lifecycle instead of a fact or message.
 
 ## Laws (short; the reasons are in DECISIONS)
 
@@ -143,6 +150,7 @@ Tell root; root orders it among the rest. Mined problems (`my.root/problems`) be
 
 ## Mistakes we have made, and do not repeat
 
+- **A clock or timer deciding anything** (owner, 2026-10-21: "no clocks or timers … running and pausing based on workload"). Procs run on queued work and park without it; batches follow the queue; runs end on the message count reaching zero; runaway work is bounded by work done (allocation, steps), never elapsed time. Measure time, never act on it. The one exception is the cron proc: at a scheduled time it puts a message on a queue, and nothing else.
 - **A timeout, deadline, sleep or retry standing in for a dependency.** Flows depend on each other through channels that park. "Never came" is an observed, recorded fact (stuck, stalled, dead), never a clock that ends a run.
 - **A gate by the shape of a form or a list of kinds.** Record what actually happened: the compiler's events, the runtime's state. The proofs and the merge judge.
 - **A swallowed error, an ignored answer, a fake default.**
@@ -171,6 +179,8 @@ Tell root; root orders it among the rest. Mined problems (`my.root/problems`) be
 
 - **Builds:** run as `nice -n 15 /usr/bin/lockf -k ~/src/seon-jolt/build.lock bin/build`, which pins the patched Chez via `JOLT_CHEZ`.
 - **Probes and timings:** probes run under `nice -n 10`. No timed runs while load is above ~20.
+- **A process that must outlive your tool call** (a standing root, a server) must be re-parented to PID 1: a double fork. **Start your root with `bin/root`** (start | status | stop): detached, on your checkout's own ports (`bin/ports`), log in runs/root.log; `bin/mcp` reaches it. The tool host kills a background task's whole process tree when the task is stopped or its agent exits; nohup or setsid alone don't help. (ISOLATION, 2026-10-21.)
+- **Ports are config, never literals:** don't bind 7777 or 7888 (the owner's root and dashboard). A check's root listens on nothing; your worktree's own ports come from its config/local.edn.
 - **One full check at a time:** `bin/check` takes `~/src/seon-jolt/check.lock` and runs niced. Iterate with single modes.
 - **Never flood the machine** (2026-10-21: two experiments made 7,500 and 5,900 threads and drove load to 982). Anything that can make threads or processes starts at n ≤ 100, under `nice -n 15`; watch `ps -M -p PID | wc -l` while it runs and kill your own process past 200 threads. One experiment process at a time.
 - **Hygiene:** kill only your own PIDs, delete only paths you created, install nothing system-wide.

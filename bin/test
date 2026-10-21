@@ -7,4 +7,6 @@ JOLT=$ROOT/target/jolt/jolt
 [ -x "$JOLT" ] || { echo "test: no target/jolt/jolt; run bin/build jolt first" >&2; exit 1; }
 . "$ROOT/bin/env"
 cd "$ROOT"
+# a root a test boots listens on no dashboard port
+SEON_WEB_PORT=${SEON_WEB_PORT:-0}; export SEON_WEB_PORT
 HOME=$ROOT/target/home JOLT_PWD=$ROOT exec "$JOLT" -A:test run -m test-runner "$@"
