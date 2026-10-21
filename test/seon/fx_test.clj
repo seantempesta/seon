@@ -1,7 +1,7 @@
 (ns seon.fx-test
   "The effect owner and lane step-fns as plain functions (no graph): admission by lanes,
   priority order, budget refusal, the queue bound, and a lane answering a defect."
-  (:require [clojure.test :refer [deftest is testing]] [seon.fx :as fx] [seon.config :as cfg]
+  (:require [clojure.test :refer [deftest is testing]] [jolt.deps] [seon.fx :as fx] [seon.config :as cfg]
             [clojure.core.async.flow :as flow]))
 
 (defn- owner [lanes] (fx/owner-proc {:kind :t :lanes lanes :work nil :back nil}))
@@ -81,3 +81,10 @@
     (let [bad (fx/resolve-deps {:req {:deps {'nowhere/nothing {:local/root (str d "/missing")}}}})]
       (is (= :seon.fx/unresolved (:seon.error/type bad)) "a dependency that cannot be resolved is its typed error")
       (is (contains? (set (:deps bad)) 'nowhere/nothing) "naming it"))))
+
+(deftest a-missing-local-root-fails-in-jolts-resolver
+  ;; task jolt.deps/a-missing-local-root-is-unresolved: red until Jolt's own resolver refuses it
+  (let [d (scratch-dir)
+        r (try (jolt.deps/resolve-deps {'nowhere/nothing {:local/root (str d "/missing")}} ".") nil
+               (catch Throwable e (ex-data e)))]
+    (is (contains? (set (map :coord (:unresolved r))) 'nowhere/nothing))))

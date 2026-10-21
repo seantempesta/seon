@@ -665,7 +665,7 @@
     ;; whose boot fact was refused cannot start anything, so its refusal ends the boot
     (let [r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (into (task/boot-tx boot max-running) (cfg/facts config cfg/sources))}})]
       (when-not (:ok r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r (:error r))) r))))
-    (when (and source (empty? (source/source-nss @conn)))
+    (when (and source (empty? (source/source-files @conn)))
       (import-source! sys source))
     sys))
 

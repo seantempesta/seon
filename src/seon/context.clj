@@ -29,6 +29,7 @@
      "LOOSE (a third of the estimate or less) is not red. Its failure message prints measured/estimate per size."
      "Verbs: (my.task/current) your task; (my.task/update! :seon.task/plan f & args) improve your plan;"
      "(my.task/send-back! reason counterexample) when the task is impossible;"
+     "(my.schema/register! k form) changes a schema (resources/seon/schemas) on your branch, as defn changes a function: your next forms see it;"
      "(my.turn/wait) to stop and wait for root."
      "Your branch sees only its own changes. A merge task's branch has main merged in: its :unmerged entries"
      "each show :base, :ours and :theirs. Resolve one by re-defining the var with the content both sides need,"
