@@ -102,7 +102,8 @@
   {:malli/schema [:=> [:cat :seon.host/db :symbol :string [:maybe :string]] :seon.db/tx-data]}
   [db nsym text file]
   (let [{:keys [accounts tail]} (accounts nsym text)
-        tx (vec (mapcat #(program/account-tx db % (:order %)) accounts))]
+        tx (vec (concat (mapcat #(program/account-tx db % (:order %)) accounts)
+                        (when file (for [a accounts] {:db/id (str "form " (:id a)) :form/source true}))))]
     (cond-> tx
       ;; a file's tail is kept even when empty: no newline at its end is part of the file
       (or file (seq tail)) (conj (cond-> {:db/id (str "ns " nsym) :ns/name nsym :ns/tail tail}

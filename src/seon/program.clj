@@ -433,8 +433,10 @@
 
 ;; ---- loading ---------------------------------------------------------------------------
 ;; A namespace imported from a file (seon.source: it has an :ns/file) is the running
-;; generation's own code, compiled into this binary: main's facts for it are the next
-;; generation's source, written back and built, never evaluated here.
+;; generation's own code, compiled into this binary. Main's facts for it are the next
+;; generation's source, written back and built: root and the fork server (load-all!,
+;; load-changes!) never evaluate them. An agent runs its branch's changes to it like any
+;; program's (load-diff!: every form but the imported text the binary already holds).
 
 (defn- compiled?
   "Was namespace nsym imported from a file on db (the binary holds it compiled)?"
@@ -509,17 +511,15 @@
 
 (defn load-diff!
   "Make this process run db-to's program where it holds db-from's: each live form db-to
-  has that db-from had not is loaded, in load order, and each definition db-from had that
-  db-to has none of is removed. Answers the load errors."
+  has that db-from had not is loaded, in load order (but imported source text, which the
+  binary holds compiled), and each definition db-from had that db-to has none of is
+  removed. Answers the load errors."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.program/error]]}
   [db-from db-to]
   (let [from (set (map :id (live-forms db-from)))
         to-defs (definitions db-to)]
-    (doseq [k (keys (definitions db-from)) :when (not (contains? to-defs k))
-            :let [nsym (case (first k) :ns (second k) (symbol (namespace (second k))))]
-            :when (not (compiled? db-to nsym))]
-      (remove-definition! k))
-    (load-forms! (loadable db-to (remove #(from (:id %)) (live-forms db-to))))))
+    (doseq [k (keys (definitions db-from)) :when (not (contains? to-defs k))] (remove-definition! k))
+    (load-forms! (remove #(or (from (:id %)) (:form/source (d/entity db-to (:e %)))) (live-forms db-to)))))
 
 (defn load-changes!
   "Load what resolved tx-data ops change, read against db (after them): each definition

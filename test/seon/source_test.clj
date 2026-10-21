@@ -109,6 +109,15 @@
         (is (= (str pt-text "\n(defn thrice [x] (* 3 x))\n")
                (get (source/files main2 (source/changed-nss ours)) "src/app/pt_src.clj")))))))
 
+(deftest an-agent-runs-its-branchs-change-to-imported-source
+  (let [main (main-with-file)
+        branch (pt/record main 'app.pt-src "(defn twice [x] (* 2 x))")]
+    (remove-ns 'app.pt-src)
+    (is (= {:loaded 0 :errors []} (program/load-all! main)) "main's imported text is the binary's: never evaluated")
+    (is (= [] (program/load-diff! main branch)))
+    (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
+    (is (nil? (resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again")))
+
 (defn- git [dir & args]
   (let [r (apply sh/sh "git" "-C" dir args)]
     (is (zero? (:exit r)) (str args " " (:err r)))

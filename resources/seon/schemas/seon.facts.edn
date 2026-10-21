@@ -10,6 +10,10 @@
  ;; the exact text as written, and the whitespace and comments before it in its file
  :form/src :string
  :form/lead :string
+ ;; the form is the text of a source tree a generation was built from (seon.source's import):
+ ;; the binary holds it compiled, so no process evaluates it; a form an agent or a merge
+ ;; makes never carries it
+ :form/source :boolean
  :form/ns [:and {:seon.db/index true} :seon.db/ref]
  ;; its place among its namespace's forms (a file's order; a new form after all others)
  :form/order :int
@@ -53,7 +57,7 @@
                       [:form/lead {:optional true} :form/lead] [:form/defines {:optional true} :form/defines]
                       [:form/declares {:optional true} :form/declares] [:form/refs {:optional true} :form/refs]
                       [:form/requires {:optional true} :form/requires] [:form/banned {:optional true} :form/banned]
-                      [:form/inline-defs {:optional true} :form/inline-defs]]
+                      [:form/inline-defs {:optional true} :form/inline-defs] [:form/source {:optional true} :form/source]]
  :seon.db/ns-fact [:map {:seon.db/attributes true} [:ns/name :ns/name] [:ns/doc {:optional true} :ns/doc]
                     [:ns/form {:optional true} :ns/form] [:ns/file {:optional true} :ns/file] [:ns/tail {:optional true} :ns/tail]]
  :seon.db/var-fact [:map {:seon.db/attributes true}
