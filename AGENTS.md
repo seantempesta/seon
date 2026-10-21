@@ -109,7 +109,9 @@ The order is **delete first, then foundations, then fixes**. Anything shared by 
 - Lanes waiting on a dependency read and plan; they run nothing heavy and keep nothing running.
 
 ### Learn, then plan, then act
-1. **What exists.** Search `docs/` (the patterns page first), the task files and the code, so nothing is built twice.
+1. **What exists, written into the plan.** Find the relevant wiki sections (`docs/README.md` is the map; the patterns page first), the task files and the code, so nothing is built twice. Then:
+   - write the sections' addresses into the task as `:seon.task/docs`, and the vars and files as `:seon.task/refs`, so every later step's context pulls exactly them;
+   - state the differences in the plan: where a section and the code disagree, and what this task changes relative to what the sections say. Those differences are the wiki edits this task owes.
 2. **What v1 did.** Read `~/src/seon` for the same problem: code, decisions, research, reverts, read-only. Port the best parts onto our pillars, and name the mistakes you are not repeating.
 3. **The field's best known way.** Don't trust a design made in five minutes. Research it: the web, and Gemini Flash through `../bin/agy-agent` as a searcher. Verify what it says.
 4. **Prove it in a REPL** at n ≤ 100.
@@ -162,7 +164,7 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
 
 ## 6. The docs are a wiki, and the system's memory
 
-- **Pages:** `docs/<topic>.md`, one concept per page, indexed in `docs/README.md`. A section is addressed `topic#slug` and has a `Describes:` EDN line naming its vars, attrs and files. The docs are mirrored in the database with real references.
+- **Pages:** `docs/<topic>.md`, one concept per page. `docs/README.md` is a map of the topics, not a file list, so a research step can find what's relevant. A section is addressed `topic#slug` and has a `Describes:` EDN line naming its vars, attrs and files. The docs are mirrored in the database with real references.
 - **References are data:** `:seon/docs` on a definition, `:seon.task/docs` and `:seon.task/refs` on a task. The context pulls the describing sections in automatically.
 - **Depth follows the delimiter** (v1's `seon.ref`):
   - a bare name pulls its summary;
