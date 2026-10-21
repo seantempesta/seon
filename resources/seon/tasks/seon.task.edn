@@ -1,0 +1,13 @@
+[{:seon.task/name "a-task-cites-what-it-needs"
+  :seon.task/plan "Found by the first DeepSeek runs (2026-10-21): in scenario `hairy` a task with no plan of its own got `seon.fixtures/decls`' default, which cites `app.m/a` (the task's name, a var that does not exist) instead of the functions its proof calls. The agents capped through two refinements (24 model calls, 69k tokens) and one wrote an uncontracted `app.inspect/ns-info` to look around. The context said only `:unresolved true` (`seon.context/resolve-ref`), and nobody was told when the task was written. A task's context is only as good as its plan's citations, so a citation that resolves to nothing must be visible where it can be fixed.
+
+Port v1's behaviour (`~/src/seon/src/seon/task.clj` `with-references`, `~/src/seon/src/my/task.clj` `update!`'s `:my.task/problems`; TASK-CHAIN §3: an unresolved reference is a problem on whatever cites it, and never rejects the write) onto `seon.ref` (`docs/references.md`):
+- the task writer derives `:seon.task/references`, the set of names the plan and instructions cite (`seon.ref/names`), in `seon.task/create-tx` (and so in `seon.task/load-tx` and `my.root/create!`); never authored; no names, no key;
+- `seon.task/citation-problems` answers, for a db and declarations, each citation that resolves to nothing on that db (`seon.ref/references`), as `{:task id :name sym :problem :unresolved}`; `my.root/create!` and `my.root/load-tasks!` carry them in their answers as `:problems`, and the write still happens;
+- the context's entry for an unresolved name (`seon.context/resolve-ref`) carries v1's message for `:unresolved` (`seon.ref`'s problem messages, if it holds them; otherwise port v1's `problem-messages` text into `seon.ref`, its owner): what it means and what to do, including that two backticks mention a name without citing it.
+Add `:seon.task/references` to the task schemas (`resources/seon/schemas/seon.task.edn` `:seon.task/declaration` is authored, so it goes on `:seon.task/own`, and the Datahike attribute in `resources/seon/schemas/seon.facts.edn` as a cardinality-many symbol). Write the lesson into `docs/references.md` (a section on task references)."
+  :seon.task/kind :work
+  :seon.task/needs #{}
+  :seon.task/proofs #{seon.task-test/the-writer-derives-a-tasks-references
+                      seon.task-test/unresolved-citations-are-answered-not-refused
+                      seon.context-test/an-unresolved-citation-says-what-to-do}}]
