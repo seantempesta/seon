@@ -7,4 +7,8 @@
   :seon.task/kind :work
   :seon.task/needs #{"seon.reconcile/a-failure-attaches-a-refinement"}
   :seon.task/proofs #{seon.reconcile-test/a-spent-budget-is-a-stuck-fact-naming-what-it-blocks
-                      seon.reconcile-test/quiescence-is-reported-when-nothing-can-move}}]
+                      seon.reconcile-test/quiescence-is-reported-when-nothing-can-move}}
+ {:seon.task/name "contract-gaps-have-one-rule"
+  :seon.task/plan "Seen 2026-10-21 by lane AGENTS: which contract gaps an attempt answers for is decided in three places. The turn loop takes harvest/uncontracted now minus the gaps when the attempt began (seon.turn/begin!, observe, turn.clj); root's judge takes the branch's program entries that have no contract and differ from main's (judge-tx, reconcile.clj:588-600); and before e37b318 the door's context read took every gap (it showed 400 seeded app.m*/f* gaps from seon.db's seed program as refusals). Two rules can disagree: a gap main gained after the branch point, or a var the agent re-evaluated unchanged. Correct: one function, the judge's (gaps on the branch's program entries that differ from main's base), called by the turn loop, the context and the judge alike. Deletes :gaps-before."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.reconcile-test/the-loop-the-context-and-the-judge-name-the-same-gaps}}]
