@@ -75,7 +75,8 @@
 (defn git-commit
   "Commit files ({relative path text}) on branch of the repository at dir, with message,
   through git's plumbing: blobs, a tree from the branch's own with the files replaced, a
-  commit whose parent is the branch head, and the ref moved only from that head. No
+  commit whose parent is the branch head (a branch not there yet starts at dir's HEAD, the
+  commit the running generation's tree checks out), and the ref moved only from that head. No
   working tree or checkout is touched, so main and every lane's files stay as they are.
   Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing to write),
   or :seon.fx/io-error."
@@ -84,7 +85,9 @@
   (if (empty? files)
     {:value {:sha nil :files 0}}
     (try
-      (let [parent (git! nil dir ["rev-parse" "--verify" (str "refs/heads/" branch)] nil)
+      (let [ref (str "refs/heads/" branch)
+            have? (zero? (:exit (sh/sh "git" "-C" dir "rev-parse" "--verify" "--quiet" ref)))
+            parent (git! nil dir ["rev-parse" "--verify" (if have? ref "HEAD")] nil)
             gp (git! nil dir ["rev-parse" "--git-path" (str "seon-index-" (lib/c-getpid))] nil)
             index (if (str/starts-with? gp "/") gp (str dir "/" gp))]
         (try
@@ -92,7 +95,8 @@
           (doseq [[path text] (sort files)]
             (git! index dir ["update-index" "--add" "--cacheinfo" (str "100644," (git! nil dir ["hash-object" "-w" "--stdin"] text) "," path)] nil))
           (let [sha (git! nil dir ["commit-tree" (git! index dir ["write-tree"] nil) "-p" parent "-m" message] nil)]
-            (git! nil dir ["update-ref" (str "refs/heads/" branch) sha parent] nil)
+            ;; only from the head read above; a new branch only if none appeared meanwhile
+            (git! nil dir ["update-ref" ref sha (if have? parent "0000000000000000000000000000000000000000")] nil)
             {:value {:sha sha :files (count files)}})
           (finally (.delete (java.io.File. ^String index)))))
       (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path dir})))))

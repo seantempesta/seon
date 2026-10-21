@@ -23,7 +23,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
-            [seon.writer :as writer] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
+            [seon.writer :as writer] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
@@ -290,6 +290,14 @@
               p (reply! p {:killed id}))
       :message (let [msg {:op :message :from (:from m :root) :body (:body m) :ns (sock/now-ns)}]
                  (reduce #(to-agent %1 %2 {:op :write :msg msg}) st (:to m)))
+      ;; an effect asked by root itself or a root proc (the reconciler's write-back): to its
+      ;; kind's owner, answered by rid like the writer's answers
+      :fx (let [owner (keyword "fx" (name (:kind m)))]
+            (if (contains? (system/fx-owners (get-in st [:system :procs])) owner)
+              (let [[st rid] (rid! st)]
+                (step/out! o [owner :in] {:req (:req m) :prio 0 :dest {:rid rid}})
+                (pend st rid p :fx nil))
+              (reply! st p (contract/error :seon.fx/unknown-kind 'seon.fx/call (str "no effect kind " (:kind m))))))
       :fs (let [[st rid] (rid! st)]
             (step/out! o :to-fs (assoc (:req m) :rid rid))
             (pend st rid p :fs nil))
@@ -502,14 +510,33 @@
 
 (declare call!)
 
+(defn- import-source!
+  "Main's program gets Seon's own source (seon.source): root's dirs read through the
+  :source effect, every form analyzed (the running generation's namespaces, never run), one
+  transaction on main; what happened is root's :seon.root/source fact. Answers it."
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [sys {:keys [root dirs]}]
+  (let [t0 (lib/now-ns)
+        r @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs}})
+        w (when-let [files (:value r)]
+            @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (source/import-tx @(:conn sys) files)}}))
+        fact (cond-> {:root root :files (count (:value r)) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (lib/ms-since t0)}
+               (contract/error? r) (assoc :error (:seon.error/message r))
+               (and w (not (:ok w))) (assoc :error (:seon.error/message w)))]
+    @(call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/source (pr-str fact)}]}})
+    fact))
+
 (defn start!
   "Boot the control process, the fork server and the root graph. opts:
-  {:datoms n :path dir (durable) :backend :lmdb|:file :log? true
+  {:datoms n :path dir (durable) :backend :lmdb|:file :log? true :source s
    :max-running n (parallel attempts) :provider p (the attempts' model; default the
    stand-in seon.fixtures/reply, or DeepSeek from SEON_AI_* when SEON_AI_PROVIDER is
-   openai-compat)}."
+   openai-compat)}. s (or SEON_SOURCE, a repository's directory): Seon's own source is the
+  program, {:root dir :dirs [\"src\"] :branch \"jolt/seon-merges\"}: main imports root's
+  dirs at boot when it holds none of them (seon.source), and each merge that changes them
+  is committed on branch (the reconciler's write-back)."
   {:malli/schema [:=> [:cat :map] :seon.root/sys]}
-  [{:keys [datoms log? path backend max-running provider] :or {datoms 2000 max-running reconcile/default-max-running}}]
+  [{:keys [datoms log? path backend max-running provider source] :or {datoms 2000 max-running reconcile/default-max-running}}]
   (lib/ignore-sigpipe!)
   (when-not log? (trove/set-log-fn! nil))
   (let [t0 (lib/now-ns)
@@ -534,6 +561,8 @@
         ;; this root's boot id (attempts of an earlier boot are reaped); its fact is written
         ;; through the writer once the graph runs, and that commit is the reconciler's first pass
         boot (str (random-uuid))
+        source (or source (when-let [dir (System/getenv "SEON_SOURCE")]
+                            {:root dir :dirs ["src"] :branch (or (System/getenv "SEON_SOURCE_BRANCH") "jolt/seon-merges")}))
         provider (or provider (if (= "openai-compat" (System/getenv "SEON_AI_PROVIDER"))
                                 (cond-> {:kind :openai-compat :base-url (System/getenv "SEON_AI_BASE_URL")
                                          :model (System/getenv "SEON_AI_MODEL") :api-key-env (System/getenv "SEON_AI_API_KEY_ENV")}
@@ -571,7 +600,7 @@
                         {:view view :graph graph-p :lease-base (pdb/lease-base conn)
                          :system root-procs-p :events events-in :events-mult events-mult
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
-                         :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider
+                         :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
                          :api-from-writer-buf (+ cfg/WRITER-BUF cfg/WRITER-BATCH cfg/API-WRITES)
                          :flush-ms cfg/FLUSH-MS :reconciler-buf cfg/RECONCILER-BUF
                          :model-lanes cfg/MODEL-LANES :model-rate (when (pos? cfg/MODEL-RATE) cfg/MODEL-RATE)})
@@ -603,6 +632,8 @@
     (flow/resume g)
     ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is
     @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (task/boot-tx boot max-running)}})
+    (when (and source (empty? (source/source-nss @conn)))
+      (import-source! sys source))
     sys))
 
 ;; ====================================================================================

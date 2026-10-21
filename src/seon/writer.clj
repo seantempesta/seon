@@ -4,7 +4,7 @@
   proto.control's writer (lane F2; writer design A, notes/option3-F1-flow.md section 4)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
-            [seon.program :as program] [seon.merge :as pm] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
+            [seon.program :as program] [seon.merge :as pm] [seon.source :as source] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
 (defn- main-commit
@@ -105,7 +105,8 @@
             ops (pdb/report->tx rep)]
         [(main-commit st o t ops (:db-after rep))
          {:tx t :datoms (count ops)
-          :results (mapv #(or (:refusal %) {:merged? true :tx t :keys (count (:ours (:r %)))}) (:members judged))}]))))
+          ;; :nss, the namespaces whose forms it changed: the source files a write-back rewrites
+          :results (mapv #(or (:refusal %) {:merged? true :tx t :keys (count (:ours (:r %))) :nss (source/changed-nss (:ours (:r %)))}) (:members judged))}]))))
 
 (defn- merge-branch
   "Merge the branch into main (git: only a branch that contains main's head; lane M1): a
