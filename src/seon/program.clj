@@ -122,8 +122,8 @@
   [n] (case (:op (tail n)) (:const :quote) :constant :throw :rethrows :expr))
 
 (defn- clause-class
-  "The class name a catch clause's test names (Jolt lowers `(catch C e ...)` to a test
-  calling clojure.core/__catch-broad? with C's name), or nil."
+  "The class name a catch clause's test names (Jolt lowers each clause for class C to a
+  test calling clojure.core/__catch-broad? with C's name), or nil."
   {:malli/schema [:=> [:cat :map] [:maybe :string]]}
   [test]
   (let [found (volatile! nil)]

@@ -1103,7 +1103,7 @@
   (let [sys (c/start! {:datoms 2000})
         pids (fn [] (set (keys (flow/ping (:graph sys) :timeout-ms 2000))))
         booted (pids)
-        expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/model}
+        expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/source :fx.source/0 :fx/git :fx.git/0 :fx/model}
                      (for [i (range seon.config/MODEL-LANES)] (keyword "fx.model" (str i))))
         dir (str "/tmp/seon-system-" (lib/c-getpid))
         _ (.mkdirs (java.io.File. dir))

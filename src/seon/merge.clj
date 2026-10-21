@@ -96,7 +96,7 @@
 
 (defn- same?
   "Is content a the same as b for key k: a form's place does not make it another form."
-  {:malli/schema [:=> [:cat :any :any :any] :boolean]}
+  {:malli/schema [:=> [:cat :seon.merge/program-key :any :any] :boolean]}
   [k a b]
   (if (and (= :form (first k)) (map? a) (map? b)) (= (dissoc a :order :lead) (dissoc b :order :lead)) (= a b)))
 
@@ -157,7 +157,7 @@
 
 (defn- def-ref
   "The entity map naming definition k (an upsert by its identity), with its tempid."
-  {:malli/schema [:=> [:cat :any] :map]}
+  {:malli/schema [:=> [:cat :seon.merge/def-key] :map]}
   [[kind a b]]
   (case kind
     :var {:db/id (str "var " a) :var/name a :var/ns (ns-tid (symbol (namespace a)))}
