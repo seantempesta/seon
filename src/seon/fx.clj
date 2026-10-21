@@ -124,14 +124,7 @@
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [deps]} :req}]
   (try
-    (let [r (deps/resolve-deps deps ".")
-          ;; Jolt resolves a :local/root that is not there to its (absent) src path; tools.deps
-          ;; refuses it (task jolt.deps/a-missing-local-root-is-unresolved moves this into Jolt)
-          gone (for [[lib {:keys [local/root]}] (:libs r) :when (and root (not (.exists (java.io.File. ^String root))))]
-                 {:coord lib :detail (str ":local/root " root " does not exist")})]
-      (if (seq gone)
-        (error :seon.fx/unresolved "a :local/root dependency does not exist" {:deps (vec (map :coord gone)) :unresolved (vec gone)})
-        {:value {:roots (:roots r)}}))
+    {:value {:roots (:roots (deps/resolve-deps deps "."))}}
     (catch Throwable e
       (let [u (:unresolved (ex-data e))]
         (error :seon.fx/unresolved (or (ex-message e) (str (type e)))
