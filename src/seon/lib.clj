@@ -15,10 +15,12 @@
 (defmacro defc
   "ffi/defcfn, its value checked from its definition on by the contract derived from its
   C signature (each C type's schema, c-schemas): the FFI edge is checked like every other
-  function, direct-linked callers included (G1's proto.lib/defc)."
+  function, direct-linked callers included (G1's proto.lib/defc). With
+  {:capture-native-error true} it answers [result errno], errno read at the call."
   [sym cname args ret & opts]
-  (let [[_ _ init] (macroexpand-1 `(ffi/defcfn ~sym ~cname ~args ~ret ~@opts)) args (remove #{:varargs} args)]
-    `(defchecked ~sym [:=> ~(into [:cat] (mapv c-schemas args)) ~(c-schemas ret)] ~init)))
+  (let [[_ _ init] (macroexpand-1 `(ffi/defcfn ~sym ~cname ~args ~ret ~@opts)) args (remove #{:varargs} args)
+        out (if (some #(and (map? %) (:capture-native-error %)) opts) [:tuple (c-schemas ret) :int] (c-schemas ret))]
+    `(defchecked ~sym [:=> ~(into [:cat] (mapv c-schemas args)) ~out] ~init)))
 
 (ffi/load-library)
 (defmacro ^:private probe-lib-default
@@ -42,6 +44,7 @@
 (defc c-setpgid "setpgid" [:int :int] :int)
 (defc c-unsetenv "unsetenv" [:string] :int)
 (defc c-creat "creat" [:string :int] :int)
+(defc c-rename "rename" [:string :string] :int {:capture-native-error true})
 (defc c-dup2 "dup2" [:int :int] :int)
 (defc c-setrlimit "setrlimit" [:int :pointer] :int)
 (defc c-getrlimit "getrlimit" [:int :pointer] :int)

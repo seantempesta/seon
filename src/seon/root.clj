@@ -529,14 +529,15 @@
 (defn start!
   "Boot the control process, the fork server and the root graph. opts:
   {:datoms n :path dir (durable) :backend :lmdb|:file :log? true :source s
-   :max-running n (parallel attempts) :provider p (the attempts' model; default the
+   :max-running n (parallel attempts) :max-merging n (merges at once; trains above 1) :provider p (the attempts' model; default the
    stand-in seon.fixtures/reply, or DeepSeek from SEON_AI_* when SEON_AI_PROVIDER is
    openai-compat)}. s (or SEON_SOURCE, a repository's directory): Seon's own source is the
   program, {:root dir :dirs [\"src\"] :branch \"jolt/seon-merges\"}: main imports root's
   dirs at boot when it holds none of them (seon.source), and each merge that changes them
   is committed on branch (the reconciler's write-back)."
   {:malli/schema [:=> [:cat :map] :seon.root/sys]}
-  [{:keys [datoms log? path backend max-running provider source] :or {datoms 2000 max-running reconcile/default-max-running}}]
+  [{:keys [datoms log? path backend max-running max-merging provider source]
+    :or {datoms 2000 max-running reconcile/default-max-running max-merging reconcile/default-max-merging}}]
   (lib/ignore-sigpipe!)
   (when-not log? (trove/set-log-fn! nil))
   (let [t0 (lib/now-ns)
@@ -631,7 +632,7 @@
         ]
     (flow/resume g)
     ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is
-    @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (task/boot-tx boot max-running)}})
+    @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (task/boot-tx boot max-running max-merging)}})
     (when (and source (empty? (source/source-nss @conn)))
       (import-source! sys source))
     sys))

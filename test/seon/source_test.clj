@@ -79,7 +79,8 @@
     (testing "through the :file effect's performer, onto a copy: diff -r finds nothing (README.md is no program)"
       (doseq [[path text] out]
         (.mkdirs (.getParentFile (java.io.File. (str copy "/" path))))
-        (is (= {:value {:bytes (count text)}} (fx/write-file {:req {:path (str copy "/" path) :text text}}))))
+        (is (= {:value {:bytes (.length (java.io.File. (str here "/" path))) :path (str copy "/" path)}}
+               (fx/write-file {:req {:path (str copy "/" path) :text text}}))))
       (let [r (sh/sh "diff" "-r" "-x" "*.md" (str here "/src") (str copy "/src"))]
         (is (= [0 ""] [(:exit r) (:out r)]))))))
 

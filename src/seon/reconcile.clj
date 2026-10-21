@@ -19,10 +19,12 @@
   4)
 
 (def default-max-merging
-  "Merge attempts at once when root's boot set no :seon.config.merge/max-running. They run
-  together only when the definitions they change are disjoint (a merge train); 1 is git's
-  one-at-a-time merge queue."
-  8)
+  "Merge attempts at once, the dial root's boot records (:seon.config.merge/max-running): 1,
+  git's one-at-a-time merge queue. Trains stay off by decision (DECISIONS, Root's calls on
+  R3's questions) until a train's members run their tests combined and the par-200 hang is
+  fixed; writing the fact above 1 turns them on (members only when what they change is
+  disjoint)."
+  1)
 
 (def merge-dials
   "The merge dials' defaults, when the task sets none (:seon.config.merge/*)."

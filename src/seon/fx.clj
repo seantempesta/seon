@@ -13,7 +13,7 @@
   asker records the outcome in its own recording transaction."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
-            [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.java.shell :as sh] [clojure.string :as str]))
+            [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.java.shell :as sh] [clojure.string :as str] [jolt.ffi :as ffi]))
 
 (defn port "The stand-in's out-port to kind's owner." {:malli/schema [:=> [:cat :keyword] :keyword]}
   [kind] (keyword "fx" (name kind)))
@@ -31,16 +31,23 @@
   [req] {:value (:req req)})
 
 (defn write-file
-  "Write-back: the text to path (staged beside it, then renamed, so a reader sees the old
-  or the new file). Answers {:value {:bytes n}} or :seon.fx/io-error."
+  "Write-back: the text to path, staged beside it and renamed over it (rename(2)), so a
+  reader sees the old or the new file. Answers {:value {:bytes n :path path}}, n the path's
+  size on disk after the rename, or :seon.fx/io-error {:path :tmp :errno :message} (errno
+  absent when the stage itself failed) with the staged file removed."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [path text]} :req}]
-  (try
-    (let [tmp (str path ".fx-" (lib/c-getpid))]
-      (spit tmp text)
-      (.renameTo (java.io.File. tmp) (java.io.File. ^String path))
-      {:value {:bytes (count text)}})
-    (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path path}))))
+  (let [tmp (str path ".fx-" (lib/c-getpid))
+        staged (try (spit tmp text) nil
+                    (catch Throwable e
+                      (.delete (java.io.File. tmp))
+                      (error :seon.fx/io-error (str "staging " tmp ": " (or (ex-message e) (str (type e)))) {:path path :tmp tmp})))]
+    (or staged
+        (let [[r errno] (lib/c-rename tmp path)]
+          (if (zero? r)
+            {:value {:bytes (.length (java.io.File. ^String path)) :path path}}
+            (do (.delete (java.io.File. tmp))
+                (error :seon.fx/io-error (str "rename " tmp " -> " path ": " (ffi/errno-message errno)) {:path path :tmp tmp :errno errno})))))))
 
 ;; Seon's own source: the program read from the tree a generation was built from, and
 ;; main's merged forms committed for the next one (seon.source). Never the working tree:

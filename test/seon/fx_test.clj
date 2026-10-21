@@ -35,3 +35,33 @@
         out (first (get o [:fx/t :done]))]
     (is (= :seon.fx/defect (get-in out [:outcome :seon.error/type])))
     (is (= {:agent :a1 :op :fx-reply :k 1} (:dest out)))))
+
+;; ---- write-back answers what happened (audit FENCES #21) ------------------------------
+
+(defn- scratch-dir []
+  (let [d (str (System/getProperty "user.dir") "/target/tmp/fx-test-" (random-uuid))]
+    (.mkdirs (java.io.File. d))
+    d))
+
+(deftest a-failed-rename-is-an-io-error-and-leaves-no-tmp
+  (let [d (scratch-dir)
+        target (str d "/occupied")
+        _ (.mkdirs (java.io.File. (str target "/inside")))
+        r (fx/write-file {:req {:path target :text "text"}})]
+    (is (= :seon.fx/io-error (:seon.error/type r)) "renaming over a non-empty directory fails, and says so")
+    (is (pos? (:errno r)) "with rename(2)'s errno")
+    (is (= target (:path r)))
+    (is (not (.exists (java.io.File. ^String (:tmp r)))) "the staged file is removed")
+    (is (= ["occupied"] (vec (.list (java.io.File. d)))) "nothing else is left beside it"))
+  (let [r (fx/write-file {:req {:path "/nonexistent-dir/x.clj" :text "text"}})]
+    (is (= :seon.fx/io-error (:seon.error/type r)) "a missing directory: the stage itself fails")))
+
+(deftest a-write-back-answers-the-bytes-on-disk
+  (let [d (scratch-dir)
+        p (str d "/f.clj")
+        text "(def s \"héllo — world\")\n"
+        r (fx/write-file {:req {:path p :text text}})]
+    (is (= {:value {:bytes (.length (java.io.File. p)) :path p}} r))
+    (is (= (+ (count text) 1 2) (get-in r [:value :bytes])) "bytes on disk, not characters: e-acute 2, em dash 3")
+    (is (= text (slurp p)))
+    (is (= ["f.clj"] (vec (.list (java.io.File. d)))) "no staged file left")))
