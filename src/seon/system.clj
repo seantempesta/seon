@@ -9,14 +9,6 @@
   (:require [seon.contract :refer [defn defn-]] [aero.core :as aero] [clojure.walk :as walk]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.fx :as fx]))
 
-(defmacro ^:private checkout-path
-  "The declaration's absolute path in the checkout this binary was built from."
-  [] (.getAbsolutePath (java.io.File. "resources/seon/system.edn")))
-
-(def path
-  "Where the declaration is read: SEON_SYSTEM, else the checkout's resources/seon/system.edn."
-  (or (System/getenv "SEON_SYSTEM") (checkout-path)))
-
 (defn read-decl
   "The declaration {:procs :fx :conns}, read with aero from the file at p."
   {:malli/schema [:=> [:cat :string] :seon.system/decl]}

@@ -401,8 +401,10 @@
     (fn [m]
       (vswap! answers conj m)
       (when (some #{"done"} (get m "status"))
-        (let [items (fold @answers identity)]
-          (when (= "eval" (get req "op")) (record! items (some-> (get req "seon/origin") keyword)))
+        ;; who asked travels with the items, to root's view as to the record
+        (let [origin (some-> (get req "seon/origin") keyword)
+              items (cond->> (fold @answers identity) origin (mapv #(assoc % :origin origin)))]
+          (when (= "eval" (get req "op")) (record! items nil))
           (agent/send! {:op :reply :id (:id req) :items items :t (:max-tx (agent/db)) :mem-mb (agent/mem-mb)}))))))
 
 (defn- eval-request

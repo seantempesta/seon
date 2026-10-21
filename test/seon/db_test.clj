@@ -37,18 +37,18 @@
   (let [[c conn] (pdb/test-branch!)
         sid (get-in c [:store :id])
         lease (pdb/lease-base conn)
-        ceiling (+ lease cfg/EID-LEASE)
+        ceiling (+ lease (cfg/value :seon.config.store/eid-lease))
         notes (fn [n tag] (vec (for [i (range n)] {:note/text (str tag i)})))]
     (try
       (pdb/lease! c lease)
-      (let [r1 (dw/apply! conn {:tx-data (notes (- cfg/EID-LEASE 2) "a")})
+      (let [r1 (dw/apply! conn {:tx-data (notes (- (cfg/value :seon.config.store/eid-lease) 2) "a")})
             before (:db-after r1)
             r2 (dw/apply! conn {:tx-data (notes 5 "b")})
             e (pdb/lease-spent r2 lease)]
         (testing "the lease mints up to its end"
           (is (map? r1))
           (is (= (- ceiling 2) (:max-eid before)))
-          (is (= {:from lease :used (- cfg/EID-LEASE 2) :of cfg/EID-LEASE} (pdb/lease-use before lease))))
+          (is (= {:from lease :used (- (cfg/value :seon.config.store/eid-lease) 2) :of (cfg/value :seon.config.store/eid-lease)} (pdb/lease-use before lease))))
         (testing "past it the transaction is refused with the typed error, nothing applied"
           (is (not (map? r2)))
           (is (= :seon.db/lease-spent (:seon.error/type e)))
@@ -69,7 +69,7 @@
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)]
     (try
       (let [{:keys [used-bytes map-bytes]} (pdb/map-use cfg)]
-        (is (= (* 1048576 cfg/LMDB-MB) map-bytes))
+        (is (= (cfg/value :seon.config.store/lmdb-map-bytes) map-bytes))
         (is (< 0 used-bytes map-bytes))
         (d/transact conn [{:note/text (apply str (repeat 100000 "x"))}])
         (pdb/sync! cfg)
@@ -83,7 +83,7 @@
   (let [[c conn] (pdb/test-branch!)
         sid (get-in c [:store :id])
         lease (pdb/lease-base conn)
-        ceiling (+ lease cfg/EID-LEASE)
+        ceiling (+ lease (cfg/value :seon.config.store/eid-lease))
         theirs (+ ceiling 10)
         new-id (fn [r] (d/q '[:find ?e . :in $ ?t :where [?e :note/text ?t]] (:db-after r) "mine"))]
     (try
@@ -95,3 +95,25 @@
         (is (map? r1) "minting goes on")
         (is (< lease (new-id r1) ceiling) "inside its own block"))
       (finally (dbt/set-eid-ceiling! sid nil)))))
+
+(deftest two-processes-branch-one-store
+  ;; two processes at once each make 50 branches of one store (two roots on one store, as
+  ;; parallel check steps or a standing root beside a run): every branch is listed. A store on
+  ;; disk of this test's own, the last resort: the race is between processes; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-race-" (random-uuid))
+        _ (d/release (:conn (pdb/open! :lmdb path 0 :db)))
+        jolt (str (System/getProperty "user.dir") "/target/jolt/jolt")
+        code (fn [tag] (pr-str `(do (require 'seon.db 'datahike.api)
+                                    (let [c# (:conn (seon.db/open! :lmdb ~path 0 :db))]
+                                      (dotimes [i# 50] (datahike.api/branch! c# :db (keyword (str ~tag "-" i#))))
+                                      (System/exit 0)))))
+        cmd (str "'" jolt "' -A:test -e " (pr-str (code "x")) " > /dev/null 2>&1 & "
+                 "'" jolt "' -A:test -e " (pr-str (code "y")) " > /dev/null 2>&1 & wait")
+        r (clojure.java.shell/sh "nice" "-n" "10" "zsh" "-c" cmd)
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+        made (for [t ["x" "y"] i (range 50)] (keyword (str t "-" i)))]
+    (try
+      (is (zero? (:exit r)))
+      (is (= 100 (count (filter #(pdb/branch? conn %) made))) "every branch's head was written")
+      (is (= (set made) (disj (d/branches conn) :db)) "and every branch is listed")
+      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))

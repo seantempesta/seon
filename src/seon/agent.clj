@@ -20,9 +20,6 @@
 ;; :id :branch :fd :conn :db :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
 (defonce state (atom nil))
 
-;; an agent's collect-trip and its heap's room to grow (seon.config, with their reasons)
-(def trip-bytes (* 1048576 cfg/TRIP-MB))
-(def heap-extra-bytes (* 1048576 cfg/AGENT-HEAP-MB))
 
 ;; ---- the socket to root: values in frames (root's end is a jolt.async.remote end) ------
 ;; This side reads and writes its socket itself, on its one thread, with no pumps: an agent
@@ -121,7 +118,7 @@
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
       (let [now (lib/now-ns)
             since (:dirty-at (swap! state #(-> % (assoc :db (:db-after r)) (update :dirty-at (fn [t] (or t now))))))]
-        (when (>= (- now since) (* 1000000 cfg/FLUSH-MS)) (commit!))
+        (when (>= (- now since) (* 1000000 pdb/flush-ms)) (commit!))
         (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
           (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r))))))))
 
@@ -221,9 +218,6 @@
 
 ;; ---- evaluation -----------------------------------------------------------------
 
-(def ^:private message-chars
-  "An exception's message is kept to this many characters in its error map."
-  2000)
 
 (defn error-map
   "A form's exception as the one error map: its ex-data when that already is one (a
@@ -235,7 +229,7 @@
   (if (contract/error? (ex-data e))
     (ex-data e)
     (let [m (or (ex-message e) (str (type e)))]
-      (contract/error :seon.agent/eval-error 'seon.repl/eval-code (subs m 0 (min message-chars (count m)))
+      (contract/error :seon.agent/eval-error 'seon.repl/eval-code m
                       (cond-> {:class (str (type e))}
                         (ex-data e) (assoc :data (print/text (ex-data e) (:part print/budgets))))))))
 
@@ -475,13 +469,14 @@
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone
   (sock/clofork! fd)
-  (lib/set-trip! trip-bytes)
-  (lib/heap-cap! (+ (lib/bytes-in-heap) heap-extra-bytes))
+  ;; the config this process was forked holding (root read it; an agent reads no environment)
+  (lib/set-trip! (cfg/value :seon.config.agent/trip-bytes))
+  (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)))
   (stderr-to-file! (stderr-path (pdb/agents-dir cfg) id))
   ;; this agent owns its branch's writes: it opens the store itself (seon.db/after-fork!)
   (pdb/after-fork! cfg lease)
   ;; the model's API key is root's alone (its :model owner calls the model; lane FX1)
-  (doseq [v (distinct (remove nil? [(System/getenv "SEON_AI_API_KEY_ENV") "DEEPSEEK_API_KEY"]))] (lib/c-unsetenv v))
+  (lib/c-unsetenv (cfg/value :seon.config.ai/api-key-variable))
   (let [nsx (make-ns! id)
         intr-ok (interrupt-self-test)
         c (sock/conn fd)

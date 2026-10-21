@@ -8,7 +8,7 @@
             [seon.task :as task]
             [seon.reconcile :as r]
             [seon.template :as tpl] [seon.problems :as problems] [seon.sock :as sock] [clojure.edn]
-            [clojure.string :as str] [clojure.set]))
+            [clojure.string :as str] [clojure.set] [seon.config :as cfg]))
 
 (defn- empty-db [] @(second (pdb/test-branch!)))
 
@@ -42,7 +42,7 @@
         db (d/db-with db (task/create-tx db decls))
         ids (if (= :all released) (map #(task/task-id 'demo (:seon.task/name %)) decls) released)]
     (cond-> (-> db (d/db-with (task/execution-tx (vec ids) :running))
-                (d/db-with (task/boot-tx "boot-1" max-running r/default-max-merging)))
+                (d/db-with (task/boot-tx "boot-1" max-running)))
       (seq extra) (d/db-with extra))))
 
 (defn- merged [nm] (attempt nm 1 :merged))
@@ -191,7 +191,7 @@
         ds (tpl/with-merge decls)
         db (d/db-with db (task/create-tx db ds))
         db (-> db (d/db-with (task/execution-tx (mapv #(task/task-id 'demo (:seon.task/name %)) ds) :running))
-               (d/db-with (task/boot-tx "boot-1" max-running r/default-max-merging)))]
+               (d/db-with (task/boot-tx "boot-1" max-running)))]
     (cond-> db (seq extra) (d/db-with extra))))
 
 (defn- mspawn [nm n] {:op :spawn :task (str "demo/" nm) :attempt (str "demo/" nm "#" n)
@@ -250,7 +250,7 @@
 (deftest boot-records-merge-max-running-one
   ;; DECISIONS: merge trains stay off (one merge at a time) until the train's combined test run
   ;; and the par-200 hang are fixed; the dial in force is a fact on main a person can read
-  (let [db (d/db-with (empty-db) (task/boot-tx "boot-1" 4 r/default-max-merging))]
+  (let [db (d/db-with (empty-db) (into (task/boot-tx "boot-1" 4) (cfg/facts cfg/config {})))]
     (is (= 1 r/default-max-merging))
     (is (= {:boot "boot-1" :max-running 4 :max-merging 1} (task/root db)) "both dials are recorded at boot")))
 

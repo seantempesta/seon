@@ -9,7 +9,7 @@
   on main), never on a deadline. Prints one EDN line per phase; the last line is the run's
   numbers and its verdict."
   (:require [seon.root :as c] [my.root :as root] [seon.task :as task] [seon.reconcile :as r]
-            [seon.fixtures :as fx] [datahike.api :as d] [seon.lib :as lib] [clojure.string :as str] [clojure.java.shell :as sh]))
+            [seon.fixtures :as fx] [datahike.api :as d] [seon.lib :as lib] [clojure.string :as str] [seon.config] [clojure.java.shell :as sh]))
 
 (defn- now [] (System/currentTimeMillis))
 (defn- db [sys] @(:conn sys))
@@ -259,12 +259,17 @@
       (println :numbers (numbers sys t0))
       (verdict! sys (and ok (empty? not-done) (empty? (agents-reused d)) (= ["[100 101 102 103 104]"] fresh-r))))))
 
+(defn- model-provider
+  "The config's OpenAI-compatible provider (:seon.config.ai/*), whatever the profile's kind."
+  []
+  (seon.config/provider (assoc seon.config/config :seon.config.ai/provider :openai-compat)))
+
 (defn model-run
-  "Tasks of the calc graph worked by DeepSeek (SEON_AI_*): which = add (one task) or calc."
+  "Tasks of the calc graph worked by the config's OpenAI-compatible endpoint
+  (:seon.config.ai/*, DeepSeek by default): which = add (one task) or calc."
   [which]
   (let [t0 (now)
-        provider {:kind :openai-compat :base-url (System/getenv "SEON_AI_BASE_URL") :model (System/getenv "SEON_AI_MODEL")
-                  :api-key-env (System/getenv "SEON_AI_API_KEY_ENV")}
+        provider (model-provider)
         specs (if (= which "add") [(first fx/calc)] fx/calc)
         sys (c/start! {:datoms 300 :max-running 6 :provider provider})
         ds (fx/decls specs 'calc nil)
@@ -326,9 +331,7 @@
     "resume2" (resume2 (first args))
     "par" (par (parse-long (first args)))
     "scenario" (let [k (keyword (first args))
-                     pv (when (= "model" (second args))
-                          {:kind :openai-compat :base-url (System/getenv "SEON_AI_BASE_URL") :model (System/getenv "SEON_AI_MODEL")
-                           :api-key-env (System/getenv "SEON_AI_API_KEY_ENV")})]
+                     pv (when (= "model" (second args)) (model-provider))]
                  (case k
                    :conflict (scenario k pv "(app.m/f 41)" ["42"])
                    :semantic (scenario k pv "[(app.m/scale 3) (app.m/six)]" ["[9 6]"])

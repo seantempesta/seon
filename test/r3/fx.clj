@@ -39,7 +39,7 @@
   [n max-running]
   (let [[_ conn] (pdb/test-branch!)
         ds (decls n)]
-    (d/transact conn {:tx-data (task/boot-tx boot max-running 1)})
+    (d/transact conn {:tx-data (task/boot-tx boot max-running)})
     (doseq [part (partition-all 400 ds)]
       (d/transact conn {:tx-data (task/create-tx @conn (vec part))}))
     (doseq [part (partition-all 400 (map #(task/task-id 'r3 (:seon.task/name %)) ds))]

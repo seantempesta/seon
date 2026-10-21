@@ -25,7 +25,7 @@
     (is (= :seon.fx/budget-spent (get-in (first (:out o)) [:r :seon.error/type])))))
 
 (deftest owner-stops-reading-at-its-bound
-  (let [st (reduce (fn [st k] (first (fx/owner-proc st :in (req k)))) (owner 0) (range cfg/FX-BUF))]
+  (let [st (reduce (fn [st k] (first (fx/owner-proc st :in (req k)))) (owner 0) (range (cfg/value :seon.config.fx/buf)))]
     (is (false? ((::flow/input-filter st) :in)))
     (is (true? ((::flow/input-filter st) :done)))))
 

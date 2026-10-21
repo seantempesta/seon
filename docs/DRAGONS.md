@@ -27,6 +27,7 @@ function.
 | Text a model or a plan wrote, read as data (a reference span, a reply's line): it may not read as Clojure, and edamame 1.4.32 on Jolt throws a bare IllegalArgumentException for some (`a^`) rather than its `:edamame/error` | `seon.reader/read-text` | `nil`: the text is not Clojure | `seon.reconcile/reference` (not a reference), `seon.reader/forgive` (not a literal line) |
 | Text an agent wrote that does not read as Clojure, read for waste at its attempt's end (lane D2) | `seon.learn/read-forms` | `[]`: the form is charged to no rule | `seon.learn/waste` |
 | A task file a person wrote does not read as one EDN vector of declarations | `seon.task/file-declarations` | `:seon.task/refused` (the one error map, naming the file) | `seon.task/load-tx` answers the refusal; `my.root/load-tasks!` returns it and writes nothing |
+| A `--set :ns/key=edn` a person typed on the command line does not read as EDN | `seon.config/parse-set` | `:seon.config/refused` (thrown, naming the argument) | boot is refused: the process exits with the refusal before any mode runs |
 | The web listener cannot bind its port (taken, refused) | `seon.web/web-proc` | `{:listening false :error message}` in the `:web` proc's state | its ping shows it on the dashboard's health line; boot goes on without the web |
 | An interrupt or a timeout stops a running form (SIGUSR1, SIGALRM) | `seon.intr/run` | ex-info `{:interrupted true}` or `{:timeout-ms n}` | `seon.repl/eval-code` answers the form `interrupted`/`eval-error` and goes on |
 
@@ -56,6 +57,7 @@ function.
 | An agent past its heap bound | Jolt's heap ceiling (`seon.lib/heap-cap!`) | `OutOfMemoryError` in the form: an `:err` item |
 | A forked process holding its parent's LMDB env and connections (physics: fork shares handles) | `seon.db/after-fork!` | forgotten, not closed; the agent opens the store itself |
 | Datahike refuses an agent's own write (its run-ahead apply) | `datahike.writer/apply!` (the library's edge) | the exception as its answer; `seon.agent/transact!` throws its message into the agent's eval (an `:err` item) |
+| A process dies inside an LMDB write txn while other processes hold the store's env open (a root SIGKILLed mid-commit, a crash check) | LMDB's own writer lock, built robust (`bin/build lmdb`, below) | the kernel releases the dead holder's lock (SysV `SEM_UNDO`); the txn is lost, the next writer commits |
 
 ## Physics: who may run threads
 
@@ -70,6 +72,12 @@ Two rules of the OS and Chez that no code may "fix" by adding a thread or a chec
   (`seon.sock`), and only root, which never forks after boot, holds `jolt.async.remote`
   ends with pumps. `bin/check threads` counts the OS threads of the fork server and of an
   agent. The real fix is a Chez atfork handler that resets the sweepers (RC1's "next (b)").
+  Root, which does hold threads, fixes its sweepers at boot, right after the fork server is
+  forked: `seon.lib/gc-sweepers!` (our Chez's `(cs)collect_sweepers`, branch
+  `jolt/gc-sweepers`) fixes them at `seon.config/GC-SWEEPERS`, 0 (measured: sweepers did
+  not shorten root's small collections), and no collection starts one.
+  Unfixed, Chez kept one per thread a collection found waiting, so root's thread count
+  drifted by load (0, 5, 15 sweepers across identical runs; lane THREADS).
 - **On macOS, a descriptor in flight by SCM_RIGHTS can be discarded when other unix
   sockets close**, so the sender keeps its copy until the receiver confirms (the fork
   server's `:in-flight`, a clone's socket kept until `:cloned`). A descriptor rides a frame
@@ -96,3 +104,23 @@ a function first called on two threads at once can be missed from `touched`. Roo
 are approximate and nothing reads them as proof. A measurement nested inside another (a
 cost proof run inside an eval form) restarts the epoch, so the outer form records only the
 calls after it.
+
+## LMDB robust locks
+
+On macOS, LMDB locks with POSIX semaphores unless built with `MDB_USE_ROBUST` (`mdb.c`:193).
+Those are not robust: a process SIGKILLed inside a write transaction leaves the writer lock
+held, and every other process with the env open (root always has its store open) blocks on
+its next write, forever. Measured 2026-10-21 by `target/lmdb-kill` (`native/lmdb_kill.c`):
+with the POSIX build the next writer and the holder both block; with the robust build both
+commit and the killed transaction is gone. `bin/build lmdb` builds `target/lib/liblmdb.dylib`
+robust from `../vendor-c/lmdb` (stamped with its commit), `bin/env` points `JOLT_LMDB_LIB`
+at it, and `bin/check`'s `lmdb-kill` step proves it. Every process on a store must load the
+same build: the lock scheme is part of the lock file's format.
+
+The robust build uses SysV semaphores, which outlive their processes: each store path keeps
+one semaphore set (two semaphores, keyed by the lock file) after its last process exits.
+See them with `ipcs -s` (LMDB's are mode `--ra-ra-r--`, owner you); one is reused when the
+same store opens again. The system limit is `sysctl kern.sysv.semmni` (87381 here), so one
+store per run is nothing. Removing a set (`ipcrm -s ID`) while no process has its store open
+is safe; LMDB makes a new one at the next open.
+

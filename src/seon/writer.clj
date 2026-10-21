@@ -206,7 +206,7 @@
 (defn- drain {:malli/schema [:=> [:cat :seon.host/chan :seon.writer/request] [:vector :seon.writer/request]]}
   [ch m]
   (loop [acc [m] k 1]
-    (if (< k cfg/WRITER-BATCH)
+    (if (< k (cfg/value :seon.config.root/writer-batch))
       (if-let [y (a/poll! ch)] (recur (conj acc y) (inc k)) acc)
       acc)))
 
@@ -219,7 +219,7 @@
   {:op :writer :tx-count :p50-ms :commits}), :main (main's commits), :events.
   A closed :in is the end of the flow: everything taken is committed and flushed, then
   {:op :drained} goes out. Answers leave when their batch is committed; the flusher's
-  window makes them durable (config FLUSH-MS), a :flush? request before its answer."
+  window makes them durable (seon.db/flush-ms), a :flush? request before its answer."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:conn "main's connection" :cfg "the store config" :to-writer "its in-port channel"}
        :outs {:to-fork-server "commits and forks, FIFO" :to-api "answers {:dest :r}" :main "main's commits"
@@ -258,13 +258,15 @@
                 :else (assoc st :dirty dirty))
            n-tx (count (filter #(= :tx (:op %)) reqs))
            st (-> st (update :tx-count + n-tx) (update :batches inc))]
-       (when (seq reqs)
-         (step/out! o :to-api {:op :writer :tx-count (:tx-count st) :batch-ms (lib/ms-since t0) :n-tx n-tx :commits commits}))
+       ;; what changed, to root's view: a batch, or a flush (its count is shown, never pinged)
+       (when (or (seq reqs) flush-now?)
+         (step/out! o :to-api {:op :writer :tx-count (:tx-count st) :batch-ms (lib/ms-since t0) :n-tx n-tx :commits commits
+                               :flushes (:flushes st 0)}))
        [st @o]))))
 
 (defn flusher-proc
   "The group flush's clock: told once that the store is dirty ({:op :dirty :since ns}), it
-  waits out the rest of the flush window (config FLUSH-MS) and asks the writer to flush
+  waits out the rest of the flush window (seon.db/flush-ms) and asks the writer to flush
   ({:op :flush} on the writer's in-port). The wait blocks only this proc; notices that
   queued meanwhile are covered by the one flush."
   {:malli/schema :seon.step/step-fn}

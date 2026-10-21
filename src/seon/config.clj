@@ -1,99 +1,322 @@
 (ns seon.config
-  "Every dial of the platform, read once from the environment when this namespace loads
-  (SEON_<NAME>; proto/flow f2-final's PROTO_<NAME> dials, collected in one place). A
-  shipped default fits a 16 GB machine running many agents beside the user's work."
-  (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.contract]))
+  "The one config system (owner, 2026-10-21: only documented config schemas stay). Every
+  limit, bound, dial and default of the platform is a key in one aero file,
+  resources/seon/config/default.edn, documented there beside its value (unit, provenance,
+  what happens at the bound) and validated by its schema (resources/seon/schemas/
+  seon.config*.edn, the `:seon.config/config` map). This namespace is its loader and the
+  only place the process environment is read:
 
-(defn- dial {:malli/schema [:=> [:cat :string :any] :int]}
-  [k default] (Long/parseLong (or (System/getenv k) (str default))))
+  - the checkout (`SEON_CHECKOUT`, which bin/env exports for the binary, else `JOLT_PWD`,
+    which `jolt run` callers set), where the file and the checkout-relative paths live;
+  - the profile (`SEON_PROFILE`, default `:default`), handed to aero's `#profile`;
+  - overrides: aero's `#env` in the file itself; the checkout's own `config/local.edn`
+    (gitignored; bin/worktree writes its ports); the command line's `--config FILE` and
+    `--set :ns/key=edn` (every mode of the binary; taken out of the mode's args). Later layers
+    win, key by key; `sources` names the layer of each key.
 
-(def MAX-AGENTS
-  "Live agents at most (root holds a socket per agent)."
-  (dial "SEON_MAX_AGENTS" 1024))
-(def WRITER-BATCH
-  "Most requests one writer step drains and commits together (group commit)."
-  (dial "SEON_WRITER_BATCH" 256))
-(def WRITER-BUF
-  "The writer's in-port. Each agent has at most one write in flight, so a buffer above the
-  live agents never fills from agents; beyond it senders park (back-pressure)."
-  (dial "SEON_WRITER_BUF" MAX-AGENTS))
-(def RECONCILER-BUF
-  "Main's commits queued for the reconciler. It reads every commit's datoms (an index kept by
-  observing them), so the buffer blocks rather than drops: a full buffer parks the writer's
-  send until the reconciler catches up (a pass costs what the commit changed)."
-  (dial "SEON_RECONCILER_BUF" 1024))
-(def AGENT-BUF
-  "Each agent channel's buffer. Small on purpose: a full channel pushes back on its sender
-  (the reader leaves frames in the socket)."
-  (dial "SEON_AGENT_BUF" 64))
-(def STOP-BOUND-MS
-  "How long an agent may take to exit after :stop before it is SIGKILLed."
-  (dial "SEON_STOP_BOUND_MS" 2000))
-(def STANDBY-EVERY
-  "Main commits after which the fork server forks a fresh standby (bounds the log of
-  commits a promoted standby is sent)."
-  (dial "SEON_STANDBY_EVERY" 256))
-(def API-WRITES
-  "Writer requests from the api in flight at most. At the bound the api stops reading its
-  entrance (Flow's input filter) and reads only answers, so callers are pushed back and
-  the writer's answers always have room: the api <-> writer cycle cannot wedge."
-  (dial "SEON_API_WRITES" 512))
-(def API-BATCH
-  "Most messages one api step takes before it applies its graph change (spawns and ends
-  become one update!)."
-  (dial "SEON_API_BATCH" 256))
-(def FLUSH-MS
-  "How long a committed write may stay unflushed (:seon.config.store/flush-ms, owner
-  2026-10-20): every write is answered when it is committed in memory, and the next group
-  flush within this window makes it durable. Recovery restores to the last flush. Up to
-  1,000 is acceptable. A write followed by an effect outside the database asks for
-  :flush? and is answered after its flush."
-  (dial "SEON_FLUSH_MS" 10))
+  The file is read once, when this namespace loads (root's boot: every process of the
+  platform is root or forked from it, so agents and the fork server hold the same value and
+  read no environment). A value resolving to nil (an unset `#env` with no fallback) is
+  absent; the result must satisfy `:seon.config/config` (a closed map: an unknown key, an
+  invalid value or a missing required key refuses boot with `:seon.config/refused`). Root
+  writes the resolved config as facts on main's root entity (`facts`), platform records a
+  merge never carries, where agents, the dashboard and the context read it.
 
-(def STALL-MS
-  "An agent with a request in flight that sends root nothing (no reply, commit or effect)
-  for this long, and has no effect outstanding, is observed stalled once (lane D2: a
-  recorded :seon.agent/stalled; root checks every half of it while an agent is busy). 0:
-  no check."
-  (dial "SEON_STALL_MS" 30000))
+  A foundational namespace, below seon.contract (which reads the guarantees dial here): its
+  functions carry contracts in their metadata and are armed at boot."
+  (:refer-clojure :exclude [resolve])
+  (:require [aero.core :as aero] [malli.core :as m] [malli.registry :as mr] [clojure.edn :as edn]
+            [clojure.java.io :as io] [clojure.string :as str] [datahike.api :as d]))
 
-(def EID-LEASE
-  "Entity ids each agent process may mint on its own branch (a block per agent, from the
-  store's highest id at boot): ids stay unique store-wide with no shared counter (L1's lease)."
-  (dial "SEON_EID_LEASE" 100000))
+;; ---- where: the checkout and the profile (the loader's own two environment reads) ----------
 
-(def LMDB-MB
-  "The LMDB map (the most the one store may hold, in MB): runs are kept and every check step,
-  run and agent is a branch of one store, so it fills over time; the writer's refusal and
-  (seon.root/state) :store show its use against it (seon.db/map-use)."
-  (dial "SEON_LMDB_MB" 1024))
+(defn checkout
+  "The checkout this process runs from: SEON_CHECKOUT (bin/env exports it; the binary runs
+  from target/), else JOLT_PWD (a `jolt run` from the checkout), or the refusal naming both.
+  Not JOLT_PWD for the binary: Jolt resolves a child process's relative path against it."
+  {:malli/schema [:=> [:cat] :string]}
+  []
+  (let [d (first (remove str/blank? [(System/getenv "SEON_CHECKOUT") (System/getenv "JOLT_PWD")]))]
+    (if d
+      d
+      (let [msg "neither SEON_CHECKOUT nor JOLT_PWD is set: the checkout the config file and its paths are read from (bin/env exports SEON_CHECKOUT)"]
+        (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation 'seon.config/checkout
+                             :seon.error/message msg}))))))
 
-(def TRIP-MB
-  "An agent's collect-trip (MB): Chez's default scales with the parent's heap (E10); a small
-  trip keeps an agent's garbage, and so its private pages, small."
-  (dial "SEON_TRIP_MB" 4))
+(defn profile
+  "The aero profile this process reads the file under: SEON_PROFILE as a keyword, else :default."
+  {:malli/schema [:=> [:cat] :keyword]}
+  []
+  (let [p (System/getenv "SEON_PROFILE")] (if (str/blank? p) :default (keyword p))))
 
-(def AGENT-HEAP-MB
-  "How far (MB) an agent's heap may grow beyond what it inherited; past it an allocation throws
-  OutOfMemoryError (an :err item), so a runaway agent cannot take the machine."
-  (dial "SEON_AGENT_HEAP_MB" 1024))
+(defn path
+  "The config file in checkout dir."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [dir] (str dir "/resources/seon/config/default.edn"))
 
-(def FX-BUF
-  "Requests one effect owner holds queued (its in-port and its priority queue). Each agent
-  has at most one synchronous effect in flight, so beyond the live agents only async
-  sends queue; at the bound stand-ins park (back-pressure). Lane FX1."
-  (dial "SEON_FX_BUF" 1024))
-(def FX-DIRECT
-  "Experiment (lane FX1): an effect owner answers straight to the asker's stand-in by id
-  ([agent :in]) instead of through the api's :back. Off by default."
-  (= "1" (System/getenv "SEON_FX_DIRECT")))
-(def MODEL-RATE
-  "Model tokens per second the provider admits, cluster-wide: the :model owner's token bucket
-  (lane R3; AIMD on a 429). 0: no bucket."
-  (dial "SEON_MODEL_RATE" 0))
+;; ---- machine-derived values: resolved at load, never shipped as a literal --------------------
 
-(def MODEL-LANES
-  "Model calls in flight at once, cluster-wide (the :model owner's lanes). Lane FX1."
-  (dial "SEON_MODEL_LANES" 8))
+(defmethod aero/reader 'seon/checkout
+  ;; #seon/checkout "rel/path": rel/path under the checkout this process runs from
+  [opts _tag value]
+  (str (::checkout opts) "/" value))
 
+;; ---- the schemas: seon.config*.edn, read when this namespace compiles (as seon.contract does) --
+
+(defmacro ^:private baked-schema-forms
+  "The config schema forms (resources/seon/schemas/seon.config*.edn), read when this
+  namespace compiles: a built binary carries them."
+  []
+  (let [dir (io/file (checkout) "resources/seon/schemas")]
+    (list 'quote
+          (reduce merge {} (for [f (sort-by #(.getName %) (file-seq dir))
+                                 :let [n (.getName f)]
+                                 :when (and (str/starts-with? n "seon.config") (str/ends-with? n ".edn"))]
+                             (edn/read-string (slurp f)))))))
+
+(def schema-forms "The config keys' schema forms, by name." (baked-schema-forms))
+
+(def ^:private registry
+  (mr/composite-registry (m/default-schemas) (mr/simple-registry schema-forms)))
+
+(def config-schema "The compiled `:seon.config/config`." (m/deref (m/schema :seon.config/config {:registry registry})))
+
+(defn keys-declared
+  "Every key the config may hold, in declaration order."
+  {:malli/schema [:=> [:cat] [:vector :qualified-keyword]]}
+  [] (mapv first (m/entries config-schema)))
+
+;; ---- resolving -------------------------------------------------------------------------------
+
+(defn refusal
+  "The thrown refusal for a config value m that does not satisfy :seon.config/config: one
+  problem per refused key (unknown, invalid, missing), each naming the key."
+  {:malli/schema [:=> [:cat :map] :seon.config/refused]}
+  [m]
+  (let [ps (vec (for [{:keys [path in type value]} (:errors (m/explain config-schema m))]
+                  {:key (or (first in) (first path))
+                   :problem (case type :malli.core/extra-key :unknown-key :malli.core/missing-key :missing-key :invalid)
+                   :value (pr-str value)}))]
+    {:seon.error/type :seon.config/refused :seon.error/operation 'seon.config/resolved
+     :seon.error/message (str "the config does not satisfy :seon.config/config: "
+                              (str/join ", " (for [{:keys [key problem]} ps] (str key " " (name problem)))))
+     :seon.config/problems ps}))
+
+(defn resolved
+  "Raw (what aero read) as the config: nil values dropped (absent), then validated against
+  :seon.config/config. Answers the map, or throws the refusal."
+  {:malli/schema [:=> [:cat :map] :seon.config/config]}
+  [raw]
+  (let [m (into {} (remove (comp nil? val)) raw)]
+    (if (m/validate config-schema m)
+      m
+      (let [r (refusal m)] (throw (ex-info (:seon.error/message r) r))))))
+
+(defn read-file
+  "The config file at p read with aero under profile, the checkout dir resolving
+  #seon/checkout: resolved and validated (or the refusal, thrown)."
+  {:malli/schema [:=> [:cat :string :keyword :string] :seon.config/config]}
+  [p prof dir]
+  (resolved (aero/read-config p {:profile prof ::checkout dir})))
+
+(defn- refuse!
+  {:malli/schema [:=> [:cat :qualified-symbol :string] :nil]}
+  [op msg] (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation op :seon.error/message msg})))
+
+;; ---- the layers: the shipped file, the checkout's own file, the command line ------------------
+;; Owner, 2026-10-21: "Hand out different edn config files that each agent can load and control
+;; separately or do command line overrides." Later layers win, key by key; the merged map is
+;; validated once, and every key remembers the layer it came from (`sources`).
+
+(defn local-path
+  "The checkout's own config (gitignored; bin/worktree writes it with the worktree's ports)."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [dir] (str dir "/config/local.edn"))
+
+(defn argv
+  "This process's command line, as *command-line-args* holds it while namespaces load (a
+  `jolt run`, and a built binary since Jolt's jolt/argv): the one place the loader reads it,
+  so --config and --set apply to every mode."
+  {:malli/schema [:=> [:cat] [:vector :string]]}
+  [] (vec *command-line-args*))
+
+(defn parse-set
+  "--set's argument `:ns/key=edn` as [key value], or the refusal naming it."
+  {:malli/schema [:=> [:cat :string] [:tuple :qualified-keyword :any]]}
+  [s]
+  (let [i (str/index-of s "=")
+        k (when i (try (edn/read-string (subs s 0 i)) (catch Exception _ nil)))
+        v (when i (try [(edn/read-string (subs s (inc i)))] (catch Exception _ nil)))]
+    (if (and (qualified-keyword? k) v)
+      [k (first v)]
+      (refuse! 'seon.config/parse-set (str "--set " s ": expected :ns/key=<edn value>")))))
+
+(defn overrides
+  "The command line's config overrides, in order, and the rest of it:
+  {:layers [[source map-or-path] ...] :rest [arg ...]}. `--config FILE` is a layer read
+  from FILE; `--set :k=v` one key."
+  {:malli/schema [:=> [:cat [:sequential :string]] [:map [:layers vector?] [:rest [:vector :string]]]]}
+  [args]
+  (loop [[a b & more :as as] (seq args) acc {:layers [] :rest []}]
+    (cond
+      (empty? as) acc
+      (and (= "--config" a) b) (recur more (update acc :layers conj [(str "--config " b) b]))
+      (and (= "--set" a) b) (recur more (update acc :layers conj ["--set" (into {} [(parse-set b)])]))
+      (#{"--config" "--set"} a) (refuse! 'seon.config/overrides (str a " needs an argument"))
+      :else (recur (rest as) (update acc :rest conj a)))))
+
+(defn without-overrides
+  "args with --config and --set (and their arguments) taken out: what a mode reads."
+  {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]}
+  [args] (:rest (overrides args)))
+
+(defn- read-layer
+  "One file layer read with aero under prof, #seon/checkout resolving under dir; nil values
+  are not stated (absent at this layer)."
+  {:malli/schema [:=> [:cat :string :keyword :string] :map]}
+  [p prof dir]
+  (into {} (remove (comp nil? val)) (aero/read-config p {:profile prof ::checkout dir})))
+
+(defn layered
+  "The config of the layers [[source map] ...] (later wins, key by key), validated once:
+  {:config :sources}, :sources naming the layer each key came from."
+  {:malli/schema [:=> [:cat [:sequential [:tuple :string :map]]] [:map [:config :seon.config/config] [:sources :seon.config/sources]]]}
+  [layers]
+  (let [m (reduce (fn [m [_ l]] (merge m l)) {} layers)
+        c (resolved m)]
+    {:config c
+     :sources (into {} (for [[src l] layers [k v] l :when (some? v)] [k src]))}))
+
+(defn load-layers
+  "The layers this process reads: the shipped file, the checkout's config/local.edn when it
+  exists, then the command line's --config files and --set keys, in order."
+  {:malli/schema [:=> [:cat :string :keyword [:sequential :string]] [:vector [:tuple :string :map]]]}
+  [dir prof args]
+  (let [local (local-path dir)]
+    (into (cond-> [["resources/seon/config/default.edn" (read-layer (path dir) prof dir)]]
+            (.exists (io/file local)) (conj ["config/local.edn" (read-layer local prof dir)]))
+          (for [[src x] (:layers (overrides args))]
+            [src (if (string? x) (read-layer x prof dir) x)]))))
+
+(def ^:private loaded
+  (let [dir (checkout)] (layered (load-layers dir (profile) (argv)))))
+
+(def config
+  "This process's config: every layer, read once at load (root's boot; agents are forked
+  holding it)."
+  (:config loaded))
+
+(def sources
+  "Which layer each key of the config came from."
+  (:sources loaded))
+
+;; ---- reading a setting: the one resolver ------------------------------------------------------
+;; Owner, 2026-10-21: settings are per model, per provider and per task; "a pillar and not just
+;; a hack": every reader resolves through `resolve-in` (task -> model -> its provider -> the
+;; config's own key), and the door shows each value with where it came from.
+
+(defn resolve-in
+  "Setting k in config c (its layer sources srcs) for ctx {:task m :model id}: the task's or
+  agent's own settings (a :seon.task/config map), then the model's entry (default
+  :seon.config.ai/model), then that model's provider's, then c's own key. Answers {:value
+  :source}, :source one of [:task], [:model id], [:provider id], [:config layer]. A key set
+  nowhere is a defect of the caller: the refusal names it (absent is never nil)."
+  {:malli/schema [:=> [:cat :map :map :qualified-keyword :seon.config/context] :seon.config/resolved]}
+  [c srcs k {:keys [task model]}]
+  (let [m (or model (:seon.config.ai/model c))
+        me (get-in c [:seon.config.ai/models m])
+        p (:seon.ai.model/provider me)
+        pe (get-in c [:seon.config.ai/providers p])]
+    (cond
+      (contains? task k) {:value (get task k) :source [:task]}
+      (contains? me k) {:value (get me k) :source [:model m]}
+      (contains? pe k) {:value (get pe k) :source [:provider p]}
+      (contains? c k) {:value (get c k) :source [:config (get srcs k "resources/seon/config/default.edn")]}
+      :else (refuse! 'seon.config/resolve (str k " is set nowhere: not by the task, the model " m ", its provider "
+                                               p " or the config (declared keys: seon.config/keys-declared)")))))
+
+(defn resolve
+  "Setting k for ctx ({:task m :model id}; default {}) in this process's config: {:value
+  :source} (resolve-in)."
+  {:malli/schema [:function [:=> [:cat :qualified-keyword] :seon.config/resolved]
+                  [:=> [:cat :qualified-keyword :seon.config/context] :seon.config/resolved]]}
+  ([k] (resolve k {}))
+  ([k ctx] (resolve-in config sources k ctx)))
+
+(defn value
+  "Setting k's value for ctx (resolve), the read every reader makes."
+  {:malli/schema [:function [:=> [:cat :qualified-keyword] :any] [:=> [:cat :qualified-keyword :seon.config/context] :any]]}
+  ([k] (value k {}))
+  ([k ctx] (:value (resolve k ctx))))
+
+;; ---- the model provider, as the config states it --------------------------------------------
+
+(defn provider
+  "The model provider config c names (:seon.config.ai/*, resolved for its model): the
+  scripted stand-in, or the OpenAI-compatible endpoint with the NAME of its key's
+  environment variable (never the key)."
+  {:malli/schema [:=> [:cat :seon.config/config] :seon.model/provider]}
+  [c]
+  (let [v #(:value (resolve-in c {} % {}))]
+    (case (:seon.config.ai/provider c)
+      :scripted {:kind :scripted :script (:seon.config.ai/script c)}
+      :openai-compat (cond-> {:kind :openai-compat :base-url (v :seon.config.ai/base-url) :model (:seon.config.ai/model c)
+                              :api-key-env (v :seon.config.ai/api-key-variable) :max-tokens (v :seon.config.ai/max-tokens)}
+                       (:seon.config.ai/thinking c) (assoc :thinking (:seon.config.ai/thinking c))
+                       (:seon.config.ai/reasoning-effort c) (assoc :reasoning-effort (:seon.config.ai/reasoning-effort c))))))
+
+(defn with-provider
+  "Config c stating provider p (a provider handed to root's start! in place of the file's):
+  the facts root writes say what the run really used (an endpoint p names is its model's
+  provider's)."
+  {:malli/schema [:=> [:cat :seon.config/config :seon.model/provider] :seon.config/config]}
+  [c p]
+  (let [top {:seon.config.ai/provider (:kind p) :seon.config.ai/script (:script p) :seon.config.ai/model (:model p)
+             :seon.config.ai/max-tokens (:max-tokens p)
+             :seon.config.ai/thinking (:thinking p) :seon.config.ai/reasoning-effort (:reasoning-effort p)}
+        c (into (dissoc c :seon.config.ai/thinking :seon.config.ai/reasoning-effort) (filter (comp some? val)) top)
+        prov (get-in c [:seon.config.ai/models (:seon.config.ai/model c) :seon.ai.model/provider])
+        wire (into {} (filter (comp some? val)) {:seon.config.ai/base-url (:base-url p) :seon.config.ai/api-key-variable (:api-key-env p)})]
+    (if (and prov (seq wire)) (update-in c [:seon.config.ai/providers prov] merge wire) c)))
+
+;; ---- the facts on main ------------------------------------------------------------------------
+
+(defn facts
+  "Config c and its sources as facts on main (platform records: never carried by a merge in
+  either direction): main's root entity holding every key (the manifest as EDN text), and an
+  entity per provider and per model (:seon.ai.model/provider-id, :seon.ai.model/id)."
+  {:malli/schema [:=> [:cat :seon.config/config :seon.config/sources] [:vector :map]]}
+  [c srcs]
+  (into [(assoc c :seon.root/id :root :seon.config/sources (pr-str srcs)
+                :seon.config.ai/providers (pr-str (:seon.config.ai/providers c))
+                :seon.config.ai/models (pr-str (:seon.config.ai/models c)))]
+        (concat (for [[id p] (:seon.config.ai/providers c)]
+                  (-> (select-keys p [:seon.config.ai/base-url :seon.config.ai/api-key-variable :seon.ai.model/output-token-wire-key])
+                      (assoc :seon.ai.model/provider-id id)))
+                (for [[id m] (:seon.config.ai/models c)]
+                  (-> (dissoc m :seon.config.ai/max-in-flight :seon.config.ai/max-tokens) (assoc :seon.ai.model/id id))))))
+
+(defn secret
+  "The value of the environment variable named var-name (a credential, e.g. the model's key,
+  named by :seon.config.ai/api-key-variable): read at its one use, never stored, never
+  printed. nil when unset."
+  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  [var-name] (System/getenv var-name))
+
+(defn from-db
+  "The config root wrote on db (main, or any branch made from it since): every declared key
+  the root entity holds. What agents, the dashboard and the context read."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :map]]}
+  [db]
+  (when-let [e (d/q '[:find ?e . :where [?e :seon.root/id :root]] db)]
+    (let [r (d/pull db (keys-declared) e)]
+      (when (seq r)
+        (cond-> r
+          (string? (:seon.config.ai/providers r)) (update :seon.config.ai/providers edn/read-string)
+          (string? (:seon.config.ai/models r)) (update :seon.config.ai/models edn/read-string))))))
+
+(defn sources-from-db
+  "Which layer each key of the config root wrote on db came from."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.config/sources]]}
+  [db]
+  (some-> (d/q '[:find ?s . :where [?e :seon.root/id :root] [?e :seon.config/sources ?s]] db) edn/read-string))

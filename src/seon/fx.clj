@@ -148,13 +148,10 @@
                                                                 (min (:rate-ms b) (+ (:per-ms b) (/ (:rate-ms b) 20)))))))))))
 
 (defn- reply!
-  "The outcome to its asker. Through the api's :back (the writer's answer route), or with
-  cfg/FX-DIRECT straight to the asker's stand-in by its id: [agent :in]."
+  "The outcome to its asker, through the api's :back (the writer's answer route)."
   {:malli/schema [:=> [:cat :seon.host/volatile :map :map] :nil]}
   [o dest r]
-  (if (and cfg/FX-DIRECT (:agent dest))
-    (step/out! o [(:agent dest) :in] {:op :write :msg (assoc r :op (:op dest) :k (:k dest))})
-    (step/out! o :out {:dest dest :r r})))
+  (step/out! o :out {:dest dest :r r}))
 
 (defn- wake-later
   "The clock (lane R3's :tick): when the head request waits on the bucket alone (a lane is
@@ -188,14 +185,14 @@
       st)))
 
 (defn- bound
-  "The owner's queue holds at most cfg/FX-BUF requests; at the bound it reads only :done
+  "The owner's queue holds at most :seon.config.fx/buf requests; at the bound it reads only :done
   (Flow's input filter), so stand-ins park on :in: back-pressure to the asking agent."
   {:malli/schema [:=> [:cat :map] :map]}
-  [st] (assoc st ::flow/input-filter (if (>= (count (:queue st)) cfg/FX-BUF) #(not= :in %) identity)))
+  [st] (assoc st ::flow/input-filter (if (>= (count (:queue st)) (cfg/value :seon.config.fx/buf)) #(not= :in %) identity)))
 
 (defn owner-proc
   "The owner of one effect kind. In :in (the stand-ins' requests {:req :dest :prio
-  :budget :budget-key :agent}, addressed by id; cfg/FX-BUF), :done (the lanes'
+  :budget :budget-key :agent}, addressed by id; :seon.config.fx/buf), :done (the lanes'
   outcomes). Out :to-lanes (its performers' shared channel), :out (the api's :back:
   {:dest :r})."
   {:malli/schema :seon.step/step-fn}
@@ -277,7 +274,7 @@
    :file {:perform #'write-file :lanes 1}
    :source {:perform #'read-source :lanes 1}
    :git {:perform #'git-commit :lanes 1}
-   :model {:perform #'model :lanes cfg/MODEL-LANES :ctx {:provider provider} :rate (when (pos? cfg/MODEL-RATE) cfg/MODEL-RATE)}})
+   :model {:perform #'model :lanes (cfg/value :seon.config.ai/max-in-flight) :ctx {:provider provider} :rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))}})
 
 (defn procs
   "The owner and lane procs of every kind, for the root graph. Any proc reaches an owner
@@ -289,7 +286,7 @@
       (let [work (a/chan lanes) owner (keyword "fx" (name kind))]
         (-> acc
             (assoc owner {:proc (flow/process #'owner-proc)
-                          :chan-opts {:in {:buf-or-n cfg/FX-BUF} :done {:buf-or-n (* 2 lanes)}}
+                          :chan-opts {:in {:buf-or-n (cfg/value :seon.config.fx/buf)} :done {:buf-or-n (* 2 lanes)}}
                           :args (cond-> {:kind kind :lanes lanes :work work :back back}
                                   rate (assoc :rate rate :tick (a/chan 1)))})
             (into (for [i (range lanes)]

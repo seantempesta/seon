@@ -3,7 +3,7 @@
   inside the budget, every string cut continues exactly, and an uncut text reads back as the value."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -122,3 +122,44 @@
     (is (empty? wrong) (str "laid out unlike fipp: " (pr-str (first wrong))))
     (is (= "a\nb" (layout (vec (fipp/serialize [:group "a" :line (reduce (fn [d _] [:group d]) "b" (range 8))])) 5))
         "the pruned group breaks")))
+
+;; ---- prose: text read as itself, cut the printer's way -----------------------------------
+
+(deftest prose-says-what-it-omitted
+  (let [msg (str/join "\n" (for [i (range 40)] (str "line " i " of a long message that says what went wrong")))
+        {:keys [text shown truncated? omitted lines offset continuation]} (seon/prose msg 60 {:source '(:message e)})]
+    (is (= "a short message" (:text (seon/prose "a short message" 60))) "text that fits is itself, unquoted")
+    (is (not (:truncated? (seon/prose "a short message" 60))))
+    (is truncated?)
+    (is (<= (select/estimate text) 60) "the text with its cut stays inside the budget")
+    (is (str/starts-with? msg shown) "what is shown is the text's own beginning")
+    (is (= (count msg) (+ (count shown) omitted)) "shown + omitted is the whole")
+    (is (str/ends-with? shown "\n") "a multi-line text is cut after a whole line")
+    (is (= (count (str/split-lines (subs msg offset))) lines) "the cut counts the lines it left")
+    (is (str/includes? text (str "…+" omitted " chars in " lines " more lines")) "the cut says what it omitted")
+    (is (= (list 'subs '(:message e) offset) continuation))
+    (is (str/includes? text "(subs (:message e) ") "the cut names the form that reads the rest")
+    (is (= msg (str shown (subs msg offset))) "the form reads exactly the rest"))
+  (testing "one line: cut after a word, no form without a source"
+    (let [s (str/join " " (repeat 60 "word"))
+          {:keys [text shown omitted]} (seon/prose s 20)]
+      (is (str/ends-with? shown " ") "cut at a space, not mid-word")
+      (is (= (str shown "…+" omitted " chars") text) "no lines left: characters only, and no form")))
+  (testing "one-line reads whitespace runs as one space"
+    (is (= "a b c" (:text (seon/prose "a\n  b\t\tc" 20 {:one-line? true}))))))
+
+(deftest more-says-how-many-and-where
+  (is (nil? (seon/more 3 3 "x")))
+  (is (= "+7 more: (seon.task/attempts db)" (seon/more 12 5 "(seon.task/attempts db)")))
+  (is (= "+1 more" (seon/more 2 1 nil))))
+
+(deftest a-one-line-cut-reads-the-source-rest
+  (let [s (str "  first   line\n\n" (str/join "\n" (repeat 40 "a line of  the message")) " ")
+        {:keys [offset omitted continuation]} (seon/prose s 20 {:one-line? true :source 'msg})]
+    (is (= (list 'subs 'msg offset) continuation))
+    (is (= (count s) (+ offset omitted)) "omitted counts what the form reads")
+    (is (str/starts-with? (str/replace (subs s offset) #"\s+" " ") (str/trim (str/replace (subs s offset) #"\s+" " ")))
+        "the form reads from a word, not the middle of one")
+    (is (= (str/replace (str/trim s) #"\s+" " ")
+           (str/trim (str (:shown (seon/prose s 20 {:one-line? true :source 'msg})) (str/replace (str/trim (subs s offset)) #"\s+" " "))))
+        "shown, then the rest the form reads, is the whole line")))

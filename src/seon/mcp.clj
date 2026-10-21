@@ -38,6 +38,13 @@
       (let [line (.readLine in)] (.close s) (or line "{:error \"no answer\"}")))
     (catch Throwable e (pr-str {:error (str "root's entrance on port " port ": " (or (ex-message e) (str (type e))))}))))
 
+(defn- tool-text
+  "What a tool call answers: the context's text itself for seon_context (the model's own
+  view, not an escaped string inside a map), else the entrance's answer line."
+  {:malli/schema [:=> [:cat :map :string] :string]}
+  [tool line]
+  (or (when (= :context (:op tool)) (:context (edn/read-string line))) line))
+
 (defn reply
   "The JSON-RPC answer to one message, or nil for a notification."
   {:malli/schema [:=> [:cat pos-int? :map] [:maybe :map]]}
@@ -50,7 +57,7 @@
                 "tools/list" {"tools" (mapv (fn [t] {"name" (:name t) "description" (:description t) "inputSchema" (:schema t)}) tools)}
                 "tools/call" (let [t (first (filter #(= (get params "name") (:name %)) tools))
                                    args (into {} (for [[k v] (get params "arguments")] [(keyword k) v]))]
-                               {"content" [{"type" "text" "text" (if t (request! port (assoc args :op (:op t))) (str "no tool " (get params "name")))}]})
+                               {"content" [{"type" "text" "text" (if t (tool-text t (request! port (assoc args :op (:op t)))) (str "no tool " (get params "name")))}]})
                 {})}))
 
 (defn serve!

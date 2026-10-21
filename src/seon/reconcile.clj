@@ -8,31 +8,30 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [clojure.edn :as edn] [seon.sock :as sock] [seon.step :as step]
             [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm] [seon.source :as source]
-            [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.reader :as reader]))
+            [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.reader :as reader]
+            [seon.config :as cfg]))
 
 (def default-max-turns
-  "Turns an attempt may take when its task sets no :seon.config.agent/max-turns."
-  8)
+  "Turns an attempt may take when its task sets no :seon.config.agent/max-turns: the config's."
+  (cfg/value :seon.config.agent/max-turns))
 
 (def default-max-running
-  "Parallel attempts when root's boot set no :seon.config.agent/max-running."
-  4)
+  "Parallel attempts when main's root entity states no :seon.config.agent/max-running: the config's."
+  (cfg/value :seon.config.agent/max-running))
 
 (def default-max-merging
-  "Merge attempts at once, the dial root's boot records (:seon.config.merge/max-running): 1,
-  git's one-at-a-time merge queue. Trains stay off by decision (DECISIONS, Root's calls on
-  R3's questions) until a train's members run their tests combined and the par-200 hang is
-  fixed; writing the fact above 1 turns them on (members only when what they change is
-  disjoint)."
-  1)
+  "Merge attempts at once when main's root entity states no :seon.config.merge/max-running:
+  the config's (1: merge trains stay off, DECISIONS). They run together only when the
+  definitions they change are disjoint (a merge train); 1 is git's one-at-a-time merge queue."
+  (cfg/value :seon.config.merge/max-running))
 
 (def merge-dials
-  "The merge dials' defaults, when the task sets none (:seon.config.merge/*)."
-  {:max-conflicts 3 :max-merge-turns 2})
+  "The merge dials' defaults, when the task sets none (:seon.config.merge/*): the config's."
+  {:max-conflicts (cfg/value :seon.config.merge/max-conflicts) :max-merge-turns (cfg/value :seon.config.merge/max-merge-turns)})
 
 (def default-budget
-  "Refinement chains a task's failures may attach when it declares no :seon.task/budget."
-  2)
+  "Refinement chains a task's failures may attach when it declares no :seon.task/budget: the config's."
+  (cfg/value :seon.config.task/budget))
 
 (defn refine?
   "Has task t budget left for one more refinement chain (its generation below its budget)?"
@@ -658,7 +657,8 @@
       :read (one (request (assoc-in st [:flights aid :branch-db] r) aid :diffed
                           {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}}))
       ;; every attempt is a new agent: none is reused
-      :diffed (let [[st o1] (request st aid :ignored {:op :kill :id agent})
+      ;; root stops it because its attempt ended: its view says :ended, not :killed
+      :diffed (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
                     [st o2] (write st aid :done (judge-tx st f (:results f) (:branch-db f) (into #{} (map pr-str) (:ours r))))]
                 [st [o1 o2]])
       ;; each member's answer, as one write: merged at the train's t, behind (its merge task

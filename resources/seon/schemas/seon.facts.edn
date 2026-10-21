@@ -133,10 +133,7 @@
  :seon.task/stuck [:map {:seon.db/edn true} [:attempt :seon.attempt/id] [:cause :string] [:blocks [:vector :seon.task/id]]]
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
- ;; config dials are attributes of the task, by their own names
- :seon.config.agent/max-turns [:int {:min 1}]
- :seon.config.merge/max-conflicts :int
- :seon.config.merge/max-merge-turns :int
+ ;; config dials are attributes of the task, by their own names (schemas: seon.config.agent.edn, seon.config.merge.edn)
  :seon.task/task-fact [:map {:seon.db/attributes true}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
@@ -207,8 +204,6 @@
  ;; ---- root's boot and dials (main) ----
  :seon.root/id [:and {:seon.db/identity true} :keyword]
  :seon.root/boot :string
- :seon.config.agent/max-running :int
- :seon.config.merge/max-running :int
  ;; the reconciler's positive report of quiescence: at main's t nothing runs, nothing is to
  ;; judge, nothing is ready; :stuck names each released task not done, with its root cause and
  ;; what it blocks (seon.reconcile/stuck)

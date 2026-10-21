@@ -68,28 +68,36 @@
   the proofs): a red test names its failures, a contract gap its var."
   {:malli/schema [:=> [:cat [:vector :seon.reconcile/refusal] [:vector :map]] [:vector :map]]}
   [refusals reds]
-  (vec (for [{:keys [refusal symbol key]} refusals :when (not= :proof-red refusal)]
-         (case refusal
-           (:regression :stray-red) (cond-> {:refusal refusal :test symbol}
-                                      (seq (filter #(= symbol (:test %)) reds))
-                                      (assoc :failures (mapv failure (filter #(= symbol (:test %)) reds))))
-           :contract-gap {:refusal refusal :var symbol}
-           :unmerged {:refusal refusal :key key}
-           {:refusal refusal}))))
+  (let [rs (remove #(= :proof-red (:refusal %)) refusals)
+        gaps (vec (keep #(when (= :contract-gap (:refusal %)) (:symbol %)) rs))
+        unmerged (vec (keep #(when (= :unmerged (:refusal %)) (:key %)) rs))]
+    ;; a contract gap and an unmerged entry say one thing about many names: one entry each,
+    ;; its names a list the printer budgets
+    (vec (concat
+           (for [{:keys [refusal symbol]} rs :when (not (#{:contract-gap :unmerged} refusal))]
+             (case refusal
+               (:regression :stray-red) (cond-> {:refusal refusal :test symbol}
+                                          (seq (filter #(= symbol (:test %)) reds))
+                                          (assoc :failures (mapv failure (filter #(= symbol (:test %)) reds))))
+               {:refusal refusal}))
+           (when (seq gaps) [{:refusal :contract-gap :vars gaps}])
+           (when (seq unmerged) [{:refusal :unmerged :keys unmerged}])))))
 
 (defn- near
-  "The code around position at of text: its line, at most 30 characters either side."
-  {:malli/schema [:=> [:cat :string :int] :string]}
+  "Where position at of text is: its line's number and its column (1-based), and the
+  whole line (the printer budgets it with the block)."
+  {:malli/schema [:=> [:cat :string :int] [:map [:line pos-int?] [:column pos-int?] [:text :string]]]}
   [text at]
   (let [at (min at (count text))
         start (if (pos? at) (inc (or (str/last-index-of text "\n" (dec at)) -1)) 0)
         end (or (str/index-of text "\n" at) (count text))]
-    (str/trim (subs text (max start (- at 30)) (min end (+ at 30))))))
+    {:line (inc (count (filter #(= \newline %) (subs text 0 start)))) :column (inc (- at start))
+     :text (subs text start end)}))
 
 (defn last-reply
   "What happened to the agent's last reply: cut at the token limit, and each delimiter the
-  reader repaired (what it dropped or inserted, and the code near it in source, the reply
-  as the reader gave it to the REPL), or nil."
+  reader repaired (what it dropped or inserted, and where: the line and column in source,
+  the reply as the reader gave it to the REPL, and that line), or nil."
   {:malli/schema [:=> [:cat [:maybe :boolean] [:maybe :string] [:vector :map]] [:maybe :map]]}
   [truncated? source repairs]
   (let [rs (for [{:keys [at dropped inserted]} repairs :when (not= ";; " inserted)]
@@ -117,7 +125,9 @@
              ;; a passing proof is its status; a red or unrun one shows its source and failures
              :proofs (vec (for [p (sort-by str proofs) :let [st (get results p :none)]]
                             (cond-> {:test p :status st}
-                              (not= :pass st) (assoc :source (source-of db p))
+                              ;; unknown is not nil: a proof with no recorded definition says so
+                              (not= :pass st) (as-> m (if-let [src (source-of db p)] (assoc m :source src)
+                                                         (assoc m :source :none-recorded-on-this-branch)))
                               (seq (filter #(= p (:test %)) reds))
                               (assoc :failures (mapv failure (filter #(= p (:test %)) reds))))))
              ;; a reference already shown as a proof is not shown twice

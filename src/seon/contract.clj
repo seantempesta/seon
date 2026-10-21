@@ -15,22 +15,23 @@
     wrappers and their compiled validators copy-on-write.
   - `arm!` is the same for one var: an agent's `defn` with `:malli/schema` metadata is
     armed when it is defined, and main's program when it loads.
-  - `SEON_GUARANTEES=off` (read once, at load) installs no wrapper and no recording
-    transaction: the same binary measured with the guarantees off; `=contracts` arms the
-    wrappers without the recording transaction."
+  - `:seon.config.contract/guarantees :off` (the config, read once at load) installs no
+    wrapper and no recording transaction: the same binary measured with the guarantees off;
+    `:contracts` arms the wrappers without the recording transaction."
   (:refer-clojure :exclude [defn defn-])
   (:require [malli.core :as m] [malli.registry :as mr] [clojure.edn :as edn]
-            [clojure.java.io :as io] [clojure.string :as str] [seon.profile :as profile] [seon.print :as print]))
+            [clojure.java.io :as io] [clojure.string :as str] [seon.profile :as profile] [seon.print :as print]
+            [seon.config :as config]))
 
 (def on?
-  "Are the contracts on in this process (SEON_GUARANTEES, read once at load)? off: no
-  wrapper and no recording; contracts: wrappers, no recording transaction (for measuring
-  the two apart); anything else: both."
-  (not= "off" (System/getenv "SEON_GUARANTEES")))
+  "Are the contracts on in this process (:seon.config.contract/guarantees)? :off: no
+  wrapper and no recording; :contracts: wrappers, no recording transaction (for measuring
+  the two apart); :on: both."
+  (not= :off (config/value :seon.config.contract/guarantees)))
 
 (def record?
-  "Does each eval request write its recording transaction (SEON_GUARANTEES on)?"
-  (not (#{"off" "contracts"} (System/getenv "SEON_GUARANTEES"))))
+  "Does each eval request write its recording transaction (:seon.config.contract/guarantees :on)?"
+  (= :on (config/value :seon.config.contract/guarantees)))
 
 ;; ---- the predicate pack: host objects with no data form ------------------------------
 ;; Named predicate schemas (malli simple schemas), so a contract names them like any
@@ -70,7 +71,7 @@
   carries the forms)."
   {:malli/schema [:=> [:cat] [:map-of :qualified-keyword :any]]}
   []
-  (let [dir (io/file (or (System/getenv "JOLT_PWD") ".") "resources/seon/schemas")]
+  (let [dir (io/file (config/checkout) "resources/seon/schemas")]
     (reduce merge {} (for [f (sort-by #(.getName %) (file-seq dir))
                            :when (.endsWith (.getName f) ".edn")]
                        (edn/read-string (slurp f))))))

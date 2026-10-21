@@ -1,0 +1,1 @@
+#merge [#include "../../../resources/seon/config/default.edn" {:seon.config.root/max-agentz 3}]

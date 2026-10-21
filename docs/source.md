@@ -4,7 +4,7 @@ The self-improvement loop (owner, 2026-10-21): agents change Seon's own function
 
 ## Import: the running generation's source as main's program
 
-With `:source {:root dir :dirs ["src"] :branch "jolt/seon-merges"}` (or `SEON_SOURCE=dir`), root reads the tree through the `:source` effect at boot, when main holds no imported namespace yet. Each file is read form by form with its exact text, the whitespace and comments before each form (`:form/lead`) and the text after the last (`:ns/tail`). Each form is analyzed by Jolt's compiler without running it, giving the same account an agent's REPL records. What happened is root's `:seon.root/source` fact (files, forms, ms, or the error).
+With `:source {:root dir :dirs ["src"] :branch "jolt/seon-merges"}` (or the config's `:seon.config.source/root`, with `:seon.config.source/dirs` and `:seon.config.source/branch`; a run states it with `--set :seon.config.source/root=\"dir\"`), root reads the tree through the `:source` effect at boot, when main holds no imported namespace yet. Each file is read form by form with its exact text, the whitespace and comments before each form (`:form/lead`) and the text after the last (`:ns/tail`). Each form is analyzed by Jolt's compiler without running it, giving the same account an agent's REPL records. What happened is root's `:seon.root/source` fact (files, forms, ms, or the error).
 
 Imported forms carry `:form/source true`: the binary already holds them compiled. Root and the fork server never evaluate a namespace imported from a file (`:ns/file`); an agent does run its branch's changes to one (`load-diff!` skips only the imported text). Measured on next/src: 54 files, 1,168 forms, 418 ms of analysis and 1.0 s to transact in the test runtime; 1.5 s at a root's boot.
 

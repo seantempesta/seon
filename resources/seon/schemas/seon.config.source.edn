@@ -1,0 +1,6 @@
+;; Seon's own source as the program (lane LOOP, seon.source tasks): which repository root
+;; imports at boot and where merges that change it are committed. Values, units and provenance:
+;; resources/seon/config/default.edn.
+{:seon.config.source/root [:string {:min 1 :seon.config/unit "path" :description "The repository whose dirs main imports at boot (when main holds none of them) and whose merges branch receives the write-back; absent: no source is imported or written."}]
+ :seon.config.source/dirs [:vector {:seon.db/edn true :seon.config/unit "paths" :description "The source directories under the root that are the program, relative to it."} [:string {:min 1}]]
+ :seon.config.source/branch [:string {:min 1 :seon.config/unit "branch" :description "The git branch of the root each merge that changes the source is committed on (never main, never pushed)."}]}
