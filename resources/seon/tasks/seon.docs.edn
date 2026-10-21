@@ -1,19 +1,38 @@
-[{:seon.task/name "docs-are-a-wiki"
-  :seon.task/plan "next/docs/ becomes a wiki that is always accurate (owner, 2026-10-21: \"a wiki style set of docs … always accurate and up to date and we can reference in the docstrings and task plans to pull in relevant details\"). One concept per page, docs/<topic>.md: system (root's procs, one paragraph each), agents (fork, branch, run-ahead writer, nREPL), tasks (lifecycle, task files, refinement, stuck, quiescence), merge (three-way keys, declared data, behind, unmerged, uncontracted, trains), store (Datahike on LMDB, branches, commits, kept runs, branch from any commit), program (definitions from the compiler, scratch namespaces, what judges), printer (seon.print and :seon.render/ai, :seon.render/html; no clipping), cost (seon.cost/proof, units, seon.profile), door (bin/root, bin/mcp, the tools), worktrees (bin/worktree, landing), check (every bin/check mode and what it proves). docs/README.md is the index. A section is addressed as \"topic#heading-slug\" (the heading's GitHub slug). Each section ends with a line naming the code it describes, as EDN: `Describes: {:vars [seon.merge/program] :attrs [:seon.root/quiescent] :files [\"src/seon/merge.clj\"]}`. Seed from what is true today: vocabulary.md, forks.md and DRAGONS.md fold in; notes/audit-2026-10-21/PROCESSES-draft.md and MAP-draft.md are the raw material for system and agents. Every claim is checked against the code as you write it (read the code, eval at the door); no page repeats another (link instead)."
+[{:seon.task/name "one-reference-reader"
+  :seon.task/plan "Port v1's reference reader, `seon.ref` (read-only: ~/src/seon/src/seon/ref.clj; its tests ~/src/seon/test/seon/ref_test.clj; the rule in ~/src/seon/docs/seon/schedule/cards/TASK-CHAIN.md §3a), onto next/'s pillars. Keep from v1:
+- one Markdown parse of any text: a plan, a doc page, a docstring;
+- the delimiter picks the depth: a bare word that names a real entity is its summary; one backtick or a link is its doc; three or more backticks is its code; two backticks is a literal and never a reference;
+- a name cited several times is shown once, at its strongest depth;
+- line citations (`src/seon/writer.clj:263`) resolve to their file;
+- a section's summary is its heading plus its lead's first sentence (v1 `lead-sentence`, `section-view`).
+Resolve names against next/'s program facts (`:var/name`), not v1's `:seon.fn/sym`. Drop v1's cache, sci and embedding hooks. Markdown on Jolt: the only Markdown library in awesome-jolt renders HTML and gives no tree, so write the minimum exact scanner (headings outside fences, code spans with their backtick width, links), proven by v1's ported tests.
+Replaces `seon.reconcile/references` (backtick-only) everywhere: the context's current-state, `hairy` and the docs check. Read first: what v1 did here (above); there is no declared reference list or key anywhere (no `Describes` line, no hand-kept task reference keys, no `:pattern-of`); references are only what text cites."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.docs-test/every-page-is-indexed seon.docs-test/every-section-describes-something}}
- {:seon.task/name "docs-references-are-data"
-  :seon.task/plan "A reference to the wiki is data, never prose to be parsed: a definition carries {:seon/docs [\"merge#behind\"]} in its metadata (recorded with the var, as :var/meta already is), a task carries :seon.task/docs #{\"merge#behind\"} (add it to seon.task/declaration and seon.task/own in resources/seon/schemas/seon.task.edn; task files may name it). seon.docs/section answers one section's text from its address (the markdown read by headings: a heading line starts a section, its slug is its address). Docstrings and task plans name docs by these keys; existing plans that cite notes/ or line numbers for an explanation get a docs reference instead as they are touched."
+  :seon.task/proofs #{seon.ref-test/one-text-gives-names-paths-and-line-citations-by-one-rule
+                      seon.ref-test/the-delimiter-picks-the-depth
+                      seon.ref-test/a-literal-and-fenced-code-are-not-references
+                      seon.ref-test/a-bare-word-is-a-reference-only-when-it-names-something
+                      seon.ref-test/a-name-is-shown-once-at-its-strongest-depth}}
+ {:seon.task/name "docs-are-data-in-the-store"
+  :seon.task/plan "The wiki (next/docs/*.md) is loaded into the store as data, written only where a page's digest changed, like task files (`seon.task/load-tx`): a section entity per heading with its address `topic#slug`, title, lead, own text and parent; its references are what its text cites, read by the one reader (`one-reference-reader`): links become refs to sections, cited names refs to var entities, file citations refs to file entities. A section's backlinks are who cites it, so a pattern's home knows its instances by its backlinks, with no extra key. A var's home is the section that cites it at code depth. Docs merge as data (a doc change on a branch merges like any other). Loaded at boot and on demand (`my.root/load-docs!`)."
   :seon.task/kind :work
-  :seon.task/needs #{"seon.docs/docs-are-a-wiki"}
-  :seon.task/proofs #{seon.docs-test/a-reference-resolves-to-its-section seon.task-test/a-task-file-declares-docs}}
- {:seon.task/name "context-pulls-referenced-docs"
-  :seon.task/plan "The agent's context includes the sections its task names (:seon.task/docs) and the sections named by the definitions the task's proofs call (their :seon/docs), each once (context says each thing once), through the context's own render (a section is a value with a :seon.render/ai; never clipped: a long section is elided by the printer with how to read the rest, e.g. (doc-section \"merge#behind\")). The door's seon_context shows the same. Recorded per turn like every context part (its characters counted in the per-turn context split)."
+  :seon.task/needs #{"seon.docs/one-reference-reader"}
+  :seon.task/proofs #{seon.docs-test/an-unchanged-page-writes-nothing
+                      seon.docs-test/a-changed-section-rewrites-only-itself
+                      seon.docs-test/a-link-to-no-section-is-refused-by-name
+                      seon.docs-test/backlinks-are-a-sections-instances}}
+ {:seon.task/name "a-task-cites-what-it-needs"
+  :seon.task/plan "A task's references are its plan's citations, read by the one reader and stored on the task (as v1's `:seon.task/references` were), never a hand-kept list. The context of every step pulls each cited section and name at the depth its citation asks for, plus, at summary depth, the sections those link to, so an agent sees a lead sentence and decides whether to read on. A task's research or design step cites the relevant sections and states the differences (section vs code; what the task changes); its done rule refuses a design with no citations or no differences, and the merge owes the cited sections' updates. Findable: `(my.docs/docs \"text\")` answers ranked sections at summary depth with why each matched; the research step's context shows the map (docs/README.md) at summary depth."
   :seon.task/kind :work
-  :seon.task/needs #{"seon.docs/docs-references-are-data"}
-  :seon.task/proofs #{seon.context-test/a-task-context-includes-its-docs}}
- {:seon.task/name "docs-stay-accurate"
-  :seon.task/plan "bin/check docs (a seon.check mode, ends on DOCS OK / DOCS FAILED): (1) every :seon/docs and :seon.task/docs reference resolves to a section; (2) every var a Describes line names resolves in the release binary (find-var after loading the program), every attr is in the schema, every file exists; (3) staleness, exact per definition: a section is stale when a var it names has a different source now than at the page's last commit (read both with the reader: the form defining it in `git show <page-commit>:<file>` against today's recorded :var/src; no line diffs, no regex), or an attr it names changed its schema entry; a stale section is a problem (:seon.problems class :docs) and the check lists them. Stale is red: a change that makes a section wrong updates the section in the same commit. Add the step to bin/check."
+  :seon.task/needs #{"seon.docs/docs-are-data-in-the-store"}
+  :seon.task/proofs #{seon.context-test/a-task-context-pulls-what-its-plan-cites-at-that-depth
+                      seon.reconcile-test/a-design-without-citations-or-differences-is-refused
+                      seon.docs-test/docs-ranks-sections-and-says-why}}
+ {:seon.task/name "the-wiki-stays-true-and-healthy"
+  :seon.task/plan "`bin/check docs` is queries over the docs facts, run in every merged-result check: a reference that doesn't resolve is red; a section is stale when a var it cites at doc or code depth has a different defining form than at the page's last commit (read both with the reader, no text diff); health is reported first, then red: a var with two homes (two sections citing it at code depth), a section with no standalone lead sentence (v1's summary is heading + lead's first sentence), an orphan (no link and no map entry reaches it), a page linking nowhere, a dated changelog section. The style is written once, in docs/wiki.md."
   :seon.task/kind :work
-  :seon.task/needs #{"seon.docs/docs-are-a-wiki" "seon.docs/docs-references-are-data"}
-  :seon.task/proofs #{seon.docs-test/a-dangling-reference-is-red seon.docs-test/a-missing-var-is-red seon.docs-test/a-section-older-than-its-code-is-stale}}]
+  :seon.task/needs #{"seon.docs/docs-are-data-in-the-store"}
+  :seon.task/proofs #{seon.docs-test/an-unresolved-reference-is-red
+                      seon.docs-test/a-section-older-than-what-it-cites-is-stale
+                      seon.docs-test/two-code-depth-homes-are-flagged
+                      seon.docs-test/an-orphan-is-flagged}}]
