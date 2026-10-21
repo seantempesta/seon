@@ -5,9 +5,9 @@
     (whoami)                  {:id :branch :pid}
     (messages)                the messages delivered and not yet taken, taken
     (send-message tos body)   body to the agents tos (ids), delivered by root
-    (source sym)              the recorded source of a definition, printed (doc is clojure.repl's)"
+    (source sym)              the recorded source of a definition, printed (also clojure.repl/source, source-fn)"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [datahike.api :as d]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context]))
 
 (defn $ "The live value of an earlier result, by handle (:h3)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
@@ -18,14 +18,13 @@
 (defn send-message "Send body to the agents tos (ids); root delivers it by id. nil." {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
   [tos body] (agent/send-message tos body))
 
-(defn source-of
-  "The source this branch records for the definition sym (the text of the form that last defined it), or nil."
+(defn source-fn
+  "The source this branch records for the var sym names (the text of the form that last defined it), or nil: clojure.repl/source-fn."
   {:malli/schema [:=> [:cat :symbol] [:maybe :string]]}
   [sym]
-  (let [sym (if (namespace sym) sym (symbol (str (ns-name *ns*)) (name sym)))]
-    (d/q '[:find ?s . :in $ ?v :where [?e :var/name ?v] [?e :var/form ?f] [?f :form/src ?s]] (agent/db) sym)))
+  (when-let [v (resolve sym)]
+    (context/source-of (agent/db) (symbol (str (ns-name (:ns (meta v)))) (str (:name (meta v)))))))
 
 (defmacro source
   "Print the recorded source of the definition named by sym (as clojure.repl/source does)."
-  [sym] `(println (or (source-of '~sym) (str "Source not found for " '~sym))))
-
+  [sym] `(println (or (source-fn '~sym) (str "Source not found for " '~sym))))
