@@ -79,6 +79,7 @@ owns the concept. A new concept gets its word here before it appears in code.
 | **unmerged entry** | a conflict kept on the branch (base, ours, theirs) until re-defn or `resolve!` | `seon.merge/unmerged` |
 | **harvest** | staging the live runtime onto the branch (unmaps, plain defs as values, aliases) | `seon.harvest/harvest!` |
 | **dragon** | a place where the outside world can fail us, met by one named edge | `docs/DRAGONS.md` |
+| **section** | one heading of a wiki page as an entity on main: address `path#anchor`, heading, lead, own text, parent, and references (what its own text cites); its backlinks are who cites it | `seon.docs/load-tx` |
 
 ## Agent-facing verbs (`my.*`)
 
