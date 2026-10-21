@@ -480,13 +480,18 @@
      [st (when-let [ms (agent/handle! m)] {:sock ms})])))
 
 (defn serve!
-  "The agent's loop: one request at a time, in arrival order. Never returns."
+  "The agent's loop: one request at a time, in arrival order. Never returns. The agent
+  process's entrant boundary: a defect no request's own boundary caught (the agent may
+  redefine a function its loop calls) ends the process; its cause is the attempt's end on
+  the branch (seon.agent/died!), and the exit status 70 (EX_SOFTWARE) names the death."
   {:malli/schema [:=> [:cat] :any]}
   []
-  (step/run-loop #'agent-step {}
-                 (fn [] (let [m (agent/next-msg!)] (when-not (= m :dead) [:sock m])))
-                 (fn [_ m] (agent/send! m)))
-  (lib/c-exit 0))
+  (try (step/run-loop #'agent-step {}
+                      (fn [] (let [m (agent/next-msg!)] (when-not (= m :dead) [:sock m])))
+                      (fn [_ m] (agent/send! m)))
+       (lib/c-exit 0)
+       (catch Throwable e
+         (try (agent/died! e) (finally (lib/c-exit 70))))))
 
 (defn run!
   "The agent's body, in the child of the fork server; fd is its socket to root. Never

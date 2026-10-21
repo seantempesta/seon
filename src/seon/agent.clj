@@ -222,18 +222,49 @@
 
 
 (defn error-map
-  "A form's exception as the one error map: its ex-data when that already is one (a
-  contract refusal names its operation, member and problems), else the
-  :seon.agent/eval-error variant raised at the agent's REPL boundary, with the exception's
-  class and its ex-data printed by the one printer."
-  {:malli/schema [:=> [:cat :seon.host/throwable] :seon.error/base]}
-  [^Throwable e]
-  (if (contract/error? (ex-data e))
-    (ex-data e)
-    (let [m (or (ex-message e) (str (type e)))]
-      (contract/error :seon.agent/eval-error 'seon.repl/eval-code m
-                      (cond-> {:class (str (type e))}
-                        (ex-data e) (assoc :data (print/text (ex-data e) (:part print/budgets))))))))
+  "An exception caught at one of the agent's entrant boundaries (operation: the REPL's
+  seon.repl/eval-code by default) as the one error map: its ex-data when that already is
+  one (a contract refusal names its operation, member and problems), else the
+  :seon.agent/eval-error variant, with the exception's class, its ex-data printed by the one
+  printer, and its cause chain (each cause's class and message)."
+  {:malli/schema [:function [:=> [:cat :seon.host/throwable] :seon.error/base]
+                  [:=> [:cat :seon.host/throwable :qualified-symbol] :seon.error/base]]}
+  ([e] (error-map e 'seon.repl/eval-code))
+  ([^Throwable e op]
+   (if (contract/error? (ex-data e))
+     (ex-data e)
+     (let [m (or (ex-message e) (str (type e)))
+           causes (mapv #(str (type %) ": " (ex-message %)) (take-while some? (rest (iterate ex-cause e))))]
+       (contract/error :seon.agent/eval-error op m
+                       (cond-> {:class (str (type e))}
+                         (ex-data e) (assoc :data (print/text (ex-data e) (:part print/budgets)))
+                         (seq causes) (assoc :causes causes)))))))
+
+(defn write-end!
+  "Attempt's end on this branch (:seon.end/*, which root's judge reads), committed: its
+  outcome, and when known its reason, the error that ended it (as data), its turns, tokens
+  and waste. The turn loop's end and the process's death write it the same way."
+  {:malli/schema [:=> [:cat :seon.attempt/id [:map [:outcome :seon.attempt/outcome]]] :any]}
+  [attempt {:keys [outcome reason error turns tokens waste]}]
+  (transact! [(cond-> {:seon.end/attempt attempt :seon.end/outcome outcome}
+                turns (assoc :seon.end/turns turns)
+                tokens (assoc :seon.end/tokens tokens)
+                reason (assoc :seon.end/reason reason)
+                error (assoc :seon.end/error (pr-str error))
+                (seq waste) (assoc :seon.end/waste (pr-str waste)))])
+  (commit!))
+
+(defn died!
+  "The process's death by defect e, caught at its entrant boundary (seon.repl/serve!): the
+  cause, printed by the one printer, to stderr (root records its tail with the death, even
+  when the end cannot be written), then the end of the attempt this process works, written
+  on its branch. Root names the death by the exit status that follows."
+  {:malli/schema [:=> [:cat :seon.host/throwable] :any]}
+  [e]
+  (let [em (error-map e 'seon.repl/serve!)]
+    (lib/write-line! 2 (print/text em (:part print/budgets)))
+    (when-let [a (get-in @state [:turn :attempt])]
+      (write-end! a {:outcome :error :reason (str "the agent's process died: " (:seon.error/message em)) :error em}))))
 
 (defn- interrupt-self-test
   "T1's boot check: SIGUSR1 reaches a Chez handler only in a process whose ancestors were

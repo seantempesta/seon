@@ -110,14 +110,18 @@
 (defn- exit-text {:malli/schema [:=> [:cat [:maybe :seon.lib/exit-status]] :string]}
   [x] (cond (:signal x) (str ": signal " (:signal x)) x (str ": exit " (:exit x)) :else ""))
 
+(declare deliver-rid)
+
 (defn- record-death
-  "Agent aid's death, folded: its died map completed with the exit status the fork server
-  reaped (nil for a clone, which is not the server's child)."
-  {:malli/schema [:=> [:cat :seon.root/api-state :keyword [:maybe :seon.lib/exit-status] :map] :seon.root/api-state]}
-  [st aid exit died]
-  (let [e (assoc died :exit exit :seon.error/message (str "agent " (name aid) " died" (exit-text exit)))]
-    (problem st (err/occurrence e :agent {:agent aid :task (get-in st [:view :agents aid :task]) :form (get-in e [:last-op :form])}
-                                (System/currentTimeMillis)))))
+  "Agent aid's death, folded, and answered to the requests it died in (inflight): its died
+  map completed with the exit status the fork server reaped (nil: never known, for a clone
+  or an orphan, which are not the server's children)."
+  {:malli/schema [:=> [:cat :seon.root/api-state :keyword [:maybe :seon.lib/exit-status] :map [:sequential :int]] :seon.root/api-state]}
+  [st aid exit died inflight]
+  (let [e (assoc died :exit exit :seon.error/message (str "agent " (name aid) " died" (exit-text exit)))
+        st (problem st (err/occurrence e :agent {:agent aid :task (get-in st [:view :agents aid :task]) :form (get-in e [:last-op :form])}
+                                       (System/currentTimeMillis)))]
+    (reduce (fn [st r] (deliver-rid st r (no-agent (get-in st [:pending r :kind]) e))) st inflight)))
 
 (defn- reply!
   "Answer a caller: an outside caller's promise is delivered; a proc's reply route
@@ -216,12 +220,13 @@
         e (or died (gone agent "agent stopped"))]
     (step/out! o :events (step/event {:type (or stopped :dead) :agent agent}))
     (let [st (cond
-               (nil? died) st
-               ;; the exit status is known (reaped first), or never will be (a clone): now
-               (or (:exit v) (:cloned-from v)) (record-death st agent (:exit v) died)
-               ;; else when the fork server reaps it (:exit)
-               :else (assoc-in st [::dying (or pid (:pid v))] [agent died]))
-          st (reduce (fn [st r] (deliver-rid st r (no-agent (get-in st [:pending r :kind]) e))) st inflight)
+               (nil? died) (reduce (fn [st r] (deliver-rid st r (no-agent (get-in st [:pending r :kind]) e))) st inflight)
+               ;; the exit status is known (reaped first), or never will be (a clone, an
+               ;; orphan of a server that went down): now
+               (or (:exit v) (:cloned-from v) (:orphan v)) (record-death st agent (:exit v) died inflight)
+               ;; else when the fork server reaps it (:exit): the requests it died in are
+               ;; answered then, with the status that names the death
+               :else (assoc-in st [::dying (or pid (:pid v))] [agent died inflight]))
           st (cond-> st rid (deliver-rid rid {:stopped true :agent agent}))]
       (-> st (update :agents dissoc agent) (update :agent-procs dissoc agent) (assoc ::update true)
           (set-agent agent {:status (or stopped :dead) :ended-ms (System/currentTimeMillis) :running nil})))))
@@ -347,8 +352,8 @@
                        (set-agent st aid {:exit (:status m)})
                        st)]
               ;; a death waiting for its exit status: recorded now
-              (if-let [[aid died] (get-in st [::dying (:pid m)])]
-                (-> st (update ::dying dissoc (:pid m)) (record-death aid (:status m) died))
+              (if-let [[aid died inflight] (get-in st [::dying (:pid m)])]
+                (-> st (update ::dying dissoc (:pid m)) (record-death aid (:status m) died inflight))
                 st))
       :fork-failed (let [why (str "fork refused: " (:active-threads m) " active threads")]
                      (-> st (set-agent (:agent m) {:error why}) (to-agent (:agent m) {:op :failed :error why})))
@@ -356,13 +361,17 @@
                    (view! assoc-in [:server :mismatch] (:mismatch m)))
       :load-errors (view! st update-in [:server :load-errors] (fnil into []) (:errors m))
       ;; fork requests the dead server never served fail; agents live on
+      ;; the dead server's children are orphans: no server reaps them, so a death waiting
+      ;; for its exit status is answered now, and a later one at once
       :server-down (do (step/out! o :events (step/event {:type :server-down :pid (:old m)}))
-                       (reduce (fn [st [aid a]]
-                                 (if (and (= :spawning (:status a)) (nil? (:pid a)) (get-in st [:agents aid]))
-                                   (-> st (set-agent aid {:error "fork server went down before the fork"})
-                                       (to-agent aid {:op :failed :error "fork server went down"}))
-                                   st))
-                               (view! st update :server assoc :status :restarting) (get-in st [:view :agents])))
+                       (as-> (reduce (fn [st [aid a]]
+                                       (if (and (= :spawning (:status a)) (nil? (:pid a)) (get-in st [:agents aid]))
+                                         (-> st (set-agent aid {:error "fork server went down before the fork"})
+                                             (to-agent aid {:op :failed :error "fork server went down"}))
+                                         (cond-> st (:pid a) (set-agent aid {:orphan true}))))
+                                     (view! st update :server assoc :status :restarting) (get-in st [:view :agents])) st
+                         (reduce (fn [st [_ [aid died inflight]]] (record-death st aid nil died inflight))
+                                 (dissoc st ::dying) (::dying st))))
       :server-lost (do (step/out! o :events (step/event {:type :server-lost}))
                        (view! st update :server assoc :status :lost))
       :server-up (do (step/out! o :events (step/event {:type :server-up :pid (:pid m)}))

@@ -40,6 +40,7 @@ function.
 |---|---|---|
 | the agent's REPL: reading and evaluating an agent's form | `seon.repl/eval-code` | the form's error as an `:err` reply item (the one error map in `seon/error`) |
 | the agent's request handler | `seon.repl/agent-step` | `err` + `done` on the request |
+| the agent process's loop: a defect no request's boundary caught (the agent redefined a function its own loop calls; a failing commit of its record) | `seon.repl/serve!` | the cause on stderr, then the attempt's end on its branch (`seon.agent/died!`: outcome `:error`, the one error map with its cause chain); exit 70, which names the death; root's judge carries the end to the attempt's reason and error |
 | a test run, in the test child of an agent | `seon.agent/run-tests-forked` | an `:error` report in the run |
 | an effect lane performing a request (lane FX1) | `seon.fx/lane-proc` | `:seon.fx/defect` as the outcome: its asker is always answered |
 | one outside connection's request (seon.entrance, line EDN) | `seon.entrance/serve-connection!` | the request's answer `{:error :data}`; the connection goes on |
@@ -52,7 +53,7 @@ function.
 | A peer's socket is gone (EOF, or its end frame) | root: `jolt.async.remote`'s reader pump; agents and the fork server: `seon.sock/fill!`, `seon.sock/recv!` | root: the end's `:in` closes, the stand-in's `:from` reads nil and becomes `{:op :dead}`; elsewhere `:eof` |
 | A write to a dead peer (EPIPE) | `seon.sock/send-frame!` | `:epipe`; the agent exits, root reads EOF |
 | `fork()` refused (another Chez thread active, the OS) | `seon.fork-server/server-step`, `seon.lib/safe-fork` | `:fork-failed`; `-2` from safe-fork (the test run and clone report it) |
-| A process dies (killed, crashed, `System/exit`) | the socket's EOF; `waitpid` in `seon.fork-server/reap` | `:dead` / `:exit` events; the agent's pending replies answer `:seon.agent/died` (its last op and stderr tail), recorded with its exit status on main (lane D2) |
+| A process dies (killed, crashed, `System/exit`) | the socket's EOF; `waitpid` in `seon.fork-server/reap` | `:dead` / `:exit` events; the agent's pending replies answer `:seon.agent/died` (its exit status, last op and stderr tail) once the server reaped it (at once for a clone or an orphan of a server that went down, whose status no one reaps), recorded on main (lane D2); a dead attempt's reason is the end it wrote on its branch, if any, beside that death (`seon.reconcile/dead-tx`) |
 | An agent's stderr file cannot be made (a store with no path) | `seon.agent/stderr-to-file!` | stderr stays where it was; a death records no tail |
 | A dead agent's stderr file is gone or empty | `seon.root/stderr-tail` | nil |
 | The fork server dies | `seon.fork-server/fork-server-proc` (EOF of its events) | its standby is promoted (`:server-down`, `:server-up`) |
