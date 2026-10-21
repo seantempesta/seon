@@ -1,6 +1,9 @@
 #!/bin/zsh
 # bin/worktree NAME [BASE]    a worktree of next/ at ../next-NAME on branch jolt/NAME (from BASE, default main)
 # bin/worktree --remove NAME  remove that worktree and its submodule worktrees (the branch is kept)
+# bin/worktree --at DIR COMMIT [REPO]  a detached worktree of REPO (default next/) at COMMIT in DIR, set
+#                             up as below: what a generation is built in (seon.fx/build, docs/source.md)
+# bin/worktree --remove-at DIR remove such a worktree and its submodule worktrees
 # bin/worktree --sync NAME    move that worktree's submodules to the pins its branch records (after
 #                             merging main), by `git -C` on its own submodule checkouts only. Never
 #                             run `git submodule` in a worktree: it rewrites the module config every
@@ -24,6 +27,65 @@ set -eu
 MAIN=$(cd "$(dirname "$0")/.." && pwd)
 die() { print -u2 "worktree: $*"; exit 1; }
 
+# setup WT: WT's submodules as worktrees of this checkout's submodule repos at the pins WT's
+# commit records (read with ls-tree, never `git submodule`), and target/ cloned
+setup() {
+  local WT=$1
+  git -C "$WT" ls-tree HEAD reference-code/ | while read -r mode type sha sub; do
+    [[ $type == commit ]] || continue
+    rmdir "$WT/$sub" 2>/dev/null || true
+    git -C "$MAIN/$sub" worktree add -q --detach "$WT/$sub" "$sha"
+    # nested submodules (jolt's vendor/*): clones of the main tree's checked-out copies
+    if [[ -f $MAIN/$sub/.gitmodules ]]; then
+      for nested in $(git -C "$MAIN/$sub" config -f .gitmodules --get-regexp 'submodule\..*\.path' | awk '{print $2}'); do
+        [[ -d $MAIN/$sub/$nested ]] || continue
+        rm -rf "$WT/$sub/$nested"; mkdir -p "$(dirname "$WT/$sub/$nested")"
+        cp -cR "$MAIN/$sub/$nested" "$WT/$sub/$nested"
+        # a plain copy for the build: its .git points at the main tree's module store by a
+        # relative path that does not exist from here
+        rm -rf "$WT/$sub/$nested/.git"
+      done
+    fi
+  done
+  # target/: an APFS clone (copy-on-write) of the builds, not of the runs: a store is opened by
+  # its path, so a cloned target/runs/store fails every root here ("Store identity mismatch:
+  # connecting to wrong database"), target/check/ is the source tree's record, not this one's,
+  # and target/tmp/ holds tests' scratch (a generation a test builds lives there)
+  if [[ -d $MAIN/target ]]; then
+    mkdir -p "$WT/target"
+    for e in "$MAIN"/target/*(N); do
+      [[ ${e:t} == (runs|check|tmp) ]] || cp -cR "$e" "$WT/target/"
+    done
+  fi
+}
+
+# unsub WT: remove WT's submodule worktrees from this checkout's submodule repos
+unsub() {
+  for sub in $(git -C "$MAIN" config -f .gitmodules --get-regexp 'submodule\..*\.path' | awk '{print $2}'); do
+    [[ -e $1/$sub/.git ]] && git -C "$MAIN/$sub" worktree remove --force "$1/$sub" 2>/dev/null || true
+  done
+}
+
+if [[ ${1:-} == --at ]]; then
+  WT=${2:-} SHA=${3:-} REPO=${4:-$MAIN}
+  [[ -n $WT && -n $SHA ]] || die "usage: bin/worktree --at DIR COMMIT [REPO]"
+  [[ ! -e $WT ]] || die "$WT exists"
+  mkdir -p "${WT:h}"
+  git -C "$REPO" worktree add -q --detach "$WT" "$SHA"
+  setup "$WT"
+  print "worktree $WT at ${SHA:0:12} of $REPO"
+  exit 0
+fi
+
+if [[ ${1:-} == --remove-at ]]; then
+  WT=${2:-}; [[ -d $WT ]] || die "usage: bin/worktree --remove-at DIR (no worktree at '$WT')"
+  unsub "$WT"
+  C=$(git -C "$WT" rev-parse --path-format=absolute --git-common-dir)
+  git --git-dir="$C" worktree remove --force "$WT"
+  print "removed $WT"
+  exit 0
+fi
+
 if [[ ${1:-} == --sync ]]; then
   NAME=${2:-}; [[ -n $NAME ]] || die "usage: bin/worktree --sync NAME"
   WT=$(dirname "$MAIN")/next-$NAME
@@ -42,9 +104,7 @@ if [[ ${1:-} == --remove ]]; then
   NAME=${2:-}; [[ -n $NAME ]] || die "usage: bin/worktree --remove NAME"
   WT=$(dirname "$MAIN")/next-$NAME
   [[ -d $WT ]] || die "no worktree at $WT"
-  for sub in $(git -C "$MAIN" config -f .gitmodules --get-regexp 'submodule\..*\.path' | awk '{print $2}'); do
-    [[ -e $WT/$sub/.git ]] && git -C "$MAIN/$sub" worktree remove --force "$WT/$sub" 2>/dev/null || true
-  done
+  unsub "$WT"
   git -C "$MAIN" worktree remove --force "$WT"
   # its port block (bin/ports) is free again
   REG=$(dirname "$MAIN")/worktree-ports
@@ -61,33 +121,7 @@ BR=jolt/$NAME
 
 git -C "$MAIN" worktree add -q -b "$BR" "$WT" "$BASE"
 
-# submodules: worktrees of the main tree's submodule repos at the pinned commits
-git -C "$WT" submodule status | while read -r line; do
-  sha=${${line#[-+ U]}%% *}; sub=${${line#*[0-9a-f] }%% *}
-  rmdir "$WT/$sub" 2>/dev/null || true
-  git -C "$MAIN/$sub" worktree add -q --detach "$WT/$sub" "$sha"
-  # nested submodules (jolt's vendor/*): clones of the main tree's checked-out copies
-  if [[ -f $MAIN/$sub/.gitmodules ]]; then
-    for nested in $(git -C "$MAIN/$sub" config -f .gitmodules --get-regexp 'submodule\..*\.path' | awk '{print $2}'); do
-      [[ -d $MAIN/$sub/$nested ]] || continue
-      rm -rf "$WT/$sub/$nested"; mkdir -p "$(dirname "$WT/$sub/$nested")"
-      cp -cR "$MAIN/$sub/$nested" "$WT/$sub/$nested"
-      # a plain copy for the build: its .git points at the main tree's module store by a
-      # relative path that does not exist from here
-      rm -rf "$WT/$sub/$nested/.git"
-    done
-  fi
-done
-
-# target/: an APFS clone (copy-on-write) of the builds, not of the runs: a store is opened by
-# its path, so a cloned target/runs/store fails every root here ("Store identity mismatch:
-# connecting to wrong database"), and target/check/ is the source tree's record, not this one's
-if [[ -d $MAIN/target ]]; then
-  mkdir -p "$WT/target"
-  for e in "$MAIN"/target/*(N); do
-    [[ ${e:t} == (runs|check) ]] || cp -cR "$e" "$WT/target/"
-  done
-fi
+setup "$WT"
 
 # its own ports (config/local.edn, from the one registry) and its own MCP server: .mcp.json names
 # this worktree's bin/mcp, which reaches this worktree's root (kept out of git status)
