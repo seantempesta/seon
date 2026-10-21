@@ -174,8 +174,10 @@
         ;; the api's end of an agent (its graph's update! is the api's, not this test's)
         end (fn [st m] (let [o (volatile! {}) st (#'root/end-agent st o m)] [(dissoc (#'root/flush-problems st o) :seon.root/update) @o]))
         [st o1] (end st {:op :ended :agent :a1 :rid nil :pid 77 :inflight [3]})
+        ;; the caller is answered when the fork server reaps the child (its exit is the death's)
+        _ (step st :from-fs {:ev :exit :pid 77 :status {:signal 9}})
         died (:err (first @p))]
-    (testing "the caller in flight is answered with the death as the one error map"
+    (testing "the caller in flight is answered with the death as the one error map, once its exit is known"
       (is (= :seon.agent/died (:seon.error/type died)))
       (is (contract/valid? :seon.agent/died died))
       (is (re-find #"out of memory" (:stderr died)) "the last lines of its stderr")
