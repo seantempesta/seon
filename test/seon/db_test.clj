@@ -95,3 +95,25 @@
         (is (map? r1) "minting goes on")
         (is (< lease (new-id r1) ceiling) "inside its own block"))
       (finally (dbt/set-eid-ceiling! sid nil)))))
+
+(deftest two-processes-branch-one-store
+  ;; two processes at once each make 50 branches of one store (two roots on one store, as
+  ;; parallel check steps or a standing root beside a run): every branch is listed. A store on
+  ;; disk of this test's own, the last resort: the race is between processes; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-race-" (random-uuid))
+        _ (d/release (:conn (pdb/open! :lmdb path 0 :db)))
+        jolt (str (System/getProperty "user.dir") "/target/jolt/jolt")
+        code (fn [tag] (pr-str `(do (require 'seon.db 'datahike.api)
+                                    (let [c# (:conn (seon.db/open! :lmdb ~path 0 :db))]
+                                      (dotimes [i# 50] (datahike.api/branch! c# :db (keyword (str ~tag "-" i#))))
+                                      (System/exit 0)))))
+        cmd (str "'" jolt "' -A:test -e " (pr-str (code "x")) " > /dev/null 2>&1 & "
+                 "'" jolt "' -A:test -e " (pr-str (code "y")) " > /dev/null 2>&1 & wait")
+        r (clojure.java.shell/sh "nice" "-n" "10" "zsh" "-c" cmd)
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+        made (for [t ["x" "y"] i (range 50)] (keyword (str t "-" i)))]
+    (try
+      (is (zero? (:exit r)))
+      (is (= 100 (count (filter #(pdb/branch? conn %) made))) "every branch's head was written")
+      (is (= (set made) (disj (d/branches conn) :db)) "and every branch is listed")
+      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
