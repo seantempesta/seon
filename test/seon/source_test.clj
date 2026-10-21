@@ -163,11 +163,17 @@
   ;; namespaces its binary never loaded (proofs live there), so the analyzer reads a
   ;; form's aliases from the file's own ns form, not from a loaded namespace
   (let [files {"test/x/unloaded_test.clj"
-               "(ns x.unloaded-test (:require [clojure.test :refer [deftest is]] [datahike.api :as d]))\n\n(defn q [db] (d/q '[:find ?e :where [?e :a]] db))\n\n(deftest q-test (is (= #{} (q nil))))\n"}
+               "(ns x.unloaded-test (:require [clojure.test :refer [deftest is]] [datahike.api :as d] [x.z-support :as z]))\n\n(defn q [db] (d/q '[:find ?e :where [?e :a]] db))\n\n(deftest q-test (is (= #{} (q nil))) (is (= ::z/k (z/k))))\n"
+               ;; required by the file before it in path order, and never loaded
+               "test/x/z_support.clj" "(ns x.z-support)\n\n(defn k [] ::k)\n"}
         db (empty-db)
         tx (source/import-tx db files)
         db (d/db-with db tx)]
-    (is (= 3 (count (d/q '[:find ?f :where [?f :form/src]] db))) "the ns form and both definitions")
+    (is (= 3 (count (d/q '[:find ?f :where [?n :ns/name x.unloaded-test] [?f :form/ns ?n] [?f :form/source true]] db)))
+        "the ns form and both definitions (the test store's seed holds forms of its own)")
     (is (contains? (set (d/q '[:find [?r ...] :where [?v :var/name x.unloaded-test/q] [?v :var/form ?f] [?f :form/refs ?r]] db))
                    'datahike.api/q)
-        "an alias resolved through the file's own ns form")))
+        "an alias resolved through the file's own ns form")
+    (is (contains? (set (d/q '[:find [?r ...] :where [?v :var/name x.unloaded-test/q-test] [?v :var/form ?f] [?f :form/refs ?r]] db))
+                   'x.z-support/k)
+        "a namespace required from a later file is analyzed first, and its alias reads ::z/k")))
