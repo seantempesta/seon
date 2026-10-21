@@ -69,7 +69,7 @@
                                  (some #(or (final %) (final-ns %)) targets) {:rule :missing :producer :template}
                                  :else {:rule :search :producer :template})]
                             :when r]
-                        (assoc r :turn (:n t) :form (subs (or form "") 0 (min 80 (count (or form ""))))))]
+                        (assoc r :turn (:n t) :form (or form "")))]
           (recur more (into seen (keep #(sig (:error %)) (:items t))) (into acc charged)))))))
 
 (defn summary

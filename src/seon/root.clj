@@ -382,7 +382,9 @@
       :error (let [e (if (contract/error? (:data m))
                        (:data m)
                        (contract/error :seon.root/proc-defect (proc-sym st (:pid m)) (or (:message m) "a defect with no message") {:pid (:pid m)}))]
+               ;; the view keeps the newest 20 and counts them all (renders say how many it left)
                (-> (view! st update :root-errors (fnil #(vec (take-last 20 (conj % %2))) []) (merge {:pid (:pid m) :message (:message m)} (:data m)))
+                   (view! update :root-errors-total (fnil inc 0))
                    (problem (err/occurrence e :platform {} (System/currentTimeMillis)))))
       ;; an agent's eval errors since its last commit (seon.error/note), counted across agents
       :errors (let [task (get-in st [:view :agents (:agent m) :task])]

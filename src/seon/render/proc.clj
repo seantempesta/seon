@@ -145,14 +145,14 @@
                         :batch-p50-ms (lib/p50 (get-in v [:writer :batch-ms])) :tx-per-batch tpb))
      :server (assoc (:server v) :lag-ms (lib/p50 lag-ms) :fork-ms-p50 (lib/p50 fork-ms))
      :store (cond-> (:store v) batches (assoc :batches batches :commits commits :tx-per-batch tpb))
-     :boot (:boot v) :root-errors (:root-errors v [])
+     :boot (:boot v) :root-errors (:root-errors v []) :root-errors-total (:root-errors-total v 0)
      :health (:health st {}) :health-ms (:health-ms st)
      ;; merges into main: root's merge! of a branch (its events) and the reconciler's
      ;; merged attempts (main's facts)
      :main (assoc (:main st {}) :merges (+ (:merges st 0) (count (filter #(= :merged (:seon.attempt/status %)) (vals (:attempts st))))))
      :recorded (:recorded st)
      :tasks (:tasks st {}) :attempts (:attempts st {}) :task-rows (:task-rows st {}) :agent-attempt (:agent-attempt st {})
-     :series (:series st {}) :events (:events st [])
+     :series (:series st {}) :events (:events st []) :events-seen (:ev-seq st 0)
      :web (:web-sample st {})
      :now-ms now-ms}))
 
@@ -263,17 +263,18 @@
 
 (defn- eval-records
   "The evaluations recorded on branch db for agent id: [[eval-id record] ...], oldest
-  first, the newest HISTORY-CAP."
+  first, the newest HISTORY-CAP, with the count of all of them as its metadata (:total)."
   {:malli/schema [:=> [:cat :seon.host/db :keyword] [:vector :any]]}
   [db id]
   (let [rows (d/q '[:find ?eid ?r :in $ ?id :where [?a :seon.agent/id ?id] [?e :seon.cluster.eval/agent ?a]
                     [?e :seon.cluster.eval/id ?eid] [?e :seon.cluster.eval/record ?r]] db id)
         key (fn [[eid]] (let [[run ord] (str/split eid #"/")] [(or (some-> run (str/split #"-") last parse-long) 0) (or (parse-long (str ord)) 0)]))]
-    (vec (take-last HISTORY-CAP (sort-by key rows)))))
+    (with-meta (vec (take-last HISTORY-CAP (sort-by key rows))) {:total (count rows)})))
 
 (defn- context-of
-  "The current-state block the agent's model reads, printed under a display budget, or
-  why there is none."
+  "The current-state block the agent's model reads, rebuilt now from root's view (its
+  attempt's results, its last test run, its newest evaluations) and printed as the turn
+  prints it, or why there is none."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :map] :map] :map]}
   [db attempt ag]
   (let [tid (:seon.attempt/task attempt)
@@ -288,7 +289,8 @@
                                                :last-items (vec (take-last 3 (:evals ag)))
                                                :turn (or (:seon.attempt/turns attempt) 0)
                                                :max-turns (get-in attempt [:seon.attempt/env :max-turns] 0)})
-            text (print/text block 2000)]
+            ;; printed exactly as the turn prints it for the model (seon.context/messages)
+            text (:content (second (context/messages block)))]
         {:text text :tokens (ai/tokens text)}))))
 
 (defn- zoom-value
@@ -311,12 +313,14 @@
         ;; its branch's db, else main's (the task is main's; a merged branch may be gone)
         ctx (if (= ctx-key (:ctx-key z)) (:ctx z)
                 (cond-> (context-of (or db (:main-db st)) attempt ag)
-                  (and (nil? db) (:main-db st)) (assoc :from :main)))]
+                  ;; on main: its branch is gone (reading it failed), or not read yet
+                  (and (nil? db) (:main-db st)) (assoc :from (if (:db-error z) :main-gone :main))))]
     [(assoc-in st [:zoom id] (assoc z :rows rows :ctx-key ctx-key :ctx ctx))
      {:agent (ui/ended-as ag id (:agent-attempt st {})) :attempt attempt :task (when attempt (get (:tasks st) (:seon.attempt/task attempt)))
       ;; each proof's task, to tell a blocking red from an allowed one
       :owners (into {} (for [[tid t] (:tasks st) p (:seon.task/proofs t)] [p tid]))
-      :context ctx :history (vec (reverse (map #(get rows (first %)) records)))}]))
+      :context ctx :history (vec (reverse (map #(get rows (first %)) records)))
+      :history-total (or (:total (meta records)) (count records))}]))
 
 ;;; --- the pass ------------------------------------------------------------------------------------
 

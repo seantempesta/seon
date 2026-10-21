@@ -76,7 +76,8 @@
   "The one value printer's output for face: hiccup for :html, text for :ai."
   {:malli/schema [:=> [:cat :seon.render/face :any :seon.render/env] :seon.render/out]}
   [face v env]
-  (let [opts {:budget (or (:seon.render/budget env) 600) :handle (or (:seon.render/handle env) 'result/h0)}]
+  ;; without a handle a cut names no form: no result would answer it
+  (let [opts {:budget (or (:seon.render/budget env) 600) :handle (:seon.render/handle env)}]
     (if (= face :html)
       (let [r (print/print-value v (assoc opts :outputs #{:hiccup}))]
         {:seon.render/html (or (:html r) [:span {:class "seon-print-refused"} (str (:seon.error/message r))])})

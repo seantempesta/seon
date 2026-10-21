@@ -222,9 +222,6 @@
 
 ;; ---- evaluation -----------------------------------------------------------------
 
-(def ^:private message-chars
-  "An exception's message is kept to this many characters in its error map."
-  2000)
 
 (defn error-map
   "A form's exception as the one error map: its ex-data when that already is one (a
@@ -236,7 +233,7 @@
   (if (contract/error? (ex-data e))
     (ex-data e)
     (let [m (or (ex-message e) (str (type e)))]
-      (contract/error :seon.agent/eval-error 'seon.repl/eval-code (subs m 0 (min message-chars (count m)))
+      (contract/error :seon.agent/eval-error 'seon.repl/eval-code m
                       (cond-> {:class (str (type e))}
                         (ex-data e) (assoc :data (print/text (ex-data e) (:part print/budgets))))))))
 

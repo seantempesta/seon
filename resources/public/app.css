@@ -144,20 +144,25 @@ input:focus { border-color: var(--signal); box-shadow: 0 0 0 3px var(--glow); }
 .cb { padding: 10px 12px 6px 14px; display: flex; flex-direction: column; gap: 6px; }
 .cb header { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .aid { color: var(--text-50); font-weight: 700; }
-.branch { color: var(--text-500); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.branch { color: var(--text-500); font-size: 10px; overflow-wrap: anywhere; flex: 1; min-width: 0; }
 .pill { font-size: 9px; text-transform: uppercase; letter-spacing: .1em; padding: 1px 6px; border-radius: 99px;
   color: var(--st); border: 1px solid color-mix(in srgb, var(--st) 45%, transparent); background: color-mix(in srgb, var(--st) 10%, transparent); }
-.task { margin: 0; color: var(--text-300); font-size: 11px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.9em; }
+/* text is budgeted where it is rendered (seon.print/prose: a cut says what it left), never clipped here */
+.task { margin: 0; color: var(--text-300); font-size: 11px; overflow-wrap: anywhere; min-height: 2.9em; }
 .stats { display: flex; gap: 10px; flex-wrap: wrap; color: var(--text-200); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 .stats em { font-style: normal; color: var(--text-500); margin-right: 4px; }
 .evals { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .ev { background: var(--base-850); border-radius: 5px; padding: 5px 7px; min-width: 0; }
 .evals .ev:not(:first-child) { display: none; }
 .card.open .evals .ev:not(:first-child) { display: block; opacity: .8; }
-.ev .form { display: block; color: var(--text-300); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; }
+/* the card's "+N more": closed it shows the newest evaluation, open the newest six */
+.evals .more { font-size: 9.5px; padding: 0 7px; }
+.evals .more.opened, .card.open .evals .more.closed { display: none; }
+.card.open .evals .more.opened { display: block; }
+.ev .form { display: block; color: var(--text-300); overflow-wrap: anywhere; font-size: 10.5px; }
 .ev .out { display: flex; gap: 6px; min-width: 0; }
 .ev .arrow { color: var(--text-500); flex: none; }
-.ev .printed { color: var(--success); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 4.4em; overflow: hidden; }
+.ev .printed { color: var(--success); white-space: pre-wrap; overflow-wrap: anywhere; }
 .card.open .ev .printed { max-height: none; }
 .ev.tag-err .printed, .ev.tag-err .arrow { color: var(--error); }
 .ev .meta { display: flex; gap: 10px; color: var(--text-500); font-size: 9.5px; margin-top: 1px; }
@@ -197,14 +202,14 @@ input:focus { border-color: var(--signal); box-shadow: 0 0 0 3px var(--glow); }
 .e time { color: var(--text-500); font-variant-numeric: tabular-nums; }
 .etype { text-transform: uppercase; font-size: 9px; letter-spacing: .08em; color: var(--et, var(--text-400)); }
 .eagent { color: var(--text-100); }
-.edetail { color: var(--text-300); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.edetail { color: var(--text-300); overflow-wrap: anywhere; }
 .e-spawned { --et: var(--info); } .e-reply { --et: var(--text-300); } .e-tx { --et: var(--signal); }
 .e-merged { --et: var(--success); } .e-killed { --et: var(--text-500); } .e-tests { --et: var(--eval); }
 .e-err .edetail { color: var(--error); }
 .e-merged .edetail { color: var(--success); }
 
 /* --- the swarm: one cell per agent ---------------------------------------- */
-.swarm { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; max-height: 64px; overflow: hidden; }
+.swarm { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; max-height: 64px; overflow: auto; }
 .swarm .cell { width: 9px; height: 9px; border-radius: 2px; background: var(--st); opacity: .8; transition: background .3s, opacity .3s, box-shadow .3s; }
 .swarm .cell.s-idle { background: var(--base-700); opacity: 1; }
 .swarm .cell.s-busy, .swarm .cell.s-testing, .swarm .cell.s-forking { opacity: 1; box-shadow: 0 0 6px var(--st); }
@@ -216,13 +221,12 @@ input:focus { border-color: var(--signal); box-shadow: 0 0 0 3px var(--glow); }
 .dense .grid { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 6px; }
 .dense .task, .dense .stats, .dense .ev .meta, .dense .actions, .dense .branch { display: none; }
 .dense .cb { padding: 7px 9px 5px 11px; gap: 4px; }
-.dense .ev .printed { max-height: 1.45em; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.dense .ev .printed { max-height: 1.45em; white-space: nowrap; overflow: auto hidden; }
 .dense .ev .form { font-size: 10px; }
 .dense .repl { display: none; }
 .dense .card:hover .repl, .dense .card:focus-within .repl { display: flex; }
 .dense .card:hover .actions, .dense .card:focus-within .actions { display: flex; }
 .dense .card.open .task, .dense .card.open .stats, .dense .card.open .ev .meta, .dense .card.open .repl, .dense .card.open .actions { display: flex; }
-.dense .card.open .task { display: -webkit-box; }
 .card:target { box-shadow: 0 0 0 2px var(--signal), 0 0 24px var(--glow); }
 .swarm .cell.f0 { animation: cell-a 1.2s ease-out; }
 .swarm .cell.f1 { animation: cell-b 1.2s ease-out; }
@@ -250,24 +254,6 @@ input:focus { border-color: var(--signal); box-shadow: 0 0 0 3px var(--glow); }
 .e-ready { --et: var(--info); } .e-dead { --et: var(--error); }
 .e-err .etype { color: var(--error); }
 
-/* --- L4: main's program as facts ----------------------------------------- */
-.program { background: var(--base-900); border-radius: 8px; box-shadow: var(--card-shadow); padding: 12px 14px 10px;
-  max-height: 40vh; overflow: hidden auto; flex: none; }
-.program header { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-.program .nss { display: flex; flex-direction: column; gap: 8px; }
-.program .ns.hot { border-left: 2px solid var(--success); padding-left: 8px; }
-.program .nsh { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; }
-.program .nsh b { color: var(--text-50); }
-.program .defs { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.program .defs li { display: grid; grid-template-columns: 12px auto minmax(0, 1fr); gap: 6px; font-size: 10.5px; align-items: baseline; }
-.program .defs .mk { color: var(--success); font-weight: 700; }
-.program .defs li.chg .mk { color: var(--signal); }
-.program .defs li.test code { color: var(--eval); }
-.program .defs code { color: var(--text-100); }
-.program .defs .src { color: var(--text-500); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.program .quiet { display: flex; flex-wrap: wrap; gap: 4px; }
-.program .chip { font-size: 9.5px; color: var(--text-400); background: var(--base-850); border-radius: 3px; padding: 1px 5px; }
-.program .chip i { font-style: normal; color: var(--text-500); margin-left: 4px; }
 
 /* --- L4: card additions -------------------------------------------------- */
 .diff { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; font-size: 10px; }
@@ -285,7 +271,7 @@ input:focus { border-color: var(--signal); box-shadow: 0 0 0 3px var(--glow); }
 .e-server-down { --et: var(--error); } .e-server-up { --et: var(--success); } .e-merged-main { --et: var(--info); }
 
 /* Seon's value printer, HTML face (seon.render.value :hiccup): spans and details */
-.printed.seon { color: var(--text-200); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 4.4em; overflow: hidden; }
+.printed.seon { color: var(--text-200); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 9em; overflow: auto; }
 .card.open .printed.seon { max-height: 18em; overflow: auto; }
 .printed.seon details, .printed.seon summary, .printed.seon .seon-print-content { display: inline; }
 .printed.seon summary { list-style: none; display: none; }
@@ -368,7 +354,7 @@ tr.o-failed td:nth-child(6), tr.o-bailed td:nth-child(6), tr.o-killed td:nth-chi
 a { color: inherit; }
 .aid { text-decoration: none; }
 .aid:hover { color: var(--signal); }
-.running { margin: 0; font-size: 10.5px; color: var(--signal); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.running { margin: 0; font-size: 10.5px; color: var(--signal); overflow-wrap: anywhere; }
 .fns { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 9.5px; color: var(--text-400); margin-top: 3px; }
 .fns .fn code { color: var(--eval); } .fns .fn i { font-style: normal; color: var(--text-500); margin-left: 4px; }
 .ev .meta .origin { color: var(--info); } .ev .meta .warn { color: var(--warning); }
