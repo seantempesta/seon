@@ -15,7 +15,7 @@
 ;;   no fallback) is absent, which only an optional key allows.
 ;; - #profile selects by SEON_PROFILE (default :default); :deepseek runs agents on DeepSeek.
 ;; - Machine-dependent values are derived at load, never shipped: #seon/checkout "p" is p under
-;;   the checkout this process runs from (JOLT_PWD).
+;;   the checkout this process runs from (SEON_CHECKOUT, else JOLT_PWD).
 {;; ==== root and its procs ====================================================================
 
  ;; Unit: live agents. Root holds a socket (two descriptors) per agent and raises its open-file

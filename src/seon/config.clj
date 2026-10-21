@@ -6,8 +6,8 @@
   seon.config*.edn, the `:seon.config/config` map). This namespace is its loader and the
   only place the process environment is read:
 
-  - the checkout (`JOLT_PWD`: bin/env exports it for the binary, `jolt run` callers set it),
-    where the file and the checkout-relative paths live;
+  - the checkout (`SEON_CHECKOUT`, which bin/env exports for the binary, else `JOLT_PWD`,
+    which `jolt run` callers set), where the file and the checkout-relative paths live;
   - the profile (`SEON_PROFILE`, default `:default`), handed to aero's `#profile`;
   - every override, through aero's `#env` in the file itself, so the file is the one list of
     what can be set.
@@ -28,15 +28,17 @@
 ;; ---- where: the checkout and the profile (the loader's own two environment reads) ----------
 
 (defn checkout
-  "The checkout this process runs from (JOLT_PWD), or the refusal naming it."
+  "The checkout this process runs from: SEON_CHECKOUT (bin/env exports it; the binary runs
+  from target/), else JOLT_PWD (a `jolt run` from the checkout), or the refusal naming both.
+  Not JOLT_PWD for the binary: Jolt resolves a child process's relative path against it."
   {:malli/schema [:=> [:cat] :string]}
   []
-  (let [d (System/getenv "JOLT_PWD")]
-    (if (str/blank? d)
-      (throw (ex-info "JOLT_PWD is not set: the checkout the config file and its paths are read from (bin/env exports it)"
-                      {:seon.error/type :seon.config/refused :seon.error/operation 'seon.config/checkout
-                       :seon.error/message "JOLT_PWD is not set: the checkout the config file and its paths are read from (bin/env exports it)"}))
-      d)))
+  (let [d (first (remove str/blank? [(System/getenv "SEON_CHECKOUT") (System/getenv "JOLT_PWD")]))]
+    (if d
+      d
+      (let [msg "neither SEON_CHECKOUT nor JOLT_PWD is set: the checkout the config file and its paths are read from (bin/env exports SEON_CHECKOUT)"]
+        (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation 'seon.config/checkout
+                             :seon.error/message msg}))))))
 
 (defn profile
   "The aero profile this process reads the file under: SEON_PROFILE as a keyword, else :default."

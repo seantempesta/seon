@@ -10,4 +10,5 @@ fi
 export JOLT_LMDB_LIB
 # The checkout this process runs from: seon.config reads resources/seon/config/default.edn
 # here and resolves its #seon/checkout paths (the probe library, system.edn, the tasks) under it.
-export JOLT_PWD=${JOLT_PWD:-$ROOT}
+# (not JOLT_PWD: Jolt resolves a child process's relative path, ./seon, against it)
+export SEON_CHECKOUT=${SEON_CHECKOUT:-$ROOT}

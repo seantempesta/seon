@@ -691,7 +691,13 @@
                              (in-ns 'agent.a2) (transact! [{:note/text \"b's unmerged note\" :note/agent :b}]) (app.m1/f2 1)"))
         cl @(c/clone! sys k {:branch :dur-clone})
         _ (await-status sys [(:id cl)] #{:idle} 5000)
+        t-clone (get-in (c/state sys) [:agents (:id cl) :t])
         _ (out! "clone " (:id cl) ": " (p1 (:id cl) "(transact! [{:note/text \"the clone's note\" :note/agent :clone}]) (count (q '[:find ?n :where [?n :note/text]]))"))
+        ;; an agent's write is answered when applied and committed when the agent is idle
+        ;; (its run-ahead writer): the kill below waits for the clone's commit, the fact that
+        ;; its write is in the store, rather than racing it (a kill between the answer and
+        ;; the commit loses the write by design)
+        _ (loop [] (when (= t-clone (get-in (c/state sys) [:agents (:id cl) :t])) (Thread/sleep 2) (recur)))
         st (c/state sys {:datoms true})
         expect {:main-datoms (get-in st [:main :datoms]) :main-t (get-in st [:main :t])}]
     (spit (str path ".expect.edn") (pr-str expect))
