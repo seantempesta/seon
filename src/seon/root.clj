@@ -596,7 +596,7 @@
         config (-> (cfg/with-provider cfg/config provider) (assoc :seon.config.agent/max-running max-running))
         program (program/load-all! @conn)
         program-ms (lib/ms-since t1)
-        contracts (contract/instrument! '[seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])
+        contracts (contract/instrument! '[seon.edn seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])
         _ (warm! conn)
         _ (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
         _ (lib/static!)

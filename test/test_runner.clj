@@ -10,7 +10,7 @@
   green at its digest."
   (:require [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
             [clojure.test :as t] [datahike.api :as d] [seon.config :as config] [seon.db :as pdb]
-            [seon.error :as error] [seon.fx :as fx] [seon.program :as program] [seon.source :as source]))
+            [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.program :as program] [seon.source :as source]))
 
 (defn- test-namespaces
   "Namespace symbols of test/**/*_test.clj(c)."
@@ -81,7 +81,7 @@
                        _ (binding [t/*report-counters* rc] (t/test-vars [(resolve tst)]))
                        r (assoc (select-keys @rc [:pass :fail :error]) :test tst :digest (digests tst)
                                 :ms (quot (- (System/nanoTime) t0) 1000000))]]
-             (do (fx/write-file {:req {:path (result-path dir (digests tst)) :text (program/pr-edn r)}})
+             (do (fx/write-file {:req {:path (result-path dir (digests tst)) :text (sedn/encode r)}})
                  [tst r]))))
 
 (defn- reach-main

@@ -26,7 +26,7 @@
   ours and theirs as data, until the branch's content for its key changes or it is
   resolved (`resolve-tx`). Every function here is pure over db values."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program] [seon.schema.datahike :as sd]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program] [seon.edn :as sedn]))
 
 (def ^:private program-ns-attrs #{"form" "var" "ns" "method" "impl" "schema" "schema.file" "db" "db.install" "db.type" "db.cardinality" "db.unique"})
 
@@ -122,7 +122,7 @@
   [base ours theirs]
   (let [oc (changes base ours)
         tc (changes base theirs)
-        ks (sort-by sd/encode-edn (keys tc))]
+        ks (sort-by sedn/encode (keys tc))]
     {:ours oc
      :theirs tc
      :apply (vec (for [k ks :let [b (get base k) o (get ours k) t (get theirs k)] :when (and (not (same? k o t)) (same? k o b))] k))
@@ -144,11 +144,11 @@
                                                                      [:call {:optional true} :qualified-symbol]
                                                                      [:inline-def {:optional true} :qualified-symbol]]]]}
   [db ours]
-  (vec (for [[[k id] [_ f]] (sort-by (comp sd/encode-edn key) ours)
+  (vec (for [[[k id] [_ f]] (sort-by (comp sedn/encode key) ours)
              :when (and (= :form k) f (not (:ns/file (d/entity db [:ns/name (:ns f)]))))
              finding (concat (for [c (sort-by str (:banned f))] {:call c})
                              (for [v (sort-by str (:inline-defs f))] {:inline-def v}))]
-         (merge {:form id :ns (:ns f) :defines (vec (sort-by sd/encode-edn (:defines f)))} finding))))
+         (merge {:form id :ns (:ns f) :defines (vec (sort-by sedn/encode (:defines f)))} finding))))
 
 ;; ---- tx-data: setting keys on a db ---------------------------------------------------
 
@@ -238,7 +238,7 @@
                               (:var :method :impl :ns) (set-def-tx db k content)
                               :schema (set-schema-tx db (second k) content)
                               :datum (set-datum-tx db k content)))
-                          (sort-by (comp sd/encode-edn key) m))))]
+                          (sort-by (comp sedn/encode key) m))))]
     (if (some #(= :schema (ffirst %)) m)
       (let [db' (d/db-with db tx)] (into tx (program/schema-declarations db (program/schema-registry (program/schema-changes db')))))
       tx)))
@@ -256,16 +256,16 @@
   inverse of `conflict-tx`): one decoder for a branch's entries and an attempt's evidence."
   {:malli/schema [:=> [:cat :any] :seon.merge/conflict]}
   [m]
-  (cond-> {:key (sd/decode-edn (:seon.merge/key m)) :kind (:seon.merge/kind m)}
-    (:seon.merge/base m) (assoc :base (sd/decode-edn (:seon.merge/base m)))
-    (:seon.merge/ours m) (assoc :ours (sd/decode-edn (:seon.merge/ours m)))
-    (:seon.merge/theirs m) (assoc :theirs (sd/decode-edn (:seon.merge/theirs m)))))
+  (cond-> {:key (sedn/decode (:seon.merge/key m)) :kind (:seon.merge/kind m)}
+    (:seon.merge/base m) (assoc :base (sedn/decode (:seon.merge/base m)))
+    (:seon.merge/ours m) (assoc :ours (sedn/decode (:seon.merge/ours m)))
+    (:seon.merge/theirs m) (assoc :theirs (sedn/decode (:seon.merge/theirs m)))))
 
 (defn entries
   "Every merge entry on db, as conflict values with :main-t and :resolved?."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.merge/entry-value]]}
   [db]
-  (vec (sort-by (comp sd/encode-edn :key)
+  (vec (sort-by (comp sedn/encode :key)
                 (for [e (entry-eids db)
                       :let [m (d/entity db e)]]
                   (assoc (conflict-value m) :main-t (:seon.merge/main-t m) :resolved? (boolean (:seon.merge/resolved? m)))))))
@@ -275,17 +275,17 @@
   and an attempt's evidence alike."
   {:malli/schema [:=> [:cat :seon.merge/conflict] :map]}
   [{:keys [key kind base ours theirs]}]
-  (cond-> {:seon.merge/key (sd/encode-edn key) :seon.merge/kind kind}
-    base (assoc :seon.merge/base (sd/encode-edn base))
-    ours (assoc :seon.merge/ours (sd/encode-edn ours))
-    theirs (assoc :seon.merge/theirs (sd/encode-edn theirs))))
+  (cond-> {:seon.merge/key (sedn/encode key) :seon.merge/kind kind}
+    base (assoc :seon.merge/base (sedn/encode base))
+    ours (assoc :seon.merge/ours (sedn/encode ours))
+    theirs (assoc :seon.merge/theirs (sedn/encode theirs))))
 
 (defn unmerged-tx
   "The branch's unmerged entries for conflicts, against main at t main-t: an earlier entry
   for the same key is replaced."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.merge/conflict] :int] :seon.db/tx-data]}
   [db conflicts main-t]
-  (let [ks (set (map (comp sd/encode-edn :key) conflicts))]
+  (let [ks (set (map (comp sedn/encode :key) conflicts))]
     (into (vec (for [e (entry-eids db)
                      :when (ks (:seon.merge/key (d/entity db e)))]
                  [:db/retractEntity e]))
@@ -303,5 +303,5 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key] :seon.db/tx-data]}
   [db k]
   (vec (for [e (entry-eids db)
-             :when (= (sd/encode-edn k) (:seon.merge/key (d/entity db e)))]
+             :when (= (sedn/encode k) (:seon.merge/key (d/entity db e)))]
          [:db/add e :seon.merge/resolved? true])))

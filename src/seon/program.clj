@@ -25,7 +25,7 @@
     platform's own source has the same facts (seon.source)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [jolt.ir :as ir] [jolt.analyzer]
-            [seon.schema.datahike :as sd] [malli.registry :as mr] [clojure.edn :as edn] [seon.error :as error]))
+            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [clojure.edn :as edn] [seon.error :as error]))
 
 (defn scratch-ns?
   "Is namespace nsx scratch (never program): `user`, or declared ^:scratch."
@@ -167,7 +167,7 @@
                            (when (banned s) (vswap! acc update :banned conj s))
                            (vswap! acc update :refs conj s))
          :host-static (vswap! acc update :refs conj (symbol (str (:class n)) (str (:member n))))
-         :try (vswap! acc update :catches into (map sd/encode-edn) (catches n))
+         :try (vswap! acc update :catches into (map sedn/encode) (catches n))
          :invoke (when (and (= 'clojure.core/deref (invoked n)) (= 3 (count (:args n))))
                    (vswap! acc update :timeouts conj 'clojure.core/deref))
          nil)
@@ -240,8 +240,8 @@
   {:malli/schema [:=> [:cat [:maybe :seon.host/var] :map] [:maybe :string]]}
   [v d]
   (if-let [c (some-> v meta :malli/schema)]
-    (sd/encode-edn c)
-    (some-> (get (:meta d) :malli/schema) unquote-form sd/encode-edn)))
+    (sedn/encode c)
+    (some-> (get (:meta d) :malli/schema) unquote-form sedn/encode)))
 
 (defn- def-kind
   "A defined var's kind: from the live var when it is bound, else from the compiler's
@@ -299,7 +299,7 @@
                   (vec (for [{:keys [multi dispatch]} (:methods a)
                              :let [mv (when (and nsx (symbol? multi)) (ns-resolve nsx multi))]
                              :when (var? mv)]
-                         {:multi (symbol mv) :dispatch (sd/encode-edn dispatch)})))
+                         {:multi (symbol mv) :dispatch (sedn/encode dispatch)})))
         impls (when (or ran? (nil? before)) (vec (distinct (:impls a))))]
     (when (and nsx (not (scratch-ns? nsx)) (not (:scratch ns-meta))
                (or ns-form? (seq defs) (seq declares) (seq methods) (seq impls) (:env? a)))
@@ -319,12 +319,12 @@
 (defn method-key
   "A method's identity: [multi dispatch], printed."
   {:malli/schema [:=> [:cat :qualified-symbol :string] :string]}
-  [multi dispatch] (sd/encode-edn [multi dispatch]))
+  [multi dispatch] (sedn/encode [multi dispatch]))
 
 (defn impl-key
   "A protocol extension's identity: [protocol type], printed."
   {:malli/schema [:=> [:cat :qualified-symbol :string] :string]}
-  [protocol type] (sd/encode-edn [protocol type]))
+  [protocol type] (sedn/encode [protocol type]))
 
 (def ^:private def-attrs
   "Each definition kind's form pointer."

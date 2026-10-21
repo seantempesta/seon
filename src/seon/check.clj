@@ -121,7 +121,7 @@
   plain caller compiled against a contracted function reaches its check. Prints the counts
   and exits 0 only when all hold."
   []
-  (let [boot (contract/instrument! '[seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])
+  (let [boot (contract/instrument! '[seon.edn seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])
         nss (platform-nss)
         vs (for [n nss v (vals (ns-interns n)) :when (contract/contract v)] v)
         at-def (filter #(= :definition (:seon.contract/checked-at (meta %))) vs)

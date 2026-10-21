@@ -26,7 +26,7 @@
   functions carry contracts in their metadata and are armed at boot."
   (:refer-clojure :exclude [resolve])
   (:require [aero.core :as aero] [malli.core :as m] [malli.registry :as mr] [clojure.edn :as edn]
-            [clojure.java.io :as io] [clojure.string :as str] [datahike.api :as d]))
+            [clojure.java.io :as io] [clojure.string :as str] [datahike.api :as d] [seon.edn :as sedn]))
 
 ;; ---- where: the checkout and the profile (the loader's own two environment reads) ----------
 
@@ -309,4 +309,4 @@
   (when-let [e (d/q '[:find ?e . :where [?e :seon.root/id :root]] db)]
     (let [r (d/pull db (keys-declared) e)]
       (when (seq r)
-        (reduce (fn [m k] (if (contains? m k) (update m k edn/read-string) m)) r edn-keys)))))
+        (reduce (fn [m k] (if (contains? m k) (update m k sedn/decode) m)) r edn-keys)))))
