@@ -14,4 +14,9 @@
   :seon.task/plan "Seen 2026-10-21 by lane RENDER's verifier on its own root: (1) an agent root stopped after its attempt ended keeps its card's merge, main, clone, interrupt and kill buttons (seon.render.ui/card-shell renders them once, at the card's first append, whatever the agent's state); (2) the health tile's steps/s for api, render and web read 2-4 steps/s with nothing happening: their own polling (render's tick, the web's sampling) is counted as work, a measurement that disturbs itself (AGENTS.md). Correct: an ended card's body carries its verbs (or the shell hides them by the body's state class); a proc's rate counts the steps that did work, its polls apart."
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/an-ended-card-offers-no-live-verbs
-                      seon.render-test/a-polling-proc-at-rest-reads-zero-work}}]
+                      seon.render-test/a-polling-proc-at-rest-reads-zero-work}}
+ {:seon.task/name "an-attempt-row-shows-where-its-time-went"
+  :seon.task/plan "Seen 2026-10-21 by lane RENDER's verifier: the attempts table shows a6's calc/neg attempt at 8,126 ms against its siblings' 100-250 ms, and nothing on the page says where the time went (seon.render.ui/attempt-row shows end-ms minus start-ms only). Lane AGENTS records each turn's split (:seon.turn/split: tests, context, model, eval, record; 7ef171b on jolt/agents). Once that is on main: the attempt row's ms cell shows the split summed over its turns (the largest part first, each part's ms), its title each turn's; the agent page's work box shows the split per turn. Replaces the bare span; no new measurement."
+  :seon.task/kind :work
+  :seon.task/needs #{"seon.turn/a-turn-records-what-it-saw-and-spent"}
+  :seon.task/proofs #{seon.render-test/an-attempt-row-shows-its-turns-split}}]
