@@ -146,6 +146,31 @@
     (is (= :no-end (:seon.attempt/outcome ended)))
     (is (= #{} (set (filter #{:seon.attempt/turns :seon.attempt/model-calls :seon.attempt/tokens :seon.attempt/ms} (keys ended)))))))
 
+(deftest a-death-names-its-cause
+  ;; task seon.agent/a-death-names-its-cause: a dead agent's attempt carries the end it wrote
+  ;; on its branch before it exited (its cause), beside the death root observed (exit status);
+  ;; a silent death (no end) is named by its exit; a turn loop that threw (the agent's REPL
+  ;; answered the error, the process lives) is named by that error, not "wrote no end"
+  (let [died (contract/error :seon.agent/died 'seon.root/api-proc "agent a1 died: exit 70" {:agent :a1 :exit {:exit 70}})
+        cause (contract/error :seon.agent/eval-error 'seon.repl/serve! "boom" {:class "clojure.lang.ExceptionInfo"})
+        row (fn [tx] (first (filter #(and (map? %) (:seon.attempt/reason %)) tx)))
+        err (fn [tx] (clojure.edn/read-string (:seon.attempt/error (row tx))))]
+    (testing "an end written before the death: its reason and cause, and the exit"
+      (let [tx (#'r/dead-tx "demo/a#1" died {:outcome :error :reason "the agent's process died: boom" :error cause})]
+        (is (= "the agent's process died: boom (agent a1 died: exit 70)" (:seon.attempt/reason (row tx))))
+        (is (= "boom" (get-in (err tx) [:cause :seon.error/message])))
+        (is (= {:exit 70} (:exit (err tx))))))
+    (testing "a silent death: named by its exit"
+      (let [tx (#'r/dead-tx "demo/a#1" (assoc died :exit {:signal 9} :seon.error/message "agent a1 died: signal 9") {})]
+        (is (= "agent a1 died: signal 9" (:seon.attempt/reason (row tx))))
+        (is (= {:signal 9} (:exit (err tx))))))
+    (testing "the turn loop threw and the agent lives: its error is the attempt's reason"
+      (let [db (db-of diamond :extra (attempt "a" 1 :running))
+            tx (#'r/judge-tx {:db db :boot "boot-1" :rid 0 :flights {} :pending {}}
+                             {:act {:attempt "demo/a#1" :task "demo/a"} :worked-error cause} {} {:db db} #{})]
+        (is (= "seon.turn/work! threw: boom" (:seon.attempt/reason (row tx))))
+        (is (= "boom" (:seon.error/message (err tx))))))))
+
 (deftest an-ended-attempt-of-a-cancelled-task-is-closed
   (is (= [{:op :close :attempt "demo/a#1"}]
          (r/reconcile (db-of diamond :extra (concat (attempt "a" 1 :ended :outcome :green :results {(t "a") :pass})

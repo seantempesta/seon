@@ -546,7 +546,7 @@
   root's own proof results, the branch's merge entries and unmerged keys, the contract gaps
   against main, its improved plan carried to the task."
   {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db]] [:set :string]] [:vector :any]]}
-  [st {:keys [act run-problems]} results {:keys [db base-t]} changed]
+  [st {:keys [act run-problems worked-error]} results {:keys [db base-t]} changed]
   (let [main (:db st)
         aid (:attempt act) id (:task act)
         end (pull-end db aid)
@@ -562,16 +562,28 @@
                                                :unmerged (mapv #(pr-str (:key %)) (pm/unmerged db (pm/program db #{})))
                                                :changed changed}
                                         (:reason end) (assoc :reason (:reason end))
-                                        (not (:outcome end)) (assoc :reason "the agent wrote no end"))
+                                        (not (:outcome end)) (assoc :reason (if worked-error
+                                                                             (str "seon.turn/work! threw: " (:seon.error/message worked-error))
+                                                                             "the agent wrote no end")))
                                       (System/currentTimeMillis) (or base-t (:max-tx main)))
                     ;; the problems measured at its end (lane D2): red assertions, cost verdicts,
                     ;; the error that ended it, its waste
                     (cond-> {}
                       (seq (:failures run-problems)) (assoc :seon.attempt/failures (sedn/encode (:failures run-problems)))
                       (seq (:costs run-problems)) (assoc :seon.attempt/costs (sedn/encode (:costs run-problems)))
-                      (:error end) (assoc :seon.attempt/error (error-text (:error end)))
+                      (or (:error end) worked-error) (assoc :seon.attempt/error (error-text (or (:error end) worked-error)))
                       (seq (:waste end)) (assoc :seon.attempt/waste (sedn/encode (:waste end))))))
             (when (and plan (not= plan (:seon.task/plan (task/task main id)))) (task/plan-tx id plan)))))
+
+(defn- dead-tx
+  "Attempt aid's death on main: the end its agent wrote on its branch before it exited (its
+  reason, and its error as the cause), beside e, the death root observed (:seon.agent/died:
+  exit status, stderr tail, last op; or :seon.root/no-agent). A silent death wrote no end."
+  {:malli/schema [:=> [:cat :seon.attempt/id :seon.error/base :map] [:vector :any]]}
+  [aid e end]
+  (cas-tx aid :running :dead {:seon.attempt/end-ms (System/currentTimeMillis)
+                              :seon.attempt/reason (if (:reason end) (str (:reason end) " (" (:seon.error/message e) ")") (:seon.error/message e))
+                              :seon.attempt/error (error-text (cond-> e (:error end) (assoc :cause (:error end))))}))
 
 (defn- advance
   "Attempt aid's flight takes answer r of its step. Answers [st outputs]."
@@ -580,14 +592,15 @@
   (let [{:keys [act agent] :as f} (get-in st [:flights aid])
         done (fn [st] [(update st :flights dissoc aid) []])
         one (fn [[st o]] [st [o]])
-        ;; its agent died: the one error map root answered with (:seon.agent/died: last op,
-        ;; stderr tail; or :seon.root/no-agent) is the attempt's error
-        dead (fn [st e] (one (write st aid :done (cas-tx aid :running :dead {:seon.attempt/end-ms (System/currentTimeMillis)
-                                                                             :seon.attempt/reason (:seon.error/message e)
-                                                                             :seon.attempt/error (error-text e)}))))]
+        ;; its agent died: the one error map root answered with (:seon.agent/died: exit
+        ;; status, last op, stderr tail; or :seon.root/no-agent), and the end the agent wrote
+        ;; on its branch before it exited, read from the branch
+        dead (fn [st e] (one (request (assoc-in st [:flights aid :died] e) aid :dead-read
+                                      {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}})))]
     (case step
       :ignored [st []]
       :done (done st)
+      :dead-read (one (write st aid :done (dead-tx aid (:died f) (if (:db r) (pull-end (:db r) aid) {}))))
       :spawned (if-let [ag (:id r)]
                  (one (write (assoc-in st [:flights aid :agent] ag) aid :started
                              (task/attempt-start-tx aid (:task act) (:boot st) ag (:env act) (System/currentTimeMillis)
@@ -601,9 +614,12 @@
                                 :forms (pr-str (list 'seon.turn/work! (list 'quote (cond-> {:task (:task act) :attempt aid :max-turns (get-in act [:env :max-turns])}
                                                                                        (get-in act [:env :model]) (assoc :model (get-in act [:env :model]))))))})))
       ;; the turn loop answered: died (no live agent), or judge it from measured facts
+      ;; work! that threw was answered by the agent's REPL (the process lives): its error
+      ;; names the attempt's end when the loop wrote none
       :worked (if (= -1 (:id (first r)))
                 (dead st (:err (first r)))
-                (one (request st aid :tested {:op :tests :id agent})))
+                (one (request (cond-> st (= :err (:tag (first r))) (assoc-in [:flights aid :worked-error] (:err (first r))))
+                              aid :tested {:op :tests :id agent})))
       :tested (if (contract/error? r)
                 (dead st r)
                 (one (request (-> st (assoc-in [:flights aid :results] (proofs/results r))

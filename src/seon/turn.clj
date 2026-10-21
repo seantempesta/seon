@@ -83,12 +83,8 @@
   {:malli/schema [:=> [:cat :map :seon.attempt/outcome [:maybe :string] [:maybe :map]] :seon.turn/end]}
   [{:keys [turn tokens t0 attempt log]} outcome reason error]
   (harvest/harvest!)
-  (let [waste (learn/summary (learn/waste (or log []) (learn/final-symbols (or log []))))]
-    (agent/transact! [(cond-> {:seon.end/attempt attempt :seon.end/outcome outcome :seon.end/turns turn :seon.end/tokens tokens}
-                        reason (assoc :seon.end/reason reason)
-                        error (assoc :seon.end/error (pr-str error))
-                        (seq waste) (assoc :seon.end/waste (pr-str waste)))]))
-  (agent/commit!)
+  (agent/write-end! attempt {:outcome outcome :turns turn :tokens tokens :reason reason :error error
+                             :waste (learn/summary (learn/waste (or log []) (learn/final-symbols (or log []))))})
   (cond-> {:outcome outcome :turns turn :model-calls turn :tokens tokens :results {} :uncontracted #{}
            :ms (/ (- (System/nanoTime) t0) 1e6)}
     reason (assoc :reason reason)))
