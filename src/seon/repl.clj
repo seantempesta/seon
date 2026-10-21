@@ -100,13 +100,21 @@
           (let [n (dec (:n (swap! agent/state update :n inc)))
                 out (chunk-writer #(reply {"out" %}))
                 err (chunk-writer #(reply {"err" %}))
-                [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err]
+                ;; *1 *2 *3 *e as clojure.main/repl and nREPL's session keep them, per session
+                rk [:repl-vars (or sid :default)]
+                {v1 :v1 v2 :v2 v3 :v3 e1 :e} (get-in @agent/state rk)
+                [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err *1 v1 *2 v2 *3 v3 *e e1]
                                          (let [v (intr/run ticks #(eval-fn form))] [:ret v *ns*]))
                                        (catch Throwable e [:err e ns (outer-frames)])
                                        (finally (.flush out) (.flush err)))
                 common {"seon/ordinal" n "seon/form" (form-text form) :repl/form form
                         :repl/src (form-src code @starts form (.getLineNumber r) (.getColumnNumber r))}]
             (swap! agent/state update :nss conj (ns-name ns'))
+            (swap! agent/state assoc-in rk (if (= tag :ret) {:v1 v :v2 v1 :v3 v2 :e e1} {:v1 v1 :v2 v2 :v3 v3 :e v}))
+            ;; a definition keeps its exact text on its var (owner: source reads the live var), so
+            ;; clojure.repl/source shows what this process runs, a REPL-typed defn included
+            (when (and (= tag :ret) (var? v) (:repl/src common))
+              (alter-meta! v assoc :source (:repl/src common)))
             (if (= tag :ret)
               (let [h (symbol "result" (str "h" n))]
                 (swap! agent/state assoc-in [:results (keyword (str "h" n))] v)

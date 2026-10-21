@@ -378,11 +378,16 @@
       (refer-clojure)
       (refer 'clojure.test :only '[deftest is are testing use-fixtures])
       (refer 'my.db)
-      (refer 'my.agent)
-      (refer 'clojure.repl :only '[doc])
-      ;; interned because Jolt's clojure.repl lacks source-fn and source (its vars carry no file and line to read), and an agent reads source from its branch's db
-      (doseq [s '[source-fn source] :let [v (ns-resolve 'my.agent s)]]
-        (intern (find-ns 'clojure.repl) (with-meta s (select-keys (meta v) [:macro])) @v))
+      (refer 'my.agent :exclude '[source source-fn pst])
+      ;; clojure.repl as clojure.main's REPL has it (clojure.main/repl-requires). Jolt's lacks
+      ;; source, source-fn and pst: interned from my.agent, whose source also reads the agent's
+      ;; own redefinitions from its branch db (task jolt.repl/clojure-repl-is-complete moves the
+      ;; file-reading part into Jolt's own clojure.repl)
+      (doseq [s '[source-fn source pst] :let [v (ns-resolve 'my.agent s)]]
+        (intern (find-ns 'clojure.repl) (with-meta s (select-keys (meta v) [:macro :arglists :doc])) @v))
+      (refer 'clojure.repl :only '[source apropos dir pst doc find-doc])
+      (require 'clojure.pprint)
+      (refer 'clojure.pprint :only '[pp pprint])
       (alias 'd 'datahike.api)
       (alias 'str 'clojure.string))
     nsx))

@@ -15,6 +15,31 @@
     (is (str/includes? (str (:out src-item)) "(defn stuck") (str src-item))
     (is (str/includes? (:printed lib-item) "(defn connect") (:printed lib-item))))
 
+(deftest an-agent-repl-answers-what-a-clojure-repl-answers
+  ;; owner, 2026-10-21: "Whatever intuitions agents have we need to make sure we are matching a
+  ;; real clojure repl as much as possible AND improving on it". Each row is what a Clojure
+  ;; user types at clojure.main's REPL (clojure.main/repl-requires refers source, apropos,
+  ;; dir, pst, doc, find-doc, pp, pprint) and what it answers, in an agent's own namespace;
+  ;; the improvements: source reads the agent's own redefinitions and Seon's program.
+  (let [rows [["(source seon.reconcile/stuck)" :out "(defn stuck"]
+              ["(do (require 'datahike.connector) (source datahike.connector/connect))" :out "(defn connect"]
+              ["(defn twice [x] (* 2 x))" :printed "twice"]
+              ["(source twice)" :out "(defn twice [x] (* 2 x))"]
+              ["(doc twice)" :out "twice"]
+              ["(dir clojure.string)" :out "join"]
+              ["(apropos \"index-of\")" :printed "index-of"]
+              ["(+ 1 2)" :printed "3"]
+              ["*1" :printed "3"]
+              ["(pprint {:a 1})" :out "{:a 1}"]
+              ["(/ 1 0)" :printed ""]
+              ["(some? *e)" :printed "true"]
+              ["(pst)" :out "Divide by zero"]
+              ["(in-ns 'seon.reconcile)" :printed "seon.reconcile"]
+              ["(clojure.repl/source stuck)" :out "(defn stuck"]]
+        items (at/in-agent (mapv first rows))]
+    (doseq [[[form k expected] item] (map vector rows items)]
+      (is (str/includes? (str (get item k)) expected) (str form " -> " (pr-str item))))))
+
 (defn- outcome [ticks thunk]
   (try {:value (intr/run ticks thunk)} (catch Throwable e {:error e})))
 

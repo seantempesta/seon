@@ -5,10 +5,11 @@
     (whoami)                  {:id :branch :pid}
     (messages)                the messages delivered and not yet taken, taken
     (send-message tos body)   body to the agents tos (ids), delivered by root
-    (source sym)              the recorded source of a definition, printed (also clojure.repl/source, source-fn)"
+    clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
+    source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context]
-            [clojure.java.io :as io] [clojure.string :as str]))
+            [clojure.java.io :as io] [clojure.string :as str] [clojure.main]))
 
 (defn $ "The live value of an earlier result, by handle (:h3)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
@@ -31,14 +32,25 @@
         (second (read+string {:read-cond :allow} (java.io.PushbackReader. (java.io.StringReader. (subs text off)))))))))
 
 (defn source-fn
-  "The source of the var sym names, or nil: clojure.repl/source-fn. What this branch records for
-  it (the text of the form that last defined it, so an agent's own redefinitions show), else the
-  form at its :file and :line (a library's)."
+  "The source of the var sym names, or nil: clojure.repl/source-fn. The text its last definition
+  in this process kept (seon.repl), else what this branch records for it, else the form at its
+  :file and :line (a library's)."
   {:malli/schema [:=> [:cat :symbol] [:maybe :string]]}
   [sym]
   (when-let [v (resolve sym)]
-    (or (context/source-of (agent/db) (symbol (str (ns-name (:ns (meta v)))) (str (:name (meta v)))))
+    (or (:source (meta v))
+        (context/source-of (agent/db) (symbol (str (ns-name (:ns (meta v)))) (str (:name (meta v)))))
         (file-source v))))
+
+(defn pst
+  "Print the exception e (*e by default) as clojure.repl/pst does: its message, then each cause's
+  class and message."
+  {:malli/schema [:function [:=> [:cat] :nil] [:=> [:cat :any] :nil]]}
+  ([] (pst *e))
+  ([e] (when (instance? Throwable e)
+         (print (clojure.main/err->msg e))
+         (doseq [{:keys [type message]} (rest (:via (Throwable->map e)))]
+           (println "Caused by:" type message)))))
 
 (defmacro source
   "Print the recorded source of the definition named by sym (as clojure.repl/source does)."

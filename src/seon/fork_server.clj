@@ -12,7 +12,8 @@
   as messages on its pipe."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program]
-            [seon.step :as step] [seon.sock :as sock] [seon.config :as cfg] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.ffi :as ffi]))
+            [seon.step :as step] [seon.sock :as sock] [seon.config :as cfg] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.ffi :as ffi]
+            [jolt.deps] [clojure.edn :as edn]))
 
 (defn- reap
   "Every child that exited, as :exit events (non-blocking waitpid)."
@@ -82,6 +83,20 @@
                              {:ev (into [{:ev :standby :gen (:gen m) :pid pid :t (:max-tx (:db st))}] (reap st))}])))
      [st nil])))
 
+(defn- dev-classpath!
+  "The source root's deps.edn roots added to the loader (jolt.deps/add-deps, the twin of
+  clojure.repl.deps/add-libs), so every agent forked from here resolves a library's files as a
+  REPL started in that project does: io/resource, clojure.repl/source, requiring an uncompiled
+  namespace. A built binary carries no dependency roots of its own (Jolt #1232). Once, before
+  the first fork."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (when-let [root (get cfg/config :seon.config.source/root)]
+    (let [cwd (.getCanonicalPath (java.io.File. "."))]
+      (lib/c-chdir root)
+      (jolt.deps/add-deps (edn/read-string (slurp "deps.edn")))
+      (lib/c-chdir cwd))))
+
 (defn main
   "The fork server's loop, on its socket to root. The boot server makes a process group
   that every agent, test child and clone inherits; a standby (boot? false) stays in it.
@@ -89,7 +104,7 @@
   returns."
   {:malli/schema [:=> [:cat :seon.host/db :seon.lib/fd :boolean] :any]}
   [db0 fd boot?]
-  (when boot? (lib/c-setpgid 0 0))
+  (when boot? (lib/c-setpgid 0 0) (dev-classpath!))
   (let [conn (sock/conn fd)
         recv! (fn [] (let [m (sock/recv-within! conn 100)]
                        (case m :eof nil :timeout [:cmd {:op :tick}] [:cmd m])))]
