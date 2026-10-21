@@ -96,7 +96,7 @@ The order of the tasks is the order of the work: **delete first, then foundation
    - Ask: is this code already scheduled for deletion or replacement (`../notes/PLAN-v2.md`, other tasks' plans)? If so, stop and tell root.
    - Write what you found into the task's plan: the cause, with file:line evidence.
    - If the premise is wrong, stop and send the evidence to root.
-   - **Plan:** write the plan before code: the changes file by file, what each deletes, the risks, how each is proved, the estimates, the landing order. For a change to a dependency (Jolt, Chez, Datahike, Flow) or a design rule, send root the plan and wait for its approval before building. Work the dependency's own way: read how its authors designed it, and fix within that design, never with a hack around it.
+   - **Plan:** a few lines, before code: the primitive you'll use (the one the platform or dependency already has: a flow proc, a channel, a branch, a fact, the alt-handler waiter), what changes, what it deletes, and the test that proves it. No new layers, wrappers, runners or managers: if the primitive doesn't fit, say so in two lines. For a change to a dependency (Jolt, Chez, Datahike, Flow) or a design rule, send root the plan and wait for its go. Work the dependency's own way, never with a hack around it.
 3. **Estimate before measuring.**
    - Derive what the work must cost: what N counts, how many passes, the unit costs from `seon.cost/units`.
    - Write the estimate as a cost proof (`seon.cost/proof`) for anything whose input grows.
