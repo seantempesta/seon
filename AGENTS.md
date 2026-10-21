@@ -87,6 +87,7 @@ All work, ours and Seon's agents', is a **task** in a task file: `resources/seon
 - `:seon.task/plan`: the research, with file:line, what exists, what it replaces, what gets deleted;
 - `:seon.task/proofs`: the deftests, cost proofs included, that say it is done;
 - `:seon.task/needs`: the tasks that must land first.
+- `:seon.task/refs`: the vars and files the task touches, as data (qualified symbols and paths), never left to be parsed out of the plan's prose; they pull in the wiki sections that describe them.
 
 The order of the tasks is the order of the work: **delete first, then foundations, then fixes**, so nothing is fixed and then deleted. Root writes and orders the tasks (from audits, mined problems and the owner's words), hands each to one lane, and lands its work. A lane may refine its task's plan as it learns, never its proofs' intent without root.
 
