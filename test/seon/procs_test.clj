@@ -27,7 +27,7 @@
     (arity-0 v)))
 
 (deftest writer
-  (let [[cfg conn] (pdb/create! 100)
+  (let [[cfg conn] (pdb/test-branch!)
         in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
         t0 (:max-tx @conn)]
@@ -53,7 +53,7 @@
       (is (map? (#'writer/writer-proc st ::flow/stop))))))
 
 (deftest reconciler
-  (let [[_ conn] (pdb/create! 100)
+  (let [[_ conn] (pdb/test-branch!)
         st (#'reconcile/reconciler-proc {:boot "b" :provider {:kind :scripted :script 'seon.fixtures/reply}})]
     (testing "a main commit with no tasks: the reconciler reads it and starts nothing (quiescence: seon.reconcile-test)"
       (let [[st outs] (step #'reconcile/reconciler-proc st :main {:t 7 :ops [] :db @conn :ns (sock/now-ns)})]
@@ -140,7 +140,7 @@
     (is (= [[:in 4]] @inbox) "nothing is taken after stop")))
 
 (deftest the-fork-server-step
-  (let [[_ conn] (pdb/create! 100)
+  (let [[_ conn] (pdb/test-branch!)
         db @conn
         st (#'server/server-step {:db db :conn nil})]
     (testing "a main commit is applied to its replica"

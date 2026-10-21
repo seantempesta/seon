@@ -10,7 +10,7 @@
 (defn- main
   "Work tasks w (names) each done with the changed keys given, their merges released."
   [changes]
-  (let [[_ conn] (pdb/create! 0)
+  (let [[_ conn] (pdb/test-branch!)
         ds (tpl/with-merge (vec (for [[nm _] changes] {:seon.task/ns 't :seon.task/name nm :seon.task/plan "p"
                                                          :seon.task/proofs #{(symbol "t" (str nm "-test"))}})))]
     (d/transact conn {:tx-data (task/boot-tx boot 16 8)})

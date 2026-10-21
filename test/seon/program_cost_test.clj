@@ -19,9 +19,7 @@
   before), and the account of redefining the middle one."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map]]}
   [n]
-  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}
-        _ (d/create-database cfg)
-        db (d/db-with @(d/connect cfg) pdb/schema)
+  (let [db @(second (pdb/test-branch!))
         db (d/db-with db (vec (mapcat #(program/account-tx db (acct % "x") %) (range n))))]
     [db (acct (quot n 2) "(inc x)")]))
 
@@ -44,10 +42,11 @@
      :overrun {:task "seon.db/avet-seek-allocates" :measured {:ns 114000.0 :bytes 137744.0}}}))
 
 (defn program-of
-  "load-order's argument: the live forms of a db holding n forms."
+  "load-order's argument: the n live forms of app.pc (the test store's example program is
+  beside them)."
   {:malli/schema [:=> [:cat pos-int?] [:tuple [:vector :map]]]}
   [n]
-  (let [[db] (branch-of n)] [(program/live-forms db)]))
+  (let [[db] (branch-of n)] [(filterv #(= 'app.pc (:ns %)) (program/live-forms db))]))
 
 (deftest load-order-is-one-pass-over-the-forms
   (cost/proof

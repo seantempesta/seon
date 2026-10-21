@@ -25,24 +25,23 @@
     (let [db @p] (remove-watch a k) db)))
 
 (defn- defect
-  "A root proc's defect recorded on main (a :platform problem) last seen at or after
-  since-ms, or nil."
-  [db since-ms]
-  (some #(let [e (d/entity db (:e %))] (when (>= (:seon.error/last-ms e 0) since-ms) (into {} e)))
+  "A root proc's defect (a :platform problem) whose record main wrote after t, or nil:
+  facts, not clocks."
+  [db t]
+  (some #(when (some (fn [dt] (> (:tx dt) t)) (d/datoms db :eavt (:e %) :seon.error/last-ms)) (into {} (d/entity db (:e %))))
         (filter #(= :platform (:v %)) (d/datoms db :aevt :seon.error/class))))
 
 (defn await-quiet
   "The reconciler's quiescence report ({:t :stuck}) for main at or after t: nothing runs,
   nothing is left to judge, nothing is ready. Waits as long as work goes on, or until a
-  root proc's defect is recorded on main from now on ({:ended :defect :problem p}): a step
+  root proc's defect is recorded on main after t ({:ended :defect :problem p}): a step
   that threw dropped its outputs, so the flight it carried never ends and quiescence never
   comes. No clock."
   [sys t]
-  (let [since (System/currentTimeMillis)
-        db (await-db sys #(or (when-let [q (r/quiescent %)] (>= (:t q) t)) (defect % since)))]
+  (let [db (await-db sys #(or (when-let [q (r/quiescent %)] (>= (:t q) t)) (defect % t)))]
     (if-let [q (and (r/quiescent db) (>= (:t (r/quiescent db)) t) (r/quiescent db))]
       q
-      (let [p (defect db since)] (println :defect p) {:ended :defect :problem p}))))
+      (let [p (defect db t)] (println :defect p) {:ended :defect :problem p}))))
 
 (defn- main-t [sys] (:max-tx (db sys)))
 
@@ -127,9 +126,9 @@
                     (= [{:task "calc/neg" :cause "cancelled" :blocks ["calc/abs" "calc/abs-merge" "calc/neg-merge"]}] (:stuck q)))))))
 
 (defn resume
-  "Phase 1 of a restart: calc on a durable store; root SIGKILLs itself mid-run."
-  [path]
-  (let [sys (c/start! {:datoms 300 :max-running 2 :path path})
+  "Phase 1 of a restart: calc on main branch nm of the one store; root SIGKILLs itself mid-run."
+  [nm]
+  (let [sys (c/start! {:datoms 300 :max-running 2 :main (keyword nm)})
         ds (fx/decls fx/calc 'calc nil)]
     (seed! sys fx/calc)
     (root/create! sys ds)
@@ -140,10 +139,10 @@
     (lib/c-kill (lib/c-getpid) 9)))
 
 (defn resume2
-  "Phase 2: a new root on the store reaps the lost attempts and finishes the graph."
-  [path]
+  "Phase 2: a new root on the same store and main nm reaps the lost attempts and finishes the graph."
+  [nm]
   (let [t0 (now)
-        sys (c/start! {:datoms 300 :max-running 2 :path path})
+        sys (c/start! {:datoms 300 :max-running 2 :main (keyword nm)})
         _ (println :recovered (get-in (c/state sys) [:store :recovered-branches]))
         _ (println :quiescent (quiet! sys))
         ok (let [idx (r/index (db sys))] (every? (fn [id] (r/done? idx id)) (map (fn [n] (str "calc/" n "-merge")) ["add" "twice" "square" "sum-sq" "neg" "abs"])))]

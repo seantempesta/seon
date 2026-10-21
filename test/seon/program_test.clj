@@ -16,10 +16,7 @@
             [seon.source :as source]
             [jolt.analyzer]))
 
-(defn- empty-db []
-  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}]
-    (d/create-database cfg)
-    (d/db-with @(d/connect cfg) pdb/schema)))
+(defn- empty-db [] @(second (pdb/test-branch!)))
 
 (defn- ns-form? [form nsx]
   (boolean (and (seq? form) (symbol? (first form)) (= #'clojure.core/ns (ns-resolve nsx (first form))))))
@@ -41,6 +38,10 @@
   (reduce (fn [db [nsym src]]
             (if-let [a (eval-account nsym src)] (d/db-with db (program/record-tx db a)) db))
           db (partition 2 forms)))
+
+(defn- in-ns-forms
+  "The live forms of namespace nsym on db (the test store's example program is beside them)."
+  [db nsym] (filterv #(= nsym (:ns %)) (program/live-forms db)))
 
 (defn- var-row [db sym] (d/pull db '[:var/kind :var/contract :var/doc {:var/form [:form/src :form/order]}] [:var/name sym]))
 
@@ -97,22 +98,22 @@
   (let [db (record (empty-db) 'app.pt-re "(defn f [x] x)" 'app.pt-re "(defn g [x] (f x))")
         order-f (get-in (var-row db 'app.pt-re/f) [:var/form :form/order])
         db2 (record db 'app.pt-re "(defn f [x] (inc x))")]
-    (is (= ["(defn f [x] (inc x))" "(defn g [x] (f x))"] (map :src (program/load-order (program/live-forms db2))))
+    (is (= ["(defn f [x] (inc x))" "(defn g [x] (f x))"] (map :src (program/load-order (in-ns-forms db2 'app.pt-re))))
         "the new form in the old one's place, before g")
     (is (= order-f (get-in (var-row db2 'app.pt-re/f) [:var/form :form/order])))
-    (is (= 2 (count (d/datoms db2 :aevt :form/id))) "the replaced form is retracted")
+    (is (= 2 (count (in-ns-forms db2 'app.pt-re))) "the replaced form is retracted")
     (testing "a form that also defines something not redefined stays, the new one after it"
       (let [db (record (empty-db) 'app.pt-re2 "(do (def a 1) (def b 2))" 'app.pt-re2 "(def a 3)")]
-        (is (= ["(do (def a 1) (def b 2))" "(def a 3)"] (map :src (program/load-order (program/live-forms db)))))))))
+        (is (= ["(do (def a 1) (def b 2))" "(def a 3)"] (map :src (program/load-order (in-ns-forms db 'app.pt-re2)))))))))
 
 (deftest load-order-follows-the-real-references
   (testing "a helper defined after its caller loads first (T5b's sibling: g replaced the stub in place, h3 came after)"
     (let [db (record (empty-db) 'app.pt-s "(defn g [x] 0)" 'app.pt-s "(defn other [x] x)"
                      'app.pt-s "(defn h3 [x] (* 3 x))" 'app.pt-s "(defn g [x] (h3 x))")]
-      (is (= ["(defn h3 [x] (* 3 x))" "(defn g [x] (h3 x))" "(defn other [x] x)"] (map :src (program/load-order (program/live-forms db)))))))
+      (is (= ["(defn h3 [x] (* 3 x))" "(defn g [x] (h3 x))" "(defn other [x] x)"] (map :src (program/load-order (in-ns-forms db 'app.pt-s)))))))
   (testing "a file's order is kept: a declare interns what a later form defines"
     (let [db (record (empty-db) 'app.pt-d "(declare b)" 'app.pt-d "(defn a [] (b))" 'app.pt-d "(defn b [] 1)")]
-      (is (= ["(declare b)" "(defn a [] (b))" "(defn b [] 1)"] (map :src (program/load-order (program/live-forms db))))))))
+      (is (= ["(declare b)" "(defn a [] (b))" "(defn b [] 1)"] (map :src (program/load-order (in-ns-forms db 'app.pt-d))))))))
 
 (def ^:private calc-srcs
   ['user "(ns app.pt-calc)"

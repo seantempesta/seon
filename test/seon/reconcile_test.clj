@@ -10,10 +10,7 @@
             [seon.template :as tpl] [seon.problems :as problems] [seon.sock :as sock] [clojure.edn]
             [clojure.string :as str] [clojure.set]))
 
-(defn- empty-db []
-  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}]
-    (d/create-database cfg)
-    (-> @(d/connect cfg) (d/db-with pdb/schema) )))
+(defn- empty-db [] @(second (pdb/test-branch!)))
 
 (defn- decl [nm & {:keys [needs proofs model]}]
   (cond-> {:seon.task/ns 'demo :seon.task/name nm :seon.task/plan (str "Make " nm " true.")

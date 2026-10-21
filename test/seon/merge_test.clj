@@ -11,10 +11,7 @@
             [seon.merge :as pm]
             [seon.program :as program]))
 
-(defn- empty-db []
-  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}]
-    (d/create-database cfg)
-    (d/db-with @(d/connect cfg) pdb/schema)))
+(defn- empty-db [] @(second (pdb/test-branch!)))
 
 (defn- defn-src [nm body] (str "(defn " nm " {:malli/schema [:=> [:cat :int] :int]} [x] " body ")"))
 

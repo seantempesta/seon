@@ -15,10 +15,7 @@
             [seon.source :as source]
             [seon.program-test :as pt]))
 
-(defn- empty-db []
-  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}]
-    (d/create-database cfg)
-    (d/db-with @(d/connect cfg) pdb/schema)))
+(defn- empty-db [] @(second (pdb/test-branch!)))
 
 (def ^:private here (System/getProperty "user.dir"))
 
@@ -65,7 +62,8 @@
         (is (= :value (:var/kind (row 'seon.program/banned))))
         (is (= '[:fn :fn] (mapv #(:var/kind (row %)) '[seon.source/read-forms my.fx/call])))))
     (testing "the platform's own namespaces are not loaded from main: the binary is the running generation"
-      (is (= {:loaded 0 :errors []} (program/load-all! db)) "load-all! skips namespaces imported from files")
+      (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! db))
+          "load-all! loads the test store's example program, and none of the namespaces imported from files")
       (is (= [] (program/load-changes! db (vec (for [dt (d/datoms db :aevt :form/src)] [:db/add (:e dt) :form/src (:v dt)]))))
           "and so does load-changes!"))))
 
@@ -114,7 +112,8 @@
   (let [main (main-with-file)
         branch (pt/record main 'app.pt-src "(defn twice [x] (* 2 x))")]
     (remove-ns 'app.pt-src)
-    (is (= {:loaded 0 :errors []} (program/load-all! main)) "main's imported text is the binary's: never evaluated")
+    (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! main))
+        "main's imported text is the binary's: never evaluated (the example program is)")
     (is (= [] (program/load-diff! main branch)))
     (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
     (is (nil? (resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again")))

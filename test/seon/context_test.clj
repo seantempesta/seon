@@ -7,9 +7,7 @@
             [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent]))
 
 (defn- db-with-program []
-  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}
-        _ (d/create-database cfg)
-        db (d/db-with @(d/connect cfg) pdb/schema)]
+  (let [db @(second (pdb/test-branch!))]
     ;; recorded definitions, each its form (seon.program's facts), written as data
     (d/db-with db (vec (mapcat (fn [[v src]]
                                  [{:db/id (str v) :var/name v :var/ns (str "ns " (namespace v)) :var/form (str "form " v)}

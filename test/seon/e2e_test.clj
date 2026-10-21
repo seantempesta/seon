@@ -7,10 +7,7 @@
             [seon.db :as pdb]
             [seon.e2e :as e2e]))
 
-(defn- conn []
-  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}]
-    (d/create-database cfg)
-    (let [c (d/connect cfg)] (d/transact c {:tx-data pdb/schema}) c)))
+(defn- conn [] (second (pdb/test-branch!)))
 
 (deftest await-quiet-ends-on-a-recorded-defect
   (let [c (conn)

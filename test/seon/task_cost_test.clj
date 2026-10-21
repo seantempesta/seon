@@ -8,9 +8,7 @@
   "The input of size n: a main db holding n tasks, and the id of one of them."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :keyword :string]]}
   [n]
-  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}
-        _ (d/create-database cfg)
-        db (d/db-with @(d/connect cfg) pdb/schema)
+  (let [db @(second (pdb/test-branch!))
         decls (vec (for [i (range n)] {:seon.task/ns 'demo :seon.task/name (str "t" i) :seon.task/plan "p"}))]
     [(d/db-with db (task/create-tx db decls)) :seon.task/id (str "demo/t" (quot n 2))]))
 

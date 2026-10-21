@@ -2,8 +2,10 @@
 # bin/root [PORT [WEB]]   a standing root with its entrance on 127.0.0.1:PORT (default 7888) and
 # its dashboard on WEB (default 7777; each worktree runs its own root on its own ports), until
 # stdin closes: the running system that outside agents (Claude lanes, an owner at a terminal)
-# reach through bin/mcp or `printf '{:op :agents}\n' | nc -w 5 127.0.0.1 PORT`. Its store is
-# a run kept under SEON_RUNS (<this tree>/runs).
+# reach through bin/mcp or `printf '{:op :agents}\n' | nc -w 5 127.0.0.1 PORT`. It runs on a
+# branch of the one kept store, <SEON_RUNS>/store (<this tree>/runs/store): each boot a new main
+# run-<time>-<id> of the store's seed (SEON_MAIN=<branch> resumes one; SEON_MAIN=db is
+# production's main), its agents' and tasks' branches named under it.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 . "$ROOT/bin/env"
 export SEON_RUNS=${SEON_RUNS:-$ROOT/runs}
