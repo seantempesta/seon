@@ -5,6 +5,8 @@
 {;; ---- variants of the one error map (each [:and :seon.error/base ...]) ----
  :seon.agent/eval-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/eval-error]]
                                                 [:class :string] [:data {:optional true} :string] [:phase {:optional true} :keyword]]]
+ :seon.db/lease-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/lease-spent]]
+                                              [:lease :int] [:ceiling :int] [:entity-id {:optional true} [:maybe :int]]]]
  :seon.root/no-agent [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-agent]] [:agent {:optional true} [:maybe :keyword]]]]
  :seon.agent/last-op [:map [:kind :keyword] [:form {:optional true} [:maybe :string]] [:since-ms {:optional true} [:maybe :int]]]
  :seon.agent/died [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/died]] [:agent :keyword]

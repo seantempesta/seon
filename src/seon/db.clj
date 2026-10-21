@@ -6,7 +6,7 @@
   (BAGGAGE.md)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-] :as contract] [seon.schema.datahike :as sd] [seon.config :as cfg]
-            [datahike.connections] [datahike.writing] [hasch.core :as hasch] [datahike.api :as d] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
+            [datahike.connections] [datahike.writing] [datahike.db.transaction :as dbt] [hasch.core :as hasch] [datahike.api :as d] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
             [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix]))
 
 (def schema
@@ -54,7 +54,7 @@
   [backend path]
   {:store (cond-> {:backend backend :path path :id (hasch/uuid path)
                    :default-serializer :FaslSerializer}
-            (= backend :lmdb) (assoc :lmdb {:flags MDB_NOSYNC :map-size (* 1048576 (Long/parseLong (or (System/getenv "SEON_LMDB_MB") "1024")))})
+            (= backend :lmdb) (assoc :lmdb {:flags MDB_NOSYNC :map-size (* 1048576 cfg/LMDB-MB)})
             (= backend :file) (assoc :config {:defer-immutable-sync? true}))
    :schema-flexibility :write :keep-history? false
    :writer writer-cfg
@@ -181,17 +181,55 @@
       (when-not (and exists? existed?) (sync! cfg))
       {:cfg cfg :conn conn :recovered? (and exists? existed?) :seeded? (not exists?)})))
 
+(defn lease!
+  "Make this process mint the store's entity ids from its lease: from lease, up to (not
+  including) lease + EID-LEASE; past it a transaction is refused (lease-spent), never
+  minting the next agent's ids. nil."
+  {:malli/schema [:=> [:cat :seon.db/cfg :int] :nil]}
+  [cfg lease]
+  (.put ^java.util.concurrent.ConcurrentHashMap @#'datahike.writing/eid-allocators
+        (get-in cfg [:store :id]) (java.util.concurrent.atomic.AtomicLong. lease))
+  (dbt/set-eid-ceiling! (get-in cfg [:store :id]) (+ lease cfg/EID-LEASE)))
+
 (defn after-fork!
   "Make this forked process (an agent, a clone) open the store itself: an LMDB env and the
   connections inherited from its parent must not be used across fork(), so they are
   forgotten (not closed: they are the parent's), and the store's entity-id allocator starts
-  at this process's lease. Physics, not a guard: fork shares the parent's handles."
+  at this process's lease and stops at its end (lease!). Physics, not a guard: fork shares
+  the parent's handles."
   {:malli/schema [:=> [:cat :seon.db/cfg :int] :any]}
   [cfg lease]
   (swap! @#'konserve.jolt.lmdb/envs dissoc (get-in cfg [:store :path]))
   (reset! datahike.connections/*connections* {})
-  (.put ^java.util.concurrent.ConcurrentHashMap @#'datahike.writing/eid-allocators
-        (get-in cfg [:store :id]) (java.util.concurrent.atomic.AtomicLong. lease)))
+  (lease! cfg lease))
+
+(defn lease-spent
+  "The typed refusal :seon.db/lease-spent when x (what a transaction answered) is Datahike's
+  refusal to mint past this process's ceiling (after-fork!), for the agent whose lease
+  starts at lease; else nil."
+  {:malli/schema [:=> [:cat :any [:maybe :int]] [:maybe :seon.db/lease-spent]]}
+  [x lease]
+  (let [d (ex-data x)]
+    (when (and lease (= :entity-id/lease-spent (:error d)))
+      (contract/error :seon.db/lease-spent 'seon.agent/transact!
+                      (str "this agent's entity ids are spent: its lease is " cfg/EID-LEASE " ids from " lease)
+                      {:lease lease :ceiling (:ceiling d) :entity-id (:entity-id d)
+                       :seon.error/fix "Write fewer new entities in this agent (retract or reuse), or raise SEON_EID_LEASE for the run; the transaction was not applied."}))))
+
+(defn lease-use
+  "How much of the lease starting at lease db's branch has minted: {:from :used :of}."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :int]] [:maybe [:map [:from :int] [:used :int] [:of :int]]]]}
+  [db lease]
+  (when lease {:from lease :used (max 0 (- (:max-eid db) lease)) :of cfg/EID-LEASE}))
+
+(defn map-use
+  "The LMDB store's use of its map: {:used-bytes (data.mdb's length: LMDB grows the file as it
+  uses pages) :map-bytes}, or nil for another backend."
+  {:malli/schema [:=> [:cat :seon.db/cfg] [:maybe [:map [:used-bytes :int] [:map-bytes :int]]]]}
+  [cfg]
+  (when (= :lmdb (get-in cfg [:store :backend]))
+    {:used-bytes (.length (java.io.File. (str (get-in cfg [:store :path]) "/data.mdb")))
+     :map-bytes (get-in cfg [:store :lmdb :map-size])}))
 
 (defn lease-base
   "The first entity id past every branch head of the store: agents' leases start here."
