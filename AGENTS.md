@@ -55,6 +55,8 @@ This is not a traditional program with a scheduler, timers and callers that wait
 - **A render.** Every view, the model's context included, is a render declared on the value's schema, over the one printer.
 - **An error is data** that flows to whoever can fix it: a defect holds its message until the code is fixed; a typed error goes to the requester, agent or task that can act on it.
 
+**A mechanism is built once, as a pillar, and reused everywhere** (owner, 2026-10-21: "simple and extremely well built code that we reuse everywhere because it's a pillar and not just a hack"). Before building anything that waits, retries, admits, holds, spawns, watches a process, answers a request or reads config, find its one implementation (`docs/patterns.md`, or ask root who owns it) and use it. If it doesn't exist yet, its owner builds it; you don't build a second one. Before building a pillar: read the research (`../notes/option3-RESEARCH-async.md`, `docs/core-async.md`, `docs/flow.md`) and prove the approach in a REPL at n ≤ 100.
+
 **Routing around a pillar** (each of these happened on 2026-10-21): a timer, sleep, poll, deadline or retry instead of a queue; a fallback default instead of an error fact; a new runner, manager or wrapper beside the reconciler and procs; a store per test instead of a branch; an env var instead of a config fact; text or regex instead of the compiler's facts; a script's line order instead of `:needs`; an OS thread instead of a fiber; stdin as a process's lifecycle instead of a fact or message.
 
 ## Laws (short; the reasons are in DECISIONS)
