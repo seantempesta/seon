@@ -1,0 +1,12 @@
+[{:seon.task/name "definitions-from-the-compiler"
+  :seon.task/plan "Lane LOOP (in flight). Each top-level form's definitions come from Jolt's analyzer (jolt.analyzer/*unit-tap*, Jolt 9e42a0d8): vars by kind, methods [multi dispatch], protocol impls [protocol type], the ns form and its requires, resolved refs (vars, macros, classes), arities, exact text; readback after the eval decides what actually ran. Applied per form through the run-ahead writer (225 us, flat; no waiting). Replaces seon.program/def-heads, def-form?, recording's form tests, names-in, ns-env, harvest's flagged guesses and the request-level :defs buffer (repl.clj:228). Design: notes/audit-2026-10-21/program-facts-draft.edn (inv4: 133/133 definitions agree with the runtime on 2,016 real agent forms). Main loads forms in the topological order of the real refs and ns requires."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.program-test/a-form-records-exactly-what-the-compiler-defined
+                      seon.program-test/defmethod-extend-and-defrecord-merge-and-load-on-main
+                      seon.program-cost-test/recording-a-form-is-flat-in-the-program}}
+ {:seon.task/name "program-mutations-are-refused-at-merge"
+  :seon.task/plan "Owner 2026-10-21: program code (what merges) does not call clojure.core/intern, alter-var-root, eval or load-string (loading code is an effect), and defines nothing inside a fn body (inline-def). The done rule refuses the branch naming the definition and the call, from the compiler's resolved refs (never text). The REPL still evaluates them; the merge judges. Platform and library code are not judged."
+  :seon.task/kind :work
+  :seon.task/needs #{"seon.program/definitions-from-the-compiler"}
+  :seon.task/proofs #{seon.program-test/a-program-calling-alter-var-root-is-refused-naming-it
+                      seon.program-test/a-def-inside-a-fn-body-is-refused}}]

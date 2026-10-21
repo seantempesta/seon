@@ -1,0 +1,9 @@
+[{:seon.task/name "image-registration-is-opt-in"
+  :seon.task/plan "inv2: about a third of a defn's compile allocation (12 of 37 MB for real named-forms) is Jolt's state-image fn-source registration: fnsrc-flush renders each anonymous fn's source, parses it back and compares (fnsrc-row-src, jolt-core/jolt/backend_scheme.clj:2510), and emits image-register-fn-form!, for every user namespace. Seon uses no images (no jolt.image anywhere in next/). A compile option, off unless images are wanted; Jolt's image gates still pass with it on. On a jolt/<topic> branch of our fork."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.program-cost-test/a-defn-compiles-within-its-estimate}}
+ {:seon.task/name "the-emitter-builds-one-buffer"
+  :seon.task/plan "inv2: the emitter builds Scheme by nested str concatenation, quadratic in nesting depth (6.2 MB at depth 50, 18 at 100, 59 at 200, 209 at 400) and ~1.4 KB of allocation per output character. Build the output in one buffer (or hand s-expressions to Chez). Agents must run release or trace-off (source mode with trace doubles every eval)."
+  :seon.task/kind :work
+  :seon.task/needs #{"jolt.backend/image-registration-is-opt-in"}
+  :seon.task/proofs #{seon.program-cost-test/a-defn-compiles-within-its-estimate}}]

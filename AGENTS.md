@@ -70,15 +70,68 @@ When you feel it, stop and ask three questions:
   - no thread, future, go-loop or atom outside procs, except an edge reader thread for a blocking read that feeds a proc's in-port;
   - the fork server and agents run the same contract in their own single-threaded loop.
 
-## How to work a change
+## How work is handed out (we dogfood Seon)
 
-1. **Read** DECISIONS, the owning note, and the code you'll touch. Read the dependency before writing around it.
-2. **Estimate** the cost and say what it is proportional to: what N counts, the least work the data needs (one pass? one lookup per row?), how it grows. Write it as a cost proof (`seon.cost/proof`) beside the behaviour proofs; its unit costs come from `seon.cost/units`, never from a run.
-3. **Write the proofs** first, red.
-4. **Build the simplest form** that makes it green.
-5. **Measure** parent against change: alternating runs, release build, bench lock. Keep it only if it's a measured win.
-6. **Show it** in the dashboard or the tour if users would care.
-7. **Commit** with explicit paths, numbers in the message, and the source cited for anything ported.
+All work, ours and Seon's agents', is a **task** in a task file: `resources/seon/tasks/<owning-ns>.edn`, loaded with `my.root/load-tasks!`. Each entry has:
+- `:seon.task/plan`: the research, with file:line, what exists, what it replaces, what gets deleted;
+- `:seon.task/proofs`: the deftests, cost proofs included, that say it is done;
+- `:seon.task/needs`: the tasks that must land first.
+
+The order of the tasks is the order of the work: **delete first, then foundations, then fixes**, so nothing is fixed and then deleted. Root writes and orders the tasks (from audits, mined problems and the owner's words), hands each to one lane, and lands its work. A lane may refine its task's plan as it learns, never its proofs' intent without root.
+
+## How to work a task (every lane, every agent)
+
+1. **Take one task.** For foundation work, open a worktree: `bin/worktree <task-name>`. Work only there and only on that task's files. Never edit the main tree, another lane's files, or anything outside the task. Never run `git checkout`, `restore`, `stash` or `reset` on paths you don't own.
+2. **Research the existing code first, end to end, before writing anything.**
+   - Read the task's plan, DECISIONS, `docs/DRAGONS.md`, and the code it touches with its callers and its tests.
+   - Read the dependency (Jolt, Datahike, Flow, malli) before working around it.
+   - Ask: is this code already scheduled for deletion or replacement (`../notes/PLAN-v2.md`, other tasks' plans)? If so, stop and tell root.
+   - Write what you found into the task's plan: the cause, with file:line evidence.
+   - If the premise is wrong, stop and send the evidence to root.
+3. **Estimate before measuring.**
+   - Derive what the work must cost: what N counts, how many passes, the unit costs from `seon.cost/units`.
+   - Write the estimate as a cost proof (`seon.cost/proof`) for anything whose input grows.
+4. **Write the proofs first and watch them fail.**
+   - The task's named deftests, a `bin/check` mode where the behaviour is end to end, and the cost proof.
+   - A proof must fail for the right reason before the code exists: real assertions, sensitive to mutation, never timing-only, never `string?`/`map?` placebos, never gated to zero assertions.
+5. **Write the simplest code that makes them pass,** at the cause, in the owner of the bad value.
+6. **Be suspicious of every number.**
+   - Compare each measurement with its estimate.
+   - A ratio past 3× either way is a finding: explain it before going on.
+   - Say plainly what was not measured.
+7. **Prove it whole:** `bin/test`, then `bin/check` in your worktree. `bin/check` fails when any step fails, keeps each step's output and the stores under `target/check/<time>/`, and is the bar.
+8. **Report to root:** commits, proofs (red → green), numbers against estimates, what you deleted, what's left. Root cherry-picks onto main by explicit paths, runs `bin/check` there, and closes the task.
+
+## Found a problem? File a task (owner, 2026-10-21)
+
+When you hit something outside your task, don't fix it in passing and don't just mention it. Examples: REPL output that is noise or cut wrong, a context section that misleads, a missing tool, an error that names nothing, a slow path, anything a Seon agent would trip on. Write it up as a task in the owning namespace's task file, filled out so a Seon agent can work it with nothing else:
+- **`:seon.task/plan`:**
+  - what you saw, exactly: the form, its output, the turn or store it came from;
+  - the cause as far as you traced it (file:line);
+  - what correct looks like;
+  - what it would replace or delete.
+- **`:seon.task/proofs`:** the deftests (and cost proof) that will say it is fixed, by name, with what each asserts written in the plan.
+- **`:seon.task/needs`:** what must land first.
+
+Tell root; root orders it among the rest. Mined problems (`my.root/problems`) become tasks the same way.
+
+## Mistakes we have made, and do not repeat
+
+- **A timeout, deadline, sleep or retry standing in for a dependency.** Flows depend on each other through channels that park. "Never came" is an observed, recorded fact (stuck, stalled, dead), never a clock that ends a run.
+- **A gate by the shape of a form or a list of kinds.** Record what actually happened: the compiler's events, the runtime's state. The proofs and the merge judge.
+- **A swallowed error, an ignored answer, a fake default.**
+  - Every `:seon.error/type` answer is read or recorded.
+  - Unknown is not `{}`, `0`, `nil` or `:ok`.
+  - A proc answers every request it took, even when its step throws.
+- **Deleting a record:** a store, a branch, a log, history. Runs are kept. Reclaiming space is an explicit owner act.
+- **A cut that drops instead of eliding.** Every cut says what it omitted and how to read the rest. Storage keeps the exact value; renders budget it.
+- **The same check in several places,** or a second producer of the same view. One owner per fact, one function per rule.
+- **Redefining instead of defining.** No `alter-var-root`, `intern`, `with-redefs` or stub-by-rebinding. Tests get a forked environment holding exactly their definitions.
+- **Text standing in for structure.** No regex over code. Ask the compiler, the reader or the db.
+- **A measurement that disturbs itself:** a meter that counts its own reads, a watchdog counted as work. And a number accepted without an estimate.
+- **A check that cannot fail.** A pipeline that drops exit codes, an assertion on a value's type, a test gated off. If it cannot go red, it proves nothing.
+- **A cache keyed by time,** or any cache not measured as necessary.
+- **Shared-tree accidents:** one lane's checkout discarding another's work. Own your files, use your worktree, commit early.
 
 ## The machine
 
