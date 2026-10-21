@@ -13,3 +13,12 @@ export SEON_CHECKOUT=${SEON_CHECKOUT:-$ROOT}
 # Jolt's compile cache (~/.jolt) per checkout, as bin/build and bin/test already have it: a root
 # or a check compiles agents' code into this checkout's target/home, never a cache other lanes share
 export HOME=$ROOT/target/home
+# Jolt's build-unit and runtime caches are shared by every checkout and generation worktree: their
+# keys hold the unit's text and the building runtime's fingerprint, no path, and entries are
+# published by temp+rename (docs/source.md). One directory in the main tree's target/, found from
+# git's common dir so a worktree anywhere (bin/worktree --at DIR too) names the same absolute path.
+# (The AOT cache stays per checkout until its keys are path-free: the J2/P2 phases.)
+SEON_MAIN=$(cd "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
+JOLT_BUILD_CACHE_DIR=${JOLT_BUILD_CACHE_DIR:-$SEON_MAIN/target/cache/build}
+JOLT_RUNTIME_CACHE_DIR=${JOLT_RUNTIME_CACHE_DIR:-$SEON_MAIN/target/cache/runtime}
+export JOLT_BUILD_CACHE_DIR JOLT_RUNTIME_CACHE_DIR
