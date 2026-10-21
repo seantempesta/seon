@@ -52,6 +52,7 @@ When you feel it, stop and ask three questions:
 
 ## Laws (short; the reasons are in DECISIONS)
 
+- **One store, many branches, as in production** (owner, 2026-10-21). Tests, checks and runs take a branch of one seeded store. A separate store is a last resort (a backup, a deep debug) and says why where it is made.
 - **Contracts on every function.** Malli contracts are armed from the definition, and every contract must generate (`mg/check` runs in `bin/check`).
 - **No guards or fences.** Do the right thing. Name every outside-world failure point in `DRAGONS.md`, with its one edge function and its declared error. Nothing else catches.
 - **No added caches.** A content-keyed cache is allowed only for a unit measured as expensive.
@@ -132,6 +133,12 @@ When you hit something outside your task, don't fix it in passing and don't just
 
 Tell root; root orders it among the rest. Mined problems (`my.root/problems`) become tasks the same way.
 
+## The docs are a wiki, and always true (owner, 2026-10-21)
+
+- `docs/<topic>.md`, one concept per page, indexed in `docs/README.md`. A section is addressed `topic#heading-slug` and ends with a `Describes:` line naming its vars, attrs and files as EDN.
+- Reference docs as data: `{:seon/docs ["merge#behind"]}` on a definition, `:seon.task/docs` on a task. The context pulls the named sections in, so explain a thing once in the wiki and point at it.
+- A change that makes a section wrong updates it in the same commit. `bin/check docs` goes red on a dangling reference, a named var or attr that doesn't exist, or a section older than the code it describes. (Tasks: `resources/seon/tasks/seon.docs.edn`.)
+
 ## Mistakes we have made, and do not repeat
 
 - **A timeout, deadline, sleep or retry standing in for a dependency.** Flows depend on each other through channels that park. "Never came" is an observed, recorded fact (stuck, stalled, dead), never a clock that ends a run.
@@ -152,6 +159,9 @@ Tell root; root orders it among the rest. Mined problems (`my.root/problems`) be
 - **Text standing in for structure.** No regex over code. Ask the compiler, the reader or the db.
 - **A measurement that disturbs itself:** a meter that counts its own reads, a watchdog counted as work. And a number accepted without an estimate.
 - **A check that cannot fail.** A pipeline that drops exit codes, an assertion on a value's type, a test gated off. If it cannot go red, it proves nothing.
+  - A check that only prints is the same mistake: smoke, scale, fx and orphan printed `:pass 0` for a day and stayed "green" (2026-10-21). Every mode ends on its own verdict (`X OK` / `X FAILED`) and exit status.
+  - When you change a rule (what judges, what merges, what is program), run the whole `bin/check` and read every step that touches it, not just the ones that go red.
+- **Landing on a check nobody read.** Root cherry-picked a lane's commits, started `bin/check`, and moved on: main went red in three steps and silently empty in four (2026-10-21). Root lands, then reads the check to its last line before launching or landing anything else; a lane reports its `target/check/<time>/` path with the result.
 - **A cache keyed by time,** or any cache not measured as necessary.
 - **Shared-tree accidents:** one lane's checkout discarding another's work. Own your files, use your worktree, commit early.
 
