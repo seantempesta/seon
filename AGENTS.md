@@ -1,202 +1,217 @@
 # AGENTS.md: how we build Seon
 
-Seon is where many agents do real work, each in its own process on its own branch, and the good changes accrete into one program that gets smaller, faster and more certain as it grows. This file is how we work on it. It is short on purpose. Decisions with their reasons live in `docs/DECISIONS.md` (`../notes/DECISIONS.md` until it moves here). Failure points live in `docs/DRAGONS.md`, and words in `docs/vocabulary.md`.
+Seon is where many agents do real work, each in its own process on its own branch, and the good changes accrete into one program that gets smaller, faster and more certain as it grows. This is the one document on how we work, for every Claude lane and every Seon agent.
 
-## The spirit (why the first version felt like magic)
+The reasons live elsewhere:
+- decisions: `../notes/DECISIONS.md`;
+- the plan: `../notes/PLAN-v3.md`;
+- the method's research: `../notes/option3-RESEARCH-parallel.md`;
+- the wiki: `docs/`;
+- failure points: `docs/DRAGONS.md`.
 
-The first version ran overnight: a dozen lanes in parallel, each owning one directory, each told to go past experiments and get something working. By morning there was a guided tour of a running system:
-- a thousand agents forked in a few seconds;
-- an idle agent at 1.4 MB;
-- a dashboard showing the whole system live;
-- every number on screen measured, not claimed.
+## 1. What we are building
 
-Keep that. Concretely:
+**The goal: the recursive self-improvement loop, as one working system.** Agents work tasks, merges land, the merged code is written to disk and runs next. One system, never separate agents fighting over the machine.
 
-1. **Make it run, then make it right, then make it fast, and measure each step.** A working end-to-end slice beats a perfect design document. Build the smallest real thing, run it, look at it, then improve it.
-2. **The demo is the spec.** Every capability is proven by something you can watch: a tour step, a dashboard tile, a REPL form with its reply. If you can't show it running, it isn't done.
-3. **Insight is a feature.** The system shows what it's doing: health, throughput, memory, every eval, every merge, every error, live. A user should understand the system by looking at it. Nothing important is hidden in a log.
-4. **Numbers, always, and honest ones.**
-   - Estimate before you measure, and derive the estimate from what the work must do.
-   - Measure at three or more sizes, under the bench lock, and report the machine load.
-   - When the result surprises you, find out why; that is where the discoveries are.
-   - Say plainly what was not measured.
-5. **Own the whole stack.** When the cause is in Chez, Jolt, Datahike or konserve, fix it there with a proper fix on a `jolt/<topic>` branch. The forks are ours. Most of the big wins came from removing waste the old design hid:
-   - code copied on every fork;
-   - a thread per `go` block;
-   - an O(N²) branch list;
-   - a cache that slowed every miss;
-   - a flush per eval.
-6. **Parallel and owned.** Work is split into lanes that each own their files, report with commits and numbers, and never touch another lane's tree. Root integrates. A lane that finds its plan's premise wrong stops and sends it back with the evidence.
-   - **A lane that changes shared foundations works in its own worktree** (owner, 2026-10-21): `bin/worktree NAME` makes `../next-NAME` on branch `jolt/NAME`, with each submodule a worktree at its pinned commit and `target/` an APFS clone, so it builds (`bin/build seon`) and tests at once and its half-done work never breaks another lane. On Jolt this is safe: each process loads only its own `JOLT_PWD` and `target/`.
-   - It lands only green work: `bin/check` green in the worktree, then commits cherry-picked onto main by explicit paths. It never edits the main tree; builds still take the one build lock; `bin/worktree --remove NAME` cleans up (the branch is kept).
-7. **Small.** About 10k lines of our own code. When something grows, ask what else should be carrying it. Every addition names what it replaces.
+The first version ran overnight and was a live, measured system by morning. Keep its spirit:
+- **Run, then right, then fast; measure each step.** A working slice beats a design document.
+- **The demo is the spec.** If you can't show it running (a tile, a REPL reply, a check), it isn't done.
+- **Insight is a feature.** The system shows what it's doing, live. Nothing important hides in a log.
+- **Honest numbers.**
+  - Estimate first, from what the work must do.
+  - Measure at three or more sizes, with the load noted.
+  - A ratio past 3× either way is a finding.
+  - Say what wasn't measured.
+- **Own the stack.** A cause in Chez, Jolt, Datahike or konserve is fixed there, on a `jolt/<topic>` branch, the dependency's own way.
+- **Small.** About 10k lines of our own code. Every addition names what it replaces.
 
-## Get out of the way (owner, 2026-10-20)
+## 2. The pillars: everything is data flowing through the system
 
-An agent has a real REPL into a real session. Clojure's own semantics are the interface: `ns` creates a namespace, `defn` defines a function, `ns-unmap` removes one. We teach exactly that, live by it, and record what happened. We never decide what an agent is "allowed" to do.
+**If nothing has changed, we do nothing.**
+- No proc steps, renders, pings, flushes or polls on an idle system.
+- **Reactive:** a proc reports its own problems as facts and its changes as events. Health is the absence of open problem facts.
+- **No clock or timer decides anything.** Work runs because it arrived, is admitted by its measured workload, and parks when there is none. Time is measured and recorded, never acted on.
+- **The exceptions:**
+  - the cron proc, which only puts a message on a queue at a scheduled time;
+  - a message's delayed insert (core.async `timeout`) when a provider says "retry after a short wait";
+  - the kernel's TCP keepalive for a silent network peer.
 
-The instinct to add a gate is wrong here. Examples: "only record defs in namespaces the db already knows", "is this a known kind of form?", "refuse unless it matches the list". That instinct produced a check that silently threw away every new namespace an agent created.
-
-When you feel it, stop and ask three questions:
-- **What would a plain Clojure REPL do?** Do that.
-- **Is this recording what happened, or judging it?** Record it. The proofs and the merge judge it, not a filter in the middle.
-- **What breaks if the check isn't there?** If the answer is "nothing we've observed", don't add it. If something real breaks, fix that thing at its cause.
-
-## The pillars: everything is data flowing through the system (owner, 2026-10-21)
-
-**If nothing has changed, we do nothing** (owner, 2026-10-21). No proc steps, renders, pings, flushes or polls on an idle system; work exists only because data changed. **The system is reactive:** a proc reports its own problems as facts when they happen and its changes as events; nothing pings to ask whether it is healthy. Health is the absence of open problem facts.
-
-This is not a traditional program with a scheduler, timers and callers that wait. Data flows: a fact is written, a commit flows to whoever reads it, a message lands on a queue, a proc runs because work arrived and parks when there is none. Every need is met by one of these pillars. If a need seems not to fit one, stop and say so; never route around them.
-
-- **A value.** State is immutable Datahike values with structural sharing, in one store with many branches. Each process owns its connection: agents own their branch, root owns main. A record is a fact; history is kept.
-- **A Flow proc and its channels.** Every component is a step-fn proc, declared as data (`resources/seon/system.edn`), with bounded channels. A dependency is a channel a proc parks on; back-pressure is a full channel; ordering is dataflow; the end of a run is the message count reaching zero. Procs run on fibers; a blocking foreign call gets a declared thread.
-- **A task.** All work is task entities: desired state on attributes, observed state as facts, `:needs` between them. One reconciler closes the gap and costs only what changed. Merges, checks and builds are tasks; an OS child is an effect owned by a proc, and its exit is a fact.
-- **A process.** Agents are forked OS processes, isolated, each on its own branch, speaking messages to its stand-in proc.
+Every need is met by one of these. If one doesn't fit, stop and say so; never route around them:
+- **A value.** Immutable Datahike values in one store with many branches. Agents own their branch; root owns main. A record is a fact, and history is kept.
+- **A Flow proc and its channels.** Every component is a step-fn proc declared as data (`resources/seon/system.edn`), with bounded channels.
+  - A dependency is a channel a proc parks on, and back-pressure is a full one.
+  - A run ends when the message count reaches zero.
+  - Procs run on fibers; a blocking foreign call gets a declared thread.
+- **A task.** All work is task entities: desired state on attributes, observed state as facts, `:needs` between them. One reconciler closes the gap at the cost of what changed. Merges, checks and builds are tasks; an OS child is an effect, and its exit is a fact.
+- **A process.** Agents are forked OS processes:
+  - fast (copy-on-write sharing of the precompiled program);
+  - free (a real, unrestricted REPL);
+  - isolated (each on its own branch, its crashes and memory its own);
+  - named by role, task and checkout;
+  - ended when their attempt ends.
 - **A render.** Every view, the model's context included, is a render declared on the value's schema, over the one printer.
-- **An error is data** that flows to whoever can fix it: a defect holds its message until the code is fixed; a typed error goes to the requester, agent or task that can act on it.
+- **An error is data**, flowing to whoever can fix it. A defect holds its message (per key) until the code is fixed. A typed error goes to the requester, agent or task that can act on it.
 
-**A mechanism is built once, as a pillar, and reused everywhere** (owner, 2026-10-21: "simple and extremely well built code that we reuse everywhere because it's a pillar and not just a hack"). Before building anything that waits, retries, admits, holds, spawns, watches a process, answers a request or reads config, find its one implementation (`docs/patterns.md`, or ask root who owns it) and use it. If it doesn't exist yet, its owner builds it; you don't build a second one. Before building a pillar: read the research (`../notes/option3-RESEARCH-async.md`, `docs/core-async.md`, `docs/flow.md`) and prove the approach in a REPL at n ≤ 100.
+**A mechanism is built once, as a pillar, and reused everywhere.**
+- Before building anything that waits, retries, admits, holds, spawns, watches a process, answers a request or reads config, find its one implementation (`docs/patterns.md` names each pillar and its owner).
+- If it doesn't exist, its owner builds it; nobody builds a second one.
 
-**Routing around a pillar** (each of these happened on 2026-10-21): a timer, sleep, poll, deadline or retry instead of a queue; a fallback default instead of an error fact; a new runner, manager or wrapper beside the reconciler and procs; a store per test instead of a branch; an env var instead of a config fact; text or regex instead of the compiler's facts; a script's line order instead of `:needs`; an OS thread instead of a fiber; stdin as a process's lifecycle instead of a fact or message.
+**Get out of an agent's way.**
+- An agent has a real REPL, and Clojure's own semantics are the interface. Record what happened; never gate what an agent may do.
+- When you feel like adding a check, ask three questions:
+  - What would a plain REPL do?
+  - Am I recording or judging?
+  - What observed thing breaks without it?
 
-## Laws (short; the reasons are in DECISIONS)
+## 3. Laws
 
-- **Only documented config** (owner, 2026-10-21). A limit, bound, dial or default is a key in the config file, with its unit, provenance and what happens at the bound, and a `seon.config.*` schema. No literals in code, no `System/getenv` outside the config loader.
-- **One store, many branches, as in production** (owner, 2026-10-21). Tests, checks and runs take a branch of one seeded store. A separate store is a last resort (a backup, a deep debug) and says why where it is made.
-- **Contracts on every function.** Malli contracts are armed from the definition, and every contract must generate (`mg/check` runs in `bin/check`).
-- **No guards or fences.** Do the right thing. Name every outside-world failure point in `DRAGONS.md`, with its one edge function and its declared error. Nothing else catches.
-- **No added caches.** A content-keyed cache is allowed only for a unit measured as expensive.
-- **Effects go through owner procs** (`my.fx/call`, `my.fx/send`). The asker records the outcome on its own branch.
-- **Durability is continuous group commit** (owner, 2026-10-21): the flusher takes everything unflushed and syncs once, then again; commits arriving during a sync share the next one. A write is answered when committed in memory; one followed by an effect outside the database waits for the sync that covers it (`docs/patterns.md#continuous-group-commit`).
-- **Every definition happens once, where it is defined (owner, 2026-10-21).** Behaviour varies through the environment (a forked process holding exactly the definitions it needs, e.g. a test's own stubs as real definitions) or through data (arguments, config facts), never by mutating a shared var. Program code does not call `intern` or `alter-var-root` (judged at the done rule from the compiler's resolved references, never by text); the platform arms contracts at definition, not after.
-- **Estimates are proofs.** A function whose input grows carries a cost proof: an overrun, or growth steeper than the work needs, is red like any failing test. Every contracted call is counted (`seon.profile`), and every eval records its costliest functions.
-- **Tests run by reach digest:** only tests reaching a change run, and results are shared by digest. Only good tests: real assertions, sensitive to mutation, not timing-only.
-- **Use the library's words and mechanisms:** Clojure, core.async.flow, Datahike, Malli, git, nREPL.
-- **Procs follow the step-fn contract** (F2's rules, `docs/DECISIONS.md`):
-  - the step-fn is a Var with the four arities, and `describe` declares `:params`, `:ins`, `:outs`, an honest `:workload` and a `:ping-map-fn`;
-  - `transform` is `(state, in, msg) -> [state' outputs]`, outputs are data, and an effect is an output to the `:io` proc that owns it;
-  - a step never blocks on another proc: request/reply is a message out, a pending entry keyed by request id, and a message back;
-  - state is plain data under its schema, and a live host object lives only in its owning proc (opened in `init`, released at `::flow/stop`);
-  - channel buffers are bounded by their loss semantics;
-  - no thread, future, go-loop or atom outside procs, except an edge reader thread for a blocking read that feeds a proc's in-port;
-  - the fork server and agents run the same contract in their own single-threaded loop.
+- **Only documented config.** Every limit, bound or default is a key in `resources/seon/config/default.edn`, with its unit, provenance and what happens at the bound, under a `seon.config.*` schema.
+  - It's read through one resolver (task → model → provider → config).
+  - No literals, no `System/getenv` outside the loader.
+  - Ports too: each checkout has its own (`bin/ports`).
+- **One store, many branches,** as in production. Tests, checks and runs take a branch of one seeded store. A separate store is a last resort, and says why where it is made.
+- **Contracts on every function,** armed at definition, and every contract must generate (`mg/check` in `bin/check`).
+- **No guards or fences.** Every outside-world failure point is named in `DRAGONS.md`, with its one edge function and declared error. Nothing else catches.
+- **Effects go through their owner** (`my.fx/call`, `my.fx/send`). The asker records the outcome on its own branch.
+- **Durability is continuous group commit.** A write is answered when committed in memory. One followed by an outside effect waits for the sync that covers it.
+- **Every definition happens once, where it is defined.**
+  - Behaviour varies through the environment (a forked process holding exactly its definitions) or through data.
+  - Never `intern`, `alter-var-root`, `with-redefs` or stub-by-rebinding. That is judged from the compiler's facts, never from text.
+- **Results are reused by input digest.** A test's result is keyed by the digest of everything it reaches, a check step's by its build's source, a build's by its sources. Unchanged inputs are never run again.
+  - Content-keyed reuse is allowed for units measured as expensive; no other caches, and never one keyed by time.
+- **Estimates are proofs.** A function whose input grows carries a cost proof. An overrun, or growth steeper than the work needs, is red.
+- **Good tests only:** real assertions, sensitive to mutation, never timing-only, never a placebo a stub would pass.
+- **Use the library's words and mechanisms:** Clojure, core.async and Flow (`docs/core-async.md`, `docs/flow.md`), Datahike, Malli, git, nREPL.
+- **Procs follow the step-fn contract:**
+  - a Var with four arities, whose `describe` declares ins, outs, an honest `:workload` and a ping-map;
+  - `transform` returns `[state' outputs]`, with data outputs;
+  - a step never blocks on another proc (request/answer with credit, `{:id :reply}`, exactly one answer);
+  - state is plain data under its schema, and a host object lives only in its owning proc;
+  - buffers are bounded by their loss semantics;
+  - no thread, future or atom outside procs, except an edge reader for a blocking read.
 
-## How work is handed out (we dogfood Seon)
+## 4. How we work
 
-All work, ours and Seon's agents', is a **task** in a task file: `resources/seon/tasks/<owning-ns>.edn`, loaded with `my.root/load-tasks!`. Each entry has:
-- `:seon.task/plan`: the research, with file:line, what exists, what it replaces, what gets deleted;
-- `:seon.task/proofs`: the deftests, cost proofs included, that say it is done;
-- `:seon.task/needs`: the tasks that must land first.
-- `:seon.task/refs`: the vars and files the task touches, as data (qualified symbols and paths), never left to be parsed out of the plan's prose; they pull in the wiki sections that describe them.
+The same method serves our lanes and Seon's own agents: small changes, integrated often, through one queue that tests the merged result, running only what the change reaches.
 
-The order of the tasks is the order of the work: **delete first, then foundations, then fixes**, so nothing is fixed and then deleted. Root writes and orders the tasks (from audits, mined problems and the owner's words), hands each to one lane, and lands its work. A lane may refine its task's plan as it learns, never its proofs' intent without root.
+### Work is tasks
+All work is a task in `resources/seon/tasks/<owning-ns>.edn`, loaded with `my.root/load-tasks!`:
+- `:seon.task/plan`: what exists (file:line), what v1 did, the cause, what it replaces and deletes;
+- `:seon.task/proofs`: the deftests and cost proofs that say it is done;
+- `:seon.task/needs`: what must land first;
+- `:seon.task/refs`: the vars and files it touches, as data. These pull in the wiki sections that describe them, and they are its write set.
 
-## How to work a task (every lane, every agent)
+The order is **delete first, then foundations, then fixes**. Anything shared by several tasks (an interface, a schema, a pillar's API) lands first as its own small contract task.
 
-0. **Work it as a Seon agent would** (owner, 2026-10-21: "build the task and load it and use the context system to make sure every step is the same; fix problems at each stage"):
-   - write your task's entry in its task file and load it into the standing root (`(my.root/load-tasks! sys "<dir>")` through `seon_eval` as root);
-   - `seon_attach` to it, read `seon_context` before each step, and evaluate through the agent (`seon_eval`);
-   - finish with `seon_done`, so the judge does exactly what it does for a Seon agent.
+### At most three lanes, on disjoint work
+- Root starts a lane only when its write set doesn't overlap any running lane's.
+- Each lane works in its own worktree (`bin/worktree NAME`: `../next-NAME` on `jolt/NAME`, submodules at their pins, `target/` cloned).
+- Lanes waiting on a dependency read and plan; they run nothing heavy and keep nothing running.
 
-   The system records all of it: the task, the attempt, every eval (origin `:outside`), the context you read, and the judgment. That record is replayable like any agent's. Where the context lacked what you needed, the output was noise, a tool was missing or the judge was wrong, that stage's problem is a task. Platform code (`seon.*`) moves into this flow as the self-improvement loop lands; until then do its code in your worktree and still work its task through the door.
-1. **Take one task.** For foundation work, open a worktree: `bin/worktree <task-name>`. Work only there and only on that task's files. Never edit the main tree, another lane's files, or anything outside the task. Never run `git checkout`, `restore`, `stash` or `reset` on paths you don't own.
-2. **Learn, plan, act, in that order** (owner, 2026-10-21). First research the existing code end to end, before writing anything; then write the plan; then build.
-   - Read the task's plan, DECISIONS, `docs/DRAGONS.md`, and the code it touches with its callers and its tests.
-   - **Read what Seon v1 did first** (owner, 2026-10-21: "always be checking what we did in ~/src/seon and learning from it, not repeating the mistakes"). For the same problem, find v1's code (`~/src/seon/src`, `test`), its decisions and research (`~/src/seon/docs`, `config/default.edn`, the schemas) and what went wrong (its research notes, reverts, rejected designs). Port the best parts onto our pillars; drop its layers; name the mistakes you are not repeating. Every plan says what v1 did and what you take from it. Read only: never write in `~/src/seon`.
-   - Read the dependency (Jolt, Datahike, Flow, malli) before working around it.
-   - Ask: is this code already scheduled for deletion or replacement (`../notes/PLAN-v2.md`, other tasks' plans)? If so, stop and tell root.
-   - Write what you found into the task's plan: the cause, with file:line evidence.
-   - If the premise is wrong, stop and send the evidence to root.
-   - **Plan:** a few lines, before code: the primitive you'll use (the one the platform or dependency already has: a flow proc, a channel, a branch, a fact, the alt-handler waiter), what changes, what it deletes, and the test that proves it. No new layers, wrappers, runners or managers: if the primitive doesn't fit, say so in two lines. For a change to a dependency (Jolt, Chez, Datahike, Flow) or a design rule, send root the plan and wait for its go. Work the dependency's own way, never with a hack around it.
-3. **Estimate before measuring.**
-   - Derive what the work must cost: what N counts, how many passes, the unit costs from `seon.cost/units`.
-   - Write the estimate as a cost proof (`seon.cost/proof`) for anything whose input grows.
-4. **Write the proofs first and watch them fail.**
-   - The task's named deftests, a `bin/check` mode where the behaviour is end to end, and the cost proof.
-   - A proof must fail for the right reason before the code exists: real assertions, sensitive to mutation, never timing-only, never `string?`/`map?` placebos, never gated to zero assertions.
-5. **Write the simplest code that makes them pass,** at the cause, in the owner of the bad value.
-6. **Be suspicious of every number.**
-   - Compare each measurement with its estimate.
-   - A ratio past 3× either way is a finding: explain it before going on.
-   - Say plainly what was not measured.
-7. **If you touched what the owner sees (the dashboard, a render, the context), have it verified by eye.** Run your worktree's own root (`bin/root start`, on its own ports from `bin/ports`), then launch a Haiku or Sonnet subagent with the built-in browser. Its job: compare the page and the context against the system's facts read through the door. Is every number real? Does anything mislead? Does it show what is going on? It reports what is wrong or useless, with screenshots. Fix what it finds, or file it.
-8. **Prove it whole:** `bin/test`, then `bin/check` in your worktree. `bin/check` fails when any step fails, keeps each step's output and the stores under `target/check/<time>/`, and is the bar.
-9. **Report to root:** commits, proofs (red → green), numbers against estimates, what you deleted, what's left. Root cherry-picks onto main by explicit paths, runs `bin/check` there, and closes the task.
+### Learn, then plan, then act
+1. **What exists.** Search `docs/` (the patterns page first), the task files and the code, so nothing is built twice.
+2. **What v1 did.** Read `~/src/seon` for the same problem: code, decisions, research, reverts, read-only. Port the best parts onto our pillars, and name the mistakes you are not repeating.
+3. **The field's best known way.** Don't trust a design made in five minutes. Research it: the web, and Gemini Flash through `../bin/agy-agent` as a searcher. Verify what it says.
+4. **Prove it in a REPL** at n ≤ 100.
+5. **Plan in a few lines:**
+   - the primitive you'll use;
+   - your write set;
+   - what it deletes;
+   - the tests;
+   - its wiki section.
 
-## Look at the running system, as a Seon agent sees it
+   A change to a dependency (Jolt, Chez, Datahike, Flow) or a design rule waits for root's go. No new layers, runners or wrappers; if the primitive doesn't fit, say so in two lines.
+6. **Estimate,** as a cost proof for anything whose input grows.
+7. **Write the proofs first and watch them fail** for the right reason.
+8. **Write the simplest code** that makes them pass, at the cause, in the owner of the bad value.
+9. **Work it as a Seon agent would,** through the door (§5): load the task, attach, read the context before each step, evaluate through the agent, finish with `seon_done`. Where the context lacked something, a tool was missing or the judge was wrong, that is a task.
+10. **If the owner sees it** (the dashboard, a render, the context), have a Haiku or Sonnet subagent with the browser compare the page against the facts read through the door, and fix what it finds.
 
-Each checkout runs its own standing root: `bin/root start` (its store kept under `runs/`, on the checkout's ports from `bin/ports`; the owner's main tree is 7888 with the dashboard on 7777). Reach it through the **`seon` MCP server** (`bin/mcp`, which defaults to your checkout's entrance). Its tools:
-- `seon_agents`: agents, and tasks with their blocked-by;
-- `seon_eval`: evaluate in an agent's own REPL, exactly the path a Seon agent's forms take, recorded `:outside`; or as `root`;
-- `seon_context`: what the agent's model would read now;
-- `seon_attach` / `seon_done`: work a task as a Seon agent.
+### Integrate small and often
+- **Branches live hours.** Merge main into yours after every landing.
+- **While iterating, run only what your change reaches:** single check modes and the tests that touch it. Never a full check per edit.
+- **To land:** merge main into your branch, then prove the merged result. Report the commits, proofs red → green, numbers against estimates, what you deleted, the check's `target/check/<time>/` path, and that nothing of yours is running.
+- **Root lands** by merging the branch, never by copying files over newer changes. Root reads main's check to its last line before landing or starting anything else.
+- **Submodule pin bumps** happen only in root's landings, never in a lane's merge.
+- **Where this is going:** a landing queue on the one root that merges main into each candidate, runs what it reaches on the merged result, and batches disjoint candidates. All builds, tests and checks become tasks on that root, admitted by workload, with results reused by digest. Seon's own merges get the same gate, and `:behind` fires only when main's change touches what the branch changes or reaches.
 
-Without MCP, the same door is one line: `printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 127.0.0.1 7888`. Use it to see what agents see: when output is noise, a tool is missing or an error names nothing, that is a task (below). Load task files into it with `(my.root/load-tasks! sys "<next>/resources/seon/tasks")`.
+### Learn as we go, so we never start from zero
+- **Each landing's lesson goes into the wiki in the same commit**, written by root: a `docs/patterns.md` section (the problem, the idiom, its "Not this") naming the vars it concerns. The next task touching those vars gets it in its context automatically.
+- **A failed attempt's cause stays on its task** for the next attempt.
+- **A problem outside your task is filed as a task**, never fixed in passing, never just mentioned.
+  - Its plan states what you saw exactly, the cause (file:line), what correct looks like, and what it replaces.
+  - Its proofs name the deftests and what each asserts.
+  - Its needs say what must land first.
 
-## Found a problem? File a task (owner, 2026-10-21)
+## 5. The running system, as a Seon agent sees it
 
-When you hit something outside your task, don't fix it in passing and don't just mention it. Examples: REPL output that is noise or cut wrong, a context section that misleads, a missing tool, an error that names nothing, a slow path, anything a Seon agent would trip on. Write it up as a task in the owning namespace's task file, filled out so a Seon agent can work it with nothing else:
-- **`:seon.task/plan`:**
-  - what you saw, exactly: the form, its output, the turn or store it came from;
-  - the cause as far as you traced it (file:line);
-  - what correct looks like;
-  - what it would replace or delete.
-- **`:seon.task/proofs`:** the deftests (and cost proof) that will say it is fixed, by name, with what each asserts written in the plan.
-- **`:seon.task/needs`:** what must land first.
+Each checkout runs its own standing root with `bin/root start` (also `status` and `stop`).
+- It runs detached, on the checkout's ports (`bin/ports`; the owner's main tree uses 7888, with the dashboard on 7777).
+- Its store is kept under `runs/`.
 
-Tell root; root orders it among the rest. Mined problems (`my.root/problems`) become tasks the same way.
+Reach it through the `seon` MCP server (`bin/mcp`):
+- `seon_agents`;
+- `seon_eval` (an agent's own REPL, recorded `:outside`, or `root`);
+- `seon_context` (what the model reads now);
+- `seon_attach`, `seon_turn` and `seon_done` (work a task as a Seon agent).
 
-## The docs are a wiki, and always true (owner, 2026-10-21)
+Without MCP, one line works:
+```
+printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 127.0.0.1 PORT
+```
 
-- `docs/<topic>.md`, one concept per page, indexed in `docs/README.md`. A section is addressed `topic#heading-slug` and ends with a `Describes:` line naming its vars, attrs and files as EDN.
-- Reference docs as data: `{:seon/docs ["merge#behind"]}` on a definition, `:seon.task/docs` on a task. The context pulls the named sections in, so explain a thing once in the wiki and point at it.
-- **Every lane keeps the wiki true for what it builds** (owner, 2026-10-21). Landing a change includes its wiki section (new or updated, with a `Describes:` line naming the real vars), and a pillar's owner writes its `docs/patterns.md` section.
-- **Every lane checks its own context.** Before landing, read your task's context through the door (`seon_context`, or `(seon.context/…)` as root) and confirm it pulls the sections and code the task needs and nothing that misleads; what's missing or wrong is a task for the context or the page.
-- A change that makes a section wrong updates it in the same commit. `bin/check docs` goes red on a dangling reference, a named var or attr that doesn't exist, or a section older than the code it describes. (Tasks: `resources/seon/tasks/seon.docs.edn`.)
+## 6. The docs are a wiki, and the system's memory
 
-## Mistakes we have made, and do not repeat
+- **Pages:** `docs/<topic>.md`, one concept per page, indexed in `docs/README.md`. A section is addressed `topic#slug` and has a `Describes:` EDN line naming its vars, attrs and files. The docs are mirrored in the database with real references.
+- **References are data:** `:seon/docs` on a definition, `:seon.task/docs` and `:seon.task/refs` on a task. The context pulls the describing sections in automatically.
+- **Depth follows the delimiter** (v1's `seon.ref`):
+  - a bare name pulls its summary;
+  - `` `name` `` or a link pulls its doc;
+  - ` ```name``` ` pulls its code.
+- **Explain once and link.**
+- **Landing a change updates its section in the same commit,** and a pillar's owner writes its patterns section.
+- **Before landing, read your task's context through the door** and confirm it pulls what the task needs. `bin/check docs` goes red on a dangling reference, a missing var or a section older than its code.
 
-- **A clock or timer deciding anything** (owner, 2026-10-21: "no clocks or timers … running and pausing based on workload"). Procs run on queued work and park without it; batches follow the queue; runs end on the message count reaching zero; runaway work is bounded by work done (allocation, steps), never elapsed time. Measure time, never act on it. The one exception is the cron proc: at a scheduled time it puts a message on a queue, and nothing else.
-- **A timeout, deadline, sleep or retry standing in for a dependency.** Flows depend on each other through channels that park. "Never came" is an observed, recorded fact (stuck, stalled, dead), never a clock that ends a run.
-- **A gate by the shape of a form or a list of kinds.** Record what actually happened: the compiler's events, the runtime's state. The proofs and the merge judge.
-- **A swallowed error, an ignored answer, a fake default.**
-  - Every `:seon.error/type` answer is read or recorded.
-  - Unknown is not `{}`, `0`, `nil` or `:ok`.
-  - A proc answers every request it took, even when its step throws.
-- **Deleting a record:** a store, a branch, a log, history. Runs are kept. Reclaiming space is an explicit owner act.
-- **A cut that drops instead of eliding.** Every cut says what it omitted and how to read the rest. Storage keeps the exact value; renders budget it.
-- **A clipping function** (owner, 2026-10-21): no `clip`, `subs`, `take n` or hand-made truncation anywhere output is made for a person or a model. Output gets better in exactly two ways:
-  - a general improvement to the one printer (`seon.print`), which every value benefits from;
-  - a render function declared on the value's schema (`:seon.render/ai` for the model's context, `:seon.render/html` for the page), written when we know that output needs focus.
+## 7. The machine
 
-  Refinement of output is ongoing work: when you see poor output, file it or fix it this way.
-- **The same check in several places,** or a second producer of the same view. One owner per fact, one function per rule.
-- **Redefining instead of defining.** No `alter-var-root`, `intern`, `with-redefs` or stub-by-rebinding. Tests get a forked environment holding exactly their definitions.
-- **Text standing in for structure.** No regex over code. Ask the compiler, the reader or the db.
-- **A measurement that disturbs itself:** a meter that counts its own reads, a watchdog counted as work. And a number accepted without an estimate.
-- **A check that cannot fail.** A pipeline that drops exit codes, an assertion on a value's type, a test gated off. If it cannot go red, it proves nothing.
-  - A check that only prints is the same mistake: smoke, scale, fx and orphan printed `:pass 0` for a day and stayed "green" (2026-10-21). Every mode ends on its own verdict (`X OK` / `X FAILED`) and exit status.
-  - When you change a rule (what judges, what merges, what is program), run the whole `bin/check` and read every step that touches it, not just the ones that go red.
-- **Landing on a check nobody read.** Root cherry-picked a lane's commits, started `bin/check`, and moved on: main went red in three steps and silently empty in four (2026-10-21). Root lands, then reads the check to its last line before launching or landing anything else; a lane reports its `target/check/<time>/` path with the result.
-- **A cache keyed by time,** or any cache not measured as necessary.
-- **Shared-tree accidents:** one lane's checkout discarding another's work. Own your files, use your worktree, commit early.
+- **Builds:** `nice -n 15 /usr/bin/lockf -k ~/src/seon-jolt/build.lock bin/build`.
+- **Full checks:** one at a time (`bin/check` takes the check lock and runs niced). Iterate with single modes.
+- **Never flood it.** Anything that can make threads or processes starts at n ≤ 100 under `nice -n 15`. Watch `ps -M -p PID | wc -l`, and kill your own process past 200 threads. One experiment at a time.
+- **A process that must outlive your tool call** is double-forked, which `bin/root` does. The tool host kills a background task's whole process tree when the task stops or its agent exits.
+- **Leave nothing running when you finish,** and say so in your report. Kill only PIDs you started; never `pkill` or `killall`. Delete only paths you created.
+- **Your scratch:** under your worktree (`target/`, `runs/`) or a folder named for your lane. The session scratch folder is shared.
+- **Git in a worktree:**
+  - `git -C` on your own checkout only;
+  - never `git submodule` commands that rewrite shared modules (`sync`, `absorbgitdirs`, `update --init`);
+  - never bare `git stash`;
+  - never `checkout`, `restore` or `reset` on paths you don't own;
+  - commit explicit paths;
+  - never push.
+- **Secrets are never printed.** Check the context before any paid model call; paid runs need the owner's go. Install nothing system-wide. Never write in `~/src/seon`.
 
-## The machine
+## 8. Mistakes we have made, and do not repeat
 
-- **Builds:** run as `nice -n 15 /usr/bin/lockf -k ~/src/seon-jolt/build.lock bin/build`, which pins the patched Chez via `JOLT_CHEZ`.
-- **Probes and timings:** probes run under `nice -n 10`. No timed runs while load is above ~20.
-- **A process that must outlive your tool call** (a standing root, a server) must be re-parented to PID 1: a double fork. **Start your root with `bin/root`** (start | status | stop): detached, on your checkout's own ports (`bin/ports`), log in runs/root.log; `bin/mcp` reaches it. The tool host kills a background task's whole process tree when the task is stopped or its agent exits; nohup or setsid alone don't help. (ISOLATION, 2026-10-21.)
-- **Ports are config, never literals:** don't bind 7777 or 7888 (the owner's root and dashboard). A check's root listens on nothing; your worktree's own ports come from its config/local.edn.
-- **Your own scratch:** temp files and logs go under your worktree (`target/` or `runs/`) or a subfolder named after your lane; the session scratch folder is shared by every lane, and one lane overwrote another's log there (2026-10-21).
-- **One full check at a time:** `bin/check` takes `~/src/seon-jolt/check.lock` and runs niced. Iterate with single modes.
-- **Never flood the machine** (2026-10-21: two experiments made 7,500 and 5,900 threads and drove load to 982). Anything that can make threads or processes starts at n ≤ 100, under `nice -n 15`; watch `ps -M -p PID | wc -l` while it runs and kill your own process past 200 threads. One experiment process at a time.
-- **Hygiene:** kill only your own PIDs, delete only paths you created, install nothing system-wide.
-- **Leave nothing running when you finish:** `bin/root stop` and stop anything else you started before you report; your report says nothing of yours is still running.
-- **Secrets:** never printed. DeepSeek is the default model; check the context before any paid call.
+- **A clock, timer, sleep, poll, deadline, ping or fixed slot** standing in for a dependency or a workload. "Never came" is a recorded fact (stuck, stalled, dead).
+- **A swallowed error, an ignored answer, a fake default.** Unknown is not `{}`, `0`, `nil` or `:ok`, and a proc answers every request it took.
+- **Routing around a pillar:**
+  - a fallback instead of an error fact;
+  - a new runner or wrapper beside the reconciler;
+  - a store per test;
+  - an env var instead of config;
+  - regex over code instead of the compiler's facts;
+  - script order instead of `:needs`;
+  - a thread instead of a fiber;
+  - stdin as a lifecycle.
+- **Building a mechanism twice,** or two producers of one view.
+- **Reinventing what v1 already solved,** or designing before researching.
+- **A half-baked plan that got built,** or too many lanes at once on overlapping work.
+- **A clipping function** (`clip`, `subs`, `take n` for output). Output improves only through the one printer, or a render declared on the value's schema. Every cut says what it left and how to read the rest.
+- **A check that cannot fail,** or that only prints. Every check mode ends on `X OK` / `X FAILED` and an exit status. When a rule changes, read every step it touches.
+- **Landing on a check nobody read,** or copying whole files over newer changes.
+- **Re-running everything on every change.**
+- **Deleting a record** (a store, a branch, history). Runs are kept, and reclaiming space is the owner's act.
+- **Flooding the machine,** killing by pattern, or leaving things running.
 
-## The bar for "done"
+## 9. Done
 
-- It runs end to end, through the same path agents use.
-- `bin/check` is green.
-- Its numbers are in the commit.
-- You can watch it work.
+It runs end to end through the path agents use; the merged result is green; its numbers are in the commit; its wiki section is true; you can watch it work; and nothing of yours is still running.
