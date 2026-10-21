@@ -55,6 +55,7 @@ When you feel it, stop and ask three questions:
 - **No added caches.** A content-keyed cache is allowed only for a unit measured as expensive.
 - **Effects go through owner procs** (`my.fx/call`, `my.fx/send`). The asker records the outcome on its own branch.
 - **Durability is batched,** with a flush window of 10 ms by default. A write that is followed by an effect outside the database waits for its flush.
+- **Every definition happens once, where it is defined (owner, 2026-10-21).** Behaviour varies through the environment (a forked process holding exactly the definitions it needs, e.g. a test's own stubs as real definitions) or through data (arguments, config facts), never by mutating a shared var. Program code does not call `intern` or `alter-var-root` (judged at the done rule from the compiler's resolved references, never by text); the platform arms contracts at definition, not after.
 - **Estimates are proofs.** A function whose input grows carries a cost proof: an overrun, or growth steeper than the work needs, is red like any failing test. Every contracted call is counted (`seon.profile`), and every eval records its costliest functions.
 - **Tests run by reach digest:** only tests reaching a change run, and results are shared by digest. Only good tests: real assertions, sensitive to mutation, not timing-only.
 - **Use the library's words and mechanisms:** Clojure, core.async.flow, Datahike, Malli, git, nREPL.
