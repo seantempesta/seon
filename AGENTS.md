@@ -148,6 +148,8 @@ Tell root; root orders it among the rest. Mined problems (`my.root/problems`) be
 
 - `docs/<topic>.md`, one concept per page, indexed in `docs/README.md`. A section is addressed `topic#heading-slug` and ends with a `Describes:` line naming its vars, attrs and files as EDN.
 - Reference docs as data: `{:seon/docs ["merge#behind"]}` on a definition, `:seon.task/docs` on a task. The context pulls the named sections in, so explain a thing once in the wiki and point at it.
+- **Every lane keeps the wiki true for what it builds** (owner, 2026-10-21). Landing a change includes its wiki section (new or updated, with a `Describes:` line naming the real vars), and a pillar's owner writes its `docs/patterns.md` section.
+- **Every lane checks its own context.** Before landing, read your task's context through the door (`seon_context`, or `(seon.context/…)` as root) and confirm it pulls the sections and code the task needs and nothing that misleads; what's missing or wrong is a task for the context or the page.
 - A change that makes a section wrong updates it in the same commit. `bin/check docs` goes red on a dangling reference, a named var or attr that doesn't exist, or a section older than the code it describes. (Tasks: `resources/seon/tasks/seon.docs.edn`.)
 
 ## Mistakes we have made, and do not repeat
