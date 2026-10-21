@@ -3,15 +3,15 @@
   handler: T1's never stopped a form that catches Throwable and left a binding behind.
 
   Stopping a running eval in a single-threaded agent with Jolt's own mechanism,
-  `jolt.host/run-interruptible`, driven by signals.
+  `jolt.host/run-interruptible`: by root's interrupt (a signal), or by the work the form
+  did (its tick budget: procedure calls and loop back-edges, never elapsed time; owner,
+  2026-10-21: no clocks or timers).
 
-  Each bounded eval runs under its own interrupt token (`jolt.host/make-interrupt`)
-  and pushes {:token :deadline} on this process's stack. Two signal handlers set
-  tokens; neither throws:
-    SIGUSR1  root's interrupt: sets every token on the stack (the whole request
-             stops, nested evals included);
-    SIGALRM  a deadline: sets the tokens whose deadline passed and re-arms one
-             ITIMER_REAL for the next earliest deadline.
+  Each eval runs under its own interrupt token (`jolt.host/make-interrupt`) and pushes
+  it on this process's stack. SIGUSR1, root's interrupt, sets every token on the stack
+  (the whole request stops, nested evals included); its handler does not throw.
+  A form past its tick budget is stopped by run-interruptible itself and answers the
+  typed :seon.repl/ticks-spent, an error of that form (the request goes on).
   A handler that set a token also arms Chez's engine timer for one tick, so
   run-interruptible's own timer handler runs at once instead of at its next
   100,000-tick poll. That handler escapes by continuation: the body's own
@@ -22,17 +22,9 @@
   Conditions (T1's): the process descends from Chez's main thread on every fork
   (else the signal is lost); every wait loop retries EINTR."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn- defchecked]] [jolt.scheme :as scm] [jolt.ffi :as ffi] [seon.lib :as lib]))
-
-(ffi/load-library)
-(lib/defc c-setitimer "setitimer" [:int :pointer :pointer] :int)
-(lib/defc c-clock-gettime-nsec "clock_gettime_nsec_np" [:int] :uint64)
-
-(defn now-ns {:malli/schema [:=> [:cat] :int]}
-  [] (c-clock-gettime-nsec 8)) ; CLOCK_UPTIME_RAW, as T1's harness reads it
+  (:require [seon.contract :as contract :refer [defn defn- defchecked]] [jolt.scheme :as scm] [seon.lib :as lib]))
 
 (def SIGUSR1 lib/SIGUSR1)
-(def SIGALRM 14)
 
 ;; The live bounded evals of this process, innermost first. The signal handlers run
 ;; on this (the only) thread at a Chez safe point and must find them; this is the
@@ -49,18 +41,6 @@
         (jolt.host/interrupt! (:token e))
         true)))
 
-(def ^:private itv (ffi/alloc 32))
-
-(defn- arm-alarm!
-  "One ITIMER_REAL for the earliest pending deadline on the stack, or disarmed."
-  {:malli/schema [:=> [:cat] :int]}
-  []
-  (let [dl (some->> @stack (remove #(jolt.host/interrupted? (:token %))) (keep :deadline) seq (apply min))
-        us (if dl (max 1 (quot (- dl (now-ns)) 1000)) 0)]
-    (ffi/write itv :long 0 0) (ffi/write itv :int 0 8)
-    (ffi/write itv :long (quot us 1000000) 16) (ffi/write itv :int (int (mod us 1000000)) 24)
-    (c-setitimer 0 itv ffi/null)))
-
 ;; root's interrupt that found no eval running (between two forms of a request): the
 ;; next bounded eval starts stopped. Cleared when the agent answers `interrupt`.
 (defonce ^:private pending (atom false))
@@ -73,18 +53,6 @@
     (if (seq es)
       (boolean (some true? (mapv #(set-token! % :interrupted) es)))
       (do (reset! pending true) false))))
-
-(defn- on-alrm {:malli/schema [:=> [:cat] :boolean]}
-  []
-  (let [t (now-ns)
-        due (filter #(some-> (:deadline %) (<= t)) @stack)]
-    ;; a timed-out eval stops with everything nested inside it
-    (let [set? (if-let [outer (last due)]
-                 (boolean (some true? (mapv #(set-token! % :timeout)
-                                            (concat (take-while #(not (identical? % outer)) @stack) [outer]))))
-                 false)]
-      (arm-alarm!)
-      set?)))
 
 (defchecked ^:private install-kick* [:=> [:cat :int :seon.host/fn] :any]
   (scm/eval-string
@@ -99,39 +67,41 @@
 (defchecked ^:private quiet-timer* [:=> [:cat] :any] (scm/eval-string "(lambda () (timer-interrupt-handler (lambda () (void))))"))
 
 (defn install!
-  "Register the two handlers (a forked child inherits them). kick? (default true) arms
+  "Register root's interrupt handler (a forked child inherits it). kick? (default true) arms
   the engine timer for one tick when a token was newly set; false leaves it to the poll."
   {:malli/schema [:function [:=> [:cat] :boolean] [:=> [:cat :boolean] :boolean]]}
   ([] (install! true))
   ([kick?]
    (quiet-timer*)
-   (let [i (if kick? install-kick* install-poll*)]
-     (i SIGUSR1 on-usr1)
-     (i SIGALRM on-alrm))
+   ((if kick? install-kick* install-poll*) SIGUSR1 on-usr1)
    true))
 
 (defn run
-  "(thunk) under its own token, stopped by root's SIGUSR1 or by timeout-ms (nil: none).
-  Throws ex-info {:interrupted true} or {:timeout-ms n} when stopped."
-  {:malli/schema [:=> [:cat [:maybe :int] :seon.host/fn] :any]}
-  [timeout-ms thunk]
+  "(thunk) under its own token, stopped by root's SIGUSR1 or once it has run ticks engine
+  ticks (nil: no budget). Throws ex-info {:interrupted true} when root stopped it, or the
+  typed :seon.repl/ticks-spent {:ticks n} when its budget ran out."
+  {:malli/schema [:=> [:cat [:maybe pos-int?] :seon.host/fn] :any]}
+  [ticks thunk]
   (let [tok (jolt.host/make-interrupt)
-        e {:token tok :cause (volatile! nil)
-           :deadline (when timeout-ms (+ (now-ns) (* 1000000 (long timeout-ms))))}]
+        e {:token tok :cause (volatile! nil)}]
     ;; an enclosing eval already stopped: this one starts stopped too
     (when-let [c (or (some #(deref (:cause %)) @stack) (when @pending :interrupted))] (set-token! e c))
     (swap! stack conj e)
-    (when timeout-ms (arm-alarm!))
-    (try (jolt.host/run-interruptible tok thunk)
+    (try (if ticks (jolt.host/run-interruptible tok thunk ticks) (jolt.host/run-interruptible tok thunk))
          (catch Throwable ex
-           (if (:jolt/interrupted (ex-data ex))
-             (throw (if (= :timeout @(:cause e))
-                      (ex-info (str "timed out after " timeout-ms " ms") {:timeout-ms timeout-ms})
-                      (ex-info "interrupted by root" {:interrupted true})))
-             (throw ex)))
+           (let [d (ex-data ex)]
+             (cond
+               (:jolt/ticks-spent d)
+               (throw (ex-info "the form spent its tick budget"
+                               (contract/error :seon.repl/ticks-spent 'seon.repl/eval-code
+                                               (str "the form ran " (:jolt/ticks-spent d) " engine ticks (procedure calls and loop"
+                                                    " back-edges), its budget of " ticks ", and was stopped: a loop that never ends,"
+                                                    " or more work than one form should do")
+                                               {:ticks (:jolt/ticks-spent d) :budget ticks})))
+               (:jolt/interrupted d) (throw (ex-info "interrupted by root" {:interrupted true}))
+               :else (throw ex))))
          (finally
-           (swap! stack (fn [s] (doall (remove #(identical? % e) s))))
-           (when timeout-ms (arm-alarm!))))))
+           (swap! stack (fn [s] (doall (remove #(identical? % e) s))))))))
 
 (defn running? {:malli/schema [:=> [:cat] :boolean]}
   [] (boolean (seq @stack)))

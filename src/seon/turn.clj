@@ -18,7 +18,7 @@
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.set :as set]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context]
-            [seon.harvest :as harvest] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn]))
+            [seon.harvest :as harvest] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: the task and
 ;; attempt it works, and a stop a verb requested.
@@ -64,7 +64,7 @@
   {:malli/schema [:=> [:cat :seon.task/id [:set :qualified-symbol]] :map]}
   [id gaps-before]
   (let [t0 (System/nanoTime)
-        run (agent/run-tests-forked 30000)
+        run (agent/run-tests-forked cfg/TEST-TICKS)
         tests-ms (ms-since t0)
         results (proofs/results run)
         db (agent/db)

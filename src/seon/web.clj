@@ -96,9 +96,9 @@
                             (vec (for [[id a] (sort-by (comp str key) index) :when (live? a)]
                                    [{:op :eval :id id :forms forms :origin :ui} id]))
                             (one {:op :eval :id agent :forms forms :origin :ui})))
-      seon.root/run-tests! (one {:op :tests :id agent :timeout-ms 30000})
+      seon.root/run-tests! (one {:op :tests :id agent})
       seon.root/merge! (if-let [b (get-in index [agent :branch])]
-                         (one {:op :merge-tests :id agent :merge-branch b :data-attrs :all :timeout-ms 30000})
+                         (one {:op :merge-tests :id agent :merge-branch b :data-attrs :all})
                          [])
       seon.root/merge-main! (one {:op :merge-main :id agent :data-attrs :all})
       seon.root/clone! (one {:op :clone :parent agent :opts {}})

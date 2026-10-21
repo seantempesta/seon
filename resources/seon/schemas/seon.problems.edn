@@ -19,6 +19,11 @@
  :seon.writer/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.writer/refused]] [:ok false?]]]
  :seon.merge/uncontracted [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/uncontracted]]
                                                   [:merged? false?] [:uncontracted [:vector :qualified-symbol]]]]
+ ;; a form or a test run stopped by the work it did: its engine ticks reached the budget
+ ;; (procedure calls and loop back-edges; never elapsed time): runtime-fixable, the agent's to read
+ :seon.repl/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.repl/ticks-spent]] [:ticks :int] [:budget :int]]]
+ :seon.test/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int]
+                                                [:test {:optional true} :string]]]
  :seon.fx/io-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/io-error]]]]
  :seon.fx/budget-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/budget-spent]]]]
  :seon.fx/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/defect]]]]
@@ -83,6 +88,8 @@
                     [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]
                     ;; a failed (is (pred ...)): what (pred ...) evaluated to, without clojure.test's (not ...)
                     [:got {:optional true} :string]
+                    ;; a run stopped by its tick budget: the typed error, on the test that was running
+                    [:seon.error/type {:optional true} :qualified-keyword] [:ticks {:optional true} :int] [:budget {:optional true} :int]
                     [:cost {:optional true} :seon.cost/report]]
  :seon.attempt/failures [:map-of {:seon.db/edn true} :qualified-symbol [:vector :seon.problems/assertion]]
  ;; a cost proof's measured rows and verdict per test (seon.cost/proof's report)

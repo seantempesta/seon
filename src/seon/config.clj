@@ -77,6 +77,19 @@
   (lane R3; AIMD on a 429). 0: no bucket."
   (dial "SEON_MODEL_RATE" 0))
 
+(def FORM-TICKS
+  "Engine ticks (procedure calls and loop back-edges: work done, never time) one form an
+  agent's model or an outside agent sends may run before it is stopped with the typed
+  :seon.repl/ticks-spent. Measured on Jolt (2026-10-21): a tight loop runs ~4e9 ticks/s, an
+  allocating one ~7.5e8, so the default stops a runaway form after ~5-25 s of work. 0: none."
+  (dial "SEON_FORM_TICKS" 20000000000))
+
+(def TEST-TICKS
+  "Engine ticks one proof run (every test of the branch, in its fork) may run before it is
+  stopped, naming the test that was running (:seon.test/ticks-spent). Larger than a form's:
+  cost proofs measure large sizes. 0: none."
+  (dial "SEON_TEST_TICKS" 200000000000))
+
 (def MODEL-LANES
   "Model calls in flight at once, cluster-wide (the :model owner's lanes). Lane FX1."
   (dial "SEON_MODEL_LANES" 8))

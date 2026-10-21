@@ -112,13 +112,14 @@
   [fd s] (write-all! fd (.getBytes (str s "\n") "UTF-8")))
 
 (defn line-reader
-  "A fn of a timeout in ms (negative: block) that answers the complete lines that
-  arrived (a vector, maybe empty) or :eof."
+  "A fn of a wait in ms (negative: until something arrives) that answers the complete
+  lines that arrived (a vector, maybe empty) or :eof. A signal ending the wait (EINTR)
+  answers [] and the caller waits again."
   {:malli/schema [:=> [:cat :seon.lib/fd] :seon.host/fn]}
   [fd]
   (let [cap 1048576 buf (ffi/alloc cap) pending (volatile! (byte-array 0))]
     (fn [ms]
-      (if (and (>= ms 0) (<= (poll1 fd ms) 0))
+      (if (<= (poll1 fd ms) 0)
         []
         (let [r (c-read fd buf cap)]
           (if (<= r 0)
@@ -188,25 +189,6 @@
   (scm/eval-string (str "(begin (putenv \"JOLT_MAX_HEAP\" \"" (long n) "\") "
                         "(when jolt-gc-policy-installed? (jolt-install-gc-policy!)) jolt-heap-ceiling-bytes)")))
 
-(defchecked ^:private run-bounded* [:=> [:cat :seon.host/fn :seon.host/fn :seon.host/fn] :any]
-  (scm/eval-string
-    "(lambda (stop? on-stop thunk)
-       (let ([prev (timer-interrupt-handler)])
-         (dynamic-wind
-           (lambda ()
-             (timer-interrupt-handler (lambda () (if (stop?) (on-stop) (set-timer 20000))))
-             (set-timer 20000))
-           thunk
-           (lambda () (set-timer 0) (timer-interrupt-handler prev)))))"))
-
-(defn run-bounded
-  "Run (thunk) on this thread; Chez's engine timer polls (stop?) every 20,000 ticks
-  (procedure calls and loop back-edges, so a tight native loop too) and calls (on-stop),
-  which throws, when it answers true. No signals: it works in any process, whichever
-  thread forked it."
-  {:malli/schema [:=> [:cat :seon.host/fn :seon.host/fn :seon.host/fn] :any]}
-  [stop? on-stop thunk] (run-bounded* stop? on-stop thunk))
-
 (defchecked ^:private install-signal-handler* [:=> [:cat :int :seon.host/fn] :any]
   (scm/eval-string "(lambda (sig f) (register-signal-handler sig (lambda (s) (f))))"))
 
@@ -218,7 +200,6 @@
 
 (def ^:private linux? (.startsWith (str (System/getProperty "os.name")) "Linux"))
 (def SIGUSR1 "Root's interrupt: 30 on macOS, 10 on Linux." (if linux? 10 30))
-(def SIGALRM 14)
 (def SIGSTOP "Stop the process: 17 on macOS, 19 on Linux." (if linux? 19 17))
 (def SIGCONT "Continue the process: 19 on macOS, 18 on Linux." (if linux? 18 19))
 
@@ -234,17 +215,6 @@
   {:malli/schema [:=> [:cat [:sequential :int]] :any]}
   [sigs]
   (scm/eval-string (str "(c-pthread-sigmask jolt-sig-unblock-how (jolt-make-sigset '(" (clojure.string/join " " sigs) ")) 0)")))
-
-(defc c-setitimer "setitimer" [:int :pointer :pointer] :int)
-
-(defn alarm-in!
-  "Deliver SIGALRM to this process after ms (ITIMER_REAL); 0 disarms."
-  {:malli/schema [:=> [:cat :int] :int]}
-  [ms]
-  (let [b (ffi/alloc 32)]            ; struct itimerval: {interval, value}, timeval = {long sec; int usec; pad}
-    (ffi/write b :long 0) (ffi/write (+ b 8) :int 0)
-    (ffi/write (+ b 16) :long (quot ms 1000)) (ffi/write (+ b 24) :int (* 1000 (mod ms 1000)))
-    (c-setitimer 0 b ffi/null)))
 
 (defchecked active-threads [:=> [:cat] :int] (scm/proc "proto-active-threads"))
 (defchecked bytes-allocated [:=> [:cat] :int] (scm/proc "proto-bytes-allocated"))

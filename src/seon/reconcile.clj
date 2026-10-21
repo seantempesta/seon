@@ -646,7 +646,7 @@
       ;; the turn loop answered: died (no live agent), or judge it from measured facts
       :worked (if (= -1 (:id (first r)))
                 (dead st (:err (first r)))
-                (one (request st aid :tested {:op :tests :id agent :timeout-ms 30000})))
+                (one (request st aid :tested {:op :tests :id agent})))
       :tested (if (contract/error? r)
                 (dead st r)
                 (one (request (-> st (assoc-in [:flights aid :results] (proofs/results r))
@@ -732,7 +732,7 @@
      ;; an outside agent handed its attempt back: judged as a turn loop's end is
      :judge (let [{:keys [attempt task env agent]} m
                   st (assoc-in st [:flights attempt] {:act {:op :spawn :attempt attempt :task task :env env} :agent agent})
-                  [st o] (request st attempt :tested {:op :tests :id agent :timeout-ms 30000})]
+                  [st o] (request st attempt :tested {:op :tests :id agent})]
               [st {:to-api [o]}])
      :answers (let [[aid step] (get-in st [:pending (:tag m)])
                     st (update st :pending dissoc (:tag m))
