@@ -14,7 +14,8 @@
   referred into its namespace. From proto/flow f2-final proto.agent (lane F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
-            [clojure.string :as str] [jolt.ffi :as ffi] [seon.program :as program] [seon.intr :as intr] [clojure.repl]))
+            [clojure.string :as str] [jolt.ffi :as ffi] [seon.program :as program] [seon.intr :as intr] [clojure.repl]
+            [seon.schema :as schema] [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :fd :conn :db :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
@@ -270,7 +271,9 @@
           (keep find-ns (sort (d/q '[:find [?n ...] :where [_ :ns/name ?n]] db)))))
 
 (defn- run-tests-here
-  "clojure.test over test-namespaces of the branch; answers report data."
+  "clojure.test over test-namespaces of the branch, with the branch's schemas in effect (malli's
+  dynamic registry bound to seon.schema/branch-registry, as the agent's REPL binds it);
+  answers report data."
   {:malli/schema [:=> [:cat] :seon.test/result]}
   []
   (let [reports (atom [])
@@ -280,7 +283,8 @@
                                     (when (#{:pass :fail :error} (:type m))
                                       (swap! reports conj (test-report m (some-> (first t/*testing-vars*) str))))
                                     (orig m))
-                         t/*test-out* (java.io.StringWriter.)]
+                         t/*test-out* (java.io.StringWriter.)
+                         mr/*registry* (schema/branch-registry (db))]
                  ;; test-ns tests the vars interned now (Jolt's run-tests also runs its
                  ;; registry, which keeps a test after ns-unmap)
                  (apply merge-with + {:test 0 :pass 0 :fail 0 :error 0}
