@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
             [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm]
-            [datahike.api :as d] [clojure.string :as str]))
+            [datahike.api :as d] [clojure.string :as str] [seon.ref :as ref]))
 
 (def default-max-turns
   "Turns an attempt may take when its task sets no :seon.config.agent/max-turns."
@@ -89,18 +89,6 @@
            (for [s (sort-by str uncontracted)] {:refusal :contract-gap :symbol s})
            (for [k (sort unmerged)] {:refusal :unmerged :key k})))))
 
-(defn references
-  "The fully qualified symbols written in backticks in text, in order, once each (a
-  task's references, as the context resolves them)."
-  {:malli/schema [:=> [:cat [:maybe :string]] [:vector :qualified-symbol]]}
-  [text]
-  (let [spans (take-nth 2 (rest (str/split (or text "") #"`" -1)))]
-    (vec (distinct (for [s spans
-                         :let [slash (str/index-of s "/")]
-                         :when (and slash (pos? slash) (< slash (dec (count s)))
-                                    (not-any? #(Character/isWhitespace ^char %) s))]
-                     (symbol s))))))
-
 (defn hairy
   "Is a merge too hairy to keep resolving, from measured facts: more conflicts than the
   dial; main deleted a var the task's plan or proofs reference; more model turns without
@@ -112,7 +100,7 @@
                   [:maybe [:map [:rule [:enum :too-many-conflicts :deleted-by-them-referenced :merge-turns]] [:reason :string]]]]}
   [{:keys [conflicts task merge-turns max-conflicts max-merge-turns]}]
   (let [{:keys [plan proofs]} (:seon.task/accumulated task)
-        refs (into (set proofs) (references plan))
+        refs (into (set proofs) (ref/names plan))
         deleted (for [{:keys [key kind]} conflicts
                       :when (and (= kind :deleted-by-them) (= :var (first key)) (refs (second key)))]
                   (second key))]
