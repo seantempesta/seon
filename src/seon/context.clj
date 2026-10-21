@@ -279,7 +279,7 @@
                   [:=> [:cat :map [:vector :map]] [:vector :seon.model/message]]]}
   ([block] (messages block []))
   ([block turns]
-   (let [current (cond-> (print/text (dissoc block :last-evals) (- (:context print/budgets) last-evals-budget))
+   (let [current (cond-> (print/text (dissoc block :last-evals) (:context print/budgets))
                    (and (empty? turns) (:last-evals block))
                    (str "\n\nYour last evaluations:\n" (transcript (:last-evals block))))
          kept (when (seq turns) (kept-turns (vec turns) (cfg/value :seon.config.render/history-budget)))

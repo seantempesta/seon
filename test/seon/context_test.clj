@@ -171,10 +171,10 @@
         (is (= 11 (count le)))
         (is (= (range 11) (map :k le)) "each folded item is the first of its kind")
         (is (= [24 24 24 24 24 24 23 23 23 23 23] (mapv :times le)) "259 = 6x24 + 5x23")))
-    (testing "the whole context stays inside its budget at 259 items and at 10x that, every distinct item shown"
+    (testing "the block and the evaluations each stay inside their own budget at 259 items and at 10x that, every distinct item shown"
       (doseq [n [259 2590]]
         (let [items (evals n 11) text (text-of items)]
-          (is (<= (select/estimate text) (:context print/budgets)) (str n " items"))
+          (is (<= (select/estimate text) (+ (:context print/budgets) context/last-evals-budget)) (str n " items"))
           (is (every? #(str/includes? text (str "\"(code-of " % ")\"")) (range 11)) "no item starves another")
           (is (str/includes? text (str ";; " (count (filter #(= "(code-of 0)" (:form %)) items)) "x, the same form and answer"))))))
     (testing "each item within its equal share; every cut's form reads exactly the rest from (my.turn/evals)"
@@ -209,8 +209,8 @@
         item (fn [c] {:id 0 :tag :ret :form "(seon.turn/context-block \"demo/f\" \"demo/f#1\")" :printed (pr-str c) :value c})
         c1 (text-of [(item c0)])
         c2 (text-of [(item c1)])]
-    (is (< (select/estimate c0) (:context print/budgets)))
-    (is (<= (select/estimate c1) (:context print/budgets)))
+    (is (< (select/estimate c0) (+ (:context print/budgets) context/last-evals-budget)))
+    (is (<= (select/estimate c1) (+ (:context print/budgets) context/last-evals-budget)))
     (is (<= (- (select/estimate c2) (select/estimate c1)) 16) "reading a context of a context adds nothing")
     (is (= 1 (count (context/shown-evals (context/fold-evals [(item c0) (item c0)])))) "a repeated read is one item")))
 

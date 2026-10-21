@@ -300,8 +300,9 @@
  :seon.config.render/part-budget 256
  ;; Unit: tokens for a form echoed back (lane P1).
  :seon.config.render/form-budget 600
- ;; Unit: tokens for the whole context block the model reads, breadth first so every section
- ;; shows before any one deepens (lane P1).
+ ;; Unit: tokens for the context block the model reads (the task, its proofs, what it cites),
+ ;; breadth first so every section shows before any one deepens (lane P1). The evaluations and
+ ;; the history have their own budgets below; none is carved out of another.
  :seon.config.render/context-budget 16000
  ;; Unit: tokens one turn's evaluations show the model, each an equal share, every cut naming
  ;; the form that reads its rest. Provenance: seon.context's literal last-evals-budget (6000),
