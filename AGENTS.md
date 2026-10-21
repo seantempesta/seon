@@ -52,6 +52,7 @@ When you feel it, stop and ask three questions:
 
 ## Laws (short; the reasons are in DECISIONS)
 
+- **Only documented config** (owner, 2026-10-21). A limit, bound, dial or default is a key in the config file, with its unit, provenance and what happens at the bound, and a `seon.config.*` schema. No literals in code, no `System/getenv` outside the config loader.
 - **One store, many branches, as in production** (owner, 2026-10-21). Tests, checks and runs take a branch of one seeded store. A separate store is a last resort (a backup, a deep debug) and says why where it is made.
 - **Contracts on every function.** Malli contracts are armed from the definition, and every contract must generate (`mg/check` runs in `bin/check`).
 - **No guards or fences.** Do the right thing. Name every outside-world failure point in `DRAGONS.md`, with its one edge function and its declared error. Nothing else catches.
