@@ -1375,6 +1375,8 @@
     (out! "after the refusal a's notes: " (:printed r-count) "; its next write: " (select-keys r-next [:tag :printed]) "; its ids " (:ids stats))
     (out! "a's unrecorded evals, recorded on main: " recorded "; b's lowest id " b-min)
     (out! (if ok "LEASE OK" "LEASE FAILED"))
+    (c/stop! sys)
+    (lib/c-exit (if ok 0 1))))
 
 (defn idle
   "An idle root steps nothing (owner, 2026-10-21: no beat; health is what flows): root
