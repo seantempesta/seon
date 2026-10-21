@@ -202,13 +202,13 @@
                 " :growth :constant :fixed {:calls 0.5} :sizes [1 10 100]}))")}])
 
 (defn problems-check
-  "Provoke every class of problem through the paths agents and root use (SEON_STALL_MS=1000
+  "Provoke every class of problem through the paths agents and root use (:stall-ms 1000
   for the stall), then read my.root/problems: an eval error and a contract refusal, an
   effect's io error, a platform defect in the api, a stall, an agent's death with its exit
   status and stderr, a red proof's assertions and a cost proof's verdict."
   []
   (let [t0 (System/currentTimeMillis)
-        sys (c/start! {:datoms 300 :max-running 2})
+        sys (c/start! {:datoms 300 :max-running 2 :stall-ms 1000})
         a (c/spawn! sys {:task "problems"})
         b (c/spawn! sys {:task "dies"})
         _ (await-status sys [a b] #{:idle} 10000)
@@ -741,14 +741,14 @@
     (lib/c-exit (if ok 0 1))))
 
 (defn window-write
-  "Phase 1 of the flush-window check (run with SEON_FLUSH_MS=1000): main branch nm of the one
+  "Phase 1 of the flush-window check (root's :flush-ms 1000): main branch nm of the one
   store. A is
   written and the window passes: flushed. B is answered committed and unflushed (the
   writer's flush count does not move before its answer). C is written with :flush? (an
   outside effect follows): its answer comes after its flush (the count moved). D is answered
   unflushed, and root SIGKILLs itself at once."
   [nm]
-  (let [sys (c/start! {:main (keyword nm)})
+  (let [sys (c/start! {:main (keyword nm) :flush-ms 1000})
         flushes #(:flushes (::flow/state (flow/ping-proc (:graph sys) :writer :timeout-ms 1000)))
         t (fn [p] (let [t0 (lib/now-ns) r @p] [(:ok r) (lib/r2 (lib/ms-since t0))]))
         a (t (c/transact-main! sys [{:note/text "A" :note/agent :window}]))
@@ -768,7 +768,7 @@
   "Phase 2: the store reopened on main nm after root's crash holds A, B and C. (D is there too: a process crash
   keeps what LMDB handed the kernel; only a machine crash loses the open window.)"
   [nm]
-  (let [sys (c/start! {:main (keyword nm)})
+  (let [sys (c/start! {:main (keyword nm) :flush-ms 1000})
         notes (set (main-q sys '[:find [?t ...] :where [?n :note/agent :window] [?n :note/text ?t]]))
         ok (every? notes ["A" "B" "C"])]
     (out! "after the crash: " (sort notes))

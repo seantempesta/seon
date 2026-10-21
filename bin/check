@@ -57,7 +57,7 @@ echo "== mcp (an outside MCP client evals in an agent and as root; both recorded
 echo "== threads (the fork server, an agent and its clone stay single-threaded: no GC sweepers where we fork)"; step threads "" run threads
 echo "== admit"; step admit "" run admit
 echo "== record"; step record "" run record
-echo "== problems (each class provoked, then read back from main by my.root/problems)"; step problems "" env SEON_STALL_MS=1000 zsh -c "cd '$ROOT/target' && ./seon problems"
+echo "== problems (each class provoked, then read back from main by my.root/problems)"; step problems "" run problems
 echo "== smoke"; step smoke "^merge|^killed|spawned|ready|^SMOKE " run smoke
 echo "== program"; step program "" run program
 echo "== robust"; step robust "" run robust
@@ -85,9 +85,9 @@ else echo "PASS none of $PIDS outlived root"; fi
 # the recovery steps kill root and reopen the one store on the branch it worked on
 echo "== durable (root writes its branch and SIGKILLs itself; a new root reopens the store and recovers it)"
 EXPECT=137 step durable-write "" run durable-write durable; step durable-read "" run durable-read durable
-echo "== window (SEON_FLUSH_MS=1000: answered unflushed, flushed within the window; :flush? waits)"
-EXPECT=137 step window-write "" env SEON_FLUSH_MS=1000 zsh -c "cd '$ROOT/target' && ./seon window-write window"
-step window-read "" env SEON_FLUSH_MS=1000 zsh -c "cd '$ROOT/target' && ./seon window-read window"
+echo "== window (root's :flush-ms 1000: answered unflushed, flushed within the window; :flush? waits)"
+EXPECT=137 step window-write "" run window-write window
+step window-read "" run window-read window
 echo "== swarm $N"; step swarm ":merged|:tasks-done|:fresh" run swarm $N
 echo "== tasks: calc (6-task graph, cancel), scenarios (conflict, semantic, hairy, newns, sibling), swarm 20 over 5 shared vars"
 step e2e-calc "" run e2e calc

@@ -101,8 +101,8 @@
     (is (every? #(= :invalid (:problem %)) (:seon.config/problems r)))))
 
 (deftest a-missing-required-key-refuses-and-nil-is-absent
-  (let [r (refused #(config/resolved (assoc config/config :seon.config.store/flush-ms nil)))]
-    (is (= [{:key :seon.config.store/flush-ms :problem :missing-key :value "nil"}] (:seon.config/problems r))))
+  (let [r (refused #(config/resolved (assoc config/config :seon.config.store/eid-lease nil)))]
+    (is (= [{:key :seon.config.store/eid-lease :problem :missing-key :value "nil"}] (:seon.config/problems r))))
   ;; an optional key resolving nil is absent, not a stored nil
   (is (not (contains? (config/resolved (assoc config/config :seon.config.ai/thinking nil)) :seon.config.ai/thinking)))
   (is (= :disabled (:seon.config.ai/thinking (config/resolved (assoc config/config :seon.config.ai/thinking :disabled))))))
@@ -123,7 +123,8 @@
 ;; ---- facts on main, read from the db -------------------------------------------------------
 
 (deftest root-writes-the-config-on-main-and-the-db-answers-it
-  (let [[cfg conn] (pdb/create! 0)
+  (let [[cfg conn] (pdb/test-branch!)
+        child (keyword (str (name (:branch cfg)) "-a1"))
         c (assoc config/config :seon.config.agent/max-running 6)]
     (is (nil? (config/from-db @conn)))
     (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6) [(config/facts c)])})
@@ -131,8 +132,8 @@
     ;; the reconciler's root read sees the same dials
     (is (= {:boot "boot-1" :max-running 6 :max-merging (config/value :seon.config.merge/max-running)} (task/root @conn)))
     ;; a branch made from main holds them too (what an agent forked onto it reads)
-    (d/branch! conn :db :a1)
-    (is (= c (config/from-db @(d/connect (assoc cfg :branch :a1)))))))
+    (d/branch! conn (:branch cfg) child)
+    (is (= c (config/from-db @(d/connect (assoc cfg :branch child)))))))
 
 ;; ---- no environment read outside the loader -------------------------------------------------
 

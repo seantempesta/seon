@@ -17,7 +17,7 @@ owns the concept. A new concept gets its word here before it appears in code.
 | **run-ahead write** | an agent's own write on its own branch: applied at once, committed when idle, at a turn's end or within the flush window | `seon.agent/transact!`, `seon.agent/commit!`, `datahike.writer/apply!` |
 | **lease** | the block of entity ids an agent process mints on its branch | `:seon.config.store/eid-lease`, `seon.db/after-fork!` |
 | **group commit** | one Datahike commit per branch per writer step | `seon.writer/commit-batch` |
-| **flush window** | every write is answered when committed in memory; one group flush within `:seon.config.store/flush-ms` makes it durable; `:flush?` waits for it | `seon.writer/flusher-proc`, `:seon.config.store/flush-ms` |
+| **flush window** | every write is answered when committed in memory; one group flush within `seon.db/flush-ms` makes it durable; `:flush?` waits for it | `seon.writer/flusher-proc`, `seon.db/flush-ms` |
 | **flusher** | the proc that times the flush window and asks the writer to flush | `seon.writer/flusher-proc` |
 | **fork server** | the single-threaded process holding main's db value that forks agents | `seon.fork-server` |
 | **standby** | a fork of the fork server, promoted when the server dies (root never forks after boot) | `seon.fork-server/promote` |

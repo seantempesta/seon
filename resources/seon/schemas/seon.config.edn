@@ -25,7 +25,6 @@
   [:seon.config.root/tasks-dir :seon.config.root/tasks-dir]
   ;; the store
   [:seon.config.store/backend :seon.config.store/backend]
-  [:seon.config.store/flush-ms :seon.config.store/flush-ms]
   [:seon.config.store/eid-lease :seon.config.store/eid-lease]
   [:seon.config.store/lmdb-map-bytes :seon.config.store/lmdb-map-bytes]
   [:seon.config.store/branching-factor :seon.config.store/branching-factor]
@@ -33,7 +32,6 @@
   [:seon.config.agent/max-running :seon.config.agent/max-running]
   [:seon.config.agent/max-turns :seon.config.agent/max-turns]
   [:seon.config.agent/inbox-size :seon.config.agent/inbox-size]
-  [:seon.config.agent/stall-ms :seon.config.agent/stall-ms]
   [:seon.config.agent/trip-bytes :seon.config.agent/trip-bytes]
   [:seon.config.agent/heap-extra-bytes :seon.config.agent/heap-extra-bytes]
   [:seon.config.agent/sock-buf-bytes :seon.config.agent/sock-buf-bytes]

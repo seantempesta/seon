@@ -68,12 +68,6 @@
 
  ;; The durable store's konserve backend: LMDB (one env sync per commit) or the POSIX filestore.
  :seon.config.store/backend :lmdb
- ;; Unit: ms a committed write may stay unflushed. Provenance: owner 2026-10-20: every write is
- ;; answered when it is committed in memory, and the next group flush within this window makes
- ;; it durable; up to 1,000 is acceptable. Recovery restores to the last flush. A write followed
- ;; by an effect outside the database asks for :flush? and is answered after its flush.
- ;; bin/check's window step runs at 1,000.
- :seon.config.store/flush-ms #long #or [#env SEON_FLUSH_MS 10]
  ;; Unit: entity ids per agent. Each agent process mints ids on its own branch from a block
  ;; of this many past the store's highest id at boot (lane L1's lease): ids stay unique
  ;; store-wide with no shared counter. At the bound: the agent's ids would run into the next
@@ -102,14 +96,6 @@
  ;; Small on purpose: a full channel pushes back on its sender (the reader leaves frames in
  ;; the socket).
  :seon.config.agent/inbox-size 64
- ;; Unit: ms. An agent with a request in flight that sends root nothing (no reply, commit or
- ;; effect) for this long, and has no effect outstanding, is observed stalled once: a recorded
- ;; :seon.agent/stalled, never an end (lane D2; root checks every half of it while an agent is
- ;; busy). 0: no check. bin/check's problems step provokes it at 1,000.
- ;; A guessed tolerance (FENCES finding 5): kept as a key only because the problems check sets
- ;; it; it goes with seon.fences/a-stall-is-past-the-requests-own-bound (a stall becomes "past
- ;; the request's own declared bound").
- :seon.config.agent/stall-ms #long #or [#env SEON_STALL_MS 30000]
  ;; Unit: bytes allocated between an agent's collections (Chez's collect-trip-bytes). Chez's
  ;; default scales with the parent heap (E10); a small trip keeps an agent's garbage, and so
  ;; its private pages, small.

@@ -47,6 +47,13 @@
 
 (def ^:private MDB_NOSYNC 0x10000)
 
+(def flush-ms
+  "How long a committed write may stay unflushed, ms (owner 2026-10-20: every write is
+  answered when committed in memory, and one group flush within this window makes it
+  durable). Not a config key: owner 2026-10-21, no clock decides anything; it goes when the
+  flush runs on the writer's workload. root's start! takes :flush-ms for the window check."
+  10)
+
 (defn store-cfg
   "Datahike config for the durable store at path; backend :lmdb (default) or :file."
   {:malli/schema [:=> [:cat [:enum :lmdb :file] :string] :seon.db/cfg]}

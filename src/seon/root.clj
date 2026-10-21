@@ -398,7 +398,7 @@
                                             (System/currentTimeMillis))))
       ;; the stall timer: each agent with an eval in flight checks its own quiet time
       :stall-check (let [now (System/currentTimeMillis)]
-                     (reduce (fn [st id] (to-agent st id {:op :stall? :now-ms now :dial-ms (cfg/value :seon.config.agent/stall-ms)})) (dissoc st ::stall-due) (::busy st)))
+                     (reduce (fn [st id] (to-agent st id {:op :stall? :now-ms now :dial-ms (:stall-ms st)})) (dissoc st ::stall-due) (::busy st)))
       :kill-all (reduce (fn [st aid] (-> st (set-agent aid {:status :killed}) (to-agent aid {:op :kill}))) st (keys (:agents st)))
       st)))
 
@@ -449,11 +449,11 @@
                 st))
          st (flush-problems st o)
          ;; while an agent has an eval in flight, the stall check runs every half dial
-         st (if (and (seq (::busy st)) (not (::stall-due st)) (pos? (cfg/value :seon.config.agent/stall-ms)) (:back st))
+         st (if (and (seq (::busy st)) (not (::stall-due st)) (pos? (:stall-ms st)) (:back st))
               (let [back (:back st)]
                 ;; a go block parks on the timer (Jolt's take! with a callback forks a thread per
                 ;; pending take: lane D2's finding, seen as one thread per root in lifecycle)
-                (a/go (a/<! (a/timeout (quot (cfg/value :seon.config.agent/stall-ms) 2))) (a/>! back {:op :stall-check}))
+                (a/go (a/<! (a/timeout (quot (:stall-ms st) 2))) (a/>! back {:op :stall-check}))
                 (assoc st ::stall-due true))
               st)
          st (if (::update st)
@@ -517,12 +517,13 @@
    about n datoms of an example program on :db; a root holds no program it was not given)
    :main branch (root's main; an existing branch is recovered; :db is production's main)
    :backend :lmdb|:file :log? true :max-running n (parallel attempts) :provider p (the
-   attempts' model)}. What opts leave out is the config's: :seon.config.root/store-path,
+   attempts' model) :flush-ms and :stall-ms (fences, seon.db/flush-ms and
+   seon.agent-proc/stall-ms, for the checks that move them)}. What opts leave out is the config's: :seon.config.root/store-path,
   :seon.config.root/main (absent: a new branch <:seon.config.root/run-name>-<time>-<id> of
   :db), :seon.config.store/backend, :seon.config.agent/max-running and the provider of
   :seon.config.ai/*. The config in force is written on main's root entity."
   {:malli/schema [:=> [:cat :map] :seon.root/sys]}
-  [{:keys [datoms log? path main backend max-running provider] :or {datoms 0}}]
+  [{:keys [datoms log? path main backend max-running provider flush-ms stall-ms] :or {datoms 0}}]
   (lib/ignore-sigpipe!)
   (when-not log? (trove/set-log-fn! nil))
   (let [t0 (lib/now-ns)
@@ -584,7 +585,7 @@
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
-                         :flush-ms (cfg/value :seon.config.store/flush-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf)
+                         :flush-ms (or flush-ms pdb/flush-ms) :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf)
                          :model-lanes (cfg/value :seon.config.ai/lanes) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
                          :web-port (cfg/value :seon.config.web/port)})
         decl (system/read-decl (cfg/value :seon.config.root/system-path))

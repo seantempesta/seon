@@ -116,7 +116,7 @@
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
       (let [now (lib/now-ns)
             since (:dirty-at (swap! state #(-> % (assoc :db (:db-after r)) (update :dirty-at (fn [t] (or t now))))))]
-        (when (>= (- now since) (* 1000000 (cfg/value :seon.config.store/flush-ms))) (commit!))
+        (when (>= (- now since) (* 1000000 pdb/flush-ms)) (commit!))
         (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
           (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r))))))))
 
