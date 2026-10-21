@@ -55,8 +55,8 @@
         (is (= {:var/kind :fn :var/contract "[:=> [:cat :int] :int]"
                 :var/form {:form/src "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x]  (s/join [(* 2 x)]))"}}
                (update (var-row db 'app.pt-new/twice) :var/form dissoc :form/order)))
-        (is (= '#{clojure.string/join} (set (d/q '[:find [?r ...] :where [?v :var/name app.pt-new/twice] [?v :var/form ?f] [?f :form/refs ?r]] db)))
-            "s/join resolved through the alias; clojure.core's * left out")))
+        (is (= '#{clojure.string/join clojure.core/*} (set (d/q '[:find [?r ...] :where [?v :var/name app.pt-new/twice] [?v :var/form ?f] [?f :form/refs ?r]] db)))
+            "s/join resolved through the alias, * to clojure.core's")))
     (testing "in-ns alone is no program: nothing was defined"
       (is (nil? (eval-account 'user "(in-ns 'app.pt-other)"))))))
 
@@ -93,6 +93,17 @@
     (is (= '#{clojure.core/alter-var-root} (:banned acct)) "a reference to alter-var-root, by resolved var")
     (is (= '#{app.pt-ban/inner} (:inline-defs acct)) "a def inside a function body"))
   (is (empty? (:banned (eval-account 'app.pt-ban "(defn fine [m] (assoc m :intern 1))"))) "a keyword named like it is nothing"))
+
+(deftest catches-and-clocks-are-recorded
+  ;; for the fence detectors (lane PATTERNS): a hiding guard is a catch answering a constant;
+  ;; time deciding is a sleep, a deref with a timeout, or core.async's timeout
+  (let [a (eval-account 'app.pt-guard (str "(defn guarded [f p] (Thread/sleep 1) (deref p 10 :late)"
+                                           " (try (f) (catch IllegalStateException e nil) (catch Exception e (throw e)) (catch Throwable t (str t))))"))]
+    (is (= #{{:class "IllegalStateException" :answers :constant} {:class "Exception" :answers :rethrows} {:class "*" :answers :expr}}
+           (set (map read-string (:catches a)))) "each clause: its class, and what its handler answers")
+    (is (contains? (:refs a) 'Thread/sleep) "a host static is a reference")
+    (is (= '#{clojure.core/deref} (:timeouts a)) "a deref with a timeout")
+    (is (empty? (:timeouts (eval-account 'app.pt-guard "(defn plain [p] @p)"))) "a plain deref is no clock")))
 
 (deftest a-redefinition-supersedes-the-form-it-replaces
   (let [db (record (empty-db) 'app.pt-re "(defn f [x] x)" 'app.pt-re "(defn g [x] (f x))")
@@ -151,7 +162,7 @@
       (is (= 5 (count accounts)) "every form, the comment block a text form")
       (is (= '[{:var app.pt-file/twice :kind :fn}] (:defs (by-src "(defn twice [x] (* 2 x))"))))
       (is (= '[{:multi app.pt-file/m :dispatch ":a"}] (:methods (by-src "(defmethod m :a [_] (s/join [\"a\"]))"))))
-      (is (= '#{clojure.string/join} (:refs (by-src "(defmethod m :a [_] (s/join [\"a\"]))"))))
+      (is (= '#{clojure.string/join clojure.core/defmethod-setup} (:refs (by-src "(defmethod m :a [_] (s/join [\"a\"]))"))))
       (is (= (select-keys (eval-account 'app.pt-file "(defn twice [x] (* 2 x))") [:id :defs :refs])
              (select-keys (by-src "(defn twice [x] (* 2 x))") [:id :defs :refs]))
           "the REPL's facts for the same text"))))

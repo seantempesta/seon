@@ -28,6 +28,11 @@
  ;; inside a function body: judged at merge (every definition happens once)
  :form/banned [:set :qualified-symbol]
  :form/inline-defs [:set :qualified-symbol]
+ ;; the calls it bounds by a clock (deref with a timeout; Thread/sleep and core.async's
+ ;; timeout are in its refs), and its catch clauses as EDN {:class name ("*" for a catch-all)
+ ;; :answers :constant|:rethrows|:expr}: the facts the fence detectors query
+ :form/timeouts [:set {:seon.db/index true} :qualified-symbol]
+ :form/catches [:set :string]
  :ns/name [:and {:seon.db/identity true} :symbol]
  :ns/doc :string
  :ns/form :seon.db/ref
@@ -57,7 +62,8 @@
                       [:form/lead {:optional true} :form/lead] [:form/defines {:optional true} :form/defines]
                       [:form/declares {:optional true} :form/declares] [:form/refs {:optional true} :form/refs]
                       [:form/requires {:optional true} :form/requires] [:form/banned {:optional true} :form/banned]
-                      [:form/inline-defs {:optional true} :form/inline-defs] [:form/source {:optional true} :form/source]]
+                      [:form/inline-defs {:optional true} :form/inline-defs] [:form/source {:optional true} :form/source]
+                      [:form/timeouts {:optional true} :form/timeouts] [:form/catches {:optional true} :form/catches]]
  :seon.db/ns-fact [:map {:seon.db/attributes true} [:ns/name :ns/name] [:ns/doc {:optional true} :ns/doc]
                     [:ns/form {:optional true} :ns/form] [:ns/file {:optional true} :ns/file] [:ns/tail {:optional true} :ns/tail]]
  :seon.db/var-fact [:map {:seon.db/attributes true}

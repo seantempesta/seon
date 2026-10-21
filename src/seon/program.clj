@@ -110,16 +110,55 @@
     {:var (vsym n) :meta (if (map? (:meta n)) (:meta n) {}) :declare? (boolean (or (:no-init n) (nil? init)))
      :init (cond (nil? init) nil (= :fn (:op init)) :fn :else f)}))
 
+(defn- tail
+  "The node whose value a node answers: through do and let to their last expression."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [n] (case (:op n) :do (tail (:ret n)) :let (tail (:body n)) n))
+
+(defn- answers
+  "What a handler answers, from its tail: :constant (a literal or quoted form), :rethrows
+  (a throw), else :expr."
+  {:malli/schema [:=> [:cat :map] [:enum :constant :rethrows :expr]]}
+  [n] (case (:op (tail n)) (:const :quote) :constant :throw :rethrows :expr))
+
+(defn- clause-class
+  "The class name a catch clause's test names (Jolt lowers `(catch C e ...)` to a test
+  calling clojure.core/__catch-broad? with C's name), or nil."
+  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  [test]
+  (let [found (volatile! nil)]
+    ((fn walk [n]
+       (when (and (nil? @found) (= 'clojure.core/__catch-broad? (invoked n)))
+         (vreset! found (str (datum (first (:args n))))))
+       (ir/reduce-ir-children (fn [_ c] (walk c)) nil n))
+     test)
+    @found))
+
+(defn- catches
+  "A :try node's catch clauses, in order, each {:class name (\"*\" for a catch-all) :answers
+  kind}: read from Jolt's lowering of the clauses (one dispatch: an if per class, a
+  catch-all's handler last, else a rethrow)."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [n]
+  (loop [d (some-> (:catch-body n) tail) acc []]
+    (cond (nil? d) acc
+          (and (= :if (:op d)) (clause-class (:test d))) (recur (tail (:else d)) (conj acc {:class (clause-class (:test d)) :answers (answers (:then d))}))
+          (= :throw (:op d)) acc
+          :else (conj acc {:class "*" :answers (answers d)}))))
+
 (defn unit-account
   "What the compiler says one analyzed top-level node does, from its IR by resolved var
   identity: the vars it defines at its top (:defs, each def-info) and inside a function body
   (:inline-defs), its multimethod methods ({:multi sym-as-written :dispatch value}) and
-  protocol extensions ({:protocol sym :type name}), the multimethods it sets up, the vars it
-  references (:refs, clojure.core's left out), the banned vars it references, the
-  namespaces it requires, and whether it changes its namespace's environment (:env?)."
+  protocol extensions ({:protocol sym :type name}), the multimethods it sets up, the vars and
+  host statics (Class/member) it references (:refs), the banned vars it references, the
+  calls it bounds by a clock (:timeouts: deref with a timeout), its catch clauses
+  (:catches, each {:class :answers}), the namespaces it requires, and whether it changes its
+  namespace's environment (:env?)."
   {:malli/schema [:=> [:cat :map] :map]}
   [node]
-  (let [acc (volatile! {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :banned #{} :requires #{} :env? false})]
+  (let [acc (volatile! {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :banned #{} :requires #{} :env? false
+                        :timeouts #{} :catches #{}})]
     ((fn walk [n in-fn?]
        (case (:op n)
          :def (if in-fn?
@@ -130,7 +169,13 @@
                      (vswap! acc update :defs conj {:var (vsym n) :meta {} :macro? true :init :fn}))
          (:var :the-var) (let [s (vsym n)]
                            (when (banned s) (vswap! acc update :banned conj s))
-                           (when-not (= "clojure.core" (namespace s)) (vswap! acc update :refs conj s)))
+                           (vswap! acc update :refs conj s))
+         :host-static (vswap! acc update :refs conj (symbol (str (:class n)) (str (:member n))))
+         :try (vswap! acc update :catches into (map pr-edn) (catches n))
+         :invoke (when (and (= 'clojure.core/deref (invoked n)) (= 3 (count (:args n))))
+                   (vswap! acc update :timeouts conj 'clojure.core/deref))
+         nil)
+       (case (:op n)
          :invoke (when-not in-fn?
                    (let [f (invoked n) args (:args n)]
                      (case f
@@ -155,7 +200,8 @@
   {:malli/schema [:=> [:cat [:sequential :map]] :map]}
   [as]
   (reduce (fn [a b] (merge-with (fn [x y] (if (boolean? x) (or x y) (into x y))) a b))
-          {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :banned #{} :requires #{} :env? false}
+          {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :banned #{} :requires #{} :env? false
+           :timeouts #{} :catches #{}}
           as))
 
 (defn root-of
@@ -263,7 +309,8 @@
                (or ns-form? (seq defs) (seq declares) (seq methods) (seq impls) (:env? a)))
       (cond-> {:id (form-id nsym src k) :src src :ns nsym :ns-form? (boolean ns-form?)
                :defs defs :declares declares :methods (or methods []) :impls (or impls [])
-               :refs (:refs a) :requires (:requires a) :banned (:banned a) :inline-defs (:inline-defs a)}
+               :refs (:refs a) :requires (:requires a) :banned (:banned a) :inline-defs (:inline-defs a)
+               :timeouts (:timeouts a) :catches (:catches a)}
         lead (assoc :lead lead)
         order (assoc :order order)))))
 
@@ -302,7 +349,7 @@
   whose every definition it redefines). A var's contract or doc the redefinition no longer
   has is retracted."
   {:malli/schema [:=> [:cat :seon.host/db :map :int] :seon.db/tx-data]}
-  [db {:keys [id src lead ns ns-form? defs declares methods impls refs requires banned inline-defs order]} next-order]
+  [db {:keys [id src lead ns ns-form? defs declares methods impls refs requires banned inline-defs timeouts catches order]} next-order]
   (let [fe (eid db :form/id id)
         dkeys (concat (for [{v :var} defs] [:var/name v])
                       (for [{:keys [multi dispatch]} methods] [:method/key (method-key multi dispatch)])
@@ -331,7 +378,9 @@
               (seq refs) (assoc :form/refs (vec refs))
               (seq requires) (assoc :form/requires (vec requires))
               (seq banned) (assoc :form/banned (vec banned))
-              (seq inline-defs) (assoc :form/inline-defs (vec inline-defs)))]
+              (seq inline-defs) (assoc :form/inline-defs (vec inline-defs))
+              (seq timeouts) (assoc :form/timeouts (vec timeouts))
+              (seq catches) (assoc :form/catches (vec catches)))]
            (for [s declares] {:db/id (var-tid s) :var/name s :var/ns (ns-tid (symbol (namespace s)))})
            (for [{v :var :keys [kind contract doc]} defs
                  :let [e (eid db :var/name v) old (when e (d/entity db e))]
@@ -377,7 +426,8 @@
              :defines (into #{} (keep def-key) (:form/defines f))
              :declares (into #{} (map :var/name) (:form/declares f))
              :refs (set (:form/refs f)) :requires (set (:form/requires f))
-             :banned (set (:form/banned f)) :inline-defs (set (:form/inline-defs f))}
+             :banned (set (:form/banned f)) :inline-defs (set (:form/inline-defs f))
+             :timeouts (set (:form/timeouts f)) :catches (set (:form/catches f))}
       (:form/lead f) (assoc :lead (:form/lead f)))))
 
 (defn live-forms

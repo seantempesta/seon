@@ -173,7 +173,7 @@
   (let [e (:e (first (d/datoms db :avet :form/id id)))]
     (if (nil? content)
       (if e [[:db/retractEntity e]] [])
-      (let [{:keys [ns src order lead defines declares refs requires banned inline-defs]} content]
+      (let [{:keys [ns src order lead defines declares refs requires banned inline-defs timeouts catches]} content]
         (into [{:db/id (ns-tid ns) :ns/name ns}
                (cond-> {:db/id (form-tid id) :form/id id :form/src src :form/ns (ns-tid ns) :form/order order}
                  lead (assoc :form/lead lead)
@@ -182,7 +182,9 @@
                  (seq refs) (assoc :form/refs (vec refs))
                  (seq requires) (assoc :form/requires (vec requires))
                  (seq banned) (assoc :form/banned (vec banned))
-                 (seq inline-defs) (assoc :form/inline-defs (vec inline-defs)))]
+                 (seq inline-defs) (assoc :form/inline-defs (vec inline-defs))
+                 (seq timeouts) (assoc :form/timeouts (vec timeouts))
+                 (seq catches) (assoc :form/catches (vec catches)))]
               (concat (map def-ref defines)
                       (for [s declares] (def-ref [:var s]))))))))
 
