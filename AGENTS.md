@@ -109,7 +109,7 @@ The order is **delete first, then foundations, then fixes**. Anything shared by 
 - Lanes waiting on a dependency read and plan; they run nothing heavy and keep nothing running.
 
 ### Learn, then plan, then act
-1. **What exists, written into the plan.** Find the relevant wiki sections (`docs/README.md` is the map; a patterns page first), the task files and the code, so nothing is built twice. Then:
+1. **What exists, written into the plan.** Find the relevant wiki sections (`docs/README.md` is the map; the section where your problem lives states its pattern and links the others like it), the task files and the code, so nothing is built twice. Then:
    - write the sections' addresses into the task as `:seon.task/docs`, and the vars and files as `:seon.task/refs`, so every later step's context pulls exactly them;
    - state the differences in the plan: where a section and the code disagree, and what this task changes relative to what the sections say. Those differences are the wiki edits this task owes.
 2. **What v1 did.** Read `~/src/seon` for the same problem: code, decisions, research, reverts, read-only. Port the best parts onto our pillars, and name the mistakes you are not repeating.
