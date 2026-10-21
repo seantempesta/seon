@@ -346,8 +346,9 @@
   "A task that always fails ends observed stuck: add (always wrong) attaches refinement
   chains until its budget is spent, then the reconciler records the stuck fact (cause and
   what it blocks: twice, needing add) and reports quiescence; this run returns on that
-  report, with no deadline. Verdict: one stuck root, the last chain's implement, blocking
-  twice and its merge; nothing held; no agent reused."
+  report, with no deadline. Verdict: one stuck root, the last chain's design (the
+  always-wrong model never improves the plan, so it is refused :no-design), blocking the
+  rest of its chain, twice and its merge; nothing held; no agent reused."
   []
   (let [t0 (now)
         specs (vec (take 2 fx/calc))
@@ -366,8 +367,8 @@
       (println :stuck (:stuck q))
       (println :quiet-after-last-end-ms (- t-quiet (apply max 0 ends)) :problems-stuck (count (get-in (root/problems sys) [:classes :stuck :rows])))
       (println :numbers (numbers sys t0))
-      (verdict! sys (and (nil? more) (= "calc/add-r2-implement" (:task row))
-                    (= ["calc/add-r2-merge" "calc/add-r2-test" "calc/twice" "calc/twice-merge"] (:blocks row))
+      (verdict! sys (and (nil? more) (= "calc/add-r2-design" (:task row))
+                    (= ["calc/add-r2-implement" "calc/add-r2-merge" "calc/add-r2-test" "calc/twice" "calc/twice-merge"] (:blocks row))
                     (not-any? #(= :held (:seon.task/execution %)) (vals (task/tasks d)))
                     (empty? (agents-reused d)))))))
 

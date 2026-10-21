@@ -88,6 +88,10 @@
       (let [text (:content (second (context/messages block)))]
         (is (re-find #":regression" text))
         (is (re-find #"timed out" text))))
+    (testing "a design step that has not improved its plan is told what it lacks and the call that does it"
+      (let [b (context/current-state db t {:results {} :refusals [{:refusal :no-design}] :turn 1 :max-turns 4})]
+        (is (= [[:no-design :seon.task/plan 'my.task/update!]]
+               (mapv (juxt :refusal :unchanged (comp first :do)) (:refused b))))))
     (testing "nothing refused, nothing failed: no section"
       (let [b (context/current-state db t {:results {'demo-test/f-test :pass} :refusals [] :turn 1 :max-turns 4 :run-errors []})]
         (is (not-any? #(contains? b %) [:refused :test-run :flagged :your-last-reply]))))))

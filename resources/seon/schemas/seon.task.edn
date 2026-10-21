@@ -54,6 +54,7 @@
                         [:seon.attempt/reason {:optional true} :string]
                         [:seon.attempt/merged-t {:optional true} :int]
                         [:seon.attempt/basis-t {:optional true} :int]
+                        [:seon.attempt/plan {:optional true} :seon.task/plan]
                         [:seon.attempt/uncontracted {:optional true} [:set :qualified-symbol]]
                         [:seon.attempt/results {:optional true} :seon.proof/results]
                         [:seon.attempt/conflicts {:optional true} [:vector :seon.merge/conflict]]
@@ -97,9 +98,11 @@
                              [:proofs :seon.task/proofs] [:results :seon.proof/results]
                              [:main-green [:set :qualified-symbol]] [:allowed-red [:set :qualified-symbol]]
                              [:uncontracted [:set :qualified-symbol]] [:unmerged {:optional true} [:vector :string]]
-                             [:kind {:optional true} :seon.task/kind]]
+                             [:kind {:optional true} :seon.task/kind]
+                             ;; a :design task's accumulated plan now and as its attempt began
+                             [:plan {:optional true} :seon.task/plan] [:plan-before {:optional true} :seon.task/plan]]
  :seon.reconcile/refusal [:map {:closed true}
-                          [:refusal [:enum :no-proofs :proof-red :regression :stray-red :contract-gap :unmerged]]
+                          [:refusal [:enum :no-proofs :proof-red :regression :stray-red :contract-gap :unmerged :no-design]]
                           [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string]]
  :seon.reconcile/action [:multi {:dispatch :op}
                          [:reap [:map {:closed true} [:op [:= :reap]] [:attempt :seon.attempt/id]]]

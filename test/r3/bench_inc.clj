@@ -14,7 +14,7 @@
   [n k]
   (let [w (str "r3/p" (+ 9 (* 10 (mod k (max 1 (quot n 10))))))   ; tasks that had no attempt (k mod 10 = 9)
         aid (str w "#b" k)]
-    [(task/attempt-start-tx aid w fx/boot :ab {:branch (task/default-branch w) :model nil :max-turns 8} 0)
+    [(task/attempt-start-tx aid w fx/boot :ab {:branch (task/default-branch w) :model nil :max-turns 8} 0 "p")
      [{:seon.attempt/id aid :seon.attempt/status :ended :seon.attempt/basis-t 1
        :seon.attempt/results [{:seon.proof/test (symbol "app.proofs" "p9-test") :seon.proof/status :pass}]}]
      [{:seon.attempt/id aid :seon.attempt/status :done}]

@@ -23,10 +23,10 @@
 (defn- attempt
   "An attempt fact of task nm: status, plus members (results as {test status}; conflicts
   as :seon.merge/conflict values; unmerged as printed keys)."
-  [nm n status & {:keys [boot model results outcome conflicts unmerged changed] :or {boot "boot-1"}}]
+  [nm n status & {:keys [boot model results outcome conflicts unmerged changed plan] :or {boot "boot-1" plan (str "Make " nm " true.")}}]
   (let [id (str "demo/" nm) aid (str id "#" n)]
     (into (task/attempt-start-tx aid id boot (keyword (str "a-" nm n))
-                                 {:branch (task/default-branch id) :model model :max-turns r/default-max-turns} 1000)
+                                 {:branch (task/default-branch id) :model model :max-turns r/default-max-turns} 1000 plan)
           [(cond-> {:seon.attempt/id aid :seon.attempt/status status}
              results (assoc :seon.attempt/results (vec (for [[t s] results] {:seon.proof/test t :seon.proof/status s})))
              outcome (assoc :seon.attempt/outcome outcome)
@@ -216,7 +216,7 @@
     (testing "the done rule judges every accumulated proof"
       (is (= [[:proof-red (t "a")]]
              (mapv (juxt :refusal :symbol)
-                   (r/done-refusals (r/done-input (r/index db) "demo/b-merge" {(t "b") :pass (t "a") :fail} #{} [] nil))))))))
+                   (r/done-refusals (r/done-input (r/index db) "demo/b-merge" {(t "b") :pass (t "a") :fail} #{} [] nil nil))))))))
 
 (deftest with-merge-chains-work-through-merges
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])])]
@@ -282,10 +282,38 @@
       (is (= [(mspawn "a-merge" 2)] (r/reconcile db))))))
 
 (deftest design-may-leave-its-proofs-red
+  ;; a design step's work is the plan: done only when the plan differs from the one it began with
   (are [in expected] (= expected (mapv :refusal (r/done-refusals in)))
-    {:kind :design :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{}} []
-    {:kind :design :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{'app/f}} [:contract-gap]
+    {:kind :design :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{} :plan "B" :plan-before "A"} []
+    {:kind :design :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{'app/f} :plan "B" :plan-before "A"} [:contract-gap]
+    {:kind :design :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{} :plan "A" :plan-before "A"} [:no-design]
     {:kind :work :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{}} [:proof-red]))
+
+(defn- design-db
+  "Main with design task demo/a released, its attempt #1 ended as status, extra after."
+  [extra]
+  (let [db (empty-db)
+        d [(assoc (decl "a") :seon.task/kind :design)]
+        db (d/db-with db (task/create-tx db d))]
+    (-> db (d/db-with (task/execution-tx ["demo/a"] :running)) (d/db-with (task/boot-tx "boot-1" 4)) (d/db-with extra))))
+
+(deftest a-design-step-is-not-done-at-its-start
+  ;; measured 2026-10-21: a design attempt ended :done :green with 0 turns; its proofs may stay
+  ;; red, so at its start nothing refused it
+  (testing "at its start (the plan as it began), the done rule refuses :no-design"
+    (let [db (design-db (attempt "a" 1 :running))]
+      (is (= [:no-design]
+             (mapv :refusal (r/done-refusals (r/done-input (r/index db) "demo/a" {(t "a") :fail} #{} []
+                                                           nil (:seon.attempt/plan (task/attempt db "demo/a#1")))))))))
+  (testing "ended green with the plan unchanged: refused, so a refinement attaches, never accepted"
+    (is (= [{:op :attach :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended green: no-design"}]
+           (r/reconcile (design-db (attempt "a" 1 :ended :outcome :green :results {(t "a") :fail})))))))
+
+(deftest a-design-step-is-done-when-it-improved-the-plan
+  ;; root's judge carried the plan the attempt improved on its branch to main (judge-tx)
+  (is (= [{:op :accept :attempt "demo/a#1" :task "demo/a"}]
+         (r/reconcile (design-db (concat (attempt "a" 1 :ended :outcome :green :results {(t "a") :fail})
+                                         (task/plan-tx "demo/a" "Make a true. Design: (defn f [xs] ...) one pass over xs.")))))))
 
 (deftest failed-merge-attaches-four-tasks
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])]

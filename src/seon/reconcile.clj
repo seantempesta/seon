@@ -61,13 +61,16 @@
   proofs of merged tasks, red here); a stray red (a red test that is no task's open
   proof); a contract gap (a function the attempt defined without a contract); an
   unmerged entry on the branch (a merge conflict not resolved). A :design task readies
-  the interface for its implement step, so its own proofs may stay red."
+  the interface and plan for its implement step, so its own proofs may stay red, and it is
+  refused :no-design until its plan differs from the one its attempt began with (or that
+  one is unknown)."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/refusal]]}
-  [{:keys [proofs results main-green allowed-red uncontracted unmerged kind]}]
+  [{:keys [proofs results main-green allowed-red uncontracted unmerged kind plan plan-before]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))
         design? (= :design kind)]
     (vec (concat
            (when (and (empty? proofs) (not design?)) [{:refusal :no-proofs}])
+           (when (and design? (or (nil? plan-before) (= plan plan-before))) [{:refusal :no-design}])
            (when-not design?
              (for [p (sort-by str proofs) :when (not= :pass (get results p :none))] {:refusal :proof-red :symbol p}))
            (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t))] {:refusal :regression :symbol t})
@@ -287,18 +290,23 @@
 (defn done-input
   "The done rule's input for attempt results of task id, observed against main at t basis
   (nil: main as idx holds it), over the index: the regression and allowed-red sets restricted to the tests
-  that ran (the only ones done-refusals asks about), each test looked up by its claimants."
-  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:maybe :int]] :seon.reconcile/done-input]}
-  [idx id results uncontracted unmerged basis]
+  that ran (the only ones done-refusals asks about), each test looked up by its claimants; for
+  a :design task, its accumulated plan now and plan-before, the one its attempt began with
+  (:seon.attempt/plan; nil: unknown)."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:maybe :int] [:maybe :seon.task/plan]] :seon.reconcile/done-input]}
+  [idx id results uncontracted unmerged basis plan-before]
   (let [by? (fn [x] (when-let [mt (get-in idx [:done x :merged-t])] (or (nil? basis) (<= mt basis))))
-        claim (fn [t] (disj (get-in idx [:claims t] #{}) id))]
-    {:proofs (get-in idx [:acc id] #{})
-     :kind (get-in idx [:tasks id :seon.task/kind] :work)
-     :results results
-     :main-green (into #{} (filter #(some by? (claim %))) (keys results))
-     :allowed-red (into #{} (filter #(some (complement by?) (claim %))) (keys results))
-     :uncontracted uncontracted
-     :unmerged (vec unmerged)}))
+        claim (fn [t] (disj (get-in idx [:claims t] #{}) id))
+        kind (get-in idx [:tasks id :seon.task/kind] :work)]
+    (cond-> {:proofs (get-in idx [:acc id] #{})
+             :kind kind
+             :results results
+             :main-green (into #{} (filter #(some by? (claim %))) (keys results))
+             :allowed-red (into #{} (filter #(some (complement by?) (claim %))) (keys results))
+             :uncontracted uncontracted
+             :unmerged (vec unmerged)}
+      (= :design kind) (assoc :plan (:plan (task/accumulate (:tasks idx) id)))
+      (and (= :design kind) plan-before) (assoc :plan-before plan-before))))
 
 (defn- merge-keys
   "The program keys merge task id lands: what the attempts on its branch measured as changed
@@ -333,7 +341,7 @@
                    (failed aid id t (str "its agent died" (some->> (:seon.attempt/reason a) (str ": "))))
                    :else
                    (let [rs (done-refusals (done-input idx id (:seon.attempt/results a {}) (:seon.attempt/uncontracted a #{})
-                                                           (:seon.attempt/unmerged a []) (:seon.attempt/basis-t a)))]
+                                                           (:seon.attempt/unmerged a []) (:seon.attempt/basis-t a) (:seon.attempt/plan a)))]
                      (cond
                        (and (empty? rs) merge?) {:op :land :attempt aid :task id}
                        (empty? rs) {:op :accept :attempt aid :task id}
@@ -582,7 +590,8 @@
       :done (done st)
       :spawned (if-let [ag (:id r)]
                  (one (write (assoc-in st [:flights aid :agent] ag) aid :started
-                             (task/attempt-start-tx aid (:task act) (:boot st) ag (:env act) (System/currentTimeMillis))))
+                             (task/attempt-start-tx aid (:task act) (:boot st) ag (:env act) (System/currentTimeMillis)
+                                                   (:plan (task/accumulate (get-in st [:idx :tasks]) (:task act))))))
                  (done st))
       ;; an outside agent works this attempt (seon.entrance): no turn loop; it hands it back
       :started (if (= "outside" (get-in act [:env :model]))
