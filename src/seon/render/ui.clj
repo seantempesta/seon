@@ -204,30 +204,30 @@
          [:li [:i {:class (str "dot s-" (kname s))}] (kname s) " " [:b (str n)]])]]}))
 
 (defn tile-writer
-  "The writer: tx/s (sparkline), group commit, flushes. input {:writer :series :health}."
+  "The writer: its transactions (and per batch, the sparkline), group commit, flushes; every
+  number from what the writer reports when it commits or flushes. input {:writer :series}."
   {:malli/schema [:=> [:cat :map :seon.render/env] :seon.render/out]}
-  [{:keys [writer series health]} _]
-  (let [st (when (map? health) (:state health))]
+  [{:keys [writer series]} _]
+  (let [{:keys [commits flushes]} writer]
     {:seon.render/html
      [:section {:id "t-writer" :class "tile"}
       (kicker "writer" "the only d/transact caller")
-      [:div {:class "big"} [:span {:class "num"} (fmt1 (:tx-per-s writer))] [:span {:class "unit"} "tx/s"]]
-      (sparkline (:tx series) "tone-signal")
+      [:div {:class "big"} [:span {:class "num"} (group3 (:tx-count writer))] [:span {:class "unit"} "txs"]]
+      [:div {:title "transactions per writer batch, the newest batches"} (sparkline (:tx series) "tone-signal")]
       [:dl {:class "kv"}
-       [:div {:title "batch p50: one group commit"} [:dt "batch"] [:dd (ms-str (:batch-p50-ms writer))]]
-       [:div [:dt "txs"] [:dd (group3 (:tx-count writer))]]
+       [:div {:title "batch p50: one writer step (a group commit and its flush, when one is due)"} [:dt "batch"] [:dd (ms-str (:batch-p50-ms writer))]]
        [:div {:title "main's transactions per group commit: one commit takes every transaction queued (at least 1)"} [:dt "tx/commit"] [:dd (fmt2 (:tx-per-commit writer))]]
        [:div {:title "main's group commits per flush: one flush makes every commit since the last durable"} [:dt "commits/flush"]
-        [:dd (if (and (number? (:commits writer)) (number? (:flushes st)) (pos? (:flushes st))) (fmt1 (/ (double (:commits writer)) (:flushes st))) "–")]]
-       [:div {:title "flushes to disk so far"} [:dt "flushes"] [:dd (group3 (:flushes st))]]]
+        [:dd (if (and (number? commits) (number? flushes) (pos? flushes)) (fmt1 (/ (double commits) flushes)) "–")]]
+       [:div {:title "flushes to disk so far"} [:dt "flushes"] [:dd (group3 flushes)]]]
       [:p {:class "muted explain"} "a transaction is one write to main; a commit takes every queued transaction at once; a flush makes the commits since the last one durable on disk"]]}))
 
 (defn tile-server
-  "The fork server: fork p50 (sparkline), lag, forked, its pid, standby and restarts.
-  input {:server :series :health}."
+  "The fork server: fork p50 (sparkline: ms per fork, the newest), lag, forked, its pid,
+  standby and restarts. input {:server :series}."
   {:malli/schema [:=> [:cat :map :seon.render/env] :seon.render/out]}
-  [{:keys [server series health]} _]
-  (let [st (or (:status server) :up) ps (when (map? health) (:state health))]
+  [{:keys [server series]} _]
+  (let [st (or (:status server) :up)]
     {:seon.render/html
      [:section {:id "t-server" :class (str "tile srv-" (kname st) " restarts-" (:restarts server 0))}
       [:header [:span {:class "kicker"} "fork server"]
@@ -238,7 +238,7 @@
        [:div [:dt "forked"] [:dd (group3 (:agents-forked server))]]
        [:div {:title "commit applied in the fork server after main took it, p50"} [:dt "lag"] [:dd (ms-str (:lag-ms server))]]
        [:div [:dt "pid"] [:dd (str (or (:pid server) "–"))]]
-       [:div {:title "a warm fork server forked in advance"} [:dt "standby"] [:dd (str (or (:standby ps) "–"))]]
+       [:div {:title "a warm fork server forked in advance: not reported yet (needs an event from its owner, the fork server)"} [:dt "standby"] [:dd (str (or (:standby server) "not reported"))]]
        [:div {:class (when (pos? (:restarts server 0)) "hot")} [:dt "restarts"] [:dd (str (:restarts server 0))]]]]}))
 
 (defn tile-main
@@ -255,59 +255,34 @@
      [:div [:dt "merges"] [:dd (group3 (:merges main 0))]]
      [:div {:title "definitions on main now: its :var/name facts (boot loaded those with source; tasks' merges add more)"} [:dt "vars"] [:dd (group3 (:vars main))]]]]})
 
-(defn health-cell
-  "One proc's health, as Flow observes it (its ping-map-fn): a dot by status and its own
-  numbers; :unknown (it did not answer within the bound) is shown as what it is."
-  {:malli/schema [:=> [:cat :seon.root/health :seon.render/env] :seon.render/out]}
-  [h _]
-  {:seon.render/html
-   (if (= :unknown h)
-     [:span {:class "hc s-unknown"} [:i {:class "dot s-unknown"}] [:b "unknown"] [:span {:class "muted"} " no answer to its ping"]]
-     (let [st (:status h)]
-       [:span {:class (str "hc s-" (kname st))} [:i {:class (str "dot s-" (kname st))}] [:b (kname st)]
-        [:span {:class "muted"} (str " " (group3 (:count h)) " steps")]
-        (when (map? (:state h))
-          [:span {:class "hs"} (for [[k v] (sort-by (comp str key) (:state h))
-                                     :when (or (number? v) (keyword? v) (boolean? v) (nil? v))]
-                                 [:span [:em (name k)] (if (number? v) (str v) (kname v))])])]))})
-
-(def ^:private key-numbers
-  "The numbers worth a glance in a proc's ping map, first found wins (all on hover)."
-  [:pending :queued :inflight :waiting :flights :busy :tabs :agents :tx-count :passes])
-
 (defn proc-health
-  "A proc's health as one line: status, steps per second, its key number; its whole ping
-  map on hover."
+  "A declared proc's health as one line: no defect recorded, or how many and the newest
+  (a step that threw; its error map is in root's errors)."
   {:malli/schema [:=> [:cat :seon.render/proc-health :seon.render/env] :seon.render/out]}
-  [{:keys [pid health]} _]
-  (let [unknown? (= :unknown health)
-        st (if unknown? :unknown (:status health))
-        state (when (map? health) (:state health))
-        k (some #(when (number? (get state %)) %) key-numbers)
-        title (if unknown? "no answer to its ping within 250 ms"
-                  (str/join "\n" (for [[kk v] (sort-by (comp str key) state)] (str (name kk) " " (print/text v 30)))))]
+  [{:keys [pid defects newest]} _]
+  (let [bad? (pos? (or defects 0))]
     {:seon.render/html
-     [:li {:class (str "ph s-" (kname st) (when (or unknown? (not= :running st)) " abnormal")) :title title}
-      [:i {:class (str "dot s-" (kname st))}] [:code (kname pid)]
-      [:b (kname st)]
-      [:span {:class "n"} (if (number? (:rate health)) (str (fmt1 (:rate health)) " steps/s") "")]
-      [:span {:class "n"} (if k (str (name k) " " (get state k)) "")]
-      (when (:error state) [:span {:class "bad"} (prose (:error state) 20 {:one-line? true})])]}))
+     [:li {:class (str "ph" (when bad? " abnormal s-failed"))}
+      [:i {:class (str "dot " (if bad? "s-failed" "s-running"))}] [:code (kname pid)]
+      (if bad?
+        (list [:b (str defects " defect" (when (> defects 1) "s"))] " " [:span {:class "bad"} (prose newest 30 {:one-line? true})])
+        [:span {:class "muted"} "no defect recorded"])]}))
 
 (defn tile-health
-  "Every root proc's health (Flow's ping of each, effect owners and lanes included), the
-  agents' stand-ins counted, not listed. input {:health {pid h} :sampled-ms ms}."
+  "Every declared root proc, healthy unless a problem was recorded of it: what flows, no
+  ping (a proc's defect arrives when it happens; root's view keeps the newest 20).
+  input {:health {pid {:defects :newest}}}."
   {:malli/schema [:=> [:cat :map :seon.render/env] :seon.render/out]}
-  [{:keys [health sampled-ms]} env]
-  (let [bad (count (filter (fn [[_ h]] (or (= :unknown h) (not= :running (:status h)))) health))]
+  [{:keys [health]} env]
+  (let [bad (count (filter (comp pos? :defects val) health))]
     {:seon.render/html
      [:section {:id "t-health" :class (str "tile wide" (when (pos? bad) " hot"))}
-      (kicker "health" (str (count health) " procs pinged · " (if (pos? bad) (str bad " not running") "all running")
-                            " · " (clock sampled-ms)))
+      (kicker "health" (str (count health) " procs · " (if (pos? bad) (str bad " with a defect recorded") "no defect recorded")
+                            " · from what they report, never pinged"))
       [:ul {:class "health"}
-       ;; anything not running first
-       (for [[pid h] (sort-by (fn [[pid h]] [(if (and (map? h) (= :running (:status h))) 1 0) (str pid)]) health)]
-         (render/html {:pid pid :health h} (assoc env :seon.render/schema :seon.render/proc-health)))]]}))
+       ;; a proc with a defect first
+       (for [[pid h] (sort-by (fn [[pid h]] [(if (pos? (:defects h 0)) 0 1) (str pid)]) health)]
+         (render/html (assoc h :pid pid) (assoc env :seon.render/schema :seon.render/proc-health)))]]}))
 
 (def task-state-order [:running :blocked :open :held :done :merged :cancelled])
 
@@ -336,19 +311,18 @@
   "The work as it is: every task by its observed state (what happened, not the desired
   execution), the tasks list (state, what blocks it, proofs green/red on its newest
   attempt, attempts so far, tokens; each links to its newest attempt's agent), then the
-  newest attempts. input {:rows (seon.render.proc/task-rows) :attempts :reconciler}."
+  newest attempts. input {:rows (seon.render.proc/task-rows) :attempts :main-t}."
   {:malli/schema [:=> [:cat :map :seon.render/env] :seon.render/out]}
-  [{:keys [rows attempts reconciler]} env]
+  [{:keys [rows attempts main-t]} env]
   (let [freq (frequencies (map :state (vals rows)))
         newest (take 8 (sort-by (comp - #(or (:seon.attempt/start-ms %) 0)) (vals attempts)))
         older (print/more (count attempts) (count newest) "older, on main: (seon.task/attempts (deref (:conn sys))) at root's REPL")
         tokens (reduce + 0 (map :tokens (vals rows)))
-        st (when (map? reconciler) (:state reconciler))
+        running (count (filter #(= :running (:seon.attempt/status %)) (vals attempts)))
         rank (zipmap task-state-order (range))]
     {:seon.render/html
      [:section {:id "t-tasks" :class "tile wide"}
-      (kicker "reconciler · tasks" (str "main t " (group3 (:t st)) " · " (group3 (:seen st)) " commits seen · "
-                                        (:flights st 0) " in flight"))
+      (kicker "reconciler · tasks" (str "main t " (group3 main-t) " · " running " attempt" (when (not= 1 running) "s") " running"))
       [:div {:class "states"}
        [:span [:b (str (count rows))] " tasks"]
        (for [k task-state-order :let [n (get freq k 0)] :when (pos? n)]
@@ -399,8 +373,9 @@
      (if (and start-ms end-ms) (group3 (- end-ms start-ms)) "–")]]})
 
 (defn tile-fx
-  "The effect owners (FX1): each kind's lanes, busy and done, its queue, and what was
-  spent by budget key (the model owner's admission and tokens). input {owner-pid health}."
+  "The effect owners (FX1), each with the defects recorded of it. Their lanes, busy, done,
+  queue and spending (the model owner's admission and tokens) are not reported yet: no
+  event carries them (each owner is to emit them when they change). input {owner-pid health}."
   {:malli/schema [:=> [:cat :map :seon.render/env] :seon.render/out]}
   [owners _]
   {:seon.render/html
@@ -409,15 +384,12 @@
     (if (empty? owners)
       [:p {:class "muted"} "no effect owners declared"]
       [:ul {:class "fx"}
-       (for [[pid h] (sort-by (comp str key) owners) :let [s (when (map? h) (:state h))]]
-         [:li [:code (kname pid)]
-          (if (= :unknown h)
-            [:span {:class "bad"} "unknown"]
-            [:span {:class "muted"} (str (:busy s 0) "/" (:lanes s 0) " busy · " (group3 (:done s)) " done · "
-                                         (:queued s 0) " queued")])
-          (when (seq (:spent s))
-            [:span {:class "spent" :title "spent by budget key"}
-             (for [[k v] (sort-by (comp - #(if (number? %) % 0) val) (:spent s))] [:span [:em (kname k)] (str v)])])])])]})
+       (for [[pid h] (sort-by (comp str key) owners)]
+         [:li [:code (kname pid)] " "
+          (if (pos? (:defects h 0))
+            [:span {:class "bad"} (str (:defects h) " defects · ") (prose (:newest h) 25 {:one-line? true})]
+            [:span {:class "muted"} "no defect recorded"])])
+       [:li {:class "muted"} "lanes, busy, done, queued, spent: not reported yet (needs an event from each owner)"]])]})
 
 (defn tile-errors
   "Root's own defects (a step that threw, recorded as data by the error reader), the
@@ -660,17 +632,16 @@
     [:pre (or text "")]]})
 
 (defn web-stats
-  "The render step's own numbers: passes, tabs, ms per pass, patches, bytes out."
+  "The tabs open. The render step's own numbers (passes, ms, patches) are not shown here: a
+  meter that changes with every pass it is shown by would patch itself (AGENTS: a
+  measurement that disturbs itself); they are at /render.edn."
   {:malli/schema [:=> [:cat :map :seon.render/env] :seon.render/out]}
   [w _]
   {:seon.render/html
    [:div {:id "webstats" :class "webstats"}
     [:span {:class "live-dot"}]
-    [:span {:title "render passes"} (str "pass " (:passes w 0))]
-    [:span (str (:tabs w 0) " tab" (when (not= 1 (:tabs w)) "s"))]
-    [:span {:title "the last pass that changed something: render ms"} (str "render " (ms-str (:render-ms w)))]
-    [:span (str (:patches w 0) " patches")]
-    [:span (str (bytes-str (:bytes-per-s w)) "/s out")]]})
+    [:span (str (:tabs w 0) " tab" (when (not= 1 (:tabs w)) "s") " open")]
+    [:a {:href "/render.edn" :title "the render step's own numbers: passes (one per change, never on a clock), ms per pass, patches"} "render stats"]]})
 
 ;;; --- root's layout ------------------------------------------------------------------
 
@@ -689,7 +660,7 @@
   {:seon.render/html
    (if (empty? lines)
      [:section {:id "problems" :class "problems ok"} [:span {:class "dot s-running"}] [:b "no problems"]
-      [:span {:class "muted"} " every proc running · no defects · no red live agents · no agent died"]]
+      [:span {:class "muted"} " no proc defect · no problem recorded on main · no red live agent · no agent died"]]
      [:section {:id "problems" :class "problems bad"}
       (kicker (str (count lines) " problem" (when (not= 1 (count lines)) "s")) "most urgent first · the same lines root's context leads with")
       [:ul (for [l lines] [:li l])]])})
@@ -766,11 +737,11 @@
      (into [(u "problems" (:problems sys []) `tile-problems)
             (u "t-agents" {:cells (mapv (fn [id] (let [a (get agents id)] [id (shown-status (ended-as a id agent-attempt)) (count (:evals a))])) order)
                            :off (- (count agents) (count order)) :retire-ms (:retire-ms sys)} `tile-agents)
-            (u "t-writer" {:writer writer :series (select-keys series [:tx]) :health (get health :writer)} `tile-writer)
-            (u "t-server" {:server server :series (select-keys series [:fork]) :health (get health :fork-server)} `tile-server)
+            (u "t-writer" {:writer writer :series (select-keys series [:tx])} `tile-writer)
+            (u "t-server" {:server server :series (select-keys series [:fork])} `tile-server)
             (u "t-main" {:main main :series (select-keys series [:datoms])} `tile-main)
-            (u "t-health" {:health procs :sampled-ms (:health-ms sys)} `tile-health)
-            (u "t-tasks" {:rows (:task-rows sys) :attempts attempts :reconciler (get health :reconciler)} `tile-tasks)
+            (u "t-health" {:health procs} `tile-health)
+            (u "t-tasks" {:rows (:task-rows sys) :attempts attempts :main-t (:t main)} `tile-tasks)
             (u "t-fx" fx `tile-fx)
             (u "t-errors" {:root-errors root-errors :root-errors-total (:root-errors-total sys) :boot boot :store store} `tile-errors)
             (u "ctx" (:context sys) `context-panel)

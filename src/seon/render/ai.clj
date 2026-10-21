@@ -39,16 +39,13 @@
   [freq] (str/join " " (for [[k n] (sort-by (comp str key) freq)] (str (kn k) " " n))))
 
 (defn problems
-  "What is wrong now, most urgent first: procs not running (or not answering), root's
-  defects, the problems main recorded (seon.problems/report, by class), live agents with
+  "What is wrong now, most urgent first: root's procs' defects (what flows: no proc is
+  pinged), the problems main recorded (seon.problems/report, by class), live agents with
   red tests or a refused merge, agents whose process died. An
   agent root stopped after its attempt finished is not a problem."
   {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}
-  [{:keys [health root-errors root-errors-total agents agent-attempt recorded]}]
-  (let [bad (for [[pid h] (sort-by (comp str key) health)
-                  :when (or (= :unknown h) (not= :running (:status h)))]
-              (str "proc " (kn pid) " " (if (= :unknown h) "UNKNOWN (no answer to its ping)" (kn (:status h)))))
-        n-errs (or root-errors-total (count root-errors))
+  [{:keys [root-errors root-errors-total agents agent-attempt recorded]}]
+  (let [n-errs (or root-errors-total (count root-errors))
         errs (concat
                (for [[i e] (reverse (take-last 3 (map-indexed vector root-errors)))]
                  (str "defect in " (kn (:pid e)) ": " (line (:message e) 50 (list :message (list 'nth '(:root-errors (seon.root/state sys)) i)))))
@@ -83,7 +80,7 @@
                                (pr-str (select-keys r [:producer :owner-ns])))
                            40))
                    (when-let [ts (seq (:answered-by r))] (str " (answered by " (str/join ", " ts) ")"))))]
-    (vec (concat bad errs rec ags))))
+    (vec (concat errs rec ags))))
 
 (defn- section-work {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}
   [{:keys [tasks attempts task-rows]}]
@@ -118,7 +115,7 @@
   ;; how each agent is in the page's words: an agent root stopped after its attempt
   ;; finished ended, it was not killed
   [(str (count agents) " agents (" (counts (frequencies (for [[id a] agents] (ui/shown-status (ui/ended-as a id (or agent-attempt {})))))) ")")
-   (str "writer " (ui/fmt1 (:tx-per-s writer)) " tx/s, " (:tx-count writer 0) " txs, batch p50 " (ui/ms-str (:batch-p50-ms writer)))
+   (str "writer " (:tx-count writer 0) " txs, " (ui/fmt2 (:tx-per-commit writer)) " per commit, " (:flushes writer 0) " flushes, batch p50 " (ui/ms-str (:batch-p50-ms writer)))
    (str "fork server " (kn (:status server)) " pid " (:pid server) ", fork p50 " (ui/ms-str (:fork-ms-p50 server))
         ", " (:agents-forked server 0) " forked, " (:restarts server 0) " restarts")
    (str "main t " (:t main) ", " (:datoms main "?") " datoms, " (:merges main 0) " merges")])
@@ -153,7 +150,7 @@
   [sys env]
   (let [budget (or (:seon.render/budget env) 700)
         problems (problems sys)
-        sections [["problems" (if (seq problems) problems [(str "none: " (count (:health sys)) " procs running, no defects, no red agents")])]
+        sections [["problems" (if (seq problems) problems [(str "none: no defect in root's " (count (:health sys)) " procs, no problem recorded on main, no red live agent")])]
                   ["work" (section-work sys)]
                   ["load" (section-load sys)]
                   ["costliest functions in the newest evaluations" (section-costly sys)]

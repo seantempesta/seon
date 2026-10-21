@@ -5,18 +5,18 @@
   (state, in, msg) -> [state' outputs], and every effect is a message:
 
     in :events   every event of root (a tap of the api's events), drained per step
-    in :tick     an edge sampler's beat (every SAMPLE-MS): every root proc's health, as
-                 Flow's ping of it (blocking reads belong to the edge, not the step)
     in :answers  the api's answers to this proc's requests (root's view; main's db; an
                  agent's branch db), and to the web proc's calls
     in :from-web the views open in tabs, and requests for a page or a keyframe
     out :to-api  requests ({:op :request :req .. :route [:render :answers] :tag ..})
     out :to-web  patches per view, keyframes, pages, the agents' index
 
-  A pass: an event (or a beat) asks the api for its view; while that request is in
+  No beat and no ping (owner, 2026-10-21: "a reactive system where we know if there's a
+  problem with the proc"): health is what flows, each proc's recorded defects; a value no
+  event carries is its owner's to emit. A pass: an event asks the api for its view; while that request is in
   flight, more events only queue, so a burst becomes one pass (the round trip is the
   coalescing window: no step sleeps). The answer is joined with health, main's tasks and
-  attempts, and the series into the system value (:seon.render/system); its declared
+  attempts, and the series (one point per change) into the system value (:seon.render/system); its declared
   render (seon.render.ui/system-page) answers the layout and its units. Then, per unit:
   inputs before render (an unchanged input renders nothing), bytes before send (an
   unchanged fragment sends nothing). The web proc serializes each patch once and fans it
@@ -28,40 +28,10 @@
             [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.ai :as ai]
             [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.context :as context] [seon.print :as print]))
 
-(def SAMPLE-MS "The sampler's beat: health pings and the tiles' series." 500)
 (def EVENT-CAP "Events the stream keeps." 60)
-(def SERIES-CAP "Points a sparkline keeps." 60)
+(def SERIES-CAP "Points a sparkline keeps: the newest changes (a writer batch, a fork, a main commit)." 60)
 (def RETIRE-MS "An ended agent leaves the grid this long after it ended." 90000)
 (def HISTORY-CAP "Evaluations an agent's page shows." 100)
-
-;;; --- the edge sampler ---------------------------------------------------------------
-
-(defn- sample!
-  "One beat: every root proc's health (Flow's ping of it, :unknown past bound-ms), the
-  agents' stand-ins left out (their status is the api's view)."
-  {:malli/schema [:=> [:cat :any [:sequential :keyword] :int] :map]}
-  [g pids bound-ms]
-  (into {} (for [pid pids]
-             [pid (if-let [m (flow/ping-proc g pid :timeout-ms bound-ms)]
-                    {:status (::flow/status m) :count (::flow/count m) :state (::flow/state m)}
-                    :unknown)])))
-
-(defn- start-sampler!
-  "The edge reader: a thread whose blocking reads (the clock, each proc's ping) feed the
-  :tick in-port (a sliding buffer of one: a late beat is replaced, never queued). It ends
-  when stop is delivered."
-  {:malli/schema [:=> [:cat :any :any :seon.host/chan :seon.host/chan] :any]}
-  [graph-p system-p tick stop]
-  (doto (Thread. (fn []
-                   (loop []
-                     (when-not (a/poll! stop)
-                       (let [g @graph-p
-                             pids (sort-by str (keys (:procs @system-p)))
-                             t0 (lib/now-ns)
-                             h (sample! g pids 250)]
-                         (a/>!! tick {:health h :ms (System/currentTimeMillis) :ping-ms (lib/ms-since t0)})
-                         (let [[_ c] (a/alts!! [stop (a/timeout SAMPLE-MS)])] (when-not (= c stop) (recur))))))))
-    (.setDaemon true) (.start)))
 
 ;;; --- requests -------------------------------------------------------------------------
 
@@ -103,11 +73,6 @@
 
 ;;; --- the system value ------------------------------------------------------------------
 
-(defn- recent-tx-per-s
-  "Writer transactions in the last second, from the api's window of [ns n]."
-  {:malli/schema [:=> [:cat [:maybe [:sequential :any]] :int] :double]}
-  [recent now] (double (reduce + 0 (keep (fn [[t n]] (when (< (- now t) 1000000000) n)) recent))))
-
 (defn- order
   "The grid's agents: by id, the ones ended over RETIRE-MS ago left out."
   {:malli/schema [:=> [:cat :map :int] [:vector :keyword]]}
@@ -128,6 +93,18 @@
       st
       (assoc st :order (order agents now-ms) :order-agents agents :order-at now-ms))))
 
+(defn- proc-health-of
+  "Each declared root proc (the built system's, once it is) with the defects root's view
+  holds of it: {pid {:defects n :newest message}}; the agents' stand-ins are not procs here."
+  {:malli/schema [:=> [:cat :map [:sequential :map]] :map]}
+  [st root-errors]
+  (let [sysp (:system-p st)
+        pids (when (and sysp (realized? sysp)) (keys (:procs @sysp)))
+        by (group-by :pid root-errors)]
+    (into (sorted-map-by #(compare (str %1) (str %2)))
+          (for [pid pids :when (keyword? pid)]
+            [pid (let [es (get by pid)] (cond-> {:defects (count es)} (seq es) (assoc :newest (:message (peek (vec es))))))]))))
+
 (defn system-value
   "The whole system as one value (:seon.render/system), from the render proc's state:
   root's view (the api's), every proc's health, main (t, datoms, tasks, attempts), the
@@ -144,19 +121,25 @@
     {:agents agents
      :order (or (:order st) (order agents now-ms))
      :writer (-> (:writer v) (dissoc :recent :batch-ms)
-                 (assoc :tx-per-s (recent-tx-per-s (get-in v [:writer :recent]) now-ns)
-                        :batch-p50-ms (lib/p50 (get-in v [:writer :batch-ms])) :tx-per-commit tpc :commits commits))
+                 (assoc :batch-p50-ms (lib/p50 (get-in v [:writer :batch-ms])) :tx-per-commit tpc :commits commits))
      :server (assoc (:server v) :lag-ms (lib/p50 lag-ms) :fork-ms-p50 (lib/p50 fork-ms))
      :store (cond-> (:store v) batches (assoc :batches batches :commits commits :tx-per-commit tpc))
      :boot (:boot v) :root-errors (:root-errors v []) :root-errors-total (:root-errors-total v 0)
-     :health (:health st {}) :health-ms (:health-ms st)
+     ;; health is what flows: each declared proc with the defects root recorded of it (a
+     ;; step that threw); no ping, no beat
+     :health (proc-health-of st (:root-errors v []))
      ;; merges into main: root's merge! of a branch (its events) and the reconciler's
      ;; merged attempts (main's facts)
      :main (assoc (:main st {}) :merges (+ (:merges st 0) (count (filter #(= :merged (:seon.attempt/status %)) (vals (:attempts st))))))
      :recorded (:recorded st)
      :tasks (:tasks st {}) :attempts (:attempts st {}) :task-rows (:task-rows st {}) :agent-attempt (:agent-attempt st {})
-     :series (:series st {}) :events (:events st []) :events-seen (:ev-seq st 0)
-     :web (:web-sample st {})
+     ;; one point per change, from the data itself: transactions per writer batch, ms per
+     ;; fork, datoms per main commit
+     :series {:tx (vec (take-last SERIES-CAP (map second (get-in v [:writer :recent]))))
+              :fork (vec (take-last SERIES-CAP (get-in v [:stats :fork-ms])))
+              :datoms (:datoms-series st [])}
+     :events (:events st []) :events-seen (:ev-seq st 0)
+     :web {:tabs (:tabs st 0)}
      :retire-ms RETIRE-MS
      :now-ms now-ms}))
 
@@ -196,8 +179,11 @@
   [st db]
   (if (= (:max-tx db) (get-in st [:main :t]))
     st
-    (let [tasks (task/tasks db) attempts (task/attempts db)]
-      (assoc st :main {:t (:max-tx db) :datoms (count (d/datoms db :eavt)) :vars (count (d/datoms db :aevt :var/name))}
+    (let [tasks (task/tasks db) attempts (task/attempts db)
+          n (count (d/datoms db :eavt))]
+      (assoc st :main {:t (:max-tx db) :datoms n :vars (count (d/datoms db :aevt :var/name))}
+             ;; one point per main commit this proc read
+             :datoms-series (vec (take-last SERIES-CAP (conj (:datoms-series st []) (double n))))
              :main-db db :tasks tasks :attempts attempts
              ;; the problems recorded on main (D2's one read; ~2.7 ms, costs the problems)
              :recorded (problems/report db)
@@ -464,25 +450,6 @@
   {:malli/schema [:=> [:cat :any :seon.host/chan :int] [:vector :any]]}
   [x ch n] (loop [acc [x]] (if-let [y (and (< (count acc) n) (a/poll! ch))] (recur (conj acc y)) acc)))
 
-(defn- sample
-  "A beat: health, and the series the tiles draw (one point a beat)."
-  {:malli/schema [:=> [:cat :map :map] :map]}
-  [st {:keys [health ms ping-ms]}]
-  (let [v (:view st)
-        push (fn [xs x] (vec (take-last SERIES-CAP (conj (or xs []) (double (or x 0))))))]
-    (-> st (assoc :health (let [prev (:health st) dt (/ (- ms (:health-ms st ms)) 1000.0)]
-                            ;; each proc's steps per second since the last beat
-                            (into {} (for [[pid h] health]
-                                       [pid (if (and (map? h) (map? (get prev pid)) (pos? dt))
-                                              (assoc h :rate (/ (- (:count h 0) (:count (get prev pid) 0)) dt))
-                                              h)])))
-                  :health-ms ms :ping-ms ping-ms)
-        (update-in [:series :tx] push (recent-tx-per-s (get-in v [:writer :recent]) (lib/now-ns)))
-        (update-in [:series :fork] push (lib/p50 (get-in v [:stats :fork-ms])))
-        (update-in [:series :datoms] push (get-in st [:main :datoms]))
-        (assoc :web-sample {:passes (:passes st 0) :render-ms (:render-ms st) :patches (:patches st 0)
-                            :tabs (:tabs st 0) :bytes-per-s (:bytes-per-s st 0)}))))
-
 (defn- on-event
   "An event: kept for the stream (merges counted), and the view asked for."
   {:malli/schema [:=> [:cat :map :map] :map]}
@@ -518,8 +485,8 @@
 (defn render-proc
   "Root's render proc (see the namespace doc)."
   {:malli/schema :seon.step/step-fn}
-  ([] {:params {:events-mult "the api's events, a mult this proc taps" :graph "a promise of the root graph"
-                :system "a promise of the built system (its procs are pinged)"}
+  ([] {:params {:events-mult "the api's events, a mult this proc taps" :graph "a promise of the root graph (unused: nothing is pinged)"
+                :system "a promise of the built system (its declared procs, for the health tile)"}
        :ins {:answers "the api's answers" :from-web "views open, page and keyframe requests"}
        :outs {:to-api "requests to the api" :to-web "patches, keyframes, pages, the agents' index"}
        ;; a pass renders what changed; it never waits
@@ -528,24 +495,20 @@
                               :pending (count (:pending st)) :rendered (get-in st [:counts :rendered] 0)
                               :same (get-in st [:counts :same] 0) :pass-p50-ms (lib/p50 (:pass-ms st))})})
   ([args]
-   (let [events (a/chan (a/sliding-buffer 4096))
-         tick (a/chan (a/sliding-buffer 1))
-         stop (a/promise-chan)]
+   ;; no beat: a pass happens on an event, an api answer or a tab's request, never on a clock
+   (let [events (a/chan (a/sliding-buffer 4096))]
      (a/tap (:events-mult args) events)
-     (start-sampler! (:graph args) (:system args) tick stop)
-     {:events-ch events :stop stop :mult (:events-mult args) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{}
-      :new-events [] :events [] :event-rows [] :views {} :zoom {} :series {} :merges 0
-      ::flow/in-ports {:events events :tick tick}}))
+     {:events-ch events :mult (:events-mult args) :system-p (:system args) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{}
+      :new-events [] :events [] :event-rows [] :views {} :zoom {} :merges 0
+      ::flow/in-ports {:events events}}))
   ([st tr]
    (when (= tr ::flow/stop)
-     (a/put! (:stop st) true)
      (a/untap (:mult st) (:events-ch st)))
    st)
   ([st in m]
    (let [o (volatile! {})
          st (case in
               :events (if (nil? m) st (ask-state (reduce on-event st (drain m (:events-ch st) 2048)) o))
-              :tick (if (nil? m) st (ask-state (sample st m) o))
               :answers (if-let [kind (get-in st [:pending (:tag m)])]
                          (answered (-> st (update :pending dissoc (:tag m)) (update :asked dissoc (:tag m))) o kind (:r m))
                          ;; the web proc's calls are answered here: shown in the stream
@@ -559,7 +522,7 @@
                                       o)
                            st))
               :from-web (case (:op m)
-                          :views (ask-state (assoc st :watch (:views m) :tabs (:tabs m) :bytes-per-s (:bytes-per-s m)) o)
+                          :views (ask-state (assoc st :watch (:views m) :tabs (:tabs m)) o)
                           :page (if (and (get-in st [:views (:view m)]) (contains? (:watch st) (:view m)))
                                   (do (vswap! o update :to-web (fnil conj []) {:op :page :k (:k m) :view (:view m) :html (page-html st (:view m))}) st)
                                   (ask-state (assoc-in st [:waiting (:k m)] (:view m)) o))

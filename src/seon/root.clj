@@ -374,6 +374,7 @@
       :clone-failed (to-agent st (:agent m) {:op :failed :error (:error m)})
       :ended (end-agent st o m)
       :writer (view! st (fn [v] (-> v (assoc-in [:writer :tx-count] (:tx-count m))
+                                    (assoc-in [:writer :flushes] (:flushes m 0))
                                     (update-in [:writer :batch-ms] lib/push-window (:batch-ms m) 200)
                                     (update-in [:writer :recent] #(lib/push-window % [(lib/now-ns) (:n-tx m)] 2000))
                                     (update-in [:stats :batches] (fnil inc 0))

@@ -36,17 +36,17 @@
   {:agents {:a1 {:status :idle :tests {:pass 1 :fail 1 :error 0 :reports [{:type :fail :var 'agent.a1/c}]}}
             :a2 {:status :dead}
             :a3 {:status :killed :tests {:pass 0 :fail 3 :error 0}}}
-   :health {:api {:status :running :count 3 :state {}} :writer :unknown}
+   :health {:api {:defects 0} :render {:defects 1 :newest "boom"}}
    :writer {:tx-count 4 :tx-per-s 2.0} :server {:status :up :pid 7} :main {:t 9 :datoms 100}
    :tasks {} :attempts {} :events [] :root-errors [{:pid :render :message "boom"}] :now-ms 0})
 
 (deftest root-context
   (let [text (r/ai sys {:seon.render/schema :seon.render/system :seon.render/budget 700})
         lines (str/split-lines text)]
-    (testing "problems first: the proc that did not answer, root's defect, the live red agent, the dead one"
+    (testing "problems first: root's defect, the live red agent, the dead one; no proc is pinged"
       (is (= "# problems" (second lines)))
       (is (not (re-find #"\d\d:\d\d:\d\d" (first lines))) "no clock: an unchanged system gives the same text")
-      (is (some #(str/includes? % "proc writer UNKNOWN") lines))
+      (is (not-any? #(str/includes? % "UNKNOWN") lines) "no ping, so no unanswered ping")
       (is (some #(str/includes? % "defect in render: boom") lines))
       (is (some #(str/includes? % "a1 idle: tests 1 pass 1 fail 0 error (agent.a1/c)") lines))
       (is (some #(str/includes? % "a2 dead: its process died") lines)))
@@ -69,7 +69,7 @@
 
 (defn- fresh-state []
   {:rid 1 :pending {} :watch #{:root} :waiting {} :kf-wanted #{} :new-events [] :events [] :event-rows []
-   :views {} :zoom {} :series {} :merges 0 :health {:api {:status :running :count 1 :state {}}} :main {:t 1}})
+   :views {} :zoom {} :merges 0 :main {:t 1}})
 
 (deftest render-step
   (let [[st1 out1] (answer (fresh-state) view0)
@@ -335,10 +335,32 @@
     (is (re-find #"…\+\d+ chars · the whole value: result/h0 at its REPL" row))))
 
 (deftest the-writer-tile-counts-per-commit-and-per-flush
-  (let [html (h/html (:seon.render/html (ui/tile-writer {:writer {:tx-per-commit 1.0 :commits 40 :tx-count 40} :series {}
-                                                         :health {:status :running :state {:flushes 10}}} {})))]
+  (let [html (h/html (:seon.render/html (ui/tile-writer {:writer {:tx-per-commit 1.0 :commits 40 :tx-count 40 :flushes 10} :series {}} {})))]
     (is (str/includes? html ">tx/commit<"))
     (is (str/includes? html "<dd>1.00</dd>"))
     (is (str/includes? html ">commits/flush</dt><dd>4.0<") "40 commits over 10 flushes")
     (is (str/includes? html "a flush makes the commits since the last one durable on disk"))
     (is (not (str/includes? html "tx/batch")))))
+
+
+;; ---- no beat: health is what flows (owner, 2026-10-21) --------------------------------------
+
+(deftest render-proc-has-no-beat
+  (let [d (p/render-proc)]
+    (is (not (contains? (:ins d) :tick)) "no beat in-port")
+    (is (= #{:answers :from-web} (set (keys (:ins d)))))
+    (is (nil? (resolve 'seon.render.proc/SAMPLE-MS)))
+    (is (nil? (resolve 'seon.render.proc/start-sampler!))))
+  (testing "health is each declared proc's recorded defects: no ping, no steps/s"
+    (let [html (h/html (:seon.render/html (ui/tile-health {:health {:api {:defects 0} :render {:defects 2 :newest "boom"}}} {})))]
+      (is (str/includes? html "2 procs · 1 with a defect recorded"))
+      (is (str/includes? html "2 defects"))
+      (is (str/includes? html "no defect recorded"))
+      (is (not (str/includes? html "steps/s")))
+      (is (not (str/includes? html "pinged ·")))))
+  (testing "a proc's health from root's view: its declared procs, its defects by pid"
+    (let [sysp (doto (promise) (deliver {:procs {:api {} :render {} :fx/model {}}}))
+          h (#'p/proc-health-of {:system-p sysp} [{:pid :render :message "a"} {:pid :render :message "b"}])]
+      (is (= {:defects 2 :newest "b"} (get h :render)))
+      (is (= {:defects 0} (get h :api)))
+      (is (= 3 (count h))))))
