@@ -1,0 +1,23 @@
+;; Every aero tag the config may use, read under Jolt by seon.config-test (one deftest each).
+{:env #env JOLT_PWD
+ :env-unset #env SEON_CONFIG_TEST_NEVER_SET
+ :envf #envf ["%s/x" JOLT_PWD]
+ :or-unset #or [#env SEON_CONFIG_TEST_NEVER_SET 7]
+ :or-set #or [#env JOLT_PWD 7]
+ :long #long "42"
+ :long-or #long #or [#env SEON_CONFIG_TEST_NEVER_SET "5"]
+ :double #double "1.5"
+ :keyword #keyword "abc"
+ :boolean #boolean "true"
+ :profile #profile {:default :d :deepseek :ds}
+ :target {:a 9}
+ :ref #ref [:target :a]
+ :ref-or #long #or [#env SEON_CONFIG_TEST_NEVER_SET #ref [:target :a]]
+ :include #include "tags-included.edn"
+ :join #join ["a" #long "2" "c"]
+ :merge #merge [{:a 1} {:b 2}]
+ :read-edn #read-edn "{:x [1 2]}"
+ :prop #prop user.dir
+ :user #user {"no-such-user-xyz" :other :default :someone}
+ :hostname #hostname {"no-such-host-xyz" :other :default :somewhere}
+ :checkout #seon/checkout "resources/seon/system.edn"}

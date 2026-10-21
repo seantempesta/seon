@@ -16,7 +16,7 @@
   Every number shown is measured by the system and carried in the value; nothing here
   invents one."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [clojure.walk]
+  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [clojure.walk] [seon.config :as config]
             [seon.render :as render] [seon.print :as print] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader]))
 
 ;;; --- small formatting helpers -------------------------------------------------
@@ -82,8 +82,8 @@
   (when-let [m (print/more total shown where)] [:li {:class "more muted"} m]))
 
 (def utc-offset-ms
-  "Jolt has no time zones: the local offset comes from SEON_UTC_OFFSET (`date +%z`)."
-  (let [z (or (System/getenv "SEON_UTC_OFFSET") "+0000")
+  "Jolt has no time zones: the local offset is :seon.config.web/utc-offset (`date +%z`)."
+  (let [z (config/value :seon.config.web/utc-offset)
         sign (if (str/starts-with? z "-") -1 1)]
     (* sign (+ (* (parse-long (subs z 1 3)) 3600000) (* (parse-long (subs z 3 5)) 60000)))))
 
@@ -412,6 +412,31 @@
      [:div [:dt "store"] [:dd (kname (:backend store))]]
      [:div {:title "main's group commits so far (the writer tile has transactions per commit and commits per flush)"} [:dt "commits"] [:dd (group3 (:commits store))]]]]})
 
+;;; --- the config ------------------------------------------------------------------
+
+(defn config-panel
+  "The config in force (the declared HTML render of :seon.config/config), as root wrote it
+  on main: every key grouped by its area, its value whole, its unit, and its schema's
+  description on hover. Where each value comes from (unit, provenance, its bound) is
+  written beside it in resources/seon/config/default.edn."
+  {:malli/schema [:=> [:cat :seon.config/config :seon.render/env] :seon.render/out]}
+  [c _]
+  (let [prop (fn [k p] (let [f (get config/schema-forms k)
+                              f (if (and (vector? f) (= :and (first f))) (second f) f)]
+                          (when (vector? f) (some #(when (map? %) (get % p)) (take 2 (rest f))))))
+        groups (group-by (comp namespace key) (sort-by (comp str key) c))]
+    {:seon.render/html
+     [:section {:id "t-config" :class "tile wide config"}
+      (kicker "config" (str (count c) " keys in force on main · resources/seon/config/default.edn · profile " (name (config/profile))))
+      [:div {:class "cfg-groups"}
+       (for [[g kvs] (sort-by key groups)]
+         [:dl {:class "cfg"}
+          [:dt {:class "cfg-area"} (str/replace g #"^seon\.config\.?" "")]
+          (for [[k v] kvs]
+            [:div {:title (str (prop k :description))}
+             [:dt (name k)]
+             [:dd [:code (pr-str v)] (when-let [u (prop k :seon.config/unit)] [:span {:class "muted"} " " u])]])])]]}))
+
 ;;; --- agent cards --------------------------------------------------------------
 
 (defn- test-dots {:malli/schema [:=> [:cat [:maybe :map]] :any]}
@@ -727,6 +752,7 @@
         [:div {:class "tiles"} (slot "t-agents") (slot "t-writer") (slot "t-server") (slot "t-main")]
         [:div {:class "tiles two"} (slot "t-health") (slot "t-tasks")]
         [:div {:class "tiles three"} (slot "t-fx") (slot "t-errors")]
+        (slot "t-config")
         [:div {:id "grid" :class "grid"} (for [id order] (slot (str "card-" (dom-id id))))]]
        [:aside {:class "side"}
         (slot "ctx")
@@ -750,9 +776,11 @@
             (assoc (u "events" (:event-rows sys []) `events-list) :keyframe-only true)
             (u "events-n" {:kept (count (:events sys)) :seen (:events-seen sys 0)} `events-count)
             (u "webstats" web `web-stats)]
+           ;; the config root wrote on main, by its schema's declared render (none before boot's fact)
+           (concat (when-let [c (:config sys)] [{:id "t-config" :input c :schema :seon.config/config}])
            (for [id order]
              {:id (str "cb-" (dom-id id)) :input (ended-as (get agents id) id agent-attempt) :agent id :schema :seon.render/agent
-              :shell (str "card-" (dom-id id)) :container "#grid"}))}))
+              :shell (str "card-" (dom-id id)) :container "#grid"})))}))
 
 ;;; --- one agent, zoomed -----------------------------------------------------------------
 

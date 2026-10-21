@@ -176,19 +176,19 @@
   (let [n (inc (:next-id st))
         id (keyword (str "a" n))
         ;; the entity ids this agent mints on its branch (its own block: L1's lease)
-        lease (+ (:lease-base st) (* n cfg/EID-LEASE))
+        lease (+ (:lease-base st) (* n (cfg/value :seon.config.store/eid-lease)))
         ;; named under root's main, so roots sharing a store never share a branch (seon.db/on-main)
         branch (pdb/on-main (pdb/conn-main (:conn st)) (or branch (keyword (str "agent-" n))))
         [r a] (sock/socketpair)
         ;; fiber pumps: an end costs no thread of its own (root may run a thousand agents)
-        end (remote/open r {:codec {:encode codec/encode :decode codec/decode} :pump :fiber :buf cfg/AGENT-BUF})]
+        end (remote/open r {:codec {:encode codec/encode :decode codec/decode} :pump :fiber :buf (cfg/value :seon.config.agent/inbox-size)})]
     [(-> st (assoc :next-id n ::update true)
          (assoc-in [:agents id] {:branch branch :lease lease})
          (assoc-in [:agent-procs id] {:proc agent-launcher
                                       :args {:id id :end end :branch branch
                                              :to-writer (:to-writer st) :back (:back st) :events (:events st)
                                              :fx-kinds (system/fx-owners (get-in st [:system :procs]))}
-                                      :chan-opts {:in {:buf-or-n cfg/AGENT-BUF}}})
+                                      :chan-opts {:in {:buf-or-n (cfg/value :seon.config.agent/inbox-size)}}})
          (assoc-in [:view :agents id] (cond-> {:branch branch :status :spawning :task task :pid nil
                                                :forked-ms nil :mem-mb nil :evals [] :tests nil}
                                         cloned-from (assoc :cloned-from cloned-from))))
@@ -252,13 +252,13 @@
                (cond
                  holder (reply! st p (refused 'seon.root/spawn! (str "branch " (:branch opts) " is held by live agent " holder)
                                               {:branch (:branch opts) :agent holder}))
-                 (>= (count (:agents st)) cfg/MAX-AGENTS) (reply! st p (refused 'seon.root/spawn! "too many live agents" {:max cfg/MAX-AGENTS}))
+                 (>= (count (:agents st)) (cfg/value :seon.config.root/max-agents)) (reply! st p (refused 'seon.root/spawn! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)}))
                  :else (let [[st aid fd] (start-agent st opts)
                              {:keys [branch lease]} (get-in st [:agents aid])]
                          (step/out! o :to-writer {:op :spawn :agent aid :branch branch :lease lease :ns (lib/now-ns) :fd fd :dest {:spawn aid}})
                          (reply! st p {:id aid}))))
       :clone (let [parent (:parent m)]
-               (if (or (nil? (get-in st [:agents parent])) (>= (count (:agents st)) cfg/MAX-AGENTS))
+               (if (or (nil? (get-in st [:agents parent])) (>= (count (:agents st)) (cfg/value :seon.config.root/max-agents)))
                  (reply! st p (refused 'seon.root/clone! (str "no live agent " parent) {:ok false}))
                  (let [[st aid fd] (start-agent st (merge {:task (get-in st [:view :agents parent :task])} (:opts m) {:cloned-from parent}))
                        {:keys [branch lease]} (get-in st [:agents aid])
@@ -407,7 +407,7 @@
                                             (System/currentTimeMillis))))
       ;; the stall timer: each agent with an eval in flight checks its own quiet time
       :stall-check (let [now (System/currentTimeMillis)]
-                     (reduce (fn [st id] (to-agent st id {:op :stall? :now-ms now :dial-ms cfg/STALL-MS})) (dissoc st ::stall-due) (::busy st)))
+                     (reduce (fn [st id] (to-agent st id {:op :stall? :now-ms now :dial-ms (:stall-ms st)})) (dissoc st ::stall-due) (::busy st)))
       :kill-all (reduce (fn [st aid] (-> st (set-agent aid {:status :killed}) (to-agent aid {:op :kill}))) st (keys (:agents st)))
       st)))
 
@@ -450,19 +450,19 @@
    (let [o (volatile! {})
          ;; this message, then whatever else is already queued at the entrance and the back door
          st (loop [st (api-one st o in m) k 1]
-              (if (< k cfg/API-BATCH)
+              (if (< k (cfg/value :seon.config.root/api-batch))
                 (if-let [[ch c-in] (some (fn [[ch c-in]] (when-let [x (a/poll! ch)] [x c-in]))
-                                         (cond-> [[(:back st) :back]] (< (count (:writes st)) cfg/API-WRITES) (conj [(:ext st) :ext])))]
+                                         (cond-> [[(:back st) :back]] (< (count (:writes st)) (cfg/value :seon.config.root/api-writes)) (conj [(:ext st) :ext])))]
                   (recur (api-one st o c-in ch) (inc k))
                   st)
                 st))
          st (flush-problems st o)
          ;; while an agent has an eval in flight, the stall check runs every half dial
-         st (if (and (seq (::busy st)) (not (::stall-due st)) (pos? cfg/STALL-MS) (:back st))
+         st (if (and (seq (::busy st)) (not (::stall-due st)) (pos? (:stall-ms st)) (:back st))
               (let [back (:back st)]
                 ;; a go block parks on the timer (Jolt's take! with a callback forks a thread per
                 ;; pending take: lane D2's finding, seen as one thread per root in lifecycle)
-                (a/go (a/<! (a/timeout (quot cfg/STALL-MS 2))) (a/>! back {:op :stall-check}))
+                (a/go (a/<! (a/timeout (quot (:stall-ms st) 2))) (a/>! back {:op :stall-check}))
                 (assoc st ::stall-due true))
               st)
          st (if (::update st)
@@ -477,7 +477,7 @@
      [(cond-> (dissoc st ::to-agents ::replies)
         (and (:closing st) (empty? (:agents st))) (assoc :writer-closed true)
         ;; at the bound of writer requests in flight: read answers only, not the entrance
-        true (assoc ::flow/input-filter (if (>= (count (:writes st)) cfg/API-WRITES) #(not= :ext %) identity)))
+        true (assoc ::flow/input-filter (if (>= (count (:writes st)) (cfg/value :seon.config.root/api-writes)) #(not= :ext %) identity)))
       @o])))
 
 ;; ====================================================================================
@@ -522,16 +522,17 @@
 (defn start!
   "Boot the control process, the fork server and the root graph on its main, a branch of
   the one store (owner, 2026-10-21: one store, many branches, as in production). opts:
-  {:path dir (the store; default SEON_STORE, else <SEON_RUNS>/store, created when missing,
-   holding the schema and, given :datoms n, about n datoms of an example program on :db; a
-   root holds no program it was not given) :main branch (root's main; default SEON_MAIN, else a new
-   branch <SEON_RUN or run>-<time>-<id> of :db; :db is production's main; an existing
-   branch is recovered) :backend :lmdb|:file :log? true
-   :max-running n (parallel attempts) :provider p (the attempts' model; default the
-   stand-in seon.fixtures/reply, or DeepSeek from SEON_AI_* when SEON_AI_PROVIDER is
-   openai-compat)}."
+  {:path dir (the store, created when missing, holding the schema and, given :datoms n,
+   about n datoms of an example program on :db; a root holds no program it was not given)
+   :main branch (root's main; an existing branch is recovered; :db is production's main)
+   :backend :lmdb|:file :log? true :max-running n (parallel attempts) :provider p (the
+   attempts' model) :flush-ms and :stall-ms (fences, seon.db/flush-ms and
+   seon.agent-proc/stall-ms, for the checks that move them)}. What opts leave out is the config's: :seon.config.root/store-path,
+  :seon.config.root/main (absent: a new branch <:seon.config.root/run-name>-<time>-<id> of
+  :db), :seon.config.store/backend, :seon.config.agent/max-running and the provider of
+  :seon.config.ai/*. The config in force is written on main's root entity."
   {:malli/schema [:=> [:cat :map] :seon.root/sys]}
-  [{:keys [datoms log? path main backend max-running provider] :or {datoms 0 max-running reconcile/default-max-running}}]
+  [{:keys [datoms log? path main backend max-running provider flush-ms stall-ms] :or {datoms 0}}]
   (lib/ignore-sigpipe!)
   (when-not log? (trove/set-log-fn! nil))
   (let [t0 (lib/now-ns)
@@ -540,11 +541,11 @@
         ;; frozen in time (owner, 2026-10-21). This root works on its own main, a branch of
         ;; the store's seed, and names its agents' branches under it
         stamp (.format (java.text.SimpleDateFormat. "yyyyMMdd'T'HHmmss") (java.util.Date.))
-        path (or path (System/getenv "SEON_STORE")
-                 (str (or (System/getenv "SEON_RUNS") (str (System/getProperty "user.dir") "/runs")) "/store"))
-        main (or main (some-> (System/getenv "SEON_MAIN") keyword)
-                 (keyword (str (or (System/getenv "SEON_RUN") "run") "-" stamp "-" (subs (str (random-uuid)) 0 8))))
-        backend (or backend (some-> (System/getenv "SEON_BACKEND") keyword) :lmdb)
+        path (or path (cfg/value :seon.config.root/store-path))
+        main (or main (some-> (get cfg/config :seon.config.root/main) keyword)
+                 (keyword (str (cfg/value :seon.config.root/run-name) "-" stamp "-" (subs (str (random-uuid)) 0 8))))
+        backend (or backend (cfg/value :seon.config.store/backend))
+        max-running (or max-running (cfg/value :seon.config.agent/max-running))
         {store-cfg :cfg conn :conn recovered? :recovered?} (pdb/open! backend path datoms main)
         ;; each agent's stderr goes to a file here (seon.agent/stderr-path), read at its death
         agents-dir (pdb/agents-dir store-cfg)
@@ -559,29 +560,24 @@
         ;; this root's boot id (attempts of an earlier boot are reaped); its fact is written
         ;; through the writer once the graph runs, and that commit is the reconciler's first pass
         boot (str (random-uuid))
-        provider (or provider (if (= "openai-compat" (System/getenv "SEON_AI_PROVIDER"))
-                                (cond-> {:kind :openai-compat :base-url (System/getenv "SEON_AI_BASE_URL")
-                                         :model (System/getenv "SEON_AI_MODEL") :api-key-env (System/getenv "SEON_AI_API_KEY_ENV")}
-                                  ;; the run's dials (absent: the provider's defaults; max-tokens 2048)
-                                  (System/getenv "SEON_AI_MAX_TOKENS") (assoc :max-tokens (Long/parseLong (System/getenv "SEON_AI_MAX_TOKENS")))
-                                  (System/getenv "SEON_AI_THINKING") (assoc :thinking (keyword (System/getenv "SEON_AI_THINKING")))
-                                  (System/getenv "SEON_AI_REASONING_EFFORT") (assoc :reasoning-effort (keyword (System/getenv "SEON_AI_REASONING_EFFORT"))))
-                                {:kind :scripted :script 'seon.fixtures/reply}))
+        provider (or provider (cfg/provider cfg/config))
+        ;; the config in force, written on main's root entity with the boot fact
+        config (-> (cfg/with-provider cfg/config provider) (assoc :seon.config.agent/max-running max-running))
         program (program/load-all! @conn)
         program-ms (lib/ms-since t1)
-        contracts (contract/instrument! '[seon.contract seon.profile seon.print seon.print.select seon.print.emit])
+        contracts (contract/instrument! '[seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])
         _ (warm! conn)
-        _ (lib/raise-open-files! (+ 256 (* 2 cfg/MAX-AGENTS)))
+        _ (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
         _ (lib/static!)
         db @conn
         ;; physics: the fork server is forked before any thread exists
         {:keys [pid fd]} (fs/fork-server db)
         ;; then the GC's sweeper threads, a declared number (Chez would grow them by timing)
-        sweepers (lib/gc-sweepers! cfg/GC-SWEEPERS)
+        sweepers (lib/gc-sweepers! (cfg/value :seon.config.root/gc-sweepers))
         events-in (a/chan (a/sliding-buffer 8192))
         ;; every event, for the API's taps (seon.root/events) and the render proc's (W2)
         events-mult (a/mult events-in)
-        chans {:ext (a/chan 1024) :back (a/chan 4096) :to-writer (a/chan cfg/WRITER-BUF)
+        chans {:ext (a/chan 1024) :back (a/chan 4096) :to-writer (a/chan (cfg/value :seon.config.root/writer-buf))
                :server-ev (a/chan 4096) :stop-ch (a/promise-chan)
                ;; outside agents' attempts handed back for judgement (seon.entrance)
                :judge (a/chan 64)}
@@ -599,10 +595,11 @@
                          :system root-procs-p :events events-in :events-mult events-mult
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider
-                         :api-from-writer-buf (+ cfg/WRITER-BUF cfg/WRITER-BATCH cfg/API-WRITES)
-                         :flush-ms cfg/FLUSH-MS :reconciler-buf cfg/RECONCILER-BUF
-                         :model-lanes cfg/MODEL-LANES :model-rate (when (pos? cfg/MODEL-RATE) cfg/MODEL-RATE)})
-        decl (system/read-decl system/path)
+                         :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
+                         :flush-ms (or flush-ms pdb/flush-ms) :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf)
+                         :model-lanes (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
+                         :web-port (cfg/value :seon.config.web/port)})
+        decl (system/read-decl (cfg/value :seon.config.root/system-path))
         built (system/build decl bindings nil)
         root-procs (:procs built) root-conns (:conns built)
         _ (deliver root-procs-p built)
@@ -630,7 +627,7 @@
         ]
     (flow/resume g)
     ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is
-    @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (task/boot-tx boot max-running)}})
+    @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (into (task/boot-tx boot max-running) (cfg/facts config cfg/sources))}})
     sys))
 
 ;; ====================================================================================
@@ -726,12 +723,12 @@
   [sys req] (call! sys {:op :write :req req}))
 
 (defn apply!
-  "Re-read root's system declaration (seon.system/path, or the file at p) and change the
+  "Re-read root's system declaration (:seon.config.root/system-path, or the file at p) and change the
   running graph to it: only the procs whose declaration changed are stopped, started or
   rewired; the others keep running with their queued messages. A promise of Flow's
   update! answer {:started :stopped :kept :lost :ms}."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :seon.host/promise] [:=> [:cat :seon.root/sys :string] :seon.host/promise]]}
-  ([sys] (apply! sys system/path))
+  ([sys] (apply! sys (cfg/value :seon.config.root/system-path)))
   ([sys p] (call! sys {:op :apply :decl (system/read-decl p) :bindings (:bindings sys)})))
 
 (defn merge!
@@ -835,11 +832,11 @@
 
 (defn stop-agent!
   "Flow's stop for one agent: it exits after the requests before the stop; root awaits
-  its death, SIGKILLs past SEON_STOP_BOUND_MS. Answers {:stopped true ...} or :timeout."
+  its death, SIGKILLs past seon.agent-proc/stop-bound-ms. Answers {:stopped true ...} or :timeout."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :any]}
   [sys agent-id]
   (let [p (call! sys {:op :stop :id agent-id})]
-    (if (= ::late (deref p cfg/STOP-BOUND-MS ::late))
+    (if (= ::late (deref p ap/stop-bound-ms ::late))
       (do (kill! sys agent-id) (deref p 5000 :timeout))
       @p)))
 
@@ -864,7 +861,7 @@
 (defn stop!
   "Stop root by letting the flow drain: the entrance closes (later calls answer \"root
   stopped\"); every agent is sent :stop and exits after the requests before it (SIGKILL
-  past SEON_STOP_BOUND_MS); the writer's in-port closes, it commits and flushes what it
+  past seon.agent-proc/stop-bound-ms); the writer's in-port closes, it commits and flushes what it
   took; the fork server is killed and reaped; then flow/stop (every proc exited), the
   reader, the error reader. Nothing accepted is lost.
   Answers {:stopped true :drained .. :graph true|{::flow/running #{pids}} :ms}."
@@ -874,7 +871,7 @@
         p (promise)]
     (a/>!! (:ext sys) {:op :shutdown :p p})
     (a/close! (:ext sys))
-    (when (= ::late (deref p (+ cfg/STOP-BOUND-MS 1000) ::late))
+    (when (= ::late (deref p (+ ap/stop-bound-ms 1000) ::late))
       (a/>!! (:back sys) {:op :kill-all}))
     (let [drained (deref p 15000 :timeout)
           graph (flow/stop (:graph sys))]
@@ -902,7 +899,7 @@
   proc listens, the web server's acceptor and sweeper."
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :seon.root/sys] :map]]}
   ([] {:roster {"main" 1 "jolt-shutdown" 1 "jolt-timer" 1 "jolt-io-poller" 1 "jolt-carrier" (lib/fiber-carriers)}
-       :gc-sweepers cfg/GC-SWEEPERS})
+       :gc-sweepers (cfg/value :seon.config.root/gc-sweepers)})
   ([sys]
    (let [procs (vals (:procs @(get-in sys [:bindings :system])))
          mixed (count (filter #(= :mixed (or (:workload (spi/describe (:proc %))) :mixed)) procs))

@@ -22,18 +22,14 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [ring-chez.adapter :as adapter]
-            [seon.lib :as lib] [seon.contract :as contract] [seon.render.ui :as ui] [seon.web.html :as h]))
+            [seon.lib :as lib] [seon.contract :as contract] [seon.config :as config] [seon.render.ui :as ui] [seon.web.html :as h]))
 
 ;;; --- the files it serves ------------------------------------------------------------
 
-(defmacro ^:private checkout-public
-  "resources/public's absolute path in the checkout this binary was built from."
-  [] (.getAbsolutePath (java.io.File. "resources/public")))
-
 (def public-dir
-  "Where app.css and datastar.js are read: SEON_WEB_PUBLIC, else the checkout's
-  resources/public (read per request, so a style edit shows on reload)."
-  (or (System/getenv "SEON_WEB_PUBLIC") (checkout-public)))
+  "Where app.css and datastar.js are read (:seon.config.web/public-dir; read per request, so
+  a style edit shows on reload)."
+  (config/value :seon.config.web/public-dir))
 
 ;;; --- SSE framing ------------------------------------------------------------------------
 
@@ -291,8 +287,8 @@
     st))
 
 (defn web-proc
-  "Root's web proc (see the namespace doc). Args :port (127.0.0.1 only; system.edn says
-  7777, the dial SEON_WEB_PORT overrides it; 0: no listener). A listener that cannot bind is data in
+  "Root's web proc (see the namespace doc). Args :port (127.0.0.1 only; system.edn binds
+  :seon.config.web/port; 0: no listener). A listener that cannot bind is data in
   its ping (:listening false :error), never a failed boot."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:port "the port on 127.0.0.1 (0: none)"}
@@ -304,7 +300,7 @@
                               :stale (count (:stale st)) :patches (:patches st 0) :calls (:calls st 0)
                               :bytes (:bytes st 0) :error (:error st)})})
   ([args]
-   (let [port (or (some-> (System/getenv "SEON_WEB_PORT") parse-long) (:port args))
+   (let [port (:port args)
          http (a/chan 256)
          st {:port port :http http :tabs {} :stale #{} :waiting {} :bytes 0 :index {}
              ::flow/in-ports {:http http}}

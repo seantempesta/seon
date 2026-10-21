@@ -14,8 +14,8 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 . "$ROOT/bin/env"
 export SEON_RUNS=${SEON_RUNS:-$ROOT/runs}
 if [[ ${1:-} =~ ^[0-9]+$ ]]; then
-  export SEON_WEB_PORT=${2:-0}
-  cd "$ROOT/target" && exec ./seon root $1
+  # the ports over the config's (local.edn honours these until --set reaches a built binary)
+  cd "$ROOT/target" && SEON_ENTRANCE_PORT=$1 SEON_WEB_PORT=${2:-0} exec ./seon root
 fi
 mkdir -p "$SEON_RUNS"
 PIDS=$SEON_RUNS/root.pids LOG=$SEON_RUNS/root.log
