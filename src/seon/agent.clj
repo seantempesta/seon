@@ -301,6 +301,19 @@
     (lib/c-waitpid pid b 0)
     (lib/decode-status (ffi/read b :int))))
 
+(defn run-answer
+  "The run, from the last line the test child wrote on its pipe before EOF (nil: none) and
+  its exit status: that line when it is the run's result; else the child died while running
+  the test the line's {:seon.test/started var} names, and the run is one :error report on
+  that test var with the status as :exit (task `seon.fences/one-test-bound-derived-and-named`;
+  the stub names no test)."
+  {:malli/schema [:=> [:cat [:maybe :string] :seon.lib/exit-status] :seon.test/result]}
+  [line status]
+  (let [v (some-> line read-string)]
+    (if (contains? v :pass)
+      v
+      {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (str "test process died: " status)}]})))
+
 (defn run-tests-forked
   "Fork this agent; the child runs the tests and writes one EDN line on a pipe. A child
   that does not answer in timeout-ms is killed."
