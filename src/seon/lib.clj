@@ -188,6 +188,41 @@
   (scm/eval-string (str "(begin (putenv \"JOLT_MAX_HEAP\" \"" (long n) "\") "
                         "(when jolt-gc-policy-installed? (jolt-install-gc-policy!)) jolt-heap-ceiling-bytes)")))
 
+(defchecked ^:private collect-sweepers* [:=> [:cat :int] :int]
+  (scm/eval-string "(foreign-procedure \"(cs)collect_sweepers\" (iptr) iptr)"))
+
+(defn gc-sweepers!
+  "Fix Chez's parallel-collector sweeper pool at n threads (our Chez, jolt/gc-sweepers):
+  the n start now and no collection starts another. Unfixed, a collection starts one per
+  thread it finds waiting and keeps it, so the pool's size depends on timing. n < 0 only
+  asks. Answers the sweepers running. A process that forks must never start one
+  (docs/DRAGONS.md, physics)."
+  {:malli/schema [:=> [:cat :int] :int]}
+  [n] (collect-sweepers* n))
+
+(defchecked ^:private gc-stats* [:=> [:cat] [:vector :int]]
+  (scm/eval-string "(lambda () (let ([s (statistics)] [ms (lambda (t) (+ (* 1000 (time-second t)) (quotient (time-nanosecond t) 1000000)))])
+                                  (jolt-vector (sstats-gc-count s) (ms (sstats-gc-real s)) (ms (sstats-gc-cpu s)))))"))
+
+(defn gc-stats
+  "This process's collections so far: {:count n :real-ms :cpu-ms} (Chez's statistics;
+  :cpu-ms sums every sweeper's CPU)."
+  {:malli/schema [:=> [:cat] [:map [:count :int] [:real-ms :int] [:cpu-ms :int]]]}
+  [] (let [[c r u] (gc-stats*)] {:count c :real-ms r :cpu-ms u}))
+
+(defn fiber-carriers
+  "The fiber carrier threads Jolt runs (or will run, before the first fiber): its pool size."
+  {:malli/schema [:=> [:cat] :int]}
+  [] (scm/eval-string "(if jolt-fiber-carriers (vector-length jolt-fiber-carriers) (jolt-fiber-carrier-count))"))
+
+(defn thread-roster
+  "This process's Jolt threads by name, a numbered name folded to its stem
+  (\"jolt-carrier-3\" -> \"jolt-carrier\"): {stem count}. A thread nobody named shows as
+  \"Thread\". The GC's sweepers are C threads, not here: (- (nthreads) this sum)."
+  {:malli/schema [:=> [:cat] [:map-of :string :int]]}
+  []
+  (frequencies (map #(str/replace (.getName ^Thread %) #"-\d+$" "") (keys (Thread/getAllStackTraces)))))
+
 (defchecked ^:private run-bounded* [:=> [:cat :seon.host/fn :seon.host/fn :seon.host/fn] :any]
   (scm/eval-string
     "(lambda (stop? on-stop thunk)

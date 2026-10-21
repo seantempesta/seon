@@ -122,8 +122,10 @@
   {:malli/schema [:=> [:cat :seon.root/sys nat-int?] :any]}
   [sys port]
   (let [ss (java.net.ServerSocket. port 50 (java.net.InetAddress/getByName "127.0.0.1"))]
-    (doto (Thread. (fn [] (loop [] (let [s (.accept ss)]
-                                     (doto (Thread. (fn [] (serve-connection! sys s))) (.setDaemon true) (.start))
-                                     (recur)))))
+    (doto (Thread. ^Runnable (fn [] (loop [] (let [s (.accept ss)]
+                                                (doto (Thread. ^Runnable (fn [] (serve-connection! sys s)) "seon-entrance-conn")
+                                                  (.setDaemon true) (.start))
+                                                (recur))))
+                   "seon-entrance-accept")
       (.setDaemon true) (.start))
     ss))

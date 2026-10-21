@@ -72,7 +72,9 @@ echo "== problems (each class provoked, then read back from main by my.root/prob
 echo "== smoke"; step smoke "^merge|^killed|spawned|ready|^SMOKE " run smoke
 echo "== program"; step program "" run program
 echo "== robust"; step robust "" run robust
-echo "== lifecycle (start!/stop! x10 in one process; pause/resume)"; step lifecycle "LIFECYCLE" run lifecycle 10
+# no web listener: the adapter's acceptor and sweeper outlive stop! (task seon.web.edn
+# web-server-threads-are-joined-at-stop), so root's exact thread count is checked without it
+echo "== lifecycle (start!/stop! x10 in one process, root's threads exactly as declared; pause/resume)"; step lifecycle "LIFECYCLE" env SEON_WEB_PORT=0 zsh -c "cd '$ROOT/target' && ./seon lifecycle 10"
 echo "== backpressure"; step backpressure "" run backpressure 200
 echo "== hotreload"; step hotreload "" run hotreload
 echo "== drain"; step drain "" run drain 32

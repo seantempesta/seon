@@ -413,17 +413,31 @@
     (c/stop! sys)
     (lib/c-exit (if (every? true? all) 0 1))))
 
+(defn thread-diff
+  "Where measured threads (seon.root/threads) differ from declared ones
+  (seon.root/declared-threads): {} when they are exactly what is declared, else each
+  differing name with [declared measured], :gc-sweepers likewise, and :os when the OS
+  counts threads beyond the roster and the sweepers."
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [decl got]
+  (let [names (into (set (keys (:roster decl))) (keys (:roster got)))
+        roster (into {} (for [n names :let [d (get-in decl [:roster n] 0) g (get-in got [:roster n] 0)] :when (not= d g)] [n [d g]]))
+        expect-os (+ (reduce + 0 (vals (:roster got))) (:gc-sweepers got))]
+    (cond-> roster
+      (not= (:gc-sweepers decl) (:gc-sweepers got)) (assoc :gc-sweepers [(:gc-sweepers decl) (:gc-sweepers got)])
+      (not= expect-os (:os got)) (assoc :os [expect-os (:os got)]))))
+
 ;; ---- scale ------------------------------------------------------------------------
 
 (defn scale [n]
   (let [sys (c/start! {:datoms 2000})
         mem0 (lib/sysmem)
-        th-boot (lib/nthreads)
+        th-boot (thread-diff (c/declared-threads sys) (c/threads))
         t0 (lib/now-ns)
         ids (vec (pmap (fn [i] (c/spawn! sys {:task (str "scale " i)})) (range n)))
         ready? (await-status sys ids #{:idle} 20000)
         t-ready (lib/ms-since t0)
-        th-ready (lib/nthreads)
+        th-ready (thread-diff (c/declared-threads sys) (c/threads))
         _ (out! "ready " ready? " in " (lib/r2 t-ready) " ms: " (frequencies (map #(get-in (c/state sys) [:agents % :status]) ids)))
         work (fn [id]
                (let [k (subs (name id) 1)
@@ -439,7 +453,7 @@
                   :eval-ms (/ (- t2 t1) 1e6) :tests-ms (/ (- t3 t2) 1e6)}))
         results (vec (pmap work ids))
         t-done (lib/ms-since t0)
-        th-work (lib/nthreads)
+        th-work (thread-diff (c/declared-threads sys) (c/threads))
         st (c/state sys)
         mem1 (lib/sysmem)
         agent-mb (keep #(get-in st [:agents % :mem-mb]) ids)
@@ -451,7 +465,7 @@
         ;; kill! marks :killed at once; the process is gone when root has retired it
         _ (loop [k 0] (when (and (not-every? #(get-in (c/state sys) [:agents % :ended-ms]) ids) (< k 1000)) (Thread/sleep 10) (recur (inc k))))
         mem2 (do (Thread/sleep 500) (lib/sysmem))
-        th-end (lib/nthreads)]
+        th-end (thread-diff (c/declared-threads sys) (c/threads))]
     (pprint {:agents n :all-ready ready? :all-ok (count (filter :ok results))
              :spawn->all-ready-ms (lib/r2 t-ready) :end-to-end-ms (lib/r2 t-done)
              :start-ms (lib/summ (keep #(get-in st [:agents % :forked-ms]) ids))
@@ -463,10 +477,15 @@
              :control-real-mb (lib/r2 (lib/real-mb)) :fork-server (select-keys fs [:mem-mb :os-threads :active-threads :mismatch :datoms])
              :writer (:writer st) :merged (count (filter :merged? merged)) :main-notes notes
              :all-killed killed? :all-ended (every? #(get-in (c/state sys) [:agents % :ended-ms]) ids)
-             :root-os-threads {:boot th-boot :all-ready th-ready :after-work th-work :after-kill th-end}})
+             :gc (lib/gc-stats) :gc-sweepers (lib/gc-sweepers! -1)
+             :root-threads {:declared (c/declared-threads sys) :os (lib/nthreads)
+                            :diff {:boot th-boot :all-ready th-ready :after-work th-work :after-kill th-end}}})
     (c/stop! sys)
     ;; every agent's eval and its test passed; the 10 merges went in
-    (let [ok (and ready? (every? :ok results) (every? :merged? merged) killed?)]
+    ;; and root's threads exactly as declared once agents run (at boot Jolt's io poller has not
+    ;; started yet: it starts at the first socket wait, an agent's)
+    (let [ok (and ready? (every? :ok results) (every? :merged? merged) killed?
+                  (every? empty? [th-ready th-work th-end]))]
       (out! (if ok "SCALE OK" "SCALE FAILED"))
       (lib/c-exit (if ok 0 1)))))
 
@@ -829,7 +848,8 @@
 (defn lifecycle
   "n cycles of start! -> 3 agents work -> stop! in ONE process. Each stop! must answer
   with every proc exited (:graph true) and no agent or fork-server process left, and root's
-  thread count must come back to where it was after the first cycle. Then pause/resume:
+  threads must be exactly what it declares (seon.root/declared-threads) while running and
+  after every stop!, by name and by the OS's count. Then pause/resume:
   a paused agent's request is held (no answer), and answered after resume, in order."
   [n]
   (let [rows (vec (for [i (range n)]
@@ -840,12 +860,13 @@
                           ready? (await-status sys ids #{:idle} 5000)
                           ok? (every? #(= "4" (:printed (first @(c/submit! sys % "(+ 2 2)")))) ids)
                           health (c/health sys)
+                          running (thread-diff (c/declared-threads sys) (c/threads))
                           pids (vec (cons (get-in (c/state sys) [:server :pid]) (keep #(get-in (c/state sys) [:agents % :pid]) ids)))
                           st (c/stop! sys)
                           left (filter alive? pids)]
                       {:cycle i :ready ready? :ok ok? :boot-ms (lib/r2 boot-ms) :stop st :left (vec left)
-                       :health (set (map #(if (map? %) (:status %) %) (vals health))) :threads (lib/nthreads)})))
-        th (map :threads rows)
+                       :health (set (map #(if (map? %) (:status %) %) (vals health)))
+                       :running running :stopped (thread-diff (c/declared-threads) (c/threads))})))
         sys (c/start! {:datoms 2000})
         a (c/spawn! sys {:task "paused"})
         _ (await-status sys [a] #{:idle} 5000)
@@ -858,18 +879,39 @@
         held-state (= :paused (:status (c/agent-health sys a)))
         _ (c/resume-agent! sys a)
         r1 (deref p1 3000 :hang) r2 (deref p2 3000 :hang)
+        declared-running (c/declared-threads sys)
         st (c/stop! sys)
         checks {:every-stop-exited (every? #(and (true? (get-in % [:stop :graph])) (zero? (get-in % [:stop :agents-left])) (empty? (:left %))) rows)
                 :every-cycle-worked (every? #(and (:ready %) (:ok %) (= #{:running} (:health %))) rows)
-                :threads-flat (<= (- (apply max (rest th)) (second th)) 2)
+                :threads-declared (every? #(and (empty? (:running %)) (empty? (:stopped %))) rows)
                 :pause-holds (and (= :held held) (true? held-state) (= :paused (:status paused-health)))
                 :resume-releases-in-order (and (= "1" (:printed (second r1))) (= "2" (:printed (first r2))))
                 :final-stop (true? (:graph st))}]
-    (pprint {:cycles (mapv #(select-keys % [:cycle :boot-ms :threads :left :health]) rows)
+    (pprint {:threads {:declared-running declared-running :declared-stopped (c/declared-threads)}
+             :cycles (mapv #(select-keys % [:cycle :boot-ms :running :stopped :left :health]) rows)
              :stop-ms (lib/summ (map #(get-in % [:stop :ms]) rows))
+             :gc (lib/gc-stats) :gc-sweepers (lib/gc-sweepers! -1)
              :checks checks})
     (out! (if (every? true? (vals checks)) "LIFECYCLE OK" "LIFECYCLE FAIL"))
     (lib/c-exit (if (every? true? (vals checks)) 0 1))))
+
+(defn threads-declared
+  "n cycles of start! -> 3 agents evaluate -> stop! in one process; after the evals and
+  after each stop!, root's threads against what it declares (thread-diff, {} when exact).
+  The last line is the EDN {:running [diff ..] :stopped [diff ..]} that
+  seon.root-test/root-threads-are-what-root-declares reads."
+  [n]
+  (let [rows (vec (for [_ (range n)]
+                    (let [sys (c/start! {:datoms 2000})
+                          ids (mapv #(c/spawn! sys {:task (str "td " %)}) (range 3))
+                          _ (await-status sys ids #{:idle} 5000)
+                          _ (mapv #(deref (c/submit! sys % "(+ 2 2)")) ids)
+                          running (thread-diff (c/declared-threads sys) (c/threads))]
+                      (c/stop! sys)
+                      {:running running :stopped (thread-diff (c/declared-threads) (c/threads))})))]
+    (pprint {:declared (c/declared-threads) :measured (c/threads)})
+    (out! (pr-str {:running (mapv :running rows) :stopped (mapv :stopped rows)}))
+    (lib/c-exit (if (every? #(and (empty? (:running %)) (empty? (:stopped %))) rows) 0 1))))
 
 ;; ---- delivery (lane F2): main's commits to the reconciler, messages to agents ------
 
@@ -1380,6 +1422,7 @@
     "system" (system-check)
     "problems" (problems-check)
     "threads" (threads-check)
+    "threads-declared" (threads-declared (Long/parseLong (or n "3")))
     "branch-cost" (branch-cost (Long/parseLong n))
     "root" (root-serve (Long/parseLong n))
     "mcp" (do (seon.mcp/serve! (Long/parseLong n)) (lib/c-exit 0))
