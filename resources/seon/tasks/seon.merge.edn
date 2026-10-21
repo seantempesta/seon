@@ -1,0 +1,4 @@
+[{:seon.task/name "platform-record-of-an-unqualified-attribute"
+  :seon.task/plan "Found by lane STORES, 2026-10-21: bin/check census is red on main 0b9df34 (target/check/20261021T111035/census.log): mg/check of seon.merge/platform-record? fails on (:A) with problem \"s\". Cause: src/seon/merge.clj:44, (namespace k) is nil for an unqualified keyword and (str/starts-with? nil \"seon.\") throws; its contract [:=> [:cat :keyword] :boolean] admits every keyword, and data-attr-set (merge.clj:53) calls it on every attribute of the schema with :all, so an agent's unqualified attribute would throw in a merge. Correct: an unqualified attribute is not a platform record (false), checked by the contract's generator; census goes green."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.merge-test/an-unqualified-attribute-is-not-a-platform-record}}]
