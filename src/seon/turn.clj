@@ -28,6 +28,16 @@
   {:malli/schema [:=> [:cat] [:maybe :seon.task/id]]}
   [] (get-in @agent/state [:turn :task]))
 
+(defn- begin!
+  "This process works task as attempt: the turn state, begun once per attempt with the
+  program's contract gaps as they stood (the attempt answers only for gaps it adds). The
+  turn loop and an outside agent's context read begin it the same way."
+  {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id] :map]}
+  [task attempt]
+  (if (= attempt (get-in @agent/state [:turn :attempt]))
+    (:turn @agent/state)
+    (:turn (swap! agent/state assoc :turn {:task task :attempt attempt :gaps-before (harvest/uncontracted (agent/db))}))))
+
 (defn last-evals
   "The items of this process's last model turn, in order: each one's form, printed value or
   error, output, and its live value (:value) while this process holds it."
@@ -134,12 +144,12 @@
   task as attempt, so the my.* verbs act on it."
   {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id] :string]}
   [task attempt]
-  (swap! agent/state assoc :turn {:task task :attempt attempt})
-  (let [{:keys [results unmerged] :as obs} (observe task #{})
+  (let [{:keys [gaps-before]} (begin! task attempt)
+        {:keys [results unmerged] :as obs} (observe task gaps-before)
         db (agent/db)]
     (:content (second (context/messages (context/current-state db (:task obs) (merge (observed db obs)
                                                                                      {:results results :turn 0 :max-turns 1
-                                                                                      :last-items [] :unmerged unmerged})))))))
+                                                                                      :last-items (last-evals) :unmerged unmerged})))))))
 
 (defn work!
   "Work task `task` as attempt `attempt` (the model `model` when set, else root's), at most
@@ -150,13 +160,13 @@
                              [:max-turns pos-int?]]]
                   :seon.turn/end]}
   [{:keys [task attempt model max-turns]}]
-  (swap! agent/state assoc :turn {:task task :attempt attempt})
-  (let [t0-task (task/task (agent/db) task)
+  (let [{:keys [gaps-before]} (begin! task attempt)
+        t0-task (task/task (agent/db) task)
         merge? (= :merge (:seon.task/kind t0-task))
         dials (r/dials t0-task)]
     (when merge? (branch/merge-main!))
     (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (System/nanoTime) :attempt attempt
-               :max-turns max-turns :merge? merge? :gaps-before (harvest/uncontracted (agent/db))}]
+               :max-turns max-turns :merge? merge? :gaps-before gaps-before}]
       (let [{:keys [refusals unmerged] :as obs} (observe task (:gaps-before st))
             stop (get-in @agent/state [:turn :stop])
             hairy (when merge? (r/hairy (merge dials {:conflicts unmerged :task (:task obs) :merge-turns (:merge-turns st)})))]
