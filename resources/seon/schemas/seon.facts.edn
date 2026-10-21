@@ -170,6 +170,18 @@
  :seon.turn/tokens :int
  ;; the model's reply stopped at max-tokens: its text was cut
  :seon.turn/truncated :boolean
+ ;; who read the context: the agent's model, or an outside agent through the entrance (a read is a turn)
+ :seon.turn/origin [:enum :model :outside]
+ ;; the exact user message the reader got (the system prompt is seon.context/system-prompt)
+ :seon.turn/context :string
+ ;; the provider's finish_reason, the model that answered, and its reasoning text
+ :seon.turn/finish :string
+ :seon.turn/model :string
+ :seon.turn/reasoning :string
+ ;; where the turn's time went, as the agent saw it: the proof run, the context render, the
+ ;; model round trip, the reply's evaluations, the turn's record (ms)
+ :seon.turn/split [:map {:seon.db/edn true} [:tests-ms {:optional true} :int] [:context-ms :int]
+                   [:model-ms {:optional true} :int] [:eval-ms {:optional true} :int] [:record-ms {:optional true} :int]]
  :seon.end/attempt [:and {:seon.db/identity true} :string]
  :seon.end/outcome :keyword
  :seon.end/reason :string
@@ -179,7 +191,10 @@
                           [:seon.turn/id :seon.turn/id] [:seon.turn/attempt :seon.turn/attempt] [:seon.turn/n :seon.turn/n]
                           [:seon.turn/reply :seon.turn/reply] [:seon.turn/forms :seon.turn/forms] [:seon.turn/errors :seon.turn/errors]
                           [:seon.turn/red :seon.turn/red] [:seon.turn/ms :seon.turn/ms] [:seon.turn/tokens :seon.turn/tokens]
-                          [:seon.turn/truncated {:optional true} :seon.turn/truncated]]
+                          [:seon.turn/truncated {:optional true} :seon.turn/truncated]
+                          [:seon.turn/origin {:optional true} :seon.turn/origin] [:seon.turn/context {:optional true} :seon.turn/context]
+                          [:seon.turn/finish {:optional true} :seon.turn/finish] [:seon.turn/model {:optional true} :seon.turn/model]
+                          [:seon.turn/reasoning {:optional true} :seon.turn/reasoning] [:seon.turn/split {:optional true} :seon.turn/split]]
  :seon.end/end-fact [:map {:seon.db/attributes true}
                          [:seon.end/attempt :seon.end/attempt] [:seon.end/outcome :seon.end/outcome]
                          [:seon.end/reason {:optional true} :seon.end/reason]

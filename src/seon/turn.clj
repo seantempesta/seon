@@ -54,18 +54,23 @@
   [outcome reason]
   (:turn (swap! agent/state assoc-in [:turn :stop] (cond-> {:outcome outcome} reason (assoc :reason reason)))))
 
+(defn- ms-since "Whole milliseconds since t0 (System/nanoTime)." {:malli/schema [:=> [:cat :int] :int]}
+  [t0] (long (/ (- (System/nanoTime) t0) 1e6)))
+
 (defn- observe
   "What a turn starts from, measured now: the proofs run in a fork of this agent, the
   branch's new contract gaps and unmerged entries, the done rule over them, and the task as
   the branch holds it (its plan may have improved)."
   {:malli/schema [:=> [:cat :seon.task/id [:set :qualified-symbol]] :map]}
   [id gaps-before]
-  (let [run (agent/run-tests-forked 30000)
+  (let [t0 (System/nanoTime)
+        run (agent/run-tests-forked 30000)
+        tests-ms (ms-since t0)
         results (proofs/results run)
         db (agent/db)
         unc (set/difference (harvest/uncontracted db) gaps-before)
         unmerged (branch/unmerged)]
-    {:run run :results results :uncontracted unc :unmerged unmerged :task (task/task db id)
+    {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :task (task/task db id)
      :refusals (r/done-refusals (r/done-input (r/index db) id results unc (mapv #(pr-str (:key %)) unmerged) nil))}))
 
 (defn- end!
@@ -102,33 +107,50 @@
   provider error. The model call is an effect (my.fx :model, lane FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
   {:malli/schema [:=> [:cat :map :map [:maybe :string]] [:or :map :map]]}
-  [{:keys [turn tokens max-turns merge? attempt] :as st} {:keys [results unmerged] :as obs} model-name]
+  [{:keys [turn tokens max-turns merge? attempt] :as st} {:keys [results unmerged tests-ms] :as obs} model-name]
   (let [t (:task obs)
         proofs (:proofs (:seon.task/accumulated t))
         db (agent/db)
+        t0 (System/nanoTime)
         block (context/current-state db t (merge (observed db obs)
                                                  {:results results :turn turn :max-turns max-turns
                                                   ;; the last turn's items as (my.turn/evals) answers them: the transcript's cuts read through it
                                                   :last-items (last-evals)
                                                   :unmerged (when merge? unmerged) :truncated? (:truncated? st)
                                                   :source (:source st) :repairs (:repairs st [])}))
+        messages (context/messages block)
+        context-ms (ms-since t0)
         t1 (System/nanoTime)
-        r (agent/fx! :model (cond-> {:messages (context/messages block) :task (:seon.task/id t) :turn turn}
+        r (agent/fx! :model (cond-> {:messages messages :task (:seon.task/id t) :turn turn}
                               model-name (assoc :model model-name))
                      {})
+        model-ms (ms-since t1)
         c (:value r)]
     (if (:seon.error/type r)
       r
       (let [{:keys [text repairs]} (reader/forgive (:text c))
+            t2 (System/nanoTime)
             items (repl/eval-string text)
+            eval-ms (ms-since t2)
             _ (swap! agent/state assoc-in [:turn :evals] items)
-            used (+ (:prompt-tokens c) (:completion-tokens c))]
-        (agent/transact! (cond-> [{:seon.turn/id (str attempt "/" turn) :seon.turn/attempt attempt :seon.turn/n turn
-                           :seon.turn/reply (:text c) :seon.turn/forms (count items)
-                           :seon.turn/errors (count (filter #(= :err (:tag %)) items))
-                           :seon.turn/red (count (remove #(= :pass (val %)) (select-keys results proofs)))
-                           :seon.turn/ms (long (/ (- (System/nanoTime) t1) 1e6)) :seon.turn/tokens used}]
-                           (:truncated? c) (conj {:seon.turn/id (str attempt "/" turn) :seon.turn/truncated true})))
+            used (+ (:prompt-tokens c) (:completion-tokens c))
+            t3 (System/nanoTime)]
+        ;; what the model read (the user message: the system prompt is seon.context/system-prompt),
+        ;; what it answered and how it stopped, and where the turn's time went as this agent saw it
+        (agent/transact! [(cond-> {:seon.turn/id (str attempt "/" turn) :seon.turn/attempt attempt :seon.turn/n turn
+                                   :seon.turn/origin :model :seon.turn/context (:content (second messages))
+                                   :seon.turn/reply (:text c) :seon.turn/forms (count items)
+                                   :seon.turn/errors (count (filter #(= :err (:tag %)) items))
+                                   :seon.turn/red (count (remove #(= :pass (val %)) (select-keys results proofs)))
+                                   :seon.turn/ms (+ model-ms eval-ms) :seon.turn/tokens used}
+                            (:truncated? c) (assoc :seon.turn/truncated true)
+                            (:finish-reason c) (assoc :seon.turn/finish (:finish-reason c))
+                            (:model c) (assoc :seon.turn/model (:model c))
+                            (:reasoning c) (assoc :seon.turn/reasoning (:reasoning c)))])
+        (agent/transact! [{:seon.turn/id (str attempt "/" turn)
+                           :seon.turn/split (pr-str (cond-> {:context-ms context-ms :model-ms model-ms :eval-ms eval-ms
+                                                             :record-ms (ms-since t3)}
+                                                      tests-ms (assoc :tests-ms tests-ms)))}])
         (cond-> (-> (assoc st :turn (inc turn) :tokens (+ tokens used) :truncated? (boolean (:truncated? c))
                            :source text :repairs repairs)
                     ;; what this turn's block showed, by producer, and what it evaluated (waste)
@@ -140,16 +162,24 @@
 
 (defn context-block
   "The current-state block of task, as the model sees it on this branch now (the proofs run
-  again): what an outside agent working the task reads. It also makes this process work
-  task as attempt, so the my.* verbs act on it."
+  again): what an outside agent working the task reads, recorded as a turn of the attempt
+  (origin :outside). It also makes this process work task as attempt, so the my.* verbs act
+  on it."
   {:malli/schema [:=> [:cat :seon.task/id :seon.attempt/id] :string]}
   [task attempt]
   (let [{:keys [gaps-before]} (begin! task attempt)
-        {:keys [results unmerged] :as obs} (observe task gaps-before)
-        db (agent/db)]
-    (:content (second (context/messages (context/current-state db (:task obs) (merge (observed db obs)
-                                                                                     {:results results :turn 0 :max-turns 1
-                                                                                      :last-items (last-evals) :unmerged unmerged})))))))
+        {:keys [results unmerged tests-ms] :as obs} (observe task gaps-before)
+        db (agent/db)
+        t0 (System/nanoTime)
+        text (:content (second (context/messages (context/current-state db (:task obs) (merge (observed db obs)
+                                                                                              {:results results :turn 0 :max-turns 1
+                                                                                               :last-items (last-evals) :unmerged unmerged})))))
+        n (get-in (swap! agent/state update-in [:turn :reads] (fnil inc 0)) [:turn :reads])]
+    ;; the read is a turn of this attempt, as a model turn is: what was read and what it cost
+    (agent/transact! [{:seon.turn/id (str attempt "/read-" n) :seon.turn/attempt attempt :seon.turn/n n
+                       :seon.turn/origin :outside :seon.turn/context text
+                       :seon.turn/split (pr-str (cond-> {:context-ms (ms-since t0)} tests-ms (assoc :tests-ms tests-ms)))}])
+    text))
 
 (defn work!
   "Work task `task` as attempt `attempt` (the model `model` when set, else root's), at most

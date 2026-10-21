@@ -77,6 +77,12 @@
   (lane R3; AIMD on a 429). 0: no bucket."
   (dial "SEON_MODEL_RATE" 0))
 
+(def MODEL-CONNECT-MS
+  "Milliseconds a model call's TCP/TLS connect may take; past it the call is a
+  :seon.model/transport failure (transient: the :model owner keeps the request and pauses).
+  The connect alone: a streamed reply runs until the server ends it."
+  (dial "SEON_MODEL_CONNECT_MS" 10000))
+
 (def MODEL-LANES
   "Model calls in flight at once, cluster-wide (the :model owner's lanes). Lane FX1."
   (dial "SEON_MODEL_LANES" 8))

@@ -122,7 +122,7 @@
  :seon.model/provider [:multi {:dispatch :kind}
                        [:scripted [:map [:kind [:= :scripted]] [:script :qualified-symbol]]]
                        [:openai-compat [:map [:kind [:= :openai-compat]] [:base-url :string] [:model :string]
-                                        [:api-key-env :string] [:timeout-ms {:optional true} pos-int?]
+                                        [:api-key-env :string] [:connect-ms {:optional true} pos-int?]
                                         [:max-tokens {:optional true} pos-int?]
                                         ;; DeepSeek's thinking mode and effort; absent: the provider's default
                                         [:thinking {:optional true} [:enum :enabled :disabled]]
@@ -131,10 +131,12 @@
  :seon.model/completion [:map [:text :string] [:prompt-tokens :int] [:completion-tokens :int] [:ms number?]
                          [:truncated? {:optional true} :boolean]
                          ;; what the call cost beyond them, when the provider says (lane D2)
-                         [:reasoning-tokens {:optional true} :int] [:cache-hit-tokens {:optional true} :int]]
+                         [:reasoning-tokens {:optional true} :int] [:cache-hit-tokens {:optional true} :int]
+                         ;; how the reply stopped (the provider's finish_reason), the model that made it, its reasoning
+                         [:finish-reason {:optional true} :string] [:model {:optional true} :string] [:reasoning {:optional true} :string]]
  :seon.model/provider-error [:map [:seon.error/type [:= :seon.model/provider-error]]
                              [:seon.error/operation :qualified-symbol] [:seon.error/message :string]
-                             [:status {:optional true} :int]]
+                             [:status {:optional true} :int] [:body {:optional true} :string]]
  ;; ---- the turn loop's end, as the agent writes it on its branch ----
  :seon.turn/end [:map {:closed true}
                  [:outcome :seon.attempt/outcome] [:turns :int] [:model-calls :int] [:tokens :int]

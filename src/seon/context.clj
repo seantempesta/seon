@@ -51,6 +51,18 @@
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :string]]}
   [db sym] (d/q '[:find ?s . :in $ ?v :where [?e :var/name ?v] [?e :var/src ?s]] db sym))
 
+(defn recorded
+  "The last context attempt's reader got, as recorded on db (seon.turn: a model turn's user
+  message, or an outside read through the entrance): {:text :origin :turn}, or nil. The one
+  source of what an agent read: the page shows it, nothing renders it a second time."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe [:map [:text :string] [:origin :keyword] [:turn :string]]]]}
+  [db attempt]
+  (when-let [[_ id text origin] (last (sort-by first (d/q '[:find ?e ?id ?c ?o :in $ ?a
+                                                          :where [?e :seon.turn/attempt ?a] [?e :seon.turn/context ?c]
+                                                          [?e :seon.turn/origin ?o] [?e :seon.turn/id ?id]]
+                                                        db attempt)))]
+    {:text text :origin origin :turn id}))
+
 (defn flagged
   "The definitions on db with no recorded source (:var/flagged): they do not merge."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :qualified-symbol]]}

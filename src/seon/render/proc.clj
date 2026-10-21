@@ -272,24 +272,15 @@
     (vec (take-last HISTORY-CAP (sort-by key rows)))))
 
 (defn- context-of
-  "The current-state block the agent's model reads, printed under a display budget, or
-  why there is none."
+  "The context the agent's reader last got, exactly as recorded on db (seon.context/recorded:
+  a model turn's message or an outside read), or why there is none."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :map] :map] :map]}
-  [db attempt ag]
-  (let [tid (:seon.attempt/task attempt)
-        t (when (and db tid) (task/task db tid))]
+  [db attempt _ag]
+  (let [r (when (and db attempt) (context/recorded db (:seon.attempt/id attempt)))]
     (cond
       (nil? attempt) {:why "it works no task (spawned by hand, not by the reconciler): its model has no context"}
-      (nil? t) {:why (str "task " tid " is not on its branch yet")}
-      :else
-      (let [block (context/current-state db t {:results (:seon.attempt/results attempt {})
-                                               :reds (vec (for [r (get-in ag [:tests :reports]) :when (not= :pass (:type r))]
-                                                            (assoc (select-keys r [:message :expected :actual]) :test (:var r))))
-                                               :last-items (vec (take-last 3 (:evals ag)))
-                                               :turn (or (:seon.attempt/turns attempt) 0)
-                                               :max-turns (get-in attempt [:seon.attempt/env :max-turns] 0)})
-            text (print/text block 2000)]
-        {:text text :tokens (ai/tokens text)}))))
+      (nil? r) {:why (str "no context read yet in attempt " (:seon.attempt/id attempt))}
+      :else {:text (:text r) :tokens (ai/tokens (:text r)) :origin (:origin r) :turn (:turn r)})))
 
 (defn- zoom-value
   "The agent page's value (:seon.render/agent-page) for agent id, and the zoom's state with

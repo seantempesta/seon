@@ -187,3 +187,27 @@
                       whole (get-in items (into [(nth (:seon.print/requery-id c) 2)] (:seon.render.data/path c)))]]
           (is (= (:seon.render.data/next-offset c) (- (count whole) (count rest))) (pr-str f))
           (is (= (seq whole) (seq (concat (take (:seon.render.data/next-offset c) whole) rest))) (pr-str f)))))))
+
+(deftest the-page-reads-the-context-as-recorded
+  ;; the one source of what an agent read: its turns' recorded user messages, model or outside
+  (let [db (d/db-with (db-with-program)
+                      [{:seon.turn/id "a#1/0" :seon.turn/attempt "a#1" :seon.turn/n 0 :seon.turn/origin :model :seon.turn/context "first"}
+                       {:seon.turn/id "a#1/read-1" :seon.turn/attempt "a#1" :seon.turn/n 1 :seon.turn/origin :outside :seon.turn/context "second"}
+                       {:seon.turn/id "b#1/0" :seon.turn/attempt "b#1" :seon.turn/n 0 :seon.turn/origin :model :seon.turn/context "other"}])]
+    (is (= {:text "second" :origin :outside :turn "a#1/read-1"} (context/recorded db "a#1")) "the last read of the attempt")
+    (is (nil? (context/recorded db "c#1")) "an attempt that read nothing has no context")))
+
+(deftest a-context-read-as-a-value-does-not-grow-the-next-context
+  ;; the model evaluates something that answers a whole context (its own block, say): the
+  ;; item gets its one share like any other, so turn after turn the context cannot nest
+  (let [db (db-with-program)
+        t (task-f db)
+        text-of (fn [items] (:content (second (context/messages (context/current-state db t {:turn 1 :max-turns 4 :last-items items})))))
+        c0 (text-of (evals 259 11))
+        item (fn [c] {:id 0 :tag :ret :form "(seon.turn/context-block \"demo/f\" \"demo/f#1\")" :printed (pr-str c) :value c})
+        c1 (text-of [(item c0)])
+        c2 (text-of [(item c1)])]
+    (is (< (select/estimate c0) (:context print/budgets)))
+    (is (<= (select/estimate c1) (:context print/budgets)))
+    (is (<= (- (select/estimate c2) (select/estimate c1)) 16) "reading a context of a context adds nothing")
+    (is (= 1 (count (context/shown-evals (context/fold-evals [(item c0) (item c0)])))) "a repeated read is one item")))
