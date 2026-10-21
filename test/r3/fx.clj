@@ -2,7 +2,7 @@
   "R3's synthetic main: n work tasks, each with its merge task (seon.template/with-merge),
   attempts spread over the lifecycle the way a busy swarm holds them. Pure tx builders plus
   one loader; nothing here is product code."
-  (:require [seon.task :as task] [seon.template :as tpl] [seon.db :as pdb] [datahike.api :as d]))
+  (:require [seon.task :as task] [seon.template :as tpl] [seon.db :as pdb] [datahike.api :as d] [seon.config]))
 
 (def boot "r3-boot")
 
@@ -13,7 +13,7 @@
             :seon.task/plan (str "Make `app.par/p" k "` pass `app.proofs/p" k "-test`.")
             :seon.task/proofs #{(symbol "app.proofs" (str "p" k "-test"))}}))))
 
-(defn- env [id] {:branch (task/default-branch (clojure.string/replace id #"-merge$" "")) :model nil :max-turns 8})
+(defn- env [id] {:branch (task/default-branch (clojure.string/replace id #"-merge$" "")) :model nil :max-turns (seon.config/value :seon.config.agent/max-turns)})
 
 (defn- attempt [aid id status extra]
   (into (task/attempt-start-tx aid id boot :a0 (env id) 0)

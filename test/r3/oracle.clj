@@ -8,20 +8,20 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
             [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm]
-            [datahike.api :as d] [clojure.string :as str] [seon.ref :as ref]))
+            [datahike.api :as d] [clojure.string :as str] [seon.ref :as ref] [seon.config :as cfg]))
 
 (def default-max-turns
-  "Turns an attempt may take when its task sets no :seon.config.agent/max-turns."
-  8)
+  "Turns an attempt may take when its task sets no :seon.config.agent/max-turns: the config's."
+  (cfg/value :seon.config.agent/max-turns))
 
 (def default-max-running
-  "Parallel attempts when root's boot set no :seon.config.agent/max-running."
-  4)
+  "Parallel attempts when root's boot set no :seon.config.agent/max-running: the config's."
+  (cfg/value :seon.config.agent/max-running))
 
 (def default-max-merging
   "Merge attempts at once when root's boot set no :seon.config.merge/max-running: one,
-  git's merge queue."
-  1)
+  git's merge queue: the config's."
+  (cfg/value :seon.config.merge/max-running))
 
 (def merge-dials
   "The merge dials' defaults, when the task sets none (:seon.config.merge/*)."
