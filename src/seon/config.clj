@@ -81,3 +81,12 @@
   "Model calls in flight at once, cluster-wide (the :model owner's lanes). Lane FX1."
   (dial "SEON_MODEL_LANES" 8))
 
+
+(def GC-SWEEPERS
+  "Unit: threads, Chez's parallel-collector sweepers in root, fixed at boot right after the
+  fork server is forked (seon.lib/gc-sweepers!; our Chez's (cs)collect_sweepers). Provenance:
+  lane THREADS, 2026-10-21: unfixed, Chez kept one per thread a collection found waiting, so
+  root's count drifted with load (0, 5, 15 across identical runs). At the bound: a collection
+  with more threads waiting gives the extra threads' areas to these n, it starts no other.
+  Not read from the environment; for lane CONFIG: key :seon.config.root/gc-sweepers."
+  4)

@@ -60,7 +60,8 @@
                              t0 (lib/now-ns)
                              h (sample! g pids 250)]
                          (a/>!! tick {:health h :ms (System/currentTimeMillis) :ping-ms (lib/ms-since t0)})
-                         (let [[_ c] (a/alts!! [stop (a/timeout SAMPLE-MS)])] (when-not (= c stop) (recur))))))))
+                         (let [[_ c] (a/alts!! [stop (a/timeout SAMPLE-MS)])] (when-not (= c stop) (recur)))))))
+                 "seon-render-sampler")
     (.setDaemon true) (.start)))
 
 ;;; --- requests -------------------------------------------------------------------------
@@ -503,8 +504,11 @@
                 :system "a promise of the built system (its procs are pinged)"}
        :ins {:answers "the api's answers" :from-web "views open, page and keyframe requests"}
        :outs {:to-api "requests to the api" :to-web "patches, keyframes, pages, the agents' index"}
-       ;; a pass renders what changed; it never waits
-       :workload :compute
+       ;; a pass renders what changed; it never waits. :mixed: one thread of its own for
+       ;; its life, joined at stop. :compute futurized each pass onto Jolt's cached pool,
+       ;; which grows when a pass is submitted before the last worker is idle again
+       ;; (lane THREADS: root's threads are a declared number)
+       :workload :mixed
        :ping-map-fn (fn [st] {:passes (:passes st 0) :views (count (:views st)) :watching (count (:watch st))
                               :pending (count (:pending st)) :rendered (get-in st [:counts :rendered] 0)
                               :same (get-in st [:counts :same] 0) :pass-p50-ms (lib/p50 (:pass-ms st))})})

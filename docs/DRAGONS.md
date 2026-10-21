@@ -67,6 +67,11 @@ Two rules of the OS and Chez that no code may "fix" by adding a thread or a chec
   (`seon.sock`), and only root, which never forks after boot, holds `jolt.async.remote`
   ends with pumps. `bin/check threads` counts the OS threads of the fork server and of an
   agent. The real fix is a Chez atfork handler that resets the sweepers (RC1's "next (b)").
+  Root, which does hold threads, fixes its sweepers at boot, right after the fork server is
+  forked: `seon.lib/gc-sweepers!` (our Chez's `(cs)collect_sweepers`, branch
+  `jolt/gc-sweepers`) starts `SEON_GC_SWEEPERS` and no collection starts another.
+  Unfixed, Chez kept one per thread a collection found waiting, so root's thread count
+  drifted by load (0, 5, 15 sweepers across identical runs; lane THREADS).
 - **On macOS, a descriptor in flight by SCM_RIGHTS can be discarded when other unix
   sockets close**, so the sender keeps its copy until the receiver confirms (the fork
   server's `:in-flight`, a clone's socket kept until `:cloned`). A descriptor rides a frame
