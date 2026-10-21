@@ -705,8 +705,9 @@
 
 (defn errors
   "The api's fold of the errors it saw (seon.error/fold): the true counts, including repeats
-  of written signatures that main does not hold."
-  {:malli/schema [:=> [:cat :seon.root/sys] :seon.error/fold]}
+  of written signatures that main does not hold; the api's defect when it could not answer
+  (task `seon.root/a-proc-answers-every-request-it-took`)."
+  {:malli/schema [:=> [:cat :seon.root/sys] [:or :seon.error/fold :seon.error/base]]}
   [sys] (deref (call! sys {:op :errors}) 5000 {}))
 
 (defn events

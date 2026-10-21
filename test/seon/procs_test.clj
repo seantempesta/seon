@@ -52,6 +52,36 @@
     (testing "the stop transition releases the branch connections"
       (is (map? (#'writer/writer-proc st ::flow/stop))))))
 
+(deftest the-flush-is-continuous-group-commit
+  ;; owner 2026-10-21 (notes/DECISIONS.md, "Durability is batched everywhere", superseded
+  ;; paragraph): no window. A write is answered when committed in memory; the flusher parks
+  ;; until something is unflushed, syncs once for everything committed so far, and says what it
+  ;; covered; commits during a sync share the next one; an idle system never syncs.
+  (let [[cfg conn] (pdb/test-branch!)
+        in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? true :to-writer in :events (a/chan 16)})]
+    (testing "the flusher syncs at once and tells the writer which commits it covered"
+      ;; :flush-ms 0: the window the implementation deletes, at none, so today's flusher answers
+      ;; without waiting
+      (let [fl (#'writer/flusher-proc {:to-writer in :cfg cfg :flush-ms 0})
+            [fl outs] (step #'writer/flusher-proc fl :in {:op :dirty :commits 3 :since 0})]
+        (is (= {:to-writer [{:op :flushed :commits 3}]} outs))
+        (is (= 1 (:flushes fl)))))
+    (testing "a write is answered unflushed, and the writer tells the flusher what it committed"
+      (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})
+            notice (first (:to-flusher outs))]
+        (is (true? (:ok (:r (first (:to-api outs))))))
+        (is (= {:op :dirty :commits (:commits st)} (select-keys notice [:op :commits])))
+        (testing "the flush that covers it leaves the store clean"
+          (let [[st2 _] (step #'writer/writer-proc st :in {:op :flushed :commits (:commits st)})]
+            (is (false? (:dirty st2)))
+            (is (= 1 (- (:flushes st2 0) (:flushes st 0))))))
+        (testing "a commit after the flush began: still dirty, and the flusher is told again"
+          (let [[st3 _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "b"}] :dest {:rid 2}})
+                [st4 outs] (step #'writer/writer-proc st3 :in {:op :flushed :commits (:commits st)})]
+            (is (true? (:dirty st4)))
+            (is (= [{:op :dirty :commits (:commits st3)}] (mapv #(select-keys % [:op :commits]) (:to-flusher outs))))))))))
+
 (deftest reconciler
   (let [[_ conn] (pdb/test-branch!)
         st (#'reconcile/reconciler-proc {:boot "b" :provider {:kind :scripted :script 'seon.fixtures/reply}})]
@@ -122,6 +152,48 @@
             rid (get-in (first (:to-writer outs)) [:dest :rid])
             [_ _] (step #'root/api-proc st :from-writer {:dest {:rid rid} :r {:ok true}})]
         (is (= {:ok true} @p))))))
+
+;; ---- task seon.root/a-proc-answers-every-request-it-took (census #2) ----------------------
+
+(defn- api-state []
+  (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                    :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))}))
+
+(defn- answer "What p was answered, or :unanswered." [p] (if (realized? p) @p :unanswered))
+
+(deftest a-throwing-step-answers-every-pending-request
+  ;; Flow's step catch keeps the old state and drops the outputs; its error message carries the
+  ;; message the step took (::flow/msg), which root's error reader forwards as :msg
+  (let [st (api-state)]
+    (testing "the api's own step threw on {:op :state}: its caller is answered the defect, not left waiting"
+      (let [p (promise)]
+        (step #'root/api-proc st :back {:op :error :pid :api :message "boom" :msg {:op :state :p p}})
+        (is (= :seon.root/proc-defect (:seon.error/type (answer p))))))
+    (testing "the writer threw on a request the api sent it: the api answers that request's caller by its rid"
+      (let [p (promise)
+            [st outs] (step #'root/api-proc st :ext {:op :write :req {:op :tx :branch :db :tx-data []} :p p})
+            sent (first (:to-writer outs))]
+        (step #'root/api-proc st :back {:op :error :pid :writer :message "boom" :msg sent})
+        (is (= :seon.root/proc-defect (:seon.error/type (answer p))))
+        (is (= "boom" (:seon.error/message (answer p))))))))
+
+(defn- answering-sys
+  "A sys whose entrance answers every request with r (a stand-in for the api), on a branch of
+  the test store."
+  [r]
+  (let [[cfg conn] (pdb/test-branch!) ext (a/chan 4)]
+    (a/go-loop [] (when-let [m (a/<! ext)] (deliver (:p m) r) (recur)))
+    {:ext ext :cfg cfg :conn conn :graph nil}))
+
+(deftest root-state-never-answers-an-empty-system
+  ;; "Unknown is not {}": what the api answers is what the caller gets; a defect stays a defect
+  (let [e (seon.contract/error :seon.root/proc-defect 'seon.root/api-proc "boom" {:pid :api})
+        sys (answering-sys e)]
+    (testing "state: the defect, not a view decorated around it"
+      (is (= e (root/state sys))))
+    (testing "errors: the defect, not an empty fold"
+      (is (= e (root/errors sys))))
+    (a/close! (:ext sys))))
 
 (deftest the-step-loop-runs-flows-contract-in-one-thread
   ;; a counter step-fn run by seon.step/run-loop over an in-memory transport

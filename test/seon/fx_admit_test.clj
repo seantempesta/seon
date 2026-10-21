@@ -38,3 +38,24 @@
         [st _] (fx/owner-proc st :in (req 3 0 :prio 3))
         [_ o] (fx/owner-proc st :done {:dest {:agent :a1} :outcome {:value 1}})]
     (is (= [3] (ran o)) "prio is the task's depth in the needs DAG: finishing a chain beats starting one")))
+
+(deftest a-rate-limited-model-call-waits-for-the-bucket-and-is-answered
+  ;; task seon.fences/a-transient-model-failure-parks: a 429 is the provider saying "wait", so
+  ;; the owner keeps the request (the lane hands it back as :request) until its bucket refills,
+  ;; and the asker is answered only by the call that went through
+  (let [r (req 1 10)
+        dest (:dest r)
+        answers (fn [o] (vec (for [x (:out o) :when (= dest (:dest x))] (:r x))))
+        [st _] (fx/owner-proc (owner 8 1000) :in r)
+        [st o] (fx/owner-proc st :done {:dest dest :request r :est 10 :cost 0
+                                        :outcome {:seon.error/type :seon.model/rate-limited :seon.error/operation 'seon.model/complete
+                                                  :seon.error/message "HTTP 429" :status 429}})]
+    (is (= [] (answers o)) "the asker is not answered the 429")
+    (is (= [:seon.model/rate-limited] (keep #(get-in % [:error :seon.error/type]) (:out o))) "each 429 is a recorded problem")
+    (is (= [{:k 1}] (map :req (vals (:queue st)))) "the request waits in the owner's queue")
+    (is (empty? (ran o)) "and is not sent again before the bucket refills")
+    (let [st (assoc-in st [:bucket :at] (- (get-in st [:bucket :at]) 1000))
+          [st o] (fx/owner-proc st :tick {})
+          _ (is (= [1] (ran o)) "the refilled bucket's tick sends it again")
+          [_ o] (fx/owner-proc st :done {:dest dest :request r :est 10 :cost 10 :outcome {:value 1}})]
+      (is (= [{:value 1}] (answers o)) "the asker gets the call that went through"))))
