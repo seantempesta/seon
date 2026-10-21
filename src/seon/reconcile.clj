@@ -419,6 +419,15 @@
   (some-> (when (task/eid db :seon.root/id :root) (:seon.root/quiescent (d/pull db [:seon.root/quiescent] [:seon.root/id :root])))
           edn/read-string))
 
+(defn generation
+  "The next generation on db: the last merges commit the :build effect built or refused
+  ({:commit :checkout :binary :ms} or {:commit :ms :error}, written by the reconciler proc),
+  or nil."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.root/generation]]}
+  [db]
+  (some-> (when (task/eid db :seon.root/id :root) (:seon.root/generation (d/pull db [:seon.root/generation] [:seon.root/id :root])))
+          edn/read-string))
+
 ;; ---- queries, over one index (list it once: (index db)) -----------------------------
 
 (defn reconcile
@@ -640,12 +649,20 @@
                      (one (request st aid :committed
                                    {:op :fx :kind :git :req {:dir (:root (:source st)) :branch (:branch (:source st)) :files files
                                                              :message (source/commit-message members)}}))))
+      ;; the sha on each merged attempt, then the next generation built from it (:build)
       :committed (let [sha (get-in r [:value :sha])
                        m (cond sha {:seon.attempt/commit sha}
                                (contract/error? r) {:seon.attempt/commit-error (:seon.error/message r)})]
                    (if m
-                     (one (write st aid :done (vec (for [{:keys [attempt]} (:members (:writeback f))] (assoc m :seon.attempt/id attempt)))))
-                     (done st))))))
+                     (one (write (assoc-in st [:flights aid :commit] sha) aid (if sha :commit-recorded :done)
+                                 (vec (for [{:keys [attempt]} (:members (:writeback f))] (assoc m :seon.attempt/id attempt)))))
+                     (done st)))
+      :commit-recorded (one (request st aid :built {:op :fx :kind :build :req {:repo (:root (:source st)) :commit (:commit f)}}))
+      ;; the generation on main's root entity, built or refused: bin/root next starts its binary
+      :built (one (write st aid :done [{:seon.root/id :root
+                                        :seon.root/generation (edn-text (if (contract/error? r)
+                                                                          {:commit (:commit f) :ms (/ (:seon.fx/us r 0) 1000.0) :error (:seon.error/message r)}
+                                                                          (:value r)))}])))))
 
 (defn- quiet
   "Report quiescence positively, once per quiet spell: when no flight is in the air and no

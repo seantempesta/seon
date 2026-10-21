@@ -113,6 +113,33 @@
           (finally (.delete (java.io.File. ^String index)))))
       (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path dir})))))
 
+(defn build
+  "The next generation (docs/source.md#the-next-generation): commit of the repository at
+  repo built as <:seon.config.source/generations-dir>/<commit>, a worktree of it with this
+  checkout's submodule repos at the commit's pins and its target/ cloned (bin/worktree --at),
+  then bin/build seon there, niced, under the one build lock. The build runs in that tree's
+  own environment (bin/env), never this root's checkout. A tree already there is built again
+  (Jolt's caches make an unchanged build cheap). Answers {:value {:commit :checkout :binary
+  :ms}}, or :seon.fx/io-error naming the step and its log (<checkout>.build.log)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [repo commit]} :req}]
+  (let [t0 (lib/now-ns)
+        from (cfg/checkout)
+        dir (str (cfg/value :seon.config.source/generations-dir) "/" commit)
+        log (str dir ".build.log")
+        ;; a process of the tree's own: bin/env derives these from the tree it is in
+        clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"]
+        step (fn [what args]
+               (let [r (apply sh/sh "zsh" "-c" "\"$@\" >> \"$0\" 2>&1" log (concat clean args))]
+                 (when-not (zero? (:exit r))
+                   (error :seon.fx/io-error (str what " exited " (:exit r) "; its log: " log) {:path dir}))))]
+    (.mkdirs (java.io.File. (str (cfg/value :seon.config.source/generations-dir))))
+    (or (when-not (.exists (java.io.File. dir))
+          (step "bin/worktree --at" [(str from "/bin/worktree") "--at" dir commit repo]))
+        (step "bin/build seon" ["nice" "-n" "15" "/usr/bin/lockf" "-k" (cfg/value :seon.config.source/build-lock)
+                                (str dir "/bin/build") "seon"])
+        {:value {:commit commit :checkout dir :binary (str dir "/target/seon") :ms (lib/ms-since t0)}})))
+
 ;; ---- the owner -----------------------------------------------------------------------
 
 (defn refill
@@ -269,17 +296,6 @@
   (let [p (cond-> (:provider ctx) (and (:model req) (= :openai-compat (:kind (:provider ctx)))) (assoc :model (:model req)))
         c (model/complete p (dissoc req :model))]
     (if (:seon.error/type c) c {:value c :cost (+ (:prompt-tokens c) (:completion-tokens c))})))
-
-(defn kinds
-  "Every effect kind root runs: its perform Var, its lanes (its concurrency) and the
-  context only root holds (the model provider)."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [provider]
-  {:echo {:perform #'echo :lanes 1}
-   :file {:perform #'write-file :lanes 1}
-   :source {:perform #'read-source :lanes 1}
-   :git {:perform #'git-commit :lanes 1}
-   :model {:perform #'model :lanes (cfg/value :seon.config.ai/max-in-flight) :ctx {:provider provider} :rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))}})
 
 (defn procs
   "The owner and lane procs of every kind, for the root graph. Any proc reaches an owner

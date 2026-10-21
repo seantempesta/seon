@@ -137,3 +137,19 @@
         (is (= t (:max-tx @c2)) "an open that finds nothing missing writes nothing")
         (d/release c2))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(deftest a-moved-store-opens
+  ;; task seon.db/a-store-opens-where-it-lies: a store's Datahike id is (hasch/uuid path) of
+  ;; the path it was created at (seon.db/store-cfg), so a store renamed or copied (kept runs:
+  ;; next/runs/store-full-20261021, renamed from next/runs/store) is refused at its new path
+  ;; with "Store identity mismatch". A store on disk of this test's own, the last resort:
+  ;; what is proved is a move; removed at the end
+  (let [base (str (System/getProperty "user.dir") "/target/db-test-move-" (random-uuid))
+        moved (str base "-moved")
+        _ (d/release (:conn (pdb/open! :lmdb base 0 :db)))
+        _ (clojure.java.shell/sh "mv" base moved)]
+    (try
+      (let [r (try (pdb/open! :lmdb moved 0 :db) (catch Exception e {:refused (ex-message e)}))]
+        (is (some? (:conn r)) (str "the moved store opens: " (:refused r)))
+        (some-> (:conn r) d/release))
+      (finally (clojure.java.shell/sh "rm" "-rf" base moved)))))

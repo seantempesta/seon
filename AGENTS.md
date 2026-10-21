@@ -158,7 +158,7 @@ The order is **delete first, then foundations, then fixes**. Anything shared by 
 
 ## 5. The running system, as a Seon agent sees it
 
-Each checkout runs its own standing root with `bin/root start` (also `status` and `stop`).
+Each checkout runs its own standing root with `bin/root start` (also `status`, `stop`, and `next`: stop root and start the newest generation's binary, the one the `:build` effect made from the last merges commit, on the same store).
 - It runs detached, on the checkout's ports (`bin/ports`; the owner's main tree uses 7888, with the dashboard on 7777).
 - Its store is kept under `runs/`.
 
@@ -200,7 +200,7 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
   - a lane's worktree is removed in the landing that merges it (`bin/worktree --remove NAME`, run by root after the merge; the branch stays in git);
   - a lane's scratch lives inside its worktree (`target/`, `runs/`) and goes with it; nobody creates a new top-level directory in `~/src/seon-jolt` (the fork repositories `docs/forks.md` lists, `notes/`, `bin/` and the worktrees are the only ones);
   - what is kept is what git and the store record (commits, task facts, notes); build output, compile caches and finished experiments' stores are regenerable and are deleted when their checkout or experiment ends;
-  - root prunes each checkout's `target/check/` to its last three runs at each landing.
+  - root prunes each checkout's `target/check/` to its last three runs at each landing, and a run's old generations (each a tree and a binary, ~200 MB) to the one running and the one before it.
 - **Leave nothing running when you finish,** and say so in your report. Kill only PIDs you started; never `pkill` or `killall`. Delete only paths you created.
 - **Your scratch:** under your worktree (`target/`, `runs/`) or a folder named for your lane. The session scratch folder is shared.
 - **Git in a worktree:**

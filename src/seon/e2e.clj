@@ -203,14 +203,34 @@
       (println :numbers (numbers sys t0))
       (verdict! sys (and (empty? (agents-reused d)) (= expect fresh-r))))))
 
+(defn loop-turn!
+  "The loop's turn on root sys, whose Seon source is on: a task redefines a platform
+  function (seon.fixtures/generation, 1 -> 2) on its branch, its merge task lands it, the
+  reconciler commits main's file on the merges branch and builds that commit (the :build
+  effect). Waits for quiescence (the build's flight included). Answers {:commit sha (the
+  merged attempt's) :commits [[attempt sha]] :commit-errors [[attempt message]] :generation
+  (main's, seon.reconcile/generation) :quiescent q}. Run through root's entrance, it is the
+  turn `bin/root next` then restarts (seon.source-test/a-new-generation-is-built-and-resumed-on-the-store)."
+  [sys]
+  (let [{:keys [specs]} (get fx/scenarios :loop)
+        ds (fx/decls specs 'loop nil)]
+    (seed! sys specs)
+    (println :create (select-keys (root/create! sys (mapv #(assoc % :seon.task/config {:seon.config.agent/max-turns 2}) ds)) [:ok]))
+    (root/run! sys (mapv #(task/task-id 'loop (:seon.task/name %)) ds))
+    (let [q (quiet! sys)
+          d (db sys)
+          commits (vec (d/q '[:find ?a ?c :where [?e :seon.attempt/commit ?c] [?e :seon.attempt/id ?a]] d))]
+      {:commit (second (first commits)) :commits commits
+       :commit-errors (vec (d/q '[:find ?a ?m :where [?e :seon.attempt/commit-error ?m] [?e :seon.attempt/id ?a]] d))
+       :generation (r/generation d) :quiescent q})))
+
 (defn loop-run
   "The self-improvement loop, first turn: root boots on a clone of this repository (its
   committed HEAD, under the run's directory: never the live tree) with Seon's own source as
-  main's program; a task redefines a platform function (seon.fixtures/generation, 1 -> 2)
-  on its branch, its merge task lands it, and the reconciler writes main's file back and
-  commits it on the clone's jolt/seon-merges. Passes when the commit holds exactly that
-  form's change and the merged attempt records its sha. The next generation (building that
-  commit) is the caller's: it prints the clone and the sha."
+  main's program, and runs loop-turn!. Passes when the commit holds exactly that form's
+  change, the merged attempt records its sha and that commit is built (the generation on
+  main names its binary). Restarting on it is bin/root next's; this prints the clone, the
+  sha and the binary, then removes the generation's tree."
   [dir]
   (let [t0 (now)
         repo (.getParent (java.io.File. (System/getProperty "user.dir")))
@@ -219,33 +239,31 @@
         cloned (sh/sh "git" "clone" "-q" "--local" repo tree)
         head (git "rev-parse" "HEAD")
         sys (c/start! {:datoms 300 :max-running 2 :source {:root tree :dirs ["src"] :branch "jolt/seon-merges"}})
-        src (some-> (d/q '[:find ?s . :where [?e :seon.root/source ?s]] (db sys)) read-string)
-        {:keys [specs]} (get fx/scenarios :loop)
-        ds (fx/decls specs 'loop nil)]
+        src (some-> (d/q '[:find ?s . :where [?e :seon.root/source ?s]] (db sys)) read-string)]
     (println :clone (:exit cloned) tree :head head)
     (println :source src)
-    (seed! sys specs)
-    (println :create (select-keys (root/create! sys (mapv #(assoc % :seon.task/config {:seon.config.agent/max-turns 2}) ds)) [:ok]))
-    (root/run! sys (mapv #(task/task-id 'loop (:seon.task/name %)) ds))
-    (println :quiescent (quiet! sys))
-    (let [d (db sys)
-          commits (d/q '[:find ?a ?c :where [?e :seon.attempt/commit ?c] [?e :seon.attempt/id ?a]] d)
-          errors (d/q '[:find ?a ?m :where [?e :seon.attempt/commit-error ?m] [?e :seon.attempt/id ?a]] d)
-          sha (second (first commits))
+    (let [{:keys [commits commit-errors generation] sha :commit} (loop-turn! sys)
+          d (db sys)
           files (when sha (git "diff" "--name-only" head sha))
           diff (when sha (git "diff" "-U0" head sha "--" "src/seon/fixtures.clj"))
           changed (when diff (filterv #(and (#{\+ \-} (first %)) (not (str/starts-with? % "+++")) (not (str/starts-with? % "---"))) (str/split-lines diff)))
           ok (and (zero? (:exit cloned)) src (nil? (:error src)) (< 1000 (:forms src))
-                  (= 1 (count commits)) (empty? errors)
+                  (= 1 (count commits)) (empty? commit-errors)
                   (= "src/seon/fixtures.clj" files)
                   (= ["-  [] 1)" "+  [] 2)"] changed)
                   (= head (git "rev-parse" "jolt/seon-merges~1"))
-                  (= head (git "rev-parse" "HEAD")))]
+                  (= head (git "rev-parse" "HEAD"))
+                  (= sha (:commit generation)) (nil? (:error generation))
+                  (.canExecute (java.io.File. (str (:binary generation)))))]
       (doseq [[id s] (summary d)] (println :task id s))
-      (println :commits commits :commit-errors errors :files files :changed changed)
+      (println :commits commits :commit-errors commit-errors :files files :changed changed)
+      (println :generation generation)
       (println :numbers (numbers sys t0))
-      (println "NEXT" tree sha)
+      (println "NEXT" tree sha (:binary generation))
       (c/stop! sys)
+      ;; the generation's tree is regenerable build output, and its submodule worktrees are
+      ;; entries in this checkout's module repos: removed once proven (AGENTS.md section 7)
+      (when (:checkout generation) (sh/sh (str repo "/bin/worktree") "--remove-at" (:checkout generation)))
       (println (if (and ok (nil? (defect d 0))) "LOOP OK" "LOOP FAILED"))
       (and ok (nil? (defect d 0))))))
 

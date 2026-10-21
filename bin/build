@@ -122,7 +122,9 @@ build_lmdb() {
 build_seon() {
   [ -x "$JOLT" ] || build_jolt
   [ -f "$T/lib/libprobe.dylib" ] || build_native
-  build_lmdb
+  # as chez and jolt: built when missing (bin/build lmdb rebuilds it on a pin change); a
+  # generation's worktree (seon.fx/build) holds its checkout's build, not ../vendor-c
+  [ -f "$T/lib/liblmdb.dylib" ] || build_lmdb
   . "$ROOT/bin/env"
   # Jolt's compile cache keys a namespace by its source and its dependencies' sources, not by
   # the files a macro reads at expansion: seon.contract/defn compiles each contract against
