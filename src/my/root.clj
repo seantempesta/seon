@@ -9,7 +9,10 @@
   {:malli/schema [:=> [:cat :seon.root/sys [:vector :seon.task/declaration]] :map]}
   [sys decls]
   (let [tx (task/create-tx @(:conn sys) decls)]
-    (if (:seon.error/type tx) tx @(root/transact-main! sys tx))))
+    (if (:seon.error/type tx)
+      tx
+      (let [ps (task/citation-problems @(:conn sys) decls)]
+        (cond-> @(root/transact-main! sys tx) (seq ps) (assoc :problems ps))))))
 
 (defn run!
   "Release tasks ids: the one release (nothing autoruns)."
@@ -44,7 +47,9 @@
          tx (task/load-tx @(:conn sys) files)]
      (cond (:seon.error/type tx) tx
            (empty? tx) {:ok true :files (count files) :changed 0}
-           :else (assoc @(root/transact-main! sys tx) :files (count files) :datoms (count tx))))))
+           :else (let [ps (task/citation-problems @(:conn sys) (vec (mapcat identity (vals files))))]
+                   (cond-> (assoc @(root/transact-main! sys tx) :files (count files) :datoms (count tx))
+                     (seq ps) (assoc :problems ps)))))))
 
 (defn problems
   "Every problem recorded on main, by class (seon.problems/report): recorded errors counted

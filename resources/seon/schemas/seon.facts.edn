@@ -59,6 +59,7 @@
  :seon.task/instructions :string
  :seon.task/proofs [:set :qualified-symbol]
  :seon.task/needs [:set :seon.db/ref]
+ :seon.task/references [:set :qualified-symbol]
  :seon.task/branch :keyword
  :seon.task/model :string
  :seon.task/execution [:and {:seon.db/index true} [:enum :held :running :cancelled]]
@@ -85,6 +86,7 @@
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                           [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind]
                           [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/needs {:optional true} :seon.task/needs]
+                          [:seon.task/references {:optional true} :seon.task/references]
                           [:seon.task/instructions {:optional true} :seon.task/instructions]
                           [:seon.task/model {:optional true} :seon.task/model] [:seon.task/problem {:optional true} :seon.task/problem]
                           [:seon.task/evidence {:optional true} :seon.task/evidence]

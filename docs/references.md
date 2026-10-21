@@ -24,3 +24,9 @@ Only a span of exactly one qualified symbol or keyword is a name. A form, an ali
 ## Cost
 
 One parse is linear in the text. Most of its allocation is reading each candidate name with `seon.reader/read-text` (about 13 µs and 18 KB per name, half of it `seon.reader/opts` rebuilt per call): `AGENTS.md` (21 KB) parses in 0.8 ms and 1.2 MB. The proof is `seon.ref-test/one-parse-costs-one-pass`. Edamame on Jolt allocates about 2 KB per symbol it reads (100 KB for a 100-byte vector of 50 symbols, measured 2026-10-21), so the reads, not the scan, are where a cheaper parse would come from.
+
+## Task references
+
+A task's references are the names its plan and instructions cite, derived by the task writer and never authored.
+
+```seon.task/create-tx``` stores them as `:seon.task/references` (the set from ```seon.ref/names```; no names, no key), and ```seon.task/load-tx``` restates them when a plan changes, so the context and the write set read one derivation. A citation that resolves to nothing is a problem on the task, never a refusal (v1's rule, TASK-CHAIN §3): ```seon.task/citation-problems``` answers `{:task id :name sym :problem :unresolved}` for each, and `my.root/create!` and `my.root/load-tasks!` carry them as `:problems` beside the write, so whoever wrote the plan sees it when they write it. In the agent's context the same name shows `:unresolved true` with `:problem`, the message from ```seon.ref/problem-messages```: it resolves to nothing on the branch, what the task intends is its plan's to say, and two backticks mention a name without citing it. A plan that cites the function its proof calls, not the task's own name, is the cheapest way to a good context.
