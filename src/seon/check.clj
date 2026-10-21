@@ -1255,7 +1255,7 @@
               {"jsonrpc" "2.0" "id" 4 "method" "tools/call" "params" {"name" "seon_eval" "arguments" {"agent" (name a) "code" "(def outside-x 41) (inc outside-x)"}}}
               {"jsonrpc" "2.0" "id" 5 "method" "tools/call" "params" {"name" "seon_eval" "arguments" {"agent" "root" "code" "(count (:agents (c/state sys)))"}}}]
         t0 (lib/now-ns)
-        r (clojure.java.shell/sh "env" (str "SEON_ENTRANCE_PORT=" port) "./seon" "mcp" :in (clojure.string/join "\n" (map clojure.data.json/write-str msgs)))
+        r (clojure.java.shell/sh "./seon" "mcp" "--set" (str ":seon.config.root/entrance-port=" port) :in (clojure.string/join "\n" (map clojure.data.json/write-str msgs)))
         ms (lib/ms-since t0)
         answers (into {} (for [l (clojure.string/split-lines (:out r)) :when (clojure.string/starts-with? l "{")
                                :let [j (clojure.data.json/read-str l)]] [(get j "id") j]))
@@ -1439,7 +1439,7 @@
         ;; the page's own first passes (the tab's views, its keyframe) settle first
         _ (Thread/sleep 1000)
         ;; root's declared procs and its effect owners (their lanes step only when given work)
-        decl (seon.system/read-decl seon.system/path)
+        decl (seon.system/read-decl (seon.config/value :seon.config.root/system-path))
         pids (sort-by str (concat (keys (:procs decl)) (for [k (keys (:fx decl))] (keyword "fx" (name k)))))
         counts (fn [] (into (sorted-map) (for [pid pids] [pid (some-> (flow/ping-proc (:graph sys) pid :timeout-ms 1000) ::flow/count)])))
         b0 @received c0 (counts)
