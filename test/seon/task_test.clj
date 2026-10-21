@@ -6,8 +6,11 @@
             [seon.db :as pdb] [seon.task :as task]))
 
 (defn- db-with-program []
+  ;; one recorded definition, its form (seon.program's facts), written as data
   (d/db-with @(second (pdb/test-branch!))
-             [{:db/id "ns" :ns/name 'demo} {:var/name 'demo/f :var/ns "ns" :var/src "(defn f [x] x)"}]))
+             [{:db/id "ns" :ns/name 'demo}
+              {:db/id "v" :var/name 'demo/f :var/ns "ns" :var/form "form"}
+              {:db/id "form" :form/id "demo/f" :form/src "(defn f [x] x)" :form/ns "ns" :form/order 0 :form/defines ["v"]}]))
 
 (defn- decl [plan] {:seon.task/ns 'demo :seon.task/name "t" :seon.task/plan plan})
 
