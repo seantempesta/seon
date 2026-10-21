@@ -4,7 +4,8 @@
   proof is not shown again, a merge task's plan stays its own."
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.task :as task] [seon.context :as context] [seon.print :as print]
-            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs]))
+            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs]
+            [seon.print.select :as select] [clojure.string :as str] [clojure.walk :as walk]))
 
 (defn- db-with-program []
   (let [db @(second (pdb/test-branch!))]
@@ -25,13 +26,13 @@
                                                :seon.task/proofs #{'demo-test/f-test 'demo-test/g-test}}]))
         t (task/task db "demo/f")
         block (context/current-state db t {:results {'demo-test/f-test :pass 'demo-test/g-test :fail}
-                                           :reds [{:test 'demo-test/g-test :type :fail :message nil :expected "(= 1 (g))" :actual "(not (= 1 0))"}]
+                                           :reds [{:test 'demo-test/g-test :type :fail :message nil :expected "(= 1 (g))" :actual "(not (= 1 0))" :got "(= 1 0)"}]
                                            :turn 0 :max-turns 4})
         by (into {} (map (juxt :test identity)) (:proofs block))]
     (is (= {:test 'demo-test/f-test :status :pass} (by 'demo-test/f-test)) "a passing proof is its status")
     (is (string? (:source (by 'demo-test/g-test))) "a red proof shows its source")
-    (is (= [{:expected "(= 1 (g))" :actual "(not (= 1 0))"}] (:failures (by 'demo-test/g-test)))
-        "a failure is what was expected and what happened")
+    (is (= [{:assert "(= 1 (g))" :got "(= 1 0)"}] (:failures (by 'demo-test/g-test)))
+        "a failure is the assertion and what it evaluated to")
     (is (= ['demo/f] (mapv :symbol (:references block))) "a proof named in the plan is not shown again as a reference")
     (is (nil? (:doc (first (:references block)))) "a program reference's source already holds its doc")))
 
@@ -68,12 +69,12 @@
         ;; contract gap; the run named one failing assertion of each red test
         refusals [{:refusal :proof-red :symbol 'demo-test/f-test} {:refusal :regression :symbol 'demo-test/g-test}
                   {:refusal :stray-red :symbol 'user/scratch-test} {:refusal :contract-gap :symbol 'demo/helper}]
-        reds [{:test 'demo-test/g-test :type :fail :expected "(= 1 (g))" :actual "(not (= 1 0))"}]
+        reds [{:test 'demo-test/g-test :type :fail :expected "(= 1 (g))" :actual "(not (= 1 0))" :got "(= 1 0)"}]
         block (context/current-state db t {:results {'demo-test/f-test :fail 'demo-test/g-test :fail} :reds reds
                                            :refusals refusals :turn 1 :max-turns 4
                                            :run-errors ["tests timed out after 30000 ms; killed"]})]
     (testing "every refusal but the task's own red proof (shown with the proofs), each with what explains it"
-      (is (= [{:refusal :regression :test 'demo-test/g-test :failures [{:expected "(= 1 (g))" :actual "(not (= 1 0))"}]}
+      (is (= [{:refusal :regression :test 'demo-test/g-test :failures [{:assert "(= 1 (g))" :got "(= 1 0)"}]}
               {:refusal :stray-red :test 'user/scratch-test}
               {:refusal :contract-gap :vars ['demo/helper]}]
              (:refused block))))
@@ -114,6 +115,104 @@
     (alter-meta! (find-ns 'ctx-scratch-ns) assoc :scratch true)
     (let [db (d/db-with (db-with-program) [{:ns/name 'ctx-prog-ns} {:ns/name 'ctx-scratch-ns} {:ns/name 'user}])]
       (is (= ['ctx-prog-ns] (mapv ns-name (agent/test-namespaces db)))))))
+
+(deftest a-failure-reads-as-assert-and-got
+  (binding [*ns* *ns*]
+    (eval '(ns ctx-calc))
+    (eval '(defn square "Squares x." {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x)))
+    (eval '(ns ctx-calc-test (:require [clojure.test :refer [deftest is]] [ctx-calc :refer [square]])))
+    (eval '(deftest square-test (is (= 9 (square 3))))))
+  (let [db (d/db-with (db-with-program)
+                      (vec (mapcat (fn [[v src]]
+                                     [{:db/id (str v) :var/name v :var/ns (str "ns " (namespace v)) :var/form (str "form " v)}
+                                      {:db/id (str "form " v) :form/id (str v) :form/src src :form/ns (str "ns " (namespace v)) :form/order 0
+                                       :form/defines [(str v)]}
+                                      {:db/id (str "ns " (namespace v)) :ns/name (symbol (namespace v))}])
+                                   '[[ctx-calc/square "(defn square \"Squares x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))"]
+                                     [ctx-calc-test/square-test "(deftest square-test (is (= 9 (square 3))))"]
+                                     [ctx-calc-test/empty-test "(deftest empty-test (square 3))"]])))
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'ctx :seon.task/name "sq" :seon.task/plan "p"
+                                               :seon.task/proofs #{'ctx-calc-test/square-test 'ctx-calc-test/cube-test 'ctx-calc-test/empty-test}}]))
+        ;; the test child's report of the failing assertion, as clojure.test makes it
+        rep (agent/test-report {:type :fail :expected '(= 9 (square 3)) :actual '(not (= 9 6))} "#'ctx-calc-test/square-test")
+        block (context/current-state db (task/task db "ctx/sq")
+                                     {:results {'ctx-calc-test/square-test :fail} :turn 1 :max-turns 4
+                                      :reds (proofs/red-reports {:reports [rep]} #{'ctx-calc-test/square-test})})
+        by (into {} (map (juxt :test identity)) (:proofs block))]
+    (is (= [{:assert "(= 9 (square 3))" :got "(= 9 6)"}] (:failures (by 'ctx-calc-test/square-test)))
+        "the assertion once, and what it evaluated to")
+    (is (= [{:var 'ctx-calc/square :arglists '([x]) :contract [:=> [:cat :int] :int] :doc "Squares x."}]
+           (:calls (by 'ctx-calc-test/square-test)))
+        "the program function the red proof calls, at summary level")
+    (is (= {:test 'ctx-calc-test/cube-test :status :undefined} (by 'ctx-calc-test/cube-test))
+        "a proof not written yet says so")
+    (is (= :no-assertions (:status (by 'ctx-calc-test/empty-test))) "a proof that ran and asserted nothing says so")
+    (let [b (context/current-state db (task/task db "ctx/sq") {:results {} :turn 1 :max-turns 4 :run-errors ["tests timed out"]})]
+      (is (= {'ctx-calc-test/square-test :not-run 'ctx-calc-test/empty-test :not-run 'ctx-calc-test/cube-test :undefined}
+             (into {} (map (juxt :test :status)) (:proofs b)))
+          "when the run failed as a whole, a written proof did not run"))))
+
+(defn- evals
+  "n evaluations cycling over k distinct forms, each answering a large value and printing
+  a large output (inv3's edit/forms: 259 items, 11 distinct)."
+  [n k]
+  (let [kinds (vec (for [j (range k) :let [v (vec (range (* 2000 (inc j))))]]
+                     {:tag :ret :form (str "(code-of " j ")") :handle (keyword (str "h" j))
+                      :printed (print/text v) :value v
+                      :out (apply str (repeat 400 (str "line " j " of pprint output\n")))}))]
+    (vec (for [i (range n)] (assoc (nth kinds (mod i k)) :id i)))))
+
+(deftest repeated-evals-fold-and-every-item-fits-its-share
+  (let [db (db-with-program)
+        t (task-f db)
+        text-of (fn [items] (:content (second (context/messages (context/current-state db t {:turn 1 :max-turns 4 :last-items items})))))]
+    (testing "259 items, 11 distinct: 11 folded items whose times sum to 259"
+      (let [le (context/fold-evals (evals 259 11))]
+        (is (= 11 (count le)))
+        (is (= (range 11) (map :k le)) "each folded item is the first of its kind")
+        (is (= [24 24 24 24 24 24 23 23 23 23 23] (mapv :times le)) "259 = 6x24 + 5x23")))
+    (testing "the whole context stays inside its budget at 259 items and at 10x that, every distinct item shown"
+      (doseq [n [259 2590]]
+        (let [items (evals n 11) text (text-of items)]
+          (is (<= (select/estimate text) (:context print/budgets)) (str n " items"))
+          (is (every? #(str/includes? text (str "\"(code-of " % ")\"")) (range 11)) "no item starves another")
+          (is (str/includes? text (str ";; " (count (filter #(= "(code-of 0)" (:form %)) items)) "x, the same form and answer"))))))
+    (testing "each item within its equal share; every cut's form reads exactly the rest from (my.turn/evals)"
+      (let [items (evals 259 11)
+            shown (context/shown-evals (context/fold-evals items))
+            share (quot context/last-evals-budget 11)]
+        (is (every? #(<= (:tokens %) share) shown))
+        (is (= 22 (count (mapcat :cuts shown))) "each of 11 items cuts its value and its output")
+        (doseq [c (mapcat :cuts shown)
+                :let [f (:seon.print/continuation c)
+                      rest ((eval (list 'fn '[items] (walk/postwalk-replace {'(my.turn/evals) 'items} f))) items)
+                      whole (get-in items (into [(nth (:seon.print/requery-id c) 2)] (:seon.render.data/path c)))]]
+          (is (= (:seon.render.data/next-offset c) (- (count whole) (count rest))) (pr-str f))
+          (is (= (seq whole) (seq (concat (take (:seon.render.data/next-offset c) whole) rest))) (pr-str f)))))))
+
+(deftest the-page-reads-the-context-as-recorded
+  ;; the one source of what an agent read: its turns' recorded user messages, model or outside
+  (let [db (d/db-with (db-with-program)
+                      [{:seon.turn/id "a#1/0" :seon.turn/attempt "a#1" :seon.turn/n 0 :seon.turn/origin :model :seon.turn/context "first"}
+                       {:seon.turn/id "a#1/read-1" :seon.turn/attempt "a#1" :seon.turn/n 1 :seon.turn/origin :outside :seon.turn/context "second"}
+                       {:seon.turn/id "b#1/0" :seon.turn/attempt "b#1" :seon.turn/n 0 :seon.turn/origin :model :seon.turn/context "other"}])]
+    (is (= {:text "second" :origin :outside :turn "a#1/read-1"} (context/recorded db "a#1")) "the last read of the attempt")
+    (is (nil? (context/recorded db "c#1")) "an attempt that read nothing has no context")))
+
+(deftest a-context-read-as-a-value-does-not-grow-the-next-context
+  ;; the model evaluates something that answers a whole context (its own block, say): the
+  ;; item gets its one share like any other, so turn after turn the context cannot nest
+  (let [db (db-with-program)
+        t (task-f db)
+        text-of (fn [items] (:content (second (context/messages (context/current-state db t {:turn 1 :max-turns 4 :last-items items})))))
+        c0 (text-of (evals 259 11))
+        item (fn [c] {:id 0 :tag :ret :form "(seon.turn/context-block \"demo/f\" \"demo/f#1\")" :printed (pr-str c) :value c})
+        c1 (text-of [(item c0)])
+        c2 (text-of [(item c1)])]
+    (is (< (select/estimate c0) (:context print/budgets)))
+    (is (<= (select/estimate c1) (:context print/budgets)))
+    (is (<= (- (select/estimate c2) (select/estimate c1)) 16) "reading a context of a context adds nothing")
+    (is (= 1 (count (context/shown-evals (context/fold-evals [(item c0) (item c0)])))) "a repeated read is one item")))
 
 (deftest an-unresolved-citation-says-what-to-do
   ;; task seon.task/a-task-cites-what-it-needs: a name the plan cites that resolves to

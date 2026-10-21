@@ -17,7 +17,7 @@
   (testing "all=>: one eval per live agent, the ended ones left out"
     (is (= [:a1 :a3] (mapv second (w/requests {:var 'seon.root/submit! :agent :all :forms "1"} index)))))
   (testing "merge!: gated by the agent's tests, on its branch"
-    (is (= {:op :merge-tests :id :a1 :merge-branch :agent-1 :data-attrs :all :timeout-ms 30000}
+    (is (= {:op :merge-tests :id :a1 :merge-branch :agent-1 :data-attrs :all}
            (ffirst (w/requests {:var 'seon.root/merge! :agent :a1} index)))))
   (testing "spawn n with the form's task"
     (let [rs (w/requests {:var 'seon.root/spawn! :agent :root :args {:n 3 :task "x"}} index)]

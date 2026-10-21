@@ -118,6 +118,16 @@
  ;; agent). Provenance: T1, 1 MB makes a 1 MB reply cost what the ring's did. At the bound a
  ;; writer waits for the reader (frames are never dropped).
  :seon.config.agent/sock-buf-bytes 1048576
+ ;; Unit: engine ticks (procedure calls and loop back-edges: work done, never time) one form
+ ;; an agent's model or an outside agent sends may run (Jolt's run-interruptible tick budget).
+ ;; Provenance: lane AGENTS, measured on Jolt 2026-10-21: a tight loop ~4e9 ticks/s, an
+ ;; allocating one ~7.5e8, so this stops a runaway form after ~5-25 s of work. At the bound
+ ;; the form answers the typed :seon.repl/ticks-spent and the request goes on. 0: none.
+ :seon.config.agent/form-ticks 20000000000
+ ;; Unit: engine ticks one proof run (every test of the branch, in its fork) may run. Larger
+ ;; than a form's: cost proofs measure large sizes. At the bound the run stops with
+ ;; :seon.test/ticks-spent naming the test that was running. 0: none.
+ :seon.config.agent/test-ticks 200000000000
 
  ;; ==== merges and refinement ==================================================================
 
@@ -161,12 +171,9 @@
  ;; whose target/seon bin/root next starts. Kept with the run (a generation is a record of what
  ;; ran); one worktree and one ~200 MB binary per merges commit built.
  :seon.config.source/generations-dir #join [#ref [:seon.config.root/runs-dir] "/generations"]
- ;; Unit: path. The one build lock every build takes (AGENTS.md section 7: lockf on it), so a
- ;; generation's build waits for a lane's and the machine runs one build at a time.
- :seon.config.source/build-lock #seon/checkout "../build.lock"
  ;; Unit: path. Test results by reach digest (task seon.program/tests-run-by-reach; owner
  ;; 2026-10-21: "incremental tests even across worktrees based on test digest"): one directory
- ;; beside the build lock, shared by every checkout and worktree, one <digest>.edn per result,
+ ;; beside the checkouts, shared by every checkout and worktree, one <digest>.edn per result,
  ;; written temp-then-rename. A digest covers everything its result depends on, so a result
  ;; from any checkout is valid in every other. A checkout's store (runs/store) is its own, so
  ;; the store cannot hold them. SEON_TEST_RESULTS moves it (a check's own run).

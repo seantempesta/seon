@@ -26,12 +26,7 @@
   ours and theirs as data, until the branch's content for its key changes or it is
   resolved (`resolve-tx`). Every function here is pure over db values."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [clojure.edn :as edn] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program]))
-
-(defn- pr-edn
-  "v printed as EDN that reads back (no print limits, no metadata)."
-  {:malli/schema [:=> [:cat :any] :string]}
-  [v] (binding [*print-length* nil *print-level* nil *print-meta* false] (pr-str v)))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program] [seon.edn :as sedn]))
 
 (def ^:private program-ns-attrs #{"form" "var" "ns" "method" "impl" "schema" "schema.file" "db" "db.install" "db.type" "db.cardinality" "db.unique"})
 
@@ -127,7 +122,7 @@
   [base ours theirs]
   (let [oc (changes base ours)
         tc (changes base theirs)
-        ks (sort-by pr-edn (keys tc))]
+        ks (sort-by sedn/encode (keys tc))]
     {:ours oc
      :theirs tc
      :apply (vec (for [k ks :let [b (get base k) o (get ours k) t (get theirs k)] :when (and (not (same? k o t)) (same? k o b))] k))
@@ -149,11 +144,11 @@
                                                                      [:call {:optional true} :qualified-symbol]
                                                                      [:inline-def {:optional true} :qualified-symbol]]]]}
   [db ours]
-  (vec (for [[[k id] [_ f]] (sort-by (comp pr-edn key) ours)
+  (vec (for [[[k id] [_ f]] (sort-by (comp sedn/encode key) ours)
              :when (and (= :form k) f (not (:ns/file (d/entity db [:ns/name (:ns f)]))))
              finding (concat (for [c (sort-by str (:banned f))] {:call c})
                              (for [v (sort-by str (:inline-defs f))] {:inline-def v}))]
-         (merge {:form id :ns (:ns f) :defines (vec (sort-by pr-edn (:defines f)))} finding))))
+         (merge {:form id :ns (:ns f) :defines (vec (sort-by sedn/encode (:defines f)))} finding))))
 
 ;; ---- tx-data: setting keys on a db ---------------------------------------------------
 
@@ -161,14 +156,18 @@
 (defn- form-tid {:malli/schema [:=> [:cat :string] :string]} [id] (str "form " id))
 
 (defn- def-ref
-  "The entity map naming definition k (an upsert by its identity), with its tempid."
-  {:malli/schema [:=> [:cat :seon.merge/def-key] :map]}
-  [[kind a b]]
-  (case kind
-    :var {:db/id (str "var " a) :var/name a :var/ns (ns-tid (symbol (namespace a)))}
-    :method (let [k (program/method-key a b)] {:db/id (str "method " k) :method/key k :method/multi a :method/dispatch b})
-    :impl (let [k (program/impl-key a b)] {:db/id (str "impl " k) :impl/key k :impl/protocol a :impl/type b})
-    :ns {:db/id (ns-tid a) :ns/name a}))
+  "The entity map naming definition k on db: its entity when db has it, else an upsert by
+  its identity with its tempid (Datahike allocates a tempid first seen as a ref, in
+  :form/defines, before the map that upserts it, and a form defining two existing
+  definitions, a protocol or a record, then conflicts)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/def-key] :map]}
+  [db [kind a b :as k]]
+  (cond-> (case kind
+            :var {:db/id (str "var " a) :var/name a :var/ns (ns-tid (symbol (namespace a)))}
+            :method (let [k (program/method-key a b)] {:db/id (str "method " k) :method/key k :method/multi a :method/dispatch b})
+            :impl (let [k (program/impl-key a b)] {:db/id (str "impl " k) :impl/key k :impl/protocol a :impl/type b})
+            :ns {:db/id (ns-tid a) :ns/name a})
+    (def-entity db k) (assoc :db/id (def-entity db k))))
 
 (def ^:private pointer {:var :var/form :method :method/form :impl :impl/form :ns :ns/form})
 
@@ -182,16 +181,16 @@
         (into [{:db/id (ns-tid ns) :ns/name ns}
                (cond-> {:db/id (form-tid id) :form/id id :form/src src :form/ns (ns-tid ns) :form/order order}
                  lead (assoc :form/lead lead)
-                 (seq defines) (assoc :form/defines (mapv (comp :db/id def-ref) defines))
-                 (seq declares) (assoc :form/declares (mapv #(str "var " %) declares))
+                 (seq defines) (assoc :form/defines (mapv #(:db/id (def-ref db %)) defines))
+                 (seq declares) (assoc :form/declares (mapv #(:db/id (def-ref db [:var %])) declares))
                  (seq refs) (assoc :form/refs (vec refs))
                  (seq requires) (assoc :form/requires (vec requires))
                  (seq banned) (assoc :form/banned (vec banned))
                  (seq inline-defs) (assoc :form/inline-defs (vec inline-defs))
                  (seq timeouts) (assoc :form/timeouts (vec timeouts))
                  (seq catches) (assoc :form/catches (vec catches)))]
-              (concat (map def-ref defines)
-                      (for [s declares] (def-ref [:var s]))))))))
+              (concat (map #(def-ref db %) defines)
+                      (for [s declares] (def-ref db [:var s]))))))))
 
 (defn- set-def-tx
   {:malli/schema [:=> [:cat :seon.host/db :any [:maybe :map]] :seon.db/tx-data]}
@@ -205,7 +204,7 @@
                 (:contract content) (assoc :var/contract (:contract content))
                 (:doc content) (assoc :var/doc (:doc content))
                 (:file content) (assoc :ns/file (:file content))))]
-    (into (if content [(merge (def-ref k) now) {:db/id (form-tid (:form content)) :form/id (:form content)}] [])
+    (into (if content [(merge (def-ref db k) now) {:db/id (form-tid (:form content)) :form/id (:form content)}] [])
           (for [a attrs :let [old (get x a)] :when (and (some? old) (not (contains? now a)))]
             [:db/retract e a (if (#{:var/form :ns/form :method/form :impl/form} a) (:db/id old) old)]))))
 
@@ -243,7 +242,7 @@
                               (:var :method :impl :ns) (set-def-tx db k content)
                               :schema (set-schema-tx db (second k) content)
                               :datum (set-datum-tx db k content)))
-                          (sort-by (comp pr-edn key) m))))]
+                          (sort-by (comp sedn/encode key) m))))]
     (if (some #(= :schema (ffirst %)) m)
       (let [db' (d/db-with db tx)] (into tx (program/schema-declarations db (program/schema-registry (program/schema-changes db')))))
       tx)))
@@ -256,35 +255,41 @@
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :int]]}
   [db] (vec (d/q '[:find [?e ...] :where [?e :seon.merge/key] [?e :seon.merge/main-t]] db)))
 
+(defn conflict-value
+  "The conflict the :seon.merge/* members of m state, m an entity or a pulled map (the
+  inverse of `conflict-tx`): one decoder for a branch's entries and an attempt's evidence."
+  {:malli/schema [:=> [:cat :any] :seon.merge/conflict]}
+  [m]
+  (cond-> {:key (sedn/decode (:seon.merge/key m)) :kind (:seon.merge/kind m)}
+    (:seon.merge/base m) (assoc :base (sedn/decode (:seon.merge/base m)))
+    (:seon.merge/ours m) (assoc :ours (sedn/decode (:seon.merge/ours m)))
+    (:seon.merge/theirs m) (assoc :theirs (sedn/decode (:seon.merge/theirs m)))))
+
 (defn entries
   "Every merge entry on db, as conflict values with :main-t and :resolved?."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.merge/entry-value]]}
   [db]
-  (vec (sort-by (comp pr-edn :key)
+  (vec (sort-by (comp sedn/encode :key)
                 (for [e (entry-eids db)
                       :let [m (d/entity db e)]]
-                  (cond-> {:key (edn/read-string (:seon.merge/key m)) :kind (:seon.merge/kind m)
-                           :main-t (:seon.merge/main-t m) :resolved? (boolean (:seon.merge/resolved? m))}
-                    (:seon.merge/base m) (assoc :base (edn/read-string (:seon.merge/base m)))
-                    (:seon.merge/ours m) (assoc :ours (edn/read-string (:seon.merge/ours m)))
-                    (:seon.merge/theirs m) (assoc :theirs (edn/read-string (:seon.merge/theirs m))))))))
+                  (assoc (conflict-value m) :main-t (:seon.merge/main-t m) :resolved? (boolean (:seon.merge/resolved? m)))))))
 
 (defn conflict-tx
   "A conflict as the members of one merge entity (no :db/id): for the branch's entries
   and an attempt's evidence alike."
   {:malli/schema [:=> [:cat :seon.merge/conflict] :map]}
   [{:keys [key kind base ours theirs]}]
-  (cond-> {:seon.merge/key (pr-edn key) :seon.merge/kind kind}
-    base (assoc :seon.merge/base (pr-edn base))
-    ours (assoc :seon.merge/ours (pr-edn ours))
-    theirs (assoc :seon.merge/theirs (pr-edn theirs))))
+  (cond-> {:seon.merge/key (sedn/encode key) :seon.merge/kind kind}
+    base (assoc :seon.merge/base (sedn/encode base))
+    ours (assoc :seon.merge/ours (sedn/encode ours))
+    theirs (assoc :seon.merge/theirs (sedn/encode theirs))))
 
 (defn unmerged-tx
   "The branch's unmerged entries for conflicts, against main at t main-t: an earlier entry
   for the same key is replaced."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.merge/conflict] :int] :seon.db/tx-data]}
   [db conflicts main-t]
-  (let [ks (set (map (comp pr-edn :key) conflicts))]
+  (let [ks (set (map (comp sedn/encode :key) conflicts))]
     (into (vec (for [e (entry-eids db)
                      :when (ks (:seon.merge/key (d/entity db e)))]
                  [:db/retractEntity e]))
@@ -302,5 +307,5 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key] :seon.db/tx-data]}
   [db k]
   (vec (for [e (entry-eids db)
-             :when (= (pr-edn k) (:seon.merge/key (d/entity db e)))]
+             :when (= (sedn/encode k) (:seon.merge/key (d/entity db e)))]
          [:db/add e :seon.merge/resolved? true])))

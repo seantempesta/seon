@@ -28,7 +28,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract] [clojure.edn] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
             [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
-            [jolt.ffi :as ffi]))
+            [jolt.ffi :as ffi] [seon.edn :as sedn] [seon.config :as cfg]))
 
 (defchecked ^:private chunk-writer [:=> [:cat :seon.host/fn] :seon.host/writer] @#'jolt.nrepl/chunk-writer)
 (defchecked ^:private ex-class-strings [:=> [:cat :seon.host/throwable [:maybe :keyword]] [:tuple :string [:maybe :string]]] @#'jolt.nrepl/ex-class-strings)
@@ -73,7 +73,11 @@
   (let [r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. code))
         starts (delay (line-starts code))
         eval-fn (:repl/eval-fn req eval)
-        timeout (get req "seon/timeout-ms")
+        ;; the form's budget of work (engine ticks): the request's, else the dial for an
+        ;; agent's model and an outside agent; root's own platform requests run unbounded
+        ticks (let [t (or (get req "seon/ticks")
+                          (when (#{"model" "outside" "ui"} (get req "seon/origin")) (cfg/value :seon.config.agent/form-ticks)))]
+                (when (and t (pos? t)) t))
         sid (get req "session")]
     (loop [ns (session-ns req)]
       (let [form (try (binding [*ns* ns] (read {:eof ::eof} r)) (catch Throwable e e))]
@@ -97,7 +101,7 @@
                 out (chunk-writer #(reply {"out" %}))
                 err (chunk-writer #(reply {"err" %}))
                 [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err]
-                                         (let [v (intr/run timeout #(eval-fn form))] [:ret v *ns*]))
+                                         (let [v (intr/run ticks #(eval-fn form))] [:ret v *ns*]))
                                        (catch Throwable e [:err e ns (outer-frames)])
                                        (finally (.flush out) (.flush err)))
                 common {"seon/ordinal" n "seon/form" (form-text form) :repl/form form
@@ -384,10 +388,9 @@
   [id run items t-basis]
   (conj (vec (for [it items :when (:id it)]
                {:seon.cluster.eval/id (str run "/" (:id it)) :seon.cluster.eval/agent "agent"
-                :seon.cluster.eval/record (binding [*print-length* nil *print-level* nil *print-meta* false]
-                                            (pr-str (cond-> (select-keys it [:tag :form :out :ms :alloc-bytes :fns :origin])
+                :seon.cluster.eval/record (sedn/encode (cond-> (select-keys it [:tag :form :out :ms :alloc-bytes :fns :origin])
                                                       (= :ret (:tag it)) (assoc :shown (:printed it))
-                                                      (= :err (:tag it)) (assoc :error (or (:err it) (:printed it))))))}))
+                                                      (= :err (:tag it)) (assoc :error (or (:err it) (:printed it)))))}))
         (cond-> {:db/id "agent" :seon.agent/id id} t-basis (assoc :seon.agent/answered-t t-basis))))
 
 (defn- record!
@@ -416,7 +419,7 @@
   {:malli/schema [:=> [:cat :string] :seon.agent/items]}
   [code]
   (let [answers (volatile! [])]
-    (@the-handler {"op" "eval" "code" code :reply #(vswap! answers conj %)})
+    (@the-handler {"op" "eval" "code" code "seon/origin" "model" :reply #(vswap! answers conj %)})
     (record! (fold @answers identity) nil)))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
@@ -442,7 +445,7 @@
   {:malli/schema [:=> [:cat :seon.wire/seon-msg] :seon.wire/msg]}
   [m]
   (let [req (cond-> {"op" "eval" "id" (str (:id m)) "code" (:forms m) :id (:id m)}
-              (:timeout-ms m) (assoc "seon/timeout-ms" (:timeout-ms m))
+              (:ticks m) (assoc "seon/ticks" (:ticks m))
               (:origin m) (assoc "seon/origin" (name (:origin m))))]
     (assoc req :reply (reply-fn req))))
 

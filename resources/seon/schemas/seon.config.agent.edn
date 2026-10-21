@@ -5,4 +5,6 @@
  :seon.config.agent/inbox-size [:int {:min 1 :seon.config/unit "messages" :description "Each agent channel's buffer; a full channel pushes back on its sender."}]
  :seon.config.agent/trip-bytes [:int {:min 65536 :seon.config/unit "bytes" :description "Chez's collect-trip-bytes in an agent: allocation between collections."}]
  :seon.config.agent/heap-extra-bytes [:int {:min 1048576 :seon.config/unit "bytes" :description "How far an agent's heap may grow past what it inherited; past it an allocation throws OutOfMemoryError."}]
- :seon.config.agent/sock-buf-bytes [:int {:min 4096 :seon.config/unit "bytes" :description "Each socket's send and receive buffer (root, fork server and agents)."}]}
+ :seon.config.agent/sock-buf-bytes [:int {:min 4096 :seon.config/unit "bytes" :description "Each socket's send and receive buffer (root, fork server and agents)."}]
+ :seon.config.agent/form-ticks [:int {:min 0 :seon.config/unit "engine ticks" :description "Work one form the model or an outside agent sends may do before it stops with :seon.repl/ticks-spent. 0: none."}]
+ :seon.config.agent/test-ticks [:int {:min 0 :seon.config/unit "engine ticks" :description "Work one proof run may do before it stops with :seon.test/ticks-spent naming the running test. 0: none."}]}

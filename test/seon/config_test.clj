@@ -5,12 +5,16 @@
   no environment read anywhere in src but the loader (asked of Jolt's analyzer, by resolved
   host reference, never by text)."
   (:require [clojure.test :refer [deftest is testing]]
-            [clojure.java.io :as io] [clojure.string :as str]
+            [clojure.java.io :as io] [clojure.string :as str] [clojure.edn :as edn]
             [aero.core :as aero] [datahike.api :as d]
             [jolt.scheme :as scm] [jolt.analyzer :as an] [jolt.ir :as ir]
             [seon.config :as config] [seon.db :as pdb] [seon.task :as task]))
 
 (def ^:private dir (str (config/checkout) "/test/seon/config"))
+
+(defn- read-file
+  "A config file at p read with aero under profile prof, resolved and validated (or the refusal, thrown)."
+  [p prof dir] (config/resolved (aero/read-config p {:profile prof ::config/checkout dir})))
 
 (defn- tags
   "test/seon/config/tags.edn read with aero under profile p (default :default)."
@@ -69,10 +73,10 @@
 
 (deftest the-shipped-file-validates-under-every-profile
   (doseq [p [:default :deepseek]]
-    (let [c (config/read-file (config/path (config/checkout)) p (config/checkout))]
-      (is (= (set (keys c)) (set (remove #{:seon.config.ai/thinking :seon.config.ai/reasoning-effort :seon.config.root/main :seon.config.source/root} (config/keys-declared)))) p)))
-  (is (= :scripted (:seon.config.ai/provider (config/read-file (config/path (config/checkout)) :default (config/checkout)))))
-  (is (= :openai-compat (:seon.config.ai/provider (config/read-file (config/path (config/checkout)) :deepseek (config/checkout))))))
+    (let [c (read-file (config/path (config/checkout)) p (config/checkout))]
+      (is (= (set (keys c)) (set (remove #{:seon.config.ai/reasoning-effort :seon.config.root/main :seon.config.source/root} (config/keys-declared)))) p)))
+  (is (= :scripted (:seon.config.ai/provider (read-file (config/path (config/checkout)) :default (config/checkout)))))
+  (is (= :openai-compat (:seon.config.ai/provider (read-file (config/path (config/checkout)) :deepseek (config/checkout))))))
 
 (deftest every-key-is-documented-by-its-schema
   (doseq [k (config/keys-declared)
@@ -90,12 +94,12 @@
 (defn- refused [f] (try (f) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))
 
 (deftest an-unknown-key-refuses-boot-naming-it
-  (let [r (refused #(config/read-file (str dir "/unknown-key.edn") :default (config/checkout)))]
+  (let [r (refused #(read-file (str dir "/unknown-key.edn") :default (config/checkout)))]
     (is (= :seon.config/refused (:seon.error/type r)))
     (is (= [{:key :seon.config.root/max-agentz :problem :unknown-key :value "3"}] (:seon.config/problems r)))))
 
 (deftest an-invalid-value-refuses-boot-naming-each-key
-  (let [r (refused #(config/read-file (str dir "/invalid.edn") :default (config/checkout)))]
+  (let [r (refused #(read-file (str dir "/invalid.edn") :default (config/checkout)))]
     (is (= :seon.config/refused (:seon.error/type r)))
     (is (= #{:seon.config.root/max-agents :seon.config.store/backend} (set (map :key (:seon.config/problems r)))))
     (is (every? #(= :invalid (:problem %)) (:seon.config/problems r)))))
@@ -108,7 +112,7 @@
   (is (= :disabled (:seon.config.ai/thinking (config/resolved (assoc config/config :seon.config.ai/thinking :disabled))))))
 
 (deftest a-key-the-config-lacks-is-refused-not-nil
-  (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.ai/thinking)))))
+  (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.ai/reasoning-effort)))))
   (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.nope/x))))))
 
 (deftest the-provider-is-the-config-s
@@ -130,7 +134,7 @@
     (is (nil? (config/from-db @conn)))
     (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6) (config/facts c {:seon.config.web/port "--set"}))})
     (is (= c (config/from-db @conn)))
-    (is (= {:seon.config.web/port "--set"} (config/sources-from-db @conn)))
+    (is (= {:seon.config.web/port "--set"} (edn/read-string (d/q '[:find ?s . :where [?e :seon.root/id :root] [?e :seon.config/sources ?s]] @conn))))
     ;; the reconciler's root read sees the same dials
     (is (= {:boot "boot-1" :max-running 6 :max-merging (config/value :seon.config.merge/max-running)} (task/root @conn)))
     ;; a branch made from main holds them too (what an agent forked onto it reads)
@@ -225,7 +229,7 @@
   (is (= [:config "resources/seon/config/default.edn"] (:source (config/resolve :seon.config.root/max-agents)))))
 
 (deftest a-setting-set-nowhere-is-refused-not-nil
-  (is (= :seon.config/refused (:seon.error/type (refused #(config/resolve :seon.config.ai/thinking {:model "deepseek-flash"})))))
+  (is (= :seon.config/refused (:seon.error/type (refused #(config/resolve :seon.config.ai/reasoning-effort {:model "deepseek-flash"})))))
   (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.nope/x))))))
 
 (deftest the-manifest-is-validated-and-written-as-entities-on-main

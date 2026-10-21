@@ -105,8 +105,11 @@ All work is a task in `resources/seon/tasks/<owning-ns>.edn`, loaded with `my.ro
 
 The order is **delete first, then foundations, then fixes**. Anything shared by several tasks (an interface, a schema, a pillar's API) lands first as its own small contract task.
 
-### At most three lanes, on disjoint work
-- Root starts a lane only when its write set doesn't overlap any running lane's.
+### Every ready task runs now, in parallel
+Owner, 2026-10-21 ("get rid of all of it"): no lane cap, no locks, no waiting.
+- Root launches every ready task whose write set doesn't overlap a running lane's, at once; the only limit is file overlap. Live agents get real tasks at the same time, never held until prerequisites land: a failure is data, and its fix lands in parallel.
+- A lane writes its own proofs first from the task's plan; root does not write them for it. Plan-before-code is only for design questions (a new mechanism, a format, a cross-owner change); a clear fix is just done.
+- Root rebuilds main as part of every landing, so a worktree made from main never reads config with a stale binary.
 - Each lane works in its own worktree (`bin/worktree NAME`: `../next-NAME` on `jolt/NAME`, submodules at their pins, `target/` cloned).
 - Lanes waiting on a dependency read and plan; they run nothing heavy and keep nothing running.
 
@@ -195,7 +198,7 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
 
 ## 7. The machine
 
-- **Builds:** `nice -n 15 /usr/bin/lockf -k ~/src/seon-jolt/build.lock bin/build`. Every process on a store must use the same LMDB build (`target/lib/liblmdb.dylib`, robust locks); stop a store's processes before a build that changes it.
+- **Builds:** `nice -n 15 bin/build`, in parallel, no lock (owner, 2026-10-21: "WTF is there a build lock?"; one machine-wide lock queued every lane's build single-file on an 18-core, 128 GB machine where a build peaks under ~2 GB; each worktree builds into its own `target/`, so builds share no mutable state). Every process on a store must use the same LMDB build (`target/lib/liblmdb.dylib`, robust locks); stop a store's processes before a build that changes it.
 - **Full checks:** one at a time (`bin/check` takes the check lock and runs niced). Iterate with single modes.
 - **Never flood it.** Anything that can make threads or processes starts at n ≤ 100 under `nice -n 15`. Watch `ps -M -p PID | wc -l`, and kill your own process past 200 threads. One experiment at a time.
 - **A process that must outlive your tool call** is double-forked, which `bin/root` does. The tool host kills a background task's whole process tree when the task stops or its agent exits.
