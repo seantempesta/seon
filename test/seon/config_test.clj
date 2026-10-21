@@ -70,7 +70,7 @@
 (deftest the-shipped-file-validates-under-every-profile
   (doseq [p [:default :deepseek]]
     (let [c (config/read-file (config/path (config/checkout)) p (config/checkout))]
-      (is (= (set (keys c)) (set (remove #{:seon.config.ai/thinking :seon.config.ai/reasoning-effort :seon.config.root/main :seon.config.source/root} (config/keys-declared)))) p)))
+      (is (= (set (keys c)) (set (remove #{:seon.config.ai/reasoning-effort :seon.config.root/main :seon.config.source/root} (config/keys-declared)))) p)))
   (is (= :scripted (:seon.config.ai/provider (config/read-file (config/path (config/checkout)) :default (config/checkout)))))
   (is (= :openai-compat (:seon.config.ai/provider (config/read-file (config/path (config/checkout)) :deepseek (config/checkout))))))
 
@@ -108,7 +108,7 @@
   (is (= :disabled (:seon.config.ai/thinking (config/resolved (assoc config/config :seon.config.ai/thinking :disabled))))))
 
 (deftest a-key-the-config-lacks-is-refused-not-nil
-  (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.ai/thinking)))))
+  (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.ai/reasoning-effort)))))
   (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.nope/x))))))
 
 (deftest the-provider-is-the-config-s
@@ -225,7 +225,7 @@
   (is (= [:config "resources/seon/config/default.edn"] (:source (config/resolve :seon.config.root/max-agents)))))
 
 (deftest a-setting-set-nowhere-is-refused-not-nil
-  (is (= :seon.config/refused (:seon.error/type (refused #(config/resolve :seon.config.ai/thinking {:model "deepseek-flash"})))))
+  (is (= :seon.config/refused (:seon.error/type (refused #(config/resolve :seon.config.ai/reasoning-effort {:model "deepseek-flash"})))))
   (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.nope/x))))))
 
 (deftest the-manifest-is-validated-and-written-as-entities-on-main
