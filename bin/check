@@ -113,8 +113,8 @@ echo "== tasks: calc (6-task graph, cancel), scenarios (conflict, semantic, hair
 step e2e-calc "" run e2e calc
 for k in conflict semantic hairy newns sibling; do step e2e-$k "" run e2e scenario $k; done
 step e2e-swarm "" run e2e swarm 20 8
-echo "== loop (Seon's own source is main's program: a task changes seon.fixtures/generation, its merge is written back and committed on a clone's jolt/seon-merges)"
-step e2e-loop ":source|:commits|^NEXT|LOOP" run e2e loop "$OUT/loop"
+echo "== loop (Seon's own source is main's program: a task changes seon.fixtures/generation, its merge is written back, committed on a clone's jolt/seon-merges and that commit built)"
+step e2e-loop ":source|:commits|:generation|^NEXT|LOOP" run e2e loop "$OUT/loop" --set ":seon.config.source/generations-dir=\"$OUT/loop/generations\""
 echo "== stuck (add always wrong: refinement chains until its budget is spent, then a stuck fact naming what it blocks; the run ends on quiescence)"; step e2e-stuck ":stuck|quiet-after" run e2e stuck
 echo "== resume (root SIGKILLed mid-graph; a new root finishes it)"
 SEON_RUN=resume1 run e2e resume resume > "$OUT/resume1.log" 2>&1; step resume "" run e2e resume2 resume

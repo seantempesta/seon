@@ -178,6 +178,49 @@
                    'x.z-support/k)
         "a namespace required from a later file is analyzed first, and its alias reads ::z/k")))
 
+(deftest a-new-generation-is-built-and-resumed-on-the-store
+  ;; task seon.source/the-next-generation-runs-from-the-merges-commit, the loop's whole turn
+  ;; through the path the owner uses: bin/root starts a root on a clone of this checkout
+  ;; (Seon's own source as main's program, its store under this test's directory); through
+  ;; its entrance, the loop's task redefines seon.fixtures/generation 1 -> 2 and merges
+  ;; (seon.e2e/loop-turn!); the reconciler commits it on the clone's jolt/seon-merges and the
+  ;; :build effect builds that commit, recording the generation on main; `bin/root next`
+  ;; stops the root and starts the generation's binary resuming the same store and main,
+  ;; where (seon.fixtures/generation) answers 2. Declared long, bound 300 s: the build is
+  ;; bin/build seon in the generation's worktree under the one build lock (40-48 s warm,
+  ;; longer while another lane holds the lock), plus two boots (~1 s each) and the loop's
+  ;; run (~10 s).
+  (let [dir (scratch-dir "nextgen")
+        tree (str dir "/tree")
+        port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
+        env ["env" (str "SEON_RUNS=" dir "/runs") (str "SEON_ENTRANCE_PORT=" port) "SEON_WEB_PORT=0"]
+        root! (fn [& args] (apply sh/sh (concat env [(str here "/bin/root")] args)))
+        ask (fn [code] (let [r (sh/sh "nc" "-w" "600" "127.0.0.1" (str port)
+                                      :in (str (pr-str {:op :eval :agent "root" :code code}) "\n"))
+                             a (try (clojure.edn/read-string {:default tagged-literal} (:out r)) (catch Exception _ nil))]
+                         (some-> a :items first :printed clojure.edn/read-string)))
+        cloned (sh/sh "git" "clone" "-q" "--local" here tree)
+        started (root! "start" "--set" (str ":seon.config.source/root=" (pr-str tree)))]
+    (try
+      (is (zero? (:exit cloned)) (:err cloned))
+      (is (zero? (:exit started)) (str (:out started) (:err started)))
+      (let [turn (ask "(seon.e2e/loop-turn! sys)")
+            sha (:commit turn)
+            gen (:generation turn)]
+        (is (re-matches #"[0-9a-f]{40}" (str sha)) (str "the merge is committed: " (pr-str turn)))
+        (is (= sha (:commit gen)) "the generation built is the merges commit")
+        (is (nil? (:error gen)) (str "and it built: " (:error gen)))
+        (is (.canExecute (java.io.File. (str (:binary gen)))) "its binary exists")
+        (let [nxt (root! "next")
+              after (ask "[(seon.fixtures/generation) (:commit (my.root/generation sys))]")]
+          (is (zero? (:exit nxt)) (str (:out nxt) (:err nxt)))
+          (is (= [2 sha] after) "the new generation runs the merged change, resumed on main holding its generation")))
+      (finally
+        (root! "stop")
+        (doseq [g (.listFiles (java.io.File. (str dir "/runs/generations")))]
+          (sh/sh (str here "/bin/worktree") "--remove-at" (.getPath g)))
+        (sh/sh "rm" "-rf" dir)))))
+
 (deftest a-schema-file-round-trips-through-the-program
   ;; task seon.source/schemas-are-part-of-the-program: a schema resource is program data
   ;; like a source file (v1: the program is entities: functions, tests, schemas), so an

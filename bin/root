@@ -1,11 +1,17 @@
 #!/bin/zsh
-# bin/root [start|stop|status]   this checkout's standing root, on this checkout's own ports
-# (bin/ports): its entrance (reached by bin/mcp, or `printf '{:op :agents}\n' | nc -w 5 127.0.0.1
-# PORT`) and its dashboard. `start` (the default) runs it detached: double-forked so it is
-# re-parented to PID 1, because the tool host kills a background task's whole process tree when
-# the task stops or its agent exits (ISOLATION, 2026-10-21). It runs until `bin/root stop` closes
-# its stdin. Its output: runs/root.log; its pids: runs/root.pids ("TAIL ROOT").
-# bin/root PORT WEB   runs one in the foreground, until stdin closes (what `start` runs).
+# bin/root [start [ARGS]|stop|status|next]   this checkout's standing root, on this checkout's own
+# ports (bin/ports): its entrance (reached by bin/mcp, or `printf '{:op :agents}\n' | nc -w 5
+# 127.0.0.1 PORT`) and its dashboard. `start` (the default) runs it detached: double-forked so it
+# is re-parented to PID 1, because the tool host kills a background task's whole process tree
+# when the task stops or its agent exits (ISOLATION, 2026-10-21). It runs until `bin/root stop`
+# closes its stdin. ARGS go to the root (`--set :seon.config.source/root=\"DIR\"`, ...). Its
+# output: runs/root.log; its pids: runs/root.pids ("TAIL ROOT").
+# `next` restarts the next generation (owner, 2026-10-21; docs/source.md#the-next-generation):
+# it asks the running root for the generation main records (my.root/next-generation: the merges
+# commit's built tree and the arguments resuming this root's store and main), stops the root,
+# and starts that tree's binary on them. A process never replaces itself: bin/root owns it.
+# bin/root run CHECKOUT PORT WEB [ARGS]   one root of CHECKOUT's build in the foreground, until
+# stdin closes (what `start` and `next` run).
 #
 # It runs on a branch of the one kept store, <SEON_RUNS>/store (<this tree>/runs/store): each
 # boot a new main run-<time>-<id> of the store's seed (SEON_MAIN=<branch> resumes one;
@@ -13,37 +19,58 @@
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 . "$ROOT/bin/env"
 export SEON_RUNS=${SEON_RUNS:-$ROOT/runs}
-if [[ ${1:-} =~ ^[0-9]+$ ]]; then
-  # the ports over the config's (local.edn honours these until --set reaches a built binary)
-  cd "$ROOT/target" && SEON_ENTRANCE_PORT=$1 SEON_WEB_PORT=${2:-0} exec ./seon root
+if [[ ${1:-} == run ]]; then
+  # the tree's own build, config and caches (bin/env, read from that tree); the ports over the
+  # config's (local.edn honours these)
+  G=$2; P=$3; W=$4; shift 4
+  cd "$G/target" && SEON_CHECKOUT=$G HOME=$G/target/home JOLT_LMDB_LIB=$G/target/lib/liblmdb.dylib \
+    SEON_ENTRANCE_PORT=$P SEON_WEB_PORT=$W exec ./seon root "$@"
 fi
 mkdir -p "$SEON_RUNS"
 PIDS=$SEON_RUNS/root.pids LOG=$SEON_RUNS/root.log
 read PORT WEB <<< "$("$ROOT/bin/ports")"
 running() { [[ -f $PIDS ]] && read T R < "$PIDS" && kill -0 $R 2>/dev/null }
+# launch CHECKOUT [ARGS]: `run` detached (double fork), until its listening line or its death
+launch() {
+  : > "$LOG"
+  rm -f "$PIDS"
+  perl -MPOSIX -e 'exit 0 if fork; POSIX::setsid(); exit 0 if fork;
+    open STDIN,"<","/dev/null"; open STDOUT,">>",$ARGV[0]; open STDERR,">&STDOUT";
+    my ($log, $pids, @cmd) = @ARGV;
+    exec "/bin/sh","-c",q{P=$1; shift; tail -f /dev/null | "$@" & R=$!; T=$(pgrep -P $$ -x tail); echo "$T $R" > "$P"; wait $R},
+      "sh", $pids, @cmd' "$LOG" "$PIDS" "$ROOT/bin/root" run "$1" "$PORT" "$WEB" "${@:2}"
+  # the root's own facts end the wait: its listening line, or its death
+  until [[ -f $PIDS ]]; do sleep 0.1; done
+  read T R < "$PIDS"
+  until grep -q "ROOT LISTENING" "$LOG" || ! kill -0 $R 2>/dev/null; do sleep 0.2; done
+  if kill -0 $R 2>/dev/null; then "$ROOT/bin/root" status
+  else print -u2 "root failed to start; its log:"; tail -20 "$LOG" >&2; exit 1; fi
+}
+stop() {
+  read T R < "$PIDS"
+  kill $T                                    # its stdin closes: root stops cleanly
+  while kill -0 $R 2>/dev/null; do sleep 0.2; done
+  rm -f "$PIDS"; print "root $R stopped"
+}
 case ${1:-start} in
   status)
     if running; then read T R < "$PIDS"; print "root $R up: entrance $PORT, dashboard http://127.0.0.1:$WEB/"
     else print "no root running for $ROOT (ports $PORT $WEB)"; exit 1; fi ;;
   stop)
     running || { print "no root running"; exit 0 }
-    read T R < "$PIDS"
-    kill $T                                    # its stdin closes: root stops cleanly
-    while kill -0 $R 2>/dev/null; do sleep 0.2; done
-    rm -f "$PIDS"; print "root $R stopped" ;;
+    stop ;;
   start)
     if running; then "$0" status; exit 0; fi
-    : > "$LOG"
-    rm -f "$PIDS"
-    perl -MPOSIX -e 'exit 0 if fork; POSIX::setsid(); exit 0 if fork;
-      open STDIN,"<","/dev/null"; open STDOUT,">>",$ARGV[0]; open STDERR,">&STDOUT";
-      exec "/bin/sh","-c",q{tail -f /dev/null | "$2" "$3" "$4" & R=$!; T=$(pgrep -P $$ -x tail); echo "$T $R" > "$1"; wait $R},
-        "sh", @ARGV[1..4]' "$LOG" "$PIDS" "$0" "$PORT" "$WEB"
-    # the root's own facts end the wait: its listening line, or its death
-    until [[ -f $PIDS ]]; do sleep 0.1; done
-    read T R < "$PIDS"
-    until grep -q "ROOT LISTENING" "$LOG" || ! kill -0 $R 2>/dev/null; do sleep 0.2; done
-    if kill -0 $R 2>/dev/null; then "$0" status
-    else print -u2 "root failed to start; its log:"; tail -20 "$LOG" >&2; exit 1; fi ;;
-  *) print -u2 "usage: bin/root [start|stop|status] | bin/root PORT WEB"; exit 2 ;;
+    launch "$ROOT" "${@:2}" ;;
+  next)
+    running || { print -u2 "no root running: next restarts a running root's next generation"; exit 1 }
+    # its answer {:items [{:printed "[\"CHECKOUT\" \"--set\" ...]"}]}: the vector's strings, NUL-separated
+    gen=("${(@0)$(print -r -- '{:op :eval :agent "root" :code "(my.root/next-generation sys)"}' | nc -w 30 127.0.0.1 $PORT |
+      perl -0777 -ne 'm/:printed "((?:[^"\\]|\\.)*)"/ or exit 1; my $v = $1; $v =~ s/\\(.)/$1/g;
+        while ($v =~ /"((?:[^"\\]|\\.)*)"/g) { my $s = $1; $s =~ s/\\(.)/$1/g; print "$s\0" }')}")
+    gen=(${gen:#})
+    (( ${#gen} )) || { print -u2 "no next generation built on the running root's main (my.root/generation)"; exit 1 }
+    stop
+    launch "${gen[@]}" ;;
+  *) print -u2 "usage: bin/root [start [ARGS]|stop|status|next] | bin/root run CHECKOUT PORT WEB [ARGS]"; exit 2 ;;
 esac

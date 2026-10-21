@@ -137,6 +137,7 @@ The order is **delete first, then foundations, then fixes**. Anything shared by 
 - **To land:** merge main into your branch, then prove the merged result. Report the commits, proofs red → green, numbers against estimates, what you deleted, the check's `target/check/<time>/` path, and that nothing of yours is running.
 - **Root lands** by merging the branch, never by copying files over newer changes, and reads main's check to its last line before landing or starting anything else.
   - Every stage's exit status decides the next: no pipe hides a failure (`setopt pipefail`, output to a log), and a check counts only if the build before it succeeded and the binary's time moved.
+  - **Root reads every landing's `src` diff stat before merging** (owner, 2026-10-21: "If we are building shit we don't need to build and not using the existing systems or extending them for minimal code we are doing the wrong thing"; `src` grew 14.1k -> 15.9k lines in one day against the ~10k goal). Every function a landing adds names the existing system it extends, or why none could carry it; a new namespace or mechanism where an existing one could be extended is sent back, not landed; the landing's commit message states its net `src` lines, and a landing that grows `src` says what it deletes or plans to delete.
   - A conflict is resolved by copying each side's lines, never retyping; the lines after `>>>>>>>` may belong to both sides; each resolved file's forms must balance as its parents' do.
 - **Root's gate, before approving any plan, format, key or rule** (owner, 2026-10-21, after root approved several inventions it should have caught). Root answers from evidence and shows the owner:
   1. Which existing mechanism does this: ours, v1's or the dependency's?
@@ -158,7 +159,7 @@ The order is **delete first, then foundations, then fixes**. Anything shared by 
 
 ## 5. The running system, as a Seon agent sees it
 
-Each checkout runs its own standing root with `bin/root start` (also `status` and `stop`).
+Each checkout runs its own standing root with `bin/root start` (also `status`, `stop`, and `next`: stop root and start the newest generation's binary, the one the `:build` effect made from the last merges commit, on the same store).
 - It runs detached, on the checkout's ports (`bin/ports`; the owner's main tree uses 7888, with the dashboard on 7777).
 - Its store is kept under `runs/`.
 
@@ -200,7 +201,7 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
   - a lane's worktree is removed in the landing that merges it (`bin/worktree --remove NAME`, run by root after the merge; the branch stays in git);
   - a lane's scratch lives inside its worktree (`target/`, `runs/`) and goes with it; nobody creates a new top-level directory in `~/src/seon-jolt` (the fork repositories `docs/forks.md` lists, `notes/`, `bin/` and the worktrees are the only ones);
   - what is kept is what git and the store record (commits, task facts, notes); build output, compile caches and finished experiments' stores are regenerable and are deleted when their checkout or experiment ends;
-  - root prunes each checkout's `target/check/` to its last three runs at each landing.
+  - root prunes each checkout's `target/check/` to its last three runs at each landing, and a run's old generations (each a tree and a binary, ~200 MB) to the one running and the one before it.
 - **Leave nothing running when you finish,** and say so in your report. Kill only PIDs you started; never `pkill` or `killall`. Delete only paths you created.
 - **Your scratch:** under your worktree (`target/`, `runs/`) or a folder named for your lane. The session scratch folder is shared.
 - **Git in a worktree:**

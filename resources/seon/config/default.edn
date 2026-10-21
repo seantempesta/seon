@@ -154,6 +154,14 @@
  ;; holds no git identity (bin/check loop, 2026-10-21: "Author identity unknown").
  :seon.config.source/committer-name "Seon"
  :seon.config.source/committer-email "seon@localhost"
+ ;; Unit: path. Where each generation is built (seon.fx/build, docs/source.md#the-next-generation):
+ ;; <dir>/<commit>, a worktree of the merges commit (bin/worktree --at) with its own target/,
+ ;; whose target/seon bin/root next starts. Kept with the run (a generation is a record of what
+ ;; ran); one worktree and one ~200 MB binary per merges commit built.
+ :seon.config.source/generations-dir #join [#ref [:seon.config.root/runs-dir] "/generations"]
+ ;; Unit: path. The one build lock every build takes (AGENTS.md section 7: lockf on it), so a
+ ;; generation's build waits for a lane's and the machine runs one build at a time.
+ :seon.config.source/build-lock #seon/checkout "../build.lock"
 
  ;; ==== effects and the model ==================================================================
 

@@ -42,6 +42,8 @@
   :source {:perform seon.fx/read-source :lanes 1}
   :git {:perform seon.fx/git-commit :lanes 1}
   :deps {:perform seon.fx/resolve-deps :lanes 1}
+  ;; the next generation: bin/build seon of the merges commit, ~45 s under the build lock
+  :build {:perform seon.fx/build :lanes 1}
   ;; the model provider is only root's: the agents never hold the key
   :model {:perform seon.fx/model :lanes :bind/model-lanes :ctx {:provider :bind/provider} :rate :bind/model-rate}}
  :conns

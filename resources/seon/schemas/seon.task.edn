@@ -84,7 +84,7 @@
                         [:ready [:set [:tuple :int :seon.task/id]]] [:ready-key :map]
                         [:live [:set :seon.attempt/id]] [:reap [:set :seon.attempt/id]] [:kill [:map-of :seon.attempt/id :keyword]]
                         [:judge [:set :seon.attempt/id]] [:merging [:set :seon.attempt/id]]]
- :seon.reconcile/step [:enum :ignored :done :spawned :started :worked :tested :read :diffed :merged :trained :landed :main-read :committed]
+ :seon.reconcile/step [:enum :ignored :done :spawned :started :worked :tested :read :diffed :merged :trained :landed :main-read :committed :commit-recorded :built]
  ;; a task and an attempt as Datahike pulls them (the readers' inputs)
  :seon.task/pulled [:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                     [:seon.task/plan :seon.task/plan] [:seon.task/execution [:enum :held :running :cancelled]]
