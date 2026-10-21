@@ -5,7 +5,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
             [seon.program :as program] [seon.merge :as pm] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
-            [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
+            [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
 (defn- main-commit
   "Main moved to t: the fork server's replica gets the commit (FIFO with fork requests),
@@ -39,8 +39,10 @@
   "Why branch head (its three-way r against main) cannot merge into main now (lane M1), or
   nil: main's program (and declared data) changed since the branch's merge base
   (:seon.merge/behind: a merge task merges main first); the branch has unmerged entries
-  (:seon.merge/unmerged); it carries an uncontracted function (:seon.merge/uncontracted:
-  contracts decide what is admitted)."
+  (:seon.merge/unmerged); its program calls intern, alter-var-root, eval or load-string,
+  or defines inside a function body (:seon.merge/mutation, seon.merge/mutations); it
+  carries an uncontracted function (:seon.merge/uncontracted: contracts decide what is
+  admitted)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/result] [:maybe :map]]}
   [main head r]
   (let [unmerged (pm/unmerged head (pm/program head #{}))
@@ -58,6 +60,13 @@
       (contract/error :seon.merge/unmerged 'seon.writer/merge-branch
                       (str "the branch has " (count unmerged) " unmerged entr(ies)")
                       {:merged? false :tx (:max-tx main) :unmerged (mapv :key unmerged)})
+      (seq (pm/mutations main (:ours r)))
+      (let [ms (pm/mutations main (:ours r))]
+        (contract/error :seon.merge/mutation 'seon.writer/merge-branch
+                        (str "the branch's program " (str/join "; " (for [m ms] (str (pr-str (:defines m))
+                                                                                    (if (:call m) (str " calls " (:call m)) (str " defines " (:inline-def m) " inside a function body"))))))
+                        {:merged? false :tx (:max-tx main) :mutations ms
+                         :seon.error/fix "Every definition happens once, where it is defined: vary behaviour through arguments or the environment, and define at the top level, not inside a function."}))
       (seq uncontracted)
       (contract/error :seon.merge/uncontracted 'seon.writer/merge-branch
                       (str "the branch carries " (count uncontracted) " function(s) without a contract")

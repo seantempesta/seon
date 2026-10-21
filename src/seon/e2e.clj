@@ -27,7 +27,7 @@
                   (:seon.task/problem t) (assoc :problem (:seon.task/problem t)))]))))
 
 (defn- seed! [sys specs]
-  (doseq [tx (fx/program-txs specs)] (println :program (select-keys @(c/transact-main! sys tx) [:ok :datoms]))))
+  (doseq [tx (fx/program-txs (db sys) specs)] (println :program (select-keys @(c/transact-main! sys tx) [:ok :datoms]))))
 
 (defn agents-reused
   "Agent ids that more than one attempt used (must be empty: every attempt is a new agent)."

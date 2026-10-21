@@ -9,10 +9,15 @@
   (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}
         _ (d/create-database cfg)
         db (d/db-with @(d/connect cfg) pdb/schema)]
-    (d/db-with db [{:db/id "ns" :ns/name 'demo}
-                   {:var/name 'demo/f :var/ns "ns" :var/src "(defn f \"Doubles.\" [x] (* 2 x))"}
-                   {:var/name 'demo-test/f-test :var/ns "ns" :var/src "(deftest f-test (is (= 4 (f 2))))"}
-                   {:var/name 'demo-test/g-test :var/ns "ns" :var/src "(deftest g-test (is (= 1 (g))))"}])))
+    ;; recorded definitions, each its form (seon.program's facts), written as data
+    (d/db-with db (vec (mapcat (fn [[v src]]
+                                 [{:db/id (str v) :var/name v :var/ns (str "ns " (namespace v)) :var/form (str "form " v)}
+                                  {:db/id (str "form " v) :form/id (str v) :form/src src :form/ns (str "ns " (namespace v)) :form/order 0
+                                   :form/defines [(str v)]}
+                                  {:db/id (str "ns " (namespace v)) :ns/name (symbol (namespace v))}])
+                               '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))"]
+                                 [demo-test/f-test "(deftest f-test (is (= 4 (f 2))))"]
+                                 [demo-test/g-test "(deftest g-test (is (= 1 (g))))"]])))))
 
 (deftest each-thing-is-said-once
   (let [db (db-with-program)

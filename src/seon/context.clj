@@ -36,9 +36,9 @@
      ":evidence, when present, is what a failed merge measured: its conflicts and red proofs."]))
 
 (defn source-of
-  "The recorded source of var sym on db (:var/src), or nil."
+  "The recorded source of var sym on db (the text of the form that last defined it), or nil."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :string]]}
-  [db sym] (d/q '[:find ?s . :in $ ?v :where [?e :var/name ?v] [?e :var/src ?s]] db sym))
+  [db sym] (d/q '[:find ?s . :in $ ?v :where [?e :var/name ?v] [?e :var/form ?f] [?f :form/src ?s]] db sym))
 
 (defn resolve-ref
   "A reference resolved: its source (from the db) when it is program, else its doc (from

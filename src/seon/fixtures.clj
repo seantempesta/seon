@@ -6,12 +6,7 @@
   redefines its function). The proofs namespace sorts after the subjects, so a boot that
   loads main's program in name order loads a subject before its proof."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.template :as tpl]))
-
-(defn- var-tx
-  {:malli/schema [:=> [:cat :any :symbol :string :string :keyword] :map]}
-  [ns-ref ns-sym nm src kind]
-  {:var/name (symbol (str ns-sym) nm) :var/ns ns-ref :var/src src})
+  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.template :as tpl] [seon.source :as source]))
 
 (def calc
   "The six-task graph: add; twice and square need add; sum-sq needs both; neg (slow on
@@ -54,16 +49,16 @@
           :proof (str "(deftest " (par-name k) "-test (is (= " (+ 10 k) " (app.par/" (par-name k) " 10))))")})))
 
 (defn program-txs
-  "Two transactions writing the program of specs on main: the subjects (a spec's :stub
-  under its :var, else its task :name), then the proofs."
-  {:malli/schema [:=> [:cat [:vector :map]] [:vector [:vector :map]]]}
-  [specs]
-  (let [nss (distinct (map #(:ns % 'app.calc) specs))]
-    [(into (vec (for [n (conj (vec nss) 'app.proofs)] {:db/id (str n) :ns/name n}))
-           (for [{:keys [stub] :as s} specs :when stub :let [n (:ns s 'app.calc)]]
-             (var-tx (str n) n (or (:var s) (:name s)) stub :fn)))
-     (vec (for [{:keys [name proof]} specs :when proof]
-            (var-tx [:ns/name 'app.proofs] 'app.proofs (str name "-test") proof :test)))]))
+  "Two transactions writing the program of specs on main (db): the subjects (each spec's
+  :stub in its :ns), then the proofs (app.proofs), each namespace's text analyzed as a file
+  is (seon.source/text-tx)."
+  {:malli/schema [:=> [:cat :seon.host/db [:vector :map]] [:vector :seon.db/tx-data]]}
+  [db specs]
+  (let [by-ns (group-by #(:ns % 'app.calc) (filter :stub specs))
+        subjects (vec (mapcat (fn [[n ss]] (source/text-tx db n (str/join "\n" (map :stub ss)) nil)) (sort-by (comp str key) by-ns)))
+        proofs (keep :proof specs)]
+    [subjects
+     (if (seq proofs) (source/text-tx db 'app.proofs (str/join "\n" proofs) nil) [])]))
 
 (defn decls
   "Task declarations for specs, in task namespace tns, with model env: each work task
