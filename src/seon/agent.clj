@@ -309,7 +309,7 @@
   "clojure.test over test-namespaces of the branch, with the branch's schemas in effect (malli's
   dynamic registry bound to seon.program/schema-registry, as the agent's REPL binds it), the
   whole run within ticks engine ticks of work: answers report data. Each test var is written
-  to w as it starts ({:started v}), so the agent can name the test a death interrupted; a run
+  to w as it starts ({:seon.test/started v}), so the agent can name the test a death interrupted; a run
   past its ticks stops with the typed :seon.test/ticks-spent naming the test that was running."
   {:malli/schema [:=> [:cat :int pos-int?] :seon.test/result]}
   [w ticks]
@@ -320,7 +320,7 @@
         r (try (binding [t/report (fn [m]
                                     (when (= :begin-test-var (:type m))
                                       (reset! started (str (:var m)))
-                                      (lib/write-line! w (pr-str {:started @started})))
+                                      (lib/write-line! w (pr-str {:seon.test/started @started})))
                                     (when (#{:pass :fail :error} (:type m))
                                       (swap! reports conj (test-report m (some-> (first t/*testing-vars*) str))))
                                     (orig m))
@@ -357,14 +357,16 @@
   "The run, from the last line the test child wrote on its pipe before EOF (nil: none) and
   its exit status: that line when it is the run's result; else the child died while running
   the test the line's {:seon.test/started var} names, and the run is one :error report on
-  that test var with the status as :exit (task `seon.fences/one-test-bound-derived-and-named`;
-  the stub names no test)."
+  that test var with the status as :exit (none started: a run error naming the status)."
   {:malli/schema [:=> [:cat [:maybe :string] :seon.lib/exit-status] :seon.test/result]}
   [line status]
-  (let [v (some-> line read-string)]
+  (let [v (some-> line read-string) var (:seon.test/started v)]
     (if (contains? v :pass)
       v
-      {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (str "test process died: " status)}]})))
+      {:pass 0 :fail 0 :error 1
+       :reports [(cond-> {:type :error :exit status
+                          :message (str "test process died: " status (when var (str " while " var " ran")))}
+                   var (assoc :var var))]})))
 
 (defn run-tests-forked
   "Fork this agent; the child runs the tests within ticks engine ticks of work, writing
@@ -392,22 +394,12 @@
       :else
       (do (lib/c-close w)
           (let [rd (lib/line-reader r)
-                [line started] (loop [started nil]
-                                 (let [ls (rd -1)]
-                                   (if (= ls :eof)
-                                     [nil started]
-                                     (let [ms (map read-string ls)
-                                           res (first (remove :started ms))]
-                                       (if res
-                                         [res started]
-                                         (recur (or (:started (last ms)) started)))))))
+                line (loop [line nil]
+                       (let [ls (rd -1)]
+                         (if (= ls :eof) line (recur (or (peek ls) line)))))
                 st (ffi-status pid)]
             (lib/c-close r)
-            (assoc (or line
-                       {:pass 0 :fail 0 :error 1
-                        :reports [(cond-> {:type :error :message (str "test process died: " st (when started (str " while " started " ran")))}
-                                    started (assoc :var started))]})
-                   :ms (lib/ms-since t0) :pid pid :exit st))))))
+            (assoc (run-answer line st) :ms (lib/ms-since t0) :pid pid :exit st))))))
 
 ;; ---- the loop ----------------------------------------------------------------------
 

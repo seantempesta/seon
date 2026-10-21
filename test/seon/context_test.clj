@@ -72,22 +72,22 @@
         reds [{:test 'demo-test/g-test :type :fail :expected "(= 1 (g))" :actual "(not (= 1 0))" :got "(= 1 0)"}]
         block (context/current-state db t {:results {'demo-test/f-test :fail 'demo-test/g-test :fail} :reds reds
                                            :refusals refusals :turn 1 :max-turns 4
-                                           :run-errors ["tests timed out after 30000 ms; killed"]})]
+                                           :run-errors ["namespace app-test did not load: Unable to resolve symbol: g"]})]
     (testing "every refusal but the task's own red proof (shown with the proofs), each with what explains it"
       (is (= [{:refusal :regression :test 'demo-test/g-test :failures [{:assert "(= 1 (g))" :got "(= 1 0)"}]}
               {:refusal :stray-red :test 'user/scratch-test}
               {:refusal :contract-gap :vars ['demo/helper]}]
              (:refused block))))
     (testing "a run that failed as a whole is said, not read as tests not run"
-      (is (= {:failed ["tests timed out after 30000 ms; killed"]} (:test-run block)))
-      (is (= ["tests timed out after 30000 ms; killed" "test process died: 9"]
-             (proofs/run-errors {:reports [{:type :error :message "tests timed out after 30000 ms; killed"}
+      (is (= {:failed ["namespace app-test did not load: Unable to resolve symbol: g"]} (:test-run block)))
+      (is (= ["namespace app-test did not load: Unable to resolve symbol: g" "test process died: 9"]
+             (proofs/run-errors {:reports [{:type :error :message "namespace app-test did not load: Unable to resolve symbol: g"}
                                            {:type :fail :var "#'demo-test/f-test" :message "x"}
                                            {:type :error :var nil :message "test process died: 9"}]}))))
     (testing "the printed context carries them"
       (let [text (:content (second (context/messages block)))]
         (is (re-find #":regression" text))
-        (is (re-find #"timed out" text))))
+        (is (re-find #"did not load" text))))
     (testing "a design step that has not improved its plan is told what it lacks and the call that does it"
       (let [b (context/current-state db t {:results {} :refusals [{:refusal :no-design}] :turn 1 :max-turns 4})]
         (is (= [[:no-design :seon.task/plan 'my.task/update!]]
@@ -151,7 +151,7 @@
     (is (= {:test 'ctx-calc-test/cube-test :status :undefined} (by 'ctx-calc-test/cube-test))
         "a proof not written yet says so")
     (is (= :no-assertions (:status (by 'ctx-calc-test/empty-test))) "a proof that ran and asserted nothing says so")
-    (let [b (context/current-state db (task/task db "ctx/sq") {:results {} :turn 1 :max-turns 4 :run-errors ["tests timed out"]})]
+    (let [b (context/current-state db (task/task db "ctx/sq") {:results {} :turn 1 :max-turns 4 :run-errors ["namespace app-test did not load"]})]
       (is (= {'ctx-calc-test/square-test :not-run 'ctx-calc-test/empty-test :not-run 'ctx-calc-test/cube-test :undefined}
              (into {} (map (juxt :test :status)) (:proofs b)))
           "when the run failed as a whole, a written proof did not run"))))

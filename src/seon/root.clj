@@ -888,7 +888,7 @@
   ([sys agent-id ms] (let [r (deref (call! sys {:op :ping :id agent-id}) ms :unknown)] (if (and (map? r) (:status r)) r :unknown))))
 
 (defn fs-call! "Ask the fork server for {:op :stats} or {:op :static}." {:malli/schema [:=> [:cat :seon.root/sys :seon.root/request] :any]}
-  [sys msg] (deref (call! sys {:op :fs :req msg}) 30000 :timeout))
+  [sys msg] @(call! sys {:op :fs :req msg}))
 
 (defn health
   "Flow's own observation of every root proc (its ping-map-fn), or :unknown within ms."
