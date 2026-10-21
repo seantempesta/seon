@@ -79,7 +79,7 @@
      seon.root/clone! seon.root/interrupt! seon.root/kill!})
 
 (defn- live? {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
-  [a] (boolean (and a (not (#{:dead :killed} (:status a))))))
+  [a] (boolean (and a (not (#{:dead :killed :ended} (:status a))))))
 
 (defn requests
   "A UI call as root's requests: [[req target-agent] ...]. index {agent {:pid :branch

@@ -23,7 +23,7 @@
   {:malli/schema [:=> [:cat :seon.root/sys] :map]}
   [sys]
   (let [db @(:conn sys) idx (r/index db)]
-    {:agents (into (sorted-map) (for [[id a] (:agents (c/state sys)) :when (not (#{:dead :killed} (:status a)))]
+    {:agents (into (sorted-map) (for [[id a] (:agents (c/state sys)) :when (not (#{:dead :killed :ended} (:status a)))]
                                   [id (select-keys a [:branch :status :task])]))
      :tasks (into (sorted-map) (for [[id t] (task/tasks db)]
                                  [id (cond-> {:execution (:seon.task/execution t) :done (r/done? idx id) :blocked-by (r/blocked-by idx id)}

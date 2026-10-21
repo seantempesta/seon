@@ -316,3 +316,29 @@
   (testing "boot's program count is definitions, and the agents tile names its retire window"
     (is (str/includes? (h/html (:seon.render/html (ui/tile-errors {:root-errors [] :boot {:program {:loaded 360}} :store {}} {}))) "360 defs"))
     (is (str/includes? (h/html (:seon.render/html (ui/tile-agents {:cells [] :off 3 :retire-ms 90000} {}))) "+3 ended over 90 s ago, off it"))))
+
+(deftest an-ended-agent-reads-ended-and-offers-no-live-verbs
+  (testing "root's own word for an agent it stopped because its attempt ended"
+    (is (= :ended (ui/shown-status {:status :ended})))
+    (is (str/includes? (h/html (:seon.render/html (ui/event-row {:type :ended :agent :a6 :at-ms 0 :ended-as :merged} {})))
+                       "stopped by root: its attempt ended merged")))
+  (testing "its live verbs and REPL box are marked live, which an ended card hides; history stays"
+    (let [shell (h/html (ui/card-shell :a6))]
+      (is (= 6 (count (re-seq #"class=\"act live" shell))) "tests, merge, main, clone, interrupt, kill")
+      (is (str/includes? shell "class=\"repl live\""))
+      (is (str/includes? shell "show history")))
+    (is (str/includes? (slurp "resources/public/app.css") ".card:has(.cb.s-ended) .live"))))
+
+(deftest a-cut-value-names-the-form-that-reads-it
+  (let [txt (pr-str (apply str (repeat 300 "lorem ipsum ")))
+        row (h/html (:seon.render/html (ui/history-row {:tag :ret :form "(apply str (repeat 300 \"lorem ipsum \"))" :printed txt :handle :h0} {})))]
+    (is (re-find #"…\+\d+ chars · the whole value: result/h0 at its REPL" row))))
+
+(deftest the-writer-tile-counts-per-commit-and-per-flush
+  (let [html (h/html (:seon.render/html (ui/tile-writer {:writer {:tx-per-commit 1.0 :commits 40 :tx-count 40} :series {}
+                                                         :health {:status :running :state {:flushes 10}}} {})))]
+    (is (str/includes? html ">tx/commit<"))
+    (is (str/includes? html "<dd>1.00</dd>"))
+    (is (str/includes? html ">commits/flush</dt><dd>4.0<") "40 commits over 10 flushes")
+    (is (str/includes? html "a flush makes the commits since the last one durable on disk"))
+    (is (not (str/includes? html "tx/batch")))))

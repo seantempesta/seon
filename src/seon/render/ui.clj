@@ -59,16 +59,17 @@
 (defn prose
   "Text on the page as the one printer's prose (seon.print/prose) under budget tokens: whole,
   or its shown part and the cut, which says what it omitted and where the rest is: a link
-  to opts :href (the page that shows it whole), else the cut's title holds the whole text.
-  opts :one-line? as the printer's (a table cell, a stream row)."
+  to opts :href (the page that shows it whole), else the cut's title holds the whole text;
+  with opts :whole (a form that answers the whole value, e.g. its result handle) the cut
+  names that form too. opts :one-line? as the printer's (a table cell, a stream row)."
   {:malli/schema [:function [:=> [:cat :any pos-int?] :any] [:=> [:cat :any pos-int? :map] :any]]}
   ([s budget] (prose s budget {}))
-  ([s budget {:keys [href one-line?]}]
+  ([s budget {:keys [href one-line? whole]}]
    (let [s (if (string? s) s (str s))
          {:keys [shown truncated? omitted lines]} (print/prose s budget {:one-line? (boolean one-line?)})]
      (if-not truncated?
        shown
-       (let [words (print/cut-words omitted lines nil)
+       (let [words (str (print/cut-words omitted lines nil) (when whole (str " · the whole value: " (pr-str whole) " at its REPL")))
              cut (if href
                    [:a {:class "seon-print-elision" :href href :title "the whole on this page"} words]
                    [:span {:class "seon-print-elision" :title s} words])]
@@ -141,7 +142,7 @@
         ;; and every node open: a closed <details> hides its content however it is styled
         (clojure.walk/postwalk (fn [x] (if (and (vector? x) (= :details (first x)) (map? (second x))) (assoc-in x [1 :open] true) x))
                                (if (and (vector? hic) (map? (second hic))) (update hic 1 dissoc :id) hic)))
-      [:code {:class "printed"} (prose txt budget opts)])))
+      [:code {:class "printed"} (prose txt budget (cond-> opts handle (assoc :whole (symbol "result" (name handle)))))])))
 
 (defn context-read?
   "Is evaluation e a context read: an outside agent reading its current-state block through
@@ -168,7 +169,8 @@
   when its process died on its own (an agent entry carries :ended-as from main's attempt)."
   {:malli/schema [:=> [:cat :map] :keyword]}
   [a]
-  (cond (and (#{:killed :dead} (:status a)) (:ended-as a)) :ended
+  (cond (= :ended (:status a)) :ended
+        (and (#{:killed :dead} (:status a)) (:ended-as a)) :ended
         (= :dead (:status a)) :died
         :else (or (:status a) :unknown)))
 (def ended-statuses #{:killed :dead :ended :died})
@@ -214,8 +216,11 @@
       [:dl {:class "kv"}
        [:div {:title "batch p50: one group commit"} [:dt "batch"] [:dd (ms-str (:batch-p50-ms writer))]]
        [:div [:dt "txs"] [:dd (group3 (:tx-count writer))]]
-       [:div {:title "transactions per group commit"} [:dt "tx/batch"] [:dd (fmt1 (:tx-per-batch writer))]]
-       [:div {:title "group flushes (durable)"} [:dt "flushes"] [:dd (group3 (:flushes st))]]]]}))
+       [:div {:title "main's transactions per group commit: one commit takes every transaction queued (at least 1)"} [:dt "tx/commit"] [:dd (fmt2 (:tx-per-commit writer))]]
+       [:div {:title "main's group commits per flush: one flush makes every commit since the last durable"} [:dt "commits/flush"]
+        [:dd (if (and (number? (:commits writer)) (number? (:flushes st)) (pos? (:flushes st))) (fmt1 (/ (double (:commits writer)) (:flushes st))) "–")]]
+       [:div {:title "flushes to disk so far"} [:dt "flushes"] [:dd (group3 (:flushes st))]]]
+      [:p {:class "muted explain"} "a transaction is one write to main; a commit takes every queued transaction at once; a flush makes the commits since the last one durable on disk"]]}))
 
 (defn tile-server
   "The fork server: fork p50 (sparkline), lag, forked, its pid, standby and restarts.
@@ -433,7 +438,7 @@
      [:div {:title "definitions of main's program loaded at boot (seon.program/load-all!: :var/name facts with source)"} [:dt "program"] [:dd (str (get-in boot [:program :loaded] "–") " defs")]]
      [:div [:dt "contracts"] [:dd (str (get-in boot [:contracts :armed] "–") " armed")]]
      [:div [:dt "store"] [:dd (kname (:backend store))]]
-     [:div {:title "commits per group flush"} [:dt "tx/batch"] [:dd (fmt1 (:tx-per-batch store))]]]]})
+     [:div {:title "main's group commits so far (the writer tile has transactions per commit and commits per flush)"} [:dt "commits"] [:dd (group3 (:commits store))]]]]})
 
 ;;; --- agent cards --------------------------------------------------------------
 
@@ -547,15 +552,17 @@
 (defn card-shell
   "One whole agent card around its body's slot: appended to the grid once, when the agent
   first appears. Its REPL box posts the forms as a UI call (an eval recorded with origin
-  :ui); its buttons are UI calls of root's verbs."
+  :ui); its buttons are UI calls of root's verbs. Its verbs that need a live process (and
+  its REPL box) carry the class `live`: an ended agent's card hides them (app.css, by the
+  body's state class), keeping only its history."
   {:malli/schema [:=> [:cat :keyword] :any]}
   [id]
   (let [d (dom-id id)
         verb (fn [f label title & [cls]]
-               [:button {:class (str "act" (when cls (str " " cls))) :title title :seon/call f :seon/agent id} label])]
+               [:button {:class (str "act live" (when cls (str " " cls))) :title title :seon/call f :seon/agent id} label])]
     [:article {:id (str "card-" d) :class "card" (keyword "data-class:open") (str "$sel==='" d "'")}
      (slot (str "cb-" d))
-     [:form {:class "repl" :seon/call 'seon.root/submit! :seon/agent id}
+     [:form {:class "repl live" :seon/call 'seon.root/submit! :seon/agent id}
       [:span {:class "prompt"} (str (kname id) "=>")]
       [:input {:id (str "ri-" d) :name "forms" :autocomplete "off" :spellcheck "false" :placeholder "(+ 1 2)"}]]
      [:div {:class "actions"}
@@ -600,6 +607,7 @@
                (str "forked in " (ms-str (:fork-ms ev)) (when (:pid ev) (str " · pid " (:pid ev)))))
     :ready (str "ready" (when (:start-ms ev) (str " in " (ms-str (:start-ms ev)))))
     :killed (if (:ended-as ev) (str "stopped by root after its attempt ended " (kname (:ended-as ev))) "KILLED")
+    :ended (str "stopped by root: its attempt ended" (when (:ended-as ev) (str " " (kname (:ended-as ev)))))
     :dead (if (:ended-as ev) (str "exited after its attempt ended " (kname (:ended-as ev))) "its process died")
     :ui (str (:call ev) (when (:detail ev) (str " · " (:text (print/prose (str (:detail ev)) 20 {:one-line? true})))))
     (print/text (dissoc ev :type :at-ms :agent) 25)))
@@ -672,7 +680,7 @@
   {:malli/schema [:=> [:cat [:maybe :map] :any :map] [:maybe :map]]}
   [a id agent-attempt]
   (let [st (:seon.attempt/status (get agent-attempt id))]
-    (if (and a (#{:killed :dead} (:status a)) (#{:done :merged} st)) (assoc a :ended-as st) a)))
+    (if (and a (#{:killed :ended :dead} (:status a)) (#{:done :merged} st)) (assoc a :ended-as st) a)))
 
 (defn tile-problems
   "What is wrong now, at the top of the page: the same lines root's context leads with."

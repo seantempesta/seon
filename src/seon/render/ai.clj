@@ -57,7 +57,7 @@
         ;; root stopped (an attempt that ended) is not a problem, whatever its last run said
         ;; one pass over the agents; only the few with a problem are sorted
         ags (for [[id a] (sort-by (comp str key) (filter (fn [[_ a]] (or (:error a) (:tests a) (:merged a) (= :dead (:status a)))) agents))
-                  :let [t (:tests a) m (:merged a) live? (not (#{:killed :dead} (:status a)))
+                  :let [t (:tests a) m (:merged a) live? (not (#{:killed :ended :dead} (:status a)))
                         finished? (#{:done :merged} (:seon.attempt/status (get agent-attempt id)))]
                   :when (or (and (= :dead (:status a)) (not finished?)) (:error a)
                             (and live? (or (pos? (+ (or (:fail t) 0) (or (:error t) 0))) (and m (false? (:merged? m))))))]

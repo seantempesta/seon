@@ -136,15 +136,18 @@
   [st now-ns now-ms]
   (let [v (:view st)
         {:keys [batches commits batched-tx lag-ms fork-ms]} (:stats v)
-        tpb (when batches (lib/r2 (/ (double (or batched-tx 0)) batches)))
+        ;; main's transactions per group commit (one Datahike commit takes every queued
+        ;; transaction): at least 1 by construction. Writer cycles that committed nothing for
+        ;; main (an agent's commit, a flush) are not commits.
+        tpc (when (and commits (pos? commits)) (lib/r2 (/ (double (or batched-tx 0)) commits)))
         agents (:agents v {})]
     {:agents agents
      :order (or (:order st) (order agents now-ms))
      :writer (-> (:writer v) (dissoc :recent :batch-ms)
                  (assoc :tx-per-s (recent-tx-per-s (get-in v [:writer :recent]) now-ns)
-                        :batch-p50-ms (lib/p50 (get-in v [:writer :batch-ms])) :tx-per-batch tpb))
+                        :batch-p50-ms (lib/p50 (get-in v [:writer :batch-ms])) :tx-per-commit tpc :commits commits))
      :server (assoc (:server v) :lag-ms (lib/p50 lag-ms) :fork-ms-p50 (lib/p50 fork-ms))
-     :store (cond-> (:store v) batches (assoc :batches batches :commits commits :tx-per-batch tpb))
+     :store (cond-> (:store v) batches (assoc :batches batches :commits commits :tx-per-commit tpc))
      :boot (:boot v) :root-errors (:root-errors v []) :root-errors-total (:root-errors-total v 0)
      :health (:health st {}) :health-ms (:health-ms st)
      ;; merges into main: root's merge! of a branch (its events) and the reconciler's
@@ -378,7 +381,7 @@
           now-ms (System/currentTimeMillis)
           ;; the stream: each new event's row rendered once
           ;; an agent that ended after its attempt finished ended normally: its event says so
-          evs (mapv (fn [e] (if-let [a (and (#{:killed :dead} (:type e)) (get-in st [:agent-attempt (:agent e)]))]
+          evs (mapv (fn [e] (if-let [a (and (#{:killed :ended :dead} (:type e)) (get-in st [:agent-attempt (:agent e)]))]
                               (cond-> e (#{:done :merged} (:seon.attempt/status a)) (assoc :ended-as (:seon.attempt/status a) :outcome (:seon.attempt/outcome a)))
                               e))
                     (:new-events st))
@@ -397,7 +400,7 @@
           ;; now that main says (60 rows at most)
           late (for [[i e] (map-indexed vector (:events st))
                      :let [a (get-in st [:agent-attempt (:agent e)])]
-                     :when (and (#{:killed :dead} (:type e)) (not (:ended-as e)) (#{:done :merged} (:seon.attempt/status a)))]
+                     :when (and (#{:killed :ended :dead} (:type e)) (not (:ended-as e)) (#{:done :merged} (:seon.attempt/status a)))]
                  [i (assoc e :ended-as (:seon.attempt/status a))])
           st (reduce (fn [st [i e]]
                        (-> st (assoc-in [:events i] e)
