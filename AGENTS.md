@@ -102,6 +102,16 @@ The order of the tasks is the order of the work: **delete first, then foundation
 7. **Prove it whole:** `bin/test`, then `bin/check` in your worktree. `bin/check` fails when any step fails, keeps each step's output and the stores under `target/check/<time>/`, and is the bar.
 8. **Report to root:** commits, proofs (red → green), numbers against estimates, what you deleted, what's left. Root cherry-picks onto main by explicit paths, runs `bin/check` there, and closes the task.
 
+## Look at the running system, as a Seon agent sees it
+
+A standing root runs at `bin/root 7888` (its store kept under `runs/`; the dashboard on 7777). Reach it through the **`seon` MCP server** (`bin/mcp 7888`, registered in `.mcp.json`). Its tools:
+- `seon_agents`: agents, and tasks with their blocked-by;
+- `seon_eval`: evaluate in an agent's own REPL, exactly the path a Seon agent's forms take, recorded `:outside`; or as `root`;
+- `seon_context`: what the agent's model would read now;
+- `seon_attach` / `seon_done`: work a task as a Seon agent.
+
+Without MCP, the same door is one line: `printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 127.0.0.1 7888`. Use it to see what agents see: when output is noise, a tool is missing or an error names nothing, that is a task (below). Load task files into it with `(my.root/load-tasks! sys "<next>/resources/seon/tasks")`.
+
 ## Found a problem? File a task (owner, 2026-10-21)
 
 When you hit something outside your task, don't fix it in passing and don't just mention it. Examples: REPL output that is noise or cut wrong, a context section that misleads, a missing tool, an error that names nothing, a slow path, anything a Seon agent would trip on. Write it up as a task in the owning namespace's task file, filled out so a Seon agent can work it with nothing else:

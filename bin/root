@@ -1,0 +1,9 @@
+#!/bin/zsh
+# bin/root [PORT]   a standing root with its entrance on 127.0.0.1:PORT (default 7888), until
+# stdin closes: the running system that outside agents (Claude lanes, an owner at a terminal)
+# reach through bin/mcp or `printf '{:op :agents}\n' | nc -w 5 127.0.0.1 PORT`. Its store is
+# a run kept under SEON_RUNS (<next>/runs); it also serves the dashboard on 7777.
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+. "$ROOT/bin/env"
+export SEON_RUNS=${SEON_RUNS:-$ROOT/runs}
+cd "$ROOT/target" && exec ./seon root ${1:-7888}

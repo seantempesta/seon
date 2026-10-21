@@ -1,0 +1,8 @@
+#!/bin/zsh
+# bin/mcp [PORT]   the MCP server (stdio JSON-RPC) for outside agents: each tool is one request to
+# the standing root's entrance on 127.0.0.1:PORT (default 7888; start it with bin/root). Tools:
+# seon_agents, seon_eval (an agent's own REPL, recorded :outside; or "root"), seon_context,
+# seon_attach, seon_done.
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+. "$ROOT/bin/env"
+cd "$ROOT/target" && exec ./seon mcp ${1:-7888}
