@@ -14,10 +14,10 @@
 # the step (SEON_RUN: <step>-<time>-<id>); the recovery steps (durable, window, resume) kill
 # and reopen that same store on the same branch. The store is kept, every branch with it.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-# one full check at a time on this machine, every lane's (each boots ~34 roots and up to 100
-# agents): a full run takes the check lock and runs niced; a single mode does not
-if [[ -z ${SEON_CHECK_LOCKED:-} && ( -z ${1:-} || ${1} =~ ^[0-9]+$ ) ]]; then
-  SEON_CHECK_LOCKED=1 exec nice -n 15 /usr/bin/lockf -k "$ROOT/../check.lock" "$0" "$@"
+# a full run is niced; full runs from different worktrees run in parallel (no lock: each
+# uses its own stores under its run directory and kernel-assigned ports; owner, 2026-10-21)
+if [[ -z ${SEON_CHECK_NICED:-} && ( -z ${1:-} || ${1} =~ ^[0-9]+$ ) ]]; then
+  SEON_CHECK_NICED=1 exec nice -n 15 "$0" "$@"
 fi
 . "$ROOT/bin/env"
 # a check's roots serve no dashboard: system.edn's :web :port 7777 is the owner's, and a
