@@ -318,12 +318,15 @@
                          (assoc rows eid (h/html (:seon.render/html (ui/history-row (if (string? r) (edn/read-string r) r) {:seon.render/budget 400}))))))
                      (select-keys (:rows z {}) (map first records)) records)
         ctx-key [(:t z) (:seon.attempt/id attempt) (:seon.attempt/turns attempt) (:tests ag)]
-        ctx-key (conj ctx-key (some? db) (get-in st [:main :t]))
+        ;; a new context read is a new evaluation of the agent's
+        ctx-key (conj ctx-key (some? db) (get-in st [:main :t]) (count (:evals ag)) (peek (:evals ag)))
         ;; its branch's db, else main's (the task is main's; a merged branch may be gone)
         ctx (if (= ctx-key (:ctx-key z)) (:ctx z)
-                (cond-> (context-of (or db (:main-db st)) attempt ag)
-                  ;; on main: its branch is gone (reading it failed), or not read yet
-                  (and (nil? db) (:main-db st)) (assoc :from (if (:db-error z) :main-gone :main))))]
+                (let [c (context-of (or db (:main-db st)) attempt ag)]
+                  (cond-> c
+                    ;; on main: its branch is gone (reading it failed), or not read yet; the
+                    ;; text it read through the door is that text, whichever db
+                    (and (nil? db) (:main-db st) (not= :door (:from c))) (assoc :from (if (:db-error z) :main-gone :main)))))]
     [(assoc-in st [:zoom id] (assoc z :rows rows :ctx-key ctx-key :ctx ctx))
      {:agent (ui/ended-as ag id (:agent-attempt st {})) :attempt attempt :task (when attempt (get (:tasks st) (:seon.attempt/task attempt)))
       ;; each proof's task, to tell a blocking red from an allowed one
