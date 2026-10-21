@@ -9,6 +9,11 @@
 # whole output is kept in target/check/<time>/<step>.log, a failing step's store is kept,
 # and the script ends with the failed steps named and exits non-zero when any failed.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# one full check at a time on this machine, every lane's (each boots ~34 roots and up to 100
+# agents): a full run takes the check lock and runs niced; a single mode does not
+if [[ -z ${SEON_CHECK_LOCKED:-} && ( -z ${1:-} || ${1} =~ ^[0-9]+$ ) ]]; then
+  SEON_CHECK_LOCKED=1 exec nice -n 15 /usr/bin/lockf -k "$ROOT/../check.lock" "$0" "$@"
+fi
 . "$ROOT/bin/env"
 S=$ROOT/target/seon
 [[ -x $S ]] || { echo "check: no target/seon; run bin/build seon" >&2; exit 1 }
