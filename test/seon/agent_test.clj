@@ -44,6 +44,111 @@
     (sh/sh "rm" "-rf" (str path "-runs") (str path "-tasks"))
     (mapv #(if (contains? % :items) (first (:items %)) %) out))))
 
+(defn- root-ended
+  "A root with two agents: a1 idle, a2 evaluating code (sent, not awaited). Then SIGKILL of
+  root; with fork-server-first?, what a pid cleanup does before it: SIGKILL of the fork
+  server's standby and of the fork server, so its group kill (seon.fork-server/main) never
+  runs and each agent has only its own socket to root to end on. Answers {:agents {id pid}
+  :left #{pid} :out text}: the agents' pids as root wrote them (an EDN file, read as data),
+  the processes of the fork server's group still alive once all have ended or 100 checks
+  0.1 s apart have passed (the bound only ends a red run; the assertion is on the
+  processes), and what the run printed, with the tail of root's log, for a red run's
+  message."
+  [code fork-server-first?]
+  (let [checkout (.getCanonicalPath (java.io.File. "."))
+        main (str "root-ended-" (random-uuid))
+        store (str checkout "/target/runs/test-store")
+        path (str checkout "/target/runs/" main)
+        port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
+        ask (fn [m] (str "printf '%s\\n' " (pr-str (pr-str m)) " | nc -w 60 127.0.0.1 " port))
+        root-eval (fn [code] (ask {:op :eval :agent "root" :code code}))
+        ;; root's own state, as a boolean root prints: no reading of the agents' text
+        until (fn [code] (str " for i in {1..300}; do " (root-eval code) " | grep -q ':printed \"true\"' && break; sleep 0.2; done;"))
+        statuses "(map :status (vals (:agents (c/state sys))))"
+        script (str "mkfifo '" path "-in'; ./seon root"
+                    " --set ':seon.config.root/store-path=" (pr-str store) "' --set ':seon.config.root/main=" (pr-str main) "'"
+                    " --set ':seon.config.root/entrance-port=" port "' --set ':seon.config.web/port=0'"
+                    " < '" path "-in' > '" path ".log' 2>&1 & R=$!; exec 3>'" path "-in';"
+                    " until grep -q 'ROOT LISTENING' '" path ".log' || ! kill -0 $R 2>/dev/null; do sleep 0.1; done;"
+                    (root-eval "[(c/spawn! sys {}) (c/spawn! sys {})]") ";"
+                    (until (str "(= [:idle :idle] " statuses ")"))
+                    (root-eval (str "(do (c/submit! sys :a2 " (pr-str code) ") :sent)")) " >/dev/null;"
+                    (until (str "(boolean (some #{:busy} " statuses "))"))
+                    (root-eval (str "(spit " (pr-str (str path "-agents.edn")) " (pr-str (into {} (for [[id a] (:agents (c/state sys))] [id (:pid a)]))))")) " >/dev/null;"
+                    " P=$(cat '" path "-agents.edn');"
+                    " FS=$(pgrep -P $R);"
+                    (when fork-server-first?
+                      (str " for k in $(pgrep -P $FS); do echo \"$P\" | grep -q \" $k\" || kill -9 $k; done;"
+                           " kill -9 $FS;"))
+                    " kill -9 $R; wait $R 2>/dev/null; exec 3>&-;"
+                    " LEFT=x; for i in {1..100}; do LEFT=$(pgrep -g $FS); [[ -z $LEFT ]] && break; sleep 0.1; done;"
+                    " echo \"LEFT $(echo $LEFT)\"; for p in $(echo $LEFT); do kill -9 $p; done;"
+                    " echo '-- root log'; tail -20 '" path ".log'")
+        {:keys [out]} (ts/binary-sh "zsh" "-c" script :dir "target")
+        agents (let [f (java.io.File. (str path "-agents.edn"))] (when (.exists f) (edn/read-string (slurp f))))
+        left (some #(when (str/starts-with? % "LEFT ") (subs % 5)) (str/split-lines out))]
+    (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
+    (sh/sh "rm" "-rf" (str path "-in") (str path ".log") (str path "-agents.edn"))
+    {:agents agents :out out
+     :left (into #{} (map parse-long) (re-seq #"\d+" (or left "")))}))
+
+(deftest an-agent-ends-when-its-root-is-gone
+  ;; task seon.agent/an-agent-ends-with-its-root: with its fork server gone first (a pid
+  ;; cleanup), an agent ends on EOF of its own socket to root, whatever it is doing: an idle
+  ;; agent reads it; one evaluating a form with no tick budget is interrupted by it (SIGIO)
+  (let [{:keys [agents left out]} (root-ended "(loop [] (recur))" true)]
+    (is (= #{:a1 :a2} (set (keys agents))) out)
+    (is (not (contains? left (:a1 agents))) "the idle agent ended")
+    (is (not (contains? left (:a2 agents))) "the busy agent ended")))
+
+(deftest a-blocked-agent-ends-with-its-root
+  ;; task seon.agent/an-agent-ends-with-its-root, an agent blocked in a wait: its thread in
+  ;; Chez's condition-wait reaches no safe point, so no signal handler runs (SIGIO, root's
+  ;; SIGUSR1) until the wait returns. The fork server's group kill on root's EOF ends it
+  ;; (task seon.agent/a-signal-wakes-a-blocked-wait makes the agent's own EOF end it too)
+  (let [{:keys [agents left out]} (root-ended "(clojure.core.async/<!! (clojure.core.async/chan))" false)]
+    (is (= #{:a1 :a2} (set (keys agents))) out)
+    (is (empty? left) (str "agents still alive: " left "\n" out))))
+
+(deftest a-blocked-agent-ends-on-its-socket-eof
+  ;; task seon.intr/a-signal-wakes-a-blocked-wait: an agent blocked in a channel take, its fork
+  ;; server gone first, ends on its own socket's EOF (SIGIO wakes its condition-wait)
+  (let [{:keys [agents left out]} (root-ended "(clojure.core.async/<!! (clojure.core.async/chan))" true)]
+    (is (= #{:a1 :a2} (set (keys agents))) out)
+    (is (empty? left) (str "agents still alive: " left "\n" out))))
+
+(deftest root-interrupts-a-blocked-take
+  ;; task seon.intr/a-signal-wakes-a-blocked-wait: root's interrupt! stops an eval blocked in a
+  ;; channel take, and the agent answers its next request
+  (let [checkout (.getCanonicalPath (java.io.File. "."))
+        main (str "blocked-take-" (random-uuid))
+        store (str checkout "/target/runs/test-store")
+        path (str checkout "/target/runs/" main)
+        port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
+        ask (fn [m] (str "printf '%s\\n' " (pr-str (pr-str m)) " | nc -w 20 127.0.0.1 " port))
+        root-eval (fn [code] (ask {:op :eval :agent "root" :code code}))
+        script (str "mkfifo '" path "-in'; ./seon root"
+                    " --set ':seon.config.root/store-path=" (pr-str store) "' --set ':seon.config.root/main=" (pr-str main) "'"
+                    " --set ':seon.config.root/entrance-port=" port "' --set ':seon.config.web/port=0'"
+                    " < '" path "-in' > '" path ".log' 2>&1 & R=$!; exec 3>'" path "-in';"
+                    " until grep -q 'ROOT LISTENING' '" path ".log' || ! kill -0 $R 2>/dev/null; do sleep 0.1; done;"
+                    (root-eval "(c/spawn! sys {})") " >/dev/null;"
+                    " for i in {1..300}; do " (ask {:op :agents}) " | grep -q ':status :idle' && break; sleep 0.2; done;"
+                    (root-eval "(do (def blocked (c/submit! sys :a1 \"(clojure.core.async/<!! (clojure.core.async/chan))\")) :sent)") " >/dev/null;"
+                    " for i in {1..300}; do " (ask {:op :agents}) " | grep -q ':status :busy' && break; sleep 0.2; done;"
+                    (root-eval "(c/interrupt! sys :a1)") " >/dev/null;"
+                    (root-eval "(def stopped (:printed (first (deref blocked 10000 [{:printed \"still blocked\"}]))))") " >/dev/null;"
+                    " echo \"STOPPED $(" (root-eval "(clojure.string/starts-with? stopped \"interrupted by root\")") ")\";"
+                    " echo \"NEXT $(" (ask {:op :eval :agent "a1" :code "(+ 2 2)"}) ")\";"
+                    " exec 3>&-; wait $R")
+        {:keys [out]} (ts/binary-sh "zsh" "-c" script :dir "target")
+        line (fn [k] (some #(when (str/starts-with? % k) (subs % (count k))) (str/split-lines out)))
+        printed (fn [k] (some-> (line k) not-empty edn/read-string :items first :printed))]
+    (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
+    (sh/sh "rm" "-rf" (str path "-in") (str path ".log"))
+    (is (= "true" (printed "STOPPED ")) (str "the blocked eval answers interrupted by root: " (line "STOPPED ")))
+    (is (= "4" (printed "NEXT ")) (pr-str (line "NEXT ")))))
+
 (deftest an-agent-holds-mains-tests-and-runs-them
   ;; task seon.agent/an-agent-holds-mains-tests: main holds the source root's test namespaces
   ;; (imported from test/), and an agent forked from the fork server holds them compiled:
@@ -75,6 +180,41 @@
                           {:dirs ["src" "test"] :proofs #{proof}})]
     (is (= {proof :pass reached :pass} (edn/read-string (:printed run)))
         "the proof and the one test reaching the change ran, green; nothing else ran")))
+
+(deftest a-wide-reach-reuses-unchanged-results
+  ;; task seon.proofs/prove-runs-what-a-change-reaches (and seon.agent/a-wide-reach-stays-cheap):
+  ;; root's boot records its source tree's inputs on its :seon.root/source fact (its binary is
+  ;; built from that tree: bin/test built it), the agent keys its digests by them and selects
+  ;; against the main it forked from, and each green goes to its root's results directory
+  ;; through root's :file owner, so the next run (the next turn's observe, the judge's :tests,
+  ;; the merge gate) of an unchanged branch reruns nothing and answers the same results
+  (let [proof 'seon.reader-test/prose-without-a-fence-is-a-comment
+        reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
+        run "(let [r @(seon.root/run-tests! sys :a1)] [(seon.proofs/results r) (:ran r) (:reused r)])"
+        own "(select-keys (prove) [:results :ran :reused])"
+        stored "(count (filter #(.endsWith (.getName %) \".edn\") (.listFiles (java.io.File. (seon.agent/results-dir)))))"
+        [_ inputs first-run files judged second-run]
+        (in-agent ["(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent.a1)"
+                   {:op :eval :agent "root" :code "(let [r (datahike.api/entity @(:conn sys) [:seon.root/id :root])] [(set (keys (:inputs (:seon.root/source r)))) (= (:boot (:seon.root/source r)) (:seon.root/boot r))])"}
+                   own
+                   {:op :eval :agent "root" :code stored}
+                   {:op :eval :agent "root" :code run}
+                   own]
+                  {:dirs ["src" "test"] :proofs #{proof}})]
+    (is (= [#{:env :tree :data-refs} true] (edn/read-string (:printed inputs))) "root's boot recorded its source tree's inputs, this boot's")
+    (is (= {:results {proof :pass reached :pass} :ran 2 :reused 0} (edn/read-string (:printed first-run))) "the agent's own run runs the proof and the reached test")
+    (is (= 2 (edn/read-string (:printed files))) "and stores both through root's :file owner, in its root's results directory")
+    (is (= [{proof :pass reached :pass} 0 2] (edn/read-string (:printed judged))) "root's :tests (the judge's) runs nothing: both reused from it, the same results")
+    (is (= {:results {proof :pass reached :pass} :ran 0 :reused 2} (edn/read-string (:printed second-run))) "and so does the agent's next run")))
+
+(deftest a-previous-roots-inputs-are-not-shared
+  ;; re-review 2026-10-22: the :root entity outlives its root, so a restart (or a root with no
+  ;; source on the same main) must not key its agents' results by a fact an earlier boot wrote
+  (let [inputs {:env "e" :tree "t" :data-refs {}}
+        source {:root "/r" :files 0 :forms 0 :ms 0 :boot "b1" :inputs inputs}
+        db (fn [boot] (datahike.api/db-with (ts/test-db) [{:seon.root/id :root :seon.root/boot boot :seon.root/source source}]))]
+    (is (some? (:dir (agent/test-plan (db "b1") (db "b1") #{}))) "this boot's inputs: its results are kept")
+    (is (nil? (:dir (agent/test-plan (db "b2") (db "b2") #{}))) "an earlier boot's: nothing is shared or reused")))
 
 (deftest a-forked-agent-knows-its-task
   ;; task seon.template/a-request-is-one-linked-transaction: root forks the agent for its
@@ -141,8 +281,8 @@
                                  :code (str "(let [a (first (filter #(= :a1 (:seon.attempt/agent %)) (vals (seon.task/attempts @(:conn sys)))))]"
                                             " (seon.reconcile/pull-end (:db @(seon.root/branch-db sys (seon.task/default-branch \"demo/t\"))) (:seon.attempt/id a)))")}])
         end (edn/read-string {:default tagged-literal} (:printed end))]
-    (is (= :err (:tag died)) "the request it died in is answered with its death")
-    (is (str/includes? (str (:printed died)) "exit 70") "named by the exit status root observed")
+    (is (= :seon.agent/died (:seon.error/type died)) "the request it died in is answered with its death, the one error map")
+    (is (= {:exit 70} (:exit died)) "named by the exit status root observed")
     (is (= :error (:outcome end)) "the attempt's end is on its branch")
     (is (= "boom: the loop's own function" (get-in end [:error :seon.error/message])) "with its cause, the one error map")
     (is (= 'seon.repl/serve! (get-in end [:error :seon.error/operation])))))

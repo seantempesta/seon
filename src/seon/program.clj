@@ -25,7 +25,7 @@
     platform's own source has the same facts (seon.source)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [jolt.ir :as ir] [jolt.analyzer]
-            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [clojure.edn :as edn] [seon.error :as error] [seon.db :as pdb]))
+            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [seon.error :as error] [seon.db :as pdb]))
 
 (defn scratch-ns?
   "Is namespace nsx scratch (never program): `user`, or declared ^:scratch."
@@ -444,8 +444,8 @@
   [db e]
   (let [f (d/entity db e)
         def-key (fn [x] (cond (:var/name x) [:var (:var/name x)]
-                              (:method/key x) (into [:method] (read-string (:method/key x)))
-                              (:impl/key x) (into [:impl] (read-string (:impl/key x)))
+                              (:method/key x) (into [:method] (sedn/decode (:method/key x)))
+                              (:impl/key x) (into [:impl] (sedn/decode (:impl/key x)))
                               (:ns/name x) [:ns (:ns/name x)]))]
     (cond-> {:e e :id (:form/id f) :src (:form/src f) :ns (:ns/name (:form/ns f)) :order (:form/order f)
              :defines (into #{} (keep def-key) (:form/defines f))
@@ -566,7 +566,7 @@
                     (let [r' (into r (for [[k ns] named :when (and (not (r k)) (some r ns))] k))]
                       (if (= r r') r (recur r'))))]
       (vec (distinct (for [dt (d/datoms db :aevt :var/contract)
-                           :when (some reached (names (edn/read-string (:v dt))))
+                           :when (some reached (names (sedn/decode (:v dt))))
                            :let [fe (:db/id (:var/form (d/entity db (:e dt))))]
                            :when (and fe (live? db fe))]
                        (form-row db fe)))))))
@@ -608,7 +608,7 @@
   [db]
   (let [src (into #{} (map :e) (d/datoms db :aevt :schema/source))]
     (into {} (for [dt (d/datoms db :aevt :schema/key) :when (not (src (:e dt)))]
-               [(:v dt) (edn/read-string (:schema/form (d/entity db (:e dt))))]))))
+               [(:v dt) (sedn/decode (:schema/form (d/entity db (:e dt))))]))))
 
 (defn schema-registry
   "The registry an evaluation on db binds as malli.registry/*registry*: the binary's forms
@@ -702,7 +702,7 @@
             :when (and (= op :db/retract) (ptr a) (not (added e)))
             :let [x (d/entity db e)]]
       (cond (:var/name x) (remove-definition! [:var (:var/name x)])
-            (:method/key x) (remove-definition! (into [:method] (read-string (:method/key x))))))
+            (:method/key x) (remove-definition! (into [:method] (sedn/decode (:method/key x))))))
     (load! db (vec (for [[op e a] ops
                          :when (and (= op :db/add) (= a :form/src) (live? db e))
                          :let [f (form-row db e)] :when (not (held? db f))]
@@ -745,27 +745,6 @@
   [db-from db-to]
   (into #{} cat (vals (dissoc (divergence db-from db-to) :schemas))))
 
-(defn reaching-tests
-  "The program's tests on db that reach one of syms (fully qualified var names): from each
-  var, the forms that reference it (one AVET seek), their definitions, and on. Cost: the
-  reached definitions, never the rest of the program."
-  {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-symbol]] [:set :qualified-symbol]]}
-  [db syms]
-  (loop [front (vec syms) seen (set syms) tests #{}]
-    (if-let [[x & more] (seq front)]
-      (let [callers (for [dt (d/datoms db :avet :form/refs x)
-                          :when (live? db (:e dt))
-                          dv (:form/defines (d/entity db (:e dt)))
-                          :let [v (:var/name dv)]
-                          :when (and v (= (:e dt) (:db/id (:var/form dv))))]
-                      [v (:var/kind dv)])
-            new (remove (comp seen first) callers)]
-        ;; a test is reached, never walked on from: a form naming a test (its name quoted as
-        ;; data, a proof list) does not run it
-        (recur (into (vec more) (comp (remove #(= :test (second %))) (map first)) new) (into seen (map first) new)
-               (into tests (comp (filter #(= :test (second %))) (map first)) callers)))
-      tests)))
-
 (def tree-readers
   "The vars that read the checkout's files or run the binary built from them: a test whose
   reached forms reference one has the whole tree as an input, so its reach digest covers it
@@ -776,14 +755,16 @@
 
 (def env-readers
   "The platform vars whose file reads are of inputs every digest already holds (:env:
-  resources/, deps.edn, web/), so reaching them does not make a test read the tree. A reader
-  not named here counts as reading the tree (conservative: a missed name reruns more, never
-  reuses a stale green). Measured 2026-10-22 (worktree session PROVE): with
+  resources/, deps.edn, web/) or of no checkout file at all, so reaching them does not make a
+  test read the tree. A reader not named here counts as reading the tree (conservative: a
+  missed name reruns more, never reuses a stale green). Measured 2026-10-22 (worktree session PROVE): with
   seon.config/baked-schema-forms (a macro every contracted form expands) counted, 327 of 368
   tests took the tree, so any edit anywhere reran them."
   '#{seon.config/baked-schema-forms ;; resources/seon/schemas, in :env
      seon.fork-server/dev-classpath! ;; deps.edn, in :env
-     seon.web/handler}) ;; web/public, in :env
+     seon.fx/declared-refs ;; resources/seon/system.edn, in :env
+     seon.web/handler ;; web/public, in :env
+     seon.proofs/greens}) ;; the results directory, outside the tree, by digest
 
 (defn reach-digests
   "{test var -> reach digest} of db's tests (task seon.program/tests-run-by-reach): the
@@ -797,14 +778,16 @@
   tree-reader. A
   test's digest moves exactly when a form or schema entry it reaches does. Cost: the live
   forms, contracts and schema entries read once and digested once, then per test its
-  closure."
-  {:malli/schema [:=> [:cat :seon.host/db [:map [:env :string] [:tree :string]
-                                              [:data-refs {:optional true} [:map-of :qualified-symbol [:set :qualified-symbol]]]]]
-                  [:map-of :qualified-symbol :string]]}
-  [db {:keys [env tree data-refs]}]
+  closure. With roots ({key [var ...]}, a bin/check step's mode functions: seon.proofs/
+  check-steps), the same digest of each key: what its vars' forms and their namespaces'
+  plain forms reach; a key one of whose vars has no form here has none."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.program/inputs] [:map-of :qualified-symbol :string]]
+                  [:=> [:cat :seon.host/db :seon.program/inputs [:map-of :string [:sequential :qualified-symbol]]] [:map-of :string :string]]]}
+  ([db inputs] (reach-digests db inputs nil))
+  ([db {:keys [env tree data-refs]} roots]
   (let [schemas (into {} (for [dt (d/datoms db :aevt :schema/key)] [(:v dt) (:schema/form (d/entity db (:e dt)))]))
         sid #(str "schema " %)
-        named (fn [text] (keep #(when (contains? schemas %) (sid %)) (names (edn/read-string text))))
+        named (fn [text] (keep #(when (contains? schemas %) (sid %)) (names (sedn/decode text))))
         contract (into {} (for [dt (d/datoms db :aevt :var/contract)] [(:var/name (d/entity db (:e dt))) (named (:v dt))]))
         live (live-forms db)
         forms (into live (for [[k text] schemas] {:id (sid k) :ns k :src text :refs #{} :defines #{} :schema (named text)}))
@@ -820,14 +803,21 @@
                               (for [[k s] (:defines f) :when (= :var k)
                                     id (concat (methods s) (impls s) (contract s) (keep var-form (get data-refs s)))]
                                 id)))
-        plain (group-by :ns (filter #(not-any? (fn [[k]] (= :var k)) (:defines %)) live))]
-    (into {} (for [f forms [k t] (:defines f) :when (and (= :var k) (= :test (:var/kind (d/entity db [:var/name t]))))
-                   :let [reached (loop [front (into [(:id f)] (map :id) (plain (:ns f))) seen #{}]
-                                   (if-let [[id & more] (seq front)]
-                                     (if (seen id) (recur more seen) (recur (into (vec more) (edges (by-id id))) (conj seen id)))
-                                     seen))
-                         reads? (some #(let [f (by-id %)]
-                                         (and (some tree-readers (:refs f))
-                                              (not (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f))))))
-                                      reached)]]
-               [t (error/digest (apply str t "\n" env "\n" (when reads? tree) (sort (map digest reached))))]))))
+        plain (group-by :ns (filter #(not-any? (fn [[k]] (= :var k)) (:defines %)) live))
+        ;; the digest of key k reaching from the forms ids, with their namespaces' plain forms
+        digest-of (fn [k ids]
+                    (let [reached (loop [front (into (vec ids) (comp (mapcat #(plain (:ns (by-id %)))) (map :id)) ids) seen #{}]
+                                    (if-let [[id & more] (seq front)]
+                                      (if (seen id) (recur more seen) (recur (into (vec more) (edges (by-id id))) (conj seen id)))
+                                      seen))
+                          reads? (some #(let [f (by-id %)]
+                                          (and (some tree-readers (:refs f))
+                                               (not (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f))))))
+                                       reached)]
+                      (error/digest (apply str k "\n" env "\n" (when reads? tree) (sort (map digest reached))))))]
+    (if roots
+      ;; a root naming a var with no form here (renamed, not imported) gets no digest: its
+      ;; caller names it missing, never a digest of :env alone that a stale green matches
+      (into {} (for [[k vars] roots :when (every? var-form vars)] [k (digest-of k (map var-form vars))]))
+      (into {} (for [f forms [k t] (:defines f) :when (and (= :var k) (= :test (:var/kind (d/entity db [:var/name t]))))]
+                 [t (digest-of t [(:id f)])]))))))

@@ -49,7 +49,12 @@
   []
   (let [es @stack]
     (if (seq es)
-      (boolean (some true? (mapv #(set-token! % :interrupted) es)))
+      (let [newly (boolean (some true? (mapv #(set-token! % :interrupted) es)))]
+        ;; a form blocked in a wait (a channel take) reaches no tick: the thread's own
+        ;; interrupt flag, read by the wait when the signal wakes it, ends it as
+        ;; Thread.interrupt ends a blocked <!! (cleared when the eval ends, in run)
+        (.interrupt (Thread/currentThread))
+        newly)
       (do (reset! pending true) false))))
 
 (defchecked ^:private install-kick* [:=> [:cat :int :seon.host/fn] :any]
@@ -68,6 +73,17 @@
   []
   (quiet-timer*)
   (install-kick* lib/SIGUSR1 on-usr1)
+  true)
+
+(defn exit-at-eof!
+  "End this process when its socket to root is closed, whatever it is doing: SIGIO (the
+  socket asked for it, seon.sock/signal-at-input!) is taken at the next safe point, as
+  root's SIGUSR1 is, and the process exits 0 only when (gone?) peeks EOF; input arriving is
+  the loop's to read. The second source of an interrupt here, beside root's (task
+  seon.agent/an-agent-ends-with-its-root)."
+  {:malli/schema [:=> [:cat :seon.host/fn] :boolean]}
+  [gone?]
+  (install-kick* lib/SIGIO (fn [] (when (gone?) (lib/c-exit 0)) false))
   true)
 
 (defn run
@@ -93,7 +109,11 @@
                                                     " back-edges), its budget of " ticks ", and was stopped: a loop that never ends,"
                                                     " or more work than one form should do")
                                                {:ticks (:jolt/ticks-spent d) :budget ticks})))
-               (:jolt/interrupted d) (throw (ex-info "interrupted by root" {:interrupted true}))
+               ;; root's interrupt, whichever way it ended the form: the escape, or a
+               ;; blocked wait thrown out by the thread's interrupt flag
+               (or (:jolt/interrupted d) (= :interrupted @(:cause e))) (throw (ex-info "interrupted by root" {:interrupted true}))
                :else (throw ex))))
          (finally
-           (swap! stack (fn [s] (doall (remove #(identical? % e) s))))))))
+           (swap! stack (fn [s] (doall (remove #(identical? % e) s))))
+           ;; the flag on-usr1 set is this eval's: never the next request's
+           (Thread/interrupted)))))

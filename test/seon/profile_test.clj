@@ -2,7 +2,7 @@
   "seon.profile: every contracted call counted exactly, one in 64 timed, read per epoch."
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :as contract :refer [defn defn-]]
-            [seon.profile :as profile] [seon.repl :as repl] [seon.agent :as agent] [jolt.ffi :as ffi]))
+            [seon.profile :as profile] [seon.cost] [seon.repl :as repl] [seon.agent :as agent] [jolt.ffi :as ffi]))
 
 (defn- leaf {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))
 
@@ -77,3 +77,50 @@
         empty-loop (bytes #(dotimes [_ n] nil))
         reads (bytes #(dotimes [_ n] (profile/now-ns)))]
     (is (<= (- reads empty-loop) 1024) (str n " reads allocated " reads " bytes, an empty loop " empty-loop))))
+
+(defn- busy-threads
+  "n threads running (work) until stop is set, each delivering its promise once it is
+  running. Answers [threads stop], after every one has started."
+  [n work]
+  (let [stop (atom false)
+        started (vec (repeatedly n promise))
+        ts (mapv (fn [p] (Thread. ^Runnable (fn [] (deliver p true) (loop [] (when-not @stop (work) (recur)))))) started)]
+    (doseq [^Thread t ts] (.start t))
+    (doseq [p started] @p)
+    [ts stop]))
+
+(defn- end-threads! [[ts stop]] (reset! stop true) (doseq [^Thread t ts] (.join t)))
+
+(defn- allocating-thread
+  "One thread allocating until stopped (a vector of 100 longs, again and again), running when answered."
+  [] (busy-threads 1 #(dotimes [_ 1000] (vec (range 100)))))
+
+(deftest a-threads-allocation-is-its-own
+  ;; task seon.cost/a-proof-measures-only-its-own-thread: alloc-bytes counted the whole
+  ;; process (1,712 B idle against 1.4 GB in 200 ms while another thread allocated), so a cost
+  ;; proof read other threads' work as its own. Now it is the calling thread's count alone.
+  (let [window #(let [a0 (profile/alloc-bytes) _ (Thread/sleep 200)] (- (profile/alloc-bytes) a0))]
+    (is (< (window) 65536) "idle, the caller allocates next to nothing")
+    (let [busy (allocating-thread)]
+      (try (let [w (window)] (is (< w 65536) (str "another thread allocating moves the caller's count by " w " B")))
+           (finally (end-threads! busy))))
+    (let [a0 (profile/alloc-bytes) b (byte-array 1000000) a1 (profile/alloc-bytes)]
+      (is (<= 1000000 (- a1 a0) 1100000) (str "the caller's own " (count b) " bytes counted as " (- a1 a0))))))
+
+(deftest a-measure-is-the-same-beside-another-thread
+  ;; the measured call's bytes are the same alone and while another thread allocates
+  (let [f (fn [] (reduce + (map leaf (range 1000))))
+        alone (seon.cost/measure f [])
+        busy (allocating-thread)
+        beside (try (seon.cost/measure f []) (finally (end-threads! busy)))]
+    (is (<= (:bytes beside) (* 1.25 (max 1.0 (:bytes alone)))) (str "alone " alone ", beside " beside))))
+
+(deftest a-measures-time-is-what-its-thread-does
+  ;; land review: a proof's ns is its thread's CPU (seon.profile/cpu-ns), so a call is timed by
+  ;; what it does, never by how long it waits: a call that sleeps 20 ms (a wait, as on a
+  ;; channel or a socket) reads 20 ms on the wall clock and next to nothing as measured
+  (let [f (fn [] (Thread/sleep 20) (reduce + (range 1000)))
+        wall (let [t0 (profile/now-ns)] (f) (- (profile/now-ns) t0))
+        measured (:ns (seon.cost/measure f []))]
+    (is (>= wall 20000000) (str "wall " wall " ns: the wait is real"))
+    (is (< measured 2000000) (str "measured " measured " ns: what the call did, not its wait"))))
