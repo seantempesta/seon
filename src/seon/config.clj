@@ -1,6 +1,6 @@
 (ns seon.config
   "The one config system (owner, 2026-10-21: only documented config schemas stay). Every
-  limit, bound, dial and default of the platform is a key in one aero file,
+  limit, bound and default of the platform is a key in one aero file,
   resources/seon/config/default.edn, documented there beside its value (unit, provenance,
   what happens at the bound) and validated by its schema (resources/seon/schemas/
   seon.config*.edn, the `:seon.config/config` map). This namespace is its loader and the
@@ -22,7 +22,7 @@
   writes the resolved config as facts on main's root entity (`facts`), platform records a
   merge never carries, where agents, the dashboard and the context read it.
 
-  A foundational namespace, below seon.contract (which reads the guarantees dial here): its
+  A foundational namespace, below seon.contract (which reads the instrument config key here): its
   functions carry contracts in their metadata and are armed at boot."
   (:refer-clojure :exclude [resolve])
   (:require [seon.edn :as sedn] [aero.core :as aero] [malli.core :as m] [malli.registry :as mr] [clojure.edn :as edn]
@@ -212,9 +212,9 @@
   (:sources loaded))
 
 ;; ---- reading a setting: the one resolver ------------------------------------------------------
-;; Owner, 2026-10-21: settings are per model, per provider and per task; "a pillar and not just
+;; Owner, 2026-10-21: settings are per model, per provider and per task; "a principle and not just
 ;; a hack": every reader resolves through `resolve-in` (task -> model -> its provider -> the
-;; config's own key), and the door shows each value with where it came from.
+;; config's own key), and the server shows each value with where it came from.
 
 (defn resolve-in
   "Setting k in config c (its layer sources srcs) for ctx {:task m :model id}: the task's or

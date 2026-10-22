@@ -1,34 +1,34 @@
 #!/bin/zsh
-# bin/lanes   what is running and what it costs, across every checkout: each worktree's branch and
+# bin/worktrees   what is running and what it costs, across every checkout: each worktree's branch and
 # how far it is from main, its root (bin/root status), the processes under it (count, CPU %,
 # memory, threads), its stores' size; then seon processes no checkout claims (orphans: parent 1,
 # or a checkout that is gone), the heaviest processes, and the machine's load and free memory.
-# Read-only. `bin/lanes -w` repeats it every 5 s (a view for a person, not a decision).
+# Read-only. `bin/worktrees -w` repeats it every 5 s (a view for a person, not a decision).
 setopt no_nomatch
 MAIN=$(cd "$(dirname "$0")/.." && pwd)
 COMMON=$(cd "$(git -C "$MAIN" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
 show() {
-  print -P "%B== lanes $(date +%H:%M:%S)%b  (load $(sysctl -n vm.loadavg | awk '{print $2, $3, $4}'), $(sysctl -n hw.ncpu) cores, memory free $(memory_pressure 2>/dev/null | awk -F': ' '/free percentage/{print $2}'))"
-  ps -Ao pid=,ppid=,pcpu=,rss=,command= > /tmp/lanes.$$
+  print -P "%B== worktrees $(date +%H:%M:%S)%b  (load $(sysctl -n vm.loadavg | awk '{print $2, $3, $4}'), $(sysctl -n hw.ncpu) cores, memory free $(memory_pressure 2>/dev/null | awk -F': ' '/free percentage/{print $2}'))"
+  ps -Ao pid=,ppid=,pcpu=,rss=,command= > /tmp/worktrees.$$
   printf '%-22s %-22s %6s %-28s %5s %6s %8s %7s %8s\n' CHECKOUT BRANCH AHEAD ROOT PROCS CPU% RSS-MB THREADS STORES
   claimed=""
   git -C "$COMMON" worktree list --porcelain | awk '/^worktree /{print $2}' | while read wt; do
     br=$(git -C "$wt" branch --show-current 2>/dev/null)
     if [[ $br == main ]]; then ahead=-; else ahead=$(git -C "$COMMON" rev-list --count main..$br 2>/dev/null); fi
-    root=$( (cd "$wt" && [[ -x bin/root ]] && bin/root status 2>/dev/null | tail -1 | sed -E 's/^root ([0-9]+) up: entrance ([0-9]+).*/up \1 :\2/; s/^no root running.*/-/') )
+    root=$( (cd "$wt" && [[ -x bin/root ]] && bin/root status 2>/dev/null | tail -1 | sed -E 's/^root ([0-9]+) up: server ([0-9]+).*/up \1 :\2/; s/^no root running.*/-/') )
     # its own executables (the shared compile cache under the main tree's target/ is not a claim)
-    pids=$(awk -v w="$wt/" 'index($5, w) == 1 {print $1}' /tmp/lanes.$$)
+    pids=$(awk -v w="$wt/" 'index($5, w) == 1 {print $1}' /tmp/worktrees.$$)
     # a checkout's root runs as ./seon from its target/: count the descendants of its root too
     rp=$(cat "$wt/runs/root.pids" 2>/dev/null | awk '{print $2}')
     if [[ -n $rp ]]; then pids="$pids $(pgrep -P $rp 2>/dev/null) $rp $(for c in $(pgrep -P $rp 2>/dev/null); do pgrep -P $c; done)"; fi
     pids=$(print -l ${=pids} | grep -E '^[0-9]+$' | sort -u | tr '\n' ' ')
-    read n cpu rss <<< $(awk -v ps=" $pids " 'index(ps, " " $1 " ") {n++; c+=$3; r+=$4} END {printf "%d %d %d", n, c, r/1024}' /tmp/lanes.$$)
+    read n cpu rss <<< $(awk -v ps=" $pids " 'index(ps, " " $1 " ") {n++; c+=$3; r+=$4} END {printf "%d %d %d", n, c, r/1024}' /tmp/worktrees.$$)
     th=0; for p in ${=pids}; do th=$(( th + $(ps -M -p $p 2>/dev/null | tail -n +2 | wc -l) )); claimed="$claimed $p "; done
     stores=$(du -sk "$wt/runs" "$wt/target/runs" "$wt/target/check-store" 2>/dev/null | awk '{s+=$1} END {printf "%dM", s/1024}')
     printf '%-22s %-22s %6s %-28s %5s %6s %8s %7s %8s\n' "${wt:t}" "${br:-detached}" "${ahead:-?}" "${root:-no root}" $n $cpu $rss $th "$stores"
   done
   print -P "%B-- seon processes no checkout claims (orphans)%b"
-  awk '/\.\/seon|bin\/root run/ && !/awk/ {print $1, $2, $4, $0}' /tmp/lanes.$$ | while read pid ppid rss rest; do
+  awk '/\.\/seon|bin\/root run/ && !/awk/ {print $1, $2, $4, $0}' /tmp/worktrees.$$ | while read pid ppid rss rest; do
     [[ $claimed == *" $pid "* ]] && continue
     cwd=$(lsof -a -p $pid -d cwd -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}')
     # bin/root's holder (parent 1 by design: it keeps a root's stdin open) is claimed while its root lives
@@ -36,7 +36,7 @@ show() {
     [[ $ppid == 1 || ( -n $cwd && ! -d $cwd ) ]] && printf '  pid %s parent %s %dMB cwd %s\n' $pid $ppid $((rss/1024)) ${cwd:-?}
   done
   print -P "%B-- heaviest processes%b"
-  sort -k3 -rn /tmp/lanes.$$ | head -5 | awk '{printf "  pid %-6s %5s%% cpu %6d MB  %s\n", $1, $3, $4/1024, substr($0, index($0,$5), 90)}'
-  rm -f /tmp/lanes.$$
+  sort -k3 -rn /tmp/worktrees.$$ | head -5 | awk '{printf "  pid %-6s %5s%% cpu %6d MB  %s\n", $1, $3, $4/1024, substr($0, index($0,$5), 90)}'
+  rm -f /tmp/worktrees.$$
 }
 if [[ ${1:-} == -w ]]; then while true; do clear; show; sleep 5; done; else show; fi

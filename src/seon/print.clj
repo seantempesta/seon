@@ -2,7 +2,7 @@
   "The one value printer. Every value a person or a model reads goes through `print-value`:
   an agent's reply, a refused value inside a contract error, a test's expected and actual,
   the context block, the dashboard's value panels. It is Seon's printer (seon.render.value
-  and seon.print, through lane P1's proto/seon-min: identical output on L3's 1,617-line
+  and seon.print, through session P1's proto/seon-min: identical output on L3's 1,617-line
   corpus): one token budget allotted breadth before depth, identity keys first, every cut
   carrying the form that reads its rest through the result handle, and text and hiccup
   from one selection.
@@ -16,7 +16,7 @@
   (:require [clojure.string :as str] [seon.print.select :as select] [seon.config :as config]))
 
 (def budgets
-  "Tokens each kind of shown value may spend: a reply's value (Seon's shipped agent dial),
+  "Tokens each kind of shown value may spend: a reply's value (Seon's shipped agent config key),
   a value shown inside another (a refused argument, a test's expected and actual, ex-data),
   a form echoed back, and the whole context block (breadth first, so every section shows
   before any one deepens). The config's :seon.config.render.agent/token-budget and

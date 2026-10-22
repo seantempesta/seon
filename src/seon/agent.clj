@@ -9,9 +9,9 @@
   is physics, not style: an agent forks (its test children, clone!), and a process that
   forks must never have started Chez's parallel-collector sweeper threads, which start at
   the first collection that finds a second thread; a child of such a process hangs in its
-  first multi-threaded collection (lane RC1). Adding pump or worker threads to an agent
-  breaks its forks; docs/DRAGONS.md, "Physics". Agent code calls the verbs of my.db and my.agent,
-  referred into its namespace. From proto/flow f2-final proto.agent (lane F2)."
+  first multi-threaded collection (session RC1). Adding pump or worker threads to an agent
+  breaks its forks; docs/failure-points.md, "Physics". Agent code calls the functions of my.db and my.agent,
+  referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [seon.program :as program] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
@@ -26,7 +26,7 @@
 ;; ---- the socket to root: values in frames (root's end is a jolt.async.remote end) ------
 ;; This side reads and writes its socket itself, on its one thread, with no pumps: an agent
 ;; forks (its tests, a clone), and a process that forks must never have started Chez's
-;; parallel-collector sweeper threads (lane RC1: a child of such a process hangs in its
+;; parallel-collector sweeper threads (session RC1: a child of such a process hangs in its
 ;; first multi-threaded collection).
 
 (defn send!
@@ -188,7 +188,7 @@
       (fx-record! k r)
       r)))
 
-;; ---- merging main into this branch (seon.merge; lane M1) -------------------------------
+;; ---- merging main into this branch (seon.merge; session M1) -------------------------------
 
 (defn merge-main!
   "git merge main into this agent's branch, in this process (it owns the branch's writes):
@@ -282,7 +282,7 @@
 (defn test-report
   "One clojure.test report as the run keeps it: its type, test var and message; a failing
   assertion's expected and actual printed by the one printer under :part; a cost proof's
-  rows and verdict (seon.cost/proof's :actual) kept as data under :cost (lane W2's agent
+  rows and verdict (seon.cost/proof's :actual) kept as data under :cost (session W2's agent
   page renders them; the judge persists them on the attempt)."
   {:malli/schema [:=> [:cat :map [:maybe :string]] :map]}
   [m var]
@@ -443,7 +443,7 @@
   [m]
   (case (:op m)
     ;; the proofs of the task root names (:task), as this branch holds them
-    ;; root hears the test child's pid once it is forked (its stand-in's :tests-started event)
+    ;; root hears the test child's pid once it is forked (its agent proc's :tests-started event)
     :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
                                                               (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
                                                               #(send! {:op :tests-started :id (:id m) :pid %}))
@@ -459,7 +459,7 @@
                                               :results (count (:results @state)) :evals (:n @state)
                                               :ids (pdb/lease-use (db) (:lease @state))
                                               :heap-mb (lib/r2 (/ (lib/bytes-in-heap) 1048576.0))}}]
-    ;; a message (lane F2): it waits in :inbox until the agent's code takes it ((messages));
+    ;; a message (session F2): it waits in :inbox until the agent's code takes it ((messages));
     ;; root hears that it arrived
     :message (do (swap! state update :inbox (fnil conj []) (select-keys m [:from :body]))
                  [{:op :received :sent-ns (:ns m) :recv-ns (profile/now-ns)}])
@@ -479,7 +479,7 @@
 
 (defn- stderr-to-file!
   "This process's stderr (fd 2: what Chez, the runtime and native code print) into the
-  file at path, truncated. The edge of a dragon: a file that cannot be made leaves stderr
+  file at path, truncated. The edge of a failure point: a file that cannot be made leaves stderr
   where it was (the death then records no tail)."
   {:malli/schema [:=> [:cat [:maybe :string]] :any]}
   [path]
@@ -547,7 +547,7 @@
   (stderr-to-file! (stderr-path (pdb/agents-dir cfg) id))
   ;; this agent owns its branch's writes: it opens the store itself (seon.db/after-fork!)
   (pdb/after-fork! cfg lease)
-  ;; the model's API key is root's alone (its :model owner calls the model; lane FX1)
+  ;; the model's API key is root's alone (its :model owner calls the model; session FX1)
   (lib/c-unsetenv (cfg/value :seon.config.ai/api-key-variable))
   (let [nsx (make-ns! id)
         intr-ok (interrupt-self-test)

@@ -9,8 +9,8 @@
 #                             run `git submodule` in a worktree: it rewrites the module config every
 #                             checkout shares (core.worktree), and main's submodules break.
 #
-# A lane that changes shared foundations works here, so its unfinished work never breaks other
-# lanes' builds and runs. On Jolt this is safe: a process loads only from its own JOLT_PWD and its
+# A worktree session that changes shared foundations works here, so its unfinished work never breaks other
+# worktree sessions' builds and runs. On Jolt this is safe: a process loads only from its own JOLT_PWD and its
 # own target/ (no shared VM), so two worktrees never mix code.
 #
 # What it sets up, so the worktree builds and tests on its own at once:
@@ -23,8 +23,8 @@
 #   checkout shares main's target/cache (bin/env);
 # - its stores are its own: its root's runs/store (bin/root), and a check run takes a store of its own
 #   (SEON_STORE=$PWD/target/check-store bin/check ...).
-# Builds run niced, in parallel (no lock). Landing: the lane reports and root merges its branch
-# (docs/landing.md); the worktree never edits the main tree.
+# Builds run niced, in parallel (no lock). Merging: the worktree session reports and root merges its branch
+# (docs/merging.md); the worktree never edits the main tree.
 set -eu
 MAIN=$(cd "$(dirname "$0")/.." && pwd)
 die() { print -u2 "worktree: $*"; exit 1; }
@@ -36,10 +36,10 @@ setup() {
   git -C "$WT" ls-tree HEAD reference-code/ | while read -r mode type sha sub; do
     [[ $type == commit ]] || continue
     rmdir "$WT/$sub" 2>/dev/null || true
-    # a submodule the main tree has not checked out yet (one a lane added, before root's landing
-    # initializes it, docs/landing.md) or a pin it lacks: said and left out, not a half-made worktree
+    # a submodule the main tree has not checked out yet (one a worktree session added, before root's merge
+    # initializes it, docs/merging.md) or a pin it lacks: said and left out, not a half-made worktree
     if [[ ! -e $MAIN/$sub/.git ]] || ! git -C "$MAIN/$sub" cat-file -e "$sha^{commit}" 2>/dev/null; then
-      print -u2 "worktree: $sub at $sha is not in the main tree's checkout; left out (root initializes it at landing)"
+      print -u2 "worktree: $sub at $sha is not in the main tree's checkout; left out (root initializes it at merge)"
       continue
     fi
     git -C "$MAIN/$sub" worktree add -q --detach "$WT/$sub" "$sha"
@@ -147,5 +147,5 @@ print "worktree $WT on $BR (from $BASE)"
 print "  build:  cd $WT && nice -n 15 bin/build seon"
 print "  test:   bin/test; SEON_STORE=$WT/target/check-store bin/check (a store of the checks' own: runs/store is this root's)"
 print "  root:   bin/root (start | status | stop), on this worktree's own ports: $PORTS"
-print "  land:   report to root, which merges the branch (docs/landing.md)"
+print "  merge:  report to root, which merges the branch (docs/merging.md)"
 print "  remove: $MAIN/bin/worktree --remove $NAME"

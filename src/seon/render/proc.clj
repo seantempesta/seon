@@ -73,7 +73,7 @@
 
 (defn- proc-health-of
   "Each declared root proc (the built system's, once it is) with the defects root's view
-  holds of it: {pid {:defects n :newest message}}; the agents' stand-ins are not procs here."
+  holds of it: {pid {:defects n :newest message}}; agent procs are not counted here."
   {:malli/schema [:=> [:cat :map [:sequential :map]] :map]}
   [st root-errors]
   (let [sysp (:system-p st)
@@ -95,7 +95,7 @@
         agents (:agents v {})]
     {:agents agents
      :order (or (:order st) (order agents now-ms))
-     :writer (:writer n) :server (:server n) :store (:store n)
+     :writer (:writer n) :fork-server (:fork-server n) :store (:store n)
      :boot (:boot v) :root-errors (:root-errors v []) :root-errors-total (:root-errors-total v 0)
      ;; health is what flows: each declared proc with the defects root recorded of it (a
      ;; step that threw); no ping, no beat
@@ -232,7 +232,7 @@
                                 (when (:task ag) (str " with the description \"" (:task ag) "\""))
                                 ", not for a task, so no model works it and there is no current-state block;"
                                 " its REPL and evaluations are above. A task's agent is started by the reconciler"
-                                " (my.root/run! sys [task-id]) or attached through root's entrance ({:op :attach :task id}).")}
+                                " (my.root/run! sys [task-id]) or attached through root's server ({:op :attach :task id}).")}
       (nil? r) {:why (str "no context read yet in attempt " (:seon.attempt/id attempt))}
       :else {:text (:text r) :tokens (select/estimate (:text r)) :origin (:origin r) :turn (:turn r)})))
 
@@ -259,9 +259,8 @@
         ctx (if (= ctx-key (:ctx-key z)) (:ctx z)
                 (let [c (context-of (or db (:main-db st)) attempt ag)]
                   (cond-> c
-                    ;; on main: its branch is gone (reading it failed), or not read yet; the
-                    ;; text it read through the door is that text, whichever db
-                    (and (nil? db) (:main-db st) (not= :door (:from c))) (assoc :from (if (:db-error z) :main-gone :main)))))]
+                    ;; on main: its branch is gone (reading it failed), or not read yet
+                    (and (nil? db) (:main-db st)) (assoc :from (if (:db-error z) :main-gone :main)))))]
     [(assoc-in st [:zoom id] (assoc z :rows rows :ctx-key ctx-key :ctx ctx))
      {:agent (ui/ended-as ag id (:agent-attempt st {})) :attempt attempt :task (when attempt (get (:tasks st) (:seon.attempt/task attempt)))
       ;; each proof's task, to tell a blocking red from an allowed one
@@ -436,7 +435,7 @@
        ;; a pass renders what changed; it never waits. :mixed: one thread of its own for
        ;; its life, joined at stop. :compute futurized each pass onto Jolt's cached pool,
        ;; which grows when a pass is submitted before the last worker is idle again
-       ;; (lane THREADS: root's threads are a declared number)
+       ;; (session THREADS: root's threads are a declared number)
        :workload :mixed
        :ping-map-fn stats})
   ([args]
@@ -461,7 +460,7 @@
                          (cond
                            kind (answered st' o kind r)
                            ;; the web proc's calls ([:web var agent form?]) are answered here: shown in
-                           ;; the stream; root's verb (its form) recorded on main with this answer
+                           ;; the stream; root's function (its form) recorded on main with this answer
                            (and (vector? (:tag m)) (= :web (first (:tag m))))
                            (let [[_ v agent form] (:tag m)
                                  ;; its text as the REPL answers it: the error's render, else the answer's

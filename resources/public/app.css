@@ -267,7 +267,7 @@ input:focus { border-color: var(--signal); box-shadow: 0 0 0 3px var(--glow); }
 .kv .hot dd { color: var(--warning); font-weight: 700; }
 .tile.srv-restarting { box-shadow: 0 0 0 1px var(--error), 0 0 28px color-mix(in srgb, var(--error) 35%, transparent); }
 .tile.restarts-1, .tile.restarts-2, .tile.restarts-3 { animation: merge-a 1.4s ease-out; }
-.e-server-down { --et: var(--error); } .e-server-up { --et: var(--success); } .e-merged-main { --et: var(--info); }
+.e-fork-server-down { --et: var(--error); } .e-fork-server-up { --et: var(--success); } .e-merged-main { --et: var(--info); }
 
 /* Seon's value printer, HTML face (seon.render.value :hiccup): spans and details */
 .printed.seon { color: var(--text-200); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 9em; overflow: auto; }
@@ -438,7 +438,7 @@ dl.cfg dt { color: var(--text-300); }
 dl.cfg dd { margin: 0; text-align: right; overflow-wrap: anywhere; min-width: 0; }
 dl.cfg dd code { color: var(--text-100); }
 
-/* an ended agent's card: no process to talk to, so no REPL box and no live verbs; ⤢ (its
+/* an ended agent's card: no process to talk to, so no REPL box and no live buttons; ⤢ (its
    history) stays (the body's state class says how it ended: seon.render.ui/shown-status) */
 .card:has(.cb.s-ended) .live, .card:has(.cb.s-killed) .live, .card:has(.cb.s-died) .live,
 .dense .card:has(.cb.s-ended):hover .repl.live, .dense .card:has(.cb.s-killed):hover .repl.live, .dense .card:has(.cb.s-died):hover .repl.live { display: none; }

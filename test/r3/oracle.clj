@@ -25,7 +25,7 @@
 
 (defn view
   "Everything the reconciler reads from db, once: tasks, attempts (grouped by task),
-  root's boot and dials."
+  root's boot and config keys."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
   (let [as (vals (task/attempts db))]

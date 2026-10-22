@@ -1,5 +1,5 @@
 (ns seon.error
-  "Recorded errors (lane D2, ported from lane R4's seon.error): every error
+  "Recorded errors (session D2, ported from session R4's seon.error): every error
   an observer sees, folded by its cause in the observer's own state and written once per
   window as one entity per signature on main, with its count, the agents it hit, when, and
   the first occurrence's error map.

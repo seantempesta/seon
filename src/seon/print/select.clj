@@ -26,9 +26,9 @@
   [tokens]
   (long (Math/floor (* tokens chars-per-token))))
 
-;;; Allocation dials (the config's `:seon.config.render.agent/*`, ported from Seon's).
+;;; Allocation config keys (the config's `:seon.config.render.agent/*`, ported from Seon's).
 
-(def ^:private dials
+(def ^:private limits
   {:whole-width (config/value :seon.config.render.agent/whole-width) :max-name (config/value :seon.config.render.agent/max-name)
    :max-number-digits (config/value :seon.config.render.agent/max-number-digits)
    :sort-bound (config/value :seon.config.render.agent/sort-bound)})
@@ -110,7 +110,7 @@
   (let [v (when (map-entry? member) (val member))]
     (cond (and (coll? v) (counted? v) (<= (count v) 2) (not-any? coll? (if (map? v) (vals v) v))) 0
           (coll? v) 2
-          (and (string? v) (> (count v) (:whole-width dials))) 1
+          (and (string? v) (> (count v) (:whole-width limits))) 1
           :else 0)))
 
 (defn- sorts?
@@ -120,7 +120,7 @@
   [x key-of]
   (boolean
    (and (sortable-classes (class x))
-        (<= (count x) (:sort-bound dials))
+        (<= (count x) (:sort-bound limits))
         (every? #(identical? (class (key-of %)) clojure.lang.Keyword) x))))
 
 (defn- held-order
@@ -186,13 +186,13 @@
       (identical? c java.util.Date) (scalar :seon.print/inst x (str "#inst \"" (.toInstant ^java.util.Date x) "\""))
       ;; Jolt unifies a small BigInteger with Long: a BigInt that fits prints whole
       (identical? c clojure.lang.BigInt)
-      (let [b (biginteger x)] (big-number x (or (< (.bitLength b) 64) (<= (integer-digits b) (:max-number-digits dials))) (str b "N") "bigint" (integer-digits b)))
+      (let [b (biginteger x)] (big-number x (or (< (.bitLength b) 64) (<= (integer-digits b) (:max-number-digits limits))) (str b "N") "bigint" (integer-digits b)))
       (identical? c clojure.lang.Ratio)
       (let [d (+ (integer-digits (biginteger (numerator x))) (integer-digits (biginteger (denominator x))))]
-        (big-number x (<= d (:max-number-digits dials)) (str (numerator x) "/" (denominator x)) "ratio" d))
+        (big-number x (<= d (:max-number-digits limits)) (str (numerator x) "/" (denominator x)) "ratio" d))
       (identical? c java.math.BigDecimal)
       (let [u (integer-digits (biginteger (.unscaledValue ^java.math.BigDecimal x)))]
-        (big-number x (<= (+ u (count (str (.scale ^java.math.BigDecimal x)))) (:max-number-digits dials)) (str x "M") "bigdec" u))
+        (big-number x (<= (+ u (count (str (.scale ^java.math.BigDecimal x)))) (:max-number-digits limits)) (str x "M") "bigdec" u))
       (map-classes c)
       {:kind :map :face :seon.print/map :open "{" :close "}" :total (count x) :indexed? true
        :lookup? (keyword-lookup? x) :sorted? (sorts? x key) :members (held-order x key)}
@@ -467,7 +467,7 @@
   [context node]
   (sized context (case (:kind node)
                    :string (shown-to node 0)
-                   :name (shown-to node (min (:whole-width dials) (:total node)))
+                   :name (shown-to node (min (:whole-width limits) (:total node)))
                    (:map :coll) (assoc node :kids [])
                    node)))
 
@@ -479,7 +479,7 @@
   (if (= :entry (:kind node))
     (sized context (update node :kids (fn [kids] (mapv #(minimal context %) kids))))
     (let [least (collapsed context node)]
-      (or (whole context node (max (:whole-width dials) (:ub least))) least))))
+      (or (whole context node (max (:whole-width limits) (:ub least))) least))))
 
 (declare allot)
 
@@ -708,7 +708,7 @@
         full? (and (instance? clojure.lang.IMeta value) (true? (:seon.print/full (meta value))))
         options (assoc emit/default-options :seon.print/width width)
         chars (estimate-chars budget-tokens)
-        context (cond-> (merge dials
+        context (cond-> (merge limits
                                {:breaks? (pos? width) :requery requery :requery-id (:seon.print/requery-id requery)
                                 :width width :budget chars :max-children (inc (quot chars 2)) :max-depth max-depth})
                   full? (assoc :budget Long/MAX_VALUE :max-children Long/MAX_VALUE :max-depth Long/MAX_VALUE

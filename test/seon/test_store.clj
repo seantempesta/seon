@@ -2,7 +2,7 @@
   "The test store: this process's one in-memory store for tests and cost setups, seeded once
   on :db (bin/test makes it on first use), and each test takes a branch of it (one store,
   many branches, as in production; owner, 2026-10-21). Test-only, so it lives in test/, not
-  in src (lane DUP-HELPERS); it seeds and opens through seon.db's own seed! and open-main!."
+  in src (session DUP-HELPERS); it seeds and opens through seon.db's own seed! and open-main!."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb]))
 
