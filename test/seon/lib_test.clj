@@ -1,7 +1,7 @@
 (ns seon.lib-test
   "The native probes (native/probe.c through seon.lib): what they answer and what they cost."
   (:require [seon.profile :as profile] [clojure.test :refer [deftest is testing]] [clojure.java.shell] [seon.lib :as lib]
-            [konserve.jolt.lmdb-ffi :as lmdb]))
+            [konserve.jolt.lmdb-ffi :as lmdb] [clojure.core.async :as a] [datahike.api :as d]))
 
 (defn- probe-ms
   "The median time of 9 calls of lib/mp-probe, ms."
@@ -41,3 +41,27 @@
     (.join spin)
     (is (= :refused (first r)) (str "answered " r))
     (is (<= 2 (second r)) (str "active threads " (second r)))))
+
+(defn- in-child
+  "f's answer in a child lib/fork! makes, as its exit status: 0 when (f) answers true
+  within 5 s, 1 when it answers anything else, 2 when it has not answered (a future
+  with a deadline, so a child whose runtime threads are gone ends instead of hanging)."
+  [f]
+  (lib/fork! {:child #(lib/c-exit (let [r (deref (future (f)) 5000 ::hung)] (cond (= ::hung r) 2 (true? r) 0 :else 1)))
+              :refused (fn [n] {:refused n}) :parent lib/wait-status}))
+
+(deftest a-forked-child-runs-go-blocks-and-makes-a-store
+  ;; fork(2) copies only the calling thread: jolt's carriers, timer and shutdown watcher
+  ;; are parked (not active) when the one active thread forks, so the child inherited a
+  ;; started pool with no threads and every go parked forever (the step E dry run's
+  ;; design agent hung making a test store, 2026-10-22). The child starts them afresh.
+  (let [c (a/chan) r (a/go (a/<! c))] (a/>!! c 41) (is (= 41 (a/<!! r)) "the parent's carriers are up before it forks"))
+  (a/<!! (a/timeout 1))
+  (is (= {:exit 0} (in-child (fn [] (let [c (a/chan) r (a/go (a/<! c))] (a/>!! c 41) (= 41 (a/<!! r))))))
+      "a go block that parks is resumed in the child")
+  (is (= {:exit 0} (in-child (fn [] (= :t (a/alt!! (a/timeout 10) :t)))))
+      "a timeout fires in the child")
+  (is (= {:exit 0} (in-child (fn [] (let [cfg {:store {:backend :memory :id (random-uuid)}}]
+                                      (d/create-database cfg)
+                                      (let [c (d/connect cfg)] (d/transact c [{:db/ident :x}]) (d/release c) true)))))
+      "an in-memory Datahike store is made and written in the child"))

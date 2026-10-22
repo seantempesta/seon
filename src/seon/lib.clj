@@ -128,7 +128,10 @@
          (define (proto-static!) (collect (collect-maximum-generation) 'static))
          (define (proto-set-trip! n) (collect-trip-bytes n))
          ;; fork only while this is the one active Chez thread, checked once under the thread
-         ;; mutex; -2 when another is active (an agent's second thread is a defect, never waited out)
+         ;; mutex; -2 when another is active (an agent's second thread is a defect, never waited out).
+         ;; Parked threads are not active, so the fork can leave jolt's carriers, timer and shutdown
+         ;; watcher behind: the child drops their bookkeeping first (jolt-after-fork-child!), and
+         ;; they start afresh on first use there
          (define proto-fork-alone
            (let ([fork (foreign-procedure \"fork\" () int)])
              (lambda ()
@@ -137,6 +140,7 @@
                (let ([pid (if (= (#%$top-level-value '$active-threads) 1) (fork) -2)])
                  (mutex-release #%$tc-mutex)
                  (enable-interrupts)
+                 (when (= pid 0) (jolt-after-fork-child!))
                  pid))))")
       true))
 
