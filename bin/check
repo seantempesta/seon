@@ -129,7 +129,7 @@ else echo "PASS none of $PIDS outlived root"; (( ${#FAILED} == ORPHAN_FAILED )) 
 echo "== durable (root writes its branch and SIGKILLs itself; a new root reopens the store and recovers it)"
 EXPECT=137 step durable-write "" run durable-write check-durable; step durable-read "" run durable-read check-durable
 [[ ${GREEN[-1]} == check-durable-read && ${GREEN[-2]} == check-durable-write ]] && GREEN+=(check-durable)
-echo "== window (root's :flush-ms 1000: answered unflushed, flushed within the window; :flush? waits)"
+echo "== window (continuous group commit: answered unflushed while the flusher is paused; :flush? waits for its sync)"
 EXPECT=137 step window-write "" run window-write check-window
 step window-read "" run window-read check-window
 [[ ${GREEN[-1]} == check-window-read && ${GREEN[-2]} == check-window-write ]] && GREEN+=(check-window)

@@ -624,8 +624,8 @@
    about n datoms of an example program on :db; a root holds no program it was not given)
    :main branch (root's main; an existing branch is resumed; :db is the seed itself)
    :backend :lmdb|:file :log? true :max-running n (parallel attempts) :provider p (the
-   attempts' model) :flush-ms and :stall-ms (fences, seon.db/flush-ms and
-   seon.agent-proc/stall-ms, for the checks that move them) :source s}. s: Seon's own source
+   attempts' model) :stall-ms (a fence, seon.agent-proc/stall-ms, for the checks that
+   move it) :source s}. s: Seon's own source
    is the program, {:root dir :dirs [\"src\"] :branch \"jolt/seon-merges\"}: main's program follows
    root's dirs at boot (import-source!: replaced when they read otherwise than main's last
    import), and each merge that changes them
@@ -634,7 +634,7 @@
   :seon.config.root/main (resumed; made from :db when the store has none), :seon.config.store/backend, :seon.config.agent/max-running and the provider of
   :seon.config.ai/*. The config in force is written on main's root entity."
   {:malli/schema [:=> [:cat :map] :seon.root/sys]}
-  [{:keys [datoms log? path main backend max-running provider flush-ms stall-ms source] :or {datoms 0}}]
+  [{:keys [datoms log? path main backend max-running provider stall-ms source] :or {datoms 0}}]
   (lib/ignore-sigpipe!)
   (when-not log? (trove/set-log-fn! nil))
   (let [t0 (lib/now-ns)
@@ -698,7 +698,7 @@
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
-                         :flush-ms (or flush-ms pdb/flush-ms) :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf)
+                         :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf)
                          :model-lanes (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
                          :web-port (cfg/value :seon.config.web/port)})
         decl (system/read-decl (cfg/value :seon.config.root/system-path))
