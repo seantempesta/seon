@@ -2,9 +2,22 @@
 
 Seon is where many agents do real work, each in its own process on its own branch, and the good changes accrete into one program that gets smaller, faster and more certain as it grows. This is the one document on how we work, for every Claude lane and every Seon agent. **One process for both** (owner, 2026-10-21: "a self reinforcing system where agents learn from each other be it claude agents or seon agents … everything linked to the same processes we will be using internally, not complex one offs"): the same tasks, the same door, the same context built by the same parser from the same wiki, and lessons landing in the same sections. Nothing is a Claude-only format or a one-off mechanism.
 
+## 0. Start here
+
+You are in `next/`, **Seon on Jolt: the system being built to replace Seon** (`~/src/seon`, the JVM version, now read-only reference). The aim is a straight upgrade: everything v1 does, next does, smaller, faster and more certain; a v1 capability left out is left out on purpose, with its reason in `BAGGAGE.md`.
+
+Read, in order, before acting:
+1. this file (the laws and the method; `CLAUDE.md` is this file);
+2. `../RESUME.md`: the current state and THE PLAN (what is being fixed now, in order);
+3. `docs/README.md`: the wiki's map; `docs/parity.md`: each v1 capability and where it stands here;
+4. the task you are given (`resources/seon/tasks/<ns>.edn`), and what its plan cites.
+
+The running system: `bin/root status` shows this checkout's standing root (the owner's main tree: entrance 7888, dashboard http://127.0.0.1:7777/); `bin/root start` starts it. Claude reaches it through the `seon` MCP server (`.mcp.json` runs `bin/mcp 7888`; §5). The standing root's store (`runs/store`) holds kept runs, which are evidence: never experiment on it. Experiments run in a worktree (`bin/worktree NAME`) on that worktree's own root and stores.
+
 The reasons live elsewhere:
 - decisions: `../notes/DECISIONS.md`;
-- the plan: `../notes/PLAN-v3.md`;
+- the plan: `../RESUME.md` (THE PLAN); designs in progress: `../notes/DESIGN-tasks.md`;
+- what v1 and next's history teach: `../notes/LEARNING-2026-10-22.md`;
 - the method's research: `../notes/option3-RESEARCH-parallel.md`;
 - the wiki: `docs/`;
 - failure points: `docs/DRAGONS.md`.
@@ -37,7 +50,7 @@ The first version ran overnight and was a live, measured system by morning. Keep
   - the kernel's TCP keepalive for a silent network peer.
 
 Every need is met by one of these. If one doesn't fit, stop and say so; never route around them:
-- **A value.** Immutable Datahike values in one store with many branches. Agents own their branch; root owns main. A record is a fact, and history is kept.
+- **A value.** Immutable Datahike values in one store with many branches. Agents own their branch; root owns main. A record is a fact, and history is kept (v1's ruling; the store runs with `:keep-history? false` today, `seon.db/store-cfg`, and THE PLAN restores it).
 - **A Flow proc and its channels.** Every component is a step-fn proc declared as data (`resources/seon/system.edn`), with bounded channels.
   - A dependency is a channel a proc parks on, and back-pressure is a full one.
   - A run ends when the message count reaches zero.
@@ -172,7 +185,7 @@ Reach it through the `seon` MCP server (`bin/mcp`):
 - `seon_agents`;
 - `seon_eval` (an agent's own REPL, recorded `:outside`, or `root`);
 - `seon_context` (what the model reads now);
-- `seon_attach`, `seon_turn` and `seon_done` (work a task as a Seon agent).
+- `seon_attach` and `seon_done` (work a task as a Seon agent).
 
 Without MCP, one line works:
 ```
@@ -194,12 +207,12 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
   - **Everything is linked.** Every section is reachable from the map, every page links its neighbours, and nothing is orphaned or duplicated.
   - **Sections state the current truth by topic.** A change rewrites the section it concerns; nothing is a dated log.
 - **Landing a change updates its section in the same commit,** and a pillar's owner writes the section where its pillar lives.
-- **Before landing, read your task's context through the door** and confirm it pulls what the task needs. `bin/check docs` goes red on a reference that doesn't resolve, or a section older than the code it cites.
+- **Before landing, read your task's context through the door** and confirm it pulls what the task needs. The check that goes red on a reference that doesn't resolve, or a section older than the code it cites (`bin/check docs`), is on the unmerged `jolt/patterns-wiki-proof` branch: until it lands, read the context yourself.
 
 ## 7. The machine
 
 - **Builds:** `nice -n 15 bin/build`, in parallel, no lock (owner, 2026-10-21: "WTF is there a build lock?"; one machine-wide lock queued every lane's build single-file on an 18-core, 128 GB machine where a build peaks under ~2 GB; each worktree builds into its own `target/`, so builds share no mutable state). Every process on a store must use the same LMDB build (`target/lib/liblmdb.dylib`, robust locks); stop a store's processes before a build that changes it.
-- **Full checks:** one at a time (`bin/check` takes the check lock and runs niced). Iterate with single modes.
+- **Full checks:** one at a time, niced (there is no lock: the owner removed it). Iterate with single modes.
 - **Never flood it.** Anything that can make threads or processes starts at n ≤ 100 under `nice -n 15`. Watch `ps -M -p PID | wc -l`, and kill your own process past 200 threads. One experiment at a time.
 - **A process that must outlive your tool call** is double-forked, which `bin/root` does. The tool host kills a background task's whole process tree when the task stops or its agent exits.
 - **Disk stays bounded** (owner, 2026-10-21: "cleanup shit we aren't using anymore and build in rules so this doesn't get out of control"; the tree had reached 261 GB):

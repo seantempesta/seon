@@ -20,3 +20,13 @@ Seon mechanisms deliberately left behind, and why. Started from `../proto/BAGGAG
 - **`proto.agents.entrance`** (the line-EDN outside-agent socket): the MCP phase replaces it.
 - **The harvest demo and the mock provider runs**: the merge tests and the scenarios cover them.
 - **`proto.agent/eval-forms` and `record-items!` for nested evals**: `seon.repl/eval-string`, the one REPL path.
+
+## Left behind from v1 Seon (`~/src/seon`), on purpose
+
+Each row of `docs/parity.md` marked dropped, with its reason:
+- **File, edit and shell verbs for agents** (`my.edit/*`, `my.fs/*`, `my.shell/run!`): agents change code at the REPL, by `in-ns` and `defn`, and never edit source files or run git (`../notes/DECISIONS.md`, "Agents work at the REPL, through tool calls, no git").
+- **`bin/lane` claims and proven commits:** worktrees and root's landings, with no locks (`../notes/DECISIONS.md`, "No locks, no lane cap, no waiting").
+- **`chain!` and `:seon.task/next`:** tasks are linked by `:needs` only.
+- **The 13 `.agents/skills`:** an agent's context is its task and the wiki sections the task cites ("process, not whim").
+- **The JVM evaluator mode of `eval_clj`:** one evaluator, Jolt's.
+- **A separate blob store:** large values stay inside the database's own store (in progress; `docs/parity.md`, storage).

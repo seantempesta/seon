@@ -2,8 +2,8 @@
   "mcpServers": {
     "seon": {
       "type": "stdio",
-      "command": "/Users/sean/src/seon-jolt/next/bin/mcp",
-      "args": ["7888"]
+      "command": "./bin/mcp",
+      "args": []
     }
   }
 }

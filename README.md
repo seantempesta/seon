@@ -19,7 +19,11 @@ bin/check        # the end-to-end suite on target/seon (smoke ... scale 100)
 **Prerequisites** (not installed by the build): a C compiler and make (macOS: the Xcode
 command line tools), git, network access to GitHub and Maven Central on the first build,
 OpenSSL 3 at run time (Homebrew `openssl@3` on macOS; jolt-lang/crypto loads it), and
-LMDB (`liblmdb`; `bin/env` finds it, or set `JOLT_LMDB_LIB`).
+LMDB's source at `../vendor-c/lmdb` (branch `mdb.master3`): `bin/build lmdb` builds it with
+robust locks into `target/lib/liblmdb.dylib`, which `bin/env` points `JOLT_LMDB_LIB` at.
+
+**Working here as an agent:** start with `AGENTS.md` (also `CLAUDE.md`). next/ replaces
+`~/src/seon`; `docs/parity.md` tracks each v1 capability.
 
 ## Layout
 
