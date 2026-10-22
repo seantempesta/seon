@@ -15,14 +15,16 @@
   (str/join "\n"
     ["You are a Seon agent working one task in a Clojure REPL on your own branch."
      "Each turn you get the current-state block: your task, its proofs (deftests) and their results,"
-     "the code the task references, and what your last forms evaluated to."
-     "Answer with Clojure forms in ```clojure fenced blocks. Prose outside a fence becomes a comment, never code;"
-     "an unbalanced delimiter is repaired and the repair is shown to you."
+     "and the code the task references."
+     "You have one tool, eval: call it with Clojure forms (prose inside the code goes in ;; comments). Its result is what"
+     "the REPL answered, identical forms and answers folded (;; 24x), and you see it before your next call: evaluate a"
+     "little, read the answer, then the next step. Text outside an eval call is never evaluated."
+     "An unbalanced delimiter is repaired and the repair is shown to you."
      "This is a real REPL: (ns my.new.ns (:require [other.ns :refer [f]])) creates a namespace and it becomes"
      "part of your branch's program, exactly as written; (in-ns 'the.ns) then (defn ...) changes an existing one;"
      "the user namespace is scratch and never merges. Every function you define needs a"
      "Malli contract in its metadata, e.g. (defn f {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))."
-     "Your task is done when every proof passes; the proofs run after each of your answers."
+     "Your task is done when every proof passes; the proofs run after each of your replies."
      "A cost proof (seon.cost/proof) is your performance goal: it says what N counts, the least work the data needs"
      "(:work, e.g. one pass with one lookup per row), how that grows and what it may cost. Read it before writing code and"
      "do no more work than it states. It is red when a size costs more than its estimate or grows faster than its :growth."
@@ -45,8 +47,7 @@
      "A red proof shows each failure as :assert (as written) and :got (what it evaluated to), and :calls, the program"
      "functions it calls (arglists, contract, doc). A proof's :status :undefined is not written yet, :not-run means the test run"
      "failed (see :test-run), :no-assertions means it ran but asserted nothing."
-     "Your last evaluations follow the block, identical ones folded (;; 24x); (my.turn/evals) holds them all in full,"
-     "and every cut names the form that reads its rest."]))
+     "(my.turn/evals) holds your last reply's evaluations in full, and every cut names the form that reads its rest."]))
 
 (defn source-of
   "The recorded source of var sym on db (the text of the form that last defined it), or nil."
@@ -251,25 +252,38 @@
 
 (defn- kept-turns
   "The earlier turns the history budget keeps, whole, in order: the newest always, then older
-  ones while they fit. A turn costs its reply's and its evaluations' tokens (4 characters a
-  token, as seon.model/estimate-tokens)."
-  {:malli/schema [:=> [:cat [:vector [:map [:reply :string] [:evals :string]]] :int] [:vector :map]]}
+  ones while they fit. A turn costs its reply's and its calls' code and evaluations' tokens
+  (4 characters a token, as seon.model/estimate-tokens)."
+  {:malli/schema [:=> [:cat [:vector [:map [:reply :string] [:calls [:vector :map]]]] :int] [:vector :map]]}
   [turns budget]
-  (let [cost #(quot (+ (count (:reply %)) (count (:evals %))) 4)
+  (let [cost #(quot (reduce + (count (:reply %)) (map (fn [c] (+ (count (:code c)) (count (:evals c)))) (:calls %))) 4)
         [newest & older] (rseq turns)]
     (->> older
          (reduce (fn [[kept spent] t] (let [s (+ spent (cost t))] (if (<= s budget) [(conj kept t) s] (reduced [kept spent]))))
                  [[newest] (cost newest)])
          first rseq vec)))
 
+(defn- turn-messages
+  "One earlier turn as the conversation holds it: the model's reply with its eval calls, then
+  each call's answer as a tool message (what the REPL answered, before the model's next call).
+  A reply that called nothing is followed by a user message saying so (last? false), so two
+  replies never meet."
+  {:malli/schema [:=> [:cat [:map [:reply :string] [:calls [:vector :map]]] :boolean] [:vector :seon.model/message]]}
+  [{:keys [reply calls]} last?]
+  (into [(cond-> {:role "assistant" :content reply}
+           (seq calls) (assoc :tool-calls (mapv #(select-keys % [:id :code]) calls)))]
+        (if (seq calls)
+          (map (fn [{:keys [id evals]}] {:role "tool" :tool-call-id id :content evals}) calls)
+          (when-not last? [{:role "user" :content "Nothing ran: the reply called no eval."}]))))
+
 (defn messages
   "The model request's messages: the system prompt; then the conversation so far, as a REPL
-  keeps its scrollback (the first turn's context, then each earlier turn's reply and what its
-  forms evaluated to, whole turns within the history budget, the newest kept); then the current
-  block printed by the one value printer under the context's budget, breadth first, each cut
-  naming the form that reads its rest. turns: [{:context :reply :evals}] of this attempt, oldest
-  first (:context only on the first); the block's :last-evals is their transcript, shown only
-  with no earlier turns."
+  keeps its scrollback (the first turn's context, then each earlier turn's reply, its eval
+  calls and each call's answer as a tool message, whole turns within the history budget, the
+  newest kept); then the current block printed by the one value printer under the context's
+  budget, breadth first, each cut naming the form that reads its rest. turns: [{:context
+  :reply :calls}] of this attempt, oldest first (:context only on the first); the block's
+  :last-evals is their transcript, shown only with no earlier turns."
   {:malli/schema [:function [:=> [:cat :map] [:vector :seon.model/message]]
                   [:=> [:cat :map [:vector :map]] [:vector :seon.model/message]]]}
   ([block] (messages block []))
@@ -281,14 +295,11 @@
          dropped (- (count turns) (count kept))]
      (if (empty? turns)
        [{:role "system" :content system-prompt} {:role "user" :content current}]
-       (into [{:role "system" :content system-prompt}
-              {:role "user" :content (cond-> (:context (first turns))
-                                       (pos? dropped) (str "\n\n;; " dropped " earlier turns are left out here (the history budget); (my.turn/evals) holds the last turn's"))}]
-             (concat
-               (mapcat (fn [[t nxt]] (cond-> [{:role "assistant" :content (:reply t)}]
-                                       nxt (conj {:role "user" :content (:evals t)})))
-                       (partition-all 2 1 kept))
-               [{:role "user" :content (str (:evals (peek kept)) "\n\nThe current state:\n" current)}]))))))
+       (-> [{:role "system" :content system-prompt}
+            {:role "user" :content (cond-> (:context (first turns))
+                                     (pos? dropped) (str "\n\n;; " dropped " earlier turns are left out here (the history budget); (my.turn/evals) holds the last turn's"))}]
+           (into (mapcat (fn [[t nxt]] (turn-messages t (nil? nxt))) (partition-all 2 1 kept)))
+           (conj {:role "user" :content (str "The current state:\n" current)}))))))
 
 ;; ---- a turn's basis: what its context was built from, and the text made from it again ----
 
@@ -296,8 +307,10 @@
   "The turn entity e on db, its facts (its basis decoded)."
   {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
   [db e]
-  (let [r (d/pull db [:db/id :seon.turn/id :seon.turn/n :seon.turn/origin :seon.turn/basis :seon.turn/reply :seon.turn/evals :seon.turn/truncated] e)]
-    (cond-> r (:seon.turn/basis r) (update :seon.turn/basis sedn/decode))))
+  (let [r (d/pull db [:db/id :seon.turn/id :seon.turn/n :seon.turn/origin :seon.turn/basis :seon.turn/reply :seon.turn/calls :seon.turn/truncated] e)]
+    (cond-> r
+      (:seon.turn/basis r) (update :seon.turn/basis sedn/decode)
+      (:seon.turn/calls r) (update :seon.turn/calls sedn/decode))))
 
 (defn- model-turns
   "The model turns of attempt on db before turn n, oldest first."
@@ -320,21 +333,21 @@
 (defn render
   "What a turn's reader got, from its basis b (seon.turn records it, :seon.turn/basis) on db,
   the commit b names: the current-state block of its task with the observations b holds, and
-  the messages, its attempt's earlier model turns as the scrollback (their replies and
-  evaluations as recorded, the first one's context made again from its own basis). The one
+  the messages, its attempt's earlier model turns as the scrollback (their replies, eval calls
+  and each call's evaluations as recorded, the first one's context made again from its own basis). The one
   maker of a context: the model's request is this, and so is every later reading of it.
   {:block :messages}."
   {:malli/schema [:=> [:cat :seon.host/db :seon.turn/basis] [:map [:block :map] [:messages [:vector :seon.model/message]]]]}
   [db {:keys [task attempt turn max-turns origin observed merge? last-evals]}]
   (let [prev (if (= :model origin) (model-turns db attempt turn) [])
         lst (peek prev)
-        {:keys [text repairs]} (when lst (reader/forgive (:seon.turn/reply lst)))
+        {:keys [text repairs]} (when lst (reader/forgive (str/join "\n" (map :code (:seon.turn/calls lst)))))
         block (cond-> (current-state db (task/task db task)
                                      (assoc observed :turn turn :max-turns max-turns :truncated? (:seon.turn/truncated lst)
                                             :source text :repairs (vec repairs)
                                             :unmerged (when merge? (pm/unmerged db (pm/program db #{})))))
                 last-evals (assoc :last-evals last-evals))
-        turns (vec (map-indexed (fn [i r] (cond-> {:reply (:seon.turn/reply r) :evals (str "Your evaluations:\n" (:seon.turn/evals r))}
+        turns (vec (map-indexed (fn [i r] (cond-> {:reply (:seon.turn/reply r) :calls (vec (:seon.turn/calls r))}
                                              (zero? i) (assoc :context (turn-text db (:db/id r)))))
                                 prev))]
     {:block block :messages (messages block turns)}))

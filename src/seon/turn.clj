@@ -1,9 +1,10 @@
 (ns seon.turn
   "The agent's turn loop, inside its own process (lanes R1 and M1's proto.agents.turn). A
   turn observes the branch (the proofs run in a fork of this agent, the done rule), and
-  either ends the attempt or acts: the context goes to the model (one interop edge), the
-  reply's forms go through the one REPL path (seon.repl/eval-string: read, evaluate,
-  record), and the turn's facts are written on the branch. The loop repeats until the done
+  either ends the attempt or acts: the context goes to the model (one interop edge), each of
+  the reply's calls of the one tool, eval, goes through the one REPL path
+  (seon.repl/eval-string: read, evaluate, record) and its answer is that call's result, which
+  the next model call reads, and the turn's facts are written on the branch. The loop repeats until the done
   rule has no refusal, a verb ends it (my.turn/wait, my.task/send-back!) or the turns run
   out. All green at the start ends it with no model call.
 
@@ -115,8 +116,8 @@
       ev (assoc :last-evals ev))))
 
 (defn- act!
-  "One model turn: the context of what was observed to the model, the reply's forms through
-  the one REPL path, the turn's facts on the branch. Answers the loop state after it, or the
+  "One model turn: the context of what was observed to the model, the reply's eval calls
+  through the one REPL path, each answered as its own result, the turn's facts on the branch. Answers the loop state after it, or the
   provider error. The model call is an effect (my.fx :model, lane FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
   {:malli/schema [:=> [:cat :map :map [:maybe :string]] [:or :map :map]]}
@@ -136,9 +137,11 @@
         c (:value r)]
     (if (:seon.error/type r)
       r
-      (let [{:keys [text]} (reader/forgive (:text c))
-            t2 (System/nanoTime)
-            items (repl/eval-string text)
+      (let [t2 (System/nanoTime)
+            ;; each eval call through the one REPL path, in order; its answer is the call's result
+            calls (mapv (fn [{:keys [id code]}] {:id id :code code :items (repl/eval-string (:text (reader/forgive code)))})
+                        (:tool-calls c))
+            items (into [] (mapcat :items) calls)
             eval-ms (ms-since t2)
             _ (swap! agent/state assoc-in [:turn :evals] items)
             used (+ (:prompt-tokens c) (:completion-tokens c))
@@ -148,7 +151,7 @@
         ;; and where the turn's time went as this agent saw it
         (agent/transact! [(cond-> {:seon.turn/id (str attempt "/" turn) :seon.turn/attempt attempt :seon.turn/n turn
                                    :seon.turn/origin :model :seon.turn/basis (sedn/encode basis)
-                                   :seon.turn/evals (context/evaluations-text items)
+                                   :seon.turn/calls (sedn/encode (mapv (fn [{:keys [id code items]}] {:id id :code code :evals (context/evaluations-text items)}) calls))
                                    :seon.turn/reply (:text c) :seon.turn/forms (count items)
                                    :seon.turn/errors (count (filter #(= :err (:tag %)) items))
                                    :seon.turn/red (count (remove #(= :pass (val %)) (select-keys results proofs)))

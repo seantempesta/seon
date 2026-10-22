@@ -80,10 +80,10 @@
                {:seon.turn/basis (seon.edn/encode {:commit (random-uuid) :task "t/x" :attempt "att-1" :turn k :max-turns 50 :origin :model
                                                    :observed {:results {'t-test/x :fail} :run-errors [] :refusals [{:refusal :proof-red :symbol 't-test/x}]
                                                               :reds [{:test 't-test/x :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))"}]}})
-                :seon.turn/evals (apply str (repeat (sz 2000) "e"))}
+                :seon.turn/calls (seon.edn/encode [{:id "call-0" :code "(f 2)" :evals (apply str (repeat (sz 2000) "e"))}])}
                ;; before: the context text inline (the attribute it was stored in is gone; a string
                ;; attribute of the same bytes writes the same)
-               {:seon.turn/evals (apply str (repeat ctx "c"))}))
+               {:seon.turn/finish (apply str (repeat ctx "c"))}))
       {:seon.turn/id id :seon.turn/reply (apply str (repeat (sz 1500) "r"))
        :seon.turn/reasoning (apply str (repeat (sz 3000) "z")) :seon.turn/forms 1 :seon.turn/errors 0
        :seon.turn/red 1 :seon.turn/ms 4000 :seon.turn/tokens 9000}]
