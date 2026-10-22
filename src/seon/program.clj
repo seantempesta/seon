@@ -44,14 +44,6 @@
                  (coll? v) (every? edn-value? v)
                  :else false)))
 
-(defn var-kind
-  "What a defined var holds now: :fn (a function, which needs a contract), :test, :macro or
-  :value (G1's)."
-  {:malli/schema [:=> [:cat :seon.host/var] [:enum :fn :test :macro :value]]}
-  [v]
-  (let [m (meta v)]
-    (cond (:test m) :test (:macro m) :macro (contract/function-var? v) :fn :else :value)))
-
 ;; ---- the compiler's account of one form ------------------------------------------------
 
 (def banned

@@ -221,7 +221,7 @@
   (let [here (System/getProperty "user.dir")
         dir (str here "/target/tmp/one-store-" (random-uuid))
         p1 'seon.reader-test/prose-without-a-fence-is-a-comment
-        p2 'seon.config-test/or-takes-the-first-non-nil
+        p2 'seon.reader-test/a-fenced-reply-reads-only-its-code
         digests (program/reach-digests (runner/program-db here) (fx/inputs here))
         _ (proofs/store-greens! #(fx/write-file {:req %}) dir (proofs/run-tests! [p1] (select-keys digests [p1]) (fn [_])))
         [r] (in-agent ["(select-keys (prove) [:results :ran :reused])"]
@@ -300,7 +300,7 @@
   ;; written before the process exits, and root answers the request it died in with the
   ;; exit status the fork server reaped
   (let [[_ died end] (in-agent [{:op :context :agent "a1"}
-                                "(intern 'seon.agent 'mem-mb (fn [& _] (throw (ex-info \"boom: the loop's own function\" {:x 1}))))"
+                                "(intern 'seon.agent 'db (fn [& _] (throw (ex-info \"boom: the loop's own function\" {:x 1}))))"
                                 {:op :eval :agent "root"
                                  :code (str "(let [a (first (filter #(= :a1 (:seon.attempt/agent %)) (vals (seon.task/attempts @(:conn sys)))))]"
                                             " (seon.reconcile/pull-end (:db @(seon.root/branch-db sys (seon.task/default-branch \"demo/t\"))) (:seon.attempt/id a)))")}])

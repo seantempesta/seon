@@ -126,10 +126,15 @@
                    ;; a clone: its pid arrives here (the fork server never saw it)
                    (when (:kill? st) (lib/c-kill (:pid m) 9))
                    (step/out! o :events (step/event {:type :spawned :agent id :pid (:pid m) :cloned-from (:cloned-from m)})))
-                 (step/out! o :to-api (status st (cond-> {:forked-ms (lib/r2 (:start-ms m)) :mem-mb (:mem-mb m) :t (:t m) :ready true
-                                                     :interrupt-ok (:interrupt-ok m)}
+                 (step/out! o :to-api (status st (cond-> {:forked-ms (lib/r2 (:start-ms m)) :mem-mb (:mem-mb m) :t (:t m) :ready true}
                                               (:cloned-from m) (assoc :pid (:pid m))
                                               (seq (:load-errors m)) (assoc :load-errors (:load-errors m)))))
+                 ;; root's interrupt cannot reach it (its SIGUSR1 handler never ran: a process not
+                 ;; forked from a main thread): a recorded problem, to whoever can act on it
+                 (when (false? (:interrupt-ok m))
+                   (step/out! o :to-api {:op :problem :class :agent :agent id
+                                         :error (contract/error :seon.agent/interrupt-unreachable 'seon.agent/init!
+                                                                "root's interrupt (SIGUSR1) does not reach this agent: its handler did not run at boot, so a runaway eval can only be killed" {})}))
                  ;; its branch's program did not load where it resumed: each failure a recorded problem
                  (doseq [{:keys [ns message]} (:load-errors m)]
                    (step/out! o :to-api {:op :problem :class :agent :agent id
@@ -174,7 +179,7 @@
                    st)
       :tests-started (do (step/out! o :events (step/event {:type :tests-started :agent id :rid (:id m) :pid (:pid m)})) st)
       :reply (let [st (answer-rid st o (:id m) (:items m))]
-               (step/out! o :to-api (status st {:evals-add (:items m) :mem-mb (:mem-mb m) :t (:t m) :status (busy st) :running nil}))
+               (step/out! o :to-api (status st {:evals-add (:items m) :t (:t m) :status (busy st) :running nil}))
                (step/out! o :events (step/event {:type :reply :agent id :items (:items m)}))
                st)
       :tests (let [{:keys [kind merge-branch data-attrs]} (get-in st [:inflight (:id m)])
@@ -201,6 +206,7 @@
       ;; the agent committed its branch (it owns the branch's writes): the writer's next flush
       ;; covers it
       :committed (do (step/out! o :to-writer {:op :agent-commit :branch (:branch st) :t (:t m)})
+                     (when (:mem-mb m) (step/out! o :to-api (status st {:mem-mb (:mem-mb m)})))
                      ;; its eval errors since its last commit: root counts them (seon.error)
                      (when (:errors m) (step/out! o :to-api {:op :errors :agent id :entries (:errors m)}))
                      (step/out! o :events (step/event {:type :commit :agent id :branch (:branch st) :t (:t m) :txs (:txs m)}))
