@@ -519,6 +519,15 @@
                       (hello! t0 {:cloned-from parent})
                       ((:serve @state))))})))))
 
+(defn misaligned
+  "Where a new agent's branch or forked image is not at the commit :spawn branched it from
+  (commit and t: main's head then, seon.writer :spawn): the members of its
+  :seon.agent/fork-misaligned problem, or nil when both are there."
+  {:malli/schema [:=> [:cat :uuid :int :seon.host/db :seon.host/db] [:maybe :map]]}
+  [commit t branch image]
+  (when (or (not= commit (d/commit-id branch)) (not= t (:max-tx image)))
+    {:commit commit :t t :branch-commit (d/commit-id branch) :image-t (:max-tx image)}))
+
 (defn init!
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
@@ -542,10 +551,7 @@
     (intr/install!)
     ;; a kept branch, resumed: its program is what this process runs (it was forked holding main's)
     (let [load-errors (when resumed (program/load-diff! db0 @store-conn))
-          ;; a new branch starts at the commit :spawn named, and the image holds main at it
-          misaligned (when (and commit (not resumed)
-                                (or (not= commit (d/commit-id @store-conn)) (not= t (:max-tx db0))))
-                       {:commit commit :t t :branch-commit (d/commit-id @store-conn) :image-t (:max-tx db0)})]
+          misaligned (when-not resumed (misaligned commit t @store-conn db0))]
      ;; a resumed branch whose program does not load runs main's for what failed: its errors
      ;; go to root with its hello (recorded problems), never dropped (T5b: a stub ran silently)
      (reset! state {:id id :branch branch :task task :attempt attempt :fd fd :conn c :db @store-conn :base db0 :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
