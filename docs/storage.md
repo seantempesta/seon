@@ -2,6 +2,10 @@
 
 One durable store holds every branch as Datahike index trees in konserve, one content-addressed node per key, on LMDB. A commit costs the nodes it rewrites, so what it writes depends on how values are laid out, whether history is kept, and how nodes are encoded. The store is opened in `seon.db` (`seon.db/open!`, ```seon.db/store-cfg```). Its failure points are in [DRAGONS](DRAGONS.md), and its dials (`:seon.config.store/*`) in [config](config.md).
 
+## Identity
+
+A store is named by the id it records, never by where it lies, so a kept run opens wherever it is copied, moved or archived. ```seon.db/store-cfg``` reads the id from the store's `:db` head (```seon.db/stored-id```, Datahike's own read path, 0.8 ms) and mints `(hasch/uuid path)` only for a store it is about to make; Datahike's connect refuses a config whose id differs from the stored one (`:store-identity-mismatch`). A copy keeps its original's id, as a Datahike replica does, so one process opens one of them. With the `:sync` writer, `(:config @conn)` still names the path a store was made at (`datahike.connector/deref-conn` reads the stored config; task `seon.db/deref-keeps-the-connections-config`): use the `:cfg` that ```seon.db/open!``` answers. Proof: `seon.db-test/a-moved-store-opens`.
+
 ## The proof: what a commit costs
 
 `seon.db-test/a-commit-costs-what-it-writes` says a turn committed by itself costs what the same turn costs in one big commit, plus one root-to-leaf path per index (32 KB at most). Its turns are realistic: each reply is real prose (the checkout's `docs/`), and each evaluated value is real source (its `src/`). A repeated letter compresses about 3× better than real turn text, which once made LZ4 look like the fix. Sample data must look like production data, or the numbers lie. Twenty turns, LMDB, branching factor 64:
@@ -75,5 +79,9 @@ Seon's `:sync` writer runs the collection itself, not as a transaction (fork `59
 With history kept and runs kept, garbage comes from deleted branches: check and test mains, which `seon drop` deletes. Measured 2026-10-22: on a copy of the standing store (297 branches, 159,152 keys), a full collection took 11 s and swept 5,148 keys (3%). On a fresh root's store, a deleted branch was reclaimed at the next quiescence (19 keys, 488 ms).
 
 Why only with no agent live: every commit is one LMDB write transaction (nodes, values, commit record and head), and LMDB's writer lock serializes commits from every process. But a commit can reuse a value out of line that the store held when its node was flushed. A collection running at that moment could sweep the value, because no branch reached it. Collecting concurrently would need a mark outside the lock, then a short delta mark and sweep inside one write transaction, plus commits that re-assert reused values in their own transaction. That is the design to build when collection has to run beside live agents.
+
+## Compiled code
+
+The store holds definitions (`:form/src`), never compiled code: a process gets its program compiled by inheriting it (an agent forks the fork server's image, copy-on-write) or by loading forms it lacks (```seon.program/load-all!```, `load-changes!`, `load-diff!`), and evaluations are records that nothing re-runs. Measured 2026-10-22 (`notes/store-native-2026-10-22.md`): a real form loads in 1.6–5 ms, ~3.6 ms of it compile and 1–2 ms contract arming; a Chez unit loads from bytes in 0.01 ms and is deterministic, but Jolt's units are 15× their source, hold absolute paths and are valid only under the runtime that compiled them, so storing them waits until loading is measured as the bottleneck (task `seon.program/compiled-units-in-the-store`). The fork server's replica stays: replaying a main commit costs ~1 ms, while reading main whole from the store costs 0.3–0.4 s and its heap in every process (task `seon.agent/an-agents-base-is-its-merge-base`).
 
 Related: [source](source.md) (merges read a branch's history by commit), [DRAGONS](DRAGONS.md).

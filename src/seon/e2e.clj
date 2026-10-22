@@ -5,7 +5,7 @@
   with a cancel, a root restart in two phases, the merge scenarios (seon.fixtures/scenarios),
   a swarm over shared definitions, a real model's run, and a task that always fails ending
   stuck; a new run is one row. bin/check runs them as modes of target/seon:
-    calc | resume DIR | resume2 DIR | scenario conflict|semantic|hairy|newns|sibling [model] | swarm N M | model add|calc | stuck
+    calc | resume DIR | resume2 DIR | scenario conflict|semantic|hairy|newns|sibling [model] | swarm N M (verdict SWARM) | model add|calc | stuck
     | loop DIR (the self-improvement loop's first turn, on a clone of this repository under DIR)
   Each run ends on what the system observes (the reconciler's quiescence report, an event,
   or a fact on main), never on a deadline. Prints one EDN line per phase; the last line is
@@ -218,8 +218,9 @@
   fresh agent runs :check on what main runs, which must print :expect, and (:ok run) judges
   the rest from {:sys :q (the quiescence report) :d (main)}, answering {:ok bool & what it
   measured}, printed as :checks. No agent may serve two attempts of one boot (a row without
-  :specs spans two boots, whose agent ids both start at a1). Answers the verdict."
-  [{:keys [boot specs during check expect ok] :as row}]
+  :specs spans two boots, whose agent ids both start at a1). Answers the verdict, printed
+  under the row's :label (E2E when it names none)."
+  [{:keys [boot specs during check expect ok label] :as row}]
   (let [t0 (now)
         sys (c/start! (merge {:datoms 300} boot))
         ev (when during (c/events sys))]
@@ -235,7 +236,7 @@
       (println :agents-reused reused :merges (merge-counts d) :fresh-agent fresh-r)
       (println :checks (dissoc checks :ok))
       (println :numbers (numbers sys t0))
-      (verdict! sys (and (:ok checks) (or (nil? specs) (empty? reused)) (or (nil? expect) (= expect fresh-r)))))))
+      (verdict! sys (and (:ok checks) (or (nil? specs) (empty? reused)) (or (nil? expect) (= expect fresh-r))) (or label "E2E")))))
 
 (defn- restart
   "A restart on main nm of the one store: phase 1 works the calc graph and SIGKILLs root
@@ -296,12 +297,16 @@
            (expectation k model?))))
 
 (defn- swarm
-  "n tasks over 5 shared definitions, max-running m: every conflict resolved by a merge
-  agent or ended in attached tasks."
+  "n tasks over 5 shared definitions, max-running m (more than 5, so tasks on one var run
+  at once and their merges conflict): conflicts arose, each was resolved by a merge agent
+  or ended in attached tasks, every task is done, nothing is stuck, and a fresh agent on
+  main gets every proof's value (s_k-test asserts (v_j 100) = 100+j). Verdict SWARM."
   [n m]
-  {:boot {:max-running (parse-long (or m "8"))} :specs (fx/swarm-specs (parse-long n)) :tns 'sw
+  {:boot {:max-running (parse-long (or m "8"))} :specs (fx/swarm-specs (parse-long (or n "20"))) :tns 'sw :label "SWARM"
    :check "(mapv #(% 100) [app.sw/v0 app.sw/v1 app.sw/v2 app.sw/v3 app.sw/v4])" :expect ["[100 101 102 103 104]"]
-   :ok (fn [{:keys [q d]}] (update (all-done d) :ok #(and % (empty? (:stuck q)))))})
+   :ok (fn [{:keys [q d]}]
+         (let [c (:conflicts-measured (merge-counts d))]
+           (-> (all-done d) (assoc :conflicts c) (update :ok #(and % (empty? (:stuck q)) (pos? c))))))})
 
 (defn- model-run
   "Tasks of the calc graph worked by the config's OpenAI-compatible endpoint
