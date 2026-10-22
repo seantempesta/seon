@@ -20,7 +20,7 @@
   [text]
   (long (Math/floor (/ (count text) chars-per-token))))
 
-(defn- estimate-chars
+(defn estimate-chars
   "Characters a token budget holds."
   {:malli/schema [:=> [:cat :int] :int]}
   [tokens]
@@ -32,8 +32,6 @@
   {:whole-width (config/value :seon.config.render.agent/whole-width) :max-name (config/value :seon.config.render.agent/max-name)
    :max-number-digits (config/value :seon.config.render.agent/max-number-digits)
    :sort-bound (config/value :seon.config.render.agent/sort-bound)})
-
-(def ^:private profile-id :seon.render.profile/agent)
 
 ;;; Exact classes, by row of the table. Named once: on Jolt a set literal of class symbols is
 ;;; built on every evaluation (1,072 B a call; the JVM makes it a constant), and classify runs
@@ -240,15 +238,38 @@
                                           (= :string (:kind node)) (:shown node)
                                           :else (:n node))})))
 
+;;; The one string cutter: a string in a value (a literal) and prose (text shown as itself,
+;;; seon.print/prose) end their cut at the same place and say the same words (emit/cut-words).
+
+(defn break-at
+  "Where a cut of s that may keep `room` characters ends: after the last line break in the
+  room's second half, else after the last space in its final quarter, else at the room."
+  {:malli/schema [:=> [:cat :string nat-int?] nat-int?]}
+  [^String s room]
+  (let [nl (.lastIndexOf s "\n" (int (dec room)))
+        sp (.lastIndexOf s " " (int (dec room)))]
+    (cond (and (pos? room) (>= nl (quot room 2))) (inc nl)
+          (and (pos? room) (>= sp (- room (quot room 4)))) (inc sp)
+          :else room)))
+
+(defn lines-after
+  "Lines that begin in s after offset: each line break at or past it starts one, and the
+  offset itself starts one when it sits at a line's start."
+  {:malli/schema [:=> [:cat :string nat-int?] nat-int?]}
+  [^String s at]
+  (loop [i (long at) n (if (and (< at (count s)) (or (zero? at) (= \newline (.charAt s (dec at))))) 1 0)]
+    (let [j (.indexOf s "\n" (int i))]
+      (if (or (neg? j) (>= (inc j) (count s))) n (recur (inc j) (inc n))))))
+
 (defn- cut-text
   "The cut's text after a node's shown part, as `emit/elided-text` prints it."
   {:malli/schema [:=> [:cat :seon.print/alloc] :string]}
   [node]
-  (let [marker (case (:kind node)
-                 (:string :name) (str "…+" (- (:total node) (:shown node)))
-                 (if (:pending? node) "…?" (str "…" (- (:total node) (:n node)))))
-        form (node-continuation node)]
-    (cond-> marker form (str " " (emit/form-text form)))))
+  (let [form (node-continuation node)]
+    (case (:kind node)
+      :string (emit/cut-words (- (:total node) (:shown node)) (lines-after (:value node) (:shown node)) form)
+      :name (str "…+" (- (:total node) (:shown node)))
+      (cond-> (if (:pending? node) "…?" (str "…" (- (:total node) (:n node)))) form (str " " (emit/form-text form))))))
 
 (defn- more? {:malli/schema [:=> [:cat :seon.print/alloc] :boolean]} [node]
   (case (:kind node)
@@ -272,7 +293,7 @@
 
 (defn- fill-end
   "Where a cut string grown into `room` more characters of literal ends: at most `room` wide,
-  back to its last line end inside the growth."
+  back to where the one cutter breaks it (`break-at`) inside the growth."
   {:malli/schema [:=> [:cat :seon.print/alloc number?] :int]}
   [node room]
   (let [^String text (:value node)
@@ -283,8 +304,8 @@
                      width (+ width (if-let [e (when-not (= \newline c) (char-escape-string c))] (count e) 1))]
                  (if (<= width room) (recur (inc i) width) i))
                i))
-        line-end (inc (.lastIndexOf text "\n" (int (dec to))))]
-    (if (and (< to limit) (> line-end (:shown node))) line-end to)))
+        at (break-at text to)]
+    (if (and (< to limit) (> at (:shown node))) at to)))
 
 (defn- insufficient-budget
   "The declared refusal when the budget cannot show the root or its first member."
@@ -621,33 +642,25 @@
       :else {:root shown})))
 
 (defn- cut-node
-  "The one tail cut of a node that shows less than it holds."
+  "The one tail cut of a node that shows less than it holds: what it omitted (a string's shown
+  prefix and the lines after it) and the form that reads the rest, or why there is none."
   {:malli/schema [:=> [:cat :seon.print/alloc :seon.print/context] :seon.print/node]}
   [node context]
-  (let [bound (cond (#{:string :name} (:kind node)) :seon.render.profile/token-budget
-                    (>= (:depth node) (:max-depth context)) :seon.render.profile/max-depth
-                    :else :seon.render.profile/token-budget)
-        request (cond-> (merge (:requery context) {:seon.render.profile/id profile-id :seon.render.data/path (:path node)})
-                  (not (:pending? node)) (assoc :seon.print/bound-by bound)
-                  (node-continuation node) (assoc :seon.print/continuation (node-continuation node)))]
-    (emit/elision
-     (case (:kind node)
-       (:string :name) (assoc request :seon.print/omitted (- (:total node) (:shown node))
-                              :seon.print/elision-unit :characters
-                              :seon.print/prefix (subs (if (= :name (:kind node)) (:text node) (:value node)) 0 (:shown node))
-                              :seon.render.data/next-offset (:shown node)
-                              :seon.render.data/total (:total node))
-       (if (:pending? node)
-         (assoc request :seon.print/elision-unit :pending :seon.render.data/next-offset (:n node))
-         (assoc request :seon.print/omitted (- (:total node) (:n node)) :seon.print/elision-unit :children
-                :seon.render.data/next-offset (:n node) :seon.render.data/total (:total node)))))))
+  (let [form (node-continuation node)
+        text? (#{:string :name} (:kind node))]
+    (cond-> {:seon.print/face :seon.print/elided
+             :seon.print/elision-unit (cond text? :characters (:pending? node) :pending :else :children)}
+      (not (:pending? node)) (assoc :seon.print/omitted (max 1 (- (:total node) (if text? (:shown node) (:n node)))))
+      text? (assoc :seon.print/prefix (subs (if (= :name (:kind node)) (:text node) (:value node)) 0 (:shown node)))
+      (= :string (:kind node)) (assoc :seon.print/lines (lines-after (:value node) (:shown node)))
+      form (assoc :seon.print/continuation form)
+      (nil? form) (assoc :seon.print/requery-refusal (get-in context [:requery :seon.print/requery-refusal] "the source has no stable requery identity")))))
 
 (defn- tree-node
-  "The print node of allotted `node`, its kids' first; each cut node is added to `cuts` (a
-  volatile transient vector) as it is built, and each node that shows less than it holds
+  "The print node of allotted `node`, its kids' first; each node that shows less than it holds
   counted in `elided` (a volatile count)."
-  {:malli/schema [:=> [:cat :seon.print/alloc :seon.print/context :any :any] :any]}
-  [node context cuts elided]
+  {:malli/schema [:=> [:cat :seon.print/alloc :seon.print/context :any] :any]}
+  [node context elided]
   (if (= :leaf (:kind node))
     ;; a leaf is its own print node, never cut
     node
@@ -655,45 +668,38 @@
           kids (if (= :entry (:kind node))
                  ;; an entry of two leaves is its kids as they are
                  (let [k (nth ks 0) v (nth ks 1)
-                       k' (tree-node k context cuts elided) v' (tree-node v context cuts elided)]
+                       k' (tree-node k context elided) v' (tree-node v context elided)]
                    (if (and (identical? k k') (identical? v v')) ks [k' v']))
-                 (mapv #(tree-node % context cuts elided) ks))
+                 (mapv #(tree-node % context elided) ks))
           ;; an entry shows all it holds (its key and value are cut, if anything)
           more (and (not= :entry (:kind node)) (more? node))
           _ (when more (vswap! elided inc))
-          cut (when more (cut-node node context))
-          result
-          (case (:kind node)
-            :entry kids
-            :name (assoc (:node node) :seon.print/text (if cut (str (:seon.print/prefix cut) "…+" (:seon.print/omitted cut)) (:text node)))
-            :string (or cut {:seon.print/face :seon.print/string :seon.print/value (:value node)})
-            (:map :coll)
-            (let [children (cond-> kids cut (conj cut))
-                  collection (cond-> {:seon.print/face (if (= :seon.print/throwable (:face node)) :seon.print/map (:face node))}
-                               (= :map (:kind node)) (assoc :seon.print/entries children)
-                               (= :coll (:kind node)) (assoc :seon.print/items children)
-                               (:ordered? node) (assoc :seon.print/ordered? true)
-                               (:total node) (assoc :seon.render.data/total (:total node)))]
-              (if (= :seon.print/throwable (:face node))
-                {:seon.print/face :seon.print/throwable :seon.print/value collection}
-                collection)))
-          result (cond-> result (not= :entry (:kind node)) (assoc :seon.render.data/path (:path node)))]
-      (when (and cut (not= :name (:kind node)))
-        (vswap! cuts conj! (if (= :string (:kind node)) result cut)))
-      result)))
+          cut (when more (cut-node node context))]
+      (case (:kind node)
+        :entry kids
+        :name (assoc (:node node) :seon.print/text (if cut (str (:seon.print/prefix cut) "…+" (:seon.print/omitted cut)) (:text node)))
+        :string (or cut {:seon.print/face :seon.print/string :seon.print/value (:value node)})
+        (:map :coll)
+        (let [children (cond-> kids cut (conj cut))
+              collection (cond-> {:seon.print/face (if (= :seon.print/throwable (:face node)) :seon.print/map (:face node))}
+                           (= :map (:kind node)) (assoc :seon.print/entries children)
+                           (= :coll (:kind node)) (assoc :seon.print/items children)
+                           (:ordered? node) (assoc :seon.print/ordered? true)
+                           (:total node) (assoc :seon.render.data/total (:total node)))]
+          (if (= :seon.print/throwable (:face node))
+            {:seon.print/face :seon.print/throwable :seon.print/value collection}
+            collection))))))
 
 (defn- tree
-  "The allotted `root` as one print-node tree, every cut node in the order they were built (a
-  node after its kids), and how many nodes show less than they hold."
-  {:malli/schema [:=> [:cat :seon.print/alloc :seon.print/context] [:map [:tree :any] [:cuts [:vector :any]] [:elisions nat-int?]]]}
+  "The allotted `root` as one print-node tree, and how many nodes show less than they hold."
+  {:malli/schema [:=> [:cat :seon.print/alloc :seon.print/context] [:map [:tree :any] [:elisions nat-int?]]]}
   [root context]
-  (let [cuts (volatile! (transient []))
-        elided (volatile! 0)
-        built (tree-node root context cuts elided)]
-    {:tree built :cuts (persistent! @cuts) :elisions @elided}))
+  (let [elided (volatile! 0)
+        built (tree-node root context elided)]
+    {:tree built :elisions @elided}))
 
 (defn show
-  "`value` selected under `opts` and emitted: `{:text :tokens :truncated? :elisions :cuts}` plus
+  "`value` selected under `opts` and emitted: `{:text :tokens :truncated? :elisions}` plus
   `:html` (hiccup) when `outputs` holds `:hiccup`, or the insufficient-budget refusal.
   opts: `:handle` (what cuts read through: a `result/…` symbol, or a form that reads the value), `:budget` tokens, `:max-depth`, `:width`,
   `:outputs`. A value whose metadata holds `:seon.print/full true` prints whole, and
@@ -716,7 +722,7 @@
         {root :root :as state} (select value context)]
     (if-not root
       state
-      (let [{selected :tree cuts :cuts k :elisions} (tree root context)
+      (let [{selected :tree k :elisions} (tree root context)
             emitted (emit/emit-both selected options (contains? outputs :hiccup))
             text (:text emitted)
             ;; one line holds the root when its flat width fits it
@@ -727,5 +733,5 @@
                           {:seon.error/type :seon.render.value/charge-exceeded :seon.error/operation 'seon.print.select/show
                            :seon.error/message "The value printer's text exceeded its charge."
                            :seon.print/charge limit :seon.error/offending (count text)})))
-        (cond-> {:text text :tokens (estimate text) :truncated? (pos? k) :elisions k :cuts cuts}
+        (cond-> {:text text :tokens (estimate text) :truncated? (pos? k) :elisions k}
           (contains? outputs :hiccup) (assoc :html [:div {:class "seon-data-panel"} (:hiccup emitted)]))))))

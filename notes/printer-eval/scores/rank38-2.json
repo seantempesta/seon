@@ -1,0 +1,74 @@
+[
+ {
+  "section": 1,
+  "ranking": [
+   "Q",
+   "P",
+   "R"
+  ],
+  "why": "Q states both the character count and the 244 hidden lines, and gives the exact form to read the rest; P gives the same form with characters only, and R's \"+26690\" has no unit."
+ },
+ {
+  "section": 2,
+  "ranking": [
+   "R",
+   "P",
+   "Q"
+  ],
+  "why": "R gives the hidden amount in both characters and lines, while P and Q give only a bare character count with no line count and no form to read the rest."
+ },
+ {
+  "section": 3,
+  "ranking": [
+   "R",
+   "Q",
+   "P"
+  ],
+  "why": "R shows the key fact (HTTP 400) plus more of the message and a unit on the hidden amount, while P shows the least of the message and does not say what the provider answered."
+ },
+ {
+  "section": 4,
+  "ranking": [
+   "R",
+   "P",
+   "Q"
+  ],
+  "why": "R and P both show two log entries, but R's hidden-amount marker has a unit; Q shows only one entry, leaving the reader less evidence per token."
+ },
+ {
+  "section": 5,
+  "ranking": [
+   "P",
+   "R",
+   "Q"
+  ],
+  "why": "P states the hidden remainder as one more line, which is clear about structure, while Q's bare \"\u2026+19\" has no unit and is ambiguous, and all three omit the form to read the rest."
+ },
+ {
+  "section": 6,
+  "ranking": [
+   "R",
+   "Q",
+   "P"
+  ],
+  "why": "R gives the title, the hidden characters and lines, and the exact form to read the rest, while P's \"+14120\" has no unit and Q gives no line count."
+ },
+ {
+  "section": 7,
+  "ranking": [
+   "Q",
+   "P",
+   "R"
+  ],
+  "why": "Q gives the first failure's expected and actual values with the hidden line count, which is the most direct answer to the question, while R's \"\u2026+245\" has no unit and P's extra second failure is less useful than Q's clearer count."
+ },
+ {
+  "section": 8,
+  "ranking": [
+   "P",
+   "R",
+   "Q"
+  ],
+  "why": "P shows the most of the call before its cut and states the hidden amount in characters, while Q's cut falls mid-keyword and its \"\u2026+7\" has no unit."
+ }
+]
