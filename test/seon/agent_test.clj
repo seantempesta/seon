@@ -60,6 +60,20 @@
     (is (= {green #{:pass} red #{:fail}} (edn/read-string (:printed run)))
         "main's test runs green in the agent; a red one beside it reports red")))
 
+(deftest an-agents-test-run-is-its-proofs-and-what-its-change-reaches
+  ;; task seon.agent/an-agent-holds-mains-tests: the agent holds main's whole suite, and its
+  ;; test run (root's :tests request, the one the judge sends) selects what the done rule
+  ;; reads: the task's proofs and the tests reaching what its branch changed since the main
+  ;; it forked from. One redefined function (same behaviour, another form) reaches one test; its namespace's other tests
+  ;; and every other namespace's do not run
+  (let [proof 'seon.reader-test/prose-without-a-fence-is-a-comment
+        reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
+        [_ run] (in-agent ["(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent.a1)"
+                           {:op :eval :agent "root" :code "(seon.proofs/results @(seon.root/run-tests! sys :a1))"}]
+                          {:dirs ["src" "test"] :proofs #{proof}})]
+    (is (= {proof :pass reached :pass} (edn/read-string (:printed run)))
+        "the proof and the one test reaching the change ran, green; nothing else ran")))
+
 (deftest a-relative-path-reads-from-the-source-root
   ;; task seon.agent/an-agent-works-in-its-source-root: a program file is read by the path
   ;; it has in its repository, as at any Clojure REPL started in the project

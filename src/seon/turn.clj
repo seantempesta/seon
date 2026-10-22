@@ -68,7 +68,7 @@
   {:malli/schema [:=> [:cat :seon.task/id [:set :qualified-symbol] :seon.task/plan] :map]}
   [id gaps-before plan-before]
   (let [t0 (System/nanoTime)
-        run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks))
+        run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks) (:proofs (:seon.task/accumulated (task/task (agent/db) id))))
         tests-ms (ms-since t0)
         results (proofs/results run)
         db (agent/db)

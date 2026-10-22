@@ -697,6 +697,15 @@
 
 ;; ---- reach: which tests a change reaches ----------------------------------------------
 
+(defn changed-vars
+  "The vars db-to points to another form than db-from does (new, redefined or removed):
+  what a branch changed since the main it forked from. Cost: each db's :var/form datoms."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :qualified-symbol]]}
+  [db-from db-to]
+  (let [forms (fn [db] (into {} (map (juxt :e :v)) (d/datoms db :aevt :var/form)))
+        a (forms db-from) b (forms db-to)]
+    (into #{} (keep #(when (not= (a %) (b %)) (:var/name (d/entity db-to %)))) (into (set (keys a)) (keys b)))))
+
 (defn reaching-tests
   "The program's tests on db that reach one of syms (fully qualified var names): from each
   var, the forms that reference it (one AVET seek), their definitions, and on. Cost: the

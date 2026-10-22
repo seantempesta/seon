@@ -14,11 +14,11 @@
   referred into its namespace. From proto/flow f2-final proto.agent (lane F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
-            [clojure.string :as str] [jolt.ffi :as ffi] [seon.program :as program] [seon.intr :as intr] [clojure.repl]
+            [clojure.string :as str] [jolt.ffi :as ffi] [seon.program :as program] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
             [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
-;; :id :branch :fd :conn :db :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
+;; :id :branch :fd :conn :db :base (main as this agent forked holding it) :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 (defonce state (atom nil))
 
@@ -296,27 +296,30 @@
       (assoc :got (print/text (second (:actual m)) (:part print/budgets)))
       (contract/valid? :seon.cost/report cost) (assoc :cost cost))))
 
-(defn test-namespaces
-  "The namespaces whose tests judge a branch: every program namespace of db holding tests
-  (main's, merged proofs among them, and the ones this agent created). Scratch namespaces
-  (user, ^:scratch) never merge, so their tests never judge."
-  {:malli/schema [:=> [:cat :seon.host/db] [:sequential :seon.host/namespace]]}
-  [db]
-  (filter (fn [nsx] (and (not (program/scratch-ns? nsx)) (some (comp :test meta) (vals (ns-interns nsx)))))
-          (keep find-ns (sort (d/q '[:find [?n ...] :where [_ :ns/name ?n]] db)))))
+(defn test-vars
+  "The tests that judge branch db, as this process holds them: proofs, and every test that
+  reaches a var the branch changed since base (the main it forked from), the changed tests
+  among them (seon.reconcile/done-refusals reads only these). A proof with no var here does
+  not run; scratch namespaces (user, ^:scratch) never merge, so their tests never judge."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :qualified-symbol]] [:sequential :seon.host/var]]}
+  [db base proofs]
+  (let [changed (program/changed-vars base db)]
+    (filter #(and (:test (meta %)) (not (program/scratch-ns? (:ns (meta %)))))
+            (keep #(some-> (find-ns (symbol (namespace %))) (ns-resolve (symbol (name %))))
+                  (sort-by str (into (into proofs changed) (program/reaching-tests db changed)))))))
 
 (defn- run-tests-here
-  "clojure.test over test-namespaces of the branch, with the branch's schemas in effect (malli's
+  "clojure.test over the branch's test-vars for the task's proofs, with the branch's schemas in effect (malli's
   dynamic registry bound to seon.program/schema-registry, as the agent's REPL binds it), the
   whole run within ticks engine ticks of work: answers report data. Each test var is written
   to w as it starts ({:seon.test/started v}), so the agent can name the test a death interrupted; a run
   past its ticks stops with the typed :seon.test/ticks-spent naming the test that was running."
-  {:malli/schema [:=> [:cat :int pos-int?] :seon.test/result]}
-  [w ticks]
+  {:malli/schema [:=> [:cat :int pos-int? [:set :qualified-symbol]] :seon.test/result]}
+  [w ticks proofs]
   (let [reports (atom [])
         started (atom nil)
         orig t/report
-        nss (test-namespaces (db))
+        vars (test-vars (db) (:base @state) proofs)
         r (try (binding [t/report (fn [m]
                                     (when (= :begin-test-var (:type m))
                                       (reset! started (str (:var m)))
@@ -326,9 +329,8 @@
                                     (orig m))
                          t/*test-out* (java.io.StringWriter.)
                          mr/*registry* (program/schema-registry (program/schema-changes (db)))]
-                 ;; test-ns tests the vars interned now (Jolt's run-tests also runs its
-                 ;; registry, which keeps a test after ns-unmap)
-                 (jolt.host/run-interruptible (jolt.host/make-interrupt) #(doseq [nsx nss] (t/test-ns nsx)) ticks)
+                 ;; exactly the selected vars, each namespace's fixtures around them
+                 (jolt.host/run-interruptible (jolt.host/make-interrupt) #(t/test-vars vars) ticks)
                  nil)
                (catch Throwable e
                  (if-let [n (:jolt/ticks-spent (ex-data e))]
@@ -369,12 +371,12 @@
                    var (assoc :var var))]})))
 
 (defn run-tests-forked
-  "Fork this agent; the child runs the tests within ticks engine ticks of work, writing
+  "Fork this agent; the child runs the test-vars of proofs within ticks engine ticks of work, writing
   each test var as it starts and then one EDN line of its result on a pipe. The agent reads
   the pipe to its end: no clock; the child ends by finishing, by its budget, or by dying
   (then the last test it started is named)."
-  {:malli/schema [:=> [:cat pos-int?] :seon.test/result]}
-  [ticks]
+  {:malli/schema [:=> [:cat pos-int? [:set :qualified-symbol]] :seon.test/result]}
+  [ticks proofs]
   (let [[r w] (lib/pipe) t0 (lib/now-ns) pid (lib/safe-fork 1000)]
     (cond
       (= pid -2)
@@ -387,7 +389,7 @@
           ;; pipe ends this child (EPIPE). The agent's socket is FD_CLOFORK: not held here.
           (lib/set-trip! (* 16 1048576))
           (swap! state assoc :mode :test :evaluating false)
-          (let [res (try (run-tests-here w ticks)
+          (let [res (try (run-tests-here w ticks proofs)
                          (catch Throwable e {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]}))]
             (lib/write-line! w (pr-str res)))
           (lib/c-exit 0))
@@ -447,7 +449,10 @@
   {:malli/schema [:=> [:cat :seon.wire/seon-msg] [:maybe [:vector :seon.wire/seon-msg]]]}
   [m]
   (case (:op m)
-    :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))) :mem-mb (mem-mb)}]
+    ;; the proofs of the task root names (:task), as this branch holds them
+    :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
+                                                              (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{}))
+             :mem-mb (mem-mb)}]
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
     :fx-reply (let [kind (get-in @state [:fx-pending (:k m)])
                     r (dissoc m :op :k)]
@@ -558,7 +563,7 @@
     (let [load-errors (when resumed (program/load-diff! db0 @store-conn))]
      ;; a resumed branch whose program does not load runs main's for what failed: its errors
      ;; go to root with its hello (recorded problems), never dropped (T5b: a stub ran silently)
-     (reset! state {:id id :branch branch :fd fd :conn c :db @store-conn :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
+     (reset! state {:id id :branch branch :fd fd :conn c :db @store-conn :base db0 :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
                    :load-errors (vec load-errors)
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
                    :ns nsx :nss #{(ns-name nsx)} :interrupt-ok intr-ok :serve serve}))))
