@@ -500,11 +500,15 @@
   the order reached. One visit per node and edge."
   {:malli/schema [:=> [:cat [:or [:sequential :any] [:set :any]] ifn?] [:vector :any]]}
   [start neighbors]
-  (loop [front (vec start) seen (set start) out []]
-    (if-let [[n & more] (seq front)]
-      (let [new (into [] (comp (remove seen) (distinct)) (neighbors n))]
-        (recur (into (vec more) new) (into seen new) (into out new)))
-      out)))
+  ;; one vector is the queue and the answer: a cursor walks it, each new node appended once
+  (let [q0 (vec (distinct start)) k (count q0)]
+    (loop [q q0 i 0 seen (set q0)]
+      (if (< i (count q))
+        (if-let [ns (seq (neighbors (nth q i)))]
+          (let [new (into [] (comp (remove seen) (distinct)) ns)]
+            (recur (into q new) (inc i) (into seen new)))
+          (recur q (inc i) seen))
+        (subvec q k)))))
 
 (defn load-order
   "forms (form rows) in the order to load them: namespaces in dependency order (after each

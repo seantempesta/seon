@@ -60,3 +60,25 @@
      ;; itself, and the depth-first sort once for the namespaces and once per namespace (one here)
      :fixed {:calls 3}
      :sizes [100 1000 10000]}))
+
+(defn fan
+  "closure's arguments of size n: one root whose neighbors are n leaves (the frontier n wide)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple [:vector :int] :seon.host/fn]]}
+  [n]
+  (let [leaves (vec (range 1 (inc n)))]
+    [[0] (fn [x] (if (zero? x) leaves []))]))
+
+(deftest a-closure-is-one-visit-per-node-and-edge
+  (cost/proof
+    {:of 'seon.program/closure :input 'seon.program-cost-test/fan
+     :n "nodes reached (a root and its n leaves: the widest frontier)"
+     :work (str "each node taken from the queue once and each edge followed once: per node reached, its "
+                "conj onto the queue vector and into the seen set and one distinct's set conj (820 B at "
+                "100 nodes, 1,010 at 1,000, measured 2026-10-23, the hash set a level deeper: the "
+                "persistent set conj has no row in seon.cost/units), and a node "
+                "with no neighbors costs its visit alone; nothing per node already queued (the frontier "
+                "was copied on every visit before: 446 KB at 100 leaves, quadratic)")
+     :growth :linear
+     :per-n {:ns 400 :bytes 1100 :calls 0}
+     :fixed {:ns 2000 :bytes 2000 :calls 1}
+     :sizes [100 1000 10000]}))

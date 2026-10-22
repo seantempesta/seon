@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg]))
+            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [clojure.edn]))
 
 (def help-page
   "The help page, docs/agent.md: what every agent reads first (its system message, the same
@@ -100,17 +100,17 @@
 
 (defn callees
   "The program functions proof p calls directly (one level: its recorded form's :form/refs,
-  the compiler's resolved references), each at summary level: its arglists, contract and
-  doc, never its body; a var is program when db holds it."
+  the compiler's resolved references), each at summary level from its own facts on db: its
+  contract and doc, never its body; a var is program when db holds it (a branch's callee
+  this process never loaded included)."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :map]]}
   [db p]
   (vec (for [q (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] db p)) p))
-             :let [m (some-> (find-var q) meta)]
-             :when (and m (not (:test m)) (pdb/eid db :var/name q))]
+             :let [v (d/entity db [:var/name q])]
+             :when (and v (not= :test (:var/kind v)))]
          (cond-> {:var q}
-           (:arglists m) (assoc :arglists (:arglists m))
-           (:malli/schema m) (assoc :contract (:malli/schema m))
-           (:doc m) (assoc :doc (:doc m))))))
+           (:var/contract v) (assoc :contract (clojure.edn/read-string (:var/contract v)))
+           (:var/doc v) (assoc :doc (:var/doc v))))))
 
 ;; ---- the last evaluations: folded, each an equal share --------------------------------
 
