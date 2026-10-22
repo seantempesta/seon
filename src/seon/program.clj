@@ -142,12 +142,20 @@
           (= :throw (:op d)) acc
           :else (conj acc {:class "*" :answers (answers d)}))))
 
+(defn- quoted-vars
+  "The qualified symbols in a quoted datum (walked: a collection's too) that name a var now:
+  a syntax-quoted or quoted name resolved later (`requiring-resolve`, a macro's template, a
+  proc or render named in data). A symbol naming no var is data."
+  {:malli/schema [:=> [:cat :any] [:set :qualified-symbol]]}
+  [x] (into #{} (filter #(and (qualified-symbol? %) (find-var %))) (tree-seq coll? seq x)))
+
 (defn unit-account
   "What the compiler says one analyzed top-level node does, from its IR by resolved var
   identity: the vars it defines at its top (:defs, each def-info) and inside a function body
   (:inline-defs), its multimethod methods ({:multi sym-as-written :dispatch value}) and
   protocol extensions ({:protocol sym :type name}), the multimethods it sets up, the vars and
-  host statics (Class/member) it references (:refs), the banned vars it references, the
+  host statics (Class/member) it references (:refs, with the vars its quoted data names:
+  quoted-vars), the banned vars it references, the
   calls it bounds by a clock (:timeouts: deref with a timeout), its catch clauses
   (:catches, each {:class :answers}), the namespaces it requires, and whether it changes its
   namespace's environment (:env?)."
@@ -167,6 +175,7 @@
                            (when (banned s) (vswap! acc update :banned conj s))
                            (vswap! acc update :refs conj s))
          :host-static (vswap! acc update :refs conj (symbol (str (:class n)) (str (:member n))))
+         (:quote :const) (vswap! acc update :refs into (quoted-vars (datum n)))
          :try (vswap! acc update :catches into (map sedn/encode) (catches n))
          :invoke (when (and (= 'clojure.core/deref (invoked n)) (= 3 (count (:args n))))
                    (vswap! acc update :timeouts conj 'clojure.core/deref))
@@ -266,6 +275,18 @@
           (#{:fn 'seon.contract/checked} (:init d)) (if types? :ctor :fn)
           :else :value)))
 
+(defn- macro-uses
+  "The macros form text src calls in namespace nsx: each list in the form as read whose head
+  resolves there to a macro var. The IR is the expansion, which names no macro, and a
+  top-level call expanding to a do leaves its units' forms no trace of it (Clojure's
+  compilation-unit rule), so the form itself is read. A macro's own template names the
+  macros it expands to as quoted vars (quoted-vars), which closes the chain."
+  {:malli/schema [:=> [:cat :seon.host/namespace :string] [:set :qualified-symbol]]}
+  [nsx src]
+  (into #{} (keep (fn [x] (when (and (seq? x) (symbol? (first x)))
+                            (let [v (ns-resolve nsx (first x))] (when (and (var? v) (:macro (meta v))) (symbol v))))))
+        (tree-seq coll? seq (binding [*ns* nsx] (read-string src)))))
+
 (defn- form-id
   "A form's identity: its namespace and exact text (an imported file's repeated text adds
   its occurrence)."
@@ -308,7 +329,7 @@
                (or ns-form? (seq defs) (seq declares) (seq methods) (seq impls) (:env? a)))
       (cond-> {:id (form-id nsym src k) :src src :ns nsym :ns-form? (boolean ns-form?)
                :defs defs :declares declares :methods (or methods []) :impls (or impls [])
-               :refs (:refs a) :requires (:requires a) :banned (:banned a) :inline-defs (:inline-defs a)
+               :refs (into (:refs a) (macro-uses nsx src)) :requires (:requires a) :banned (:banned a) :inline-defs (:inline-defs a)
                :timeouts (:timeouts a) :catches (:catches a)}
         lead (assoc :lead lead)
         order (assoc :order order)))))
@@ -728,22 +749,29 @@
   "{test var -> reach digest} of db's tests (task seon.program/tests-run-by-reach): the
   digest of the test's name, inputs' :env (what has no program facts), its own form, its
   namespace's forms that define no var (the ns form, fixtures), and every live form their
-  references reach (a var to the form that last defined it; a defined multimethod's methods
-  and protocol's extensions), with inputs' :tree when a reached form references a
-  tree-reader. A test's digest moves exactly when a form it reaches does, so it is the
-  inverse of reaching-tests. Cost: the live forms read once and digested once, then per
-  test its closure."
+  references reach (a var to the form that last defined it, macros and quoted names among
+  them (unit-account); a defined multimethod's methods and protocol's extensions; a
+  contracted var's form to the schema entries its contract names, and each entry to those
+  its form names), with inputs' :tree when a reached form references a tree-reader. A
+  test's digest moves exactly when a form or schema entry it reaches does. Cost: the live
+  forms, contracts and schema entries read once and digested once, then per test its
+  closure."
   {:malli/schema [:=> [:cat :seon.host/db [:map [:env :string] [:tree :string]]] [:map-of :qualified-symbol :string]]}
   [db {:keys [env tree]}]
-  (let [forms (live-forms db)
+  (let [schemas (into {} (for [dt (d/datoms db :aevt :schema/key)] [(:v dt) (:schema/form (d/entity db (:e dt)))]))
+        sid #(str "schema " %)
+        named (fn [text] (keep #(when (contains? schemas %) (sid %)) (names (edn/read-string text))))
+        contract (into {} (for [dt (d/datoms db :aevt :var/contract)] [(:var/name (d/entity db (:e dt))) (named (:v dt))]))
+        live (live-forms db)
+        forms (into live (for [[k text] schemas] {:id (sid k) :ns k :src text :refs #{} :defines #{} :schema (named text)}))
         by-def (fn [kind] (reduce (fn [m f] (reduce (fn [m [k s]] (if (= k kind) (update m s (fnil conj []) (:id f)) m)) m (:defines f))) {} forms))
         var-form (into {} (for [[s ids] (by-def :var)] [s (peek ids)]))
         methods (by-def :method) impls (by-def :impl)
         by-id (into {} (map (juxt :id identity)) forms)
         digest (into {} (for [f forms] [(:id f) (error/digest (str (:ns f) "\n" (:src f)))]))
-        edges (fn [f] (concat (keep var-form (:refs f))
-                              (for [[k s] (:defines f) :when (= :var k) id (concat (methods s) (impls s))] id)))
-        plain (group-by :ns (filter #(not-any? (fn [[k]] (= :var k)) (:defines %)) forms))]
+        edges (fn [f] (concat (keep var-form (:refs f)) (:schema f)
+                              (for [[k s] (:defines f) :when (= :var k) id (concat (methods s) (impls s) (contract s))] id)))
+        plain (group-by :ns (filter #(not-any? (fn [[k]] (= :var k)) (:defines %)) live))]
     (into {} (for [f forms [k t] (:defines f) :when (and (= :var k) (= :test (:var/kind (d/entity db [:var/name t]))))
                    :let [reached (loop [front (into [(:id f)] (map :id) (plain (:ns f))) seen #{}]
                                    (if-let [[id & more] (seq front)]
