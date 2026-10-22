@@ -96,7 +96,7 @@ Its references are derived from the plan's citations by the one parser ([referen
   - the kernel's TCP keepalive for a silent network peer.
 
 Every need is met by one of these. If one doesn't fit, stop and say so; never route around them:
-- **A value.** Immutable Datahike values in one store with many branches. Agents own their branch; root owns main. A record is a fact, and history is kept (v1's ruling; the store runs with `:keep-history? false` today, `seon.db/store-cfg`, and THE PLAN restores it).
+- **A value.** Immutable Datahike values in one store with many branches. Agents own their branch; root owns main. A record is a fact, and history is kept (v1's ruling; `:seon.config.store/keep-history?`, docs/storage.md#history).
 - **A Flow proc and its channels.** Every component is a step-fn proc declared as data (`resources/seon/system.edn`), with bounded channels.
   - A dependency is a channel a proc parks on, and back-pressure is a full one.
   - A run ends when the message count reaches zero.
