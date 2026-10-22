@@ -38,7 +38,7 @@ function. The same census judges the other laws: [clocks](clocks.md) and [resolu
 | boundary | (`ns/fn`) | what it records |
 |---|---|---|
 | the agent's REPL: reading and evaluating an agent's form | `seon.repl/eval-code` | the form's error as an `:err` reply item (the one error map itself, under `:err`) |
-| the agent's request handler | `seon.repl/agent-step` | `err` + `done` on the request |
+| a request's evaluation | `seon.repl/eval-string` | the answers so far plus one `:err` item (its error map and id), recorded with them |
 | the agent process's loop: a defect no request's boundary caught (the agent redefined a function its own loop calls; a failing commit of its record) | `seon.repl/serve!` | the cause on stderr, then the attempt's end on its branch (`seon.agent/died!`: outcome `:error`, the one error map with its cause chain); exit 70, which names the death; root's judge carries the end to the attempt's reason and error |
 | a test run, in the test child of an agent | `seon.agent/run-tests-forked` | an `:error` report in the run |
 | an effect lane performing a request (lane FX1) | `seon.fx/lane-proc` | `:seon.fx/defect` as the outcome: its asker is always answered |

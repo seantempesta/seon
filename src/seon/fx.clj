@@ -52,9 +52,10 @@
 
 (defn read-source
   "The text of every .clj and .edn file under root's dirs (relative paths, e.g.
-  src/seon/fx.clj, resources/seon/schemas/seon.facts.edn), sorted by path, and the commit
-  root's HEAD names (absent when root is no git repository: git rev-parse answers none).
-  Answers {:value {path text} :commit sha} or :seon.fx/io-error."
+  src/seon/fx.clj, resources/seon/schemas/seon.facts.edn), sorted by path, the commit root's
+  HEAD names and the revision it pins each reference-code submodule at (its gitlink), both
+  absent when root is no git repository (git answers none).
+  Answers {:value {path text} :commit sha :pins {path sha}} or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [root dirs]} :req}]
   (try
@@ -66,10 +67,14 @@
                               :let [p (.getCanonicalPath ^java.io.File f)]
                               :when (and (.isFile ^java.io.File f) (or (.endsWith p ".clj") (.endsWith p ".edn")))]
                           [(subs p (inc (count base))) (slurp f)]))}
-        (zero? (:exit head)) (assoc :commit (str/trim (:out head)))))
+        (zero? (:exit head)) (assoc :commit (str/trim (:out head))
+                                    :pins (into (sorted-map)
+                                                (for [[_ sha p] (re-seq #"(?m)^160000 ([0-9a-f]{40}) \d+\t(\S+)$"
+                                                                        (:out (sh/sh "git" "-C" base "ls-files" "-s" "--" "reference-code")))]
+                                                  [p sha])))))
     (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path root}))))
 
-(defn git!
+(defn- git!
   "git in dir with args, under the environment variables env adds ({name value}), its
   trimmed output; a failure throws its stderr (git-commit answers it as :seon.fx/io-error)."
   {:malli/schema [:=> [:cat [:map-of :string :string] :string [:sequential :string] [:maybe :string]] :string]}

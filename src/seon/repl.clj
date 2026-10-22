@@ -1,5 +1,5 @@
 (ns seon.repl
-  "An agent's REPL speaking nREPL's message model on its one thread (lane F2, after lane
+  "An agent's REPL speaking nREPL's message model on its one thread (worktree session F2, after
   R2's r2.repl; the owner chose nREPL's model for agents).
 
   The agent's process runs `agent-step` (the step-fn contract) under seon.step/run-loop.
@@ -56,10 +56,10 @@
 (defn- eval-code
   "Read the request's code once, form by form, and evaluate each with (:repl/eval-fn req)
   under seon.intr/run, in the request's \"ns\", else the agent's own. Answers each form,
-  with its exact text (:repl/src); an interrupt stops the request; then done."
+  with its exact text (:repl/src); an interrupt stops the request (one pending since its
+  asker cleared it included: agent-step, the turn loop); then done."
   {:malli/schema [:=> [:cat :seon.wire/msg] :any]}
   [{:keys [reply] :as req}]
-  (intr/clear-pending!)
   (let [code (get req "code")
         r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. code))
         starts (delay (reader/line-starts code))
@@ -338,13 +338,19 @@
   folded into reply items, each with who asked (:origin, when not the agent's own :model),
   and recorded (an agent's, on its branch). From inside an agent, the turn loop's forms; req
   adds to the request (root's: seon.entrance's namespace, origin, budget and eval fn; root's
-  requests to an agent: agent-step's)."
+  requests to an agent: agent-step's). The request's entrant boundary: a defect past a
+  form's own (a middleware's, the printer's) ends the request with the answers so far and
+  one :err item, its error map, recorded with them."
   {:malli/schema [:function [:=> [:cat :string] :seon.agent/items] [:=> [:cat :string :map] :seon.agent/items]]}
   ([code] (eval-string code {:origin :model}))
   ([code req]
    (let [answers (volatile! [])
          o (:origin req)]
-     (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
+     (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
+          (catch Throwable e
+            (let [em (agent/error-map e)]
+              (vswap! answers conj {:tag :err :id (dec (:n (swap! agent/state update :n (fnil inc 0))))
+                                    :err em :printed (:seon.error/message em) :err-text (nrepl/err->msg e)}))))
      (record! (cond->> (fold @answers) (and o (not= :model o)) (mapv #(assoc % :origin o)))))))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
@@ -362,14 +368,14 @@
   ([st _] st)
   ([st _ m]
    (if (= :eval (:op m))
-     ;; the agent's entrant boundary: a defect answers its error as the reply's item
      (do
-       ;; root hears that this request began (its proc's :started event): what an
-       ;; interrupt or a kill meant for a running eval waits on, never a sleep
+       ;; an interrupt left from before this request is not its; then root hears that it began
+       ;; (its proc's :started event), what an interrupt or a kill meant for a running eval
+       ;; waits on, never a sleep: one landing from here on stops it
+       (intr/clear-pending!)
        (agent/send! {:op :started :id (:id m)})
-       (let [items (try (eval-string (:forms m) (select-keys m [:ticks :origin]))
-                        (catch Throwable e [{:tag :err :err-text (nrepl/err->msg e)}]))]
-         [st {:sock [{:op :reply :id (:id m) :items items :t (:max-tx (agent/db)) :mem-mb (agent/mem-mb)}]}]))
+       [st {:sock [{:op :reply :id (:id m) :items (eval-string (:forms m) (select-keys m [:ticks :origin]))
+                    :t (:max-tx (agent/db)) :mem-mb (agent/mem-mb)}]}])
      [st (when-let [ms (agent/handle! m)] {:sock ms})])))
 
 (defn serve!

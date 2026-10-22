@@ -158,6 +158,9 @@
     (is (= ["docs/flow.md#workloads" "docs/flow.md#the-api" "docs/flow.md#the-api-1"] (mapv :seon.ref/address (:seon.ref/below flow))))
     (is (= ["create-flow" "start"] (mapv :seon.ref/heading (:seon.ref/below api))) "the headings below, one level")
     (is (= [1 6 11] (mapv :seon.ref/line (map #(nth (:seon.ref/sections doc) %) [0 1 2]))))
+    (is (= ["Flow runs procs, e.g. steps. Each proc is a Var.\nSee `seon.step/step`." nil]
+           (mapv :seon.ref/text (map #(nth (:seon.ref/sections doc) %) [0 2])))
+        "a section's own text stops at its first heading below; one opening straight into a heading has none")
     (is (= ["docs/flow.md#the-api" "docs/flow.md#flow"] (mapv :seon.ref/parent (map #(nth (:seon.ref/sections doc) %) [3 2]))))))
 
 (deftest a-section-opening-with-a-list-has-no-lead
