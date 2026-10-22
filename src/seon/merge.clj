@@ -1,5 +1,5 @@
 (ns seon.merge
-  "The program merge: git's three-way merge over a branch's PROGRAM, as data. From lane
+  "The program merge: git's three-way merge over a branch's PROGRAM, as data. From worktree session
   M1's proto.merge (proto/agents/core-patches/01-proto-merge.patch), over the program as
   the compiler knows it (seon.program).
 

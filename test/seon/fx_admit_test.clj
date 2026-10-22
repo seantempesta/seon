@@ -1,17 +1,17 @@
 (ns seon.fx-admit-test
-  "Lane R3's admission over FX1's owner: the provider's rate as a token bucket, the clock's
+  "Session R3's admission over FX1's owner: the provider's rate as a token bucket, the clock's
   tick, AIMD on a rate-limit outcome, priority by chain progress. Plain step-fn calls."
   (:require [clojure.test :refer [deftest is testing]] [seon.fx :as fx]))
 
-(defn- owner [lanes rate] (fx/owner-proc {:kind :model :lanes lanes :rate rate :work nil :back nil}))
+(defn- owner [workers rate] (fx/owner-proc {:kind :model :workers workers :rate rate :work nil :back nil}))
 (defn- req [k est & {:as more}] (merge {:req {:k k} :est est :dest {:agent :a1 :op :fx-reply :k k}} more))
-(defn- ran [o] (map #(get-in % [:req :k]) (:to-lanes o)))
+(defn- ran [o] (map #(get-in % [:req :k]) (:to-workers o)))
 
 (deftest a-request-waits-on-the-bucket-and-a-tick-admits-it
   (let [[st o] (fx/owner-proc (owner 8 1000) :in (req 1 900))
         _ (is (= [1] (ran o)) "900 of 1000 tokens: admitted")
         [st o] (fx/owner-proc st :in (req 2 900))
-        _ (is (empty? (ran o)) "100 tokens left: it waits, a lane free")
+        _ (is (empty? (ran o)) "100 tokens left: it waits, a worker free")
         st (assoc-in st [:bucket :at] (- (get-in st [:bucket :at]) 1000))
         [_ o] (fx/owner-proc st :tick {})]
     (is (= [2] (ran o)) "a second later the bucket refilled: the tick admits it")))
@@ -41,7 +41,7 @@
 
 (deftest a-rate-limited-model-call-waits-for-the-bucket-and-is-answered
   ;; task seon.fences/a-transient-model-failure-parks: a 429 is the provider saying "wait", so
-  ;; the owner keeps the request (the lane hands it back as :request) until its bucket refills,
+  ;; the owner keeps the request (the worker hands it back as :request) until its bucket refills,
   ;; and the asker is answered only by the call that went through
   (let [r (req 1 10)
         dest (:dest r)

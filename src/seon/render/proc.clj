@@ -436,7 +436,7 @@
        ;; a pass renders what changed; it never waits. :mixed: one thread of its own for
        ;; its life, joined at stop. :compute futurized each pass onto Jolt's cached pool,
        ;; which grows when a pass is submitted before the last worker is idle again
-       ;; (lane THREADS: root's threads are a declared number)
+       ;; (session THREADS: root's threads are a declared number)
        :workload :mixed
        :ping-map-fn (fn [st] {:passes (:passes st 0) :views (count (:views st)) :watching (count (:watch st))
                               :pending (count (:pending st)) :rendered (get-in st [:counts :rendered] 0)

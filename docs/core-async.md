@@ -37,7 +37,7 @@ Closing and nil:
 | `>!` `<!` `>!!` `<!!` | park | block (condition variable) | inside `go`, a park the CPS pass can see costs no continuation capture (`async.clj:27-45`) |
 | `offer!` / `poll!` | never wait; `nil` if they can't [A8] | same | `async.ss:668-671`, `async.clj:600` |
 | `alts!` `alts!!` | park / block on all ports at once | same | a fast pass, then handler registration, no poll loop (`async.ss:1119-1180`); `:priority true` takes the first ready port in order [A17]; `:default` answers at once [A18] (`async.clj:465-495`) |
-| **`put!` `take!` that can't complete at once** | **an OS daemon thread each**, blocked until it completes [A9] | same | `async.ss:900-919`. 10 pending → +10 threads. No cap. This is the one op that doesn't use the waiter protocol; lane THREADS is changing it to a callback waiter on a fiber. |
+| **`put!` `take!` that can't complete at once** | **an OS daemon thread each**, blocked until it completes [A9] | same | `async.ss:900-919`. 10 pending → +10 threads. No cap. This is the one op that doesn't use the waiter protocol; session THREADS is changing it to a callback waiter on a fiber. |
 | `timeout ms` | a channel the **one timer thread** closes at ms [A15] | same | `async.ss:889-893`. All deadlines share one thread and a min-heap: O(log k) to arm, O(1) to cancel (`async.ss:673-874`). 100 pending timeouts → +1 thread, once per process [A14]. |
 
 ## go, thread, io-thread

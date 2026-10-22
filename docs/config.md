@@ -7,7 +7,7 @@ its value, validated by its schema, and read through one resolver.
 ## The file
 
 `resources/seon/config/default.edn` holds every key with its unit, its provenance (an owner
-ruling, a measurement, a lane) and what happens at its bound, in v1's shape. Its schemas are
+ruling, a measurement, a worktree session) and what happens at its bound, in v1's shape. Its schemas are
 `resources/seon/schemas/seon.config*.edn`; `:seon.config/config` is the whole config, a closed
 map, so an unknown key, an invalid value or a missing required key refuses boot with
 `:seon.config/refused`, naming each key. Machine-dependent values are derived at load:

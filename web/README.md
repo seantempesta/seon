@@ -1,7 +1,7 @@
-# Root's web: the live admin interface (lane W2)
+# Root's web: the live admin interface (session W2)
 
 A real-time dashboard of the whole system, a zoomed page per agent, and root's own context, all
-from schema-declared render functions. Ported from `proto/web` (lane L2's dashboard, L4's polish)
+from schema-declared render functions. Ported from `proto/web` (session L2's dashboard, L4's polish)
 and W1's render selection (`proto/render`); rebuilt on `seon.root`'s API as two step-fn procs.
 
 ## Run it

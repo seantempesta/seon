@@ -1,5 +1,5 @@
 (ns seon.render-test
-  "Renders (lane W2): selection (override key, schema-declared, printer), root's AI face,
+  "Renders (session W2): selection (override key, schema-declared, printer), root's AI face,
   and the render proc's step as a plain function: inputs before render, bytes before
   send, a new agent appended, a retired one removed, keyframes composed from what was
   retained. Run: bin/test seon.render-test"

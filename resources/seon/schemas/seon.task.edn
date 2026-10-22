@@ -1,4 +1,4 @@
-;; Tasks, attempts, the reconciler, the turn loop and the model, as values (lanes R1 and M1's
+;; Tasks, attempts, the reconciler, the turn loop and the model, as values (sessions R1 and M1's
 ;; proto.agents.schema, renamed). The stored attributes are in seon.facts.edn; where a value's
 ;; shape differs from the stored one (needs as ids, results as a map, conflicts as a vector) the
 ;; map entry carries its schema inline.
@@ -84,7 +84,7 @@
                         [:rid :int] [:flights :map] [:pending :map] [:quiet {:optional true} :boolean]
                         ;; tasks root refused to spawn, waiting for main to move for another reason
                         [:refused {:optional true} [:set :seon.task/id]]]
- ;; the incremental reconciler's index of main (lane R3's seon.reconcile/index): desired and
+ ;; the incremental reconciler's index of main (session R3's seon.reconcile/index): desired and
  ;; observed state by id, the derived needs, depths and claims, and the sets the actions read.
  ;; Its parts agree with each other (every id in a set is an attempt it holds), which a
  ;; generator of the parts alone breaks: the census generates the empty index only, and the
@@ -155,7 +155,7 @@
                          ;; the reply's calls of the one tool, eval, in order
                          [:tool-calls {:optional true} [:vector :seon.model/tool-call]]
                          [:truncated? {:optional true} :boolean]
-                         ;; what the call cost beyond them, when the provider says (lane D2)
+                         ;; what the call cost beyond them, when the provider says (session D2)
                          [:reasoning-tokens {:optional true} :int] [:cache-hit-tokens {:optional true} :int] [:cache-miss-tokens {:optional true} :int]
                          ;; how the reply stopped (the provider's finish_reason), the model that made it, its reasoning
                          [:finish-reason {:optional true} :string] [:model {:optional true} :string] [:reasoning {:optional true} :string]]

@@ -1,7 +1,7 @@
 (ns seon.writer
   "The writer: the only d/transact, d/branch! and merge caller, with group commit (drain
   the in-port, one Datahike commit per branch, one flush). From proto/flow f2-final
-  proto.control's writer (lane F2; writer design A, notes/option3-F1-flow.md section 4)."
+  proto.control's writer (session F2; writer design A, notes/option3-F1-flow.md section 4)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
             [seon.program :as program] [seon.merge :as pm] [seon.source :as source] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
@@ -23,7 +23,7 @@
   "seon.merge/three-way of branch b against main, from their merge base over Datahike's
   commit graph (the branch point, or the main the branch last merged), the branch read
   from the store (its agent commits it). data-attrs: the data that merges beside the
-  program (lane M1)."
+  program (session M1)."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.db/branch :seon.merge/data-attrs] [:tuple :seon.host/db :seon.merge/result]]}
   [{:keys [conn]} b data-attrs]
   (let [head (pdb/head conn b)]
@@ -36,7 +36,7 @@
   [why members] (contract/error :seon.writer/refused 'seon.writer/writer-proc why (merge {:ok false} members)))
 
 (defn- merge-refusal
-  "Why branch head (its three-way r against main) cannot merge into main now (lane M1), or
+  "Why branch head (its three-way r against main) cannot merge into main now (session M1), or
   nil: main's program (and declared data) changed since the branch's merge base
   (:seon.merge/behind: a merge task merges main first); the branch has unmerged entries
   (:seon.merge/unmerged); its program calls intern, alter-var-root, eval or load-string,
@@ -74,7 +74,7 @@
                        :seon.error/fix "Declare each function's contract ({:malli/schema [:=> [:cat ...] ...]}) and merge again."}))))
 
 (defn- merge-train
-  "Merge branches into main in ONE commit (a merge train, lane R3; git's octopus merge, every
+  "Merge branches into main in ONE commit (a merge train, session R3; git's octopus merge, every
   member a parent): each member that holds main's program head and is not refused lands, in
   order; a member whose changes meet an earlier member's is behind (it merges main first).
   Members are judged against the same main, so the commit is each one's clean merge.
@@ -109,7 +109,7 @@
           :results (mapv #(or (:refusal %) {:merged? true :tx t :keys (count (:ours (:r %))) :files (source/changed-files (:db-after rep) (:ours (:r %)))}) (:members judged))}]))))
 
 (defn- merge-branch
-  "Merge the branch into main (git: only a branch that contains main's head; lane M1): a
+  "Merge the branch into main (git: only a branch that contains main's head; session M1): a
   train of one. Answers [st result]."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/branch :seon.merge/data-attrs] [:tuple :seon.writer/state :map]]}
   [st o branch data-attrs]

@@ -98,7 +98,7 @@
     No key overlaps, but six-test is red after b's merge agent merges main; it fixes six.
   - :sibling: a and b change two definitions of one namespace; b merges after a, and b's g
     calls a helper b defined, h3, which sorts after it. b's merge agent (forked holding
-    main's program, resuming b's branch) must run b's g (lane T5b's finding: loading in name
+    main's program, resuming b's branch) must run b's g (session T5b's finding: loading in name
     order failed on the helper and left main's stub running).
   - :newns: n creates two namespaces at its REPL (next-review #6, #5): app.newns with a
     function, quoted data and a dynamic var, and app.newns-test whose deftest uses a

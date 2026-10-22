@@ -4,7 +4,7 @@ The machine Seon is built on and for, and the rules that keep builds, disk and p
 
 ## Seeing what runs
 
-`bin/lanes` shows everything running across every checkout at once: each worktree's branch and how far it is from main, its root, the processes under it (count, CPU, memory, threads), its stores' size; then seon processes no checkout claims (orphans: a parent of 1, or a checkout that is gone), the heaviest processes on the machine, and its load and free memory. `bin/lanes -w` repeats it every 5 s. Root reads it when lanes run in parallel and before a session ends; a lane reads it before it reports that nothing of its own is running.
+`bin/worktrees` shows everything running across every checkout at once: each worktree's branch and how far it is from main, its root, the processes under it (count, CPU, memory, threads), its stores' size; then seon processes no checkout claims (orphans: a parent of 1, or a checkout that is gone), the heaviest processes on the machine, and its load and free memory. `bin/worktrees -w` repeats it every 5 s. Root reads it when worktree sessions run in parallel and before a session ends; a worktree session reads it before it reports that nothing of its own is running.
 
 ## The target: a 16 GB MacBook M1
 
@@ -12,11 +12,11 @@ The target is a 16 GB MacBook M1 (owner, 2026-10-22: "I want this system to run 
 
 ## The clock
 
-Seon has one clock: `seon.profile/now-ns`, the machine's monotonic CLOCK_UPTIME_RAW read by a Chez foreign procedure (9.5 ns a read, nothing allocated, 41 ns resolution; measured 2026-10-22), and `seon.profile/ms-since` for "milliseconds since t0". Every process reads the same timeline, so a stamp one process sends (the writer's `:main` commit, a message's `:ns`) is a t0 another can subtract from. The profiler's samples use the same read. `System/nanoTime` (Jolt's, 1 µs and counted from the process's start) and Chez's `current-time` are not used; a new reading of time goes through `seon.profile` (lane DUP-HELPERS, task ``seon.profile/one-monotonic-clock``). Time is measured and recorded, never acted on ([AGENTS.md §4](../AGENTS.md)); [clocks](clocks.md) names every function that reads it.
+Seon has one clock: `seon.profile/now-ns`, the machine's monotonic CLOCK_UPTIME_RAW read by a Chez foreign procedure (9.5 ns a read, nothing allocated, 41 ns resolution; measured 2026-10-22), and `seon.profile/ms-since` for "milliseconds since t0". Every process reads the same timeline, so a stamp one process sends (the writer's `:main` commit, a message's `:ns`) is a t0 another can subtract from. The profiler's samples use the same read. `System/nanoTime` (Jolt's, 1 µs and counted from the process's start) and Chez's `current-time` are not used; a new reading of time goes through `seon.profile` (session DUP-HELPERS, task ``seon.profile/one-monotonic-clock``). Time is measured and recorded, never acted on ([AGENTS.md §4](../AGENTS.md)); [clocks](clocks.md) names every function that reads it.
 
 ## Builds and checks
 
-Builds run as `nice -n 15 bin/build`, in parallel, with no lock (owner, 2026-10-21: "WTF is there a build lock?"; one machine-wide lock queued every lane's build single-file on an 18-core, 128 GB machine where a build peaks under ~2 GB; each worktree builds into its own `target/`, so builds share no mutable state). Every process on a store must use the same LMDB build (`target/lib/liblmdb.dylib`, robust locks); stop a store's processes before a build that changes it.
+Builds run as `nice -n 15 bin/build`, in parallel, with no lock (owner, 2026-10-21: "WTF is there a build lock?"; one machine-wide lock queued every worktree's build single-file on an 18-core, 128 GB machine where a build peaks under ~2 GB; each worktree builds into its own `target/`, so builds share no mutable state). Every process on a store must use the same LMDB build (`target/lib/liblmdb.dylib`, robust locks); stop a store's processes before a build that changes it.
 
 Full checks run one at a time, niced (there is no lock: the owner removed it). Iterate with single modes.
 
@@ -33,12 +33,12 @@ Leave nothing running when you finish, and say so in your report. Kill only PIDs
 ## Disk stays bounded
 
 Disk stays bounded (owner, 2026-10-21: "cleanup shit we aren't using anymore and build in rules so this doesn't get out of control"; the tree had reached 261 GB):
-- a lane's worktree is removed in the landing that merges it (`bin/worktree --remove NAME`, run by root after the merge; the branch stays in git);
-- a lane's scratch lives inside its worktree (`target/`, `runs/`) and goes with it; nobody creates a new top-level directory in `~/src/seon-jolt` (the fork repositories [forks](forks.md) lists, `notes/`, `bin/`, `test-results/` (test results by reach digest, shared by every checkout) and the worktrees are the only ones);
+- a worktree session's worktree is removed in the landing that merges it (`bin/worktree --remove NAME`, run by root after the merge; the branch stays in git);
+- a worktree session's scratch lives inside its worktree (`target/`, `runs/`) and goes with it; nobody creates a new top-level directory in `~/src/seon-jolt` (the fork repositories [forks](forks.md) lists, `notes/`, `bin/`, `test-results/` (test results by reach digest, shared by every checkout) and the worktrees are the only ones);
 - what is kept is what git and the store record (commits, task facts, notes); build output, compile caches and finished experiments' stores are regenerable and are deleted when their checkout or experiment ends;
 - root prunes each checkout's `target/check/` to its last three runs at each landing, and a run's old generations (each a tree and a binary, ~200 MB) to the one running and the one before it.
 
-Your scratch: under your worktree (`target/`, `runs/`) or a folder named for your lane. The session scratch folder is shared.
+Your scratch: under your worktree (`target/`, `runs/`) or a folder named for your worktree. The session scratch folder is shared.
 
 ## Secrets and paid runs
 

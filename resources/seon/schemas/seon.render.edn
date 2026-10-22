@@ -1,4 +1,4 @@
-;; Renders (seon.render, lane W2; W1's render contract, notes/option3-W1-render.md §1): a
+;; Renders (seon.render, session W2; W1's render contract, notes/option3-W1-render.md §1): a
 ;; render takes a value and an env and answers one or both faces. A schema declares its
 ;; renders in its own properties ({:seon.render/html sym :seon.render/ai sym}); selection is
 ;; the value's own override key, else the declared render (the schema, then its parents),

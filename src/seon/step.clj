@@ -1,5 +1,5 @@
 (ns seon.step
-  "The step-fn contract as the one process abstraction (lane F2; proto/flow f2-final
+  "The step-fn contract as the one process abstraction (session F2; proto/flow f2-final
   proto.step and proto.proc). Root's procs run under
   core.async.flow. A process that must stay single-threaded so it can fork (the fork
   server, an agent) runs the SAME step-fn on its own thread with `run-loop`, and

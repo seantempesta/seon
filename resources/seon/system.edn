@@ -9,7 +9,7 @@
 ;; value the boot step holds (a connection, a channel, a dial; seon.root/bindings), put in
 ;; at build. :conns is the dependency graph: procs park on their inputs until upstream
 ;; sends, readiness is each proc's ping-map-fn, and there is no start order.
-;; :fx declares the effect kinds (lane FX1): each becomes an owner :fx/<kind> and its lanes.
+;; :fx declares the effect kinds (session FX1): each becomes an owner :fx/<kind> and its workers.
 {:procs
  {:api {:proc seon.root/api-proc
         ;; room for every answer the writer can owe while the api is not reading
@@ -29,7 +29,7 @@
   :reconciler {:proc seon.reconcile/reconciler-proc
                :chan-opts {:main {:buf-or-n :bind/reconciler-buf}}
                :args {:boot :bind/boot :judge :bind/judge :source :bind/source}}
-  ;; root's web (lane W2): the render proc renders what changed into patches per view
+  ;; root's web (session W2): the render proc renders what changed into patches per view
   ;; (:compute, never waits); the web proc owns the listener and the tabs (:io). Port:
   ;; 127.0.0.1 only, :seon.config.web/port; 0 serves nothing
   :render {:proc seon.render.proc/render-proc
@@ -37,15 +37,15 @@
   :web {:proc seon.web/web-proc
         :args {:port :bind/web-port}}}
  :fx
- {:echo {:perform seon.fx/echo :lanes 1}
-  :file {:perform seon.fx/write-file :lanes 1}
-  :source {:perform seon.fx/read-source :lanes 1}
-  :git {:perform seon.fx/git-commit :lanes 1}
-  :deps {:perform seon.fx/resolve-deps :lanes 1}
+ {:echo {:perform seon.fx/echo :workers 1}
+  :file {:perform seon.fx/write-file :workers 1}
+  :source {:perform seon.fx/read-source :workers 1}
+  :git {:perform seon.fx/git-commit :workers 1}
+  :deps {:perform seon.fx/resolve-deps :workers 1}
   ;; the next generation (my.root/build!): bin/build seon of the last merges commit, niced, ~25-45 s
-  :build {:perform seon.fx/build :lanes 1}
+  :build {:perform seon.fx/build :workers 1}
   ;; the model provider is only root's: the agents never hold the key
-  :model {:perform seon.fx/model :lanes :bind/model-lanes :ctx {:provider :bind/provider} :rate :bind/model-rate}}
+  :model {:perform seon.fx/model :workers :bind/model-workers :ctx {:provider :bind/provider} :rate :bind/model-rate}}
  :conns
  [[[:writer :to-fork-server] [:fork-server :cmd]]
   [[:writer :to-api] [:api :from-writer]]

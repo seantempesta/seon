@@ -1,5 +1,5 @@
 (ns seon.root
-  "Root: the control process (lane F2, notes/option3-F1-flow.md; proto/flow f2-final
+  "Root: the control process (session F2, notes/option3-F1-flow.md; proto/flow f2-final
   proto.control's api, reader, boot and API). Boots the database
   (Datahike, E4a index), forks the single-threaded fork server before any thread exists,
   then runs ONE root graph of four procs:
@@ -35,7 +35,7 @@
 ;; The api: where requests come in
 ;; ====================================================================================
 
-;; ---- problems root observes (lane D2): recorded as seon.error facts on main -----------
+;; ---- problems root observes (session D2): recorded as seon.error facts on main -----------
 
 (defn- gone
   "The one error map of a request no live agent can take (agent id, or nil)."
@@ -194,7 +194,7 @@
 (defn- start-agent
   "Register a new agent: its socket (root keeps one end; the other goes to whoever forks
   it), its proc definition (added to the graph by update! at the end of the step). Root's
-  end is a jolt.async.remote end (lane RC1): its :in is the stand-in's :from, so the
+  end is a jolt.async.remote end (session RC1): its :in is the stand-in's :from, so the
   agent's port is an ordinary channel. Answers [st id agent-end-fd]."
   {:malli/schema [:=> [:cat :seon.root/api-state :map] [:tuple :seon.root/api-state :seon.agent/id :seon.lib/fd]]}
   [st {:keys [branch task cloned-from]}]
@@ -228,7 +228,7 @@
         v (get-in st [:view :agents agent])
         ;; stopped by root: a kill, or the end of its attempt (:ended); else it died
         stop (stopped-statuses (:status v))
-        ;; neither stopped by root nor killed: a death, with what root saw of it (lane D2)
+        ;; neither stopped by root nor killed: a death, with what root saw of it (session D2)
         died (when-not (or rid stop)
                (contract/error :seon.agent/died 'seon.root/api-proc (str "agent " (name agent) " died" (exit-text (:exit v)))
                                {:agent agent :pid (or pid (:pid v)) :exit (:exit v)
@@ -530,7 +530,7 @@
          st (if (and (seq (::busy st)) (not (::stall-due st)) (pos? (:stall-ms st)) (:back st))
               (let [back (:back st)]
                 ;; a go block parks on the timer (Jolt's take! with a callback forks a thread per
-                ;; pending take: lane D2's finding, seen as one thread per root in lifecycle)
+                ;; pending take: session D2's finding, seen as one thread per root in lifecycle)
                 (a/go (a/<! (a/timeout (quot (:stall-ms st) 2))) (a/>! back {:op :stall-check}))
                 (assoc st ::stall-due true))
               st)
@@ -722,7 +722,7 @@
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
                          :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf)
-                         :model-lanes (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
+                         :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
                          :web-port (cfg/value :seon.config.web/port)})
         decl (system/read-decl (cfg/value :seon.config.root/system-path))
         built (system/build decl bindings nil)
@@ -917,7 +917,7 @@
   ([sys p] (call! sys {:op :apply :decl (system/read-decl p) :bindings (:bindings sys)})))
 
 (defn merge!
-  "Root merges the agent's branch into main (seon.merge, lane M1); a promise of {:merged?
+  "Root merges the agent's branch into main (seon.merge, session M1); a promise of {:merged?
   :tx ...}, or :seon.merge/behind when main changed since the branch's merge base (merge
   main first), :seon.merge/unmerged, :seon.merge/uncontracted. Unless opts has :gate?
   false, the agent's tests run first in a fork of it. opts {:data-attrs}: the data that
@@ -1019,7 +1019,7 @@
         (not (:ok fact)) (assoc :stop-fact-refused fact))))))
 
 ;; ====================================================================================
-;; Root's threads: a declared number (lane THREADS)
+;; Root's threads: a declared number (session THREADS)
 ;; ====================================================================================
 
 (defn declared-threads

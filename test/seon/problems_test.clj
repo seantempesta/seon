@@ -1,5 +1,5 @@
 (ns seon.problems-test
-  "Lane D2: every class of problem lands as a typed fact written by its observer, and
+  "Session D2: every class of problem lands as a typed fact written by its observer, and
   seon.problems/report lists them by class at a cost that follows the problems, not the
   program. Run: bin/test seon.problems-test"
   (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is testing]] [clojure.edn :as edn]
@@ -230,7 +230,7 @@
 
 (deftest an-effect-error-is-counted-by-root
   (testing "the owner of an effect kind tells the api about each error outcome"
-    (let [st (#'fx/owner-proc {:kind :model :lanes 1 :work (a/chan 4) :back (a/chan 4)})
+    (let [st (#'fx/owner-proc {:kind :model :workers 1 :work (a/chan 4) :back (a/chan 4)})
           outcome (contract/error :seon.model/rate-limited 'seon.model/complete "HTTP 429: slow down" {:status 429})
           [_ outs] (#'fx/owner-proc (assoc st :busy 1) :done {:dest {:agent :a5 :op :fx-reply :k 1} :outcome outcome})
           pr (first (filter #(= :problem (:op %)) (:out outs)))]

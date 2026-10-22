@@ -1,14 +1,14 @@
 #!/bin/zsh
-# bin/lanes   what is running and what it costs, across every checkout: each worktree's branch and
+# bin/worktrees   what is running and what it costs, across every checkout: each worktree's branch and
 # how far it is from main, its root (bin/root status), the processes under it (count, CPU %,
 # memory, threads), its stores' size; then seon processes no checkout claims (orphans: parent 1,
 # or a checkout that is gone), the heaviest processes, and the machine's load and free memory.
-# Read-only. `bin/lanes -w` repeats it every 5 s (a view for a person, not a decision).
+# Read-only. `bin/worktrees -w` repeats it every 5 s (a view for a person, not a decision).
 setopt no_nomatch
 MAIN=$(cd "$(dirname "$0")/.." && pwd)
 COMMON=$(cd "$(git -C "$MAIN" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
 show() {
-  print -P "%B== lanes $(date +%H:%M:%S)%b  (load $(sysctl -n vm.loadavg | awk '{print $2, $3, $4}'), $(sysctl -n hw.ncpu) cores, memory free $(memory_pressure 2>/dev/null | awk -F': ' '/free percentage/{print $2}'))"
+  print -P "%B== worktrees $(date +%H:%M:%S)%b  (load $(sysctl -n vm.loadavg | awk '{print $2, $3, $4}'), $(sysctl -n hw.ncpu) cores, memory free $(memory_pressure 2>/dev/null | awk -F': ' '/free percentage/{print $2}'))"
   ps -Ao pid=,ppid=,pcpu=,rss=,command= > /tmp/lanes.$$
   printf '%-22s %-22s %6s %-28s %5s %6s %8s %7s %8s\n' CHECKOUT BRANCH AHEAD ROOT PROCS CPU% RSS-MB THREADS STORES
   claimed=""

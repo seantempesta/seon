@@ -1,7 +1,7 @@
 (ns seon.render.ui
   "The HTML renders of root's web: render functions all the way up (DECISIONS, \"Renders,
   the agent UI and context\"; W1's proto.render.ui). Ported from proto/web's
-  proto.web.view (lane L2's dashboard and L4's polish): layout, tiles, swarm grid, cards,
+  proto.web.view (session L2's dashboard and L4's polish): layout, tiles, swarm grid, cards,
   event stream, the REPL box per card, the Phosphor theme's classes (resources/public/app.css).
 
   Two layouts are declared renders: `system-page` (:seon.render/system, root's whole
@@ -342,7 +342,7 @@
    [:tr {:class (str "at s-" (kname status) (when outcome (str " o-" (kname outcome))))}
     [:td [:code id]]
     [:td (if agent [:a {:href (str "/agent/" (dom-id agent))} (kname agent)] "–")
-     (when (= "outside" (:model env)) [:span {:class "muted" :title "worked from outside (a lane through root's server): no turn loop, its turns and tokens are not counted here"} " · outside"])]
+     (when (= "outside" (:model env)) [:span {:class "muted" :title "worked from outside (a worktree session through root's server): no turn loop, its turns and tokens are not counted here"} " · outside"])]
     [:td [:span {:class (str "pill s-" (kname status))} (kname status)]]
     [:td (str (or turns "–"))] [:td (group3 tokens)]
     [:td {:title (str reason)} (kname outcome)]

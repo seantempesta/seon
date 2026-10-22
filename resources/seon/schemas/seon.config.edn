@@ -1,4 +1,4 @@
-;; The config (lane CONFIG, owner 2026-10-21: "the only things that should stay are documented
+;; The config (session CONFIG, owner 2026-10-21: "the only things that should stay are documented
 ;; config schemas that we are porting from seon if they are relevant"). The values, with each
 ;; key's unit, provenance and what happens at its bound, are in resources/seon/config/default.edn;
 ;; the keys' schemas are in seon.config.<area>.edn, v1's shape (~/src/seon resources/seon/schemas/

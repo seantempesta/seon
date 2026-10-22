@@ -3,11 +3,11 @@
   commit's tx-data with d/db-with in commit order, and forks agents on request. Commits
   and fork requests arrive on one FIFO pipe, so an agent forked after commit k sees k:
   the agent's branch was created by the writer at exactly that point. Its one socket to
-  root (lane F2, T1's transport) carries commands down and events up, and each agent's
+  root (session F2, T1's transport) carries commands down and events up, and each agent's
   socket arrives with its fork request (SCM_RIGHTS). It reaps its
   children and reports their exits. It never starts a thread, a future or core.async.
 
-  It is a step-fn (`server-step`), run on its one thread by `seon.step/run-loop` (lane
+  It is a step-fn (`server-step`), run on its one thread by `seon.step/run-loop` (worktree session
   F2): the same process contract as root's Flow procs, with pause, resume, stop and ping
   as messages on its pipe."
   (:refer-clojure :exclude [defn defn-])
@@ -70,7 +70,7 @@
                        :mismatch (:mismatch st) :mem-mb (lib/r2 (lib/real-mb)) :os-threads (lib/nthreads)
                        :active-threads (lib/active-threads)}]}]
      :static (let [t0 (profile/now-ns)] (lib/static!) [st {:ev [{:ev :static :ms (profile/ms-since t0)}]}])
-     ;; a standby (lane F2): a fork of this server, idle on its own named pipes until root
+     ;; a standby (session F2): a fork of this server, idle on its own named pipes until root
      ;; promotes it, so that no fork after boot ever comes from root (multithreaded).
      ;; The previous standby is killed: one standby at a time.
      :standby (fork-carrying! st #(main (:db st) % false)

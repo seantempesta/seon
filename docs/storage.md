@@ -23,7 +23,7 @@ Inline values were the cause. Every commit rewrites the tail leaf of `:eavt` and
 
 ## Entity ids
 
-The entity whose unique attribute holds a value is found by `seon.db/eid`: one seek in that attribute's AVET index, never a Datalog query (a query planned per call cost ~95 µs and 100 KB at 100 tasks). It is the one lookup; every namespace that needs an entity id by value calls it. Reading an entity's facts needs no id first: a pull by lookup ref (`(d/pull db attrs [:seon.root/id :root])`) answers nil when no entity holds the value, so root's facts, a task, an attempt or an error record are pulled directly (lane DUP-HELPERS, task ``seon.db/one-entity-id-lookup``).
+The entity whose unique attribute holds a value is found by `seon.db/eid`: one seek in that attribute's AVET index, never a Datalog query (a query planned per call cost ~95 µs and 100 KB at 100 tasks). It is the one lookup; every namespace that needs an entity id by value calls it. Reading an entity's facts needs no id first: a pull by lookup ref (`(d/pull db attrs [:seon.root/id :root])`) answers nil when no entity holds the value, so root's facts, a task, an attempt or an error record are pulled directly (session DUP-HELPERS, task ``seon.db/one-entity-id-lookup``).
 
 ## History
 

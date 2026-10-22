@@ -1,5 +1,5 @@
 (ns seon.e2e
-  "Tasks end to end with real agent processes (lanes R1 and M1's proto.agents.e2e). Each run
+  "Tasks end to end with real agent processes (sessions R1 and M1's proto.agents.e2e). Each run
   is a row of data that one runner works (run-scenario): its specs, its boot, what a fresh
   agent must print on main afterwards and what else it asserts. The rows: the six-task graph
   with a cancel, a root restart in two phases, the merge scenarios (seon.fixtures/scenarios),

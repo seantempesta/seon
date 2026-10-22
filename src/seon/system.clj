@@ -39,7 +39,7 @@
   {pid (cond-> {:proc (flow/process (step-fn proc)) :args (or args {})} chan-opts (assoc :chan-opts chan-opts))})
 
 (defn- build-fx
-  "One effect kind's owner and lanes (seon.fx/procs), its perform resolved."
+  "One effect kind's owner and workers (seon.fx/procs), its perform resolved."
   {:malli/schema [:=> [:cat :keyword :map :seon.host/chan] :map]}
   [kind spec back]
   (fx/procs {kind (cond-> (update spec :perform step-fn) (nil? (:rate spec)) (dissoc :rate))} back))

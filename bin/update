@@ -7,7 +7,7 @@
 #   4. build (bin/build: each step skips what is up to date);
 #   5. restart the standing root on its store (bin/root stop, start): it boots on main's build and
 #      imports its source tree (docs/source.md).
-# Lanes land first (root merges their branches into main, docs/landing.md); then bin/update.
+# Worktree sessions merge first (root merges their branches into main, docs/landing.md); then bin/update.
 # Every step's exit status counts; the last line is UPDATE OK or UPDATE FAILED.
 setopt pipefail
 MAIN=$(cd "$(dirname "$0")/.." && pwd); MERGES=${MAIN:h}/next-merges

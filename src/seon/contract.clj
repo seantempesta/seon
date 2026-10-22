@@ -1,5 +1,5 @@
 (ns seon.contract
-  "From proto/core 9f5100a proto.contract (lane G1). The guarantee: every platform function carries a Malli function schema over named,
+  "From proto/core 9f5100a proto.contract (session G1). The guarantee: every platform function carries a Malli function schema over named,
   registered schemas, and every call is checked on entry (inputs, arity) and on exit
   (output) by malli's own `m/-instrument`, as Seon's `seon.instrument/compiled-wrapper`
   does. A refusal throws an ex-info whose data is the one error map

@@ -1,5 +1,5 @@
 (ns seon.repl
-  "An agent's REPL speaking nREPL's message model on its one thread (lane F2, after lane
+  "An agent's REPL speaking nREPL's message model on its one thread (session F2, after worktree session
   R2's r2.repl; the owner chose nREPL's model for agents).
 
   The agent's process runs `agent-step` (the step-fn contract) under seon.step/run-loop.

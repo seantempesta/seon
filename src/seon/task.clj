@@ -5,8 +5,8 @@
   `:seon.task/needs` is the one dependency edge.
 
   This namespace is the one writer of those facts (tx-data builders; root transacts
-  them) and the one reader (pull shapes for the reconciler and the agent). From lanes R1
-  and M1's proto.agents.task; the attributes are derived from resources/seon/schemas (lane D1)."
+  them) and the one reader (pull shapes for the reconciler and the agent). From sessions R1
+  and M1's proto.agents.task; the attributes are derived from resources/seon/schemas (session D1)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn] [seon.merge :as pm] [seon.db :as pdb] [seon.edn :as sedn]
             [seon.print :as print] [seon.ref :as ref]))

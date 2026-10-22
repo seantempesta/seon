@@ -1,5 +1,5 @@
 (ns seon.web-test
-  "Root's web proc (lane W2) as a plain function: a UI call becomes root's requests (and,
+  "Root's web proc (session W2) as a plain function: a UI call becomes root's requests (and,
   for root's functions, its record on main); a patch is framed once for Datastar and offered to
   every tab of its view; a tab that opened gets the view's keyframe; a callback written as
   data serializes to the stateless /call route. Run: bin/test seon.web-test"

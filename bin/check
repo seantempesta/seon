@@ -14,7 +14,7 @@
 # One store, many branches, as in production (owner, 2026-10-21 and 2026-10-22: "The
 # branches are supposed to be light. I'm guessing making a new store every time isn't"): a
 # run takes the one store it is given: the checks' own, target/check-store (SEON_STORE names
-# another), never the checkout's runs/store, which is its standing or lane root's, made
+# another), never the checkout's runs/store, which is its standing or worktree root's, made
 # without the example program the steps work on (steps failed falsely on it). It is seeded
 # only when missing, by a full run's seed step and before a single mode, and every root a step boots
 # works on a branch of it, the step's own main check-<step> (SEON_MAIN), never the store's
@@ -86,7 +86,7 @@ step lmdb-kill "" "$ROOT/target/lmdb-kill" "$OUT/lmdb-kill.mdb"
 echo "== contracts"; step contracts ":contracted|:uncontracted|^CONTRACTS " run contracts
 echo "== census (no [:fn] without :gen; mg/check on every pure contract, in the release binary)"
 # in K shards at once, each a process checking every Kth contracted var (seon.check/census);
-# each shard's exit status counts. K = 4 until the config file holds it (lane CONFIG).
+# each shard's exit status counts. K = 4 until the config file holds it (session CONFIG).
 K=4; CP=()
 for i in $(seq 0 $((K-1))); do run census $i/$K > "$OUT/census-$i.log" 2>&1 & CP+=($!); done
 for i in $(seq 0 $((K-1))); do

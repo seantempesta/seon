@@ -1,5 +1,5 @@
 (ns seon.turn
-  "The agent's turn loop, inside its own process (lanes R1 and M1's proto.agents.turn). A
+  "The agent's turn loop, inside its own process (sessions R1 and M1's proto.agents.turn). A
   turn observes the branch (the proofs run in a fork of this agent, the done rule), and
   either ends the attempt or acts: the context goes to the model (one interop edge), each of
   the reply's calls of the one tool, eval, goes through the one REPL path
@@ -79,7 +79,7 @@
 
 (defn- end!
   "The attempt's end: the live runtime staged onto the branch, the end written there (with
-  the error that ended it and the turns' waste, as data: lane D2), and the branch committed
+  the error that ended it and the turns' waste, as data: session D2), and the branch committed
   (a turn's end commits the agent's run-ahead writes)."
   {:malli/schema [:=> [:cat :map :seon.attempt/outcome [:maybe :string] [:maybe :map]] :seon.turn/end]}
   [{:keys [turn tokens t0 attempt log]} outcome reason error]
@@ -132,7 +132,7 @@
 (defn- act!
   "One model turn: the context of what was observed to the model, the reply's eval calls
   through the one REPL path, each answered as its own result, the turn's facts on the branch. Answers the loop state after it, or the
-  provider error. The model call is an effect (my.fx :model, lane FX1): root's model owner
+  provider error. The model call is an effect (my.fx :model, session FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
   {:malli/schema [:=> [:cat :map :map [:maybe :string]] [:or :map :map]]}
   [{:keys [turn tokens max-turns merge? attempt] :as st} {:keys [results tests-ms] :as obs} model-name]

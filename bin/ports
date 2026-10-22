@@ -6,7 +6,7 @@
 # writes once when it is missing: the main tree (next/) gets 7888 7777, the owner's; each
 # worktree (next-NAME) its own block K from ../worktree-ports (one line per worktree, "NAME K";
 # server 7900+10K, web 7901+10K), allocated once under a lock and freed by
-# bin/worktree --remove. No two checkouts share a port, so every lane can run its own root
+# bin/worktree --remove. No two checkouts share a port, so every worktree session can run its own root
 # beside the owner's. Edit local.edn to move them; this reads what the config resolves.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 NAME=${ROOT:t}

@@ -1,10 +1,10 @@
 (ns seon.agent-proc
   "An agent's proc in root: one proc of the root graph per agent, added and removed by
   the api with flow/update!. It owns root's end of the agent's socket, a jolt.async.remote
-  end (lane RC1): the agent's frames arrive as values on the end's :in, which IS this
+  end (session RC1): the agent's frames arrive as values on the end's :in, which IS this
   proc's :from in-port, and what it sends the agent is put on the end's :out. It owns the
   agent's process and passes Flow's pause, resume and stop on to the agent's own loop.
-  From proto/flow f2-final proto.control (lane F2)."
+  From proto/flow f2-final proto.control (session F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.sock :as sock] [seon.step :as step]
             [jolt.async.remote :as remote] [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
@@ -41,7 +41,7 @@
 
 (def stall-ms
   "Silence, ms, after which a busy agent is observed stalled once (a recorded fact, never an
-  end; lane D2). A guessed tolerance (FENCES finding 5) and a clock (owner 2026-10-21: no
+  end; session D2). A guessed tolerance (FENCES finding 5) and a clock (owner 2026-10-21: no
   clocks decide anything), so not a config key; it goes with
   seon.fences/a-stall-is-past-the-requests-own-bound. root's start! takes :stall-ms (the
   problems check provokes a stall at 1,000). 0: no check."

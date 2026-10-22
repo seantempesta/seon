@@ -1,5 +1,5 @@
 (ns seon.reconcile
-  "The one reconciler (lanes R1 and M1's proto.agents.reconcile): a pure function of main's
+  "The one reconciler (sessions R1 and M1's proto.agents.reconcile): a pure function of main's
   db value (desired state: the tasks; observed state: attempts, their ends and proof
   results, root's boot) to the minimal actions that close the gap, and the done rule
   `done-refusals` (one function, used by root to judge and by the agent to know when to
@@ -589,7 +589,7 @@
                                                                              (str "seon.turn/work! threw: " (:seon.error/message worked-error))
                                                                              "the agent wrote no end")))
                                       (System/currentTimeMillis) (or base-t (:max-tx main)))
-                    ;; the problems measured at its end (lane D2): red assertions, cost verdicts,
+                    ;; the problems measured at its end (session D2): red assertions, cost verdicts,
                     ;; the error that ended it, its waste
                     (cond-> {}
                       (seq (:failures run-problems)) (assoc :seon.attempt/failures (:failures run-problems))
