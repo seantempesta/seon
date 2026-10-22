@@ -63,7 +63,7 @@
  ;; the agent window's head: its view entry, attempt and task, the totals over its turns
  :seon.render/zoom-head [:map {:seon.render/html seon.render.ui/zoom-head} [:agent :map] [:turns :map]]
  ;; the attempt's turns, each row serialized ahead by its declared render (seon.render.ui/turn-row)
- :seon.render/turns [:map {:seon.render/html seon.render.ui/turns-list} [:rows [:sequential :string]]]
+ :seon.render/turns [:map {:seon.render/html seon.render.ui/turns-list} [:rows [:sequential :string]] [:turns nat-int?]]
  ;; the input at the bottom of the agent's window
  :seon.render/agent-input [:map {:seon.render/html seon.render.ui/agent-input} [:id :keyword] [:live? :boolean]]
  ;; the agent window's live tiles, the last changed first, each serialized ahead

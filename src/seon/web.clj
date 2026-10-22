@@ -115,9 +115,13 @@
     {:status 503 :headers {"Content-Type" "text/plain"} :body "not rendered yet: reload"}))
 
 (defn- view-of
-  "The view a path names: :root, or an agent's id."
+  "The view a path names: :root, an agent's id, or an attempt (attempt:<id>, its id's agent
+  window as that attempt ran: agent ids start again each boot, an attempt's never does)."
   {:malli/schema [:=> [:cat [:maybe :string]] :any]}
-  [s] (if (or (str/blank? s) (= "root" s)) :root (keyword s)))
+  [s]
+  (cond (or (str/blank? s) (= "root" s)) :root
+        (str/starts-with? s "attempt:") (keyword "attempt" (str/replace-first s "attempt:" ""))
+        :else (keyword s)))
 
 (defn handler
   "The routes, as an edge in front of the proc's :http in-port."
@@ -128,11 +132,13 @@
       (let [uri (:uri req) m (:request-method req) q (form-params (:query-string req))]
         (cond
           (and (= m :get) (= uri "/")) (html-response (ask! ch {:op :page :view :root}))
-          ;; the whole request an agent's turn read, made again from its basis (its page links it)
-          (and (= m :get) (str/starts-with? uri "/agent/") (str/ends-with? uri "/turn"))
+          ;; the whole request an agent's turn read, made again from its basis (its window links it)
+          (and (= m :get) (= uri "/turn"))
           {:status 200 :headers {"Content-Type" "text/plain; charset=utf-8" "Cache-Control" "no-store"}
-           :body (str (ask! ch {:op :turn-text :agent (keyword (subs uri 7 (- (count uri) 5))) :turn (get q "id")}))}
+           :body (str (ask! ch {:op :turn-text :agent (view-of (get q "view")) :turn (get q "id")}))}
           (and (= m :get) (str/starts-with? uri "/agent/")) (html-response (ask! ch {:op :page :view (view-of (subs uri 7))}))
+          (and (= m :get) (str/starts-with? uri "/attempt/"))
+          (html-response (ask! ch {:op :page :view (view-of (str "attempt:" (java.net.URLDecoder/decode (subs uri 9) "UTF-8")))}))
           (and (= m :get) (= uri "/feed"))
           (let [out (a/chan 64)]
             (a/>!! ch {:op :open :view (view-of (get q "view")) :ch out})
@@ -200,7 +206,7 @@
   (when body
     (str "<!doctype html>"
          (h/html (ui/shell (if (= :root view) "Seon on Jolt · root" (str "Seon on Jolt · " (name view)))
-                           (str "/feed?view=" (if (= :root view) "root" (name view)))
+                           (str "/feed?view=" (ui/view-param view))
                            (h/raw body))))))
 
 (defn- stats
