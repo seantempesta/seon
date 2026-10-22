@@ -574,10 +574,12 @@
 (defn- dir-bytes [path] (reduce + (map #(.length %) (filter #(.isFile %) (file-seq (java.io.File. path))))))
 
 (defn- main-data-datoms
-  "Main's datoms but root's own facts (:seon.root/*: its quiescence report, its collection
-  record), which a restarted root writes anew: what a restart must give back exactly."
+  "Main's datoms but root's own facts (:seon.root/*: its boot, its quiescence report, its
+  collection record) and every transaction entity's own datoms (:db/txInstant, e = tx): a
+  restarted root writes its facts anew in transactions of its own (boot, quiescent, collected:
+  three :db/txInstant datoms more), so what a restart must give back exactly is the rest."
   [sys]
-  (count (remove #(= "seon.root" (namespace (:a %))) (d/datoms @(:conn sys) :eavt))))
+  (count (remove #(or (= "seon.root" (namespace (:a %))) (= (:e %) (:tx %))) (d/datoms @(:conn sys) :eavt))))
 
 (defn durable-write
   "Phase 1 (a process of its own): boot on main branch nm of the one store (made from its
@@ -625,7 +627,9 @@
         boot-ms (lib/r2 (lib/ms-since t0))
         st (c/state sys {:datoms true})
         _ (out! "recovered in " boot-ms " ms: " (:store st) " main " (:main st))
-        main-ok (= (:main-datoms expect) (main-data-datoms sys))
+        md (main-data-datoms sys)
+        main-ok (= (:main-datoms expect) md)
+        _ (out! "main's data datoms: phase 1 " (:main-datoms expect) ", recovered " md)
         n (c/spawn! sys {:task "born after the restart"})
         _ (await-status sys [n] #{:idle} 5000)
         p1 (fn [id forms] (mapv (juxt :printed :recorded) @(c/submit! sys id forms)))
