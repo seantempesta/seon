@@ -69,7 +69,7 @@ The same method serves our lanes and Seon's agents: small changes, integrated of
 
 Its references are derived from the plan's citations by the one parser ([references](docs/references.md)), and the names it changes are its write set. **A lane's brief is its task** (owner, 2026-10-21: process, not whim): root writes what the lane needs into the task and the wiki sections it cites. What anyone learns goes back into the task or that section, never only into a report. Order: delete first, then foundations (a shared interface lands first as its own small task), then fixes.
 
-**Every ready task runs now, in parallel** (owner, 2026-10-21: "get rid of all of it": no lane cap, no locks, no waiting). Root launches every ready task whose write set doesn't overlap a running lane's. Each lane works in its own worktree (`bin/worktree NAME`: `../next-NAME` on `jolt/NAME`). Lanes waiting on a dependency read and plan, and keep nothing running.
+**Every ready task runs now, in parallel** (owner, 2026-10-21: "get rid of all of it": no lane cap, no locks, no waiting). Lanes are truly independent (owner, 2026-10-22: "Each lane should be able to do anything they want to the codebase, fully test it and then we can shut it down and merge it"): each works in its own worktree (`bin/worktree NAME`: `../next-NAME` on `jolt/NAME`) on its own root and stores, may change any file, runs the full `bin/test` and `bin/check` there, and stops; root merges and resolves conflicts at landing. Write sets inform root's landing order; they never fence a lane. Lanes waiting on a dependency read and plan, and keep nothing running.
 
 **A lane's method:**
 1. **Learn:** find the wiki sections, tasks and code for the problem; read what v1 did (`~/src/seon`, read-only); research the field's best known way (web, `../bin/agy-agent`), and verify it. Cite what you find in the plan; where a section and the code disagree, that is a wiki edit the task owes.
@@ -175,7 +175,7 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
 ## 8. The machine
 
 - **The target is a 16 GB MacBook M1** (owner, 2026-10-22). Seon stays within `:seon.config.machine/memory-mb`, and `bin/check scale` fails past it.
-- **Builds:** `nice -n 15 bin/build`, in parallel, no lock. Full checks run one at a time, niced. Every process on a store uses the same LMDB build. Details, and the disk rules (worktrees removed at landing, no new top-level directories, pruning): [machine](docs/machine.md).
+- **Builds:** `nice -n 15 bin/build`, in parallel, no lock. Full checks run niced, each lane in its own worktree. Every process on a store uses the same LMDB build. Details, and the disk rules (worktrees removed at landing, no new top-level directories, pruning): [machine](docs/machine.md).
 - **Never flood it.** Anything that makes threads or processes starts at n ≤ 100 under `nice -n 15`; kill your own process past 200 threads. One experiment at a time.
 - **Leave nothing running when you finish,** and say so. Kill only PIDs you started; never `pkill` or `killall`. Delete only paths you created. A process that must outlive a tool call is double-forked (`bin/root` does).
 - **Git in a worktree:** `git -C` on your own checkout only; never `git submodule` in a worktree (after merging main, `bin/worktree --sync NAME` from the main tree); never bare `git stash`; never `checkout`, `restore` or `reset` on paths you don't own; commit explicit paths; never push.
