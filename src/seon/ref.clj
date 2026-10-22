@@ -7,7 +7,7 @@
   paragraph boundaries) in one pass over the text."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.db :as pdb] [seon.reader :as reader]
-            [clojure.string :as str] [clojure.java.io :as io] [datahike.api :as d] [seon.config :as cfg] [seon.fx :as fx]))
+            [clojure.string :as str] [clojure.java.io :as io] [datahike.api :as d] [seon.config :as cfg]))
 
 (def roots
   "The checkout's top-level entries (docs, src, AGENTS.md, ...), read at first use: the bases
@@ -521,21 +521,23 @@
                depth)))))
 
 (defn- pin
-  "The revision the checkout pins the reference-code submodule at path to (its gitlink, as
-  `git ls-files -s` lists it), or nil for any other path."
-  {:malli/schema [:=> [:cat :string :string] [:maybe :string]]}
-  [checkout path]
+  "The revision main's source pins the reference-code submodule at path to (root's import
+  records each gitlink on its :seon.root/source fact), or nil for any other path or when
+  root imported no source."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]]}
+  [db path]
   (let [[top sub] (str/split path #"/")]
     (when (and (= "reference-code" top) sub)
-      (second (re-find #"^160000 ([0-9a-f]{40}) " (fx/git! {} checkout ["ls-files" "-s" "--" (str top "/" sub)] nil))))))
+      (get-in (d/pull db [:seon.root/source] [:seon.root/id :root]) [:seon.root/source :pins (str top "/" sub)]))))
 
 (defn file-view
   "File path of the checkout as depth shows it, read now: a Markdown file by the one parse and
   the one rule (`view`, anchor or else its first section; at :code its own text), any
   other file by its address and line count, the text whole at :code. A file of reference-code
-  carries the revision it is pinned at. nil when there is no such file or no such anchor."
-  {:malli/schema [:=> [:cat :string :string [:maybe :string] :seon.ref/depth] [:maybe :seon.ref/view]]}
-  [checkout path anchor depth]
+  carries the revision main's source pins it at (pin, from db). nil when there is no such
+  file or no such anchor."
+  {:malli/schema [:=> [:cat :seon.host/db :string :string [:maybe :string] :seon.ref/depth] [:maybe :seon.ref/view]]}
+  [db checkout path anchor depth]
   (let [f (io/file checkout path)]
     (when (.isFile f)
       (let [text (slurp f)
@@ -547,7 +549,7 @@
                 (when-not anchor
                   (cond-> {:seon.ref/address path :seon.ref/heading path :seon.ref/lines (count (str/split-lines text))}
                     (= :code depth) (assoc :seon.ref/text text))))]
-        (when v (if-let [p (pin checkout path)] (assoc v :seon.ref/pin p) v))))))
+        (when v (if-let [p (pin db path)] (assoc v :seon.ref/pin p) v))))))
 
 ;; ---- resolution ---------------------------------------------------------------------------
 
