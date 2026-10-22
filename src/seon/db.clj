@@ -108,10 +108,17 @@
     (lmdb-ffi/sync! (klmdb/open-env! (get-in cfg [:store :path]) nil)))
   nil)
 
+(defn tx-meta
+  "The tx-meta of every transaction Seon makes: the runtime that made it
+  (:seon.tx/runtime, jolt.host/runtime-fingerprint), none when Jolt cannot identify it."
+  {:malli/schema [:=> [:cat] [:map [:seon.tx/runtime {:optional true} :string]]]}
+  [] (if-let [fp (jolt.host/runtime-fingerprint)] {:seon.tx/runtime fp} {}))
+
 (defn- seed! {:malli/schema [:=> [:cat :seon.host/conn :int] :any]}
   [conn n]
+  ;; the schema transaction installs :seon.tx/runtime, so it alone cannot carry it
   (d/transact conn {:tx-data schema})
-  (doseq [tx (seed-tx n)] (d/transact conn {:tx-data tx})))
+  (doseq [tx (seed-tx n)] (d/transact conn {:tx-data tx :tx-meta (tx-meta)})))
 
 (defn- install-missing!
   "Transact the attributes of `schema` the db under conn lacks, in one transaction, and
@@ -133,7 +140,7 @@
                                      :seon.error/fix "An attribute's value type is fixed once installed: open a store made with this schema (a fresh one), or keep running the build that made this store."})]
               (throw (ex-info (:seon.error/message e) e))))
         missing (vec (remove #(contains? have (:db/ident %)) schema))]
-    (when (seq missing) (d/transact conn {:tx-data missing}))
+    (when (seq missing) (d/transact conn {:tx-data missing :tx-meta (tx-meta)}))
     (count missing)))
 
 ;; ---- one store, many branches, as in production (owner, 2026-10-21) ------------
