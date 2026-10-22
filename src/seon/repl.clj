@@ -28,7 +28,7 @@
   is answered once the eval has stopped. Seon's platform ops (tests, stats, clone,
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
+  (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
             [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
             [jolt.ffi :as ffi] [seon.config :as cfg]))
 
@@ -45,14 +45,6 @@
     (or (some-> (get req "ns") symbol find-ns)
         (some-> (get-in s [:sessions (get req "session") :ns]) find-ns)
         (:ns s))))
-
-(defn- line-starts
-  "The offset in code where each line starts."
-  {:malli/schema [:=> [:cat :string] [:vector :int]]}
-  [^String code]
-  (loop [acc [0] i 0]
-    (let [j (.indexOf code "\n" (int i))]
-      (if (neg? j) acc (recur (conj acc (inc j)) (inc j))))))
 
 (defn- form-src
   "The exact text of form in code, from its reader position (:line, :column) to where the
@@ -78,7 +70,7 @@
   {:malli/schema [:=> [:cat :seon.wire/msg :string] :any]}
   [{:keys [reply] :as req} code]
   (let [r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. code))
-        starts (delay (line-starts code))
+        starts (delay (reader/line-starts code))
         eval-fn (:repl/eval-fn req eval)
         ;; the form's budget of work (engine ticks): the request's, else the dial for an
         ;; agent's model and an outside agent; root's own platform requests run unbounded
@@ -385,7 +377,7 @@
     (swap! agent/state dissoc :defs)
     (when (and contract/record? (= :agent (:mode @agent/state)) (seq items))
       (try
-        (agent/transact! (into defs (record-tx (:id @agent/state) (str (name (:id @agent/state)) "-" (lib/c-getpid) "-" (lib/now-ns))
+        (agent/transact! (into defs (record-tx (:id @agent/state) (str (name (:id @agent/state)) "-" (lib/c-getpid) "-" (profile/now-ns))
                                                items (:max-tx (agent/db)))))
         (catch clojure.lang.ExceptionInfo e
           (if (= :seon.db/lease-spent (:seon.error/type (ex-data e)))

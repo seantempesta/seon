@@ -2,13 +2,13 @@
   "The agent's current-state block says each thing once: a passing proof is its status, a
   red one its source and its failures (expected and actual), a reference already shown as a
   proof is not shown again, a merge task's plan stays its own."
-  (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.task :as task] [seon.context :as context] [seon.print :as print]
             [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs]
             [seon.print.select :as select] [clojure.string :as str] [clojure.walk :as walk] [seon.edn]))
 
 (defn- db-with-program []
-  (let [db (pdb/test-db)]
+  (let [db (ts/test-db)]
     ;; recorded definitions, each its form (seon.program's facts), written as data
     (d/db-with db (vec (mapcat (fn [[v src]]
                                  [{:db/id (str v) :var/name v :var/ns (str "ns " (namespace v)) :var/form (str "form " v)}
@@ -200,7 +200,7 @@
   ;; it before (current-state and messages, the first turn's text carried in the scrollback),
   ;; equals the text seon.context/render makes again from the recorded basis on the commit it
   ;; names, after the branch moved on (the program changed, later turns were written)
-  (pdb/test-branch! (fn [_ conn] (let [program (fn [src] [{:db/id "f" :var/name 'demo/f :var/ns "ns" :var/form "form"}
+  (ts/test-branch! (fn [_ conn] (let [program (fn [src] [{:db/id "f" :var/name 'demo/f :var/ns "ns" :var/form "form"}
                            {:db/id "form" :form/id (str "demo/f " src) :form/src src :form/ns "ns" :form/order 0 :form/defines ["f"]}
                            {:db/id "ns" :ns/name 'demo}])
         _ (d/transact conn (program "(defn f \"Doubles.\" [x] (* 2 x))"))

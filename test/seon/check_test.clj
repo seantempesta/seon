@@ -3,7 +3,7 @@
   seeds one store (seon.check/seed); every step's root opens it on a main of its own, a
   branch of the seed (seon.db/open!, as seon.root/start! does), names its agents' branches
   under that main, and a recovery step reopens the same store on the same main."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d]
             [seon.db :as pdb] [clojure.core.async :as a] [seon.check]))
 
@@ -58,7 +58,7 @@
 (deftest a-check-leaves-its-store-as-it-found-it
   ;; task seon.check/a-run-takes-a-branch-and-deletes-it: a check step run against a store
   ;; works on a branch of it (its main, check-<step>) and deletes what it made when it is
-  ;; green; a test's branch of the test store is deleted by its fixture (seon.db/test-branch!);
+  ;; green; a test's branch of the test store is deleted by its fixture (seon.test-store/test-branch!);
   ;; neither makes a store. The store given is this test's own (the last resort: what is
   ;; proved is what a run leaves in the store it is given); removed at the end.
   (let [dir (System/getProperty "user.dir")
@@ -74,8 +74,8 @@
       (is (= stores {:check (entries (str dir "/target/check")) :runs (entries (str dir "/target/runs"))}) "and no new store or run directory exists")
       (testing "a test's branch of the test store is deleted when the test ends"
         (let [seen (fn [cfg conn] [(:branch cfg) (d/branches conn) (count (d/datoms @conn :eavt))])
-              [b1 in1 datoms] (pdb/test-branch! seen)
-              [b2 in2] (pdb/test-branch! seen)]
+              [b1 in1 datoms] (ts/test-branch! seen)
+              [b2 in2] (ts/test-branch! seen)]
           (is (pos? datoms) "the fixture hands the test a branch holding the seed")
           (is (in1 b1) "the branch exists while the test runs")
           (is (not (in2 b1)) "a later test sees no branch the earlier one made")

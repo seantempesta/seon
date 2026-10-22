@@ -66,10 +66,6 @@
 (def PAGE 16384)
 (defn ignore-sigpipe! {:malli/schema [:=> [:cat] :seon.ffi/address]}
   [] (c-signal 13 1))
-(defn now-ns {:malli/schema [:=> [:cat] :seon.lib/ns-time]}
-  [] (System/nanoTime))
-(defn ms-since {:malli/schema [:=> [:cat :seon.lib/ns-time] :seon.lib/ms]}
-  [t0] (/ (- (now-ns) t0) 1e6))
 
 (defn mp-probe
   "This process's Mach VM accounting: {:phys-fp :internal :resident :regions {:jit :malloc :anon0 :other}} in MB."
@@ -97,19 +93,6 @@
   (let [b (ffi/alloc 8)]
     (when-not (zero? (c-pipe b)) (throw (ex-info "pipe failed" {})))
     [(ffi/read b :int) (ffi/read (+ b 4) :int)]))
-
-(defn write-all! {:malli/schema [:=> [:cat :seon.lib/fd :seon.host/bytes] :int]}
-  [fd ^bytes arr]
-  (let [n (alength arr) buf (ffi/alloc (max 1 n))]
-    (ffi/write-array buf arr)
-    (loop [off 0]
-      (if (< off n)
-        (let [r (c-write fd (+ buf off) (- n off))]
-          (if (neg? r) -1 (recur (+ off r))))
-        n))))
-
-(defn write-line! {:malli/schema [:=> [:cat :seon.lib/fd :any] :int]}
-  [fd s] (write-all! fd (.getBytes (str s "\n") "UTF-8")))
 
 (defn line-reader
   "A fn of a wait in ms (negative: until something arrives) that answers the complete

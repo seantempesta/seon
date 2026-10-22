@@ -25,7 +25,7 @@
     platform's own source has the same facts (seon.source)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [jolt.ir :as ir] [jolt.analyzer]
-            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [clojure.edn :as edn] [seon.error :as error]))
+            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [clojure.edn :as edn] [seon.error :as error] [seon.db :as pdb]))
 
 (defn scratch-ns?
   "Is namespace nsx scratch (never program): `user`, or declared ^:scratch."
@@ -359,9 +359,6 @@
   {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :int]]}
   [db e] (some #(:db/id (get (d/entity db e) %)) def-attrs))
 
-(defn- eid {:malli/schema [:=> [:cat :seon.host/db :keyword :any] [:maybe :int]]}
-  [db a v] (:e (first (d/datoms db :avet a v))))
-
 (defn account-tx
   "The facts of a form's account on db: the form (keeping its order when it is already
   there, else taking the place of the forms it supersedes, else after every form: order
@@ -370,12 +367,12 @@
   has is retracted."
   {:malli/schema [:=> [:cat :seon.host/db :map :int] :seon.db/tx-data]}
   [db {:keys [id src lead ns ns-form? defs declares methods impls refs requires banned inline-defs timeouts catches order]} next-order]
-  (let [fe (eid db :form/id id)
+  (let [fe (pdb/eid db :form/id id)
         dkeys (concat (for [{v :var} defs] [:var/name v])
                       (for [{:keys [multi dispatch]} methods] [:method/key (method-key multi dispatch)])
                       (for [{:keys [protocol type]} impls] [:impl/key (impl-key protocol type)])
                       (when ns-form? [[:ns/name ns]]))
-        des (set (keep (fn [[a v]] (eid db a v)) dkeys))
+        des (set (keep (fn [[a v]] (pdb/eid db a v)) dkeys))
         olds (disj (set (keep #(form-of db %) des)) fe nil)
         superseded (filterv (fn [o] (every? #(contains? des (:db/id %)) (:form/defines (d/entity db o)))) olds)
         order (or (when fe (:form/order (d/entity db fe)))
@@ -387,7 +384,7 @@
         ;; a var main already has is named by its entity: Datahike allocates a tempid first
         ;; seen as a ref (:form/defines) before the map that upserts it, and a form defining
         ;; two existing vars (a protocol, a record) then conflicts
-        vid (fn [s] (or (eid db :var/name s) (var-tid s)))
+        vid (fn [s] (or (pdb/eid db :var/name s) (var-tid s)))
         dtids (concat (for [{v :var} defs] (vid v))
                       (for [{:keys [multi dispatch]} methods] (str "method " (method-key multi dispatch)))
                       (for [{:keys [protocol type]} impls] (str "impl " (impl-key protocol type)))
@@ -407,7 +404,7 @@
               (seq catches) (assoc :form/catches (vec catches)))]
            (for [s declares] {:db/id (vid s) :var/name s :var/ns (ns-tid (symbol (namespace s)))})
            (for [{v :var :keys [kind contract doc]} defs
-                 :let [e (eid db :var/name v) old (when e (d/entity db e))]
+                 :let [e (pdb/eid db :var/name v) old (when e (d/entity db e))]
                  tx (into [(cond-> {:db/id (vid v) :var/name v :var/ns (ns-tid (symbol (namespace v))) :var/form f :var/kind kind}
                              contract (assoc :var/contract contract) doc (assoc :var/doc doc))]
                           (for [[a x] [[:var/contract contract] [:var/doc doc]]
@@ -649,10 +646,10 @@
   "{program key -> form id} of db's definitions that point to a form."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
-  (into {} (for [f (live-forms db) k (:defines f) :let [e (case (first k) :var (eid db :var/name (second k))
-                                                             :method (eid db :method/key (method-key (second k) (nth k 2)))
-                                                             :impl (eid db :impl/key (impl-key (second k) (nth k 2)))
-                                                             :ns (eid db :ns/name (second k)))]
+  (into {} (for [f (live-forms db) k (:defines f) :let [e (case (first k) :var (pdb/eid db :var/name (second k))
+                                                             :method (pdb/eid db :method/key (method-key (second k) (nth k 2)))
+                                                             :impl (pdb/eid db :impl/key (impl-key (second k) (nth k 2)))
+                                                             :ns (pdb/eid db :ns/name (second k)))]
              :when (and e (= (:e f) (form-of db e)))]
          [k (:id f)])))
 

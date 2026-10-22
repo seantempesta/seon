@@ -13,8 +13,11 @@
   - The wrapper is Scheme, not Clojure: one fixnum compare and increment on a vector slot
     per call, no Clojure dispatch. Estimate 1-2 ns per call; probe 0.9 ns (9.5 vs 8.6 ns
     for a bare inc).
-  - The clock is Chez's monotonic `current-time`, not System/nanoTime (a host-static
-    lookup by string on every call: 72 ns in the probe, against 25 ns).
+  - The clock is the machine's CLOCK_UPTIME_RAW (clock_gettime_nsec_np), a foreign
+    procedure called from Scheme: 9.5 ns a read, nothing allocated, 41 ns resolution
+    (2026-10-22), where Chez's `current-time` was 28 ns, 48 bytes and 1 us, counted from
+    this process's start. It is Seon's one clock (`now-ns`, docs/machine.md#the-clock):
+    every process reads the same timeline, so one process's stamp is another's t0.
   - The sample rate is a power of two, so the test is one fxand. Amortized clock cost: two
     reads per 64 calls, about 0.8 ns.
   - No ThreadLocal and no self-time frame (E15: the bracket's 3 ThreadLocal ops and frame
@@ -33,9 +36,9 @@
   (scm/eval-string
     "(define seon-profile-epoch 0)
      (define seon-profile-touched '())
-     (define (seon-profile-now)
-       (let ([t (current-time 'time-monotonic)])
-         (+ (* (time-second t) 1000000000) (time-nanosecond t))))
+     ;; CLOCK_UPTIME_RAW is 8 on macOS
+     (define seon-profile-now
+       (let ([clock (foreign-procedure \"clock_gettime_nsec_np\" (int) unsigned-64)]) (lambda () (clock 8))))
      ;; a cell: #(calls epoch sampled-ns samples symbol)
      (define (seon-profile-cell sym) (vector 0 -1 0 0 sym))
      ;; count one call; #t when this call is to be timed
@@ -91,9 +94,15 @@
              [k (scm/proc (str "seon-profile-" (name k)))])))
 
 (defn now-ns
-  "Monotonic nanoseconds from Chez's clock (25 ns a read against System/nanoTime's 72)."
-  {:malli/schema [:=> [:cat] :int]}
+  "Nanoseconds on the machine's monotonic clock (CLOCK_UPTIME_RAW): Seon's one clock, the
+  same timeline in every process (docs/machine.md#the-clock)."
+  {:malli/schema [:=> [:cat] :seon.lib/ns-time]}
   [] ((:now procs)))
+
+(defn ms-since
+  "Milliseconds on the one clock since t0, a reading of `now-ns`."
+  {:malli/schema [:=> [:cat :seon.lib/ns-time] :seon.lib/ms]}
+  [t0] (/ (- (now-ns) t0) 1e6))
 
 (defn alloc-bytes
   "Bytes this process has allocated since it started (Chez's sstats, counted, never

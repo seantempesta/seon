@@ -6,7 +6,7 @@
   the rule needs (ATX headings, fenced and indented code, code spans, inline links,
   paragraph boundaries) in one pass over the text."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.reader :as reader]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.db :as pdb] [seon.reader :as reader]
             [clojure.string :as str] [clojure.java.io :as io] [datahike.api :as d] [seon.config :as cfg]))
 
 (def roots
@@ -505,7 +505,7 @@
   namespace). nil when neither db nor process holds it."
   {:malli/schema [:=> [:cat :seon.host/db :symbol :seon.ref/depth] [:maybe :seon.ref/view]]}
   [db nsym depth]
-  (let [e (:e (first (d/datoms db :avet :ns/name nsym)))
+  (let [e (pdb/eid db :ns/name nsym)
         loaded (find-ns nsym)]
     (when (or e loaded)
       (let [doc (if e (:ns/doc (d/pull db [:ns/doc] e)) (:doc (meta loaded)))

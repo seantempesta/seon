@@ -7,7 +7,7 @@
   `render` makes the text from it, for the model and again for anyone who reads it later."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d]
-            [seon.task :as task] [seon.merge :as pm]
+            [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
             [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg]
             [clojure.java.io :as io]))
 
@@ -23,9 +23,9 @@
 
 (defn source-of
   "The recorded source of var sym on db (the text of the form that last defined it), or nil:
-  one AVET seek (seon.task/eid), never a query."
+  one AVET seek (seon.db/eid), never a query."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :string]]}
-  [db sym] (some->> (task/eid db :var/name sym) (d/entity db) :var/form :form/src))
+  [db sym] (some->> (pdb/eid db :var/name sym) (d/entity db) :var/form :form/src))
 
 (def reference-tokens
   "Tokens a cited var's source may take in the context: the config's."
@@ -111,7 +111,7 @@
                  :let [v (ns-resolve nsx sym)]
                  :when (and (var? v) (not (:test (meta v))))
                  :let [q (symbol (str (ns-name (:ns (meta v)))) (str (:name (meta v))))]
-                 :when (and (not= q p) (d/q '[:find ?e . :in $ ?n :where [?e :var/name ?n]] db q))]
+                 :when (and (not= q p) (pdb/eid db :var/name q))]
              (cond-> {:var q}
                (:arglists (meta v)) (assoc :arglists (:arglists (meta v)))
                (:malli/schema (meta v)) (assoc :contract (:malli/schema (meta v)))

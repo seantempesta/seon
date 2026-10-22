@@ -61,20 +61,28 @@
   [opts _tag value]
   (str (::checkout opts) "/" value))
 
-;; ---- the schemas: seon.config*.edn, read when this namespace compiles (as seon.contract does) --
+;; ---- the schemas: read once, when this namespace compiles --------------------------------
+
+(def schemas-dir
+  "Where the platform's schema resources live, relative to the checkout: the files the
+  build compiles in, and the schema resources seon.source imports and writes back."
+  "resources/seon/schemas")
 
 (defmacro ^:private baked-schema-forms
-  "The config schema forms (resources/seon/schemas/seon.config*.edn), read when this
-  namespace compiles: a built binary carries them."
+  "Every named schema form of the platform: the maps in resources/seon/schemas/*.edn, read
+  when this namespace compiles (the build host has the directory; a built binary carries the
+  forms, and bakes no resource files of this project's own paths)."
   []
-  (let [dir (io/file (checkout) "resources/seon/schemas")]
+  (let [dir (io/file (checkout) schemas-dir)]
     (list 'quote
           (reduce merge {} (for [f (sort-by #(.getName %) (file-seq dir))
-                                 :let [n (.getName f)]
-                                 :when (and (str/starts-with? n "seon.config") (str/ends-with? n ".edn"))]
+                                 :when (str/ends-with? (.getName f) ".edn")]
                              (edn/read-string (slurp f)))))))
 
-(def schema-forms "The config keys' schema forms, by name." (baked-schema-forms))
+(def schema-forms
+  "Every named schema form of the platform, by name: the config keys' among them, and the
+  one baked map seon.contract/forms is."
+  (baked-schema-forms))
 
 (def ^:private registry
   (mr/composite-registry (m/default-schemas) (mr/simple-registry schema-forms)))
@@ -300,6 +308,4 @@
   the root entity holds. What agents, the dashboard and the context read."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :map]]}
   [db]
-  (when-let [e (d/q '[:find ?e . :where [?e :seon.root/id :root]] db)]
-    (let [r (d/pull db (keys-declared) e)]
-      (when (seq r) r))))
+  (not-empty (d/pull db (keys-declared) [:seon.root/id :root])))

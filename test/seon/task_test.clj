@@ -2,12 +2,12 @@
   "The task writer derives what a task cites (seon.docs.edn's one-reference-reader, task
   seon.task/a-task-cites-what-it-needs): references from the plan, never authored, and a
   citation that resolves to nothing answered beside the write."
-  (:require [clojure.test :refer [deftest is]] [datahike.api :as d]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]] [datahike.api :as d]
             [seon.db :as pdb] [seon.task :as task] [seon.ref :as ref] [seon.template :as template]))
 
 (defn- db-with-program []
   ;; one recorded definition, its form (seon.program's facts), written as data
-  (d/db-with (pdb/test-db)
+  (d/db-with (ts/test-db)
              [{:db/id "ns" :ns/name 'demo}
               {:db/id "v" :var/name 'demo/f :var/ns "ns" :var/form "form"}
               {:db/id "form" :form/id "demo/f" :form/src "(defn f [x] x)" :form/ns "ns" :form/order 0 :form/defines ["v"]}]))
