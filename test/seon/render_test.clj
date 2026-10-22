@@ -457,8 +457,10 @@
       (is (str/starts-with? text "task calc/add · work · held · needs calc/sub"))
       (is (str/includes? text "failed: add cannot be total over longs · counterexample (add Long/MAX_VALUE 1)"))
       (is (str/includes? text "stuck: failed: held for root · blocks calc/div, calc/mul"))
-      (testing "a long plan is cut with the form that reads the rest"
-        (is (re-find #"…\+\d+ chars in \d+ more lines \(subs \(get-in result/h2 \[:seon.task/accumulated :plan\]\) \d+\)" text)))
+      (testing "a long plan is cut, past the env's budget, with the form that reads the rest"
+        (is (str/includes? (:text (r/printed failed-task 'result/h2)) "Step 399")))
+      (testing "(the part budget when the env names none)"
+        (is (re-find #"…\+\d+ chars in \d+ more lines \(subs \(get-in result/h2 \[:seon.task/accumulated :plan\]\) \d+\)" (r/ai failed-task {:seon.render/handle 'result/h2}))))
       (testing "the proofs are a bounded list: how many more and where"
         (is (str/includes? text "12 proofs: app.proofs/add-0-test"))
         (is (str/includes? text "+4 more: (:seon.task/proofs result/h2)")))

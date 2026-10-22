@@ -76,7 +76,7 @@
           (when (:seon.task/problem t) (str "problem: " (print/line (:seon.task/problem t) (line-budget) (read-of env :seon.task/problem))))
           (when reason (str "failed: " (print/line reason (line-budget)) (when counterexample (str " · counterexample " counterexample))))
           (when cause (str "stuck: " (print/line cause (line-budget)) (when (seq blocks) (str " · blocks " (str/join ", " (sort blocks))))))
-          (str "plan: " (:text (print/prose plan (config/value :seon.config.render/part-budget)
+          (str "plan: " (:text (print/prose plan (or (:seon.render/budget env) (config/value :seon.config.render/part-budget))
                                             {:source (if acc (some-> (:seon.render/handle env) (#(list 'get-in % [:seon.task/accumulated :plan]))) (read-of env :seon.task/plan))})))
           (when (:seon.task/instructions t) (str "instructions: " (print/line (:seon.task/instructions t) (line-budget) (read-of env :seon.task/instructions))))
           (str (count (or (:proofs acc) (:seon.task/proofs t))) " proofs: " (str/join " " proofs) (when more (str " · " more)))
