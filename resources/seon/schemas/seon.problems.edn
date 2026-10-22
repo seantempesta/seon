@@ -18,6 +18,9 @@
  ;; what root saw go wrong for an agent: a red test run of an agent with no task (a task's
  ;; attempt records its reds at its end), a spawn or fork refused (seon.root/set-agent)
  :seon.agent/failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/failed]] [:agent :keyword]]]
+ ;; an agent's socket to root that cannot raise SIGIO (seon.sock/signal-at-input!): the agent
+ ;; ends with its root only when it next reads that socket (task seon.agent/an-agent-ends-with-its-root)
+ :seon.sock/unwatched [:and :seon.error/base [:map [:seon.error/type [:= :seon.sock/unwatched]] [:errno :int]]]
  :seon.agent/stalled [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/stalled]] [:agent :keyword]
                                              [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]
  ;; a resumed agent's branch program that did not load (seon.program/load-diff!): main's ran instead

@@ -136,6 +136,8 @@
                    (step/out! o :to-api {:op :problem :class :agent :agent id
                                          :error (contract/error :seon.agent/load-failed 'seon.agent/init!
                                                                 (str "its branch's program did not load in " ns ": " message) {:ns ns})}))
+                 ;; its socket to root cannot raise SIGIO: it ends with root only when it next reads
+                 (when-let [e (:unwatched m)] (step/out! o :to-api {:op :problem :class :agent :agent id :error e}))
                  (when-let [x (:misaligned m)]
                    (step/out! o :to-api {:op :problem :class :agent :agent id
                                          :error (contract/error :seon.agent/fork-misaligned 'seon.agent/init!
@@ -236,7 +238,7 @@
                    holds requests ({:op :pause}); while paused this proc takes nothing,
                    so frames stay in the socket and senders are pushed back;
     stop           {:op :stop} to the agent (it exits after the requests before it),
-                   then await its death (kqueue), SIGKILL past the bound.
+                   then await its death (its socket's EOF), SIGKILL past the bound.
   In :in (from the api), :from (its socket, via the reader). Out :to-writer, :to-api,
   :events (external channels)."
   {:malli/schema :seon.step/step-fn}

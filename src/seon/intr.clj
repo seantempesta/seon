@@ -70,6 +70,17 @@
   (install-kick* lib/SIGUSR1 on-usr1)
   true)
 
+(defn exit-at-eof!
+  "End this process when its socket to root is closed, whatever it is doing: SIGIO (the
+  socket asked for it, seon.sock/signal-at-input!) is taken at the next safe point, as
+  root's SIGUSR1 is, and the process exits 0 only when (gone?) peeks EOF; input arriving is
+  the loop's to read. The second source of an interrupt here, beside root's (task
+  seon.agent/an-agent-ends-with-its-root)."
+  {:malli/schema [:=> [:cat :seon.host/fn] :boolean]}
+  [gone?]
+  (install-kick* lib/SIGIO (fn [] (when (gone?) (lib/c-exit 0)) false))
+  true)
+
 (defn run
   "(thunk) under its own token, stopped by root's SIGUSR1 or once it has run ticks engine
   ticks (nil: no budget). Throws ex-info {:interrupted true} when root stopped it, or the

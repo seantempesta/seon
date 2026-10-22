@@ -195,6 +195,7 @@
 
 (def ^:private linux? (.startsWith (str (System/getProperty "os.name")) "Linux"))
 (def SIGUSR1 "Root's interrupt: 30 on macOS, 10 on Linux." (if linux? 10 30))
+(def SIGIO "Input on a socket that asked for it (O_ASYNC): 23 on macOS, 29 on Linux." (if linux? 29 23))
 
 (defchecked active-threads [:=> [:cat] :int] (scm/proc "proto-active-threads"))
 (defchecked bytes-in-heap [:=> [:cat] :int] (scm/proc "proto-bytes-in-heap"))

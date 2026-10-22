@@ -521,7 +521,8 @@
                         (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn (sock/conn fd) :mode :agent :tx-seq 0
                                :lease (:lease r) :pending clojure.lang.PersistentQueue/EMPTY :mem-at nil :fx-pending {}
                                :store-conn store-conn :db @store-conn))
-                      (hello! t0 {:cloned-from parent})
+                      (let [unwatched (sock/signal-at-input! fd)]
+                        (hello! t0 (cond-> {:cloned-from parent} unwatched (assoc :unwatched unwatched))))
                       ((:serve @state))))})))))
 
 (defn misaligned
@@ -554,6 +555,8 @@
         c (sock/conn fd)
         store-conn (d/connect (assoc cfg :branch branch))]
     (intr/install!)
+    ;; root gone, this process ends, busy or not (the fork server's group kill may be gone too)
+    (intr/exit-at-eof! #(sock/peer-gone? (:fd @state)))
     ;; a kept branch, resumed: its program is what this process runs (it was forked holding main's)
     (let [load-errors (when resumed (program/load-diff! db0 @store-conn))
           misaligned (when-not resumed (misaligned commit t @store-conn db0))]
@@ -564,6 +567,6 @@
      ;; read main's later changes as the branch's (seon.program/divergence, changed-vars)
      (reset! state {:id id :branch branch :task task :attempt attempt :fd fd :conn c :db @store-conn
                    :base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0) :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
-                   :load-errors (vec load-errors) :misaligned misaligned
+                   :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
                    :ns nsx :interrupt-ok intr-ok :serve serve}))))

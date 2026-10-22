@@ -46,6 +46,62 @@
     (sh/sh "rm" "-rf" (str path "-in") (str path ".log") (str path "-tasks"))
     (mapv #(let [a (edn/read-string {:default tagged-literal} %)] (if (contains? a :items) (first (:items a)) a)) (str/split-lines (str/replace out #"(?s)^.*ROOT LISTENING[^\n]*\n" ""))))))
 
+(defn- root-ended
+  "A root with two agents: a1 idle, a2 evaluating code (sent, not awaited). Then what a pid
+  cleanup does: SIGKILL of the fork server's standby, of the fork server, then of root, so
+  the fork server's group kill (seon.fork-server/main) never runs and each agent has only
+  its own socket to root to end on. Answers {:agents {id pid} :left #{pid}}: the agents'
+  pids, and the processes of the fork server's group still alive once all have ended or
+  100 checks 0.1 s apart have passed (the bound only ends a red run; the assertion is on
+  the processes)."
+  [code]
+  (let [checkout (.getCanonicalPath (java.io.File. "."))
+        main (str "root-ended-" (random-uuid))
+        store (str checkout "/target/runs/test-store")
+        path (str checkout "/target/runs/" main)
+        port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
+        ask (fn [m] (str "printf '%s\\n' " (pr-str (pr-str m)) " | nc -w 60 127.0.0.1 " port))
+        script (str "mkfifo '" path "-in'; ./seon root"
+                    " --set ':seon.config.root/store-path=" (pr-str store) "' --set ':seon.config.root/main=" (pr-str main) "'"
+                    " --set ':seon.config.root/entrance-port=" port "' --set ':seon.config.web/port=0'"
+                    " < '" path "-in' > '" path ".log' 2>&1 & R=$!; exec 3>'" path "-in';"
+                    " until grep -q 'ROOT LISTENING' '" path ".log' || ! kill -0 $R 2>/dev/null; do sleep 0.1; done;"
+                    (ask {:op :eval :agent "root" :code "[(c/spawn! sys {}) (c/spawn! sys {})]"}) " >/dev/null;"
+                    " for i in {1..300}; do [[ $(" (ask {:op :agents}) " | grep -o ':status :idle' | wc -l) -ge 2 ]] && break; sleep 0.2; done;"
+                    (ask {:op :eval :agent "root" :code (str "(do (c/submit! sys :a2 " (pr-str code) ") :sent)")}) " >/dev/null;"
+                    " for i in {1..300}; do " (ask {:op :agents}) " | grep -q ':status :busy' && break; sleep 0.2; done;"
+                    " P=$(" (ask {:op :eval :agent "root" :code "(pr-str (into {} (for [[id a] (:agents (c/state sys))] [id (:pid a)])))"}) ");"
+                    " echo \"AGENTS $P\";"
+                    " FS=$(pgrep -P $R);"
+                    " for k in $(pgrep -P $FS); do echo \"$P\" | grep -q \" $k\" || kill -9 $k; done;"
+                    " kill -9 $FS; kill -9 $R; wait $R 2>/dev/null; exec 3>&-;"
+                    " LEFT=x; for i in {1..100}; do LEFT=$(pgrep -g $FS); [[ -z $LEFT ]] && break; sleep 0.1; done;"
+                    " echo \"LEFT $(echo $LEFT)\"; for p in $(echo $LEFT); do kill -9 $p; done")
+        {:keys [out]} (sh/sh "zsh" "-c" script :dir "target")
+        line (fn [k] (some #(when (str/starts-with? % k) (subs % (count k))) (str/split-lines out)))
+        printed (:printed (first (:items (edn/read-string (line "AGENTS ")))))]
+    (sh/sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
+    (sh/sh "rm" "-rf" (str path "-in") (str path ".log"))
+    {:agents (some-> printed edn/read-string edn/read-string)
+     :left (into #{} (map parse-long) (re-seq #"\d+" (or (line "LEFT ") "")))}))
+
+(deftest an-agent-ends-when-its-root-is-gone
+  ;; task seon.agent/an-agent-ends-with-its-root: with its fork server gone first (a pid
+  ;; cleanup), an agent ends on EOF of its own socket to root, whatever it is doing: an idle
+  ;; agent reads it; one evaluating a form with no tick budget is interrupted by it (SIGIO)
+  (let [{:keys [agents left]} (root-ended "(loop [] (recur))")]
+    (is (= #{:a1 :a2} (set (keys agents))) (pr-str agents))
+    (is (not (contains? left (:a1 agents))) "the idle agent ended")
+    (is (not (contains? left (:a2 agents))) "the busy agent ended")))
+
+(deftest a-hung-agent-ends-when-its-root-is-gone
+  ;; task seon.agent/an-agent-ends-with-its-root, the hung case: a timeout in a forked agent
+  ;; waits on a fiber pool with no carriers (worktree dry-run, its fork-carrier branch);
+  ;; with that branch the wait returns and the agent reads its EOF. Red until it merges.
+  (let [{:keys [agents left]} (root-ended "(clojure.core.async/<!! (clojure.core.async/timeout 600000))")]
+    (is (= #{:a1 :a2} (set (keys agents))) (pr-str agents))
+    (is (empty? left) (str "agents still alive: " left))))
+
 (deftest an-agent-holds-mains-tests-and-runs-them
   ;; task seon.agent/an-agent-holds-mains-tests: main holds the source root's test namespaces
   ;; (imported from test/), and an agent forked from the fork server holds them compiled:
