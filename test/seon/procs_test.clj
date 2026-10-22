@@ -189,9 +189,9 @@
       (let [[st2 outs] (step #'server/fork-server-proc st :ev {:ev :eof :pid 2})]
         (is (= st st2)) (is (nil? outs))))))
 
-(deftest agent-stand-in
+(deftest agent-proc-steps
   ;; root's end of the agent's socket is a jolt.async.remote end: the agent's frames arrive
-  ;; as values on its :in (the stand-in's :from), and nil there is its close
+  ;; as values on its :in (the agent proc's :from), and nil there is its close
   (let [[r a] (sock/socketpair)
         end (remote/open r {:codec {:encode codec/encode :decode codec/decode}})
         st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
@@ -216,7 +216,7 @@
     (remote/close! end)
     (sock/close! a)))
 
-(deftest api-entrance
+(deftest api-server
   (let [st (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                           :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})]
     (testing "the view is answered to its caller's promise"
@@ -334,7 +334,7 @@
         settled? (fn [outs] (some #(= :settled (:op %)) (:to-web outs)))
         [st o1] (#'seon.render.proc/render-proc st :events {:type :spawned :agent :a1 :at-ms 1})
         tag (:tag (first (filter #(= {:op :state} (:req %)) (:to-api o1))))
-        [st o2] (#'seon.render.proc/render-proc st :answers {:tag tag :r {:agents {} :writer {:tx-count nil :recent []} :server {:status :up} :stats {} :store {} :boot {}}})]
+        [st o2] (#'seon.render.proc/render-proc st :answers {:tag tag :r {:agents {} :writer {:tx-count nil :recent []} :fork-server {:status :up} :stats {} :store {} :boot {}}})]
     (is (not (settled? o1)) "its ask is in flight")
     (is (settled? o2) "the answer emptied what was in flight")
     (is (empty? (:pending st))))
@@ -354,12 +354,12 @@
         [st o2] (#'seon.render.proc/render-proc st :events {:type :ready :agent :a1 :at-ms 2})]
     (is (= 1 (count (asks o1))) "an event asks for the view")
     (is (empty? (asks o2)) "while that request is in flight, more events only queue")
-    (let [[st _] (#'seon.render.proc/render-proc st :answers {:tag (:tag (first (asks o1))) :r {:agents {} :writer {:tx-count 1 :recent []} :server {:status :up} :stats {} :store {} :boot {}}})
+    (let [[st _] (#'seon.render.proc/render-proc st :answers {:tag (:tag (first (asks o1))) :r {:agents {} :writer {:tx-count 1 :recent []} :fork-server {:status :up} :stats {} :store {} :boot {}}})
           [_ o3] (#'seon.render.proc/render-proc st :events {:type :ready :agent :a2 :at-ms 3})]
       (is (not-any? #{:state} (vals (:pending st))) "the answer took its request")
       (is (= 1 (count (asks o3))) "the next event asks again"))))
 
-;; ---- task seon.root/a-proc-answers-every-request-it-took (census #2) ----------------------
+;; ---- task seon.root/a-proc-answers-every-request-it-took (laws audit #2) ----------------------
 
 (defn- api-state []
   (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
@@ -406,7 +406,7 @@
             (is (= (:view rs) (:view rs2)))))))))
 
 (defn- answering-sys
-  "(f sys), sys's entrance answering every request with r (a stand-in for the api), on a
+  "(f sys), sys's server answering every request with r (a stub for the api), on a
   branch of the test store deleted when f returns."
   [r f]
   (ts/test-branch! (fn [cfg conn] (let [ext (a/chan 4)]

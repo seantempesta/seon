@@ -1,19 +1,19 @@
 # Config
 
 Owner, 2026-10-21: "the only things that should stay are documented config schemas". Every
-limit, bound, dial and default of the platform is one key in one aero file, documented beside
+limit, bound and default of the platform is one key in one aero file, documented beside
 its value, validated by its schema, and read through one resolver.
 
 ## The file
 
 `resources/seon/config/default.edn` holds every key with its unit, its provenance (an owner
-ruling, a measurement, a lane) and what happens at its bound, in v1's shape. Its schemas are
+ruling, a measurement, a worktree session) and what happens at its bound, in v1's shape. Its schemas are
 `resources/seon/schemas/seon.config*.edn`; `:seon.config/config` is the whole config, a closed
 map, so an unknown key, an invalid value or a missing required key refuses boot with
 `:seon.config/refused`, naming each key. Machine-dependent values are derived at load:
 `#seon/checkout "p"` is `p` under the checkout (`SEON_CHECKOUT`, else `JOLT_PWD`). No key is a
 clock (owner: no clocks or timers decide anything); the stall silence and
-the stop bound are fences in their owners, not keys.
+the stop bound are guards in their owners, not keys.
 
 The file is `resources/seon/config/default.edn`, its schema `:seon.config/config` (in `resources/seon/schemas/seon.config.edn`); ```seon.config/config``` is the loaded, validated map, built by ```seon.config/resolved``` and checked against ```seon.config/keys-declared```.
 
@@ -35,7 +35,7 @@ config says so: `:seon.config.web/port` and `:seon.config.root/entrance-port` sh
 
 ```seon.config/load-layers``` reads the layers and ```seon.config/layered``` merges them; ```seon.config/overrides``` reads the command line; ```seon.config/sources``` names each key's layer (`:seon.config/sources` on main). `bin/ports` and `bin/worktree` write and free a checkout's layer.
 
-**A value one run needs goes on that run's command line, never in the environment** (landing of CONFIG, 2026-10-21): the checkout's `config/local.edn` is a later layer than the shipped file's `#env` defaults, so a check that handed its MCP client a port through `SEON_ENTRANCE_PORT` was overridden by a stale local file and dialled a port nothing listened on. `--set :seon.config.root/entrance-port=N` is the top layer and always wins. Not this: a new `#env` read for a per-run value.
+**A value one run needs goes on that run's command line, never in the environment** (the merge of CONFIG, 2026-10-21): the checkout's `config/local.edn` is a later layer than the shipped file's `#env` defaults, so a check that handed its MCP client a port through `SEON_ENTRANCE_PORT` was overridden by a stale local file and dialled a port nothing listened on. `--set :seon.config.root/entrance-port=N` is the top layer and always wins. Not this: a new `#env` read for a per-run value.
 
 ## The resolver
 
@@ -44,7 +44,7 @@ id}`. Order: the task's or agent's own settings (`:seon.task/config`), the model
 (default `:seon.config.ai/model`), that model's provider's, then the config's own key. It
 answers `{:value v :source s}`, where `s` is `[:task]`, `[:model id]`, `[:provider id]` or
 `[:config layer]`. A key set nowhere refuses. `(seon.config/value k ctx)` is its value. Ask it
-at the door: `(seon.config/resolve :seon.config.ai/max-in-flight {:model "deepseek-v4-pro"})`.
+at the server: `(seon.config/resolve :seon.config.ai/max-in-flight {:model "deepseek-v4-pro"})`.
 
 ```seon.config/resolve``` answers `{:value :source}` for a key in a context, through ```seon.config/resolve-in```; ```seon.config/value``` is the read every caller makes.
 

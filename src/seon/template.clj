@@ -150,7 +150,7 @@
         tid #(task/task-id tns (str base "-" %))
         branch (task/default-branch (task/task-id tns base))
         ev (evidence a problem)
-        dials (select-keys m [:seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
+        task-config (select-keys m [:seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
         all (task/tasks db)
         ;; the failed task's chain on its branch: it and the tasks there that need it, transitively
         chain (loop [cs #{task}]
@@ -170,8 +170,8 @@
                  needs (assoc :seon.task/needs #{needs})
                  (:seon.task/model m) (assoc :seon.task/model (:seon.task/model m))
                  (:seon.task/budget m) (assoc :seon.task/budget (:seon.task/budget m))
-                 ;; the task's dials carry to its refinements
-                 (seq dials) (assoc :seon.task/config dials)))
+                 ;; the task's config keys carry to its refinements
+                 (seq task-config) (assoc :seon.task/config task-config)))
         decls [(step :design nil) (step :implement (tid "design")) (step :test (tid "implement")) (step :merge (tid "test"))]
         new-merge (tid "merge")
         moved (for [[id t] (sort-by key all) :when (not (chain id)) n (sort (filter chain (:seon.task/needs t)))] [id n])]

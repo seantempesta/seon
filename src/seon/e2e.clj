@@ -1,5 +1,5 @@
 (ns seon.e2e
-  "Tasks end to end with real agent processes (lanes R1 and M1's proto.agents.e2e). Each run
+  "Tasks end to end with real agent processes (sessions R1 and M1's proto.agents.e2e). Each run
   is a row of data that one runner works (run-scenario): its specs, its boot, what a fresh
   agent must print on main afterwards and what else it asserts. The rows: the six-task graph
   with a cancel, a root restart in two phases, the merge scenarios (seon.fixtures/scenarios),
@@ -12,7 +12,7 @@
   the run's numbers and its verdict."
   (:require [seon.root :as c] [my.root :as root] [seon.task :as task] [seon.context :as context] [seon.reconcile :as r]
             [seon.fixtures :as fx] [datahike.api :as d] [seon.lib :as lib] [clojure.string :as str] [seon.config] [clojure.java.shell :as sh]
-            [clojure.core.async :as a] [seon.entrance :as entrance] [seon.contract :as contract]))
+            [clojure.core.async :as a] [seon.server :as server] [seon.contract :as contract]))
 
 (defn- now [] (System/currentTimeMillis))
 (defn- db [sys] @(:conn sys))
@@ -116,7 +116,7 @@
 
 (defn loop-turn!
   "The loop's turn on root sys, whose Seon source is on: a task redefines a platform
-  function (seon.fixtures/generation, 1 -> 2) on its branch, its merge task lands it, the
+  function (seon.fixtures/generation, 1 -> 2) on its branch, its merge task merges it, the
   reconciler commits main's file on the merges branch, and the merge loads in place: root
   and every agent forked after it run the new definition, with no build and no restart
   (BUILD plan P4). Waits for quiescence. Answers {:commit sha (the merged attempt's)
@@ -172,7 +172,7 @@
                   (= head (git "rev-parse" "jolt/seon-merges~1"))
                   (= head (git "rev-parse" "HEAD"))
                   (= 2 root) (= "2" agent) (nil? (r/generation d)))]
-      (doseq [[id s] (entrance/task-summaries d)] (println :task id s))
+      (doseq [[id s] (server/task-summaries d)] (println :task id s))
       (println :commits commits :commit-errors commit-errors :files files :changed changed)
       (println :live {:root root :agent agent :turn-ms turn-ms :spans spans})
       (println :numbers (numbers sys t0))
@@ -184,7 +184,7 @@
   (seon.config/provider (assoc seon.config/config :seon.config.ai/provider :openai-compat)))
 
 (defn always-wrong
-  "The stand-in for a model that never gets it right: every reply defines app.calc/add as
+  "The scripted model that never gets it right: every reply defines app.calc/add as
   subtraction (inv1's repro: add always wrong, with twice needing it)."
   {:malli/schema [:=> [:cat :seon.model/request] :string]}
   [_]
@@ -198,7 +198,7 @@
 
 (defn- all-done
   "Every task done on d; what is not, by id."
-  [d] (let [not-done (into {} (remove (comp :done val)) (entrance/task-summaries d))] {:ok (empty? not-done) :not-done not-done}))
+  [d] (let [not-done (into {} (remove (comp :done val)) (server/task-summaries d))] {:ok (empty? not-done) :not-done not-done}))
 
 (defn- run-scenario
   "Work one row: boot root on (merge {:datoms 300} :boot), release :specs (release!), run
@@ -221,7 +221,7 @@
           fresh-r (when check (fresh sys check))
           checks (if ok (ok {:sys sys :q q :d d}) {:ok true})
           reused (agents-reused d)]
-      (doseq [[id s] (entrance/task-summaries d)] (println :task id s))
+      (doseq [[id s] (server/task-summaries d)] (println :task id s))
       (println :agents-reused reused :merges (merge-counts d) :fresh-agent fresh-r)
       (println :checks (dissoc checks :ok))
       (println :numbers (numbers sys t0))

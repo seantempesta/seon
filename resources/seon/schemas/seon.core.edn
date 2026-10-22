@@ -1,4 +1,4 @@
-;; The platform's shared named schemas (lane A1; G1's proto/core 9f5100a names where the
+;; The platform's shared named schemas (session A1; G1's proto/core 9f5100a names where the
 ;; concept is the same, renamed seon.*). Each name sits at its producer's namespace.
 {;; host values with a plain data form
  :seon.lib/pid :int
@@ -43,8 +43,8 @@
  ;; the writer's state and requests (seon.writer)
  :seon.writer/state [:map [:conn :seon.host/conn] [:cfg :seon.db/cfg]]
  :seon.writer/request [:map [:op :keyword]]
- ;; an effect owner's token bucket (seon.fx, lane R3): tokens now, capacity, the refill rate
- ;; per ms now and as dialed, the ms it was last refilled at
+ ;; an effect owner's token bucket (seon.fx, session R3): tokens now, capacity, the refill rate
+ ;; per ms now and as configured, the ms it was last refilled at
  :seon.fx/bucket [:map [:tokens number?] [:cap number?] [:per-ms number?] [:rate-ms {:optional true} number?] [:at :int]]
  ;; the fork server (seon.fork-server)
  :seon.fork-server/event [:map [:ev :keyword]]

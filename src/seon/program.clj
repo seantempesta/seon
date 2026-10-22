@@ -143,11 +143,15 @@
           :else (conj acc {:class "*" :answers (answers d)}))))
 
 (defn- quoted-vars
-  "The qualified symbols in a quoted datum (walked: a collection's too) that name a var now:
-  a syntax-quoted or quoted name resolved later (`requiring-resolve`, a macro's template, a
-  proc or render named in data). A symbol naming no var is data."
+  "The qualified symbols in a quoted datum (walked: a collection's too) whose namespace
+  exists: a syntax-quoted or quoted name resolved later (`requiring-resolve`, a macro's
+  template, a proc or render named in data). A symbol of no namespace is data. By namespace,
+  not by var: whether the var exists yet depends on what this process analyzed before (an
+  import of the same files twice gave 43 of 387 tests the same reach digest, so no result was
+  reused across runs or checkouts; worktree session PROVE 2026-10-22), while every imported
+  file's namespace exists before any form is analyzed."
   {:malli/schema [:=> [:cat :any] [:set :qualified-symbol]]}
-  [x] (into #{} (filter #(and (qualified-symbol? %) (find-var %))) (tree-seq coll? seq x)))
+  [x] (into #{} (filter #(and (qualified-symbol? %) (find-ns (symbol (namespace %))))) (tree-seq coll? seq x)))
 
 (defn unit-account
   "What the compiler says one analyzed top-level node does, from its IR by resolved var
@@ -756,14 +760,28 @@
                           :when (and v (= (:e dt) (:db/id (:var/form dv))))]
                       [v (:var/kind dv)])
             new (remove (comp seen first) callers)]
-        (recur (into (vec more) (map first) new) (into seen (map first) new)
+        ;; a test is reached, never walked on from: a form naming a test (its name quoted as
+        ;; data, a proof list) does not run it
+        (recur (into (vec more) (comp (remove #(= :test (second %))) (map first)) new) (into seen (map first) new)
                (into tests (comp (filter #(= :test (second %))) (map first)) callers)))
       tests)))
 
 (def tree-readers
   "The host vars that read files: a test whose reached forms reference one reads the
-  checkout's tree, so its reach digest covers the whole tree (reach-digests)."
+  checkout's tree, so its reach digest covers the whole tree (reach-digests), unless the
+  form referencing it defines one of env-readers."
   '#{clojure.core/slurp clojure.core/file-seq})
+
+(def env-readers
+  "The platform vars whose file reads are of inputs every digest already holds (:env:
+  resources/, deps.edn, web/), so reaching them does not make a test read the tree. A reader
+  not named here counts as reading the tree (conservative: a missed name reruns more, never
+  reuses a stale green). Measured 2026-10-22 (worktree session PROVE): with
+  seon.config/baked-schema-forms (a macro every contracted form expands) counted, 327 of 368
+  tests took the tree, so any edit anywhere reran them."
+  '#{seon.config/baked-schema-forms ;; resources/seon/schemas, in :env
+     seon.fork-server/dev-classpath! ;; deps.edn, in :env
+     seon.web/handler}) ;; web/public, in :env
 
 (defn reach-digests
   "{test var -> reach digest} of db's tests (task seon.program/tests-run-by-reach): the
@@ -789,7 +807,10 @@
         methods (by-def :method) impls (by-def :impl)
         by-id (into {} (map (juxt :id identity)) forms)
         digest (into {} (for [f forms] [(:id f) (error/digest (str (:ns f) "\n" (:src f)))]))
-        edges (fn [f] (concat (keep var-form (:refs f)) (:schema f)
+        ;; a test's form is reached only as the root it is: another form naming a test (its
+        ;; name quoted as data, a proof list) never runs it, clojure.test does
+        test-ids (set (for [dt (d/datoms db :aevt :var/kind) :when (= :test (:v dt)) :let [id (var-form (:var/name (d/entity db (:e dt))))] :when id] id))
+        edges (fn [f] (concat (remove test-ids (keep var-form (:refs f))) (:schema f)
                               (for [[k s] (:defines f) :when (= :var k) id (concat (methods s) (impls s) (contract s))] id)))
         plain (group-by :ns (filter #(not-any? (fn [[k]] (= :var k)) (:defines %)) live))]
     (into {} (for [f forms [k t] (:defines f) :when (and (= :var k) (= :test (:var/kind (d/entity db [:var/name t]))))
@@ -797,5 +818,8 @@
                                    (if-let [[id & more] (seq front)]
                                      (if (seen id) (recur more seen) (recur (into (vec more) (edges (by-id id))) (conj seen id)))
                                      seen))
-                         reads? (some #(some tree-readers (:refs (by-id %))) reached)]]
+                         reads? (some #(let [f (by-id %)]
+                                         (and (some tree-readers (:refs f))
+                                              (not (and (seq (:defines f)) (every? (fn [[k s]] (and (= :var k) (env-readers s))) (:defines f))))))
+                                      reached)]]
                [t (error/digest (apply str t "\n" env "\n" (when reads? tree) (sort (map digest reached))))]))))

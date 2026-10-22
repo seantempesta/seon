@@ -1,4 +1,4 @@
-(ns seon.entrance
+(ns seon.server
   "Root's MCP and request server for outside agents (Claude Code through MCP, a person): a
   socket on 127.0.0.1, one request per line in, one answer per line out (R1's
   proto.agents.entrance, on the flow core). A line is line EDN ({:op k ...}), or MCP's
@@ -17,9 +17,9 @@
             [seon.lib :as lib] [seon.repl :as repl] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str]))
 
 (defn- refused
-  "The entrance refusing a request, as root's API does: the one error map."
+  "The server refusing a request, as root's API does: the one error map."
   {:malli/schema [:=> [:cat :string] :seon.root/refused]}
-  [why] (contract/error :seon.root/refused 'seon.entrance/answer why))
+  [why] (contract/error :seon.root/refused 'seon.server/answer why))
 
 (defn task-summaries
   "Every task on main db: {id {:execution :done :blocked-by :attempts [[id status outcome
@@ -59,7 +59,7 @@
   (let [items (mapv #(assoc % :origin :outside)
                     (binding [*sys* sys]
                       (repl/eval-string code {"ns" "root.repl" :origin :outside :ticks 0
-                                              :repl/eval-fn (fn [form] (eval (list 'let '[sys seon.entrance/*sys*] form)))})))]
+                                              :repl/eval-fn (fn [form] (eval (list 'let '[sys seon.server/*sys*] form)))})))]
     @(c/transact-main! sys (repl/record-tx :root (str "root-outside-" (profile/now-ns)) items nil))
     items))
 
@@ -180,7 +180,7 @@
   line opening `{\"` is MCP's JSON-RPC (mcp-reply, JSON out), every other line is EDN (answer,
   EDN out), so an EDN request is a keyword-keyed map. The entrant boundary: a defect (a line
   that does not read, an op that throws) answers that request as the typed
-  :seon.entrance/defect, for MCP inside a JSON-RPC error with the request's id (-32700 for
+  :seon.server/defect, for MCP inside a JSON-RPC error with the request's id (-32700 for
   a line that is not JSON, naming the rule)."
   {:malli/schema [:=> [:cat [:maybe :seon.root/sys] :string] [:maybe :string]]}
   [sys line]
@@ -191,7 +191,7 @@
            (binding [*print-length* nil *print-level* nil] (pr-str (answer sys (edn/read-string line)))))
          (catch Throwable e
            (let [cause (or (ex-message e) (str (type e)))
-                 d (contract/error :seon.entrance/defect 'seon.entrance/answer
+                 d (contract/error :seon.server/defect 'seon.server/answer
                                    (if (and mcp? (nil? @msg)) (str "a line opening {\" is MCP's JSON-RPC, and an EDN request a keyword-keyed map; this one is not JSON: " cause) cause)
                                    (cond-> {:line line} (ex-data e) (assoc :data (pr-str (ex-data e)))))]
              (if mcp?
@@ -221,9 +221,9 @@
   [sys port]
   (let [ss (java.net.ServerSocket. port 50 (java.net.InetAddress/getByName "127.0.0.1"))]
     (doto (Thread. ^Runnable (fn [] (loop [] (let [s (.accept ss)]
-                                                (doto (Thread. ^Runnable (fn [] (serve-connection! sys s)) "seon-entrance-conn")
+                                                (doto (Thread. ^Runnable (fn [] (serve-connection! sys s)) "seon-server-conn")
                                                   (.setDaemon true) (.start))
                                                 (recur))))
-                   "seon-entrance-accept")
+                   "seon-server-accept")
       (.setDaemon true) (.start))
     ss))

@@ -157,7 +157,7 @@
   the n start now and no collection starts another. Unfixed, a collection starts one per
   thread it finds waiting and keeps it, so the pool's size depends on timing. n < 0 only
   asks. Answers the sweepers running. A process that forks must never start one
-  (docs/DRAGONS.md, physics)."
+  (docs/failure-points.md, physics)."
   {:malli/schema [:=> [:cat :int] :int]}
   [n] (collect-sweepers* n))
 

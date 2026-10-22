@@ -1,4 +1,4 @@
-;; The program merge's named schemas (lane M1's proto.merge.edn).
+;; The program merge's named schemas (session M1's proto.merge.edn).
 {:seon.merge/data-attrs [:or [:= :all] [:set :keyword]]
  ;; a definition (var, multimethod method, protocol extension, namespace), a form (the
  ;; unit main evaluates), or a datum of declared data

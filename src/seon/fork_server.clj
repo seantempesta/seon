@@ -3,11 +3,11 @@
   commit's tx-data with d/db-with in commit order, and forks agents on request. Commits
   and fork requests arrive on one FIFO pipe, so an agent forked after commit k sees k:
   the agent's branch was created by the writer at exactly that point. Its one socket to
-  root (lane F2, T1's transport) carries commands down and events up, and each agent's
+  root (session F2, T1's transport) carries commands down and events up, and each agent's
   socket arrives with its fork request (SCM_RIGHTS). It reaps its
   children and reports their exits. It never starts a thread, a future or core.async.
 
-  It is a step-fn (`server-step`), run on its one thread by `seon.step/run-loop` (lane
+  It is a step-fn (`server-step`), run on its one thread by `seon.step/run-loop` (session
   F2): the same process contract as root's Flow procs, with pause, resume, stop and ping
   as messages on its pipe."
   (:refer-clojure :exclude [defn defn-])
@@ -70,7 +70,7 @@
                        :mismatch (:mismatch st) :mem-mb (lib/r2 (lib/real-mb)) :os-threads (lib/nthreads)
                        :active-threads (lib/active-threads)}]}]
      :static (let [t0 (profile/now-ns)] (lib/static!) [st {:ev [{:ev :static :ms (profile/ms-since t0)}]}])
-     ;; a standby (lane F2): a fork of this server, idle on its own named pipes until root
+     ;; a standby (session F2): a fork of this server, idle on its own named pipes until root
      ;; promotes it, so that no fork after boot ever comes from root (multithreaded).
      ;; The previous standby is killed: one standby at a time.
      :standby (fork-carrying! st #(main (:db st) % false)
@@ -185,13 +185,13 @@
     (sock/close! (:fd st))
     (some-> (:standby-pending st) drop-standby)
     (if-not alive?
-      [(assoc st :pid nil :lost true :standby-pending nil) {:to-api [{:ev :server-down :old (:pid st)} {:ev :server-lost}]}]
+      [(assoc st :pid nil :lost true :standby-pending nil) {:to-api [{:ev :fork-server-down :old (:pid st)} {:ev :fork-server-lost}]}]
       (let [_ (doseq [c (:log st) :when (> (:t c) (:t sb))] (sock/send! (:fd sb) c))
             _ (doseq [{:keys [req]} (:waiters st)] (sock/send! (:fd sb) req))
             st (assoc st :standby-pending nil :pid (:pid sb) :fd (:fd sb) :standby nil :restarts (inc (:restarts st 0))
-                      :reader (start-event-reader! (:server-ev st) (:fd sb) (:pid sb)))]
+                      :reader (start-event-reader! (:fork-server-ev st) (:fd sb) (:pid sb)))]
         [(request-standby st)
-         {:to-api [{:ev :server-down :old (:pid st)} {:ev :server-up :pid (:pid sb)}]}]))))
+         {:to-api [{:ev :fork-server-down :old (:pid st)} {:ev :fork-server-up :pid (:pid sb)}]}]))))
 
 (defn fork-server-proc
   "The fork server's side in root, and the one writer of its command pipe.
@@ -201,16 +201,16 @@
   socket to root); when the server dies the standby is promoted (lesson 1: every fork comes from a
   single-threaded process)."
   {:malli/schema :seon.step/step-fn}
-  ([] {:params {:pid "the server" :fd "its socket" :server-ev "its events, read by the reader thread"}
+  ([] {:params {:pid "the server" :fd "its socket" :fork-server-ev "its events, read by the reader thread"}
        :ins {:cmd "commits and forks, FIFO" :ext "the api's requests"} :outs {:to-api "events and answers"}
        ;; pipe writes: short, blocking only on the pipe
        :workload :io
        :ping-map-fn (fn [st] {:pid (:pid st) :standby (:pid (:standby st)) :restarts (:restarts st 0)
                               :waiting (count (:waiters st)) :log (count (:log st)) :stopping (boolean (:stopping st))})})
-  ([{:keys [server-ev fd pid] :as args}]
+  ([{:keys [fork-server-ev fd pid] :as args}]
    (request-standby
-     (assoc args :waiters clojure.lang.PersistentQueue/EMPTY :log [] :reader (start-event-reader! server-ev fd pid)
-            ::flow/in-ports {:ev server-ev})))
+     (assoc args :waiters clojure.lang.PersistentQueue/EMPTY :log [] :reader (start-event-reader! fork-server-ev fd pid)
+            ::flow/in-ports {:ev fork-server-ev})))
   ([st tr]
    ;; the stop transition releases what init opened: the server, its standby, the reader
    (when (and (= tr ::flow/stop) (not (:stopping st)))

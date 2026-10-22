@@ -1,15 +1,15 @@
 #!/bin/sh
-# bin/dragons [KIND ...] — the law census: for each law, every site in src/ (the check and
+# bin/laws [KIND ...] — every law's sites: for each law, every site in src/ (the check and
 # e2e drivers left out, but for clocks: a harness wait is a clock too) where its mark appears, by its function (`ns/fn`), and whether the
 # law's doc names that function in backticks with the owner's reason. Prints each site;
 # exits 1 when one is not named. Kinds (default: all), each a mark over code with strings
 # and comments stripped, and the doc (and section) that sanctions it:
-#   catch       `(catch `                                         docs/DRAGONS.md
+#   catch       `(catch `                                         docs/failure-points.md
 #   clocks      time decides: sleep, timeout, deadline, *-MS      docs/clocks.md "## Time decides"
 #   measures    a clock read (currentTimeMillis, nanoTime, now-ns) docs/clocks.md
 #   resolution  requiring-resolve, ns-resolve, (resolve '..),
 #               intern, alter-var-root, with-redefs               docs/resolution.md
-# bin/dragons growth [BASE]: not a gate; net src lines since BASE (default main) and the
+# bin/laws growth [BASE]: not a gate; net src lines since BASE (default main) and the
 # top-level definitions on its added lines (ns/name; a moved one counts).
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
@@ -21,7 +21,7 @@ if [ "${1:-}" = growth ]; then
 fi
 mkdir -p target
 bad=0
-census() { # KIND PATTERN DOC [SECTION]
+sites() { # KIND PATTERN DOC [SECTION]
   if [ "$1" = clocks ]; then files=$(find src -name '*.clj' | sort); else files=$(find src -name '*.clj' ! -name check.clj ! -name e2e.clj | sort); fi
   for f in $files; do
     ns=$(sed -n 's/^(ns \([^ ]*\).*/\1/p' "$f" | head -1)
@@ -40,7 +40,7 @@ census() { # KIND PATTERN DOC [SECTION]
   done < "target/$1-sites.txt"
   n=$(wc -l < "target/$1-sites.txt" | tr -d ' ')
   if [ "$1" = catch ]; then
-    [ $kb = 0 ] && echo "DRAGONS OK ($n catch sites, all named)" || echo "DRAGONS FAILED"
+    [ $kb = 0 ] && echo "LAWS OK ($n catch sites, all named)" || echo "LAWS FAILED"
   else
     [ $kb = 0 ] && echo "$1 OK ($n sites, all named in $3)" || echo "$1 FAILED (unnamed sites above; $3)"
   fi
@@ -50,11 +50,11 @@ kinds=${*:-catch clocks measures resolution}
 for k in $kinds; do
   [ "$k" = catch ] || echo "== $k"
   case $k in
-    catch) census catch '[(]catch ' docs/DRAGONS.md ;;
-    clocks) census clocks '[Ss]leep|[Tt]imeout([^s]|$)|deadline|[A-Z]-MS' docs/clocks.md "## Time decides" ;;
-    measures) census measures 'currentTimeMillis|nanoTime|now-ns|now-ms' docs/clocks.md ;;
-    resolution) census resolution "[(](requiring-resolve|ns-resolve|resolve '|intern|alter-var-root|with-redefs)[ )]" docs/resolution.md ;;
-    *) echo "dragons: no kind $k"; bad=1 ;;
+    catch) sites catch '[(]catch ' docs/failure-points.md ;;
+    clocks) sites clocks '[Ss]leep|[Tt]imeout([^s]|$)|deadline|[A-Z]-MS' docs/clocks.md "## Time decides" ;;
+    measures) sites measures 'currentTimeMillis|nanoTime|now-ns|now-ms' docs/clocks.md ;;
+    resolution) sites resolution "[(](requiring-resolve|ns-resolve|resolve '|intern|alter-var-root|with-redefs)[ )]" docs/resolution.md ;;
+    *) echo "laws: no kind $k"; bad=1 ;;
   esac
 done
 exit $bad

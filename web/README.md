@@ -1,7 +1,7 @@
-# Root's web: the live admin interface (lane W2)
+# Root's web: the live admin interface (session W2)
 
 A real-time dashboard of the whole system, a zoomed page per agent, and root's own context, all
-from schema-declared render functions. Ported from `proto/web` (lane L2's dashboard, L4's polish)
+from schema-declared render functions. Ported from `proto/web` (session L2's dashboard, L4's polish)
 and W1's render selection (`proto/render`); rebuilt on `seon.root`'s API as two step-fn procs.
 
 ## Run it
@@ -79,7 +79,7 @@ open http://127.0.0.1:7777/
   | `:seon.render/event` | `event-row` |
 - **Callbacks are data.** `{:seon/call 'ns/fn :seon/args {...} :seon/agent id}` on a form or
   button serializes to `@post('/call?...')`.
-  - Root's verbs (`seon.root/spawn! submit! run-tests! merge! merge-main! clone! interrupt! kill!`)
+  - Root's functions (`seon.root/spawn! submit! run-tests! merge! merge-main! clone! interrupt! kill!`)
     become root's requests. Each is recorded on main as root's evaluation, origin `:ui`.
   - The REPL box is an eval in the agent with origin `:ui`.
   - Any other fn runs in the agent as `(seon.web/ui-call 'fn args)`. It is refused as data
