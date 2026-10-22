@@ -146,3 +146,8 @@ I did not land it, because the honest value needs the Jolt `def-var!`. A version
 2. A go for Q2's two small changes: `:base` from `branch-base`, and the commit id on `:fork`, checked.
 3. A ruling on Q1: no units now (recommended), or the per-form unit cache in the store (Jolt work first: emit to a bytevector, no absolute paths).
 4. A go for the Datahike line in `deref-keeps-the-connections-config`.
+
+## Verification (this branch, 2026-10-22)
+
+- Full `bin/test`: 335 tests; the reds are 4 open tasks' proofs that predate the branch: `seon.root-test/a-build-without-whole-program-inference-reads-with-tools-reader` (jolt.ns), `seon.procs-test/the-flush-is-continuous-group-commit` (seon.writer), `seon.source-test/a-restart-catches-up-and-a-new-generation-resumes` (seon.source), `seon.schema-test/a-registration-counts-the-stored-values-it-refuses` (my.schema).
+- `bin/check 100`: everything OK but `census-3` and `orphan` (both predate the branch) and `e2e-loop`. The loop ran on a stale `target/seon` (main's `e117b9b`): its merge deleted `seon.db/stored-id`, a form the binary lacked. Rebuilt from HEAD (`bin/build seon`, 38 s), `bin/check e2e loop` passes. The deletion is filed as `seon.source/a-merge-writes-back-only-what-it-changed`.
