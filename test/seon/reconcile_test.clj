@@ -138,7 +138,7 @@
     [{:op :bail :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended cap: proof-red demo-test/a-test"}]))
 
 (deftest an-attempt-with-no-end-records-no-fake-spend
-  ;; task seon.fences/budgets-are-data-and-spend-is-measured: the agent wrote no end (it died
+  ;; task seon.model/budgets-are-data-and-spend-is-measured: the agent wrote no end (it died
   ;; or was killed before end!), so its turns, tokens and time are unknown: absent, never 0
   (let [db (db-of diamond :extra (attempt "a" 1 :running))
         tx (#'r/judge-tx {:db db :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:attempt "demo/a#1" :task "demo/a"}} {} {:db db} #{})
@@ -495,6 +495,28 @@
     (is (= :refused (:seon.attempt/status attempt)) "the refusal is written as the attempt")
     (is (= held-why (:seon.attempt/reason attempt)) "with root's reason")
     (is (= [(spawn "a" 2)] (r/reconcile (d/db-with db written))) "the next pass starts the task again")))
+
+(deftest a-refused-task-asks-again-when-main-moves
+  ;; if nothing has changed, asking again is refused again: neither the refusal's answer nor
+  ;; its own commit starts the task; other work on main lets it ask again, as its next attempt
+  (let [commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
+        main (fn [st db ops] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns (sock/now-ns)}))
+        spawns (fn [outs] (vec (keep #(when (= :spawn (get-in % [:req :op])) (get-in % [:req :opts :task])) (:to-api outs))))
+        db (db-of [(decl "a")])
+        [st outs] (main (r/reconciler-proc {:boot "boot-1"}) db [])
+        asked (first (filter #(= :spawn (get-in % [:req :op])) (:to-api outs)))
+        [st outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r (contract/error :seon.root/refused 'seon.root/spawn! held-why {:branch :demo/a :agent :a9})})
+        w (first (filter #(= :write (get-in % [:req :op])) (:to-api outs2)))
+        [st outs3] (r/reconciler-proc st :answers {:tag (:tag w) :r {:ok true}})
+        [db2 ops2] (commit db (get-in w [:req :req :tx-data]))
+        [st outs4] (main st db2 ops2)
+        [db3 ops3] (commit db2 [{:seon.task/id "demo/a" :seon.task/plan "Make a true, again."}])
+        [_ outs5] (main st db3 ops3)]
+    (is (= ["demo/a"] (spawns outs)))
+    (is (= [] (spawns outs3)) "the write's answer starts nothing")
+    (is (= [] (spawns outs4)) "nor does the refusal's own commit")
+    (is (= [{:task "demo/a" :cause held-why :attempt "demo/a#1" :blocks []}] (get-in st [:quiescent :stuck])) "quiet, naming it")
+    (is (= ["demo/a"] (spawns outs5)) "other work on main: it asks again")))
 
 (deftest quiescence-names-a-task-that-cannot-start
   ;; a refused attempt is a root cause at quiescence, naming what it blocks
