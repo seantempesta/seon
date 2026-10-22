@@ -174,13 +174,13 @@
     (sock/close! (:fd st))
     (some-> (:standby-pending st) drop-standby)
     (if-not alive?
-      [(assoc st :pid nil :lost true :standby-pending nil) {:to-api [{:ev :server-down :old (:pid st)} {:ev :server-lost}]}]
+      [(assoc st :pid nil :lost true :standby-pending nil) {:to-api [{:ev :fork-server-down :old (:pid st)} {:ev :fork-server-lost}]}]
       (let [_ (doseq [c (:log st) :when (> (:t c) (:t sb))] (sock/send! (:fd sb) c))
             _ (doseq [{:keys [req]} (:waiters st)] (sock/send! (:fd sb) req))
             st (assoc st :standby-pending nil :pid (:pid sb) :fd (:fd sb) :standby nil :restarts (inc (:restarts st 0))
-                      :reader (start-event-reader! (:server-ev st) (:fd sb) (:pid sb)))]
+                      :reader (start-event-reader! (:fork-server-ev st) (:fd sb) (:pid sb)))]
         [(request-standby st)
-         {:to-api [{:ev :server-down :old (:pid st)} {:ev :server-up :pid (:pid sb)}]}]))))
+         {:to-api [{:ev :fork-server-down :old (:pid st)} {:ev :fork-server-up :pid (:pid sb)}]}]))))
 
 (defn fork-server-proc
   "The fork server's side in root, and the one writer of its command pipe.
@@ -190,16 +190,16 @@
   socket to root); when the server dies the standby is promoted (lesson 1: every fork comes from a
   single-threaded process)."
   {:malli/schema :seon.step/step-fn}
-  ([] {:params {:pid "the server" :fd "its socket" :server-ev "its events, read by the reader thread"}
+  ([] {:params {:pid "the server" :fd "its socket" :fork-server-ev "its events, read by the reader thread"}
        :ins {:cmd "commits and forks, FIFO" :ext "the api's requests"} :outs {:to-api "events and answers"}
        ;; pipe writes: short, blocking only on the pipe
        :workload :io
        :ping-map-fn (fn [st] {:pid (:pid st) :standby (:pid (:standby st)) :restarts (:restarts st 0)
                               :waiting (count (:waiters st)) :log (count (:log st)) :stopping (boolean (:stopping st))})})
-  ([{:keys [server-ev fd pid] :as args}]
+  ([{:keys [fork-server-ev fd pid] :as args}]
    (request-standby
-     (assoc args :waiters clojure.lang.PersistentQueue/EMPTY :log [] :reader (start-event-reader! server-ev fd pid)
-            ::flow/in-ports {:ev server-ev})))
+     (assoc args :waiters clojure.lang.PersistentQueue/EMPTY :log [] :reader (start-event-reader! fork-server-ev fd pid)
+            ::flow/in-ports {:ev fork-server-ev})))
   ([st tr]
    ;; the stop transition releases what init opened: the server, its standby, the reader
    (when (and (= tr ::flow/stop) (not (:stopping st)))

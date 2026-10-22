@@ -18,7 +18,7 @@
  ;; proc's health, main's tasks and attempts, the series the tiles draw, and the events.
  ;; Its HTML face is root's layout; its AI face is root's context (a budgeted text).
  :seon.render/system [:map {:seon.render/html seon.render.ui/system-page :seon.render/ai seon.render.ai/system}
-                      [:agents :map] [:health :map] [:writer :map] [:server :map]
+                      [:agents :map] [:health :map] [:writer :map] [:fork-server :map]
                       [:main :map] [:tasks :map] [:attempts :map] [:events [:vector :any]]]
  ;; one agent as root holds it (the api's view entry, its id added): its card in root's layout
  :seon.render/agent [:map {:seon.render/html seon.render.ui/agent-card}

@@ -247,7 +247,7 @@
 
 (defn instrument
   "An agent's defn with :malli/schema is armed (a bad call refuses as the error map); one
-  without is instrumented with a warning that grows with the agent's uncontracted definitions."
+  without stays uninstrumented, joins the agent's uncontracted set, and the warning naming them grows."
   []
   (run-check "INSTRUMENT" {:datoms 500}
    (fn [sys]
@@ -423,8 +423,8 @@
         r12b @(c/submit! sys b ":next")
         r10 @(c/submit! sys x "(println \"hello from\" (:id (my.agent/whoami))) (def busy (future (loop [] (recur))))")
         t10 @(c/run-tests! sys x)
-        _ (lib/c-kill (get-in (c/state sys) [:server :pid]) 9)
-        _ (await-event ev #(#{:server-up :server-lost} (:type %)))
+        _ (lib/c-kill (get-in (c/state sys) [:fork-server :pid]) 9)
+        _ (await-event ev #(#{:fork-server-up :fork-server-lost} (:type %)))
         r7 @(c/submit! sys b "(+ 3 4)")
         [y] (spawn-ready! sys "after the fork server died")
         r8 @(c/submit! sys y "(count (q '[:find ?v :where [?v :var/name]])) (loop [] (recur)) :after" {:ticks 1000000000})]
@@ -432,7 +432,7 @@
                 :refused (short-items r2) :printed-chars (mapv #(count (:printed %)) r3) :read-error (short-items r4)
                 :spin (select-keys t5 [:error :reports :ms]) :test-exits (select-keys t6 [:error :reports :exit])
                 :oom (short-items r9) :interrupt (short-items r12) :ticks (short-items r11)
-                :out [(:out (first r10)) (:reports t10)] :fork-server [(:server (c/state sys)) (short-items r7) (short-items r8)]}
+                :out [(:out (first r10)) (:reports t10)] :fork-server [(:fork-server (c/state sys)) (short-items r7) (short-items r8)]}
        :checks {"agent calling System/exit mid-request dies alone, named by its exit status"
                 (and (= :seon.agent/died (:seon.error/type (:err (last r1)))) (= {:exit 3} (:exit (:err (last r1))))
                      (= :dead (get-in (c/state sys) [:agents a :status])))
@@ -518,7 +518,7 @@
       {:report {:agents n :all-ok (count (filter :ok results))
                 :spawn->all-ready-ms (lib/r2 t-ready) :end-to-end-ms (lib/r2 t-done)
                 :start-ms (lib/summ (keep #(get-in st [:agents % :forked-ms]) ids))
-                :server-fork-ms-p50 (get-in st [:server :fork-ms-p50])
+                :server-fork-ms-p50 (get-in st [:fork-server :fork-ms-p50])
                 :eval+transact-ms (lib/summ (map :eval-ms results)) :tests-ms (lib/summ (map :tests-ms results))
                 :agent-real-mb (lib/summ agent-mb) :agent-real-mb-sum (lib/r2 (reduce + agent-mb))
                 :system-free-drop-mb-per-agent (lib/r2 per-agent)
@@ -553,7 +553,7 @@
                                      #(and (= b (:agent %)) (#{:tests-started :tests} (:type %)))])
         test-child (when (= :tests-started (:type forked)) (:pid forked))
         pids (keep #(get-in (c/state sys) [:agents % :pid]) [a b (:id cl)])]
-    (out! "PIDS " (clojure.string/join " " (concat pids [(get-in (c/state sys) [:server :pid])] (when test-child [test-child]))))
+    (out! "PIDS " (clojure.string/join " " (concat pids [(get-in (c/state sys) [:fork-server :pid])] (when test-child [test-child]))))
     ;; without a running test child there is nothing to prove about it
     (when-not test-child (out! "NO TEST CHILD " (pr-str forked)))
     (lib/c-exit (if test-child 0 1))))
@@ -687,7 +687,7 @@
                ok? (every? #(= "4" (:printed (first @(c/submit! sys % "(+ 2 2)")))) ids)
                health (mapv #(let [p (ping sys %)] (:status p p)) [:api :writer :fork-server :flusher :reconciler])
                running (thread-diff (c/declared-threads sys) (c/threads))
-               pids (vec (cons (get-in (c/state sys) [:server :pid]) (keep #(get-in (c/state sys) [:agents % :pid]) ids)))
+               pids (vec (cons (get-in (c/state sys) [:fork-server :pid]) (keep #(get-in (c/state sys) [:agents % :pid]) ids)))
                st (c/stop! sys)]
            {:cycle i :ok ok? :boot-ms (lib/r2 boot-ms) :stop st :left (vec (filter alive? pids))
             :health (set health)
@@ -745,7 +745,7 @@
    (fn [sys]
     (let [ids (ready! sys #(vec (pmap (fn [i] (c/spawn! sys {:task (str "drain " i)})) (range n))))
         pids (vec (keep #(get-in (c/state sys) [:agents % :pid]) ids))
-        fs-pid (get-in (c/state sys) [:server :pid])
+        fs-pid (get-in (c/state sys) [:fork-server :pid])
         ;; each agent: one eval writing 50 notes, one transact! at a time
         evals (mapv #(c/submit! sys % (str "(dotimes [i 50] (transact! [{:note/text (str \"d\" i) :note/agent " % "}])) :done")) ids)
         write #(c/transact-main! sys [{:note/text (str "m" %) :note/agent :root}])
@@ -981,7 +981,7 @@
                 :running-set-after (= (conj expect :probe) after)}}))))
 
 (defn root-serve
-  "A root with its entrance on 127.0.0.1:(:seon.config.root/entrance-port) (seon.entrance),
+  "A root with its server on 127.0.0.1:(:seon.config.root/entrance-port) (seon.server),
   until stdin closes (bin/root stop) or SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks):
   what an outside agent's MCP relay (bin/mcp) talks to. Its end is a fact on main
   naming that cause (seon.root/stop!). A checkout whose config names no server port (0)
@@ -989,7 +989,7 @@
   []
   (let [port (seon.config/value :seon.config.root/entrance-port)
         _ (when (zero? port)
-            (out! "ROOT REFUSED: :seon.config.root/entrance-port is 0 (no entrance); bin/worktree --ports writes config/local.edn with this checkout's ports")
+            (out! "ROOT REFUSED: :seon.config.root/entrance-port is 0 (no server); bin/worktree --ports writes config/local.edn with this checkout's ports")
             (lib/c-exit 1))
         sys (c/start! {})]
     ;; the first cause stops root, once; a signal's hook waits for that stop, then Jolt exits
@@ -1094,7 +1094,7 @@
           cl (:id (ready! sys #(deref (c/clone! sys a {}))))
           cl-eval (:printed (last @(c/submit! sys cl "(inc 41)")))
           st (c/state sys)
-          res {:fork-server (os-threads (get-in st [:server :pid])) :agent (os-threads (get-in st [:agents a :pid]))
+          res {:fork-server (os-threads (get-in st [:fork-server :pid])) :agent (os-threads (get-in st [:agents a :pid]))
                :clone (os-threads (get-in st [:agents cl :pid]))}]
       {:report (assoc res :tests tests :clone-eval cl-eval)
        :checks {:each-forking-process-one-thread (= 1 (:fork-server res) (:agent res) (:clone res))

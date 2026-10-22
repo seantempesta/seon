@@ -74,7 +74,7 @@
                         [:seon.attempt/unmerged {:optional true} [:vector :string]]
                         [:seon.attempt/changed {:optional true} [:set :string]]]
  ;; ---- the done rule and the reconciler's answer ----
- :seon.reconcile/merge-config [:map [:max-conflicts nat-int?] [:max-merge-turns nat-int?]]
+ :seon.reconcile/merge-limits [:map [:max-conflicts nat-int?] [:max-merge-turns nat-int?]]
  ;; a released task not done at quiescence: a root cause (its stuck fact, or cancelled or held)
  ;; and the released tasks it blocks, transitively
  :seon.reconcile/stuck-row [:map {:closed true} [:task :seon.task/id] [:cause :string]
@@ -99,7 +99,7 @@
                         [:ready [:set [:tuple :int :seon.task/id]]] [:ready-key :map]
                         [:live [:set :seon.attempt/id]] [:reap [:set :seon.attempt/id]] [:kill [:map-of :seon.attempt/id :keyword]]
                         [:judge [:set :seon.attempt/id]] [:merging [:set :seon.attempt/id]]]
- :seon.reconcile/step [:enum :ignored :done :dead-read :spawned :started :worked :tested :read :diffed :merged :octopus-merged :merged-to-write-back :main-read :committed :commit-recorded :built]
+ :seon.reconcile/step [:enum :ignored :done :dead-read :spawned :started :worked :tested :read :diffed :merged :octopus-merged :write-back :main-read :committed :commit-recorded :built]
  ;; a task and an attempt as Datahike pulls them (the readers' inputs)
  :seon.task/pulled [:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                     [:seon.task/plan :seon.task/plan] [:seon.task/execution [:enum :held :running :cancelled]]

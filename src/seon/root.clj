@@ -10,7 +10,7 @@
     :fork-server  :io     the fork server's command pipe, its events, its restart
     :reconciler   :io     main's commits through a bounded buffer (every commit's datoms; the hook a
                           reconciler and the dashboard plug into)
-  and one proc per agent (`agent-proc`, added and removed with flow/update!), its agent proc:
+  and one proc per agent (`agent-proc`, added and removed with flow/update!):
   it owns root's end of the agent's socket and its process, and passes Flow's pause, resume and stop on to the
   agent's own loop (seon.step/run-loop), which runs the same step-fn contract.
 
@@ -365,7 +365,7 @@
       :forked (do (step/out! o :events (step/event {:type :spawned :agent (:agent m) :pid (:pid m) :fork-ms (:fork-ms m)}))
                   (when (stopped-statuses (get-in st [:view :agents (:agent m) :status])) (lib/c-kill (:pid m) 9))
                   (-> st (set-agent (:agent m) {:pid (:pid m)})
-                      (view! update-in [:server :agents-forked] (fnil inc 0))
+                      (view! update-in [:fork-server :agents-forked] (fnil inc 0))
                       (view! update-in [:stats :fork-ms] lib/push-window (:fork-ms m) 500)
                       (to-agent (:agent m) {:op :forked :pid (:pid m)})))
       :exit (let [st (if-let [aid (some (fn [[aid a]] (when (= (:pid m) (:pid a)) aid)) (get-in st [:view :agents]))]
@@ -378,24 +378,24 @@
       :fork-failed (let [why (str "fork refused: " (:active-threads m) " active threads")]
                      (-> st (set-agent (:agent m) {:error why}) (to-agent (:agent m) {:op :failed :error why})))
       :applied (-> st (view! update-in [:stats :lag-ms] lib/push-window (:lag-ms m) 200)
-                   (view! assoc-in [:server :mismatch] (:mismatch m)))
-      :load-errors (view! st update-in [:server :load-errors] (fnil into []) (:errors m))
+                   (view! assoc-in [:fork-server :mismatch] (:mismatch m)))
+      :load-errors (view! st update-in [:fork-server :load-errors] (fnil into []) (:errors m))
       ;; fork requests the dead server never served fail; agents live on
       ;; the dead server's children are orphans: no server reaps them, so a death waiting
       ;; for its exit status is answered now, and a later one at once
-      :server-down (do (step/out! o :events (step/event {:type :server-down :pid (:old m)}))
+      :fork-server-down (do (step/out! o :events (step/event {:type :fork-server-down :pid (:old m)}))
                        (as-> (reduce (fn [st [aid a]]
                                        (if (and (= :spawning (:status a)) (nil? (:pid a)) (get-in st [:agents aid]))
                                          (-> st (set-agent aid {:error "fork server went down before the fork"})
                                              (to-agent aid {:op :failed :error "fork server went down"}))
                                          (cond-> st (:pid a) (set-agent aid {:orphan true}))))
-                                     (view! st update :server assoc :status :restarting) (get-in st [:view :agents])) st
+                                     (view! st update :fork-server assoc :status :restarting) (get-in st [:view :agents])) st
                          (reduce (fn [st [_ [aid died inflight]]] (record-death st aid nil died inflight))
                                  (dissoc st ::dying) (::dying st))))
-      :server-lost (do (step/out! o :events (step/event {:type :server-lost}))
-                       (view! st update :server assoc :status :lost))
-      :server-up (do (step/out! o :events (step/event {:type :server-up :pid (:pid m)}))
-                     (view! st update :server (fn [s] (-> s (assoc :status :up :pid (:pid m)) (update :restarts (fnil inc 0))))))
+      :fork-server-lost (do (step/out! o :events (step/event {:type :fork-server-lost}))
+                       (view! st update :fork-server assoc :status :lost))
+      :fork-server-up (do (step/out! o :events (step/event {:type :fork-server-up :pid (:pid m)}))
+                     (view! st update :fork-server (fn [s] (-> s (assoc :status :up :pid (:pid m)) (update :restarts (fnil inc 0))))))
       st)
 
     :else
@@ -703,11 +703,11 @@
         ;; every event, for the API's taps (seon.root/events) and the render proc's (W2)
         events-mult (a/mult events-in)
         chans {:ext (a/chan 1024) :back (a/chan 4096) :to-writer (a/chan (cfg/value :seon.config.root/writer-buf))
-               :server-ev (a/chan 4096)
+               :fork-server-ev (a/chan 4096)
                ;; outside agents' attempts handed back for judgement (seon.server)
                :judge (a/chan 64)}
         view {:agents {} :writer {:tx-count 0} :stats {}
-              :server {:agents-forked 0 :pid pid :status :up :restarts 0}
+              :fork-server {:agents-forked 0 :pid pid :status :up :restarts 0}
               :store {:backend backend :path path :main main :agents-dir agents-dir :recovered? (boolean recovered?)
                       :recovered-branches recovered :open-ms (lib/r2 open-ms) :preload-ms (lib/r2 preload-ms)}
               :boot {:gc-sweepers sweepers :load-ms (lib/r2 load-ms) :program (assoc program :ms (lib/r2 program-ms))
@@ -715,7 +715,7 @@
         graph-p (promise)
         root-procs-p (promise)
         ;; what the declaration (resources/seon/system.edn) names as :bind/<name>
-        bindings (merge (select-keys chans [:ext :back :to-writer :server-ev :judge])
+        bindings (merge (select-keys chans [:ext :back :to-writer :fork-server-ev :judge])
                         {:view view :graph graph-p :lease-base (pdb/lease-base conn)
                          :system root-procs-p :events events-in :events-mult events-mult
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
@@ -789,7 +789,7 @@
         tpc (when (and commits (pos? commits)) (lib/r2 (/ (double (or batched-tx 0)) commits)))]
     (-> v
         (update :writer #(-> % (dissoc :recent :batch-ms) (assoc :batch-p50-ms (lib/p50 (:batch-ms %)) :tx-per-commit tpc :commits commits)))
-        (update :server assoc :lag-ms (lib/p50 lag-ms) :fork-ms-p50 (lib/p50 fork-ms))
+        (update :fork-server assoc :lag-ms (lib/p50 lag-ms) :fork-ms-p50 (lib/p50 fork-ms))
         (update :store merge (when batches {:batches batches :commits commits :tx-per-commit tpc})))))
 
 (defn state

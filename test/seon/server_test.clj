@@ -4,7 +4,7 @@
   (:require [clojure.test :refer [deftest is]] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]))
 
 (deftest a-root-eval-replies-like-an-agent-eval
-  ;; task seon.server/root-evals-through-the-one-repl: an eval as root goes through the
+  ;; task seon.entrance/root-evals-through-the-one-repl: an eval as root goes through the
   ;; agents' REPL path, so its reply items are an agent's: the one printer, a result
   ;; handle, the error's message, *1 kept between requests
   (let [[a-ret a-err r-ret r-err r-star]
@@ -26,7 +26,7 @@
       (is (nil? (:error a)) (pr-str a)))))
 
 (deftest a-server-defect-answers-that-request-alone
-  ;; task seon.server/a-server-defect-answers-that-request-alone: a request whose op throws
+  ;; task seon.entrance/a-door-defect-answers-that-request-alone: a request whose op throws
   ;; (attach! refuses a task id that is not a string: its contract) is answered the typed
   ;; :seon.server/defect naming the line it took, and the server answers the next request
   (let [[defect ok] (at/in-agent [{:op :attach :task 5} {:op :eval :agent "root" :code "(+ 1 2)"}])]
@@ -35,7 +35,7 @@
     (is (= "3" (:printed ok)) "the server goes on")))
 
 (deftest the-server-speaks-mcp
-  ;; task seon.server/the-server-answers-mcp-itself: root's server answers MCP's JSON-RPC
+  ;; task seon.entrance/the-server-answers-mcp-itself: root's server answers MCP's JSON-RPC
   ;; itself (bin/mcp only relays lines): initialize with a version it implements, ping,
   ;; tools/list from the one op table, nothing for a notification, and the JSON-RPC error for
   ;; a method or tool it does not know. tools/call through a real root is
@@ -54,7 +54,7 @@
     (is (= -32602 (get-in (ask {"id" 4 "method" "tools/call" "params" {"name" "seon_nope" "arguments" {}}}) ["error" "code"])) "a tool no op names: invalid params")))
 
 (deftest a-line-opening-a-string-key-is-mcps
-  ;; task seon.server/the-server-answers-mcp-itself: the protocol rule. A line opening {" is
+  ;; task seon.entrance/the-server-answers-mcp-itself: the protocol rule. A line opening {" is
   ;; JSON-RPC, so an EDN request with a string key is refused naming the rule (-32700), never
   ;; misread; a keyword-keyed EDN line still reads as EDN
   (let [respond #'seon.server/respond
@@ -64,7 +64,7 @@
     (is (contract/error? (clojure.edn/read-string (respond nil "{:op :nope}"))) "a keyword-keyed line is EDN in, EDN out")))
 
 (deftest a-refused-attach-writes-nothing
-  ;; task seon.server/attach-writes-nothing-when-it-is-refused: attach spawns first and
+  ;; task seon.entrance/attach-writes-nothing-when-it-is-refused: attach spawns first and
   ;; writes the env, the release and the attempt in one transaction only once its agent
   ;; exists, so a refused spawn leaves the task as it was, and the reconciler never sees a
   ;; release with no attempt (it would spawn a second agent for it). demo/u shares demo/t's

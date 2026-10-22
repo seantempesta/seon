@@ -30,7 +30,7 @@
 
 (def type->datahike
   "Malli scalar type to Datahike value type (Seon's `malli-type->datahike-type`, with the
-  integer predicates the worktree sessions already write)."
+  integer predicates our schemas already use)."
   {:string :db.type/string :re :db.type/string :int :db.type/long :double :db.type/double :float :db.type/float
    :keyword :db.type/keyword :qualified-keyword :db.type/keyword :boolean :db.type/boolean
    :uuid :db.type/uuid :symbol :db.type/symbol :qualified-symbol :db.type/symbol

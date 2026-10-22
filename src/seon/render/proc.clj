@@ -95,7 +95,7 @@
         agents (:agents v {})]
     {:agents agents
      :order (or (:order st) (order agents now-ms))
-     :writer (:writer n) :server (:server n) :store (:store n)
+     :writer (:writer n) :fork-server (:fork-server n) :store (:store n)
      :boot (:boot v) :root-errors (:root-errors v []) :root-errors-total (:root-errors-total v 0)
      ;; health is what flows: each declared proc with the defects root recorded of it (a
      ;; step that threw); no ping, no beat
@@ -259,9 +259,8 @@
         ctx (if (= ctx-key (:ctx-key z)) (:ctx z)
                 (let [c (context-of (or db (:main-db st)) attempt ag)]
                   (cond-> c
-                    ;; on main: its branch is gone (reading it failed), or not read yet; the
-                    ;; text it read through the server is that text, whichever db
-                    (and (nil? db) (:main-db st) (not= :server (:from c))) (assoc :from (if (:db-error z) :main-gone :main)))))]
+                    ;; on main: its branch is gone (reading it failed), or not read yet
+                    (and (nil? db) (:main-db st)) (assoc :from (if (:db-error z) :main-gone :main)))))]
     [(assoc-in st [:zoom id] (assoc z :rows rows :ctx-key ctx-key :ctx ctx))
      {:agent (ui/ended-as ag id (:agent-attempt st {})) :attempt attempt :task (when attempt (get (:tasks st) (:seon.attempt/task attempt)))
       ;; each proof's task, to tell a blocking red from an allowed one

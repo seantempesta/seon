@@ -26,7 +26,7 @@
   (cfg/value :seon.config.merge/max-running))
 
 (def merge-defaults
-  "The merge config's defaults, when the task sets none (:seon.config.merge/*): the config's."
+  "The merge limits' defaults, when the task sets none (:seon.config.merge/*): the config's."
   {:max-conflicts (cfg/value :seon.config.merge/max-conflicts) :max-merge-turns (cfg/value :seon.config.merge/max-merge-turns)})
 
 (def default-budget
@@ -38,9 +38,9 @@
   {:malli/schema [:=> [:cat :seon.task/own] :boolean]}
   [t] (< (:seon.task/generation t 0) (:seon.task/budget t default-budget)))
 
-(defn merge-config
-  "Task t's merge config: its own :seon.config.merge/* over the defaults."
-  {:malli/schema [:=> [:cat :seon.task/own] :seon.reconcile/merge-config]}
+(defn merge-limits
+  "Task t's merge limits: its own :seon.config.merge/* over the defaults."
+  {:malli/schema [:=> [:cat :seon.task/own] :seon.reconcile/merge-limits]}
   [t]
   (into {} (for [[k v] merge-defaults] [k (get t (keyword "seon.config.merge" (name k)) v)])))
 
@@ -678,7 +678,7 @@
                      paths (vec (sort (distinct (mapcat (comp :files second) merged))))
                      back? (and (:source st) (seq paths))]
                  (one (write (cond-> st back? (assoc-in [:flights aid :writeback] {:files paths :members (mapv first merged)}))
-                             aid (if back? :merged-to-write-back :done)
+                             aid (if back? :write-back :done)
                            (vec (mapcat (fn [{:keys [attempt task]} r]
                                           (let [problem (str "merge refused: " (:seon.error/message r))]
                                             (cond
@@ -691,7 +691,7 @@
                                               :else (into (cas-tx attempt :ended :bailed {:seon.attempt/error (error-text r)})
                                                           (stuck-tx (:idx st) attempt task problem)))))
                                         (:members act) (:results r))))))
-      :merged-to-write-back (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))
+      :write-back (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)
                        files (source/files (:db r) paths)]
                    (if (empty? files)
