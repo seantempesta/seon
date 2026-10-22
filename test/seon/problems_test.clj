@@ -77,7 +77,7 @@
   ;; it to main as one commit, and that commit is the reconciler's next input. A step that
   ;; throws leaves the proc's state as it was, so it fails on every commit it is handed.
   ;; Main's commits over ten rounds are the first record, and no more.
-  (pdb/test-branch! (fn [_ conn] (let [_ (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/quiescent "{:t 1, :stuck []}"}]})
+  (pdb/test-branch! (fn [_ conn] (let [_ (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t 1 :stuck []}}]})
         t0 (:max-tx @conn)
         st (rec/reconciler-proc {:boot "boot-1"})
         round (fn [f i]
@@ -110,7 +110,7 @@
           rec (some :seon.cluster.eval/record (repl/record-tx :a1 "r1" [it] nil))]
       (is (= em (:err it)))
       (is (= "Divide by zero" (:printed it)))
-      (is (= em (:error (edn/read-string rec))) "grouped by type and producer without parsing text")))
+      (is (= em (:error rec)) "grouped by type and producer without parsing text")))
   (testing "the agent folds its errors until its commit; root folds them as :eval occurrences"
     (let [em (agent/error-map (ArithmeticException. "Divide by zero"))
           m (-> nil (err/note em "(/ 1 0)" 10) (err/note em "(/ 2 0)" 12))
@@ -185,7 +185,7 @@
       (let [[_ o2] (step st :from-fs {:ev :exit :pid 77 :status {:signal 9}})
             [[w]] (writes o2)]
         (is (= [:agent :seon.agent/died :a1 "t/x"] [(:seon.error/class w) (:seon.error/type w) (:seon.error/last-agent w) (:seon.error/last-task w)]))
-        (is (= {:signal 9} (:exit (edn/read-string (:seon.error/example w)))))))
+        (is (= {:signal 9} (:exit (:seon.error/example w))))))
     (testing "a stop root asked for is not a death"
       (let [st (-> (api {:agents {:a2 {:status :busy :pid 78}}}) (assoc-in [:agents :a2] {:branch :b2}))
             [st _] (end st {:op :ended :agent :a2 :rid 9 :pid 78 :inflight []})
@@ -241,11 +241,11 @@
                                   (for [i (range n)] (assoc (task (str "t/r" i)) :seon.task/proofs #{'app.t/red}))
                                   (for [i (range n)] (att (str "t/r" i) (str "t/r" i "#1")
                                                           {:seon.attempt/status :bailed :seon.attempt/outcome :cap
-                                                           :seon.attempt/failures (pr-str {'app.t/red [{:type :fail :message "m" :expected "1" :actual "2"}]})}))
+                                                           :seon.attempt/failures {'app.t/red [{:type :fail :message "m" :expected "1" :actual "2"}]}}))
                                   (for [i (range n)] (task (str "t/d" i)))
                                   (for [i (range n)] (att (str "t/d" i) (str "t/d" i "#1")
                                                           {:seon.attempt/status :dead :seon.attempt/reason "its agent died"
-                                                           :seon.attempt/error (pr-str (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1}))})))))
+                                                           :seon.attempt/error (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1})})))))
     @conn))))
 
 (deftest problems-lists-every-class-with-what-a-declaration-needs
@@ -274,8 +274,8 @@
                                         {:seon.attempt/id "t/m#1" :seon.attempt/task [:seon.task/id "t/m"] :seon.attempt/boot "b" :seon.attempt/agent :a2
                                          :seon.attempt/start-ms 1 :seon.attempt/end-ms 9 :seon.attempt/branch :b :seon.attempt/max-turns 2
                                          :seon.attempt/status :behind :seon.attempt/unmerged ["[:var app/g]"]
-                                         :seon.attempt/conflicts [{:seon.merge/key (pr-str [:var 'app/f]) :seon.merge/kind :both-modified}]
-                                         :seon.attempt/error (pr-str behind)}]))
+                                         :seon.attempt/conflicts [{:seon.merge/key [:var 'app/f] :seon.merge/kind :both-modified}]
+                                         :seon.attempt/error behind}]))
             [m] (get-in (problems/report db2) [:classes :merge :rows])]
         (is (= ["t/m#1" :behind 1 ["[:var app/g]"] 'seon.writer/merge-branch]
                [(:attempt m) (:status m) (:conflicts m) (:unmerged m) (:producer m)]))
@@ -286,7 +286,7 @@
             db2 db
             sig (:signature (first (get-in r [:classes :eval :rows])))
             db3 (:db-after (d/with db2 [{:seon.task/id "fix/e" :seon.task/ns 'fix :seon.task/name "e" :seon.task/plan "p" :seon.task/execution :held
-                                          :seon.task/branch :f :seon.task/kind :work :seon.task/evidence (pr-str {:kind :error :signature sig})}]))
+                                          :seon.task/branch :f :seon.task/kind :work :seon.task/evidence {:kind :error :signature sig}}]))
             r3 (problems/report db3)]
         (is (= ["fix/e"] (:answered-by (first (filter #(= sig (:signature %)) (get-in r3 [:classes :eval :rows]))))))))))))
 
@@ -369,6 +369,6 @@
     (d/transact conn [{:seon.attempt/id "t/a#1" :seon.attempt/task [:seon.task/id "t/a"] :seon.attempt/boot "b" :seon.attempt/agent :a1
                        :seon.attempt/start-ms 1 :seon.attempt/end-ms 2 :seon.attempt/branch :b :seon.attempt/max-turns 2
                        :seon.attempt/status :ended :seon.attempt/outcome :red
-                       :seon.attempt/failures (pr-str {'app.t/a-test [{:type :fail :expected "1" :actual "2"}]
-                                                       'app.t/other-test [{:type :fail :expected "3" :actual "4"}]})}])
+                       :seon.attempt/failures {'app.t/a-test [{:type :fail :expected "1" :actual "2"}]
+                                               'app.t/other-test [{:type :fail :expected "3" :actual "4"}]}}])
     (is (= ['app.t/a-test] (mapv :test (get-in (problems/report @conn) [:classes :red :rows])))))))

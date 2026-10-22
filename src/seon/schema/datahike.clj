@@ -8,7 +8,7 @@
   `malli->datahike-schema-in`, and the EDN slot codec). Kept: the type table, cardinality,
   uniqueness, index, refs, components and no-history from the attribute schema's own
   `:seon.db/*` properties, entity maps that declare their members (`:seon.db/attributes`),
-  and one explicit EDN-text slot. Cut: Seon's vector cells and Datalog lowering, the
+  and one explicit plain-data slot (`{:seon.db/data true}`). Cut: Seon's vector cells and Datalog lowering, the
   projection (a registry generation), render-pair properties, secondary indexes, tuples, and
   the automatic EDN codec for unions (see notes/option3-D1-schema-datahike.md).
 
@@ -23,7 +23,8 @@
   - `:seon.db/ref` is a reference (entity id, tempid, lookup ref or nested map); `[:set X]`
     is cardinality many.
   - A map with `{:seon.db/attributes true}` declares its members as attributes.
-  - `{:seon.db/edn true}` on any schema stores its value as EDN text (`seon.edn/encode`)."
+  - `{:seon.db/data true}` on any schema stores its value as plain data (`:db.type/data`, our
+    Datahike's: the store's serializer writes it as data, no text between; docs/storage.md)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- error error?]] [malli.core :as m] [malli.registry :as mr]))
 
@@ -51,20 +52,20 @@
 ;; ---- what one schema stores -------------------------------------------------------
 ;; Seon folds the whole schema with `m/walk` (children first, cached per compiled schema).
 ;; Here it descends only the one path that decides the storage: an attribute's schema is a
-;; few nodes deep, and an EDN slot's value schema is never walked.
+;; few nodes deep, and a data slot's value schema is never walked.
 
 (defn- refused
   {:malli/schema [:=> [:cat :qualified-keyword :any] :map]}
   [reason form] {:refusal [reason form]})
 
 (defn- storage
-  "What `node` stores: {:type :card :props :edn?}, or {:refusal [reason form]}. `active` is
+  "What `node` stores: {:type :card :props}, or {:refusal [reason form]}. `active` is
   the set of registry names being dereferenced (a cycle refuses)."
   {:malli/schema [:=> [:cat :seon.host/schema [:set :any]] :map]}
   [node active]
   (let [t (m/type node) props (m/properties node)]
     (cond
-      (:seon.db/edn props) {:type :db.type/string :card :one :props props :edn? true}
+      (:seon.db/data props) {:type :db.type/data :card :one :props props}
 
       (m/-ref-schema? node)
       (let [r (m/-ref node)]
@@ -107,11 +108,11 @@
   {::absent "The attribute has no registered schema."
    ::cyclic "A stored attribute's schema refers to itself."
    ::nested-collection "A stored collection holds scalars or refs, not another collection."
-   ::ordered-collection "A stored collection is a [:set T]; Datahike cardinality-many is unordered. Register [:set T], or mark an ordered value {:seon.db/edn true}."
+   ::ordered-collection "A stored collection is a [:set T]; Datahike cardinality-many is unordered. Register [:set T], or mark an ordered value {:seon.db/data true}."
    ::nilable "Stored attributes cannot use :maybe. Omit an absent key or mark its entity-map entry {:optional true}."
    ::literal "Only scalar Malli literals are storable."
    ::enum "Only keyword enums are storable."
-   ::value-type-unavailable "This Malli form has no Datahike value type. Register a scalar, or mark the value {:seon.db/edn true}."})
+   ::value-type-unavailable "This Malli form has no Datahike value type. Register a scalar, or mark the value {:seon.db/data true}."})
 
 (defn- storable?
   {:malli/schema [:=> [:cat :seon.host/registry :qualified-keyword] :boolean]}

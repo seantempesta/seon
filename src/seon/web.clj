@@ -109,8 +109,8 @@
   {:malli/schema [:=> [:cat :seon.render/call] :seon.db/tx-data]}
   [{f :var :keys [agent args forms]}]
   [{:seon.cluster.eval/id (str "root-ui-" (lib/now-ns) "/0") :seon.cluster.eval/agent "agent"
-    :seon.cluster.eval/record (pr-str {:tag :ret :form (pr-str (cond-> (list f) agent (concat [agent]) (seq args) (concat [args]) forms (concat [forms])))
-                                       :shown "requested" :origin :ui})}
+    :seon.cluster.eval/record {:tag :ret :form (pr-str (cond-> (list f) agent (concat [agent]) (seq args) (concat [args]) forms (concat [forms])))
+                               :shown "requested" :origin :ui}}
    {:db/id "agent" :seon.agent/id :root}])
 
 ;;; --- HTTP edge ----------------------------------------------------------------------------

@@ -11,9 +11,9 @@
   "Main moved to t: the fork server's replica gets the commit (FIFO with fork requests),
   the reconciler the report, and root loads the program change (a restarted fork server
   forks from root). Answers st."
-  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/t :seon.db/resolved-tx :seon.host/db] :seon.writer/state]}
-  [st o t ops db]
-  (step/out! o :to-fork-server {:op :tx :t t :ns (lib/now-ns) :tx-data ops})
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/t :seon.db/resolved-tx :map :seon.host/db] :seon.writer/state]}
+  [st o t ops tx-meta db]
+  (step/out! o :to-fork-server {:op :tx :t t :ns (lib/now-ns) :tx-data ops :tx-meta tx-meta})
   (step/out! o :main {:t t :ops ops :db db :ns (sock/now-ns)})
   (when-let [errs (seq (program/load-changes! db ops))]
     (step/out! o :events (step/event {:type :load-errors :errors (vec errs)})))
@@ -103,7 +103,7 @@
       (let [rep (d/merge-db conn (set (map :branch ok)) (pm/apply-tx main changed))
             t (:max-tx (:db-after rep))
             ops (pdb/report->tx rep)]
-        [(main-commit st o t ops (:db-after rep))
+        [(main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep))
          {:tx t :datoms (count ops)
           ;; :files, the source files (namespaces' and schema resources') its changes touch: what a write-back rewrites
           :results (mapv #(or (:refusal %) {:merged? true :tx t :keys (count (:ours (:r %))) :files (source/changed-files (:db-after rep) (:ours (:r %)))}) (:members judged))}]))))
@@ -133,7 +133,7 @@
                 (do (answer o (:dest m) (refused (step/error-msg rep) {})) st)
                 (let [t (:max-tx (:db-after rep)) ops (pdb/report->tx rep)]
                   (answer o (:dest m) {:ok true :t t :datoms (count ops)})
-                  (main-commit st o t ops (:db-after rep)))))
+                  (main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep)))))
             (-> st (dissoc :pend) (update :commits inc))
             (map vector ms (dw/transact-batch! (:conn st) (mapv (fn [m] {:tx-data (:tx-data m)}) ms))))
     st))
@@ -186,6 +186,11 @@
       :branch-info (reply st (if (exists? (:branch m))
                                (let [h (pdb/head conn (:branch m))] {:ok true :datoms (count (d/datoms h :eavt)) :t (:max-tx h)})
                                (refused (str "no branch " (:branch m)) {})))
+      ;; root's collection of the store (seon.db/collect!), asked at quiescence: swept when a
+      ;; branch the last one saw is gone, and recorded on main through the batch
+      :collect (let [r (pdb/collect! conn)]
+                 (reply (if (:skipped r) st (commit-batch (update st :pend (fnil conj []) {:tx-data [{:seon.root/id :root :seon.root/collected r}]}) o))
+                        {:ok true :collected r}))
       (reply st (refused (str "unknown op " op) {})))))
 
 (defn- writer-one

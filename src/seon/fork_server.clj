@@ -43,7 +43,8 @@
      :tx (if (<= (:t m) (:max-tx (:db st)))
            [st nil] ; already in the db this server was forked with
            (let [t0 (lib/now-ns)
-                 db' (d/db-with (:db st) (:tx-data m))
+                 ;; main's transaction facts as this transaction's own (seon.db/report->tx-meta)
+                 db' (:db-after (d/with (:db st) {:tx-data (:tx-data m) :tx-meta (:tx-meta m {})}))
                  st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled
                  errs (seq (program/load-changes! db' (:tx-data m)))]

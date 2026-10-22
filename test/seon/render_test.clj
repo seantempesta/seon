@@ -294,7 +294,7 @@
                :observed {:results {} :reds [] :run-errors []
                           :refusals (vec (for [i (range 360)] {:refusal :contract-gap :symbol (symbol "app.m" (str "f" i))}))}}
             _ (d/transact conn [{:seon.turn/id "t/x#1/read-1" :seon.turn/attempt "t/x#1" :seon.turn/n 1
-                                 :seon.turn/origin :outside :seon.turn/basis (seon.edn/encode b)}])
+                                 :seon.turn/origin :outside :seon.turn/basis b}])
             db @conn
             ctxv (#'p/context-of db {:seon.attempt/id "t/x#1" :seon.attempt/task "t/x"} {:evals [read]})]
         (is (= {:text (:content (peek (:messages (seon.context/render db b)))) :origin :outside} (select-keys ctxv [:text :origin]))

@@ -7,7 +7,7 @@
   `render` makes the text from it, for the model and again for anyone who reads it later."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d]
-            [seon.edn :as sedn] [seon.task :as task] [seon.merge :as pm]
+            [seon.task :as task] [seon.merge :as pm]
             [seon.print :as print] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg]))
 
 (def system-prompt
@@ -304,13 +304,10 @@
 ;; ---- a turn's basis: what its context was built from, and the text made from it again ----
 
 (defn- turn-record
-  "The turn entity e on db, its facts (its basis decoded)."
+  "The turn entity e on db, its facts."
   {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
   [db e]
-  (let [r (d/pull db [:db/id :seon.turn/id :seon.turn/n :seon.turn/origin :seon.turn/basis :seon.turn/reply :seon.turn/calls :seon.turn/truncated] e)]
-    (cond-> r
-      (:seon.turn/basis r) (update :seon.turn/basis sedn/decode)
-      (:seon.turn/calls r) (update :seon.turn/calls sedn/decode))))
+  (d/pull db [:db/id :seon.turn/id :seon.turn/n :seon.turn/origin :seon.turn/basis :seon.turn/reply :seon.turn/calls :seon.turn/truncated] e))
 
 (defn- model-turns
   "The model turns of attempt on db before turn n, oldest first."

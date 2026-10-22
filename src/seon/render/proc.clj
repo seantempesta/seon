@@ -27,7 +27,7 @@
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.ai :as ai]
             [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.context :as context] [seon.print :as print]
-            [seon.config :as config] [seon.edn :as sedn]))
+            [seon.config :as config]))
 
 (def EVENT-CAP "Events the stream keeps." 60)
 (def SERIES-CAP "Points a sparkline keeps: the newest changes (a writer batch, a fork, a main commit)." 60)
@@ -293,7 +293,7 @@
         rows (reduce (fn [rows [eid r]]
                        (if (contains? rows eid)
                          rows
-                         (assoc rows eid (h/html (:seon.render/html (ui/history-row (if (string? r) (sedn/decode r) r) {:seon.render/budget 400}))))))
+                         (assoc rows eid (h/html (:seon.render/html (ui/history-row r {:seon.render/budget 400}))))))
                      (select-keys (:rows z {}) (map first records)) records)
         ctx-key [(:t z) (:seon.attempt/id attempt) (:seon.attempt/turns attempt) (:tests ag)]
         ;; a new context read is a new evaluation of the agent's

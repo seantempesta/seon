@@ -150,6 +150,22 @@
             [_ _] (step #'root/api-proc st :from-writer {:dest {:rid rid} :r {:ok true}})]
         (is (= {:ok true} @p))))))
 
+(deftest a-collection-waits-until-no-agent-is-live
+  ;; root collects the store only as its only writer (owner, 2026-10-22, simplest first;
+  ;; seon.db/collect!): a :collect while an agent is live is refused at once, naming the live
+  ;; agents, and never reaches the writer; with none live it goes to the writer like any write
+  (let [st (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                             :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})]
+    (let [p (promise)
+          [_ outs] (step #'root/api-proc (assoc st :agents {:a1 {:status :running}}) :ext {:op :write :req {:op :collect} :p p})]
+      (is (realized? p) "answered at once")
+      (is (= :seon.root/refused (:seon.error/type (when (realized? p) @p))))
+      (is (= [:a1] (:agents (when (realized? p) @p))))
+      (is (empty? (:to-writer outs))))
+    (let [p (promise)
+          [_ outs] (step #'root/api-proc st :ext {:op :write :req {:op :collect} :p p})]
+      (is (= :collect (:op (first (:to-writer outs))))))))
+
 ;; ---- task seon.root/a-proc-answers-every-request-it-took (census #2) ----------------------
 
 (defn- api-state []
@@ -218,7 +234,15 @@
         (is (= (:max-tx (:db-after rep)) (:max-tx (:db st))))
         (is (= [:applied] (map :ev (:ev outs))))
         (testing "and a commit it already holds is skipped"
-          (is (= [st nil] (#'server/server-step st :cmd {:op :tx :t (:max-tx (:db st)) :tx-data ops}))))))))))
+          (is (= [st nil] (#'server/server-step st :cmd {:op :tx :t (:max-tx (:db st)) :tx-data ops}))))))
+    (testing "the replica's transaction holds main's transaction facts (its instant, its tx-meta): seon.db/report->tx-meta"
+      (let [rep (d/with db {:tx-data [{:note/text "w"}] :tx-meta {:note/text "the commit's own fact"}})
+            t (:max-tx (:db-after rep))
+            [st2 _] (step #'server/server-step st :cmd {:op :tx :t t :ns 0 :tx-data (pdb/report->tx rep) :tx-meta (pdb/report->tx-meta rep)})
+            instant (fn [d] (:db/txInstant (d/entity d t)))]
+        (is (inst? (instant (:db-after rep))) "main's transaction has its instant (history is kept)")
+        (is (= (instant (:db-after rep)) (instant (:db st2))))
+        (is (= "the commit's own fact" (:note/text (d/entity (:db st2) t))) "and its tx-meta")))))))
 
 (defn -main [& _]
   (let [{:keys [fail error]} (run-tests 'seon.procs-test)]

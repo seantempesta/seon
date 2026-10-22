@@ -60,16 +60,28 @@
   10)
 
 (defn store-cfg
-  "Datahike config for the durable store at path; backend :lmdb (default) or :file."
+  "Datahike config for the durable store at path; backend :lmdb (default) or :file. It names
+  no :keep-history?: that is fixed when a store is made (Datahike's store-fixed-record-keys;
+  made-cfg), and a connect adopts what the store records, so a kept store made either way opens."
   {:malli/schema [:=> [:cat [:enum :lmdb :file] :string] :seon.db/cfg]}
   [backend path]
   {:store (cond-> {:backend backend :path path :id (hasch/uuid path)
                    :default-serializer :FaslSerializer}
             (= backend :lmdb) (assoc :lmdb {:flags MDB_NOSYNC :map-size (cfg/value :seon.config.store/lmdb-map-bytes)})
+            ;; konserve's per-value compressor (its header names it, so stored values of either kind read)
+            (#{:lz4 :zstd} (cfg/value :seon.config.store/compressor)) (assoc-in [:config :compressor] {:type (cfg/value :seon.config.store/compressor)})
             (= backend :file) (assoc :config {:defer-immutable-sync? true}))
-   :schema-flexibility :write :keep-history? false
+   :schema-flexibility :write
    :writer writer-cfg
-   :index-config {:branching-factor (cfg/value :seon.config.store/branching-factor)}})
+   :index-config (let [n (cfg/value :seon.config.store/value-out-of-line-bytes)]
+                   (cond-> {:branching-factor (cfg/value :seon.config.store/branching-factor)}
+                     (int? n) (assoc :value-out-of-line-bytes n)))})
+
+(defn made-cfg
+  "cfg as a store is made with it: keeping history (its temporal indexes, and each
+  transaction's tx-meta) as :seon.config.store/keep-history? says (v1's ruling 23)."
+  {:malli/schema [:=> [:cat :seon.db/cfg] :seon.db/cfg]}
+  [cfg] (assoc cfg :keep-history? (cfg/value :seon.config.store/keep-history?)))
 
 (defn sync!
   "Make every commit so far durable: one env sync for LMDB (MDB_NOSYNC); the filestore
@@ -87,12 +99,23 @@
 
 (defn- install-missing!
   "Transact the attributes of `schema` the db under conn lacks, in one transaction, and
-  answer how many: a kept store seeded before an attribute existed gains it when a root
+  answer how many (an attribute it holds as another value type is refused, :seon.db/types-differ:
+  a value type is fixed once installed): a kept store seeded before an attribute existed gains it when a root
   opens it (Datahike accepts new attribute definitions at any time). Nothing missing
   writes nothing."
   {:malli/schema [:=> [:cat :seon.host/conn] :int]}
   [conn]
   (let [have (d/schema @conn)
+        differ (into {} (for [{k :db/ident t :db/valueType} schema
+                              :let [stored (get-in have [k :db/valueType])]
+                              :when (and stored (not= stored t))]
+                          [k {:stored stored :declared t}]))
+        _ (when (seq differ)
+            (let [e (contract/error :seon.db/types-differ 'seon.db/open!
+                                    (str "the store holds " (count differ) " attributes as another value type than the schema declares: " (pr-str (keys differ)))
+                                    {:seon.db/attributes differ
+                                     :seon.error/fix "An attribute's value type is fixed once installed: open a store made with this schema (a fresh one), or keep running the build that made this store."})]
+              (throw (ex-info (:seon.error/message e) e))))
         missing (vec (remove #(contains? have (:db/ident %)) schema))]
     (when (seq missing) (d/transact conn {:tx-data missing}))
     (count missing)))
@@ -160,9 +183,9 @@
 (def ^:private test-store
   "This process's one in-memory store for tests and cost setups, seeded once on :db
   (bin/test makes it on first use): each test takes a branch of it (test-branch!)."
-  (delay (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false
+  (delay (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write
                         :writer writer-cfg}]
-           (d/create-database cfg)
+           (d/create-database (made-cfg cfg))
            (let [conn (d/connect cfg)] (seed! conn 2000) (d/release conn))
            cfg)))
 
@@ -222,7 +245,7 @@
   (let [cfg (store-cfg backend path)
         exists? (posix/exists? (if (= backend :lmdb) (str path "/data.mdb") path))]
     (when-not exists?
-      (d/create-database cfg)
+      (d/create-database (made-cfg cfg))
       (let [conn (d/connect cfg)] (seed! conn n) (when-not (= :db main) (d/release conn))))
     (let [[conn existed?] (open-main! cfg main)
           added (install-missing! conn)
@@ -231,6 +254,31 @@
       ;; fsync, ~5-10 ms); a recovered main with its schema whole wrote nothing
       (when-not (and exists? existed? (zero? added)) (sync! cfg))
       {:cfg cfg :conn conn :recovered? (and exists? existed?) :seeded? (not exists?)})))
+
+(defn collect!
+  "Collect the store under conn (datahike.api/gc-storage: every key no branch reaches, nodes
+  and values out of line, is swept) when a branch the last record saw is gone (main's
+  :seon.root/collected): the record to write, {:swept :ms :branches :gone}. With no record yet
+  (a new main) or none gone but branches made since, the record of what is here, nothing swept,
+  so a branch seen at one quiescence and gone at a later one is reclaimed; {:skipped true} when
+  the branches are the ones recorded. Only while no
+  other process writes the store (owner, 2026-10-22, simplest first): root's writer runs it
+  (:collect) and root refuses it while an agent is live (docs/storage.md#collection)."
+  {:malli/schema [:=> [:cat :seon.host/conn] [:or [:map [:skipped :boolean]] :seon.root/collected]]}
+  [conn]
+  (let [last (d/q '[:find ?c . :where [?e :seon.root/id :root] [?e :seon.root/collected ?c]] @conn)
+        now (set (d/branches conn))
+        gone (count (remove now (:branches last)))]
+    (cond
+      (and last (zero? gone) (= now (:branches last))) {:skipped true}
+      ;; no record yet (a new main: every check step's) or nothing gone: record what is here,
+      ;; sweep nothing; a full sweep on a store of hundreds of branches held a check step's
+      ;; spawns behind root's writer for seconds (scale: 8.2 s to ready, 2026-10-22)
+      (zero? gone) {:swept 0 :ms 0.0 :branches now :gone 0}
+      :else
+      (let [t0 (System/nanoTime)
+            swept @(d/gc-storage conn (java.util.Date. 0))]
+        {:swept (count swept) :ms (/ (- (System/nanoTime) t0) 1e6) :branches now :gone gone}))))
 
 (defn lease!
   "Make this process mint the store's entity ids from its lease: from lease, up to (not
@@ -306,8 +354,18 @@
 ;; server's main, an agent's branch copy) applies the writer's RESOLVED datoms rather
 ;; than re-resolving tempids with its own counter.
 
+(defn report->tx-meta
+  "The transaction entity's own facts in the writer's tx-report ({attribute value}: its
+  :db/txInstant and any tx-meta; empty without history): what a replica of the branch
+  applies as its own transaction's :tx-meta, so its transaction entity holds main's facts
+  (a transaction's id is its branch's own, so they cannot travel as datoms on it)."
+  {:malli/schema [:=> [:cat :seon.db/tx-report] :map]}
+  [rep]
+  (into {} (for [dt (:tx-data rep) :when (and (= (:e dt) (:tx dt)) (:added dt))] [(:a dt) (:v dt)])))
+
 (defn report->tx
-  "The writer's tx-report as explicit-id tx-data (the transaction entity's own datoms left out)."
+  "The writer's tx-report as explicit-id tx-data (the transaction entity's own datoms left
+  out: report->tx-meta carries them)."
   {:malli/schema [:=> [:cat :seon.db/tx-report] :seon.db/resolved-tx]}
   [rep]
   (vec (for [dt (:tx-data rep) :when (not= (:e dt) (:tx dt))]

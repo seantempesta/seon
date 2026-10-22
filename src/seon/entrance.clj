@@ -51,7 +51,7 @@
         run (str "root-outside-" (lib/now-ns))]
     @(c/transact-main! sys (conj (vec (for [it items]
                                         {:seon.cluster.eval/id (str run "/" (:id it)) :seon.cluster.eval/agent "agent"
-                                         :seon.cluster.eval/record (pr-str (assoc (select-keys it [:tag :form :ms]) :shown (:printed it) :origin :outside))}))
+                                         :seon.cluster.eval/record (assoc (select-keys it [:tag :form :ms]) :shown (:printed it) :origin :outside)}))
                                  {:db/id "agent" :seon.agent/id :root}))
     items))
 

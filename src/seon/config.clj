@@ -26,7 +26,7 @@
   functions carry contracts in their metadata and are armed at boot."
   (:refer-clojure :exclude [resolve])
   (:require [aero.core :as aero] [malli.core :as m] [malli.registry :as mr] [clojure.edn :as edn]
-            [clojure.java.io :as io] [clojure.string :as str] [datahike.api :as d] [seon.edn :as sedn]))
+            [clojure.java.io :as io] [clojure.string :as str] [datahike.api :as d]))
 
 ;; ---- where: the checkout and the profile (the loader's own two environment reads) ----------
 
@@ -274,20 +274,14 @@
 
 ;; ---- the facts on main ------------------------------------------------------------------------
 
-(def ^:private edn-keys
-  "The config keys whose schema stores the value as EDN text ({:seon.db/edn true})."
-  (filterv #(:seon.db/edn (m/properties (m/schema (get schema-forms %) {:registry registry}))) (keys-declared)))
-
 (defn facts
   "Config c and its sources as facts on main (platform records: never carried by a merge in
-  either direction): main's root entity holding every key (each {:seon.db/edn true} key, the
-  manifest among them, as EDN text), and an entity per provider and per model
+  either direction): main's root entity holding every key (each {:seon.db/data true} key, the
+  manifest among them, as data), and an entity per provider and per model
   (:seon.ai.model/provider-id, :seon.ai.model/id)."
   {:malli/schema [:=> [:cat :seon.config/config :seon.config/sources] [:vector :map]]}
   [c srcs]
-  (into [(reduce (fn [m k] (if (contains? m k) (update m k pr-str) m))
-                 (assoc c :seon.root/id :root :seon.config/sources (pr-str srcs))
-                 edn-keys)]
+  (into [(assoc c :seon.root/id :root :seon.config/sources srcs)]
         (concat (for [[id p] (:seon.config.ai/providers c)]
                   (-> (select-keys p [:seon.config.ai/base-url :seon.config.ai/api-key-variable :seon.ai.model/output-token-wire-key])
                       (assoc :seon.ai.model/provider-id id)))
@@ -308,5 +302,4 @@
   [db]
   (when-let [e (d/q '[:find ?e . :where [?e :seon.root/id :root]] db)]
     (let [r (d/pull db (keys-declared) e)]
-      (when (seq r)
-        (reduce (fn [m k] (if (contains? m k) (update m k sedn/decode) m)) r edn-keys)))))
+      (when (seq r) r))))

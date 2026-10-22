@@ -88,7 +88,7 @@
                           (assoc :db/id id :seon.task/id id :seon.task/execution :held)
                           (update :seon.task/branch #(or % (default-branch id))))
                 (seq needs) (assoc :seon.task/needs (mapv #(if (new %) % [:seon.task/id %]) needs))
-                evidence (assoc :seon.task/evidence (sedn/encode evidence))
+                evidence (assoc :seon.task/evidence evidence)
                 (seq config) (merge config)
                 true (merge (references-of decl))))
             ids decls))))
@@ -173,9 +173,7 @@
   [t]
   (cond-> (-> t (update :seon.task/needs #(set (map :seon.task/id %)))
               (update :seon.task/proofs set)
-              (update :seon.task/kind #(or % :work)))
-    (:seon.task/evidence t) (update :seon.task/evidence sedn/decode)
-    (:seon.task/stuck t) (update :seon.task/stuck sedn/decode)))
+              (update :seon.task/kind #(or % :work)))))
 
 (defn accumulate
   "Task id's accumulated plan and proofs over its needs (owner, 2026-10-20: a task
@@ -326,8 +324,7 @@
         now (d/pull db (conj stated-attributes {:seon.task/needs [:seon.task/id]}) e)
         want (cond-> (merge (dissoc decl :seon.task/ns :seon.task/name :seon.task/config :seon.task/needs) (:seon.task/config decl)
                             (references-of decl))
-               true (update :seon.task/branch #(or % (default-branch id)))
-               (:seon.task/evidence decl) (update :seon.task/evidence sedn/encode))
+               true (update :seon.task/branch #(or % (default-branch id))))
         old-needs (set (map :seon.task/id (:seon.task/needs now)))
         new-needs (set (:seon.task/needs decl))]
     (vec (concat

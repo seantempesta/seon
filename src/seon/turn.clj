@@ -20,7 +20,7 @@
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context]
             [seon.harvest :as harvest] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg]
-            [seon.edn :as sedn] [datahike.api :as d]))
+            [datahike.api :as d]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: the task and
 ;; attempt it works, and a stop a verb requested.
@@ -150,8 +150,8 @@
         ;; it answered and how it stopped, what its forms evaluated to as the next turns show it,
         ;; and where the turn's time went as this agent saw it
         (agent/transact! [(cond-> {:seon.turn/id (str attempt "/" turn) :seon.turn/attempt attempt :seon.turn/n turn
-                                   :seon.turn/origin :model :seon.turn/basis (sedn/encode basis)
-                                   :seon.turn/calls (sedn/encode (mapv (fn [{:keys [id code items]}] {:id id :code code :evals (context/evaluations-text items)}) calls))
+                                   :seon.turn/origin :model :seon.turn/basis basis
+                                   :seon.turn/calls (mapv (fn [{:keys [id code items]}] {:id id :code code :evals (context/evaluations-text items)}) calls)
                                    :seon.turn/reply (:text c) :seon.turn/forms (count items)
                                    :seon.turn/errors (count (filter #(= :err (:tag %)) items))
                                    :seon.turn/red (count (remove #(= :pass (val %)) (select-keys results proofs)))
@@ -161,9 +161,9 @@
                             (:model c) (assoc :seon.turn/model (:model c))
                             (:reasoning c) (assoc :seon.turn/reasoning (:reasoning c)))])
         (agent/transact! [{:seon.turn/id (str attempt "/" turn)
-                           :seon.turn/split (pr-str (cond-> {:context-ms context-ms :model-ms model-ms :eval-ms eval-ms
-                                                             :record-ms (ms-since t3)}
-                                                      tests-ms (assoc :tests-ms tests-ms)))}])
+                           :seon.turn/split (cond-> {:context-ms context-ms :model-ms model-ms :eval-ms eval-ms
+                                                     :record-ms (ms-since t3)}
+                                              tests-ms (assoc :tests-ms tests-ms))}])
         (cond-> (-> (assoc st :turn (inc turn) :tokens (+ tokens used))
                     ;; what this turn's block showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
@@ -187,8 +187,8 @@
         text (:content (peek (:messages (context/render (agent/db) basis))))]
     ;; the read is a turn of this attempt, as a model turn is: what it was built from and what it cost
     (agent/transact! [{:seon.turn/id (str attempt "/read-" n) :seon.turn/attempt attempt :seon.turn/n n
-                       :seon.turn/origin :outside :seon.turn/basis (sedn/encode basis)
-                       :seon.turn/split (pr-str (cond-> {:context-ms (ms-since t0)} tests-ms (assoc :tests-ms tests-ms)))}])
+                       :seon.turn/origin :outside :seon.turn/basis basis
+                       :seon.turn/split (cond-> {:context-ms (ms-since t0)} tests-ms (assoc :tests-ms tests-ms))}])
     text))
 
 (defn work!
