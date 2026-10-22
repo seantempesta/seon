@@ -23,10 +23,10 @@
 
 (deftest a-templates-instructions-are-cited-as-a-plan-is
   ;; owner, 2026-10-22: instructions are cited text; a var a kind's instructions cite reaches
-  ;; the task's references, and so its context, exactly as a plan's does
+  ;; the task's references, and so its context, exactly as a plan's does (the navigation functions
+  ;; every kind shares are the help page's, docs/agent.md)
   (doseq [kind [:design :implement :test :merge]
           :let [[written] (task/create-tx (db-with-program) [(assoc (decl "") :seon.task/instructions (template/instructions kind))])]]
-    (is (contains? (set (:seon.task/references written)) 'my.agent/callers) (str kind " cites the navigation verbs"))
     (is (= (set (ref/names (template/instructions kind))) (set (:seon.task/references written))) (str kind ": every name, derived"))))
 
 (deftest unresolved-citations-are-answered-not-refused
