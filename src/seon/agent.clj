@@ -82,10 +82,6 @@
       (cond
         (= m :dead) (lib/c-exit 0)
         (and (= op (:op m)) (= k (:k m))) m
-        ;; Flow's ping reaches a waiting agent too: health while an effect is in flight
-        (= :ping (:op m)) (do (send! {:op :pong :status :waiting :count (:n @state 0) :held 0
-                                      :state {:evals (:n @state) :waiting-for op}})
-                              (recur))
         :else (do (swap! state update :pending conj m) (recur))))))
 
 
@@ -146,11 +142,11 @@
     (swap! state update :fx-pending dissoc k)
     (swap! state assoc-in [:defs [:fx k]]
            [(cond-> (into {:seon.fx/id (str (name (:id @state)) "-" (lib/c-getpid) "-fx" k) :seon.fx/kind kind
-                           :seon.fx/status (if (:seon.error/type r) :error :ok)
+                           :seon.fx/status (if (contract/error? r) :error :ok)
                            :seon.fx/us (long (:seon.fx/us r 0)) :seon.fx/queue-us (long (:seon.fx/queue-us r 0))}
                           (for [[f a] model-cost-attrs :let [v (when (map? c) (get c f))] :when (int? v)] [a (long v)]))
               (:cost r) (assoc :seon.fx/cost (long (:cost r)))
-              (:seon.error/type r) (assoc :seon.fx/error (str (:seon.error/type r) ": " (:seon.error/message r))
+              (contract/error? r) (assoc :seon.fx/error (str (:seon.error/type r) ": " (:seon.error/message r))
                                           :seon.fx/error-type (:seon.error/type r)))])
     kind))
 
@@ -395,9 +391,10 @@
   is named). Each selected test green at its digest is reused: one :pass report marked :reused.
   Each test that ran green is stored at its digest in test-plan's :dir through root's :file
   owner (seon.proofs/store-greens!); a write refused is named under :unstored, and that test
-  runs again. :ran is how many tests reported. (forked pid) runs here once the child exists."
-  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol]] :seon.test/result]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] :seon.host/fn] :seon.test/result]]}
+  runs again. :ran is how many tests reported. (forked pid) runs here once the child exists.
+  A fork refused (threads active) is :seon.test/fork-refused: no test ran."
+  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol]] [:or :seon.test/result :seon.test/fork-refused]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]]}
   ([ticks proofs] (run-tests-forked ticks proofs (fn [_] nil)))
   ([ticks proofs forked]
   (let [{:keys [selected run reused digests dir]} (test-plan (db) (:base @state) proofs)
@@ -405,8 +402,8 @@
         [r w] (lib/pipe) t0 (profile/now-ns)
         res (lib/fork!
               {:refused (fn [n] (lib/c-close r) (lib/c-close w)
-                          {:pass 0 :fail 0 :error 1 :ms (profile/ms-since t0)
-                           :reports [{:type :error :message (str "cannot fork the tests: " n " Chez threads active (a running future?)")}]})
+                          (contract/error :seon.test/fork-refused 'seon.agent/run-tests-forked
+                                          (str "cannot fork the tests: " n " Chez threads active (a running future?)") {:active-threads n}))
                :child (fn []
                         (lib/c-close r)
                         ;; the run ends by its budget; if the agent dies first, the next write to the
@@ -426,15 +423,17 @@
                                st (lib/wait-status pid)]
                            (lib/c-close r)
                            (assoc (run-answer line st) :ms (profile/ms-since t0) :pid pid :exit st)))})
-        unstored (when dir
+        unstored (when (and dir (not (contract/error? res)))
                    (proofs/store-greens! #(fx! :file % {}) dir
                                          (into {} (for [[t status] (proofs/results res) :when (and (= :pass status) (digests t))]
                                                     [t {:test t :digest (digests t) :pass 1 :fail 0 :error 0}]))))]
-    (-> res
+    (if (contract/error? res)
+      res
+      (-> res
         (cond-> (seq unstored) (assoc :unstored unstored))
         (update :reports into reused-reports)
         (update :pass + (count reused-reports))
-        (assoc :reused (count reused-reports) :ran (count (distinct (keep :var (:reports res)))))))))
+        (assoc :reused (count reused-reports) :ran (count (distinct (keep :var (:reports res))))))))))
 
 ;; ---- the loop ----------------------------------------------------------------------
 
@@ -544,11 +543,11 @@
     (commit!)
     (send! {:op :branch-me :k k})
     (let [r (await-op! :branched k)]
-      (if-not (:ok r)
+      (if (:error r)
         (do (sock/close! fd) (send! {:op :clone-failed :k k :error (:error r)}))
         (lib/fork!
           {:fd fd :double? true
-           :refused (fn [n] (send! {:op :clone-failed :k k :error (str "cannot fork: " n " Chez threads active (a running future?)")}))
+           :refused (fn [n] (send! {:op :clone-failed :k k :error (contract/error :seon.agent/failed 'seon.agent/clone! (str "cannot fork: " n " Chez threads active (a running future?)") {:agent (:agent m)})}))
            :parent (fn [_] (send! {:op :cloned :k k :clone (:agent m)}))
            :child (fn []
                     (let [parent (:id @state)]
@@ -561,7 +560,8 @@
                         (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn (sock/conn fd) :mode :agent :tx-seq 0
                                :lease (:lease r) :pending clojure.lang.PersistentQueue/EMPTY :mem-at nil :fx-pending {}
                                :store-conn store-conn :db @store-conn))
-                      (hello! t0 {:cloned-from parent})
+                      (let [unwatched (sock/signal-at-input! fd)]
+                        (hello! t0 (cond-> {:cloned-from parent} unwatched (assoc :unwatched unwatched))))
                       ((:serve @state))))})))))
 
 (defn misaligned
@@ -594,6 +594,8 @@
         c (sock/conn fd)
         store-conn (d/connect (assoc cfg :branch branch))]
     (intr/install!)
+    ;; root gone, this process ends, busy or not (the fork server's group kill may be gone too)
+    (intr/exit-at-eof! #(sock/peer-gone? (:fd @state)))
     ;; a kept branch, resumed: its program is what this process runs (it was forked holding main's)
     (let [load-errors (when resumed (program/load-diff! db0 @store-conn))
           misaligned (when-not resumed (misaligned commit t @store-conn db0))]
@@ -604,7 +606,7 @@
      ;; read main's later changes as the branch's (seon.program/divergence, changed-vars)
      (reset! state {:id id :branch branch :task task :attempt attempt :fd fd :conn c :db @store-conn
                    :base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0) :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
-                   :load-errors (vec load-errors) :misaligned misaligned
+                   :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
                    :ns nsx :interrupt-ok intr-ok :serve serve})
      ;; a kept branch, resumed (root released its held task: seon.reconcile/hold-tx), takes

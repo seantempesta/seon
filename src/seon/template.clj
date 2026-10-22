@@ -16,7 +16,7 @@
     set starts from the same graph.
   A failed attempt attaches no tasks: its task is held for root (seon.reconcile/hold-tx)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.task :as task] [clojure.string :as str]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.task :as task] [clojure.string :as str]))
 
 (defn merge-name
   "The name of work task nm's merge task."
@@ -107,6 +107,6 @@
   [db decl]
   (let [ds (request decl)
         tx (task/create-tx db ds)]
-    (if (:seon.error/type tx)
+    (if (contract/error? tx)
       tx
       (into tx (task/execution-tx (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) ds) :running)))))

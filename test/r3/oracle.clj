@@ -183,7 +183,7 @@
                        ;; a refused attempt: its task is held for root (no automatic retry)
                        :else
                        {:op :hold :attempt aid :task id
-                        :problem (str "attempt " aid " ended " (name (:seon.attempt/outcome a :error))
+                        :problem (str "attempt " aid " ended" (some->> (:seon.attempt/outcome a) name (str " "))
                                       (some->> (:seon.attempt/reason a) (str " (") (#(str % ")")))
                                       ": " (refusals-text rs))}))))
         live-after (- (count (filter #(live? v %) all)) (count kills))
