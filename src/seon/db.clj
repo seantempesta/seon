@@ -73,7 +73,9 @@
             (= backend :file) (assoc :config {:defer-immutable-sync? true}))
    :schema-flexibility :write
    :writer writer-cfg
-   :index-config {:branching-factor (cfg/value :seon.config.store/branching-factor)}})
+   :index-config (let [n (cfg/value :seon.config.store/value-out-of-line-bytes)]
+                   (cond-> {:branching-factor (cfg/value :seon.config.store/branching-factor)}
+                     (int? n) (assoc :value-out-of-line-bytes n)))})
 
 (defn made-cfg
   "cfg as a store is made with it: keeping history (its temporal indexes, and each

@@ -4,7 +4,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [clojure.java.io] [clojure.string] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.config :as cfg] [seon.contract :as contract] [seon.edn]
-            [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4]))
+            [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.core :as k] [hasch.core] [datahike.gc]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
@@ -248,6 +248,43 @@
     (is (= (seq text) (seq (konserve.jolt.lz4/decompress frame))) "a frame round-trips")
     (is (< (alength frame) (/ (alength text) 1.5)) (str "64 KiB of docs compress to " (alength frame) " bytes"))))
 
+;; ---- values out of line (task seon.db/values-out-of-line: :seon.config.store/value-out-of-line-bytes) ----
+
+(deftest a-large-value-lives-once-under-its-own-key
+  ;; a value past :seon.config.store/value-out-of-line-bytes is stored once under its content
+  ;; key (hasch's uuid of the value, Datahike's own content address) inside Datahike's store;
+  ;; the index holds a reference, read back as the value by the first read since the write
+  ;; (a written node is not cached: the storage counts the nodes it read from the store; one
+  ;; read only, as a later connection may reuse the store's storage and its cache); GC's mark
+  ;; keeps the value while a branch reaches it and sweeps it once none does. A store on disk of this test's own, the last resort: what is
+  ;; proved is the store's bytes and its collection; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-ool-" (random-uuid))
+        {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
+        _ (d/release conn)
+        reply (slice @prose 7 3000)
+        vk (hasch.core/uuid reply)
+        on (fn [b f] (let [c (d/connect (assoc cfg :branch b))] (try (f c) (finally (d/release c)))))
+        cold-read (fn [] (on :turns (fn [c] [(d/q '[:find ?r . :where [_ :seon.turn/reply ?r]] @c)
+                                             (:reads @(:stats (:storage (:store @c))))])))
+        stored? (fn [] (on :db #(k/exists? (:store @%) vk {:sync? true})))
+        gc! (fn [] (on :db #(datahike.gc/gc-storage! @% (java.util.Date. 0) {:sync? true})))]
+    (try
+      (on :db #(d/branch! % :db :turns))
+      (on :turns (fn [c]
+                   (d/transact c {:tx-data (turn-facts 0)})
+                   (d/transact c {:tx-data [{:seon.turn/id "att/0" :seon.turn/reply reply}]})
+                   (pdb/sync! cfg)))
+      (is (= reply (on :db #(k/get (:store @%) vk nil {:sync? true}))) "the value is stored under its content key")
+      (testing "GC keeps a value a branch reaches, and a cold read swaps the reference back for it"
+        (gc!)
+        (is (stored?))
+        (let [[r reads] (cold-read)] (is (= reply r)) (is (pos? reads) "nodes were read from the store")))
+      (testing "and sweeps it once no branch does"
+        (on :db #(d/delete-branch! % :turns))
+        (gc!)
+        (is (not (stored?))))
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
 (deftest a-commit-costs-what-it-writes
   ;; task seon.db/the-store-grows-with-what-it-keeps. Estimate, from what a commit must
   ;; write: its own datoms (each value twice, in :eavt and :aevt) and the root-to-leaf path
@@ -264,10 +301,13 @@
         n 20]
     (try
       (let [once (write-turns! conn cfg path :once n n)
+            t0 (System/nanoTime)
             per-turn (write-turns! conn cfg path :per-turn n 1)
+            ms (/ (- (System/nanoTime) t0) 1e6)
             bound (+ once (* n 32 1024))]
-        (println (str "a-commit-costs-what-it-writes: " n " turns, one commit " once " B, per turn " per-turn " B, bound " bound " B"
-                      " (compressor " (cfg/value :seon.config.store/compressor) ")"))
+        (println (str "a-commit-costs-what-it-writes: " n " turns, one commit " once " B, per turn " per-turn " B, bound " bound " B, "
+                      (format "%.1f" (/ ms n)) " ms per turn (compressor " (cfg/value :seon.config.store/compressor)
+                      ", out of line from " (cfg/value :seon.config.store/value-out-of-line-bytes) " B)"))
         (is (<= per-turn bound)
             (str n " per-turn commits wrote " per-turn " bytes; the same turns in one commit wrote " once
                  ", so the bound is " bound " (" (format "%.1f" (/ (double per-turn) bound)) "x over)")))

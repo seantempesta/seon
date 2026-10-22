@@ -102,6 +102,13 @@
  ;; ruling 23 (2026-08-03) and Datahike's default; next had it false, hardcoded, until 2026-10-22.
  ;; Cost measured on seon.db-test/a-commit-costs-what-it-writes (docs/storage.md).
  :seon.config.store/keep-history? true
+ ;; Unit: bytes, or :never. A datom value at least this large (a string's characters, a
+ ;; collection's elements) is stored once under its own content key in Datahike's store, and
+ ;; the index nodes hold a reference to it (datahike.index.persistent-set's out-of-line), so a
+ ;; commit rewriting the index tail never writes it again; :never keeps every value inline.
+ ;; Provenance: measured 2026-10-22 on seon.db-test/a-commit-costs-what-it-writes
+ ;; (docs/storage.md#values-out-of-line); v1 kept values up to 4,096 bytes inline (seon.blob).
+ :seon.config.store/value-out-of-line-bytes 1024
  ;; Codec: konserve's per-value compressor, LZ4 frames through liblz4 (konserve.jolt.lz4).
  ;; Provenance: measured 2026-10-22 on 190 index nodes that 20 per-turn commits of real turn
  ;; text wrote (2,544 KB): LZ4 1,178 KB (2.2x less); compressing the 12.7 MB five times took

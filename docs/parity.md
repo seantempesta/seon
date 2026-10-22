@@ -75,7 +75,7 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 | one store, many Datahike branches | `seon.db` (LMDB), `seon.writer` | present |
 | history kept | `:seon.config.store/keep-history?` (default true), fixed when a store is made; a kept store made without it keeps its layout ([storage](storage.md#history)) | present |
 | storage collection, log rotation (`seon.maintenance`) | none; `datahike.gc/gc-storage!` runs on Jolt with a `java.util.Date` | missing |
-| blobs out of line (`seon.blob`) | LZ4 node compression through liblz4 built from source ([storage](storage.md#node-compression)); large values out of line inside Datahike's own store in progress | partial |
+| blobs out of line (`seon.blob`) | large values out of line inside Datahike's own store, written once, kept by GC's mark ([storage](storage.md#values-out-of-line)); LZ4 nodes through liblz4 built from source ([storage](storage.md#node-compression)) | present |
 | every dial documented | one aero file, one resolver (`seon.config`) | present |
 | one error shape, recorded once per signature, problem report | `seon.contract/error`, `seon.error`, `seon.problems` | present |
 | named catch sites | `docs/DRAGONS.md`, `bin/dragons` | new |
@@ -91,7 +91,7 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 ## The gaps, in order
 
 1. History: kept since 2026-10-22 (A.2); the `my.program/history` verb is not built.
-2. Large values and storage reclaim: compression, values out of line, GC (RESUME's plan, A).
+2. Storage reclaim: GC running with a store-wide safe point; plain values native (RESUME's plan, A).
 3. The door: health through MCP, a compact `seon_agents`, and `jolt/door`'s refusals as data.
 4. The owner's view: `/ns` pages and the message input bar, with messages stored as facts.
 5. Main wins a conflict; an unrun proof is unknown, not red.
