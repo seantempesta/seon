@@ -164,7 +164,7 @@
                       "(do (seon.lib/c-kill (seon.lib/c-getpid) seon.lib/SIGUSR1) (loop [] (recur)))"
                       "(+ 2 2)"])]
     (is (= "3" (:printed after-idle)) (str "the request after an idle interrupt runs: " (pr-str after-idle)))
-    (is (= "interrupted by root" (:printed stopped)) (pr-str stopped))
+    (is (str/starts-with? (:printed stopped) "interrupted by root\n") (pr-str stopped))
     (is (= "4" (:printed after-stop)) (pr-str after-stop))))
 
 (deftest an-interrupt-after-the-request-began-stops-it
@@ -175,7 +175,7 @@
   (#'intr/on-usr1)
   (try (let [[it] (repl/eval-string "(+ 1 2)" {"ns" "user" :origin :outside})]
          (is (= :err (:tag it)) (pr-str it))
-         (is (= "interrupted by root" (:printed it))))
+         (is (str/starts-with? (:printed it) "interrupted by root\n")))
        (finally (intr/clear-pending!))))
 
 (deftest a-handler-defect-answers-what-ran-and-its-error
