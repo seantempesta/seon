@@ -196,10 +196,10 @@
        :workload :io
        :ping-map-fn (fn [st] {:pid (:pid st) :standby (:pid (:standby st)) :restarts (:restarts st 0)
                               :waiting (count (:waiters st)) :log (count (:log st)) :stopping (boolean (:stopping st))})})
-  ([{:keys [server-ev fd pid] :as args}]
+  ([{:keys [fork-server-ev fd pid] :as args}]
    (request-standby
-     (assoc args :waiters clojure.lang.PersistentQueue/EMPTY :log [] :reader (start-event-reader! server-ev fd pid)
-            ::flow/in-ports {:ev server-ev})))
+     (assoc args :waiters clojure.lang.PersistentQueue/EMPTY :log [] :reader (start-event-reader! fork-server-ev fd pid)
+            ::flow/in-ports {:ev fork-server-ev})))
   ([st tr]
    ;; the stop transition releases what init opened: the server, its standby, the reader
    (when (and (= tr ::flow/stop) (not (:stopping st)))
