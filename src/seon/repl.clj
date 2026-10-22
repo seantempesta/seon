@@ -144,11 +144,6 @@
                      (assoc m :err em :printed (:seon.error/message em)))
                    m))))))
 
-(def top-fns
-  "How many of a form's costliest contracted functions its record keeps (Seon's
-  :seon.config.test.cost/top)."
-  10)
-
 (defn wrap-cost
   "Per-form wall µs, allocated bytes and the form's costliest contracted functions (each
   with its exact calls and estimated ms: seon.profile), measured around the per-form eval
@@ -163,7 +158,7 @@
                                     (let [a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/now-ns)]
                                       (try (ef form)
                                            (finally (let [t1 (profile/now-ns) a1 (profile/alloc-bytes)]
-                                                      (vreset! last [(/ (quot (- t1 t0) 1000) 1000.0) (- a1 a0) (profile/top (profile/touched) top-fns)])))))))
+                                                      (vreset! last [(/ (quot (- t1 t0) 1000) 1000.0) (- a1 a0) (profile/top (profile/touched) (cfg/value :seon.config.agent/form-top-fns))])))))))
              (around-reply (fn [m]
                              (if-let [[ms a fns] (when (or (contains? m :repl/value) (contains? m :repl/ex)) @last)]
                                (do (vreset! last nil)
@@ -340,39 +335,19 @@
 
 (defn eval-string
   "Evaluate code through the one REPL path: the handler and its middleware, its answers
-  folded into reply items and recorded (an agent's, on its branch). From inside an agent,
-  the turn loop's forms (origin :model); req adds to the request (root's evaluations,
-  seon.entrance: their namespace, origin, budget and eval fn)."
+  folded into reply items, each with who asked (:origin, when not the agent's own :model),
+  and recorded (an agent's, on its branch). From inside an agent, the turn loop's forms; req
+  adds to the request (root's: seon.entrance's namespace, origin, budget and eval fn; root's
+  requests to an agent: agent-step's)."
   {:malli/schema [:function [:=> [:cat :string] :seon.agent/items] [:=> [:cat :string :map] :seon.agent/items]]}
   ([code] (eval-string code {:origin :model}))
   ([code req]
-   (let [answers (volatile! [])]
+   (let [answers (volatile! [])
+         o (:origin req)]
      (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
-     (record! (fold @answers)))))
+     (record! (cond->> (fold @answers) (and o (not= :model o)) (mapv #(assoc % :origin o)))))))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
-
-(defn- reply-fn
-  "The request's answers are kept and folded at its done into one reply value for root
-  ({:op :reply :id :items :t :mem-mb}); its items are recorded first (the agent owns its
-  branch's writes)."
-  {:malli/schema [:=> [:cat :seon.wire/msg] :seon.host/fn]}
-  [req]
-  (let [answers (volatile! [])]
-    (fn [m]
-      (vswap! answers conj m)
-      (when (some #{"done"} (get m "status"))
-        ;; who asked travels with the items, to root's view as to the record
-        (let [items (cond->> (fold @answers) (:origin req) (mapv #(assoc % :origin (:origin req))))]
-          (record! items)
-          (agent/send! {:op :reply :id (:id req) :items items :t (:max-tx (agent/db)) :mem-mb (agent/mem-mb)}))))))
-
-(defn- eval-request
-  "Root's eval request as the nREPL request the handler takes."
-  {:malli/schema [:=> [:cat :seon.wire/seon-msg] :seon.wire/msg]}
-  [m]
-  (let [req (assoc (select-keys m [:id :ticks :origin]) "code" (:forms m))]
-    (assoc req :reply (reply-fn req))))
 
 (defn agent-step
   "The agent as a step-fn, run on its one thread by seon.step/run-loop: requests in on
@@ -387,12 +362,10 @@
   ([st _] st)
   ([st _ m]
    (if (= :eval (:op m))
-     (let [req (eval-request m)]
-       ;; the agent's entrant boundary: a defect answers err + done
-       (try (@the-handler req)
-            (catch Throwable e
-              ((:reply req) {:tag :err :err-text (nrepl/err->msg e) "status" ["eval-error" "done"]})))
-       [st nil])
+     ;; the agent's entrant boundary: a defect answers its error as the reply's item
+     (let [items (try (eval-string (:forms m) (select-keys m [:ticks :origin]))
+                      (catch Throwable e [{:tag :err :err-text (nrepl/err->msg e)}]))]
+       [st {:sock [{:op :reply :id (:id m) :items items :t (:max-tx (agent/db)) :mem-mb (agent/mem-mb)}]}])
      [st (when-let [ms (agent/handle! m)] {:sock ms})])))
 
 (defn serve!

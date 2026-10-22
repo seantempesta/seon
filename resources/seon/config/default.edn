@@ -165,6 +165,11 @@
  ;; allocating one ~7.5e8, so this stops a runaway form after ~5-25 s of work. At the bound
  ;; the form answers the typed :seon.repl/ticks-spent and the request goes on. 0: none.
  :seon.config.agent/form-ticks 20000000000
+ ;; Unit: functions. How many of a form's costliest contracted functions (seon.profile/top)
+ ;; its reply item and evaluation record keep, each with its exact calls and estimated ms.
+ ;; Provenance: lane F2's literal 10, made a key (research row top-fns, 2026-10-22). At the
+ ;; bound the rest are left out of the item; the record says nothing of them.
+ :seon.config.agent/form-top-fns 10
  ;; Unit: engine ticks one proof run (every test of the branch, in its fork) may run. Larger
  ;; than a form's: cost proofs measure large sizes. At the bound the run stops with
  ;; :seon.test/ticks-spent naming the test that was running. 0: none.
