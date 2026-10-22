@@ -192,6 +192,12 @@
 
 ;; ---- merging main into this branch (seon.merge; lane M1) -------------------------------
 
+(defn merge-base
+  "The db at the merge base of this agent's branch and main (git's merge-base): what a merge
+  compares both sides against, so what the branch itself changed is what differs from it."
+  {:malli/schema [:=> [:cat] :seon.host/db]}
+  [] (pdb/branch-base (:store-conn @state) (pdb/main-branch (:cfg @state)) (:branch @state)))
+
 (defn merge-main!
   "git merge main into this agent's branch, in this process (it owns the branch's writes):
   main's changes since the merge base that do not conflict apply in one merge commit with
@@ -205,7 +211,7 @@
         main-b (pdb/main-branch (:cfg @state))
         main (pdb/head conn main-b)
         head @conn
-        r (pm/three-way (pm/program (pdb/branch-base conn main-b (:branch @state)) data-attrs) (pm/program head data-attrs) (pm/program main data-attrs))]
+        r (pm/three-way (pm/program (merge-base) data-attrs) (pm/program head data-attrs) (pm/program main data-attrs))]
     (if (empty? (:theirs r))
       {:ok true :applied [] :conflicts [] :t (:max-tx head)}
       (let [theirs (pm/program main data-attrs)
