@@ -31,37 +31,39 @@
 
 (defn- with [db & txs] (reduce (fn [db t] (d/db-with db (if (fn? t) (t db) t))) db txs))
 
-(def base (with (empty-db) (var-tx "f" "x") (var-tx "g" "x") (var-tx "h" "x")))
+;; a function, not a def: a test namespace loads without effects (it is loaded where main's
+;; program runs, the fork server included, which opens no store)
+(defn- base [] (with (empty-db) (var-tx "f" "x") (var-tx "g" "x") (var-tx "h" "x")))
 
 (defn- unmap [nm]
   (fn [db] (let [e (:db/id (d/entity db [:var/name (symbol "app" nm)]))]
              [[:db/retract e :var/form (:db/id (:var/form (d/entity db e)))]])))
 
-(defn- tw [o t] (pm/three-way (pm/program base #{}) (pm/program o #{}) (pm/program t #{})))
+(defn- tw [o t] (pm/three-way (pm/program (base) #{}) (pm/program o #{}) (pm/program t #{})))
 (defn- vk [nm] [:var (symbol "app" nm)])
 (defn- defs-of "The definition keys among ks (a form's own key follows its definition)." [ks] (filterv #(not= :form (first %)) ks))
 
 (deftest three-way-cases
   (testing "o = t: nothing to do (identical change, both deleted)"
     (are [o t] (let [r (tw o t)] (and (empty? (:apply r)) (empty? (:conflicts r))))
-      (with base (var-tx "f" "(inc x)")) (with base (var-tx "f" "(inc x)"))
-      (with base (unmap "f")) (with base (unmap "f"))
-      (with base (var-tx "n" "1")) (with base (var-tx "n" "1"))))
+      (with (base) (var-tx "f" "(inc x)")) (with (base) (var-tx "f" "(inc x)"))
+      (with (base) (unmap "f")) (with (base) (unmap "f"))
+      (with (base) (var-tx "n" "1")) (with (base) (var-tx "n" "1"))))
   (testing "o = b: theirs applies (add, modify, delete)"
-    (are [t k] (= [k] (defs-of (:apply (tw base t))))
-      (with base (var-tx "n" "1")) (vk "n")
-      (with base (var-tx "f" "(dec x)")) (vk "f")
-      (with base (unmap "g")) (vk "g")))
+    (are [t k] (= [k] (defs-of (:apply (tw (base) t))))
+      (with (base) (var-tx "n" "1")) (vk "n")
+      (with (base) (var-tx "f" "(dec x)")) (vk "f")
+      (with (base) (unmap "g")) (vk "g")))
   (testing "t = b: ours kept, nothing applied, and it is an ours-change"
-    (let [r (tw (with base (var-tx "f" "(dec x)")) base)]
+    (let [r (tw (with (base) (var-tx "f" "(dec x)")) (base))]
       (is (empty? (:apply r))) (is (empty? (:conflicts r))) (is (= [(vk "f")] (defs-of (keys (:ours r)))))))
   (testing "conflicts carry their kind, base, ours and theirs"
     (are [o t kind] (= [kind] (map :kind (filter #(= :var (first (:key %))) (:conflicts (tw o t)))))
-      (with base (var-tx "f" "(inc x)")) (with base (var-tx "f" "(dec x)")) :both-modified
-      (with base (var-tx "n" "1")) (with base (var-tx "n" "2")) :both-added
-      (with base (unmap "f")) (with base (var-tx "f" "(dec x)")) :deleted-by-us
-      (with base (var-tx "f" "(inc x)")) (with base (unmap "f")) :deleted-by-them)
-    (let [c (first (:conflicts (tw (with base (var-tx "f" "(inc x)")) (with base (var-tx "f" "(dec x)")))))]
+      (with (base) (var-tx "f" "(inc x)")) (with (base) (var-tx "f" "(dec x)")) :both-modified
+      (with (base) (var-tx "n" "1")) (with (base) (var-tx "n" "2")) :both-added
+      (with (base) (unmap "f")) (with (base) (var-tx "f" "(dec x)")) :deleted-by-us
+      (with (base) (var-tx "f" "(inc x)")) (with (base) (unmap "f")) :deleted-by-them)
+    (let [c (first (:conflicts (tw (with (base) (var-tx "f" "(inc x)")) (with (base) (var-tx "f" "(dec x)")))))]
       (is (= (vk "f") (:key c)))
       (is (= (fid "f" "x") (:form (:base c))))
       (is (= (fid "f" "(inc x)") (:form (:ours c))))
@@ -69,44 +71,44 @@
 
 (deftest identical-defs-on-two-branches-merge-clean
   ;; one side makes an unrelated entity first, so app/n gets a different entity id on each
-  (let [o (with base [{:note/text "scratch"}] (var-tx "n" "(* 2 x)"))
-        t (with base (var-tx "n" "(* 2 x)"))]
+  (let [o (with (base) [{:note/text "scratch"}] (var-tx "n" "(* 2 x)"))
+        t (with (base) (var-tx "n" "(* 2 x)"))]
     (is (not= (d/q '[:find ?e . :where [?e :var/name app/n]] o) (d/q '[:find ?e . :where [?e :var/name app/n]] t)))
     (is (= {:apply [] :conflicts []} (select-keys (tw o t) [:apply :conflicts])))))
 
 (deftest unmap-merges-as-delete
-  (let [ours (with base (unmap "g"))
-        r (tw ours base)
-        main' (d/db-with base (pm/apply-tx base (into {} (for [[k [_ o]] (:ours r)] [k o]))))]
+  (let [ours (with (base) (unmap "g"))
+        r (tw ours (base))
+        main' (d/db-with (base) (pm/apply-tx (base) (into {} (for [[k [_ o]] (:ours r)] [k o]))))]
     (is (= #{(vk "g") [:form (fid "g" "x")]} (set (keys (:ours r)))) "the definition, and the form it leaves dead")
     (is (nil? (program/source-of main' 'app/g)))
     (is (nil? (d/entity main' [:form/id (fid "g" "x")])) "the form is retracted on main")
-    (is (= [:deleted-by-us] (map :kind (filter #(= :var (first (:key %))) (:conflicts (tw ours (with base (var-tx "g" "(dec x)"))))))))))
+    (is (= [:deleted-by-us] (map :kind (filter #(= :var (first (:key %))) (:conflicts (tw ours (with (base) (var-tx "g" "(dec x)"))))))))))
 
 (deftest latest-redefinition-wins
-  (let [ours (with base (var-tx "f" "1") (var-tx "f" "2") (var-tx "f" "3"))]
-    (is (= (fid "f" "3") (:form (second (get (:ours (tw ours base)) (vk "f"))))))
-    (is (= [(defn-src "f" "3")] (for [[[k] [_ o]] (:ours (tw ours base)) :when (and (= :form k) o)] (:src o)))
+  (let [ours (with (base) (var-tx "f" "1") (var-tx "f" "2") (var-tx "f" "3"))]
+    (is (= (fid "f" "3") (:form (second (get (:ours (tw ours (base))) (vk "f"))))))
+    (is (= [(defn-src "f" "3")] (for [[[k] [_ o]] (:ours (tw ours (base))) :when (and (= :form k) o)] (:src o)))
         "only the last form is live: each redefinition superseded the one before")))
 
 (deftest a-form-s-place-does-not-make-it-another
-  (let [o (with base [{:note/text "first"}] (var-tx "n" "(* 2 x)"))
-        t (with base (var-tx "n" "(* 2 x)"))]
+  (let [o (with (base) [{:note/text "first"}] (var-tx "n" "(* 2 x)"))
+        t (with (base) (var-tx "n" "(* 2 x)"))]
     (is (not= (get-in (pm/program o #{}) [[:form (fid "n" "(* 2 x)")] :order])
               (get-in (pm/program t #{}) [[:form (fid "n" "(* 2 x)")] :order])))
     (is (= {:apply [] :conflicts []} (select-keys (tw o t) [:apply :conflicts])))))
 
 (deftest scratch-and-observations-never-merge
-  (let [ours (with base [{:note/text "scratch" :note/agent :a1}
+  (let [ours (with (base) [{:note/text "scratch" :note/agent :a1}
                          {:seon.cluster.eval/id "r/1" :seon.cluster.eval/record "{:tag :ret :form \"(+ 1 2)\"}"}
                          {:seon.agent/id :a1 :seon.agent/answered-t 7}
                          {:task/name :x/y :task/status :done}])]
-    (is (= (pm/program base #{}) (pm/program ours #{})))
-    (is (empty? (:ours (tw ours base))))))
+    (is (= (pm/program (base) #{}) (pm/program ours #{})))
+    (is (empty? (:ours (tw ours (base)))))))
 
 (deftest apply-tx-sets-each-key
-  (let [p (pm/program (with base (var-tx "f" "(dec x)") (var-tx "n" "1") (unmap "h")) #{})
-        db' (d/db-with base (pm/apply-tx base (select-keys p [(vk "f") (vk "n") [:form (fid "f" "(dec x)")] [:form (fid "n" "1")]])))
+  (let [p (pm/program (with (base) (var-tx "f" "(dec x)") (var-tx "n" "1") (unmap "h")) #{})
+        db' (d/db-with (base) (pm/apply-tx (base) (select-keys p [(vk "f") (vk "n") [:form (fid "f" "(dec x)")] [:form (fid "n" "1")]])))
         db'' (d/db-with db' (pm/apply-tx db' {(vk "h") nil}))]
     (is (= (select-keys p [(vk "f") (vk "n")]) (select-keys (pm/program db' #{}) [(vk "f") (vk "n")])))
     (is (= "(defn n {:malli/schema [:=> [:cat :int] :int]} [x] 1)" (program/source-of db' 'app/n))
@@ -114,8 +116,8 @@
     (is (not (contains? (pm/program db'' #{}) (vk "h"))))))
 
 (deftest unmerged-entry-derivation
-  (let [o (with base (var-tx "f" "(inc x)"))
-        t (with base (var-tx "f" "(dec x)"))
+  (let [o (with (base) (var-tx "f" "(inc x)"))
+        t (with (base) (var-tx "f" "(dec x)"))
         cs (:conflicts (tw o t))
         b1 (d/db-with o (pm/unmerged-tx o cs 42))
         unmerged (fn [db] (mapv :key (pm/unmerged db (pm/program db #{}))))]
@@ -134,26 +136,26 @@
         (is (= [43] (map :main-t (pm/entries b2))))))))
 
 (deftest behind-means-main-program-moved
-  (let [observed (with base [{:seon.agent/id :root :seon.agent/answered-t 9} {:note/text "attempt facts"}])]
-    (is (empty? (:theirs (tw base observed))))
-    (is (seq (:theirs (tw base (with base (var-tx "f" "(dec x)"))))))))
+  (let [observed (with (base) [{:seon.agent/id :root :seon.agent/answered-t 9} {:note/text "attempt facts"}])]
+    (is (empty? (:theirs (tw (base) observed))))
+    (is (seq (:theirs (tw (base) (with (base) (var-tx "f" "(dec x)"))))))))
 
 (deftest platform-records-never-put-a-branch-behind
   ;; root's records on main (boot, quiescence, recorded errors) are platform records: with
   ;; all data merged (the writer's :all) they change no key a branch carries; the task
   ;; content an agent may improve (my.task/update!) is carried
-  (let [rooted (with base [{:seon.root/id :root :seon.root/quiescent "{:t 9 :stuck []}"}])
-        tasked (with base [{:seon.task/id "t/x" :seon.task/plan "better"}])
+  (let [rooted (with (base) [{:seon.root/id :root :seon.root/quiescent "{:t 9 :stuck []}"}])
+        tasked (with (base) [{:seon.task/id "t/x" :seon.task/plan "better"}])
         p #(pm/program % :all)]
-    (is (empty? (:theirs (pm/three-way (p base) (p base) (p rooted)))))
-    (is (some (fn [[k]] (= [:datum :seon.task/plan] [(first k) (nth k 2)])) (:ours (pm/three-way (p base) (p tasked) (p base)))))))
+    (is (empty? (:theirs (pm/three-way (p (base)) (p (base)) (p rooted)))))
+    (is (some (fn [[k]] (= [:datum :seon.task/plan] [(first k) (nth k 2)])) (:ours (pm/three-way (p (base)) (p tasked) (p (base))))))))
 
 (deftest declared-data-merges-by-key
   ;; the data part, used by core's generic merge (every non-program, non-observation attribute)
-  (let [o (with base [{:db/id 900 :note/text "n" :note/agent :a1}])
-        r (pm/three-way (pm/program base :all) (pm/program o :all) (pm/program base :all))]
+  (let [o (with (base) [{:db/id 900 :note/text "n" :note/agent :a1}])
+        r (pm/three-way (pm/program (base) :all) (pm/program o :all) (pm/program (base) :all))]
     (is (= #{[:datum 900 :note/text] [:datum 900 :note/agent]} (set (keys (:ours r)))))
-    (is (empty? (:ours (pm/three-way (pm/program base #{}) (pm/program o #{}) (pm/program base #{})))))))
+    (is (empty? (:ours (pm/three-way (pm/program (base) #{}) (pm/program o #{}) (pm/program (base) #{})))))))
 
 (def ^:private facts-path "resources/seon/schemas/seon.facts.edn")
 
