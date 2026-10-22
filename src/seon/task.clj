@@ -177,7 +177,7 @@
         b (vs base) o (vs branch) m (vs main)]
     (reduce (fn [acc [e a :as k]]
               (let [id (:seon.task/id (d/entity branch e)) bv (b k) ov (o k) mv (m k)]
-                (cond (or (nil? id) (nil? (eid main :seon.task/id id)) (= mv ov)) acc
+                (cond (or (nil? id) (nil? (pdb/eid main :seon.task/id id)) (= mv ov)) acc
                       (= mv bv) (update acc :tx conj (if (some? ov) [:db/add [:seon.task/id id] a ov] [:db/retract [:seon.task/id id] a mv]))
                       :else (update acc :conflicts conj {:task id :attr a :base bv :ours ov :theirs mv}))))
             {:tx [] :conflicts []}
