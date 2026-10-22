@@ -5,7 +5,7 @@
   the reply's calls of the one tool, eval, goes through the one REPL path
   (seon.repl/eval-string: read, evaluate, record) and its answer is that call's result, which
   the next model call reads, and the turn's facts are written on the branch. The loop repeats until the done
-  rule has no refusal, a verb ends it (my.turn/wait, my.task/send-back!) or the turns run
+  rule has no refusal, a verb ends it (my.turn/wait, my.task/fail!) or the turns run
   out. All green at the start ends it with no model call.
 
   A merge task's agent first merges main into the branch (no model call) and merges main
@@ -55,8 +55,8 @@
           (get-in @agent/state [:turn :evals]))))
 
 (defn request-stop!
-  "A verb ends the loop after this turn's forms: :waiting (my.turn/wait) or :sent-back."
-  {:malli/schema [:=> [:cat [:enum :waiting :sent-back] [:maybe :string]] :map]}
+  "A verb ends the loop after this turn's forms: :waiting (my.turn/wait) or :failed (my.task/fail!)."
+  {:malli/schema [:=> [:cat [:enum :waiting :failed] [:maybe :string]] :map]}
   [outcome reason]
   (:turn (swap! agent/state assoc-in [:turn :stop] (cond-> {:outcome outcome} reason (assoc :reason reason)))))
 

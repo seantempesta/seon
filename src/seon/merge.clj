@@ -30,9 +30,9 @@
 
 (def ^:private program-ns-attrs #{"form" "var" "ns" "method" "impl" "schema" "schema.file" "db" "db.install" "db.type" "db.cardinality" "db.unique"})
 
-(def ^:private carried-platform-attrs
+(def carried-platform-attrs
   "The platform attributes (seon.*) a branch carries: the task content an agent may improve
-  (my.task/update!). Every other seon.* attribute is a platform record (root's boot and
+  (my.task/update!), carried onto main at its attempt's end (seon.task/carry-tx). Every other seon.* attribute is a platform record (root's boot and
   quiescence, recorded errors, attempts, observations) written where it happened and never
   carried, so main writing one never puts a branch behind."
   #{:seon.task/plan :seon.task/instructions})

@@ -31,7 +31,7 @@ The door's verbs are one table, `seon.entrance/verbs`: MCP lists each as the too
 
 | v1 | next | Status |
 |---|---|---|
-| `my.task/current`, `update!`, `send-back!`; `my.turn/wait` | the same names | present (an agent holds its task from the fork: [tasks](tasks.md#the-agent-knows-its-task)) |
+| `my.task/current`, `update!`, `send-back!`; `my.turn/wait` | `current`, `update!`, `fail!` (send-back replaced: a failure is task data, held for root: [tasks](tasks.md#a-failed-task-is-held-for-root)); `my.turn/wait` | present (an agent holds its task from the fork: [tasks](tasks.md#the-agent-knows-its-task)) |
 | `my.program/callers`, `source`, `tests-reaching` | `my.agent/callers`, `callees`, `grep`, `source`; `seon.program/reach-digests` | present |
 | `my.program/history` | none yet; the store keeps history now ([storage](storage.md#history)), the verb is not built | missing |
 | `my.program/search`, `similar` (embeddings) | none; decided (DECISIONS, "Embeddings join the context"), not built | missing |

@@ -43,7 +43,7 @@
 
 (deftest an-unchanged-file-costs-nothing-and-keeps-what-main-learned
   (let [db (load-text (empty-db) file-a)
-        db (d/db-with db (task/plan-tx "demo/index" "Index the rows; group by key first (learned)."))]
+        db (d/db-with db [{:seon.task/id "demo/index" :seon.task/plan "Index the rows; group by key first (learned)."}])]
     (is (= [] (task/load-tx db {'demo (task/file-declarations 'demo file-a)})))
     (is (= "Index the rows; group by key first (learned)." (:seon.task/plan (task/task db "demo/index"))))))
 

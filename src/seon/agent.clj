@@ -18,7 +18,7 @@
             [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
-;; :id :branch :task (the task root forked it for, or nil) :fd :conn :db :base (main as this agent forked holding it) :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
+;; :id :branch :task :attempt (the task and attempt root forked it for, or nil) :fd :conn :db :base (main as this agent forked holding it) :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 (defonce state (atom nil))
 
@@ -523,7 +523,7 @@
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
-  [fd {id :agent branch :branch task :task cfg :cfg lease :lease resumed :resumed} db0 serve]
+  [fd {id :agent branch :branch task :task attempt :attempt cfg :cfg lease :lease resumed :resumed} db0 serve]
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone
   (sock/clofork! fd)
@@ -544,7 +544,7 @@
     (let [load-errors (when resumed (program/load-diff! db0 @store-conn))]
      ;; a resumed branch whose program does not load runs main's for what failed: its errors
      ;; go to root with its hello (recorded problems), never dropped (T5b: a stub ran silently)
-     (reset! state {:id id :branch branch :task task :fd fd :conn c :db @store-conn :base db0 :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
+     (reset! state {:id id :branch branch :task task :attempt attempt :fd fd :conn c :db @store-conn :base db0 :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
                    :load-errors (vec load-errors)
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
                    :ns nsx :nss #{(ns-name nsx)} :interrupt-ok intr-ok :serve serve}))))

@@ -90,7 +90,7 @@ owns the concept. A new concept gets its word here before it appears in code.
 |---|---|
 | `my.db` | `db`, `q`, `pull`, `transact!` (on the agent's own branch) |
 | `my.agent` | `$`, `whoami`, `messages`, `send-message` |
-| `my.task` | `current`, `update!`, `send-back!` |
+| `my.task` | `current`, `update!`, `fail!` |
 | `my.turn` | `wait` |
 | `my.branch` | `merge-main!`, `unmerged`, `resolve!` |
 | `my.root` (root's verbs) | `create!`, `run!`, `cancel!` |

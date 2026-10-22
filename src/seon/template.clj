@@ -58,7 +58,7 @@
      "- Back to your own scratch namespace, where these verbs are referred unqualified: `(in-ns (symbol (str \"agent.\" (name (:id (my.agent/whoami))))))`. Elsewhere, call them qualified as written here."
      "## Recording and ending"
      "- Record what you learn in the plan, so the next step starts from it: `(my.task/update! :seon.task/plan str \"\\n\\nFound: seon.task/accumulate owns the plan's accumulation.\")`."
-     "- A task that is broken or impossible goes back to root with your evidence: `(my.task/send-back! \"the premise is refuted\" '(seon.task/accumulate {} \"x\"))`."
+     "- A task that is broken or impossible is marked failed with your evidence, and root takes it from there: `(my.task/fail! \"the premise is refuted\" '(seon.task/accumulate {} \"x\"))`."
      "- When your part is done: `(my.turn/wait)`."]))
 
 (def instructions
