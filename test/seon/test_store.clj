@@ -4,7 +4,7 @@
   many branches, as in production; owner, 2026-10-21). Test-only, so it lives in test/, not
   in src (session DUP-HELPERS); it seeds and opens through seon.db's own seed! and open-main!."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh]))
 
 (def ^:private store
   "The test store's config, made and seeded with about 2,000 datoms on first use."
@@ -32,3 +32,10 @@
         seed (d/connect @store)]
     (try (f (assoc @store :branch b) conn)
          (finally (d/release conn) (pdb/delete-main! seed b) (d/release seed)))))
+
+(defn binary-sh
+  "clojure.java.shell/sh of a command that runs the checkout's binary (target/seon, bin/root,
+  bin/check): the one way a test does, so seon.program/tree-readers names it and such a test's
+  reach digest covers the whole tree the binary is built from."
+  {:malli/schema [:=> [:cat [:* :any]] :map]}
+  [& args] (apply sh/sh args))

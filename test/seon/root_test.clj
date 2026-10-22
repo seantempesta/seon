@@ -3,7 +3,7 @@
   boots its fork server, so it runs in a process of its own rather than in the test
   runner's, whose threads and GC sweepers are the runner's."
   (:require [clojure.test :refer [deftest is]] [clojure.java.shell :as sh] [clojure.edn :as edn]
-            [clojure.string :as str] [seon.db :as pdb] [datahike.api :as d]))
+            [clojure.string :as str] [seon.db :as pdb] [datahike.api :as d] [seon.test-store :as ts]))
 
 (defn- test-store "The one store these tests' roots take a branch of." []
   (str (.getCanonicalPath (java.io.File. ".")) "/target/runs/test-store"))
@@ -12,7 +12,7 @@
   "Delete main and every branch under it from the test store (seon.check/drop-mains), once
   the root that made them has stopped."
   [main]
-  (sh/sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str (test-store))) :dir "target"))
+  (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str (test-store))) :dir "target"))
 
 (deftest root-threads-are-what-root-declares
   ;; three start!/stop! cycles in one process: while running (three agents just
@@ -23,7 +23,7 @@
   ;; web-server-threads-are-joined-at-stop).
   ;; On a main of its own on the test store, deleted at the end.
   (let [main (str "root-test-" (random-uuid))
-        {:keys [exit out err]} (sh/sh "env" "SEON_WEB_PORT=0" (str "SEON_STORE=" (test-store)) (str "SEON_MAIN=" main)
+        {:keys [exit out err]} (ts/binary-sh "env" "SEON_WEB_PORT=0" (str "SEON_STORE=" (test-store)) (str "SEON_MAIN=" main)
                                       "./seon" "threads-declared" "3" :dir "target")
         _ (drop-main! main)
         res (edn/read-string (last (str/split-lines out)))]
@@ -44,7 +44,7 @@
         main (str "root-test-" (random-uuid))
         ;; a kernel-assigned port, never the checkout's: its standing root may hold that one
         port (let [sock (java.net.ServerSocket. 0)] (try (.getLocalPort sock) (finally (.close sock))))
-        {:keys [exit out err]} (sh/sh "env" "SEON_WEB_PORT=0" "./seon" "root"
+        {:keys [exit out err]} (ts/binary-sh "env" "SEON_WEB_PORT=0" "./seon" "root"
                                       "--set" (str ":seon.config.root/entrance-port=" port)
                                       "--set" (str ":seon.config.source/root=" (pr-str checkout))
                                       "--set" ":seon.config.source/dirs=[\"src\" \"test\"]"
@@ -72,7 +72,7 @@
                     " until grep -q 'ROOT LISTENING' '" path ".log' || ! kill -0 $R 2>/dev/null; do sleep 0.1; done;"
                     (apply str (map ask requests))
                     " exec 3>&-; wait $R; echo EXIT $?; cat '" path ".log'")]
-    (:out (sh/sh "zsh" "-c" script :dir "target")))))
+    (:out (ts/binary-sh "zsh" "-c" script :dir "target")))))
 
 (deftest a-root-resumes-a-store-an-earlier-build-wrote
   ;; task seon.root/a-root-resumes-a-store-an-earlier-build-wrote: the store as builds of
