@@ -56,3 +56,32 @@
   (testing "usage sent: both counts, as the provider measured them"
     (let [c (model/parse-reply "{\"choices\":[{\"message\":{\"content\":\"x\"}}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3}}" 12.0 2048)]
       (is (= [7 3] [(:prompt-tokens c) (:completion-tokens c)])))))
+
+(deftest a-reply-calls-the-one-tool-eval
+  ;; owner, 2026-10-22: a turn is native tool calls, one tool, eval, so the model sees each
+  ;; evaluation's answer before its next call (DeepSeek's OpenAI-compatible tool_calls)
+  (testing "the request declares the one tool, and the conversation's calls and answers go as the API reads them"
+    (let [b (model/request-body {:kind :openai-compat :base-url "x" :model "m" :api-key-env "HOME" :max-tokens 64}
+                                {:messages [{:role "user" :content "go"}
+                                            {:role "assistant" :content "" :tool-calls [{:id "c1" :code "(+ 1 2)"}]}
+                                            {:role "tool" :tool-call-id "c1" :content "3"}]
+                                 :task "t/x" :turn 1})]
+      (is (= ["eval"] (mapv #(get-in % [:function :name]) (:tools b))))
+      (is (= [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"code\":\"(+ 1 2)\"}"}}]
+             (:tool_calls (second (:messages b)))))
+      (is (= {:role "tool" :content "3" :tool_call_id "c1"} (nth (:messages b) 2)))))
+  (testing "a streamed reply's call pieces join by index into each call's code, in order"
+    (let [c (model/parse-reply
+             (apply str (map chunk-line
+                             [{:choices [{:delta {:content "Two steps."}}]}
+                              {:choices [{:delta {:tool_calls [{:index 0 :id "c1" :function {:name "eval" :arguments "{\"code\":"}}]}}]}
+                              {:choices [{:delta {:tool_calls [{:index 0 :function {:arguments "\"(def x 41)\"}"}}]}}]}
+                              {:choices [{:delta {:tool_calls [{:index 1 :id "c2" :function {:name "eval" :arguments "{\"code\":\"(inc x)\"}"}}]}}]}
+                              {:choices [{:delta {} :finish_reason "tool_calls"}] :usage {:prompt_tokens 9 :completion_tokens 4}}]))
+             5.0 64)]
+      (is (= [{:id "c1" :code "(def x 41)"} {:id "c2" :code "(inc x)"}] (:tool-calls c)))
+      (is (= ["Two steps." "tool_calls"] [(:text c) (:finish-reason c)]))))
+  (testing "a call with no content beside it, and a call cut mid-arguments: its arguments as they came"
+    (let [c (model/parse-reply "{\"choices\":[{\"message\":{\"content\":null,\"tool_calls\":[{\"id\":\"c\",\"function\":{\"name\":\"eval\",\"arguments\":\"{\\\"code\\\":\\\"(+ 1\"}}]},\"finish_reason\":\"length\"}]}" 1.0 64)]
+      (is (= "" (:text c)))
+      (is (= [{:id "c" :code "{\"code\":\"(+ 1"}] (:tool-calls c))))))

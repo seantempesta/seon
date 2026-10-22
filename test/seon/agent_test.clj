@@ -14,8 +14,10 @@
   forms evaluated in that agent (a string) or sent to the entrance as it is (a map): the
   first item of every reply, or the answer that holds no items, in order. The root works on a
   main of its own, a branch of the one test store (target/runs/test-store), deleted with
-  every branch under it when the root has stopped (seon.check/drop-mains)."
-  [forms]
+  every branch under it when the root has stopped (seon.check/drop-mains). sets: more
+  --set config overrides for the root (e.g. its scripted model)."
+  ([forms] (in-agent forms []))
+  ([forms sets]
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         main (str "in-agent-" (random-uuid))
         store (str checkout "/target/runs/test-store")
@@ -28,6 +30,7 @@
                     " --set ':seon.config.source/root=" (pr-str checkout) "' --set ':seon.config.source/dirs=[\"src\"]'"
                     " --set ':seon.config.root/store-path=" (pr-str store) "' --set ':seon.config.root/main=" (pr-str main) "'"
                     " --set ':seon.config.root/entrance-port=" port "' --set ':seon.config.web/port=0'"
+                    (str/join (for [x sets] (str " --set '" x "'")))
                     " < '" path "-in' > '" path ".log' 2>&1 & R=$!; exec 3>'" path "-in';"
                     " until grep -q 'ROOT LISTENING' '" path ".log' || ! kill -0 $R 2>/dev/null; do sleep 0.1; done;"
                     (ask {:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str (str path "-tasks")) ")")}) " >/dev/null;"
@@ -38,7 +41,7 @@
         {:keys [out]} (sh/sh "zsh" "-c" script :dir "target")]
     (sh/sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
     (sh/sh "rm" "-rf" (str path "-in") (str path ".log") (str path "-tasks"))
-    (mapv #(let [a (edn/read-string {:default tagged-literal} %)] (if (contains? a :items) (first (:items a)) a)) (str/split-lines (str/replace out #"(?s)^.*ROOT LISTENING[^\n]*\n" "")))))
+    (mapv #(let [a (edn/read-string {:default tagged-literal} %)] (if (contains? a :items) (first (:items a)) a)) (str/split-lines (str/replace out #"(?s)^.*ROOT LISTENING[^\n]*\n" ""))))))
 
 (deftest a-relative-path-reads-from-the-source-root
   ;; task seon.agent/an-agent-works-in-its-source-root: a program file is read by the path
@@ -51,6 +54,28 @@
     ;; an agent's direct edit of the shared source root stopped root's next boot (2026-10-21)
     (is (= "\"(ns x)\"" (:printed wrote)) "the agent writes and reads back its own file")
     (is (not (.exists (java.io.File. "src/seon/written_by_an_agent.clj"))) "the source root never sees it")))
+
+(deftest each-eval-call-is-answered-before-the-next
+  ;; owner, 2026-10-22 (DECISIONS "Agents work at the REPL, through tool calls"): a reply was a
+  ;; batch of forms whose results came only after the whole reply, and 18% of model turns were
+  ;; repetition loops asking for answers the model could not see. Now each call of the one
+  ;; tool, eval, is answered as its own tool message before the next model call: the stand-in
+  ;; (seon.fixtures/two-calls) writes its second call from the answer its first call got
+  (let [[end msgs] (in-agent ["(seon.turn/work! {:task \"demo/t\" :attempt \"demo/t#calls\" :max-turns 2})"
+                              (str "(let [db (seon.agent/db)]"
+                                   " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task \"demo/t\" :attempt \"demo/t#calls\""
+                                   "                                       :turn 2 :max-turns 2 :origin :model :observed {}}))"
+                                   "      (filter #(#{\"assistant\" \"tool\"} (:role %))) (mapv #(select-keys % [:role :tool-calls :tool-call-id :content]))))")]
+                             [":seon.config.ai/script=seon.fixtures/two-calls"])
+        end (edn/read-string {:default tagged-literal} (:printed end))
+        [a0 r0 a1 r1 :as ms] (edn/read-string {:default tagged-literal} (:printed msgs))]
+    (is (= [:cap 2] [(:outcome end) (:model-calls end)]) "two model calls (the proof stays red), then the cap")
+    (is (= ["assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each reply followed by its call's answer")
+    (is (= [{:id "call-0" :code "(+ 20 21)"}] (:tool-calls a0)))
+    (is (= "call-0" (:tool-call-id r0)) "the answer names its call")
+    (is (str/includes? (:content r0) "41") "the first call's answer")
+    (is (= [{:id "call-1" :code "(+ 1 41)"}] (:tool-calls a1)) "the second call was made after the first call's answer, from it")
+    (is (str/includes? (:content r1) "42") "and both answers are in the conversation")))
 
 (deftest an-agent-that-throws-ends-with-its-cause
   ;; task seon.agent/a-death-names-its-cause: a defect that no request's own boundary

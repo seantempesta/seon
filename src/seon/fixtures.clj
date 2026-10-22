@@ -6,7 +6,7 @@
   redefines its function). The proofs namespace sorts after the subjects, so a boot that
   loads main's program in name order loads a subject before its proof."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.template :as tpl] [seon.source :as source] [seon.reader :as reader]))
+  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.template :as tpl] [seon.source :as source] [seon.reader :as reader]))
 
 (def calc
   "The six-task graph: add; twice and square need add; sum-sq needs both; neg (slow on
@@ -201,6 +201,16 @@
   "Scripted replies by task name (calc) and by task id (a scenario's tasks live in a task
   namespace named after it, e.g. conflict/b-merge)."
   (into calc-replies (for [[k {:keys [replies]}] scenarios [nm r] replies] [(str (name k) "/" nm) r])))
+
+(defn two-calls
+  "The stand-in that proves a turn's rhythm (seon.agent-test): its first call evaluates
+  (+ 20 21); each later call adds one to the answer the last call's result printed, so its
+  code holds what it saw before it was made."
+  {:malli/schema [:=> [:cat :seon.model/request] :string]}
+  [{:keys [messages]}]
+  (if-let [seen (some #(when (= "tool" (:role %)) (edn/read-string (:content %))) (rseq messages))]
+    (str "(+ 1 " (or (:printed seen) (:value seen)) ")")
+    "(+ 20 21)"))
 
 (defn reply
   "The stand-in model: the scripted reply for the request's task and turn (the last one

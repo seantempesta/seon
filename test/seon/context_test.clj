@@ -218,18 +218,19 @@
         db0 @conn
         b0 (basis db0 0)
         sent0 (:content (peek (context/messages (context/current-state db0 (task/task db0 "demo/f") (assoc observed :turn 0 :max-turns 4 :repairs []))))) 
-        reply0 "```clojure\n(defn f [x] (* 3 x)\n```"
+        code0 "(defn f [x] (* 3 x)"
         evals0 (context/evaluations-text [{:id 0 :tag :ret :form "(defn f [x] (* 3 x))" :printed "#'demo/f"}])
-        _ (record! b0 {:seon.turn/reply reply0 :seon.turn/evals evals0 :seon.turn/truncated true})
+        calls0 [{:id "call-0" :code code0 :evals evals0}]
+        _ (record! b0 {:seon.turn/reply "f triples." :seon.turn/calls (seon.edn/encode calls0) :seon.turn/truncated true})
         ;; the reply changed the program: turn 0's text must come from its own commit
         _ (d/transact conn (program "(defn f \"Triples.\" [x] (* 3 x))"))
         db1 @conn
         b1 (basis db1 1)
-        {:keys [text repairs]} (reader/forgive reply0)
+        {:keys [text repairs]} (reader/forgive code0)
         sent1 (:content (peek (context/messages (context/current-state db1 (task/task db1 "demo/f")
                                                                        (assoc observed :turn 1 :max-turns 4 :truncated? true :source text :repairs repairs))
-                                                [{:reply reply0 :evals (str "Your evaluations:\n" evals0) :context sent0}])))
-        _ (record! b1 {:seon.turn/reply "(my.turn/wait)" :seon.turn/evals ""})
+                                                [{:reply "f triples." :calls calls0 :context sent0}])))
+        _ (record! b1 {:seon.turn/reply "" :seon.turn/calls (seon.edn/encode [{:id "call-1" :code "(my.turn/wait)" :evals ""}])})
         _ (d/transact conn (program "(defn f \"Later.\" [x] x)"))
         db @conn
         e-of (fn [id] (d/q '[:find ?e . :in $ ?id :where [?e :seon.turn/id ?id]] db id))]
@@ -311,15 +312,24 @@
 
 (deftest an-agent-reads-its-conversation-so-far
   ;; a live DeepSeek agent re-read the same Datahike source every other turn because each
-  ;; context showed only the previous turn's evaluations (2026-10-21); a REPL keeps its scrollback
-  (let [turns [{:context "C0" :reply "R0" :evals "E0"} {:reply "R1" :evals "E1"} {:reply "R2" :evals "E2"}]
+  ;; context showed only the previous turn's evaluations (2026-10-21); a REPL keeps its
+  ;; scrollback. Owner, 2026-10-22: a turn is native tool calls, so each eval call's answer is
+  ;; its own tool message, read before the next call
+  (let [turns [{:context "C0" :reply "R0" :calls [{:id "a" :code "(def x 41)" :evals "E0"}]}
+               {:reply "" :calls [{:id "b" :code "(inc x)" :evals "E1"} {:id "c" :code "(dec x)" :evals "E2"}]}
+               {:reply "R2" :calls []}]
         ms (context/messages {:task "t"} turns)]
-    (is (= ["system" "user" "assistant" "user" "assistant" "user" "assistant" "user"] (mapv :role ms))
-        "the first context, then each turn's reply and what its forms evaluated to, then the current state")
-    (is (= ["C0" "R0" "E0" "R1" "E1" "R2"] (mapv :content (subvec ms 1 7))) "every earlier turn, in order")
-    (is (str/starts-with? (:content (peek ms)) "E2") "the last turn's evaluations lead the current state")
-    (is (str/includes? (:content (peek ms)) "The current state") "the current state follows them"))
+    (is (= ["system" "user" "assistant" "tool" "assistant" "tool" "tool" "assistant" "user"] (mapv :role ms))
+        "the first context, then each reply with its calls' answers, then the current state")
+    (is (= [[{:id "a" :code "(def x 41)"}] "a" "E0"] [(:tool-calls (nth ms 2)) (:tool-call-id (nth ms 3)) (:content (nth ms 3))])
+        "a call and its answer, named by the call's id")
+    (is (= ["b" "c"] (mapv :tool-call-id (subvec ms 5 7))) "each call of a reply answered, in order")
+    (is (not (contains? (nth ms 7) :tool-calls)) "a reply that called nothing carries no calls")
+    (is (str/starts-with? (:content (peek ms)) "The current state") "the current state comes last"))
+  (testing "a reply that called nothing is followed by a user message, so two replies never meet"
+    (let [ms (context/messages {:task "t"} [{:context "C0" :reply "R0" :calls []} {:reply "R1" :calls []}])]
+      (is (= ["system" "user" "assistant" "user" "assistant" "user"] (mapv :role ms)))))
   (testing "the history budget keeps whole turns, the newest always"
-    (let [turns [{:reply (apply str (repeat 400 "a")) :evals ""} {:reply "R1" :evals "E1"} {:reply "R2" :evals "E2"}]]
+    (let [turns [{:reply (apply str (repeat 400 "a")) :calls []} {:reply "R1" :calls [{:id "b" :code "(f)" :evals "E1"}]} {:reply "R2" :calls []}]]
       (is (= ["R1" "R2"] (mapv :reply (#'context/kept-turns turns 10))) "an older turn past the budget is left out whole")
       (is (= ["R2"] (mapv :reply (#'context/kept-turns turns 0))) "the newest stays at budget 0"))))

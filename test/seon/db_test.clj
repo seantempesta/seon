@@ -160,13 +160,14 @@
 (defn- turn-facts
   "Turn k of an attempt as seon.turn/act! records it: the basis its context was built from
   (the commit, its red assertion; the text is made again from it, seon.context/render), its
-  reply (1,500 bytes) and what its forms evaluated to as the next turn shows them (2,000)."
+  reply (1,500 bytes) and its eval call with what it evaluated to as the next turn shows it (2,000)."
   [k]
   [{:seon.turn/id (str "att/" k) :seon.turn/attempt "att" :seon.turn/n k :seon.turn/origin :model
     :seon.turn/basis (seon.edn/encode {:commit (random-uuid) :task "t/x" :attempt "att" :turn k :max-turns 8 :origin :model
                                        :observed {:results {'t-test/x :fail} :run-errors [] :refusals [{:refusal :proof-red :symbol 't-test/x}]
                                                   :reds [{:test 't-test/x :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))"}]}})
-    :seon.turn/reply (apply str (repeat 1500 "r")) :seon.turn/evals (apply str (repeat 2000 "e"))}])
+    :seon.turn/reply (apply str (repeat 1500 "r"))
+    :seon.turn/calls (seon.edn/encode [{:id "call-0" :code "(f 2)" :evals (apply str (repeat 2000 "e"))}])}])
 
 (defn- write-turns!
   "Bytes the store at path gains when branch b gets n turns through the agent's run-ahead

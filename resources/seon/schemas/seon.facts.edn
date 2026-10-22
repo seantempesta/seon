@@ -267,9 +267,9 @@
  :seon.turn/basis [:map {:seon.db/edn true} [:commit :uuid] [:task :seon.task/id] [:attempt :seon.attempt/id]
                    [:turn :int] [:max-turns :int] [:origin :seon.turn/origin] [:observed :map]
                    [:merge? {:optional true} :boolean] [:last-evals {:optional true} :string]]
- ;; what a model turn's forms evaluated to, as the later turns' scrollback shows it
- ;; (seon.context/evaluations-text: folded, within the evals budget)
- :seon.turn/evals :string
+ ;; a model turn's eval calls, each its id, its code and what it evaluated to as the later
+ ;; turns' tool messages show it (seon.context/evaluations-text: folded, within the evals budget)
+ :seon.turn/calls [:vector {:seon.db/edn true} [:map [:id :string] [:code :string] [:evals :string]]]
  ;; the provider's finish_reason, the model that answered, and its reasoning text
  :seon.turn/finish :string
  :seon.turn/model :string
@@ -289,7 +289,7 @@
                           [:seon.turn/red :seon.turn/red] [:seon.turn/ms :seon.turn/ms] [:seon.turn/tokens :seon.turn/tokens]
                           [:seon.turn/truncated {:optional true} :seon.turn/truncated]
                           [:seon.turn/origin {:optional true} :seon.turn/origin] [:seon.turn/basis {:optional true} :seon.turn/basis]
-                          [:seon.turn/evals {:optional true} :seon.turn/evals]
+                          [:seon.turn/calls {:optional true} :seon.turn/calls]
                           [:seon.turn/finish {:optional true} :seon.turn/finish] [:seon.turn/model {:optional true} :seon.turn/model]
                           [:seon.turn/reasoning {:optional true} :seon.turn/reasoning] [:seon.turn/split {:optional true} :seon.turn/split]]
  :seon.end/end-fact [:map {:seon.db/attributes true}

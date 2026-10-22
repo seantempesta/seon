@@ -1,11 +1,13 @@
 (ns seon.model
   "The model, as one function of a provider value and a request: `complete` answers
-  `:seon.model/completion` (the reply text and its token usage) or the declared
-  `:seon.model/provider-error`.
+  `:seon.model/completion` (the reply text, its calls of the one tool `eval`, and its token
+  usage) or the declared `:seon.model/provider-error`. Every request declares that one tool
+  (`eval-tool`), so the model sees each evaluation's answer before its next call.
 
   Providers (`:seon.model/provider`, dispatched on :kind):
   - :scripted, a deterministic stand-in: the function named by :script answers the reply
-    text for a request (it sees the task id and turn, as a test double may);
+    text for a request (it sees the task id, turn and messages, as a test double may), sent
+    as one eval call, its prose read as comments (seon.reader/forgive);
   - :openai-compat, an OpenAI-compatible chat API (DeepSeek's: base URL plus
     /chat/completions) over jolt-lang/http-client's transport (BSD sockets and OpenSSL
     through jolt.ffi). The API key is read from the environment variable NAMED by
@@ -14,7 +16,7 @@
   Root loads the HTTP transport and JSON before it forks anything, so every agent holds them
   compiled."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [jolt.http.core :as http] [clojure.data.json :as json] [seon.config :as config]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [seon.reader :as reader] [jolt.http.core :as http] [clojure.data.json :as json] [seon.config :as config]))
 
 (defn estimate-tokens
   "Tokens of text, estimated at 4 characters a token (the stand-in's usage)."
@@ -43,7 +45,8 @@
   [{:keys [script]} request]
   (let [t0 (System/nanoTime)
         text ((resolve script) request)]
-    {:text text :prompt-tokens (reduce + (map (comp estimate-tokens :content) (:messages request)))
+    {:text "" :tool-calls [{:id (str "call-" (:turn request)) :code (:text (reader/forgive text))}]
+     :prompt-tokens (reduce + (map (comp estimate-tokens :content) (:messages request)))
      :completion-tokens (estimate-tokens text) :ms (/ (- (System/nanoTime) t0) 1e6)}))
 
 (defn- body-text
@@ -77,35 +80,67 @@
             (finally (http/s-close s))))
         (catch Throwable e (transport-error (or (ex-message e) (str (type e))) {:url url}))))))
 
+(def eval-tool
+  "The model's one tool (v1's): its code is the REPL's input, read as reply text is."
+  {:type "function"
+   :function {:name "eval"
+              :description "Evaluate Clojure forms at your REPL; the answer is this call's result."
+              :parameters {:type "object"
+                           :properties {:code {:type "string" :description "Clojure forms; prose in ;; comments."}}
+                           :required ["code"]}}})
+
+(defn- wire-message
+  "A conversation message as the chat API reads it: an assistant's eval calls as tool_calls
+  (their code as the JSON arguments), a tool result named by its call's id."
+  {:malli/schema [:=> [:cat :seon.model/message] :map]}
+  [{:keys [role content tool-calls tool-call-id]}]
+  (cond-> {:role role :content content}
+    (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code]}]
+                                                {:id id :type "function"
+                                                 :function {:name "eval" :arguments (json/write-str {:code code})}})
+                                              tool-calls))
+    tool-call-id (assoc :tool_call_id tool-call-id)))
+
 (defn request-body
   "The chat-completions request (data, before JSON) for request under an :openai-compat
-  provider, streamed with its usage: its model, the messages, its :max-tokens, and DeepSeek's
-  thinking mode and effort only when the provider sets them (absent: the provider's own
-  default)."
+  provider, streamed with its usage: its model, the messages, the one tool `eval-tool`, its
+  :max-tokens, and DeepSeek's thinking mode and effort only when the provider sets them
+  (absent: the provider's own default)."
   {:malli/schema [:=> [:cat :seon.model/provider :seon.model/request] :map]}
   [{:keys [model max-tokens thinking reasoning-effort]} request]
-  (cond-> {:model model :messages (:messages request) :max_tokens max-tokens
+  (cond-> {:model model :messages (mapv wire-message (:messages request)) :tools [eval-tool] :max_tokens max-tokens
            ;; streamed: the reply arrives as it is made, so no clock has to guess its length
            :temperature 0 :stream true :stream_options {:include_usage true}}
     thinking (assoc :thinking {:type (name thinking)})
     reasoning-effort (assoc :reasoning_effort (name reasoning-effort))))
 
+(defn- call-code
+  "An eval call's code: the `code` of its JSON arguments, or the arguments as they came when
+  they are not that JSON (a reply cut mid-call): the reader shows what they hold."
+  {:malli/schema [:=> [:cat [:maybe :string]] :string]}
+  [arguments]
+  (let [a (or arguments "")
+        j (try (json/read-str a) (catch Throwable _ nil))]
+    (if (and (map? j) (string? (get j "code"))) (get j "code") a)))
+
 (defn reply-of
-  "A 200 reply (its chat-completion JSON as data) as the completion, with what it cost (prompt, completion,
-  reasoning and cache-hit tokens) and ms; or the declared failure: no content at all, or an
-  empty content beside non-empty reasoning (:seon.model/reasoning-ate-reply: thinking spent
-  the budget of max-tokens)."
+  "A 200 reply (its chat-completion JSON as data) as the completion: its text, its eval calls
+  ({:id :code}, in order), what it cost (prompt, completion, reasoning and cache-hit tokens)
+  and ms; or the declared failure: no content and no call, or an empty content beside
+  non-empty reasoning and no call (:seon.model/reasoning-ate-reply: thinking spent the
+  budget of max-tokens)."
   {:malli/schema [:=> [:cat :map number? [:maybe :int]] [:or :seon.model/completion :seon.model/failure]]}
   [j ms max-tokens]
   (let [msg (get-in j [:choices 0 :message])
-        text (:content msg)
+        calls (mapv (fn [c] {:id (str (:id c)) :code (call-code (get-in c [:function :arguments]))}) (:tool_calls msg))
+        text (or (:content msg) (when (seq calls) ""))
         reasoning (:reasoning_content msg)
         u (:usage j)
         rt (get-in u [:completion_tokens_details :reasoning_tokens])
         ;; the reply stopped at max-tokens: its text is cut (kept; the forgiving reader repairs it)
         cut? (= "length" (get-in j [:choices 0 :finish_reason]))]
     (cond
-      (and (str/blank? text) (string? reasoning) (not (str/blank? reasoning)))
+      (and (str/blank? text) (empty? calls) (string? reasoning) (not (str/blank? reasoning)))
       (contract/error :seon.model/reasoning-ate-reply 'seon.model/complete
                       (str "the reply is empty: reasoning took " (or rt (count reasoning)) (if rt " tokens" " characters")
                            " of a " max-tokens "-token budget")
@@ -115,6 +150,7 @@
                         max-tokens (assoc :max-tokens max-tokens)))
       (string? text)
       (cond-> {:text text :prompt-tokens (long (:prompt_tokens u 0)) :completion-tokens (long (:completion_tokens u 0)) :ms ms}
+        (seq calls) (assoc :tool-calls calls)
         (get-in j [:choices 0 :finish_reason]) (assoc :finish-reason (str (get-in j [:choices 0 :finish_reason])))
         (string? (:model j)) (assoc :model (:model j))
         (and (string? reasoning) (not (str/blank? reasoning))) (assoc :reasoning reasoning)
@@ -126,7 +162,8 @@
 (defn sse-reply
   "A streamed reply's text (server-sent events: data: lines, each a chat-completion chunk,
   ending data: [DONE]) folded into the one reply it streams: the content and reasoning
-  concatenated in order, the last finish_reason, the usage the final chunk carries."
+  concatenated in order, each tool call's pieces joined by its index (its id and name kept,
+  its arguments appended), the last finish_reason, the usage the final chunk carries."
   {:malli/schema [:=> [:cat :string] :map]}
   [text]
   (let [chunks (for [line (str/split-lines text)
@@ -134,8 +171,15 @@
                      :when (and (str/starts-with? l "data:") (not= "[DONE]" (str/trim (subs l 5))))]
                  (json/read-str (str/trim (subs l 5)) :key-fn keyword))
         deltas (keep #(get-in % [:choices 0 :delta]) chunks)
-        joined (fn [k] (let [xs (keep k deltas)] (when (seq xs) (apply str xs))))]
+        joined (fn [k] (let [xs (keep k deltas)] (when (seq xs) (apply str xs))))
+        calls (reduce (fn [acc {:keys [index id function]}]
+                        (update acc index (fn [c] (cond-> (or c {:function {:arguments ""}})
+                                                    id (assoc :id id)
+                                                    (:name function) (assoc-in [:function :name] (:name function))
+                                                    (:arguments function) (update-in [:function :arguments] str (:arguments function))))))
+                      (sorted-map) (mapcat :tool_calls deltas))]
     (cond-> {:choices [{:message (cond-> {}
+                                   (seq calls) (assoc :tool_calls (vec (vals calls)))
                                    (joined :content) (assoc :content (joined :content))
                                    (joined :reasoning_content) (assoc :reasoning_content (joined :reasoning_content)))
                         :finish_reason (last (keep #(get-in % [:choices 0 :finish_reason]) chunks))}]}
