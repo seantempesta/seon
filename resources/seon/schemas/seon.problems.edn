@@ -22,9 +22,13 @@
                                              [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]
  ;; a resumed agent's branch program that did not load (seon.program/load-diff!): main's ran instead
  :seon.agent/load-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/load-failed]] [:ns :symbol]]]
+ ;; a new agent whose branch or forked image is not at the commit root branched it from
+ ;; (the writer's :spawn names main's commit and t on :fork; seon.agent/init! compares)
+ :seon.agent/fork-misaligned [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/fork-misaligned]]
+                                                     [:commit :uuid] [:t :int] [:branch-commit [:maybe :uuid]] [:image-t :int]]]
  :seon.root/proc-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/proc-defect]] [:pid {:optional true} [:maybe :keyword]]]]
  :seon.root/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/refused]]]]
- ;; a defect answering one outside request at the door (seon.entrance/serve-connection!): the
+ ;; a defect answering one outside request at root's server (seon.entrance/respond): the
  ;; line it took, and the cause's ex-data printed; the door goes on serving
  :seon.entrance/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.entrance/defect]] [:line :string] [:data {:optional true} :string]]]
  :seon.writer/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.writer/refused]] [:ok false?]]]

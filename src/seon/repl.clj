@@ -435,6 +435,9 @@
   ([st _ m]
    (if (= :eval (:op m))
      (let [req (eval-request m)]
+       ;; root hears that this request began (its proc's :started event): what an
+       ;; interrupt or a kill meant for a running eval waits on, never a sleep
+       (agent/send! {:op :started :id (:id m)})
        ;; the agent's entrant boundary: a defect answers err + done
        (try (@the-handler req)
             (catch Throwable e
@@ -463,5 +466,6 @@
   [fd m db0 t-req-ns]
   (agent/init! fd m db0 serve!)
   (agent/hello! t-req-ns (cond-> {:interrupt-ok (:interrupt-ok @agent/state)}
-                            (seq (:load-errors @agent/state)) (assoc :load-errors (:load-errors @agent/state))))
+                            (seq (:load-errors @agent/state)) (assoc :load-errors (:load-errors @agent/state))
+                            (:misaligned @agent/state) (assoc :misaligned (:misaligned @agent/state))))
   (serve!))

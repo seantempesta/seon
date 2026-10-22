@@ -7,7 +7,8 @@
   no clock ends it; the child's exit does, and a child that died names the test it was running.
   Run: bin/test seon.agent-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
-            [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]))
+            [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
+            [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]))
 
 (defn in-agent
   "A root on the checkout's src (its source root), one agent on a task of its own, each of
@@ -16,9 +17,10 @@
   main of its own, a branch of the one test store (target/runs/test-store), deleted with
   every branch under it when the root has stopped (seon.check/drop-mains).
   opts: :dirs, the source dirs root imports (default [\"src\"]); :proofs, the task's proofs;
-  :sets, more --set config overrides for the root (e.g. its scripted model)."
+  :sets, more --set config overrides for the root (e.g. its scripted model); :decls, more
+  task declarations in demo's file beside demo/t."
   ([forms] (in-agent forms {}))
-  ([forms {:keys [dirs proofs sets] :or {dirs ["src"] proofs '#{demo-test/t}}}]
+  ([forms {:keys [dirs proofs sets decls] :or {dirs ["src"] proofs '#{demo-test/t}}}]
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         main (str "in-agent-" (random-uuid))
         store (str checkout "/target/runs/test-store")
@@ -26,7 +28,7 @@
         port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
         ask (fn [m] (str "printf '%s\\n' " (pr-str (pr-str m)) " | nc -w 60 127.0.0.1 " port))
         script (str "mkdir -p '" path "-tasks'; mkfifo '" path "-in';"
-                    " echo " (pr-str (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}]))
+                    " echo " (pr-str (pr-str (into [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}] decls)))
                     " > '" path "-tasks/demo.edn'; ./seon root"
                     " --set ':seon.config.source/root=" (pr-str checkout) "' --set ':seon.config.source/dirs=" (pr-str dirs) "'"
                     " --set ':seon.config.root/store-path=" (pr-str store) "' --set ':seon.config.root/main=" (pr-str main) "'"
@@ -181,3 +183,52 @@
     (let [run (agent/run-answer nil {:exit 1})]
       (is (= {} (proofs/results run)))
       (is (= 1 (count (proofs/run-errors run)))))))
+
+(deftest after-merge-main-the-agent-judges-against-the-new-base
+  ;; task seon.agent/an-agents-base-is-its-merge-base: an agent chooses the tests that judge
+  ;; its branch from what it changed since :base. merge-main! left :base at the main the agent
+  ;; forked from, so main's own changes, merged in, counted as the agent's. In this process,
+  ;; on a branch of the test store, with a socketpair standing for root
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [ab (pdb/on-main (:branch cfg) :agent-base)
+           _ (d/branch! conn (:branch cfg) ab)
+           forked @conn
+           ;; main redefines app.m0/f1 after the agent forked: a new form, the var pointed to it
+           [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f1] [?v :var/form ?f] [?f :form/ns ?n]] forked)
+           _ (d/transact conn [{:db/id "f1'" :form/id "app.m0/f1-redefined" :form/ns nsx :form/order 100 :form/defines [v]
+                                :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
+                               [:db/add v :var/form "f1'"]])
+           store-conn (d/connect (assoc cfg :branch ab))
+           [a b] (sock/socketpair)
+           old @agent/state]
+       (try
+         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :db @store-conn :base forked})
+         (is (empty? (program/changed-vars (:base @agent/state) (agent/db))) "the agent has changed nothing")
+         (let [r (agent/merge-main! #{})]
+           (is (some #{[:var 'app.m0/f1]} (:applied r)) "main's change merges in")
+           (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity (agent/db) (:t r))))
+               "in a merge commit that names its runtime (task seon.db/each-commit-names-its-runtime)"))
+         (is (empty? (program/changed-vars (:base @agent/state) (agent/db)))
+             "and is main's, not the agent's: its base is the merge base")
+         (is (= {} (program/divergence (:base @agent/state) (agent/db)))
+             "so the agent's :will-merge carries none of main's changes")
+         (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+
+(deftest an-agents-transactions-name-their-runtime
+  ;; task seon.db/each-commit-names-its-runtime: what an agent writes on its branch
+  ;; (seon.agent/transact!, the run-ahead writer) carries the runtime that made it
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [ab (pdb/on-main (:branch cfg) :agent-tx)
+           _ (d/branch! conn (:branch cfg) ab)
+           store-conn (d/connect (assoc cfg :branch ab))
+           [a b] (sock/socketpair)
+           old @agent/state]
+       (try
+         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :db @store-conn :lease 0})
+         (let [{:keys [t]} (agent/transact! [{:note/text "the agent's"}])]
+           (agent/commit!)
+           (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @store-conn t)))))
+         (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+

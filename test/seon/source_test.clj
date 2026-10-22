@@ -243,8 +243,12 @@
   ;; older than both merges, started on the same store and main: it catches up at boot
   ;; (seon.program/load-all!). Then the cold-start path: my.root/build! builds main's last
   ;; merges commit (seon.fx/build, bin/build seon in the generation's worktree) and
-  ;; `bin/root next` starts it on the same store and main. Declared long, bound 300 s: two
-  ;; turns (~14 s each), three boots (~3 s each with the import) and one build (~25-60 s).
+  ;; `bin/root next` starts it on the same store and main. The root imports the owner's
+  ;; standing root's dirs (src, test and the schemas: the main tree's config/local.edn, not
+  ;; the default), so a restart re-imports test/ after load-all! has run main's test
+  ;; namespaces, as the owner's does (2026-10-22: the import skipped seon.program-test's ns
+  ;; form and the root died on `No such namespace: ts`). Declared long, bound 300 s: two
+  ;; turns (~14 s each), three boots (~3-9 s each with the import) and one build (~25-60 s).
   (let [dir (scratch-dir "nextgen")
         tree (str dir "/tree")
         port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
@@ -256,7 +260,8 @@
                          (some-> a :items first :printed clojure.edn/read-string)))
         pids (fn [] (str/split (str/trim (slurp (str dir "/runs/root.pids"))) #" "))
         cloned (sh/sh "git" "clone" "-q" "--local" here tree)
-        started (root! "start" "--set" (str ":seon.config.source/root=" (pr-str tree)))]
+        started (root! "start" "--set" (str ":seon.config.source/root=" (pr-str tree))
+                       "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]")]
     (try
       (is (zero? (:exit cloned)) (:err cloned))
       (is (zero? (:exit started)) (str (:out started) (:err started)))
@@ -270,8 +275,17 @@
           (while (zero? (:exit (sh/sh "kill" "-0" pid))) (Thread/sleep 50))
           ;; bin/root's holder of the dead root's stdin
           (sh/sh "kill" holder))
+        ;; the tree changes a test namespace's ns form while root is down (as a merge to test/
+        ;; does): main still holds the old one, which load-all! runs at boot (and another test
+        ;; namespace's require marks it loaded), and the import must still apply the new
+        ;; alias before the form that uses it
+        (let [f (str tree "/test/seon/program_test.clj")]
+          (spit f (str (str/replace-first (slurp f) "(:require " "(:require [clojure.set :as restart-set] ")
+                       "\n(defn restart-probe [] (restart-set/union #{1} #{2}))\n")))
         (let [restarted (apply root! "start" args)]
           (is (zero? (:exit restarted)) (str (:out restarted) (:err restarted)))
+          (is (true? (ask "(some? (seon.db/eid @(:conn sys) :var/name 'seon.program-test/restart-probe))"))
+              "the changed ns form's alias analyzed: the form using it is main's program")
           (is (= [2 [1 2]] (ask "[(seon.fixtures/generation) (seon.fixtures/generations)]"))
               "the binary older than both merges runs both, caught up at boot on the same main"))
         (let [g (ask "(my.root/build! sys)")

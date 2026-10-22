@@ -360,3 +360,44 @@
     (is (not= (before 'app.pt-sc-test/h-test) (after-base 'app.pt-sc-test/h-test)) "and a schema that schema names, on")
     (is (= (before 'app.pt-sc-test/plain-test) (after 'app.pt-sc-test/plain-test) (after-base 'app.pt-sc-test/plain-test))
         "a test not reaching h kept its digest")))
+
+(deftest divergence-names-each-change-a-merge-carries
+  ;; owner D4 (2026-10-22): the agent sees, every turn, every change its branch's merge will
+  ;; carry back to main: what it added, redefined and removed, and the schemas it registered
+  (let [base (d/db-with (ts/test-db)
+                        [{:db/id "a" :var/name 'app/a :var/form "fa"} {:db/id "fa" :form/id "a1" :form/src "(def a 1)"}
+                         {:db/id "b" :var/name 'app/b :var/form "fb"} {:db/id "fb" :form/id "b1" :form/src "(def b 1)"}
+                         {:db/id "k" :schema/key :app/k :schema/form ":int"}])
+        e (fn [db sym] (d/q '[:find ?e . :in $ ?n :where [?e :var/name ?n]] db sym))
+        b-form (:db/id (:var/form (d/entity base (e base 'app/b))))
+        branch (d/db-with base [{:db/id (e base 'app/a) :var/form "fa2"} {:db/id "fa2" :form/id "a2" :form/src "(def a 2)"}
+                                [:db/retract (e base 'app/b) :var/form b-form]
+                                {:db/id "c" :var/name 'app/c :var/form "fc"} {:db/id "fc" :form/id "c1" :form/src "(def c 1)"}
+                                {:schema/key :app/k :schema/form ":string"} {:schema/key :app/n :schema/form ":int"}])]
+    (is (= {:added ['app/c] :changed ['app/a] :removed ['app/b] :schemas [:app/k :app/n]} (program/divergence base branch)))
+    (is (= #{'app/a 'app/b 'app/c} (program/changed-vars base branch)) "the changed vars are its vars")
+    (is (= {} (program/divergence base base)) "an unchanged branch carries nothing")))
+
+(deftest a-branch-that-merged-main-carries-only-its-own-changes
+  ;; root, 2026-10-22: entity ids are a branch's own, and a merge applies main's forms by
+  ;; content under the branch's ids; against its merge base (main's head once merged), the
+  ;; branch carries only what it changed itself, never main's changes
+  (let [base (d/db-with (ts/test-db) [{:db/id "f" :var/name 'app/f :var/form "ff"} {:db/id "ff" :form/id "(def f 1)" :form/src "(def f 1)"}
+                                      {:schema/key :app/k :schema/form ":int"}])
+        e (fn [db sym] (d/q '[:find ?e . :in $ ?n :where [?e :var/name ?n]] db sym))
+        ;; main redefines f, adds g, changes a schema
+        main (d/db-with base [{:db/id (e base 'app/f) :var/form "f2"} {:db/id "f2" :form/id "(def f 2)" :form/src "(def f 2)"}
+                              {:db/id "g" :var/name 'app/g :var/form "g1"} {:db/id "g1" :form/id "(def g 1)" :form/src "(def g 1)"}
+                              {:schema/key :app/k :schema/form ":string"}])
+        ;; the branch first writes entities of its own, so its ids differ from main's
+        own (d/db-with base (vec (for [i (range 5)] {:db/id (str "x" i) :form/id (str "(comment " i ")") :form/src "x"})))
+        ;; it adds h, then merges main: main's forms by content, under the branch's own ids
+        merged (d/db-with own [{:db/id "h" :var/name 'app/h :var/form "h1"} {:db/id "h1" :form/id "(def h 1)" :form/src "(def h 1)"}
+                               {:db/id (e own 'app/f) :var/form "bf2"} {:db/id "bf2" :form/id "(def f 2)" :form/src "(def f 2)"}
+                               {:db/id "bg" :var/name 'app/g :var/form "bg1"} {:db/id "bg1" :form/id "(def g 1)" :form/src "(def g 1)"}
+                               {:schema/key :app/k :schema/form ":string"}])
+        form-e (fn [db v] (:db/id (:var/form (d/entity db (e db v)))))]
+    (is (not= (form-e main 'app/f) (form-e merged 'app/f)) "f's form is another entity on each side")
+    (is (not= (e main 'app/g) (e merged 'app/g)) "and so is g")
+    (is (= {:added ['app/h]} (program/divergence main merged)) "only h, the branch's own")
+    (is (= #{'app/h} (program/changed-vars main merged)) "and the tests it reaches are h's")))

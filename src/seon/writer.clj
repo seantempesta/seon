@@ -100,7 +100,7 @@
     (if (empty? changed)
       [st {:results (mapv #(or (:refusal %) {:merged? true :tx (:max-tx main) :datoms 0 :keys 0}) (:members judged))}]
       ;; git: each member's head becomes a parent, so its merge base moves to it
-      (let [rep (d/merge-db conn (set (map :branch ok)) (pm/apply-tx main changed))
+      (let [rep (d/merge-db conn (set (map :branch ok)) (pm/apply-tx main changed) (pdb/tx-meta))
             t (:max-tx (:db-after rep))
             ops (pdb/report->tx rep)]
         [(main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep))
@@ -135,7 +135,7 @@
                   (answer o (:dest m) {:ok true :t t :datoms (count ops)})
                   (main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep)))))
             (-> st (dissoc :pend) (update :commits inc))
-            (map vector ms (dw/transact-batch! (:conn st) (mapv (fn [m] {:tx-data (:tx-data m)}) ms))))
+            (map vector ms (dw/transact-batch! (:conn st) (mapv (fn [m] {:tx-data (:tx-data m) :tx-meta (pdb/tx-meta)}) ms))))
     st))
 
 (defn- other-op
@@ -160,8 +160,10 @@
       :spawn (let [{:keys [agent branch]} m
                    resumed? (exists? branch)]
                (when-not resumed? (d/branch! conn main branch))
+               ;; main's commit and t, which this branch starts at and the image it forks from holds
                (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :task (:task m) :attempt (:attempt m) :ns (:ns m) :fd (:fd m)
-                                              :cfg (:cfg st) :lease (:lease m) :resumed resumed?})
+                                              :cfg (:cfg st) :lease (:lease m) :resumed resumed?
+                                              :commit (d/commit-id @conn) :t (:max-tx @conn)})
                (reply st {:ok true :t (:max-tx @conn) :resumed resumed?}))
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
                         (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st) :lease (:lease m)}))

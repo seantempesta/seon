@@ -1,5 +1,5 @@
 (ns seon.agent-proc
-  "An agent's stand-in in root: one proc of the root graph per agent, added and removed by
+  "An agent's proc in root: one proc of the root graph per agent, added and removed by
   the api with flow/update!. It owns root's end of the agent's socket, a jolt.async.remote
   end (lane RC1): the agent's frames arrive as values on the end's :in, which IS this
   proc's :from in-port, and what it sends the agent is put on the end's :out. It owns the
@@ -80,7 +80,9 @@
            (let [st (cond-> (to-proc! st (assoc msg (if (= kind :clone) :k :id) rid))
                       ;; a clone's socket follows in its own frame once the agent asks
                       (= kind :clone) (assoc :holding rid)
-                      true (update :inflight assoc rid (select-keys m [:kind :branch :new :merge-branch :data-attrs :pass-fd :lease]))
+                      true (update :inflight assoc rid (cond-> (select-keys m [:kind :branch :new :merge-branch :data-attrs :pass-fd :lease])
+                                                         ;; an eval's text, for its :started event
+                                                         (string? (:forms msg)) (assoc :form (:forms msg))))
                       ;; what root last asked of it, for a stall or a death (seon.agent/last-op)
                       true (assoc :last-op (cond-> {:kind kind :since-ms (System/currentTimeMillis)}
                                              (string? (:forms msg)) (assoc :form (:forms msg))))
@@ -134,6 +136,10 @@
                    (step/out! o :to-api {:op :problem :class :agent :agent id
                                          :error (contract/error :seon.agent/load-failed 'seon.agent/init!
                                                                 (str "its branch's program did not load in " ns ": " message) {:ns ns})}))
+                 (when-let [x (:misaligned m)]
+                   (step/out! o :to-api {:op :problem :class :agent :agent id
+                                         :error (contract/error :seon.agent/fork-misaligned 'seon.agent/init!
+                                                                (str "its branch or image is not at the commit it was branched at: " (pr-str x)) x)}))
                  (step/out! o :events (step/event {:type :ready :agent id :start-ms (:start-ms m)}))
                  (cond-> st (:cloned-from m) (assoc :pid (:pid m))))
       ;; its eval's record could not be written on its branch (its entity ids are spent):
@@ -155,16 +161,21 @@
         st)
       :synced (do (step/out! o :to-api (status st {:t (:t m) :load-errors (:load-errors m)})) st)
       ;; the back-pressure check's flood: counted, in order
-      :noise (let [ok (= (:i m) (:noise st 0))
+      :noise (let [ok (= (:i m) (:noise st))
                    ordered (and (:noise-ordered st true) ok)
-                   bad (or (:noise-bad st) (when-not ok [(:i m) (:noise st 0)]))]
-               (step/out! o :to-api {:op :stat :k :noise :v (inc (:noise st 0)) :ordered ordered :bad bad})
-               (assoc st :noise (inc (:noise st 0)) :noise-ordered ordered :noise-bad bad))
+                   bad (or (:noise-bad st) (when-not ok [(:i m) (:noise st)]))]
+               (step/out! o :to-api {:op :stat :k :noise :v (inc (:noise st)) :ordered ordered :bad bad})
+               (assoc st :noise (inc (:noise st)) :noise-ordered ordered :noise-bad bad))
       :received (do (step/out! o :to-api {:op :stat :k :msg-us :v (/ (- (:recv-ns m) (:sent-ns m)) 1000.0)}) st)
       :send (do (step/out! o :to-api {:op :message :from id :to (:to m) :body (:body m)}) st)
       :pong (if-let [rid (peek (:pings st))]
               (answer-rid (update st :pings pop) o rid (dissoc m :op))
               st)
+      ;; the agent began request rid's eval, or forked rid's test child: root's events say so
+      :started (do (step/out! o :events (step/event (cond-> {:type :started :agent id :rid (:id m)}
+                                                         (get-in st [:inflight (:id m) :form]) (assoc :form (get-in st [:inflight (:id m) :form])))))
+                   st)
+      :tests-started (do (step/out! o :events (step/event {:type :tests-started :agent id :rid (:id m) :pid (:pid m)})) st)
       :reply (let [st (answer-rid st o (:id m) (:items m))]
                (step/out! o :to-api (status st {:evals-add (:items m) :mem-mb (:mem-mb m) :t (:t m) :status (busy st) :running nil}))
                (step/out! o :events (step/event {:type :reply :agent id :items (:items m)}))
@@ -217,7 +228,7 @@
       st)))
 
 (defn agent-proc
-  "ONE agent's stand-in: a proc of the root graph, added by the api's update! at spawn and
+  "ONE agent's proc in the root graph, added by the api's update! at spawn and
   removed when the agent has ended. It owns root's end of the
   agent's socket and its process, and runs Flow's lifecycle on the real process:
     start (init)   nothing to open: the api has asked the writer for the fork;
@@ -233,9 +244,9 @@
        :ins {:in "requests from the api, and the writer's answers it routes"} :outs {}
        ;; socket writes are short; a full socket blocks only this agent's proc
        :workload :io
-       :ping-map-fn (fn [st] {:id (:id st) :pid (:pid st) :dead? (boolean (:dead? st)) :inflight (count (:inflight st))})})
+       :ping-map-fn (fn [st] {:id (:id st) :pid (:pid st) :dead? (boolean (:dead? st)) :inflight (count (:inflight st)) :noise (:noise st)})})
   ([args] (assoc (select-keys args [:id :end :branch :pid])
-                 :inflight {} :pings clojure.lang.PersistentQueue/EMPTY :fx-kinds (:fx-kinds args)
+                 :inflight {} :noise 0 :pings clojure.lang.PersistentQueue/EMPTY :fx-kinds (:fx-kinds args)
                  ::flow/in-ports {:from (:in (:end args))}
                  ::flow/out-ports {:to-writer (:to-writer args) :to-api (:back args) :events (:events args)}))
   ([st tr]

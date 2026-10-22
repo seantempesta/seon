@@ -454,6 +454,7 @@
    st)
   ([st in m]
    (let [o (volatile! {})
+         busy? (seq (:pending st))
          st (case in
               :events (if (nil? m) st (ask-state (reduce on-event st (drain m (:events-ch st) 2048)) o))
               :answers (let [[st' kind] (step/answered st (:tag m))
@@ -484,4 +485,7 @@
                           :stats (do (step/out! o :to-web {:op :text :k (:k m) :text (pr-str (stats st))}) st)
                           st)
               st)]
+     ;; nothing asked is in flight after what was, or after what went to the tabs: their
+     ;; views are current (the web proc says so on each feed; seon.check/idle waits on it)
+     (when (and (empty? (:pending st)) (or busy? (seq (:to-web @o)))) (step/out! o :to-web {:op :settled}))
      [st @o])))

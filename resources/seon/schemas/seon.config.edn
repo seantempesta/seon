@@ -33,6 +33,11 @@
   [:seon.config.store/compressor :seon.config.store/compressor]
   ;; the machine
   [:seon.config.machine/memory-mb :seon.config.machine/memory-mb]
+  [:seon.config.machine/relay-mb :seon.config.machine/relay-mb]
+  ;; the check harness
+  [:seon.config.check/ping-ms :seon.config.check/ping-ms]
+  [:seon.config.check/hold-ms :seon.config.check/hold-ms]
+  [:seon.config.check/pages-ms :seon.config.check/pages-ms]
   ;; agents
   [:seon.config.agent/max-running :seon.config.agent/max-running]
   [:seon.config.agent/max-turns :seon.config.agent/max-turns]
@@ -83,6 +88,8 @@
   [:seon.config.render/context-budget :seon.config.render/context-budget]
   [:seon.config.render/evals-budget :seon.config.render/evals-budget]
   [:seon.config.render/history-budget :seon.config.render/history-budget]
+  [:seon.config.render/reference-tokens :seon.config.render/reference-tokens]
+  [:seon.config.render/found :seon.config.render/found]
   [:seon.config.render.list/rows :seon.config.render.list/rows]
   [:seon.config.render.list/newest :seon.config.render.list/newest]
   [:seon.config.render.list/brief :seon.config.render.list/brief]

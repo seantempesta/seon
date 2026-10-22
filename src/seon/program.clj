@@ -709,6 +709,38 @@
 
 ;; ---- reach: which tests a change reaches ----------------------------------------------
 
+(defn divergence
+  "What branch db-to changed since db-from (its merge base), the changes its merge carries to
+  main: the vars it added, redefined and removed, and the schema keys it registered or
+  changed; each sorted, an empty kind left out ({}: nothing). Compared by content: a var's
+  form by its :form/id (its text), a schema by its form's text, because entity ids are a
+  branch's own and a merge applies main's forms by content under the branch's ids. Cost:
+  each db's :var/form and :schema/form datoms, and two seeks per entry whose ids differ."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db]
+                  [:map-of [:enum :added :changed :removed :schemas] [:vector [:or :qualified-symbol :qualified-keyword]]]]}
+  [db-from db-to]
+  (let [by (fn [db a] (into {} (map (juxt :e :v)) (d/datoms db :aevt a)))
+        ;; the entries whose ids differ, by name, then compared by content
+        differ (fn [attr name-attr content]
+                 (let [a (by db-from attr) b (by db-to attr)]
+                   (into #{} (for [e (into (set (keys a)) (keys b)) :when (not= (a e) (b e))
+                                   :let [n (name-attr (d/entity (if (b e) db-to db-from) e))
+                                         x (content db-from n) y (content db-to n)]
+                                   :when (not= x y)]
+                               [(cond (nil? x) :added (nil? y) :removed :else :changed) n]))))
+        form-id (fn [db v] (some->> (pdb/eid db :var/name v) (d/entity db) :var/form :form/id))
+        schema (fn [db k] (some->> (pdb/eid db :schema/key k) (d/entity db) :schema/form))
+        vars (differ :var/form :var/name form-id)
+        schemas (for [[_ k] (differ :schema/form :schema/key schema)] [:schemas k])]
+    (into {} (for [[k xs] (group-by first (concat vars schemas))] [k (vec (sort-by str (map second xs)))]))))
+
+(defn changed-vars
+  "The vars db-to points to another form than db-from does (new, redefined or removed), by
+  content: what a branch changed since its base (divergence's vars)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :qualified-symbol]]}
+  [db-from db-to]
+  (into #{} cat (vals (dissoc (divergence db-from db-to) :schemas))))
+
 (defn reaching-tests
   "The program's tests on db that reach one of syms (fully qualified var names): from each
   var, the forms that reference it (one AVET seek), their definitions, and on. Cost: the

@@ -18,7 +18,7 @@
             [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
-;; :id :branch :task :attempt (the task and attempt root forked it for, or nil) :fd :conn :db :base (main as this agent forked holding it) :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
+;; :id :branch :task :attempt (the task and attempt root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 ;; :proved {digest result} (the tests this agent's runs proved green, by reach digest) :base-digests [base {test digest}] (test-plan)
 (defonce state (atom nil))
@@ -115,7 +115,7 @@
     (let [r (d/with (db) tx-data)]
       (swap! state assoc :db (:db-after r))
       {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
-    (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data})]
+    (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta)})]
       ;; past this process's block of entity ids: the typed refusal, nothing applied
       (when-let [e (and (not (map? r)) (pdb/lease-spent r (:lease @state)))] (throw (ex-info (:seon.error/message e) e)))
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
@@ -123,7 +123,7 @@
       (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
         (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r)))))))
 
-;; ---- effects (seon.fx, lane FX1): root's owner procs, through the stand-in -------------
+;; ---- effects (seon.fx, worktree session FX1): root's owner procs, through the agent's proc ---
 
 (def ^:dynamic *fx-stub*
   "Inside a test (a fork of this agent) no effect leaves the process: a test that needs
@@ -204,15 +204,17 @@
         main-b (pdb/main-branch (:cfg @state))
         main (pdb/head conn main-b)
         head @conn
-        r (pm/three-way (pm/program (pdb/branch-base conn main-b (:branch @state)) data-attrs) (pm/program head data-attrs) (pm/program main data-attrs))]
+        r (pm/three-way (pm/program (:base @state) data-attrs) (pm/program head data-attrs) (pm/program main data-attrs))]
     (if (empty? (:theirs r))
       {:ok true :applied [] :conflicts [] :t (:max-tx head)}
       (let [theirs (pm/program main data-attrs)
             rep (d/merge-db conn #{main-b} (into (pm/apply-tx head (into {} (for [k (:apply r)] [k (get theirs k)])))
-                                              (pm/unmerged-tx head (:conflicts r) (:max-tx main))))
+                                              (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
+                             (pdb/tx-meta))
             ops (pdb/report->tx rep)
             errs (program/load-changes! (:db-after rep) ops)]
-        (swap! state assoc :db @conn)
+        ;; the merge base is now main's head: what main changed is not this branch's change
+        (swap! state assoc :db @conn :base (pdb/branch-base conn main-b (:branch @state)))
         (send! {:op :committed :t (:max-tx @conn) :txs 1})
         (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:max-tx @conn) :datoms (count ops)}
           (seq errs) (assoc :load-errors errs))))))
@@ -297,7 +299,7 @@
 
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
-  (seon.program/reach-digests) against base's (the main it forked from: an immutable value,
+  (seon.program/reach-digests) against base's (main at its merge base: an immutable value,
   digested once and held while it is the base; ~0.7 s over src and test),
   the greens this agent's earlier runs proved at those digests (:proved, {digest result}) and
   proofs. A test is selected when it is a proof or reaches what the branch changed since base (a
@@ -379,9 +381,12 @@
   starts and then one EDN line of its result on a pipe. The agent reads the pipe to its end: no
   clock; the child ends by finishing, by its budget, or by dying (then the last test it started
   is named). Each selected test green at its digest is reused: one :pass report marked :reused.
-  Each test that ran green is held at its digest (:proved) for the next run."
-  {:malli/schema [:=> [:cat pos-int? [:set :qualified-symbol]] :seon.test/result]}
-  [ticks proofs]
+  Each test that ran green is held at its digest (:proved) for the next run. (forked pid) runs
+  here once the child exists."
+  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol]] :seon.test/result]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] :seon.host/fn] :seon.test/result]]}
+  ([ticks proofs] (run-tests-forked ticks proofs (fn [_] nil)))
+  ([ticks proofs forked]
   (let [{:keys [selected run reused digests]} (test-plan (db) (:base @state) proofs)
         vars (keep #(some-> (find-ns (symbol (namespace %))) (ns-resolve (symbol (name %)))) run)
         reused-reports (vec (for [t selected :when (reused t)] {:type :pass :var (str "#'" t) :reused true}))
@@ -401,6 +406,7 @@
                           (sock/write-line! w (pr-str res))))
                :parent (fn [pid]
                          (lib/c-close w)
+                         (forked pid)
                          (let [rd (lib/line-reader r)
                                line (loop [line nil]
                                       (let [ls (rd -1)]
@@ -413,7 +419,7 @@
     (-> res
         (update :reports (fnil into []) reused-reports)
         (update :pass (fnil + 0) (count reused-reports))
-        (assoc :reused (count reused-reports) :ran (count vars)))))
+        (assoc :reused (count reused-reports) :ran (count vars))))))
 
 ;; ---- the loop ----------------------------------------------------------------------
 
@@ -462,8 +468,10 @@
   [m]
   (case (:op m)
     ;; the proofs of the task root names (:task), as this branch holds them
+    ;; root hears the test child's pid once it is forked (its stand-in's :tests-started event)
     :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
-                                                              (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{}))
+                                                              (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
+                                                              #(send! {:op :tests-started :id (:id m) :pid %}))
              :mem-mb (mem-mb)}]
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
     :fx-reply (let [r (dissoc m :op :k)]
@@ -541,11 +549,20 @@
                       (hello! t0 {:cloned-from parent})
                       ((:serve @state))))})))))
 
+(defn misaligned
+  "Where a new agent's branch or forked image is not at the commit :spawn branched it from
+  (commit and t: main's head then, seon.writer :spawn): the members of its
+  :seon.agent/fork-misaligned problem, or nil when both are there."
+  {:malli/schema [:=> [:cat :uuid :int :seon.host/db :seon.host/db] [:maybe :map]]}
+  [commit t branch image]
+  (when (or (not= commit (d/commit-id branch)) (not= t (:max-tx image)))
+    {:commit commit :t t :branch-commit (d/commit-id branch) :image-t (:max-tx image)}))
+
 (defn init!
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
-  [fd {id :agent branch :branch task :task attempt :attempt cfg :cfg lease :lease resumed :resumed} db0 serve]
+  [fd {id :agent branch :branch task :task attempt :attempt cfg :cfg lease :lease resumed :resumed commit :commit t :t} db0 serve]
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone
   (sock/clofork! fd)
@@ -563,10 +580,15 @@
         store-conn (d/connect (assoc cfg :branch branch))]
     (intr/install!)
     ;; a kept branch, resumed: its program is what this process runs (it was forked holding main's)
-    (let [load-errors (when resumed (program/load-diff! db0 @store-conn))]
+    (let [load-errors (when resumed (program/load-diff! db0 @store-conn))
+          misaligned (when-not resumed (misaligned commit t @store-conn db0))]
      ;; a resumed branch whose program does not load runs main's for what failed: its errors
      ;; go to root with its hello (recorded problems), never dropped (T5b: a stub ran silently)
-     (reset! state {:id id :branch branch :task task :attempt attempt :fd fd :conn c :db @store-conn :base db0 :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
-                   :load-errors (vec load-errors)
+     ;; :base is the branch's merge base with main: a new branch's is the image (main as it
+     ;; forked); a resumed one's is older than main, and comparing against main's head would
+     ;; read main's later changes as the branch's (seon.program/divergence, changed-vars)
+     (reset! state {:id id :branch branch :task task :attempt attempt :fd fd :conn c :db @store-conn
+                   :base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0) :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
+                   :load-errors (vec load-errors) :misaligned misaligned
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
                    :ns nsx :nss #{(ns-name nsx)} :interrupt-ok intr-ok :serve serve}))))

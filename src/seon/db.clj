@@ -108,16 +108,18 @@
     (lmdb-ffi/sync! (klmdb/open-env! (get-in cfg [:store :path]) nil)))
   nil)
 
-(defn seed!
-  "Seed the empty store under conn: the schema, then (seed-tx n)."
-  {:malli/schema [:=> [:cat :seon.host/conn :int] :any]}
-  [conn n]
-  (d/transact conn {:tx-data schema})
-  (doseq [tx (seed-tx n)] (d/transact conn {:tx-data tx})))
+(defn tx-meta
+  "The tx-meta of every transaction Seon makes: the runtime that made it
+  (:seon.tx/runtime, jolt.host/runtime-fingerprint). A runtime Jolt cannot identify (nil)
+  is refused by this contract, never recorded as no runtime."
+  {:malli/schema [:=> [:cat] [:map [:seon.tx/runtime :string]]]}
+  [] {:seon.tx/runtime (jolt.host/runtime-fingerprint)})
 
 (defn- install-missing!
-  "Transact the attributes of `schema` the db under conn lacks, in one transaction, and
-  answer how many (an attribute it holds as another value type is refused, :seon.db/types-differ:
+  "Transact the attributes of `schema` the db under conn lacks and answer how many: first
+  :seon.tx/runtime alone when it is missing (the one transaction that cannot name its
+  runtime, since it installs the attribute), then the rest in one transaction carrying
+  tx-meta (an attribute it holds as another value type is refused, :seon.db/types-differ:
   a value type is fixed once installed): a kept store seeded before an attribute existed gains it when a root
   opens it (Datahike accepts new attribute definitions at any time). Nothing missing
   writes nothing."
@@ -135,8 +137,17 @@
                                      :seon.error/fix "An attribute's value type is fixed once installed: open a store made with this schema (a fresh one), or keep running the build that made this store."})]
               (throw (ex-info (:seon.error/message e) e))))
         missing (vec (remove #(contains? have (:db/ident %)) schema))]
-    (when (seq missing) (d/transact conn {:tx-data missing}))
+    (let [[runtime others] ((juxt filter remove) #(= :seon.tx/runtime (:db/ident %)) missing)]
+      (when (seq runtime) (d/transact conn {:tx-data (vec runtime)}))
+      (when (seq others) (d/transact conn {:tx-data (vec others) :tx-meta (tx-meta)})))
     (count missing)))
+
+(defn seed!
+  "Seed the empty store under conn: the schema (install-missing!), then (seed-tx n)."
+  {:malli/schema [:=> [:cat :seon.host/conn :int] :any]}
+  [conn n]
+  (install-missing! conn)
+  (doseq [tx (seed-tx n)] (d/transact conn {:tx-data tx :tx-meta (tx-meta)})))
 
 ;; ---- one store, many branches, as in production (owner, 2026-10-21) ------------
 ;; A store holds one seed on :db. Every root works on a main of its own, a branch of :db

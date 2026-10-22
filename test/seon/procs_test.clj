@@ -9,7 +9,7 @@
             [datahike.api :as d]
             [seon.step :as step] [seon.db :as pdb] [seon.sock :as sock]
             [seon.writer :as writer] [seon.reconcile :as reconcile] [seon.fork-server :as server]
-            [seon.agent-proc :as ap] [seon.root :as root] [seon.repl :as repl] [seon.render.proc]
+            [seon.agent :as agent] [seon.agent-proc :as ap] [seon.root :as root] [seon.repl :as repl] [seon.render.proc] [seon.web]
             [taoensso.trove :as trove]))
 
 (trove/set-log-fn! nil)
@@ -50,6 +50,68 @@
         (is (= :drained (:op (first (:to-api outs)))))))
     (testing "the stop transition releases the branch connections"
       (is (map? (#'writer/writer-proc st ::flow/stop))))))))
+
+(deftest the-writers-transactions-name-their-runtime
+  ;; task seon.db/each-commit-names-its-runtime: main's transactions through the writer's group
+  ;; commit carry the runtime that made them, and the fork server's replica applies it too
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})
+        fp (jolt.host/runtime-fingerprint)]
+    (is (= fp (:seon.tx/runtime (d/entity @conn (:max-tx @conn)))) "main's transaction names it")
+    (is (= fp (get-in (first (:to-fork-server outs)) [:tx-meta :seon.tx/runtime])) "and so does what the replica applies")))))
+
+(deftest a-writers-merge-names-its-runtime
+  ;; task seon.db/each-commit-names-its-runtime: a branch merged into main through the writer
+  ;; (:merge, d/merge-db) is a transaction like any other: it names the runtime that made it
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        b (pdb/on-main (:branch cfg) :a1)
+        _ (d/branch! conn (:branch cfg) b)
+        bc (d/connect (assoc cfg :branch b))
+        [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f2] [?v :var/form ?f] [?f :form/ns ?n]] @bc)
+        _ (d/transact bc [{:db/id "f2'" :form/id "app.m0/f2-redefined" :form/ns nsx :form/order 100 :form/defines [v]
+                           :form/src "(defn f2 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 200))"}
+                          [:db/add v :var/form "f2'"]])
+        _ (d/release bc)
+        t0 (:max-tx @conn)
+        [_ outs] (step #'writer/writer-proc st :in {:op :merge :branch b :dest {:rid 1}})]
+    (is (:merged? (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))) "the branch merges")
+    (is (< t0 (:max-tx @conn)))
+    (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @conn (:max-tx @conn)))) "and its merge names the runtime")))))
+
+(deftest a-fork-at-another-commit-is-recorded-misaligned
+  ;; task seon.agent/an-agents-base-is-its-merge-base: a new agent whose branch is not at the
+  ;; commit :spawn named (or whose image is not at its t) says so in its hello, and root
+  ;; records it as the agent's problem, :seon.agent/fork-misaligned
+  (ts/test-branch! (fn [cfg conn]
+    (let [at (d/commit-id @conn) t (:max-tx @conn)
+          _ (d/transact conn [{:note/text "main moved on"}])]
+      (is (nil? (agent/misaligned (d/commit-id @conn) (:max-tx @conn) @conn @conn)) "aligned: nothing to say")
+      (let [x (agent/misaligned at t @conn @conn)
+            [r a'] (sock/socketpair)
+            end (remote/open r {:codec {:encode codec/encode :decode codec/decode}})
+            st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
+            [_ outs] (step #'ap/agent-proc st :from {:op :hello :t t :start-ms 1.0 :mem-mb 1.0 :interrupt-ok true :misaligned x})
+            problem (first (filter #(= :problem (:op %)) (:to-api outs)))]
+        (is (= {:commit at :t t :branch-commit (d/commit-id @conn) :image-t (:max-tx @conn)} x) "a branch past the commit it was branched at")
+        (is (= :seon.agent/fork-misaligned (get-in problem [:error :seon.error/type])) "is recorded as the agent's problem")
+        (is (= at (get-in problem [:error :commit])))
+        (remote/close! end) (sock/close! a'))))))
+
+(deftest a-fork-names-the-commit-its-agent-starts-at
+  ;; task seon.agent/an-agents-base-is-its-merge-base: :spawn branches the agent from main's
+  ;; head and asks the fork server, whose image holds main at that head (the FIFO), to fork it;
+  ;; :fork names that commit and t, so the agent checks both (seon.agent/init!)
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})
+        b (pdb/on-main (:branch cfg) :a1)
+        [_ outs] (step #'writer/writer-proc st :in {:op :spawn :agent :a1 :branch b :ns 0 :fd 0 :lease 0 :dest {:rid 2}})
+        fork (first (filter #(= :fork (:op %)) (:to-fork-server outs)))]
+    (is (= (d/commit-id @conn) (:commit fork)) "main's commit")
+    (is (= (:max-tx @conn) (:t fork)) "main's t")
+    (is (= (:commit fork) (d/commit-id (pdb/head conn b))) "which the agent's branch starts at")))))
 
 (deftest the-flush-is-continuous-group-commit
   ;; owner 2026-10-21 (notes/DECISIONS.md, "Durability is batched everywhere", superseded
@@ -184,6 +246,50 @@
         (is (= {1 :state} (:pending st)))))
     (testing "an id never asked finds nothing"
       (is (nil? (second (step/answered st 99)))))))
+
+(defn- agent-proc-on
+  "An agent's proc over a socketpair, with request 7 in flight; f takes it, then both ends close."
+  [f]
+  (let [[r a] (sock/socketpair)
+        end (remote/open r {:codec {:encode codec/encode :decode codec/decode}})
+        st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})]
+    (try (f (assoc st :pid 42))
+         (finally (remote/close! end) (sock/close! a)))))
+
+(deftest an-eval-says-it-started
+  ;; task seon.check/every-wait-is-the-event-it-means: the agent's {:op :started} is root's
+  ;; :started event, with the eval's text (what a kill or an interrupt meant for it awaits)
+  (agent-proc-on
+   (fn [st]
+     (let [[st _] (step #'ap/agent-proc st :in {:op :req :rid 7 :kind :eval :msg {:op :eval :forms "(loop [] (recur))"}})
+           [_ outs] (step #'ap/agent-proc st :from {:op :started :id 7})]
+       (is (= [{:type :started :agent :a1 :rid 7 :form "(loop [] (recur))"}] (mapv #(dissoc % :at-ms) (:events outs))))))))
+
+(deftest a-test-run-says-its-child-forked
+  ;; the agent sends the test child's pid once it is forked: root's :tests-started event
+  (agent-proc-on
+   (fn [st]
+     (let [[_ outs] (step #'ap/agent-proc st :from {:op :tests-started :id 7 :pid 4242})]
+       (is (= [{:type :tests-started :agent :a1 :rid 7 :pid 4242}] (mapv #(dissoc % :at-ms) (:events outs))))))))
+
+(deftest a-tab-hears-its-view-settled
+  ;; the render proc says when nothing it asked is in flight any more (after an answer, or
+  ;; after what it sent the tabs), never while a request is out; the web proc puts a
+  ;; settled comment on every feed
+  (let [st {:events-ch (a/chan 8) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events []
+            :event-rows [] :views {} :zoom {} :merges 0 :main {:t 1}}
+        settled? (fn [outs] (some #(= :settled (:op %)) (:to-web outs)))
+        [st o1] (#'seon.render.proc/render-proc st :events {:type :spawned :agent :a1 :at-ms 1})
+        tag (:tag (first (filter #(= {:op :state} (:req %)) (:to-api o1))))
+        [st o2] (#'seon.render.proc/render-proc st :answers {:tag tag :r {:agents {} :writer {:tx-count nil :recent []} :server {:status :up} :stats {} :store {} :boot {}}})]
+    (is (not (settled? o1)) "its ask is in flight")
+    (is (settled? o2) "the answer emptied what was in flight")
+    (is (empty? (:pending st))))
+  (let [ch (a/chan 4)
+        st {:tabs {1 {:ch ch :view :root}} :stale #{} :bytes 0}
+        [st _] (#'seon.web/web-proc st :from-render {:op :settled})]
+    (is (= ": settled\n\n" (a/poll! ch)))
+    (is (= (count ": settled\n\n") (:bytes st)))))
 
 (deftest the-render-proc-asks-for-root-s-view-once-per-round-trip
   ;; the coalescing window is the request in flight, not a clock (ASK-BOUND-MS is gone)

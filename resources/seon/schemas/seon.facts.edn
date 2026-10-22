@@ -270,6 +270,11 @@
                           [:seon.root/collected {:optional true} :seon.root/collected]
                           [:seon.config.agent/max-running {:optional true} :seon.config.agent/max-running]
                           [:seon.config.merge/max-running {:optional true} :seon.config.merge/max-running]]
+ ;; ---- on every transaction Seon makes, in its tx-meta (seon.db/tx-meta) ----
+ ;; the runtime that made it, as its compiled units are keyed (jolt.host/runtime-fingerprint:
+ ;; Jolt's version, its runtime fingerprint, its trace tag; docs/storage.md#history)
+ :seon.tx/runtime :string
+ :seon.tx/meta [:map {:seon.db/attributes true} [:seon.tx/runtime {:optional true} :seon.tx/runtime]]
  ;; ---- written by an agent on its own branch; they reach main with its merge ----
  :seon.turn/id [:and {:seon.db/identity true} :string]
  :seon.turn/attempt [:and {:seon.db/index true} :string]
@@ -280,6 +285,10 @@
  :seon.turn/red :int
  :seon.turn/ms :int
  :seon.turn/tokens :int
+ ;; the prompt tokens the provider served from its prefix cache, and those it did not, as its
+ ;; usage reported them (absent when it did not: nobody measured them)
+ :seon.turn/cache-hit-tokens :int
+ :seon.turn/cache-miss-tokens :int
  ;; the model's reply stopped at max-tokens: its text was cut
  :seon.turn/truncated :boolean
  ;; who read the context: the agent's model, or an outside agent through the entrance (a read is a turn)
@@ -312,6 +321,8 @@
                           [:seon.turn/id :seon.turn/id] [:seon.turn/attempt :seon.turn/attempt] [:seon.turn/n :seon.turn/n]
                           [:seon.turn/reply :seon.turn/reply] [:seon.turn/forms :seon.turn/forms] [:seon.turn/errors :seon.turn/errors]
                           [:seon.turn/red :seon.turn/red] [:seon.turn/ms :seon.turn/ms] [:seon.turn/tokens {:optional true} :seon.turn/tokens]
+                          [:seon.turn/cache-hit-tokens {:optional true} :seon.turn/cache-hit-tokens]
+                          [:seon.turn/cache-miss-tokens {:optional true} :seon.turn/cache-miss-tokens]
                           [:seon.turn/truncated {:optional true} :seon.turn/truncated]
                           [:seon.turn/origin {:optional true} :seon.turn/origin] [:seon.turn/basis {:optional true} :seon.turn/basis]
                           [:seon.turn/calls {:optional true} :seon.turn/calls]

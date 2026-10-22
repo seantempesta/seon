@@ -127,6 +127,30 @@
  ;; fails when root, the fork server and :seon.config.agent/max-running agents would exceed it
  ;; (each agent charged the system's measured free-memory drop per agent).
  :seon.config.machine/memory-mb 4096
+ ;; Unit: MB. The most physical footprint one MCP relay (bin/mcp, one per Claude session) may
+ ;; reach: stock perl measured 6.3 MB peak (`/usr/bin/time -l`, 2026-10-22) where the Seon binary
+ ;; it replaced was 729 MB. At the bound: seon.check/mcp-proof fails, so a relay that boots Seon
+ ;; again is red.
+ :seon.config.machine/relay-mb 32
+
+ ;; ==== the check harness (seon.check) =========================================================
+
+ ;; Unit: ms a check's Flow ping (seon.check/ping) waits for a proc to take its control message,
+ ;; which a proc takes between two steps. Provenance: task seon.check/every-wait-is-the-event-it-means
+ ;; (2026-10-22); the pings it replaced waited 1000 and 2000 ms and read a miss as nil or
+ ;; :unknown, and a check beside a full bin/test must not mistake a slow step for a missing
+ ;; proc. At the bound: the proc is recorded {:blocked pid :ping-ms ..} in the check's report
+ ;; and the check that read it fails, naming it.
+ :seon.config.check/ping-ms 10000
+ ;; Unit: ms over which a check measures that something does not happen: a paused agent's
+ ;; request unanswered (lifecycle), a paused proc's flood not taken and a paused writer's
+ ;; commits held (backpressure). Provenance: the windows it replaced were 300, 400 and 500 ms.
+ ;; Load only makes what it measures likelier. At the bound: the measurement is read.
+ :seon.config.check/hold-ms 500
+ ;; Unit: ms after scale's agents are killed over which it measures the memory the kernel
+ ;; returns (:system-free-returned-mb-per-agent, reported, not checked). Provenance: the
+ ;; window it replaced. At the bound: the free memory is read.
+ :seon.config.check/pages-ms 500
  ;; Unit: attempts running at once (v1's :seon.config.agent/max-running, same value and
  ;; reason): four agents beside the user's work fit a 16 GB machine. A ready task beyond it
  ;; waits for an end; 0 starts nothing new while running work finishes. root's start! may
@@ -200,12 +224,14 @@
  ;; boots): absent, no source is imported and nothing is written. config/local.edn or --set names
  ;; another tree: the main tree's names ../next-merges, so write-back never edits main's files.
  :seon.config.source/root #env SEON_SOURCE_ROOT
- ;; Unit: paths under the root, read in this order. Their .clj files are namespaces (test/'s
- ;; too: the tests are program, and every root imports what the owner's standing root does,
- ;; so a check boots the import the owner's root runs); the .edn files under
- ;; resources/seon/schemas are schema resources (schemas are program: an agent changes one
- ;; with my.schema/register!, and the merge writes it back; owner 2026-10-21).
- :seon.config.source/dirs ["src" "test" "resources/seon/schemas"]
+ ;; Unit: paths under the root, read in this order. Their .clj files are namespaces; the .edn
+ ;; files under resources/seon/schemas are schema resources (schemas are program: an agent
+ ;; changes one with my.schema/register!, and the merge writes it back; owner 2026-10-21).
+ ;; test/ is left out by default: a root importing it re-evaluates every test form at each
+ ;; boot (+5 s a restart, measured 2026-10-22; task seon.source/test-namespaces-built-into-the-binary).
+ ;; The owner's standing root adds it (the main tree's config/local.edn), and
+ ;; seon.source-test/a-restart-catches-up-and-a-new-generation-resumes boots with those dirs.
+ :seon.config.source/dirs ["src" "resources/seon/schemas"]
  ;; Unit: branch. Merges are committed here, never on main and never pushed (owner).
  :seon.config.source/branch "jolt/seon-merges"
  ;; Unit: a git identity. Seon authors and commits its merges (the message names the merged
@@ -367,6 +393,15 @@
  ;; turn (owner: "wtf"); 32000 keeps the last several whole turns (a turn is a reply of ~1-3k
  ;; plus its evaluations up to the evals budget), so a turn sends ~20-55k with the block.
  :seon.config.render/history-budget 32000
+ ;; Unit: tokens of one cited var's source in the context (cited in three backticks). Past it
+ ;; the var shows at doc depth with how many tokens were left out and the form that reads them,
+ ;; (clojure.repl/source ns/f). Provenance: v1's must-reads per-function cap, reference-tokens
+ ;; 3000 (audit notes/AUDIT-v1-to-next-2026-10-22.md 2.3).
+ :seon.config.render/reference-tokens 3000
+ ;; Unit: vars. The helpers the context names that the plan does not (:found): program functions
+ ;; the plan's cited vars and the proofs call. 0 shows none. Provenance: R4's k = 5
+ ;; (notes/option3-R4-learning.md 5: 14 of 16 needed helpers in the top 5).
+ :seon.config.render/found 5
  ;; Unit: items. A list shown in part (seon.print/bounded) shows this many, then `+N more:
  ;; where` (docs/render.md#bounded-lists). Provenance: the literals each list carried before
  ;; (render.ui and render.ai, 2026-10-22), kept as they were.
