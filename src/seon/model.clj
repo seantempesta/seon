@@ -226,5 +226,7 @@
                   [:or :seon.model/completion :seon.model/failure]]}
   [provider request]
   (case (:kind provider)
+    :none (contract/error :seon.model/no-provider 'seon.model/complete
+                          "no model provider is configured: set SEON_PROFILE=deepseek (a paid model) or SEON_PROFILE=scripted (the stand-in), or :seon.config.ai/provider" {})
     :scripted (scripted provider request)
     :openai-compat (openai-compat provider request)))

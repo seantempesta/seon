@@ -143,3 +143,17 @@
     (is (= :seon.repl/ticks-spent (:seon.error/type (agent/error-map e))) "the form's own catch cannot swallow it"))
   (is (= {:value 5050} (outcome 100000000 #(reduce + (range 101)))) "a form under its budget answers its value")
   (is (= {:value 3000000} (outcome nil #(loop [i 0] (if (= i 3000000) i (recur (inc i)))))) "no budget: unbounded"))
+
+(deftest an-interrupt-stops-only-the-request-it-lands-in
+  ;; research row 7: no client sends nREPL's `interrupt` op, so it cannot be what clears an
+  ;; interrupt; root's SIGUSR1 stops the request running, and one that lands while the agent
+  ;; is idle stops nothing that comes after it
+  (let [[idle after-idle stopped after-stop]
+        (at/in-agent [{:op :eval :agent "root" :code "(seon.root/interrupt! sys :a1)"}
+                      "(+ 1 2)"
+                      "(do (seon.lib/c-kill (seon.lib/c-getpid) seon.lib/SIGUSR1) (loop [] (recur)))"
+                      "(+ 2 2)"])]
+    (is (some? idle) (pr-str idle))
+    (is (= "3" (:printed after-idle)) (str "the request after an idle interrupt runs: " (pr-str after-idle)))
+    (is (= "interrupted by root" (:printed stopped)) (pr-str stopped))
+    (is (= "4" (:printed after-stop)) (pr-str after-stop))))

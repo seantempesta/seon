@@ -38,6 +38,8 @@ export SEON_STORE=${SEON_STORE:-$ROOT/target/check-store}
 # step's root that found it free took it (the owner's browser then showed a throwaway check
 # root). A run that wants one names its port: SEON_WEB_PORT=7790 bin/root
 export SEON_WEB_PORT=${SEON_WEB_PORT:-0}
+# agents' turns are the scripted stand-in's (a root with no profile has no model provider)
+export SEON_PROFILE=${SEON_PROFILE:-scripted}
 S=$ROOT/target/seon
 [[ -x $S ]] || { echo "check: no target/seon; run bin/build seon" >&2; exit 1 }
 run() { (cd "$ROOT/target" && ./seon "$@" 2>&1) }

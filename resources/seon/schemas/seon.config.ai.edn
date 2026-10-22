@@ -1,7 +1,7 @@
 ;; The model provider and its effect lanes (v1: seon.config.ai.edn; ported: model,
 ;; api-key-variable, max-tokens, thinking, chars-per-token-prior; base-url replaces
 ;; v1's endpoint (next appends /chat/completions); provider, script, lanes, rate are new).
-{:seon.config.ai/provider [:enum {:seon.config/unit "kind" :description "Who answers agents' turns: the scripted stand-in or an OpenAI-compatible endpoint."} :scripted :openai-compat]
+{:seon.config.ai/provider [:enum {:seon.config/unit "kind" :description "Who answers agents' turns: none (the first turn answers :seon.model/no-provider), the scripted stand-in or an OpenAI-compatible endpoint."} :none :scripted :openai-compat]
  :seon.config.ai/script [:qualified-symbol {:seon.config/unit "function" :description "The scripted stand-in's reply function (provider :scripted)."}]
  :seon.config.ai/base-url [:string {:min 1 :seon.config/unit "URL" :description "The OpenAI-compatible endpoint's base URL (/chat/completions is appended)."}]
  :seon.config.ai/model [:string {:min 1 :seon.config/unit "model name" :description "The provider's own model name."}]

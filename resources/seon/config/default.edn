@@ -189,6 +189,11 @@
  ;; allocating one ~7.5e8, so this stops a runaway form after ~5-25 s of work. At the bound
  ;; the form answers the typed :seon.repl/ticks-spent and the request goes on. 0: none.
  :seon.config.agent/form-ticks 20000000000
+ ;; Unit: functions. How many of a form's costliest contracted functions (seon.profile/top)
+ ;; its reply item and evaluation record keep, each with its exact calls and estimated ms.
+ ;; Provenance: lane F2's literal 10, made a key (research row top-fns, 2026-10-22). At the
+ ;; bound the rest are left out of the item; the record says nothing of them.
+ :seon.config.agent/form-top-fns 10
  ;; Unit: engine ticks one proof run (every test of the branch, in its fork) may run. Larger
  ;; than a form's: cost proofs measure large sizes. At the bound the run stops with
  ;; :seon.test/ticks-spent naming the test that was running. 0: none.
@@ -259,12 +264,15 @@
  ;; sends queue. At the bound stand-ins park (back-pressure). Lane FX1.
  :seon.config.fx/buf 1024
 
- ;; Who answers agents' turns. :scripted is the stand-in (no paid call); SEON_PROFILE=deepseek
- ;; (or SEON_AI_PROVIDER=openai-compat) uses the endpoint below. Provenance: owner, DeepSeek is
- ;; the default model (AGENTS.md "The machine"); check the context before any paid call.
- :seon.config.ai/provider #keyword #or [#env SEON_AI_PROVIDER #profile {:default "scripted" :deepseek "openai-compat"}]
+ ;; Who answers agents' turns. With no profile, none: the first turn answers the typed
+ ;; :seon.model/no-provider and the attempt ends on it (root's ruling 2026-10-22: production
+ ;; ran the scripted test fixture as if it were a model). SEON_PROFILE=deepseek (or
+ ;; SEON_AI_PROVIDER=openai-compat) uses the endpoint below; SEON_PROFILE=scripted, the
+ ;; deterministic stand-in bin/check and bin/test run under (no paid call). Provenance: owner,
+ ;; DeepSeek is the default model (AGENTS.md "The machine"); check the context before any paid call.
+ :seon.config.ai/provider #keyword #or [#env SEON_AI_PROVIDER #profile {:default "none" :scripted "scripted" :deepseek "openai-compat"}]
  ;; The scripted stand-in's reply function (provider :scripted): replies by task.
- :seon.config.ai/script seon.fixtures/reply
+ :seon.config.ai/script #profile {:scripted seon.fixtures/reply}
  ;; Unit: the provider's own model name. Provenance: v1 owner ruling 2026-09-10, deepseek-flash
  ;; is the default for every agent.
  :seon.config.ai/model #or [#env SEON_AI_MODEL "deepseek-flash"]

@@ -311,7 +311,9 @@
                                                :seon.task/proofs #{'demo-test/f-test}}]))
         block (context/current-state db (task/task db "demo/n") {:results {} :reds [] :turn 0 :max-turns 4})
         by (into {} (map (juxt :seon.ref/address identity)) (:sections block))]
-    (is (= 40 (count (:seon.ref/pin (first (filter #(clojure.string/starts-with? (:seon.ref/address %) "reference-code/malli/README.md") (:sections block)))))) "the pinned revision, looked up")
+    (is (= (second (re-find #"^160000 (\S+)" (:out (clojure.java.shell/sh "git" "ls-files" "-s" "reference-code/malli"))))
+           (:seon.ref/pin (first (filter #(clojure.string/starts-with? (:seon.ref/address %) "reference-code/malli/README.md") (:sections block)))))
+        "the revision the checkout pins (its gitlink), not the submodule's HEAD")
     (is (= {:seon.ref/address "demo.calc" :seon.ref/heading "demo.calc" :seon.ref/lead "Adds. More."
             :seon.ref/below [{:seon.ref/address "demo.calc/add" :seon.ref/heading "add"}] :seon.ref/depth :doc}
            (by "demo.calc")) "a namespace: its docstring and publics")

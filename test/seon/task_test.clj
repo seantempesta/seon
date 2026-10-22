@@ -34,3 +34,12 @@
         ds [(decl "Make `demo/f` and `demo/a` pass.")]]
     (is (= [{:task "demo/t" :name 'demo/a :problem :unresolved}] (task/citation-problems db ds)))
     (is (vector? (task/create-tx db ds)) "the write still happens")))
+
+(deftest the-reader-answers-every-stored-member
+  ;; research row 20: the reader pulls what main stores (Datahike's wildcard), so a task
+  ;; attribute is written in one place; references were stored and never read back
+  (let [db (d/db-with (db-with-program) (task/create-tx (db-with-program) [(decl "Make `demo/f` pass.")]))
+        t (task/task db "demo/t")]
+    (is (= #{'demo/f} (:seon.task/references t)))
+    (is (not-any? #{:db/id :seon.task/declared} (keys t)) "the stored declaration is load-tx's, not the reader's")
+    (is (= t (get (task/tasks db) "demo/t")))))

@@ -51,8 +51,9 @@
                  [:seon.ref/blocks [:vector :seon.ref/block]]
                  [:seon.ref/spans [:vector :seon.ref/span]]
                  [:seon.ref/line-count nat-int?]]
- ;; a section: its address (path#anchor), heading, level, line span, enclosing section, and its
- ;; lead (the heading's next block when that is a paragraph) or else its opening block
+ ;; a section: its address (path#anchor), heading, level, line, enclosing section, its lead (the
+ ;; heading's next block when that is a paragraph) or else its opening block, and its own text
+ ;; (the lines after its heading up to the next heading)
  :seon.ref/address :string
  :seon.ref/section [:map {:closed true}
                     [:seon.ref/address :seon.ref/address]
@@ -60,15 +61,15 @@
                     [:seon.ref/heading :string]
                     [:seon.ref/heading-level [:int {:min 1 :max 6}]]
                     [:seon.ref/line :seon.ref/line]
-                    [:seon.ref/end-line :seon.ref/line]
                     [:seon.ref/parent {:optional true} :seon.ref/address]
                     [:seon.ref/lead {:optional true} :string]
-                    [:seon.ref/opening {:optional true} :string]]
+                    [:seon.ref/opening {:optional true} :string]
+                    [:seon.ref/text {:optional true} :string]]
  :seon.ref/document [:map {:closed true}
                      [:seon.ref/sections [:vector :seon.ref/section]]
                      [:seon.ref/citations [:vector :seon.ref/citation]]]
  ;; a section as a citation's depth shows it: at summary its heading and its lead's first
- ;; sentence, at doc its lead (or opening) and the sections below, at code the section whole;
+ ;; sentence, at doc its lead (or opening) and the sections below, at code its own text too;
  ;; with no lead, :no-lead at summary and doc
  :seon.ref/view [:map
                  [:seon.ref/address :seon.ref/address]
@@ -77,7 +78,7 @@
                  [:seon.ref/lead {:optional true} :string]
                  [:seon.ref/opening {:optional true} :string]
                  [:seon.ref/below {:optional true} [:vector [:map [:seon.ref/address :seon.ref/address] [:seon.ref/heading :string]]]]
-                 ;; a section's lines at code depth, or a file's whole text; the line count of a file
+                 ;; a section's own text at code depth, or a file's whole text; the line count of a file
                  ;; that is not Markdown; the revision a reference-code file is pinned at
                  [:seon.ref/text {:optional true} :string]
                  [:seon.ref/lines {:optional true} nat-int?]
