@@ -12,16 +12,18 @@
 (defn in-agent
   "A root on the checkout's src (its source root), one agent on a task of its own, each of
   forms evaluated in that agent (a string) or sent to the entrance as it is (a map): the
-  first item of every reply, or the answer that holds no items, in order. Its store is removed."
-  [forms]
+  first item of every reply, or the answer that holds no items, in order. Its store is removed.
+  opts: :dirs, the source dirs root imports (default [\"src\"]); :proofs, the task's proofs."
+  ([forms] (in-agent forms {}))
+  ([forms {:keys [dirs proofs] :or {dirs ["src"] proofs '#{demo-test/t}}}]
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         path (str checkout "/target/runs/in-agent-" (random-uuid))
         port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
         ask (fn [m] (str "printf '%s\\n' " (pr-str (pr-str m)) " | nc -w 60 127.0.0.1 " port))
         script (str "mkdir -p '" path "-tasks'; mkfifo '" path "-in';"
-                    " echo " (pr-str (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]))
+                    " echo " (pr-str (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}]))
                     " > '" path "-tasks/demo.edn'; ./seon root"
-                    " --set ':seon.config.source/root=" (pr-str checkout) "' --set ':seon.config.source/dirs=[\"src\"]'"
+                    " --set ':seon.config.source/root=" (pr-str checkout) "' --set ':seon.config.source/dirs=" (pr-str dirs) "'"
                     " --set ':seon.config.root/store-path=" (pr-str path) "' --set ':seon.config.root/entrance-port=" port "' --set ':seon.config.web/port=0'"
                     " < '" path "-in' > '" path ".log' 2>&1 & R=$!; exec 3>'" path "-in';"
                     " until grep -q 'ROOT LISTENING' '" path ".log' || ! kill -0 $R 2>/dev/null; do sleep 0.1; done;"
@@ -32,7 +34,23 @@
                     " exec 3>&-; wait $R")
         {:keys [out]} (sh/sh "zsh" "-c" script :dir "target")]
     (sh/sh "rm" "-rf" path (str path "-in") (str path ".log") (str path "-tasks") (str path "-agents"))
-    (mapv #(let [a (edn/read-string {:default tagged-literal} %)] (if (contains? a :items) (first (:items a)) a)) (str/split-lines (str/replace out #"(?s)^.*ROOT LISTENING[^\n]*\n" "")))))
+    (mapv #(let [a (edn/read-string {:default tagged-literal} %)] (if (contains? a :items) (first (:items a)) a)) (str/split-lines (str/replace out #"(?s)^.*ROOT LISTENING[^\n]*\n" ""))))))
+
+(deftest an-agent-holds-mains-tests-and-runs-its-proofs
+  ;; task seon.agent/an-agent-runs-its-proofs: main holds the source root's test namespaces
+  ;; (imported from test/), and an agent forked from the fork server holds them compiled at
+  ;; fork. Its run selects the task's proofs and the tests reaching its changes, never the
+  ;; whole suite: a green proof is green, a red one red, a proof with no definition did not run
+  (let [green 'seon.reader-test/prose-without-a-fence-is-a-comment
+        red 'seon.reader-test/an-agent-made-this-red
+        [held _ _ run] (in-agent ["(boolean (find-ns 'seon.reader-test))"
+                                  {:op :context :agent "a1"}
+                                  "(in-ns 'seon.reader-test) (clojure.test/deftest an-agent-made-this-red (clojure.test/is (= 1 2))) (in-ns 'agent.a1)"
+                                  "(seon.proofs/results (seon.agent/run-tests-forked (seon.config/value :seon.config.agent/test-ticks)))"]
+                                 {:dirs ["src" "test"] :proofs #{green red 'demo-test/t}})]
+    (is (= "true" (:printed held)) "the agent holds main's test namespace without requiring it")
+    (is (= {green :pass red :fail} (edn/read-string (:printed run)))
+        "its proofs ran, green and red; the undefined proof and the rest of main's tests did not")))
 
 (deftest a-relative-path-reads-from-the-source-root
   ;; task seon.agent/an-agent-works-in-its-source-root: a program file is read by the path

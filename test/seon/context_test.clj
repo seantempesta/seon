@@ -118,7 +118,7 @@
     ;; Jolt's (ns ^:scratch x) does not carry the metadata yet (reported to root)
     (alter-meta! (find-ns 'ctx-scratch-ns) assoc :scratch true)
     (let [db (d/db-with (db-with-program) [{:ns/name 'ctx-prog-ns} {:ns/name 'ctx-scratch-ns} {:ns/name 'user}])]
-      (is (= ['ctx-prog-ns] (mapv ns-name (agent/test-namespaces db)))))))
+      (is (= ['ctx-prog-ns/p-test] (mapv symbol (agent/tests-to-run db db '#{ctx-prog-ns/p-test ctx-scratch-ns/s-test})))))))
 
 (deftest a-failure-reads-as-assert-and-got
   (binding [*ns* *ns*]
@@ -150,7 +150,7 @@
         "the program function the red proof calls, at summary level")
     (is (= {:test 'ctx-calc-test/cube-test :status :undefined} (by 'ctx-calc-test/cube-test))
         "a proof not written yet says so")
-    (is (= :no-assertions (:status (by 'ctx-calc-test/empty-test))) "a proof that ran and asserted nothing says so")
+    (is (= :not-run (:status (by 'ctx-calc-test/empty-test))) "a written proof with no result did not run: never \"asserted nothing\"")
     (let [b (context/current-state db (task/task db "ctx/sq") {:results {} :turn 1 :max-turns 4 :run-errors ["namespace app-test did not load"]})]
       (is (= {'ctx-calc-test/square-test :not-run 'ctx-calc-test/empty-test :not-run 'ctx-calc-test/cube-test :undefined}
              (into {} (map (juxt :test :status)) (:proofs b)))

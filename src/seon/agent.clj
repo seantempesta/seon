@@ -296,17 +296,21 @@
       (assoc :got (print/text (second (:actual m)) (:part print/budgets)))
       (contract/valid? :seon.cost/report cost) (assoc :cost cost))))
 
-(defn test-namespaces
-  "The namespaces whose tests judge a branch: every program namespace of db holding tests
-  (main's, merged proofs among them, and the ones this agent created). Scratch namespaces
-  (user, ^:scratch) never merge, so their tests never judge."
-  {:malli/schema [:=> [:cat :seon.host/db] [:sequential :seon.host/namespace]]}
-  [db]
-  (filter (fn [nsx] (and (not (program/scratch-ns? nsx)) (some (comp :test meta) (vals (ns-interns nsx)))))
-          (keep find-ns (sort (d/q '[:find [?n ...] :where [_ :ns/name ?n]] db)))))
+(defn tests-to-run
+  "The test vars that judge a branch, as this process holds them: the task's proofs and every
+  program test reaching a var the branch changed since base (the main this agent forked
+  from), the changed tests among them. A proof this process holds no var for is not run.
+  Scratch namespaces (user, ^:scratch) never merge, so their tests never judge."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :qualified-symbol]] [:vector :seon.host/var]]}
+  [db base proofs]
+  (let [changed (program/changed-vars base db)]
+    (->> (into proofs (program/reaching-tests db changed)) (into (sort-by str changed)) distinct
+         (keep #(some-> (find-ns (symbol (namespace %))) (ns-resolve (symbol (name %)))))
+         (filter #(and (:test (meta %)) (not (program/scratch-ns? (:ns (meta %))))))
+         vec)))
 
 (defn- run-tests-here
-  "clojure.test over test-namespaces of the branch, with the branch's schemas in effect (malli's
+  "clojure.test over the branch's tests-to-run, with the branch's schemas in effect (malli's
   dynamic registry bound to seon.program/schema-registry, as the agent's REPL binds it), the
   whole run within ticks engine ticks of work: answers report data. Each test var is written
   to w as it starts ({:seon.test/started v}), so the agent can name the test a death interrupted; a run
@@ -315,20 +319,26 @@
   [w ticks]
   (let [reports (atom [])
         started (atom nil)
+        asserted (atom 0)
         orig t/report
-        nss (test-namespaces (db))
+        vars (tests-to-run (db) (:base @state) (or (get-in @state [:turn :proofs]) #{}))
         r (try (binding [t/report (fn [m]
                                     (when (= :begin-test-var (:type m))
                                       (reset! started (str (:var m)))
                                       (lib/write-line! w (pr-str {:seon.test/started @started})))
                                     (when (#{:pass :fail :error} (:type m))
+                                      (swap! asserted inc)
                                       (swap! reports conj (test-report m (some-> (first t/*testing-vars*) str))))
+                                    ;; a test that asserted nothing proves nothing: it is red, saying so
+                                    (when (= :end-test-var (:type m))
+                                      (when (zero? @asserted)
+                                        (swap! reports conj {:type :fail :var (str (:var m)) :message "the test asserted nothing"}))
+                                      (reset! asserted 0))
                                     (orig m))
                          t/*test-out* (java.io.StringWriter.)
                          mr/*registry* (program/schema-registry (program/schema-changes (db)))]
-                 ;; test-ns tests the vars interned now (Jolt's run-tests also runs its
-                 ;; registry, which keeps a test after ns-unmap)
-                 (jolt.host/run-interruptible (jolt.host/make-interrupt) #(doseq [nsx nss] (t/test-ns nsx)) ticks)
+                 ;; test-vars runs exactly the selected vars, each namespace's fixtures around them
+                 (jolt.host/run-interruptible (jolt.host/make-interrupt) #(t/test-vars vars) ticks)
                  nil)
                (catch Throwable e
                  (if-let [n (:jolt/ticks-spent (ex-data e))]
@@ -558,7 +568,8 @@
     (let [load-errors (when resumed (program/load-diff! db0 @store-conn))]
      ;; a resumed branch whose program does not load runs main's for what failed: its errors
      ;; go to root with its hello (recorded problems), never dropped (T5b: a stub ran silently)
-     (reset! state {:id id :branch branch :fd fd :conn c :db @store-conn :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
+     ;; :base, main as this agent forked holding it: what its branch changed is measured against it
+     (reset! state {:id id :branch branch :fd fd :conn c :db @store-conn :base db0 :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
                    :load-errors (vec load-errors)
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
                    :ns nsx :nss #{(ns-name nsx)} :interrupt-ok intr-ok :serve serve}))))

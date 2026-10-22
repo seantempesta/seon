@@ -485,8 +485,11 @@
            (by-id id)))))
 
 ;; ---- loading ---------------------------------------------------------------------------
-;; A form imported from a source tree (seon.source: :form/source) is the running binary's
-;; own code, compiled in. Every other form of main runs where main's program runs: a merge
+;; A form imported from a source tree (seon.source: :form/source) whose namespace this
+;; process holds is the running binary's own code, compiled in. An imported namespace the
+;; binary was not built with (test/'s) is loaded at boot like every other form, so root,
+;; the fork server and every agent forked from it hold main's tests compiled. Every other
+;; form of main runs where main's program runs: a merge
 ;; loads in place, in root, the fork server (so every agent forked after it inherits it
 ;; compiled) and an agent that merges main (BUILD plan P4). A binary's own form is
 ;; evaluated again only where a changed macro expanded (`dependents`) or a changed schema
@@ -495,9 +498,10 @@
 (declare schema-changes load-forms!)
 
 (defn- held?
-  "Does this binary hold form row f compiled (imported from the source tree it was built from)?"
+  "Does this process already hold form row f compiled: imported from the source tree, in a
+  namespace it holds (the binary's own; test/ is imported but not built in)?"
   {:malli/schema [:=> [:cat :seon.host/db :map] :boolean]}
-  [db f] (boolean (:form/source (d/entity db (:e f)))))
+  [db f] (boolean (and (:form/source (d/entity db (:e f))) (find-ns (:ns f)))))
 
 (defn- requiring
   "The form entities of namespace nsym and of every namespace a form requires it from: where
@@ -692,6 +696,14 @@
                   (:schema/key x))))))
 
 ;; ---- reach: which tests a change reaches ----------------------------------------------
+
+(defn changed-vars
+  "The vars db-to defines by another form than db-from does: new, redefined or removed
+  (what a branch changed since the main it forked from)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :qualified-symbol]]}
+  [db-from db-to]
+  (let [a (definitions db-from) b (definitions db-to)]
+    (into #{} (comp (filter #(and (= :var (first %)) (not= (get a %) (get b %)))) (map second)) (concat (keys a) (keys b)))))
 
 (defn reaching-tests
   "The program's tests on db that reach one of syms (fully qualified var names): from each

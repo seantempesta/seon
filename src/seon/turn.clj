@@ -37,9 +37,11 @@
   [task attempt]
   (if (= attempt (get-in @agent/state [:turn :attempt]))
     (:turn @agent/state)
-    (let [db (agent/db)]
+    (let [db (agent/db)
+          acc (:seon.task/accumulated (task/task db task))]
+      ;; :proofs, the task's: what the attempt's test runs select (seon.agent/tests-to-run)
       (:turn (swap! agent/state assoc :turn {:task task :attempt attempt :gaps-before (harvest/uncontracted db)
-                                             :plan-before (:plan (:seon.task/accumulated (task/task db task)))})))))
+                                             :plan-before (:plan acc) :proofs (:proofs acc)})))))
 
 (defn last-evals
   "The items of this process's last model turn, in order: each one's form, printed value or

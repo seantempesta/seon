@@ -41,8 +41,8 @@
      ":unmerged, :no-proofs. :test-run is the test run itself failing (a timeout, a dead fork): no test result is real until it runs."
      ":your-last-reply says what happened to your reply: cut at the token limit, or delimiters the reader repaired."
      "A red proof shows each failure as :assert (as written) and :got (what it evaluated to), and :calls, the program"
-     "functions it calls (arglists, contract, doc). A proof's :status :undefined is not written yet, :not-run means the test run"
-     "failed (see :test-run), :no-assertions means it ran but asserted nothing."
+     "functions it calls (arglists, contract, doc). A proof's :status :undefined is not written yet, :not-run means it did not run"
+     "(see :test-run when the run failed); a test that ran and asserted nothing is red, saying so."
      "Your last evaluations follow the block, identical ones folded (;; 24x); (my.turn/evals) holds them all in full,"
      "and every cut names the form that reads its rest."]))
 
@@ -171,7 +171,7 @@
   has not improved its plan the call that does."
   {:malli/schema [:=> [:cat [:vector :seon.reconcile/refusal] [:vector :map]] [:vector :map]]}
   [refusals reds]
-  (let [rs (remove #(= :proof-red (:refusal %)) refusals)
+  (let [rs (remove #(#{:proof-red :proof-not-run} (:refusal %)) refusals)
         gaps (vec (keep #(when (= :contract-gap (:refusal %)) (:symbol %)) rs))
         unmerged (vec (keep #(when (= :unmerged (:refusal %)) (:key %)) rs))]
     ;; a contract gap and an unmerged entry say one thing about many names: one entry each,
@@ -235,8 +235,8 @@
              ;; and the program functions it calls; one not defined yet says so
              :proofs (vec (for [p (sort-by str proofs)
                                 :let [src (source-of db p)
-                                      ;; no result: not written yet, the run failed as a whole, or it asserted nothing
-                                      st (get results p (cond (nil? src) :undefined (seq run-errors) :not-run :else :no-assertions))
+                                      ;; no result: not written yet, or it did not run (see :test-run)
+                                      st (get results p (if (nil? src) :undefined :not-run))
                                       fs (filter #(= p (:test %)) reds)]]
                             (cond-> {:test p :status st}
                               (and src (not= :pass st)) (assoc :source src)
