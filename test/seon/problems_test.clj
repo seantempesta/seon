@@ -469,3 +469,19 @@
         (is (= #{(str "demo/p.md#p cites " v ", which names nothing")} (problems/caused base head)))
         (testing "and fixed it by restoring v: nothing"
           (is (= #{} (problems/caused base (d/db-with head [{:var/name v}])))))))))
+
+(deftest a-catch-its-page-does-not-name-is-a-law-problem
+  ;; bin/laws catch's rule, from the compiler's facts: a live form carrying :form/catches, by
+  ;; the var it defines, named by docs/failure-points.md's cited names
+  (let [db0 (ts/test-db)
+        [fe v] (first (for [{:keys [e]} (d/datoms db0 :aevt :form/defines)
+                            :when (seon.program/live? db0 e)
+                            d (:form/defines (d/entity db0 e)) :when (:var/name d)]
+                        [e (:var/name d)]))
+        db1 (d/db-with db0 [[:db/add fe :form/catches "{:class Exception, :answers :expr}"]])
+        unnamed #(mapv (juxt :law :site) (get-in (problems/health %) [:classes :unnamed-site :rows]))]
+    (is (= [] (unnamed db0)) "no catch, no site")
+    (is (= [[:catch v]] (unnamed db1)) "a catch the page does not name")
+    (testing "the page names it: no problem, nothing written to close it"
+      (let [page (str "# Failure points\n\n| failure | edge |\n|---|---|\n| x | `" v "` |\n")]
+        (is (= [] (unnamed (d/db-with db1 (seon.docs/load-tx db1 "docs" {"docs/failure-points.md" page})))))))))

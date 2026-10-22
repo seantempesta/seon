@@ -25,12 +25,14 @@
     :dead-citation                  a name a wiki section cites (:seon.section/names) that names
                                     nothing now (seon.ref/names-something?): derived when read,
                                     never written, so it is open exactly while it is true
+    :unnamed-site                   a site of a law (`laws`: a catch) its page does not name:
+                                    derived from the compiler's facts and the page's names
 
   `report` reads what was recorded, at a cost that follows the problems. `health` adds the
   derived classes, which read the program's names once (a set): their cost follows the
   citations (seon.problems-test/dead-citations-follow-the-citations)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [seon.merge :as pm] [seon.ref :as ref]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [seon.merge :as pm] [seon.ref :as ref] [seon.program :as program]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses "Attempt statuses of a death (:seon.attempt/status)." (:seon.status/failed (contract/properties :seon.attempt/status)))
@@ -95,6 +97,35 @@
             :producer nil :owner-ns (symbol (namespace v)) :proofs []
             :evidence {:kind :dead-citation :section a :name v} :answered-by (get-in ans [:signature s] []) :at-ms nil}))))
 
+(def laws
+  "The laws the compiler's facts answer exactly, as data: the fact that marks a site, the page
+  that must name each site's function, and the namespaces the law leaves out (the check
+  drivers: bin/laws' scope). The others stay bin/laws' text scan: clocks and measures (a host
+  member is recorded as jolt.host/static-member, not by its name), resolution (a quoted
+  symbol is a ref, so the facts over-count)."
+  [{:law :catch :fact :form/catches :page "docs/failure-points.md" :except #{"seon.check" "seon.e2e"}}])
+
+(defn unnamed-sites
+  "Each site of a law (`laws`) its page does not name: a live form carrying the law's fact,
+  by the var it defines, whose name no section of the page cites (:seon.section/names), as an
+  :unnamed-site row. Cost: the forms carrying the fact (aevt) and the wiki's cited names, once."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (vec (for [{:keys [law fact page except]} laws
+             :let [named (into #{} (keep (fn [{:keys [e v]}]
+                                           (when (str/starts-with? (:seon.section/address (d/pull db [:seon.section/address] e)) (str page "#")) v)))
+                               (d/datoms db :aevt :seon.section/names))]
+             fe (distinct (map :e (d/datoms db :aevt fact)))
+             :when (program/live? db fe)
+             d (:form/defines (d/entity db fe))
+             :let [v (:var/name d)]
+             :when (and v (not (except (namespace v))) (not (named v)))
+             :let [s (str "unnamed-site " (name law) " " v)]]
+         {:signature s :law law :site v :page page :open? true
+          :message (str v " has a " (name law) " site that " page " does not name")
+          :producer nil :owner-ns (symbol (namespace v)) :proofs []
+          :evidence {:kind :unnamed-site :law law :site v :page page} :answered-by (get-in ans [:signature s] []) :at-ms nil})))
+
 ;; ---- caused: what a branch's own work made true -----------------------------------------
 
 (defn caused
@@ -104,8 +135,9 @@
   evaluation is never refused (AGENTS: get out of an agent's way)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :string]]}
   [base head]
-  (let [before (into #{} (map :signature) (dead-citations base {}))]
-    (into (sorted-set) (comp (remove (comp before :signature)) (map :message)) (dead-citations head {}))))
+  (let [derived #(concat (dead-citations % {}) (unnamed-sites % {}))
+        before (into #{} (map :signature) (derived base))]
+    (into (sorted-set) (comp (remove (comp before :signature)) (map :message)) (derived head))))
 
 ;; ---- attempts ------------------------------------------------------------------------
 
@@ -230,12 +262,14 @@
 
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the
-  program's facts make true now (`dead-citations`). What the page, an agent's context and
+  program's facts make true now (`dead-citations`, `unnamed-sites`). What the page, an agent's context and
   the done and merge gates read: computed when read, never stored, never polled."
   {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.problems/report]
                   [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}
   ([db] (health db {}))
   ([db fold]
-   (let [dead (dead-citations db (answers db))]
-     (vary-meta (assoc-in (report db fold) [:classes :dead-citation] {:n (count dead) :rows dead})
+   (let [ans (answers db) dead (dead-citations db ans) unnamed (unnamed-sites db ans)]
+     (vary-meta (update (report db fold) :classes assoc
+                        :dead-citation {:n (count dead) :rows dead}
+                        :unnamed-site {:n (count unnamed) :rows unnamed})
                 assoc :seon.render/schema :seon.problems/report))))

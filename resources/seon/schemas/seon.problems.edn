@@ -149,11 +149,11 @@
  ;; ---- the one read: seon.problems/report ----
  ;; each class's area, the group root's page and context show it under (docs/health.md),
  ;; declared once here and read through seon.contract/properties (as a status set is)
- :seon.problems/class [:enum {:seon.problems/derived #{:dead-citation}
+ :seon.problems/class [:enum {:seon.problems/derived #{:dead-citation :unnamed-site}
                              :seon.problems/areas [[:docs #{:dead-citation}] [:tests #{:red :cost}]
-                                                    [:merges #{:merge :task-conflict}] [:tasks #{:stuck :failed}]
+                                                    [:laws #{:unnamed-site}] [:merges #{:merge :task-conflict}] [:tasks #{:stuck :failed}]
                                                     [:agents #{:dead :error :waste}] [:errors #{:platform :eval :agent :effect}]]}
-                       :platform :eval :agent :effect :red :cost :merge :dead :error :waste :stuck :failed :task-conflict :dead-citation]
+                       :platform :eval :agent :effect :red :cost :merge :dead :error :waste :stuck :failed :task-conflict :dead-citation :unnamed-site]
  :seon.problems/row [:map {:seon.render/ai seon.render.ai/problem-row}
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]
