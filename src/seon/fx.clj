@@ -68,7 +68,7 @@
                               :when (and (.isFile ^java.io.File f) (or (.endsWith p ".clj") (.endsWith p ".edn")))]
                           [(subs p (inc (count base))) (slurp f)]))}
         (zero? (:exit head)) (assoc :commit (str/trim (:out head))
-                                    :pins (into (sorted-map)
+                                    :pins (into {}
                                                 (for [[_ sha p] (re-seq #"(?m)^160000 ([0-9a-f]{40}) \d+\t(\S+)$"
                                                                         (:out (sh/sh "git" "-C" base "ls-files" "-s" "--" "reference-code")))]
                                                   [p sha])))))
