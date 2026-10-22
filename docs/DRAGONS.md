@@ -66,7 +66,7 @@ function. The same census judges the other laws: [clocks](clocks.md) and [resolu
 
 ## Physics: who may run threads
 
-Two rules of the OS and Chez that no code may "fix" by adding a thread or a check:
+Three rules of the OS and Chez that no code may "fix" by adding a thread or a check:
 
 - **A process that forks must never have started Chez's parallel-collector sweeper
   threads.** Chez starts them at the first collection that finds another thread, and keeps
@@ -84,6 +84,19 @@ Two rules of the OS and Chez that no code may "fix" by adding a thread or a chec
   not shorten root's small collections), and no collection starts one.
   Unfixed, Chez kept one per thread a collection found waiting, so root's thread count
   drifted by load (0, 5, 15 sweepers across identical runs; lane THREADS).
+- **A forked child holds none of its parent's threads, only their bookkeeping.** fork(2)
+  copies the calling thread; Jolt's fiber carriers, its timer and its shutdown watcher are
+  parked when the one active thread forks (a parked thread is not active, so
+  ```seon.lib/fork!``` forks), and root has them all before it forks the fork server (its
+  boot's first Datahike release runs a `go`). So the child resets them first: the fork in
+  `seon.lib`'s `proto-fork-alone` calls Jolt's `jolt-after-fork-child!` (branch
+  `jolt/fork-carriers`), which drops the carrier pool, the timer's started flag, the thread
+  tables and re-arms the watcher, so each starts afresh on first use. Before it, every `go`
+  that parked in an agent never resumed: a design agent hung making a test store, the judge's
+  proof fork would have too, and SIGTERM stayed pending (the step E dry run, 2026-10-22;
+  `seon.lib-test/a-forked-child-runs-go-blocks-and-makes-a-store`, Jolt's
+  `test/chez/fork-child-test.clj`). A pool made with `jolt-fiber-pool-make` is not restarted:
+  a forking program makes it after the fork.
 - **On macOS, a descriptor in flight by SCM_RIGHTS can be discarded when other unix
   sockets close**, so the sender keeps its copy until the receiver confirms (the fork
   server's `:in-flight`, a clone's socket kept until `:cloned`). A descriptor rides a frame
