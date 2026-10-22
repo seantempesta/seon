@@ -12,7 +12,7 @@
   the run's numbers and its verdict."
   (:require [seon.root :as c] [my.root :as root] [seon.task :as task] [seon.context :as context] [seon.reconcile :as r]
             [seon.fixtures :as fx] [datahike.api :as d] [seon.lib :as lib] [clojure.string :as str] [seon.config] [clojure.java.shell :as sh]
-            [clojure.core.async :as a]))
+            [clojure.core.async :as a] [seon.entrance :as entrance]))
 
 (defn- now [] (System/currentTimeMillis))
 (defn- db [sys] @(:conn sys))
@@ -45,17 +45,6 @@
     (if-let [q (and (r/quiescent db) (>= (:t (r/quiescent db)) t) (r/quiescent db))]
       q
       (let [p (defect db t)] (println :defect p) {:ended :defect :problem p}))))
-
-(defn summary
-  "Per task: execution, done, attempts as [id status outcome turns tokens], problem."
-  [d]
-  (let [idx (r/index d)]
-    (into (sorted-map)
-          (for [[id t] (:tasks idx)]
-            [id (cond-> {:execution (:seon.task/execution t) :done (r/done? idx id)
-                         :attempts (mapv (juxt :seon.attempt/id :seon.attempt/status :seon.attempt/outcome :seon.attempt/turns :seon.attempt/tokens)
-                                         (sort-by :seon.attempt/id (map (:attempts idx) (get-in idx [:by-task id]))))}
-                  (:seon.task/problem t) (assoc :problem (:seon.task/problem t)))]))))
 
 (defn- release!
   "Write specs' program on main, then their tasks in task namespace tns (each with
@@ -183,7 +172,7 @@
                   (= head (git "rev-parse" "jolt/seon-merges~1"))
                   (= head (git "rev-parse" "HEAD"))
                   (= 2 root) (= "2" agent) (nil? (r/generation d)))]
-      (doseq [[id s] (summary d)] (println :task id s))
+      (doseq [[id s] (entrance/task-summaries d)] (println :task id s))
       (println :commits commits :commit-errors commit-errors :files files :changed changed)
       (println :live {:root root :agent agent :turn-ms turn-ms :spans spans})
       (println :numbers (numbers sys t0))
@@ -209,7 +198,7 @@
 
 (defn- all-done
   "Every task done on d; what is not, by id."
-  [d] (let [not-done (into {} (remove (comp :done val)) (summary d))] {:ok (empty? not-done) :not-done not-done}))
+  [d] (let [not-done (into {} (remove (comp :done val)) (entrance/task-summaries d))] {:ok (empty? not-done) :not-done not-done}))
 
 (defn- run-scenario
   "Work one row: boot root on (merge {:datoms 300} :boot), release :specs (release!), run
@@ -232,7 +221,7 @@
           fresh-r (when check (fresh sys check))
           checks (if ok (ok {:sys sys :q q :d d}) {:ok true})
           reused (agents-reused d)]
-      (doseq [[id s] (summary d)] (println :task id s))
+      (doseq [[id s] (entrance/task-summaries d)] (println :task id s))
       (println :agents-reused reused :merges (merge-counts d) :fresh-agent fresh-r)
       (println :checks (dissoc checks :ok))
       (println :numbers (numbers sys t0))

@@ -30,9 +30,9 @@
 
 (def ^:private program-ns-attrs #{"form" "var" "ns" "method" "impl" "schema" "schema.file" "db" "db.install" "db.type" "db.cardinality" "db.unique"})
 
-(def ^:private carried-platform-attrs
+(def carried-platform-attrs
   "The platform attributes (seon.*) a branch carries: the task content an agent may improve
-  (my.task/update!). Every other seon.* attribute is a platform record (root's boot and
+  (my.task/update!), carried onto main at its attempt's end (seon.task/carry-tx). Every other seon.* attribute is a platform record (root's boot and
   quiescence, recorded errors, attempts, observations) written where it happened and never
   carried, so main writing one never puts a branch behind."
   #{:seon.task/plan :seon.task/instructions})
@@ -254,9 +254,9 @@
   [db] (vec (d/q '[:find [?e ...] :where [?e :seon.merge/key] [?e :seon.merge/main-t]] db)))
 
 (defn conflict-value
-  "The conflict the :seon.merge/* members of m state, m an entity or a pulled map (the
-  inverse of `conflict-tx`): one decoder for a branch's entries and an attempt's evidence."
-  {:malli/schema [:=> [:cat :any] :seon.merge/conflict]}
+  "The conflict the :seon.merge/* members of m state, m a pulled entry (the inverse of
+  `conflict-tx`): one decoder for a branch's entries and an attempt's evidence."
+  {:malli/schema [:=> [:cat :seon.merge/entry-members] :seon.merge/conflict]}
   [m]
   (cond-> {:key (:seon.merge/key m) :kind (:seon.merge/kind m)}
     (:seon.merge/base m) (assoc :base (:seon.merge/base m))
@@ -269,7 +269,7 @@
   [db]
   (vec (sort-by (comp sedn/encode :key)
                 (for [e (entry-eids db)
-                      :let [m (d/entity db e)]]
+                      :let [m (d/pull db '[*] e)]]
                   (assoc (conflict-value m) :main-t (:seon.merge/main-t m) :resolved? (boolean (:seon.merge/resolved? m)))))))
 
 (defn conflict-tx

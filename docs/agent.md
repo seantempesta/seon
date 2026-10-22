@@ -73,5 +73,5 @@ A merge task's branch has main merged in, and each of its unmerged entries shows
 Record what you learned in the plan, so the next step starts from it, then stop.
 
 - `(my.task/update! :seon.task/plan str "\n\nFound: seon.task/accumulate owns the plan's accumulation.")`.
-- When the task cannot be done as planned: ``(my.task/fail! reason counterexample)``, with the form that shows it. It records the failure on the task, your attempt ends, and the task is held for root.
+- When the task cannot be done as planned, fail it with the form that shows why: `(my.task/fail! "the premise is refuted" '(seon.task/accumulate {} "x"))`. The failure goes on the task, your attempt ends, and the task is held for root (`docs/tasks.md#a-failed-task-is-held-for-root`).
 - `(my.turn/wait)` ends your turn and waits for root.

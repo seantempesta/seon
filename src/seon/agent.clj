@@ -18,7 +18,7 @@
             [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
-;; :id :branch :fd :conn :db :base (main as this agent forked holding it) :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
+;; :id :branch :task :attempt (the task and attempt root forked it for, or nil) :fd :conn :db :base (main as this agent forked holding it) :results :n :pending :tx-seq :mode :ns :home :nss :mismatch
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 (defonce state (atom nil))
 
@@ -50,7 +50,7 @@
   []
   (if-let [m (peek (:pending @state))]
     (do (swap! state update :pending pop) m)
-    (if (:dirty-at @state)
+    (if (:dirty? @state)
       (let [m (sock/next-frame! (:conn @state))]
         (case m
           :none (do (commit!) (recv-raw!))
@@ -95,7 +95,7 @@
   {:malli/schema [:=> [:cat] :any]}
   []
   (when-let [c (dw/commit-pending! (:store-conn @state))]
-    (swap! state #(-> % (assoc :db (:db c)) (dissoc :dirty-at)))
+    (swap! state #(-> % (assoc :db (:db c)) (dissoc :dirty?)))
     ;; the eval errors folded since the last commit ride it (seon.error/note): root counts
     ;; them across agents
     (let [errs (:errors @state)]
@@ -104,8 +104,8 @@
 
 (defn transact!
   "Write tx-data to this agent's branch: applied at once to the value ahead of the
-  committed one (its answer does not wait for a commit), committed when the agent is idle,
-  at a turn's end or within the flush window (owner, 2026-10-20: the agent-owned run-ahead
+  committed one (its answer does not wait for a commit), committed when the agent is idle
+  or at a turn's end, never because time passed (owner, 2026-10-20: the agent-owned run-ahead
   writer). Answers {:t :datoms :tempids}. Inside a test (a fork of the agent) it applies to
   the fork's db only. A refused transaction throws its message into the caller's eval."
   {:malli/schema [:=> [:cat :seon.db/tx-data] :seon.agent/tx-result]}
@@ -118,11 +118,9 @@
       ;; past this process's block of entity ids: the typed refusal, nothing applied
       (when-let [e (and (not (map? r)) (pdb/lease-spent r (:lease @state)))] (throw (ex-info (:seon.error/message e) e)))
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
-      (let [now (lib/now-ns)
-            since (:dirty-at (swap! state #(-> % (assoc :db (:db-after r)) (update :dirty-at (fn [t] (or t now))))))]
-        (when (>= (- now since) (* 1000000 pdb/flush-ms)) (commit!))
-        (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
-          (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r))))))))
+      (swap! state assoc :db (:db-after r) :dirty? true)
+      (cond-> {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r))}
+        (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r)))))))
 
 ;; ---- effects (seon.fx, lane FX1): root's owner procs, through the stand-in -------------
 
@@ -529,7 +527,7 @@
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
-  [fd {id :agent branch :branch cfg :cfg lease :lease resumed :resumed} db0 serve]
+  [fd {id :agent branch :branch task :task attempt :attempt cfg :cfg lease :lease resumed :resumed} db0 serve]
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone
   (sock/clofork! fd)
@@ -550,7 +548,7 @@
     (let [load-errors (when resumed (program/load-diff! db0 @store-conn))]
      ;; a resumed branch whose program does not load runs main's for what failed: its errors
      ;; go to root with its hello (recorded problems), never dropped (T5b: a stub ran silently)
-     (reset! state {:id id :branch branch :fd fd :conn c :db @store-conn :base db0 :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
+     (reset! state {:id id :branch branch :task task :attempt attempt :fd fd :conn c :db @store-conn :base db0 :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
                    :load-errors (vec load-errors)
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
                    :ns nsx :nss #{(ns-name nsx)} :interrupt-ok intr-ok :serve serve}))))

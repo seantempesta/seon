@@ -14,11 +14,6 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.config :as config] [seon.print :as print] [seon.print.select :as select] [seon.render.ui :as ui]))
 
-(defn tokens
-  "A text's tokens, by the printer's own sizer (seon.print.select/estimate)."
-  {:malli/schema [:=> [:cat :string] nat-int?]}
-  [s] (select/estimate s))
-
 (defn- counts {:malli/schema [:=> [:cat :map] :string]}
   [freq] (str/join " " (for [[k n] (sort-by (comp str key) freq)] (str (ui/kname k) " " n))))
 
@@ -108,10 +103,10 @@
 
 (defn system
   "Root's context: the system as a budgeted text, problems first (see the namespace doc).
-  env :seon.render/budget tokens (default 700)."
+  env :seon.render/budget tokens (default :seon.config.render/root-context-budget)."
   {:malli/schema [:=> [:cat :seon.render/system :seon.render/env] :seon.render/out]}
   [sys env]
-  (let [budget (or (:seon.render/budget env) 700)
+  (let [budget (or (:seon.render/budget env) (config/value :seon.config.render/root-context-budget))
         problems (problems sys)
         sections [["problems" (if (seq problems) problems [(str "none: no defect in root's " (count (:health sys)) " procs, no problem recorded on main")])]
                   ["work" (section-work sys)]
@@ -123,7 +118,7 @@
         head "seon root: the whole system, every number measured, problems first"
         [text left] (reduce (fn [[text left] [title lines]]
                               (let [part (str "\n# " title "\n" (str/join "\n" (map #(str "- " %) lines)))]
-                                (if (and (empty? left) (<= (tokens (str text part)) budget))
+                                (if (and (empty? left) (<= (select/estimate (str text part)) budget))
                                   [(str text part) left]
                                   [text (conj left title)])))
                             [head []] (remove (comp empty? second) sections))]

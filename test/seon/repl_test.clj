@@ -77,8 +77,8 @@
   ;; its task), runs every kind's forms in order; the ending verbs come last
   (let [forms (into [] (comp (mapcat (comp runnable val)) (distinct)) (sort-by key template/instructions))
         ends #{"(my.turn/wait)"}
-        forms (concat (remove #(or (ends %) (str/starts-with? % "(my.task/send-back!")) forms)
-                      (filter #(str/starts-with? % "(my.task/send-back!") forms)
+        forms (concat (remove #(or (ends %) (str/starts-with? % "(my.task/fail!")) forms)
+                      (filter #(str/starts-with? % "(my.task/fail!") forms)
                       (filter ends forms))
         cited "(seon.task/citation-problems (my.db/db) (vec (for [[k v] seon.template/instructions] {:seon.task/ns 'demo :seon.task/name (name k) :seon.task/plan \"\" :seon.task/instructions v})))"
         [problems & items] (rest (at/in-agent (into [{:op :context :agent "a1"} cited] forms)))]
@@ -93,8 +93,8 @@
   ;; turn saver): every form the help page tells an agent to run works in a real agent, in
   ;; order, the ending verb last, and every name it cites resolves in the program
   (let [forms (runnable (context/help-text))
-        ends #{"(my.turn/wait)"}
-        forms (concat (remove ends forms) (filter ends forms))
+        end? #(or (= "(my.turn/wait)" %) (str/starts-with? % "(my.task/fail!"))
+        forms (concat (remove end? forms) (sort-by #(= "(my.turn/wait)" %) (filter end? forms)))
         cited (str "(seon.task/citation-problems (my.db/db) [{:seon.task/ns 'demo :seon.task/name \"help\" :seon.task/plan (seon.context/help-text)}])")
         [problems & items] (rest (at/in-agent (into [{:op :context :agent "a1"} cited] forms)))]
     (is (= "[]" (:printed problems)) (str "every name the help page cites resolves in the program: " (pr-str problems)))

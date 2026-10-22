@@ -17,12 +17,17 @@
     :error                          an attempt the turn loop ended on an error (the model)
     :waste                          forms charged to the producer of what was shown
     :stuck                          a task whose failures spent its budget: its root cause and
-                                    the released tasks it blocks (seon.reconcile/stuck-tx)"
+                                    the released tasks it blocks (seon.reconcile/stuck-tx)
+    :task-conflict                  task content a branch and main both changed, differently,
+                                    recorded at its attempt's end (seon.task/carry-tx)
+    :failed                         a task marked failed (my.task/fail!, root or a check): its
+                                    reason and counterexample; open while it is held"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.merge :as pm] [seon.reconcile :as reconcile]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [seon.merge :as pm] [seon.reconcile :as reconcile]))
 
 (def counted-classes [:platform :eval :agent :effect])
-(def attempt-classes [:red :cost :merge :dead :error :waste])
+(def ^:private death-statuses "Attempt statuses of a death (:seon.attempt/status)." (:seon.status/failed (contract/properties :seon.attempt/status)))
+(def attempt-classes [:red :cost :merge :dead :error :waste :task-conflict])
 
 (defn- es
   "The entities carrying attribute a (its aevt index: only the entities that have it)."
@@ -69,7 +74,7 @@
   "What a problem row reads of an attempt: one pull (its conflicts are read only when it has
   them)."
   [:seon.attempt/id :seon.attempt/status :seon.attempt/outcome :seon.attempt/reason :seon.attempt/end-ms :seon.attempt/agent
-   :seon.attempt/unmerged :seon.attempt/failures :seon.attempt/costs :seon.attempt/error :seon.attempt/waste
+   :seon.attempt/unmerged :seon.attempt/failures :seon.attempt/costs :seon.attempt/error :seon.attempt/waste :seon.attempt/task-conflicts
    {:seon.attempt/task [:db/id :seon.task/id :seon.task/ns :seon.task/proofs]}
    {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
@@ -80,7 +85,19 @@
   (boolean (some #(reconcile/finished (:seon.attempt/status (d/pull db [:seon.attempt/status] (:e %))))
                  (d/datoms db :avet :seon.attempt/task te))))
 
-;; ---- stuck tasks ---------------------------------------------------------------------
+;; ---- stuck and failed tasks ------------------------------------------------------------
+
+(defn- failed-row
+  "Task entity e, which carries a failure, as a row: open while the task is held for root."
+  {:malli/schema [:=> [:cat :seon.host/db :map :int] :seon.problems/row]}
+  [db ans e]
+  (let [t (d/pull db [:seon.task/id :seon.task/ns :seon.task/failure :seon.task/execution :seon.task/proofs] e)
+        {:keys [attempt] :as f} (:seon.task/failure t)
+        end-ms (some-> attempt (as-> a (d/pull db [:seon.attempt/end-ms] [:seon.attempt/id a])) :seon.attempt/end-ms)]
+    (merge (select-keys f [:reason :counterexample])
+           {:task (:seon.task/id t) :attempt attempt :open? (= :held (:seon.task/execution t))
+            :owner-ns (:seon.task/ns t) :producer nil :proofs (vec (sort-by str (:seon.task/proofs t)))
+            :evidence (assoc f :kind :failed) :answered-by (get-in ans [:from attempt] []) :at-ms end-ms})))
 
 (defn- stuck-row
   "Task entity e, which carries a stuck fact, as a row: open while it is not done."
@@ -132,9 +149,12 @@
                             :evidence (cond-> {:from aid :conflicts conflicts :unmerged unmerged
                                                :red []}
                                         err (assoc :error err)))])
-      (#{:dead :lost} status)
+      (seq (:seon.attempt/task-conflicts p))
+      (assoc :task-conflict (vec (for [c (:seon.attempt/task-conflicts p)]
+                                   (assoc base :task (:task c) :attr (:attr c) :evidence (assoc c :from aid)))))
+      (death-statuses status)
       (assoc :dead [(assoc base :error err :producer (:seon.error/operation err) :evidence (cond-> {:from aid} err (assoc :error err)))])
-      (and err (not merge?) (not (#{:dead :lost} status)))
+      (and err (not merge?) (not (death-statuses status)))
       (assoc :error [(assoc base :error err :producer (:seon.error/operation err) :evidence {:from aid :error err})])
       (seq waste)
       (assoc :waste [(assoc base :waste waste :evidence {:from aid :waste waste})]))))
@@ -155,13 +175,15 @@
                                      (es db :seon.error/signature)))
         attempts (into (sorted-set)
                        (concat (mapcat #(es db %) [:seon.attempt/failures :seon.attempt/costs :seon.attempt/error :seon.attempt/waste
-                                                   :seon.attempt/conflicts :seon.attempt/unmerged])
-                               (mapcat (fn [s] (map :e (d/datoms db :avet :seon.attempt/status s))) [:dead :lost :behind])))
+                                                   :seon.attempt/conflicts :seon.attempt/unmerged :seon.attempt/task-conflicts])
+                               (mapcat (fn [s] (map :e (d/datoms db :avet :seon.attempt/status s))) (conj death-statuses :behind))))
         by-class (apply merge-with into (map #(attempt-rows db ans %) attempts))
-        stuck (mapv #(stuck-row db ans %) (es db :seon.task/stuck))]
+        stuck (mapv #(stuck-row db ans %) (es db :seon.task/stuck))
+        failed (mapv #(failed-row db ans %) (es db :seon.task/failure))]
     {:t (:max-tx db)
      :classes (merge (into {} (for [c counted-classes :let [rows (vec (sort-by (comp - :count) (get errors c)))]]
                                 [c {:n (reduce + 0 (map :count rows)) :rows rows}]))
                      (into {} (for [c attempt-classes :let [rows (vec (sort-by #(- (or (:end-ms %) 0)) (get by-class c)))]]
                                 [c {:n (count rows) :rows rows}]))
-                     {:stuck {:n (count stuck) :rows (vec (sort-by #(- (or (:at-ms %) 0)) stuck))}})})))
+                     {:stuck {:n (count stuck) :rows (vec (sort-by #(- (or (:at-ms %) 0)) stuck))}
+                      :failed {:n (count failed) :rows (vec (sort-by #(- (or (:at-ms %) 0)) failed))}})})))

@@ -5,7 +5,7 @@
   data serializes to the stateless /call route. Run: bin/test seon.web-test"
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str] [clojure.core.async :as a]
-            [seon.web :as w] [seon.web.html :as h]))
+            [seon.web :as w] [seon.web.html :as h] [seon.render.proc :as p] [seon.contract]))
 
 (def ^:private index {:a1 {:pid 11 :branch :agent-1 :status :idle} :a2 {:pid 12 :branch :agent-2 :status :killed}
                       :a3 {:pid 13 :branch :agent-3 :status :busy}})
@@ -71,3 +71,28 @@
             (is (str/includes? (a/poll! root-tab) "<i id=\"t\"></i>"))
             (is (nil? (a/poll! zoom-tab)))
             (is (= 1 (:patches st)))))))))
+
+(deftest a-root-verb-is-recorded-with-its-answer
+  ;; task seon.render/one-owner-per-view-path (B9): root's verb called from the page is
+  ;; recorded on main with what root answered, when it answers; never a made-up "requested"
+  (let [st (#'w/web-proc {:port 0})
+        [_ out] (#'w/web-proc (assoc st :index index) :http {:op :call :call {:var 'seon.root/kill! :agent :a1}})
+        [req] (:to-api out)]
+    (is (= 1 (count (:to-api out))) "the verb's request only: nothing is recorded before root answers")
+    (is (not (str/includes? (pr-str out) "requested")))
+    (let [rp {:rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events [] :event-rows [] :views {} :zoom {} :merges 0}
+          [_ o] (#'p/render-proc rp :answers {:tag (:tag req) :r {:ok true :killed :a1}})
+          w (first (filter #(= :write (get-in % [:req :op])) (:to-api o)))
+          rec (some :seon.cluster.eval/record (get-in w [:req :req :tx-data]))]
+      (is (= "(seon.root/kill! :a1)" (:form rec)))
+      (is (= :ui (:origin rec)))
+      (is (str/includes? (str (:shown rec)) ":killed :a1") "what root answered"))))
+
+(deftest a-listener-that-cannot-bind-is-the-one-error-map
+  ;; task seon.render/one-owner-per-view-path (B2): a port taken is data, the one error map
+  (let [taken (java.net.ServerSocket. 0 50 (java.net.InetAddress/getByName "127.0.0.1"))]
+    (try
+      (let [st (#'w/web-proc {:port (.getLocalPort taken)})]
+        (is (false? (:listening st)))
+        (is (seon.contract/error? (:error st)) (pr-str (:error st))))
+      (finally (.close taken)))))

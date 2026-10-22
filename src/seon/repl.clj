@@ -369,7 +369,7 @@
   (conj (vec (for [it items :when (:id it)]
                {:seon.cluster.eval/id (str run "/" (:id it)) :seon.cluster.eval/agent "agent"
                 :seon.cluster.eval/record (cond-> (select-keys it [:tag :form :out :ms :alloc-bytes :fns :origin])
-                                            (= :ret (:tag it)) (assoc :shown (:printed it))
+                                            (:printed it) (assoc :shown (:printed it))
                                             (= :err (:tag it)) (assoc :error (or (:err it) (:printed it))))}))
         (cond-> {:db/id "agent" :seon.agent/id id} t-basis (assoc :seon.agent/answered-t t-basis))))
 
