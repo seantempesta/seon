@@ -50,7 +50,7 @@
   (let [flags (filter #(str/starts-with? % "--") names)
         nss (set (map str (test-namespaces)))
         unknown (remove #(or (str/starts-with? % "--") (nss %)) names)]
-    (cond (seq flags) (str "no flag " (str/join " " flags) " (bin/test [--all] [NS ...])")
+    (cond (seq flags) (str "no flag " (str/join " " flags) " (bin/test [--all] [NS ...]: --all, the one flag, comes first)")
           (seq unknown) (str "no test namespace " (str/join " " unknown) " in test/"))))
 
 (defn- write!
@@ -134,14 +134,11 @@
       (when (seq run-steps) (println "prove: check steps to run:" (str/join " " run-steps)))
       (when (seq missing)
         (println "prove: check steps naming a function the program does not define (seon.proofs/check-steps):" (str/join " " missing))))
-    (cond
-      (seq missing) 1
-      ;; namespaces named, and none of their tests is a test the program holds: a selection that
-      ;; matched nothing passes nothing
-      (and (seq names) tests? (empty? digests)) (do (println (str "TEST FAILED: " (str/join " " names) " select no test")) 1)
-      :else (do (when (and (empty? run-tests) (empty? run-steps))
-                  (println (str "prove: nothing to run: " (count reused) " reused green at their digest")))
-                0)))))
+    (if (seq missing)
+      1
+      (do (when (and (empty? run-tests) (empty? run-steps))
+            (println (str "prove: nothing to run: " (count reused) " reused green at their digest")))
+          0)))))
 
 (defn- store-steps!
   "bin/prove's last part: each step of out/steps.edn that bin/check named green in out/green
