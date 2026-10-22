@@ -66,7 +66,6 @@
  ;; and the released tasks it blocks, transitively
  :seon.reconcile/stuck-row [:map {:closed true} [:task :seon.task/id] [:cause :string]
                             [:attempt {:optional true} :seon.attempt/id] [:blocks [:vector :seon.task/id]]]
- :seon.reconcile/view [:map [:tasks [:map-of :seon.task/id :seon.task/task]] [:attempts :map] [:root :map]]
  ;; the reconciler proc's state, and the steps of a flight
  :seon.reconcile/state [:map [:db :seon.host/db] [:boot :string]
                         [:rid :int] [:flights :map] [:pending :map] [:quiet {:optional true} :boolean]]

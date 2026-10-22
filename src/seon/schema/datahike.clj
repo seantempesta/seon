@@ -194,27 +194,3 @@
   (mapv (fn [a] (let [d (declaration registry a)]
                   (if (error? d) (throw (ex-info (:seon.error/message d) d)) d)))
         (attributes registry)))
-
-;; ---- the render a schema declares -------------------------------------------------
-
-(defn- chain-properties
-  "Property maps along `compiled`'s reference chain, nearest first: its own, its type's, then
-  a registry reference's target and an :and's arms (the later arm first, as `malli.util/merge`
-  lets the later arm win)."
-  {:malli/schema [:=> [:cat :seon.host/schema] [:vector [:maybe :map]]]}
-  [compiled]
-  (into [(m/properties compiled) (m/type-properties compiled)]
-        (cond
-          (m/-ref-schema? compiled) (chain-properties (m/deref compiled))
-          (= :and (m/type compiled)) (into [] (mapcat chain-properties) (rseq (vec (m/children compiled))))
-          :else [])))
-
-(defn declared-reference
-  "The function that `property` (`:seon.render/ai`, `:seon.render/html`, `:seon.render/form`)
-  names for `compiled`'s values, own or inherited: the nearest qualified symbol along the
-  reference chain, else nil. A schema declares its render this way, so a derived schema takes
-  its own arm's render before its base's (Seon's `declared-reference`)."
-  {:malli/schema [:=> [:cat :seon.host/schema :qualified-keyword] [:maybe :qualified-symbol]]}
-  [compiled property]
-  (let [found (some #(get % property) (chain-properties compiled))]
-    (when (qualified-symbol? found) found)))

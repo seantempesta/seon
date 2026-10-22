@@ -101,14 +101,6 @@
           (if (contains? out k) out (merge out (print-out face v env))))
         (print-out face v env)))))
 
-(defn render
-  "v rendered under env: {:seon.render/html hiccup :seon.render/ai data}, the faces env's
-  :seon.render/faces asks for (default #{:html})."
-  {:malli/schema [:=> [:cat :any :seon.render/env] :seon.render/out]}
-  [v env]
-  (reduce (fn [out face] (merge out (select-keys (render-face face v env) [(faces face)])))
-          {} (or (:seon.render/faces env) #{:html})))
-
 (defn html
   "v's HTML face under env (the hiccup)."
   {:malli/schema [:=> [:cat :any :seon.render/env] :any]}

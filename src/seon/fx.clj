@@ -15,9 +15,6 @@
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.java.shell :as sh] [clojure.string :as str] [jolt.ffi :as ffi] [jolt.deps :as deps]))
 
-(defn port "The stand-in's out-port to kind's owner." {:malli/schema [:=> [:cat :keyword] :keyword]}
-  [kind] (keyword "fx" (name kind)))
-
 (defn- error
   "An effect's declared failure, as the one error map (its variant registered in
   seon.problems.edn), raised by seon.fx/call."

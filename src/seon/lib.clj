@@ -30,7 +30,6 @@
 (defc c-exit "_exit" [:int] :void)
 (defc c-getpid "getpid" [] :int)
 (defc c-chdir "chdir" [:string] :int)
-(defc c-getppid "getppid" [] :int)
 (defc c-waitpid "waitpid" [:int :pointer :int] :int {:blocking true})
 (defc c-waitpid-nb "waitpid" [:int :pointer :int] :int)
 (defc c-pipe "pipe" [:pointer] :int)
@@ -142,9 +141,7 @@
 (defonce scheme-defs
   (do (scm/eval-string
         "(define (proto-active-threads) (#%$top-level-value '$active-threads))
-         (define (proto-bytes-allocated) (sstats-bytes (statistics)))
          (define (proto-bytes-in-heap) (bytes-allocated))
-         (define (proto-collections) (collections))
          (define (proto-static!) (collect (collect-maximum-generation) 'static))
          (define (proto-set-trip! n) (collect-trip-bytes n))
          (define proto-qfork
@@ -237,9 +234,7 @@
 (def SIGUSR1 "Root's interrupt: 30 on macOS, 10 on Linux." (if linux? 10 30))
 
 (defchecked active-threads [:=> [:cat] :int] (scm/proc "proto-active-threads"))
-(defchecked bytes-allocated [:=> [:cat] :int] (scm/proc "proto-bytes-allocated"))
 (defchecked bytes-in-heap [:=> [:cat] :int] (scm/proc "proto-bytes-in-heap"))
-(defchecked collections [:=> [:cat] :int] (scm/proc "proto-collections"))
 (defchecked static! [:=> [:cat] :any] (scm/proc "proto-static!"))
 (defchecked set-trip! [:=> [:cat :int] :any] (scm/proc "proto-set-trip!"))
 (defchecked qfork [:=> [:cat] :seon.lib/pid] (scm/proc "proto-qfork"))

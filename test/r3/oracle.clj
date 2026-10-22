@@ -1,14 +1,10 @@
 (ns r3.oracle
-  "The one reconciler (lanes R1 and M1's proto.agents.reconcile): a pure function of main's
-  db value (desired state: the tasks; observed state: attempts, their ends and proof
-  results, root's boot) to the minimal actions that close the gap, and the done rule
-  `done-refusals` (one function, used by root to judge and by the agent to know when to
-  stop). `reconciler-proc` is the root proc that runs it on main's commits and carries the
-  actions out as requests to the api, each action's facts written by the writer."
+  "The reconciler as a full recompute, kept as r3.inc-test's oracle: `reconcile-view` of
+  `view` (one read of main) gives the actions the incremental `seon.reconcile` must match,
+  and `done-refusals` the done rule."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
-            [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm]
-            [datahike.api :as d] [clojure.string :as str] [seon.ref :as ref] [seon.config :as cfg]))
+  (:require [seon.contract :refer [defn defn-]] [seon.task :as task] [clojure.string :as str]
+            [seon.config :as cfg]))
 
 (def default-max-turns
   "Turns an attempt may take when its task sets no :seon.config.agent/max-turns: the config's."
@@ -23,17 +19,7 @@
   git's merge queue: the config's."
   (cfg/value :seon.config.merge/max-running))
 
-(def merge-dials
-  "The merge dials' defaults, when the task sets none (:seon.config.merge/*)."
-  {:max-conflicts 3 :max-merge-turns 2})
-
 (def default-budget "Refinement chains a task's failures may attach, undeclared." 2)
-
-(defn dials
-  "Task t's merge dials: its own :seon.config.merge/* over the defaults."
-  {:malli/schema [:=> [:cat :seon.task/task] :seon.reconcile/merge-dials]}
-  [t]
-  (into {} (for [[k v] merge-dials] [k (get t (keyword "seon.config.merge" (name k)) v)])))
 
 ;; ---- the view: one read of main ---------------------------------------------------
 
@@ -89,29 +75,6 @@
            (for [s (sort-by str uncontracted)] {:refusal :contract-gap :symbol s})
            (for [k (sort unmerged)] {:refusal :unmerged :key k})))))
 
-(defn hairy
-  "Is a merge too hairy to keep resolving, from measured facts: more conflicts than the
-  dial; main deleted a var the task's plan or proofs reference; more model turns without
-  green than the dial. Answers {:rule :reason} or nil. The merge agent stops early on it;
-  the reconciler decides from the attempt's facts alone."
-  {:malli/schema [:=> [:cat [:map [:conflicts [:sequential [:map [:key :any] [:kind :keyword]]]]
-                             [:task [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]
-                             [:merge-turns :int] [:max-conflicts :int] [:max-merge-turns :int]]]
-                  [:maybe [:map [:rule [:enum :too-many-conflicts :deleted-by-them-referenced :merge-turns]] [:reason :string]]]]}
-  [{:keys [conflicts task merge-turns max-conflicts max-merge-turns]}]
-  (let [{:keys [plan proofs]} (:seon.task/accumulated task)
-        refs (into (set proofs) (ref/names plan))
-        deleted (for [{:keys [key kind]} conflicts
-                      :when (and (= kind :deleted-by-them) (= :var (first key)) (refs (second key)))]
-                  (second key))]
-    (cond
-      (> (count conflicts) max-conflicts)
-      {:rule :too-many-conflicts :reason (str (count conflicts) " conflicts > :seon.config.merge/max-conflicts " max-conflicts)}
-      (seq deleted)
-      {:rule :deleted-by-them-referenced :reason (str "main deleted " (str/join ", " deleted) ", which the task references")}
-      (> merge-turns max-merge-turns)
-      {:rule :merge-turns :reason (str merge-turns " turns without green > :seon.config.merge/max-merge-turns " max-merge-turns)})))
-
 (defn- done-by?
   "Was task id merged into main at or before main's t `basis` (nil: at any t)?"
   {:malli/schema [:=> [:cat :map :seon.task/id [:maybe :int]] :boolean]}
@@ -143,26 +106,9 @@
 
 ;; ---- queries ------------------------------------------------------------------------
 
-(defn running
-  "The attempts running now (in this boot), by id."
-  {:malli/schema [:=> [:cat :seon.host/db] [:set :seon.attempt/id]]}
-  [db]
-  (let [v (view db)]
-    (into #{} (comp cat (filter #(live? v %)) (map :seon.attempt/id)) (vals (:attempts v)))))
-
-(defn done?
-  "Is task id done (merged into its target)?"
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] :boolean]}
-  [db id] (done-in? (view db) id))
-
 (defn- blocked-in
   {:malli/schema [:=> [:cat :map :seon.task/id] [:set :seon.task/id]]}
   [v id] (into #{} (remove #(done-in? v %)) (get-in v [:tasks id :seon.task/needs])))
-
-(defn blocked-by
-  "The needs of task id that are not done."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:set :seon.task/id]]}
-  [db id] (blocked-in (view db) id))
 
 (defn- depth
   "A task's depth in the needs DAG (0: no needs), the order attempts start in."
@@ -188,12 +134,6 @@
   [v]
   (->> (vals (:tasks v)) (filter #(ready? v %)) (map :seon.task/id) (sort-by (juxt #(- (depth v %)) identity)) vec))
 
-(defn should-run
-  "Tasks that should have an attempt running and have none, in start order (dependency
-  depth, then id); max-running is not applied here."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.task/id]]}
-  [db] (should-run-in (view db)))
-
 (defn- kill-reason
   "Why live attempt a must stop, or nil: its task is no longer released, or its desired
   environment differs from the one it runs in."
@@ -211,11 +151,6 @@
              :when (live? v a)
              :let [r (kill-reason v a)] :when r]
          [(:seon.attempt/id a) r])))
-
-(defn to-kill
-  "Live attempts to stop, with why: [[attempt-id reason]]."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector [:tuple :seon.attempt/id :keyword]]]}
-  [db] (to-kill-in (view db)))
 
 ;; ---- the reconciler -------------------------------------------------------------------
 
@@ -273,9 +208,3 @@
                  {:op :spawn :task id :env (desired-env t)
                   :attempt (str id "#" (inc (count (get-in v [:attempts id]))))})]
     (vec (concat reaps kills judged spawns))))
-
-(defn reconcile
-  "The actions that move main's observed state toward its desired state."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector :map]]}
-  [db] (reconcile-view (view db)))
-
