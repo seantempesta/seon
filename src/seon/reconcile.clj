@@ -423,13 +423,15 @@
   its task held for root with the failure (problem, the attempt) and the measured evidence,
   exactly as my.task/fail!'s failure holds it, and the attempt closed, in one write. Root
   decides: release it again (my.root/run!: the next attempt continues its branch, from the
-  evidence), edit it, or cancel it (owner, 2026-10-23: no automatic retries)."
+  evidence), edit it, or cancel it (owner, 2026-10-23: no automatic retries). The hold is a
+  compare-and-swap from :running, so a cancel! that landed first refuses it (the attempt is
+  then closed by the judged rule, its task not running)."
   {:malli/schema [:=> [:cat :seon.attempt/attempt :string] [:vector :any]]}
   [a problem]
-  (let [aid (:seon.attempt/id a)]
+  (let [aid (:seon.attempt/id a) id (:seon.attempt/task a)]
     (into (cas-tx aid (:seon.attempt/status a) :closed {})
-          [{:seon.task/id (:seon.attempt/task a) :seon.task/execution :held
-            :seon.task/failure {:reason problem :attempt aid} :seon.task/evidence (evidence a problem)}])))
+          [[:db/cas [:seon.task/id id] :seon.task/execution :running :held]
+           {:seon.task/id id :seon.task/failure {:reason problem :attempt aid} :seon.task/evidence (evidence a problem)}])))
 
 (defn quiescent
   "Main's last quiescence report on db ({:t :stuck}, written by the reconciler proc), or nil."
@@ -584,8 +586,12 @@
                       (seq (:conflicts carried)) (assoc :seon.attempt/task-conflicts (:conflicts carried)))))
             (concat (:tx carried)
                     ;; marked failed in this attempt (my.task/fail!): the failure on main and the
-                    ;; task held for root, so the judge closes the attempt (no retry)
-                    (when (= aid (:attempt failure)) [{:seon.task/id id :seon.task/failure failure :seon.task/execution :held}])))))
+                    ;; task held for root (a compare-and-swap from :running), so the judge closes
+                    ;; the attempt (no retry); one root already cancelled or held keeps root's
+                    (when (= aid (:attempt failure))
+                      (cond-> [{:seon.task/id id :seon.task/failure failure}]
+                        (= :running (:seon.task/execution (task/task main id)))
+                        (conj [:db/cas [:seon.task/id id] :seon.task/execution :running :held])))))))
 
 (defn- dead-tx
   "Attempt aid's death on main: the end its agent wrote on its branch before it exited (its

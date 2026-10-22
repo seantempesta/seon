@@ -449,7 +449,22 @@
         (is (= {:reason problem :attempt aid} (:seon.task/failure tk)))
         (is (= aid (:from (:seon.task/evidence tk))))
         (is (= :closed (:seon.attempt/status (task/attempt db' aid))) "the attempt is answered once")
-        (is (= :failed (r/task-state (r/index db') id)))))))
+        (is (= :failed (r/task-state (r/index db') id))))))
+  (testing "a merge the octopus merge refused: the reconciler proc's answer to the writer"
+    (let [db (mdb [(decl "add")] :extra (concat (attempt "add" 1 :done) (attempt "add-merge" 1 :ended :outcome :green :results {(t "add") :pass})))
+          [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1"}) :main {:t (:max-tx db) :ops [] :db db :ns (profile/now-ns)})
+          asked (first (filter #(= :octopus-merge (get-in % [:req :req :op])) (:to-api outs)))
+          refusal (contract/error :seon.writer/refused 'seon.writer/octopus-merge "conflicts with main at app/f" {:merged? false})
+          [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r {:ok true :results [refusal]}})
+          tx (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= :write (get-in % [:req :op])) (:to-api outs2))))
+          db' (d/db-with db tx)
+          tk (task/task db' "demo/add-merge")]
+      (is (some? asked) "the green merge is asked of the writer")
+      (is (= (set (keys (task/tasks db))) (set (keys (task/tasks db')))) "no new task")
+      (is (= :held (:seon.task/execution tk)))
+      (is (= {:reason "merge refused: conflicts with main at app/f" :attempt "demo/add-merge#1"} (:seon.task/failure tk)))
+      (is (= :closed (:seon.attempt/status (task/attempt db' "demo/add-merge#1"))))
+      (is (= refusal (:seon.attempt/error (task/attempt db' "demo/add-merge#1"))) "the writer's refusal, on the attempt"))))
 
 (deftest a-held-task-shows-its-reason-among-the-problems
   (let [[db' act] (held (mdb [(decl "add")] :extra (attempt "add" 1 :ended :outcome :cap :results {(t "add") :fail})))
@@ -458,7 +473,7 @@
     (is (= {:task "demo/add" :attempt "demo/add#1" :reason (:problem act) :open? true}
            (select-keys row [:task :attempt :reason :open?])))
     (is (= [(t "add")] (get-in row [:evidence :red])) "with its measured evidence")
-    (is (nil? (get-in (problems/report db') [:classes :stuck])) "one class for a held task: :failed")))
+    (is (= [] (:answered-by row)) "its own evidence is not an answer to it")))
 
 (deftest roots-release-runs-again-on-the-same-branch-with-the-evidence
   (let [db (mdb [(decl "add")] :extra (attempt "add" 1 :ended :outcome :cap :results {(t "add") :fail}))

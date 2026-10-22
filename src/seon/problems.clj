@@ -23,7 +23,7 @@
                                     marked failed (my.task/fail!, root or a check): its reason, a
                                     counterexample when marked, its evidence; open while held"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [seon.merge :as pm] [seon.reconcile :as reconcile]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [seon.merge :as pm] [seon.reconcile :as reconcile] [seon.db :as pdb]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses "Attempt statuses of a death (:seon.attempt/status)." (:seon.status/failed (contract/properties :seon.attempt/status)))
@@ -36,16 +36,19 @@
 
 (defn answers
   "The tasks on db whose evidence names a problem: {signature [task-id]} and
-  {attempt-id [task-id]} under :signature and :from. Reads only the tasks that carry
-  evidence (aevt :seon.task/evidence)."
+  {attempt-id [task-id]} under :signature and :from. A task's evidence about its own
+  attempt (a hold's, seon.reconcile/hold-tx) answers nothing: it is that problem. Reads
+  only the tasks that carry evidence (aevt :seon.task/evidence)."
   {:malli/schema [:=> [:cat :seon.host/db] [:map [:signature :map] [:from :map]]]}
   [db]
   (reduce (fn [acc {:keys [e v]}]
             (let [ev v
-                  id (:seon.task/id (d/pull db [:seon.task/id] e))]
+                  id (:seon.task/id (d/pull db [:seon.task/id] e))
+                  own? (some->> (:from ev) (pdb/eid db :seon.attempt/id) (d/pull db [{:seon.attempt/task [:seon.task/id]}])
+                                :seon.attempt/task :seon.task/id (= id))]
               (cond-> acc
                 (:signature ev) (update-in [:signature (:signature ev)] (fnil conj []) id)
-                (:from ev) (update-in [:from (:from ev)] (fnil conj []) id))))
+                (and (:from ev) (not own?)) (update-in [:from (:from ev)] (fnil conj []) id))))
           {:signature {} :from {}} (d/datoms db :aevt :seon.task/evidence)))
 
 ;; ---- recorded errors ------------------------------------------------------------------
@@ -99,8 +102,7 @@
     (merge (select-keys f [:reason :counterexample])
            {:task (:seon.task/id t) :attempt attempt :open? (= :held (:seon.task/execution t))
             :owner-ns (:seon.task/ns t) :producer nil :proofs (vec (sort-by str (:seon.task/proofs t)))
-            ;; its own evidence names its attempt: the task itself is not an answer to it
-            :evidence (merge ev f {:kind :failed}) :answered-by (vec (remove #{(:seon.task/id t)} (get-in ans [:from attempt] []))) :at-ms end-ms})))
+            :evidence (merge ev f {:kind :failed}) :answered-by (get-in ans [:from attempt] []) :at-ms end-ms})))
 
 (defn- attempt-rows
   "The rows of attempt entity e, by class."

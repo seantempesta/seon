@@ -44,23 +44,23 @@
     (is (not-any? #{:db/id :seon.task/declared} (keys t)) "the stored declaration is load-tx's, not the reader's")
     (is (= t (get (task/tasks db) "demo/t")))))
 
-(deftest a-continued-branch-takes-its-refinements-tasks-from-main
-  ;; root's ruling (2026-10-22): a refinement continues the failed branch, which was forked
-  ;; before main held the refinement's tasks; the step E dry run's r1 design read its task on
-  ;; its branch as nil and threw (seon.reconcile/dials). onto-tx puts the task and what it
-  ;; needs there, as main holds them, and leaves what the branch already holds
+(deftest a-resumed-branch-takes-its-needs-from-main
+  ;; a kept branch resumed for an attempt may have been forked before main held the tasks its
+  ;; task needs (the step E dry run read its task on its branch as nil and threw).
+  ;; onto-tx puts the task and what it needs there, as main holds them, and leaves another
+  ;; task the branch already holds as the branch has it
   (let [db0 (ts/test-db)
         branch (d/db-with db0 (task/create-tx db0 [{:seon.task/ns 'demo :seon.task/name "a" :seon.task/plan "Branch's own a."}]))
-        main (d/db-with branch (task/create-tx branch [{:seon.task/ns 'demo :seon.task/name "r1-design" :seon.task/plan "Refine." :seon.task/needs #{"demo/a"}}
-                                                       {:seon.task/ns 'demo :seon.task/name "r1-implement" :seon.task/plan "" :seon.task/needs #{"demo/r1-design"}}]))
+        main (d/db-with branch (task/create-tx branch [{:seon.task/ns 'demo :seon.task/name "schema" :seon.task/plan "Register the schema." :seon.task/needs #{"demo/a"}}
+                                                       {:seon.task/ns 'demo :seon.task/name "store" :seon.task/plan "" :seon.task/needs #{"demo/schema"}}]))
         main (d/db-with main [{:seon.task/id "demo/a" :seon.task/plan "Main's a."}])
-        tx (task/onto-tx main branch "demo/r1-implement")
+        tx (task/onto-tx main branch "demo/store")
         after (d/db-with branch tx)]
-    (is (= #{"demo/r1-design" "demo/r1-implement"} (set (map :seon.task/id tx))) "the task and what it needs that the branch lacks")
-    (is (= "Refine." (:seon.task/plan (task/task after "demo/r1-design"))))
-    (is (= #{"demo/r1-design"} (:seon.task/needs (task/task after "demo/r1-implement"))) "its needs resolve on the branch")
+    (is (= #{"demo/schema" "demo/store"} (set (map :seon.task/id tx))) "the task and what it needs that the branch lacks")
+    (is (= "Register the schema." (:seon.task/plan (task/task after "demo/schema"))))
+    (is (= #{"demo/schema"} (:seon.task/needs (task/task after "demo/store"))) "its needs resolve on the branch")
     (is (= "Branch's own a." (:seon.task/plan (task/task after "demo/a"))) "a task the branch holds is left as the branch has it")
-    (is (= [] (task/onto-tx main after "demo/r1-implement")) "nothing when the branch holds them")))
+    (is (= [] (task/onto-tx main after "demo/store")) "nothing when the branch holds them")))
 
 (deftest a-released-branch-takes-its-task-from-main
   ;; owner, 2026-10-23: a refused attempt holds its task for root, and root's release runs it
