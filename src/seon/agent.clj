@@ -297,23 +297,28 @@
 
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
-  (seon.program/reach-digests) against base's (the main it forked from, digested once per base),
+  (seon.program/reach-digests) against base's (the main it forked from: an immutable value,
+  digested once and held while it is the base; ~0.7 s over src and test),
   the greens this agent's earlier runs proved at those digests (:proved, {digest result}) and
   proofs. A test is selected when it is a proof or reaches what the branch changed since base (a
   var, method, fixture, ns form, macro or schema entry), and runs when no green is held at its
   digest (seon.reconcile/done-refusals reads the selected). Scratch namespaces' tests (user,
-  ^:scratch) never merge, so they never judge; a proof with no test var here does not run.
+  ^:scratch) never merge, so they never judge; a proof with no test var here does not run, and
+  one with a var but no program facts (loaded, never recorded) has no digest: it always runs.
   Answers the plan with :digests {test digest}."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :qualified-symbol]] [:map [:selected :any] [:run :any] [:reused :any] [:digests :any]]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :qualified-symbol]] [:map [:selected [:vector :qualified-symbol]] [:run [:vector :qualified-symbol]] [:reused [:map-of :qualified-symbol :map]] [:digests [:map-of :qualified-symbol :string]]]]}
   [db base proofs]
   (let [in {:env "" :tree ""}
         judges? (fn [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
                           (and (:test m) (not (program/scratch-ns? (:ns m))))))
         bd (let [[b ds] (:base-digests @state)]
              (if (identical? b base) ds (let [ds (program/reach-digests base in)] (swap! state assoc :base-digests [base ds]) ds)))
-        cd (into {} (filter (comp judges? key)) (program/reach-digests db in))]
-    (assoc (proofs/plan bd cd (into {} (keep #(some->> (get (:proved @state) %) (vector %))) (vals cd)) proofs)
-           :digests cd)))
+        cd (into {} (filter (comp judges? key)) (program/reach-digests db in))
+        unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))]
+    (-> (proofs/plan bd cd (into {} (keep #(some->> (get (:proved @state) %) (vector %))) (vals cd)) proofs)
+        (update :selected into unrecorded)
+        (update :run into unrecorded)
+        (assoc :digests cd))))
 
 (defn- run-tests-here
   "clojure.test over vars (the test vars a test-plan runs), with the branch's schemas in effect (malli's
@@ -379,7 +384,7 @@
   [ticks proofs]
   (let [{:keys [selected run reused digests]} (test-plan (db) (:base @state) proofs)
         vars (keep #(some-> (find-ns (symbol (namespace %))) (ns-resolve (symbol (name %)))) run)
-        reused-reports (vec (for [t selected :when (and (reused t) (not (some #{t} run)))] {:type :pass :var (str "#'" t) :reused true}))
+        reused-reports (vec (for [t selected :when (reused t)] {:type :pass :var (str "#'" t) :reused true}))
         [r w] (lib/pipe) t0 (profile/now-ns)
         res (lib/fork!
               {:refused (fn [n] (lib/c-close r) (lib/c-close w)
