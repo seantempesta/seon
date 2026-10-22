@@ -512,3 +512,14 @@
     (is (str/includes? text ":expected :keyword") text)
     (is (str/includes? text "Fix seon.e2e/agents-reused") text)
     (is (= 1 (count (re-seq #"its value does not satisfy" text))) "the message once")))
+
+(deftest a-turns-reasoning-goes-back-with-its-reply
+  ;; DeepSeek's thinking mode with tools needs each earlier reply's reasoning_content sent back
+  ;; (a 400 otherwise): the scrollback's assistant message carries the turn's recorded reasoning
+  (let [db (db-with-program)
+        block (context/current-state db (task-f db) {:turn 1 :max-turns 4})
+        msgs (context/messages "H" block [{:attempt "A" :reply "f triples." :reasoning "Square it first."
+                                           :calls [{:id "c1" :code "(f 3)" :evals "9"}]}])
+        assistant (first (filter #(= "assistant" (:role %)) msgs))]
+    (is (= "Square it first." (:reasoning assistant)))
+    (is (not-any? :reasoning (remove #{assistant} msgs)))))

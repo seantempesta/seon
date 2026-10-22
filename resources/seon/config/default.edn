@@ -283,8 +283,12 @@
  ;; the reasoning ate the reply (:seon.model/reasoning-ate-reply). v1 ships 65,536 for Flash
  ;; with thinking on (its 4,096 and 8,192 starved reasoning). Ported 2026-10-21 after the first
  ;; DeepSeek agent on Seon's own code: two refinement attempts answered empty, reasoning took all
- ;; 2,048. Billed by use, so the ceiling costs nothing unspent.
- :seon.config.ai/max-tokens #long #or [#env SEON_AI_MAX_TOKENS 65536]
+ ;; 2,048. 2026-10-22, step E (root's research, notes/agent-context-research-2026-10-22.md §3.3):
+ ;; 8,192 while thinking is off (the default below). The largest ordinary reply measured ~5k;
+ ;; loop replies ran for minutes (168 of 181 model-minutes, 12.4M tokens, AUDIT-agents §5.2),
+ ;; and a task whose every reply runs to 65,536 costs ~$5.8 (one such reply ~$0.04). A task or
+ ;; model that turns thinking on raises it through the resolver (v1's 65,536 for that case).
+ :seon.config.ai/max-tokens #long #or [#env SEON_AI_MAX_TOKENS 8192]
  ;; DeepSeek's thinking mode (:enabled | :disabled). Off (owner, 2026-10-21: "if we can't have
  ;; intuitive function calling based on the context our context is bad and instructions need
  ;; help"): a task whose next step needs long reasoning is a context or instruction defect to

@@ -289,13 +289,15 @@
          first rseq vec)))
 
 (defn- turn-messages
-  "One earlier turn as the conversation holds it: the model's reply with its eval calls, then
+  "One earlier turn as the conversation holds it: the model's reply with its eval calls (and
+  its reasoning, which a thinking provider needs back), then
   each call's answer as a tool message (what the REPL answered, before the model's next call).
   A reply that called nothing is followed by a user message saying so (last? false), so two
   replies never meet."
   {:malli/schema [:=> [:cat [:map [:reply :string] [:calls [:vector :map]]] :boolean] [:vector :seon.model/message]]}
-  [{:keys [reply calls]} last?]
+  [{:keys [reply calls reasoning]} last?]
   (into [(cond-> {:role "assistant" :content reply}
+           reasoning (assoc :reasoning reasoning)
            (seq calls) (assoc :tool-calls (mapv #(select-keys % [:id :code]) calls)))]
         (if (seq calls)
           (map (fn [{:keys [id evals]}] {:role "tool" :tool-call-id id :content evals}) calls)
@@ -355,7 +357,7 @@
   "The turn entity e on db, its facts."
   {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
   [db e]
-  (d/pull db [:db/id :seon.turn/id :seon.turn/n :seon.turn/origin :seon.turn/basis :seon.turn/reply :seon.turn/calls :seon.turn/truncated] e))
+  (d/pull db [:db/id :seon.turn/id :seon.turn/n :seon.turn/origin :seon.turn/basis :seon.turn/reply :seon.turn/calls :seon.turn/truncated :seon.turn/reasoning] e))
 
 (defn- model-turns
   "The model turns of attempt on db before turn n, oldest first."
@@ -403,6 +405,7 @@
                                        (= :model origin) (assoc :turn turn :max-turns max-turns)))
                 last-evals (assoc :last-evals last-evals))
         turns (vec (map-indexed (fn [i r] (cond-> {:reply (:seon.turn/reply r) :calls (vec (:seon.turn/calls r))}
+                                             (:seon.turn/reasoning r) (assoc :reasoning (:seon.turn/reasoning r))
                                              (zero? i) (assoc :attempt (attempt-text db (:db/id r)))))
                                 prev))]
     {:block block :messages (if (seq turns) (messages (help-text db) block turns) (messages (help-text db) block))}))

@@ -139,7 +139,8 @@
  ;; a conversation message: an assistant's may carry its eval calls, a tool message answers one by its id
  :seon.model/tool-call [:map [:id :string] [:code :string]]
  :seon.model/message [:map [:role [:enum "system" "user" "assistant" "tool"]] [:content :string]
-                      [:tool-calls {:optional true} [:vector :seon.model/tool-call]] [:tool-call-id {:optional true} :string]]
+                      [:tool-calls {:optional true} [:vector :seon.model/tool-call]] [:tool-call-id {:optional true} :string]
+                      [:reasoning {:optional true} :string]]
  :seon.model/provider [:multi {:dispatch :kind}
                        [:none [:map [:kind [:= :none]]]]
                        [:scripted [:map [:kind [:= :scripted]] [:script :qualified-symbol]]]
