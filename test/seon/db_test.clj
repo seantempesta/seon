@@ -205,6 +205,52 @@
         (is (= {:seon.turn/basis {:stored :db.type/string :declared :db.type/data}} (:seon.db/attributes r))))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
+;; ---- renamed attributes (task seon.db/stored-attributes-take-the-new-words) -----------------
+
+(defn- old-store!
+  "A store at path made before the rename: the schema with every renamed attribute under its
+  old name (seon.db/renamed), holding a config value and an attempt's overrun under the old
+  names. A store on disk of the test's own, the last resort: what is proved is a root's open
+  of a kept store."
+  [path]
+  (let [made (pdb/made-cfg (pdb/store-cfg :lmdb path))
+        was (into {} (map (fn [[o n]] [n o])) pdb/renamed)
+        c0 (do (d/create-database made) (d/connect made))]
+    (d/transact c0 {:tx-data (mapv #(update % :db/ident (fn [k] (was k k))) pdb/schema)})
+    (d/transact c0 {:tx-data [{:seon.root/id :root :seon.config.contract/guarantees :contracts}
+                              {:seon.attempt/id "t/a#1" :seon.attempt/waste {'app/f {:forms 2 :turns 1}}}]})
+    (d/release c0)))
+
+(deftest a-store-made-before-the-rename-reads-its-facts-under-the-new-names
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-rename-" (random-uuid))]
+    (try
+      (old-store! path)
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db) db @conn]
+        (is (= :contracts (:seon.config.contract/instrument (d/pull db [:seon.config.contract/instrument] [:seon.root/id :root])))
+            "a config value reads under its new name")
+        (is (= {'app/f {:forms 2 :turns 1}} (:seon.attempt/overrun (d/pull db [:seon.attempt/overrun] [:seon.attempt/id "t/a#1"])))
+            "a plain-data value too, as it was")
+        (is (empty? (d/datoms db :aevt :seon.attempt/waste)) "and no longer under its old name")
+        (d/release conn))
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(deftest the-rename-migration-runs-once-and-keeps-history
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-rename-" (random-uuid))]
+    (try
+      (old-store! path)
+      (let [t1 (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)
+                     t (:max-tx @conn)
+                     h (d/history @conn)]
+                 (is (= #{[:contracts true] [:contracts false]}
+                        (set (d/q '[:find ?v ?added :where [_ :seon.config.contract/guarantees ?v _ ?added]] h)))
+                     "history holds the old fact as written, and its move")
+                 (is (= #{[:contracts true]} (set (d/q '[:find ?v ?added :where [_ :seon.config.contract/instrument ?v _ ?added]] h))))
+                 (d/release conn) t)
+            {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
+        (is (= t1 (:max-tx @conn)) "a second open writes nothing")
+        (d/release conn))
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
 ;; ---- history (task seon.db/history-is-kept: v1's ruling 23, Datahike's default) --------------
 
 (deftest the-store-keeps-history
@@ -271,7 +317,7 @@
   [k]
   [{:seon.turn/id (str "att/" k) :seon.turn/attempt "att" :seon.turn/n k :seon.turn/origin :model
     :seon.turn/basis {:commit (random-uuid) :task "t/x" :attempt "att" :turn k :max-turns 8 :origin :model
-                                       :observed {:results {'t-test/x :fail} :run-errors [] :refusals [{:refusal :proof-red :symbol 't-test/x}]
+                                       :observed {:results {'t-test/x :fail} :run-errors [] :reasons [{:reason :proof-red :symbol 't-test/x}]
                                                   :reds [{:test 't-test/x :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))"}]}}
     :seon.turn/reply (slice @prose k 1500)
     :seon.turn/calls [{:id "call-0" :code "(f 2)" :evals (slice @code k 2000)}]}])
