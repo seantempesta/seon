@@ -58,10 +58,6 @@ Measured 2026-10-22 on data from the standing root's kept runs, each value compr
 
 On 0.9 KB records, zstd-3 compresses at ~260 MB/s and decompresses at ~580 MB/s (LZ4: 1,330 and 7,550 MB/s). A 2 KB value takes 1–3 µs either way, well under a commit's fsync. On the proof's workload with values out of line, zstd writes 194 KB per 20 per-turn commits, against 233 KB with LZ4, at the same ~1.9 ms a commit. A dictionary trained on our own values compresses small ones 2–5× better, and is faster too. It waits until we have a corpus that represents the running system (owner, 2026-10-22); it would live in the store under its content key, named by each frame.
 
-## Renamed attributes
-
-An attribute is renamed by moving its current facts, because Datahike renames none: an attribute's `:db/ident` never changes and no second name aliases it (`datahike.schema/find-invalid-schema-updates`). `seon.db/renamed` maps each old name to its new one, and `seon.db/open!` moves every current fact of an old name in one transaction (`seon.db/rename-tx`: added under the new name, retracted under the old). The old attribute stays installed, so history keeps what was written under the name it was written with; a reader of history across a rename asks for both names. A second open writes nothing. Measured (2026-10-22, n <= 100): 30-49 ms on the open that moves them, about 30 ms of it fixed; 2-3 ms after.
-
 ## Values out of line
 
 A datom value at least `:seon.config.store/value-out-of-line-bytes` large (1,024, the default; `:never` keeps every value inline) is stored once under its own key inside Datahike's store, and the index nodes hold a reference to it. Datahike's `:index-config :value-out-of-line-bytes` does this in the node storage of [our fork](forks.md), `datahike.index.persistent-set/CachedStorage`:

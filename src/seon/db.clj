@@ -142,29 +142,6 @@
       (when (seq others) (d/transact conn {:tx-data (vec others) :tx-meta (tx-meta)})))
     (count missing)))
 
-(def renamed
-  "Stored attributes renamed (AGENTS.md section 7a, owner 2026-10-22), old name -> new name.
-  Datahike renames nothing itself: an attribute's :db/ident never changes and no second
-  name aliases it (datahike.schema/find-invalid-schema-updates), so open! moves each current
-  fact to its new name (rename-tx) and the old attribute stays installed: history keeps what
-  was written, under the name it was written with."
-  {:seon.task/stuck :seon.task/budget-spent
-   :seon.config.root/entrance-port :seon.config.root/server-port
-   :seon.config.contract/guarantees :seon.config.contract/instrument
-   :seon.ai.model/thinking-dials :seon.ai.model/thinking-modes})
-
-(defn rename-tx
-  "tx-data moving every current fact db holds under a renamed attribute to its new name: an
-  add under the new name, a retract under the old. Empty once nothing is left under an old
-  name, so a second open writes nothing. O(current facts of the renamed attributes)."
-  {:malli/schema [:=> [:cat :seon.host/db] :seon.db/tx-data]}
-  [db]
-  (let [have (d/schema db)]
-    (vec (for [[old new] renamed :when (contains? have old)
-               dt (d/datoms db :aevt old)
-               op [[:db/add (:e dt) new (:v dt)] [:db/retract (:e dt) old (:v dt)]]]
-           op))))
-
 (defn seed!
   "Seed the empty store under conn: the schema (install-missing!), then (seed-tx n)."
   {:malli/schema [:=> [:cat :seon.host/conn :int] :any]}
@@ -273,13 +250,10 @@
       (let [conn (d/connect cfg)] (seed! conn n) (d/release conn)))
     (let [[conn existed?] (open-main! cfg main)
           added (install-missing! conn)
-          moved (let [tx (rename-tx @conn)]
-                  (when (seq tx) (d/transact conn {:tx-data tx :tx-meta (tx-meta)}))
-                  (count tx))
           cfg (cond-> cfg (not= :db main) (assoc :branch main))]
-      ;; durable before root runs: the seed, the new branch, the added attributes or the
-      ;; renamed facts (an fsync, ~5-10 ms); a recovered main with its schema whole wrote nothing
-      (when-not (and exists? existed? (zero? added) (zero? moved)) (sync! cfg))
+      ;; durable before root runs: the seed, the new branch or the added attributes (an
+      ;; fsync, ~5-10 ms); a recovered main with its schema whole wrote nothing
+      (when-not (and exists? existed? (zero? added)) (sync! cfg))
       {:cfg cfg :conn conn :recovered? (and exists? existed?) :seeded? (not exists?)})))
 
 (defn collect!

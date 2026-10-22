@@ -205,52 +205,6 @@
         (is (= {:seon.turn/basis {:stored :db.type/string :declared :db.type/data}} (:seon.db/attributes r))))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
-;; ---- renamed attributes (task seon.db/stored-attributes-take-the-new-words) -----------------
-
-(defn- old-store!
-  "A store at path made before the rename: the schema with every renamed attribute under its
-  old name (seon.db/renamed), holding a config value and a task's spent budget under the old
-  names. A store on disk of the test's own, the last resort: what is proved is a root's open
-  of a kept store."
-  [path]
-  (let [made (pdb/made-cfg (pdb/store-cfg :lmdb path))
-        was (into {} (map (fn [[o n]] [n o])) pdb/renamed)
-        c0 (do (d/create-database made) (d/connect made))]
-    (d/transact c0 {:tx-data (mapv #(update % :db/ident (fn [k] (was k k))) pdb/schema)})
-    (d/transact c0 {:tx-data [{:seon.root/id :root :seon.config.contract/guarantees :contracts}
-                              {:seon.task/id "t/a" :seon.task/stuck {:attempt "t/a#1" :cause "capped" :blocks ["t/b"]}}]})
-    (d/release c0)))
-
-(deftest a-store-made-before-the-rename-reads-its-facts-under-the-new-names
-  (let [path (str (System/getProperty "user.dir") "/target/db-test-rename-" (random-uuid))]
-    (try
-      (old-store! path)
-      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db) db @conn]
-        (is (= :contracts (:seon.config.contract/instrument (d/pull db [:seon.config.contract/instrument] [:seon.root/id :root])))
-            "a config value reads under its new name")
-        (is (= {:attempt "t/a#1" :cause "capped" :blocks ["t/b"]} (:seon.task/budget-spent (d/pull db [:seon.task/budget-spent] [:seon.task/id "t/a"])))
-            "a plain-data value too, as it was")
-        (is (empty? (d/datoms db :aevt :seon.task/stuck)) "and no longer under its old name")
-        (d/release conn))
-      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
-
-(deftest the-rename-migration-runs-once-and-keeps-history
-  (let [path (str (System/getProperty "user.dir") "/target/db-test-rename-" (random-uuid))]
-    (try
-      (old-store! path)
-      (let [t1 (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)
-                     t (:max-tx @conn)
-                     h (d/history @conn)]
-                 (is (= #{[:contracts true] [:contracts false]}
-                        (set (d/q '[:find ?v ?added :where [_ :seon.config.contract/guarantees ?v _ ?added]] h)))
-                     "history holds the old fact as written, and its move")
-                 (is (= #{[:contracts true]} (set (d/q '[:find ?v ?added :where [_ :seon.config.contract/instrument ?v _ ?added]] h))))
-                 (d/release conn) t)
-            {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
-        (is (= t1 (:max-tx @conn)) "a second open writes nothing")
-        (d/release conn))
-      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
-
 ;; ---- history (task seon.db/history-is-kept: v1's ruling 23, Datahike's default) --------------
 
 (deftest the-store-keeps-history
