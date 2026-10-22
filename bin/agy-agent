@@ -20,7 +20,7 @@
 # Moved into next/bin from ~/src/seon-jolt/bin (2026-10-23; that was a copy of ~/src/seon/bin/agy-agent,
 # 2026-10-21), its state from ../tmp/agy to this checkout's runs/agy (gitignored, as runs/ is): reviewers are
 # READ-ONLY REVIEWERS. They never run in the checkout; all state lives in runs/agy/<name>/: sid, pid, prompt, stream.jsonl (raw events),
-# transcript.log, summary.txt, usage.json, work/ or tree/, out/. Lanes run with
+# transcript.log, summary.txt, usage.json, work/ or tree/, out/. Reviewers run with
 # --dangerously-skip-permissions only because headless agy otherwise refuses every tool call; the
 # working directory is a scratch copy, so nothing they do can reach the repository.
 
