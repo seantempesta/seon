@@ -287,12 +287,15 @@
                     :ping {:op :ping}
                     :merge-main {:op :merge-main :data-attrs (:data-attrs m)})]
           (to-agent (pend st rid p op id) id {:op :req :rid rid :kind op :msg msg :merge-branch (:merge-branch m) :data-attrs (:data-attrs m)})))
-      ;; requests for the writer: answered by rid
-      :write (let [[st rid] (rid! st)
+      ;; requests for the writer: answered by rid; a collection only while no agent is live,
+      ;; the store's only writer then being root's writer (seon.db/collect!)
+      :write (if (and (= :collect (get-in m [:req :op])) (seq (:agents st)))
+               (reply! st p (refused 'seon.root/collect "a collection waits until no agent is live" {:agents (vec (sort (keys (:agents st))))}))
+               (let [[st rid] (rid! st)
                    req (:req m)
                    dest (case (:op req) :merge-main {:merge-main (:agent req) :rid rid} :merge {:merged (:agent req) :rid rid} {:rid rid})]
                (step/out! o :to-writer (assoc (dissoc req :agent) :dest dest))
-               (-> (pend st rid p (:op req) nil) (update :writes (fnil conj #{}) rid)))
+               (-> (pend st rid p (:op req) nil) (update :writes (fnil conj #{}) rid))))
       :kill (cond-> (if (get-in st [:agents id])
                       ;; :ended when root stops it because its attempt ended (the reconciler says so)
                       (-> st (set-agent id {:status (if (:ended m) :ended :killed)}) (to-agent id {:op :kill}))

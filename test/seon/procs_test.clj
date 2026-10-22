@@ -150,6 +150,22 @@
             [_ _] (step #'root/api-proc st :from-writer {:dest {:rid rid} :r {:ok true}})]
         (is (= {:ok true} @p))))))
 
+(deftest a-collection-waits-until-no-agent-is-live
+  ;; root collects the store only as its only writer (owner, 2026-10-22, simplest first;
+  ;; seon.db/collect!): a :collect while an agent is live is refused at once, naming the live
+  ;; agents, and never reaches the writer; with none live it goes to the writer like any write
+  (let [st (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                             :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})]
+    (let [p (promise)
+          [_ outs] (step #'root/api-proc (assoc st :agents {:a1 {:status :running}}) :ext {:op :write :req {:op :collect} :p p})]
+      (is (realized? p) "answered at once")
+      (is (= :seon.root/refused (:seon.error/type (when (realized? p) @p))))
+      (is (= [:a1] (:agents (when (realized? p) @p))))
+      (is (empty? (:to-writer outs))))
+    (let [p (promise)
+          [_ outs] (step #'root/api-proc st :ext {:op :write :req {:op :collect} :p p})]
+      (is (= :collect (:op (first (:to-writer outs))))))))
+
 ;; ---- task seon.root/a-proc-answers-every-request-it-took (census #2) ----------------------
 
 (defn- api-state []

@@ -674,17 +674,20 @@
 (defn- quiet
   "Report quiescence positively, once per quiet spell: when no flight is in the air and no
   attempt is live after a pass that started nothing, write main's :seon.root/quiescent (the
-  t judged, and the stuck rows). Its answer is not awaited (no flight), and the commit it
-  makes touches only root, which does not end the spell. Answers [st outputs]."
+  t judged, and the stuck rows), and ask the writer to collect the store (:collect: it sweeps
+  only when a branch is gone, and root refuses it while an agent is live). Their answers are
+  not awaited (no flight), and the commits they make touch only root, which does not end the
+  spell. Answers [st outputs]."
   {:malli/schema [:=> [:cat :seon.reconcile/state [:vector :map]] [:tuple :seon.reconcile/state [:vector :map]]]}
   [st outs]
   (if (or (:quiet st) (seq outs) (seq (:flights st)) (seq (:live (:idx st))))
     [st outs]
     (let [rid (inc (:rid st))
           fact {:t (:t st) :stuck (stuck (:idx st))}]
-      [(-> st (assoc :rid rid :quiet true :quiescent fact) (assoc-in [:pending rid] [nil :ignored]))
+      [(-> st (assoc :rid (inc rid) :quiet true :quiescent fact) (assoc-in [:pending rid] [nil :ignored]) (assoc-in [:pending (inc rid)] [nil :ignored]))
        [{:op :request :route [:reconciler :answers] :tag rid
-         :req {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/quiescent fact}]}}}]])))
+         :req {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/quiescent fact}]}}}
+        {:op :request :route [:reconciler :answers] :tag (inc rid) :req {:op :write :req {:op :collect}}}]])))
 
 (defn- pass
   "Reconcile main's latest db and start each action whose attempt is not in flight; spawns

@@ -255,6 +255,28 @@
       (when-not (and exists? existed? (zero? added)) (sync! cfg))
       {:cfg cfg :conn conn :recovered? (and exists? existed?) :seeded? (not exists?)})))
 
+(defn collect!
+  "Collect the store under conn (datahike.api/gc-storage: every key no branch reaches, nodes
+  and values out of line, is swept) when a branch the last record saw is gone (main's
+  :seon.root/collected), or no record exists yet: the record to write, {:swept :ms :branches
+  :gone}. With none gone but branches made since, the record of them, nothing swept, so a
+  branch seen at one quiescence and gone at a later one is reclaimed; {:skipped true} when the
+  branches are the ones recorded. Only while no
+  other process writes the store (owner, 2026-10-22, simplest first): root's writer runs it
+  (:collect) and root refuses it while an agent is live (docs/storage.md#collection)."
+  {:malli/schema [:=> [:cat :seon.host/conn] [:or [:map [:skipped :boolean]] :seon.root/collected]]}
+  [conn]
+  (let [last (d/q '[:find ?c . :where [?e :seon.root/id :root] [?e :seon.root/collected ?c]] @conn)
+        now (set (d/branches conn))
+        gone (count (remove now (:branches last)))]
+    (cond
+      (and last (zero? gone) (= now (:branches last))) {:skipped true}
+      (and last (zero? gone)) {:swept 0 :ms 0.0 :branches now :gone 0}
+      :else
+      (let [t0 (System/nanoTime)
+            swept @(d/gc-storage conn (java.util.Date. 0))]
+        {:swept (count swept) :ms (/ (- (System/nanoTime) t0) 1e6) :branches now :gone gone}))))
+
 (defn lease!
   "Make this process mint the store's entity ids from its lease: from lease, up to (not
   including) lease + EID-LEASE; past it a transaction is refused (lease-spent), never

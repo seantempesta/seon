@@ -74,7 +74,7 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 |---|---|---|
 | one store, many Datahike branches | `seon.db` (LMDB), `seon.writer` | present |
 | history kept | `:seon.config.store/keep-history?` (default true), fixed when a store is made; a kept store made without it keeps its layout ([storage](storage.md#history)) | present |
-| storage collection, log rotation (`seon.maintenance`) | none; `datahike.gc/gc-storage!` runs on Jolt with a `java.util.Date` | missing |
+| storage collection, log rotation (`seon.maintenance`) | root collects at quiescence with no agent live, when a branch is gone ([storage](storage.md#collection)); no log rotation | partial |
 | blobs out of line (`seon.blob`) | large values out of line inside Datahike's own store, written once, kept by GC's mark ([storage](storage.md#values-out-of-line)); zstd for every stored value, built from source ([storage](storage.md#compression)); plain values stored as data, not EDN text ([storage](storage.md#plain-values)) | present |
 | every dial documented | one aero file, one resolver (`seon.config`) | present |
 | one error shape, recorded once per signature, problem report | `seon.contract/error`, `seon.error`, `seon.problems` | present |
@@ -91,7 +91,7 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 ## The gaps, in order
 
 1. History: kept since 2026-10-22 (A.2); the `my.program/history` verb is not built.
-2. Storage reclaim: GC running with a store-wide safe point (RESUME's plan, A); a trained zstd dictionary once a representative corpus exists.
+2. Storage: collection beside live agents (docs/storage.md#collection's design); a trained zstd dictionary once a representative corpus exists; log rotation.
 3. The door: health through MCP, a compact `seon_agents`, and `jolt/door`'s refusals as data.
 4. The owner's view: `/ns` pages and the message input bar, with messages stored as facts.
 5. Main wins a conflict; an unrun proof is unknown, not red.

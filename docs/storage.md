@@ -57,4 +57,17 @@ A value that is plain data (a map, vector, set or list of strings, numbers, keyw
 
 Measured on 5,006 real eval records: jfasl is the same size as EDN text (4.65 vs 4.67 MB). A record reads in 1.3 µs instead of 11 µs and writes in 1.6 µs instead of 14.4 µs, and instants, uuids and keywords come back as themselves. It compresses about 10% less well than EDN text without a dictionary (zstd-3: 1.84× vs 2.05×), 4% less with one.
 
+## Collection
+
+Root collects the store while it is the store's only writer: at quiescence, with no agent live (owner, 2026-10-22, simplest first). The reconciler asks once per quiet spell (```seon.reconcile/quiet```), root refuses while an agent is live (`seon.root/api-proc`, `:collect`), and the writer runs ```seon.db/collect!```:
+- When a branch named in main's `:seon.root/collected` record is gone (or there is no record yet), it runs `datahike.api/gc-storage`. That sweeps every key no branch reaches: nodes, and the values out of line that the mark keeps while a tree reaches them.
+- When branches were only added, it records them as seen and sweeps nothing. So a branch that exists at one quiescence and is gone at a later one gets reclaimed.
+- The record (`{:swept :ms :branches :gone}`) is committed on main through the writer's batch.
+
+Seon's `:sync` writer runs the collection itself, not as a transaction (fork `594815d`). Proofs: `seon.db-test/a-collection-runs-when-a-branch-is-gone`, `seon.db-test/gc-runs-through-the-sync-writer`, `seon.procs-test/a-collection-waits-until-no-agent-is-live`, `seon.reconcile-test/quiescence-is-reported-when-nothing-can-move`.
+
+With history kept and runs kept, garbage comes from deleted branches: check and test mains, which `seon drop` deletes. Measured 2026-10-22: on a copy of the standing store (297 branches, 159,152 keys), a full collection took 11 s and swept 5,148 keys (3%). On a fresh root's store, a deleted branch was reclaimed at the next quiescence (19 keys, 488 ms).
+
+Why only with no agent live: every commit is one LMDB write transaction (nodes, values, commit record and head), and LMDB's writer lock serializes commits from every process. But a commit can reuse a value out of line that the store held when its node was flushed. A collection running at that moment could sweep the value, because no branch reached it. Collecting concurrently would need a mark outside the lock, then a short delta mark and sweep inside one write transaction, plus commits that re-assert reused values in their own transaction. That is the design to build when collection has to run beside live agents.
+
 Related: [source](source.md) (merges read a branch's history by commit), [DRAGONS](DRAGONS.md).

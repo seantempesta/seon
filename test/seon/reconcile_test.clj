@@ -459,6 +459,7 @@
     (testing "nothing to start, nothing in flight: one positive report, naming the stuck root and what it blocks"
       (is (empty? (:flights st)))
       (is (= {:t (:max-tx db) :stuck [{:task "demo/add" :cause "capped" :attempt "demo/add#1" :blocks blocked}]} report))
+      (is (some #(= {:op :collect} (get-in % [:req :req])) outs) "and asks the writer to collect the store, once a spell")
       (is (:quiet st)))
     (let [[db2 ops2] (commit db [{:seon.root/id :root :seon.root/quiescent report}])
           [st2 outs2] (step st db2 ops2)]

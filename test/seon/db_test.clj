@@ -319,6 +319,40 @@
         (is (= #{"kept"} (notes @conn)) "the branch reads as before"))
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
+(deftest a-collection-runs-when-a-branch-is-gone
+  ;; seon.db/collect! (root's writer runs it, :collect, at quiescence when no agent is live:
+  ;; owner, 2026-10-22, simplest first): the first collection of a store sweeps and answers its
+  ;; record (:swept, the branches it saw); the same branches again: nothing; a branch made
+  ;; since is recorded as seen, nothing swept; once a branch named in the record is gone, its nodes and its values out of line are swept and
+  ;; every live branch reads as before. A store on disk of this test's own, the last resort:
+  ;; the in-memory store has no nodes to collect; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-collect-" (random-uuid))
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+        reply (slice @prose 11 3000)
+        vk (hasch.core/uuid reply)
+        on (fn [b f] (let [c (d/connect (assoc (:config @conn) :branch b))] (try (f c) (finally (d/release c)))))
+        record! (fn [r] (when-not (:skipped r) (d/transact conn [{:seon.root/id :root :seon.root/collected r}])) r)]
+    (try
+      (d/transact conn [{:note/text "main's"}])
+      (let [r1 (record! (pdb/collect! conn))]
+        (is (= #{:db} (:branches r1)) "the first collection records the branches it saw")
+        (is (nat-int? (:swept r1))))
+      (is (:skipped (pdb/collect! conn)) "the same branches: nothing to reclaim, nothing written")
+      (d/branch! conn :db :gone)
+      (on :gone #(d/transact % {:tx-data [{:seon.turn/id "att/0" :seon.turn/reply reply}]}))
+      (let [r (record! (pdb/collect! conn))]
+        (is (= {:swept 0 :gone 0 :branches #{:db :gone}} (select-keys r [:swept :gone :branches]))
+            "a branch made since: recorded as seen, nothing swept"))
+      (is (k/exists? (:store @conn) vk {:sync? true}))
+      (d/delete-branch! conn :gone)
+      (let [r2 (record! (pdb/collect! conn))]
+        (is (pos? (:swept r2)) "the gone branch's nodes are swept")
+        (is (= 1 (:gone r2)))
+        (is (= #{:db} (:branches r2))))
+      (is (not (k/exists? (:store @conn) vk {:sync? true})) "and its value out of line")
+      (is (= #{"main's"} (notes @conn)) "main reads as before")
+      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+
 (deftest a-commit-costs-what-it-writes
   ;; task seon.db/the-store-grows-with-what-it-keeps. Estimate, from what a commit must
   ;; write: its own datoms (each value twice, in :eavt and :aevt) and the root-to-leaf path
