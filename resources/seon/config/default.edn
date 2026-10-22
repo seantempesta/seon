@@ -140,6 +140,9 @@
  ;; sits above the measured p90. Tokens are the paid resource; task
  ;; seon.model/budgets-are-data-and-spend-is-measured makes them the budget.
  :seon.config.agent/max-turns 40
+ ;; Unit: functions. An evaluation's record keeps its this many costliest contracted functions
+ ;; (seon.repl/wrap-cost). Provenance: seon.repl's top-fns 10.
+ :seon.config.agent/top-fns 10
  ;; Unit: path, every agent process's working directory, shared, made at the fork server's boot.
  ;; No repository above it: an agent changes code through its REPL, never git (owner, 2026-10-22:
  ;; "no git in agents"); it reads and writes any file by its absolute path. At the bound: n/a.
@@ -403,9 +406,6 @@
  ;; Unit: evaluations an agent's page shows, newest first (seon.print/bounded names the rest
  ;; on its branch). Provenance: the render proc's HISTORY-CAP 100.
  :seon.config.render.list/history 100
- ;; Unit: functions. An evaluation's record keeps its this many costliest contracted functions
- ;; (seon.repl/wrap-cost). Provenance: seon.repl's top-fns 10.
- :seon.config.render.list/fns 10
 
  ;; ==== the web, the guarantees, the native probe ==============================================
 

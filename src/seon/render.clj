@@ -117,11 +117,14 @@
 
 (defn printed
   "v as a REPL answers it, cuts reading through handle (result/h3, or a form that reads v):
-  its declared AI render's text (the value's own key or its schema's), else the one value
-  printer's result under the reply budget. Answers the printer's result shape."
-  {:malli/schema [:=> [:cat :any :any] :seon.print/result]}
+  the AI render its producer named (the value's own key, or its metadata's
+  :seon.render/schema: a key present in a map names nothing here, so a partial pull or tx
+  data prints as the data it is), else the one value printer's result under the reply
+  budget. A render's text ends with the form that shows the whole value as data,
+  (with-meta result/h3 nil). Answers the printer's result, or {:text :tokens} of a render."
+  {:malli/schema [:=> [:cat :any :any] [:or :seon.print/result [:map [:text :string] [:tokens nat-int?]]]]}
   [v handle]
-  (if (or (symbol? (own-key v :seon.render/ai)) (declared (schema-of v nil) :ai))
+  (if (or (symbol? (own-key v :seon.render/ai)) (declared (:seon.render/schema (meta v)) :ai))
     (let [t (ai v {:seon.render/handle handle :seon.render/budget print/default-budget})]
-      {:text t :tokens (select/estimate t) :truncated? false :elisions 0 :cuts []})
+      {:text t :tokens (select/estimate t)})
     (print/print-value v {:handle handle})))

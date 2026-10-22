@@ -33,7 +33,7 @@
   finding, not red), unmeasured (a stated dimension with nothing measured)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.profile :as profile]
-            [clojure.test :as t] [clojure.string :as str]))
+            [clojure.test :as t] [clojure.string :as str] [seon.print :as print]))
 
 ;; ---- the judge (pure) -----------------------------------------------------------------
 
@@ -202,7 +202,8 @@
           (for [{:keys [dim n ratio]} under] ["muted" (str "LOOSE: " (name dim) " at n=" n " is " (format "%.2f" ratio) "x its estimate: tighten the estimate.")])
           (for [d unmeasured] ["muted" (str "NOT MEASURED: " (name d) ".")])
           (when-let [{:keys [task]} accepted]
-            [["muted" (str "OVERRUN accepted while task " task " is open (within " ratchet "x of the overrun its task recorded): it is that task's work.")]])
+            [["muted" (str "OVERRUN accepted while task " task " is open (within " ratchet "x of "
+                           (if-let [m (:measured (:overrun e))] (print/text m (:part print/budgets)) "the overrun its task recorded") "): it is that task's work.")]])
           (when (and (:overrun e) (not ok?))
             [["bad" (str "REGRESSION: past " ratchet "x of the overrun recorded for task " (:task (:overrun e)) ".")]])))
 

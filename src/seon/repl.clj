@@ -171,8 +171,8 @@
                (if-let [text (:text pv)]
                  (cond-> (assoc m :printed text :tokens (:tokens pv))
                    (:truncated? pv) (assoc :truncated? true)
-                   (pos? (:elisions pv)) (assoc :elisions (:elisions pv)))
-                 (assoc m :printed (:seon.error/message pv) :printer-error pv)))
+                   (pos? (:elisions pv 0)) (assoc :elisions (:elisions pv)))
+                 (assoc m :printed (render/ai pv {}) :printer-error pv)))
              m))))))
 
 (defn wrap-caught
@@ -192,8 +192,8 @@
 
 (def top-fns
   "How many of a form's costliest contracted functions its record keeps
-  (:seon.config.render.list/fns)."
-  (cfg/value :seon.config.render.list/fns))
+  (:seon.config.agent/top-fns)."
+  (cfg/value :seon.config.agent/top-fns))
 
 (defn wrap-cost
   "Per-form wall µs, allocated bytes and the form's costliest contracted functions (each

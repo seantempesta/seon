@@ -432,13 +432,13 @@
   (testing "an error map's schema is its variant: the base's render, whatever the variant"
     (is (= :seon.merge/behind (r/schema-of behind nil)))
     (is (= :seon.error/base (r/schema-of {:seon.error/type :no.such/variant :seon.error/operation 'a/b :seon.error/message "m"} nil))))
-  (let [text (:text (r/printed behind 'result/h4))]
+  (let [text (r/ai behind {:seon.render/handle 'result/h4})]
     (testing "the message first, as a REPL answers; the fix; then its variant, where, and its own keys"
       (is (str/starts-with? text "main changed 3 key(s)"))
       (is (str/includes? text "fix: A merge task merges main into the branch (my.branch/merge-main!)"))
       (is (str/includes? text "(seon.merge/behind in seon.writer/merge-branch {"))
       (is (str/includes? text ":behind 3"))
-      (is (str/includes? text "the whole value: result/h4"))))
+      (is (str/includes? text "the whole value as data: (with-meta result/h4 nil)"))))
   (testing "the page shows the same facts"
     (let [html (h/html (r/html behind {}))]
       (is (str/includes? html "main changed 3 key(s)"))
@@ -454,13 +454,15 @@
          :seon.task/evidence {:from "calc/add#2" :conflicts [] :unmerged [] :red ['app.proofs/add-0-test] :problem "red"}))
 
 (deftest a-task-reads-its-state-plan-proofs-and-failure
-  (testing "a task's map at the REPL is its declared render (its identity attribute names the schema)"
-    (let [text (:text (r/printed failed-task 'result/h2))]
+  (testing "a key present in a map names no render at the REPL: it prints as the data it is"
+    (is (str/starts-with? (:text (r/printed failed-task 'result/h2)) "#:seon.task{")))
+  (testing "a task its producer names (seon.task/task's metadata) reads at the REPL by its declared render"
+    (let [text (:text (r/printed (with-meta failed-task {:seon.render/schema :seon.task/task}) 'result/h2))]
       (is (str/starts-with? text "task calc/add · work · held · needs calc/sub"))
       (is (str/includes? text "failed: add cannot be total over longs · counterexample (add Long/MAX_VALUE 1)"))
-      (is (str/includes? text "stuck: failed: held for root · blocks calc/div, calc/mul"))
-      (testing "a long plan is cut, past the env's budget, with the form that reads the rest"
-        (is (str/includes? (:text (r/printed failed-task 'result/h2)) "Step 399")))
+      (is (str/includes? text "blocked: failed: held for root · blocks calc/div, calc/mul"))
+      (testing "a long plan shows whole under the REPL's reply budget"
+        (is (str/includes? text "Step 399")))
       (testing "(the part budget when the env names none)"
         (is (re-find #"…\+\d+ chars in \d+ more lines \(subs \(get-in result/h2 \[:seon.task/accumulated :plan\]\) \d+\)" (r/ai failed-task {:seon.render/handle 'result/h2}))))
       (testing "the proofs are a bounded list: how many more and where"
@@ -470,7 +472,7 @@
   (testing "the page's task box shows the failure and the stuck fact too"
     (let [html (h/html (r/html failed-task {:seon.render/schema :seon.task/task}))]
       (is (str/includes? html "failed in calc/add#2: add cannot be total over longs"))
-      (is (str/includes? html "stuck: failed: held for root · blocks calc/div, calc/mul")))))
+      (is (str/includes? html "blocked: failed: held for root · blocks calc/div, calc/mul")))))
 
 (deftest an-attempt-reads-in-one-line
   (is (= "running calc/add#1 on a3, turn 2, 1840 tokens"
@@ -490,7 +492,7 @@
 (deftest every-problem-class-reads-what-it-is-about-and-why
   ;; rows as seon.problems/report makes them, one per class that had no line of its own
   (let [line #(r/ai (row (assoc %2 :class %1)) {:seon.render/schema :seon.problems/row})]
-    (is (= "task-conflict calc/add calc/add#3 plan: ours \"Make add total.\" · theirs \"Make add pass.\""
+    (is (= "task-conflict calc/add calc/add#3 plan: {:ours \"Make add total.\", :theirs \"Make add pass.\"}"
            (line :task-conflict {:task "calc/add" :attempt "calc/add#3" :attr :plan :open? true
                                  :evidence {:task "calc/add" :attr :plan :base "Make add." :ours "Make add total." :theirs "Make add pass." :from "calc/add#3"}})))
     (is (= "stuck calc/add calc/add#2: failed: held for root · blocks 2"
@@ -537,7 +539,8 @@
   namespaces ns? holds."
   [forms marks ns?]
   (sort (distinct (for [f forms :when (and (ns? (:ns f)) (some marks (:refs f)))
-                        [k sym] (:defines f) :when (= :var k)]
+                        ;; a var's form, or a method's (named by its multi)
+                        [k sym] (:defines f) :when (#{:var :method} k)]
                     sym))))
 
 (deftest one-printer-and-no-cut-before-it

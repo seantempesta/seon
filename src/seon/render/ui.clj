@@ -807,7 +807,7 @@
       (when-let [{:keys [reason counterexample attempt]} (:seon.task/failure t)]
         [:p {:class "err"} "failed" (when attempt (str " in " attempt)) ": " reason (when counterexample (list " · counterexample " [:code counterexample]))])
       (when-let [{:keys [cause blocks]} (:seon.task/stuck t)]
-        [:p {:class "warn"} "stuck: " cause (when (seq blocks) (str " · blocks " (str/join ", " (sort blocks))))])
+        [:p {:class "warn"} "blocked: " cause (when (seq blocks) (str " · blocks " (str/join ", " (sort blocks))))])
       (when (seq (:seon.task/needs t)) [:p {:class "muted"} "needs " (str/join ", " (sort (:seon.task/needs t)))])
       [:p {:class "muted"} (str (count proofs) (if (= 1 (count proofs)) " proof: " " proofs: ")) (str/join " " (map str (sort-by str proofs)))]
       (when-let [ev (:seon.task/evidence t)]

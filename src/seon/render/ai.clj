@@ -32,9 +32,10 @@
   [f] (some-> f (print/text (config/value :seon.config.render/form-budget))))
 
 (defn- whole
-  "The closing line: the form that holds the whole value, when env names one."
+  "The closing line, when env names a handle: the form that shows the whole value as data
+  (without the metadata that names its render, the printer prints it)."
   {:malli/schema [:=> [:cat :seon.render/env] [:maybe :string]]}
-  [env] (some->> (:seon.render/handle env) form (str "the whole value: ")))
+  [env] (when-let [h (:seon.render/handle env)] (str "the whole value as data: " (form (list 'with-meta h nil)))))
 
 (defn error
   "An error map (:seon.error/base and every variant): its message first, as a REPL answers,
@@ -45,7 +46,7 @@
   [e env]
   (let [[ps more] (print/bounded (:seon.error/problems e) :seon.config.render.list/top
                                  (form (read-of env :seon.error/problems)))
-        own (apply dissoc e (filter #(= "seon.error" (namespace %)) (keys e)))]
+        own (dissoc e :seon.error/type :seon.error/operation :seon.error/message :seon.error/fix :seon.error/problems)]
     {:seon.render/ai
      (str/join "\n" (concat [(:text (print/prose (:seon.error/message e) (config/value :seon.config.render/part-budget)
                                                   {:source (read-of env :seon.error/message)}))]
@@ -72,14 +73,15 @@
      (str/join "\n"
        (remove nil?
          [(str "task " (:seon.task/id t) " · " (ui/kname (:seon.task/kind t)) " · " (ui/kname (:seon.task/execution t))
-               (when (seq (:seon.task/needs t)) (str " · needs " (str/join ", " (sort (:seon.task/needs t))))))
+               (when (seq (:seon.task/needs t)) (str " · needs " (str/join ", " (sort (:seon.task/needs t)))))
+               (some->> (:seon.task/branch t) ui/kname (str " · branch ")) (some->> (:seon.task/model t) (str " · model ")))
           (when (:seon.task/problem t) (str "problem: " (print/line (:seon.task/problem t) (line-budget) (read-of env :seon.task/problem))))
-          (when reason (str "failed: " (print/line reason (line-budget)) (when counterexample (str " · counterexample " counterexample))))
-          (when cause (str "stuck: " (print/line cause (line-budget)) (when (seq blocks) (str " · blocks " (str/join ", " (sort blocks))))))
-          (str "plan: " (:text (print/prose plan (or (:seon.render/budget env) (config/value :seon.config.render/part-budget))
-                                            {:source (if acc (some-> (:seon.render/handle env) (#(list 'get-in % [:seon.task/accumulated :plan]))) (read-of env :seon.task/plan))})))
+          (when reason (str "failed: " (print/line reason (line-budget)) (when counterexample (str " · counterexample " (print/line counterexample (line-budget))))))
+          (when cause (str "blocked: " (print/line cause (line-budget)) (when (seq blocks) (str " · blocks " (str/join ", " (sort blocks))))))
+          (when plan (str "plan: " (:text (print/prose plan (or (:seon.render/budget env) (config/value :seon.config.render/part-budget))
+                                            {:source (if acc (some-> (:seon.render/handle env) (#(list 'get-in % [:seon.task/accumulated :plan]))) (read-of env :seon.task/plan))}))))
           (when (:seon.task/instructions t) (str "instructions: " (print/line (:seon.task/instructions t) (line-budget) (read-of env :seon.task/instructions))))
-          (let [n (count (or (:proofs acc) (:seon.task/proofs t)))] (str n (if (= 1 n) " proof: " " proofs: ") (str/join " " proofs) (when more (str " · " more))))
+          (let [n (count (or (:proofs acc) (:seon.task/proofs t)))] (when (pos? n) (str n (if (= 1 n) " proof: " " proofs: ") (str/join " " proofs) (when more (str " · " more)))))
           (when (:seon.task/evidence t) (str "evidence: " (part (:seon.task/evidence t))))
           (whole env)]))}))
 
@@ -95,7 +97,7 @@
      (str (if outcome
             (str "ended " id " " (ui/kname outcome)
                  (when reason (str ": " (print/line reason (line-budget) (read-of env :seon.attempt/reason)))))
-            (str (ui/kname status) " " id " on " (ui/kname agent) ", turn " (or turns 0) ", " (or tokens 0) " tokens"))
+            (str (ui/kname status) " " id (some->> agent ui/kname (str " on ")) (some->> turns (str ", turn ")) (some-> tokens (str " tokens") (->> (str ", ")))))
           (n conflicts "conflicts") (n unmerged "unmerged") (n changed "changed") (n uncontracted "without a contract"))}))
 
 (defn problem-row
@@ -106,13 +108,16 @@
   {:malli/schema [:=> [:cat :map :seon.render/env] :seon.render/out]}
   [r env]
   (let [ev (:evidence r)
-        why (or (:message r) (get-in r [:error :seon.error/message]) (:reason r) (:cause r)
-                (when (= :task-conflict (:class r)) (str "ours " (part (:ours ev)) " · theirs " (part (:theirs ev))))
-                (some-> (:outcome r) ui/kname))
+        [k why] (some (fn [[k v]] (when v [k v]))
+                      [[:message (:message r)] [[:error :seon.error/message] (get-in r [:error :seon.error/message])]
+                       [:reason (:reason r)] [:cause (:cause r)]
+                       [nil (when (= :task-conflict (:class r))
+                              (:text (print/print-value (select-keys ev [:ours :theirs]) {:handle (read-of env :evidence) :budget (line-budget)})))]
+                       [nil (some-> (:outcome r) ui/kname)]])
         what (remove nil? [(:task r) (:attempt r) (some-> (:test r) str) (some-> (:attr r) ui/kname)])]
     {:seon.render/ai
      (str (ui/kname (:class r)) (if-let [n (:n r)] (str " " n) (some->> (:count r) (str " ×"))) (when (seq what) (str " " (str/join " " what)))
-          (when why (str ": " (print/line why (line-budget) (read-of env :message))))
+          (when why (str ": " (if k (print/line why (line-budget) (some->> (:seon.render/handle env) (#(if (vector? k) (list 'get-in % k) (list k %))))) why)))
           (when (pos? (or (:conflicts r) 0)) (str " · " (:conflicts r) " conflicts"))
           (when (seq (:unmerged r)) (str " · unmerged " (str/join ", " (:unmerged r))))
           (when (seq (:blocks r)) (str " · blocks " (count (:blocks r))))

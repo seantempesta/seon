@@ -36,33 +36,33 @@ An outside agent reads its current-state block through root's entrance (`{:op :c
 
 ## One printer
 
-There is one value printer, `seon.print`, and nothing is cut before it (owner, 2026-10-22: "Do not create more than one value printer and no clipping happens before then"). A value a person or a model reads is its schema's declared render (`seon.render`) or the printer's text; a value that is not text reaching the page's serializer (`seon.web.html/html`), a one-line row (`seon.print/line`) or prose (`seon.render.ui/prose`) is printed by the printer, never `str`. The REPL answers every value through `seon.render/printed`, so a value with a declared AI render (an error map by its variant, a task, an attempt, a problem row, the problems report) reads the same to an agent at its REPL, to root at its own, and in root's context; the page's HTML renders of the same schemas show the same facts.
+There is one value printer, `seon.print`, and nothing is cut before it (owner, 2026-10-22: "Do not create more than one value printer and no clipping happens before then"). A value a person or a model reads is its schema's declared render (`seon.render`) or the printer's text; a value that is not text reaching the page's serializer (`seon.web.html/html`), a one-line row (`seon.print/line`) or prose (`seon.render.ui/prose`) is printed by the printer, never `str`. The REPL answers every value through `seon.render/printed`: a value whose producer names its schema (`seon.task/task`, `seon.problems/report`: the value's metadata `:seon.render/schema`) reads by its declared AI render, the same text root's context and the page are made from, and ends with the form that shows the whole value as data, `(with-meta result/h3 nil)`; a map that merely holds a key (a partial pull, tx data) prints as the data it is. An evaluation's error reads by the error map's render (its message, fix, variant and where). The page's HTML renders of the same schemas show the same facts.
 
-`seon.render-test/one-printer-and-no-cut-before-it` reads the compiler's facts (`:form/refs` of src imported, `seon.program/live-forms`): every var outside `seon.print` that references `pr-str`, `prn-str`, `print-str`, `with-out-str`, `pr`, `prn` or `clojure.pprint`'s `pprint`/`pp`, and every var of a display namespace (`seon.render.*`, `seon.web*`, `seon.context`, `seon.mcp`, `seon.entrance`) that references `subs`, `take`, `take-last` or `drop-last`, is named below with its reason; an unnamed one is red, and so is a name here that no longer prints or cuts. (`butlast` is left out: destructuring's expansion references it in every function.)
+`seon.render-test/one-printer-and-no-cut-before-it` reads the compiler's facts (`:form/refs` of src imported, `seon.program/live-forms`): every var outside `seon.print` that references `pr-str`, `prn-str`, `print-str`, `with-out-str`, `pr`, `prn` or `clojure.pprint`'s `pprint`/`pp`, and every var of a display namespace (`seon.render.*`, `seon.web*`, `seon.context`, `seon.mcp`, `seon.entrance`) that references `subs`, `take`, `take-last` or `drop-last`, is named below with its reason; an unnamed one is red, and so is a name here that no longer prints or cuts. (`butlast` is left out: destructuring's expansion references it in every function. Not covered: `str`, `print`, `println` and `format` on data, and `first` or `drop` on rows shown, which the compiler's facts cannot tell from their use on data; review reads for them.)
 
 ### Printing beside the printer: the wire, storage and code text
 
 - `seon.edn/encode`: EDN for storage and the wire, whole (`*print-length*` nil).
 - `seon.agent/run-tests-forked`, `seon.agent/run-tests-here`: a test child's answer line on its socket.
-- `seon.entrance/serve-connection!`: the entrance's answer line on its socket (its `:data` field is owed below).
+- `seon.entrance/serve-connection!`: root's server's answer line on its socket (its `:data` field is owed below).
 - `seon.entrance/verbs`: the code text a context read submits.
 - `seon.reconcile/advance`: the code text of an attempt's turn loop.
 - `seon.reconcile/judge-tx`, `seon.turn/observe`: a definition's key as the stored string `:seon.attempt/unmerged` holds.
 - `seon.web/requests`, `seon.web/http-in`: the code text of a UI call, and its recorded form.
 - `seon.web/handler`, `seon.render.proc/render-proc`: `/web.edn` and `/render.edn`, EDN endpoints by design.
 - `seon.web.html/call-url`: a call's arguments in its URL.
-- `seon.mcp/request!`: the request line on the entrance's socket.
+- `seon.mcp/request!`: the request line on root's server's socket.
 - `seon.error/signature`, `seon.error/fold-entry`, `seon.root/import-source!`: digest keys.
 - `my.root/resume-args`: a config value as a `--set` argument.
 - `seon.check/durable-write`, `seon.check/system-check`, `seon.check/threads-declared`: files a check writes and the line `seon.root-test` reads back as EDN.
-- `seon.config/refusal`: boot's refusal names each refused value before the printer can load (`seon.print` reads config).
+- `seon.config/refusal`: boot refuses an invalid config naming each value before the printer can load (`seon.print` reads config).
 
 An agent's namespace refers `clojure.pprint`'s `pp` and `pprint` (`seon.agent/make-ns!`), as a plain Clojure REPL does (AGENTS §4, "what would a plain REPL do"); what they write reaches the model as the evaluation's `:out`, budgeted as prose.
 
 ### Owed: display that prints beside the printer
 
-- `seon.agent-proc/agent-frame`, `seon.writer/merge-refusal`: a refusal message built with `pr-str` of its data; the data is already the error map's, which the error's render prints (lane dup-root's files).
-- `seon.mcp/unreachable`: the error line an outside model reads as `pr-str`; with `seon.mcp`'s tool text (the entrance's answer printed whole as EDN) it becomes the answer's render (after land5's relay).
+- `seon.agent-proc/agent-frame`, `seon.writer/merge-refusal`: a refusal message built with `pr-str` of its data; the data is already the error map's, which the error's render prints (dup-root's worktree session's files).
+- `seon.mcp/unreachable`: the error line an outside model reads as `pr-str`; with `seon.mcp`'s tool text (root's server's answer printed whole as EDN) it becomes the answer's render (after land5's relay).
 - `seon.check/run-check`, `seon.check/root-serve`: `pprint` of a check's report and a stop's summary on the console; they become `seon.print/text` (after land5's check events).
 
 ### Cuts in a display namespace that are not cuts of output

@@ -36,7 +36,15 @@
               ["(some? *e)" :printed "true"]
               ["(pst)" :out "Divide by zero"]
               ["(in-ns 'seon.reconcile)" :printed "seon.reconcile"]
-              ["(clojure.repl/source stuck)" :out "(defn stuck"]]
+              ["(clojure.repl/source stuck)" :out "(defn stuck"]
+              ;; a value its producer names the schema of reads by its declared render, and
+              ;; shows whole as data without that metadata; a map that only holds a key is data
+              ["(my.task/current)" :printed "task demo/t · work"]
+              ["(my.task/current)" :printed "the whole value as data: (with-meta result/h"]
+              ["(:seon.task/id (with-meta (my.task/current) nil))" :printed "\"demo/t\""]
+              ["(pr-str (keys (with-meta (my.task/current) nil)))" :printed ":seon.task/plan"]
+              ["{:seon.task/id \"x/y\" :n 1}" :printed ":n 1"]
+              ["(seon.contract/error :seon.root/refused 'a/b \"m\")" :printed "#:seon.error{:type :seon.root/refused"]]
         items (at/in-agent (mapv first rows))]
     (doseq [[[form k expected] item] (map vector rows items)]
       (is (str/includes? (str (get item k)) expected) (str form " -> " (pr-str item))))))
