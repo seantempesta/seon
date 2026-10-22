@@ -27,12 +27,14 @@
                                     never written, so it is open exactly while it is true
     :unnamed-site                   a site of a law (`laws`: a catch) its page does not name:
                                     derived from the compiler's facts and the page's names
+    :stale-pin                      a pin the wiki states (`pins`: docs/forks.md) that is not
+                                    the gitlink root's source import recorded
 
   `report` reads what was recorded, at a cost that follows the problems. `health` adds the
   derived classes, which read the program's names once (a set): their cost follows the
   citations (seon.problems-test/dead-citations-follow-the-citations)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [seon.merge :as pm] [seon.ref :as ref] [seon.program :as program]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [seon.merge :as pm] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses "Attempt statuses of a death (:seon.attempt/status)." (:seon.status/failed (contract/properties :seon.attempt/status)))
@@ -125,6 +127,30 @@
           :message (str v " has a " (name law) " site that " page " does not name")
           :producer nil :owner-ns (symbol (namespace v)) :proofs []
           :evidence {:kind :unnamed-site :law law :site v :page page} :answered-by (get-in ans [:signature s] []) :at-ms nil})))
+
+(def pins
+  "Where the wiki states each customized library's pin: the page, and the line that states one
+  (`reference-code/x` pinned at `sha`), compared with the gitlinks root's source import
+  recorded (:seon.root/source :pins, seon.root/import-source!)."
+  {:page "docs/forks.md" :line #"(?m)^`(reference-code/[^`]+)` pinned at `([0-9a-f]+)`"})
+
+(defn stale-pins
+  "Each pin the wiki states (`pins`) that is not the gitlink root's source import recorded, as a
+  :stale-pin row; none while root has recorded no import (unknown, not a mismatch). Cost: the
+  page's sections (one AVET range of addresses) and their text."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (let [{:keys [page line]} pins
+        recorded (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/source]) :seon.root/source :pins)]
+    (vec (when recorded
+           (for [{a :v e :e} (d/datoms db :aevt :seon.section/address) :when (str/starts-with? a (str page "#"))
+                 [_ path sha] (re-seq line (or (:seon.section/text (d/pull db [:seon.section/text] e)) ""))
+                 :let [g (get recorded path)] :when (not (some-> g (str/starts-with? sha)))
+                 :let [s (str "stale-pin " a " " path)]]
+             {:signature s :section a :path path :stated sha :recorded g :open? true
+              :message (str a " states " path " pinned at " sha ", its gitlink is " (or g "none"))
+              :producer nil :owner-ns 'seon.docs :proofs []
+              :evidence {:kind :stale-pin :section a :path path :stated sha :recorded g} :answered-by (get-in ans [:signature s] []) :at-ms nil})))))
 
 ;; ---- caused: what a branch's own work made true -----------------------------------------
 
@@ -262,14 +288,15 @@
 
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the
-  program's facts make true now (`dead-citations`, `unnamed-sites`). What the page, an agent's context and
+  program's facts make true now (`dead-citations`, `unnamed-sites`, `stale-pins`). What the page, an agent's context and
   the done and merge gates read: computed when read, never stored, never polled."
   {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.problems/report]
                   [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}
   ([db] (health db {}))
   ([db fold]
-   (let [ans (answers db) dead (dead-citations db ans) unnamed (unnamed-sites db ans)]
+   (let [ans (answers db) dead (dead-citations db ans) unnamed (unnamed-sites db ans) pinned (stale-pins db ans)]
      (vary-meta (update (report db fold) :classes assoc
                         :dead-citation {:n (count dead) :rows dead}
-                        :unnamed-site {:n (count unnamed) :rows unnamed})
+                        :unnamed-site {:n (count unnamed) :rows unnamed}
+                        :stale-pin {:n (count pinned) :rows pinned})
                 assoc :seon.render/schema :seon.problems/report))))

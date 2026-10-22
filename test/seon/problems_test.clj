@@ -485,3 +485,15 @@
     (testing "the page names it: no problem, nothing written to close it"
       (let [page (str "# Failure points\n\n| failure | edge |\n|---|---|\n| x | `" v "` |\n")]
         (is (= [] (unnamed (d/db-with db1 (seon.docs/load-tx db1 "docs" {"docs/failure-points.md" page})))))))))
+
+(deftest a-pin-the-wiki-states-is-the-recorded-gitlink
+  (let [db0 (ts/test-db)
+        page "# Forks\n\n## Jolt\n\n`reference-code/jolt` pinned at `4342b73c`, the tip of ``jolt/x``.\n\n## Chez\n\n`reference-code/chez` pinned at `80e4b9f`.\n"
+        db (d/db-with db0 (seon.docs/load-tx db0 "docs" {"docs/forks.md" page}))
+        pinned (fn [pins] (mapv (juxt :path :stated :recorded)
+                                (get-in (problems/health (cond-> db pins (d/db-with [{:seon.root/id :root :seon.root/source {:root "/c" :files 1 :forms 1 :ms 1 :pins pins}}])))
+                                        [:classes :stale-pin :rows])))]
+    (is (= [] (pinned nil)) "no import recorded: unknown, not a mismatch")
+    (is (= [] (pinned {"reference-code/jolt" "4342b73cdeadbeef" "reference-code/chez" "80e4b9f0"})))
+    (is (= [["reference-code/chez" "80e4b9f" "d19eb3b0"]] (pinned {"reference-code/jolt" "4342b73cdeadbeef" "reference-code/chez" "d19eb3b0"})))
+    (is (= [["reference-code/jolt" "4342b73c" nil]] (pinned {"reference-code/chez" "80e4b9f0"})) "a pin with no gitlink")))
