@@ -38,7 +38,6 @@
                     " until grep -q 'ROOT LISTENING' '" path ".log' || ! kill -0 $R 2>/dev/null; do sleep 0.1; done;"
                     (ask {:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str (str path "-tasks")) ")")}) " >/dev/null;"
                     (ask {:op :attach :task "demo/t"}) " >/dev/null;"
-                    " for i in {1..300}; do " (ask {:op :agents}) " | grep -q idle && break; sleep 0.2; done;"
                     (str/join (for [f forms] (str (ask (if (map? f) f {:op :eval :agent "a1" :code f})) ";")))
                     " exec 3>&-; wait $R")
         {:keys [out]} (ts/binary-sh "zsh" "-c" script :dir "target")]
@@ -72,8 +71,8 @@
                     " --set ':seon.config.root/entrance-port=" port "' --set ':seon.config.web/port=0'"
                     " < '" path "-in' > '" path ".log' 2>&1 & R=$!; exec 3>'" path "-in';"
                     " until grep -q 'ROOT LISTENING' '" path ".log' || ! kill -0 $R 2>/dev/null; do sleep 0.1; done;"
+                    ;; spawn! answers at each agent's hello: both are ready (seon.root/a-spawn-answers-at-its-agents-ready)
                     (root-eval "[(c/spawn! sys {}) (c/spawn! sys {})]") ";"
-                    (until (str "(= [:idle :idle] " statuses ")"))
                     (root-eval (str "(do (c/submit! sys :a2 " (pr-str code) ") :sent)")) " >/dev/null;"
                     (until (str "(boolean (some #{:busy} " statuses "))"))
                     (root-eval (str "(spit " (pr-str (str path "-agents.edn")) " (pr-str (into {} (for [[id a] (:agents (c/state sys))] [id (:pid a)]))))")) " >/dev/null;"
@@ -134,8 +133,8 @@
                     " --set ':seon.config.root/entrance-port=" port "' --set ':seon.config.web/port=0'"
                     " < '" path "-in' > '" path ".log' 2>&1 & R=$!; exec 3>'" path "-in';"
                     " until grep -q 'ROOT LISTENING' '" path ".log' || ! kill -0 $R 2>/dev/null; do sleep 0.1; done;"
+                    ;; spawn! answers at the agent's hello: it is ready
                     (root-eval "(c/spawn! sys {})") " >/dev/null;"
-                    " for i in {1..300}; do " (ask {:op :agents}) " | grep -q ':status :idle' && break; sleep 0.2; done;"
                     (root-eval "(do (def blocked (c/submit! sys :a1 \"(clojure.core.async/<!! (clojure.core.async/chan))\")) :sent)") " >/dev/null;"
                     " for i in {1..300}; do " (ask {:op :agents}) " | grep -q ':status :busy' && break; sleep 0.2; done;"
                     (root-eval "(c/interrupt! sys :a1)") " >/dev/null;"

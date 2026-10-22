@@ -607,8 +607,10 @@
       :ignored [st []]
       :done (done st)
       :dead-read (one (write st aid :done (dead-tx aid (:died f) (some-> (:db r) (pull-end aid)))))
-      :spawned (if-let [ag (:id r)]
-                 (one (write (assoc-in st [:flights aid :agent] ag) aid :started
+      ;; root answers a spawn at its agent's hello, or at the end the agent met first: a death
+      ;; (:seon.agent/died, naming the agent) is this attempt's death, its row started first
+      :spawned (if-let [ag (or (:id r) (when (= :seon.agent/died (:seon.error/type r)) (:agent r)))]
+                 (one (write (cond-> (assoc-in st [:flights aid :agent] ag) (:seon.error/type r) (assoc-in [:flights aid :died-at-spawn] r)) aid :started
                              (task/attempt-start-tx aid (:task act) (:boot st) ag (:env act) (System/currentTimeMillis)
                                                    (:plan (task/accumulate (get-in st [:idx :tasks]) (:task act))))))
                  ;; root refused it (the branch is held, or too many live agents): the refusal
@@ -621,8 +623,11 @@
                                     (assoc :seon.attempt/status :refused :seon.attempt/end-ms now
                                            :seon.attempt/reason (:seon.error/message r) :seon.attempt/error r)))])))
       ;; an outside agent works this attempt (seon.server): no turn loop; it hands it back
-      :started (if (= "outside" (get-in act [:env :model]))
+      :started (cond
+                 (:died-at-spawn f) (dead st (:died-at-spawn f))
+                 (= "outside" (get-in act [:env :model]))
                  (done st)
+                 :else
                  (one (request st aid :worked
                                {:op :eval :id agent
                                 :forms (sedn/encode (list 'seon.turn/work! (list 'quote (cond-> {:task (:task act) :attempt aid :max-turns (get-in act [:env :max-turns])}

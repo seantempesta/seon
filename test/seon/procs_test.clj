@@ -425,6 +425,46 @@
             (is (empty? (:pending rs2)))
             (is (= (:view rs) (:view rs2)))))))))
 
+(defn- spawning-api
+  "(f st) on an api state that can spawn: its main a branch of the test store, its graph a stub
+  that takes the update! a spawn makes (the agent's proc), so the api's step runs alone."
+  [f]
+  (ts/test-branch! (fn [_ conn]
+    (f (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 8) :conn conn
+                         :view {:agents {}} :system (doto (promise) (deliver {:procs {} :conns []}))
+                         :graph (doto (promise) (deliver (reify clojure.core.async.flow.impl.graph/Update (update-flow [_ _] {}))))})))))
+
+(deftest a-spawn-is-answered-at-its-agents-ready
+  ;; task seon.root/a-spawn-answers-at-its-agents-ready: never at once, while the agent is
+  ;; :spawning, but at its hello, so what is sent to it next reaches a ready agent
+  (spawning-api (fn [st]
+    (let [p (promise)
+          [st _] (step #'root/api-proc st :ext {:op :spawn :opts {} :p p})]
+      (is (= :unanswered (answer p)) "spawning: not answered")
+      (let [[st _] (step #'root/api-proc st :back {:op :status :agent :a1 :set {:forked-ms 1.0 :mem-mb 1.0 :t 1}})]
+        (is (= :unanswered (answer p)) "a status that is not its hello: still not")
+        (step #'root/api-proc st :back {:op :status :agent :a1 :set {:ready true}})
+        (is (= {:id :a1} (answer p)) "its hello answers it"))))))
+
+(deftest a-spawn-whose-agent-dies-first-answers-the-death
+  ;; the end the agent met before its hello is the answer: died, with the exit status the fork
+  ;; server reaped (the process's exit, never a timeout); stopped first, the stop
+  (spawning-api (fn [st]
+    (let [p (promise)
+          [st _] (step #'root/api-proc st :ext {:op :spawn :opts {} :p p})
+          [st _] (step #'root/api-proc st :from-fs {:ev :forked :agent :a1 :pid 4242 :fork-ms 1.0})
+          [st _] (step #'root/api-proc st :back {:op :ended :agent :a1 :pid 4242 :inflight []})]
+      (is (= :unanswered (answer p)) "its death waits for the exit status")
+      (step #'root/api-proc st :from-fs {:ev :exit :pid 4242 :status {:exit 3}})
+      (is (= :seon.agent/died (:seon.error/type (answer p))))
+      (is (= {:exit 3} (:exit (answer p))) "with the status it exited with")
+      (is (= :a1 (:agent (answer p)))))))
+  (spawning-api (fn [st]
+    (let [p (promise)
+          [st _] (step #'root/api-proc st :ext {:op :spawn :opts {} :p p})]
+      (step #'root/api-proc st :back {:op :ended :agent :a1 :pid nil :inflight []})
+      (is (= :seon.agent/died (:seon.error/type (answer p))) "never forked: its death at once, no status to wait for")))))
+
 (defn- answering-sys
   "(f sys), sys's server answering every request with r (a stub for the api), on a
   branch of the test store deleted when f returns."
