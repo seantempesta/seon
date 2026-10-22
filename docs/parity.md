@@ -38,7 +38,7 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 | `my.message/inbox`, `send` (stored facts) | `my.agent/messages`, `send-message`, held in the agent's process | partial |
 | `my.test/run`, `check` | proofs run by themselves after each evaluation | partial (no agent verb) |
 | `my.web/fetch`, `search` | none (no `:web` effect) | missing |
-| `my.edit/*`, `my.fs/*`, `my.shell/run!` | agents work at the REPL only | dropped |
+| `my.fs/*` (read, write, list files), `my.edit/*` (exact-span text edits), `my.shell/run!` (a command, its output and exit) | none yet; they go through the effect owner (`my.fx/call`), like every outside-world call. Seon's own code still changes at the REPL (`in-ns` + `defn`), not by editing its source files | missing |
 | `my.schema/register!`, `my.branch/merge-main!`, `unmerged`, `resolve!` | the same names | present |
 
 ## Tasks, merges, tests
@@ -99,4 +99,5 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 7. Embeddings and `similar`.
 8. A turns-to-green report.
 9. Operator commands: `open`, `logs`, `reset`.
-10. Scheduled work, web fetch.
+10. File and shell verbs (`my.fs`, `my.edit`, `my.shell`) through the effect owner.
+11. Scheduled work, web fetch.
