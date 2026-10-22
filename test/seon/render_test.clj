@@ -599,3 +599,13 @@
       (is (not (str/includes? (:text shown) "\\n"))))
     (is (not (str/includes? (:text shown) ":seon.task/accumulated")))
     (is (str/includes? (:text plain) ":value {:n 1}"))))
+
+(deftest every-part-names-its-inputs-schema
+  (testing "a unit names its input's schema, whose declared render shows it, never a render function (docs/render.md#the-frame-and-its-units)"
+    (let [units (concat (:seon.render/units (r/render-face :html (assoc sys :order [:a1] :series {} :agent-attempt {}) {:seon.render/schema :seon.render/system}))
+                        (:seon.render/units (r/render-face :html {:agent {:id :a1 :status :idle} :context {:why "none"}}
+                                                           {:seon.render/schema :seon.render/agent-page})))]
+      (is (= #{"events" "z-history"} (set (map :id (filter :render units))))
+          "only the two lists around rows serialized ahead (jolt/printer-eval makes their rows units)")
+      (doseq [{:keys [id schema]} (remove :render units)]
+        (is (r/declared schema :html) (str id " names " schema ", which declares an HTML render"))))))
