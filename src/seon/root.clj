@@ -617,6 +617,19 @@
         @(call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/source fact}]}})
         fact))))
 
+(defn wiki-tx
+  "The wiki (the checkout's docs/) onto main db, written in the boot fact's own commit so main
+  holds it before any agent forks: the help page every agent reads first is one of its pages
+  (seon.context/help-text). An unchanged wiki writes nothing. A wiki the one load refuses (a
+  link to no section, seon.docs/load-dir-tx) is a recorded :platform error (seon.error, what
+  my.root/problems shows) and main keeps the wiki it held: the boot goes on."
+  {:malli/schema [:=> [:cat :seon.host/db :string :int] [:vector :any]]}
+  [db checkout ms]
+  (let [w (docs/load-dir-tx db checkout "docs")]
+    (if (contract/error? w)
+      (second (err/flush-tx (err/fold {} (err/occurrence w :platform {} ms)) db))
+      w)))
+
 (defn- previous-end
   "How the root before this boot on main ended: the stop fact it wrote, or, when it wrote
   none (SIGKILL, a crash: nothing could be written), :unclean, found now. nil on a main no
@@ -743,14 +756,9 @@
     ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is; a root
     ;; whose boot fact was refused cannot start anything, so its refusal ends the boot
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
-    ;; the wiki (the checkout's docs/) rides the boot fact's commit, so main holds it before
-    ;; any agent forks: the help page every agent reads first is one of its pages
-    ;; (seon.context/help-text). An unchanged wiki writes nothing; a link to no section
-    ;; refuses it, and the boot with it, as a refused boot fact does.
     (let [prev (previous-end db)
-          wiki (docs/load-tx db "docs" (docs/pages (cfg/checkout) "docs"))
-          _ (when (contract/error? wiki) (throw (ex-info (str "root's wiki was refused: " (:seon.error/message wiki)) wiki)))
-          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running) (into (cfg/facts config cfg/sources)) (into wiki))
+          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running) (into (cfg/facts config cfg/sources))
+                                                                                  (into (wiki-tx db (cfg/checkout) (System/currentTimeMillis))))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev}))}})]
       (when-not (:ok r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
     (when source (import-source! sys source))

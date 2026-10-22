@@ -183,3 +183,10 @@
         (for [f (sort-by #(.getName %) (or (seq (.listFiles (io/file checkout dir))) []))
               :let [n (.getName f)] :when (.endsWith n ".md")]
           [(str dir "/" n) (slurp f)])))
+
+(defn load-dir-tx
+  "The one load of the wiki under dir of the checkout onto db: load-tx over its pages (an
+  unchanged wiki answers [], a link to no section the :seon.docs/refused error). Root's boot
+  and my.root/load-docs! both write it."
+  {:malli/schema [:=> [:cat :seon.host/db :string :string] [:or [:vector :any] :seon.docs/refused]]}
+  [db checkout dir] (load-tx db dir (pages checkout dir)))
