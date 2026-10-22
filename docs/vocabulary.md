@@ -108,4 +108,4 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | `proto.smoke` | `seon.check` |
 | `proto.agents.*` (R1, M1) | `seon.task`, `seon.reconcile`, `seon.template`, `seon.turn`, `seon.context`, `seon.model`, `seon.proofs`, `seon.stage`, `seon.fixtures`, `seon.e2e`; `proto.merge` → `seon.merge` |
 | `proto.agents.root` (executor thread, observer threads) | `seon.reconcile/reconciler-proc` (one step-fn) and `my.root` |
-| `PROTO_<DIAL>` | `SEON_<DIAL>` |
+| `PROTO_<KEY>` | `SEON_<KEY>` |

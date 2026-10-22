@@ -165,7 +165,7 @@
       (let [[st2 outs] (step #'server/fork-server-proc st :ev {:ev :eof :pid 2})]
         (is (= st st2)) (is (nil? outs))))))
 
-(deftest agent-stand-in
+(deftest agent-proc-steps
   ;; root's end of the agent's socket is a jolt.async.remote end: the agent's frames arrive
   ;; as values on its :in (the agent proc's :from), and nil there is its close
   (let [[r a] (sock/socketpair)

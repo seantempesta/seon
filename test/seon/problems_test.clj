@@ -211,7 +211,7 @@
       (is (= [[:agent :seon.agent/failed "fork server went down before the fork" :a2]]
              (written (step (api view) :back {:op :status :agent :a2 :set {:error "fork server went down before the fork"}})))))))
 
-(deftest a-stall-is-observed-by-the-stand-in
+(deftest a-stall-is-observed-by-the-agent-proc
   (let [end {:in (a/chan 4) :out (a/chan 16)}
         st (#'ap/agent-proc {:id :a1 :end end :branch :b1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4) :fx-kinds #{:fx/model}})
         [st _] (#'ap/agent-proc st :in {:op :req :rid 1 :kind :eval :msg {:op :eval :forms "(Thread/sleep 99999)"}})
