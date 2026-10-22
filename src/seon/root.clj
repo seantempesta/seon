@@ -634,8 +634,8 @@
    about n datoms of an example program on :db; a root holds no program it was not given)
    :main branch (root's main; an existing branch is resumed; :db is the seed itself)
    :backend :lmdb|:file :log? true :max-running n (parallel attempts) :provider p (the
-   attempts' model) :flush-ms and :stall-ms (fences, seon.db/flush-ms and
-   seon.agent-proc/stall-ms, for the checks that move them) :source s}. s: Seon's own source
+   attempts' model) :stall-ms (a fence, seon.agent-proc/stall-ms, for the checks that
+   move it) :source s}. s: Seon's own source
    is the program, {:root dir :dirs [\"src\"] :branch \"jolt/seon-merges\"}: main's program follows
    root's dirs at boot (import-source!: replaced when they read otherwise than main's last
    import), and each merge that changes them
@@ -644,7 +644,7 @@
   :seon.config.root/main (resumed; made from :db when the store has none), :seon.config.store/backend, :seon.config.agent/max-running and the provider of
   :seon.config.ai/*. The config in force is written on main's root entity."
   {:malli/schema [:=> [:cat :map] :seon.root/sys]}
-  [{:keys [datoms log? path main backend max-running provider flush-ms stall-ms source] :or {datoms 0}}]
+  [{:keys [datoms log? path main backend max-running provider stall-ms source] :or {datoms 0}}]
   (lib/ignore-sigpipe!)
   (when-not log? (trove/set-log-fn! nil))
   (let [t0 (lib/now-ns)
@@ -708,7 +708,7 @@
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
-                         :flush-ms (or flush-ms pdb/flush-ms) :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf)
+                         :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf)
                          :model-lanes (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
                          :web-port (cfg/value :seon.config.web/port)})
         decl (system/read-decl (cfg/value :seon.config.root/system-path))
@@ -746,7 +746,7 @@
     (let [prev (previous-end db)
           r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (into (task/boot-tx boot max-running) (cfg/facts config cfg/sources))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev}))}})]
-      (when-not (:ok r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r (:error r))) r))))
+      (when-not (:ok r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
     (when source (import-source! sys source))
     sys))
 
@@ -764,6 +764,20 @@
       (deliver p (no-agent (:op m) (gone nil "root stopped"))))
     p))
 
+(defn view-numbers
+  "Root's view v (the api's :state answer) with its windows as the numbers shown: the
+  writer's batch p50, main's transactions per group commit (>= 1: one commit takes every
+  queued transaction), the fork server's lag and fork p50s; the windows themselves dropped.
+  The one decoration: `state` and the render proc's system value both read it."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [v]
+  (let [{:keys [batches commits batched-tx lag-ms fork-ms]} (:stats v)
+        tpc (when (and commits (pos? commits)) (lib/r2 (/ (double (or batched-tx 0)) commits)))]
+    (-> v
+        (update :writer #(-> % (dissoc :recent :batch-ms) (assoc :batch-p50-ms (lib/p50 (:batch-ms %)) :tx-per-commit tpc :commits commits)))
+        (update :server assoc :lag-ms (lib/p50 lag-ms) :fork-ms-p50 (lib/p50 fork-ms))
+        (update :store merge (when batches {:batches batches :commits commits :tx-per-commit tpc})))))
+
 (defn state
   "The current state value (plain EDN), from the api's view. With {:datoms true}, main's
   datom count too, taken here in the caller from main's db value (O(datoms): a poll
@@ -774,19 +788,14 @@
   (let [v @(call! sys {:op :state})
         now (lib/now-ns)
         recent (reduce + 0 (keep (fn [[t n]] (when (< (- now t) 1000000000) n)) (get-in v [:writer :recent])))
-        db @(:conn sys)
-        {:keys [batches commits batched-tx lag-ms fork-ms]} (:stats v)]
+        db @(:conn sys)]
     ;; the api's answer passes through as itself: a defect is not decorated as a view
     (if (contract/error? v)
       v
-      (-> v
-          (update :writer #(-> % (dissoc :recent :batch-ms) (assoc :tx-per-s (double recent) :batch-p50-ms (lib/p50 (:batch-ms %)))))
+      (-> (view-numbers v)
+          (assoc-in [:writer :tx-per-s] (double recent))
           (assoc :main (cond-> {:t (:max-tx db)} datoms (assoc :datoms (count (d/datoms db :eavt)))))
-          (update :server assoc :lag-ms (lib/p50 lag-ms) :fork-ms-p50 (lib/p50 fork-ms))
-          (update :store merge (pdb/map-use (:cfg sys))
-                  (when batches (cond-> {:batches batches :commits commits}
-                                  ;; main's transactions per group commit (>= 1)
-                                  (and commits (pos? commits)) (assoc :tx-per-commit (lib/r2 (/ (double (or batched-tx 0)) commits)))))))))))
+          (update :store merge (pdb/map-use (:cfg sys))))))))
 
 (defn stats "The raw counters and windows." {:malli/schema [:=> [:cat :seon.root/sys] [:maybe :map]]}
   [sys] (:stats @(call! sys {:op :state})))
@@ -811,7 +820,7 @@
   and merge-main! read; a verb the agent cannot take answers its refusal."
   {:malli/schema [:=> [:cat :symbol [:maybe :seon.agent/id] [:maybe :map] [:maybe :map]] :map]}
   [verb id args a]
-  (let [live? (boolean (and a (not (#{:dead :killed :ended} (:status a)))))
+  (let [live? (boolean (and a (not (gone-statuses (:status a)))))
         data-attrs (:data-attrs args :all)]
     (case verb
       spawn! {:op :spawn :opts (or args {})}

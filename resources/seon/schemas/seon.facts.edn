@@ -173,8 +173,9 @@
  ;; ---- the attempt and its proof results (observed by root) ----
  :seon.attempt/id [:and {:seon.db/identity true} :string]
  :seon.attempt/task [:and {:seon.db/index true} :seon.db/ref]
- ;; finished: its task is done (seon.reconcile/finished); judged: ended or dead, the done rule's to judge
- :seon.attempt/status [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ended :dead}} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed :refused]]
+ ;; finished: its task is done (seon.reconcile/finished); judged: ended or dead, the done rule's to judge;
+ ;; failed: its agent died or was lost, a death (seon.problems/report)
+ :seon.attempt/status [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ended :dead} :seon.status/failed #{:dead :lost}} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed :refused]]
  :seon.attempt/boot :string
  :seon.attempt/agent :keyword
  :seon.attempt/pid :int

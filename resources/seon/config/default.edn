@@ -378,6 +378,16 @@
  ;; Unit: bytes. An evaluation that allocated more is flagged on its card and row
  ;; (seon.render.ui/alloc-span). Provenance: render.ui's BIG-ALLOC literal (10 MiB).
  :seon.config.render/big-alloc 10485760
+ ;; Unit: tokens a rendered value spends when its env names no budget (seon.render/print-out,
+ ;; seon.render/ai, an agent's history row). Provenance: the literal 600 render.clj and
+ ;; render.ui carried (2026-10-22), kept as it was.
+ :seon.config.render/value-budget 600
+ ;; Unit: tokens of root's context, the system's AI face (seon.render.ai/system); past it the
+ ;; later sections are named, not shown. Provenance: render.ai's and the render proc's 700.
+ :seon.config.render/root-context-budget 700
+ ;; Unit: tokens each evaluation's value shows in an agent's history on its page (the render
+ ;; proc renders each row once). Provenance: the render proc's literal 400.
+ :seon.config.render/history-row-budget 400
 
  ;; ==== the web, the guarantees, the native probe ==============================================
 

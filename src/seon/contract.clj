@@ -108,6 +108,17 @@
   [] (list 'quote (schema-forms)))
 
 (def forms (baked-forms))
+
+(clojure.core/defn properties
+  "The properties map of named schema k's form ([:type {props} ...]), or nil: what a
+  schema declares of its values (a status set, a render, a unit), read here only."
+  {:malli/schema [:=> [:cat :any] [:maybe :map]]}
+  [k] (let [form (get forms k)] (when (and (vector? form) (map? (second form))) (second form))))
+
+(clojure.core/defn enum-values
+  "The members of named [:enum {props} ...] schema k, in their declared order."
+  {:malli/schema [:=> [:cat :qualified-keyword] [:vector :any]]}
+  [k] (let [form (get forms k)] (vec (drop (if (map? (second form)) 2 1) form))))
 (def registry (registry-of forms))
 
 (def options

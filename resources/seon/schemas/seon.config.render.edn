@@ -16,4 +16,7 @@
  :seon.config.render.list/newest [:int {:min 1 :seon.config/unit "items" :description "A tile's or card's newest shown: root's defects on the page, a card's evaluations."}]
  :seon.config.render.list/brief [:int {:min 1 :seon.config/unit "items" :description "A secondary list in root's context: ended attempts, costliest functions."}]
  :seon.config.render.list/top [:int {:min 1 :seon.config/unit "items" :description "The few shown first: root's context's defects, the evaluations its costliest functions come from, a card's top functions."}]
- :seon.config.render/big-alloc [:int {:min 1 :seon.config/unit "bytes" :description "An evaluation that allocated more is flagged on the page."}]}
+ :seon.config.render/big-alloc [:int {:min 1 :seon.config/unit "bytes" :description "An evaluation that allocated more is flagged on the page."}]
+ :seon.config.render/value-budget [:int {:min 1 :seon.config/unit "tokens" :description "A rendered value whose env names no budget."}]
+ :seon.config.render/root-context-budget [:int {:min 1 :seon.config/unit "tokens" :description "Root's context, the system's AI face; later sections past it are named."}]
+ :seon.config.render/history-row-budget [:int {:min 1 :seon.config/unit "tokens" :description "Each evaluation's value in an agent's history on its page."}]}
