@@ -498,7 +498,7 @@
 (defn closure
   "The nodes reachable from start through (neighbors node), start excluded, each once, in
   the order reached. One visit per node and edge."
-  {:malli/schema [:=> [:cat [:sequential :any] :seon.host/fn] [:vector :any]]}
+  {:malli/schema [:=> [:cat [:or [:sequential :any] [:set :any]] ifn?] [:vector :any]]}
   [start neighbors]
   (loop [front (vec start) seen (set start) out []]
     (if-let [[n & more] (seq front)]
