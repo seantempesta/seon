@@ -1,16 +1,59 @@
 #!/bin/sh
-# bin/dragons — every catch in src/ (the check and e2e drivers left out) must be one
-# docs/DRAGONS.md names: an interop edge or an entrant boundary, by its function
-# (`ns/fn`). Prints each site; exits 1 when one is not listed.
+# bin/dragons [KIND ...] — the law census: for each law, every site in src/ (the check and
+# e2e drivers left out) where its mark appears, by its function (`ns/fn`), and whether the
+# law's doc names that function in backticks with the owner's reason. Prints each site;
+# exits 1 when one is not named. Kinds (default: all), each a mark over code with strings
+# and comments stripped, and the doc (and section) that sanctions it:
+#   catch       `(catch `                                         docs/DRAGONS.md
+#   clocks      time decides: sleep, timeout, deadline, *-MS      docs/clocks.md "## Time decides"
+#   measures    a clock read (currentTimeMillis, nanoTime, now-ns) docs/clocks.md
+#   resolution  requiring-resolve, ns-resolve, (resolve '..),
+#               intern, alter-var-root, with-redefs               docs/resolution.md
+# bin/dragons growth [BASE]: not a gate; net src lines since BASE (default main) and the
+# top-level definitions on its added lines (ns/name; a moved one counts).
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
+if [ "${1:-}" = growth ]; then
+  base=$(git merge-base "${2:-main}" HEAD)
+  git diff --numstat "$base" -- src | awk '{a+=$1; d+=$2} END {printf "src: +%d -%d net %+d lines\n", a, d, a-d}'
+  git diff -U0 "$base" -- src | awk '/^\+\+\+ b\//{f=substr($0,11); sub(/\.clj$/,"",f); gsub("/",".",f); gsub("_","-",f)} /^\+\((defn-?|defchecked|defmacro|def|defonce) /{split(substr($0,2),a," "); n=a[2]; if (n ~ /^\^/) n=a[3]; print "added " f "/" n}'
+  exit 0
+fi
+mkdir -p target
 bad=0
-for f in $(find src -name '*.clj' ! -name check.clj ! -name e2e.clj | sort); do
-  ns=$(sed -n 's/^(ns \([^ ]*\).*/\1/p' "$f" | head -1)
-  awk -v ns="$ns" '/^\((defn-?|defchecked|defmacro|def|defonce) /{split($0,a," "); n=a[2]; if (n ~ /^\^/) n=a[3]} /\(catch /{print ns "/" n}' "$f"
-done | sort -u > "$ROOT/target/catch-sites.txt"
-while read -r site; do
-  if grep -qF "\`$site\`" docs/DRAGONS.md; then echo "listed   $site"; else echo "UNLISTED $site"; bad=1; fi
-done < "$ROOT/target/catch-sites.txt"
-[ $bad = 0 ] && echo "DRAGONS OK ($(wc -l < "$ROOT/target/catch-sites.txt" | tr -d ' ') catch sites, all named)" || echo "DRAGONS FAILED"
+census() { # KIND PATTERN DOC [SECTION]
+  for f in $(find src -name '*.clj' ! -name check.clj ! -name e2e.clj | sort); do
+    ns=$(sed -n 's/^(ns \([^ ]*\).*/\1/p' "$f" | head -1)
+    awk -v ns="$ns" -v pat="$2" '
+      /^\((defn-?|defchecked|defmacro|def|defonce) /{split($0,a," "); n=a[2]; if (n ~ /^\^/) n=a[3]}
+      { c=""; for (i=1; i<=length($0); i++) { ch=substr($0,i,1)
+          if (s) { if (ch=="\\") i++; else if (ch=="\"") s=0; continue }
+          if (ch=="\\") { i++; continue } if (ch=="\"") { s=1; continue } if (ch==";") break
+          c=c ch }
+        if (c ~ pat) print ns "/" n }' "$f"
+  done | sort -u > "target/$1-sites.txt"
+  awk -v h="$4" 'h=="" || /^## /{on=(h=="" || index($0,h)==1)} on' "$3" > "target/$1-doc.txt"
+  kb=0
+  while read -r site; do
+    if grep -qF "\`$site\`" "target/$1-doc.txt"; then echo "listed   $site"; else echo "UNLISTED $site"; kb=1; fi
+  done < "target/$1-sites.txt"
+  n=$(wc -l < "target/$1-sites.txt" | tr -d ' ')
+  if [ "$1" = catch ]; then
+    [ $kb = 0 ] && echo "DRAGONS OK ($n catch sites, all named)" || echo "DRAGONS FAILED"
+  else
+    [ $kb = 0 ] && echo "$1 OK ($n sites, all named in $3)" || echo "$1 FAILED (unnamed sites above; $3)"
+  fi
+  [ $kb = 0 ] || bad=1
+}
+kinds=${*:-catch clocks measures resolution}
+for k in $kinds; do
+  [ "$k" = catch ] || echo "== $k"
+  case $k in
+    catch) census catch '[(]catch ' docs/DRAGONS.md ;;
+    clocks) census clocks '[Ss]leep|[Tt]imeout([^s]|$)|deadline|[A-Z]-MS' docs/clocks.md "## Time decides" ;;
+    measures) census measures 'currentTimeMillis|nanoTime|now-ns|now-ms' docs/clocks.md ;;
+    resolution) census resolution "[(](requiring-resolve|ns-resolve|resolve '|intern|alter-var-root|with-redefs)[ )]" docs/resolution.md ;;
+    *) echo "dragons: no kind $k"; bad=1 ;;
+  esac
+done
 exit $bad

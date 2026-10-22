@@ -247,8 +247,18 @@
  ;; live): how many keys it swept, how long it took, the branches it saw (a later collection
  ;; runs only once one of them is gone) and how many were gone since the one before
  :seon.root/collected [:map {:seon.db/data true} [:swept :int] [:ms number?] [:branches [:set :keyword]] [:gone :int]]
+ ;; how a root ended: its boot, why (:stop! a caller's stop, :stdin-eof its owner closed its
+ ;; stdin (bin/root stop), :signal SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks), :unclean
+ ;; no stop fact at all: SIGKILL or a crash, found by the next boot) and when
+ :seon.root/end [:map {:seon.db/data true} [:boot :string] [:cause :keyword] [:at-ms :int]]
+ ;; written by seon.root/stop! before anything stops, durable
+ :seon.root/stopped :seon.root/end
+ ;; what this boot found of the root before it on this main: its stop fact, or :unclean
+ :seon.root/previous-end :seon.root/end
  :seon.root/root-fact [:map {:seon.db/attributes true}
                           [:seon.root/id :seon.root/id] [:seon.root/boot :seon.root/boot]
+                          [:seon.root/stopped {:optional true} :seon.root/stopped]
+                          [:seon.root/previous-end {:optional true} :seon.root/previous-end]
                           [:seon.root/quiescent {:optional true} :seon.root/quiescent]
                           [:seon.root/source {:optional true} :seon.root/source]
                           [:seon.root/generation {:optional true} :seon.root/generation]

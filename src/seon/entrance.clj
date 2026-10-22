@@ -10,7 +10,7 @@
   connection is an outside caller of root's API, as bin/check is. Try it:
   printf '{:op :agents}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.root :as c] [seon.task :as task] [seon.reconcile :as r]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.reconcile :as r]
             [seon.lib :as lib] [seon.repl :as repl] [clojure.edn :as edn]))
 
 (defn- refused
@@ -129,8 +129,9 @@
 
 (defn- serve-connection!
   "Answer one connection's requests, line by line, until it closes. The entrant boundary:
-  a defect answers as data, the one error map (a thrown one as it is), and the connection
-  goes on."
+  a defect (a line that does not read, a verb that throws) answers that request as the typed
+  :seon.entrance/defect, and the connection goes on; every other connection is its own
+  thread and never sees it."
   {:malli/schema [:=> [:cat :seon.root/sys :any] :any]}
   [sys sock]
   (let [r (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream sock)))
@@ -138,8 +139,9 @@
     (loop []
       (when-let [line (.readLine r)]
         (let [a (try (answer sys (edn/read-string line))
-                     (catch Throwable e (if (contract/error? (ex-data e)) (ex-data e)
-                                            (contract/error :seon.root/proc-defect 'seon.entrance/serve-connection! (step/error-msg e) {:data (ex-data e)}))))]
+                     (catch Throwable e
+                       (contract/error :seon.entrance/defect 'seon.entrance/answer (or (ex-message e) (str (type e)))
+                                       (cond-> {:line line} (ex-data e) (assoc :data (pr-str (ex-data e)))))))]
           (.write out (.getBytes (str (binding [*print-length* nil *print-level* nil] (pr-str a)) "\n") "UTF-8"))
           (.flush out)
           (recur))))

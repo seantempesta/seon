@@ -1,0 +1,799 @@
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -31,6 +31,7 @@
+ - [source](source.md): agents change Seon's own functions at the REPL on their branches; a merge lands them on main, writes the files back and runs them next.
+ - [references](references.md): what a text cites, read by one parser (`seon.ref`), becomes its references, pulled into a context at the depth its delimiter asks.
+ - [render](render.md): every view, the model's context included, is the one value printer or a render declared on the value's schema; nothing clips.
++- [cost](cost.md): a cost proof's estimate is priced by the measured unit table and judged by tolerances derived from the table's own spread.
+ 
+ ## How work moves
+ 
+--- /dev/null
++++ b/docs/cost.md
+@@ -0,0 +1,23 @@
++# Cost
++
++A cost proof states an estimate priced by the unit table and is red when a measured size costs more than the estimate allows, by tolerances derived from the table's own measured spread. A proof is an ordinary deftest calling ```seon.cost/proof```, so it sits in a task's proofs beside the behaviour proofs; the estimate's shape is the `:seon.cost/estimate` schema, and what each contracted function cost comes from `seon.profile`.
++
++## The unit table
++
++```seon.cost/units``` holds what one unit operation costs on this runtime: ns and bytes per unit, and `:range`, the least and largest ratio to that price of every measurement taken of it. Each row's bench is in the test, ```seon.cost-test/unit-benches```, measured through ```seon.cost-test/measure-unit```; ```seon.cost-test/table``` measures every row k times at 1k, 10k and 100k units and answers the table's literal (each row priced at its median 10k measurement, ranged by ```seon.cost-test/unit-range```). The table holds the release binary's 10k median, ranged over both the release binary and source mode, since proofs run in both. Bytes are ranged only for rows that allocate.
++
++A unit stated as a difference (`:minus`, e.g. ``:db/pull-attr``, a two-attribute pull minus a one-attribute pull) measures both terms on one input, the second right after the first, so only the difference in work remains. Measured on two different dbs, that row was bimodal: its one entity sat in a ~519-datom index, at the edge of a 512-datom EAVT leaf, and read 8.8 KB in one index level or 11.6 KB in two, on one binary (lane UNITFLAKE, 2026-10-21; task `seon.cost/a-unit-measures-the-work-not-the-cache`). Both pull rows now take one setup, ```seon.cost-test/notes-db```: a branch of the test store with n notes. An extra attribute measures ~10 KB, ten times its estimate; that is Datahike's pull, filed as `datahike.pull-api/a-pull-allocates-what-it-reads`.
++
++`seon.cost-test/the-unit-table-is-current` re-measures every row at 10k: bytes inside the row's own range, wall time inside the table's pooled range. `seon.cost-test/a-unit-measures-the-same-across-runs` holds the pull rows to 2% across fresh branches, order and size.
++
++## The judge's tolerances
++
++No tolerance is a guessed constant: ```seon.cost/tolerances``` derives them per estimate from the table's ranges, and every verdict carries them as `:tolerances`.
++
++- **Bytes** are counted. The slack is the largest ratio measured among the rows the estimate's `:ops` price, or the whole table's when it prices none or states bytes in `:per-n`.
++- **Wall time** pools every row's range, since three runs of one row do not show the machine's spread (3.15x when derived).
++- **Growth**: a dimension is STEEPER past `:growth` plus the steepest `log(hi/lo)/log(100)` of the same rows, which is how fast a unit's own cost moved over the table's 100x span (```seon.cost/table-span```).
++- **Calls** are exact: 1.0x, and no exponent tolerance.
++- **An accepted overrun** (`:overrun`, naming its open task) holds while the largest size is within the dimension's slack of what was measured when its task was filed.
++
++```seon.cost/judge``` applies them, `seon.cost/explain` and the verdict's render (`seon.render.ui/verdict-lines`, the page's box and the model's cost report alike) print them, and the agent's prompt (`seon.context/system-prompt`) renders the widest through ```seon.cost/tolerance-text``` and ```seon.cost/widest-tolerances```, so no copy of a number goes stale when the table is re-measured. Proofs: `seon.cost-test/the-exponent-tolerance-follows-slack-and-span`, `seon.cost-test/slack-is-the-units-measured-spread`, `seon.context-test/the-prompt-states-the-judges-own-tolerances`.
+--- a/docs/parity.md
++++ b/docs/parity.md
+@@ -54,7 +54,7 @@
+ | main wins a conflict (MERGE-STEP 5a) | ours is kept | missing |
+ | one done rule shared with merge | `seon.reconcile/done-refusals` (a proof that never ran counts red, not unknown) | partial |
+ | tests selected by reach; results reused by reach digest | `seon.program/reach-digests`; `bin/test --reach` reuses green results in `../test-results` | present for `bin/test`; agents' proof runs don't reuse |
+-| contracts armed at definition; cost proofs; per-function profile | `seon.contract`, `seon.cost`, `seon.profile` | present |
++| contracts armed at definition; cost proofs ([cost](cost.md)); per-function profile | `seon.contract`, `seon.cost`, `seon.profile` | present |
+ | turns-to-green report (median, p90) | `seon.learn` charges waste per attempt | partial |
+ | scheduled work (`seon.schedule`) | none (AGENTS names a cron proc; `system.edn` has none) | missing |
+ 
+--- a/resources/seon/schemas/seon.cost.edn
++++ b/resources/seon/schemas/seon.cost.edn
+@@ -2,7 +2,8 @@
+ ;; function cost (seon.profile). A cost proof (seon.cost/proof) states an estimate: what N
+ ;; counts, the least work the data requires, how that work grows, and what each unit of it
+ ;; costs; it measures the function at three or more sizes and is red when it costs more.
+-{:seon.profile/fn-cost [:map {:closed true} [:var :qualified-symbol] [:calls nat-int?] [:ms [:double {:min 0.0}]]]
++{:seon.profile/fn-cost [:map {:closed true} [:var :qualified-symbol] [:calls nat-int?] [:samples {:optional true} nat-int?]
++                        [:ms [:double {:min 0.0}]]]
+  ;; how the least work grows with N: W(n) = 1, log2 n, n, n log2 n, n², n³
+  :seon.cost/growth [:enum :constant :log :linear :n-log-n :quadratic :cubic]
+  ;; the measured dimensions: wall ns (min over repeats), allocated bytes, calls of contracted functions
+@@ -14,7 +15,19 @@
+                   [:calls {:optional true} :seon.cost/amount]]
+  :seon.cost/dim [:enum :ns :bytes :calls]
+  ;; one unit operation of the unit table (seon.cost/units): its measured cost on this runtime
+- :seon.cost/unit [:map {:closed true} [:ns [:double {:min 0.0}]] [:bytes [:double {:min 0.0}]] [:what :string]]
++ ;; how far a unit's measurements strayed from its price: per dimension the least and largest
++ ;; ratio of a measurement to the price, over 1k-100k units, several runs and both runtimes
++ :seon.cost/range [:map {:closed true}
++                   [:ns {:optional true} [:tuple [:double {:min 0.0}] [:double {:min 0.0}]]]
++                   [:bytes {:optional true} [:tuple [:double {:min 0.0}] [:double {:min 0.0}]]]]
++ :seon.cost/unit [:map {:closed true} [:ns [:double {:min 0.0}]] [:bytes [:double {:min 0.0}]] [:what :string]
++                  [:range {:optional true} :seon.cost/range]]
++ ;; what a verdict was judged by, derived from the unit table (seon.cost/tolerances): per
++ ;; dimension the slack (largest measured/estimate allowed) and the exponent tolerance (how
++ ;; much faster than :growth a dimension may grow)
++ :seon.cost/tolerances [:map {:closed true}
++                        [:slack [:map {:closed true} [:ns [:double {:min 1.0}]] [:bytes [:double {:min 1.0}]] [:calls [:double {:min 1.0}]]]]
++                        [:exponent [:map {:closed true} [:ns [:double {:min 0.0}]] [:bytes [:double {:min 0.0}]] [:calls [:double {:min 0.0}]]]]]
+  :seon.cost/estimate [:map {:closed true}
+                       ;; the function measured, and the function of n answering its argument vector
+                       [:of :qualified-symbol]
+@@ -32,7 +45,7 @@
+                       ;; ascending, at least three, spanning at least 100x
+                       [:sizes [:vector {:min 3} pos-int?]]
+                       ;; an overrun accepted while its task is open: the task (a task-file entry) and what
+-                      ;; the largest size measured when it was filed; red again past ratchet x that
++                      ;; the largest size measured when it was filed; red again past the dimension's slack x that
+                       [:overrun {:optional true} [:map {:closed true} [:task :string] [:measured :seon.cost/dims]]]]
+  ;; one size measured: n, what it cost, what the estimate allows there
+  :seon.cost/row [:map {:closed true} [:n pos-int?] [:measured :seon.cost/dims] [:expected :seon.cost/dims]]
+@@ -49,5 +62,7 @@
+                      [:under [:vector :seon.cost/over]]
+                      ;; a dimension the estimate states that was not measured (contracts off: no calls)
+                      [:unmeasured [:vector :seon.cost/dim]]
++                     ;; the tolerances it was judged by (seon.cost/tolerances)
++                     [:tolerances {:optional true} :seon.cost/tolerances]
+                      ;; the over and steeper findings an open overrun task accepts (still shown, not red)
+                      [:accepted {:optional true} [:map [:task :string] [:over [:vector :seon.cost/over]] [:steeper [:vector :seon.cost/fit]]]]]}
+--- /dev/null
++++ b/resources/seon/tasks/datahike.pull-api.edn
+@@ -0,0 +1,4 @@
++[{:seon.task/name "a-pull-allocates-what-it-reads"
++  :seon.task/plan "Found by lane UNITFLAKE (2026-10-21) measuring seon.cost's pull units (source mode, contracts on and off alike): one d/pull of an entity in a 1-entity db allocates 22.2 KB for [:db/id], 24.9 KB for [:note/text], 36.0 KB for [:note/text :note/agent]; in a 10k-entity db 24.6 KB for one attribute and ~10.5 KB per further attribute (release binary: 22.8 KB and 9.6 KB). The work's estimate: resolve the eid (one EAVT seek), per attribute one EAVT slice (two bound datoms, one iterator, ~0.5 KB) and one assoc! into the result: ~1-2 KB per pull and well under 1 KB per attribute. Measured is 10-20x that. Where it goes, from reference-code/datahike/src/datahike/pull_api.cljc: every call recompiles the selector (pull -> compile-pull-plan -> compile-pull-spec -> datalog.parser.pull/parse-pull, line 54-73, an atom per call), builds a budget and binds resource/*budget* (pull-spec, line 517), carries frames as maps updated per attribute (pull-pattern-frame, line 466) and post-processes each slice through a transducer (db.cljc post-process-datoms, line 180). Correct: a pull costs its seeks plus its result; a selector compiled once per distinct selector (the plan is already a value: PullPlan) and frames that do not allocate per attribute. Every pull the platform does (seon.task, seon.problems, the context) pays this, priced by seon.cost/units :db/pull and :db/pull-attr. Measure with seon.cost/measure-unit :db/pull and :db/pull-attr at 1k and 10k; the table rows move down when it lands."
++  :seon.task/kind :work
++  :seon.task/proofs #{seon.cost-test/the-unit-table-is-current datahike.pull-api-cost-test/a-pull-is-its-seeks-and-its-result}}]
+--- a/resources/seon/tasks/seon.cost.edn
++++ b/resources/seon/tasks/seon.cost.edn
+@@ -1,4 +1,4 @@
+ [{:seon.task/name "a-unit-measures-the-work-not-the-cache"
+-  :seon.task/plan "seon.cost-test/the-unit-table-is-current went red for AGENTS on :db/pull-attr (11.6 KB measured, table 7.6 KB). Root traced it 2026-10-21: not the Jolt pin (the same 11.6 KB on Jolt 00a3b321 and 9e42a0d8) and not a code change. The same revision (33f6283, same binary) measured 11.6 KB on one run and 8.9 KB on the next two; bisecting over 9 revisions gave either value. The unit (seon.cost/unit-benches :db/pull-attr: pull [:note/text :note/agent] minus pull [:note/text], same entity n times) depends on Datahike's caches (:search-cache-size, the store cache) being warm or cold at the start, so the table row is a coin flip and the test flakes. A unit must measure the work alone: state the cache it runs under (a fresh db per measurement, or a declared warm-up that settles it), show the two modes are gone over 10 runs, then re-measure the row on the release binary (bin/check units)."
++  :seon.task/plan "seon.cost-test/the-unit-table-is-current went red for AGENTS on :db/pull-attr (11.6 KB measured, table 7.6 KB). Root traced it 2026-10-21: not the Jolt pin (the same 11.6 KB on Jolt 00a3b321 and 9e42a0d8) and not a code change. The same revision (33f6283, same binary) measured 11.6 KB on one run and 8.9 KB on the next two; bisecting over 9 revisions gave either value. The unit (seon.cost-test/unit-benches :db/pull-attr: pull [:note/text :note/agent] minus pull [:note/text], same entity n times) depends on Datahike's caches (:search-cache-size, the store cache) being warm or cold at the start, so the table row is a coin flip and the test flakes. A unit must measure the work alone: state the cache it runs under (a fresh db per measurement, or a declared warm-up that settles it), show the two modes are gone over 10 runs, then re-measure the row on the release binary (seon.cost-test/table). Lane UNITFLAKE (2026-10-21), what was found. The cause is the shape of the index around the measured entity, not a cache. The old row was (pull [:note/text :note/agent] of ONE entity in a nearly empty db, n times) minus measure-unit :db/pull (pull [:note/text] of n distinct entities in a fresh n-entity db, set up again inside measure-unit). Measured (source mode, probe8, a fresh store holding the schema's 407 EAVT datoms plus k filler entities): the two-attribute pull is 33,408 B while EAVT holds <= 509 datoms and 36,048 B from 529 up (36,534 B by 709): a leaf holds 512 datoms, and a second index level costs ~2.6 KB per pull. The old one-entity db held schema (407) + seed-tx 0's example namespace (110) + the entity (2) = ~519 datoms, a dozen from that edge, so a schema change of a few attributes (revisions add them) moved the row between 36.0 - 24.6 = 11.6 KB and 33.4 - 24.6 = 8.8 KB. Reproduced both modes on one binary: fresh store with no seed 8,802 B; seed 110 11,570 B; a test-store branch (main 5be0d5e) 11,577 B. On one revision the db was always ~519 datoms, so the 18 source-mode processes of 0b9df34 all read 11,442-11,577 B (contracts on/off, 4 at once and serial, load 6-8); root's same-revision 8.9 KB runs left no logs to say what differed. Also ruled out with evidence: GC accounting (Chez sstats-bytes is heap-now + reclaimed, continuous across collections; the collect handler allocates ~1.4 KB per collection; the counter steps by ~64 KB segment events, 1-22 per 10k-pull call as the adaptive nursery moves: <=1.3% of a row at 10k), contract settings, AOT cache cold vs warm (the compiled datahike code is identical modulo gensyms across all 15 source-mode variants; every bin/test recompiles ~100 namespaces anyway: jolt.loader/the-aot-cache-hits-on-a-second-identical-run). Fix (seon.cost-test/notes-db, seon.cost-test/unit-benches, seon.cost-test/measure-unit; wave 1 moved the bench from src/seon/cost.clj into the test): both pull units take one setup (a test-store branch with n notes), and a :minus unit measures its subtrahend on the SAME args right after, so the db, its index shape and the entities are the same for both terms and only the extra attribute remains. After: release binary, two processes, load 5-8: 9,921 / 9,928 / 10,440 B at 1k/10k/100k (second run 9,934 at 10k); source mode 10,855 B three times identical. Row 7,628 B (STORES: 11,577) -> 9,928 B, ns 9,270; the table derived with ranges (seon.fences/cost-tolerances-are-derived) prices it at 9,934 B, :range bytes 0.991-1.143. Every other row re-measured three times on the release binary (load 6-510): unchanged within tolerance, bytes identical to 2 decimals except the shuffled sort rows; none moved. Estimate vs measured: an extra attribute should cost one EAVT slice and one assoc!, under 1 KB; ~10 KB is 10x, filed as datahike.pull-api/a-pull-allocates-what-it-reads."
+   :seon.task/kind :work
+   :seon.task/proofs #{seon.cost-test/the-unit-table-is-current seon.cost-test/a-unit-measures-the-same-across-runs}}]
+--- a/resources/seon/tasks/seon.fences.edn
++++ b/resources/seon/tasks/seon.fences.edn
+@@ -56,7 +56,7 @@
+   :seon.task/proofs #{seon.check-test/no-check-sleeps-or-polls
+                       seon.check-test/backpressure-asserts-its-derived-ceiling}}
+  {:seon.task/name "cost-tolerances-are-derived"
+-  :seon.task/plan "Audit FENCES #38, #40-42, #44. seon.cost/slack {:ns 3.0 :bytes 1.25 :calls 1.0} (cost.clj:40-43): bytes are called exact yet get 25% because the unit table flakes (seon.cost/a-unit-measures-the-work-not-the-cache: 11.6 vs 8.9 KB); ns gets 3x for load. steeper-by 0.3 (cost.clj:45-49) and ratchet 1.5 (cost.clj:55-59) are guesses too. seon.context's prompt hardcodes 1.25x/1.0x/3x (context.clj:27), a second copy. test/seon/profile_test.clj:37-41 asserts within 2x and is gated (when contract/on?), zero assertions when off. Correct: each unit row records its spread over k runs under a declared cache state; a dimension's slack is the spread of the units its estimate prices (bytes then near 1.0); ns carries the run's load (uptime, the bench lock) and its spread at that load; the exponent tolerance is derived per dimension and proof as log(slack_d)/log(n_max/n_min) (over 100x: bytes 1.25 -> 0.048, ns 3 -> 0.24); the ratchet is the overrun's own measured spread at filing; every verdict prints the derived tolerances, and the prompt renders them from seon.cost. profile_test asserts the sampling rule exactly (ceil(n/64) timed calls) in an environment with contracts on."
++  :seon.task/plan "Audit FENCES #38, #40-42, #44. seon.cost/slack {:ns 3.0 :bytes 1.25 :calls 1.0} (cost.clj:40-43): bytes are called exact yet get 25% because the unit table flakes (seon.cost/a-unit-measures-the-work-not-the-cache: 11.6 vs 8.9 KB); ns gets 3x for load. steeper-by 0.3 (cost.clj:45-49) and ratchet 1.5 (cost.clj:55-59) are guesses too. seon.context's prompt hardcodes 1.25x/1.0x/3x (context.clj:27), a second copy. test/seon/profile_test.clj:37-41 asserts within 2x and is gated (when contract/on?), zero assertions when off. Correct: each unit row records its spread over k runs under a declared cache state; a dimension's slack is the spread of the units its estimate prices (bytes then near 1.0); ns carries the run's load (uptime, the bench lock) and its spread at that load; the exponent tolerance is derived per dimension and proof as log(slack_d)/log(n_max/n_min) (over 100x: bytes 1.25 -> 0.048, ns 3 -> 0.24); the ratchet is the overrun's own measured spread at filing; every verdict prints the derived tolerances, and the prompt renders them from seon.cost. profile_test asserts the sampling rule exactly (ceil(n/64) timed calls) in an environment with contracts on. Done by lane UNITFLAKE (2026-10-21): every unit row carries :range, the least and largest ratio to its price of 18 measurements (1k/10k/100k units x 3 runs x release and source mode; seon.cost-test/table 3, print rounding included); seon.cost/tolerances derives, per estimate: bytes slack = the largest hi of the rows its :ops price (the whole table's when it prices none or states bytes in :per-n), exponent tolerance = the steepest log(hi/lo)/log(100) of those rows (the table spans 100x; the unit's own drift with n, rather than log(slack)/log(proof span)); calls 1.0 and 0 (fit rounding 1e-9). Wall time differs from the plan: three runs of one row do not show its spread (a 10k row re-measured at the same load left its own range by 1.4x), so ns takes every row's range pooled (today 3.15x, exponent 0.256). The ratchet is the dimension's slack (an overrun holds while the largest size is within its own measured spread of what was filed), not a k-run record per overrun. Every verdict carries :tolerances and explain/verdict-box print them; the prompt renders cost/tolerance-text of the widest; the unit-table check is each row's own byte range and the pooled ns range. Today's widest: bytes 1.26x (+0.109), ns 3.15x (+0.256). One proof went red under the tighter derived slack and was given an overrun naming its task: seon.print/an-entry-allocates-what-its-work-prices (2,431 B per entry measured, 2,256 priced)."
+   :seon.task/kind :work
+   :seon.task/needs #{"seon.cost/a-unit-measures-the-work-not-the-cache"}
+   :seon.task/proofs #{seon.cost-test/the-exponent-tolerance-follows-slack-and-span
+--- a/resources/seon/tasks/seon.print.edn
++++ b/resources/seon/tasks/seon.print.edn
+@@ -1,4 +1,8 @@
+ [{:seon.task/name "a-long-string-does-not-starve-its-siblings"
+   :seon.task/plan "Seen 2026-10-21 by lane AGENTS: an eval item {:form \"(code-of 0)\" :out <9,600 chars of pprint output> :value (vec (range 2000))} printed under 545 tokens (seon.print/print-value, the last-evals share) shows 1,584 characters of :out and :value as `[…2000 (get-in (nth (my.turn/evals) 0) [:value])]`: not one element of the value the agent asked for. Cause: seon.print.select ranks a long string before a collection (member-rank, select.clj:109-118) and then the string's characters are allotted like one member, greedily, while the collection's members are a level deeper, so breadth-first never reaches them. Correct: a long string's characters are allotted in the same rounds as its siblings' members (a string is a sequence of lines for allotment), so every sibling shows its first part before any one deepens. A general printer improvement: every value with a long string beside a collection benefits (contract refusals, test expected/actual, the context). Replaces nothing; the law tests in seon.print-test stay green."
+   :seon.task/kind :work
+-  :seon.task/proofs #{seon.print-test/a-long-string-shares-the-budget-with-its-siblings}}]
++  :seon.task/proofs #{seon.print-test/a-long-string-shares-the-budget-with-its-siblings}}
++ {:seon.task/name "an-entry-allocates-what-its-work-prices"
++  :seon.task/plan "Found by lane UNITFLAKE (2026-10-21) when the cost judge's byte slack became derived (seon.cost/tolerances: the measured spread of the units an estimate prices, 1.02x for the print entry's :map/literal, :vec/conj, :vec/conj! and :pr-str/char) instead of a guessed 1.25x. seon.print-cost-test/printing-a-map-is-one-pass-over-its-entries prices one entry at 2,256 B (5 small maps as :map/literal 144 B, 2 :vec/conj, 16 :vec/conj!, 12 :pr-str/char) and measures 2,431 B per entry (source mode, unarmed: 253,648 B at 100 entries, 2,467,472 at 1k, 24,348,544 at 10k; slope 2,431 B, fixed ~36 KB): 1.08x, about 175 B per entry not priced. Either the estimate prices a small map wrong (the work's maps have 2-7 keys; the table's :map/literal row is 5 keys) or the printer allocates something per entry its :work does not name. Find which with seon.profile counts and per-op allocation (measure each step of one entry: classify, entry, emit, layout), then either add the unit row the work really uses (measured like the others, with its :range) or remove the allocation. The proof carries an :overrun naming this task until then (green while within its slack of 24,348,544 B at 10k)."
++  :seon.task/kind :work
++  :seon.task/proofs #{seon.print-cost-test/printing-a-map-is-one-pass-over-its-entries}}]
+--- a/src/seon/check.clj
++++ b/src/seon/check.clj
+@@ -320,7 +320,8 @@
+   "Pure functions in namespaces that are otherwise host code (seon.lib binds libc: never
+   generate its arguments)."
+   '#{seon.lib/percentile seon.lib/r2 seon.lib/summ seon.lib/push-window seon.lib/p50
+-     seon.cost/work seon.cost/exponent seon.cost/per-unit seon.cost/expected seon.cost/judge seon.profile/top})
++     seon.cost/work seon.cost/exponent seon.cost/per-unit seon.cost/expected seon.cost/judge seon.profile/top
++     seon.cost/tolerances seon.cost/widest-tolerances seon.cost/tolerance-text})
+ 
+ (defn- fn-without-gen
+   "The [:fn ...] schemas without a :gen property in form f, anywhere in it."
+--- a/src/seon/context.clj
++++ b/src/seon/context.clj
+@@ -8,7 +8,8 @@
+   (:refer-clojure :exclude [defn defn-])
+   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d]
+             [seon.task :as task] [seon.merge :as pm]
+-            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg]))
++            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg]
++            [seon.cost :as cost]))
+ 
+ (def system-prompt
+   "What every model is told once per turn: how to answer and which verbs exist."
+@@ -28,8 +29,9 @@
+      "A cost proof (seon.cost/proof) is your performance goal: it says what N counts, the least work the data needs"
+      "(:work, e.g. one pass with one lookup per row), how that grows and what it may cost. Read it before writing code and"
+      "do no more work than it states. It is red when a size costs more than its estimate or grows faster than its :growth."
+-     "The judge: allocated bytes may reach 1.25x the estimate and contracted calls 1.0x (both are counted exactly), wall time 3x;"
+-     "a dimension whose growth exponent exceeds :growth's by more than 0.3 is STEEPER (an extra pass), red even inside the slack;"
++     (str "The judge's tolerances are derived from the measured spread of the unit operations your estimate prices"
++          " (seon.cost/tolerances), and every verdict prints its own; at their widest: " (cost/tolerance-text (cost/widest-tolerances cost/units)) ";")
++     "a dimension that grows faster than :growth by more than its exponent tolerance is STEEPER (an extra pass), red even inside the slack;"
+      "LOOSE (a third of the estimate or less) is not red. Its failure message prints measured/estimate per size."
+      "Verbs: (my.task/current) your task; (my.task/update! :seon.task/plan f & args) improve your plan;"
+      "(my.task/send-back! reason counterexample) when the task is impossible;"
+--- a/src/seon/cost.clj
++++ b/src/seon/cost.clj
+@@ -24,10 +24,11 @@
+   - :input names (fn [n] args): the input is built outside the measurement.
+ 
+   `run` measures the function at each size, ascending: allocated bytes and calls of
+-  contracted functions (seon.profile) are exact, so they are judged tightly; wall ns is the
+-  minimum over repeats, judged at 3x (the machine is shared). It stops at the first size
+-  over its estimate, so a quadratic body under a linear estimate costs one size too many,
+-  not hours. `judge` is pure: over (a size above slack x estimate), steeper (a dimension
++  contracted functions (seon.profile) are counted, wall ns is the minimum over repeats. No
++  tolerance is guessed: `tolerances` derives each from the unit table's measured :range of
++  the units the estimate prices (calls are exact: 1.0). It stops at the first size over its
++  estimate, so a quadratic body under a linear estimate costs one size too many, not
++  hours. `judge` is pure: over (a size above its slack x estimate), steeper (a dimension
+   grew faster than :growth allows over the sizes: the extra pass, the scan inside a loop),
+   under (a third of the estimate or less at the largest size: the estimate is loose, a
+   finding, not red), unmeasured (a stated dimension with nothing measured)."
+@@ -37,26 +38,46 @@
+ 
+ ;; ---- the judge (pure) -----------------------------------------------------------------
+ 
+-(def slack
+-  "Each dimension is red above this multiple of its estimate. Bytes and calls are exact on
+-  one thread (allocation is counted, not sampled); wall time moves with the machine's load."
+-  {:ns 3.0 :bytes 1.25 :calls 1.0})
+-
+-(def steeper-by
+-  "A dimension is steeper when its fitted exponent exceeds its growth's own exponent over
+-  the same sizes by more than this: n log n under a linear estimate (+0.17 over 100x)
+-  passes, a second loop over the data (+1.0) does not."
+-  0.3)
++(declare units)
++
++(def table-span
++  "The unit table measures each row at 1k, 10k and 100k units: a span of 100x in n."
++  100.0)
++
++(def fit-rounding
++  "The least-squares fit's floating-point rounding: an exact count's fitted exponent sits
++  within this of its growth's. Not a measurement tolerance."
++  1e-9)
+ 
+ (def loose
+   "At or below this fraction of its estimate at the largest size, the estimate is loose."
+   (/ 1.0 3.0))
+ 
+-(def ratchet
+-  "An accepted overrun stays green while every dimension at the largest size is within this
+-  multiple of what was measured when its task was filed (Seon's ratchet: the spread of one
+-  operation measured apart), so a regression is red even inside an open overrun."
+-  1.5)
++(defn tolerances
++  "The judge's tolerances for estimate e under unit table u, derived, never guessed, from
++  the rows' measured :range: the slack is the largest ratio a measurement reached to its
++  price, over 1k-100k, the runs and both runtimes (what pricing by the table can be off by),
++  and the exponent tolerance the steepest log(hi/lo) / log(table-span) (how fast a unit's
++  own cost moved with n). Bytes are counted, so they take the rows e's :ops price (the whole
++  table's when e prices none, or states bytes in :per-n). Wall time is the machine's: three
++  runs of one row do not show its spread (a 10k row re-measured at the same load left its
++  own range by 1.4x), so ns takes every row's range pooled. Calls are exact: 1.0 and 0."
++  {:malli/schema [:=> [:cat :seon.cost/estimate [:map-of :keyword :seon.cost/unit]] :seon.cost/tolerances]}
++  [e u]
++  (let [ranged (fn [d ks] (seq (keep #(get-in u [% :range d]) ks)))
++        rs (fn [d] (or (when-not (or (= d :ns) (contains? (:per-n e) d)) (ranged d (keys (:ops e))))
++                       (ranged d (keys u))
++                       [[1.0 1.0]]))
++        slack (fn [d] (max 1.0 (apply max (map second (rs d)))))
++        expo (fn [d] (apply max 0.0 (map (fn [[lo hi]] (/ (Math/log (/ hi (max lo 1e-9))) (Math/log table-span))) (rs d))))]
++    {:slack {:ns (slack :ns) :bytes (slack :bytes) :calls 1.0}
++     :exponent {:ns (expo :ns) :bytes (expo :bytes) :calls 0.0}}))
++
++(defn widest-tolerances
++  "The tolerances an estimate that prices no unit is judged by: the whole table's (u's)."
++  {:malli/schema [:=> [:cat [:map-of :keyword :seon.cost/unit]] :seon.cost/tolerances]}
++  [u]
++  (tolerances {:of 'seon.cost/none :input 'seon.cost/none :n "" :work "" :growth :linear :sizes [1 10 100]} u))
+ 
+ (defn work
+   "W(n), the least work's growth at n."
+@@ -100,10 +121,13 @@
+                [d (+ (double (get f d 0.0)) (* w (double (get p d 0.0))))]))))
+ 
+ (defn judge
+-  "The verdict on rows (ascending sizes, each measured and expected) under estimate e."
++  "The verdict on rows (ascending sizes, each measured and expected) under estimate e, with
++  the tolerances it was judged by (`tolerances`, from the unit table)."
+   {:malli/schema [:=> [:cat :seon.cost/estimate [:vector :seon.cost/row]] :seon.cost/verdict]}
+   [e rows]
+-  (let [dims (into #{} (mapcat (comp keys :expected)) rows)
++  (let [tol (tolerances e units)
++        slack (:slack tol)
++        dims (into #{} (mapcat (comp keys :expected)) rows)
+         ratio (fn [{:keys [measured expected]} d]
+                 (let [m (get measured d) x (get expected d)]
+                   (when (and (some? m) (some? x)) (if (pos? x) (/ (double m) x) (if (pos? m) Double/POSITIVE_INFINITY 1.0)))))
+@@ -111,24 +135,34 @@
+                         :let [q (ratio r d)] :when (and q (> q (slack d)))]
+                     {:dim d :n (:n r) :ratio q}))
+         fixed (:fixed e {})
+-        allowed (+ steeper-by (exponent (for [r rows] [(:n r) (work (:growth e) (:n r))])))
++        growth (exponent (for [r rows] [(:n r) (work (:growth e) (:n r))]))
+         steeper (vec (for [d [:ns :bytes :calls] :when (dims d)
+-                           :let [pts (for [r rows :let [m (get-in r [:measured d])] :when m] [(:n r) (- m (get fixed d 0.0))])]
++                           :let [allowed (+ growth (get-in tol [:exponent d]))
++                                 pts (for [r rows :let [m (get-in r [:measured d])] :when m] [(:n r) (- m (get fixed d 0.0))])]
+                            :when (>= (count pts) 2)
+-                           :let [x (exponent pts)] :when (> x allowed)]
++                           :let [x (exponent pts)] :when (> x (+ allowed fit-rounding))]
+                        {:dim d :exponent x :allowed allowed}))
+         largest (peek rows)
+         under (vec (for [d [:ns :bytes :calls] :when (dims d)
+                          :let [q (when largest (ratio largest d))] :when (and q (< q loose))]
+                      {:dim d :n (:n largest) :ratio q}))
+         unmeasured (vec (for [d [:ns :bytes :calls] :when (and (dims d) (seq rows) (every? #(nil? (get-in % [:measured d])) rows))] d))
++        ;; an accepted overrun holds while the largest size stays within the dimension's own
++        ;; measured spread (its slack) of what was measured when its task was filed
+         held? (when-let [{:keys [measured]} (:overrun e)]
+-                (and largest (every? (fn [[d m]] (<= (get-in largest [:measured d] 0.0) (* ratchet m))) measured)))]
++                (and largest (every? (fn [[d m]] (<= (get-in largest [:measured d] 0.0) (* (slack d) m))) measured)))]
+     (cond-> {:ok? (or (and (empty? over) (empty? steeper)) (boolean held?))
+-             :over over :steeper steeper :under under :unmeasured unmeasured}
++             :over over :steeper steeper :under under :unmeasured unmeasured :tolerances tol}
+       (and held? (or (seq over) (seq steeper)))
+       (assoc :accepted {:task (:task (:overrun e)) :over over :steeper steeper}))))
+ 
++(defn tolerance-text
++  "The tolerances tol as one sentence an agent reads."
++  {:malli/schema [:=> [:cat :seon.cost/tolerances] :string]}
++  [{:keys [slack exponent]}]
++  (format "bytes %.2fx and wall time %.2fx the estimate, contracted calls %.2fx; growth exponent +%.3f bytes, +%.3f ns, +%.3f calls"
++          (:bytes slack) (:ns slack) (:calls slack) (:bytes exponent) (:ns exponent) (:calls exponent)))
++
+ ;; ---- measuring ----------------------------------------------------------------------------
+ 
+ (defn- once
+@@ -160,8 +194,6 @@
+         (let [m (once f args)]
+           (recur (inc k) (+ spent (:ns m)) (if best (merge-with min best m) m)))))))
+ 
+-(declare units)
+-
+ (defn run
+   "Estimate e measured: its function on its input at each size, ascending, stopping after
+   the first size over its estimate. Answers {:rows :verdict}."
+@@ -189,17 +221,19 @@
+   "The estimate, the measurements against it and the verdict, as text an agent reads."
+   {:malli/schema [:=> [:cat :seon.cost/estimate [:vector :seon.cost/row] :seon.cost/verdict] :string]}
+   [e rows v]
+-  (let [dims (filter (set (mapcat (comp keys :expected) rows)) [:ns :bytes :calls])]
++  (let [dims (filter (set (mapcat (comp keys :expected) rows)) [:ns :bytes :calls])
++        tol (or (:tolerances v) (tolerances e units))]
+     (str/join "\n"
+       (concat
+         [(str (:of e) ", N = " (:n e) ". The work: " (:work e) " (" (name (:growth e)) ").")
++         (str "Judged within " (tolerance-text tol) " (derived from the unit table's measured ranges).")
+          (str "n: " (str/join "  " (for [d dims] (str (name d) " measured/estimate (x)"))))]
+         (for [{:keys [n measured expected]} rows]
+           (str n ": " (str/join "  " (for [d dims :let [m (get measured d) x (get expected d)]]
+                                        (str (num-text m) "/" (num-text x)
+                                             (when (and m (pos? x)) (format " (%.2fx)" (/ m x))))))))
+         (for [{:keys [dim n ratio]} (:over v)]
+-          (str "OVER: " (name dim) " at n=" n " is " (format "%.2f" ratio) "x its estimate (allowed " (slack dim) "x)."))
++          (str "OVER: " (name dim) " at n=" n " is " (format "%.2f" ratio) "x its estimate (allowed " (format "%.2f" (get-in tol [:slack dim])) "x)."))
+         (for [{:keys [dim exponent allowed]} (:steeper v)]
+           (str "STEEPER: " (name dim) " grew as n^" (format "%.2f" exponent) "; " (name (:growth e))
+                " allows n^" (format "%.2f" allowed) ". Something does more passes over the data than the work needs."))
+@@ -207,10 +241,10 @@
+           (str "LOOSE: " (name dim) " at n=" n " is " (format "%.2f" ratio) "x its estimate: tighten the estimate."))
+         (for [d (:unmeasured v)] (str "NOT MEASURED: " (name d) "."))
+         (when-let [{:keys [task]} (:accepted v)]
+-          [(str "OVERRUN accepted while task " task " is open (within " ratchet "x of "
++          [(str "OVERRUN accepted while task " task " is open (within its slack of "
+                 (pr-str (:measured (:overrun e))) "): it is that task's work.")])
+         (when (and (:overrun e) (not (:ok? v)))
+-          [(str "REGRESSION: past " ratchet "x of the overrun recorded for task " (:task (:overrun e)) ".")])))))
++          [(str "REGRESSION: past its slack of the overrun recorded for task " (:task (:overrun e)) ".")])))))
+ 
+ (defn proof
+   "Assert, inside a deftest, that estimate e holds: one clojure.test report (pass or fail)
+@@ -228,39 +262,58 @@
+ ;; ---- the unit table -------------------------------------------------------------------------
+ 
+ (def units
+-  "Measured costs of unit operations on this runtime (release seon binary, M5 Max, load 5,
+-  2026-10-20, at 10k units; source mode is within 10% except a plain call, 7 ns; the last
+-  five rows were measured in source mode after P2 found :str/append mislabeled: the 308 B
+-  per char it showed was the String's seq, not the StringBuilder; :fn/armed-call and the
+-  pull rows re-measured on Jolt 00a3b321, J3's try/catch: 990 -> 354 B per armed call), per unit: estimates price their :ops with these.
+-  seon.cost-test/the-unit-table-is-current measures them again (seon.cost-test/unit-benches)
+-  and is red when a row has drifted past 3x, naming the row it measured, so estimates stay
+-  derived from today's physics."
+-  {:seq/reduce {:ns 1.4 :bytes 0.0 :what "one step of reduce over a vector"}
+-   :fn/call {:ns 7.4 :bytes 0.0 :what "a reduce step calling one plain function, both defined at the REPL"}
+-   :fn/armed-call {:ns 32.8 :bytes 353.53 :what "a reduce step calling one contracted function ([:=> [:cat :int] :int])"}
+-   :vec/nth {:ns 12.4 :bytes 0.0 :what "nth of a vector"}
+-   :vec/conj {:ns 30.7 :bytes 245.99 :what "conj onto a persistent vector"}
+-   :vec/conj! {:ns 12.3 :bytes 43.28 :what "conj! onto a transient vector"}
+-   :map/get {:ns 35.6 :bytes 0.0 :what "get of an integer key in a hash map of n"}
+-   :map/assoc {:ns 117.5 :bytes 825.01 :what "assoc of a new integer key into a persistent hash map"}
+-   :map/assoc! {:ns 83.2 :bytes 123.72 :what "assoc! of a new integer key into a transient hash map"}
+-   :map/update {:ns 238.2 :bytes 1074.43 :what "update of a counter in a hash map (frequencies' step)"}
+-   :set/conj! {:ns 79.1 :bytes 91.72 :what "conj! of a new integer into a transient hash set"}
+-   :sorted/assoc {:ns 1334.7 :bytes 3327.21 :what "assoc of a new integer key into a sorted map"}
+-   :sort/compare {:ns 13.51 :bytes 39.04 :what "sort of shuffled integers, per n log2 n"}
+-   :str/append {:ns 9.9 :bytes 36.0 :what "StringBuilder append of one char"}
+-   :str/seq-char {:ns 29.9 :bytes 272.0 :what "one step of a seq over a String's chars (doseq, reduce)"}
+-   :map/literal {:ns 5.2 :bytes 144.0 :what "a small map literal of 5 keys built per element"}
+-   :map/seq-step {:ns 28.3 :bytes 127.1 :what "one step of reduce over a hash map's entries (each a map entry)"}
+-   :map/reduce-kv {:ns 4.7 :bytes 0.0 :what "one step of reduce-kv over a hash map"}
+-   :edn/read-char {:ns 29.22 :bytes 38.02 :what "clojure.edn/read-string, per character of a vector of integers"}
+-   :pr-str/char {:ns 61.9 :bytes 25.67 :what "pr-str, per character printed (a vector of integers)"}
+-   ;; lane D2, source mode, load 3, 2026-10-20, at 2k: a pull is 21 us and 28 KB, each further
+-   ;; attribute 9.7 us and 13 KB (a finding: the pull's own allocation, like seon.task/eid's seek)
+-   ;; lane STORES, 2026-10-21, load 8, at 10k, three runs: measured on a branch of the seeded test
+-   ;; store (seon.db/test-branch!: ~2,000 datoms beside the setup's) instead of an empty store,
+-   ;; a pull 21 us and 24.6 KB, each further attribute 11.3-15.1 us and 11.6 KB: pull-attr's one
+-   ;; entity sat in a one-level index before, the seed makes it the two levels real dbs have
+-   :db/pull {:ns 21200.3 :bytes 24612.49 :what "d/pull of one attribute of an entity, by entity id (per pull)"}
+-   :db/pull-attr {:ns 11801.8 :bytes 11576.64 :what "each attribute of a d/pull beyond its first (per attribute)"}})
++  "Measured costs of unit operations on this runtime, per unit; estimates price their :ops
++  with these, and the judge's tolerances come from each row's :range (seon.cost/tolerances).
++  Lane UNITFLAKE, 2026-10-21 (FENCES: the tolerances are derived): seon.cost-test/table on the
++  release binary (load 11) and in source mode (load 9), each row (seon.cost-test/unit-benches)
++  at 1k, 10k and 100k units, three runs each. :ns and :bytes are the release binary's
++  median at 10k; :range is the least and largest ratio to them of all 18 measurements, both
++  runtimes (source mode allocates more for a pull: 10.9 KB per extra attribute against 9.9 KB;
++  ns of :db/pull-attr, a difference of two pulls, is the noisiest: 0.97-3.15x). :bytes is
++  ranged only for a row that allocates (1 B or more per unit), and each ratio's bounds take in
++  the printed measurements' rounding (2 decimals). Earlier rows' history: git log.
++  seon.cost-test/the-unit-table-is-current is red when a row measured at 10k leaves its range."
++  {:db/pull {:ns 18093.0 :bytes 22828.46 :range {:ns [0.935 1.324] :bytes [0.996 1.122]}
++             :what "d/pull of one attribute of an entity, by entity id (per pull)"}
++   :db/pull-attr {:ns 7097.6 :bytes 9934.33 :range {:ns [0.967 3.146] :bytes [0.991 1.143]}
++                  :what "each attribute of a d/pull beyond its first (per attribute)"}
++   :edn/read-char {:ns 30.47 :bytes 38.04 :range {:ns [0.871 1.538] :bytes [0.915 1.259]}
++                   :what "clojure.edn/read-string, per character of a vector of integers"}
++   :fn/armed-call {:ns 35.1 :bytes 353.53 :range {:ns [0.968 1.269] :bytes [0.999 1.001]}
++                   :what "a reduce step calling one contracted function ([:=> [:cat :int] :int])"}
++   :fn/call {:ns 6.8 :bytes 0.02 :range {:ns [0.880 1.326]}
++             :what "a reduce step calling one plain function, both defined at the REPL"}
++   :map/assoc {:ns 144.6 :bytes 825.01 :range {:ns [0.656 1.974] :bytes [0.763 1.260]}
++               :what "assoc of a new integer key into a persistent hash map"}
++   :map/assoc! {:ns 93.0 :bytes 123.72 :range {:ns [0.870 2.266] :bytes [0.999 1.108]}
++                :what "assoc! of a new integer key into a transient hash map"}
++   :map/get {:ns 37.6 :bytes 0.02 :range {:ns [0.904 1.760]}
++             :what "get of an integer key in a hash map of n"}
++   :map/literal {:ns 5.1 :bytes 144.02 :range {:ns [0.919 1.179] :bytes [0.999 1.002]}
++                 :what "a small map literal of 5 keys built per element"}
++   :map/reduce-kv {:ns 4.8 :bytes 0.01 :range {:ns [0.831 2.577]}
++                   :what "one step of reduce-kv over a hash map"}
++   :map/seq-step {:ns 31.3 :bytes 127.11 :range {:ns [0.766 1.528] :bytes [0.999 1.030]}
++                  :what "one step of reduce over a hash map's entries (each a map entry)"}
++   :map/update {:ns 281.8 :bytes 1074.43 :range {:ns [0.872 1.730] :bytes [0.999 1.001]}
++                :what "update of a counter in a hash map (frequencies' step)"}
++   :pr-str/char {:ns 108.57 :bytes 29.36 :range {:ns [0.800 1.312] :bytes [0.999 1.023]}
++                 :what "pr-str, per character printed (a vector of integers)"}
++   :seq/reduce {:ns 1.4 :bytes 0.02 :range {:ns [0.708 1.151]}
++                :what "one step of reduce over a vector"}
++   :set/conj! {:ns 83.8 :bytes 91.72 :range {:ns [0.823 2.050] :bytes [0.999 1.145]}
++               :what "conj! of a new integer into a transient hash set"}
++   :sort/compare {:ns 13.93 :bytes 38.99 :range {:ns [0.958 1.100] :bytes [0.981 1.102]}
++                  :what "sort of shuffled integers, per n log2 n"}
++   :sorted/assoc {:ns 1630.1 :bytes 3324.2 :range {:ns [0.628 1.619] :bytes [0.797 1.202]}
++                  :what "assoc of a new integer key into a sorted map"}
++   :str/append {:ns 10.2 :bytes 36.02 :range {:ns [0.950 1.080] :bytes [0.999 1.007]}
++                :what "StringBuilder append of one char"}
++   :str/seq-char {:ns 30.3 :bytes 272.01 :range {:ns [0.897 1.082] :bytes [0.999 1.001]}
++                  :what "one step of a seq over a String's chars (doseq, reduce)"}
++   :vec/conj {:ns 31.3 :bytes 245.99 :range {:ns [0.958 1.093] :bytes [0.990 1.015]}
++              :what "conj onto a persistent vector"}
++   :vec/conj! {:ns 13.0 :bytes 43.28 :range {:ns [0.922 1.032] :bytes [0.773 1.001]}
++               :what "conj! onto a transient vector"}
++   :vec/nth {:ns 13.2 :bytes 0.02 :range {:ns [0.832 1.167]}
++             :what "nth of a vector"}})
+--- a/src/seon/profile.clj
++++ b/src/seon/profile.clj
+@@ -117,13 +117,14 @@
+   [] ((:calls procs)))
+ 
+ (defn touched
+-  "The functions called since the epoch began, each with its exact :calls and its :ms,
+-  estimated from its timed calls (sampled ns ÷ samples × calls). Costs what was touched."
++  "The functions called since the epoch began, each with its exact :calls, its :samples
++  (the calls timed: the first and one in 64 after, ceil(calls/64)) and its :ms, estimated
++  from them (sampled ns ÷ samples × calls). Costs what was touched."
+   {:malli/schema [:=> [:cat] [:vector :seon.profile/fn-cost]]}
+   []
+   (persistent!
+     ((:fold procs) (fn [acc sym calls ns samples]
+-                     (conj! acc {:var sym :calls calls
++                     (conj! acc {:var sym :calls calls :samples samples
+                                  :ms (if (pos? samples) (/ (* (/ (double ns) samples) calls) 1e6) 0.0)}))
+                    (transient []))))
+ 
+--- a/src/seon/render/ui.clj
++++ b/src/seon/render/ui.clj
+@@ -792,14 +792,17 @@
+ (defn verdict-lines
+   "A cost verdict as [class words] lines, red first: within or over its estimate, each size
+   over it, each dimension grown steeper than the work needs, then loose estimates and
+-  unmeasured dimensions as findings. The page's verdict box and root's cost report."
++  unmeasured dimensions as findings, and the tolerances it was judged by. The page's
++  verdict box and root's cost report."
+   {:malli/schema [:=> [:cat :seon.cost/verdict] [:sequential [:tuple :string :string]]]}
+-  [{:keys [ok? over steeper under unmeasured]}]
++  [{:keys [ok? over steeper under unmeasured tolerances]}]
+   (concat [[(if ok? "ok" "bad") (if ok? "within estimate" "OVER ESTIMATE")]]
+           (for [{:keys [dim n ratio]} over] ["bad" (str "over " (name dim) " at n=" (group3 n) " " (fmt2 ratio) "×")])
+           (for [{:keys [dim exponent allowed]} steeper] ["bad" (str "steeper " (name dim) " n^" (fmt2 exponent) " > n^" (fmt2 allowed))])
+           (for [{:keys [dim n ratio]} under] ["muted" (str "loose " (name dim) " at n=" (group3 n) " " (fmt2 ratio) "×")])
+-          (for [d unmeasured] ["muted" (str "unmeasured " (name d))])))
++          (for [d unmeasured] ["muted" (str "unmeasured " (name d))])
++          (when-let [{:keys [slack]} tolerances]
++            [["muted" (str "judged within bytes " (fmt2 (:bytes slack)) "×, ns " (fmt2 (:ns slack)) "×, calls " (fmt2 (:calls slack)) "×")]])))
+ 
+ (defn verdict-box
+   "A cost verdict (`verdict-lines`): red when a size is over its estimate or grew steeper."
+@@ -820,7 +823,7 @@
+        [:tbody (for [{:keys [n measured expected]} rows]
+                  [:tr [:td (group3 n)]
+                   (for [d dims :let [m (get measured d) x (get expected d)]]
+-                    [:td {:class (when (and m x (pos? x) (> (/ m x) 3)) "bad")}
++                    [:td {:class (when (and m x (pos? x) (> (/ m x) (get-in verdict [:tolerances :slack d] 1.0))) "bad")}
+                      (str (group3 m) " / " (group3 x) (when (and m x (pos? x)) (str " (" (fmt2 (/ m x)) "×)")))])])]]
+       (render/html verdict (assoc env :seon.render/schema :seon.cost/verdict))]}))
+ 
+--- a/test/seon/context_test.clj
++++ b/test/seon/context_test.clj
+@@ -5,7 +5,7 @@
+   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d]
+             [seon.db :as pdb] [seon.task :as task] [seon.context :as context] [seon.print :as print]
+             [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs]
+-            [seon.print.select :as select] [clojure.string :as str] [clojure.walk :as walk] [seon.edn]))
++            [seon.print.select :as select] [clojure.string :as str] [clojure.walk :as walk] [seon.edn] [seon.cost :as cost]))
+ 
+ (defn- db-with-program []
+   (let [db (pdb/test-db)]
+@@ -332,4 +332,12 @@
+   (testing "the history budget keeps whole turns, the newest always"
+     (let [turns [{:reply (apply str (repeat 400 "a")) :calls []} {:reply "R1" :calls [{:id "b" :code "(f)" :evals "E1"}]} {:reply "R2" :calls []}]]
+       (is (= ["R1" "R2"] (mapv :reply (#'context/kept-turns turns 10))) "an older turn past the budget is left out whole")
+-      (is (= ["R2"] (mapv :reply (#'context/kept-turns turns 0))) "the newest stays at budget 0"))))
+\ No newline at end of file
++      (is (= ["R2"] (mapv :reply (#'context/kept-turns turns 0))) "the newest stays at budget 0"))))
++
++(deftest the-prompt-states-the-judges-own-tolerances
++  ;; one owner for the rule: the prompt renders the judge's derived tolerances from seon.cost,
++  ;; never a copy of numbers that go stale when the unit table is re-measured
++  (let [t (cost/widest-tolerances cost/units)]
++    (is (.contains ^String context/system-prompt (cost/tolerance-text t)))
++    (is (.contains ^String context/system-prompt (format "bytes %.2fx" (get-in t [:slack :bytes]))))
++    (is (not (re-find #"1\.25x|wall time 3x|more than 0\.3" context/system-prompt)) "no hardcoded tolerance")))
+--- a/test/seon/cost_test.clj
++++ b/test/seon/cost_test.clj
+@@ -45,9 +45,10 @@
+     (is (not (:ok? v)))
+     (is (= [:calls] (distinct (map :dim (:over v)))) "calls are exact: one more than stated is over")
+     (is (empty? (:steeper v))))
+-  (testing "wall time has 3x slack"
+-    (is (:ok? (cost/judge linear (rows linear (fn [n] {:ns (* 290.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})))))
+-    (is (not (:ok? (cost/judge linear (rows linear (fn [n] {:ns (* 310.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)}))))))))
++  (testing "wall time is red past its derived slack, not before"
++    (let [sns (get-in (cost/tolerances linear cost/units) [:slack :ns])]
++      (is (:ok? (cost/judge linear (rows linear (fn [n] {:ns (* 99.0 sns n) :bytes (* 50.0 n) :calls (+ 1.0 n)})))))
++      (is (not (:ok? (cost/judge linear (rows linear (fn [n] {:ns (* 101.0 sns n) :bytes (* 50.0 n) :calls (+ 1.0 n)})))))))))
+ 
+ (deftest a-second-pass-is-steeper-even-inside-the-slack
+   ;; quadratic bytes that stay under the linear estimate at every size: only the growth sees them
+@@ -58,9 +59,42 @@
+     (is (< 1.9 (:exponent (first (:steeper v))) 2.1))
+     (is (not (:ok? v)))))
+ 
+-(deftest n-log-n-under-a-linear-estimate-is-not-steeper
+-  (let [e (assoc linear :per-n {:ns 1000.0} :fixed {})]
+-    (is (empty? (:steeper (cost/judge e (rows e (fn [n] {:ns (cost/work :n-log-n n)}))))))))
++(deftest the-exponent-tolerance-follows-slack-and-span
++  (testing "derived from the priced units' measured range over the table's 100x span: log(hi/lo)/log(100)"
++    (let [u {:a/op {:ns 10.0 :bytes 4.0 :what "a" :range {:ns [0.5 2.0] :bytes [1.0 1.1]}}
++             :b/op {:ns 10.0 :bytes 4.0 :what "b" :range {:ns [0.9 1.2] :bytes [0.8 1.3]}}}
++          e (assoc linear :ops {:a/op 1.0} :per-n {:calls 1.0})
++          t (cost/tolerances e u)]
++      (is (= {:ns 2.0 :bytes 1.1 :calls 1.0} (:slack t)) "the slack is the largest ratio measured")
++      (is (< (Math/abs (- (get-in t [:exponent :ns]) (/ (Math/log 4.0) (Math/log 100.0)))) 1e-12))
++      (is (< (Math/abs (- (get-in t [:exponent :bytes]) (/ (Math/log 1.1) (Math/log 100.0)))) 1e-12))
++      (is (= 0.0 (get-in t [:exponent :calls])) "calls are counted: no exponent tolerance")
++      (testing "an estimate pricing no unit (or stating the dimension in :per-n) gets the whole table's widest"
++        (is (= {:ns 2.0 :bytes 1.3 :calls 1.0} (:slack (cost/tolerances linear u)))))))
++  (testing "the judge: growth past :growth by less than the tolerance is not steeper, by more is"
++    (let [e (assoc linear :per-n {:bytes 1.0} :fixed {} :sizes [100 1000 10000])
++          tol (get-in (cost/tolerances e cost/units) [:exponent :bytes])
++          at (fn [x] (cost/judge e (rows e (fn [n] {:bytes (Math/pow n (+ 1.0 x))}))))]
++      (is (pos? tol))
++      (is (empty? (:steeper (at (* 0.9 tol)))))
++      (is (= [:bytes] (map :dim (:steeper (at (* 1.1 tol))))))
++      (is (= tol (get-in (at 0.0) [:tolerances :exponent :bytes])) "the verdict carries what it was judged by"))))
++
++(deftest slack-is-the-units-measured-spread
++  (testing "every row of the table carries its measured range, and its price lies inside it"
++    (doseq [[k {:keys [range bytes]}] cost/units]
++      (is (some? (:ns range)) (str k " has no measured ns range"))
++      (is (<= (first (:ns range)) 1.0 (second (:ns range))) (str k " ns range " (:ns range)))
++      (when (>= bytes 1.0)
++        (is (<= (first (:bytes range)) 1.0 (second (:bytes range))) (str k " bytes range " (:bytes range))))))
++  (testing "an estimate priced by one unit is judged by that unit's byte spread; wall time by the table's"
++    (let [e {:of 'seon.cost-test/one-pass :input 'seon.cost-test/ints :n "integers" :work "one armed call each"
++             :growth :linear :ops {:fn/armed-call 1.0} :sizes [100 1000 10000]}
++          s (get-in (cost/tolerances e cost/units) [:slack :bytes])
++          price (:bytes (cost/units :fn/armed-call))]
++      (is (= s (max 1.0 (second (get-in cost/units [:fn/armed-call :range :bytes])))))
++      (is (:ok? (cost/judge e (rows e (fn [n] {:bytes (* 0.999 s price n)})))))
++      (is (not (:ok? (cost/judge e (rows e (fn [n] {:bytes (* 1.01 s price n)})))))))))
+ 
+ (deftest a-loose-estimate-is-a-finding-not-red
+   (let [v (cost/judge linear (rows linear (fn [n] {:ns (* 10.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})))]
+@@ -129,6 +163,15 @@
+     (eval forms)
+     @(ns-resolve 'seon.cost.unit sym)))
+ 
++(defn- notes-db
++  "A fresh branch of the test store (seon.db/test-branch!) with n notes added, each with
++  :note/text and :note/agent, and their entity ids in index order: the input of the pull units."
++  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:vector :int]]]}
++  [n]
++  (pdb/test-branch! (fn [_ conn]
++                      (d/transact conn (vec (for [i (range n)] {:note/text (str "n" i) :note/agent :u})))
++                      [(d/db conn) (mapv :e (d/datoms (d/db conn) :aevt :note/text))])))
++
+ (def unit-benches
+   "How each unit operation is measured: (f n) does n units on (setup n). The table below
+   is these, divided by n; the-unit-table-is-current measures them again."
+@@ -172,20 +215,19 @@
+    :pr-str/char {:what "pr-str, per character printed (a vector of integers)" :setup #(vector (vec (range (quot % 6))))
+                  :f (fn [v] (pr-str v)) :per-char true}
+    ;; a pull from a branch of the in-memory test store (lane D2: every read of facts is pulls)
+-   :db/pull {:what "d/pull of one attribute of an entity, by entity id (per pull)"
+-             :setup (fn [n] (pdb/test-branch! (fn [_ conn]
+-                              (d/transact conn (vec (for [i (range n)] {:note/text (str "n" i) :note/agent :u})))
+-                              [(d/db conn) (mapv :e (d/datoms (d/db conn) :aevt :note/text))])))
++   :db/pull {:what "d/pull of one attribute of an entity, by entity id (per pull)" :setup notes-db
+              :f (fn [db es] (reduce (fn [a e] (d/pull db [:note/text] e) a) 0 es))}
+-   :db/pull-attr {:what "each attribute of a d/pull beyond its first (per attribute)"
+-                  :setup (fn [n] (pdb/test-branch! (fn [_ conn]
+-                                   (d/transact conn [{:note/text "x" :note/agent :u}])
+-                                   [(d/db conn) (first (map :e (d/datoms (d/db conn) :aevt :note/text))) n])))
+-                  :f (fn [db e n] (dotimes [_ n] (d/pull db [:note/text :note/agent] e)))
++   ;; the same db, the same entities, one attribute more: the difference is the attribute alone
++   ;; (one entity in a ~519-datom db sat at the edge of a 512-datom EAVT leaf: 8.8 or 11.6 KB)
++   :db/pull-attr {:what "each attribute of a d/pull beyond its first (per attribute)" :setup notes-db
++                  :f (fn [db es] (reduce (fn [a e] (d/pull db [:note/text :note/agent] e) a) 0 es))
+                   :minus :db/pull}})
+ 
+ (defn measure-unit
+-  "Unit k measured at n units: {:ns :bytes} per unit."
++  "Unit k measured at n units: {:ns :bytes} per unit. A unit stated as the difference from
++  another (:minus) measures both on the one input, the second right after the first, so
++  the db, the entities and every cache under them are the same for both and only the
++  difference in work remains."
+   {:malli/schema [:=> [:cat :keyword pos-int?] [:map [:ns :double] [:bytes :double]]]}
+   [k n]
+   (let [{:keys [setup f per per-char minus]} (unit-benches k)
+@@ -193,30 +235,81 @@
+         units (cond per-char (double (count (if (string? (first args)) (first args) (pr-str (first args)))))
+                     per (cost/work per n) :else (double n))
+         m (cost/measure f args)
+-        ;; a unit measured as the difference from another (an attribute beyond a pull's first)
+-        b (when minus (measure-unit minus n))]
+-    {:ns (- (/ (:ns m) units) (:ns b 0.0)) :bytes (- (/ (:bytes m) units) (:bytes b 0.0))}))
++        b (when minus (cost/measure (:f (unit-benches minus)) args))]
++    {:ns (/ (- (:ns m) (:ns b 0.0)) units) :bytes (/ (- (:bytes m) (:bytes b 0.0)) units)}))
++
++(defn unit-range
++  "How far measurements ms of one unit stray from its price: per dimension, the least and
++  largest ratio of a measurement to the price, over every size and run. :bytes only for a
++  unit that allocates (a price of 1 B or more: a zero row's ratio means nothing)."
++  {:malli/schema [:=> [:cat [:map [:ns [:double {:min 0.0}]] [:bytes [:double {:min 0.0}]]] [:sequential :seon.cost/dims]]
++                  :seon.cost/range]}
++  [price ms]
++  (into {} (for [d [:ns :bytes]
++                 :let [p (double (get price d 0.0))
++                       rs (for [m ms :let [v (get m d)] :when (some? v)] (/ (double v) p))]
++                 :when (and (>= p 1.0) (seq rs))]
++             [d [(apply min rs) (apply max rs)]])))
++
++(defn table
++  "The unit table measured k times at 1k, 10k and 100k units, as seon.cost/units' literal:
++  each row priced at its median 10k measurement, with :range (`unit-range`) over all of
++  them. Run at the REPL on the release binary and in source mode, and merge the ranges."
++  {:malli/schema [:=> [:cat pos-int?] [:map-of :keyword :seon.cost/unit]]}
++  [k]
++  (into (sorted-map)
++    (for [u (keys unit-benches)
++          :let [runs (vec (for [_ (range k)] (mapv #(measure-unit u %) [1000 10000 100000])))
++                median (fn [xs] (nth (vec (sort xs)) (quot (count xs) 2)))
++                price {:ns (median (map (comp :ns second) runs)) :bytes (median (map (comp :bytes second) runs))}]]
++      [u (assoc price :range (unit-range price (apply concat runs)) :what (:what (unit-benches u)))])))
+ 
+ (deftest the-unit-table-is-current
+-  ;; every row of the table measured again at 10k units: within 3x of its ns, its bytes within
+-  ;; 1.25x (allocation is counted); a drifted row means the estimates priced by it are stale
+-  (doseq [[k {:keys [ns bytes]}] cost/units
+-          :let [m (measure-unit k 10000)]]
+-    (is (<= (/ ns 3.0) (:ns m) (* ns 3.0)) (str k " ns: table " ns ", measured " (:ns m) "; the row now: " (assoc m :what (:what (unit-benches k)))))
+-    (is (<= (- (/ bytes 1.25) 1.0) (:bytes m) (+ (* bytes 1.25) 1.0)) (str k " bytes: table " bytes ", measured " (:bytes m)))))
++  ;; every row of the table measured again at 10k units: its bytes inside the range its own
++  ;; measurements spanned (1k-100k, three runs, release and source), its wall time inside the
++  ;; table's pooled ns range (seon.cost/tolerances: the machine's spread); a drifted row means
++  ;; the estimates priced by it are stale, and (table 3) measures the rows again
++  (let [nlo (apply min (map #(first (get-in % [:range :ns])) (vals cost/units)))
++        nhi (apply max (map #(second (get-in % [:range :ns])) (vals cost/units)))]
++    (doseq [[k {:keys [ns bytes range]}] cost/units
++            :let [m (measure-unit k 10000) [blo bhi] (:bytes range [1.0 1.0])]]
++      (is (<= (* ns nlo) (:ns m) (* ns nhi)) (str k " ns: table " ns " x " [nlo nhi] ", measured " (:ns m) "; the row now: " (assoc m :what (:what (unit-benches k)))))
++      (if (>= bytes 1.0)
++        (is (<= (* bytes blo) (:bytes m) (* bytes bhi)) (str k " bytes: table " bytes " x " (:bytes range) ", measured " (:bytes m)))
++        (is (< (:bytes m) 1.0) (str k " allocates nothing per unit in the table, measured " (:bytes m)))))))
++
++(deftest a-unit-measures-the-same-across-runs
++  ;; bytes are counted, not sampled, so a unit that measures the work measures the same
++  ;; bytes every time: on fresh branches, before and after the other pull unit has warmed the
++  ;; process, and at both table sizes the db is the same shape for (1k and 10k entities).
++  ;; Collections leave the counter a few 64 KB steps apart (a few B per unit at 10k): 2%.
++  (let [bytes (fn [k n] (:bytes (measure-unit k n)))
++        within (fn [xs] (<= (apply max xs) (* 1.02 (apply min xs))))
++        attr-first (bytes :db/pull-attr 10000)
++        pulls (vec (repeatedly 2 #(bytes :db/pull 10000)))
++        attrs (into [attr-first] (repeatedly 2 #(bytes :db/pull-attr 10000)))
++        attr-1k (bytes :db/pull-attr 1000)]
++    (is (within pulls) (str ":db/pull bytes per pull, run after run: " pulls))
++    (is (within attrs) (str ":db/pull-attr bytes, first in the test and after :db/pull: " attrs))
++    (is (within [attr-1k (peek attrs)]) (str ":db/pull-attr at 1k and 10k entities: " [attr-1k (peek attrs)]))
++    (testing "the attribute is priced on the db and entities its subtrahend pulled"
++      (is (= (:setup (unit-benches :db/pull)) (:setup (unit-benches :db/pull-attr)))))))
+ 
+ (deftest an-open-overrun-is-accepted-until-it-regresses
+-  ;; 400 ns per integer against a 100 ns estimate: 4x, over the 3x slack (4e6 ns at n=10000)
+-  (let [m (fn [n] {:ns (* 400.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})]
+-    (testing "within the ratchet (1.5x) of what was measured when its task was filed: green, still reported"
+-      (let [e (assoc linear :overrun {:task "seon.cost/demo-overrun" :measured {:ns 3000000.0}})
++  ;; wall time 1.5x over its slack; the overrun holds while the largest size stays within the
++  ;; slack (the dimension's own measured spread) of what was measured when its task was filed
++  (let [sns (get-in (cost/tolerances linear cost/units) [:slack :ns])
++        m (fn [n] {:ns (* 150.0 sns n) :bytes (* 50.0 n) :calls (+ 1.0 n)})
++        largest (:ns (m 10000))]
++    (testing "within its slack of what was filed: green, still reported"
++      (let [e (assoc linear :overrun {:task "seon.cost/demo-overrun" :measured {:ns (* 1.01 (/ largest sns))}})
+             v (cost/judge e (rows e m))]
+         (is (:ok? v))
+         (is (= "seon.cost/demo-overrun" (get-in v [:accepted :task])))
+         (is (seq (get-in v [:accepted :over])))
+         (is (re-find #"OVERRUN accepted while task seon.cost/demo-overrun" (cost/explain e (rows e m) v)))))
+-    (testing "past the ratchet: a regression, red"
+-      (let [e (assoc linear :overrun {:task "seon.cost/demo-overrun" :measured {:ns 2000000.0}})
++    (testing "past it: a regression, red"
++      (let [e (assoc linear :overrun {:task "seon.cost/demo-overrun" :measured {:ns (* 0.99 (/ largest sns))}})
+             v (cost/judge e (rows e m))]
+         (is (not (:ok? v)))
+         (is (re-find #"REGRESSION" (cost/explain e (rows e m) v)))))))
+--- a/test/seon/print_cost_test.clj
++++ b/test/seon/print_cost_test.clj
+@@ -41,17 +41,16 @@
+ 
+ (def ^:private per-entry
+   "The unit operations of one entry (`work`), by the nearest rows of seon.cost/units: a small map
+-  built as :map/assoc! (the table has no small-map literal row; Jolt's 3-9 key literal measures
+-  110-210 B, so bytes are priced a little low), a small vector as :vec/conj, a conj!, assoc! or
+-  list cell as :vec/conj!, a character printed as :pr-str/char."
+-  {:map/assoc! 5 :vec/conj 2 :vec/conj! 16 :pr-str/char 12})
++  as :map/literal (5 keys, 144 B; Jolt's 3-9 key literal measures 110-210 B), a small vector as
++  :vec/conj, a conj!, assoc! or list cell as :vec/conj!, a character printed as :pr-str/char."
++  {:map/literal 5 :vec/conj 2 :vec/conj! 16 :pr-str/char 12})
+ 
+ (def ^:private fixed
+   "What does not grow with the entries: about sixty small maps per print (the context and its
+   dials, the options, the root's row and node, its sizings, the tree's and the emitter's maps
+   and the answer). A map of at most :sort-bound (64) keys is shown sorted, which adds per-entry
+   work below 65 entries: the sizes start above it."
+-  (round (priced {:map/assoc! 60})))
++  (round (priced {:map/literal 60})))
+ 
+ (deftest printing-a-map-is-one-pass-over-its-entries
+   ;; the printer's own work: its namespaces as defined, whatever an earlier test armed (and
+@@ -66,7 +65,11 @@
+          :growth :linear
+          :ops per-entry
+          :fixed fixed
+-         :sizes [100 1000 10000]})
++         :sizes [100 1000 10000]
++         ;; measured 2,431 B per entry against the 2,256 priced (1.08x, jolt/unitflake, 2026-10-21)
++         ;; once the judge's byte slack became the priced units' measured spread (1.02x) instead
++         ;; of a guessed 1.25x; RE-MEASURE the 10k bytes on main before landing
++         :overrun {:task "seon.print/an-entry-allocates-what-its-work-prices" :measured {:bytes 24348544.0}}})
+       (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))
+ 
+ (deftest armed-printing-adds-only-its-contracted-calls
+--- a/test/seon/profile_test.clj
++++ b/test/seon/profile_test.clj
+@@ -27,18 +27,19 @@
+     (is (= 201 (profile/calls)))))
+ 
+ (deftest every-touched-function-has-an-estimated-time
+-  (when contract/on?
+-    (testing "the first call of an epoch is always timed, so a function called once has a time"
++  ;; contracted functions are counted only with contracts on, which bin/test runs with
++  (testing "the first call of an epoch is always timed, so a function called once has a time"
++    (profile/begin!)
++    (branch 50)
++    (let [by (into {} (map (juxt :var :ms)) (profile/touched))]
++      (is (pos? (by 'seon.profile-test/branch)))
++      (is (every? #(>= % 0.0) (vals by)) "a call shorter than a clock read reads as 0, never negative")))
++  (testing "the sampling rule, exactly: the first call and one in 64 after it are timed, ceil(n/64)"
++    (doseq [n [1 63 64 65 6400 64001]]
+       (profile/begin!)
+-      (branch 50)
+-      (let [by (into {} (map (juxt :var :ms)) (profile/touched))]
+-        (is (pos? (by 'seon.profile-test/branch)))
+-        (is (every? #(>= % 0.0) (vals by)) "a call shorter than a clock read reads as 0, never negative")))
+-    (testing "the estimate (one call in 64 timed) is within 2x of the exact time in a loop (probe: 12-30% high)"
+-      (profile/begin!)
+-      (let [t0 (profile/now-ns) _ (dotimes [i 64000] (leaf i)) exact (/ (- (profile/now-ns) t0) 1e6)
+-            est (:ms (first (profile/touched)))]
+-        (is (<= (/ exact 2) est (* exact 2)) (str "exact " exact " ms, estimated " est " ms"))))))
++      (dotimes [i n] (leaf i))
++      (let [{:keys [calls samples]} (first (profile/touched))]
++        (is (= [n (long (Math/ceil (/ n 64.0)))] [calls samples]) (str n " calls"))))))
+ 
+ (deftest top-orders-by-time-then-calls
+   (is (= '[c a b] (mapv :var (profile/top [{:var 'a :calls 9 :ms 1.0} {:var 'b :calls 1 :ms 1.0} {:var 'c :calls 1 :ms 2.0}] 3))))

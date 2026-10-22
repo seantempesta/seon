@@ -7,9 +7,9 @@ dragons are and name them explicitly when dealing with them."
 A **dragon** is a place where the world outside our code can fail us. Each one is met by
 exactly one function, its **edge**. The edge either answers a declared variant, which is
 plain data its callers handle as an ordinary branch, or it is an **entrant boundary**, which
-turns a defect into a recorded error map. Nothing else catches. `bin/dragons` (run by
+turns a defect into a recorded error map. Nothing else catches. `bin/dragons catch` (run by
 `bin/check`) lists every `catch` in `src/` and fails when one is not named below by its
-function.
+function. The same census judges the other laws: [clocks](clocks.md) and [resolution](resolution.md).
 
 ## Edges that catch (each names its one variant)
 
@@ -43,7 +43,7 @@ function.
 | the agent process's loop: a defect no request's boundary caught (the agent redefined a function its own loop calls; a failing commit of its record) | `seon.repl/serve!` | the cause on stderr, then the attempt's end on its branch (`seon.agent/died!`: outcome `:error`, the one error map with its cause chain); exit 70, which names the death; root's judge carries the end to the attempt's reason and error |
 | a test run, in the test child of an agent | `seon.agent/run-tests-forked` | an `:error` report in the run |
 | an effect lane performing a request (lane FX1) | `seon.fx/lane-proc` | `:seon.fx/defect` as the outcome: its asker is always answered |
-| one outside connection's request (seon.entrance, line EDN) | `seon.entrance/serve-connection!` | the request's answer, the one error map (a thrown one as it is, else `:seon.root/proc-defect` with its ex-data); the connection goes on |
+| one outside connection's request (seon.entrance, line EDN) | `seon.entrance/serve-connection!` | that request's answer, the typed `:seon.entrance/defect` (the line it took, the cause's ex-data printed); the connection and every other one go on |
 | every root proc | Flow's error channel, read by root's error reader | `:root-errors` in the api's view, with the error map; written once per signature on main, repeats counted in the api's fold (`seon.error/flush-tx`; `my.root/problems` reads both); a repeat of a written signature writes nothing, or the error's own record would be the next commit it fails on |
 
 ## Dragons met without a catch (the edge answers data)
@@ -53,6 +53,7 @@ function.
 | A peer's socket is gone (EOF, or its end frame) | root: `jolt.async.remote`'s reader pump; agents and the fork server: `seon.sock/fill!`, `seon.sock/recv!` | root: the end's `:in` closes, the stand-in's `:from` reads nil and becomes `{:op :dead}`; elsewhere `:eof` |
 | A write to a dead peer (EPIPE) | `seon.sock/send-frame!` | `:epipe`; the agent exits, root reads EOF |
 | `fork()` refused (another Chez thread active, the OS) | `seon.lib/fork!`, the one spawning skeleton (the fork server's agents and standby, an agent's test child and clone) | its `refused` branch with the active Chez threads, checked once, never waited out: `:fork-failed` / `:standby-failed` with `:active-threads`; the test run's `:error` report; the clone's `:clone-failed` |
+| An outside client half-open at the door (it never sends its line, or never reads its answer) | `seon.entrance/serve-connection!`, on that connection's own edge thread | nothing: that connection's thread parks (no bound can tell slow from gone); every other connection is served. It shows as one more root thread, and ends when the client's socket closes |
 | A process dies (killed, crashed, `System/exit`) | the socket's EOF; `waitpid` in `seon.fork-server/reap` | `:dead` / `:exit` events; the agent's pending replies answer `:seon.agent/died` (its exit status, last op and stderr tail) once the server reaped it (at once for a clone or an orphan of a server that went down, whose status no one reaps), recorded on main (lane D2); a dead attempt's reason is the end it wrote on its branch, if any, beside that death (`seon.reconcile/dead-tx`) |
 | An agent's stderr file cannot be made (a store with no path) | `seon.agent/stderr-to-file!` | stderr stays where it was; a death records no tail |
 | A dead agent's stderr file is gone or empty | `seon.root/stderr-tail` | nil |

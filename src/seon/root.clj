@@ -617,6 +617,16 @@
         @(call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/source fact}]}})
         fact))))
 
+(defn- previous-end
+  "How the root before this boot on main ended: the stop fact it wrote, or, when it wrote
+  none (SIGKILL, a crash: nothing could be written), :unclean, found now. nil on a main no
+  root ran on."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.root/end]]}
+  [db]
+  (let [{:seon.root/keys [boot stopped]} (d/q '[:find (pull ?e [:seon.root/boot :seon.root/stopped]) . :where [?e :seon.root/id :root]] db)]
+    (when boot
+      (if (= boot (:boot stopped)) stopped {:boot boot :cause :unclean :at-ms (System/currentTimeMillis)}))))
+
 (defn start!
   "Boot the control process, the fork server and the root graph on its main, a branch of
   the one store (owner, 2026-10-21: one store, many branches, as in production). opts:
@@ -732,7 +742,10 @@
     (flow/resume g)
     ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is; a root
     ;; whose boot fact was refused cannot start anything, so its refusal ends the boot
-    (let [r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (into (task/boot-tx boot max-running) (cfg/facts config cfg/sources))}})]
+    ;; with it, how the root before it on main ended (its stop fact, or :unclean)
+    (let [prev (previous-end db)
+          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (into (task/boot-tx boot max-running) (cfg/facts config cfg/sources))
+                                                                         prev (conj {:seon.root/id :root :seon.root/previous-end prev}))}})]
       (when-not (:ok r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
     (when source (import-source! sys source))
     sys))
@@ -967,13 +980,6 @@
      {:status (::flow/status m) :count (::flow/count m) :state (::flow/state m)}
      :unknown)))
 
-(defn agent-ping
-  "A ping answered by the agent's own process loop (it answers after its form in flight):
-  {:status :count :held :state}, or :unknown within ms."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.root/health] [:=> [:cat :seon.root/sys :seon.agent/id :int] :seon.root/health]]}
-  ([sys agent-id] (agent-ping sys agent-id 1000))
-  ([sys agent-id ms] (let [r (deref (call! sys {:op :ping :id agent-id}) ms :unknown)] (if (and (map? r) (:status r)) r :unknown))))
-
 (defn fs-call! "Ask the fork server for {:op :stats} or {:op :static}." {:malli/schema [:=> [:cat :seon.root/sys :seon.root/request] :any]}
   [sys msg] @(call! sys {:op :fs :req msg}))
 
@@ -993,10 +999,16 @@
   past seon.agent-proc/stop-bound-ms); the writer's in-port closes, it commits and flushes what it
   took; the fork server is killed and reaped; then flow/stop (every proc exited), the
   reader, the error reader. Nothing accepted is lost.
-  Answers {:stopped true :drained .. :graph true|{::flow/running #{pids}} :ms}."
-  {:malli/schema [:=> [:cat :seon.root/sys] :map]}
-  [sys]
-  (let [t0 (lib/now-ns)
+  First the end is a fact on main, durable (:seon.root/stopped {:boot :cause :at-ms}; cause
+  :stop! unless the caller names it: :stdin-eof, :signal), so every clean end says why; a
+  refused stop fact still stops root, and the answer carries it (:stop-fact-refused).
+  Answers {:stopped true :cause :drained .. :graph true|{::flow/running #{pids}} :ms}."
+  {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :keyword] :map]]}
+  ([sys] (stop! sys :stop!))
+  ([sys cause]
+  (let [fact @(transact-main! sys [{:seon.root/id :root :seon.root/stopped {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)}}]
+                              {:flush? true})
+        t0 (lib/now-ns)
         p (promise)]
     (a/>!! (:ext sys) {:op :shutdown :p p})
     (a/close! (:ext sys))
@@ -1009,7 +1021,8 @@
       ;; the store is released and kept, whoever gave its path
       (d/release (:conn sys))
       (when (= :lmdb (:backend (:store (:cfg sys)))) (klmdb/close-env! (:store-path sys)))
-      {:stopped true :drained drained :graph graph :agents-left 0 :ms (lib/r2 (lib/ms-since t0))})))
+      (cond-> {:stopped true :cause cause :drained drained :graph graph :agents-left 0 :ms (lib/r2 (lib/ms-since t0))}
+        (not (:ok fact)) (assoc :stop-fact-refused fact))))))
 
 ;; ====================================================================================
 ;; Root's threads: a declared number (lane THREADS)
