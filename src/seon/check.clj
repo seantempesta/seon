@@ -703,17 +703,23 @@
                running (thread-diff (c/declared-threads sys) (c/threads))
                pids (vec (cons (get-in (c/state sys) [:fork-server :pid]) (keep #(get-in (c/state sys) [:agents % :pid]) ids)))
                st (c/stop! sys)]
-           {:cycle i :ok ok? :boot-ms (lib/r2 boot-ms) :stop st :left (vec (filter alive? pids))
-            :health (set health)
-            :running running :stopped (thread-diff (c/declared-threads) (c/threads))}))))
+           ;; after stop!, the named roster and the sweepers are what stop! answers for; the OS's
+           ;; count is recorded, not compared: a thread Thread.join answered for is still in the
+           ;; kernel's count for a while (164 of 200 trials; macOS removes it after even a
+           ;; pthread_join), and nothing can await its removal (notes/pure-tests/lifecycle.md). A
+           ;; thread that does not end shows in the next cycle's :running, which keeps :os
+           (let [stopped (thread-diff (c/declared-threads) (c/threads))]
+             {:cycle i :ok ok? :boot-ms (lib/r2 boot-ms) :stop st :left (vec (filter alive? pids))
+              :health (set health)
+              :running running :stopped (dissoc stopped :os) :stopped-os (:os stopped)})))))
 
 (defn- exact? [row] (and (empty? (:running row)) (empty? (:stopped row))))
 
 (defn lifecycle
   "n cycles (cycles): each stop! must answer with every proc exited (:graph true) and no
   agent or fork-server process left, and root's threads must be exactly what it declares
-  (seon.root/declared-threads) while running and after every stop!, by name and by the OS's
-  count. Then pause/resume: a paused agent's request is held (no answer), and answered after
+  (seon.root/declared-threads): while running by name and by the OS's count, after every
+  stop! by name (the OS's count after a stop recorded: cycles). Then pause/resume: a paused agent's request is held (no answer), and answered after
   resume, in order."
   [n]
   (let [rows (cycles n)]
@@ -731,7 +737,7 @@
             _ (flow/resume-proc (:graph sys) a)
             r1 @p1 r2 @p2]
         {:report {:threads {:declared-running (c/declared-threads sys) :declared-stopped (c/declared-threads)}
-                  :cycles (mapv #(select-keys % [:cycle :boot-ms :running :stopped :left :health]) rows)
+                  :cycles (mapv #(select-keys % [:cycle :boot-ms :running :stopped :stopped-os :left :health]) rows)
                   :stop-ms (lib/summ (map #(get-in % [:stop :ms]) rows))
                   :gc (lib/gc-stats) :gc-sweepers (lib/gc-sweepers! -1)}
          :checks {:every-stop-exited (every? #(and (true? (get-in % [:stop :graph])) (zero? (get-in % [:stop :agents-left])) (empty? (:left %))) rows)
