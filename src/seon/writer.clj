@@ -3,7 +3,7 @@
   the in-port, one Datahike commit per branch, one flush). From proto/flow f2-final
   proto.control's writer (session F2; writer design A, notes/option3-F1-flow.md section 4)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
             [seon.program :as program] [seon.merge :as pm] [seon.source :as source] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
@@ -63,7 +63,7 @@
       (seq (pm/mutations main (:ours r)))
       (let [ms (pm/mutations main (:ours r))]
         (contract/error :seon.merge/mutation 'seon.writer/merge-branch
-                        (str "the branch's program " (str/join "; " (for [m ms] (str (pr-str (:defines m))
+                        (str "the branch's program " (str/join "; " (for [m ms] (str (sedn/encode (:defines m))
                                                                                     (if (:call m) (str " calls " (:call m)) (str " defines " (:inline-def m) " inside a function body"))))))
                         {:merged? false :tx (:max-tx main) :mutations ms
                          :seon.error/fix "Every definition happens once, where it is defined: vary behaviour through arguments or the environment, and define at the top level, not inside a function."}))
@@ -169,16 +169,18 @@
       ;; the agent's branch (new: a pointer to main's head), then its fork: the agent opens
       ;; the branch itself and owns its writes (run-ahead, committed by the agent), and holds
       ;; the task and attempt it works from its first form
+      ;; its block of entity ids is reserved here, from the counter main's writes mint from
       :spawn (let [{:keys [agent branch]} m
-                   resumed? (exists? branch)]
+                   resumed? (exists? branch)
+                   lease (pdb/lease-block! @conn)]
                (when-not resumed? (d/branch! conn main branch))
                ;; main's commit and t, which this branch starts at and the image it forks from holds
                (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :task (:task m) :attempt (:attempt m) :ns (:ns m) :fd (:fd m)
-                                              :cfg (:cfg st) :lease (:lease m) :resumed resumed?
+                                              :cfg (:cfg st) :lease lease :resumed resumed?
                                               :commit (d/commit-id @conn) :t (:max-tx @conn)})
                (reply st {:ok true :t (:max-tx @conn) :resumed resumed?}))
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
-                        (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st) :lease (:lease m)}))
+                        (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st) :lease (pdb/lease-block! @conn)}))
       :octopus-merge (let [[st r] (octopus-merge st o (vec (:branches m)) (:data-attrs m #{}))] (reply st r))
       :merge (if (exists? (:branch m))
                (let [[st r] (merge-branch st o (:branch m) (:data-attrs m #{}))] (reply st r))

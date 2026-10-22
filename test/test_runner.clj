@@ -34,19 +34,42 @@
            (str/starts-with? p "resources/seon/tasks/")
            (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))))))
 
+(defn config-input
+  "The config in force as a test reads it, cfg (seon.config/config: the shipped file, this
+  checkout's config/local.edn, the #env values, the profile), as text: the checkout's own path
+  written as <checkout>, and the TCP ports left out (each checkout's own by design, bin/ports;
+  a test's root takes its own). What a result depends on that git does not see."
+  [cfg checkout]
+  (str/replace (pr-str (into (sorted-map) (remove (fn [[k]] (= "TCP port" (get-in config/schema-forms [k 1 :seon.config/unit])))) cfg))
+               checkout "<checkout>"))
+
+(defn declared-refs
+  "{seon.system/read-decl #{symbol}}: every qualified symbol resources/seon/system.edn names in
+  the checkout at root (its procs' step-fns and its effects' performers), which root resolves
+  by name at boot (seon.system/step-fn): reach edges of the function that reads the
+  declaration (seon.program/reach-digests' :data-refs); none in a checkout that declares no
+  system."
+  [root]
+  (let [f (io/file root "resources/seon/system.edn")
+        decl (when (.isFile f) (edn/read-string {:default tagged-literal} (slurp f)))]
+    {'seon.system/read-decl (set (filter qualified-symbol? (tree-seq #(or (coll? %) (tagged-literal? %))
+                                                                     #(if (tagged-literal? %) [(:form %)] (seq %)) decl)))}))
+
 (defn inputs
   "The checkout at root's inputs that have no program facts: {:env (every test's: env-input?
-  files and every submodule's pin, Jolt's included) :tree (a test reading files: every file
-  and pin)}, digests of relative paths and content, so the same content at another path is
-  the same inputs."
-  [root]
-  (let [pins (filter #(str/starts-with? % "160000 ") (str/split-lines (git root "ls-files" "-s")))
-        files (for [p (sort (str/split (git root "ls-files" "--cached" "--others" "--exclude-standard" "-z") #"\u0000"))
-                    :let [f (io/file root p)] :when (.isFile f)]
-                [p (str p " " (error/digest (slurp f)))])
-        digest #(error/digest (str/join "\n" %))]
-    {:env (digest (concat pins (keep (fn [[p line]] (when (env-input? p) line)) files)))
-     :tree (digest (concat pins (map second files)))}))
+  files, every submodule's pin, Jolt's included, and the config in force, config-input) :tree
+  (a test reading files: every file and pin) :data-refs (declared-refs)}, digests of relative
+  paths and content, so the same content at another path is the same inputs."
+  ([root] (inputs root config/config (config/checkout)))
+  ([root cfg checkout]
+   (let [pins (filter #(str/starts-with? % "160000 ") (str/split-lines (git root "ls-files" "-s")))
+         files (for [p (sort (str/split (git root "ls-files" "--cached" "--others" "--exclude-standard" "-z") #"\u0000"))
+                     :let [f (io/file root p)] :when (.isFile f)]
+                 [p (str p " " (error/digest (slurp f)))])
+         digest #(error/digest (str/join "\n" %))]
+     {:env (digest (concat pins (keep (fn [[p line]] (when (env-input? p) line)) files) [(config-input cfg checkout)]))
+      :tree (digest (concat pins (map second files)))
+      :data-refs (declared-refs root)})))
 
 (defn program-db
   "A test-store branch's db holding src and test of the checkout at root as program facts
