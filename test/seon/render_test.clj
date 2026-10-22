@@ -415,3 +415,94 @@
     (is (str/includes? card "2 functions have no contract") "the pill's title says why, not that its tests were red")
     (is (= 1 (count (re-seq #"no contract" row))) row)
     (is (str/includes? (ui/event-detail {:type :merged-main :result (assoc r :ok false)}) "no contract"))))
+
+;;; --- the values agents and root read: declared AI and HTML renders, one per value --------
+
+(def ^:private behind
+  ;; as seon.writer/merge-refusal makes it
+  (seon.contract/error :seon.merge/behind 'seon.writer/merge-branch
+                       "main changed 3 key(s) since the branch's merge base: merge main into the branch first"
+                       {:merged? false :tx 812 :behind 3
+                        :seon.error/fix "A merge task merges main into the branch (my.branch/merge-main!), resolves any conflict, and its proofs run on the combined program."}))
+
+(deftest an-error-reads-its-message-fix-and-variant
+  (testing "an error map's schema is its variant: the base's render, whatever the variant"
+    (is (= :seon.merge/behind (r/schema-of behind nil)))
+    (is (= :seon.error/base (r/schema-of {:seon.error/type :no.such/variant :seon.error/operation 'a/b :seon.error/message "m"} nil))))
+  (let [text (:text (r/printed behind 'result/h4))]
+    (testing "the message first, as a REPL answers; the fix; then its variant, where, and its own keys"
+      (is (str/starts-with? text "main changed 3 key(s)"))
+      (is (str/includes? text "fix: A merge task merges main into the branch (my.branch/merge-main!)"))
+      (is (str/includes? text "(seon.merge/behind in seon.writer/merge-branch {"))
+      (is (str/includes? text ":behind 3"))
+      (is (str/includes? text "the whole value: result/h4"))))
+  (testing "the page shows the same facts"
+    (let [html (h/html (r/html behind {}))]
+      (is (str/includes? html "main changed 3 key(s)"))
+      (is (str/includes? html "fix: A merge task merges main"))
+      (is (str/includes? html "seon.merge/behind in seon.writer/merge-branch")))))
+
+(def ^:private failed-task
+  (assoc task :seon.task/execution :held :seon.task/needs #{"calc/sub"}
+         :seon.task/accumulated {:plan (str/join "\n" (cons "Make `app.calc/add` pass." (for [i (range 400)] (str "Step " i ": read `app.calc/f" i "` and its proof."))))
+                                 :proofs (set (for [i (range 12)] (symbol "app.proofs" (str "add-" i "-test"))))}
+         :seon.task/failure {:reason "add cannot be total over longs" :counterexample "(add Long/MAX_VALUE 1)" :attempt "calc/add#2"}
+         :seon.task/stuck {:attempt "calc/add#2" :cause "failed: held for root" :blocks ["calc/div" "calc/mul"]}
+         :seon.task/evidence {:from "calc/add#2" :conflicts [] :unmerged [] :red ['app.proofs/add-0-test] :problem "red"}))
+
+(deftest a-task-reads-its-state-plan-proofs-and-failure
+  (testing "a task's map at the REPL is its declared render (its identity attribute names the schema)"
+    (let [text (:text (r/printed failed-task 'result/h2))]
+      (is (str/starts-with? text "task calc/add · work · held · needs calc/sub"))
+      (is (str/includes? text "failed: add cannot be total over longs · counterexample (add Long/MAX_VALUE 1)"))
+      (is (str/includes? text "stuck: failed: held for root · blocks calc/div, calc/mul"))
+      (testing "a long plan is cut with the form that reads the rest"
+        (is (re-find #"…\+\d+ chars in \d+ more lines \(subs \(get-in result/h2 \[:seon.task/accumulated :plan\]\) \d+\)" text)))
+      (testing "the proofs are a bounded list: how many more and where"
+        (is (str/includes? text "12 proofs: app.proofs/add-0-test"))
+        (is (str/includes? text "+4 more: (:seon.task/proofs result/h2)")))
+      (is (str/includes? text "evidence: {:from \"calc/add#2\""))))
+  (testing "the page's task box shows the failure and the stuck fact too"
+    (let [html (h/html (r/html failed-task {:seon.render/schema :seon.task/task}))]
+      (is (str/includes? html "failed in calc/add#2: add cannot be total over longs"))
+      (is (str/includes? html "stuck: failed: held for root · blocks calc/div, calc/mul")))))
+
+(deftest an-attempt-reads-in-one-line
+  (is (= "running calc/add#1 on a3, turn 2, 1840 tokens"
+         (r/ai {:seon.attempt/id "calc/add#1" :seon.attempt/status :running :seon.attempt/agent :a3 :seon.attempt/turns 2 :seon.attempt/tokens 1840} {})))
+  (let [line (r/ai {:seon.attempt/id "calc/add#2" :seon.attempt/status :failed :seon.attempt/outcome :merge-failed
+                    :seon.attempt/reason (str "merge refused: " (:seon.error/message behind))
+                    :seon.attempt/conflicts [{:key "var app.calc/add" :kind :var :base "a" :ours "b" :theirs "c"}]
+                    :seon.attempt/unmerged ["var app.calc/add"]}
+                   {:seon.render/handle '(get atts "calc/add#2")})]
+    (is (str/starts-with? line "ended calc/add#2 merge-failed: merge refused: main changed 3 key(s)"))
+    (is (str/includes? line " · 1 conflicts · 1 unmerged"))))
+
+(defn- row
+  "A problem row as seon.problems/report makes it: every row's members, then its class's."
+  [m] (merge {:producer nil :owner-ns 'calc :evidence {} :proofs [] :answered-by [] :at-ms 1761170000000} m))
+
+(deftest every-problem-class-reads-what-it-is-about-and-why
+  ;; rows as seon.problems/report makes them, one per class that had no line of its own
+  (let [line #(r/ai (row (assoc %2 :class %1)) {:seon.render/schema :seon.problems/row})]
+    (is (= "task-conflict calc/add calc/add#3 plan: ours \"Make add total.\" · theirs \"Make add pass.\""
+           (line :task-conflict {:task "calc/add" :attempt "calc/add#3" :attr :plan :open? true
+                                 :evidence {:task "calc/add" :attr :plan :base "Make add." :ours "Make add total." :theirs "Make add pass." :from "calc/add#3"}})))
+    (is (= "stuck calc/add calc/add#2: failed: held for root · blocks 2"
+           (line :stuck {:task "calc/add" :attempt "calc/add#2" :cause "failed: held for root" :blocks ["calc/div" "calc/mul"]})))
+    (is (= "failed calc/add calc/add#2: add cannot be total over longs"
+           (line :failed {:task "calc/add" :attempt "calc/add#2" :reason "add cannot be total over longs" :counterexample "(add Long/MAX_VALUE 1)"})))
+    (is (= "merge calc/add calc/add#2: main changed 3 key(s) since the branch's merge base: merge main into the branch first · 1 conflicts · unmerged var app.calc/add"
+           (line :merge {:task "calc/add" :attempt "calc/add#2" :error behind :conflicts 1 :unmerged ["var app.calc/add"]})))
+    (is (= "red calc/add calc/add#1 app.proofs/add-test: tests-red"
+           (line :red {:task "calc/add" :attempt "calc/add#1" :test 'app.proofs/add-test :outcome :tests-red})))
+    (is (= "platform ×4: Datahike transact refused (answered by calc/fix-store)"
+           (line :platform {:signature "s" :message "Datahike transact refused" :count 4 :answered-by ["calc/fix-store"]}))))
+  (testing "the whole report at root's REPL: by class, each row by its render, closed rows marked"
+    (let [rep (with-meta {:t 90 :classes {:failed {:n 1 :rows [(row {:task "calc/add" :reason "not total" :open? true})]}
+                                          :stuck {:n 1 :rows [(row {:task "calc/sub" :cause "held" :open? false})]}
+                                          :red {:n 0 :rows []}}}
+                {:seon.render/schema :seon.problems/report})
+          text (:text (r/printed rep 'result/h1))]
+      (is (= ["problems recorded on main at t 90" "# failed 1" "- failed calc/add: not total" "# stuck 1" "- stuck calc/sub: held (closed)"]
+             (str/split-lines text))))))

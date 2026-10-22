@@ -8,7 +8,7 @@
  :seon.error/problem [:map {:description "One refused part of a value: malli's path and the value shown as text."}
                       [:path vector?] [:in vector?] [:expected :any] [:value :string]]
  :seon.error/problems [:vector :seon.error/problem]
- :seon.error/base [:map {:description "Every error: its variant (a registered schema key), the operation that raised it, a short message."}
+ :seon.error/base [:map {:seon.render/ai seon.render.ai/error :seon.render/html seon.render.ui/error-box :description "Every error: its variant (a registered schema key), the operation that raised it, a short message."}
                    [:seon.error/type :seon.error/type]
                    [:seon.error/operation :seon.error/operation]
                    [:seon.error/message :seon.error/message]

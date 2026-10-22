@@ -10,7 +10,8 @@
                    [:seon.render/schema {:optional true} [:maybe :qualified-keyword]]
                    ;; tokens for the printer (the AI face's budget, and the HTML face's)
                    [:seon.render/budget {:optional true} pos-int?]
-                   [:seon.render/handle {:optional true} [:maybe :symbol]]]
+                   ;; what a cut reads the value through: its result handle (result/h3) or a form
+                   [:seon.render/handle {:optional true} :any]]
  :seon.render/out [:map [:seon.render/html {:optional true} :any] [:seon.render/ai {:optional true} :any]]
 
  ;; ---- what root's dashboard shows: the whole system as one value ----

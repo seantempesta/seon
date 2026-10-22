@@ -1,6 +1,6 @@
 (ns seon.repl-test
   "An agent's REPL answers: asked of an agent in a root of its own (seon.agent-test/in-agent), and a form bounded by the work it does, never by a clock (seon.intr/run under a tick budget)."
-  (:require [clojure.test :refer [deftest is]] [clojure.string :as str] [seon.agent-test :as at]
+  (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [seon.agent-test :as at]
             [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]
             [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl]))
 
@@ -58,7 +58,9 @@
       (is (= ['seon.repl-test.scratch/uncontracted-g] (:uncontracted (first (:warnings d)))))
       (is (every? number? (map :ms [d e])))
       (is (= :seon.agent/eval-error (:seon.error/type (:err e))) "the error map itself")
-      (is (= (:seon.error/message (:err e)) (:printed e)))
+      (testing "its text is the error's render: the message first, then its type and where it was raised"
+        (is (str/starts-with? (:printed e) (:seon.error/message (:err e))))
+        (is (str/includes? (:printed e) "(seon.agent/eval-error in seon.repl/eval-code")))
       (is (str/includes? (str (:err-text e)) "Divide by zero") (pr-str e)))))
 
 (defn- runnable

@@ -437,6 +437,22 @@
         (proofs/red? (:tests r)) [:refused (str "tests " (run-words (:tests r)))]
         :else [:refused (or (:seon.error/message r) "refused")]))
 
+(defn error-box
+  "An error map (:seon.error/base, every variant): its message first, then its type and where
+  it was raised, the fix when it carries one, and its variant's own keys by the printer."
+  {:malli/schema [:=> [:cat :seon.error/base :seon.render/env] :seon.render/out]}
+  [e _]
+  (let [own (apply dissoc e (filter #(= "seon.error" (namespace %)) (keys e)))
+        budget (config/value :seon.config.render/part-budget)]
+    {:seon.render/html
+     [:div {:class "err"}
+      [:b (prose (:seon.error/message e) budget)]
+      [:span {:class "muted"} (str " · " (kname (:seon.error/type e)) " in " (:seon.error/operation e))]
+      (when (:seon.error/fix e) [:p {:class "fix"} "fix: " (prose (:seon.error/fix e) budget)])
+      (for [{:keys [in expected value]} (:seon.error/problems e)]
+        [:p {:class "muted"} "at " [:code (print/text in budget)] " expected " [:code (print/text expected budget)] ", got " [:code value]])
+      (when (seq own) (:seon.render/html (render/print-out :html own {:seon.render/budget budget})))]}))
+
 (defn- status-pill
   "How an agent is, as its pill: its status word, or how it ended once its attempt did."
   {:malli/schema [:=> [:cat :map :string] :any]}
@@ -479,6 +495,7 @@
   (let [err? (= :err (:tag e)) txt (or (:printed e) (:shown e))]
     (list [:span {:class "arrow"} (if err? "✕" "⇒")]
           (cond (and (context-read? e) (not err?)) (context-ref e href)
+                (map? (:err e)) (render/html (:err e) {})
                 (and structural? (not err?)) [:div {:class "printed seon"} (value-html txt value-budget (:handle e) {:href href})]
                 :else [:code {:class "printed"} (prose txt text-budget {:href href})]))))
 
@@ -769,8 +786,8 @@
 ;;; --- one agent, zoomed -----------------------------------------------------------------
 
 (defn task-box
-  "A task: its plan (accumulated along its needs), instructions, its proofs, its kind,
-  execution and problem."
+  "A task: its kind and execution, its plan (accumulated along its needs), instructions, what
+  is wrong (its problem, failure, stuck fact), its needs and proofs, and its evidence."
   {:malli/schema [:=> [:cat :seon.task/task :seon.render/env] :seon.render/out]}
   [t _]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)]
@@ -780,8 +797,14 @@
       [:pre {:class "plan"} plan]
       (when (:seon.task/instructions t) [:p {:class "muted"} (:seon.task/instructions t)])
       (when (:seon.task/problem t) [:p {:class "err"} (:seon.task/problem t)])
+      (when-let [{:keys [reason counterexample attempt]} (:seon.task/failure t)]
+        [:p {:class "err"} "failed" (when attempt (str " in " attempt)) ": " reason (when counterexample (list " · counterexample " [:code counterexample]))])
+      (when-let [{:keys [cause blocks]} (:seon.task/stuck t)]
+        [:p {:class "warn"} "stuck: " cause (when (seq blocks) (str " · blocks " (str/join ", " (sort blocks))))])
       (when (seq (:seon.task/needs t)) [:p {:class "muted"} "needs " (str/join ", " (sort (:seon.task/needs t)))])
-      [:p {:class "muted"} (str (count proofs) " proofs: ") (str/join " " (map str (sort-by str proofs)))]]}))
+      [:p {:class "muted"} (str (count proofs) " proofs: ") (str/join " " (map str (sort-by str proofs)))]
+      (when-let [ev (:seon.task/evidence t)]
+        [:div {:class "muted"} "evidence " (:seon.render/html (render/print-out :html ev {:seon.render/budget (config/value :seon.config.render/part-budget)}))])]}))
 
 (defn verdict-lines
   "A cost verdict as [class words] lines, red first: within or over its estimate, each size

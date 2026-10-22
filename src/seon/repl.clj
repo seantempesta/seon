@@ -29,7 +29,7 @@
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
-            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
+            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.render :as render] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
             [jolt.ffi :as ffi] [seon.config :as cfg]))
 
 (defchecked ^:private outer-frames [:=> [:cat] :any] @#'jolt.nrepl/outer-frames)
@@ -156,17 +156,18 @@
   [req f] (assoc req :reply (let [r (:reply req)] (fn [m] (r (f m))))))
 
 (defn wrap-print
-  "The value through the one value printer (seon.print), its cuts reading the rest through
-  the value's result handle: `value`, with the printer's tokens, truncation and elision
-  count. A value whose first part does not fit the budget answers the printer's refusal
-  message, with the refusal beside it."
+  "The value as its render shows it (seon.render/printed: its schema's declared AI render,
+  else the one value printer), its cuts reading the rest through the value's result
+  handle: `value`, with the printer's tokens, truncation and elision count. A value whose
+  first part does not fit the budget answers the printer's refusal message, with the
+  refusal beside it."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
     (h (around-reply req
          (fn [m]
            (if (contains? m :repl/value)
-             (let [pv (print/print-value (:repl/value m) {:handle (some->> (:handle m) name (symbol "result"))})]
+             (let [pv (render/printed (:repl/value m) (some->> (:handle m) name (symbol "result")))]
                (if-let [text (:text pv)]
                  (cond-> (assoc m :printed text :tokens (:tokens pv))
                    (:truncated? pv) (assoc :truncated? true)
@@ -175,7 +176,8 @@
              m))))))
 
 (defn wrap-caught
-  "An eval error also as the one error map (seon.agent/error-map, the item's :err), and
+  "An eval error also as the one error map (seon.agent/error-map, the item's :err, its
+  text the error's render: message and fix), and
   noted in this agent's error fold (seon.error/note): its next commit carries the fold to
   root, which counts each signature across agents."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
@@ -185,7 +187,7 @@
          (fn [m] (if-let [e (:repl/ex m)]
                    (let [em (cond-> (agent/error-map e) (:repl/phase m) (assoc :phase :read))]
                      (swap! agent/state update :errors err/note em (:form m) (System/currentTimeMillis))
-                     (assoc m :err em :printed (:seon.error/message em)))
+                     (assoc m :err em :printed (render/ai em {})))
                    m))))))
 
 (def top-fns
