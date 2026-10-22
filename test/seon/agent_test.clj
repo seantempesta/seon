@@ -32,7 +32,7 @@
                     " > '" path "-tasks/demo.edn'; ./seon root"
                     " --set ':seon.config.source/root=" (pr-str checkout) "' --set ':seon.config.source/dirs=" (pr-str dirs) "'"
                     " --set ':seon.config.root/store-path=" (pr-str store) "' --set ':seon.config.root/main=" (pr-str main) "'"
-                    " --set ':seon.config.root/entrance-port=" port "' --set ':seon.config.web/port=0'"
+                    " --set ':seon.config.root/server-port=" port "' --set ':seon.config.web/port=0'"
                     (str/join (for [x sets] (str " --set '" x "'")))
                     " < '" path "-in' > '" path ".log' 2>&1 & R=$!; exec 3>'" path "-in';"
                     " until grep -q 'ROOT LISTENING' '" path ".log' || ! kill -0 $R 2>/dev/null; do sleep 0.1; done;"

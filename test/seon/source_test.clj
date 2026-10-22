@@ -252,7 +252,7 @@
   (let [dir (scratch-dir "nextgen")
         tree (str dir "/tree")
         port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
-        env ["env" (str "SEON_RUNS=" dir "/runs") (str "SEON_ENTRANCE_PORT=" port) "SEON_WEB_PORT=0"]
+        env ["env" (str "SEON_RUNS=" dir "/runs") (str "SEON_SERVER_PORT=" port) "SEON_WEB_PORT=0"]
         root! (fn [& args] (apply sh/sh (concat env [(str here "/bin/root")] args)))
         ask (fn [code] (let [r (sh/sh "nc" "-w" "600" "127.0.0.1" (str port)
                                       :in (str (pr-str {:op :eval :agent "root" :code code}) "\n"))

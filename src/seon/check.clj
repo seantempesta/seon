@@ -981,15 +981,15 @@
                 :running-set-after (= (conj expect :probe) after)}}))))
 
 (defn root-serve
-  "A root with its server on 127.0.0.1:(:seon.config.root/entrance-port) (seon.server),
+  "A root with its server on 127.0.0.1:(:seon.config.root/server-port) (seon.server),
   until stdin closes (bin/root stop) or SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks):
   what an outside agent's MCP relay (bin/mcp) talks to. Its end is a fact on main
   naming that cause (seon.root/stop!). A checkout whose config names no server port (0)
   serves none, and says so."
   []
-  (let [port (seon.config/value :seon.config.root/entrance-port)
+  (let [port (seon.config/value :seon.config.root/server-port)
         _ (when (zero? port)
-            (out! "ROOT REFUSED: :seon.config.root/entrance-port is 0 (no server); bin/worktree --ports writes config/local.edn with this checkout's ports")
+            (out! "ROOT REFUSED: :seon.config.root/server-port is 0 (no server); bin/worktree --ports writes config/local.edn with this checkout's ports")
             (lib/c-exit 1))
         sys (c/start! {})]
     ;; the first cause stops root, once; a signal's hook waits for that stop, then Jolt exits
@@ -1265,7 +1265,7 @@
     "threads" (threads-check)
     "root" (root-serve)
     ;; this checkout's ports as the config resolves them, "SERVER WEB" (bin/ports)
-    "ports" (do (println (seon.config/value :seon.config.root/entrance-port) (seon.config/value :seon.config.web/port)) (lib/c-exit 0))
+    "ports" (do (println (seon.config/value :seon.config.root/server-port) (seon.config/value :seon.config.web/port)) (lib/c-exit 0))
     "mcp-proof" (mcp-proof)
     "hotreload" (hotreload)
     "idle" (idle (n-or "5000"))

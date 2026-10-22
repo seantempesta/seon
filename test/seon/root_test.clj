@@ -64,7 +64,7 @@
         ask (fn [m] (str "printf '%s\\n' " (pr-str (pr-str m)) " | nc -w 30 127.0.0.1 " port ";"))
         script (str "mkfifo '" path "-in'; " env "./seon root"
                     " --set ':seon.config.root/store-path=" (pr-str path) "' " (str/join " " args)
-                    " --set ':seon.config.root/entrance-port=" port "' --set ':seon.config.web/port=0'"
+                    " --set ':seon.config.root/server-port=" port "' --set ':seon.config.web/port=0'"
                     " < '" path "-in' > '" path ".log' 2>&1 & R=$!; exec 3>'" path "-in';"
                     " until grep -q 'ROOT LISTENING' '" path ".log' || ! kill -0 $R 2>/dev/null; do sleep 0.1; done;"
                     (apply str (map ask requests))

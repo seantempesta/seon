@@ -432,9 +432,9 @@
  ;; Unit: TCP port on 127.0.0.1: root's server (seon.server), which bin/mcp and outside
  ;; agents reach. 0 (the shipped value): `seon root` refuses to serve. config/local.edn names
  ;; the checkout's own (main 7888, worktree k 7900+10k).
- ;; bin/root PORT WEB, bin/mcp PORT and the mcp check set SEON_ENTRANCE_PORT, which local.edn
+ ;; bin/root PORT WEB, bin/mcp PORT and the mcp check set SEON_SERVER_PORT, which local.edn
  ;; honours (until a built binary's top-level code sees its argv, so --set can say it).
- :seon.config.root/entrance-port #long #or [#env SEON_ENTRANCE_PORT 0]
+ :seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 0]
  ;; app.css and datastar.js, read per request so a style edit shows on reload.
  :seon.config.web/public-dir #seon/checkout "resources/public"
  ;; Unit: +hhmm. Jolt has no time zones: clocks on the page add this offset (`date +%z`).

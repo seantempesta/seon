@@ -149,6 +149,7 @@
   fact to its new name (rename-tx) and the old attribute stays installed: history keeps what
   was written, under the name it was written with."
   {:seon.task/stuck :seon.task/budget-spent
+   :seon.config.root/entrance-port :seon.config.root/server-port
    :seon.config.contract/guarantees :seon.config.contract/instrument
    :seon.ai.model/thinking-dials :seon.ai.model/thinking-modes})
 
