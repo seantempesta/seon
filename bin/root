@@ -45,35 +45,15 @@ running() { [[ -f $PIDS ]] && read T R < "$PIDS" && kill -0 $R 2>/dev/null }
 launch() {
   : > "$LOG"
   rm -f "$PIDS" "$PORTF" "$READY"; mkfifo "$READY"
-  # the holder (perl, below) owns the root's stdin and its output, and waits on the root. It
-  # copies the root's output to the log line by line; at the root's ROOT LISTENING line it writes
-  # "HOLDER ROOT PORT" (the port the root bound) on the ready fifo this shell is reading, and at
-  # the root's death before that it closes the fifo (EOF): the root's own facts end the wait,
-  # never a poll. stop sends it TERM: it closes the root's stdin (the root stops cleanly), reaps
-  # it, and writes its exit status on the done fifo stop reads. A root that dies any other way
-  # ends the holder with it (a `tail -f /dev/null | root` holder outlived every root that
-  # crashed or was killed: its shell waited on a tail that never ends)
-  perl -MPOSIX -MIO::Handle -e 'exit 0 if fork; POSIX::setsid(); exit 0 if fork;
-    open STDIN,"<","/dev/null";
-    my ($log, $pids, $ready, $done, @cmd) = @ARGV;
-    open my $l, ">>", $log or die "log: $!"; $l->autoflush(1);
-    open STDOUT, ">&", $l; open STDERR, ">&", $l;
-    open my $r, ">", $ready or die "ready: $!"; $r->autoflush(1);
-    pipe(my $in_r, my $in_w) or die "pipe: $!"; pipe(my $out_r, my $out_w) or die "pipe: $!";
-    my $root = fork // die "fork: $!";
-    if ($root == 0) { close $in_w; close $out_r; open STDIN, "<&", $in_r or die;
-      open STDOUT, ">&", $out_w or die; open STDERR, ">&", $out_w or die; exec @cmd; die "exec: $!" }
-    close $in_r; close $out_w;
-    open my $f, ">", $pids or die; print $f "$$ $root\n"; close $f;
-    $SIG{TERM} = sub { close $in_w };
-    while (my $line = <$out_r>) {
-      print $l $line;
-      if ($r && $line =~ /^ROOT LISTENING (\d+)/) { print $r "$$ $root $1\n"; close $r; undef $r }
-    }
-    close $r if $r;
-    waitpid($root, 0); my $st = $? >> 8;
-    if (sysopen(my $d, $done, O_WRONLY|O_NONBLOCK)) { print $d "$st\n"; close $d }
-    exit 0' "$LOG" "$PIDS" "$READY" "$DONE" "$ROOT/bin/root" run "$1" "$PORT" "$WEB" "${@:2}"
+  # the one holder (bin/held, detached) owns the root's stdin and output and waits on it: it
+  # copies the output to the log; at the root's ROOT LISTENING line it writes "HOLDER ROOT PORT"
+  # (the port the root bound) on the ready fifo this shell is reading, and at the root's death
+  # before that it closes the fifo (EOF): the root's own facts end the wait, never a poll. stop
+  # sends it TERM: the root's stdin closes (it stops cleanly), and held writes its exit status
+  # on the done fifo stop reads. A root started with SEON_STARTER_FIFO (a test's) ends with its
+  # starter. (A `tail -f /dev/null | root` holder outlived every root that crashed or was killed.)
+  "$ROOT/bin/held" --detach --log "$LOG" --pids "$PIDS" --ready "$READY" --done "$DONE" \
+    "$ROOT/bin/root" run "$1" "$PORT" "$WEB" "${@:2}"
   read -r T R P < "$READY"
   rm -f "$READY"
   if [[ -n ${P:-} ]]; then print $P > "$PORTF"; "$ROOT/bin/root" status

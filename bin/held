@@ -1,0 +1,79 @@
+#!/usr/bin/perl
+# bin/held [--detach] [--log F] [--pids F] [--ready F] [--done F] CMD [ARGS]   the one holder of a
+# long-lived child (a root, a check mode): CMD in a process group of its own, ended with its
+# starter, its end reported. The process that started it (bin/check, a test runner) holds the
+# fifo SEON_STARTER_FIFO open read-write while it lives; at that fifo's EOF, the starter gone
+# however it ended (a harness's alarm, a SIGKILL), held SIGKILLs CMD's group: the agents'
+# mechanism (an end is EOF), never a clock (8 `seon lease` roots outlived the bin/check that
+# started them by hours; root, 2026-10-23). With no SEON_STARTER_FIFO, CMD only runs held.
+#   --detach  double-forked out of the caller's session (bin/root start: the tool host kills a
+#             background task's whole tree), CMD's stdin a pipe held keeps open: TERM to held
+#             closes it, and CMD stops cleanly
+#   --log F   held's and CMD's output appended to F
+#   --pids F  "HELD CMD" written to F
+#   --ready F CMD's output read line by line: at its ROOT LISTENING line, "HELD CMD PORT" written
+#             on the fifo F (the port the root bound), at its death before that, F closed (EOF)
+#   --done F  at CMD's end, its exit status written on the fifo F if someone holds it open
+# held exits with CMD's status (128+N for a signal).
+use strict; use warnings; use POSIX (); use IO::Handle; use Fcntl qw(O_WRONLY O_NONBLOCK);
+my %o;
+while (@ARGV && $ARGV[0] =~ /^--(detach|log|pids|ready|done)$/) { shift; $o{$1} = $1 eq "detach" ? 1 : shift }
+@ARGV or die "usage: bin/held [--detach] [--log F] [--pids F] [--ready F] [--done F] CMD [ARGS]\n";
+if ($o{detach}) { exit 0 if fork; POSIX::setsid(); exit 0 if fork; open STDIN, "<", "/dev/null" }
+if ($o{log}) { open my $l, ">>", $o{log} or die "held: log: $!\n"; $l->autoflush(1);
+               open STDOUT, ">&", $l; open STDERR, ">&", $l; STDOUT->autoflush(1) }
+my $ready; if ($o{ready}) { open $ready, ">", $o{ready} or die "held: ready: $!\n"; $ready->autoflush(1) }
+my ($in_r, $in_w, $out_r, $out_w);
+pipe($in_r, $in_w) or die "held: pipe: $!\n" if $o{detach};
+pipe($out_r, $out_w) or die "held: pipe: $!\n" if $ready;
+my $cmd = fork // die "held: fork: $!\n";
+if ($cmd == 0) {
+  POSIX::setpgid(0, 0);
+  if ($in_r) { close $in_w; open STDIN, "<&", $in_r or die }
+  if ($out_w) { close $out_r; open STDOUT, ">&", $out_w or die; open STDERR, ">&", $out_w or die }
+  exec { $ARGV[0] } @ARGV or die "held: exec $ARGV[0]: $!\n";
+}
+POSIX::setpgid($cmd, $cmd);
+close $in_r if $in_r; close $out_w if $out_w;
+if ($o{pids}) { open my $f, ">", $o{pids} or die; print $f "$$ $cmd\n"; close $f }
+# TERM closes CMD's stdin. Installed without SA_RESTART (%SIG's handlers restart a blocking read,
+# so a TERM to a holder of a quiet root waited for the root's next line): the read returns
+# EINTR, the handler runs, the read is read again
+POSIX::sigaction(POSIX::SIGTERM(), POSIX::SigAction->new(sub { if ($in_w) { close $in_w; undef $in_w } })) if $in_w;
+my $fifo = $ENV{SEON_STARTER_FIFO} // "";
+my $watch = 0;
+if ($fifo ne "") {
+  $watch = fork // die "held: fork: $!\n";
+  if ($watch == 0) {
+    # it holds none of CMD's pipes: a copy of CMD's stdin's write end here would keep CMD's
+    # stdin open after held closes its own (a stop that never reached the root)
+    close $in_w if $in_w; close $out_r if $out_r; close $ready if $ready;
+    open STDIN, "<", "/dev/null";
+    open(my $s, "<", $fifo) or exit 0;
+    1 while sysread($s, my $buf, 512);
+    kill "KILL", -$cmd;
+    exit 0;
+  }
+}
+if ($out_r) {
+  # read to CMD's EOF: a signal (TERM at stop) interrupts a read, which is read again
+  my $buf = "";
+  while (1) {
+    my $n = sysread($out_r, my $chunk, 65536);
+    if (!defined $n) { next if $!{EINTR}; last }
+    last if $n == 0;
+    print $chunk;
+    $buf .= $chunk;
+    while ($buf =~ s/^([^\n]*)\n//) {
+      my $line = $1;
+      if ($ready && $line =~ /^ROOT LISTENING (\d+)/) { print $ready "$$ $cmd $1\n"; close $ready; undef $ready }
+    }
+  }
+  close $ready if $ready;
+}
+1 while waitpid($cmd, 0) == -1 && $!{EINTR};
+my $st = $?;
+my $code = ($st & 127) ? 128 + ($st & 127) : $st >> 8;
+if ($watch) { kill "KILL", $watch; waitpid($watch, 0) }
+if ($o{done} && sysopen(my $d, $o{done}, O_WRONLY | O_NONBLOCK)) { print $d "$code\n"; close $d }
+exit $code;

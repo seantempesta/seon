@@ -33,12 +33,23 @@
     (try (f (assoc @store :branch b) conn)
          (finally (d/release conn) (pdb/delete-main! seed b) (d/release seed)))))
 
+(def ^:private starter
+  "This test process's starter fifo: made once and held open read-write for the process's life
+  (its children do not inherit it), so its EOF says the test process is gone however it ended;
+  what a test starts runs under bin/held, which ends it then (task
+  seon.check/a-test-root-names-its-store-and-main). [path its-holder]."
+  (delay (let [path (str (.getCanonicalPath (java.io.File. "target/tmp")) "/test-starter-" (random-uuid) ".fifo")]
+           (.mkdirs (java.io.File. "target/tmp"))
+           (sh/sh "mkfifo" path)
+           [path (java.io.RandomAccessFile. path "rw")])))
+
 (defn binary-sh
   "clojure.java.shell/sh of a command that runs the checkout's binary (target/seon, bin/root,
   bin/check): the one way a test does, so seon.program/tree-readers names it and such a test's
-  reach digest covers the whole tree the binary is built from."
+  reach digest covers the whole tree the binary is built from. It runs under bin/held with this
+  process's starter fifo: what it starts ends when the test process ends."
   {:malli/schema [:=> [:cat [:* :any]] :map]}
-  [& args] (apply sh/sh args))
+  [& args] (apply sh/sh "env" (str "SEON_STARTER_FIFO=" (first @starter)) (.getCanonicalPath (java.io.File. "bin/held")) args))
 
 (defn- root-sh
   "bin/root VERB ARGS for a test's root (root): its store, main and runs named in the

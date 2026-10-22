@@ -45,7 +45,14 @@ IDLE_WEB_PORT=$((20000 + $$ % 20000))
 export SEON_PROFILE=${SEON_PROFILE:-scripted}
 S=$ROOT/target/seon
 [[ -x $S ]] || { echo "check: no target/seon; run bin/build seon" >&2; exit 1 }
-run() { (cd "$ROOT/target" && ./seon "$@" 2>&1) }
+# what this run starts ends with it (bin/held): a fifo of its own, held open read-write while
+# bin/check lives, named to every step; its EOF, bin/check gone however it ended, ends them
+STARTER=$ROOT/target/tmp/check-starter-$$.fifo
+mkdir -p "$ROOT/target/tmp"; rm -f "$STARTER"; mkfifo "$STARTER"; exec 7<>"$STARTER"
+export SEON_STARTER_FIFO=$STARTER
+trap 'rm -f "$STARTER"' EXIT
+# (fd 7, the fifo's write end, stays bin/check's own: a child holding it would keep the fifo open)
+run() { (cd "$ROOT/target" && "$ROOT/bin/held" ./seon "$@" 2>&1 7>&-) }
 # a step's own settings, the same alone or in the run: lease's block is small enough to spend
 LEASE_SET=(--set :seon.config.store/eid-lease=50)
 # a single mode: on its own branch check-<mode> of the given store, deleted when it is green
@@ -70,7 +77,7 @@ FAILED=() GREEN=()
 step() {
   local name=$1 filter=$2; shift 2
   local log=$OUT/$name.log expect=${EXPECT:-0}
-  SEON_MAIN=check-$name "$@" > "$log" 2>&1
+  SEON_MAIN=check-$name "$@" > "$log" 2>&1 7>&-
   local st=$?
   if [[ -n $filter ]]; then grep -E "$filter" "$log"; else tail -1 "$log"; fi
   if (( st != expect )); then FAILED+=("$name (exit $st, expected $expect, $log)"); echo "FAILED $name (exit $st, expected $expect)"
@@ -114,12 +121,12 @@ echo "== smoke"; step smoke "^merge|^killed|spawned|ready|^SMOKE " run smoke
 echo "== robust"; step robust "" run robust
 # no web listener: the adapter's acceptor and sweeper outlive stop! (task seon.web.edn
 # web-server-threads-are-joined-at-stop), so root's exact thread count is checked without it
-echo "== lifecycle (start!/stop! x10 in one process, root's threads exactly as declared; pause/resume)"; step lifecycle "LIFECYCLE" env SEON_WEB_PORT=0 zsh -c "cd '$ROOT/target' && ./seon lifecycle 10"
+echo "== lifecycle (start!/stop! x10 in one process, root's threads exactly as declared; pause/resume)"; step lifecycle "LIFECYCLE" env SEON_WEB_PORT=0 zsh -c "cd '$ROOT/target' && '$ROOT/bin/held' ./seon lifecycle 10"
 echo "== backpressure"; step backpressure "" run backpressure 200
 echo "== hotreload"; step hotreload "" run hotreload
 echo "== drain"; step drain "" run drain 32
 echo "== idle (no beat: an idle root with a tab open steps nothing; a spawn and a commit still reach the tab)"
-step idle ":steps-at-idle|:bytes-at-idle|reached-tab|^IDLE " env SEON_WEB_PORT=$IDLE_WEB_PORT zsh -c "cd '$ROOT/target' && ./seon idle 5000"
+step idle ":steps-at-idle|:bytes-at-idle|reached-tab|^IDLE " env SEON_WEB_PORT=$IDLE_WEB_PORT zsh -c "cd '$ROOT/target' && '$ROOT/bin/held' ./seon idle 5000"
 
 echo "== orphan (root dies under busy agents, a clone and a test child)"
 SEON_MAIN=check-orphan run orphan > "$OUT/orphan.log" 2>&1
