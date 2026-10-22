@@ -47,14 +47,14 @@
     (mapv #(let [a (edn/read-string {:default tagged-literal} %)] (if (contains? a :items) (first (:items a)) a)) (str/split-lines (str/replace out #"(?s)^.*ROOT LISTENING[^\n]*\n" ""))))))
 
 (defn- root-ended
-  "A root with two agents: a1 idle, a2 evaluating code (sent, not awaited). Then what a pid
-  cleanup does: SIGKILL of the fork server's standby, of the fork server, then of root, so
-  the fork server's group kill (seon.fork-server/main) never runs and each agent has only
-  its own socket to root to end on. Answers {:agents {id pid} :left #{pid}}: the agents'
+  "A root with two agents: a1 idle, a2 evaluating code (sent, not awaited). Then SIGKILL of
+  root; with fork-server-first?, what a pid cleanup does before it: SIGKILL of the fork
+  server's standby and of the fork server, so its group kill (seon.fork-server/main) never
+  runs and each agent has only its own socket to root to end on. Answers {:agents {id pid} :left #{pid}}: the agents'
   pids, and the processes of the fork server's group still alive once all have ended or
   100 checks 0.1 s apart have passed (the bound only ends a red run; the assertion is on
   the processes)."
-  [code]
+  [code fork-server-first?]
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         main (str "root-ended-" (random-uuid))
         store (str checkout "/target/runs/test-store")
@@ -73,8 +73,10 @@
                     " P=$(" (ask {:op :eval :agent "root" :code "(pr-str (into {} (for [[id a] (:agents (c/state sys))] [id (:pid a)])))"}) ");"
                     " echo \"AGENTS $P\";"
                     " FS=$(pgrep -P $R);"
-                    " for k in $(pgrep -P $FS); do echo \"$P\" | grep -q \" $k\" || kill -9 $k; done;"
-                    " kill -9 $FS; kill -9 $R; wait $R 2>/dev/null; exec 3>&-;"
+                    (when fork-server-first?
+                      (str " for k in $(pgrep -P $FS); do echo \"$P\" | grep -q \" $k\" || kill -9 $k; done;"
+                           " kill -9 $FS;"))
+                    " kill -9 $R; wait $R 2>/dev/null; exec 3>&-;"
                     " LEFT=x; for i in {1..100}; do LEFT=$(pgrep -g $FS); [[ -z $LEFT ]] && break; sleep 0.1; done;"
                     " echo \"LEFT $(echo $LEFT)\"; for p in $(echo $LEFT); do kill -9 $p; done")
         {:keys [out]} (sh/sh "zsh" "-c" script :dir "target")
@@ -89,16 +91,17 @@
   ;; task seon.agent/an-agent-ends-with-its-root: with its fork server gone first (a pid
   ;; cleanup), an agent ends on EOF of its own socket to root, whatever it is doing: an idle
   ;; agent reads it; one evaluating a form with no tick budget is interrupted by it (SIGIO)
-  (let [{:keys [agents left]} (root-ended "(loop [] (recur))")]
+  (let [{:keys [agents left]} (root-ended "(loop [] (recur))" true)]
     (is (= #{:a1 :a2} (set (keys agents))) (pr-str agents))
     (is (not (contains? left (:a1 agents))) "the idle agent ended")
     (is (not (contains? left (:a2 agents))) "the busy agent ended")))
 
-(deftest a-hung-agent-ends-when-its-root-is-gone
-  ;; task seon.agent/an-agent-ends-with-its-root, the hung case: a timeout in a forked agent
-  ;; waits on a fiber pool with no carriers (worktree dry-run, its fork-carrier branch);
-  ;; with that branch the wait returns and the agent reads its EOF. Red until it merges.
-  (let [{:keys [agents left]} (root-ended "(clojure.core.async/<!! (clojure.core.async/timeout 600000))")]
+(deftest a-blocked-agent-ends-with-its-root
+  ;; task seon.agent/an-agent-ends-with-its-root, an agent blocked in a wait: its thread in
+  ;; Chez's condition-wait reaches no safe point, so no signal handler runs (SIGIO, root's
+  ;; SIGUSR1) until the wait returns. The fork server's group kill on root's EOF ends it
+  ;; (task seon.agent/a-signal-wakes-a-blocked-wait makes the agent's own EOF end it too)
+  (let [{:keys [agents left]} (root-ended "(clojure.core.async/<!! (clojure.core.async/chan))" false)]
     (is (= #{:a1 :a2} (set (keys agents))) (pr-str agents))
     (is (empty? left) (str "agents still alive: " left))))
 
