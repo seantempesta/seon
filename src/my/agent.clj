@@ -77,12 +77,17 @@
       (d/q '[:find ?src . :in $ ?s :where [?n :ns/name ?s] [?f :form/defines ?n] [?f :form/src ?src]] (agent/db) sym))))
 
 (defn not-found
-  "What source prints for sym when it names nothing: Clojure's words, and, when its namespace
-  part names a namespace, the form that shows that namespace's ns form."
+  "What source prints for sym when it names nothing: Clojure's words; when its namespace part
+  names a namespace, that no such var is defined here or recorded on this branch (a name a
+  plan gives a function to write is not one yet: step E's paid run 4, whose design and
+  implement asked the source of a planned function until they ended :no-progress), how to
+  write it there, and the form that shows that namespace's ns form."
   {:malli/schema [:=> [:cat :symbol] :string]}
   [sym]
-  (cond-> (str "Source not found for " sym)
-    (some-> (namespace sym) symbol find-ns) (str "; its namespace's ns form: (source " (namespace sym) ")")))
+  (if-let [n (some-> (namespace sym) symbol find-ns)]
+    (str "Source not found for " sym ": no such var is defined or recorded on this branch. If your plan names it as new, "
+         "write it: (in-ns '" (ns-name n) ") (defn " (name sym) " ...). Its namespace's ns form: (source " (ns-name n) ")")
+    (str "Source not found for " sym)))
 
 (defn pst
   "Print the exception e (*e by default) as clojure.repl/pst does: its message, then each cause's

@@ -25,4 +25,8 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.agent-test/after-merge-main-the-agent-judges-against-the-new-base
                       seon.procs-test/a-fork-names-the-commit-its-agent-starts-at
-                      seon.procs-test/a-fork-at-another-commit-is-recorded-misaligned}}]
+                      seon.procs-test/a-fork-at-another-commit-is-recorded-misaligned}}
+ {:seon.task/name "a-proof-run-ends-with-its-agent"
+  :seon.task/plan "Found by step E's paid run 4 (2026-10-22, worktree dry-run): the r2-design agent's proof run (`seon.agent/run-tests-forked`, a fork of the agent) was running an `in-agent` integration test, polling a child with sleeps; the agent was killed (its task cancelled), and the test fork lived on under ppid 1, sleeping, because it learns of its agent's death only at its next write to the pipe (EPIPE), which a polling test never makes. Correct: a proof run ends when its agent does, by what the kernel already says (the agent's end of the pipe closed: the child watches it, or the agent's death kills its process group), never by a clock. Proof: an agent whose proof run is parked in a sleep is killed; the proof run's process is gone (waitpid by the fork server, or kill 0 answers ESRCH) once the agent's death is recorded."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.agent-test/a-proof-run-ends-with-its-agent}}]
