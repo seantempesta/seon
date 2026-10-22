@@ -47,17 +47,10 @@
 ;; holding E4a's real index nodes, one content-addressed node per key. Branching factor
 ;; 64: a commit rewrites the nodes it touched, so smaller nodes mean fewer bytes printed
 ;; and written per commit (dev/dur.clj: 512 -> 64 cut a small commit 27 -> 16 ms with
-;; fsync, before the node emitter). LMDB runs MDB_NOSYNC and the writer syncs the env
-;; once per commit (sync!), so a commit is one drive flush, not one per node.
+;; fsync, before the node emitter). LMDB runs MDB_NOSYNC and the flusher syncs the env
+;; once for every commit so far (sync!), so a commit is at most one drive flush, not one per node.
 
 (def ^:private MDB_NOSYNC 0x10000)
-
-(def flush-ms
-  "How long a committed write may stay unflushed, ms (owner 2026-10-20: every write is
-  answered when committed in memory, and one group flush within this window makes it
-  durable). Not a config key: owner 2026-10-21, no clock decides anything; it goes when the
-  flush runs on the writer's workload. root's start! takes :flush-ms for the window check."
-  10)
 
 (defn- stored-id
   "The id the store cfg names was made with, read from its :db head's stored config (0.8 ms),

@@ -83,9 +83,7 @@
   (pdb/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? true :to-writer in :events (a/chan 16)})]
     (testing "the flusher syncs at once and tells the writer which commits it covered"
-      ;; :flush-ms 0: the window the implementation deletes, at none, so today's flusher answers
-      ;; without waiting
-      (let [fl (#'writer/flusher-proc {:to-writer in :cfg cfg :flush-ms 0})
+      (let [fl (#'writer/flusher-proc {:to-writer in :cfg cfg})
             [fl outs] (step #'writer/flusher-proc fl :in {:op :dirty :commits 3 :since 0})]
         (is (= {:to-writer [{:op :flushed :commits 3}]} outs))
         (is (= 1 (:flushes fl)))))
