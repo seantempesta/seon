@@ -23,7 +23,7 @@
     :failed                         a task marked failed (my.task/fail!, root or a check): its
                                     reason and counterexample; open while it is held
     :dead-citation                  a name a wiki section cites (:seon.section/names) that names
-                                    nothing now (seon.ref/names-something?): derived when read,
+                                    nothing now (seon.ref/names-on-db?): derived when read,
                                     never written, so it is open exactly while it is true
     :unnamed-site                   a site of a law (`laws`: a catch) its page does not name:
                                     derived from the compiler's facts and the page's names
@@ -84,14 +84,14 @@
 
 (defn dead-citations
   "Each name a wiki section cites (:seon.section/names) that names nothing on db
-  (seon.ref/names-something?, the one rule), as a :dead-citation row: open while it is true,
+  (seon.ref/names-on-db?, the one rule for a name), as a :dead-citation row: open while it is true,
   since nothing writes it. Cost: main's var names read once into a set and one set lookup per
   cited name; the rule runs only on a name the set misses."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
   [db ans]
   (let [vars (into #{} (map :v) (d/datoms db :aevt :var/name))]
     (vec (for [{:keys [e v]} (d/datoms db :aevt :seon.section/names)
-               :when (not (or (vars v) (ref/names-something? db {:seon.ref/name v :seon.ref/depth :summary :seon.ref/line 1})))
+               :when (not (or (vars v) (ref/names-on-db? db v)))
                :let [a (:seon.section/address (d/pull db [:seon.section/address] e))
                      s (str "dead-citation " a " " v)]]
            {:signature s :section a :name v :open? true

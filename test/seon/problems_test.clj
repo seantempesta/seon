@@ -447,7 +447,7 @@
   (cost/proof {:of 'seon.problems/dead-citations :input 'seon.problems-test/citing-input
                :n "sections, each citing one var, every one deleted (each a dead citation)"
                :work (str "fixed: main's var names read once into a set (the seed's ~300 vars). Per cited name: one set "
-                          "lookup; a dead one also runs seon.ref/names-something? (an AVET seek for the var, two for a task, "
+                          "lookup; a dead one also runs seon.ref/names-on-db? (an AVET seek for the var, two for a task, "
                           "one for its namespace: ~4 seeks at ~17 us and ~33 KB, seon.db/avet-seek-allocates) and pulls its "
                           "section's address (one pull)")
                :growth :linear
