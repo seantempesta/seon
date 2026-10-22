@@ -83,18 +83,14 @@
     (is (not= (before "smoke") (after "smoke")) "add changed: the step whose function calls it moves")
     (is (= (before "idle") (after "idle")) "the step not reaching add keeps its digest, so its green is reused")
     (testing "a step that censuses the tree is keyed by the tree; the others by their functions"
-      (let [sd (proofs/step-digests (fn [roots] (zipmap (keys roots) (map str (keys roots)))) {:env "e" :tree "t1"})]
-        (is (= (set (keys proofs/check-steps)) (set (keys sd))))
-        (is (not= (sd "dragons") ((proofs/step-digests (fn [roots] (zipmap (keys roots) (keys roots))) {:env "e" :tree "t2"}) "dragons")))))))
-
-(deftest every-bin-check-step-is-keyed
-  (let [named (set (map second (re-seq #"\bstep ([a-z0-9$-]+) \"" (slurp "bin/check"))))
-        units (set (map #(str/replace % #"-(write|read)$" "") (disj named "seed")))
-        units (into (disj units "e2e-$k") (map #(str "e2e-" %) ["conflict" "semantic" "hairy" "newns" "sibling"]))]
-    (is (= (set (keys proofs/check-steps)) (conj units "census" "orphan"))
-        "seon.proofs/check-steps keys exactly the steps bin/check runs (census and orphan run outside its step helper)")
-    (is (every? #(or (keyword? %) (every? requiring-resolve %)) (vals proofs/check-steps))
-        "every function a step names is a var")))
+      (let [all (fn [roots] (zipmap (keys roots) (map str (keys roots))))
+            sd (proofs/step-digests all {:env "e" :tree "t1"})]
+        (is (= (set (keys proofs/check-steps)) (set (keys (:digests sd)))))
+        (is (= [] (:missing sd)))
+        (is (not= ((:digests sd) "dragons") ((:digests (proofs/step-digests all {:env "e" :tree "t2"})) "dragons")))))
+    (testing "a step whose function the program does not define (renamed) has no digest and is named missing"
+      (is (= {} (program/reach-digests db {:env "e" :tree "t"} {"gone" '[app.pv-check/renamed]})))
+      (is (= ["smoke"] (:missing (proofs/step-digests (fn [roots] (dissoc (zipmap (keys roots) (map str (keys roots))) "smoke")) {:env "e" :tree "t"})))))))
 
 (deftest shards-split-by-namespace-and-each-result-is-stored
   (record (ts/test-db) 'user "(ns app.pv-red-test (:require [clojure.test :refer [deftest is use-fixtures]]))"
@@ -150,6 +146,25 @@
     (is (= a c) "the same commit in another checkout: every digest equal, so its results are shared")
     (is (= [] (:run (proofs/plan nil a (into {} (for [d (vals a)] [d {:pass 1 :fail 0 :error 0}])) #{})))
         "with each green stored, a second run on the unchanged tree runs nothing")))
+
+(deftest a-failed-write-or-a-throwing-fixture-is-recorded-red
+  ;; review 2026-10-22: a write's declared error was dropped (read as stored), and a fixture's
+  ;; throw went only to printed output with a guessed message
+  (prog)
+  (record (ts/test-db) 'user "(ns app.pv-fx-test (:require [clojure.test :refer [deftest is use-fixtures]]))"
+          'app.pv-fx-test "(use-fixtures :once (fn [f] (throw (ex-info \"the fixture's store is gone\" {:store :gone}))))"
+          'app.pv-fx-test "(deftest never-runs (is true))")
+  (let [quiet #(binding [*out* (java.io.StringWriter.)] (%))
+        unwritable (quiet #(proofs/run-tests! '[app.pv-calc-test/add-test] '{app.pv-calc-test/add-test "d-add"} "/dev/null/results" (fn [_])))
+        thrown (quiet #(proofs/run-tests! '[app.pv-fx-test/never-runs] '{app.pv-fx-test/never-runs "d-never"} (scratch-dir) (fn [_])))
+        r (unwritable 'app.pv-calc-test/add-test)
+        t (thrown 'app.pv-fx-test/never-runs)]
+    (is (= [1 1] [(:pass r) (:error r)]) "the test passed, and the failed write of its result is an error of the run")
+    (is (re-find #"result not stored" (:message r)) (:message r))
+    (is (not (proofs/green? r)) "so it is never read as stored")
+    (is (= 1 (:error t)))
+    (is (re-find #"the fixture's store is gone" (:message t)) "the throw's own message, not a guess")
+    (is (= "{:store :gone}" (:data t)) "and its data")))
 
 (defn plan-input
   "The input of size n: n keys with stored greens, one in a hundred moved since."

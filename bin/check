@@ -6,8 +6,10 @@
 # resume, scale N (default N = 100).
 # bin/check MODE [ARGS] runs one mode. bin/check with no argument is bin/prove --checks: only
 # the steps whose reach digest has no green result run (seon.proofs/check-steps); a number is
-# the full run. SEON_CHECK_STEPS="a b ..." (bin/prove sets it) runs only those steps of a full
-# run, and SEON_CHECK_GREEN names the file the green steps are written to (check-<step> ...).
+# the full run. bin/check --steps DIR (bin/prove's) runs only the steps DIR/steps names, of a
+# full run, and writes the green ones to DIR/green (check-<step> ...). A full run takes its step
+# names from the binary (./seon steps: seon.proofs/check-steps, the one list): a step this script
+# runs that the list does not name is FAILED, so the two cannot drift.
 #
 # Every step's exit status counts (a mode answers 0 only when its own proof holds, and ends
 # on the one verdict line NAME OK / NAME FAILED: seon.check/run-check), its
@@ -29,7 +31,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 [[ -z ${1:-} ]] && exec "$ROOT/bin/prove" --checks
 # a full run is niced; full runs from different worktrees run in parallel (no lock: each
 # uses its own stores under its run directory and kernel-assigned ports; owner, 2026-10-21)
-if [[ -z ${SEON_CHECK_NICED:-} && ( -z ${1:-} || ${1} =~ ^[0-9]+$ ) ]]; then
+if [[ -z ${SEON_CHECK_NICED:-} && ( ${1:-} =~ ^[0-9]+$ || ${1:-} == --steps ) ]]; then
   SEON_CHECK_NICED=1 exec nice -n 15 "$0" "$@"
 fi
 # the run is niced once (above, or by its caller): its background steps (the census shards)
@@ -42,6 +44,9 @@ export SEON_STORE=${SEON_STORE:-$ROOT/target/check-store}
 # step's root that found it free took it (the owner's browser then showed a throwaway check
 # root). A run that wants one names its port: SEON_WEB_PORT=7790 bin/root
 export SEON_WEB_PORT=${SEON_WEB_PORT:-0}
+# --steps DIR: a full run of the steps DIR/steps names, its greens written to DIR/green
+SEL=
+[[ ${1:-} == --steps ]] && { SEL=$2; shift 2; set -- 100 }
 S=$ROOT/target/seon
 [[ -x $S ]] || { echo "check: no target/seon; run bin/build seon" >&2; exit 1 }
 run() { (cd "$ROOT/target" && ./seon "$@" 2>&1) }
@@ -58,8 +63,12 @@ N=${1:-100}
 OUT=$ROOT/target/check/$(date +%Y%m%dT%H%M%S)
 mkdir -p "$OUT"
 FAILED=() GREEN=()
-# want STEP: is STEP (a bin/check step, seon.proofs/check-steps) one this run runs?
-want() { [[ -z ${SEON_CHECK_STEPS:-} || " $SEON_CHECK_STEPS " == *" $1 "* ]] }
+# want STEP: is STEP one this run runs? A step seon.proofs/check-steps does not name is FAILED.
+KNOWN=" $(run steps) " ONLY=${SEL:+$(cat "$SEL/steps")}
+want() {
+  [[ $KNOWN == *" $1 "* ]] || { FAILED+=("$1 (not a step of seon.proofs/check-steps)"); echo "FAILED $1 (not in seon.proofs/check-steps)"; return 1 }
+  [[ -z $SEL || " $ONLY " == *" $1 "* ]]
+}
 
 # step NAME FILTER CMD...: run CMD, keep its output, show the lines FILTER (a grep -E
 # pattern; empty: the last line) selects, and record NAME as failed when CMD's exit status
@@ -164,7 +173,7 @@ echo "== scale $N"; step scale ":all-ok|:spawn->all|:end-to-end|:control-real-mb
 # what the green steps made is deleted; a failed step's branches stay until its next run
 run drop $GREEN > "$OUT/drop-after.log" 2>&1 || FAILED+=("drop-after ($OUT/drop-after.log)")
 read -r _ KB1 BR1 <<< "$(run store)"
-[[ -n ${SEON_CHECK_GREEN:-} ]] && print -r -- "${GREEN[@]}" > "$SEON_CHECK_GREEN"
+[[ -n $SEL ]] && print -r -- "${GREEN[@]}" > "$SEL/green"
 echo
 echo "store $STORE: ${KB0} KB and ${BR0} branches before the run, ${KB1} KB and ${BR1} after; run directory $(du -sk "$OUT" | cut -f1) KB"
 if (( ${#FAILED} )); then

@@ -78,7 +78,8 @@
 ;; ---- prove: run what a change reaches, reuse every green by digest ------------------------
 
 (def check-steps
-  "bin/check's steps as prove keys them: each step name (its SEON_CHECK_STEPS unit) to the
+  "bin/check's steps, the one list of them (bin/check reads it from ./seon steps and fails a
+  step it does not name), as prove keys them: each step name (a bin/check --steps unit) to the
   seon.check mode functions its body runs, whose reach is the step's (seon.program/
   reach-digests with roots), with the checkout's :env (bin/, native/, resources/, the pins:
   the binary's other inputs) in every digest. dragons censuses the whole tree and has no
@@ -95,13 +96,17 @@
     "e2e-loop" [seon.e2e/run] "e2e-stuck" [seon.e2e/run] "resume" [seon.e2e/run] "scale" [seon.check/scale]})
 
 (defn step-digests
-  "{step digest} of check-steps: the reach digests (digests-of, seon.program/reach-digests over
-  the step's functions) and, for a step censusing the tree, the digest of its name and :tree."
-  {:malli/schema [:=> [:cat :seon.host/fn [:map [:env :string] [:tree :string]]] [:map-of :string :string]]}
+  "Of check-steps, {:digests {step digest} :missing [step ...]}: the reach digests (digests-of,
+  seon.program/reach-digests over the steps' functions) and, for a step censusing the tree, the
+  digest of its name and :tree; missing, the steps naming a function the program does not
+  define (renamed, not imported), which a run reports red rather than keying by :env alone."
+  {:malli/schema [:=> [:cat :seon.host/fn [:map [:env :string] [:tree :string]]]
+                  [:map [:digests [:map-of :string :string]] [:missing [:vector :string]]]]}
   [digests-of {:keys [tree]}]
-  (let [fns (into {} (filter (comp vector? val)) check-steps)]
-    (merge (digests-of fns)
-           (into {} (for [[k v] check-steps :when (= :tree v)] [k (error/digest (str k "\n" tree))])))))
+  (let [fns (into {} (filter (comp vector? val)) check-steps)
+        ds (merge (digests-of fns)
+                  (into {} (for [[k v] check-steps :when (= :tree v)] [k (error/digest (str k "\n" tree))])))]
+    {:digests ds :missing (vec (sort (remove ds (keys check-steps))))}))
 
 (defn green? "Is result r green: no failing or erroring assertion?" {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
   [r] (and (some? r) (not (red? r))))
@@ -119,12 +124,11 @@
 
 (defn store!
   "Result r ({:test or :step, :digest, :pass :fail :error :ms}) written at its digest in dir
-  through the effect owner's file write (seon.fx/write-file: temp then rename). Answers r."
+  through the effect owner's file write (seon.fx/write-file: temp then rename). Answers the
+  write's outcome: {:value ...}, or its declared :seon.fx/io-error, which the caller records."
   {:malli/schema [:=> [:cat :string [:map [:digest :string]]] :map]}
   [dir r]
-  (.mkdirs (java.io.File. ^String dir))
-  (fx/write-file {:req {:path (result-path dir (:digest r)) :text (sedn/encode r)}})
-  r)
+  (fx/write-file {:req {:path (result-path dir (:digest r)) :text (sedn/encode r)}}))
 
 (defn plan
   "What a change runs: of cand ({key digest}, the candidate's), base (the base's {key digest},
@@ -164,33 +168,43 @@
   "Run tests (var symbols, their namespaces required) here, each namespace's by
   clojure.test/test-vars so its fixtures run around them; each test's result {:test :digest
   :pass :fail :error :ms} stored at its digest in dir (store!) as it ends, and (note! x) told
-  each test as it starts ({:seon.test/started test}) and each result. A red namespace's
-  clojure.test output is printed. Answers {test result}; a test that never reported (its
-  namespace's fixture threw) is an :error result."
+  each test as it starts ({:seon.test/started test}) and each result. A result whose write
+  failed is an :error result naming the write's error (never read as stored). A red
+  namespace's clojure.test output is printed. Answers {test result}; a test that never
+  reported, because its namespace's run threw (a fixture), is an :error result carrying that
+  throw's message and data. The per-namespace counts are volatiles local to its run: clojure.test
+  reports through a callback, one thread, no proc."
   {:malli/schema [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol :string] :string :seon.host/fn]
                   [:map-of :qualified-symbol :map]]}
   [tests digests dir note!]
   (into {} (for [[n ts] (group-by (comp symbol namespace) tests)
-                 :let [counts (atom {}) ran (atom {}) out (java.io.StringWriter.) t0 (atom nil)
+                 :let [counts (volatile! {}) ran (volatile! {}) out (java.io.StringWriter.) t0 (volatile! nil)
                        done! (fn [v] (let [r (assoc (merge {:pass 0 :fail 0 :error 0} (@counts v)) :test v :digest (digests v)
-                                                    :ms (quot (- (profile/now-ns) @t0) 1000000))]
-                                       (swap! ran assoc v (store! dir r))
+                                                    :ms (quot (- (profile/now-ns) @t0) 1000000))
+                                           w (store! dir r)
+                                           r (if (:seon.error/type w)
+                                               (-> r (update :error inc) (assoc :message (str "result not stored: " (:seon.error/message w))))
+                                               r)]
+                                       (vswap! ran assoc v r)
                                        (note! r)))
-                       _ (binding [t/*test-out* out
-                                   t/report (fn [m]
-                                              ;; a test running tests of its own (test-ns inside a deftest) reports
-                                              ;; them too: only this run's tests are counted
-                                              (let [v (some-> (or (:var m) (first t/*testing-vars*)) str test-symbol)
-                                                    v (when (digests v) v)]
-                                                (case (when v (:type m))
-                                                  :begin-test-var (do (reset! t0 (profile/now-ns)) (note! {:seon.test/started v}))
-                                                  :end-test-var (done! v)
-                                                  (:pass :fail :error) (when v (swap! counts update-in [v (:type m)] (fnil inc 0)))
-                                                  nil))
-                                              (binding [t/*test-out* out] (report m)))]
-                           (try (t/test-vars (keep #(ns-resolve n (symbol (name %))) ts))
-                                (catch Throwable e (.write out (str "\n" n ": " (ex-message e) "\n")))))
-                       _ (when (some #(not (green? (@ran %))) ts) (print (str out)) (flush))]
+                       thrown (binding [t/*test-out* out
+                                        t/report (fn [m]
+                                                   ;; a test running tests of its own (test-ns inside a deftest) reports
+                                                   ;; them too: only this run's tests are counted
+                                                   (let [v (some-> (or (:var m) (first t/*testing-vars*)) str test-symbol)
+                                                         v (when (digests v) v)]
+                                                     (case (when v (:type m))
+                                                       :begin-test-var (do (vreset! t0 (profile/now-ns)) (note! {:seon.test/started v}))
+                                                       :end-test-var (done! v)
+                                                       (:pass :fail :error) (vswap! counts update-in [v (:type m)] (fnil inc 0))
+                                                       nil))
+                                                   (binding [t/*test-out* out] (report m)))]
+                                (try (t/test-vars (keep #(ns-resolve n (symbol (name %))) ts)) nil
+                                     (catch Throwable e e)))
+                       _ (when (or thrown (some #(not (green? (@ran %))) ts)) (print (str out)) (flush))]
                  tst ts]
-             [tst (or (@ran tst) {:test tst :digest (digests tst) :pass 0 :fail 0 :error 1 :ms 0
-                                  :message (str "no report: " n "'s run ended before it (a fixture threw?)")})])))
+             [tst (or (@ran tst)
+                      (cond-> {:test tst :digest (digests tst) :pass 0 :fail 0 :error 1 :ms 0
+                               :message (if thrown (str n "'s run threw before this test reported: " (ex-message thrown))
+                                            (str n "'s run ended before this test reported"))}
+                        (ex-data thrown) (assoc :data (pr-str (ex-data thrown)))))])))

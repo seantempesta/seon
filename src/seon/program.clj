@@ -794,7 +794,7 @@
   forms, contracts and schema entries read once and digested once, then per test its
   closure. With roots ({key [var ...]}, a bin/check step's mode functions: seon.proofs/
   check-steps), the same digest of each key: what its vars' forms and their namespaces'
-  plain forms reach."
+  plain forms reach; a key one of whose vars has no form here has none."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:map [:env :string] [:tree :string]]] [:map-of :qualified-symbol :string]]
                   [:=> [:cat :seon.host/db [:map [:env :string] [:tree :string]] [:map-of :string [:sequential :qualified-symbol]]] [:map-of :string :string]]]}
   ([db inputs] (reach-digests db inputs nil))
@@ -825,6 +825,8 @@
                                        reached)]
                       (error/digest (apply str k "\n" env "\n" (when reads? tree) (sort (map digest reached))))))]
     (if roots
-      (into {} (for [[k vars] roots] [k (digest-of k (keep var-form vars))]))
+      ;; a root naming a var with no form here (renamed, not imported) gets no digest: its
+      ;; caller names it missing, never a digest of :env alone that a stale green matches
+      (into {} (for [[k vars] roots :when (every? var-form vars)] [k (digest-of k (map var-form vars))]))
       (into {} (for [f forms [k t] (:defines f) :when (and (= :var k) (= :test (:var/kind (d/entity db [:var/name t]))))]
                  [t (digest-of t [(:id f)])]))))))

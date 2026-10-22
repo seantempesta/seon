@@ -67,16 +67,23 @@
     {:db db :inputs in
      :digests (into {} (filter #(nss (symbol (namespace (key %))))) (program/reach-digests db in))}))
 
+(defn- write!
+  "text to path through the effect owner's file write (seon.fx/write-file); its declared
+  error is thrown with its data, so the run ends red naming the path, never as if written."
+  [path text]
+  (let [r (fx/write-file {:req {:path path :text text}})]
+    (when (:seon.error/type r) (throw (ex-info (str "write failed: " (:seon.error/message r)) r)))
+    r))
+
 (defn- write-shards!
   "tests (var symbols) dealt into :seon.config.proofs/jobs shards (seon.proofs/shards), each
   written as out/shard-<i>.edn ({:tests [...] :digests {test digest}}) for bin/test to run, one
   process each. Answers the shard count."
   [out tests digests]
-  (.mkdirs (io/file out))
   (doseq [f (.listFiles (io/file out)) :when (re-find #"^shard-" (.getName f))] (.delete f))
   (let [sh (proofs/shards tests (config/value :seon.config.proofs/jobs))]
     (doseq [[i ts] (map-indexed vector sh)]
-      (fx/write-file {:req {:path (str out "/shard-" i ".edn") :text (sedn/encode {:tests ts :digests (select-keys digests ts)})}}))
+      (write! (str out "/shard-" i ".edn") (sedn/encode {:tests ts :digests (select-keys digests ts)})))
     (count sh)))
 
 (defn- shard!
@@ -100,14 +107,15 @@
   "The planning part of bin/prove and bin/test (what is tests, checks or both): the tests of
   names (or all) with no green at their digest (seon.proofs/plan; all? every one) are dealt
   into out's shards (write-shards!), and the bin/check steps with none are written to out/steps
-  (names, one line) and out/steps.edn ({step digest}) for bin/prove to run."
+  (names, one line) and out/steps.edn ({step digest}) for bin/prove to run. Answers the exit
+  status: 1 when a check step names a function the program does not define."
   [what all? out names]
   (let [root (System/getProperty "user.dir")
         t0 (profile/now-ns)
         {:keys [db inputs digests]} (tests-of root names)
         dir (config/value :seon.config.source/test-results-dir)
         tests? (not= what "checks") checks? (not= what "tests")
-        steps (when checks? (proofs/step-digests #(program/reach-digests db inputs %) inputs))
+        {steps :digests missing :missing} (when checks? (proofs/step-digests #(program/reach-digests db inputs %) inputs))
         cand (merge (when tests? digests) steps)
         {:keys [run reused]} (proofs/plan nil cand (if all? {} (proofs/greens dir (vals cand))) #{})
         {run-steps true run-tests false} (group-by string? run)
@@ -116,10 +124,12 @@
                   (count reused) " green at their digest (reused), " (count run-tests) " tests to run in " (if (seq run-tests) n 0)
                   " shards, " (count run-steps) " steps to run; selected in " (quot (- (profile/now-ns) t0) 1000000) " ms; results " dir))
     (when checks?
-      (fx/write-file {:req {:path (str out "/steps") :text (str (str/join " " run-steps) (when (seq run-steps) "\n"))}})
-      (fx/write-file {:req {:path (str out "/steps.edn") :text (sedn/encode (select-keys steps run-steps))}})
-      (when (seq run-steps) (println "prove: check steps to run:" (str/join " " run-steps))))
-    0))
+      (write! (str out "/steps") (str (str/join " " run-steps) (when (seq run-steps) "\n")))
+      (write! (str out "/steps.edn") (sedn/encode (select-keys steps run-steps)))
+      (when (seq run-steps) (println "prove: check steps to run:" (str/join " " run-steps)))
+      (when (seq missing)
+        (println "prove: check steps naming a function the program does not define (seon.proofs/check-steps):" (str/join " " missing))))
+    (if (seq missing) 1 0)))
 
 (defn- store-steps!
   "bin/prove's last part: each step of out/steps.edn that bin/check named green in out/green
@@ -131,7 +141,9 @@
         f (io/file out "green")
         green (set (when (.isFile f) (map #(str/replace % #"^check-" "") (str/split (str/trim (slurp f)) #"\s+"))))
         red (sort (remove green (keys steps)))]
-    (doseq [[k dg] steps :when (green k)] (proofs/store! dir {:step k :digest dg :pass 1 :fail 0 :error 0}))
+    (doseq [[k dg] steps :when (green k)
+            :let [w (proofs/store! dir {:step k :digest dg :pass 1 :fail 0 :error 0})]]
+      (when (:seon.error/type w) (throw (ex-info (str "step " k " green, its result not stored: " (:seon.error/message w)) w))))
     (println (str "prove: " (count (filter green (keys steps))) " check steps green and stored, " (count red) " red"
                   (when (seq red) (str ": " (str/join " " red)))))
     (if (empty? red) 0 1)))

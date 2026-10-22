@@ -4,7 +4,7 @@
 # namespaces) and every bin/check step (seon.proofs/check-steps) whose reach digest has no green
 # result in the results directory every checkout shares runs; the rest are reused. An unchanged
 # tree runs nothing. Tests run in :seon.config.proofs/jobs shards at once (bin/test); the steps to run go
-# through bin/check's own bodies (SEON_CHECK_STEPS), on target/seon built from this tree first
+# through bin/check's own bodies (bin/check --steps target/prove), on target/seon built from this tree first
 # (bin/test builds it when anything runs).
 # Ends on PROVE OK / PROVE FAILED and its exit status. The full runs are explicit:
 # bin/test --all, bin/check 100.
@@ -18,7 +18,7 @@ st=0
 nice -n 15 "$ROOT/bin/test" --prove $WHAT "$OUT" "$@" || st=1
 if [[ $WHAT != tests && -s $OUT/steps ]]; then
   # bin/test built target/seon from this tree: a step's result is keyed by the source it reaches
-  SEON_CHECK_STEPS="$(cat "$OUT/steps")" SEON_CHECK_GREEN=$OUT/green "$ROOT/bin/check" 100 || st=1
+  "$ROOT/bin/check" --steps "$OUT" || st=1
   nice -n 15 "$ROOT/bin/test" --store-steps "$OUT" || st=1
 fi
 if (( st == 0 )); then echo "PROVE OK"; else echo "PROVE FAILED"; fi
