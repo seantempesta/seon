@@ -1,5 +1,5 @@
 (ns seon.agent-proc
-  "An agent's stand-in in root: one proc of the root graph per agent, added and removed by
+  "An agent's proc in root: one proc of the root graph per agent, added and removed by
   the api with flow/update!. It owns root's end of the agent's socket, a jolt.async.remote
   end (lane RC1): the agent's frames arrive as values on the end's :in, which IS this
   proc's :from in-port, and what it sends the agent is put on the end's :out. It owns the
@@ -224,7 +224,7 @@
       st)))
 
 (defn agent-proc
-  "ONE agent's stand-in: a proc of the root graph, added by the api's update! at spawn and
+  "ONE agent's proc in the root graph, added by the api's update! at spawn and
   removed when the agent has ended. It owns root's end of the
   agent's socket and its process, and runs Flow's lifecycle on the real process:
     start (init)   nothing to open: the api has asked the writer for the fork;

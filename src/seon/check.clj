@@ -60,17 +60,17 @@
 
 (def ping-ms
   "A Flow ping's bound: a proc that took no control message (it takes one between steps) for
-  this long is stuck mid-step, recorded so (seon.check/ping). docs/clocks.md names it."
+  this long is blocked mid-step, recorded so (seon.check/ping). docs/clocks.md names it."
   10000)
 
 (def hold-ms "A window over which a check measures that something does not happen (docs/clocks.md)." 500)
 
 (def pages-ms "The window over which scale measures the memory the kernel returns after the kill." 500)
 
-(defn- ping "Flow's ping of proc pid: {:status :count :state}, or {:stuck pid :ping-ms ping-ms}." [sys pid]
+(defn- ping "Flow's ping of proc pid: {:status :count :state}, or {:blocked pid :ping-ms ping-ms}." [sys pid]
   (if-let [m (flow/ping-proc (:graph sys) pid :timeout-ms ping-ms)]
     {:status (::flow/status m) :count (::flow/count m) :state (::flow/state m)}
-    {:stuck pid :ping-ms ping-ms}))
+    {:blocked pid :ping-ms ping-ms}))
 
 (defn- await-agents
   "ids, once each has sent an event whose :type is in types on ev (await-event); an agent
@@ -648,7 +648,7 @@
   [nm]
   (run-check "WINDOW-WRITE" {:main (keyword nm)}
    (fn [sys]
-    (let [writer #(let [p (ping sys :writer)] (if (:stuck p) p (select-keys (:state p) [:flushes :dirty])))
+    (let [writer #(let [p (ping sys :writer)] (if (:blocked p) p (select-keys (:state p) [:flushes :dirty])))
           t (fn [p] (let [t0 (profile/now-ns) r @p] [(:ok r) (lib/r2 (profile/ms-since t0))]))
           a (t (c/transact-main! sys [{:note/text "A" :note/agent :window}] {:flush? true}))
           w0 (writer)
@@ -947,7 +947,7 @@
   []
   (run-check "SYSTEM" {:datoms 2000}
    (fn [sys]
-    (let [;; the procs that answered a graph ping within ping-ms (an expected one that did not is stuck or absent)
+    (let [;; the procs that answered a graph ping within ping-ms (an expected one that did not is blocked or absent)
           pids (fn [] (set (keys (flow/ping (:graph sys) :timeout-ms ping-ms))))
         booted (pids)
         expect (into #{:api :writer :fork-server :flusher :reconciler :render :web :fx/echo :fx.echo/0 :fx/file :fx.file/0 :fx/source :fx.source/0 :fx/git :fx.git/0 :fx/deps :fx.deps/0 :fx/build :fx.build/0 :fx/model}
@@ -1146,7 +1146,7 @@
         ;; root's declared procs and its effect owners (their lanes step only when given work)
         decl (seon.system/read-decl (seon.config/value :seon.config.root/system-path))
         pids (sort-by str (concat (keys (:procs decl)) (for [k (keys (:fx decl))] (keyword "fx" (name k)))))
-        counts (fn [] (into (sorted-map) (for [pid pids :let [p (ping sys pid)]] [pid (if (:stuck p) :stuck (:count p))])))
+        counts (fn [] (into (sorted-map) (for [pid pids :let [p (ping sys pid)]] [pid (if (:blocked p) :blocked (:count p))])))
         b0 @received c0 (counts)
         _ (Thread/sleep window-ms)
         c1 (counts) b1 @received
@@ -1160,7 +1160,7 @@
       (.close sock)
       {:report {:window-ms window-ms :procs (count pids) :steps-at-idle moved :bytes-at-idle (- b1 b0) :agent a}
        :checks {:tab-opened opened :tab-settled settled :no-step-at-idle (empty? moved) :no-byte-at-idle (= b0 b1)
-                :no-proc-stuck (not-any? #{:stuck} (concat (vals c0) (vals c1)))
+                :no-proc-blocked (not-any? #{:blocked} (concat (vals c0) (vals c1)))
                 :spawn-reached-tab spawned :commit-reached-tab committed}}))))
 
 ;; ---- the store bin/check is given ----------------------------------------------------------

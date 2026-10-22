@@ -435,7 +435,7 @@
   ([st _ m]
    (if (= :eval (:op m))
      (let [req (eval-request m)]
-       ;; root hears that this request began (its stand-in's :started event): what an
+       ;; root hears that this request began (its proc's :started event): what an
        ;; interrupt or a kill meant for a running eval waits on, never a sleep
        (agent/send! {:op :started :id (:id m)})
        ;; the agent's entrant boundary: a defect answers err + done

@@ -185,8 +185,8 @@
     (testing "an id never asked finds nothing"
       (is (nil? (second (step/answered st 99)))))))
 
-(defn- stand-in
-  "An agent's stand-in over a socketpair, with request 7 in flight; f takes it, then both ends close."
+(defn- agent-proc-on
+  "An agent's proc over a socketpair, with request 7 in flight; f takes it, then both ends close."
   [f]
   (let [[r a] (sock/socketpair)
         end (remote/open r {:codec {:encode codec/encode :decode codec/decode}})
@@ -197,7 +197,7 @@
 (deftest an-eval-says-it-started
   ;; task seon.check/every-wait-is-the-event-it-means: the agent's {:op :started} is root's
   ;; :started event, with the eval's text (what a kill or an interrupt meant for it awaits)
-  (stand-in
+  (agent-proc-on
    (fn [st]
      (let [[st _] (step #'ap/agent-proc st :in {:op :req :rid 7 :kind :eval :msg {:op :eval :forms "(loop [] (recur))"}})
            [_ outs] (step #'ap/agent-proc st :from {:op :started :id 7})]
@@ -205,7 +205,7 @@
 
 (deftest a-test-run-says-its-child-forked
   ;; the agent sends the test child's pid once it is forked: root's :tests-started event
-  (stand-in
+  (agent-proc-on
    (fn [st]
      (let [[_ outs] (step #'ap/agent-proc st :from {:op :tests-started :id 7 :pid 4242})]
        (is (= [{:type :tests-started :agent :a1 :rid 7 :pid 4242}] (mapv #(dissoc % :at-ms) (:events outs))))))))

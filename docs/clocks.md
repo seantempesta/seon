@@ -3,7 +3,7 @@
 Time is measured and recorded, and decides only at the owner's three exceptions; `bin/dragons clocks` and `bin/dragons measures` name every place in `src/` that reads or waits on a clock.
 
 Work runs because it arrived and parks when there is none; a missing answer is a recorded
-fact (stuck, stalled, dead), never a timer's guess. The exceptions are the cron proc, a
+fact (blocked, stalled, dead), never a timer's guess. The exceptions are the cron proc, a
 message's delayed insert, and the kernel's TCP keepalive ([AGENTS.md §4](../AGENTS.md)).
 
 `bin/dragons clocks` lists every function in `src/` whose code (strings and comments left
@@ -25,7 +25,7 @@ way in [DRAGONS](DRAGONS.md).
 
 `bin/dragons clocks` reads the check harness too (`seon.check`, `seon.e2e`): a wait there that stands for an event is the event instead ([machine](machine.md#builds-and-checks)).
 - `seon.check/lifecycle`, `seon.check/backpressure`, `seon.check/scale`, `seon.check/idle`: the window over which a check measures that something does not happen or what it costs (`seon.check/hold-ms`: a paused agent's request unanswered, a paused proc's flood and a paused writer's commits held; `seon.check/pages-ms`: memory the kernel returns after the kill; idle's window, bin/check's argument). The measurement, never a dependency: load only makes what it measures likelier.
-- `seon.check/ping`, `seon.check/system-check`: Flow's ping takes a bound (`seon.check/ping-ms`); a proc that has not taken its control message by then is mid-step that long, and the check records it `:stuck` (an expected proc missing from a graph ping is reported under `:no-answer`), never reads it as nil.
+- `seon.check/ping`, `seon.check/system-check`: Flow's ping takes a bound (`seon.check/ping-ms`); a proc that has not taken its control message by then is mid-step that long, and the check records it `:blocked` (an expected proc missing from a graph ping is reported under `:no-answer`), never reads it as nil.
 
 ## Time decides, owed its owner's fix
 
