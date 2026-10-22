@@ -259,7 +259,7 @@
                                   (for [i (range k)] (att (str "t/c" i) (str "t/c" i "#1") {:seon.attempt/status :done :seon.attempt/outcome :green}))
                                   (for [i (range n)] (assoc (task (str "t/r" i)) :seon.task/proofs #{'app.t/red}))
                                   (for [i (range n)] (att (str "t/r" i) (str "t/r" i "#1")
-                                                          {:seon.attempt/status :bailed :seon.attempt/outcome :cap
+                                                          {:seon.attempt/status :closed :seon.attempt/outcome :cap
                                                            :seon.attempt/failures {'app.t/red [{:type :fail :message "m" :expected "1" :actual "2"}]}}))
                                   (for [i (range n)] (task (str "t/d" i)))
                                   (for [i (range n)] (att (str "t/d" i) (str "t/d" i "#1")

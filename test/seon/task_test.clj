@@ -61,3 +61,16 @@
     (is (= #{"demo/r1-design"} (:seon.task/needs (task/task after "demo/r1-implement"))) "its needs resolve on the branch")
     (is (= "Branch's own a." (:seon.task/plan (task/task after "demo/a"))) "a task the branch holds is left as the branch has it")
     (is (= [] (task/onto-tx main after "demo/r1-implement")) "nothing when the branch holds them")))
+
+(deftest a-released-branch-takes-its-task-from-main
+  ;; owner, 2026-10-23: a refused attempt holds its task for root, and root's release runs it
+  ;; again on the same, kept branch; root's judge wrote the failure and the evidence on main
+  ;; after the branch last moved, so the resumed agent takes its task as main holds it
+  (let [db0 (ts/test-db)
+        branch (d/db-with db0 (task/create-tx db0 [{:seon.task/ns 'demo :seon.task/name "a" :seon.task/plan "Make a true."}]))
+        ev {:from "demo/a#1" :conflicts [] :unmerged [] :red ['demo-test/a-test] :problem "proof-red demo-test/a-test"}
+        main (d/db-with branch [{:seon.task/id "demo/a" :seon.task/evidence ev :seon.task/failure {:reason "proof-red demo-test/a-test" :attempt "demo/a#1"}}])
+        after (d/db-with branch (task/onto-tx main branch "demo/a"))]
+    (is (= ev (:seon.task/evidence (task/task after "demo/a"))) "the evidence")
+    (is (= "demo/a#1" (:attempt (:seon.task/failure (task/task after "demo/a")))) "and the failure it answers")
+    (is (= [] (task/onto-tx main after "demo/a")) "nothing when the branch holds it as main does")))

@@ -607,7 +607,7 @@
                    :load-errors (vec load-errors) :misaligned misaligned
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
                    :ns nsx :interrupt-ok intr-ok :serve serve})
-     ;; a kept branch forked before main held this attempt's task (a refinement continuing a
-     ;; failed branch, seon.template/attach-tx) takes it, and the tasks it needs, from main
+     ;; a kept branch, resumed (root released its held task: seon.reconcile/hold-tx), takes
+     ;; its task from main, with the failure and evidence the last attempt left there
      (when-let [tx (when resumed (not-empty (task/onto-tx db0 @store-conn task)))]
        (transact! tx)))))

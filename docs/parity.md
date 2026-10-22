@@ -31,7 +31,7 @@ The server's ops are one table, `seon.server/ops`: MCP lists each as the tool `s
 
 | v1 | next | Status |
 |---|---|---|
-| `my.task/current`, `update!`, `send-back!`; `my.turn/wait` | `current`, `update!`, `fail!` (send-back replaced: a failure is task data, held for root: [tasks](tasks.md#a-failed-task-is-held-for-root)); `my.turn/wait` | present (an agent holds its task from the fork: [tasks](tasks.md#the-agent-knows-its-task)) |
+| `my.task/current`, `update!`, `send-back!`; `my.turn/wait` | `current`, `update!`, `fail!` (send-back replaced: a failure is task data, held for root: [tasks](tasks.md#a-refused-attempt-is-held-for-root)); `my.turn/wait` | present (an agent holds its task from the fork: [tasks](tasks.md#the-agent-knows-its-task)) |
 | `my.program/callers`, `source`, `tests-reaching` | `my.agent/callers`, `callees`, `grep`, `source`; `seon.program/reach-digests` | present |
 | `my.program/history` | none yet; the store keeps history now ([storage](storage.md#history)), the function is not built | missing |
 | `my.program/search`, `similar` (embeddings) | none; decided (DECISIONS, "Embeddings join the context"), not built; the context's `:found` finds helpers by the call graph meanwhile (`seon.context/found`) | missing |
