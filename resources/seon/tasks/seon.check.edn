@@ -17,4 +17,8 @@
  {:seon.task/name "in-agent-never-orphans-its-root"
   :seon.task/plan "Found 2026-10-22 by lane SELECT: `seon.agent-test/in-agent` leaves its root process running when a reply times out (two roots orphaned and killed by hand). Correct: the helper's root ends when the helper does, however its forms answer."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.agent-test/in-agent-ends-its-root}}]
+  :seon.task/proofs #{seon.agent-test/in-agent-ends-its-root}}
+ {:seon.task/name "mcp-reads-the-agents-records-once-committed"
+  :seon.task/plan "Found 2026-10-22 by lane DUP-VIEWS: bin/check 100's mcp step failed once (:both-recorded-outside false, :agent-records []) and passed twice alone. Cause: seon.check/mcp-proof reads the agent's branch (seon.root/branch-db) as soon as the MCP client exits, but the agent's record of the outside eval is applied ahead of its commit (seon.agent/transact!: committed when the agent is idle), so under load the read can come before the commit. Correct, by the harness's one way to wait (events, never a sleep, retry or deadline): tap root's events before the client runs and read the branch again at each of the agent's :commit events (seon.agent-proc emits {:type :commit :agent :branch :t}) until its records are there (seon.check/await-records). Reproduce: bin/check mcp-proof beside a full bin/test, red before, green after."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.check-test/records-are-read-at-the-agents-commit}}]
