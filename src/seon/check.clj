@@ -1161,6 +1161,8 @@
     "contracts" (contracts)
     "census" (census n)
     "e2e" (lib/c-exit (if (seon.e2e/run n more) 0 1))
+    ;; swarm N M: seon.e2e's swarm row (N tasks over 5 shared vars, max-running M), SWARM OK/FAILED
+    "swarm" (lib/c-exit (if (seon.e2e/run "swarm" [(or n "20") (or (first more) "8")]) 0 1))
     "admit" (admit)
     "record" (record)
     "orphan" (orphan)

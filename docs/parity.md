@@ -51,6 +51,7 @@ The door's verbs are one table, `seon.entrance/verbs`: MCP lists each as the too
 | `chain!` and `:seon.task/next` | `:needs` only | dropped |
 | step templates (design, prove, implement, merge) | `seon.template` (being redesigned: `../notes/DESIGN-tasks.md`) | present |
 | three-way program merge, conflicts as entries, forward merge | `seon.merge`, `my.branch/merge-main!` | present |
+| many agents merging onto shared definitions at once (v1's swarm) | `bin/check swarm` (`seon.e2e`'s swarm row: 20 tasks over 5 shared vars, 8 agents at once; red unless conflicts arose and every one was resolved, every task done, and a fresh agent on main gets every proof's value) | present |
 | main wins a conflict (MERGE-STEP 5a) | ours is kept | missing |
 | one done rule shared with merge | `seon.reconcile/done-refusals` (a proof that never ran counts red, not unknown) | partial |
 | tests selected by reach; results reused by reach digest | `seon.program/reach-digests`; `bin/test --reach` reuses green results in `../test-results` | present for `bin/test`; agents' proof runs don't reuse |
