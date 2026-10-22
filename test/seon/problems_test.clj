@@ -28,8 +28,7 @@
 (defn- occ [e agent ms] (err/occurrence e :eval {:agent agent :task "t/a" :form "(f 1)"} ms))
 
 (deftest a-storm-is-one-write-per-window
-  (let [[_ conn] (pdb/test-branch!)
-        f (reduce err/fold {} (concat (for [i (range 1000)] (occ (refusal 'app/f i) (if (even? i) :a1 :a2) (+ 1000 i)))
+  (pdb/test-branch! (fn [_ conn] (let [f (reduce err/fold {} (concat (for [i (range 1000)] (occ (refusal 'app/f i) (if (even? i) :a1 :a2) (+ 1000 i)))
                                      (for [i (range 10)] (occ (refusal 'app/g i) :a3 (+ 5000 i)))))
         [f tx] (err/flush-tx f @conn)
         s (err/signature (refusal 'app/f 0))]
@@ -53,7 +52,7 @@
             (is (= #{1005 1} (set (map :seon.error/count tx))))))
         (let [[_ tx] (err/flush-tx (reduce err/fold {} (for [i (range 7)] (occ (refusal 'app/f i) :a9 4000))) @conn)]
           (d/transact conn tx)
-          (is (= 1007 (:seon.error/count (err/record @conn s)))))))))
+          (is (= 1007 (:seon.error/count (err/record @conn s)))))))))))
 
 ;; ---- a repeated defect is not a write (task seon.error/a-repeated-defect-writes-nothing) ------
 
@@ -61,8 +60,7 @@
   ;; the window's write is one entity per signature that CHANGED (a-storm-is-one-write-per-window);
   ;; a signature already on main whose only change is one more occurrence is the same fact,
   ;; counted in the observer's fold: transacting its count is what made 41,709 commits in 70 s
-  (let [[_ conn] (pdb/test-branch!)
-        f (reduce err/fold {} (for [i (range 3)] (occ (refusal 'app/f i) :a1 (+ 1000 i))))
+  (pdb/test-branch! (fn [_ conn] (let [f (reduce err/fold {} (for [i (range 3)] (occ (refusal 'app/f i) :a1 (+ 1000 i))))
         [f tx] (err/flush-tx f @conn)]
     (is (= 1 (count tx)) "the first occurrence writes the signature")
     (d/transact conn {:tx-data tx})
@@ -71,7 +69,7 @@
       (let [f (reduce err/fold f (for [i (range 1000)] (occ (refusal 'app/f i) :a1 (+ 2000 i))))]
         (is (= [3 1003] [(get-in (problems/report @conn) [:classes :eval :rows 0 :count])
                          (get-in (problems/report @conn f) [:classes :eval :rows 0 :count])])
-            "the report reads the true count from the fold")))))
+            "the report reads the true count from the fold")))))))
 
 (deftest a-defect-in-the-reconciler-does-not-feed-itself
   ;; root's path in miniature: the reconciler proc's step throws on a commit (root's entity
@@ -79,8 +77,7 @@
   ;; it to main as one commit, and that commit is the reconciler's next input. A step that
   ;; throws leaves the proc's state as it was, so it fails on every commit it is handed.
   ;; Main's commits over ten rounds are the first record, and no more.
-  (let [[_ conn] (pdb/test-branch!)
-        _ (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/quiescent "{:t 1, :stuck []}"}]})
+  (pdb/test-branch! (fn [_ conn] (let [_ (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/quiescent "{:t 1, :stuck []}"}]})
         t0 (:max-tx @conn)
         st (rec/reconciler-proc {:boot "boot-1"})
         round (fn [f i]
@@ -93,7 +90,7 @@
                   f))]
     (is (= ['seon.task/entity-value] (map #(get-in % [:example :seon.error/operation]) (vals (reduce round {} (range 10)))))
         "the step fails in the task owner's contract, each round")
-    (is (<= (- (:max-tx @conn) t0) 1) "ten failing commits, one record")))
+    (is (<= (- (:max-tx @conn) t0) 1) "ten failing commits, one record")))))
 
 ;; ---- eval errors: the error map as data, on the branch, and counted across agents ------
 
@@ -230,8 +227,7 @@
   "A main db with n recorded errors, n red attempts and n dead attempts over a task each,
   plus k clean tasks with green attempts (the program the read must not cost)."
   [n k]
-  (let [[_ conn] (pdb/test-branch!)
-        f (reduce err/fold {} (for [i (range n)] (err/occurrence {:seon.error/type :seon.agent/eval-error :seon.error/operation 'seon.repl/eval-code
+  (pdb/test-branch! (fn [_ conn] (let [f (reduce err/fold {} (for [i (range n)] (err/occurrence {:seon.error/type :seon.agent/eval-error :seon.error/operation 'seon.repl/eval-code
                                                                   :seon.error/message (str "Unable to resolve symbol: s" (char (+ 97 (mod i 26))) i) :class "x"}
                                                                  :eval {:agent :a1 :task "t/x0"} 100)))
         [_ tx] (err/flush-tx f @conn)
@@ -250,7 +246,7 @@
                                   (for [i (range n)] (att (str "t/d" i) (str "t/d" i "#1")
                                                           {:seon.attempt/status :dead :seon.attempt/reason "its agent died"
                                                            :seon.attempt/error (pr-str (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1}))})))))
-    @conn))
+    @conn))))
 
 (deftest problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
@@ -286,14 +282,13 @@
         (is (= [{:key [:var 'app/f] :kind :both-modified}] (get-in m [:evidence :conflicts])))
         (is (= :seon.merge/behind (get-in m [:error :seon.error/type])))))
     (testing "a task whose evidence names a problem answers it: mining files no duplicate"
-      (let [[_ c] (pdb/test-branch!)
-            _ (d/transact c (vec (d/datoms db :eavt)))
+      (pdb/test-branch! (fn [_ c] (let [_ (d/transact c (vec (d/datoms db :eavt)))
             db2 db
             sig (:signature (first (get-in r [:classes :eval :rows])))
             db3 (:db-after (d/with db2 [{:seon.task/id "fix/e" :seon.task/ns 'fix :seon.task/name "e" :seon.task/plan "p" :seon.task/execution :held
                                           :seon.task/branch :f :seon.task/kind :work :seon.task/evidence (pr-str {:kind :error :signature sig})}]))
             r3 (problems/report db3)]
-        (is (= ["fix/e"] (:answered-by (first (filter #(= sig (:signature %)) (get-in r3 [:classes :eval :rows]))))))))))
+        (is (= ["fix/e"] (:answered-by (first (filter #(= sig (:signature %)) (get-in r3 [:classes :eval :rows]))))))))))))
 
 (defn rows-input
   "The cost proof's input at n: a main db with n problems of each of three classes over a
@@ -368,7 +363,7 @@
 (deftest another-tasks-unfinished-proof-is-not-a-problem
   ;; T5's real run: one attempt's run reports every program test, so 210 rows named other
   ;; tasks' proofs not done yet (allowed reds); only the task's own proofs are its problems
-  (let [[_ conn] (pdb/test-branch!)]
+  (pdb/test-branch! (fn [_ conn]
     (d/transact conn [{:seon.task/id "t/a" :seon.task/ns 't :seon.task/name "a" :seon.task/plan "p" :seon.task/execution :running
                        :seon.task/branch :b :seon.task/kind :work :seon.task/proofs #{'app.t/a-test}}])
     (d/transact conn [{:seon.attempt/id "t/a#1" :seon.attempt/task [:seon.task/id "t/a"] :seon.attempt/boot "b" :seon.attempt/agent :a1
@@ -376,4 +371,4 @@
                        :seon.attempt/status :ended :seon.attempt/outcome :red
                        :seon.attempt/failures (pr-str {'app.t/a-test [{:type :fail :expected "1" :actual "2"}]
                                                        'app.t/other-test [{:type :fail :expected "3" :actual "4"}]})}])
-    (is (= ['app.t/a-test] (mapv :test (get-in (problems/report @conn) [:classes :red :rows]))))))
+    (is (= ['app.t/a-test] (mapv :test (get-in (problems/report @conn) [:classes :red :rows])))))))

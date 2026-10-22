@@ -8,10 +8,10 @@
 (def boot "b")
 
 (defn- main
-  "Work tasks w (names) each done with the changed keys given, their merges released."
-  [changes]
-  (let [[_ conn] (pdb/test-branch!)
-        ds (tpl/with-merge (vec (for [[nm _] changes] {:seon.task/ns 't :seon.task/name nm :seon.task/plan "p"
+  "(f conn) on a branch of the test store holding work tasks (names) each done with the
+  changed keys given, their merges released; the branch is deleted when f returns."
+  [changes f]
+  (pdb/test-branch! (fn [_ conn] (let [ds (tpl/with-merge (vec (for [[nm _] changes] {:seon.task/ns 't :seon.task/name nm :seon.task/plan "p"
                                                          :seon.task/proofs #{(symbol "t" (str nm "-test"))}})))]
     (d/transact conn {:tx-data (into (task/boot-tx boot 16) [{:seon.root/id :root :seon.config.merge/max-running 8}])})
     (d/transact conn {:tx-data (task/create-tx @conn ds)})
@@ -20,7 +20,7 @@
       (d/transact conn {:tx-data (into (task/attempt-start-tx (str id "#1") id boot :a {:branch (task/default-branch id) :model nil :max-turns 8} 0 "p")
                                        [(cond-> {:seon.attempt/id (str id "#1") :seon.attempt/status :done}
                                           ks (assoc :seon.attempt/changed (vec ks)))])}))
-    conn))
+    (f conn)))))
 
 (defn- spawned [acts] (set (for [a acts :when (= :spawn (:op a))] (:task a))))
 
@@ -30,20 +30,17 @@
                                      :seon.attempt/results [{:seon.proof/test (symbol "t" (str (subs id 2 (- (count id) 6)) "-test")) :seon.proof/status :pass}]}])}))
 
 (deftest disjoint-merges-run-together-overlapping-serialize
-  (let [conn (main [["a" ["[:var x/f]"]] ["b" ["[:var x/g]"]] ["c" ["[:var x/f]" "[:var x/h]"]]])]
-    (is (= #{"t/a-merge" "t/b-merge"} (spawned (r/reconcile @conn))) "a and b are disjoint; c overlaps a and waits")))
+  (main [["a" ["[:var x/f]"]] ["b" ["[:var x/g]"]] ["c" ["[:var x/f]" "[:var x/h]"]]] (fn [conn] (is (= #{"t/a-merge" "t/b-merge"} (spawned (r/reconcile @conn))) "a and b are disjoint; c overlaps a and waits"))))
 
 (deftest unknown-changes-run-alone
-  (let [conn (main [["a" nil] ["b" ["[:var x/g]"]]])]
-    (is (= 1 (count (spawned (r/reconcile @conn)))) "a merge whose changes no attempt measured runs alone")))
+  (main [["a" nil] ["b" ["[:var x/g]"]]] (fn [conn] (is (= 1 (count (spawned (r/reconcile @conn)))) "a merge whose changes no attempt measured runs alone"))))
 
 (deftest a-train-lands-once-no-merge-runs-and-closes-when-a-member-ends
-  (let [conn (main [["a" ["[:var x/f]"]] ["b" ["[:var x/g]"]] ["c" ["[:var x/k]"]]])]
-    (start-merge! conn "t/a-merge" :ended)
+  (main [["a" ["[:var x/f]"]] ["b" ["[:var x/g]"]] ["c" ["[:var x/k]"]]] (fn [conn] (start-merge! conn "t/a-merge" :ended)
     (start-merge! conn "t/b-merge" :running)
     (let [acts (r/reconcile @conn)]
       (is (not-any? #(= :merge-train (:op %)) acts) "b still runs: the train waits for it")
       (is (not (contains? (spawned acts) "t/c-merge")) "a ended: the train is closed to new members"))
     (d/transact conn {:tx-data [{:seon.attempt/id "t/b-merge#1" :seon.attempt/status :ended}]})
     (let [train (first (filter #(= :merge-train (:op %)) (r/reconcile @conn)))]
-      (is (= ["t/a-merge#1" "t/b-merge#1"] (mapv :attempt (:members train))) "both land in one train"))))
+      (is (= ["t/a-merge#1" "t/b-merge#1"] (mapv :attempt (:members train))) "both land in one train")))))

@@ -7,7 +7,7 @@
 
 (defn- db-with-program []
   ;; one recorded definition, its form (seon.program's facts), written as data
-  (d/db-with @(second (pdb/test-branch!))
+  (d/db-with (pdb/test-db)
              [{:db/id "ns" :ns/name 'demo}
               {:db/id "v" :var/name 'demo/f :var/ns "ns" :var/form "form"}
               {:db/id "form" :form/id "demo/f" :form/src "(defn f [x] x)" :form/ns "ns" :form/order 0 :form/defines ["v"]}]))

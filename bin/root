@@ -15,9 +15,9 @@
 # bin/root run CHECKOUT PORT WEB [ARGS]   one root of CHECKOUT's build in the foreground, until
 # stdin closes (what `start` and `next` run).
 #
-# It runs on a branch of the one kept store, <SEON_RUNS>/store (<this tree>/runs/store): each
-# boot a new main run-<time>-<id> of the store's seed (SEON_MAIN=<branch> resumes one;
-# SEON_MAIN=db is production's main), its agents' and tasks' branches named under it.
+# It runs on the one kept store, <SEON_RUNS>/store (<this tree>/runs/store), and resumes its
+# main (:seon.config.root/main, "main"; SEON_MAIN=<branch> names another) at every boot, its
+# agents' and tasks' branches named under it: a run's record is main's commit history.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 . "$ROOT/bin/env"
 export SEON_RUNS=${SEON_RUNS:-$ROOT/runs}

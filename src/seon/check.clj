@@ -575,7 +575,7 @@
   [nm]
   (let [t0 (lib/now-ns)
         sys (c/start! {:main (keyword nm)})
-        path (str (:store-path sys) "." nm)
+        path (str (seon.db/agents-dir (:cfg sys)) "/durable")
         _ (out! "fresh branch booted in " (lib/r2 (lib/ms-since t0)) " ms: " (:store (c/state sys)))
         [a b k] (mapv #(c/spawn! sys {:task % :branch %2}) ["make f1 multiply" "unmerged work" "parent"] [:dur-a :dur-b :dur-c])
         _ (await-status sys [a b k] #{:idle} 5000)
@@ -608,7 +608,7 @@
   [nm]
   (let [t0 (lib/now-ns)
         sys (c/start! {:main (keyword nm)})
-        expect (read-string (slurp (str (:store-path sys) "." nm ".expect.edn")))
+        expect (read-string (slurp (str (seon.db/agents-dir (:cfg sys)) "/durable.expect.edn")))
         boot-ms (lib/r2 (lib/ms-since t0))
         st (c/state sys {:datoms true})
         _ (out! "recovered in " boot-ms " ms: " (:store st) " main " (:main st))
@@ -1199,19 +1199,41 @@
     (lib/c-exit (if ok 0 1))))
 
 (defn seed
-  "bin/check's one store: created at :seon.config.root/store-path (bin/check sets SEON_STORE)
-  and seeded with about n datoms on :db, before any step boots; each step's root then works on
-  a branch of it (seon.db/open!)."
+  "The one store bin/check is given (:seon.config.root/store-path; SEON_STORE names another),
+  opened before any step boots: created and seeded with about n datoms on :db when missing,
+  else as it is. Each step's root then works on a branch of it, its own main (seon.db/open!)."
   [n]
   (let [path (seon.config/value :seon.config.root/store-path)
         t0 (lib/now-ns)
         {:keys [seeded? conn]} (seon.db/open! :lmdb path n :db)
         ms (lib/r2 (lib/ms-since t0))
-        datoms (count (d/datoms @conn :eavt))]
+        datoms (count (d/datoms @conn :eavt))
+        branches (count (d/branches conn))]
     (d/release conn)
-    (out! "seeded " path " (" datoms " datoms) in " ms " ms; " (dir-bytes path) " bytes")
-    (out! (if seeded? "SEED OK" "SEED FAILED (the store existed)"))
-    (lib/c-exit (if seeded? 0 1))))
+    (out! (if seeded? "seeded " "opened ") path " (" datoms " datoms on :db, " branches " branches) in " ms " ms; " (dir-bytes path) " bytes")
+    (out! "SEED OK")
+    (lib/c-exit 0)))
+
+(defn drop-mains
+  "Delete each of mains (check steps' own, check-<step>) and every branch under it from the
+  given store, with its agents' directory (seon.db/delete-main!): what a step made, deleted
+  by the run that made it, before the step runs (a failed earlier run's) and once it is
+  green. A store not yet made holds nothing to delete."
+  [mains]
+  (let [path (seon.config/value :seon.config.root/store-path)]
+    (if (seon.db/store? path)
+      (let [cfg (seon.db/store-cfg :lmdb path)
+            conn (d/connect cfg)
+            gone (vec (mapcat #(seon.db/delete-main! conn (keyword %)) mains))]
+        (seon.db/sync! cfg)
+        (d/release conn)
+        (doseq [m mains] (clojure.java.shell/sh "rm" "-rf" (seon.db/agents-dir (assoc cfg :branch (keyword m)))))
+        ;; the store's agents directory goes when the last main's has (rmdir leaves a non-empty one)
+        (clojure.java.shell/sh "rmdir" (str path "-agents"))
+        (out! "deleted " (count gone) " branches of " (count mains) " mains"))
+      (out! "no store at " path ": nothing to delete"))
+    (out! "DROP OK")
+    (lib/c-exit 0)))
 
 (defn -main [& args]
   ;; --config FILE and --set :k=v are the config's (seon.config reads them from the command
@@ -1219,6 +1241,11 @@
   (let [[mode n & more] (seon.config/without-overrides args)]
   (case mode
     "seed" (seed (Long/parseLong (or n "2000")))
+    "drop" (drop-mains (remove nil? (cons n more)))
+    ;; the store bin/check is given, its size and branch count: "PATH KB BRANCHES"
+    "store" (let [path (seon.config/value :seon.config.root/store-path)
+                  c (d/connect (seon.db/store-cfg :lmdb path))]
+              (println path (quot (dir-bytes path) 1024) (count (d/branches c))) (d/release c) (lib/c-exit 0))
     "durable-write" (durable-write n)
     "durable-read" (durable-read n)
     "window-write" (window-write n)

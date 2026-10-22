@@ -8,7 +8,7 @@
             [seon.db :as pdb]
             [seon.task :as task] [my.root :as root]))
 
-(defn- empty-db [] @(second (pdb/test-branch!)))
+(defn- empty-db [] (pdb/test-db))
 
 (def ^:private file-a
   "[{:seon.task/name \"parse\" :seon.task/plan \"Parse the rows.\" :seon.task/proofs #{demo-test/parse-test}}

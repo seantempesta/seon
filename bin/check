@@ -9,10 +9,15 @@
 # whole output is kept in target/check/<time>/<step>.log, and the script ends with the
 # failed steps named and exits non-zero when any failed.
 #
-# One store, many branches, as in production (owner, 2026-10-21): the run seeds one store,
-# target/check/<time>/store, and every root a step boots works on a branch of it named for
-# the step (SEON_RUN: <step>-<time>-<id>); the recovery steps (durable, window, resume) kill
-# and reopen that same store on the same branch. The store is kept, every branch with it.
+# One store, many branches, as in production (owner, 2026-10-21 and 2026-10-22: "The
+# branches are supposed to be light. I'm guessing making a new store every time isn't"): a
+# run takes the one store it is given (:seon.config.root/store-path, this checkout's
+# runs/store; SEON_STORE names another), seeded only when missing, and every root a step boots
+# works on a branch of it, the step's own main check-<step> (SEON_MAIN), never the store's
+# main. The recovery steps (durable, window, resume, orphan) kill their root and reopen the
+# same store on the same branch. What a step made is deleted by the run (bin/check's drop:
+# seon.db/delete-main!): a green step's branches when the run ends, a failed step's at that
+# step's next run. Only logs stay, in target/check/<time>/.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # a full run is niced; full runs from different worktrees run in parallel (no lock: each
 # uses its own stores under its run directory and kernel-assigned ports; owner, 2026-10-21)
@@ -27,13 +32,18 @@ export SEON_WEB_PORT=${SEON_WEB_PORT:-0}
 S=$ROOT/target/seon
 [[ -x $S ]] || { echo "check: no target/seon; run bin/build seon" >&2; exit 1 }
 run() { (cd "$ROOT/target" && ./seon "$@" 2>&1) }
-if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then run "$@"; exit $?; fi
+# a single mode: on its own branch check-<mode> of the given store, deleted when it is green
+if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then
+  M=check-$1
+  run drop $M > /dev/null || exit 1
+  SEON_MAIN=$M run "$@"; st=$?
+  (( st == 0 )) && { run drop $M > /dev/null || exit 1 }
+  exit $st
+fi
 N=${1:-100}
 OUT=$ROOT/target/check/$(date +%Y%m%dT%H%M%S)
 mkdir -p "$OUT"
-# the one store of this run: every step's root works on a branch of its seed
-export SEON_STORE=$OUT/store
-FAILED=()
+FAILED=() GREEN=()
 
 # step NAME FILTER CMD...: run CMD, keep its output, show the lines FILTER (a grep -E
 # pattern; empty: the last line) selects, and record NAME as failed when CMD's exit status
@@ -42,17 +52,27 @@ FAILED=()
 step() {
   local name=$1 filter=$2; shift 2
   local log=$OUT/$name.log expect=${EXPECT:-0}
-  SEON_RUN=$name "$@" > "$log" 2>&1
+  SEON_MAIN=check-$name "$@" > "$log" 2>&1
   local st=$?
   if [[ -n $filter ]]; then grep -E "$filter" "$log"; else tail -1 "$log"; fi
-  if (( st != expect )); then FAILED+=("$name (exit $st, expected $expect, $log)"); echo "FAILED $name (exit $st, expected $expect)"; fi
+  if (( st != expect )); then FAILED+=("$name (exit $st, expected $expect, $log)"); echo "FAILED $name (exit $st, expected $expect)"
+  else GREEN+=(check-$name); fi
   return 0
 }
 
-echo "== seed (the one store every step branches from)"; step seed "" run seed 2000
+echo "== seed (the one store every step branches from: made when missing)"; step seed "" run seed 2000
+read -r STORE KB0 BR0 <<< "$(run store)"
+# the steps' own mains: what a failed earlier run left is deleted before this run's step
+STEPS=(seed fx config system mcp threads admit record problems smoke program robust lifecycle backpressure hotreload drain idle
+       orphan durable window lease swarm e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns e2e-sibling e2e-swarm e2e-loop e2e-stuck resume scale)
+run drop ${STEPS/#/check-} > "$OUT/drop-before.log" 2>&1 || FAILED+=("drop-before ($OUT/drop-before.log)")
 echo "== dragons"; step dragons "" "$ROOT/bin/dragons"
+# lmdb-kill runs below Datahike, on an LMDB env of its own: a raw put has no branch to take,
+# and the store's env is konserve's key space (a raw key or a named sub-db there is a key
+# konserve reads). Its env is deleted when the step is green.
 echo "== lmdb-kill (a writer SIGKILLed inside a txn while this process holds the env; the next writes commit: robust locks)"
 step lmdb-kill "" "$ROOT/target/lmdb-kill" "$OUT/lmdb-kill.mdb"
+[[ ${GREEN[-1]} == check-lmdb-kill ]] && rm -f "$OUT/lmdb-kill.mdb" "$OUT/lmdb-kill.mdb-lock"
 echo "== contracts"; step contracts ":contracted|:uncontracted|:result" run contracts
 echo "== census (no [:fn] without :gen; mg/check on every pure contract, in the release binary)"
 # in K shards at once, each a process checking every Kth contracted var (seon.check/census);
@@ -85,8 +105,9 @@ echo "== idle (no beat: an idle root with a tab open steps nothing; a spawn and 
 step idle ":steps-at-idle|:bytes-at-idle|reached-tab|^IDLE " env SEON_WEB_PORT=$((20000 + $$ % 20000)) zsh -c "cd '$ROOT/target' && ./seon idle 5000"
 
 echo "== orphan (root dies under busy agents, a clone and a test child)"
-SEON_RUN=orphan run orphan > "$OUT/orphan.log" 2>&1
+SEON_MAIN=check-orphan run orphan > "$OUT/orphan.log" 2>&1
 (( $? == 0 )) || { echo "FAILED orphan (no test child)"; FAILED+=("orphan (no test child, $OUT/orphan.log)") }
+ORPHAN_FAILED=${#FAILED}
 PIDS=$(sed -n 's/^PIDS //p' "$OUT/orphan.log")
 # the orphans are given until their parent's death reaches them: each is asked once a
 # second for up to 5 s, and a survivor past that is the failure
@@ -98,14 +119,16 @@ for i in 1 2 3 4 5; do
 done
 if [[ -z $PIDS ]]; then echo "FAIL no pids"; FAILED+=("orphan (no pids, $OUT/orphan.log)")
 elif [[ -n $LEFT ]]; then echo "FAIL left running: $LEFT"; kill -9 ${=LEFT}; FAILED+=("orphan (left running: $LEFT)")
-else echo "PASS none of $PIDS outlived root"; fi
+else echo "PASS none of $PIDS outlived root"; (( ${#FAILED} == ORPHAN_FAILED )) && GREEN+=(check-orphan); fi
 
 # the recovery steps kill root and reopen the one store on the branch it worked on
 echo "== durable (root writes its branch and SIGKILLs itself; a new root reopens the store and recovers it)"
-EXPECT=137 step durable-write "" run durable-write durable; step durable-read "" run durable-read durable
+EXPECT=137 step durable-write "" run durable-write check-durable; step durable-read "" run durable-read check-durable
+[[ ${GREEN[-1]} == check-durable-read && ${GREEN[-2]} == check-durable-write ]] && GREEN+=(check-durable)
 echo "== window (root's :flush-ms 1000: answered unflushed, flushed within the window; :flush? waits)"
-EXPECT=137 step window-write "" run window-write window
-step window-read "" run window-read window
+EXPECT=137 step window-write "" run window-write check-window
+step window-read "" run window-read check-window
+[[ ${GREEN[-1]} == check-window-read && ${GREEN[-2]} == check-window-write ]] && GREEN+=(check-window)
 echo "== lease (eid-lease 50: an agent past its block of entity ids is refused, typed; the next agent's ids are never minted)"
 step lease "" run lease --set :seon.config.store/eid-lease=50
 echo "== swarm $N"; step swarm ":merged|:tasks-done|:fresh" run swarm $N
@@ -117,11 +140,14 @@ echo "== loop (Seon's own source is main's program: a task changes seon.fixtures
 step e2e-loop ":source|:commits|:live|LOOP" run e2e loop "$OUT/loop"
 echo "== stuck (add always wrong: refinement chains until its budget is spent, then a stuck fact naming what it blocks; the run ends on quiescence)"; step e2e-stuck ":stuck|quiet-after" run e2e stuck
 echo "== resume (root SIGKILLed mid-graph; a new root finishes it)"
-SEON_RUN=resume1 run e2e resume resume > "$OUT/resume1.log" 2>&1; step resume "" run e2e resume2 resume
+run e2e resume check-resume > "$OUT/resume1.log" 2>&1; step resume "" run e2e resume2 check-resume
 echo "== scale $N"; step scale ":all-ok|:spawn->all|:end-to-end|:control-real-mb|:all-killed|^SCALE " run scale $N
 
+# what the green steps made is deleted; a failed step's branches stay until its next run
+run drop $GREEN > "$OUT/drop-after.log" 2>&1 || FAILED+=("drop-after ($OUT/drop-after.log)")
+read -r _ KB1 BR1 <<< "$(run store)"
 echo
-echo "store: $(du -sk "$OUT/store" | cut -f1) KB, one seed and $(ls "$OUT/store-agents" | wc -l | tr -d ' ') roots' mains"
+echo "store $STORE: ${KB0} KB and ${BR0} branches before the run, ${KB1} KB and ${BR1} after; run directory $(du -sk "$OUT" | cut -f1) KB"
 if (( ${#FAILED} )); then
   echo "CHECK FAILED: ${#FAILED} step(s)"; for f in $FAILED; do echo "  $f"; done
   echo "outputs: $OUT"

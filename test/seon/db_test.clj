@@ -8,9 +8,7 @@
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
 (deftest a-test-takes-a-branch-of-the-test-store
-  (let [[cfg-a a] (pdb/test-branch!)
-        [cfg-b b] (pdb/test-branch!)
-        seed (d/connect (dissoc cfg-a :branch))]
+  (pdb/test-branch! (fn [cfg-a a] (pdb/test-branch! (fn [cfg-b b] (let [seed (d/connect (dissoc cfg-a :branch))]
     (testing "both are branches of one store, each named apart"
       (is (= (get-in cfg-a [:store :id]) (get-in cfg-b [:store :id])))
       (is (not= (:branch cfg-a) (:branch cfg-b)))
@@ -29,13 +27,12 @@
     (testing "the five fresh-store copies went with the memory config"
       (is (nil? (resolve 'seon.db/create!)))
       (is (nil? (resolve 'seon.db/mem-cfg))))
-    (d/release seed)))
+    (d/release seed)))))))
 
 (deftest minting-past-the-lease-is-refused-not-shared
   ;; this process takes a lease on a test branch as a forked agent does (seon.db/after-fork!
   ;; -> lease!), mints all but two of its ids, then asks for five more
-  (let [[c conn] (pdb/test-branch!)
-        sid (get-in c [:store :id])
+  (pdb/test-branch! (fn [c conn] (let [sid (get-in c [:store :id])
         lease (pdb/lease-base conn)
         ceiling (+ lease (cfg/value :seon.config.store/eid-lease))
         notes (fn [n tag] (vec (for [i (range n)] {:note/text (str tag i)})))]
@@ -60,7 +57,7 @@
           (let [run-ahead (:db-after (dw/apply! conn {:tx-data []}))]
             (is (= (- ceiling 2) (:max-eid run-ahead)))
             (is (empty? (d/datoms run-ahead :eavt ceiling))))))
-      (finally (dbt/set-eid-ceiling! sid nil)))))
+      (finally (dbt/set-eid-ceiling! sid nil)))))))
 
 (deftest the-store-reports-its-map-use
   ;; a store on disk of this test's own, the last resort: what is proved is how an LMDB
@@ -74,14 +71,13 @@
         (d/transact conn [{:note/text (apply str (repeat 100000 "x"))}])
         (pdb/sync! cfg)
         (is (< used-bytes (:used-bytes (pdb/map-use cfg))) "it grows as the store does"))
-      (is (nil? (pdb/map-use (first (pdb/test-branch!)))) "an in-memory store has no map")
+      (is (nil? (pdb/map-use (pdb/test-branch! (fn [c _] c)))) "an in-memory store has no map")
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest a-lease-mints-in-its-own-block-after-a-merge
   ;; main merged into the branch brings entities minted in a later agent's block (ids past
   ;; this lease's ceiling): this process still mints inside its own block, never above them
-  (let [[c conn] (pdb/test-branch!)
-        sid (get-in c [:store :id])
+  (pdb/test-branch! (fn [c conn] (let [sid (get-in c [:store :id])
         lease (pdb/lease-base conn)
         ceiling (+ lease (cfg/value :seon.config.store/eid-lease))
         theirs (+ ceiling 10)
@@ -94,7 +90,7 @@
         (is (<= theirs (:max-eid (:db-after r0))) "the branch holds the later block's entity")
         (is (map? r1) "minting goes on")
         (is (< lease (new-id r1) ceiling) "inside its own block"))
-      (finally (dbt/set-eid-ceiling! sid nil)))))
+      (finally (dbt/set-eid-ceiling! sid nil)))))))
 
 (deftest two-processes-branch-one-store
   ;; two processes at once each make 50 branches of one store (two roots on one store, as

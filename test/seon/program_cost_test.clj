@@ -19,7 +19,7 @@
   before), and the account of redefining the middle one."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map]]}
   [n]
-  (let [db @(second (pdb/test-branch!))
+  (let [db (pdb/test-db)
         db (d/db-with db (vec (mapcat #(program/account-tx db (acct % "x") %) (range n))))]
     [db (acct (quot n 2) "(inc x)")]))
 
