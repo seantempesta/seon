@@ -262,7 +262,7 @@
   {:malli/schema [:=> [:cat :seon.host/throwable] :any]}
   [e]
   (let [em (error-map e 'seon.repl/serve!)]
-    (lib/write-line! 2 (print/text em (:part print/budgets)))
+    (sock/write-line! 2 (print/text em (:part print/budgets)))
     (when-let [a (get-in @state [:turn :attempt])]
       (write-end! a {:outcome :error :reason (str "the agent's process died: " (:seon.error/message em)) :error em}))))
 
@@ -323,7 +323,7 @@
         r (try (binding [t/report (fn [m]
                                     (when (= :begin-test-var (:type m))
                                       (reset! started (str (:var m)))
-                                      (lib/write-line! w (pr-str {:seon.test/started @started})))
+                                      (sock/write-line! w (pr-str {:seon.test/started @started})))
                                     (when (#{:pass :fail :error} (:type m))
                                       (swap! reports conj (test-report m (some-> (first t/*testing-vars*) str))))
                                     (orig m))
@@ -382,7 +382,7 @@
                 (swap! state assoc :mode :test :evaluating false)
                 (let [res (try (run-tests-here w ticks proofs)
                                (catch Throwable e {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]}))]
-                  (lib/write-line! w (pr-str res))))
+                  (sock/write-line! w (pr-str res))))
        :parent (fn [pid]
                  (lib/c-close w)
                  (let [rd (lib/line-reader r)

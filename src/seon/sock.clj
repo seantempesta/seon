@@ -20,8 +20,6 @@
 
 (lib/defc c-socketpair "socketpair" [:int :int :int :pointer] :int)
 (lib/defc c-fcntl "fcntl" [:int :int :varargs :int] :int)
-(lib/defc c-write "write" [:int :pointer :size_t] :ssize_t {:blocking true})
-(lib/defc c-close "close" [:int] :int)
 (lib/defc c-setsockopt "setsockopt" [:int :int :int :pointer :int] :int)
 (lib/defc c-memmove "memmove" [:pointer :pointer :size_t] :pointer)
 (lib/defc c-sendmsg "sendmsg" [:int :pointer :int] :ssize_t {:blocking true})
@@ -70,7 +68,7 @@
   [fd] (c-fcntl fd F-SETFD (bit-or FD-CLOFORK (c-fcntl fd F-GETFD 0))))
 
 (defn close! {:malli/schema [:=> [:cat :seon.lib/fd] :int]}
-  [fd] (c-close fd))
+  [fd] (lib/c-close fd))
 
 
 ;; ---- a buffered conn ----------------------------------------------------------
@@ -187,7 +185,7 @@
   "Close every descriptor received on c and not yet taken (a forked child does this: they
   belong to its parent's later frames)."
   {:malli/schema [:=> [:cat :seon.sock/conn] :any]}
-  [{:keys [fds]}] (run! c-close @fds) (vreset! fds []))
+  [{:keys [fds]}] (run! lib/c-close @fds) (vreset! fds []))
 
 (defn take-fd!
   "The oldest descriptor received with a frame on c (the one its handler is owed)."
@@ -223,7 +221,7 @@
   (loop [off 0]
     (if (= off n)
       true
-      (let [r (c-write fd (+ p off) (- n off))]
+      (let [r (lib/c-write fd (+ p off) (- n off))]
         (if (neg? r)
           (if (= 4 (ffi/errno)) (recur off) :epipe) ; EINTR retries
           (recur (+ off r)))))))
@@ -237,6 +235,14 @@
     (aset f 2 (unchecked-byte (bit-shift-right n 16))) (aset f 3 (unchecked-byte (bit-shift-right n 24)))
     (System/arraycopy b 0 f 4 n)
     f))
+
+(defn write-line!
+  "Write s and a newline to fd whole (a pipe or stderr; EINTR retried). Answers true, or
+  :epipe (the reader is gone)."
+  {:malli/schema [:=> [:cat :seon.lib/fd :any] :seon.sock/sent]}
+  [fd s]
+  (let [^bytes b (.getBytes (str s "\n") "UTF-8") n (alength b)]
+    (with-mem [p n] (ffi/write-array p b 0 n) (write-all! fd p n))))
 
 (defn send-frame!
   "Write frame bytes f to fd; with pass-fd, the descriptor travels with them

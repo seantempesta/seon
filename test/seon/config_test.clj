@@ -8,7 +8,7 @@
             [clojure.java.io :as io] [clojure.string :as str] [clojure.edn :as edn]
             [aero.core :as aero] [datahike.api :as d]
             [jolt.scheme :as scm] [jolt.analyzer :as an] [jolt.ir :as ir]
-            [seon.config :as config] [seon.db :as pdb] [seon.task :as task]))
+            [seon.config :as config] [seon.contract :as contract] [seon.db :as pdb] [seon.task :as task]))
 
 (def ^:private dir (str (config/checkout) "/test/seon/config"))
 
@@ -240,3 +240,11 @@
     (is (= 0.15 (d/q '[:find ?p . :where [?m :seon.ai.model/id "deepseek-flash"] [?m :seon.ai.model/input-usd-per-mtok ?p]] @conn)))
     (is (= "DEEPSEEK_API_KEY" (d/q '[:find ?v . :where [?p :seon.ai.model/provider-id "deepseek"] [?p :seon.config.ai/api-key-variable ?v]] @conn)))
     (is (= config/config (config/from-db @conn))))))
+
+(deftest the-schema-forms-are-baked-once
+  (testing "seon.contract's forms are seon.config's one baked map, not a second read of the directory"
+    (is (identical? contract/forms config/schema-forms)))
+  (testing "it holds every schema file's forms: the config keys' and the platform's"
+    (is (contains? config/schema-forms :seon.config/config))
+    (is (contains? config/schema-forms :seon.task/id))
+    (is (every? #(contains? config/schema-forms %) (config/keys-declared)))))

@@ -14,16 +14,8 @@
   the base its write-back edits, entry by entry, with rewrite-clj (v1's `schema-file-text`):
   every other byte as it was."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.program :as program] [seon.db :as pdb] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.program :as program] [seon.db :as pdb] [seon.reader :as reader] [seon.config :as config] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn]
             [rewrite-clj.zip :as z] [rewrite-clj.node :as node] [rewrite-clj.parser :as parser] [jolt.analyzer] [jolt.host] [seon.edn :as sedn]))
-
-(defn- line-starts
-  "The offset in text where each line starts."
-  {:malli/schema [:=> [:cat :string] [:vector :int]]}
-  [^String text]
-  (loop [acc [0] i 0]
-    (let [j (.indexOf text "\n" (int i))]
-      (if (neg? j) acc (recur (conj acc (inc j)) (inc j))))))
 
 (defn- lead-end
   "Where the first form starts in text from i to end: past whitespace, commas and ; comments."
@@ -50,7 +42,7 @@
   ([nsym text] (read-forms nsym text identity))
   ([nsym ^String text step]
    (let [r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. text))
-         starts (line-starts text)
+         starts (reader/line-starts text)
          off (fn [line col] (+ (starts (dec line)) (dec col)))]
      (loop [acc [] prev 0 nsym nsym]
        (let [form (binding [*ns* (or (find-ns nsym) *ns*)] (read {:eof ::eof} r))]
@@ -146,9 +138,9 @@
     (:requires (program/unit-account (analyze nsym form)))))
 
 (defn schema-resource?
-  "Is the relative path a schema resource: an .edn file under seon.contract/schemas-dir?"
+  "Is the relative path a schema resource: an .edn file under seon.config/schemas-dir?"
   {:malli/schema [:=> [:cat :string] :boolean]}
-  [path] (and (str/starts-with? path (str contract/schemas-dir "/")) (str/ends-with? path ".edn")))
+  [path] (and (str/starts-with? path (str config/schemas-dir "/")) (str/ends-with? path ".edn")))
 
 (defn schema-tx
   "The facts of one schema resource's text at path: the file with its text (write-back's

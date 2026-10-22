@@ -94,19 +94,6 @@
     (when-not (zero? (c-pipe b)) (throw (ex-info "pipe failed" {})))
     [(ffi/read b :int) (ffi/read (+ b 4) :int)]))
 
-(defn write-all! {:malli/schema [:=> [:cat :seon.lib/fd :seon.host/bytes] :int]}
-  [fd ^bytes arr]
-  (let [n (alength arr) buf (ffi/alloc (max 1 n))]
-    (ffi/write-array buf arr)
-    (loop [off 0]
-      (if (< off n)
-        (let [r (c-write fd (+ buf off) (- n off))]
-          (if (neg? r) -1 (recur (+ off r))))
-        n))))
-
-(defn write-line! {:malli/schema [:=> [:cat :seon.lib/fd :any] :int]}
-  [fd s] (write-all! fd (.getBytes (str s "\n") "UTF-8")))
-
 (defn line-reader
   "A fn of a wait in ms (negative: until something arrives) that answers the complete
   lines that arrived (a vector, maybe empty) or :eof. A signal ending the wait (EINTR)
