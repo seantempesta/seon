@@ -10,7 +10,7 @@
             [seon.db :as pdb]
             [seon.merge :as pm]
             [seon.program :as program] [seon.context :as context]
-            [seon.edn :as sedn]
+            [seon.edn :as sedn] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg]
             [my.schema :as schema]
             [seon.source :as source]
             [clojure.string :as str]))
@@ -134,6 +134,18 @@
     (testing "a second conflict on the same key replaces the entry"
       (let [b2 (d/db-with b1 (pm/unmerged-tx b1 cs 43))]
         (is (= [43] (map :main-t (pm/entries b2))))))))
+
+(deftest a-conflict-value-reads-a-pulled-entry
+  ;; task seon.merge/conflict-value-states-its-input: its input is a merge entry's members
+  ;; (census generated nil and 0 from its `:any` input, which state no conflict)
+  (let [c (first (:conflicts (tw (with (base) (var-tx "f" "(inc x)")) (with (base) (var-tx "f" "(dec x)")))))
+        db (d/db-with (base) [(pm/conflict-tx c)])
+        e (d/q '[:find ?e . :where [?e :seon.merge/key]] db)]
+    (is (= c (pm/conflict-value (pm/conflict-tx c))) "the inverse of conflict-tx")
+    (is (= c (pm/conflict-value (d/pull db '[*] e))) "a pulled entry")
+    (is (nil? (mg/check (m/deref (contract/schema (contract/contract #'pm/conflict-value))) pm/conflict-value
+                        {:registry contract/registry :num-tests 100 :seed 42}))
+        "census: every input its contract generates states a conflict")))
 
 (deftest behind-means-main-program-moved
   (let [observed (with (base) [{:seon.agent/id :root :seon.agent/answered-t 9} {:note/text "attempt facts"}])]
