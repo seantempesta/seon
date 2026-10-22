@@ -249,6 +249,10 @@
                (step/out! o :to-render {:op :keyframe :view (:view m)}))
              st)
     :keyframe (keyframe! st (:view m) (:html m))
+    ;; the render proc has nothing in flight: an SSE comment on every feed (Datastar ignores
+    ;; comments), the event a client or a check waits on before reading a current view
+    :settled (reduce (fn [st view] (let [[st sent] (offer-all st view ": settled\n\n")] (update st :bytes + sent)))
+                     st (distinct (map :view (vals (:tabs st)))))
     (:page :text) (let [[st [p view]] (step/answered st (:k m))]
                     (some-> p (deliver (if (= :page (:op m)) (page-doc view (:html m)) (:text m))))
                     st)

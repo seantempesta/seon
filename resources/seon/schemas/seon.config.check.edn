@@ -1,0 +1,4 @@
+;; The check harness's time (seon.check; docs/clocks.md "a check's measurement, and a check's ping").
+{:seon.config.check/ping-ms [:int {:min 1 :seon.config/unit "ms" :description "How long a check's Flow ping waits for a proc to take its control message; past it the proc is recorded :blocked."}]
+ :seon.config.check/hold-ms [:int {:min 1 :seon.config/unit "ms" :description "The window over which a check measures that something does not happen (a paused proc's request held, its flood not taken)."}]
+ :seon.config.check/pages-ms [:int {:min 0 :seon.config/unit "ms" :description "The window after scale's kills over which it measures the memory the kernel returns (reported, not checked)."}]}

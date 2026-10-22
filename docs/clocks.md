@@ -3,7 +3,7 @@
 Time is measured and recorded, and decides only at the owner's three exceptions; `bin/dragons clocks` and `bin/dragons measures` name every place in `src/` that reads or waits on a clock.
 
 Work runs because it arrived and parks when there is none; a missing answer is a recorded
-fact (stuck, stalled, dead), never a timer's guess. The exceptions are the cron proc, a
+fact (blocked, stalled, dead), never a timer's guess. The exceptions are the cron proc, a
 message's delayed insert, and the kernel's TCP keepalive ([AGENTS.md §4](../AGENTS.md)).
 
 `bin/dragons clocks` lists every function in `src/` whose code (strings and comments left
@@ -21,13 +21,18 @@ way in [DRAGONS](DRAGONS.md).
 
 - `seon.fx/wake-later`, `seon.fx/refill`, `seon.fx/admit`, `seon.fx/dispatch`, `seon.fx/owner-proc`: the delayed insert. The provider's rate is a token bucket (halved by a rate-limit outcome); a request the bucket cannot cover yet is put back on the owner's `:tick` port once it refills, by one core.async `timeout`.
 
+## Time decides (a check's measurement, and a check's ping)
+
+`bin/dragons clocks` reads the check harness too (`seon.check`, `seon.e2e`): a wait there that stands for an event is the event instead ([machine](machine.md#builds-and-checks)).
+- `seon.check/lifecycle`, `seon.check/backpressure`, `seon.check/scale`, `seon.check/idle`: the window over which a check measures that something does not happen or what it costs (`:seon.config.check/hold-ms`: a paused agent's request unanswered, a paused proc's flood and a paused writer's commits held; `:seon.config.check/pages-ms`: memory the kernel returns after the kill; idle's window, bin/check's argument). The measurement, never a dependency: load only makes what it measures likelier.
+- `seon.check/ping`, `seon.check/system-check`: Flow's ping takes a bound (`:seon.config.check/ping-ms`); a proc that has not taken its control message by then is mid-step that long, and the check records it `:blocked` (an expected proc missing from a graph ping is reported under `:no-answer`), never reads it as nil.
+
 ## Time decides, owed its owner's fix
 
 Each is a defect named with the task that removes it, so the census stays a ratchet: a new
 site is red, and a fixed one leaves this list in the fix's commit.
 - `seon.root/start!` (Flow's `:stop-timeout-ms`), `seon.root/stop!` (timed derefs and a `.join`), `seon.agent-proc/await-dead` (the SIGKILL ladder), `seon.fork-server/main` and `seon.sock/recv-within!` (the 100 ms poll by which a child's death is seen): task `seon.root/shutdown-and-death-are-dataflow`.
 - `seon.root/api-proc` (the stall timer), `seon.root/back-op` (its `:stall-check`), `seon.agent-proc/agent-proc` (the `:last-frame-ms` the stall compares): task `seon.fences/a-stall-is-past-the-requests-own-bound`.
-- `seon.root/agent-health`, `seon.root/health` (`:unknown` after a ping's 1000 ms): task `seon.fences/health-is-answered-and-failover-recorded`.
 - `seon.writer/flusher-proc` (sleeps out the flush window), `seon.writer/writer-proc` (the `:since` it decides from), `seon.agent/transact!` (commits after the flush window): task `seon.writer/durability-is-continuous-group-commit`.
 - `seon.render.proc/RETIRE-MS`, `seon.render.proc/order`, `seon.render.proc/ordered` (an ended agent leaves the grid by elapsed time; the order is re-derived when a second passed), and `seon.render.proc/system-value` (carries the bound to the tile's caption): task `seon.render/an-ended-agent-leaves-the-grid-by-an-event`.
 - `seon.web/web-proc` (the HTTP adapter's keep-alive and write timeouts, literals): task `seon.web/web-server-threads-are-joined-at-stop`.
