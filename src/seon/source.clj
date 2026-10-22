@@ -14,7 +14,7 @@
   the base its write-back edits, entry by entry, with rewrite-clj (v1's `schema-file-text`):
   every other byte as it was."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.program :as program] [seon.db :as pdb] [seon.reader :as reader] [seon.config :as config] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.program :as program] [seon.db :as pdb] [seon.reader :as reader] [seon.config :as config] [datahike.api :as d] [clojure.string :as str]
             [rewrite-clj.zip :as z] [rewrite-clj.node :as node] [rewrite-clj.parser :as parser] [jolt.analyzer] [jolt.host] [seon.edn :as sedn]))
 
 (defn- lead-end
@@ -149,7 +149,7 @@
   {:malli/schema [:=> [:cat :string :string] :seon.db/tx-data]}
   [path text]
   (into [{:schema.file/path path :schema.file/text text}]
-        (for [[k v] (sort-by (comp str key) (edn/read-string text))]
+        (for [[k v] (sort-by (comp str key) (sedn/decode text))]
           {:schema/key k :schema/form (binding [*print-namespace-maps* false] (sedn/encode v)) :schema/file path :schema/source true})))
 
 (defn import-tx
@@ -322,7 +322,7 @@
   [db path]
   (let [fe (pdb/eid db :schema.file/path path)
         base (if fe (:schema.file/text (d/entity db fe)) "{}\n")
-        held (edn/read-string base)
+        held (sedn/decode base)
         now (into {} (for [dt (d/datoms db :avet :schema/file path) :let [x (d/entity db (:e dt))]]
                        [(:schema/key x) (:schema/form x)]))
         edits (concat (for [[k form] (sort-by (comp str key) now)

@@ -30,10 +30,10 @@
     [head (pm/three-way (pm/program (pdb/branch-base conn (pdb/conn-main conn) b) data-attrs) (pm/program head data-attrs) (pm/program @conn data-attrs))]))
 
 (defn- refused
-  "The writer refusing a request, as the one error map (:seon.writer/refused) with the
-  members its callers branch on (:ok false; :merged? false on a merge)."
+  "The writer refusing a request, as the one error map (:seon.writer/refused); members
+  describe the refusal."
   {:malli/schema [:=> [:cat :string :map] :seon.writer/refused]}
-  [why members] (contract/error :seon.writer/refused 'seon.writer/writer-proc why (merge {:ok false} members)))
+  [why members] (contract/error :seon.writer/refused 'seon.writer/writer-proc why members))
 
 (defn- merge-refusal
   "Why branch head (its three-way r against main) cannot merge into main now (session M1), or
@@ -46,31 +46,28 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/result] [:maybe :map]]}
   [main head r]
   (let [unmerged (pm/unmerged head (pm/program head #{}))
-        uncontracted (when contract/on?
-                       (vec (sort-by str (for [[[k sym] [_ ov]] (:ours r)
-                                               :when (and (= :var k) (= :fn (:kind ov)) (nil? (:contract ov)))]
-                                           sym))))]
+        uncontracted (pm/uncontracted (:ours r))]
     (cond
       (seq (:theirs r))
       (contract/error :seon.merge/behind 'seon.writer/merge-branch
                       (str "main changed " (count (:theirs r)) " key(s) since the branch's merge base: merge main into the branch first")
-                      {:merged? false :tx (:max-tx main) :behind (count (:theirs r))
+                      {:tx (:max-tx main) :behind (count (:theirs r))
                        :seon.error/fix "A merge task merges main into the branch (my.branch/merge-main!), resolves any conflict, and its proofs run on the combined program."})
       (seq unmerged)
       (contract/error :seon.merge/unmerged 'seon.writer/merge-branch
                       (str "the branch has " (count unmerged) " unmerged entr(ies)")
-                      {:merged? false :tx (:max-tx main) :unmerged (mapv :key unmerged)})
+                      {:tx (:max-tx main) :unmerged (mapv :key unmerged)})
       (seq (pm/mutations main (:ours r)))
       (let [ms (pm/mutations main (:ours r))]
         (contract/error :seon.merge/mutation 'seon.writer/merge-branch
                         (str "the branch's program " (str/join "; " (for [m ms] (str (sedn/encode (:defines m))
                                                                                     (if (:call m) (str " calls " (:call m)) (str " defines " (:inline-def m) " inside a function body"))))))
-                        {:merged? false :tx (:max-tx main) :mutations ms
+                        {:tx (:max-tx main) :mutations ms
                          :seon.error/fix "Every definition happens once, where it is defined: vary behaviour through arguments or the environment, and define at the top level, not inside a function."}))
       (seq uncontracted)
       (contract/error :seon.merge/uncontracted 'seon.writer/merge-branch
                       (str "the branch carries " (count uncontracted) " function(s) without a contract")
-                      {:merged? false :tx (:max-tx main) :uncontracted uncontracted
+                      {:tx (:max-tx main) :uncontracted uncontracted
                        :seon.error/fix "Declare each function's contract ({:malli/schema [:=> [:cat ...] ...]}) and merge again."}))))
 
 (defn- octopus-merge
@@ -86,12 +83,12 @@
         judged (reduce (fn [{:keys [taken] :as acc} b]
                          (let [have? (pdb/branch? conn b)
                                [head r] (when have? (branch-merge st b data-attrs))
-                               refusal (if have? (merge-refusal main head r) (refused (str "no branch " b) {:merged? false}))
+                               refusal (if have? (merge-refusal main head r) (refused (str "no branch " b) {}))
                                refusal (or refusal
                                            (when (some taken (keys (:ours r)))
                                              (contract/error :seon.merge/behind 'seon.writer/octopus-merge
                                                              "another member of the octopus merge changes the same definitions: merge main into the branch first"
-                                                             {:merged? false :tx (:max-tx main) :behind (count (filter taken (keys (:ours r))))})))]
+                                                             {:tx (:max-tx main) :behind (count (filter taken (keys (:ours r))))})))]
                            (-> acc (update :members conj {:branch b :r r :refusal refusal})
                                (cond-> (nil? refusal) (update :taken into (keys (:ours r)))))))
                        {:taken #{} :members []} branches)
@@ -184,13 +181,13 @@
       :octopus-merge (let [[st r] (octopus-merge st o (vec (:branches m)) (:data-attrs m #{}))] (reply st r))
       :merge (if (exists? (:branch m))
                (let [[st r] (merge-branch st o (:branch m) (:data-attrs m #{}))] (reply st r))
-               (reply st (refused (str "no branch " (:branch m)) {:merged? false})))
+               (reply st (refused (str "no branch " (:branch m)) {})))
       ;; one derivation (seon.merge/three-way) for the dashboard, the done rule and merges
       :branch-diff (reply st (if (exists? (:branch m))
                                (let [[head r] (branch-merge st (:branch m) (:data-attrs m #{}))]
                                  {:ok true :ours (vec (sort-by str (keys (:ours r)))) :theirs (count (:theirs r))
                                   :conflicts (count (:conflicts r))
-                                  :unmerged (mapv :key (pm/unmerged head (pm/program head #{})))
+                                  :unmerged (mapv :key (pm/unmerged head (pm/program head #{}))) :uncontracted (pm/uncontracted (:ours r))
                                   :vars (into (sorted-set) (keep (fn [[k s]] (when (= :var k) s))) (keys (:ours r)))})
                                (refused (str "no branch " (:branch m)) {})))
       ;; root's read of a branch (or main): its committed value from the store; :base is the
@@ -222,7 +219,7 @@
     (catch Throwable e
       ;; an interop edge (Datahike) refused: the request's answer is the error, as data
       ;; with the store's map use: a full map (MDB_MAP_FULL) shows itself against its size
-      (answer o (:dest m) (refused (step/error-msg e) (cond-> {:merged? false} (pdb/map-use (:cfg st)) (assoc :store (pdb/map-use (:cfg st))))))
+      (answer o (:dest m) (refused (step/error-msg e) (cond-> {} (pdb/map-use (:cfg st)) (assoc :store (pdb/map-use (:cfg st))))))
       (dissoc st :pend))))
 
 (defn- drain {:malli/schema [:=> [:cat :seon.host/chan :seon.writer/request] [:vector :seon.writer/request]]}

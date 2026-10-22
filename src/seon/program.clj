@@ -25,7 +25,7 @@
     platform's own source has the same facts (seon.source)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [jolt.ir :as ir] [jolt.analyzer]
-            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [clojure.edn :as edn] [seon.error :as error] [seon.db :as pdb]))
+            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [seon.error :as error] [seon.db :as pdb]))
 
 (defn scratch-ns?
   "Is namespace nsx scratch (never program): `user`, or declared ^:scratch."
@@ -472,8 +472,8 @@
   [db e]
   (let [f (d/entity db e)
         def-key (fn [x] (cond (:var/name x) [:var (:var/name x)]
-                              (:method/key x) (into [:method] (read-string (:method/key x)))
-                              (:impl/key x) (into [:impl] (read-string (:impl/key x)))
+                              (:method/key x) (into [:method] (sedn/decode (:method/key x)))
+                              (:impl/key x) (into [:impl] (sedn/decode (:impl/key x)))
                               (:ns/name x) [:ns (:ns/name x)]))]
     (cond-> (into {:e e :id (:form/id f) :src (:form/src f) :ns (:ns/name (:form/ns f)) :order (:form/order f)
                    :defines (into #{} (keep def-key) (:form/defines f))
@@ -592,7 +592,7 @@
                     (let [r' (into r (for [[k ns] named :when (and (not (r k)) (some r ns))] k))]
                       (if (= r r') r (recur r'))))]
       (vec (distinct (for [dt (d/datoms db :aevt :var/contract)
-                           :when (some reached (names (edn/read-string (:v dt))))
+                           :when (some reached (names (sedn/decode (:v dt))))
                            :let [fe (:db/id (:var/form (d/entity db (:e dt))))]
                            :when (and fe (live? db fe))]
                        (form-row db fe)))))))
@@ -634,7 +634,7 @@
   [db]
   (let [src (into #{} (map :e) (d/datoms db :aevt :schema/source))]
     (into {} (for [dt (d/datoms db :aevt :schema/key) :when (not (src (:e dt)))]
-               [(:v dt) (edn/read-string (:schema/form (d/entity db (:e dt))))]))))
+               [(:v dt) (sedn/decode (:schema/form (d/entity db (:e dt))))]))))
 
 (defn schema-registry
   "The registry an evaluation on db binds as malli.registry/*registry*: the binary's forms
@@ -728,7 +728,7 @@
             :when (and (= op :db/retract) (ptr a) (not (added e)))
             :let [x (d/entity db e)]]
       (cond (:var/name x) (remove-definition! [:var (:var/name x)])
-            (:method/key x) (remove-definition! (into [:method] (read-string (:method/key x))))))
+            (:method/key x) (remove-definition! (into [:method] (sedn/decode (:method/key x))))))
     (load! db (vec (for [[op e a] ops
                          :when (and (= op :db/add) (= a :form/src) (live? db e))
                          :let [f (form-row db e)] :when (not (held? db f))]
@@ -813,7 +813,7 @@
   ([db {:keys [env tree data-refs]} roots]
   (let [schemas (into {} (for [dt (d/datoms db :aevt :schema/key)] [(:v dt) (:schema/form (d/entity db (:e dt)))]))
         sid #(str "schema " %)
-        named (fn [text] (keep #(when (contains? schemas %) (sid %)) (names (edn/read-string text))))
+        named (fn [text] (keep #(when (contains? schemas %) (sid %)) (names (sedn/decode text))))
         contract (into {} (for [dt (d/datoms db :aevt :var/contract)] [(:var/name (d/entity db (:e dt))) (named (:v dt))]))
         live (live-forms db)
         forms (into live (for [[k text] schemas] {:id (sid k) :ns k :src text :refs #{} :defines #{} :schema (named text)}))

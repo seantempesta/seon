@@ -26,7 +26,7 @@
   ours and theirs as data, until the branch's content for its key changes or it is
   resolved (`resolve-tx`). Every function here is pure over db values."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program] [seon.edn :as sedn]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program] [seon.edn :as sedn]))
 
 (def ^:private program-ns-attrs #{"form" "var" "ns" "method" "impl" "schema" "schema.file" "db" "db.install" "db.type" "db.cardinality" "db.unique"})
 
@@ -100,6 +100,16 @@
                  :let [a (get from k) b (get to k)]
                  :when (not (same? k a b))]
              [k [a b]])))
+
+(defn uncontracted
+  "The functions a branch's changes ours (a three-way's :ours) define without a contract,
+  sorted; none while contracts are off (seon.contract/on?). The writer's merge gate and
+  root's judge both ask this."
+  {:malli/schema [:=> [:cat :seon.merge/changes] [:vector :qualified-symbol]]}
+  [ours]
+  (if contract/on?
+    (vec (sort-by str (for [[[k sym] [_ ov]] ours :when (and (= :var k) (= :fn (:kind ov)) (nil? (:contract ov)))] sym)))
+    []))
 
 (defn- conflict-kind
   {:malli/schema [:=> [:cat :any :any :any] :seon.merge/conflict-kind]}

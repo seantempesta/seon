@@ -14,7 +14,7 @@
     collection). docs/failure-points.md, \"Physics\".
   - The socket's buffer is the bounded channel: a full buffer makes the sender wait."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [jolt.ffi :as ffi] [seon.lib :as lib] [konserve.jolt.fasl :as codec] [seon.config :as config]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [jolt.ffi :as ffi] [seon.lib :as lib] [konserve.jolt.fasl :as codec] [seon.config :as config]))
 
 (ffi/load-library)
 
@@ -25,6 +25,7 @@
 (lib/defc c-sendmsg "sendmsg" [:int :pointer :int] :ssize_t {:blocking true})
 (lib/defc c-recvmsg "recvmsg" [:int :pointer :int] :ssize_t {:blocking true})
 (lib/defc c-recvmsg-nb "recvmsg" [:int :pointer :int] :ssize_t)
+(lib/defc c-recv-nb "recv" [:int :pointer :size_t :int] :ssize_t)
 (lib/defc c-poll "poll" [:pointer :int :int] :int {:blocking true})
 
 (defmacro ^:private with-mem
@@ -42,6 +43,11 @@
 (def ^:private F-SETFD 2)
 (def ^:private FD-CLOFORK 2)
 (def ^:private MSG-DONTWAIT 0x80)
+(def ^:private MSG-PEEK 0x2)
+(def ^:private F-GETFL 3)
+(def ^:private F-SETFL 4)
+(def ^:private F-SETOWN 6)
+(def ^:private O-ASYNC 0x40)
 
 (def BUF
   "Each socket's send and receive buffer, bytes (:seon.config.agent/sock-buf-bytes)."
@@ -66,6 +72,23 @@
   "Close fd in every child this process forks from now on."
   {:malli/schema [:=> [:cat :seon.lib/fd] :int]}
   [fd] (c-fcntl fd F-SETFD (bit-or FD-CLOFORK (c-fcntl fd F-GETFD 0))))
+
+(defn signal-at-input!
+  "fd raises SIGIO in this process when input arrives on it or its peer closes it (O_ASYNC,
+  the signal owned by this process). nil, or :seon.sock/unwatched when fcntl refuses (the
+  failure point's edge: docs/failure-points.md)."
+  {:malli/schema [:=> [:cat :seon.lib/fd] [:maybe :seon.error/base]]}
+  [fd]
+  (when-not (and (not (neg? (c-fcntl fd F-SETOWN (lib/c-getpid))))
+                 (not (neg? (c-fcntl fd F-SETFL (bit-or O-ASYNC (c-fcntl fd F-GETFL 0))))))
+    (contract/error :seon.sock/unwatched 'seon.sock/signal-at-input!
+                    (str "fd " fd " cannot raise SIGIO (fcntl errno " (ffi/errno) "): this process ends only when it next reads its socket")
+                    {:errno (ffi/errno)})))
+
+(defn peer-gone?
+  "Has fd's peer closed it, with nothing left to read before the EOF? A non-blocking peek."
+  {:malli/schema [:=> [:cat :seon.lib/fd] :boolean]}
+  [fd] (with-mem [b 1] (zero? (c-recv-nb fd b 1 (bit-or MSG-PEEK MSG-DONTWAIT)))))
 
 (defn close! {:malli/schema [:=> [:cat :seon.lib/fd] :int]}
   [fd] (lib/c-close fd))
@@ -275,8 +298,6 @@
 
 
 
-;; ---- kqueue -----------------------------------------------------------------
-;; struct kevent (arm64): ident u64 @0, filter i16 @8, flags u16 @10, fflags u32 @12, data i64 @16, udata u64 @24
 
 
 
