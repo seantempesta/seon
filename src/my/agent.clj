@@ -8,12 +8,15 @@
     (callers 'ns/f)           the program vars whose recorded definition names ns/f
     (callees 'ns/f)           the vars ns/f's recorded definition names
     (grep "text")             the program vars whose recorded definition's text holds it
+    (prove)                   run what judges this branch: the task's proofs and the tests reaching
+                              what it changed since main, each green one at its digest reused
     (help)                    the help page's sections (docs/agent.md); (help "done") one whole
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.docs :as docs]
-            [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d] [seon.task :as task]))
+            [seon.config :as cfg] [seon.proofs :as proofs] [seon.task :as task]
+            [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "The live value of an earlier result, by handle (:h3)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
@@ -41,6 +44,18 @@
   (vec (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]]
                              (agent/db) sym))
                    sym))))
+
+(defn prove
+  "Run what judges this branch, as root's judge and the turn loop run it (seon.agent/run-tests-forked,
+  in a fork of this agent): the task's proofs (or the given ones) and every test reaching what the
+  branch changed since the main it forked from, each test green at its reach digest reused, not
+  run. Answers that run ({:pass :fail :error :reports :ran :reused :ms ...}) with :results
+  {test :pass|:fail|:error}."
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:set :qualified-symbol]] :map]]}
+  ([] (prove (or (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})))
+  ([proofs]
+   (let [run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks) proofs)]
+     (assoc run :results (proofs/results run)))))
 
 (defn grep
   "The program vars whose recorded definition's text (:form/src on this branch) holds the

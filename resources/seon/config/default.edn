@@ -264,6 +264,13 @@
  ;; from any checkout is valid in every other. A checkout's store (runs/store) is its own, so
  ;; the store cannot hold them. SEON_TEST_RESULTS moves it (a check's own run).
  :seon.config.source/test-results-dir #or [#env SEON_TEST_RESULTS #seon/checkout "../test-results"]
+ ;; Unit: processes. A proof run's selected tests (bin/prove, bin/test) are dealt, a namespace (with
+ ;; its fixtures) at a time, into this many shards, each a runner process of its own that bin/test
+ ;; starts at once (test-runner/shards), its greens stored by digest when it has run. Provenance:
+ ;; worktree session PROVE 2026-10-22 on the 16 GB M1 target (AGENTS section 8): 4 keeps the machine
+ ;; responsive beside a standing root and other worktree sessions (measured in docs/merging.md#a-merge-runs-what-the-change-reaches).
+ ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected.
+ :seon.config.proofs/jobs 4
 
  ;; ==== effects and the model ==================================================================
 

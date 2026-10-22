@@ -131,13 +131,13 @@
                     :plan "Create the namespace `app.newns` with `triple` (three times x), and its tests in `app.newns-test`, which refers `triple`."}]
            :after {}
            ;; main runs the new namespaces as written: the function, data still data, the var still
-           ;; dynamic, the test (its :refer) passing, user's def absent, and the test reaching triple
+           ;; dynamic, the test (its :refer) passing, user's def absent, and the test a program test (it has a reach digest)
            :check (str "[(app.newns/triple 3) app.newns/ops app.newns/syms"
                        " (:dynamic (meta #'app.newns/*depth*)) (binding [app.newns/*depth* 1] app.newns/*depth*)"
                        " ((juxt :test :pass :fail :error) (binding [clojure.test/*test-out* (java.io.StringWriter.)] (clojure.test/test-ns 'app.newns-test)))"
                        " (some? (resolve 'user/scratch-x))"
-                       " (seon.program/reaching-tests (seon.agent/db) #{'app.newns/triple})]")
-           :expect ["[9 (inc 1) [a b] true 1 [1 1 0 0] false #{app.newns-test/triple-test}]"]
+                       " (some? ((seon.program/reach-digests (seon.agent/db) {:env \"\" :tree \"\"}) 'app.newns-test/triple-test))]")
+           :expect ["[9 (inc 1) [a b] true 1 [1 1 0 0] false true]"]
            ;; the plan asks for triple and a passing test that refers it
            :model {:check (str "(let [r (binding [clojure.test/*test-out* (java.io.StringWriter.)] (clojure.test/test-ns 'app.newns-test))]"
                                " [(app.newns/triple 3) (pos? (:pass r)) (zero? (+ (:fail r) (:error r)))])")

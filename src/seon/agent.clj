@@ -14,7 +14,7 @@
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
-            [clojure.string :as str] [seon.program :as program] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
+            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
             [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
@@ -82,10 +82,6 @@
       (cond
         (= m :dead) (lib/c-exit 0)
         (and (= op (:op m)) (= k (:k m))) m
-        ;; Flow's ping reaches a waiting agent too: health while an effect is in flight
-        (= :ping (:op m)) (do (send! {:op :pong :status :waiting :count (:n @state 0) :held 0
-                                      :state {:evals (:n @state) :waiting-for op}})
-                              (recur))
         :else (do (swap! state update :pending conj m) (recur))))))
 
 
@@ -146,11 +142,11 @@
     (swap! state update :fx-pending dissoc k)
     (swap! state assoc-in [:defs [:fx k]]
            [(cond-> (into {:seon.fx/id (str (name (:id @state)) "-" (lib/c-getpid) "-fx" k) :seon.fx/kind kind
-                           :seon.fx/status (if (:seon.error/type r) :error :ok)
+                           :seon.fx/status (if (contract/error? r) :error :ok)
                            :seon.fx/us (long (:seon.fx/us r 0)) :seon.fx/queue-us (long (:seon.fx/queue-us r 0))}
                           (for [[f a] model-cost-attrs :let [v (when (map? c) (get c f))] :when (int? v)] [a (long v)]))
               (:cost r) (assoc :seon.fx/cost (long (:cost r)))
-              (:seon.error/type r) (assoc :seon.fx/error (str (:seon.error/type r) ": " (:seon.error/message r))
+              (contract/error? r) (assoc :seon.fx/error (str (:seon.error/type r) ": " (:seon.error/message r))
                                           :seon.fx/error-type (:seon.error/type r)))])
     kind))
 
@@ -296,49 +292,74 @@
       (assoc :got (print/text (second (:actual m)) (:part print/budgets)))
       (contract/valid? :seon.cost/report cost) (assoc :cost cost))))
 
-(defn test-vars
-  "The tests that judge branch db, as this process holds them: proofs, and every in-process
-  test that reaches a var the branch changed since base (main at its merge base), the changed
-  tests among them (seon.program/test-split; seon.reconcile/done-refusals reads only these).
-  A process test it reaches is deferred to the merge (deferred-tests). A proof with no var
-  here does not run; scratch namespaces (user, ^:scratch) never merge, so their tests never
-  judge."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :qualified-symbol]] [:sequential :seon.host/var]]}
+(defn results-dir
+  "Where this root's agents keep their test results: beside its store, under its main (this
+  root's agents only), never the results directory bin/test and every checkout share: an agent's REPL can
+  change live state its recorded forms do not show (until the owner rules that agents share)."
+  {:malli/schema [:=> [:cat] :string]}
+  [] (str (cfg/value :seon.config.root/store-path) "-results/" (cfg/value :seon.config.root/main)))
+
+(defn test-plan
+  "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
+  (seon.program/reach-digests) against base's (main at its merge base), the greens stored at
+  those digests and proofs. The digests' inputs with no program facts are this boot's
+  :inputs on root's :seon.root/source fact (seon.root/import-source!: present only when root's
+  binary is built from its source tree), so an agent's results are kept by digest in
+  results-dir; a root with no such fact this boot shares nothing and reuses nothing (the
+  inputs then are blank, which keys nothing stored: it only selects). A test is selected when
+  it is a proof or reaches what the branch changed since base (a var, method, fixture, ns form,
+  macro or schema entry), and runs when no green is stored at its digest
+  (seon.reconcile/done-refusals reads the selected). Scratch namespaces' tests (user,
+  ^:scratch) never merge, so they never judge; a proof with no test var here does not run, and
+  one with a var but no program facts (loaded, never recorded) has no digest: it always runs.
+  Answers the plan with :digests {test digest} and :dir (results-dir when shared)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :qualified-symbol]]
+                  [:map [:selected [:vector :qualified-symbol]] [:run [:vector :qualified-symbol]] [:reused [:map-of :qualified-symbol :map]]
+                   [:digests [:map-of :qualified-symbol :string]] [:dir [:maybe :string]]]]}
   [db base proofs]
-  (filter #(and (:test (meta %)) (not (program/scratch-ns? (:ns (meta %)))))
-          (keep #(some-> (find-ns (symbol (namespace %))) (ns-resolve (symbol (name %))))
-                (:run (program/test-split db (program/changed-vars base db) proofs)))))
+  (let [root (d/entity db [:seon.root/id :root])
+        source (:seon.root/source root)
+        shared (when (= (:boot source) (:seon.root/boot root)) (:inputs source))
+        in (or shared {:env "" :tree "" :data-refs (fx/declared-refs (cfg/value :seon.config.root/system-path))})
+        dir (when shared (results-dir))
+        judges? (fn [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
+                          (and (:test m) (not (program/scratch-ns? (:ns m))))))
+        cd (into {} (filter (comp judges? key)) (program/reach-digests db in))
+        unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))]
+    (-> (proofs/plan (program/reach-digests base in) cd (if dir (proofs/greens dir (vec (vals cd))) {}) proofs)
+        (update :selected into unrecorded)
+        (update :run into unrecorded)
+        (assoc :digests cd :dir dir))))
 
 (defn deferred-tests
   "The process tests branch db's change since base reaches, deferred to the merge, which runs
-  them on a checkout (seon.program/test-split): names, sorted."
+  them on a checkout (seon.program/test-split): names, sorted. The agent's turn and root's
+  judge run test-plan's tests less these."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :qualified-symbol]] [:vector :qualified-symbol]]}
   [db base proofs] (:deferred (program/test-split db (program/changed-vars base db) proofs)))
 
 (defn- run-tests-here
-  "clojure.test over the branch's test-vars for the task's proofs, with the branch's schemas in effect (malli's
-  dynamic registry bound to seon.program/schema-registry, as the agent's REPL binds it), the
-  whole run within ticks engine ticks of work: answers report data. Each test var is written
-  to w as it starts ({:seon.test/started v}), so the agent can name the test a death interrupted; a run
-  past its ticks stops with the typed :seon.test/ticks-spent naming the test that was running."
-  {:malli/schema [:=> [:cat :int pos-int? [:set :qualified-symbol]] :seon.test/result]}
-  [w ticks proofs]
+  "The tests a test-plan runs (var symbols), by the one runner (seon.proofs/run-tests!, nothing
+  stored: the parent holds the greens), with the branch's schemas in effect (malli's dynamic
+  registry bound to seon.program/schema-registry, as the agent's REPL binds it), the whole run
+  within ticks engine ticks of work: answers report data. Each test var is written to w as it
+  starts ({:seon.test/started v}), so the agent can name the test a death interrupted; a run
+  past its ticks stops with the typed :seon.test/ticks-spent naming the test that was running;
+  a test its namespace's throw kept from reporting is an :error report carrying that throw
+  (the runner reports it)."
+  {:malli/schema [:=> [:cat :int pos-int? [:sequential :qualified-symbol]] :seon.test/result]}
+  [w ticks tests]
   (let [reports (atom [])
         started (atom nil)
-        orig t/report
-        vars (test-vars (db) (:base @state) proofs)
-        r (try (binding [t/report (fn [m]
-                                    (when (= :begin-test-var (:type m))
-                                      (reset! started (str (:var m)))
-                                      (sock/write-line! w (sedn/encode {:seon.test/started @started})))
-                                    (when (#{:pass :fail :error} (:type m))
-                                      (swap! reports conj (test-report m (some-> (first t/*testing-vars*) str))))
-                                    (orig m))
-                         t/*test-out* (java.io.StringWriter.)
-                         mr/*registry* (program/schema-registry (program/schema-changes (db)))]
-                 ;; exactly the selected vars, each namespace's fixtures around them
-                 (jolt.host/run-interruptible (jolt.host/make-interrupt) #(t/test-vars vars) ticks)
-                 nil)
+        note! (fn [x]
+                (cond (:seon.test/started x) (do (reset! started (str "#'" (:seon.test/started x)))
+                                                 (sock/write-line! w (sedn/encode {:seon.test/started @started})))
+                      (:seon.test/report x) (swap! reports conj (test-report (:seon.test/report x) (str "#'" (:test x))))
+                      :else nil))
+        r (try (binding [mr/*registry* (program/schema-registry (program/schema-changes (db)))]
+                 (jolt.host/run-interruptible (jolt.host/make-interrupt)
+                                              #(proofs/run-tests! tests (zipmap tests (repeat nil)) note!) ticks))
+               nil
                (catch Throwable e
                  (if-let [n (:jolt/ticks-spent (ex-data e))]
                    (contract/error :seon.test/ticks-spent 'seon.agent/run-tests-forked
@@ -370,38 +391,60 @@
                    var (assoc :var var))]})))
 
 (defn run-tests-forked
-  "Fork this agent; the child runs the test-vars of proofs within ticks engine ticks of work, writing
-  each test var as it starts and then one EDN line of its result on a pipe. The agent reads
-  the pipe to its end: no clock; the child ends by finishing, by its budget, or by dying
-  (then the last test it started is named). (forked pid) runs here once the child exists."
-  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol]] :seon.test/result]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] :seon.host/fn] :seon.test/result]]}
+  "Fork this agent; the child runs what test-plan runs for proofs (the selected tests with no
+  green held at their digest) within ticks engine ticks of work, writing each test var as it
+  starts and then one EDN line of its result on a pipe. The agent reads the pipe to its end: no
+  clock; the child ends by finishing, by its budget, or by dying (then the last test it started
+  is named). Each selected test green at its digest is reused: one :pass report marked :reused.
+  Each test that ran green is stored at its digest in test-plan's :dir through root's :file
+  owner (seon.proofs/store-greens!); a write refused is named under :unstored, and that test
+  runs again. :ran is how many tests reported. (forked pid) runs here once the child exists.
+  A fork refused (threads active) is :seon.test/fork-refused: no test ran."
+  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol]] [:or :seon.test/result :seon.test/fork-refused]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]]}
   ([ticks proofs] (run-tests-forked ticks proofs (fn [_] nil)))
   ([ticks proofs forked]
-  (let [[r w] (lib/pipe) t0 (profile/now-ns)]
-    (lib/fork!
-      {:refused (fn [n] (lib/c-close r) (lib/c-close w)
-                  {:pass 0 :fail 0 :error 1 :ms (profile/ms-since t0)
-                   :reports [{:type :error :message (str "cannot fork the tests: " n " Chez threads active (a running future?)")}]})
-       :child (fn []
-                (lib/c-close r)
-                ;; the run ends by its budget; if the agent dies first, the next write to the
-                ;; pipe ends this child (EPIPE). The agent's socket is FD_CLOFORK: not held here.
-                (lib/set-trip! (* 16 1048576))
-                (swap! state assoc :mode :test :evaluating false)
-                (let [res (try (run-tests-here w ticks proofs)
-                               (catch Throwable e {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]}))]
-                  (sock/write-line! w (sedn/encode res))))
-       :parent (fn [pid]
-                 (lib/c-close w)
-                 (forked pid)
-                 (let [rd (lib/line-reader r)
-                       line (loop [line nil]
-                              (let [ls (rd -1)]
-                                (if (= ls :eof) line (recur (or (peek ls) line)))))
-                       st (lib/wait-status pid)]
-                   (lib/c-close r)
-                   (assoc (run-answer line st) :ms (profile/ms-since t0) :pid pid :exit st)))}))))
+  (let [;; root's ruling (2026-10-22): the process tests the change reaches run at the merge
+        deferred (set (deferred-tests (db) (:base @state) proofs))
+        {:keys [selected run reused digests dir]} (-> (test-plan (db) (:base @state) proofs)
+                                                      (update :selected #(vec (remove deferred %)))
+                                                      (update :run #(vec (remove deferred %))))
+        reused-reports (vec (for [t selected :when (reused t)] {:type :pass :var (str "#'" t) :reused true}))
+        [r w] (lib/pipe) t0 (profile/now-ns)
+        res (lib/fork!
+              {:refused (fn [n] (lib/c-close r) (lib/c-close w)
+                          (contract/error :seon.test/fork-refused 'seon.agent/run-tests-forked
+                                          (str "cannot fork the tests: " n " Chez threads active (a running future?)") {:active-threads n}))
+               :child (fn []
+                        (lib/c-close r)
+                        ;; the run ends by its budget; if the agent dies first, the next write to the
+                        ;; pipe ends this child (EPIPE). The agent's socket is FD_CLOFORK: not held here.
+                        (lib/set-trip! (* 16 1048576))
+                        (swap! state assoc :mode :test :evaluating false)
+                        (let [res (try (run-tests-here w ticks run)
+                                       (catch Throwable e {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]}))]
+                          (sock/write-line! w (sedn/encode res))))
+               :parent (fn [pid]
+                         (lib/c-close w)
+                         (forked pid)
+                         (let [rd (lib/line-reader r)
+                               line (loop [line nil]
+                                      (let [ls (rd -1)]
+                                        (if (= ls :eof) line (recur (or (peek ls) line)))))
+                               st (lib/wait-status pid)]
+                           (lib/c-close r)
+                           (assoc (run-answer line st) :ms (profile/ms-since t0) :pid pid :exit st)))})
+        unstored (when (and dir (not (contract/error? res)))
+                   (proofs/store-greens! #(fx! :file % {}) dir
+                                         (into {} (for [[t status] (proofs/results res) :when (and (= :pass status) (digests t))]
+                                                    [t {:test t :digest (digests t) :pass 1 :fail 0 :error 0}]))))]
+    (if (contract/error? res)
+      res
+      (-> res
+        (cond-> (seq unstored) (assoc :unstored unstored))
+        (update :reports into reused-reports)
+        (update :pass + (count reused-reports))
+        (assoc :reused (count reused-reports) :ran (count (distinct (keep :var (:reports res))))))))))
 
 ;; ---- the loop ----------------------------------------------------------------------
 
@@ -511,11 +554,11 @@
     (commit!)
     (send! {:op :branch-me :k k})
     (let [r (await-op! :branched k)]
-      (if-not (:ok r)
+      (if (:error r)
         (do (sock/close! fd) (send! {:op :clone-failed :k k :error (:error r)}))
         (lib/fork!
           {:fd fd :double? true
-           :refused (fn [n] (send! {:op :clone-failed :k k :error (str "cannot fork: " n " Chez threads active (a running future?)")}))
+           :refused (fn [n] (send! {:op :clone-failed :k k :error (contract/error :seon.agent/failed 'seon.agent/clone! (str "cannot fork: " n " Chez threads active (a running future?)") {:agent (:agent m)})}))
            :parent (fn [_] (send! {:op :cloned :k k :clone (:agent m)}))
            :child (fn []
                     (let [parent (:id @state)]
@@ -528,7 +571,8 @@
                         (swap! state assoc :id (:agent m) :branch (:branch m) :fd fd :conn (sock/conn fd) :mode :agent :tx-seq 0
                                :lease (:lease r) :pending clojure.lang.PersistentQueue/EMPTY :mem-at nil :fx-pending {}
                                :store-conn store-conn :db @store-conn))
-                      (hello! t0 {:cloned-from parent})
+                      (let [unwatched (sock/signal-at-input! fd)]
+                        (hello! t0 (cond-> {:cloned-from parent} unwatched (assoc :unwatched unwatched))))
                       ((:serve @state))))})))))
 
 (defn misaligned
@@ -561,6 +605,8 @@
         c (sock/conn fd)
         store-conn (d/connect (assoc cfg :branch branch))]
     (intr/install!)
+    ;; root gone, this process ends, busy or not (the fork server's group kill may be gone too)
+    (intr/exit-at-eof! #(sock/peer-gone? (:fd @state)))
     ;; a kept branch, resumed: its program is what this process runs (it was forked holding main's)
     (let [load-errors (when resumed (program/load-diff! db0 @store-conn))
           misaligned (when-not resumed (misaligned commit t @store-conn db0))]
@@ -571,7 +617,7 @@
      ;; read main's later changes as the branch's (seon.program/divergence, changed-vars)
      (reset! state {:id id :branch branch :task task :attempt attempt :fd fd :conn c :db @store-conn
                    :base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0) :store-conn store-conn :cfg cfg :lease lease :results {} :n 0
-                   :load-errors (vec load-errors) :misaligned misaligned
+                   :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :pending clojure.lang.PersistentQueue/EMPTY :tx-seq 0 :mode :agent
                    :ns nsx :interrupt-ok intr-ok :serve serve})
      ;; a kept branch forked before main held this attempt's task (a refinement continuing a

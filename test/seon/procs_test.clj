@@ -44,7 +44,7 @@
                 answers (into {} (keep (fn [x] (when-let [r (get-in x [:dest :rid])] [r (:r x)]))) (:to-api outs))]
             (is (= 1 (- (:commits st2) (:commits st))))
             (is (every? :ok (map answers [2 3])))
-            (is (false? (:ok (answers 4))) "a refused transaction answers its error, the others commit")))))
+            (is (seon.contract/error? (answers 4)) "a refused transaction answers its error, the others commit")))))
     (testing "a closed in-port: drained"
       (let [[_ outs] (step #'writer/writer-proc st :in nil)]
         (is (= :drained (:op (first (:to-api outs)))))))
@@ -164,6 +164,26 @@
             (is (true? (:dirty st4)))
             (is (= [{:op :dirty :commits (:commits st3)}] (mapv #(select-keys % [:op :commits]) (:to-flusher outs))))))))))))
 
+(deftest the-writer-answers-clean-once-the-flush-covers-its-commits
+  ;; task seon.check/idle-waits-for-the-flush: a :clean request is held while the store is
+  ;; dirty and answered by the step that takes the covering flush, after that flush's notice
+  ;; to the api; a clean store answers at once
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? true :to-writer in :events (a/chan 16)})
+        [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})
+        [st outs] (step #'writer/writer-proc st :in {:op :clean :dest {:rid 2}})]
+    (is (not-any? #(= {:rid 2} (:dest %)) (:to-api outs)) "dirty: held")
+    (let [[st2 outs] (step #'writer/writer-proc st :in {:op :flushed :commits (:commits st)})
+          api (:to-api outs)
+          i-notice (first (keep-indexed #(when (= :writer (:op %2)) %1) api))
+          i-answer (first (keep-indexed #(when (= {:rid 2} (:dest %2)) %1) api))]
+      (is (some? i-answer) "the covering flush answers it")
+      (is (< i-notice i-answer) "after the flush's notice to the api")
+      (is (= (:commits st) (get-in api [i-answer :r :commits])))
+      (is (empty? (:clean-waiters st2)))
+      (let [[_ outs] (step #'writer/writer-proc st2 :in {:op :clean :dest {:rid 3}})]
+        (is (some #(= {:rid 3} (:dest %)) (:to-api outs)) "clean: at once")))))))
+
 (deftest reconciler
   (ts/test-branch! (fn [_ conn] (let [st (#'reconcile/reconciler-proc {:boot "b" :provider {:kind :scripted :script 'seon.fixtures/reply}})]
     (testing "a main commit with no tasks: the reconciler reads it and starts nothing (quiescence: seon.reconcile-test)"
@@ -226,13 +246,42 @@
     (testing "a request for no live agent answers at once"
       (let [p (promise)]
         (step #'root/api-proc st :ext {:op :eval :id :nope :forms "1" :p p})
-        (is (re-find #"no live agent" (:printed (first @p))))))
+        (is (re-find #"no live agent" (:seon.error/message @p)))))
     (testing "a writer request carries its rid and is answered by it"
       (let [p (promise)
             [st outs] (step #'root/api-proc st :ext {:op :write :req {:op :tx :branch :db :tx-data []} :p p})
             rid (get-in (first (:to-writer outs)) [:dest :rid])
             [_ _] (step #'root/api-proc st :from-writer {:dest {:rid rid} :r {:ok true}})]
         (is (= {:ok true} @p))))))
+
+(def ^:private fake-members
+  "Protocol members a refusal must not carry: an eval item's, a test count's, a merge's."
+  #{:id :tag :ok :merged? :pass :fail :error :reports :applied :conflicts})
+
+(deftest a-refusal-is-the-one-error-map
+  ;; a request no live agent can take, a function root refuses, and a write the writer refuses
+  ;; each answer the one error map (seon.contract/error) and nothing beside it: no eval item
+  ;; with id -1, no test count, no :ok or :merged? false
+  (let [st (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                             :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
+        bare? (fn [r] (and (map? r) (seon.contract/error? r) (empty? (filter fake-members (keys r)))))]
+    (doseq [op [:eval :tests :merge-tests :merge-main :stats]]
+      (let [p (promise)]
+        (step #'root/api-proc st :ext {:op op :id :nope :forms "1" :p p})
+        (is (bare? @p) (str op " to no live agent: " (pr-str @p)))))
+    (let [p (promise)]
+      (step #'root/api-proc st :ext {:op :clone :parent :nope :p p})
+      (is (bare? @p) (pr-str @p)))
+    (let [p (promise)]
+      (step #'root/api-proc st :ext {:op :ping :id :nope :p p})
+      (is (= :seon.root/refused (:seon.error/type @p)) "a request kind with no producer is refused, not left unanswered"))
+    (doseq [[f a] [['merge-main! nil] ['merge! nil] ['merge! {:branch :b :status :dead}] ['nope! nil]]]
+      (is (bare? (root/request f :a1 nil a)) (str f))))
+  (ts/test-branch! (fn [cfg conn]
+    (let [st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 4) :events (a/chan 4)})
+          [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:no/such 1}] :dest {:rid 1}})
+          r (:r (first (:to-api outs)))]
+      (is (and (seon.contract/error? r) (not (contains? r :ok))) (pr-str r))))))
 
 (deftest a-collection-waits-until-no-agent-is-live
   ;; root collects the store only as its only writer (owner, 2026-10-22, simplest first;

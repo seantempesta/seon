@@ -13,7 +13,8 @@
   asker records the outcome in its own recording transaction."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
-            [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.java.shell :as sh] [clojure.string :as str] [jolt.ffi :as ffi] [jolt.deps :as deps]))
+            [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.java.shell :as sh] [clojure.string :as str] [jolt.ffi :as ffi] [jolt.deps :as deps]
+            [seon.edn :as sedn] [seon.error :as err] [clojure.edn :as edn]))
 
 (defn- error
   "An effect's declared failure, as the one error map (its variant registered in
@@ -28,14 +29,14 @@
   [req] {:value (:req req)})
 
 (defn write-file
-  "Write-back: the text to path, staged beside it and renamed over it (rename(2)), so a
-  reader sees the old or the new file. Answers {:value {:bytes n :path path}}, n the path's
+  "Write-back: the text to path (its directory made when missing), staged beside it and
+  renamed over it (rename(2)), so a reader sees the old or the new file. Answers {:value {:bytes n :path path}}, n the path's
   size on disk after the rename, or :seon.fx/io-error {:path :tmp :errno :message} (errno
   absent when the stage itself failed) with the staged file removed."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [path text]} :req}]
   (let [tmp (str path ".fx-" (lib/c-getpid))
-        staged (try (spit tmp text) nil
+        staged (try (.mkdirs (.getParentFile (java.io.File. ^String tmp))) (spit tmp text) nil
                     (catch Throwable e
                       (.delete (java.io.File. tmp))
                       (error :seon.fx/io-error (str "staging " tmp ": " (or (ex-message e) (str (type e)))) {:path path :tmp tmp})))]
@@ -50,14 +51,19 @@
 ;; main's merged forms committed for the next one (seon.source). Never the working tree:
 ;; reading is read-only, and a commit is git's plumbing on a ref, so no checkout moves.
 
+(declare inputs)
+
 (defn read-source
   "The text of every .clj and .edn file under root's dirs (relative paths, e.g.
   src/seon/fx.clj, resources/seon/schemas/seon.facts.edn), sorted by path, the commit root's
   HEAD names and the revision it pins each reference-code submodule at (its gitlink), both
   absent when root is no git repository (git answers none).
-  Answers {:value {path text} :commit sha :pins {path sha}} or :seon.fx/io-error."
+  With :binary-tree (the file bin/build wrote beside the running binary), also :inputs (the
+  tree's, inputs) and :binary (the tree id that file holds, or none), so root records the
+  inputs only for a binary built from this very tree.
+  Answers {:value {path text} :commit sha :pins {path sha} :inputs :binary} or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [root dirs]} :req}]
+  [{{:keys [root dirs binary-tree]} :req}]
   (try
     (let [base (.getCanonicalPath (java.io.File. ^String root))
           head (sh/sh "git" "-C" base "rev-parse" "--verify" "--quiet" "HEAD")]
@@ -71,7 +77,9 @@
                                     :pins (into {}
                                                 (for [[_ sha p] (re-seq #"(?m)^160000 ([0-9a-f]{40}) \d+\t(\S+)$"
                                                                         (:out (sh/sh "git" "-C" base "ls-files" "-s" "--" "reference-code")))]
-                                                  [p sha])))))
+                                                  [p sha])))
+        (and binary-tree (zero? (:exit head))) (assoc :inputs (inputs base)
+                           :binary (let [f (java.io.File. ^String binary-tree)] (when (.isFile f) (str/trim (slurp f)))))))
     (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path root}))))
 
 (defn- git!
@@ -84,6 +92,69 @@
     (when-not (zero? (:exit r))
       (throw (ex-info (str "git " (first args) ": " (str/trim (str (:err r) (:out r)))) {})))
     (str/trim (:out r))))
+
+(defn- env-input?
+  "Is the file at relative path p an input of every test: everything git tracks or would
+  track but the source program facts carry (.clj under src and test), task files (data
+  root loads, no test's code) and prose (.md)?"
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [p]
+  (not (or (str/ends-with? p ".md")
+           (str/starts-with? p "resources/seon/tasks/")
+           (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))))))
+
+(defn config-input
+  "The config in force as a test reads it, cfg (seon.config/config: the shipped file, this
+  checkout's config/local.edn, the #env values, the profile), as text: the checkout's own path
+  written as <checkout>, and the TCP ports left out (each checkout's own by design, bin/ports;
+  a test's root takes its own). What a result depends on that git does not see."
+  {:malli/schema [:=> [:cat :map :string] :string]}
+  [cfg checkout]
+  (str/replace (sedn/encode (into (sorted-map) (remove (fn [[k]] (= "TCP port" (get-in cfg/schema-forms [k 1 :seon.config/unit])))) cfg))
+               checkout "<checkout>"))
+
+(defn declared-refs
+  "{seon.system/read-decl #{symbol}}: every qualified symbol the system declaration at p names
+  (its procs' step-fns, its effects' performers), which root resolves by name at boot: reach
+  edges of the function that reads the declaration (seon.program/reach-digests' :data-refs),
+  so a test booting root reaches its procs. None when there is no file at p."
+  {:malli/schema [:=> [:cat :string] [:map-of :qualified-symbol [:set :qualified-symbol]]]}
+  [p]
+  (let [f (java.io.File. ^String p)
+        decl (when (.isFile f) (edn/read-string {:default tagged-literal} (slurp f)))]
+    {'seon.system/read-decl (set (filter qualified-symbol? (tree-seq #(or (coll? %) (tagged-literal? %))
+                                                                     #(if (tagged-literal? %) [(:form %)] (seq %)) decl)))}))
+
+(defn tree-id
+  "git's id of the tree at root as it is on disk: HEAD's tree (none before a first commit)
+  with every changed and untracked unignored file added, in an index of its own (the
+  repository's index untouched). bin/build records the same id for the tree it builds
+  (target/seon.tree), so a root can tell whether its binary is built from its source."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [root]
+  (let [idx (doto (java.io.File/createTempFile "seon-tree" ".index") (.delete))
+        env {"GIT_INDEX_FILE" (.getPath idx)}]
+    (try
+      (when (zero? (:exit (sh/sh "git" "-C" root "rev-parse" "--verify" "--quiet" "HEAD"))) (git! env root ["read-tree" "HEAD"] nil))
+      (git! env root ["add" "-A"] nil)
+      (git! env root ["write-tree"] nil)
+      (finally (.delete idx)))))
+
+(defn inputs
+  "The one producer of the checkout at root's inputs that have no program facts, for bin/test
+  and for root's :source read (read-source, which records them for its agents):
+  {:tree (tree-id: every file and pin, for a test reading files or running the binary) :env
+  (every test's: the tree's env-input? entries, every submodule's pin, Jolt's included, and
+  the config in force, config-input) :data-refs (declared-refs of its system.edn)}, by
+  relative paths and content, so the same content at another path is the same inputs."
+  {:malli/schema [:function [:=> [:cat :string] :seon.program/inputs] [:=> [:cat :string :map :string] :seon.program/inputs]]}
+  ([root] (inputs root cfg/config (cfg/checkout)))
+  ([root cfg checkout]
+   (let [tree (tree-id root)
+         entries (for [l (str/split-lines (git! {} root ["ls-tree" "-r" tree] nil)) :let [[_ p] (str/split l #"\t" 2)] :when (env-input? p)] l)]
+     {:tree tree
+      :env (err/digest (str/join "\n" (concat entries [(config-input cfg checkout)])))
+      :data-refs (declared-refs (str root "/resources/seon/system.edn"))})))
 
 (defn git-commit
   "Commit files ({relative path text}) on branch of the repository at dir, with message,
@@ -321,7 +392,7 @@
                  (when-not limited? (reply! o (:dest m) (:outcome m)))
                    ;; root counts every failed effect across agents (seon.error, class :effect);
                    ;; the asker records its own outcome on its branch
-                   (when (:seon.error/type (:outcome m))
+                   (when (contract/error? (:outcome m))
                      (step/out! o :out {:op :problem :class :effect :error (dissoc (:outcome m) :seon.fx/us :seon.fx/queue-us)
                                         :agent (get-in m [:dest :agent])}))
                    (let [st (settle st m)
@@ -372,7 +443,7 @@
   [{:keys [req ctx]}]
   (let [p (cond-> (:provider ctx) (and (:model req) (= :openai-compat (:kind (:provider ctx)))) (assoc :model (:model req)))
         c (model/complete p (dissoc req :model))]
-    (cond (:seon.error/type c) c
+    (cond (contract/error? c) c
           (and (:prompt-tokens c) (:completion-tokens c)) {:value c :cost (+ (:prompt-tokens c) (:completion-tokens c))}
           :else {:value c})))
 

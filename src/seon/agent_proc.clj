@@ -85,8 +85,7 @@
                                                          (string? (:forms msg)) (assoc :form (:forms msg))))
                       ;; what root last asked of it, for a stall or a death (seon.agent/last-op)
                       true (assoc :last-op (cond-> {:kind kind :since-ms (System/currentTimeMillis)}
-                                             (string? (:forms msg)) (assoc :form (:forms msg))))
-                      (= kind :ping) (update :pings conj rid))]
+                                             (string? (:forms msg)) (assoc :form (:forms msg)))))]
              [st {:to-api [(status st (cond-> {:status :busy}
                                         (= kind :eval) (assoc :running {:form (:forms msg)
                                                                         :since-ms (System/currentTimeMillis)})))]}]))
@@ -136,6 +135,8 @@
                    (step/out! o :to-api {:op :problem :class :agent :agent id
                                          :error (contract/error :seon.agent/load-failed 'seon.agent/init!
                                                                 (str "its branch's program did not load in " ns ": " message) {:ns ns})}))
+                 ;; its socket to root cannot raise SIGIO: it ends with root only when it next reads
+                 (when-let [e (:unwatched m)] (step/out! o :to-api {:op :problem :class :agent :agent id :error e}))
                  (when-let [x (:misaligned m)]
                    (step/out! o :to-api {:op :problem :class :agent :agent id
                                          :error (contract/error :seon.agent/fork-misaligned 'seon.agent/init!
@@ -154,8 +155,7 @@
       (let [{:keys [new pass-fd]} (get-in st [:inflight (:k m)])
             ;; the clone's socket end: the parent has it (or failed), root's copy closes now
             _ (some-> pass-fd sock/close!)
-            st (answer-rid st o (:k m) (if (= :cloned (:op m)) {:ok true :id new}
-                                           (contract/error :seon.root/refused 'seon.root/clone! (str "clone failed: " (:error m)) {:ok false})))]
+            st (answer-rid st o (:k m) (if (= :cloned (:op m)) {:ok true :id new} (:error m)))]
         (when (= :clone-failed (:op m)) (step/out! o :to-api {:op :clone-failed :agent new :error (:error m)}))
         (step/out! o :to-api (status st {:status (busy st)}))
         st)
@@ -168,9 +168,6 @@
                (assoc st :noise (inc (:noise st)) :noise-ordered ordered :noise-bad bad))
       :received (do (step/out! o :to-api {:op :stat :k :msg-us :v (/ (- (:recv-ns m) (:sent-ns m)) 1000.0)}) st)
       :send (do (step/out! o :to-api {:op :message :from id :to (:to m) :body (:body m)}) st)
-      :pong (if-let [rid (peek (:pings st))]
-              (answer-rid (update st :pings pop) o rid (dissoc m :op))
-              st)
       ;; the agent began request rid's eval, or forked rid's test child: root's events say so
       :started (do (step/out! o :events (step/event (cond-> {:type :started :agent id :rid (:id m)}
                                                          (get-in st [:inflight (:id m) :form]) (assoc :form (get-in st [:inflight (:id m) :form])))))
@@ -182,17 +179,21 @@
                st)
       :tests (let [{:keys [kind merge-branch data-attrs]} (get-in st [:inflight (:id m)])
                    result (:result m)
-                   green? (and (zero? (:fail result 0)) (zero? (:error result 0)))
+                   ;; a run the agent could not fork is its refusal, answered as it is
+                   ran? (not (contract/error? result))
+                   green? (and ran? (zero? (:fail result)) (zero? (:error result)))
                    summary (select-keys result [:pass :fail :error :test])
-                   st (if (and (= kind :merge-tests) green?)
+                   st (cond
                         ;; a gated merge's green run goes on to the writer; its answer is the merge's
+                        (and (= kind :merge-tests) green?)
                         (do (step/out! o :to-writer {:op :merge :branch merge-branch :data-attrs (or data-attrs :all) :dest {:merged id :rid (:id m) :tests summary}})
                             (update st :inflight dissoc (:id m)))
-                        (answer-rid st o (:id m) (if (= kind :merge-tests)
-                                                   {:merged? false :tests summary :reports (vec (remove #(= :pass (:type %)) (:reports result)))}
-                                                   result)))]
-               (step/out! o :to-api (status st {:tests result :mem-mb (:mem-mb m) :status (busy st)}))
-               (step/out! o :events (step/event {:type :tests :agent id :ms (:ms result) :pass (:pass result) :fail (:fail result) :error (:error result)}))
+                        (and (= kind :merge-tests) ran?)
+                        (answer-rid st o (:id m) (contract/error :seon.merge/red 'seon.root/merge! (str "tests red: " (:fail result) " fail, " (:error result) " error")
+                                                                 {:tests summary :reports (vec (remove #(= :pass (:type %)) (:reports result)))}))
+                        :else (answer-rid st o (:id m) result))]
+               (step/out! o :to-api (status st (cond-> {:mem-mb (:mem-mb m) :status (busy st)} ran? (assoc :tests result) (not ran?) (assoc :error result))))
+               (when ran? (step/out! o :events (step/event {:type :tests :agent id :ms (:ms result) :pass (:pass result) :fail (:fail result) :error (:error result)})))
                st)
       :stats (let [st (answer-rid st o (:id m) (:result m))]
                (step/out! o :to-api (status st {:mem-mb (:mem-mb (:result m)) :status (busy st)}))
@@ -236,7 +237,7 @@
                    holds requests ({:op :pause}); while paused this proc takes nothing,
                    so frames stay in the socket and senders are pushed back;
     stop           {:op :stop} to the agent (it exits after the requests before it),
-                   then await its death (kqueue), SIGKILL past the bound.
+                   then await its death (its socket's EOF), SIGKILL past the bound.
   In :in (from the api), :from (its socket, via the reader). Out :to-writer, :to-api,
   :events (external channels)."
   {:malli/schema :seon.step/step-fn}
@@ -246,7 +247,7 @@
        :workload :io
        :ping-map-fn (fn [st] {:id (:id st) :pid (:pid st) :dead? (boolean (:dead? st)) :inflight (count (:inflight st)) :noise (:noise st)})})
   ([args] (assoc (select-keys args [:id :end :branch :pid])
-                 :inflight {} :noise 0 :pings clojure.lang.PersistentQueue/EMPTY :fx-kinds (:fx-kinds args)
+                 :inflight {} :noise 0 :fx-kinds (:fx-kinds args)
                  ::flow/in-ports {:from (:in (:end args))}
                  ::flow/out-ports {:to-writer (:to-writer args) :to-api (:back args) :events (:events args)}))
   ([st tr]

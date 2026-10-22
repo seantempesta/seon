@@ -83,12 +83,12 @@ Its references are derived from the plan's citations by the one parser ([referen
 ### Testing: compute only what is needed
 
 **Every computation must earn its time** (owner, 2026-10-22: "I want faster development"; "We should always be trying to minimize extra computations and do smarter testing"). A run that cannot tell you anything new is waste, and waste slows every worktree on the machine.
-- **Run only what your change reaches.** `bin/test --reach` runs the tests whose reach digest changed and reuses every result already green at its digest (§5, results reused by input digest); `bin/test NS` runs one namespace; `bin/check MODE` runs one check step. Pick the steps your code touches, plus `bin/check smoke`.
+- **Run only what your change reaches: `bin/prove`.** It runs the tests and the `bin/check` steps whose reach digest has no green result, and reuses every other (§5, results reused by input digest), so an unchanged tree runs nothing; `bin/test` and `bin/check` without arguments are its two halves, `bin/test NS` one namespace, `bin/check MODE` one step. Seon agents run the same selection (`(my.agent/prove)`, the turn's observe, the judge's `:tests`). Then `bin/check smoke`.
 - **Iterate at the REPL first.** Prove an idea at n ≤ 100 in a REPL before any suite runs.
 - **Long runs only when the work is done** (owner, 2026-10-22: "Don't run long tests unless we are pretty sure it's done"): the full `bin/test` and `bin/check 100` (about 10 minutes) run once per worktree session, when it believes its task is finished and its review findings are fixed. Never while iterating, never twice for the same tree, never "just to be safe".
-- **Root's merge re-runs only what merging changed:** `--reach` and smoke on the merged batch; the full run only when resolving a conflict changed boot, the writer, the reconciler or the build. The full suite also runs once a day.
+- **Root's merge re-runs only what merging changed:** `bin/prove` and smoke on the merged batch; the full run only when resolving a conflict changed boot, the writer, the reconciler or the build. The full suite also runs once a day.
 - **Never repeat a run on an unchanged tree.** A green result at a digest is the answer; reuse it. A flaky result is a defect to fix at its cause (a clock, a race), never a reason to re-run.
-- **Being built:** `prove`, one entry for worktree sessions, root and Seon agents that selects tests and check steps by reach digest and reuses their results (`notes/fork-test-merge-design-2026-10-22.md` §2). Until it merges, check steps are picked by hand.
+- **The full runs are explicit:** `bin/test --all` and `bin/check 100`.
 
 **Root's gate, before approving any plan, format, key or rule** (owner, 2026-10-21): (1) which existing mechanism does this, ours, v1's or the dependency's? (2) what did v1 do here? (3) what is the field's best known way? (4) does it add a format, key, layer or rule, and why can't the existing one do it? An agent gathers the evidence; root shows it to the owner. No evidence, no approval.
 
@@ -213,6 +213,7 @@ Library words stay: proc, step-fn, transact, branch, merge, schema, registry, co
 - **Builds:** `nice -n 15 bin/build`, in parallel, no lock. Full checks run niced, each in its own worktree. Every process on a store uses the same LMDB build. Details, and the disk rules (worktrees removed at merge, no new top-level directories, pruning): [machine](docs/machine.md).
 - **Never flood it.** Anything that makes threads or processes starts at n ≤ 100 under `nice -n 15`; kill your own process past 200 threads. One experiment at a time.
 - **Leave nothing running when you finish,** and say so. Kill only PIDs you started; never `pkill` or `killall`. Delete only paths you created. A process that must outlive a tool call is double-forked (`bin/root` does).
+- **A root's processes end with it:** kill the root, or its fork server's process group (`kill -9 -PGID`), never a fork server by pid. Killing the fork server first skips the group kill that ends its agents ([failure points](docs/failure-points.md), root dies).
 - **Git in a worktree:** `git -C` on your own checkout only; never `git submodule` in a worktree (after merging main, `bin/worktree --sync NAME` from the main tree); never bare `git stash`; never `checkout`, `restore` or `reset` on paths you don't own; commit explicit paths; never push.
 - **Secrets are never printed.** Paid model runs need the owner's go. Install nothing system-wide. Never write in `~/src/seon`.
 
