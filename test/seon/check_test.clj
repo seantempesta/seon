@@ -66,12 +66,15 @@
         _ (d/release (:conn (pdb/open! :lmdb path 300 :db)))
         branches #(let [c (d/connect (pdb/store-cfg :lmdb path))] (try (d/branches c) (finally (d/release c))))
         before (branches)
-        stores {:check (entries (str dir "/target/check")) :runs (entries (str dir "/target/runs"))}
-        run (ts/binary-sh "env" (str "SEON_STORE=" path) "SEON_WEB_PORT=0" "bin/check" "config" :dir dir)]
+        ;; the step's own runs directory: other tests (bin/test's shards run at once) make theirs
+        ;; under target/runs while this one runs, so only a directory of its own shows what it made
+        runs (str dir "/target/runs/check-test-runs-" (random-uuid))
+        _ (.mkdirs (java.io.File. runs))
+        run (ts/binary-sh "env" (str "SEON_STORE=" path) (str "SEON_RUNS=" runs) "SEON_WEB_PORT=0" "bin/check" "config" :dir dir)]
     (try
       (is (= 0 (:exit run)) (str "the step is green: " (:out run)))
       (is (= before (branches)) "the store's branch set holds nothing the step made")
-      (is (= stores {:check (entries (str dir "/target/check")) :runs (entries (str dir "/target/runs"))}) "and no new store or run directory exists")
+      (is (= #{} (entries runs)) "and no new store or run directory exists")
       (testing "a test's branch of the test store is deleted when the test ends"
         (let [seen (fn [cfg conn] [(:branch cfg) (d/branches conn) (count (d/datoms @conn :eavt))])
               [b1 in1 datoms] (ts/test-branch! seen)
@@ -80,7 +83,7 @@
           (is (in1 b1) "the branch exists while the test runs")
           (is (not (in2 b1)) "a later test sees no branch the earlier one made")
           (is (= (disj in1 b1) (disj in2 b2)) "and nothing else changed")))
-      (finally (clojure.java.shell/sh "rm" "-rf" path (str path "-agents"))))))
+      (finally (clojure.java.shell/sh "rm" "-rf" path (str path "-agents") runs)))))
 
 (deftest records-are-read-at-the-agents-commit
   ;; task seon.check/mcp-reads-the-agents-records-once-committed: the branch is read again at
