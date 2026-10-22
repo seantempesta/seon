@@ -218,7 +218,7 @@
   (let [{:keys [gaps-before plan-before]} (begin! task attempt)
         t0-task (task/task (agent/db) task)
         merge? (= :merge (:seon.task/kind t0-task))
-        merge-cfg (r/merge-config t0-task)]
+        merge-cfg (r/merge-limits t0-task)]
     (when merge? (branch/merge-main!))
     (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (profile/now-ns) :attempt attempt
                :max-turns max-turns :merge? merge? :gaps-before gaps-before}]

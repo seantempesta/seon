@@ -21,7 +21,7 @@
            :args {:conn :bind/conn :cfg :bind/store-cfg :durable? :bind/durable?
                   :to-writer :bind/to-writer :events :bind/events}}
   :fork-server {:proc seon.fork-server/fork-server-proc
-                :args {:conn :bind/conn :pid :bind/fork-server-pid :fd :bind/fork-server-fd :server-ev :bind/server-ev}}
+                :args {:conn :bind/conn :pid :bind/fork-server-pid :fd :bind/fork-server-fd :fork-server-ev :bind/fork-server-ev}}
   :flusher {:proc seon.writer/flusher-proc
             :args {:to-writer :bind/to-writer :cfg :bind/store-cfg}}
   ;; the incremental reconciler reads every commit's datoms (k8s's watch): a bounded

@@ -281,7 +281,7 @@
         settled? (fn [outs] (some #(= :settled (:op %)) (:to-web outs)))
         [st o1] (#'seon.render.proc/render-proc st :events {:type :spawned :agent :a1 :at-ms 1})
         tag (:tag (first (filter #(= {:op :state} (:req %)) (:to-api o1))))
-        [st o2] (#'seon.render.proc/render-proc st :answers {:tag tag :r {:agents {} :writer {:tx-count nil :recent []} :server {:status :up} :stats {} :store {} :boot {}}})]
+        [st o2] (#'seon.render.proc/render-proc st :answers {:tag tag :r {:agents {} :writer {:tx-count nil :recent []} :fork-server {:status :up} :stats {} :store {} :boot {}}})]
     (is (not (settled? o1)) "its ask is in flight")
     (is (settled? o2) "the answer emptied what was in flight")
     (is (empty? (:pending st))))
@@ -301,7 +301,7 @@
         [st o2] (#'seon.render.proc/render-proc st :events {:type :ready :agent :a1 :at-ms 2})]
     (is (= 1 (count (asks o1))) "an event asks for the view")
     (is (empty? (asks o2)) "while that request is in flight, more events only queue")
-    (let [[st _] (#'seon.render.proc/render-proc st :answers {:tag (:tag (first (asks o1))) :r {:agents {} :writer {:tx-count 1 :recent []} :server {:status :up} :stats {} :store {} :boot {}}})
+    (let [[st _] (#'seon.render.proc/render-proc st :answers {:tag (:tag (first (asks o1))) :r {:agents {} :writer {:tx-count 1 :recent []} :fork-server {:status :up} :stats {} :store {} :boot {}}})
           [_ o3] (#'seon.render.proc/render-proc st :events {:type :ready :agent :a2 :at-ms 3})]
       (is (not-any? #{:state} (vals (:pending st))) "the answer took its request")
       (is (= 1 (count (asks o3))) "the next event asks again"))))

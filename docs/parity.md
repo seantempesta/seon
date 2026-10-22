@@ -21,7 +21,7 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 | `eval_clj` (an agent's REPL or root's) | `seon_eval` (one evaluator: no JVM mode) | present |
 | `runtime_status` (health, problems, flow, readiness) | `seon_agents` lists agents and tasks; health only on the dashboard | partial |
 | an outside agent works a task | `seon_attach`, `seon_context`, `seon_done` | new |
-| refusals and defects answered per request | a defect answers that request the typed `:seon.server/defect` and the server goes on (`seon.server/respond`); a refused attach still writes the task's state first (`seon.server/attach-writes-nothing-when-it-is-refused`) | partial |
+| refusals and defects answered per request | a defect answers that request the typed `:seon.server/defect` and the server goes on (`seon.server/respond`); a refused attach still writes the task's state first (`seon.entrance/attach-writes-nothing-when-it-is-refused`) | partial |
 
 The server's ops are one table, `seon.server/ops`: MCP lists each as the tool `seon_<op>` (`seon.server/mcp-reply`, answered by the server itself on its one port; `bin/mcp` is a stdio relay of a few MB, no Seon binary), so a new op is one row. An eval as root goes through the agents' REPL path (`seon.repl/eval-string`: the one printer, cost, error maps, `*1` and `*e`), in `root.repl` with `sys` a local, recorded on main by `seon.repl/record-tx` like an agent's evaluation. The dashboard's calls of root's functions are the requests the API fns send (`seon.root/request`), so the UI and `seon.root/merge!` cannot disagree on a request or a refusal. Not this: a second read/eval loop, a second recorder, or an `:op`'s request map written again in `seon.web`.
 

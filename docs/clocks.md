@@ -32,7 +32,7 @@ way in [failure points](failure-points.md).
 Each is a defect named with the task that removes it, so the laws check stays a ratchet: a new
 site is red, and a fixed one leaves this list in the fix's commit.
 - `seon.root/start!` (Flow's `:stop-timeout-ms`), `seon.root/stop!` (timed derefs and a `.join`), `seon.agent-proc/await-dead` (the SIGKILL ladder), `seon.fork-server/main` and `seon.sock/recv-within!` (the 100 ms poll by which a child's death is seen): task `seon.root/shutdown-and-death-are-dataflow`.
-- `seon.root/api-proc` (the stall timer), `seon.root/back-op` (its `:stall-check`), `seon.agent-proc/agent-proc` (the `:last-frame-ms` the stall compares): task `seon.guards/a-stall-is-past-the-requests-own-bound`.
+- `seon.root/api-proc` (the stall timer), `seon.root/back-op` (its `:stall-check`), `seon.agent-proc/agent-proc` (the `:last-frame-ms` the stall compares): task `seon.fences/a-stall-is-past-the-requests-own-bound`.
 - `seon.writer/flusher-proc` (sleeps out the flush window), `seon.writer/writer-proc` (the `:since` it decides from), `seon.agent/transact!` (commits after the flush window): task `seon.writer/durability-is-continuous-group-commit`.
 - `seon.render.proc/RETIRE-MS`, `seon.render.proc/order`, `seon.render.proc/ordered` (an ended agent leaves the grid by elapsed time; the order is re-derived when a second passed), and `seon.render.proc/system-value` (carries the bound to the tile's caption): task `seon.render/an-ended-agent-leaves-the-grid-by-an-event`.
 - `seon.web/web-proc` (the HTTP adapter's keep-alive and write timeouts, literals): task `seon.web/web-server-threads-are-joined-at-stop`.

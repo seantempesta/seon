@@ -217,8 +217,8 @@
   owner reports when it changes (the writer when it commits or flushes, the fork server
   when it forks, main when it commits); series: one point per change."
   {:malli/schema [:=> [:cat :map :map :map :map] [:vector :map]]}
-  [{:keys [commits flushes] :as writer} server main series]
-  (let [st (or (:status server) :up)]
+  [{:keys [commits flushes] :as writer} fork-server main series]
+  (let [st (or (:status fork-server) :up)]
     [{:id "t-writer" :kicker "writer" :sub "the only d/transact caller" :big (group3 (:tx-count writer)) :unit "txs"
       :series (:tx series) :tone "tone-signal" :series-title "transactions per writer batch, the newest batches"
       :rows [["batch" (ms-str (:batch-p50-ms writer)) "batch p50: one writer step (a group commit and its flush, when one is due)"]
@@ -227,13 +227,13 @@
               "main's group commits per flush: one flush makes every commit since the last durable"]
              ["flushes" (group3 flushes) "flushes to disk so far"]]
       :explain "a transaction is one write to main; a commit takes every queued transaction at once; a flush makes the commits since the last one durable on disk"}
-     {:id "t-server" :class (str "srv-" (kname st) " restarts-" (:restarts server 0)) :kicker "fork server"
+     {:id "t-fork-server" :class (str "srv-" (kname st) " restarts-" (:restarts fork-server 0)) :kicker "fork server"
       :pill [(str "srv " (if (= st :up) "s-up" "s-down")) (kname st)]
-      :big (fmt2 (:fork-ms-p50 server)) :unit "ms fork p50" :series (:fork series) :tone "tone-info"
-      :rows [["forked" (group3 (:agents-forked server))]
+      :big (fmt2 (:fork-ms-p50 fork-server)) :unit "ms fork p50" :series (:fork series) :tone "tone-info"
+      :rows [["forked" (group3 (:agents-forked fork-server))]
              ["lag" (ms-str (:lag-ms server)) "commit applied in the fork server after main took it, p50"]
-             ["pid" (str (or (:pid server) "–"))]
-             ["restarts" (str (:restarts server 0)) nil (when (pos? (:restarts server 0)) "hot")]]}
+             ["pid" (str (or (:pid fork-server) "–"))]
+             ["restarts" (str (:restarts fork-server 0)) nil (when (pos? (:restarts fork-server 0)) "hot")]]}
      {:id "t-main" :class (str "pulse-" (mod (or (:merges main) 0) 2)) :kicker "main" :sub "every write to main moves t"
       :big (group3 (:datoms main)) :unit "datoms" :series (:datoms series) :tone "tone-success"
       :rows [["t" (group3 (:t main))] ["merges" (group3 (:merges main 0))]
@@ -342,7 +342,7 @@
    [:tr {:class (str "at s-" (kname status) (when outcome (str " o-" (kname outcome))))}
     [:td [:code id]]
     [:td (if agent [:a {:href (str "/agent/" (dom-id agent))} (kname agent)] "–")
-     (when (= "outside" (:model env)) [:span {:class "muted" :title "worked from outside (a worktree session through root's server): no turn loop, its turns and tokens are not counted here"} " · outside"])]
+     (when (= "outside" (:model env)) [:span {:class "muted" :title "worked from outside (an outside agent through root's server): no turn loop, its turns and tokens are not counted here"} " · outside"])]
     [:td [:span {:class (str "pill s-" (kname status))} (kname status)]]
     [:td (str (or turns "–"))] [:td (group3 tokens)]
     [:td {:title (str reason)} (kname outcome)]
@@ -594,8 +594,8 @@
     :merged-main (let [r (:result ev)]
                    (if (:ok r) (str "main → branch · " (count (:applied r)) " applied · " (count (:conflicts r)) " conflicts")
                        (str "refused: " (print/line (:seon.error/message r) 20))))
-    :server-down (str "fork server pid " (:pid ev) " is gone · agents keep running")
-    :server-up (str "root forked a new fork server · pid " (:pid ev))
+    :fork-server-down (str "fork server pid " (:pid ev) " is gone · agents keep running")
+    :fork-server-up (str "root forked a new fork server · pid " (:pid ev))
     :spawned (if (:cloned-from ev)
                (str "cloned from " (kname (:cloned-from ev)) " · pid " (:pid ev))
                (str "forked in " (ms-str (:fork-ms ev)) (when (:pid ev) (str " · pid " (:pid ev)))))
@@ -613,7 +613,7 @@
   (boolean (or (some #(= :err (:tag %)) (:items ev))
                (and (= :tests (:type ev)) (proofs/red? ev))
                (and (= :dead (:type ev)) (not (:ended-as ev)))
-               (#{:server-down :server-lost} (:type ev))
+               (#{:fork-server-down :fork-server-lost} (:type ev))
                (false? (get-in ev [:result :merged?]))
                (and (= :ui (:type ev)) (some? (:error ev))))))
 
@@ -738,7 +738,7 @@
   top bar, the metric tiles, the grid of agent cards, the side column (root's context,
   the event stream), each part a unit reading exactly what it shows."
   {:malli/schema [:=> [:cat :seon.render/system :seon.render/env] :seon.render/out]}
-  [{:keys [agents health series writer server main attempts root-errors boot store web agent-attempt] :as sys} _]
+  [{:keys [agents health series writer fork-server main attempts root-errors boot store web agent-attempt] :as sys} _]
   (let [order (:order sys)
         procs (into {} (remove (fn [[pid]] (and (keyword? pid) (str/starts-with? (str (namespace pid)) "fx.")))) health)
         u (fn [id input render] {:id id :input input :render render})]
@@ -748,7 +748,7 @@
       [:main {:class "layout"}
        [:div {:class "left"}
         (slot "problems")
-        [:div {:class "tiles"} (slot "t-agents") (slot "t-writer") (slot "t-server") (slot "t-main")]
+        [:div {:class "tiles"} (slot "t-agents") (slot "t-writer") (slot "t-fork-server") (slot "t-main")]
         [:div {:class "tiles two"} (slot "t-health") (slot "t-tasks")]
         [:div {:class "tiles three"} (slot "t-errors")]
         (slot "t-config")
@@ -763,7 +763,7 @@
            [(u "problems" (:problems sys []) `tile-problems)
             (u "t-agents" {:cells (mapv (fn [id] (let [a (get agents id)] [id (shown-status (ended-as a id agent-attempt)) (count (:evals a))])) order)
                            :off (- (count agents) (count order)) :retire-ms (:retire-ms sys)} `tile-agents)]
-           (for [t (load-tiles writer server main series)] (u (:id t) t `metric-tile))
+           (for [t (load-tiles writer fork-server main series)] (u (:id t) t `metric-tile))
            [(u "t-health" {:health procs} `tile-health)
             (u "t-tasks" {:rows (:task-rows sys) :attempts attempts :main-t (:t main)} `tile-tasks)
             (u "t-errors" {:root-errors root-errors :root-errors-total (:root-errors-total sys) :boot boot :store store} `tile-errors)
@@ -936,9 +936,8 @@
   {:seon.render/html
    [:section {:id "z-context" :class "box"}
     (kicker "context" (if text (str "≈" tokens " tokens · its model's current-state block"
-                                    (when-not (= :server from) ", rebuilt now from main's facts and its last test run")
+                                    ", rebuilt now from main's facts and its last test run"
                                     (case from
-                                      :server " · the text it last read through root's server, as is"
                                       :main-gone " · read on main (its branch is gone)"
                                       :main " · read on main (its branch has no commit this page has read)"
                                       nil))
