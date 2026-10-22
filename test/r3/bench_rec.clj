@@ -8,8 +8,7 @@
 (defn- r2 [x] (/ (Math/round (* 100.0 x)) 100.0))
 
 (defn measure [n reps]
-  (let [conn (fx/load! n (max 1 (quot (* 3 n) 10)))
-        db @conn
+  (fx/load! n (max 1 (quot (* 3 n) 10)) (fn [conn] (let [db @conn
         _ (dotimes [_ 2] (r/reconcile db))
         alloc0 (System/nanoTime)
         tasks (vec (for [_ (range reps)] (ms #(task/tasks db))))
@@ -22,7 +21,7 @@
     {:n-tasks (* 2 n) :attempts (count (task/attempts db))
      :actions (frequencies (map :op acts))
      :tasks-ms (r2 (med tasks)) :attempts-ms (r2 (med atts)) :view-ms (r2 (med views))
-     :decide-ms (r2 (med decide)) :pass-ms (r2 (med full)) :pass-min (r2 (apply min full))}))
+     :decide-ms (r2 (med decide)) :pass-ms (r2 (med full)) :pass-min (r2 (apply min full))}))))
 
 (defn -main [& args]
   (println :guarantees (or (System/getenv "SEON_GUARANTEES") "on"))

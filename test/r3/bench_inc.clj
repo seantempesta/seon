@@ -21,8 +21,7 @@
      (task/execution-tx [(str w "-merge")] :running)]))
 
 (defn measure [n rounds]
-  (let [conn (fx/load! n (max 1 (quot (* 3 n) 10)))
-        t0 (now) idx (r/index @conn) list-ms (/ (- (now) t0) 1e6)
+  (fx/load! n (max 1 (quot (* 3 n) 10)) (fn [conn] (let [t0 (now) idx (r/index @conn) list-ms (/ (- (now) t0) 1e6)
         _ (r/actions idx)
         samples (loop [k 0 idx idx acc []]
                   (if (= k rounds)
@@ -41,7 +40,7 @@
      :per-tx {:n (count samples) :ops-med (med (map :ops samples))
               :observe-med (r3 (med (map :observe samples))) :actions-med (r3 (med (map :actions samples)))
               :total-med (r3 (med tot)) :total-p95 (r3 (p95 tot))}
-     :full-pass-med (r3 (med full))}))
+     :full-pass-med (r3 (med full))}))))
 
 (defn -main [& args]
   (println :guarantees (or (System/getenv "SEON_GUARANTEES") "on"))

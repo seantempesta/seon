@@ -19,7 +19,7 @@
   "A branch of the seeded test store (app.m0/f0 ... are its vars) with one namespace and var more."
   {:malli/schema [:=> [:cat] :seon.host/db]}
   []
-  (d/db-with @(second (pdb/test-branch!)) [{:db/id "ns" :ns/name 'demo.calc} {:var/name 'demo.calc/add :var/ns "ns"}]))
+  (d/db-with (pdb/test-db) [{:db/id "ns" :ns/name 'demo.calc} {:var/name 'demo.calc/add :var/ns "ns"}]))
 
 (defn- names-on
   "The names of the references text makes on db."

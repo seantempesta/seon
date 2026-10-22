@@ -24,7 +24,7 @@
 (defn- main-db
   "A test branch with every schema resource imported, as a root's main holds them."
   []
-  (let [db @(second (pdb/test-branch!))]
+  (let [db (pdb/test-db)]
     (d/db-with db (source/import-tx db (schema-files)))))
 
 (defn- evals

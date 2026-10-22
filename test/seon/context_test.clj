@@ -8,7 +8,7 @@
             [seon.print.select :as select] [clojure.string :as str] [clojure.walk :as walk]))
 
 (defn- db-with-program []
-  (let [db @(second (pdb/test-branch!))]
+  (let [db (pdb/test-db)]
     ;; recorded definitions, each its form (seon.program's facts), written as data
     (d/db-with db (vec (mapcat (fn [[v src]]
                                  [{:db/id (str v) :var/name v :var/ns (str "ns " (namespace v)) :var/form (str "form " v)}

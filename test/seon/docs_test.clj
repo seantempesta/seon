@@ -8,7 +8,7 @@
             [seon.db :as pdb]
             [seon.docs :as docs]))
 
-(defn- empty-db [] @(second (pdb/test-branch!)))
+(defn- empty-db [] (pdb/test-db))
 
 (def ^:private flow
   "# Flow\n\nFlow runs procs.\n\n## Idioms\n\nPark on a channel, as ```app.m0/f0``` does.\n\n## Quiet\n\nCount messages, with `app.m0/f1`.\n")

@@ -156,8 +156,7 @@
                                     :agent-attempt {:a2 {:seon.attempt/status :done}}))))))
 
 (deftest observed-task-states
-  (let [[_ conn] (seon.db/test-branch!)
-        db @conn
+  (seon.db/test-branch! (fn [_ conn] (let [db @conn
         tasks {"t/a" {:seon.task/execution :running :seon.task/needs #{} :seon.task/accumulated {:proofs #{'p/x}}} "t/b" {:seon.task/execution :running :seon.task/needs #{"t/a"}}
                "t/c" {:seon.task/execution :cancelled :seon.task/needs #{}}}
         attempts {"t/a#1" {:seon.attempt/task "t/a" :seon.attempt/status :running :seon.attempt/start-ms 1 :seon.attempt/tokens 7
@@ -169,7 +168,7 @@
       (is (= #{"t/a"} (get-in rows ["t/b" :blocked-by])))
       (is (= :cancelled (get-in rows ["t/c" :state]))))
     (testing "its own proofs on its newest attempt (another task's red is allowed), attempts so far, tokens"
-      (is (= [1 0 1 1 7] ((juxt :green :red :allowed-red :attempts :tokens) (get rows "t/a")))))))
+      (is (= [1 0 1 1 7] ((juxt :green :red :allowed-red :attempts :tokens) (get rows "t/a")))))))))
 
 (deftest stop-row-says-how-it-ended-once-main-knows
   (let [[st1 _] (answer (fresh-state) view0)
@@ -289,13 +288,12 @@
     (testing "the agent page's panel is the text it read, as recorded (seon.context/recorded), and one copy of it"
       (let [ctxv (#'p/context-of nil {:seon.attempt/task "t/x"} {:evals [{:tag :ret :form "(+ 1 2)" :printed "3"} read]})]
         (is (= :why (first (keys ctxv))) "no db: why, not a rebuild"))
-      (let [[_ conn] (seon.db/test-branch!)
-            db (d/db-with @conn [{:seon.turn/id "t/x#1/read-1" :seon.turn/attempt "t/x#1" :seon.turn/n 1
+      (seon.db/test-branch! (fn [_ conn] (let [db (d/db-with @conn [{:seon.turn/id "t/x#1/read-1" :seon.turn/attempt "t/x#1" :seon.turn/n 1
                                   :seon.turn/origin :outside :seon.turn/context ctx}])
             ctxv (#'p/context-of db {:seon.attempt/id "t/x#1" :seon.attempt/task "t/x"} {:evals [read]})]
         (is (= {:text ctx :origin :outside} (select-keys ctxv [:text :origin])) "the text it read, as is")
         (is (= 1 (count (re-seq #"app.m/f359" (:text ctxv)))) "one copy")
-        (is (:why (#'p/context-of db {:seon.attempt/id "t/x#2" :seon.attempt/task "t/x"} {:evals []})) "an attempt that read nothing says why")))))
+        (is (:why (#'p/context-of db {:seon.attempt/id "t/x#2" :seon.attempt/task "t/x"} {:evals []})) "an attempt that read nothing says why")))))))
 
 (deftest a-hand-spawned-agent-says-why-it-has-no-context
   (let [{:keys [why]} (#'p/context-of nil nil {:task "index rows by id (#0)"})]

@@ -15,7 +15,7 @@
             [seon.source :as source]
             [clojure.string :as str]))
 
-(defn- empty-db [] @(second (pdb/test-branch!)))
+(defn- empty-db [] (pdb/test-db))
 
 (defn- defn-src [nm body] (str "(defn " nm " {:malli/schema [:=> [:cat :int] :int]} [x] " body ")"))
 
