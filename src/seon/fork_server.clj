@@ -7,7 +7,7 @@
   socket arrives with its fork request (SCM_RIGHTS). It reaps its
   children and reports their exits. It never starts a thread, a future or core.async.
 
-  It is a step-fn (`server-step`), run on its one thread by `seon.step/run-loop` (worktree session
+  It is a step-fn (`server-step`), run on its one thread by `seon.step/run-loop` (session
   F2): the same process contract as root's Flow procs, with pause, resume, stop and ping
   as messages on its pipe."
   (:refer-clojure :exclude [defn defn-])

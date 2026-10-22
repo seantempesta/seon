@@ -1,7 +1,7 @@
 (ns seon.sock
   "The single-threaded side of the transport (session F2, from session T1's t1.sock): the fork
   server's socket to root and each agent's, read and written by the one thread that owns
-  them, with no pumps. Root's side of an agent's socket is a jolt.async.remote end (worktree session
+  them, with no pumps. Root's side of an agent's socket is a jolt.async.remote end (session
   RC1), which speaks the same frames:
   - Frames are [u32 len][body], the body jfasl (konserve.jolt.fasl); a length word of
     0xFFFFFFFF is the end frame (the peer closed its writer), read as EOF.
