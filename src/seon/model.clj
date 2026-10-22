@@ -82,7 +82,8 @@
    :function {:name "eval"
               :description "Evaluate Clojure forms at your REPL; the answer is this call's result."
               :parameters {:type "object"
-                           :properties {:code {:type "string" :description "Clojure forms; prose in ;; comments."}}
+                           :properties {:code {:type "string" :description "Clojure forms; your thought about each in ;; comments before it."}
+                                        :thinking {:type "string" :description "Optional: why this call, what you expect it to show."}}
                            :required ["code"]}}})
 
 (defn- wire-message
@@ -91,9 +92,9 @@
   {:malli/schema [:=> [:cat :seon.model/message] :map]}
   [{:keys [role content tool-calls tool-call-id]}]
   (cond-> {:role role :content content}
-    (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code]}]
+    (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code thinking]}]
                                                 {:id id :type "function"
-                                                 :function {:name "eval" :arguments (json/write-str {:code code})}})
+                                                 :function {:name "eval" :arguments (json/write-str (cond-> {:code code} thinking (assoc :thinking thinking)))}})
                                               tool-calls))
     tool-call-id (assoc :tool_call_id tool-call-id)))
 
@@ -111,13 +112,16 @@
     reasoning-effort (assoc :reasoning_effort (name reasoning-effort))))
 
 (defn- call-code
-  "An eval call's code: the `code` of its JSON arguments, or the arguments as they came when
-  they are not that JSON (a reply cut mid-call): the reader shows what they hold."
-  {:malli/schema [:=> [:cat [:maybe :string]] :string]}
+  "An eval call's code and its thinking: the `code` of its JSON arguments (and `thinking`, when
+  the model gave it), or the arguments as they came when they are not that JSON (a reply cut
+  mid-call): the reader shows what they hold."
+  {:malli/schema [:=> [:cat [:maybe :string]] [:map [:code :string] [:thinking {:optional true} :string]]]}
   [arguments]
   (let [a (or arguments "")
         j (try (json/read-str a) (catch Throwable _ nil))]
-    (if (and (map? j) (string? (get j "code"))) (get j "code") a)))
+    (if (and (map? j) (string? (get j "code")))
+      (cond-> {:code (get j "code")} (and (string? (get j "thinking")) (not (str/blank? (get j "thinking")))) (assoc :thinking (get j "thinking")))
+      {:code a})))
 
 (defn reply-of
   "A 200 reply (its chat-completion JSON as data) as the completion: its text, its eval calls
@@ -128,7 +132,7 @@
   {:malli/schema [:=> [:cat :map number? [:maybe :int]] [:or :seon.model/completion :seon.model/failure]]}
   [j ms max-tokens]
   (let [msg (get-in j [:choices 0 :message])
-        calls (mapv (fn [c] {:id (str (:id c)) :code (call-code (get-in c [:function :arguments]))}) (:tool_calls msg))
+        calls (mapv (fn [c] (assoc (call-code (get-in c [:function :arguments])) :id (str (:id c)))) (:tool_calls msg))
         text (or (:content msg) (when (seq calls) ""))
         reasoning (:reasoning_content msg)
         u (:usage j)

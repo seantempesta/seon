@@ -164,7 +164,8 @@
             ;; an interrupt left from before this turn's evals is not theirs
             _ (intr/clear-pending!)
             ;; each eval call through the one REPL path, in order; its answer is the call's result
-            calls (mapv (fn [{:keys [id code]}] {:id id :code code :items (repl/eval-string (:text (reader/forgive code)))})
+            calls (mapv (fn [{:keys [id code thinking]}] (cond-> {:id id :code code :items (repl/eval-string (:text (reader/forgive code)))}
+                                                             thinking (assoc :thinking thinking)))
                         (:tool-calls c))
             items (into [] (mapcat :items) calls)
             eval-ms (long (profile/ms-since t2))
@@ -176,7 +177,10 @@
         ;; and where the turn's time went as this agent saw it
         (agent/transact! [(cond-> (merge (usage c) {:seon.turn/id (str attempt "/" turn) :seon.turn/attempt attempt :seon.turn/n turn
                                    :seon.turn/origin :model :seon.turn/basis basis
-                                   :seon.turn/calls (mapv (fn [{:keys [id code items]}] {:id id :code code :evals (context/evaluations-text items)}) calls)
+                                   :seon.turn/calls (mapv (fn [{:keys [id code thinking items]}]
+                                                            (cond-> {:id id :code code :evals (context/evaluations-text items) :items (mapv :id items)}
+                                                              thinking (assoc :thinking thinking)))
+                                                          calls)
                                    :seon.turn/reply (:text c) :seon.turn/forms (count items)
                                    :seon.turn/errors (count (filter #(= :err (:tag %)) items))
                                    :seon.turn/red (count (remove #(= :pass (val %)) (select-keys results proofs)))

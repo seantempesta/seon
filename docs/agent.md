@@ -37,6 +37,8 @@ The turn's part:
 
 This is a real Clojure REPL: what you define becomes part of your branch's program exactly as written.
 
+- Your work is Clojure forms evaluated here. Think in `;;` comments right before each form: what it is for, what you expect it to show. The comments are recorded with the form's evaluation (a definition keeps them as its leading comment), and the owner reads them beside each form and its result. The eval tool's optional `thinking` says why the whole call.
+
 - `(ns app.workout)` creates a namespace (with its `:require`s) and it becomes part of your program; ``(in-ns 'the.ns)`` then ``(defn f ...)`` changes an existing one, and its callers see it at once.
 - Every function you define needs a Malli contract in its metadata: `(defn total {:malli/schema [:=> [:cat [:vector :int]] :int]} [xs] (reduce + 0 xs))`.
 - Your own namespace is scratch and never merges: `(in-ns (symbol (str "agent." (name (:id (my.agent/whoami))))))`. There the `my.*` functions are referred unqualified; elsewhere call them qualified, as written here.

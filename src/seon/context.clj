@@ -297,7 +297,7 @@
   {:malli/schema [:=> [:cat [:map [:reply :string] [:calls [:vector :map]]] :boolean] [:vector :seon.model/message]]}
   [{:keys [reply calls]} last?]
   (into [(cond-> {:role "assistant" :content reply}
-           (seq calls) (assoc :tool-calls (mapv #(select-keys % [:id :code]) calls)))]
+           (seq calls) (assoc :tool-calls (mapv #(select-keys % [:id :code :thinking]) calls)))]
         (if (seq calls)
           (map (fn [{:keys [id evals]}] {:role "tool" :tool-call-id id :content evals}) calls)
           (when-not last? [{:role "user" :content "Nothing ran: the reply called no eval."}]))))

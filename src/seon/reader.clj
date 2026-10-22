@@ -14,6 +14,28 @@
     (let [j (.indexOf text "\n" (int i))]
       (if (neg? j) acc (recur (conj acc (inc j)) (inc j))))))
 
+(defn lead-end
+  "Where the first form starts in text from i to end: past whitespace, commas and ; comments."
+  {:malli/schema [:=> [:cat :string :int :int] :int]}
+  [^String text i end]
+  (loop [i i]
+    (if (>= i end)
+      end
+      (let [c (.charAt text i)]
+        (cond (or (Character/isWhitespace c) (= c \,)) (recur (inc i))
+              (= c \;) (let [j (.indexOf text "\n" (int i))] (recur (if (or (neg? j) (> j end)) end (inc j))))
+              :else i)))))
+
+(defn lead
+  "The ; comments before the form that ends at end in text, read from i (where the form
+  before it ended): the text between them, trimmed, when it holds a comment, else nil. A
+  form's lead is what its writer said before it: a definition's (:form/lead), and an
+  evaluation's thought."
+  {:malli/schema [:=> [:cat :string :int :int] [:maybe :string]]}
+  [^String text i end]
+  (let [l (str/trim (subs text i (lead-end text i end)))]
+    (when (str/includes? l ";") l)))
+
 (defn opts
   "edamame's options for reading source written in namespace nsym: every Clojure syntax
   (`#()`, regex, var, syntax-quote, `#=` as data), `::kw` resolved against nsym (an alias
