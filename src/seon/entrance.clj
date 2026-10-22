@@ -23,7 +23,7 @@
 
 (defn task-summaries
   "Every task on main db: {id {:execution :done :blocked-by :attempts [[id status outcome
-  turns tokens]] :problem}}: the door's and the e2e harness's one summary."
+  turns tokens]] :problem}}: the server's and the e2e harness's one summary."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
   (let [idx (r/index db)]

@@ -34,8 +34,8 @@
     (is (= (pr-str {:op :attach :task 5}) (:line defect)))
     (is (= "3" (:printed ok)) "the door goes on")))
 
-(deftest the-door-speaks-mcp
-  ;; task seon.entrance/the-door-answers-mcp-itself: root's server answers MCP's JSON-RPC
+(deftest the-server-speaks-mcp
+  ;; task seon.entrance/the-server-answers-mcp-itself: root's server answers MCP's JSON-RPC
   ;; itself (bin/mcp only relays lines): initialize with a version it implements, ping,
   ;; tools/list from the one op table, nothing for a notification, and the JSON-RPC error for
   ;; a method or tool it does not know. tools/call through a real root is
@@ -54,7 +54,7 @@
     (is (= -32602 (get-in (ask {"id" 4 "method" "tools/call" "params" {"name" "seon_nope" "arguments" {}}}) ["error" "code"])) "a tool no op names: invalid params")))
 
 (deftest a-line-opening-a-string-key-is-mcps
-  ;; task seon.entrance/the-door-answers-mcp-itself: the protocol rule. A line opening {" is
+  ;; task seon.entrance/the-server-answers-mcp-itself: the protocol rule. A line opening {" is
   ;; JSON-RPC, so an EDN request with a string key is refused naming the rule (-32700), never
   ;; misread; a keyword-keyed EDN line still reads as EDN
   (let [respond #'seon.entrance/respond
