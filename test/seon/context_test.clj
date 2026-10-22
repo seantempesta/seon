@@ -200,8 +200,7 @@
   ;; it before (current-state and messages, the first turn's text carried in the scrollback),
   ;; equals the text seon.context/render makes again from the recorded basis on the commit it
   ;; names, after the branch moved on (the program changed, later turns were written)
-  (let [[_ conn] (pdb/test-branch!)
-        program (fn [src] [{:db/id "f" :var/name 'demo/f :var/ns "ns" :var/form "form"}
+  (pdb/test-branch! (fn [_ conn] (let [program (fn [src] [{:db/id "f" :var/name 'demo/f :var/ns "ns" :var/form "form"}
                            {:db/id "form" :form/id (str "demo/f " src) :form/src src :form/ns "ns" :form/order 0 :form/defines ["f"]}
                            {:db/id "ns" :ns/name 'demo}])
         _ (d/transact conn (program "(defn f \"Doubles.\" [x] (* 2 x))"))
@@ -241,7 +240,7 @@
     (is (= sent1 (:content (peek (:messages (context/render db1 b1))))) "the turn loop's own render is the same text")
     (is (= {:text sent1 :origin :model :turn "demo/f#1/1"} (context/recorded db "demo/f#1")) "the page reads the last turn's")
     (is (nil? (context/recorded db "c#1")) "an attempt that read nothing has no context")
-    (is (< (count (seon.edn/encode b1)) 600) "the basis is small: no text the db already holds")))
+    (is (< (count (seon.edn/encode b1)) 600) "the basis is small: no text the db already holds")))))
 
 (deftest a-context-read-as-a-value-does-not-grow-the-next-context
   ;; the model evaluates something that answers a whole context (its own block, say): the
