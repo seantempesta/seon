@@ -2,7 +2,7 @@
   "One store, many branches, as in production (owner, 2026-10-21): bin/test seeds one test
   store and each test takes a branch of it through one helper (seon.db/test-branch!)."
   (:require [clojure.test :refer [deftest is testing]]
-            [clojure.java.shell] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
+            [clojure.java.shell] [clojure.java.io] [clojure.string] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.config :as cfg] [seon.contract :as contract] [seon.edn]
             [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb]))
 
@@ -157,17 +157,36 @@
   (let [db (klmdb/open-env! path nil)]
     (lmdb/read-txn db (fn [txn] (into {} (for [k (lmdb/all-keys db txn)] [k (alength ^bytes (lmdb/get-bytes db txn k))]))))))
 
+(defn- corpus
+  "The text of the checkout's files under dir ending in ext, sorted by path and joined: real
+  prose (docs/*.md) or real code (src/**/*.clj) for turn text that compresses as a turn's does."
+  [dir ext]
+  (->> (file-seq (clojure.java.io/file dir)) (map str) (filter #(clojure.string/ends-with? % ext)) sort
+       (map slurp) (apply str)))
+
+(def ^:private prose (delay (corpus "docs" ".md")))
+(def ^:private code (delay (corpus "src" ".clj")))
+
+(defn- slice
+  "n characters of text from k*n on, wrapping at its end: turn k's own text."
+  [text k n]
+  (let [i (mod (* k n) (- (count text) n))] (subs text i (+ i n))))
+
 (defn- turn-facts
   "Turn k of an attempt as seon.turn/act! records it: the basis its context was built from
   (the commit, its red assertion; the text is made again from it, seon.context/render), its
-  reply (1,500 bytes) and its eval call with what it evaluated to as the next turn shows it (2,000)."
+  reply (1,500 bytes) and its eval call with what it evaluated to as the next turn shows it
+  (2,000). The reply is real prose and the evaluated value real source, each turn its own
+  (a real turn's reply is the model's prose and code; its evals are mostly source and
+  printed data: a slurp, a source, a test's report): a repeated letter compressed ~3x better
+  than real turn text and made LZ4 look like the fix (2026-10-22)."
   [k]
   [{:seon.turn/id (str "att/" k) :seon.turn/attempt "att" :seon.turn/n k :seon.turn/origin :model
     :seon.turn/basis (seon.edn/encode {:commit (random-uuid) :task "t/x" :attempt "att" :turn k :max-turns 8 :origin :model
                                        :observed {:results {'t-test/x :fail} :run-errors [] :refusals [{:refusal :proof-red :symbol 't-test/x}]
                                                   :reds [{:test 't-test/x :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))"}]}})
-    :seon.turn/reply (apply str (repeat 1500 "r"))
-    :seon.turn/calls (seon.edn/encode [{:id "call-0" :code "(f 2)" :evals (apply str (repeat 2000 "e"))}])}])
+    :seon.turn/reply (slice @prose k 1500)
+    :seon.turn/calls (seon.edn/encode [{:id "call-0" :code "(f 2)" :evals (slice @code k 2000)}])}])
 
 (defn- write-turns!
   "Bytes the store at path gains when branch b gets n turns through the agent's run-ahead
@@ -201,6 +220,8 @@
       (let [once (write-turns! conn cfg path :once n n)
             per-turn (write-turns! conn cfg path :per-turn n 1)
             bound (+ once (* n 32 1024))]
+        (println (str "a-commit-costs-what-it-writes: " n " turns, one commit " once " B, per turn " per-turn " B, bound " bound " B"
+                      " (compressor " (cfg/value :seon.config.store/compressor) ")"))
         (is (<= per-turn bound)
             (str n " per-turn commits wrote " per-turn " bytes; the same turns in one commit wrote " once
                  ", so the bound is " bound " (" (format "%.1f" (/ (double per-turn) bound)) "x over)")))
