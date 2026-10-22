@@ -438,9 +438,7 @@
        ;; which grows when a pass is submitted before the last worker is idle again
        ;; (lane THREADS: root's threads are a declared number)
        :workload :mixed
-       :ping-map-fn (fn [st] {:passes (:passes st 0) :views (count (:views st)) :watching (count (:watch st))
-                              :pending (count (:pending st)) :rendered (get-in st [:counts :rendered] 0)
-                              :same (get-in st [:counts :same] 0) :pass-p50-ms (lib/p50 (:pass-ms st))})})
+       :ping-map-fn stats})
   ([args]
    ;; no beat: a pass happens on an event, an api answer or a tab's request, never on a clock
    (let [events (a/chan (a/sliding-buffer 4096))]

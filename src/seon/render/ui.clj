@@ -16,7 +16,7 @@
   Every number shown is measured by the system and carried in the value; nothing here
   invents one."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [clojure.walk] [seon.config :as config]
+  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
             [seon.render :as render] [seon.print :as print] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.proofs :as proofs]))
 
 ;;; --- small formatting helpers -------------------------------------------------
@@ -40,14 +40,7 @@
 (defn group3
   "n with thousands separated: 120000 -> \"120,000\"."
   {:malli/schema [:=> [:cat :any] :string]}
-  [n]
-  (if (number? n)
-    (let [s (str (long n))
-          neg? (str/starts-with? s "-")
-          s (if neg? (subs s 1) s)
-          g (->> (reverse s) (partition-all 3) (map (comp str/join reverse)) reverse (str/join ","))]
-      (str (when neg? "-") g))
-    "–"))
+  [n] (if (number? n) (format "%,d" (long n)) "–"))
 
 (defn bytes-str {:malli/schema [:=> [:cat :any] :string]}
   [b]
@@ -134,11 +127,7 @@
         ;; through the one reader edge: text that does not read is an answer (nil), not a catch here
         v (when plain? (let [fs (reader/read-text txt 'user)] (when (= 1 (count fs)) (first fs))))]
     (if (and plain? (coll? v))
-      (let [hic (:seon.render/html (render/print-out :html v {:seon.render/budget budget :seon.render/handle (some->> handle name (symbol "result"))}))]
-        ;; the printer's panel id is per value, not per part (ids drive Datastar's morph)
-        ;; and every node open: a closed <details> hides its content however it is styled
-        (clojure.walk/postwalk (fn [x] (if (and (vector? x) (= :details (first x)) (map? (second x))) (assoc-in x [1 :open] true) x))
-                               (if (and (vector? hic) (map? (second hic))) (update hic 1 dissoc :id) hic)))
+      (:seon.render/html (render/print-out :html v {:seon.render/budget budget :seon.render/handle (some->> handle name (symbol "result"))}))
       [:code {:class "printed"} (prose txt budget (cond-> opts handle (assoc :whole (symbol "result" (name handle)))))])))
 
 (defn context-read?

@@ -174,8 +174,7 @@
   [st view html]
   (if-not html
     st
-    (let [body (second (re-find #"(?s)<body[^>]*>(.*)</body>" html))
-          chunk (patch-event (or body html))]
+    (let [chunk (patch-event html)]
       (reduce-kv (fn [st k {:keys [ch] :as tab}]
                    (if (and (= view (:view tab)) (contains? (:stale st) k))
                      (let [ok (a/offer! ch chunk)]
@@ -196,6 +195,13 @@
                            (str "/feed?view=" (if (= :root view) "root" (name view)))
                            (h/raw body))))))
 
+(defn- stats
+  "The web proc's own numbers: its :stats answer and its ping map."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
+  {:tabs (count (:tabs st)) :stale (count (:stale st)) :sent-bytes (:bytes st 0) :patches (:patches st 0)
+   :chunk-p50-bytes (lib/p50 (:chunk-bytes st)) :listening (:listening st) :port (:port st) :calls (:calls st 0) :error (:error st)})
+
 (defn- http-in
   "A request from the edge."
   {:malli/schema [:=> [:cat :map :seon.host/volatile :map] :map]}
@@ -214,10 +220,7 @@
              (let [[st k] (step/pend st [(:p m) :text])]
                (step/out! o :to-render {:op (if (= :context (:op m)) :context :stats) :k k})
                st)
-    :stats (do (deliver (:p m) {:tabs (count (:tabs st)) :stale (count (:stale st)) :sent-bytes (:bytes st 0)
-                                :patches (:patches st 0) :chunk-p50-bytes (lib/p50 (:chunk-bytes st)) :listening (:listening st)
-                                :port (:port st) :calls (:calls st 0) :error (:error st)})
-               st)
+    :stats (do (deliver (:p m) (stats st)) st)
     :call (let [c (:call m)
                 reqs (requests c (:index st {}))]
             (when (= 'seon.root/interrupt! (:var c))
@@ -265,9 +268,7 @@
        :outs {:to-render "views open, page and keyframe requests" :to-api "UI calls as root's requests"}
        ;; socket writes and offers only; rendering is the render proc's
        :workload :io
-       :ping-map-fn (fn [st] {:listening (:listening st) :port (:port st) :tabs (count (:tabs st))
-                              :stale (count (:stale st)) :patches (:patches st 0) :calls (:calls st 0)
-                              :bytes (:bytes st 0) :error (:error st)})})
+       :ping-map-fn stats})
   ([args]
    (let [port (:port args)
          http (a/chan 256)
