@@ -7,7 +7,7 @@ dragons are and name them explicitly when dealing with them."
 A **dragon** is a place where the world outside our code can fail us. Each one is met by
 exactly one function, its **edge**. The edge either answers a declared variant, which is
 plain data its callers handle as an ordinary branch, or it is an **entrant boundary**, which
-turns a defect into a recorded error map. A refusal or a death answers its asker with that error map alone, never a stand-in shaped like a success (an eval item, a test count, `:ok false`, `:merged? false`): every asker branches on `seon.contract/error?`. Nothing else catches. `bin/dragons catch` (run by
+turns a defect into a recorded error map. A refusal or a death answers its asker with that error map alone, never an imitation of a success (an eval item, a test count, `:ok false`, `:merged? false`): every asker branches on `seon.contract/error?`. Nothing else catches. `bin/dragons catch` (run by
 `bin/check`) lists every `catch` in `src/` and fails when one is not named below by its
 function. The same census judges the other laws: [clocks](clocks.md) and [resolution](resolution.md).
 

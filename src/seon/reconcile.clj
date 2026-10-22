@@ -17,7 +17,7 @@
   [t] (< (:seon.task/generation t 0) (:seon.task/budget t (cfg/value :seon.config.task/budget))))
 
 (defn dials
-  "Task t's merge dials (:seon.config.merge/*), through the one resolver."
+  "Task t's merge config keys (:seon.config.merge/*), through the one resolver."
   {:malli/schema [:=> [:cat :seon.task/own] :seon.reconcile/merge-dials]}
   [t]
   {:max-conflicts (cfg/value :seon.config.merge/max-conflicts {:task t :model (:seon.task/model t)})
@@ -596,7 +596,12 @@
         ;; status, last op, stderr tail; or :seon.root/no-agent), and the end the agent wrote
         ;; on its branch before it exited, read from the branch
         dead (fn [st e] (one (request (assoc-in st [:flights aid :died] e) aid :dead-read
-                                      {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}})))]
+                                      {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}})))
+        ;; the writer refused to read or diff its branch: its agent is stopped, and the attempt
+        ;; ends with the refusal as its cause, not judged on facts nobody measured
+        refused (fn [st e] (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
+                                 [st [o2]] (dead st e)]
+                             [st [o1 o2]]))]
     (case step
       :ignored [st []]
       :done (done st)
@@ -634,13 +639,17 @@
                                   (assoc-in [:flights aid :run-problems] {:failures (proofs/failures r) :costs (proofs/costs r)}))
                               aid :read {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}})))
       ;; what the branch changed since its merge base (three-way's :ours), measured for the train
-      :read (one (request (assoc-in st [:flights aid :branch-db] r) aid :diffed
-                          {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}}))
+      :read (if (contract/error? r)
+              (refused st r)
+              (one (request (assoc-in st [:flights aid :branch-db] r) aid :diffed
+                            {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}})))
       ;; every attempt is a new agent: none is reused
       ;; root stops it because its attempt ended: its view says :ended, not :killed
-      :diffed (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
-                    [st o2] (write st aid :done (judge-tx st f (:results f) (:branch-db f) r))]
-                [st [o1 o2]])
+      :diffed (if (contract/error? r)
+                (refused st r)
+                (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
+                      [st o2] (write st aid :done (judge-tx st f (:results f) (:branch-db f) r))]
+                  [st [o1 o2]]))
       ;; each member's answer, as one write: merged at the train's t, behind (its merge task
       ;; runs again, a new agent), or refused: a failed attempt like any other (a refinement
       ;; chain while the budget lasts, else stuck)

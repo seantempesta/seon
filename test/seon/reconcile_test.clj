@@ -204,6 +204,16 @@
     (is (= died (get-in st' [:flights "demo/a#1" :died])) "the death is the flight's cause")
     (is (= [{:op :write :req {:op :branch-db :branch :demo/a}}] (mapv :req outs)) "its end is read from the branch next")))
 
+(deftest a-refused-diff-ends-the-attempt-with-its-cause
+  ;; the writer refuses to diff the branch: the attempt is not judged on facts nobody
+  ;; measured (no changed keys, no gaps); its agent is stopped and the refusal is its cause
+  (let [no (contract/error :seon.writer/refused 'seon.writer/writer-proc "no branch :demo/a" {})
+        st {:db (db-of [(decl "a")]) :boot "boot-1" :rid 0 :pending {}
+            :flights {"demo/a#1" {:act {:attempt "demo/a#1" :task "demo/a" :env {:branch :demo/a}} :agent :a1 :step :diffed}}}
+        [st' outs] (#'r/advance st "demo/a#1" :diffed no)]
+    (is (= no (get-in st' [:flights "demo/a#1" :died])))
+    (is (= [{:op :kill :id :a1 :ended true} {:op :write :req {:op :branch-db :branch :demo/a}}] (mapv :req outs)))))
+
 (deftest an-ended-attempt-of-a-cancelled-task-is-closed
   (is (= [{:op :close :attempt "demo/a#1"}]
          (r/reconcile (db-of diamond :extra (concat (attempt "a" 1 :ended :outcome :green :results {(t "a") :pass})

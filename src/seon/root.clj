@@ -399,7 +399,7 @@
       ;; a proc's request (the reconciler's, the web's, MCP's): an ordinary entrance request
       ;; whose answer goes back to the proc as data
       :request (ext-op st o (assoc (:req m) :p {:route (:route m) :tag (:tag m)}))
-      :clone-failed (to-agent st (:agent m) {:op :failed :error (:error m)})
+      :clone-failed (spawn-failed st (:agent m) "clone refused" (:error m))
       ;; the web proc's listener, when it changes (seon.web)
       :web (view! st assoc :web (select-keys m [:listening :port :error]))
       :ended (end-agent st o m)
@@ -861,7 +861,7 @@
 
 (defn clone!
   "Fork a live agent into a new agent on a branch of its branch. A promise of
-  {:ok true :id new-id} or {:ok false :error}."
+  {:ok true :id new-id}, or its refusal (the one error map)."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :map] :seon.host/promise]]}
   ([sys agent-id] (clone! sys agent-id {}))
   ([sys agent-id opts] (request! sys 'clone! agent-id opts)))
@@ -908,7 +908,7 @@
   "Root merges the agent's branch into main (seon.merge, lane M1); a promise of {:merged?
   :tx ...}, or :seon.merge/behind when main changed since the branch's merge base (merge
   main first), :seon.merge/unmerged, :seon.merge/uncontracted. Unless opts has :gate?
-  false, the agent's tests run first in a fork of it. opts {:data-attrs}: the data that
+  false, the agent's tests run first in a fork of it (red: :seon.merge/red). opts {:data-attrs}: the data that
   merges beside the program (default :all: every attribute that is neither program nor
   observation)."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id :map] :seon.host/promise]]}
@@ -918,7 +918,7 @@
 (defn merge-main!
   "git merge main, on the agent's branch (seon.merge): main's changes since the merge base
   come into the branch and the agent's db; each conflict stays on the branch as an unmerged
-  entry. A promise of {:ok true :applied [key] :conflicts [...] :t}. opts {:data-attrs}
+  entry. A promise of {:ok true :applied [key] :conflicts [...] :t}, or :seon.root/no-agent. opts {:data-attrs}
   (default :all)."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]
                   [:=> [:cat :seon.root/sys :seon.agent/id :map] :seon.host/promise]]}

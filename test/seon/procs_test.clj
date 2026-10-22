@@ -215,7 +215,7 @@
   #{:id :tag :ok :merged? :pass :fail :error :reports :applied :conflicts})
 
 (deftest a-refusal-is-the-one-error-map
-  ;; a request no live agent can take, a verb root refuses, and a write the writer refuses
+  ;; a request no live agent can take, a function root refuses, and a write the writer refuses
   ;; each answer the one error map (seon.contract/error) and nothing beside it: no eval item
   ;; with id -1, no test count, no :ok or :merged? false
   (let [st (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
@@ -231,8 +231,8 @@
     (let [p (promise)]
       (step #'root/api-proc st :ext {:op :ping :id :nope :p p})
       (is (= :seon.root/refused (:seon.error/type @p)) "a request kind with no producer is refused, not left unanswered"))
-    (doseq [[verb a] [['merge-main! nil] ['merge! nil] ['merge! {:branch :b :status :dead}] ['nope! nil]]]
-      (is (bare? (root/request verb :a1 nil a)) (str verb))))
+    (doseq [[f a] [['merge-main! nil] ['merge! nil] ['merge! {:branch :b :status :dead}] ['nope! nil]]]
+      (is (bare? (root/request f :a1 nil a)) (str f))))
   (ts/test-branch! (fn [cfg conn]
     (let [st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 4) :events (a/chan 4)})
           [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:no/such 1}] :dest {:rid 1}})

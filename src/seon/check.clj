@@ -108,7 +108,7 @@
 
 (defn- main-q [sys query & inputs] (apply d/q query @(:conn sys) inputs))
 
-(defn- short-items [items] (mapv #(select-keys % [:tag :printed :ms]) items))
+(defn- short-items [items] (if (contract/error? items) items (mapv #(select-keys % [:tag :printed :ms]) items)))
 
 (defn- p1 "Each reply item of forms evaluated in agent id, as [printed recorded]." [sys id forms]
   (mapv (juxt :printed :recorded) @(c/submit! sys id forms)))
