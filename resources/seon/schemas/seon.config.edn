@@ -1,4 +1,4 @@
-;; The config (lane CONFIG, owner 2026-10-21: "the only things that should stay are documented
+;; The config (session CONFIG, owner 2026-10-21: "the only things that should stay are documented
 ;; config schemas that we are porting from seon if they are relevant"). The values, with each
 ;; key's unit, provenance and what happens at its bound, are in resources/seon/config/default.edn;
 ;; the keys' schemas are in seon.config.<area>.edn, v1's shape (~/src/seon resources/seon/schemas/
@@ -8,7 +8,7 @@
 ;; and its entries declare the attributes root writes on main's root entity (seon.config/facts).
 {:seon.config/config
  [:map {:closed true :seon.db/attributes true :seon.render/html seon.render.ui/config-panel
-        :description "The resolved config: every limit, bound, dial and default of the platform, one key each."}
+        :description "The resolved config: every limit, bound and default of the platform, one key each."}
   ;; root and its procs
   [:seon.config.root/max-agents :seon.config.root/max-agents]
   [:seon.config.root/api-writes :seon.config.root/api-writes]
@@ -99,7 +99,7 @@
   [:seon.config.render/value-budget :seon.config.render/value-budget]
   [:seon.config.render/root-context-budget :seon.config.render/root-context-budget]
   [:seon.config.render/history-row-budget :seon.config.render/history-row-budget]
-  ;; the web, the guarantees, the native probe
+  ;; the web, instrumentation, the native probe
   [:seon.config.web/port :seon.config.web/port]
   [:seon.config.root/entrance-port :seon.config.root/entrance-port]
   [:seon.config.web/public-dir :seon.config.web/public-dir]

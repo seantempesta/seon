@@ -1,6 +1,6 @@
 (ns seon.schema.datahike
   "Datahike attribute declarations derived from registered Malli schemas: the registry is
-  the one shape authority, the Datahike schema its derivation. From lane D1's
+  the one shape authority, the Datahike schema its derivation. From session D1's
   proto.schema.datahike (d1/src/proto/schema/datahike.clj).
 
   Adapted from Seon's `seon.schema.datahike` (1,193 lines; `attribute-declaration`,
@@ -30,7 +30,7 @@
 
 (def type->datahike
   "Malli scalar type to Datahike value type (Seon's `malli-type->datahike-type`, with the
-  integer predicates the lanes already write)."
+  integer predicates our schemas already use)."
   {:string :db.type/string :re :db.type/string :int :db.type/long :double :db.type/double :float :db.type/float
    :keyword :db.type/keyword :qualified-keyword :db.type/keyword :boolean :db.type/boolean
    :uuid :db.type/uuid :symbol :db.type/symbol :qualified-symbol :db.type/symbol

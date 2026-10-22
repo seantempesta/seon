@@ -1,4 +1,4 @@
-;; The named schemas of seon.schema.datahike (lane D1) (Seon's :seon.db/ref, simplified) and its one error.
+;; The named schemas of seon.schema.datahike (session D1) (Seon's :seon.db/ref, simplified) and its one error.
 {:seon.db/ref [:or {:description "A Datahike reference: entity id, tempid, lookup ref, or nested entity map carrying :db/id."}
                :int :string [:tuple :keyword :any] [:map [:db/id :int]]]
  :seon.schema/declaration [:map {:description "A Datahike attribute map, as d/transact takes it."}

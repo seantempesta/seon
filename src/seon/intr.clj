@@ -1,5 +1,5 @@
 (ns seon.intr
-  "Copied from lane R2's r2.intr (notes/option3-R2-nrepl.md), which replaces T1's throwing
+  "Copied from session R2's r2.intr (notes/option3-R2-nrepl.md), which replaces T1's throwing
   handler: T1's never stopped a form that catches Throwable and left a binding behind.
 
   Stopping a running eval in a single-threaded agent with Jolt's own mechanism,
@@ -57,13 +57,13 @@
     "(lambda (sig f) (register-signal-handler sig (lambda (s) (when (eq? #t (f)) (set-timer 1)))))"))
 
 ;; Outside any run-interruptible the engine timer has Chez's default handler, which
-;; raises; a kick that lands just outside one (a token set between push and entry)
+;; raises; a kick that arrives just outside one (a token set between push and entry)
 ;; must do nothing there. An agent runs no fibers, so no scheduler handler is replaced.
 (defchecked ^:private quiet-timer* [:=> [:cat] :any] (scm/eval-string "(lambda () (timer-interrupt-handler (lambda () (void))))"))
 
 (defn install!
   "Register root's interrupt handler (a forked child inherits it): it arms the engine timer
-  for one tick when a token was newly set, so the stop lands at once."
+  for one tick when a token was newly set, so the stop merges at once."
   {:malli/schema [:=> [:cat] :boolean]}
   []
   (quiet-timer*)

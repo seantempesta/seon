@@ -1,13 +1,13 @@
 (ns seon.fx
-  "Effects (lane FX1, notes/option3-FX1-effects.md). Every outside effect kind has ONE
-  owner proc in root behind a bounded channel, and `lanes` performer procs:
+  "Effects (session FX1, notes/option3-FX1-effects.md). Every outside effect kind has ONE
+  owner proc in root behind a bounded channel, and `workers` performer procs:
 
-    agent --socket--> stand-in --:fx/<kind>--> owner --:work--> lane (performs)
-    agent <--socket-- stand-in <--api :back--- owner <--:done-- lane
+    agent --socket--> agent proc --:fx/<kind>--> owner --:work--> worker (performs)
+    agent <--socket-- agent proc <--api :back--- owner <--:done-- worker
 
-  The owner admits (concurrency = its lanes; priority and budget are request attributes,
+  The owner admits (concurrency = its workers; priority and budget are request attributes,
   rate and budget counters its live state), queues by priority, and replies {:dest :r}
-  on the api's :back, the route the writer's answers already take. A lane performs one
+  on the api's :back, the route the writer's answers already take. A worker performs one
   request with the kind's perform Var (the interop edge: it returns its declared error as
   data) and is the entrant boundary for a defect in it. Nothing here writes a branch: the
   asker records the outcome in its own recording transaction."
@@ -24,7 +24,7 @@
 
 ;; ---- performers: the interop edges, one Var per kind ------------------------------------
 
-(defn echo "The stand-in effect: answers the request as its value." {:malli/schema [:=> [:cat :map] :map]}
+(defn echo "The test effect: answers the request as its value." {:malli/schema [:=> [:cat :map] :map]}
   [req] {:value (:req req)})
 
 (defn write-file
@@ -90,7 +90,7 @@
   through git's plumbing: blobs, a tree from the branch's own with the files replaced, a
   commit whose parent is the branch head (a branch not there yet starts at dir's HEAD, the
   commit the running generation's tree checks out), and the ref moved only from that head. No
-  working tree or checkout is touched, so main and every lane's files stay as they are.
+  working tree or checkout is touched, so main and every worktree's files stay as they are.
   Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing to write),
   or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
@@ -164,16 +164,16 @@
 ;; ---- the owner -----------------------------------------------------------------------
 
 (defn refill
-  "The owner's token bucket at now-ms (lane R3): tokens grow at :per-ms up to :cap since :at.
-  A bucket is the provider's rate as data: tokens per second, set from the dial and halved by
+  "The owner's token bucket at now-ms (session R3): tokens grow at :per-ms up to :cap since :at.
+  A bucket is the provider's rate as data: tokens per second, set from its config key and halved by
   a rate-limit outcome."
   {:malli/schema [:=> [:cat :seon.fx/bucket :int] :seon.fx/bucket]}
   [{:keys [tokens cap per-ms at] :as b} now-ms]
   (assoc b :tokens (min cap (+ tokens (* per-ms (max 0 (- now-ms at))))) :at (max at now-ms)))
 
 (defn- admit
-  "What the owner does with a queued request at now-ms: :run, :wait (no free lane, or its
-  bucket holds fewer tokens than the request's estimate :est: a :tick or a lane's :done
+  "What the owner does with a queued request at now-ms: :run, :wait (no free worker, or its
+  bucket holds fewer tokens than the request's estimate :est: a :tick or a worker's :done
   dispatches again), or the refusal (the task spent its :budget; spend is this proc's live
   counter, keyed by :budget-key)."
   {:malli/schema [:=> [:cat :map :map :int] [:or [:enum :run :wait] :map]]}
@@ -181,15 +181,15 @@
   (cond
     (and budget (>= (get-in st [:spent budget-key] 0) budget))
     (error :seon.fx/budget-spent "the request's budget is spent" {:budget budget :spent (get-in st [:spent budget-key])})
-    (>= (:busy st) (:lanes st)) :wait
+    (>= (:busy st) (:workers st)) :wait
     (and (:bucket st) (< (:tokens (refill (:bucket st) now-ms)) (or est 0))) :wait
     :else :run))
 
 (defn- settle
-  "The owner at a lane's outcome m: the lane is free; the task's spend grows by the actual
+  "The owner at a worker's outcome m: the worker is free; the task's spend grows by the actual
   cost; the bucket gets back (or pays) the difference from the estimate; a rate-limit outcome
-  (the provider's 429, the named dragon of this edge) halves the bucket's rate, and each
-  other outcome raises it by a twentieth back toward the dial (AIMD, TCP's congestion rule)."
+  (the provider's 429, the named failure point of this edge) halves the bucket's rate, and each
+  other outcome raises it by a twentieth back toward the configured rate (AIMD, TCP's congestion rule)."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [st {:keys [budget-key cost est outcome]}]
   (let [limited? (= :seon.model/rate-limited (:seon.error/type outcome))]
@@ -209,12 +209,12 @@
   (step/out! o :out {:dest dest :r r}))
 
 (defn- wake-later
-  "The clock (lane R3's :tick): when the head request waits on the bucket alone (a lane is
+  "The clock (session R3's :tick): when the head request waits on the bucket alone (a worker is
   free), one :tick is due on the owner's :tick port once the bucket refills to its estimate.
   Answers st, marked :tick-due until that tick arrives."
   {:malli/schema [:=> [:cat :map :map :int] :map]}
   [st m now]
-  (if (and (:bucket st) (:tick st) (not (:tick-due st)) (< (:busy st) (:lanes st)))
+  (if (and (:bucket st) (:tick st) (not (:tick-due st)) (< (:busy st) (:workers st)))
     (let [b (refill (:bucket st) now)
           ms (long (Math/ceil (/ (max 1 (- (or (:est m) 0) (:tokens b))) (:per-ms b))))]
       (a/take! (a/timeout ms) (fn [_] (a/put! (:tick st) {})))
@@ -222,7 +222,7 @@
     st))
 
 (defn- dispatch
-  "Take queued requests in priority order while lanes are free; a refused one is answered
+  "Take queued requests in priority order while workers are free; a refused one is answered
   at once. Answers st."
   {:malli/schema [:=> [:cat :map :seon.host/volatile] :map]}
   [st o]
@@ -232,7 +232,7 @@
             d (admit st m now)]
         (cond
           (= :wait d) (wake-later st m now)
-          (= :run d) (do (step/out! o :to-lanes (assoc m :taken-ns (profile/now-ns) ::qk qk))
+          (= :run d) (do (step/out! o :to-workers (assoc m :taken-ns (profile/now-ns) ::qk qk))
                          (recur (cond-> (-> st (update :queue dissoc qk) (update :busy inc))
                                   (:bucket st) (update :bucket #(update (refill % now) :tokens - (or (:est m) 0))))))
           :else (do (reply! o (:dest m) (assoc d :seon.fx/kind (:kind st)))
@@ -241,29 +241,29 @@
 
 (defn- bound
   "The owner's queue holds at most :seon.config.fx/buf requests; at the bound it reads only :done
-  (Flow's input filter), so stand-ins park on :in: back-pressure to the asking agent."
+  (Flow's input filter), so agent procs park on :in: back-pressure to the asking agent."
   {:malli/schema [:=> [:cat :map] :map]}
   [st] (assoc st ::flow/input-filter (if (>= (count (:queue st)) (cfg/value :seon.config.fx/buf)) #(not= :in %) identity)))
 
 (defn owner-proc
-  "The owner of one effect kind. In :in (the stand-ins' requests {:req :dest :prio
-  :budget :budget-key :agent}, addressed by id; :seon.config.fx/buf), :done (the lanes'
-  outcomes). Out :to-lanes (its performers' shared channel), :out (the api's :back:
+  "The owner of one effect kind. In :in (the agent procs' requests {:req :dest :prio
+  :budget :budget-key :agent}, addressed by id; :seon.config.fx/buf), :done (the workers'
+  outcomes). Out :to-workers (its performers' shared channel), :out (the api's :back:
   {:dest :r})."
   {:malli/schema :seon.step/step-fn}
-  ([] {:params {:kind "the effect kind" :lanes "performers, its concurrency"
+  ([] {:params {:kind "the effect kind" :workers "performers, its concurrency"
                 :rate "tokens per second the provider admits (nil: no bucket)"
                 :tick "its clock's channel (external in-port, with :rate): a :tick when the bucket refilled"}
-       :ins {:in "requests, addressed [:fx/<kind> :in] by any proc" :done "its lanes' outcomes"} :outs {}
+       :ins {:in "requests, addressed [:fx/<kind> :in] by any proc" :done "its workers' outcomes"} :outs {}
        ;; admission and routing only: never blocks, never computes long
        :workload :io
-       :ping-map-fn (fn [st] (-> (select-keys st [:kind :lanes :busy :done]) (assoc :queued (count (:queue st)) :spent (:spent st))))})
-  ([args] (assoc (select-keys args [:kind :lanes]) :busy 0 :done 0 :seq 0 :queue (sorted-map) :spent {}
+       :ping-map-fn (fn [st] (-> (select-keys st [:kind :workers :busy :done]) (assoc :queued (count (:queue st)) :spent (:spent st))))})
+  ([args] (assoc (select-keys args [:kind :workers]) :busy 0 :done 0 :seq 0 :queue (sorted-map) :spent {}
                  :bucket (when-let [r (:rate args)]
                            {:tokens (double r) :cap (double r) :per-ms (/ r 1000.0) :rate-ms (/ r 1000.0) :at (quot (profile/now-ns) 1000000)})
                  :tick (:tick args)
                  ::flow/in-ports (if (:tick args) {:tick (:tick args)} {})
-                 ::flow/out-ports {:to-lanes (:work args) :out (:back args)}))
+                 ::flow/out-ports {:to-workers (:work args) :out (:back args)}))
   ([st _] st)
   ([st in m]
    (let [o (volatile! {})]
@@ -290,7 +290,7 @@
                      [(bound (dispatch st o)) @o]))
          :tick [(bound (dispatch (dissoc st :tick-due) o)) @o])))))
 
-(defn lane-proc
+(defn worker-proc
   "One performer of an effect kind: takes a request from its owner's shared channel,
   performs it with the kind's Var, and gives the owner the outcome (with its timing).
   The entrant boundary for a defect in the perform Var: the defect is the outcome, as an
@@ -300,8 +300,8 @@
        ;; the effect blocks in native IO (an HTTP read, a file write). Jolt runs :io procs
        ;; on fibers bound to their carrier thread for life, and a blocking FFI call pins the
        ;; carrier, stranding every other fiber placed on it (inv2: replies 4-15 s late).
-       ;; :mixed gives each lane its own thread: the declared workload is true, and the
-       ;; lane count already bounds the threads
+       ;; :mixed gives each worker its own thread: the declared workload is true, and the
+       ;; worker count already bounds the threads
        :workload :mixed
        :ping-map-fn (fn [st] (select-keys st [:n]))})
   ([args] {:perform (:perform args) :kind (:kind args) :ctx (:ctx args) :n 0
@@ -332,19 +332,19 @@
           :else {:value c})))
 
 (defn procs
-  "The owner and lane procs of every kind, for the root graph. Any proc reaches an owner
+  "The owner and worker procs of every kind, for the root graph. Any proc reaches an owner
   by its id, [:fx/<kind> :in]; back is the api's :back channel. Answers {pid def}."
   {:malli/schema [:=> [:cat :map :seon.host/chan] :map]}
   [kinds back]
   (reduce-kv
-    (fn [acc kind {:keys [perform lanes ctx rate]}]
-      (let [work (a/chan lanes) owner (keyword "fx" (name kind))]
+    (fn [acc kind {:keys [perform workers ctx rate]}]
+      (let [work (a/chan workers) owner (keyword "fx" (name kind))]
         (-> acc
             (assoc owner {:proc (flow/process #'owner-proc)
-                          :chan-opts {:in {:buf-or-n (cfg/value :seon.config.fx/buf)} :done {:buf-or-n (* 2 lanes)}}
-                          :args (cond-> {:kind kind :lanes lanes :work work :back back}
+                          :chan-opts {:in {:buf-or-n (cfg/value :seon.config.fx/buf)} :done {:buf-or-n (* 2 workers)}}
+                          :args (cond-> {:kind kind :workers workers :work work :back back}
                                   rate (assoc :rate rate :tick (a/chan 1)))})
-            (into (for [i (range lanes)]
+            (into (for [i (range workers)]
                     [(keyword (str "fx." (name kind)) (str i))
-                     {:proc (flow/process #'lane-proc) :args {:kind kind :perform perform :ctx ctx :work work :owner owner}}])))))
+                     {:proc (flow/process #'worker-proc) :args {:kind kind :perform perform :ctx ctx :work work :owner owner}}])))))
     {} kinds))

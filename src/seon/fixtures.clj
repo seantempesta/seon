@@ -1,5 +1,5 @@
 (ns seon.fixtures
-  "The end-to-end task graphs and the stand-in model's script.
+  "The end-to-end task graphs and the scripted model's script.
 
   The program: `app.calc` (and each scenario's namespace) holds stub functions that answer
   wrong values, and `app.proofs` holds the deftests that prove each task (red until the
@@ -27,7 +27,7 @@
 (defn- fenced {:malli/schema [:=> [:cat :string :string] :string]} [prose code] (str prose "\n```clojure\n" code "\n```\n"))
 
 (def calc-replies
-  "The stand-in's replies by task name and turn. square answers wrong first (its proof
+  "The scripted model's replies by task name and turn. square answers wrong first (its proof
   stays red, the next turn sees the failure and fixes it); neg is slow."
   {"add" [(fenced "add adds." "(in-ns 'app.calc)\n(defn add {:malli/schema [:=> [:cat :int :int] :int]} [a b] (+ a b))")]
    "twice" [(fenced "twice is add with itself." "(in-ns 'app.calc)\n(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (add x x))")]
@@ -87,23 +87,23 @@
 (def scenarios
   "Merge scenarios, by name (seon.e2e runs each as a row): :specs (the program and its
   tasks, in app.m), :after (merge task -> the merge task it must follow, so the order is
-  fixed), the stand-in's scripted replies by task name and turn, and :check, the forms a
+  fixed), the scripted model's replies by task name and turn, and :check, the forms a
   fresh agent runs on what main runs, with :expect, what they must print (one string per
   form); :model holds the :check and :expect of a real model's run where they differ: what
   the task's plan and proofs ask of any correct solution, where :check also asserts the
-  stand-in's own extras.
+  scripted model's own extras.
   - :conflict: a and b both rewrite f (same behaviour, different text); b merges after a,
     gets one conflict, and its merge agent takes main's version.
   - :semantic: a triples scale; b defines six from scale on a branch where scale doubles.
     No key overlaps, but six-test is red after b's merge agent merges main; it fixes six.
   - :sibling: a and b change two definitions of one namespace; b merges after a, and b's g
     calls a helper b defined, h3, which sorts after it. b's merge agent (forked holding
-    main's program, resuming b's branch) must run b's g (lane T5b's finding: loading in name
+    main's program, resuming b's branch) must run b's g (session T5b's finding: loading in name
     order failed on the helper and left main's stub running).
   - :newns: n creates two namespaces at its REPL (next-review #6, #5): app.newns with a
     function, quoted data and a dynamic var, and app.newns-test whose deftest uses a
     :refer'd fn; a def in `user` stays scratch. Main must run all of it as written.
-  - :hairy: a and b both rewrite f1..f4: four conflicts (dial 3), so b's merge fails and
+  - :hairy: a and b both rewrite f1..f4: four conflicts (:seon.config.merge/max-conflicts 3), so b's merge fails and
     design -> implement -> test -> merge attach; on main's code b's proofs pass."
   {:conflict {:specs [{:name "a" :ns 'app.m :var "f" :stub (defn1 "f" "0")
                        :plan "Make `app.m/f` pass its proof `app.proofs/a-test`. Write its body as (+ x 1)." :proof "(deftest a-test (is (= 2 (app.m/f 1))))"}
@@ -201,7 +201,7 @@
       (fenced "Rewrite in my own words." (str "(in-ns 'app.sw)\n" (defn1 (str "v" j) (str "(+ x " j (str/join (repeat (quot k 5) " 0")) ")")))))))
 
 (def ^:private generic
-  "The stand-in's reply by task kind (from the name): a merge agent takes main's side of
+  "The scripted model's reply by task kind (from the name): a merge agent takes main's side of
   every unmerged entry; a design agent improves the plan and waits."
   {"-merge" (fenced "Take main's version of each conflict." "(doseq [e (my.branch/unmerged)] (my.branch/resolve! (second (:key e)) :theirs))")
    "-design" (fenced "Main's code is the base now." "(my.task/update! :seon.task/plan str \" Design: build on main's definitions as they are.\")\n(my.turn/wait)")})
@@ -212,7 +212,7 @@
   (into calc-replies (for [[k {:keys [replies]}] scenarios [nm r] replies] [(str (name k) "/" nm) r])))
 
 (defn two-calls
-  "The stand-in that proves a turn's rhythm (seon.agent-test): its first call evaluates
+  "The scripted model that proves a turn's rhythm (seon.agent-test): its first call evaluates
   (+ 20 21); each later call adds one to the answer the last call's result printed, so its
   code holds what it saw before it was made."
   {:malli/schema [:=> [:cat :seon.model/request] :string]}
@@ -222,7 +222,7 @@
     "(+ 20 21)"))
 
 (defn reply
-  "The stand-in model: the scripted reply for the request's task and turn (the last one
+  "The scripted model: the scripted reply for the request's task and turn (the last one
   repeats); a swarm task's reply is generated from its index; a merge or design task
   without a script gets the generic reply of its kind; any other task, prose without code."
   {:malli/schema [:=> [:cat :seon.model/request] :string]}

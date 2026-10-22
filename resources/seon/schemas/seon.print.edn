@@ -14,7 +14,7 @@
  :seon.print/prose [:map [:text :string] [:shown :string] [:truncated? :boolean]
                     [:omitted {:optional true} nat-int?] [:lines {:optional true} nat-int?]
                     [:offset {:optional true} nat-int?] [:continuation {:optional true} :any]]
- ;; the allotter's working node ({:kind :leaf|:string|:name|:map|:coll|:entry ...}) and its context (budget, width, dials)
+ ;; the allotter's working node ({:kind :leaf|:string|:name|:map|:coll|:entry ...}) and its context (budget, width, config keys)
  :seon.print/alloc [:map [:kind [:enum :leaf :string :name :map :coll :entry]]]
  :seon.print/context [:map [:budget number?] [:max-depth number?]]
  ;; a print node (a face and its members), and one fipp operation

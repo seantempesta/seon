@@ -87,7 +87,7 @@
             sd (proofs/step-digests all {:env "e" :tree "t1"})]
         (is (= (set (keys proofs/check-steps)) (set (keys (:digests sd)))))
         (is (= [] (:missing sd)))
-        (is (not= ((:digests sd) "dragons") ((:digests (proofs/step-digests all {:env "e" :tree "t2"})) "dragons")))))
+        (is (not= ((:digests sd) "laws") ((:digests (proofs/step-digests all {:env "e" :tree "t2"})) "laws")))))
     (testing "a step whose function the program does not define (renamed) has no digest and is named missing"
       (is (= {} (program/reach-digests db {:env "e" :tree "t"} {"gone" '[app.pv-check/renamed]})))
       (is (= ["smoke"] (:missing (proofs/step-digests (fn [roots] (dissoc (zipmap (keys roots) (map str (keys roots))) "smoke")) {:env "e" :tree "t"})))))))

@@ -78,7 +78,7 @@ Its references are derived from the plan's citations by the one parser ([referen
 4. **Act:** write the simplest code that passes, at the cause, in the owner of the bad value.
 5. **Work it as a Seon agent would**, through the server (§6): attach, read the context, evaluate, `seon_done`. What the context lacked is a task. If the owner will see it (a page, a render), have a subagent with the browser compare the page against the facts.
 
-**Integrate small and often.** Branches live hours; merge main in after every merge into main. To be merged, a worktree session merges main in, proves its own tests red → green, and reports: commits, numbers against estimates, what it deleted, and that nothing of its is running. **Root merges** branches into main (never copying files), in batches of ready branches proven together. Before approving it reads each batch's verdict (a subagent may read a long log for it) and its `src` diff stat; a merge that grows `src` names what it deletes. The mechanics (exit statuses, batching, conflicts, pin bumps): [landing](docs/landing.md) (to be renamed). **Every branch is reviewed before it merges** (owner, 2026-10-22: "make sure agents are doing good work and not building fragile fences and guards again"): a reviewer reads its diff against main for §9's mistakes (a guard, a fake default, a clock deciding, a second mechanism, a fix at the reader instead of the producer, an old §7a word, a test that cannot fail), each finding with file:line and its right fix; the worktree session fixes them before its branch merges. The mechanics (exit statuses, what a merge runs, batching, conflicts, pin bumps): [landing](docs/landing.md) (to be renamed).
+**Integrate small and often.** Branches live hours; merge main into the branch whenever main moves. To be merged, a worktree session merges main in, proves its own tests red → green, and reports: commits, numbers against estimates, what it deleted, and that nothing of its is running. **Root merges** branches into main (never copying files), in batches of ready branches proven together. Before approving it reads each batch's verdict (a subagent may read a long log for it) and its `src` diff stat; a merge that grows `src` names what it deletes. **Every branch is reviewed before it merges** (owner, 2026-10-22: "make sure agents are doing good work and not building fragile fences and guards again"): a reviewer reads its diff against main for §9's mistakes (a guard, a fake default, a clock deciding, a second mechanism, a fix at the reader instead of the producer, an old §7a word, a test that cannot fail), each finding with file:line and its right fix; the worktree session fixes them before its branch merges. The mechanics (exit statuses, what a merge runs, batching, conflicts, pin bumps): [merging](docs/merging.md).
 
 ### Testing: compute only what is needed
 
@@ -99,7 +99,7 @@ Its references are derived from the plan's citations by the one parser ([referen
 **If nothing has changed, we do nothing.**
 - No proc steps, renders, pings, flushes or polls on an idle system.
 - **Reactive:** a proc reports its own problems as facts and its changes as events. Health is the absence of open problem facts.
-- **No clock or timer decides anything.** Work runs because it arrived, is admitted by its measured workload, and parks when there is none. Time is measured and recorded, never acted on: `bin/dragons clocks` lists every place time decides and `bin/dragons measures` every clock read, each named in [clocks](docs/clocks.md) with its reason; an unnamed one is red.
+- **No clock or timer decides anything.** Work runs because it arrived, is admitted by its measured workload, and parks when there is none. Time is measured and recorded, never acted on: `bin/laws clocks` lists every place time decides and `bin/laws measures` every clock read, each named in [clocks](docs/clocks.md) with its reason; an unnamed one is red.
 - **The exceptions:**
   - the cron proc, which only puts a message on a queue at a scheduled time;
   - a message's delayed insert (core.async `timeout`) when a provider says "retry after a short wait";
@@ -140,12 +140,12 @@ Every need is met by one of these. If one doesn't fit, stop and say so; never ro
   - Ports too: each checkout has its own (`bin/ports`).
 - **One store, many branches,** as in production. Tests, checks and runs take a branch of one seeded store. A separate store is a last resort, and says why where it is made.
 - **Contracts (Malli function schemas) on every function,** instrumented at definition, and every contract must generate (`mg/check` in `bin/check`).
-- **No guards.** Every outside-world failure point is named in the failure points page (`docs/DRAGONS.md`, to be renamed), with its one edge function and declared error. Nothing else catches: `bin/dragons catch` lists every `catch` and is red on one the page does not name.
+- **No guards.** Every outside-world failure point is named in the failure points page (`docs/failure-points.md`), with its one edge function and declared error. Nothing else catches: `bin/laws catch` lists every `catch` and is red on one the page does not name.
 - **Effects go through their owner** (`my.fx/call`, `my.fx/send`). The asker records the outcome on its own branch.
 - **Durability is continuous group commit.** A write is answered when committed in memory. One followed by an outside effect waits for the sync that covers it.
 - **Every definition happens once, where it is defined.**
   - Behaviour varies through the environment (a forked process holding exactly its definitions) or through data.
-  - `intern`, `alter-var-root` and `with-redefs` are code smells (owner, 2026-10-21: "intern isn't banned it's a code smell"). A legitimate use builds vars programmatically in a namespace you own, where no definition form exists (a REPL harness, a test environment), and its docstring says why. Filling a gap in another namespace (a library's, Jolt's stdlib) is fixed in that namespace's owner instead. Stub-by-rebinding is replaced by a test environment that holds the stub's definition. `bin/dragons resolution` lists every such site in `src`, each named in [resolution](docs/resolution.md) with its reason.
+  - `intern`, `alter-var-root` and `with-redefs` are code smells (owner, 2026-10-21: "intern isn't banned it's a code smell"). A legitimate use builds vars programmatically in a namespace you own, where no definition form exists (a REPL harness, a test environment), and its docstring says why. Filling a gap in another namespace (a library's, Jolt's stdlib) is fixed in that namespace's owner instead. Stub-by-rebinding is replaced by a test environment that holds the stub's definition. `bin/laws resolution` lists every such site in `src`, each named in [resolution](docs/resolution.md) with its reason.
 - **Results are reused by input digest.** A test's result is keyed by the digest of everything it reaches, a check step's by its build's source, a build's by its sources. Unchanged inputs are never run again.
   - Content-keyed reuse is allowed for units measured as expensive; no other caches, and never one keyed by time.
 - **Estimates are proofs.** A function whose input grows carries a cost proof. An overrun, or growth steeper than the work needs, is red.
@@ -165,7 +165,7 @@ Each checkout runs its own standing root with `bin/root start` (also `status`, `
 - It runs detached, on the checkout's ports (`bin/ports`; the owner's main tree uses 7888, with the dashboard on 7777).
 - Its store is kept under `runs/`.
 
-Reach it through the `seon` MCP server (`bin/mcp`, a stdio relay to the entrance, which answers MCP itself):
+Reach it through the `seon` MCP server (`bin/mcp`, a stdio relay to the server, which answers MCP itself):
 - `seon_agents`;
 - `seon_eval` (an agent's own REPL, recorded `:outside`, or `root`);
 - `seon_context` (what the model reads now);

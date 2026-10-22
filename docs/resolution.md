@@ -1,6 +1,6 @@
 # Resolution
 
-A name resolves at run time, or a Var is defined outside its definition form, only where this page names the function and its reason; `bin/dragons resolution` lists every such site in `src/`.
+A name resolves at run time, or a Var is defined outside its definition form, only where this page names the function and its reason; `bin/laws resolution` lists every such site in `src/`.
 
 Every definition happens once, where it is defined: code names what it calls through its
 namespace's requires, and behaviour varies through the environment or through data
@@ -8,10 +8,10 @@ namespace's requires, and behaviour varies through the environment or through da
 data names it (a declaration, a schema's render, a cost estimate) or where the compiler's
 facts are read; a Var's root changes only when its contract is armed.
 
-`bin/dragons resolution` lists every function in `src/` that calls `requiring-resolve`,
+`bin/laws resolution` lists every function in `src/` that calls `requiring-resolve`,
 `ns-resolve`, `resolve` on a quoted symbol, `intern`, `alter-var-root` or `with-redefs`
 (strings and comments left out), and fails on one not named here. An agent's own program
-is judged from the compiler's facts at merge (`seon.program/banned`), not by this census.
+is judged from the compiler's facts at merge (`seon.program/banned`), not by this check.
 
 ## Sanctioned
 

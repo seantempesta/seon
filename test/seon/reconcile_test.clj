@@ -266,8 +266,8 @@
           (is (= #{"demo/a-merge"} (r/blocked-by (r/index db) "demo/b"))))))))
 
 (deftest green-merge-attempt-merges
-  ;; a train of one: no other merge attempt runs
-  (is (= [{:op :merge-train :attempt "demo/a-merge#1" :members [{:attempt "demo/a-merge#1" :task "demo/a-merge"}]}]
+  ;; an octopus merge of one: no other merge attempt runs
+  (is (= [{:op :octopus-merge :attempt "demo/a-merge#1" :members [{:attempt "demo/a-merge#1" :task "demo/a-merge"}]}]
          (r/reconcile (mdb [(decl "a")] :extra (concat (attempt "a" 1 :done)
                                                        (attempt "a-merge" 1 :ended :outcome :green :results {(t "a") :pass}))))))
   ;; (the attempt helper names branches by task id; only the action matters here)
@@ -290,18 +290,18 @@
       (is (= ["demo/x" "demo/y" "demo/z"] (map :task (r/reconcile (mdb three))))))))
 
 (deftest boot-records-merge-max-running-one
-  ;; DECISIONS: merge trains stay off (one merge at a time) until the train's combined test run
-  ;; and the par-200 hang are fixed; the dial in force is a fact on main a person can read
+  ;; DECISIONS: octopus merges stay off (one merge at a time) until the octopus merge's combined test run
+  ;; and the par-200 hang are fixed; the config value in force is a fact on main a person can read
   (let [db (d/db-with (empty-db) (into (task/boot-tx "boot-1" 4) (cfg/facts cfg/config {})))]
     (is (= 1 r/default-max-merging))
-    (is (= {:boot "boot-1" :max-running 4 :max-merging 1} (task/root db)) "both dials are recorded at boot")))
+    (is (= {:boot "boot-1" :max-running 4 :max-merging 1} (task/root db)) "both config keys are recorded at boot")))
 
 (deftest two-ready-disjoint-merges-run-one-at-a-time-by-default
-  ;; x and y change disjoint definitions: a train could take both, but the dial is 1
+  ;; x and y change disjoint definitions: an octopus merge could take both, but the config says 1
   (let [two [(decl "x") (decl "y")]
         extra (concat (attempt "x" 1 :done :changed #{"[:var app.m/x]"}) (attempt "y" 1 :done :changed #{"[:var app.m/y]"}))]
     (is (= ["demo/x-merge"] (map :task (filter #(= :spawn (:op %)) (r/reconcile (mdb two :extra extra))))))
-    (testing "a train is turned on by writing the fact"
+    (testing "an octopus merge is turned on by writing the fact"
       (is (= ["demo/x-merge" "demo/y-merge"]
              (map :task (filter #(= :spawn (:op %)) (r/reconcile (mdb two :extra (concat extra [{:seon.root/id :root :seon.config.merge/max-running 8}]))))))))))
 
@@ -443,8 +443,8 @@
 (deftest hairy-rule
   (let [t {:seon.task/accumulated {:plan "Use `app/g` and `app/f`." :proofs #{'app.proofs/a-test}}}
         c (fn [k kind] {:key [:var k] :kind kind})
-        dials {:max-conflicts 3 :max-merge-turns 2}]
-    (are [conflicts merge-turns rule] (= rule (:rule (r/hairy (merge dials {:conflicts conflicts :task t :merge-turns merge-turns}))))
+        merge-cfg {:max-conflicts 3 :max-merge-turns 2}]
+    (are [conflicts merge-turns rule] (= rule (:rule (r/hairy (merge merge-cfg {:conflicts conflicts :task t :merge-turns merge-turns}))))
       [] 0 nil
       [(c 'app/f :both-modified)] 0 nil
       [(c 'app/f :both-modified) (c 'app/h :both-modified) (c 'app/i :both-added)] 0 nil
@@ -575,5 +575,5 @@
     (is (= [conflict] (:seon.attempt/task-conflicts (d/pull judged [:seon.attempt/task-conflicts] [:seon.attempt/id "demo/a#1"]))))
     (is (= [(assoc conflict :from "demo/a#1")] (map :evidence (get-in (problems/report judged) [:classes :task-conflict :rows])))
         "root sees it among the problems")
-    (testing "main's task plans never put a landing behind: landing merges the program, no task data"
+    (testing "main's task plans never put a merge behind: merging merges the program, no task data"
       (is (empty? (:theirs (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program main #{}))))))))

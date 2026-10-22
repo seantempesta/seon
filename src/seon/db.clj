@@ -11,7 +11,7 @@
 
 (def schema
   "The Datahike schema, derived from the registry's entity schemas (resources/seon/schemas,
-  seon.schema.datahike; lane D1): one source of truth with the contracts."
+  seon.schema.datahike; session D1): one source of truth with the contracts."
   (sd/declarations contract/registry))
 
 (defn eid
@@ -43,7 +43,7 @@
                    :task/status :held :task/refs [[:var/name (symbol (str nsym) "f0")] [:var/name (symbol (str nsym) "f1")]]}]]))
             (range nns))))
 
-;; :writer :sync (vendor datahike.writer, lane F1): root's Flow :writer proc is the only
+;; :writer :sync (vendor datahike.writer, session F1): root's Flow :writer proc is the only
 ;; caller of transact, so it is THE serial writer; Datahike runs no queue, commit loop or
 ;; go block of its own (memory: commit p50 0.49 -> 0.39 ms, 639 -> 446 KB/tx, 2 threads
 ;; fewer per connection; src/proto/f1_bench.clj).

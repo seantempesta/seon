@@ -111,15 +111,15 @@
   (are [span expected] (= expected (kinds nil (str "`" span "`")))
     "app.calc/add" [['app.calc/add nil nil nil :doc]]
     ":seon.task/plan" [[:seon.task/plan nil nil nil :doc]]
-    "docs/DRAGONS.md" [[nil "docs/DRAGONS.md" nil nil :doc]]
-    "docs/DRAGONS.md#physics" [[nil "docs/DRAGONS.md" "physics" nil :doc]]
+    "docs/failure-points.md" [[nil "docs/failure-points.md" nil nil :doc]]
+    "docs/failure-points.md#physics" [[nil "docs/failure-points.md" "physics" nil :doc]]
     "src/seon/repl.clj" [[nil "src/seon/repl.clj" nil nil :doc]]
     "(my.task/current)" []
     "add" []
     "a b c" []
     "3" []
     "(unbalanced" [])
-  (is (= '[app.calc/add] (ref/names "`:seon.task/plan` `docs/DRAGONS.md` `(my.task/current)` `app.calc/add`"))
+  (is (= '[app.calc/add] (ref/names "`:seon.task/plan` `docs/failure-points.md` `(my.task/current)` `app.calc/add`"))
       "the review's reproduction: one var, the form is code")
   (is (= '[app.calc/twice] (ref/names "Use `app.calc/twice`.\n```clojure\n(app.calc/add `x` 1)\n```\nnot `prose with/slash`")))
   (is (= [] (ref/names ""))))

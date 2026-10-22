@@ -1,6 +1,6 @@
 (ns seon.proofs
   "Proofs: what a change must run, and what a run proved. prove's selection (task
-  seon.proofs/prove-runs-what-a-change-reaches, docs/landing.md#a-merge-runs-what-the-change-reaches):
+  seon.proofs/prove-runs-what-a-change-reaches, docs/merging.md#a-merge-runs-what-the-change-reaches):
   a key (a test var, or a bin/check step of check-steps) runs only when no green result is
   stored at its reach digest (seon.program/reach-digests), in the one directory every checkout
   shares; bin/prove, bin/test, bin/check without a run size and an agent's test run all
@@ -82,11 +82,11 @@
   step it does not name), as prove keys them: each step name (a bin/check --steps unit) to the
   seon.check mode functions its body runs, whose reach is the step's (seon.program/
   reach-digests with roots), with the checkout's :env (bin/, native/, resources/, the pins:
-  the binary's other inputs) in every digest. dragons (bin/dragons) reads the whole tree and has no
+  the binary's other inputs) in every digest. laws (bin/laws) reads the whole tree and has no
   functions: its key is the tree's digest (step-digests)."
-  '{"dragons" :tree "lmdb-kill" [] "contracts" [seon.check/contracts] "census" [seon.check/census] "fx" [seon.check/fx]
+  '{"laws" :tree "lmdb-kill" [] "contracts" [seon.check/contracts] "mg-check" [seon.check/mg-check] "fx" [seon.check/fx]
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
-    "threads" [seon.check/threads-check] "admit" [seon.check/admit] "record" [seon.check/record]
+    "threads" [seon.check/threads-check] "instrument" [seon.check/instrument] "record" [seon.check/record]
     "problems" [seon.check/problems-check] "smoke" [seon.check/smoke] "robust" [seon.check/robust]
     "lifecycle" [seon.check/lifecycle] "backpressure" [seon.check/backpressure] "hotreload" [seon.check/hotreload]
     "drain" [seon.check/drain] "idle" [seon.check/idle] "orphan" [seon.check/orphan]

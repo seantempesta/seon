@@ -1,6 +1,6 @@
 #!/bin/zsh
 # bin/prove [--tests | --checks] [NS ...] — run exactly what the change reaches (task
-# seon.proofs/prove-runs-what-a-change-reaches, docs/landing.md): every test (of the named
+# seon.proofs/prove-runs-what-a-change-reaches, docs/merging.md): every test (of the named
 # namespaces) and every bin/check step (seon.proofs/check-steps) whose reach digest has no green
 # result in the results directory every checkout shares runs; the rest are reused. An unchanged
 # tree runs nothing. Tests run in :seon.config.proofs/jobs shards at once (bin/test); the steps to run go

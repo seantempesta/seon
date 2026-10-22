@@ -1,10 +1,10 @@
 (ns seon.agent-proc
   "An agent's proc in root: one proc of the root graph per agent, added and removed by
   the api with flow/update!. It owns root's end of the agent's socket, a jolt.async.remote
-  end (lane RC1): the agent's frames arrive as values on the end's :in, which IS this
+  end (session RC1): the agent's frames arrive as values on the end's :in, which IS this
   proc's :from in-port, and what it sends the agent is put on the end's :out. It owns the
   agent's process and passes Flow's pause, resume and stop on to the agent's own loop.
-  From proto/flow f2-final proto.control (lane F2)."
+  From proto/flow f2-final proto.control (session F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.sock :as sock] [seon.step :as step]
             [jolt.async.remote :as remote] [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
@@ -41,14 +41,14 @@
 
 (def stall-ms
   "Silence, ms, after which a busy agent is observed stalled once (a recorded fact, never an
-  end; lane D2). A guessed tolerance (FENCES finding 5) and a clock (owner 2026-10-21: no
+  end; session D2). A guessed tolerance (FENCES finding 5) and a clock (owner 2026-10-21: no
   clocks decide anything), so not a config key; it goes with
   seon.fences/a-stall-is-past-the-requests-own-bound. root's start! takes :stall-ms (the
   problems check provokes a stall at 1,000). 0: no check."
   30000)
 
 (def stop-bound-ms
-  "How long an agent may take to exit after :stop before it is SIGKILLed. A fence, not a
+  "How long an agent may take to exit after :stop before it is SIGKILLed. A guard, not a
   config key (FENCES finding 3: a clock standing in for the exit event); it goes with
   seon.root/shutdown-and-death-are-dataflow."
   2000)
@@ -92,10 +92,10 @@
                                                                         :since-ms (System/currentTimeMillis)})))]}]))
     :write [(cond-> (to-proc! st (:msg m)) (= :fx-reply (:op (:msg m))) (update :fx-out (fnil dec 1))) nil]
     ;; root's stall check (seon.root's timer): a request in flight, no frame from the agent
-    ;; for longer than the dial and no effect of its outstanding is a stall, observed once
+    ;; for longer than the stall bound and no effect of its outstanding is a stall, observed once
     ;; per quiet spell
     :stall? (let [quiet (- (:now-ms m) (:last-frame-ms st (:now-ms m)))]
-              (if (and (seq (:inflight st)) (not (:stall-seen st)) (> quiet (:dial-ms m)) (zero? (:fx-out st 0)) (not (:dead? st)))
+              (if (and (seq (:inflight st)) (not (:stall-seen st)) (> quiet (:stall-ms m)) (zero? (:fx-out st 0)) (not (:dead? st)))
                 [(assoc st :stall-seen true)
                  {:to-api [{:op :stalled :agent (:id st)
                             :error (contract/error :seon.agent/stalled 'seon.agent-proc/agent-proc

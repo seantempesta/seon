@@ -1,5 +1,5 @@
 (ns seon.step
-  "The step-fn contract as the one process abstraction (lane F2; proto/flow f2-final
+  "The step-fn contract as the one process abstraction (session F2; proto/flow f2-final
   proto.step and proto.proc). Root's procs run under
   core.async.flow. A process that must stay single-threaded so it can fork (the fork
   server, an agent) runs the SAME step-fn on its own thread with `run-loop`, and
@@ -68,7 +68,7 @@
   [st v] (let [rid (inc (:rid st))] [(cond-> (assoc st :rid rid) (some? v) (assoc-in [:pending rid] v)) rid]))
 
 (defn ask
-  "A proc's request to root's api, through the entrance: st with v pending under a new id,
+  "A proc's request to root's api, through the server: st with v pending under a new id,
   and the message for the proc's :to-api port; the api answers {:tag rid :r r} on route
   ([pid in]). Answers [st' message]."
   {:malli/schema [:=> [:cat [:map [:rid :int] [:pending :map]] [:tuple :keyword :keyword] :any :map] [:tuple :map :map]]}
