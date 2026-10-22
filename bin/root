@@ -1,11 +1,11 @@
 #!/bin/zsh
 # bin/root [start [ARGS]|stop|status|next]   this checkout's standing root, on this checkout's own
-# ports (bin/ports): its entrance (reached by bin/mcp, or `printf '{:op :agents}\n' | nc -w 5
+# ports (bin/ports): its server (reached by bin/mcp, or `printf '{:op :agents}\n' | nc -w 5
 # 127.0.0.1 PORT`) and its dashboard. `start` (the default) runs it detached: double-forked so it
 # is re-parented to PID 1, because the tool host kills a background task's whole process tree
 # when the task stops or its agent exits (ISOLATION, 2026-10-21). It runs until `bin/root stop`
 # closes its stdin. ARGS go to the root (`--set :seon.config.source/root=\"DIR\"`, ...). Its
-# output: runs/root.log; its pids: runs/root.pids ("TAIL ROOT"); the entrance port it was started
+# output: runs/root.log; its pids: runs/root.pids ("TAIL ROOT"); the server port it was started
 # on (bin/ports' resolution, what bin/mcp relays to): runs/root.port, while it runs.
 # `next` restarts the next generation (owner, 2026-10-21; docs/source.md#the-next-generation):
 # it asks the running root for the generation main records (my.root/next-generation: the tree
@@ -70,7 +70,7 @@ stop() {
 }
 case ${1:-start} in
   status)
-    if running; then read T R < "$PIDS"; print "root $R up: entrance $PORT, dashboard http://127.0.0.1:$WEB/"
+    if running; then read T R < "$PIDS"; print "root $R up: server $PORT, dashboard http://127.0.0.1:$WEB/"
     else print "no root running for $ROOT (ports $PORT $WEB)"; exit 1; fi ;;
   stop)
     running || { print "no root running"; exit 0 }

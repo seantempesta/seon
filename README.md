@@ -33,6 +33,6 @@ robust locks into `target/lib/liblmdb.dylib`, which `bin/env` points `JOLT_LMDB_
 - `native/` — `probe.c` (Mach memory accounting), built into `target/lib`
 - `src/`, `web/`, `resources/` — the platform, arriving by need (see each README)
 - `test/` — deftests; `test/build/` holds the build's smoke binary
-- `docs/` — `forks.md` (provenance), `vocabulary.md` (the words), `DRAGONS.md` (the named catch sites)
+- `docs/` — `forks.md` (provenance), `vocabulary.md` (the words), `failure-points.md` (the named catch sites)
 - `AGENTS.md` — how work is handed out and done; `resources/seon/tasks/` — the work itself, as task files
 - `BAGGAGE.md` — what we left behind, and why

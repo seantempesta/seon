@@ -13,7 +13,7 @@
             [seon.merge :as pm]
             [seon.program :as program]
             [seon.source :as source]
-            [seon.program-test :as pt] [seon.harvest :as harvest]))
+            [seon.program-test :as pt] [seon.stage :as stage]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -241,7 +241,7 @@
   ;; BUILD plan P5 (task seon.source/the-next-generation-runs-from-the-merges-commit),
   ;; through the path the owner uses: bin/root starts a root on a clone of this checkout
   ;; (Seon's own source as main's program, its store under this test's directory); through
-  ;; its entrance two loop turns merge seon.fixtures/generation 1 -> 2 and a new
+  ;; its server two loop turns merge seon.fixtures/generation 1 -> 2 and a new
   ;; seon.fixtures/generations, each live in place. Root is SIGKILLed and the same binary,
   ;; older than both merges, started on the same store and main: it catches up at boot
   ;; (seon.program/load-all!). Then the cold-start path: my.root/build! builds main's last
@@ -255,12 +255,20 @@
   (let [dir (scratch-dir "nextgen")
         tree (str dir "/tree")
         port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
-        env ["env" (str "SEON_RUNS=" dir "/runs") (str "SEON_ENTRANCE_PORT=" port) "SEON_WEB_PORT=0"]
+        ;; its root's own store and main, named: an inherited SEON_STORE or SEON_MAIN (a bin/check
+        ;; run's) otherwise opens a store whose main already holds these merges, made in another
+        ;; run's clone (task seon.source/the-restart-test-runs-its-root-on-its-own-store)
+        env ["env" (str "SEON_RUNS=" dir "/runs") (str "SEON_STORE=" dir "/runs/store") "SEON_MAIN=main"
+             (str "SEON_ENTRANCE_PORT=" port) "SEON_WEB_PORT=0"]
         root! (fn [& args] (apply sh/sh (concat env [(str here "/bin/root")] args)))
-        ask (fn [code] (let [r (sh/sh "nc" "-w" "600" "127.0.0.1" (str port)
-                                      :in (str (pr-str {:op :eval :agent "root" :code code}) "\n"))
-                             a (try (clojure.edn/read-string {:default tagged-literal} (:out r)) (catch Exception _ nil))]
-                         (some-> a :items first :printed clojure.edn/read-string)))
+        ;; one request line, then its one reply line: the read ends on the reply, or on EOF when the
+        ;; root closes the connection or dies (nil, a recorded verdict); nc -w never times out on macOS
+        ask (fn [code] (with-open [s (java.net.Socket. "127.0.0.1" (int port))]
+                         (let [out (.getOutputStream s)
+                               _ (doto out (.write (.getBytes (str (pr-str {:op :eval :agent "root" :code code}) "\n") "UTF-8")) (.flush))
+                               line (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s) "UTF-8")))
+                               a (try (clojure.edn/read-string {:default tagged-literal} line) (catch Exception _ nil))]
+                           (some-> a :items first :printed clojure.edn/read-string))))
         pids (fn [] (str/split (str/trim (slurp (str dir "/runs/root.pids"))) #" "))
         cloned (sh/sh "git" "clone" "-q" "--local" here tree)
         started (root! "start" "--set" (str ":seon.config.source/root=" (pr-str tree))
@@ -423,7 +431,7 @@
         errs (program/load-changes! (:db-after rep) (pdb/report->tx rep))]
     (is (= [] errs))
     (is (= 2 (some-> (resolve (symbol (str nsym) "b")) deref (apply []))) "the imported form is loaded where main's program runs")
-    (is (= [] (harvest/stage-tx (:db-after rep))) "so staging this runtime unmaps nothing")))
+    (is (= [] (stage/stage-tx (:db-after rep))) "so staging this runtime unmaps nothing")))
 
 (deftest the-source-read-carries-each-reference-code-pin
   ;; land6 review, must-fix 4: a cited reference-code file shows the revision main's source

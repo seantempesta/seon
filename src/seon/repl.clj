@@ -1,5 +1,5 @@
 (ns seon.repl
-  "An agent's REPL speaking nREPL's message model on its one thread (worktree session F2, after
+  "An agent's REPL speaking nREPL's message model on its one thread (session F2, after session
   R2's r2.repl; the owner chose nREPL's model for agents).
 
   The agent's process runs `agent-step` (the step-fn contract) under seon.step/run-loop.
@@ -24,7 +24,7 @@
   socket), and the request's answers go back folded, as one {:op :reply :items ...}.
 
   Interrupt is out of band: root sends SIGUSR1 (seon.intr), which stops the request it
-  lands in and nothing after it. Seon's platform ops (tests, stats, clone,
+  arrives in and nothing after it. Seon's platform ops (tests, stats, clone,
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
@@ -64,7 +64,7 @@
         r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. code))
         starts (delay (reader/line-starts code))
         eval-fn (:repl/eval-fn req eval)
-        ;; the form's budget of work (engine ticks): the request's, else the dial for an
+        ;; the form's budget of work (engine ticks): the request's, else the config key for an
         ;; agent's model and an outside agent; root's own platform requests run unbounded
         ticks (let [t (or (:ticks req)
                           (when (#{:model :outside :ui} (:origin req)) (cfg/value :seon.config.agent/form-ticks)))]
@@ -238,8 +238,8 @@
     (let [ef (:repl/eval-fn req eval)]
       (h (assoc req :repl/eval-fn (fn [form] (binding [mr/*registry* (branch-registry)] (ef form))))))))
 
-(defn- admit
-  "Admit a definition by its contract (G1's proto.agent/admit!, Seon's rule): a function var
+(defn- instrument
+  "Instrument a definition by its contract (G1's proto.agent/admit!, Seon's rule): a function var
   with :malli/schema is armed and leaves the agent's uncontracted set; one without joins
   it, and the response carries the warning naming every uncontracted definition so far.
   Answers the response's additions (its reply item's keys)."
@@ -259,9 +259,9 @@
                                                          "A branch carrying an uncontracted function is refused at merge.")
                                      :uncontracted (vec (sort-by str u)) :count (count u)}]})))))
 
-(defn wrap-admit
-  "Each var a form defined (wrap-record's :repl/defined) is admitted by its contract
-  (admit): armed, or a growing warning."
+(defn wrap-instrument
+  "Each var a form defined (wrap-record's :repl/defined) is instrumented by its contract
+  (instrument): armed, or a growing warning."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
@@ -269,14 +269,14 @@
          (fn [m]
            ;; arming compiles the contract: against the branch's population, as its eval did
            (binding [mr/*registry* (if (seq (:repl/defined m)) (branch-registry) {})]
-             (reduce (fn [m s] (if-let [v (find-var s)] (merge m (admit v)) m)) m (:repl/defined m))))))))
+             (reduce (fn [m s] (if-let [v (find-var s)] (merge m (instrument v)) m)) m (:repl/defined m))))))))
 
 (def middleware
-  "Outermost first. Answers pass innermost first: record, cost, admit, caught, print. The
+  "Outermost first. Answers pass innermost first: record, cost, instrument, caught, print. The
   eval fn is the registry's binding around record's around cost's around eval, so an eval's
   cost is the eval's (with the compiler's tap in it, as part of compiling); keying the
   branch's registry, read before each form, is not the form's (0.7 ms measured)."
-  [wrap-print wrap-caught wrap-admit wrap-cost wrap-record wrap-registry])
+  [wrap-print wrap-caught wrap-instrument wrap-cost wrap-record wrap-registry])
 
 (defn handler
   "eval-code with the middleware composed over it, outermost first."
@@ -338,7 +338,7 @@
   "Evaluate code through the one REPL path: the handler and its middleware, its answers
   folded into reply items, each with who asked (:origin, when not the agent's own :model),
   and recorded (an agent's, on its branch). From inside an agent, the turn loop's forms; req
-  adds to the request (root's: seon.entrance's namespace, origin, budget and eval fn; root's
+  adds to the request (root's: seon.server's namespace, origin, budget and eval fn; root's
   requests to an agent: agent-step's). The request's entrant boundary: a defect past a
   form's own (a middleware's, the printer's) ends the request with the answers so far and
   one :err item, its error map, recorded with them."
@@ -372,7 +372,7 @@
      (do
        ;; an interrupt left from before this request is not its; then root hears that it began
        ;; (its proc's :started event), what an interrupt or a kill meant for a running eval
-       ;; waits on, never a sleep: one landing from here on stops it
+       ;; waits on, never a sleep: one arriving from here on stops it
        (intr/clear-pending!)
        (agent/send! {:op :started :id (:id m)})
        [st {:sock [{:op :reply :id (:id m) :items (eval-string (:forms m) (select-keys m [:ticks :origin]))

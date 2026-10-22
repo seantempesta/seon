@@ -5,8 +5,8 @@
   `:seon.task/needs` is the one dependency edge.
 
   This namespace is the one writer of those facts (tx-data builders; root transacts
-  them) and the one reader (pull shapes for the reconciler and the agent). From lanes R1
-  and M1's proto.agents.task; the attributes are derived from resources/seon/schemas (lane D1)."
+  them) and the one reader (pull shapes for the reconciler and the agent). From sessions R1
+  and M1's proto.agents.task; the attributes are derived from resources/seon/schemas (session D1)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn] [seon.merge :as pm] [seon.db :as pdb] [seon.edn :as sedn]
             [seon.print :as print] [seon.ref :as ref]))
@@ -123,7 +123,7 @@
      max-turns (assoc :seon.config.agent/max-turns max-turns))])
 
 (defn boot-tx
-  "Root's boot: its id for this process lifetime and its max-running dial (merges at once,
+  "Root's boot: its id for this process lifetime and its max-running config key (merges at once,
   :seon.config.merge/max-running, is written with the config in force, seon.config/facts)."
   {:malli/schema [:=> [:cat :string pos-int?] [:vector :map]]}
   [boot max-running]
@@ -293,7 +293,7 @@
   (some-> (d/pull db attempt-pull [:seon.attempt/id aid]) attempt-value))
 
 (defn root
-  "Root's boot and dials on db: {:boot :max-running :max-merging}, nil before the first boot."
+  "Root's boot and config keys on db: {:boot :max-running :max-merging}, nil before the first boot."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe [:map [:boot :string] [:max-running :int] [:max-merging {:optional true} :int]]]]}
   [db]
   (when-let [r (d/pull db [:seon.root/boot :seon.config.agent/max-running :seon.config.merge/max-running] [:seon.root/id :root])]

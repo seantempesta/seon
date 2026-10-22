@@ -1,7 +1,7 @@
 (ns seon.agent-test
   "An agent's process, run as the built binary (target/seon, bin/build seon): the root forks
   it, so the test boots a root of its own, as seon.root-test does, and asks the agent over
-  the entrance what its REPL answers.
+  the server what its REPL answers.
 
   An agent's test run, read from its child's pipe (task seon.fences/one-test-bound-derived-and-named):
   no clock ends it; the child's exit does, and a child that died names the test it was running.
@@ -12,7 +12,7 @@
 
 (defn in-agent
   "A root on the checkout's src (its source root), one agent on a task of its own, each of
-  forms evaluated in that agent (a string) or sent to the entrance as it is (a map): the
+  forms evaluated in that agent (a string) or sent to the server as it is (a map): the
   first item of every reply, or the answer that holds no items, in order. The root works on a
   main of its own, a branch of the one test store (target/runs/test-store), deleted with
   every branch under it when the root has stopped (seon.check/drop-mains).
@@ -85,7 +85,7 @@
   (let [[id] (in-agent ["(:seon.task/id (my.task/current))"])]
     (is (= (pr-str "demo/t") (:printed id)))))
 
-(deftest a-failure-marked-through-the-door-holds-the-task
+(deftest a-failure-marked-through-the-server-holds-the-task
   ;; owner, 2026-10-22: a failure is task data and root reacts to it. The agent marks its
   ;; task failed on its branch, hands the attempt back (seon_done), and root, at the
   ;; attempt's end, holds the task as :failed and reports it among the problems
@@ -113,7 +113,7 @@
   ;; owner, 2026-10-22 (DECISIONS "Agents work at the REPL, through tool calls"): a reply was a
   ;; batch of forms whose results came only after the whole reply, and 18% of model turns were
   ;; repetition loops asking for answers the model could not see. Now each call of the one
-  ;; tool, eval, is answered as its own tool message before the next model call: the stand-in
+  ;; tool, eval, is answered as its own tool message before the next model call: the scripted model
   ;; (seon.fixtures/two-calls) writes its second call from the answer its first call got
   (let [[end msgs] (in-agent ["(seon.turn/work! {:task \"demo/t\" :attempt \"demo/t#calls\" :max-turns 2})"
                               (str "(let [db (seon.agent/db)]"

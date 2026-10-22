@@ -153,7 +153,7 @@
   (is (= {:value 5050} (outcome 100000000 #(reduce + (range 101)))) "a form under its budget answers its value")
   (is (= {:value 3000000} (outcome nil #(loop [i 0] (if (= i 3000000) i (recur (inc i)))))) "no budget: unbounded"))
 
-(deftest an-interrupt-stops-only-the-request-it-lands-in
+(deftest an-interrupt-stops-only-the-request-it-arrives-in
   ;; research row 7: no client sends nREPL's `interrupt` op, so it cannot be what clears an
   ;; interrupt; root's SIGUSR1 stops the request running, and one that lands while the agent
   ;; is idle stops nothing that comes after it

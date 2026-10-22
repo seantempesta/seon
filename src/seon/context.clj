@@ -419,7 +419,7 @@
 
 (defn recorded
   "The last context attempt's reader got, made again from its turn's basis on db (seon.turn:
-  a model turn's user message, or an outside read through the entrance): {:text :origin
+  a model turn's user message, or an outside read through the server): {:text :origin
   :turn}, or nil. The page shows it; nothing stores the text."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe [:map [:text :string] [:origin :keyword] [:turn :string]]]]}
   [db attempt]

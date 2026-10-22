@@ -1,7 +1,7 @@
 (ns seon.web
   "Root's web proc (:web, an :io step-fn, declared in resources/seon/system.edn): it owns
   the HTTP listener (ring-chez-adapter, 127.0.0.1 only, fibers) and the tabs' SSE
-  channels, and renders nothing (W1 §5.1; proto/web's transport, lane L2). Its parts:
+  channels, and renders nothing (W1 §5.1; proto/web's transport, session L2). Its parts:
 
     in :http        the adapter's handlers (edge fibers) put each request here as data,
                     with a promise when it waits for an answer

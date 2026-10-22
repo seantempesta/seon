@@ -13,7 +13,7 @@
   ;; lib/mp-probe asked the kernel for each region's extended info, which walks every page of
   ;; the region: an agent maps the store's LMDB file twice at :seon.config.store/lmdb-map-bytes
   ;; (64 GiB), so one probe took ~1.25 s and 100 agents probing at their start serialized on
-  ;; the file's object (100 ready in 18 s, 640 ms before the map grew; lane spawn-regression,
+  ;; the file's object (100 ready in 18 s, 640 ms before the map grew; session spawn-regression,
   ;; 2026-10-22). Its cost must not grow with what the process maps: a probe with a 64 GiB map
   ;; open costs about what it costs with a 1 GiB map. Two LMDB envs on disk of this test's own,
   ;; the last resort: what is proved is a mapping's size; removed at the end

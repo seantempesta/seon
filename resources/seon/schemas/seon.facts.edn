@@ -1,4 +1,4 @@
-;; The program facts seon.db writes (lane D1's proto.db.facts.edn) (namespaces, vars, the example task and note) and the
+;; The program facts seon.db writes (session D1's proto.db.facts.edn) (namespaces, vars, the example task and note) and the
 ;; recording transaction of each eval request, as entity schemas. Stored shapes; the Datahike
 ;; schema is derived from them (seon.schema.datahike/declarations).
 {;; ---- the program, as the compiler knows it (seon.program; inv4's design) ----
@@ -31,7 +31,7 @@
  :form/inline-defs [:set :qualified-symbol]
  ;; the calls it bounds by a clock (deref with a timeout; Thread/sleep and core.async's
  ;; timeout are in its refs), and its catch clauses as EDN {:class name ("*" for a catch-all)
- ;; :answers :constant|:rethrows|:expr}: the facts the fence detectors query
+ ;; :answers :constant|:rethrows|:expr}: the facts the guard detectors query
  :form/timeouts [:set {:seon.db/index true} :qualified-symbol]
  :form/catches [:set :string]
  :ns/name [:and {:seon.db/identity true} :symbol]
@@ -119,7 +119,7 @@
                      [:seon.cluster.eval/record :seon.cluster.eval/record]]
  :seon.db/agent-fact [:map {:seon.db/attributes true}
                        [:seon.agent/id :seon.agent/id] [:seon.agent/answered-t {:optional true} :seon.agent/answered-t]]
- ;; ---- tasks, attempts, proof results, root's boot, turns and ends (lane D1's proto.agents.facts.edn) ----
+ ;; ---- tasks, attempts, proof results, root's boot, turns and ends (session D1's proto.agents.facts.edn) ----
 ;; ---- the task ----
  :seon.task/id [:and {:seon.db/identity true} :string]
  :seon.task/ns :symbol
@@ -153,7 +153,7 @@
  :seon.task/failure [:map {:seon.db/data true} [:reason :string] [:counterexample :string] [:attempt {:optional true} [:maybe :seon.attempt/id]]]
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
- ;; config dials are attributes of the task, by their own names (schemas: seon.config.agent.edn, seon.config.merge.edn)
+ ;; config keys are attributes of the task, by their own names (schemas: seon.config.agent.edn, seon.config.merge.edn)
  :seon.task/task-fact [:map {:seon.db/attributes true}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
@@ -207,7 +207,7 @@
  :seon.attempt/conflicts [:set {:seon.db/component true} :seon.db/ref]
  :seon.attempt/unmerged [:set :string]
  ;; measured at the attempt's end from the branch (seon.merge/three-way's :ours): the printed
- ;; program keys the branch changed since its merge base; the merge train admits on them
+ ;; program keys the branch changed since its merge base; the octopus merge admits on them
  :seon.attempt/changed [:set :string]
  ;; measured at the attempt's end (seon.program/test-split): the process tests its change reaches,
  ;; which its merge runs on a checkout (root's ruling, 2026-10-22), never an agent's fork
@@ -236,7 +236,7 @@
                              [:seon.attempt/commit {:optional true} :seon.attempt/commit]
                              [:seon.attempt/commit-error {:optional true} :seon.attempt/commit-error]]
  :seon.proof/proof-fact [:map {:seon.db/attributes true} [:seon.proof/test :seon.proof/test] [:seon.proof/status :seon.proof/status]]
- ;; ---- root's boot and dials (main) ----
+ ;; ---- root's boot and config keys (main) ----
  :seon.root/id [:and {:seon.db/identity true} :keyword]
  :seon.root/boot :string
  ;; the reconciler's positive report of quiescence: at main's t nothing runs, nothing is to
@@ -301,7 +301,7 @@
  :seon.turn/cache-miss-tokens :int
  ;; the model's reply stopped at max-tokens: its text was cut
  :seon.turn/truncated :boolean
- ;; who read the context: the agent's model, or an outside agent through the entrance (a read is a turn)
+ ;; who read the context: the agent's model, or an outside agent through the server (a read is a turn)
  :seon.turn/origin [:enum :model :outside]
  ;; what the reader's context was built from, never its text (a model call stores its basis,
  ;; not its prompt): the commit it read, its task, attempt and turn, the observations no db
@@ -342,7 +342,7 @@
                          [:seon.end/attempt :seon.end/attempt] [:seon.end/outcome :seon.end/outcome]
                          [:seon.end/reason {:optional true} :seon.end/reason]
                          [:seon.end/turns {:optional true} :seon.end/turns] [:seon.end/tokens {:optional true} :seon.end/tokens]]
- ;; ---- an effect's outcome, recorded by its asker on its own branch (seon.fx, lane FX1) ----
+ ;; ---- an effect's outcome, recorded by its asker on its own branch (seon.fx, session FX1) ----
  :seon.fx/id [:and {:seon.db/identity true} :string]
  :seon.fx/kind :keyword
  :seon.fx/status :keyword
@@ -354,7 +354,7 @@
                      [:seon.fx/id :seon.fx/id] [:seon.fx/kind :seon.fx/kind] [:seon.fx/status :seon.fx/status]
                      [:seon.fx/us :seon.fx/us] [:seon.fx/queue-us :seon.fx/queue-us]
                      [:seon.fx/cost {:optional true} :seon.fx/cost] [:seon.fx/error {:optional true} :seon.fx/error]]
- ;; ---- the program merge's facts (lane D1's proto.merge.facts.edn) ----
+ ;; ---- the program merge's facts (session D1's proto.merge.facts.edn) ----
  :seon.merge/key [:any {:seon.db/index true :seon.db/data true}]
  :seon.merge/kind :keyword
  :seon.merge/base [:any {:seon.db/data true}]

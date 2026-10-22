@@ -1,21 +1,21 @@
 (ns seon.root
-  "Root: the control process (lane F2, notes/option3-F1-flow.md; proto/flow f2-final
+  "Root: the control process (session F2, notes/option3-F1-flow.md; proto/flow f2-final
   proto.control's api, reader, boot and API). Boots the database
   (Datahike, E4a index), forks the single-threaded fork server before any thread exists,
   then runs ONE root graph of four procs:
-    :api          :io     the entrance: owns the callers' reply promises and the agents'
+    :api          :io     where requests come in: owns the callers' reply promises and the agents'
                           graphs; routes every request and answer as data
     :writer       :mixed  the only d/transact, d/branch! and merge caller, with group
                           commit (drain the in-port, one commit per branch, one flush)
     :fork-server  :io     the fork server's command pipe, its events, its restart
     :reconciler   :io     main's commits through a bounded buffer (every commit's datoms; the hook a
                           reconciler and the dashboard plug into)
-  and one proc per agent (`agent-proc`, added and removed with flow/update!), its stand-in:
+  and one proc per agent (`agent-proc`, added and removed with flow/update!):
   it owns root's end of the agent's socket and its process, and passes Flow's pause, resume and stop on to the
   agent's own loop (seon.step/run-loop), which runs the same step-fn contract.
 
   Ordering is dataflow: every proc starts and parks on its inputs. Shutdown flows too:
-  the entrance closes, agents drain and exit, the writer's in-port closes, the writer
+  the api closes, agents drain and exit, the writer's in-port closes, the writer
   drains and flushes last, the fork server is reaped, then flow/stop.
 
   Agents transact facts on their own branch; root reacts: the writer applies them, and
@@ -32,10 +32,10 @@
 
 
 ;; ====================================================================================
-;; The api: the entrance
+;; The api: where requests come in
 ;; ====================================================================================
 
-;; ---- problems root observes (lane D2): recorded as seon.error facts on main -----------
+;; ---- problems root observes (session D2): recorded as seon.error facts on main -----------
 
 (defn- gone
   "The one error map of a request no live agent can take (agent id, or nil)."
@@ -99,7 +99,7 @@
     st))
 
 (defn- proc-sym
-  "The step-fn of root proc pid, as its declaration names it (an agent's stand-in for an
+  "The step-fn of root proc pid, as its declaration names it (an agent's proc for an
   agent id)."
   {:malli/schema [:=> [:cat :seon.root/api-state [:maybe :keyword]] :qualified-symbol]}
   [st pid]
@@ -194,7 +194,7 @@
 (defn- start-agent
   "Register a new agent: its socket (root keeps one end; the other goes to whoever forks
   it), its proc definition (added to the graph by update! at the end of the step). Root's
-  end is a jolt.async.remote end (lane RC1): its :in is the stand-in's :from, so the
+  end is a jolt.async.remote end (session RC1): its :in is the agent proc's :from, so the
   agent's port is an ordinary channel. Answers [st id agent-end-fd]."
   {:malli/schema [:=> [:cat :seon.root/api-state :map] [:tuple :seon.root/api-state :seon.agent/id :seon.lib/fd]]}
   [st {:keys [branch task cloned-from]}]
@@ -220,7 +220,7 @@
      id a]))
 
 (defn- end-agent
-  "The agent's process is gone and its stand-in saw its last frame: its proc leaves the
+  "The agent's process is gone and its agent proc saw its last frame: its proc leaves the
   graph (update! at the end of the step) and its branch's connection is released."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :map] :seon.root/api-state]}
   [st o {:keys [agent rid pid inflight]}]
@@ -228,7 +228,7 @@
         v (get-in st [:view :agents agent])
         ;; stopped by root: a kill, or the end of its attempt (:ended); else it died
         stop (stopped-statuses (:status v))
-        ;; neither stopped by root nor killed: a death, with what root saw of it (lane D2)
+        ;; neither stopped by root nor killed: a death, with what root saw of it (session D2)
         died (when-not (or rid stop)
                (contract/error :seon.agent/died 'seon.root/api-proc (str "agent " (name agent) " died" (exit-text (:exit v)))
                                {:agent agent :pid (or pid (:pid v)) :exit (:exit v)
@@ -336,7 +336,7 @@
       st)))
 
 (defn- back-op
-  "A message from a stand-in, a fork-server or writer event, or the error reader."
+  "A message from an agent proc, a fork-server or writer event, or the error reader."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :map] :seon.root/api-state]}
   [st o m]
   (cond
@@ -365,7 +365,7 @@
       :forked (do (step/out! o :events (step/event {:type :spawned :agent (:agent m) :pid (:pid m) :fork-ms (:fork-ms m)}))
                   (when (stopped-statuses (get-in st [:view :agents (:agent m) :status])) (lib/c-kill (:pid m) 9))
                   (-> st (set-agent (:agent m) {:pid (:pid m)})
-                      (view! update-in [:server :agents-forked] (fnil inc 0))
+                      (view! update-in [:fork-server :agents-forked] (fnil inc 0))
                       (view! update-in [:stats :fork-ms] lib/push-window (:fork-ms m) 500)
                       (to-agent (:agent m) {:op :forked :pid (:pid m)})))
       :exit (let [st (if-let [aid (some (fn [[aid a]] (when (= (:pid m) (:pid a)) aid)) (get-in st [:view :agents]))]
@@ -378,24 +378,24 @@
       :fork-failed (let [why (str "fork refused: " (:active-threads m) " active threads")]
                      (-> st (set-agent (:agent m) {:error why}) (to-agent (:agent m) {:op :failed :error why})))
       :applied (-> st (view! update-in [:stats :lag-ms] lib/push-window (:lag-ms m) 200)
-                   (view! assoc-in [:server :mismatch] (:mismatch m)))
-      :load-errors (view! st update-in [:server :load-errors] (fnil into []) (:errors m))
+                   (view! assoc-in [:fork-server :mismatch] (:mismatch m)))
+      :load-errors (view! st update-in [:fork-server :load-errors] (fnil into []) (:errors m))
       ;; fork requests the dead server never served fail; agents live on
       ;; the dead server's children are orphans: no server reaps them, so a death waiting
       ;; for its exit status is answered now, and a later one at once
-      :server-down (do (step/out! o :events (step/event {:type :server-down :pid (:old m)}))
+      :fork-server-down (do (step/out! o :events (step/event {:type :fork-server-down :pid (:old m)}))
                        (as-> (reduce (fn [st [aid a]]
                                        (if (and (= :spawning (:status a)) (nil? (:pid a)) (get-in st [:agents aid]))
                                          (-> st (set-agent aid {:error "fork server went down before the fork"})
                                              (to-agent aid {:op :failed :error "fork server went down"}))
                                          (cond-> st (:pid a) (set-agent aid {:orphan true}))))
-                                     (view! st update :server assoc :status :restarting) (get-in st [:view :agents])) st
+                                     (view! st update :fork-server assoc :status :restarting) (get-in st [:view :agents])) st
                          (reduce (fn [st [_ [aid died inflight]]] (record-death st aid nil died inflight))
                                  (dissoc st ::dying) (::dying st))))
-      :server-lost (do (step/out! o :events (step/event {:type :server-lost}))
-                       (view! st update :server assoc :status :lost))
-      :server-up (do (step/out! o :events (step/event {:type :server-up :pid (:pid m)}))
-                     (view! st update :server (fn [s] (-> s (assoc :status :up :pid (:pid m)) (update :restarts (fnil inc 0))))))
+      :fork-server-lost (do (step/out! o :events (step/event {:type :fork-server-lost}))
+                       (view! st update :fork-server assoc :status :lost))
+      :fork-server-up (do (step/out! o :events (step/event {:type :fork-server-up :pid (:pid m)}))
+                     (view! st update :fork-server (fn [s] (-> s (assoc :status :up :pid (:pid m)) (update :restarts (fnil inc 0))))))
       st)
 
     :else
@@ -406,7 +406,7 @@
               (view! st update-in [:stats (:k m)] lib/push-window (:v m) 100000))
       :message (let [msg {:op :message :from (:from m) :body (:body m) :ns (profile/now-ns)}]
                  (reduce #(to-agent %1 %2 {:op :write :msg msg}) st (:to m)))
-      ;; a proc's request (the reconciler's, the web's, MCP's): an ordinary entrance request
+      ;; a proc's request (the reconciler's, the web's, MCP's): an ordinary api request
       ;; whose answer goes back to the proc as data
       :request (ext-op st o (assoc (:req m) :p {:route (:route m) :tag (:tag m)}))
       :clone-failed (to-agent st (:agent m) {:op :failed :error (:error m)})
@@ -441,21 +441,21 @@
       ;; an effect owner's failed outcome (seon.fx/owner-proc)
       :problem (problem st (err/occurrence (:error m) (:class m) {:agent (:agent m) :task (get-in st [:view :agents (:agent m) :task])}
                                            (System/currentTimeMillis)))
-      ;; an agent's stand-in observed it stalled (seon.agent-proc :stall?)
+      ;; an agent's proc observed it stalled (seon.agent-proc :stall?)
       :stalled (-> st (set-agent (:agent m) {:stalled (:quiet-ms (:error m))})
                    (problem (err/occurrence (:error m) :agent {:agent (:agent m) :task (get-in st [:view :agents (:agent m) :task])
                                                                :form (get-in m [:error :last-op :form])}
                                             (System/currentTimeMillis))))
       ;; the stall timer: each agent with an eval in flight checks its own quiet time
       :stall-check (let [now (System/currentTimeMillis)]
-                     (reduce (fn [st id] (to-agent st id {:op :stall? :now-ms now :dial-ms (:stall-ms st)})) (dissoc st ::stall-due) (::busy st)))
+                     (reduce (fn [st id] (to-agent st id {:op :stall? :now-ms now :stall-ms (:stall-ms st)})) (dissoc st ::stall-due) (::busy st)))
       :kill-all (reduce (fn [st aid] (-> st (set-agent aid {:status :killed}) (to-agent aid {:op :kill}))) st (keys (:agents st)))
       st)))
 
 (defn- answer-taken
   "st with the caller of x, a message proc pid's throwing step took, answered the defect e
   (task `seon.root/a-proc-answers-every-request-it-took`): the answer its :dest names
-  (`seon.root/back-op`), its promise or reply route when it came in at the entrance or as a
+  (`seon.root/back-op`), its promise or reply route when it came in at the api or as a
   proc's request, the request pending under its :rid, or, for an answer the proc took
   ({:tag :r}), that answer again on the proc's :answers route. An answer that was already an
   error is not answered again: the proc had its one answer, and a step that throws on an
@@ -477,7 +477,7 @@
   (some->> m (vswap! (::taken st) conj))
   (cond
     (and (= in :ext) (nil? m))
-    ;; the entrance closed: agents drain and exit; then the writer's in-port closes
+    ;; the api closed: agents drain and exit; then the writer's in-port closes
     (let [st (assoc st :closing true)]
       (reduce (fn [st aid] (let [[st rid] (step/pend st nil)] (to-agent st aid {:op :drain :rid rid}))) st (keys (:agents st))))
     (= in :ext) (ext-op st o m)
@@ -485,8 +485,8 @@
     :else (back-op st o m)))
 
 (defn api-proc
-  "The entrance. In :ext (the API's callers, each request with its reply promise: the
-  promises live only here), :back (the agents' stand-ins and the error reader),
+  "The api. In :ext (the API's callers, each request with its reply promise: the
+  promises live only here), :back (the agent procs and the error reader),
   :from-writer and :from-fs (answers and events). Out :to-writer, :to-fs, :events, and
   [agent :in] for each agent (routed by the resolver).
   Agents are procs of this graph: a step that spawned or ended agents applies ONE
@@ -517,7 +517,7 @@
          ;; answered when the api's defect arrives at :error
          st (if-let [lost (seq @(::taken st))] (update st ::lost (fnil into []) lost) st)
          _ (vreset! (::taken st) [])
-         ;; this message, then whatever else is already queued at the entrance and the back door
+         ;; this message, then whatever else is already queued at the api and on :back
          st (loop [st (api-one st o in m) k 1]
               (if (< k (cfg/value :seon.config.root/api-batch))
                 (if-let [[ch c-in] (some (fn [[ch c-in]] (when-let [x (a/poll! ch)] [x c-in]))
@@ -526,11 +526,11 @@
                   st)
                 st))
          st (flush-problems st o)
-         ;; while an agent has an eval in flight, the stall check runs every half dial
+         ;; while an agent has an eval in flight, the stall check runs every half stall bound
          st (if (and (seq (::busy st)) (not (::stall-due st)) (pos? (:stall-ms st)) (:back st))
               (let [back (:back st)]
                 ;; a go block parks on the timer (Jolt's take! with a callback forks a thread per
-                ;; pending take: lane D2's finding, seen as one thread per root in lifecycle)
+                ;; pending take: session D2's finding, seen as one thread per root in lifecycle)
                 (a/go (a/<! (a/timeout (quot (:stall-ms st) 2))) (a/>! back {:op :stall-check}))
                 (assoc st ::stall-due true))
               st)
@@ -538,7 +538,7 @@
               (do (flow/update! @(:graph st) {:procs (merge (get-in st [:system :procs]) (:agent-procs st)) :conns (get-in st [:system :conns])})
                   (dissoc st ::update))
               st)]
-     ;; the writer's in-port closes once the entrance is closed and every agent has ended
+     ;; the writer's in-port closes once the api is closed and every agent has ended
      (when (and (:closing st) (empty? (:agents st)) (not (:writer-closed st)))
        (a/close! (:to-writer st)))
      (doseq [[id msg] (::to-agents st)] (step/out! o [id :in] msg))
@@ -546,7 +546,7 @@
      (vreset! (::taken st) [])
      [(cond-> (dissoc st ::to-agents ::replies)
         (and (:closing st) (empty? (:agents st))) (assoc :writer-closed true)
-        ;; at the bound of writer requests in flight: read answers only, not the entrance
+        ;; at the bound of writer requests in flight: read answers only, not the api
         true (assoc ::flow/input-filter (if (>= (count (:writes st)) (cfg/value :seon.config.root/api-writes)) #(not= :ext %) identity)))
       @o])))
 
@@ -648,7 +648,7 @@
    about n datoms of an example program on :db; a root holds no program it was not given)
    :main branch (root's main; an existing branch is resumed; :db is the seed itself)
    :backend :lmdb|:file :log? true :max-running n (parallel attempts) :provider p (the
-   attempts' model) :stall-ms (a fence, seon.agent-proc/stall-ms, for the checks that
+   attempts' model) :stall-ms (a guard, seon.agent-proc/stall-ms, for the checks that
    move it) :source s}. s: Seon's own source
    is the program, {:root dir :dirs [\"src\"] :branch \"jolt/seon-merges\"}: main's program follows
    root's dirs at boot (import-source!: replaced when they read otherwise than main's last
@@ -697,7 +697,7 @@
         _ (lib/static!)
         db @conn
         ;; physics: the fork server is forked while this is the one active thread (Jolt's carriers,
-        ;; timer and watcher parked: the child resets them, seon.lib/fork!; docs/DRAGONS.md, Physics)
+        ;; timer and watcher parked: the child resets them, seon.lib/fork!; docs/failure-points.md, Physics)
         {:keys [pid fd]} (fs/fork-server db)
         ;; then the GC's sweeper threads, a declared number (Chez would grow them by timing)
         sweepers (lib/gc-sweepers! (cfg/value :seon.config.root/gc-sweepers))
@@ -705,26 +705,26 @@
         ;; every event, for the API's taps (seon.root/events) and the render proc's (W2)
         events-mult (a/mult events-in)
         chans {:ext (a/chan 1024) :back (a/chan 4096) :to-writer (a/chan (cfg/value :seon.config.root/writer-buf))
-               :server-ev (a/chan 4096)
-               ;; outside agents' attempts handed back for judgement (seon.entrance)
+               :fork-server-ev (a/chan 4096)
+               ;; outside agents' attempts handed back for judgement (seon.server)
                :judge (a/chan 64)}
         view {:agents {} :writer {:tx-count 0} :stats {}
-              :server {:agents-forked 0 :pid pid :status :up :restarts 0}
+              :fork-server {:agents-forked 0 :pid pid :status :up :restarts 0}
               :store {:backend backend :path path :main main :agents-dir agents-dir :recovered? (boolean recovered?)
                       :recovered-branches recovered :open-ms (lib/r2 open-ms) :preload-ms (lib/r2 preload-ms)}
               :boot {:gc-sweepers sweepers :load-ms (lib/r2 load-ms) :program (assoc program :ms (lib/r2 program-ms))
-                     :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :guarantees (if contract/on? :on :off)}}
+                     :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :instrument (if contract/on? :on :off)}}
         graph-p (promise)
         root-procs-p (promise)
         ;; what the declaration (resources/seon/system.edn) names as :bind/<name>
-        bindings (merge (select-keys chans [:ext :back :to-writer :server-ev :judge])
+        bindings (merge (select-keys chans [:ext :back :to-writer :fork-server-ev :judge])
                         {:view view :graph graph-p :lease-base (pdb/lease-base conn)
                          :system root-procs-p :events events-in :events-mult events-mult
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
                          :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf)
-                         :model-lanes (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
+                         :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
                          :web-port (cfg/value :seon.config.web/port)})
         decl (system/read-decl (cfg/value :seon.config.root/system-path))
         built (system/build decl bindings nil)
@@ -771,8 +771,8 @@
 ;; ====================================================================================
 
 (defn- call!
-  "Put m (with a fresh reply promise) on the entrance; a promise. After stop! the
-  entrance is closed and the promise answers {:ok false :error \"root stopped\"}."
+  "Put m (with a fresh reply promise) on the api; a promise. After stop! the
+  api is closed and the promise answers {:ok false :error \"root stopped\"}."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.root/request] :seon.host/promise]}
   [sys m]
   (let [p (promise)]
@@ -791,7 +791,7 @@
         tpc (when (and commits (pos? commits)) (lib/r2 (/ (double (or batched-tx 0)) commits)))]
     (-> v
         (update :writer #(-> % (dissoc :recent :batch-ms) (assoc :batch-p50-ms (lib/p50 (:batch-ms %)) :tx-per-commit tpc :commits commits)))
-        (update :server assoc :lag-ms (lib/p50 lag-ms) :fork-ms-p50 (lib/p50 fork-ms))
+        (update :fork-server assoc :lag-ms (lib/p50 lag-ms) :fork-ms-p50 (lib/p50 fork-ms))
         (update :store merge (when batches {:batches batches :commits commits :tx-per-commit tpc})))))
 
 (defn state
@@ -919,7 +919,7 @@
   ([sys p] (call! sys {:op :apply :decl (system/read-decl p) :bindings (:bindings sys)})))
 
 (defn merge!
-  "Root merges the agent's branch into main (seon.merge, lane M1); a promise of {:merged?
+  "Root merges the agent's branch into main (seon.merge, session M1); a promise of {:merged?
   :tx ...}, or :seon.merge/behind when main changed since the branch's merge base (merge
   main first), :seon.merge/unmerged, :seon.merge/uncontracted. Unless opts has :gate?
   false, the agent's tests run first in a fork of it. opts {:data-attrs}: the data that
@@ -974,7 +974,7 @@
   (some-> (:pid (agent-entry sys agent-id)) (lib/c-kill lib/SIGUSR1))
   nil)
 
-(defn kill! "SIGKILL the agent's process (through its stand-in). nil." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
+(defn kill! "SIGKILL the agent's process (through its agent proc). nil." {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :nil]}
   [sys agent-id] (request! sys 'kill! agent-id nil) nil)
 
 (defn pause-agent!
@@ -990,7 +990,7 @@
   [sys msg] @(call! sys {:op :fs :req msg}))
 
 (defn stop!
-  "Stop root by letting the flow drain: the entrance closes (later calls answer \"root
+  "Stop root by letting the flow drain: the api closes (later calls answer \"root
   stopped\"); every agent is sent :stop and exits after the requests before it (SIGKILL
   past seon.agent-proc/stop-bound-ms); the writer's in-port closes, it commits and flushes what it
   took; the fork server is killed and reaped; then flow/stop (every proc exited), the
@@ -1021,7 +1021,7 @@
         (not (:ok fact)) (assoc :stop-fact-refused fact))))))
 
 ;; ====================================================================================
-;; Root's threads: a declared number (lane THREADS)
+;; Root's threads: a declared number (session THREADS)
 ;; ====================================================================================
 
 (defn declared-threads
@@ -1031,7 +1031,7 @@
   The timer starts at the first timeout and the io poller at the first socket wait (an
   agent's), so a root has both once its first agent runs.
   With a running sys, also one thread per :mixed proc of its declaration (Flow runs :io
-  procs, agents' stand-ins included, on the carriers), its two edge readers (Flow's
+  procs, agent procs included, on the carriers), its two edge readers (Flow's
   error channel, the fork server's socket) and, while the web
   proc listens, the web server's acceptor and sweeper."
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :seon.root/sys] :map]]}

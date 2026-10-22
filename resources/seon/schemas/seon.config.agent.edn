@@ -1,5 +1,5 @@
 ;; Agents (v1: seon.config.agent.edn's max-running and inbox-size, ported; max-turns was
-;; next's task dial; the rest are new in next, where an agent is a forked process).
+;; next's task config key; the rest are new in next, where an agent is a forked process).
 {:seon.config.agent/max-running [:int {:min 0 :seon.config/unit "attempts" :description "Attempts running at once; a ready task beyond it waits for an end. 0 starts nothing new."}]
  :seon.config.agent/max-turns [:int {:min 1 :seon.config/unit "turns" :description "Turns an attempt may take when its task sets none."}]
  :seon.config.agent/cwd [:string {:min 1 :seon.config/unit "path" :description "Every agent process's working directory, with no repository above it."}]
