@@ -32,7 +32,7 @@ show() {
     [[ $claimed == *" $pid "* ]] && continue
     cwd=$(lsof -a -p $pid -d cwd -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}')
     # bin/root's holder (parent 1 by design: it keeps a root's stdin open) is claimed while its root lives
-    [[ $rest == *"tail -f /dev/null"* ]] && pgrep -P $pid -f '\./seon' >/dev/null && continue
+    pgrep -P $pid -f '\./seon' >/dev/null && continue
     [[ $ppid == 1 || ( -n $cwd && ! -d $cwd ) ]] && printf '  pid %s parent %s %dMB cwd %s\n' $pid $ppid $((rss/1024)) ${cwd:-?}
   done
   print -P "%B-- heaviest processes%b"
