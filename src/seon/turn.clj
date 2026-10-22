@@ -22,13 +22,14 @@
             [seon.harvest :as harvest] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
             [datahike.api :as d]))
 
-;; The turn loop's own facts live in the agent's one state map, under :turn: the task and
-;; attempt it works, and a stop a verb requested.
+;; The turn loop's own facts live in the agent's one state map, under :turn: the attempt it
+;; works, and a stop a verb requested.
 
 (defn current-task
-  "The id of the task this process works, or nil outside a turn loop."
+  "The id of the task this process works: the one root forked it for (seon.agent/init!), or
+  nil for an agent forked with none."
   {:malli/schema [:=> [:cat] [:maybe :seon.task/id]]}
-  [] (get-in @agent/state [:turn :task]))
+  [] (:task @agent/state))
 
 (defn- begin!
   "This process works task as attempt: the turn state, begun once per attempt with the
@@ -40,7 +41,7 @@
   (if (= attempt (get-in @agent/state [:turn :attempt]))
     (:turn @agent/state)
     (let [db (agent/db)]
-      (:turn (swap! agent/state assoc :turn {:task task :attempt attempt :gaps-before (harvest/uncontracted db)
+      (:turn (swap! agent/state assoc :turn {:attempt attempt :gaps-before (harvest/uncontracted db)
                                              :plan-before (:plan (:seon.task/accumulated (task/task db task)))})))))
 
 (defn last-evals

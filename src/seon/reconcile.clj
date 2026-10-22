@@ -57,7 +57,8 @@
 
 (defn done-refusals
   "Why an attempt's measured facts do not make its task done; empty means done. Refused:
-  no proofs (never proven); a proof not passing; a regression (a test green on main, the
+  no proofs (never proven); a proof not passing (red), or with no result (unknown: it
+  never ran); a regression (a test green on main, the
   proofs of merged tasks, red here); a stray red (a red test that is no task's open
   proof); a contract gap (a function the attempt defined without a contract); an
   unmerged entry on the branch (a merge conflict not resolved). A :design task readies
@@ -71,8 +72,10 @@
     (vec (concat
            (when (and (empty? proofs) (not design?)) [{:refusal :no-proofs}])
            (when (and design? (or (nil? plan-before) (= plan plan-before))) [{:refusal :no-design}])
+           ;; a proof with no result never ran: unknown, not red (v1's reading)
            (when-not design?
-             (for [p (sort-by str proofs) :when (not= :pass (get results p :none))] {:refusal :proof-red :symbol p}))
+             (for [p (sort-by str proofs) :let [s (get results p)] :when (not= :pass s)]
+               {:refusal (if s :proof-red :proof-unknown) :symbol p}))
            (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t))] {:refusal :regression :symbol t})
            (for [t (sort-by str (keys results))
                  :when (and (red? t) (not (proofs t)) (not (main-green t)) (not (allowed-red t)))]

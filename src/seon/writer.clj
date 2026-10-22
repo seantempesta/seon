@@ -155,11 +155,12 @@
       ;; an agent process committed its branch: the store is dirty until the next flush
       :agent-commit (assoc st :dirty true)
       ;; the agent's branch (new: a pointer to main's head), then its fork: the agent opens
-      ;; the branch itself and owns its writes (run-ahead, committed by the agent)
+      ;; the branch itself and owns its writes (run-ahead, committed by the agent), and holds
+      ;; the task it works from its first form
       :spawn (let [{:keys [agent branch]} m
                    resumed? (exists? branch)]
                (when-not resumed? (d/branch! conn main branch))
-               (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :ns (:ns m) :fd (:fd m)
+               (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :task (:task m) :ns (:ns m) :fd (:fd m)
                                               :cfg (:cfg st) :lease (:lease m) :resumed resumed?})
                (reply st {:ok true :t (:max-tx @conn) :resumed resumed?}))
       :clone-branch (do (d/branch! conn (:from m) (:branch m))

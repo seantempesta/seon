@@ -9,6 +9,11 @@
     from the merge template (kind :merge, on the work task's branch, needing it, its plan
     and proofs inherited). A task that needs another's work needs its merge, so it starts
     from a main that holds that work.
+  - `request`: a request (one declaration: what the user asked) becomes design ->
+    implement -> merge on design's branch, so each step holds the last one's work, and
+    `request-tx` writes the whole linked set released in one transaction (owner,
+    2026-10-22): the reconciler forks only from a committed main, so every agent of the
+    set starts from the same graph.
   - `attach-tx`: a failed attempt (any kind: refused by the done rule, its merge refused,
     its agent dead) attaches design -> implement -> test -> merge on a fresh branch from
     main, while the task's budget lasts (seon.reconcile/refine?). Each starts from the failed
@@ -80,6 +85,18 @@
                 "proofs namespace. Make everything pass, record what you learn in the plan, then wait.")}
     #(str % "\n\n" repl)))
 
+(defn- merge-decl
+  "Merge task nm (merge-name of its work's) of work declaration d (id wid), on d's branch,
+  needing it."
+  {:malli/schema [:=> [:cat :seon.task/declaration :seon.task/id :seon.task/name] :seon.task/declaration]}
+  [d wid nm]
+  (cond-> {:seon.task/ns (:seon.task/ns d) :seon.task/name nm
+           :seon.task/kind :merge :seon.task/plan (merge-plan wid)
+           :seon.task/instructions (instructions :merge)
+           :seon.task/needs #{wid} :seon.task/branch (:seon.task/branch d)}
+    (:seon.task/model d) (assoc :seon.task/model (:seon.task/model d))
+    (:seon.task/config d) (assoc :seon.task/config (:seon.task/config d))))
+
 (defn with-merge
   "decls (task declarations of work) followed by their merge tasks; needs on a work task
   of decls become needs on its merge."
@@ -90,16 +107,41 @@
         merge-of (fn [wid] (let [[ns nm] (str/split wid #"/" 2)] (str ns "/" (merge-name nm))))]
     (vec (mapcat (fn [d]
                    (let [wid (id d)
-                         branch (or (:seon.task/branch d) (task/default-branch wid))
-                         d (cond-> (assoc d :seon.task/branch branch)
+                         d (cond-> (update d :seon.task/branch #(or % (task/default-branch wid)))
                              (seq (:seon.task/needs d)) (update :seon.task/needs #(set (map (fn [n] (if (work n) (merge-of n) n)) %))))]
-                     [d (cond-> {:seon.task/ns (:seon.task/ns d) :seon.task/name (merge-name (:seon.task/name d))
-                                 :seon.task/kind :merge :seon.task/plan (merge-plan wid)
-                                 :seon.task/instructions (instructions :merge)
-                                 :seon.task/needs #{wid} :seon.task/branch branch}
-                          (:seon.task/model d) (assoc :seon.task/model (:seon.task/model d))
-                          (:seon.task/config d) (assoc :seon.task/config (:seon.task/config d)))]))
+                     [d (merge-decl d wid (merge-name (:seon.task/name d)))]))
                  decls))))
+
+(defn request
+  "Request decl (what the user asked: its plan, perhaps one line, and any proofs) as the
+  linked tasks that work it: decl's name as the design step, then <name>-implement needing
+  it, then <name>-merge needing that, all on the design step's branch (so implement holds
+  design's schemas, stubs and red proofs, and merge holds both). The request's proofs are
+  design's and accumulate along :needs (seon.task/accumulate)."
+  {:malli/schema [:=> [:cat :seon.task/declaration] [:vector :seon.task/declaration]]}
+  [decl]
+  (let [tns (:seon.task/ns decl)
+        did (task/task-id tns (:seon.task/name decl))
+        design (-> decl (assoc :seon.task/kind :design :seon.task/instructions (instructions :design))
+                   (update :seon.task/branch #(or % (task/default-branch did))))
+        implement (cond-> (-> (select-keys design [:seon.task/ns :seon.task/branch :seon.task/model :seon.task/config :seon.task/budget])
+                              (assoc :seon.task/name (str (:seon.task/name decl) "-implement") :seon.task/kind :implement
+                                     :seon.task/plan "" :seon.task/instructions (instructions :implement)
+                                     :seon.task/needs #{did})))]
+    [design implement (merge-decl implement (task/task-id tns (:seon.task/name implement)) (merge-name (:seon.task/name decl)))]))
+
+(defn request-tx
+  "The one transaction that writes request decl's linked tasks (request) on main, released:
+  the reconciler sees the whole set at once and forks its first agent only once it is
+  committed. A refusal (seon.task/create-tx's) answers as it is."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/declaration]
+                  [:or [:vector :any] [:map [:seon.error/type [:= :seon.task/refused]] [:seon.error/message :string]]]]}
+  [db decl]
+  (let [ds (request decl)
+        tx (task/create-tx db ds)]
+    (if (:seon.error/type tx)
+      tx
+      (into tx (task/execution-tx (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) ds) :running)))))
 
 (defn evidence
   "The measured evidence of failed attempt a: its conflicts (read from the branch by root's

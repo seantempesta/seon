@@ -279,7 +279,7 @@
                  (>= (count (:agents st)) (cfg/value :seon.config.root/max-agents)) (reply! st p (refused 'seon.root/spawn! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)}))
                  :else (let [[st aid fd] (start-agent st opts)
                              {:keys [branch lease]} (get-in st [:agents aid])]
-                         (step/out! o :to-writer {:op :spawn :agent aid :branch branch :lease lease :ns (lib/now-ns) :fd fd :dest {:spawn aid}})
+                         (step/out! o :to-writer {:op :spawn :agent aid :branch branch :task (:task opts) :lease lease :ns (lib/now-ns) :fd fd :dest {:spawn aid}})
                          (reply! st p {:id aid}))))
       :clone (let [parent (:parent m)]
                (if (or (nil? (get-in st [:agents parent])) (>= (count (:agents st)) (cfg/value :seon.config.root/max-agents)))

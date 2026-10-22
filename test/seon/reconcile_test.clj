@@ -127,9 +127,9 @@
     ;; its proof red: a refinement chain attaches (the budget has room)
     (attempt "a" 1 :ended :outcome :cap :results {(t "a") :fail})
     [{:op :attach :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended cap: proof-red demo-test/a-test"}]
-    ;; its proof never ran
+    ;; its proof never ran: unknown, which refuses done as red does
     (attempt "a" 1 :ended :outcome :green :results {})
-    [{:op :attach :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended green: proof-red demo-test/a-test"}]
+    [{:op :attach :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended green: proof-unknown demo-test/a-test"}]
     ;; b needs a, so b carries a's proof (accumulated along :needs): red there is b's own red
     (concat (merged "a") (attempt "b" 1 :ended :outcome :green :results {(t "a") :fail (t "b") :pass}))
     [{:op :attach :attempt "demo/b#1" :task "demo/b" :problem "attempt demo/b#1 ended green: proof-red demo-test/a-test"}
@@ -189,6 +189,8 @@
     {:proofs #{'p/a} :results {'p/a :pass} :main-green #{} :allowed-red #{} :uncontracted #{}} []
     {:proofs #{} :results {} :main-green #{} :allowed-red #{} :uncontracted #{}} [[:no-proofs nil]]
     {:proofs #{'p/a} :results {'p/a :error} :main-green #{} :allowed-red #{} :uncontracted #{}} [[:proof-red 'p/a]]
+    ;; a proof that never ran is unknown, not red
+    {:proofs #{'p/a} :results {} :main-green #{} :allowed-red #{} :uncontracted #{}} [[:proof-unknown 'p/a]]
     {:proofs #{'p/a} :results {'p/a :pass 'p/m :fail} :main-green #{'p/m} :allowed-red #{} :uncontracted #{}} [[:regression 'p/m]]
     {:proofs #{'p/a} :results {'p/a :pass 'p/o :fail} :main-green #{} :allowed-red #{'p/o} :uncontracted #{}} []
     {:proofs #{'p/a} :results {'p/a :pass 'p/s :fail} :main-green #{} :allowed-red #{} :uncontracted #{}} [[:stray-red 'p/s]]

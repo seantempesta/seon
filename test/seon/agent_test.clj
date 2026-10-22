@@ -76,6 +76,13 @@
     (is (= {proof :pass reached :pass} (edn/read-string (:printed run)))
         "the proof and the one test reaching the change ran, green; nothing else ran")))
 
+(deftest a-forked-agent-knows-its-task
+  ;; task seon.template/a-request-is-one-linked-transaction: root forks the agent for its
+  ;; task, so my.task/current answers it at the agent's first form, before any turn loop
+  ;; or context read begins (it was nil: root kept the task in its view only)
+  (let [[id] (in-agent ["(:seon.task/id (my.task/current))"])]
+    (is (= (pr-str "demo/t") (:printed id)))))
+
 (deftest an-agent-finds-no-repository
   ;; owner, 2026-10-22: no git in agents, and no source-file editing as the way to develop
   ;; Seon; an agent works in a scratch dir with no repository above it
