@@ -3,7 +3,7 @@
   store and each test takes a branch of it through one helper (seon.db/test-branch!)."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
-            [seon.db :as pdb] [seon.config :as cfg] [seon.contract :as contract]
+            [seon.db :as pdb] [seon.config :as cfg] [seon.contract :as contract] [seon.edn]
             [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
@@ -162,11 +162,15 @@
     (lmdb/read-txn db (fn [txn] (into {} (for [k (lmdb/all-keys db txn)] [k (alength ^bytes (lmdb/get-bytes db txn k))]))))))
 
 (defn- turn-facts
-  "Turn k of an attempt as seon.turn/act! records it: the context the model read (8,000
-  bytes) and its reply (1,500 bytes) are what the turn itself writes."
+  "Turn k of an attempt as seon.turn/act! records it: the basis its context was built from
+  (the commit, its red assertion; the text is made again from it, seon.context/render), its
+  reply (1,500 bytes) and what its forms evaluated to as the next turn shows them (2,000)."
   [k]
-  [{:seon.turn/id (str "att/" k) :seon.turn/attempt "att" :seon.turn/n k
-    :seon.turn/context (apply str (repeat 8000 "c")) :seon.turn/reply (apply str (repeat 1500 "r"))}])
+  [{:seon.turn/id (str "att/" k) :seon.turn/attempt "att" :seon.turn/n k :seon.turn/origin :model
+    :seon.turn/basis (seon.edn/encode {:commit (random-uuid) :task "t/x" :attempt "att" :turn k :max-turns 8 :origin :model
+                                       :observed {:results {'t-test/x :fail} :run-errors [] :refusals [{:refusal :proof-red :symbol 't-test/x}]
+                                                  :reds [{:test 't-test/x :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))"}]}})
+    :seon.turn/reply (apply str (repeat 1500 "r")) :seon.turn/evals (apply str (repeat 2000 "e"))}])
 
 (defn- write-turns!
   "Bytes the store at path gains when branch b gets n turns through the agent's run-ahead

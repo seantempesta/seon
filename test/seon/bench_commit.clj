@@ -6,7 +6,7 @@
   same 100 in one commit; on a fresh store seeded at each size.
   jolt -A:test run -m seon.bench-commit DIR N..."
   (:require [seon.db :as pdb] [seon.repl :as repl] [datahike.api :as d] [datahike.writer :as dw]
-            [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as l] [clojure.string :as str]))
+            [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as l] [clojure.string :as str] [seon.edn]))
 
 (defn- snapshot
   "Every key of the store at path with its value's byte count, and data.mdb's size."
@@ -67,13 +67,24 @@
 
 (defn- turn-tx
   "One model turn's writes as seon.turn/act! makes them: its eval record (one form, a printed
-  value of 2,000 bytes), its turn facts with the context of ctx bytes, and its split; with
-  small, every value over 1 KB is a 40-byte reference instead."
+  value of 2,000 bytes), its turn facts, and its split; with small, every value over 1 KB is a
+  40-byte reference instead. ctx bytes: the context text the turn stored before
+  (:seon.turn/context); :basis: what it stores now, the basis its context is made from again
+  (seon.context/render) and its evaluations as the next turn shows them (2,000 bytes, its
+  eval's printed value)."
   [k ctx small]
   (let [id (str "att-1/" k) sz (fn [n] (if small 40 n))]
     [(if small (repl/record-tx :agent-1 (str "agent-1-" k) (items 1 40 0) k) (eval-tx k 2000))
-     [{:seon.turn/id id :seon.turn/attempt "att-1" :seon.turn/n k :seon.turn/origin :model
-       :seon.turn/context (apply str (repeat ctx "c")) :seon.turn/reply (apply str (repeat (sz 1500) "r"))
+     [(merge {:seon.turn/id id :seon.turn/attempt "att-1" :seon.turn/n k :seon.turn/origin :model}
+             (if (= :basis ctx)
+               {:seon.turn/basis (seon.edn/encode {:commit (random-uuid) :task "t/x" :attempt "att-1" :turn k :max-turns 50 :origin :model
+                                                   :observed {:results {'t-test/x :fail} :run-errors [] :refusals [{:refusal :proof-red :symbol 't-test/x}]
+                                                              :reds [{:test 't-test/x :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))"}]}})
+                :seon.turn/evals (apply str (repeat (sz 2000) "e"))}
+               ;; before: the context text inline (the attribute it was stored in is gone; a string
+               ;; attribute of the same bytes writes the same)
+               {:seon.turn/evals (apply str (repeat ctx "c"))}))
+      {:seon.turn/id id :seon.turn/reply (apply str (repeat (sz 1500) "r"))
        :seon.turn/reasoning (apply str (repeat (sz 3000) "z")) :seon.turn/forms 1 :seon.turn/errors 0
        :seon.turn/red 1 :seon.turn/ms 4000 :seon.turn/tokens 9000}]
      [{:seon.turn/id id :seon.turn/split "{:context-ms 3 :model-ms 4000 :eval-ms 2 :record-ms 0}"}]]))
@@ -93,7 +104,7 @@
     (let [b (snapshot path)]
       (d/release c1) (d/release conn)
       {:seed n :context-bytes ctx :turns-per-commit every :turns 50
-       :written (dissoc (delta a b) :sizes) :own-bytes (when-not small (* 50 (+ ctx 1500 3000 2400)))})))
+       :written (dissoc (delta a b) :sizes) :own-bytes (when-not small (* 50 (+ (if (= :basis ctx) 2400 ctx) 1500 3000 2400)))})))
 
 (defn -main
   "DIR BF,BF.. N.. : every seed size n and branching factor, printed values of 200 and 2,000 bytes."
@@ -105,6 +116,11 @@
     (System/exit 0))
   (when (= bfs "turns")
     (doseq [ctx [8000 32000] every [1 10 50]] (println (pr-str (measure-turns! dir 2000 ctx every))))
+    (System/exit 0))
+  (when (= bfs "turns-basis")
+    ;; the same turns storing their basis instead of their context: the context's size no longer
+    ;; reaches the store (an 8 KB and a 32 KB context write the same)
+    (doseq [every [1 10 50]] (println (pr-str (measure-turns! dir 2000 :basis every))))
     (System/exit 0))
   (doseq [n (map parse-long ns) bf (map parse-long (str/split bfs #",")) shown [200 2000]]
     (println (pr-str (measure! dir n shown bf)))))
