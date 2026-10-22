@@ -254,7 +254,7 @@
 
 (defn provider
   "The model provider config c names (:seon.config.ai/*, resolved for its model): none, the
-  scripted stand-in, or the OpenAI-compatible endpoint with the NAME of its key's
+  scripted provider (a test fixture), or the OpenAI-compatible endpoint with the NAME of its key's
   environment variable (never the key)."
   {:malli/schema [:=> [:cat :seon.config/config] :seon.model/provider]}
   [c]

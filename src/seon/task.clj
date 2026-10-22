@@ -72,7 +72,7 @@
                       :else (some #(visit (conj seen id) %) (get graph id))))]
     (some #(visit #{} %) (keys graph))))
 
-(defn- refused
+(defn- invalid
   {:malli/schema [:=> [:cat :symbol :string] :map]}
   [op m] {:seon.error/type :seon.task/refused :seon.error/operation op :seon.error/message m})
 
@@ -95,7 +95,7 @@
   (let [ids (mapv #(task-id (:seon.task/ns %) (:seon.task/name %)) decls)
         graph (zipmap ids (map #(set (:seon.task/needs %)) decls))]
     (if-let [p (needs-problem graph #(or (graph %) (pdb/eid db :seon.task/id %)))]
-      (refused 'seon.task/create-tx p)
+      (invalid 'seon.task/create-tx p)
       (mapv (fn [id {:seon.task/keys [config needs evidence] :as decl}]
               (cond-> (-> decl (dissoc :seon.task/config :seon.task/needs :seon.task/evidence)
                           (assoc :db/id id :seon.task/id id :seon.task/execution :held)
@@ -311,7 +311,7 @@
 
 (defn- file-refusal
   {:malli/schema [:=> [:cat :symbol :string] :map]}
-  [ns-sym m] (refused 'seon.task/file-declarations (str "task file " ns-sym ".edn: " m)))
+  [ns-sym m] (invalid 'seon.task/file-declarations (str "task file " ns-sym ".edn: " m)))
 
 (defn file-declarations
   "The declarations of task file text, owned by namespace ns-sym (the file's name), each
