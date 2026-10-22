@@ -73,7 +73,8 @@
                         [:seon.attempt/conflicts {:optional true} [:vector :seon.merge/conflict]]
                         [:seon.attempt/unmerged {:optional true} [:vector :string]]
                         [:seon.attempt/changed {:optional true} [:set :string]]
-                        [:seon.attempt/deferred {:optional true} [:set :qualified-symbol]]]
+                        [:seon.attempt/deferred {:optional true} [:set :qualified-symbol]]
+                        [:seon.attempt/deferred-results {:optional true} :seon.proof/results]]
  ;; ---- the done rule and the reconciler's answer ----
  :seon.reconcile/merge-dials [:map [:max-conflicts nat-int?] [:max-merge-turns nat-int?]]
  ;; a released task not done at quiescence: a root cause (its stuck fact, or cancelled or held)
@@ -100,7 +101,7 @@
                         [:ready [:set [:tuple :int :seon.task/id]]] [:ready-key :map]
                         [:live [:set :seon.attempt/id]] [:reap [:set :seon.attempt/id]] [:kill [:map-of :seon.attempt/id :keyword]]
                         [:judge [:set :seon.attempt/id]] [:merging [:set :seon.attempt/id]]]
- :seon.reconcile/step [:enum :ignored :done :dead-read :spawned :started :worked :tested :read :diffed :merged :trained :landed :main-read :committed :commit-recorded :built]
+ :seon.reconcile/step [:enum :ignored :done :dead-read :spawned :started :worked :tested :read :diffed :merged :trained :landed :main-read :committed :commit-recorded :built :gate-read :gated]
  ;; a task and an attempt as Datahike pulls them (the readers' inputs)
  :seon.task/pulled [:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                     [:seon.task/plan :seon.task/plan] [:seon.task/execution [:enum :held :running :cancelled]]
@@ -126,6 +127,10 @@
                          ;; a merge train: every green merge attempt whose keys are disjoint lands in one commit
                          [:merge-train [:map {:closed true} [:op [:= :merge-train]] [:attempt :seon.attempt/id]
                                         [:members [:vector [:map {:closed true} [:attempt :seon.attempt/id] [:task :seon.task/id]]]]]]
+                         ;; a green merge whose change reaches process tests: they run on a checkout of the
+                         ;; merge candidate first (seon.fx/run-tests), and gate it like proofs
+                         [:gate [:map {:closed true} [:op [:= :gate]] [:attempt :seon.attempt/id] [:task :seon.task/id]
+                                 [:tests [:vector :qualified-symbol]]]]
                          [:accept [:map {:closed true} [:op [:= :accept]] [:attempt :seon.attempt/id] [:task :seon.task/id]]]
                          ;; a failure with budget left: a refinement chain attaches (seon.template/attach-tx)
                          [:attach [:map {:closed true} [:op [:= :attach]] [:attempt :seon.attempt/id] [:task :seon.task/id]

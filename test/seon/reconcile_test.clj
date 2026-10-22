@@ -23,7 +23,7 @@
 (defn- attempt
   "An attempt fact of task nm: status, plus members (results as {test status}; conflicts
   as :seon.merge/conflict values; unmerged as printed keys)."
-  [nm n status & {:keys [boot model results outcome conflicts unmerged changed plan] :or {boot "boot-1" plan (str "Make " nm " true.")}}]
+  [nm n status & {:keys [boot model results outcome conflicts unmerged changed plan deferred deferred-results] :or {boot "boot-1" plan (str "Make " nm " true.")}}]
   (let [id (str "demo/" nm) aid (str id "#" n)]
     (into (task/attempt-start-tx aid id boot (keyword (str "a-" nm n))
                                  {:branch (task/default-branch id) :model model :max-turns r/default-max-turns} 1000 plan)
@@ -32,7 +32,9 @@
              outcome (assoc :seon.attempt/outcome outcome)
              conflicts (assoc :seon.attempt/conflicts (mapv pm/conflict-tx conflicts))
              unmerged (assoc :seon.attempt/unmerged unmerged)
-             changed (assoc :seon.attempt/changed changed))])))
+             changed (assoc :seon.attempt/changed changed)
+             deferred (assoc :seon.attempt/deferred (vec deferred))
+             deferred-results (assoc :seon.attempt/deferred-results (vec (for [[t s] deferred-results] {:seon.proof/test t :seon.proof/status s}))))])))
 
 (defn- db-of
   "A main db: decls written, the ids in `released` released (all when :all), root's boot,
@@ -272,6 +274,19 @@
                                                        (attempt "a-merge" 1 :ended :outcome :green :results {(t "a") :pass}))))))
   ;; (the attempt helper names branches by task id; only the action matters here)
   )
+
+(deftest a-merge-with-deferred-tests-is-gated-first
+  ;; root's ruling (2026-10-22): the process tests a branch's change reaches run at its merge, on
+  ;; a worktree of the merge candidate, and gate it like proofs: unrun, the member is gated
+  ;; first (alone); all passing, it rides the train; a red is refused as a red proof is
+  (let [land (fn [& kv] (r/reconcile (mdb [(decl "a")] :extra (concat (attempt "a" 1 :done)
+                                                                     (apply attempt "a-merge" 1 :ended :outcome :green :results {(t "a") :pass}
+                                                                            :deferred ['seon.root-test/boots] kv)))))]
+    (is (= [{:op :gate :attempt "demo/a-merge#1" :task "demo/a-merge" :tests ['seon.root-test/boots]}] (land)))
+    (is (= [{:op :merge-train :attempt "demo/a-merge#1" :members [{:attempt "demo/a-merge#1" :task "demo/a-merge"}]}]
+           (land :deferred-results {'seon.root-test/boots :pass})))
+    (is (= [:attach] (map :op (land :deferred-results {'seon.root-test/boots :fail}))))
+    (is (str/includes? (:problem (first (land :deferred-results {'seon.root-test/boots :fail}))) "seon.root-test/boots"))))
 
 (deftest merges-run-one-at-a-time
   ;; git's merge queue: a merge agent's last merge-main and root's merge see the same main,

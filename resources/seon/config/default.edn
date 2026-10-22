@@ -249,6 +249,10 @@
  ;; whose target/seon bin/root next starts. Kept with the run (a generation is a record of what
  ;; ran); one worktree and one ~200 MB binary per merges commit built.
  :seon.config.source/generations-dir #join [#ref [:seon.config.root/runs-dir] "/generations"]
+ ;; Unit: path. Where a merge's deferred process tests run (seon.fx/run-tests, root's ruling
+ ;; 2026-10-22): <dir>/<sha>-<uuid>, a worktree of the merges head with the candidate's files,
+ ;; removed after its run; its log stays beside it (<dir>/<sha>-<uuid>.tests.log).
+ :seon.config.source/tests-dir #join [#ref [:seon.config.root/runs-dir] "/merge-tests"]
  ;; Unit: path. Test results by reach digest (task seon.program/tests-run-by-reach; owner
  ;; 2026-10-21: "incremental tests even across worktrees based on test digest"): one directory
  ;; beside the checkouts, shared by every checkout and worktree, one <digest>.edn per result,

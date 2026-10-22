@@ -161,6 +161,51 @@
           (step "bin/worktree --at" [(str from "/bin/worktree") "--at" dir commit repo]))
         (step "bin/build seon" ["nice" "-n" "15" (str dir "/bin/build") "seon"])
         {:value {:commit commit :checkout dir :binary (str dir "/target/seon") :ms (profile/ms-since t0)}})))
+(defn test-command
+  "The runner the :tests effect calls in a checkout, as argv, for namespaces nss: bin/test runs
+  the named namespaces' tests. Prove's one entry replaces it when it lands (root, 2026-10-22),
+  a change to this definition alone."
+  {:malli/schema [:=> [:cat [:sequential :symbol]] [:vector :string]]}
+  [nss] (into ["nice" "-n" "15" "bin/test"] (map str nss)))
+
+(defn test-results
+  "Each of tests' status from the runner's output out (clojure.test's report lines: FAIL in
+  (name), ERROR in (name)) and its exit status: :fail or :error where a line names it, :pass
+  when the run reported its namespace and named it in no failure, :error for all when the run
+  ended with no report of tests (it could not run them)."
+  {:malli/schema [:=> [:cat :string :int [:sequential :qualified-symbol]] [:map-of :qualified-symbol [:enum :pass :fail :error]]]}
+  [out exit tests]
+  (let [named (fn [kind] (set (map second (re-seq (re-pattern (str "(?m)^" kind " in \\(([^)\\s]+)\\)")) out))))
+        failed (named "FAIL") errored (named "ERROR")
+        ran? (boolean (re-find #"(?m)^Ran \d+ tests" out))]
+    (into {} (for [t tests :let [n (name t)]]
+               [t (cond (errored n) :error (failed n) :fail (and ran? (or (zero? exit) (not (contains? (into failed errored) n)))) :pass :else :error)]))))
+
+(defn run-tests
+  "The :tests effect: tests (qualified names) run on a checkout of the merge candidate: a
+  detached worktree of repo at branch's head (bin/worktree --at, as a generation's), files
+  ({relative path text}, the candidate's changed files) written over it, then the runner
+  (test-command) over the tests' namespaces there, niced, in that tree's own environment;
+  the worktree removed after. Answers {:value {:results {test status} :ms :log}}, or
+  :seon.fx/io-error naming the step and its log."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [repo branch files tests]} :req}]
+  (let [t0 (profile/now-ns)
+        sha (str/trim (:out (sh/sh "git" "-C" repo "rev-parse" branch)))
+        dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
+        log (str dir ".tests.log")
+        clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"]
+        at (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo)]
+    (if-not (zero? (:exit at))
+      (error :seon.fx/io-error (str "bin/worktree --at exited " (:exit at) ": " (:err at)) {:path dir})
+      (try
+        (doseq [[p text] files] (let [f (java.io.File. dir p)] (.mkdirs (.getParentFile f)) (spit f text)))
+        (let [r (apply sh/sh (concat clean (test-command (sort (distinct (map (comp symbol namespace) tests)))) [:dir dir]))
+              out (str (:out r) (:err r))]
+          (spit log out)
+          {:value {:results (test-results out (:exit r) tests) :ms (profile/ms-since t0) :log log}})
+        (finally (sh/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir))))))
+
 ;; ---- the owner -----------------------------------------------------------------------
 
 (defn refill

@@ -258,6 +258,7 @@
 (def ^:private attempt-pull
   '[* {:seon.attempt/task [:seon.task/id]}
     {:seon.attempt/results [:seon.proof/test :seon.proof/status]}
+    {:seon.attempt/deferred-results [:seon.proof/test :seon.proof/status]}
    {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
 (defn- attempt-value
@@ -274,6 +275,7 @@
       unmerged (assoc :seon.attempt/unmerged (vec (sort unmerged)))
       (:seon.attempt/changed a) (update :seon.attempt/changed set)
       (:seon.attempt/deferred a) (update :seon.attempt/deferred set)
+      (:seon.attempt/deferred-results a) (update :seon.attempt/deferred-results #(into {} (map (juxt :seon.proof/test :seon.proof/status)) %))
       conflicts (assoc :seon.attempt/conflicts
                        (vec (sort-by (comp str :key) (map pm/conflict-value conflicts)))))))
 

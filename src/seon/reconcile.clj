@@ -349,7 +349,16 @@
                    (let [rs (done-refusals (done-input idx id (:seon.attempt/results a {}) (:seon.attempt/uncontracted a #{})
                                                            (:seon.attempt/unmerged a []) (:seon.attempt/basis-t a) (:seon.attempt/plan a)))]
                      (cond
-                       (and (empty? rs) merge?) {:op :land :attempt aid :task id}
+                       ;; root's ruling (2026-10-22): the process tests the branch's change
+                       ;; reaches gate its merge like proofs, run on a checkout (:gate, seon.fx/run-tests)
+                       (and (empty? rs) merge?)
+                       (let [deferred (sort-by str (:seon.attempt/deferred a #{})) dres (:seon.attempt/deferred-results a)
+                             red (for [t deferred :let [s (get dres t)] :when (not= :pass s)] [t (or s :unknown)])]
+                         (cond (empty? deferred) {:op :land :attempt aid :task id}
+                               (nil? dres) {:op :gate :attempt aid :task id :tests (vec deferred)}
+                               (empty? red) {:op :land :attempt aid :task id}
+                               :else (failed aid id t (str "attempt " aid "'s deferred tests, run on a checkout at its merge, are not green: "
+                                                           (str/join ", " (for [[t s] red] (str t " " (name s))))))))
                        (empty? rs) {:op :accept :attempt aid :task id}
                        :else
                        (failed aid id t (str "attempt " aid " ended " (name (:seon.attempt/outcome a :error))
@@ -360,8 +369,10 @@
         ;; main; a train closes when its first member ends (no new member joins until it
         ;; lands, so landing cannot starve)
         lands (filter #(= :land (:op %)) judged)
-        judged (remove #(= :land (:op %)) judged)
         live-merge? (some (:live idx) (:merging idx))
+        ;; one gate at a time, while no merge is in flight (it runs on the merges branch's head)
+        gates (when-not live-merge? (take 1 (filter #(= :gate (:op %)) judged)))
+        judged (remove #(#{:land :gate} (:op %)) judged)
         train (when (and (seq lands) (not live-merge?))
                 [{:op :merge-train :attempt (:attempt (first lands)) :members (mapv #(select-keys % [:attempt :task]) lands)}])
         closed? (some #(= :ended (get-in idx [:attempts % :seon.attempt/status])) (:merging idx))
@@ -384,7 +395,7 @@
         spawns (for [id starts :let [t (get-in idx [:tasks id])]]
                  {:op :spawn :task id :env (desired-env t)
                   :attempt (str id "#" (inc (count (get-in idx [:by-task id]))))})]
-    (vec (concat reaps kills judged train spawns))))
+    (vec (concat reaps kills judged gates train spawns))))
 
 ;; ---- stuck: observed, never held ------------------------------------------------------
 
@@ -557,7 +568,11 @@
       :merge-train (let [bs (mapv #(get-in (task/attempt (:db st) (:attempt %)) [:seon.attempt/env :branch]) (:members act))]
                      (one (request (assoc-in st [:flights attempt :branches] bs) attempt :trained
                                    {:op :write :req {:op :merge-train :branches bs :data-attrs #{}}})))
-      :attach (one (write st attempt :done (tpl/attach-tx (:db st) act))))))
+      :attach (one (write st attempt :done (tpl/attach-tx (:db st) act)))
+      ;; the merge gate: the candidate's files read from its branch, then its deferred tests
+      ;; run on a checkout of the merges head with them (seon.fx/run-tests)
+      :gate (one (request st attempt :gate-read
+                          {:op :write :req {:op :branch-db :branch (get-in (task/attempt (:db st) attempt) [:seon.attempt/env :branch])}})))))
 
 (defn- judge-tx
   "Attempt aid's end on main from MEASURED facts: the end its agent wrote on the branch,
@@ -693,6 +708,19 @@
                                               :else (into (cas-tx attempt :ended :bailed {:seon.attempt/error (error-text r)})
                                                           (stuck-tx (:idx st) attempt task problem)))))
                                         (:members act) (:results r))))))
+      ;; the gate's candidate: the files of the namespaces the branch changed, as it holds them
+      :gate-read (let [nss (sort (distinct (for [k (:seon.attempt/changed (task/attempt (:db st) aid))
+                                                  :let [[kind x] (read-string k)]
+                                                  :when (#{:var :form} kind)]
+                                              (symbol (first (str/split (str x) #"/" 2))))))
+                       files (source/files (:db r) (vec (keep #(:ns/file (d/entity (:db r) [:ns/name %])) nss)))]
+                   (one (request st aid :gated {:op :fx :kind :tests :req {:repo (:root (:source st)) :branch (:branch (:source st))
+                                                                          :files files :tests (:tests act)}})))
+      ;; each deferred test's status on the attempt; the next judgment lands it or refuses it
+      :gated (let [rs (if (contract/error? r) (zipmap (:tests act) (repeat :error)) (get-in r [:value :results]))]
+               (one (write st aid :done (cond-> [{:seon.attempt/id aid
+                                                  :seon.attempt/deferred-results (vec (for [[t s] rs] {:seon.proof/test t :seon.proof/status s}))}]
+                                          (contract/error? r) (conj {:seon.attempt/id aid :seon.attempt/error (error-text r)})))))
       :landed (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)
                        files (source/files (:db r) paths)]
