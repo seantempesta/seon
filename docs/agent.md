@@ -27,7 +27,7 @@ The attempt's part:
 The turn's part:
 - `:turn`: this turn of the most you have.
 - `:proofs`: each of your proofs and its status. A red one shows each failure as `:assert` (as written) and `:got` (what it evaluated to), its source, and `:calls`, the program functions it calls. `:undefined` is not written yet, `:not-run` means the test run failed (see `:test-run`), `:no-assertions` means it ran and asserted nothing.
-- `:refused`: what keeps you from done beyond your red proofs: `:regression` (green on main, red here: your change broke it), `:stray-red` (a red test that is no task's proof), `:contract-gap` (a function you defined without a ``:malli/schema``), `:unmerged`, `:no-proofs`.
+- `:refused`: what keeps you from done beyond your red proofs (the done rule, `seon.reconcile/done-refusals`): `:regression` (green on main, red here: your change broke it), `:stray-red` (a red test that is no task's proof), `:contract-gap` (a function you defined without a ``:malli/schema``), `:proof-unknown` (a proof with no result: it never ran), `:unmerged` (a merge entry not resolved), `:no-proofs`, and on a design task `:no-design` (your plan is unchanged since the attempt began; it shows the form that changes it).
 - `:test-run`: the test run itself failing (a timeout, a dead fork); no test result is real until it runs.
 - `:unmerged`: on a merge task, the entries to resolve.
 - `:will-merge`: every change your branch's merge will carry to main: the vars you added, changed and removed, and the schemas you registered or changed; `{}` when it carries nothing. Anything listed that the task does not need, put back.
@@ -41,7 +41,8 @@ This is a real Clojure REPL: what you define becomes part of your branch's progr
 - Every function you define needs a Malli contract in its metadata: `(defn total {:malli/schema [:=> [:cat [:vector :int]] :int]} [xs] (reduce + 0 xs))`.
 - Your own namespace is scratch and never merges: `(in-ns (symbol (str "agent." (name (:id (my.agent/whoami))))))`. There the `my.*` functions are referred unqualified; elsewhere call them qualified, as written here.
 - A schema changes as a function does, on your branch: `(my.schema/register! :app.workout/set [:map [:reps :int] [:kg :double]])`; your next forms see it. To change an existing key, start from its form: `(get (my.schema/forms) :seon.task/task)`.
-- An earlier result: ``(my.agent/$ :h3)`` by its handle, or `*1`; the last error is `*e`.
+- Your branch's program is the forms you evaluate, recorded on your branch; the files in the checkout are not your branch. Writing a file under src or test, or running git, changes the shared checkout under every agent and root, not your program: a file is an effect, through its owner.
+- An earlier result: ``(my.agent/$ :h3)`` by its handle, or `*1`; the last error is `*e`, and ``(my.agent/pst)`` prints it with its causes.
 
 ## Finding your way
 
@@ -59,7 +60,8 @@ Your task is done when every proof passes and the done rule refuses nothing; the
 
 - A proof is a deftest in a test namespace: `(ns app.workout-test (:require [clojure.test :refer [deftest is]] [app.workout :as w]))`, then `(deftest total-sums (is (= 6 (w/total [1 2 3]))))`, run with `(clojure.test/run-tests 'app.workout-test)`.
 - A cost proof (`seon.cost/proof`) is your performance goal: it says what N counts, the least work the data needs (`:work`, e.g. one pass with one lookup per row), how that grows and what it may cost. Read it before writing code and do no more work than it states.
-- The judge counts exactly: allocated bytes may reach 1.25x the estimate and contracted calls 1.0x, wall time 3x. A dimension whose growth exponent exceeds `:growth`'s by more than 0.3 is STEEPER (an extra pass), red even inside the slack; LOOSE (a third of the estimate or less) is not red. Its failure message prints measured over estimate per size.
+- Run what judges your branch now, as root's judge does: ``(my.agent/prove)`` runs your proofs and every test your change reaches, reusing each one green at its reach digest, and answers `:results`.
+- The judge counts exactly (`seon.cost/slack`): allocated bytes may reach 1.25x the estimate and contracted calls 1.0x, wall time 3x. A dimension whose growth exponent exceeds `:growth`'s by more than 0.3 is STEEPER (an extra pass), red even inside the slack; LOOSE (a third of the estimate or less) is not red. Its failure message prints measured over estimate per size.
 
 ## Merging
 
