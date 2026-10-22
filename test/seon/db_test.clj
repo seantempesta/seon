@@ -41,35 +41,43 @@
       (is (nil? (resolve 'seon.db/mem-cfg))))
     (d/release seed)))))))
 
-(deftest minting-past-the-lease-is-refused-not-shared
-  ;; this process takes a lease on a test branch as a forked agent does (seon.db/after-fork!
-  ;; -> lease!), mints all but two of its ids, then asks for five more
-  (ts/test-branch! (fn [c conn] (let [sid (get-in c [:store :id])
-        lease (pdb/lease-block! @conn)
-        ceiling (+ lease (cfg/value :seon.config.store/eid-lease))
-        notes (fn [n tag] (vec (for [i (range n)] {:note/text (str tag i)})))]
+(deftest each-id-is-issued-once-across-branches
+  ;; the store's one page of ids (seon.db/ids!): two branches forked at one commit each take
+  ;; their own entity ids and transaction ids, and an id carried in tx-data moves the page past it
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [b (keyword (str (name (:branch cfg)) "-ids"))
+           _ (d/branch! conn (:branch cfg) b)
+           bc (d/connect (assoc cfg :branch b))
+           write (fn [c tag] (let [r (d/transact c [{:db/id "n" :note/text tag}])]
+                               [(get-in r [:tempids "n"]) (get-in r [:tempids :db/current-tx])]))]
+       (try
+         (let [[ea ta] (write conn "a") [eb tb] (write bc "b")]
+           (testing "two branches of one commit: different entity ids, different transaction ids"
+             (is (not= ea eb))
+             (is (not= ta tb))
+             (is (= ta (:max-tx @conn)) "a branch's t is its last transaction's id")
+             (is (< ta tb) "issued in order across branches"))
+           (testing "an explicit id is never issued again"
+             (let [far (+ 1000 (max ea eb))]
+               (d/transact bc [[:db/add far :note/text "carried"]])
+               (is (< far (first (write conn "after")))))))
+         (finally (d/release bc) (d/delete-branch! conn b)))))))
+
+(deftest a-reopened-store-issues-past-every-head
+  ;; the page is reseeded from the heads when it opens, so a page lost (a crash, a deleted
+  ;; file) re-issues no id a committed head holds; a store on disk of its own, removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
     (try
-      (pdb/lease! c lease)
-      (let [r1 (dw/apply! conn {:tx-data (notes (- (cfg/value :seon.config.store/eid-lease) 2) "a")})
-            before (:db-after r1)
-            r2 (dw/apply! conn {:tx-data (notes 5 "b")})
-            e (pdb/lease-spent r2 lease)]
-        (testing "the lease mints up to its end"
-          (is (map? r1))
-          (is (= (- ceiling 2) (:max-eid before)))
-          (is (= {:from lease :used (- (cfg/value :seon.config.store/eid-lease) 2) :of (cfg/value :seon.config.store/eid-lease)} (pdb/lease-use before lease))))
-        (testing "past it the transaction is refused with the typed error, nothing applied"
-          (is (not (map? r2)))
-          (is (= :seon.db/lease-spent (:seon.error/type e)))
-          (is (contract/valid? :seon.db/lease-spent e))
-          (is (= {:lease lease :ceiling ceiling} (select-keys e [:lease :ceiling])))
-          (is (string? (:seon.error/fix e)))
-          (is (nil? (pdb/lease-spent r2 nil)) "a process without a lease (root) is never refused this way"))
-        (testing "the next lease's ids were never minted"
-          (let [run-ahead (:db-after (dw/apply! conn {:tx-data []}))]
-            (is (= (- ceiling 2) (:max-eid run-ahead)))
-            (is (empty? (d/datoms run-ahead :eavt ceiling))))))
-      (finally (dbt/set-eid-ceiling! sid nil)))))))
+      (let [r (d/transact conn [{:db/id "n" :note/text "before"}])
+            e (get-in r [:tempids "n"]) t (:max-tx (:db-after r))]
+        (clojure.java.shell/sh "rm" (str path "/ids"))
+        (pdb/ids! conn)
+        (let [r2 (d/transact conn [{:db/id "n" :note/text "after"}])]
+          (is (< e (get-in r2 [:tempids "n"])))
+          (is (< t (:max-tx (:db-after r2))))))
+      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest the-store-reports-its-map-use
   ;; a store on disk of this test's own, the last resort: what is proved is how an LMDB
@@ -85,24 +93,6 @@
         (is (< used-bytes (:used-bytes (pdb/map-use cfg))) "it grows as the store does"))
       (is (nil? (pdb/map-use (ts/test-branch! (fn [c _] c)))) "an in-memory store has no map")
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
-
-(deftest a-lease-mints-in-its-own-block-after-a-merge
-  ;; main merged into the branch brings entities minted in a later agent's block (ids past
-  ;; this lease's ceiling): this process still mints inside its own block, never above them
-  (ts/test-branch! (fn [c conn] (let [sid (get-in c [:store :id])
-        lease (pdb/lease-block! @conn)
-        ceiling (+ lease (cfg/value :seon.config.store/eid-lease))
-        theirs (+ ceiling 10)
-        new-id (fn [r] (d/q '[:find ?e . :in $ ?t :where [?e :note/text ?t]] (:db-after r) "mine"))]
-    (try
-      (pdb/lease! c lease)
-      (let [r0 (dw/apply! conn {:tx-data [[:db/add theirs :note/text "theirs"]]})
-            r1 (dw/apply! conn {:tx-data [{:note/text "mine"}]})]
-        (is (map? r0))
-        (is (<= theirs (:max-eid (:db-after r0))) "the branch holds the later block's entity")
-        (is (map? r1) "minting goes on")
-        (is (< lease (new-id r1) ceiling) "inside its own block"))
-      (finally (dbt/set-eid-ceiling! sid nil)))))))
 
 (deftest two-processes-branch-one-store
   ;; two processes at once each make 50 branches of one store (two roots on one store, as
@@ -423,15 +413,35 @@
                  ", so the bound is " bound " (" (format "%.1f" (/ (double per-turn) bound)) "x over)")))
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
-(deftest root-mints-past-every-reserved-block-after-a-merge
-  ;; task seon.db/root-mints-in-a-block-of-its-own: an agent's block is reserved from the one
-  ;; counter root's own writes mint from (seon.db/lease-block!), so after a merge brings an
-  ;; entity from inside that block onto main, root's next id still lies past the block
-  (ts/test-branch! (fn [_ conn]
-    (let [lease (pdb/lease-block! @conn)
-          end (+ lease (cfg/value :seon.config.store/eid-lease))
-          merged (d/transact conn [[:db/add (+ lease 5) :note/text "the agent's, merged"]])
-          root (d/transact conn [{:note/text "root's"}])
-          e (d/q '[:find ?e . :where [?e :note/text "root's"]] (:db-after root))]
-      (is (= (+ lease 5) (:max-eid (:db-after merged))) "main holds an id inside the agent's block")
-      (is (>= e end) (str "root's id " e " lies past the block ending at " end))))))
+(deftest two-branches-diff-by-what-each-wrote
+  ;; datoms-diff walks both trees and skips every subtree they share (Jolt's HashSet needs
+  ;; retainAll for that), so a branch's own writes are its side of the diff against its fork
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [fork @conn
+           b (keyword (str (name (:branch cfg)) "-b"))
+           _ (d/branch! conn (:branch cfg) b)
+           bc (d/connect (assoc cfg :branch b))]
+       (try
+         (d/transact bc [{:note/text "b's 1"} {:note/text "b's 2"}])
+         (d/transact conn [{:note/text "main's"}])
+         (let [[only-fork only-b] (d/datoms-diff fork @bc :eavt [])
+               [only-b' only-main] (d/datoms-diff @bc @conn :eavt [])]
+           (is (empty? only-fork) "the branch only added")
+           (is (= #{"b's 1" "b's 2"} (set (keep #(when (= :note/text (:a %)) (:v %)) only-b))))
+           (is (= #{"b's 1" "b's 2"} (set (keep #(when (= :note/text (:a %)) (:v %)) only-b'))))
+           (is (= #{"main's"} (set (keep #(when (= :note/text (:a %)) (:v %)) only-main)))))
+         (finally (d/release bc) (d/delete-branch! conn b)))))))
+
+(deftest a-planned-query-reads-every-version-in-the-history
+  ;; the planner's history path opens sorted-set cursors with a java.util.Comparator
+  ;; (datahike.query.execute/history-versions!); every version of a replaced value answers
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [e (get-in (d/transact conn [{:db/id "f" :form/id "h/f" :form/src "(defn f [] 0)" :form/order 1}]) [:tempids "f"])]
+       (d/transact conn [[:db/add e :form/order 2]])
+       (d/transact conn [[:db/add e :form/order 3]])
+       (is (= #{[1 true] [1 false] [2 true] [2 false] [3 true]}
+              (set (d/q '[:find ?o ?added :in $ ?id :where [?f :form/id ?id] [?f :form/order ?o _ ?added]]
+                        (d/history @conn) "h/f"))))
+       (is (= #{[3]} (d/q '[:find ?o :in $ ?id :where [?f :form/id ?id] [?f :form/order ?o]] @conn "h/f")))))))

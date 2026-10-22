@@ -6,8 +6,8 @@
   (BAGGAGE.md)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-] :as contract] [seon.schema.datahike :as sd] [seon.config :as cfg]
-            [datahike.connections] [datahike.writing] [datahike.config] [datahike.store] [konserve.store] [datahike.db.transaction :as dbt] [hasch.core :as hasch] [datahike.api :as d] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
-            [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix]))
+            [datahike.connections] [datahike.writing] [datahike.config] [datahike.store] [konserve.store] [hasch.core :as hasch] [datahike.api :as d] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
+            [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix] [seon.lib :as lib] [jolt.ffi :as ffi] [datahike.ids] [datahike.core]))
 
 (def schema
   "The Datahike schema, derived from the registry's entity schemas (resources/seon/schemas,
@@ -87,6 +87,7 @@
                       (#{:lz4 :zstd} (cfg/value :seon.config.store/compressor)) (assoc-in [:config :compressor] {:type (cfg/value :seon.config.store/compressor)})
                       (= backend :file) (assoc :config {:defer-immutable-sync? true}))
              :schema-flexibility :write
+             :store-cache-bytes (cfg/value :seon.config.store/node-cache-bytes)
              :writer writer-cfg
              :index-config (let [n (cfg/value :seon.config.store/value-out-of-line-bytes)]
                              (cond-> {:branching-factor (cfg/value :seon.config.store/branching-factor)}
@@ -231,6 +232,37 @@
   (count (d/datoms db :aevt)) (count (d/datoms db :avet))
   (count (d/datoms db :eavt)))
 
+(lib/defc c-ids-open "seon_ids_open" [:string] :pointer {:capture-native-error true})
+(lib/defc c-ids-take "seon_ids_take" [:pointer :int] :uint64)
+(lib/defc c-ids-reach "seon_ids_reach" [:pointer :int :uint64] :void)
+
+(defn ids!
+  "Make the store of conn take its entity ids and transaction ids from one page every
+  process writing it shares (native/ids.c): the file `ids` beside a durable store, or an
+  anonymous page for a store in memory; a process forked from this one maps the same page.
+  Each id is issued once across every branch and process, so a datom keeps its e and tx
+  wherever it travels (notes/global-ids/MEASURED.md §6: 28-34 ns an id, 200-240 ns with 10
+  processes contending). The page is moved past every branch head's ids
+  (datahike.writing/set-ids!), so an id issued but never committed is a gap, never reused,
+  and a page lost in a crash is reseeded from the heads. A page the OS refuses is
+  :seon.db/ids-unopened (docs/failure-points.md). nil."
+  {:malli/schema [:=> [:cat :seon.host/conn] :nil]}
+  [conn]
+  (let [{:keys [backend path]} (get-in @conn [:config :store])
+        file (if (= :memory backend) "" (str path "/ids"))
+        [page errno] (c-ids-open file)]
+    (when (zero? (ffi/address page))
+      (let [e (contract/error :seon.db/ids-unopened 'seon.db/ids!
+                              (str "the store's ids page " (pr-str file) " was refused: " (ffi/errno-message errno))
+                              {:path file :errno errno
+                               :seon.error/fix "Make the store's directory writable (the ids page lives beside data.mdb), then open the store again."})]
+        (throw (ex-info (:seon.error/message e) e))))
+    (datahike.writing/set-ids! (:store @conn) (get-in @conn [:config :store :id])
+                               (reify datahike.ids/IIds
+                                 (-take! [_ kind] (c-ids-take page (if (= :eid kind) 0 1)))
+                                 (-reach! [_ kind id] (c-ids-reach page (if (= :eid kind) 0 1) id) nil)))
+    nil))
+
 (defn store?
   "Does a durable LMDB store exist at path (its data file)?"
   {:malli/schema [:=> [:cat :string] :boolean]}
@@ -249,6 +281,7 @@
       (d/create-database (made-cfg cfg))
       (let [conn (d/connect cfg)] (seed! conn n) (d/release conn)))
     (let [[conn existed?] (open-main! cfg main)
+          _ (ids! conn)
           added (install-missing! conn)
           cfg (cond-> cfg (not= :db main) (assoc :branch main))]
       ;; durable before root runs: the seed, the new branch or the added attributes (an
@@ -281,46 +314,15 @@
             swept @(d/gc-storage conn (java.util.Date. 0))]
         {:swept (count swept) :ms (profile/ms-since t0) :branches now :gone gone}))))
 
-(defn lease!
-  "Make this process mint the store's entity ids from its lease: from lease, up to (not
-  including) lease + EID-LEASE; past it a transaction is refused (lease-spent), never
-  minting the next agent's ids. nil."
-  {:malli/schema [:=> [:cat :seon.db/cfg :int] :nil]}
-  [cfg lease]
-  (.put ^java.util.concurrent.ConcurrentHashMap @#'datahike.writing/eid-allocators
-        (get-in cfg [:store :id]) (java.util.concurrent.atomic.AtomicLong. lease))
-  (dbt/set-eid-ceiling! (get-in cfg [:store :id]) (+ lease (cfg/value :seon.config.store/eid-lease))))
-
 (defn after-fork!
   "Make this forked process (an agent, a clone) open the store itself: an LMDB env and the
   connections inherited from its parent must not be used across fork(), so they are
-  forgotten (not closed: they are the parent's), and the store's entity-id allocator starts
-  at this process's lease and stops at its end (lease!). Physics, not a guard: fork shares
-  the parent's handles."
-  {:malli/schema [:=> [:cat :seon.db/cfg :int] :any]}
-  [cfg lease]
+  forgotten (not closed: they are the parent's). The store's ids page stays: fork maps the
+  parent's page (ids!). Physics, not a guard: fork shares the parent's handles."
+  {:malli/schema [:=> [:cat :seon.db/cfg] :any]}
+  [cfg]
   (swap! @#'konserve.jolt.lmdb/envs dissoc (get-in cfg [:store :path]))
-  (reset! datahike.connections/*connections* {})
-  (lease! cfg lease))
-
-(defn lease-spent
-  "The typed refusal :seon.db/lease-spent when x (what a transaction answered) is Datahike's
-  refusal to mint past this process's ceiling (after-fork!), for the agent whose lease
-  starts at lease; else nil."
-  {:malli/schema [:=> [:cat :any [:maybe :int]] [:maybe :seon.db/lease-spent]]}
-  [x lease]
-  (let [d (ex-data x)]
-    (when (and lease (= :entity-id/lease-spent (:error d)))
-      (contract/error :seon.db/lease-spent 'seon.agent/transact!
-                      (str "this agent's entity ids are spent: its lease is " (cfg/value :seon.config.store/eid-lease) " ids from " lease)
-                      {:lease lease :ceiling (:ceiling d) :entity-id (:entity-id d)
-                       :seon.error/fix "Write fewer new entities in this agent (retract or reuse), or raise :seon.config.store/eid-lease for the run (--set); the transaction was not applied."}))))
-
-(defn lease-use
-  "How much of the lease starting at lease db's branch has minted: {:from :used :of}."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe :int]] [:maybe [:map [:from :int] [:used :int] [:of :int]]]]}
-  [db lease]
-  (when lease {:from lease :used (max 0 (- (:max-eid db) lease)) :of (cfg/value :seon.config.store/eid-lease)}))
+  (reset! datahike.connections/*connections* {}))
 
 (defn map-use
   "The LMDB store's use of its map: {:used-bytes (data.mdb's length: LMDB grows the file as it
@@ -330,15 +332,6 @@
   (when (= :lmdb (get-in cfg [:store :backend]))
     {:used-bytes (.length (java.io.File. (str (get-in cfg [:store :path]) "/data.mdb")))
      :map-bytes (get-in cfg [:store :lmdb :map-size])}))
-
-(defn lease-block!
-  "Reserve the next block of eid-lease entity ids from this process's one counter for db's
-  store (the counter its own writes mint from, seeded past every branch head): answers the
-  block's lease, its ids lease+1 up to lease+eid-lease (exclusive, lease!). The process's
-  later ids start past it, so a block and the writes to main never meet."
-  {:malli/schema [:=> [:cat :seon.host/db] :int]}
-  [db]
-  (.getAndAdd ^java.util.concurrent.atomic.AtomicLong (datahike.writing/eid-allocator db) (cfg/value :seon.config.store/eid-lease)))
 
 (defn head
   "Branch b's committed value, read from the store (another process may have committed it)."
@@ -354,19 +347,33 @@
   (d/commit-as-db conn (d/merge-base conn branch main)))
 
 ;; ---- tx-data that replays exactly -----------------------------------------------
-;; Seon's Datahike fork issues entity ids from one store-wide counter, so ids are unique
+;; The store issues every entity id and transaction id once (ids!), so ids are unique
 ;; across branches: a branch's new entity keeps its id on main, and a replica (the fork
-;; server's main, an agent's branch copy) applies the writer's RESOLVED datoms rather
-;; than re-resolving tempids with its own counter.
+;; server's main) applies the writer's RESOLVED datoms as main's own transaction (replay)
+;; rather than re-resolving tempids or taking an id of its own.
 
 (defn report->tx-meta
   "The transaction entity's own facts in the writer's tx-report ({attribute value}: its
   :db/txInstant and any tx-meta; empty without history): what a replica of the branch
-  applies as its own transaction's :tx-meta, so its transaction entity holds main's facts
-  (a transaction's id is its branch's own, so they cannot travel as datoms on it)."
+  applies as its transaction's :tx-meta (replay), so its transaction entity holds main's facts."
   {:malli/schema [:=> [:cat :seon.db/tx-report] :map]}
   [rep]
   (into {} (for [dt (:tx-data rep) :when (and (= (:e dt) (:tx dt)) (:added dt))] [(:a dt) (:v dt)])))
+
+(defn replay
+  "db with main's commit t applied as main's transaction t: tx-data (report->tx) and the
+  transaction's facts (report->tx-meta) under main's own transaction id, so a replica's t
+  is main's (the fork server's replica: seon.agent/misaligned compares them). A speculation
+  of the replica's own (d/with) would take the next id after its own, which the store has
+  issued to another transaction. Explicit-id tx-data mints no entity id."
+  {:malli/schema [:=> [:cat :seon.host/db :int :seon.db/resolved-tx :map] :seon.host/db]}
+  [db t tx-data tx-meta]
+  (:db-after (datahike.core/with db tx-data tx-meta
+                                 (reify datahike.ids/IIds
+                                   (-take! [_ kind]
+                                     (if (= :tx kind) t
+                                         (throw (ex-info "a replayed commit names its entity ids (report->tx)" {:t t}))))
+                                   (-reach! [_ _ _] nil)))))
 
 (defn report->tx
   "The writer's tx-report as explicit-id tx-data (the transaction entity's own datoms left

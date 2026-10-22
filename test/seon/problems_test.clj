@@ -90,7 +90,7 @@
                   f))]
     (is (= ['seon.task/entity-value] (map #(get-in % [:example :seon.error/operation]) (vals (reduce round {} (range 10)))))
         "the step fails in the task owner's contract, each round")
-    (is (<= (- (:max-tx @conn) t0) 1) "ten failing commits, one record")))))
+    (is (<= (or (d/q '[:find (count ?tx) . :in $ ?t0 :where [?tx :db/txInstant] [(> ?tx ?t0)]] @conn t0) 0) 1) "ten failing commits, one record")))))
 
 ;; ---- eval errors: the error map as data, on the branch, and counted across agents ------
 

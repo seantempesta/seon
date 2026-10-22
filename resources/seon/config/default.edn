@@ -78,15 +78,6 @@
 
  ;; The durable store's konserve backend: LMDB (one env sync per commit) or the POSIX filestore.
  :seon.config.store/backend :lmdb
- ;; Unit: entity ids per agent. Each agent process mints ids on its own branch from a block
- ;; of this many, reserved for it from root's one counter of the store (the one main's writes
- ;; mint from) when the writer branches it or its clone (seon.db/lease-block!): agents' ids
- ;; and main's never meet (docs/storage.md#leases). At the bound the agent's next write is
- ;; refused :seon.db/lease-spent, nothing applied. Each spawn, resume or clone takes a block:
- ;; ids stay below tx0 (2^29, about 5.4e8), so a kept store holds about 5,400 blocks of
- ;; 100,000 (task seon.db/the-id-space-holds-the-blocks-a-store-keeps). Not measured
- ;; against the largest branch.
- :seon.config.store/eid-lease 100000
  ;; Unit: bytes. LMDB's map size, the store's largest size. At the bound LMDB refuses the
  ;; write (MDB_MAP_FULL, a :seon.writer/refused answer). Provenance: the store's first
  ;; default was 1 GiB (seon.db's SEON_LMDB_MB); on 2026-10-21 the standing root's kept store
@@ -122,6 +113,17 @@
  ;; same ~1.9 ms a commit. A trained dictionary (7.3x on the records) waits for a representative
  ;; corpus (owner, 2026-10-22).
  :seon.config.store/compressor :zstd
+ ;; Unit: bytes. The node cache of a process (Datahike's :store-cache-bytes): index nodes read
+ ;; back from the store, kept by address and shared by every connection and branch db of the
+ ;; store in that process (datahike.index.interface/node-cache-key), least recently used out
+ ;; first; Jolt's cache counts every node as 4,096 bytes (datahike.index.node-cache), so this
+ ;; is 32,768 nodes. At the bound a node is evicted and its next read goes to the store again
+ ;; (65-75 us cold against 8.6 us warm per seek). Provenance, measured 2026-10-23
+ ;; (notes/global-ids/MEASURED.md §2-3): Datahike's default of 1,000 nodes thrashed on a scan
+ ;; of one 115k-datom index (3,704 nodes: a second scan read all again, 270 ms, as cold), and a
+ ;; cache holding them scanned in 26 ms and opened a sibling branch reading 8 nodes. 128 MB holds
+ ;; about nine such indexes: a thirty-second of :seon.config.machine/memory-mb per process.
+ :seon.config.store/node-cache-bytes 134217728
 
  ;; ==== agents =================================================================================
 

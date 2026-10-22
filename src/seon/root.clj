@@ -345,7 +345,7 @@
         (:errors-flushed dest) (dissoc st ::errors-flight)
         (:rid dest) (deliver-rid st (:rid dest) r)
         (:agent dest) (to-agent st (:agent dest) {:op :write :msg (cond (:op r) r
-                                                                          (= :branched (:op dest)) (cond-> {:op :branched :k (:k dest) :cfg (:cfg r) :lease (:lease r)} (contract/error? r) (assoc :error r))
+                                                                          (= :branched (:op dest)) (cond-> {:op :branched :k (:k dest) :cfg (:cfg r)} (contract/error? r) (assoc :error r))
                                                                           :else (assoc r :op (:op dest) :k (:k dest)))})
         (:spawn dest) (if (contract/error? r) (spawn-failed st (:spawn dest) (:seon.error/message r) r) st)
         :else st))
