@@ -521,7 +521,8 @@
         _ (c/submit! sys a "(loop [] (recur))")
         _ (c/submit! sys (:id cl) "(loop [] (recur))")
         _ @(c/submit! sys b "(ns app.forever (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (deftest forever (loop [] (recur)))")
-        _ (c/run-tests! sys b 600000)
+        ;; bounded by :seon.config.agent/test-ticks: root dies long before the bound
+        _ (c/run-tests! sys b)
         _ (Thread/sleep 300)
         pids (keep #(get-in (c/state sys) [:agents % :pid]) [a b (:id cl)])
         test-child (:out (clojure.java.shell/sh "pgrep" "-P" (str (get-in (c/state sys) [:agents b :pid]))))]
@@ -606,35 +607,38 @@
                 :b-merges-now (and (:merged? mb) (= "\"b:1\"" (ffirst r-n2)) (= "20" (first (nth r-n2 2))))}}))))
 
 (defn window-write
-  "Phase 1 of the flush-window check (root's :flush-ms 1000): main branch nm of the one
-  store. A is
-  written and the window passes: flushed. B is answered committed and unflushed (the
-  writer's flush count does not move before its answer). C is written with :flush? (an
-  outside effect follows): its answer comes after its flush (the count moved). D is answered
-  unflushed, and root SIGKILLs itself at once."
+  "Phase 1 of the group-commit check (continuous, no window): main branch nm of the one
+  store. A is written with :flush? (an outside effect follows): synced before its answer,
+  the store clean. With the flusher paused, B is answered committed and unflushed (the
+  writer dirty, its flush count unmoved), and C, with :flush?, is answered after its own
+  sync (the count moved, clean). The flusher resumed, D is answered, and root SIGKILLs
+  itself at once."
   [nm]
-  (run-check "WINDOW-WRITE" {:main (keyword nm) :flush-ms 1000}
+  (run-check "WINDOW-WRITE" {:main (keyword nm)}
    (fn [sys]
-    (let [flushes #(:flushes (::flow/state (flow/ping-proc (:graph sys) :writer :timeout-ms 1000)))
+    (let [writer #(select-keys (::flow/state (flow/ping-proc (:graph sys) :writer :timeout-ms 1000)) [:flushes :dirty])
           t (fn [p] (let [t0 (lib/now-ns) r @p] [(:ok r) (lib/r2 (lib/ms-since t0))]))
-          a (t (c/transact-main! sys [{:note/text "A" :note/agent :window}]))
-          ;; the window passes (the measurement: A is flushed by then)
-          _ (Thread/sleep 1500)
-          f0 (flushes)
+          a (t (c/transact-main! sys [{:note/text "A" :note/agent :window}] {:flush? true}))
+          w0 (writer)
+          _ (flow/pause-proc (:graph sys) :flusher)
           b (t (c/transact-main! sys [{:note/text "B" :note/agent :window}]))
-          f1 (flushes)
+          w1 (writer)
           cc (t (c/transact-main! sys [{:note/text "C" :note/agent :window}] {:flush? true}))
-          f2 (flushes)
+          w2 (writer)
+          _ (flow/resume-proc (:graph sys) :flusher)
           d (t (c/transact-main! sys [{:note/text "D" :note/agent :window}]))]
-      {:report {:answers {:A a :B b :C-flush? cc :D d} :flushes [f0 f1 f2]}
-       :checks {:b-answered-unflushed (= f0 f1) :c-answered-after-its-flush (= (inc f1) f2) :all-ok (every? first [a b cc d])}
+      {:report {:answers {:A-flush? a :B b :C-flush? cc :D d} :writer [w0 w1 w2]}
+       :checks {:a-answered-after-its-flush (false? (:dirty w0))
+                :b-answered-unflushed (and (:dirty w1) (= (:flushes w0) (:flushes w1)))
+                :c-answered-after-its-flush (and (false? (:dirty w2)) (= (inc (:flushes w1)) (:flushes w2)))
+                :all-ok (every? first [a b cc d])}
        :then :kill}))))
 
 (defn window-read
   "Phase 2: the store reopened on main nm after root's crash holds A, B and C. (D is there too: a process crash
   keeps what LMDB handed the kernel; only a machine crash loses the open window.)"
   [nm]
-  (run-check "WINDOW" {:main (keyword nm) :flush-ms 1000}
+  (run-check "WINDOW" {:main (keyword nm)}
    (fn [sys]
     (let [notes (set (main-q sys '[:find [?t ...] :where [?n :note/agent :window] [?n :note/text ?t]]))]
       {:report {:after-the-crash (sort notes)} :checks {:a-b-c-survive (every? notes ["A" "B" "C"])}}))))

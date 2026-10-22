@@ -28,6 +28,10 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 if [[ -z ${SEON_CHECK_NICED:-} && ( -z ${1:-} || ${1} =~ ^[0-9]+$ ) ]]; then
   SEON_CHECK_NICED=1 exec nice -n 15 "$0" "$@"
 fi
+# the run is niced once (above, or by its caller): its background steps (the census shards)
+# keep that priority. zsh's BG_NICE renices each by 5 more, which at the ceiling (a niced
+# caller of the re-exec: 15 + 15) prints "nice(5) failed: operation not permitted"
+unsetopt BG_NICE
 . "$ROOT/bin/env"
 export SEON_STORE=${SEON_STORE:-$ROOT/target/check-store}
 # a check's roots serve no dashboard: system.edn's :web :port 7777 is the owner's, and a
@@ -130,7 +134,7 @@ else echo "PASS none of $PIDS outlived root"; (( ${#FAILED} == ORPHAN_FAILED )) 
 echo "== durable (root writes its branch and SIGKILLs itself; a new root reopens the store and recovers it)"
 EXPECT=137 step durable-write "" run durable-write check-durable; step durable-read "" run durable-read check-durable
 [[ ${GREEN[-1]} == check-durable-read && ${GREEN[-2]} == check-durable-write ]] && GREEN+=(check-durable)
-echo "== window (root's :flush-ms 1000: answered unflushed, flushed within the window; :flush? waits)"
+echo "== window (continuous group commit: answered unflushed while the flusher is paused; :flush? waits for its sync)"
 EXPECT=137 step window-write "" run window-write check-window
 step window-read "" run window-read check-window
 [[ ${GREEN[-1]} == check-window-read && ${GREEN[-2]} == check-window-write ]] && GREEN+=(check-window)
