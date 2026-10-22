@@ -7,7 +7,8 @@
   no clock ends it; the child's exit does, and a child that died names the test it was running.
   Run: bin/test seon.agent-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
-            [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]))
+            [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
+            [datahike.api :as d] [seon.db :as pdb] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]))
 
 (defn in-agent
   "A root on the checkout's src (its source root), one agent on a task of its own, each of
@@ -164,3 +165,47 @@
     (let [run (agent/run-answer nil {:exit 1})]
       (is (= {} (proofs/results run)))
       (is (= 1 (count (proofs/run-errors run)))))))
+
+(deftest after-merge-main-the-agent-judges-against-the-new-base
+  ;; task seon.agent/an-agents-base-is-its-merge-base: an agent chooses the tests that judge
+  ;; its branch from what it changed since :base. merge-main! left :base at the main the agent
+  ;; forked from, so main's own changes, merged in, counted as the agent's. In this process,
+  ;; on a branch of the test store, with a socketpair standing for root
+  (pdb/test-branch!
+   (fn [cfg conn]
+     (let [ab (pdb/on-main (:branch cfg) :agent-base)
+           _ (d/branch! conn (:branch cfg) ab)
+           forked @conn
+           ;; main redefines app.m0/f1 after the agent forked: a new form, the var pointed to it
+           [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f1] [?v :var/form ?f] [?f :form/ns ?n]] forked)
+           _ (d/transact conn [{:db/id "f1'" :form/id "app.m0/f1-redefined" :form/ns nsx :form/order 100 :form/defines [v]
+                                :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
+                               [:db/add v :var/form "f1'"]])
+           store-conn (d/connect (assoc cfg :branch ab))
+           [a b] (sock/socketpair)
+           old @agent/state]
+       (try
+         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :db @store-conn :base forked})
+         (is (empty? (program/changed-vars (:base @agent/state) (agent/db))) "the agent has changed nothing")
+         (is (some #{[:var 'app.m0/f1]} (:applied (agent/merge-main! #{}))) "main's change merges in")
+         (is (empty? (program/changed-vars (:base @agent/state) (agent/db)))
+             "and is main's, not the agent's: its base is the merge base")
+         (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+
+(deftest an-agents-transactions-name-their-runtime
+  ;; task seon.db/each-commit-names-its-runtime: what an agent writes on its branch
+  ;; (seon.agent/transact!, the run-ahead writer) carries the runtime that made it
+  (pdb/test-branch!
+   (fn [cfg conn]
+     (let [ab (pdb/on-main (:branch cfg) :agent-tx)
+           _ (d/branch! conn (:branch cfg) ab)
+           store-conn (d/connect (assoc cfg :branch ab))
+           [a b] (sock/socketpair)
+           old @agent/state]
+       (try
+         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :db @store-conn :lease 0})
+         (let [{:keys [t]} (agent/transact! [{:note/text "the agent's"}])]
+           (agent/commit!)
+           (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @store-conn t)))))
+         (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+

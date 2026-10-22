@@ -51,6 +51,30 @@
     (testing "the stop transition releases the branch connections"
       (is (map? (#'writer/writer-proc st ::flow/stop))))))))
 
+(deftest the-writers-transactions-name-their-runtime
+  ;; task seon.db/each-commit-names-its-runtime: main's transactions through the writer's group
+  ;; commit carry the runtime that made them, and the fork server's replica applies it too
+  (pdb/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})
+        fp (jolt.host/runtime-fingerprint)]
+    (is (= fp (:seon.tx/runtime (d/entity @conn (:max-tx @conn)))) "main's transaction names it")
+    (is (= fp (get-in (first (:to-fork-server outs)) [:tx-meta :seon.tx/runtime])) "and so does what the replica applies")))))
+
+(deftest a-fork-names-the-commit-its-agent-starts-at
+  ;; task seon.agent/an-agents-base-is-its-merge-base: :spawn branches the agent from main's
+  ;; head and asks the fork server, whose image holds main at that head (the FIFO), to fork it;
+  ;; :fork names that commit and t, so the agent checks both (seon.agent/init!)
+  (pdb/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})
+        b (pdb/on-main (:branch cfg) :a1)
+        [_ outs] (step #'writer/writer-proc st :in {:op :spawn :agent :a1 :branch b :ns 0 :fd 0 :lease 0 :dest {:rid 2}})
+        fork (first (filter #(= :fork (:op %)) (:to-fork-server outs)))]
+    (is (= (d/commit-id @conn) (:commit fork)) "main's commit")
+    (is (= (:max-tx @conn) (:t fork)) "main's t")
+    (is (= (:commit fork) (d/commit-id (pdb/head conn b))) "which the agent's branch starts at")))))
+
 (deftest the-flush-is-continuous-group-commit
   ;; owner 2026-10-21 (notes/DECISIONS.md, "Durability is batched everywhere", superseded
   ;; paragraph): no window. A write is answered when committed in memory; the flusher parks

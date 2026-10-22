@@ -146,6 +146,23 @@
         (d/release c2))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
+(deftest a-kept-store-from-before-the-runtime-attribute-opens
+  ;; the transaction that installs :seon.tx/runtime cannot carry it in its tx-meta: a kept
+  ;; store made before the attribute existed (every store before 2026-10-22) failed to open
+  ;; (bin/check seed: "Bad entity attribute :seon.tx/runtime"). A store on disk of this test's
+  ;; own, the last resort: what is proved is a root's open of a kept store; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-runtime-" (random-uuid))
+        made (pdb/made-cfg (pdb/store-cfg :lmdb path))]
+    (try
+      (d/create-database made)
+      (let [c0 (d/connect made)] (d/transact c0 {:tx-data (vec (remove #(= :seon.tx/runtime (:db/ident %)) pdb/schema))}) (d/release c0))
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
+        (is (= :seon.tx/runtime (:db/ident (get (d/schema @conn) :seon.tx/runtime))) "the attribute is installed")
+        (let [r (d/transact conn {:tx-data [{:note/text "after"}] :tx-meta (pdb/tx-meta)})]
+          (is (string? (:seon.tx/runtime (d/entity @conn (:db/current-tx (:tempids r))))) "and the next transaction names its runtime"))
+        (d/release conn))
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
 (deftest a-moved-store-opens
   ;; task seon.db/a-store-opens-where-it-lies: a store was named by (hasch/uuid path) of the
   ;; path it was given (seon.db/store-cfg), so a store renamed or copied (kept runs:
@@ -163,6 +180,7 @@
                            (when-let [c (:conn r)]
                              (is (= made (get-in r [:cfg :store :id])) "named by the id it was made with")
                              (is (= path (get-in r [:cfg :store :path])) "its config names where it lies now")
+                             (is (= path (get-in @c [:config :store :path])) "and so does its db (task seon.db/deref-keeps-the-connections-config)")
                              (is (seq (d/datoms @c :eavt)) "and it holds its data")
                              (d/release c))))]
     (try
@@ -186,6 +204,25 @@
         (is (= :seon.db/types-differ (:seon.error/type r)) (pr-str r))
         (is (= {:seon.turn/basis {:stored :db.type/string :declared :db.type/data}} (:seon.db/attributes r))))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(deftest each-transaction-names-the-runtime-that-made-it
+  ;; task seon.db/each-commit-names-its-runtime: every transaction Seon makes carries the
+  ;; runtime that made it in its tx-meta (jolt.host/runtime-fingerprint), as its compiled units
+  ;; are keyed; the writer's, an agent's and a merge's each pass seon.db/tx-meta, proved here
+  ;; through the two Datahike paths they use (a group commit and an applied transaction)
+  (let [fp (jolt.host/runtime-fingerprint)]
+    (is (string? fp) "this runtime can be identified")
+    (is (= {:seon.tx/runtime fp} (pdb/tx-meta)))
+    (pdb/test-branch!
+     (fn [_ conn]
+       (let [[r] (dw/transact-batch! conn [{:tx-data [{:note/text "by the writer"}] :tx-meta (pdb/tx-meta)}])
+             tx (:db/current-tx (:tempids r))]
+         (is (= fp (:seon.tx/runtime (d/entity @conn tx))) "a group commit's transaction names it"))
+       (let [r (dw/apply! conn {:tx-data [{:note/text "by an agent"}] :tx-meta (pdb/tx-meta)})
+             tx (:db/current-tx (:tempids r))]
+         (dw/commit-pending! conn)
+         (is (= fp (:seon.tx/runtime (d/entity @conn tx))) "an agent's applied transaction names it"))
+       (is (= fp (d/q '[:find ?r . :where [?t :seon.tx/runtime ?r] [?t :db/txInstant]] @conn)))))))
 
 ;; ---- history (task seon.db/history-is-kept: v1's ruling 23, Datahike's default) --------------
 

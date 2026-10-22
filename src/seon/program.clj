@@ -711,12 +711,18 @@
 
 (defn changed-vars
   "The vars db-to points to another form than db-from does (new, redefined or removed):
-  what a branch changed since the main it forked from. Cost: each db's :var/form datoms."
+  what a branch changed since its base. A form is the same when its :form/id (its text) is:
+  entity ids are a branch's own, and a merge applies main's forms by content, under the
+  branch's ids. Cost: each db's :var/form datoms, and two seeks per var whose ids differ."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :qualified-symbol]]}
   [db-from db-to]
   (let [forms (fn [db] (into {} (map (juxt :e :v)) (d/datoms db :aevt :var/form)))
-        a (forms db-from) b (forms db-to)]
-    (into #{} (keep #(when (not= (a %) (b %)) (:var/name (d/entity db-to %)))) (into (set (keys a)) (keys b)))))
+        a (forms db-from) b (forms db-to)
+        form-id (fn [db v] (some->> (eid db :var/name v) (d/entity db) :var/form :form/id))]
+    (into #{} (keep #(when (not= (a %) (b %))
+                       (let [v (:var/name (d/entity (if (b %) db-to db-from) %))]
+                         (when (not= (form-id db-from v) (form-id db-to v)) v))))
+          (into (set (keys a)) (keys b)))))
 
 (defn reaching-tests
   "The program's tests on db that reach one of syms (fully qualified var names): from each

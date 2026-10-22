@@ -270,6 +270,11 @@
                           [:seon.root/collected {:optional true} :seon.root/collected]
                           [:seon.config.agent/max-running {:optional true} :seon.config.agent/max-running]
                           [:seon.config.merge/max-running {:optional true} :seon.config.merge/max-running]]
+ ;; ---- on every transaction Seon makes, in its tx-meta (seon.db/tx-meta) ----
+ ;; the runtime that made it, as its compiled units are keyed (jolt.host/runtime-fingerprint:
+ ;; Jolt's version, its runtime fingerprint, its trace tag; docs/storage.md#history)
+ :seon.tx/runtime :string
+ :seon.tx/meta [:map {:seon.db/attributes true} [:seon.tx/runtime {:optional true} :seon.tx/runtime]]
  ;; ---- written by an agent on its own branch; they reach main with its merge ----
  :seon.turn/id [:and {:seon.db/identity true} :string]
  :seon.turn/attempt [:and {:seon.db/index true} :string]
