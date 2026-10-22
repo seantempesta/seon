@@ -183,7 +183,7 @@
 (defn- settle
   "The owner at a worker's outcome m: the worker is free; the task's spend grows by the actual
   cost; the bucket gets back (or pays) the difference from the estimate; a rate-limit outcome
-  (the provider's 429, the named dragon of this edge) halves the bucket's rate, and each
+  (the provider's 429, the named failure point of this edge) halves the bucket's rate, and each
   other outcome raises it by a twentieth back toward the dial (AIMD, TCP's congestion rule)."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [st {:keys [budget-key cost est outcome]}]

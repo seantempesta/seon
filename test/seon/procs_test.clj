@@ -306,7 +306,7 @@
       (is (not-any? #{:state} (vals (:pending st))) "the answer took its request")
       (is (= 1 (count (asks o3))) "the next event asks again"))))
 
-;; ---- task seon.root/a-proc-answers-every-request-it-took (census #2) ----------------------
+;; ---- task seon.root/a-proc-answers-every-request-it-took (laws audit #2) ----------------------
 
 (defn- api-state []
   (#'root/api-proc {:ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)

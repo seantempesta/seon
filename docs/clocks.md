@@ -1,21 +1,21 @@
 # Clocks
 
-Time is measured and recorded, and decides only at the owner's three exceptions; `bin/dragons clocks` and `bin/dragons measures` name every place in `src/` that reads or waits on a clock.
+Time is measured and recorded, and decides only at the owner's three exceptions; `bin/laws clocks` and `bin/laws measures` name every place in `src/` that reads or waits on a clock.
 
 Work runs because it arrived and parks when there is none; a missing answer is a recorded
 fact (blocked, stalled, dead), never a timer's guess. The exceptions are the cron proc, a
 message's delayed insert, and the kernel's TCP keepalive ([AGENTS.md §4](../AGENTS.md)).
 
-`bin/dragons clocks` lists every function in `src/` whose code (strings and comments left
+`bin/laws clocks` lists every function in `src/` whose code (strings and comments left
 out) sleeps, takes a timeout, holds a deadline or names a `*-MS` constant, and fails on one
-not named under a "Time decides" heading below. `bin/dragons measures` lists every function
+not named under a "Time decides" heading below. `bin/laws measures` lists every function
 that reads a clock (`currentTimeMillis`, `nanoTime`, `now-ns`, `now-ms`) and fails on one
 this page does not name. A function named only under "Time measured" that starts to decide
 by time is red under `clocks`. The marks are text: a bound passed under another name (a
 3-arity `deref`, `.join n`, a literal compared to a duration) is not seen, as
 `seon.agent/transact!`, `seon.agent/mem-mb` and `seon.render.proc/ordered` show below;
 review catches it, and the fix is the mark, not an exemption. Catches are judged the same
-way in [DRAGONS](DRAGONS.md).
+way in [failure points](failure-points.md).
 
 ## Time decides (the owner's exceptions)
 
@@ -23,13 +23,13 @@ way in [DRAGONS](DRAGONS.md).
 
 ## Time decides (a check's measurement, and a check's ping)
 
-`bin/dragons clocks` reads the check harness too (`seon.check`, `seon.e2e`): a wait there that stands for an event is the event instead ([machine](machine.md#builds-and-checks)).
+`bin/laws clocks` reads the check harness too (`seon.check`, `seon.e2e`): a wait there that stands for an event is the event instead ([machine](machine.md#builds-and-checks)).
 - `seon.check/lifecycle`, `seon.check/backpressure`, `seon.check/scale`, `seon.check/idle`: the window over which a check measures that something does not happen or what it costs (`:seon.config.check/hold-ms`: a paused agent's request unanswered, a paused proc's flood and a paused writer's commits held; `:seon.config.check/pages-ms`: memory the kernel returns after the kill; idle's window, bin/check's argument). The measurement, never a dependency: load only makes what it measures likelier.
 - `seon.check/ping`, `seon.check/system-check`: Flow's ping takes a bound (`:seon.config.check/ping-ms`); a proc that has not taken its control message by then is mid-step that long, and the check records it `:blocked` (an expected proc missing from a graph ping is reported under `:no-answer`), never reads it as nil.
 
 ## Time decides, owed its owner's fix
 
-Each is a defect named with the task that removes it, so the census stays a ratchet: a new
+Each is a defect named with the task that removes it, so the laws check stays a ratchet: a new
 site is red, and a fixed one leaves this list in the fix's commit.
 - `seon.root/start!` (Flow's `:stop-timeout-ms`), `seon.root/stop!` (timed derefs and a `.join`), `seon.agent-proc/await-dead` (the SIGKILL ladder), `seon.fork-server/main` and `seon.sock/recv-within!` (the 100 ms poll by which a child's death is seen): task `seon.root/shutdown-and-death-are-dataflow`.
 - `seon.root/api-proc` (the stall timer), `seon.root/back-op` (its `:stall-check`), `seon.agent-proc/agent-proc` (the `:last-frame-ms` the stall compares): task `seon.fences/a-stall-is-past-the-requests-own-bound`.

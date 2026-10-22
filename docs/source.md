@@ -82,7 +82,7 @@ Proven by `seon.source-test/a-restart-catches-up-and-a-new-generation-resumes` (
 
 ## Dependencies
 
-Fetching a library is an outside-world effect with one owner, like write-back: the `:deps` effect kind, performed by ```seon.fx/resolve-deps```, which passes a deps map (`{lib {:mvn/version "..."}}`, `:git/sha` or `:local/root`) to Jolt's own `jolt.deps/resolve-deps` (no resolver of ours) and answers `{:value {:roots [absolute source roots]}}`, or `:seon.fx/unresolved` naming the libraries that did not resolve (see `DRAGONS.md`). It writes only the checkout's shared caches (`.m2`, gitlibs, `.cpcache` under `HOME`), so a second resolve of the same map is a cache hit that needs no network. The asker records the outcome and decides what to load; `add-deps` and `sync-deps` at the REPL, and checksums, are later Jolt steps (the PKG plan, step one). Related: the other kinds in ```seon.fx/kinds```.
+Fetching a library is an outside-world effect with one owner, like write-back: the `:deps` effect kind, performed by ```seon.fx/resolve-deps```, which passes a deps map (`{lib {:mvn/version "..."}}`, `:git/sha` or `:local/root`) to Jolt's own `jolt.deps/resolve-deps` (no resolver of ours) and answers `{:value {:roots [absolute source roots]}}`, or `:seon.fx/unresolved` naming the libraries that did not resolve (see `failure-points.md`). It writes only the checkout's shared caches (`.m2`, gitlibs, `.cpcache` under `HOME`), so a second resolve of the same map is a cache hit that needs no network. The asker records the outcome and decides what to load; `add-deps` and `sync-deps` at the REPL, and checksums, are later Jolt steps (the PKG plan, step one). Related: the other kinds in ```seon.fx/kinds```.
 
 ## Shared build caches
 

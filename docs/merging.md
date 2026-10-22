@@ -24,7 +24,7 @@ Root merges with git merge, never by copying files over newer changes, and reads
 
 ## A merge runs what the change reaches
 
-A merge runs what the change reaches, not every check (owner, 2026-10-21: "I want faster iteration not a matrix with every run permutation"). A merge's proof is: `bin/dragons` (every law census, no build), the tests of the changed namespaces and of their callers (found with the compiler's facts, or grep until reach selection exists), the `bin/check` steps whose code changed, and `bin/check smoke`. The full `bin/check 100` and `bin/test` run once a day in the background, and before a change to boot, the writer, the reconciler or the build; a red there becomes a task, not a blocked merge. Target: tests selected by reach digest and results reused (v1's `seon.test.cache`), so an unchanged test never runs again.
+A merge runs what the change reaches, not every check (owner, 2026-10-21: "I want faster iteration not a matrix with every run permutation"). A merge's proof is: `bin/laws` (every law's sites, no build), the tests of the changed namespaces and of their callers (found with the compiler's facts, or grep until reach selection exists), the `bin/check` steps whose code changed, and `bin/check smoke`. The full `bin/check 100` and `bin/test` run once a day in the background, and before a change to boot, the writer, the reconciler or the build; a red there becomes a task, not a blocked merge. Target: tests selected by reach digest and results reused (v1's `seon.test.cache`), so an unchanged test never runs again.
 
 ## Ready branches merge in batches
 
@@ -32,7 +32,7 @@ Root merges ready branches in batches (owner, 2026-10-21: "this is taking foreve
 
 ## Every merge's `src` diff stat is read
 
-Root reads every merge's `src` diff stat before merging (owner, 2026-10-21: "If we are building shit we don't need to build and not using the existing systems or extending them for minimal code we are doing the wrong thing"; `src` grew 14.1k -> 15.9k lines in one day against the ~10k goal). Every function a merge adds names the existing system it extends, or why none could carry it; a new namespace or mechanism where an existing one could be extended is sent back, not merged; the merge's commit message states its net `src` lines (`bin/dragons growth` prints them and the definitions the branch adds), and a merge that grows `src` says what it deletes or plans to delete.
+Root reads every merge's `src` diff stat before merging (owner, 2026-10-21: "If we are building shit we don't need to build and not using the existing systems or extending them for minimal code we are doing the wrong thing"; `src` grew 14.1k -> 15.9k lines in one day against the ~10k goal). Every function a merge adds names the existing system it extends, or why none could carry it; a new namespace or mechanism where an existing one could be extended is sent back, not merged; the merge's commit message states its net `src` lines (`bin/laws growth` prints them and the definitions the branch adds), and a merge that grows `src` says what it deletes or plans to delete.
 
 ## Conflicts and pins
 

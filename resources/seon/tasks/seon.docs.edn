@@ -1,5 +1,5 @@
 [{:seon.task/name "one-reference-reader"
-  :seon.task/plan "Port v1's reference reader, `seon.ref` (read-only: ~/src/seon/src/seon/ref.clj; its tests ~/src/seon/test/seon/ref_test.clj; the rule in ~/src/seon/docs/seon/schedule/cards/TASK-CHAIN.md §3a), onto next/'s pillars. Keep from v1:
+  :seon.task/plan "Port v1's reference reader, `seon.ref` (read-only: ~/src/seon/src/seon/ref.clj; its tests ~/src/seon/test/seon/ref_test.clj; the rule in ~/src/seon/docs/seon/schedule/cards/TASK-CHAIN.md §3a), onto next/'s principles. Keep from v1:
 - one Markdown parse of any text: a plan, a doc page, a docstring;
 - the delimiter picks the depth: a bare word that names a real entity is its summary; one backtick or a link is its doc; three or more backticks is its code; two backticks is a literal and never a reference;
 - a name cited several times is shown once, at its strongest depth;

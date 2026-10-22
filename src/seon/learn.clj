@@ -1,5 +1,5 @@
 (ns seon.learn
-  "Waste, charged to the producer of what an agent was shown (session R4's seon.learn, census
+  "Waste, charged to the producer of what an agent was shown (session R4's seon.learn, v1 survey
   idea 14; ported by session D2). At an attempt's end the agent folds its
   turns: each turn's forms, and what that turn's context block showed, by its producer.
   A form that looks for code instead of changing it is waste, charged to whoever should

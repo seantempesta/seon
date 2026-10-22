@@ -111,7 +111,7 @@
  ;; a cost proof's measured rows and verdict per test (seon.cost/proof's report)
  :seon.cost/report [:map [:rows [:vector :seon.cost/row]] [:verdict :seon.cost/verdict]]
  :seon.attempt/costs [:map-of {:seon.db/data true} :qualified-symbol :seon.cost/report]
- ;; waste charged to the producer of what the agent was shown (R4, census idea 14)
+ ;; waste charged to the producer of what the agent was shown (R4, v1 survey idea 14)
  :seon.learn/waste [:map-of {:seon.db/data true} :any [:map [:forms :int] [:turns :int]]]
  :seon.attempt/waste :seon.learn/waste
  :seon.end/waste :seon.learn/waste

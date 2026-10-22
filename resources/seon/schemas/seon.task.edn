@@ -87,7 +87,7 @@
  ;; the incremental reconciler's index of main (session R3's seon.reconcile/index): desired and
  ;; observed state by id, the derived needs, depths and claims, and the sets the actions read.
  ;; Its parts agree with each other (every id in a set is an attempt it holds), which a
- ;; generator of the parts alone breaks: the census generates the empty index only, and the
+ ;; generator of the parts alone breaks: mg/check generates the empty index only, and the
  ;; index's laws are R3's oracle property test (test/r3/inc_test.clj, the same actions as a
  ;; full reconcile on generated dbs)
  :seon.reconcile/index [:map {:gen/elements [{:root nil :tasks {} :keys {} :needed-by {} :acc {} :depth {} :claims {}

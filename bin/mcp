@@ -11,7 +11,7 @@
 # a root restarted between calls (bin/root next) costs the session nothing. A message with an id
 # that root does not answer (none running, not listening, it died mid-request) is answered the
 # JSON-RPC error saying why: the client never hangs on it. A line that is not JSON is relayed as
-# it is, and root answers its defect (docs/DRAGONS.md).
+# it is, and root answers its defect (docs/failure-points.md).
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 exec perl -MIO::Socket::INET -MJSON::PP -e '
   $| = 1; my ($port, $portf) = @ARGV;

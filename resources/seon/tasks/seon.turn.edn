@@ -1,5 +1,5 @@
 [{:seon.task/name "a-form-has-a-time-bound"
-  :seon.task/plan "inv1/audit A: seon.turn passes no per-form bound (repl/eval-string), so a model's infinite loop hangs an attempt forever. Pass the bound (a dial) in act!; the interrupt is the named dragon seon.intr/run."
+  :seon.task/plan "inv1/audit A: seon.turn passes no per-form bound (repl/eval-string), so a model's infinite loop hangs an attempt forever. Pass the bound (a dial) in act!; the interrupt is the named failure point seon.intr/run."
   :seon.task/kind :work
   :seon.task/proofs #{seon.turn-test/an-endless-form-is-interrupted-and-recorded}}
  {:seon.task/name "a-turn-records-what-it-saw-and-spent"

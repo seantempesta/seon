@@ -81,7 +81,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **three-way** | git's merge of program maps (base, ours, theirs) keyed `[:var sym]`, `[:form id]`, `[:schema k]` (a schema entry) | `seon.merge/three-way` |
 | **unmerged entry** | a conflict kept on the branch (base, ours, theirs) until re-defn or `resolve!` | `seon.merge/unmerged` |
 | **stage** (was harvest) | staging the live runtime onto the branch (unmaps, plain defs as values, aliases) | `seon.harvest/harvest!` |
-| **failure point** (was dragon) | a place where the outside world can fail us, met by one named edge function | `docs/DRAGONS.md` |
+| **failure point** (was dragon) | a place where the outside world can fail us, met by one named edge function | `docs/failure-points.md` |
 | **section** | one heading of a wiki page as an entity on main: address `path#anchor`, heading, lead, own text, parent, and references (what its own text cites); its backlinks are who cites it | `seon.docs/load-tx` |
 
 ## Agent-facing functions (`my.*`)

@@ -26,7 +26,7 @@
   The meter is not metered: seon.contract/wrap counts every armed function except this
   namespace's own (armed at boot with seon.contract), so reading a count adds no call.
 
-  The dragon: the cells are plain process state. An agent is one thread, so its counts
+  The failure point: the cells are plain process state. An agent is one thread, so its counts
   are exact. Root's procs run on several threads, so two threads calling one function can
   lose an increment, and a function first called on two threads at once can be missed from
   `touched`. Root's counts are approximate; nothing in root reads them as proof."

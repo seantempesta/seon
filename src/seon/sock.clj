@@ -11,7 +11,7 @@
     children and clones), and a process that forks must never have started Chez's
     parallel-collector sweeper threads, which start at the first collection that finds
     another thread (RC1: a child of such a process hangs in its first multi-threaded
-    collection). docs/DRAGONS.md, \"Physics\".
+    collection). docs/failure-points.md, \"Physics\".
   - The socket's buffer is the bounded channel: a full buffer makes the sender wait."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [jolt.ffi :as ffi] [seon.lib :as lib] [konserve.jolt.fasl :as codec] [seon.config :as config]))

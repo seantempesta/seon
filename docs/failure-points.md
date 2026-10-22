@@ -1,19 +1,19 @@
-# Dragons
+# Failure points
 
 Owner, 2026-10-20: "Guards and fences are almost always wrong. We should be doing the right
 thing, not guarding for it or trying to block random shit. We should know where all the
-dragons are and name them explicitly when dealing with them."
+failure points are and name them explicitly when dealing with them."
 
-A **dragon** is a place where the world outside our code can fail us. Each one is met by
+A **failure point** is a place where the world outside our code can fail us. Each one is met by
 exactly one function, its **edge**. The edge either answers a declared variant, which is
 plain data its callers handle as an ordinary branch, or it is an **entrant boundary**, which
-turns a defect into a recorded error map. Nothing else catches. `bin/dragons catch` (run by
+turns a defect into a recorded error map. Nothing else catches. `bin/laws catch` (run by
 `bin/check`) lists every `catch` in `src/` and fails when one is not named below by its
-function. The same census judges the other laws: [clocks](clocks.md) and [resolution](resolution.md).
+function. The same sites check judges the other laws: [clocks](clocks.md) and [resolution](resolution.md).
 
 ## Edges that catch (each names its one variant)
 
-| dragon | edge (`ns/fn`) | declared variant | handled by, as data |
+| failure point | edge (`ns/fn`) | declared variant | handled by, as data |
 |---|---|---|---|
 | Datahike or the store refuses a write (a bad transaction, LMDB full or failing) | `seon.writer/writer-one` | `:seon.writer/refused` (the one error map, with `:ok false`) | the caller of the write: an agent's `transact!` throws it into its own eval (an `:err` item); root's callers read `:ok` and `:seon.error/message` |
 | The model's HTTP call (connect, TLS, the socket dying mid-stream), made by root's `:model` effect workers; streamed over SSE with no clock (a reasoning reply streams for minutes) | `seon.model/http-post` | `:seon.model/transport` (the connection failed or dropped); a non-200 is `:seon.model/provider-error` with the whole body, or `:seon.model/rate-limited` for HTTP 429 with its Retry-After (`seon.model/complete`) | the `:model` owner answers it to the asking agent (a 429 is kept and retried after its wait); `seon.turn/act!` returns it; `seon.turn/work!` ends the attempt `:error` with its message |
@@ -45,9 +45,9 @@ function. The same census judges the other laws: [clocks](clocks.md) and [resolu
 | one outside connection's request (seon.server, line EDN or MCP's JSON-RPC) | `seon.server/respond` | that request's answer, the typed `:seon.server/defect` (the line it took, the cause's ex-data printed; for MCP, inside a JSON-RPC error with the request's id, `-32700` for a line opening `{"` that is not JSON, naming the rule that such a line is MCP's and an EDN request a keyword-keyed map); the connection and every other one go on |
 | every root proc | Flow's error channel, read by root's error reader | `:root-errors` in the api's view, with the error map; written once per signature on main, repeats counted in the api's fold (`seon.error/flush-tx`; `my.root/problems` reads both); a repeat of a written signature writes nothing, or the error's own record would be the next commit it fails on |
 
-## Dragons met without a catch (the edge answers data)
+## Failure points met without a catch (the edge answers data)
 
-| dragon | edge | answer |
+| failure point | edge | answer |
 |---|---|---|
 | A peer's socket is gone (EOF, or its end frame) | root: `jolt.async.remote`'s reader pump; agents and the fork server: `seon.sock/fill!`, `seon.sock/recv!` | root: the end's `:in` closes, the stand-in's `:from` reads nil and becomes `{:op :dead}`; elsewhere `:eof` |
 | A write to a dead peer (EPIPE) | `seon.sock/send-frame!` | `:epipe`; the agent exits, root reads EOF |
@@ -93,7 +93,7 @@ Two rules of the OS and Chez that no code may "fix" by adding a thread or a chec
 
 ## Contracts over host objects are proved by deftests, never by generation
 
-The census gate (`bin/check census`) runs `malli.generator/check` only on the pure
+The mg/check gate (`bin/check mg-check`) runs `malli.generator/check` only on the pure
 namespaces' contracts. A contract over a host binding (a pid, a file descriptor, a signal
 number, a socket, a connection) is never handed generated arguments: a generated pid passed
 to `kill(2)` is a real signal to a real process, a generated fd closes someone's socket.

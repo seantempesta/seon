@@ -212,7 +212,7 @@
   (:sources loaded))
 
 ;; ---- reading a setting: the one resolver ------------------------------------------------------
-;; Owner, 2026-10-21: settings are per model, per provider and per task; "a pillar and not just
+;; Owner, 2026-10-21: settings are per model, per provider and per task; "a principle and not just
 ;; a hack": every reader resolves through `resolve-in` (task -> model -> its provider -> the
 ;; config's own key), and the server shows each value with where it came from.
 
