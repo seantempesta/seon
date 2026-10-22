@@ -460,8 +460,9 @@
  ;; A taken port leaves the web proc {:listening false} on the health line and boot goes on.
  :seon.config.web/port #long #or [#env SEON_WEB_PORT 0]
  ;; Unit: TCP port on 127.0.0.1: root's server (seon.server), which bin/mcp and outside
- ;; agents reach. 0 (the shipped value): `seon root` refuses to serve. -1: a free port the kernel
- ;; assigns, named on the root's ROOT LISTENING line (a test's root: seon.test-store/start-root!,
+ ;; agents reach. Three values: >0 that port; 0 (the shipped value) none, `seon root` refuses to
+ ;; serve; -1 a free port the kernel assigns. The port bound is named on the root's ROOT LISTENING
+ ;; line and recorded in runs/root.port (a test's root: seon.test-store/start-root!,
  ;; never a port picked and released beforehand, which another process can take). config/local.edn names
  ;; the checkout's own (main 7888, worktree k 7900+10k).
  ;; bin/root PORT WEB, bin/mcp PORT and the mcp check set SEON_ENTRANCE_PORT, which local.edn

@@ -1003,7 +1003,9 @@
                  (when (= why @cause) (out! "ROOT STOPPED " (shown (select-keys (c/stop! sys why) [:cause :ms :stop-fact-refused]))) (deliver stopped true))
                  @stopped)]
       (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (end! :signal))))
-      (out! "ROOT LISTENING " (.getLocalPort ^java.net.ServerSocket (seon.server/serve! sys (max port 0))))
+      ;; the key's three values, read here only: -1 the kernel assigns a port (0 to bind), >0 that
+      ;; port (0, none, refused above); the port bound is the fact, printed for bin/root to record
+      (out! "ROOT LISTENING " (.getLocalPort ^java.net.ServerSocket (seon.server/serve! sys (if (= -1 port) 0 port)))))
       (loop [] (when (read-line) (recur)))
       (end! :stdin-eof))
     (lib/c-exit 0)))
