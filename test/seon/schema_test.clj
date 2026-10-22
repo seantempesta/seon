@@ -36,7 +36,7 @@
         old @agent/state]
     (reset! agent/state {:n 0 :ns (the-ns 'user) :mode :test :db db})
     (try ((repl/handler) {"op" "eval" "code" code :reply #(vswap! answers conj %)})
-         [(mapv :printed (repl/fold @answers identity)) (:db @agent/state)]
+         [(mapv :printed (repl/fold @answers)) (:db @agent/state)]
          (finally (reset! agent/state old)))))
 
 (def ^:private refused-status
