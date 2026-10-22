@@ -60,7 +60,9 @@
   10)
 
 (defn store-cfg
-  "Datahike config for the durable store at path; backend :lmdb (default) or :file."
+  "Datahike config for the durable store at path; backend :lmdb (default) or :file. It names
+  no :keep-history?: that is fixed when a store is made (Datahike's store-fixed-record-keys;
+  made-cfg), and a connect adopts what the store records, so a kept store made either way opens."
   {:malli/schema [:=> [:cat [:enum :lmdb :file] :string] :seon.db/cfg]}
   [backend path]
   {:store (cond-> {:backend backend :path path :id (hasch/uuid path)
@@ -69,9 +71,15 @@
             ;; konserve's per-value compressor (its header names it, so stored values of either kind read)
             (= :lz4 (cfg/value :seon.config.store/compressor)) (assoc-in [:config :compressor] {:type :lz4})
             (= backend :file) (assoc :config {:defer-immutable-sync? true}))
-   :schema-flexibility :write :keep-history? false
+   :schema-flexibility :write
    :writer writer-cfg
    :index-config {:branching-factor (cfg/value :seon.config.store/branching-factor)}})
+
+(defn made-cfg
+  "cfg as a store is made with it: keeping history (its temporal indexes, and each
+  transaction's tx-meta) as :seon.config.store/keep-history? says (v1's ruling 23)."
+  {:malli/schema [:=> [:cat :seon.db/cfg] :seon.db/cfg]}
+  [cfg] (assoc cfg :keep-history? (cfg/value :seon.config.store/keep-history?)))
 
 (defn sync!
   "Make every commit so far durable: one env sync for LMDB (MDB_NOSYNC); the filestore
@@ -162,9 +170,9 @@
 (def ^:private test-store
   "This process's one in-memory store for tests and cost setups, seeded once on :db
   (bin/test makes it on first use): each test takes a branch of it (test-branch!)."
-  (delay (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false
+  (delay (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write
                         :writer writer-cfg}]
-           (d/create-database cfg)
+           (d/create-database (made-cfg cfg))
            (let [conn (d/connect cfg)] (seed! conn 2000) (d/release conn))
            cfg)))
 
@@ -224,7 +232,7 @@
   (let [cfg (store-cfg backend path)
         exists? (posix/exists? (if (= backend :lmdb) (str path "/data.mdb") path))]
     (when-not exists?
-      (d/create-database cfg)
+      (d/create-database (made-cfg cfg))
       (let [conn (d/connect cfg)] (seed! conn n) (when-not (= :db main) (d/release conn))))
     (let [[conn existed?] (open-main! cfg main)
           added (install-missing! conn)

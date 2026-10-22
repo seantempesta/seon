@@ -95,6 +95,13 @@
  ;; mean fewer bytes printed and written per commit. Provenance: dev/dur.clj measured 512 -> 64
  ;; cut a small commit 27 -> 16 ms with fsync, before the node emitter.
  :seon.config.store/branching-factor 64
+ ;; Boolean: whether a store is made keeping history: its temporal indexes (d/history, as-of,
+ ;; since; a retraction stays a datom) and each transaction's tx-meta, :db/txInstant included
+ ;; (Datahike applies tx-meta only with history). Fixed when the store is made (Datahike's
+ ;; store-fixed-record-keys): a kept store opens with what it was made with. Provenance: v1's
+ ;; ruling 23 (2026-08-03) and Datahike's default; next had it false, hardcoded, until 2026-10-22.
+ ;; Cost measured on seon.db-test/a-commit-costs-what-it-writes (docs/storage.md).
+ :seon.config.store/keep-history? true
  ;; Codec: konserve's per-value compressor, LZ4 frames through liblz4 (konserve.jolt.lz4).
  ;; Provenance: measured 2026-10-22 on 190 index nodes that 20 per-turn commits of real turn
  ;; text wrote (2,544 KB): LZ4 1,178 KB (2.2x less); compressing the 12.7 MB five times took

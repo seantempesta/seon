@@ -151,6 +151,40 @@
         (some-> (:conn r) d/release))
       (finally (clojure.java.shell/sh "rm" "-rf" base moved)))))
 
+;; ---- history (task seon.db/history-is-kept: v1's ruling 23, Datahike's default) --------------
+
+(deftest the-store-keeps-history
+  ;; with :seon.config.store/keep-history? (default true) a store keeps its temporal indexes:
+  ;; a retraction stays visible in d/history, and a transaction keeps its :db/txInstant
+  ;; (Datahike applies a transaction's tx-meta only with history: off, it was silently dropped)
+  (pdb/test-branch!
+   (fn [_ conn]
+     (let [{tx :tempids} (d/transact conn [{:db/id "n" :note/text "kept"}])
+           e (get tx "n")
+           r (d/transact conn [[:db/retractEntity e]])
+           tx-e (:db/current-tx (:tempids r))]
+       (is (true? (:keep-history? (:config @conn))))
+       (is (= #{["kept" true] ["kept" false]}
+              (set (for [d (d/datoms (d/history @conn) :eavt e :note/text)] [(:v d) (:added d)])))
+           "the note's assertion and its retraction are both in the history")
+       (is (inst? (:db/txInstant (d/entity @conn tx-e))) "the retracting transaction keeps its instant")))))
+
+(deftest a-kept-store-keeps-the-history-it-was-made-with
+  ;; :keep-history? is fixed when a store is made (Datahike's store-fixed-record-keys): an open
+  ;; adopts what the store records, so a kept store made either way opens, and keeps its layout
+  ;; (the standing root's store was made without history). A store on disk of this test's own,
+  ;; the last resort: what is proved is a root's open of a kept store; removed at the end
+  (doseq [kept? [false true]]
+    (let [path (str (System/getProperty "user.dir") "/target/db-test-history-" (random-uuid))
+          made (assoc (pdb/store-cfg :lmdb path) :keep-history? kept?)]
+      (try
+        (d/create-database made)
+        (let [c0 (d/connect made)] (d/transact c0 {:tx-data pdb/schema}) (d/release c0))
+        (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
+          (is (= kept? (:keep-history? (:config @conn))) (str "a store made with :keep-history? " kept? " opens keeping it"))
+          (d/release conn))
+        (finally (clojure.java.shell/sh "rm" "-rf" path))))))
+
 (defn- stored-bytes
   "Value bytes of every key in the LMDB store at path, by key."
   [path]

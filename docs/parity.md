@@ -31,7 +31,7 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 |---|---|---|
 | `my.task/current`, `update!`, `send-back!`; `my.turn/wait` | the same names | present (`my.task/current` answers nil in released agents: RESUME's plan, A) |
 | `my.program/callers`, `source`, `tests-reaching` | `my.agent/callers`, `callees`, `grep`, `source`; `seon.program/reach-digests` | present |
-| `my.program/history` | none: the store keeps no history (`seon.db/store-cfg`) | missing |
+| `my.program/history` | none yet; the store keeps history now ([storage](storage.md#history)), the verb is not built | missing |
 | `my.program/search`, `similar` (embeddings) | none; decided (DECISIONS, "Embeddings join the context"), not built | missing |
 | `my.program/diff`, `sizes`, `breaks` | `seon.root/branch-diff` (root only) | partial |
 | `my.program/write-branch!` | write-back at merge (`seon.source`, the `:git` effect) | present, better |
@@ -73,7 +73,7 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 | v1 | next | Status |
 |---|---|---|
 | one store, many Datahike branches | `seon.db` (LMDB), `seon.writer` | present |
-| history kept | `:keep-history? false` | missing |
+| history kept | `:seon.config.store/keep-history?` (default true), fixed when a store is made; a kept store made without it keeps its layout ([storage](storage.md#history)) | present |
 | storage collection, log rotation (`seon.maintenance`) | none; `datahike.gc/gc-storage!` runs on Jolt with a `java.util.Date` | missing |
 | blobs out of line (`seon.blob`) | in progress: LZ4 node compression through liblz4, and large values out of line inside Datahike's own store | missing |
 | every dial documented | one aero file, one resolver (`seon.config`) | present |
@@ -90,7 +90,7 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 
 ## The gaps, in order
 
-1. History: `:keep-history? false` (RESUME's plan, A).
+1. History: kept since 2026-10-22 (A.2); the `my.program/history` verb is not built.
 2. Large values and storage reclaim: compression, values out of line, GC (RESUME's plan, A).
 3. The door: health through MCP, a compact `seon_agents`, and `jolt/door`'s refusals as data.
 4. The owner's view: `/ns` pages and the message input bar, with messages stored as facts.
