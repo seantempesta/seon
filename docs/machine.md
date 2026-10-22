@@ -12,7 +12,7 @@ The target is a 16 GB MacBook M1 (owner, 2026-10-22: "I want this system to run 
 
 ## The clock
 
-Seon has one clock: `seon.profile/now-ns`, the machine's monotonic CLOCK_UPTIME_RAW read by a Chez foreign procedure (9.5 ns a read, nothing allocated, 41 ns resolution; measured 2026-10-22), and `seon.profile/ms-since` for "milliseconds since t0". Every process reads the same timeline, so a stamp one process sends (the writer's `:main` commit, a message's `:ns`) is a t0 another can subtract from. The profiler's samples use the same read. `System/nanoTime` (Jolt's, 1 µs and counted from the process's start) and Chez's `current-time` are not used; a new reading of time goes through `seon.profile` (lane DUP-HELPERS, task ``seon.profile/one-monotonic-clock``). Time is measured and recorded, never acted on ([AGENTS.md §4](../AGENTS.md)).
+Seon has one clock: `seon.profile/now-ns`, the machine's monotonic CLOCK_UPTIME_RAW read by a Chez foreign procedure (9.5 ns a read, nothing allocated, 41 ns resolution; measured 2026-10-22), and `seon.profile/ms-since` for "milliseconds since t0". Every process reads the same timeline, so a stamp one process sends (the writer's `:main` commit, a message's `:ns`) is a t0 another can subtract from. The profiler's samples use the same read. `System/nanoTime` (Jolt's, 1 µs and counted from the process's start) and Chez's `current-time` are not used; a new reading of time goes through `seon.profile` (lane DUP-HELPERS, task ``seon.profile/one-monotonic-clock``). Time is measured and recorded, never acted on ([AGENTS.md §4](../AGENTS.md)); [clocks](clocks.md) names every function that reads it.
 
 ## Builds and checks
 
