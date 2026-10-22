@@ -46,10 +46,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/result] [:maybe :map]]}
   [main head r]
   (let [unmerged (pm/unmerged head (pm/program head #{}))
-        uncontracted (when contract/on?
-                       (vec (sort-by str (for [[[k sym] [_ ov]] (:ours r)
-                                               :when (and (= :var k) (= :fn (:kind ov)) (nil? (:contract ov)))]
-                                           sym))))]
+        uncontracted (pm/uncontracted (:ours r))]
     (cond
       (seq (:theirs r))
       (contract/error :seon.merge/behind 'seon.writer/merge-branch
@@ -176,7 +173,7 @@
                                (let [[head r] (branch-merge st (:branch m) (:data-attrs m #{}))]
                                  {:ok true :ours (vec (sort-by str (keys (:ours r)))) :theirs (count (:theirs r))
                                   :conflicts (count (:conflicts r))
-                                  :unmerged (mapv :key (pm/unmerged head (pm/program head #{})))
+                                  :unmerged (mapv :key (pm/unmerged head (pm/program head #{}))) :uncontracted (pm/uncontracted (:ours r))
                                   :vars (into (sorted-set) (keep (fn [[k s]] (when (= :var k) s))) (keys (:ours r)))})
                                (refused (str "no branch " (:branch m)) {})))
       ;; root's read of a branch (or main): its committed value from the store; :base is the

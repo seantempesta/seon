@@ -555,29 +555,26 @@
 
 (defn- judge-tx
   "Attempt aid's end on main from MEASURED facts: the end its agent wrote on the branch,
-  root's own proof results, the branch's merge entries and unmerged keys, the contract gaps
-  against main; the task content the branch changed carried to main, or its conflicts with
-  main's recorded on the attempt for root (seon.task/carry-tx); and a failure it marked
-  (my.task/fail!) carried with the task held."
-  {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db]] [:set :string]] [:vector :any]]}
-  [st {:keys [act run-problems worked-error]} results {:keys [db base base-t]} changed]
+  root's own proof results, the branch's merge entries, and diff, the writer's diff of the
+  branch (:branch-diff: the keys it changed, its unmerged keys, its contract gaps); the
+  task content the branch changed carried to main, or its conflicts with main's recorded on
+  the attempt for root (seon.task/carry-tx); and a failure it marked (my.task/fail!)
+  carried with the task held."
+  {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db]] [:map [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]]] [:vector :any]]}
+  [st {:keys [act run-problems worked-error]} results {:keys [db base base-t]} diff]
   (let [main (:db st)
         aid (:attempt act) id (:task act)
         end (pull-end db aid)
-        mp (pm/program main #{})
-        unc (into #{} (for [[[k sym] e] (pm/program db #{})
-                            :when (and (= :var k) (= :fn (:kind e)) (nil? (:contract e)) (not= e (get mp [k sym])))]
-                        sym))
         carried (task/carry-tx base db main)
         failure (:seon.task/failure (task/task db id))]
     (into (cas-tx aid :running :ended
                     ;; spend is what the end measured: no end (died, killed, never reached
                     ;; seon.turn/end!) is outcome :no-end with its turns, calls and tokens absent
                     (merge (task/end-members (cond-> (merge (select-keys end [:turns :model-calls :tokens])
-                                                      {:outcome (:outcome end :no-end) :results results :uncontracted unc
+                                                      {:outcome (:outcome end :no-end) :results results :uncontracted (set (:uncontracted diff))
                                                        :conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
-                                                       :unmerged (mapv #(pr-str (:key %)) (pm/unmerged db (pm/program db #{})))
-                                                       :changed changed})
+                                                       :unmerged (mapv pr-str (:unmerged diff))
+                                                       :changed (into #{} (map pr-str) (:ours diff))})
                                         (:reason end) (assoc :reason (:reason end))
                                         (not (:outcome end)) (assoc :reason (if worked-error
                                                                              (str "seon.turn/work! threw: " (:seon.error/message worked-error))
@@ -660,7 +657,7 @@
       ;; every attempt is a new agent: none is reused
       ;; root stops it because its attempt ended: its view says :ended, not :killed
       :diffed (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
-                    [st o2] (write st aid :done (judge-tx st f (:results f) (:branch-db f) (into #{} (map pr-str) (:ours r))))]
+                    [st o2] (write st aid :done (judge-tx st f (:results f) (:branch-db f) r))]
                 [st [o1 o2]])
       ;; each member's answer, as one write: merged at the train's t, behind (its merge task
       ;; runs again, a new agent), or refused: a failed attempt like any other (a refinement

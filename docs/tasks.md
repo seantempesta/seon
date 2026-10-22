@@ -41,4 +41,6 @@ An agent calls `my.task/fail!`: the failure goes on its task on its branch, and 
 
 `seon.reconcile/done-refusals` says why an attempt's measured facts do not make its task done; empty means done. A proof with no result never ran: it refuses as `:proof-unknown`, not `:proof-red` (v1's reading), so the refusal names what was not measured.
 
+A contract gap is a function the branch's own changes define without a contract: `seon.merge/uncontracted` over the three-way merge's `:ours`, one answer for the writer's merge gate and for root's judge (which reads it from the writer's `:branch-diff`), so the done rule never refuses what the merge would take, or the reverse. The agent's own check before its definitions are staged asks `seon.contract/uncontracted` of its live namespaces, the same predicate.
+
 Related: [landing](landing.md) for how a merge task's branch reaches main, [references](references.md) for how a plan's citations become the task's references, [parity](parity.md) for v1's chain and templates.

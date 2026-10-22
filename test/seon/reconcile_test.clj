@@ -149,10 +149,20 @@
   ;; task seon.model/budgets-are-data-and-spend-is-measured: the agent wrote no end (it died
   ;; or was killed before end!), so its turns, tokens and time are unknown: absent, never 0
   (let [db (db-of diamond :extra (attempt "a" 1 :running))
-        tx (#'r/judge-tx {:db db :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:attempt "demo/a#1" :task "demo/a"}} {} {:db db :base db} #{})
+        tx (#'r/judge-tx {:db db :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:attempt "demo/a#1" :task "demo/a"}} {} {:db db :base db} {:ours [] :uncontracted [] :unmerged []})
         ended (first (filter #(and (map? %) (= "demo/a#1" (:seon.attempt/id %)) (:seon.attempt/outcome %)) tx))]
     (is (= :no-end (:seon.attempt/outcome ended)))
     (is (= #{} (set (filter #{:seon.attempt/turns :seon.attempt/model-calls :seon.attempt/tokens :seon.attempt/ms} (keys ended)))))))
+
+(deftest the-judge-and-the-merge-gate-agree-on-contract-gaps
+  ;; root's judge records the gaps the writer's diff of the branch names (seon.merge/uncontracted
+  ;; over its :ours), not a second derivation over the whole program against main
+  (let [db (db-of diamond :extra (attempt "a" 1 :running))
+        tx (#'r/judge-tx {:db db :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:attempt "demo/a#1" :task "demo/a"}} {}
+                         {:db db :base db} {:ours [[:var 'app/g]] :uncontracted '[app/g] :unmerged []})
+        ended (first (filter #(and (map? %) (= "demo/a#1" (:seon.attempt/id %)) (:seon.attempt/outcome %)) tx))]
+    (is (= '[app/g] (:seon.attempt/uncontracted ended)))
+    (is (= ["[:var app/g]"] (:seon.attempt/changed ended)))))
 
 (deftest a-death-names-its-cause
   ;; task seon.agent/a-death-names-its-cause: a dead agent's attempt carries the end it wrote
@@ -175,7 +185,7 @@
     (testing "the turn loop threw and the agent lives: its error is the attempt's reason"
       (let [db (db-of diamond :extra (attempt "a" 1 :running))
             tx (#'r/judge-tx {:db db :boot "boot-1" :rid 0 :flights {} :pending {}}
-                             {:act {:attempt "demo/a#1" :task "demo/a"} :worked-error cause} {} {:db db :base db} #{})]
+                             {:act {:attempt "demo/a#1" :task "demo/a"} :worked-error cause} {} {:db db :base db} {:ours [] :uncontracted [] :unmerged []})]
         (is (= "seon.turn/work! threw: boom" (:seon.attempt/reason (row tx))))
         (is (= "boom" (:seon.error/message (err tx))))))))
 
@@ -552,7 +562,7 @@
   (let [main (db-of [(decl "a")] :extra (attempt "a" 1 :running))
         f {:reason "the premise is refuted" :counterexample "(= 1 2)" :attempt "demo/a#1"}
         branch (d/db-with main [{:seon.task/id "demo/a" :seon.task/failure f}])
-        judge #(#'r/judge-tx {:db main :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:attempt "demo/a#1" :task "demo/a"}} {} {:db % :base main} #{})
+        judge #(#'r/judge-tx {:db main :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:attempt "demo/a#1" :task "demo/a"}} {} {:db % :base main} {:ours [] :uncontracted [] :unmerged []})
         judged (d/db-with main (judge branch))
         idx (r/index judged)]
     (is (= :held (:seon.task/execution (task/task judged "demo/a"))) "held for root, without a merge")
@@ -578,7 +588,7 @@
                                 {:seon.task/id "demo/c" :seon.task/plan "c, the branch's"}])
         main (d/db-with base [{:seon.task/id "demo/c" :seon.task/plan "c, main's"}])
         judged (d/db-with main (#'r/judge-tx {:db main :boot "boot-1" :rid 0 :flights {} :pending {}}
-                                             {:act {:attempt "demo/a#1" :task "demo/a"}} {} {:db branch :base base} #{}))
+                                             {:act {:attempt "demo/a#1" :task "demo/a"}} {} {:db branch :base base} {:ours [] :uncontracted [] :unmerged []}))
         conflict {:task "demo/c" :attr :seon.task/plan :base "Make c true." :ours "c, the branch's" :theirs "c, main's"}]
     (is (= "b, as a's agent learned it" (:seon.task/plan (task/task judged "demo/b"))) "another task's edit reaches main at the attempt's end")
     (is (= "Make a true." (:seon.task/plan (task/task judged "demo/a"))) "an unchanged task stays as main holds it")
