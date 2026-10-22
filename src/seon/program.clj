@@ -763,6 +763,7 @@
   '#{seon.config/baked-schema-forms ;; resources/seon/schemas, in :env
      seon.fork-server/dev-classpath! ;; deps.edn, in :env
      seon.system/declared-refs ;; resources/seon/system.edn, in :env
+     seon.proofs/inputs ;; digests the tree into a key (root's boot fact): a test reaching it depends on no file's content
      seon.web/handler ;; web/public, in :env
      seon.proofs/greens}) ;; the results directory, outside the tree, by digest
 

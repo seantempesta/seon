@@ -618,6 +618,23 @@
         @(call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/source fact}]}})
         fact))))
 
+(defn- record-proof-inputs!
+  "Root's source checkout's inputs with no program facts (seon.proofs/inputs, read by the
+  :proof-inputs effect on a worker: its files but the program's, its pins, the config in
+  force), recorded as :seon.root/proof-inputs on main, so the
+  agents forked after it key their test results by them and share the one results directory.
+  Called at boot and when root re-reads its system declaration (apply!): what can change while
+  root is up without a new process (a pin bump, deps, a config --set or local.edn need a new
+  root, which records anew). Answers the promise of the write, or of the effect's declared
+  error when the inputs could not be read (nothing recorded: the agents share nothing)."
+  {:malli/schema [:=> [:cat :map :string] :seon.host/promise]}
+  [sys root]
+  (let [r @(call! sys {:op :fx :kind :proof-inputs :req {:root root}})]
+    (if (:value r)
+      (call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/proof-inputs (:value r)}]}})
+      ;; the effect's declared error: no inputs recorded, so this root's agents share nothing
+      (doto (promise) (deliver r)))))
+
 (defn wiki-tx
   "The wiki (the checkout's docs/) onto main db, written in the boot fact's own commit so main
   holds it before any agent forks: the help page every agent reads first is one of its pages
@@ -762,7 +779,7 @@
                                                                                   (into (wiki-tx db (cfg/checkout) (System/currentTimeMillis))))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev}))}})]
       (when-not (:ok r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
-    (when source (import-source! sys source))
+    (when source (import-source! sys source) @(record-proof-inputs! sys (:root source)))
     sys))
 
 ;; ====================================================================================
@@ -911,11 +928,14 @@
 (defn apply!
   "Re-read root's system declaration (:seon.config.root/system-path, or the file at p) and change the
   running graph to it: only the procs whose declaration changed are stopped, started or
-  rewired; the others keep running with their queued messages. A promise of Flow's
-  update! answer {:started :stopped :kept :lost :ms}."
+  rewired; the others keep running with their queued messages. A root with a source records
+  its proof inputs anew first (record-proof-inputs!: the declaration is one of them). A promise
+  of Flow's update! answer {:started :stopped :kept :lost :ms}."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :seon.host/promise] [:=> [:cat :seon.root/sys :string] :seon.host/promise]]}
   ([sys] (apply! sys (cfg/value :seon.config.root/system-path)))
-  ([sys p] (call! sys {:op :apply :decl (system/read-decl p) :bindings (:bindings sys)})))
+  ([sys p]
+   (some->> (get cfg/config :seon.config.source/root) (record-proof-inputs! sys) deref)
+   (call! sys {:op :apply :decl (system/read-decl p) :bindings (:bindings sys)})))
 
 (defn merge!
   "Root merges the agent's branch into main (seon.merge, session M1); a promise of {:merged?

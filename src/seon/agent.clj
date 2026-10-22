@@ -20,7 +20,7 @@
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task :attempt (the task and attempt root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :mismatch
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
-;; :proved {digest result} (the tests this agent's runs proved green, by reach digest) :base-digests [base {test digest}] (test-plan)
+;; :base-digests [base inputs {test digest}] (test-plan)
 (defonce state (atom nil))
 
 
@@ -300,27 +300,34 @@
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/reach-digests) against base's (main at its merge base: an immutable value,
-  digested once and held while it is the base; ~0.7 s over src and test),
-  the greens this agent's earlier runs proved at those digests (:proved, {digest result}) and
-  proofs. A test is selected when it is a proof or reaches what the branch changed since base (a
-  var, method, fixture, ns form, macro or schema entry), and runs when no green is held at its
+  digested once per base and inputs), the greens stored at those digests and proofs. The
+  digests' inputs with no program facts are root's :seon.root/proof-inputs, the fact root
+  records from its source checkout (seon.root/record-proof-inputs!), so an agent's results are
+  bin/test's: read from and written to the one results directory (:seon.config.source/
+  test-results-dir). A root with no source records none: nothing is shared, nothing reused.
+  A test is selected when it is a proof or reaches what the branch changed since base (a var,
+  method, fixture, ns form, macro or schema entry), and runs when no green is stored at its
   digest (seon.reconcile/done-refusals reads the selected). Scratch namespaces' tests (user,
   ^:scratch) never merge, so they never judge; a proof with no test var here does not run, and
   one with a var but no program facts (loaded, never recorded) has no digest: it always runs.
-  Answers the plan with :digests {test digest}."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :qualified-symbol]] [:map [:selected [:vector :qualified-symbol]] [:run [:vector :qualified-symbol]] [:reused [:map-of :qualified-symbol :map]] [:digests [:map-of :qualified-symbol :string]]]]}
+  Answers the plan with :digests {test digest} and :dir (the results directory when shared)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :qualified-symbol]]
+                  [:map [:selected [:vector :qualified-symbol]] [:run [:vector :qualified-symbol]] [:reused [:map-of :qualified-symbol :map]]
+                   [:digests [:map-of :qualified-symbol :string]] [:dir [:maybe :string]]]]}
   [db base proofs]
-  (let [in {:env "" :tree "" :data-refs (system/declared-refs (cfg/value :seon.config.root/system-path))}
+  (let [shared (:seon.root/proof-inputs (d/entity db [:seon.root/id :root]))
+        in (assoc (or shared {:env "" :tree ""}) :data-refs (system/declared-refs (cfg/value :seon.config.root/system-path)))
+        dir (when shared (cfg/value :seon.config.source/test-results-dir))
         judges? (fn [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
                           (and (:test m) (not (program/scratch-ns? (:ns m))))))
-        bd (let [[b ds] (:base-digests @state)]
-             (if (identical? b base) ds (let [ds (program/reach-digests base in)] (swap! state assoc :base-digests [base ds]) ds)))
+        bd (let [[b i ds] (:base-digests @state)]
+             (if (and (identical? b base) (= i in)) ds (let [ds (program/reach-digests base in)] (swap! state assoc :base-digests [base in ds]) ds)))
         cd (into {} (filter (comp judges? key)) (program/reach-digests db in))
         unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))]
-    (-> (proofs/plan bd cd (into {} (keep #(some->> (get (:proved @state) %) (vector %))) (vals cd)) proofs)
+    (-> (proofs/plan bd cd (if dir (proofs/greens dir (vals cd)) {}) proofs)
         (update :selected into unrecorded)
         (update :run into unrecorded)
-        (assoc :digests cd))))
+        (assoc :digests cd :dir dir))))
 
 (defn- run-tests-here
   "The tests a test-plan runs (var symbols), by the one runner (seon.proofs/run-tests!, nothing
@@ -381,13 +388,17 @@
   starts and then one EDN line of its result on a pipe. The agent reads the pipe to its end: no
   clock; the child ends by finishing, by its budget, or by dying (then the last test it started
   is named). Each selected test green at its digest is reused: one :pass report marked :reused.
-  Each test that ran green is held at its digest (:proved) for the next run. (forked pid) runs
-  here once the child exists."
+  Each test that ran green is stored at its digest through root's :file owner (when test-plan
+  shares a directory and store?: the agent's own runs, each turn's observe and (prove), store;
+  root's :tests request, answered while root ends or judges the attempt, does not, and its
+  greens were stored by the turn before it); a write refused is named under :unstored, and
+  that test runs again.
+  (forked pid) runs here once the child exists."
   {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol]] :seon.test/result]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] :seon.host/fn] :seon.test/result]]}
-  ([ticks proofs] (run-tests-forked ticks proofs (fn [_] nil)))
-  ([ticks proofs forked]
-  (let [{:keys [selected run reused digests]} (test-plan (db) (:base @state) proofs)
+                  [:=> [:cat pos-int? [:set :qualified-symbol] :seon.host/fn :boolean] :seon.test/result]]}
+  ([ticks proofs] (run-tests-forked ticks proofs (fn [_] nil) true))
+  ([ticks proofs forked store?]
+  (let [{:keys [selected run reused digests dir]} (test-plan (db) (:base @state) proofs)
         vars (filterv #(some-> (find-ns (symbol (namespace %))) (ns-resolve (symbol (name %)))) run)
         reused-reports (vec (for [t selected :when (reused t)] {:type :pass :var (str "#'" t) :reused true}))
         [r w] (lib/pipe) t0 (profile/now-ns)
@@ -414,9 +425,13 @@
                                st (lib/wait-status pid)]
                            (lib/c-close r)
                            (assoc (run-answer line st) :ms (profile/ms-since t0) :pid pid :exit st)))})
-        green (for [[t status] (proofs/results res) :when (and (= :pass status) (digests t))] [(digests t) {:test t :pass 1 :fail 0 :error 0}])]
-    (swap! state update :proved (fnil into {}) green)
+        unstored (when (and store? dir)
+                   (vec (for [[t status] (proofs/results res) :when (and (= :pass status) (digests t))
+                              :let [w (fx! :file (proofs/result-file dir {:test t :digest (digests t) :pass 1 :fail 0 :error 0}) {})]
+                              :when (:seon.error/type w)]
+                          {:test t :message (:seon.error/message w)})))]
     (-> res
+        (cond-> (seq unstored) (assoc :unstored unstored))
         (update :reports (fnil into []) reused-reports)
         (update :pass (fnil + 0) (count reused-reports))
         (assoc :reused (count reused-reports) :ran (count vars))))))
@@ -471,7 +486,7 @@
     ;; root hears the test child's pid once it is forked (its agent proc's :tests-started event)
     :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
                                                               (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
-                                                              #(send! {:op :tests-started :id (:id m) :pid %}))
+                                                              #(send! {:op :tests-started :id (:id m) :pid %}) false)
              :mem-mb (mem-mb)}]
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
     :fx-reply (let [r (dissoc m :op :k)]

@@ -9,6 +9,7 @@
   loop and root's judge."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.profile :as profile]
+            [seon.config :as config] [seon.system :as system] [clojure.java.shell :as sh]
             [clojure.edn :as edn] [clojure.string :as str] [clojure.test :as t]))
 
 (defn test-symbol
@@ -75,6 +76,58 @@
   [run]
   (into {} (for [{:keys [var cost]} (:reports run) :let [t (test-symbol var)] :when (and t cost)] [t cost])))
 
+;; ---- the inputs with no program facts --------------------------------------------------
+
+(defn- git {:malli/schema [:=> [:cat :string [:* :string]] :string]}
+  [root & args] (:out (apply sh/sh "git" "-C" root args)))
+
+(defn- env-input?
+  "Is the file at relative path p an input of every test: everything git tracks or would
+  track but the source program facts carry (.clj under src and test), task files (data
+  root loads, no test's code) and prose (.md)?"
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [p]
+  (not (or (str/ends-with? p ".md")
+           (str/starts-with? p "resources/seon/tasks/")
+           (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))))))
+
+(defn config-input
+  "The config in force as a test reads it, cfg (seon.config/config: the shipped file, this
+  checkout's config/local.edn, the #env values, the profile), as text: the checkout's own path
+  written as <checkout>, and the TCP ports left out (each checkout's own by design, bin/ports;
+  a test's root takes its own). What a result depends on that git does not see."
+  {:malli/schema [:=> [:cat :map :string] :string]}
+  [cfg checkout]
+  (str/replace (pr-str (into (sorted-map) (remove (fn [[k]] (= "TCP port" (get-in config/schema-forms [k 1 :seon.config/unit])))) cfg))
+               checkout "<checkout>"))
+
+(defn inputs
+  "The one producer of the checkout at root's inputs that have no program facts, for bin/test
+  and for root (which records them at boot for its agents, seon.root/record-proof-inputs!):
+  {:env (every test's: env-input? files, every submodule's pin, Jolt's included, and the config
+  in force, config-input) :tree (a test reading files: every file and pin) :data-refs
+  (seon.system/declared-refs of its system.edn)}, digests of relative paths and content, so the
+  same content at another path is the same inputs."
+  {:malli/schema [:function [:=> [:cat :string] :map] [:=> [:cat :string :map :string] :map]]}
+  ([root] (inputs root config/config (config/checkout)))
+  ([root cfg checkout]
+   (let [pins (filter #(str/starts-with? % "160000 ") (str/split-lines (git root "ls-files" "-s")))
+         files (for [p (sort (str/split (git root "ls-files" "--cached" "--others" "--exclude-standard" "-z") #"\u0000"))
+                     :let [f (java.io.File. ^String root ^String p)] :when (.isFile f)]
+                 [p (str p " " (error/digest (slurp f)))])
+         digest #(error/digest (str/join "\n" %))]
+     {:env (digest (concat pins (keep (fn [[p line]] (when (env-input? p) line)) files) [(config-input cfg checkout)]))
+      :tree (digest (concat pins (map second files)))
+      :data-refs (system/declared-refs (str root "/resources/seon/system.edn"))})))
+
+(defn perform-inputs
+  "The :proof-inputs effect's performer (resources/seon/system.edn): inputs of the checkout at
+  the request's :root, its :env and :tree, read on an effect worker (git and every file read:
+  never on root's own thread, which stays fit to fork). Answers {:value {:env :tree}}."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [root]} :req}]
+  {:value (select-keys (inputs root) [:env :tree])})
+
 ;; ---- prove: run what a change reaches, reuse every green by digest ------------------------
 
 (def check-steps
@@ -115,20 +168,28 @@
   [dir digest] (str dir "/" digest ".edn"))
 
 (defn greens
-  "{digest result} of the results stored green at digests in dir (one <digest>.edn each)."
-  {:malli/schema [:=> [:cat :string [:sequential :string]] [:map-of :string :map]]}
+  "{digest result} of the results stored green at digests in dir (one <digest>.edn each); none
+  for no digests (a branch holding no test: (vals {}) is nil)."
+  {:malli/schema [:=> [:cat :string [:maybe [:sequential :string]]] [:map-of :string :map]]}
   [dir digests]
   (into {} (for [dg (distinct digests) :let [f (java.io.File. ^String (result-path dir dg))] :when (.isFile f)
                  :let [r (edn/read-string (slurp f))] :when (green? r)]
              [dg r])))
 
+(defn result-file
+  "The write that stores result r ({:test or :step, :digest, :pass :fail :error :ms}) in dir:
+  seon.fx/write-file's request {:path :text}, the one encoding greens reads back."
+  {:malli/schema [:=> [:cat :string [:map [:digest :string]]] [:map [:path :string] [:text :string]]]}
+  [dir r] {:path (result-path dir (:digest r)) :text (sedn/encode r)})
+
 (defn store!
-  "Result r ({:test or :step, :digest, :pass :fail :error :ms}) written at its digest in dir
-  through the effect owner's file write (seon.fx/write-file: temp then rename). Answers the
-  write's outcome: {:value ...}, or its declared :seon.fx/io-error, which the caller records."
+  "Result r written at its digest in dir through the effect owner's file write
+  (seon.fx/write-file: temp then rename), in a process with no root (bin/test); an agent asks
+  root's :file owner for the same request (result-file). Answers the write's outcome:
+  {:value ...}, or its declared :seon.fx/io-error, which the caller records."
   {:malli/schema [:=> [:cat :string [:map [:digest :string]]] :map]}
   [dir r]
-  (fx/write-file {:req {:path (result-path dir (:digest r)) :text (sedn/encode r)}}))
+  (fx/write-file {:req (result-file dir r)}))
 
 (defn plan
   "What a change runs: of cand ({key digest}, the candidate's), base (the base's {key digest},

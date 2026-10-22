@@ -80,21 +80,27 @@
 
 (deftest a-wide-reach-reuses-unchanged-results
   ;; task seon.proofs/prove-runs-what-a-change-reaches (and seon.agent/a-wide-reach-stays-cheap):
-  ;; the agent's run selects by reach digest against the main it forked from and holds each
-  ;; green at its digest, so the next run (the next turn's observe, the judge's :tests, the
-  ;; merge gate) of an unchanged branch reruns nothing and answers the same results
+  ;; root records its source checkout's proof inputs at boot, the agent keys its digests by them
+  ;; and selects against the main it forked from, and each green goes to the one results
+  ;; directory through root's :file owner, so the next run (the next turn's observe, the judge's
+  ;; :tests, the merge gate) of an unchanged branch reruns nothing and answers the same results
   (let [proof 'seon.reader-test/prose-without-a-fence-is-a-comment
         reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
+        dir (str (.getCanonicalPath (java.io.File. ".")) "/target/tmp/agent-results-" (random-uuid))
         run "(let [r @(seon.root/run-tests! sys :a1)] [(seon.proofs/results r) (:ran r) (:reused r)])"
-        [_ first-run second-run prove-run]
+        own "(select-keys (prove) [:results :ran :reused])"
+        [_ inputs first-run judged second-run]
         (in-agent ["(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent.a1)"
+                   {:op :eval :agent "root" :code "(set (keys (:seon.root/proof-inputs (datahike.api/entity @(:conn sys) [:seon.root/id :root]))))"}
+                   own
                    {:op :eval :agent "root" :code run}
-                   {:op :eval :agent "root" :code run}
-                   "(select-keys (prove) [:results :ran :reused])"]
-                  {:dirs ["src" "test"] :proofs #{proof}})]
-    (is (= [{proof :pass reached :pass} 2 0] (edn/read-string (:printed first-run))) "the first run runs the proof and the reached test")
-    (is (= [{proof :pass reached :pass} 0 2] (edn/read-string (:printed second-run))) "the second runs nothing: both reused, the same results")
-    (is (= {:results {proof :pass reached :pass} :ran 0 :reused 2} (edn/read-string (:printed prove-run))) "and the agent's own function, (prove), answers the same")))
+                   own]
+                  {:dirs ["src" "test"] :proofs #{proof} :sets [(str ":seon.config.source/test-results-dir=" (pr-str dir))]})]
+    (is (= #{:env :tree} (edn/read-string (:printed inputs))) "root recorded its source checkout's proof inputs at boot")
+    (is (= {:results {proof :pass reached :pass} :ran 2 :reused 0} (edn/read-string (:printed first-run))) "the agent's own run runs the proof and the reached test")
+    (is (= 2 (count (filter #(.endsWith (.getName %) ".edn") (.listFiles (java.io.File. dir))))) "and stores both through root's :file owner, in the one results directory")
+    (is (= [{proof :pass reached :pass} 0 2] (edn/read-string (:printed judged))) "root's :tests (the judge's) runs nothing: both reused from it, the same results")
+    (is (= {:results {proof :pass reached :pass} :ran 0 :reused 2} (edn/read-string (:printed second-run))) "and so does the agent's next run")))
 
 (deftest a-forked-agent-knows-its-task
   ;; task seon.template/a-request-is-one-linked-transaction: root forks the agent for its

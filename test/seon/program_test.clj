@@ -289,16 +289,16 @@
         b (checkout! "b" files)
         dir (scratch-dir "shared")
         db (calc-db)
-        in-a (runner/inputs a)
+        in-a (proofs/inputs a)
         da (select-keys (program/reach-digests db in-a) calc-tests)]
-    (is (= in-a (runner/inputs b)) "the same content at another path: the same inputs")
+    (is (= in-a (proofs/inputs b)) "the same content at another path: the same inputs")
     (binding [*out* (java.io.StringWriter.)] (proofs/run-tests! (:run (run-plan da dir)) da dir (fn [_])))
-    (is (= [] (:run (run-plan (select-keys (program/reach-digests db (runner/inputs b)) calc-tests) dir)))
+    (is (= [] (:run (run-plan (select-keys (program/reach-digests db (proofs/inputs b)) calc-tests) dir)))
         "checkout b reuses every result checkout a recorded")
     (spit (str b "/docs/a.md") "# a, edited")
-    (is (= (:env in-a) (:env (runner/inputs b))) "prose is no input of a test that reads no files")
+    (is (= (:env in-a) (:env (proofs/inputs b))) "prose is no input of a test that reads no files")
     (spit (str b "/resources/seon/schemas/x.edn") "{:x :string}")
-    (is (= calc-tests (set (:run (run-plan (select-keys (program/reach-digests db (runner/inputs b)) calc-tests) dir))))
+    (is (= calc-tests (set (:run (run-plan (select-keys (program/reach-digests db (proofs/inputs b)) calc-tests) dir))))
         "a changed schema resource is an input of every test")))
 
 ;; ---- refs the expansion and the quote leave (task seon.program/refs-name-quoted-symbols-and-macro-uses)
@@ -441,7 +441,7 @@
         moved (set (for [[t d] a :when (not= d (b t))] t))]
     (is (not (moved 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a reader test reaches only :env reads: the tree is no input")
     (is (moved 'seon.task-files-test/the-shipped-task-files-load) "a test reading the task files (my.root/task-files, not in :env): the tree is its input")
-    (is (moved 'seon.program-test/a-result-recorded-in-one-checkout-is-reused-in-another) "a test reading files itself (test-runner/inputs): the tree is its input")
+    (is (moved 'seon.program-test/a-result-recorded-in-one-checkout-is-reused-in-another) "a test reading files itself (test-proofs/inputs): the tree is its input")
     (is (< (count moved) (quot (count a) 2)) (str (count moved) " of " (count a) " tests take the tree: fewer than half"))))
 
 (deftest a-test-naming-another-test-does-not-reach-it
@@ -490,9 +490,9 @@
   ;; checkout's config was reused in another's
   (let [here (System/getProperty "user.dir")
         cfg {:seon.config.ai/model "a" :seon.config.root/runs-dir (str here "/runs") :seon.config.web/port 8451}
-        env #(:env (runner/inputs here % here))]
+        env #(:env (proofs/inputs here % here))]
     (is (not= (env cfg) (env (assoc cfg :seon.config.ai/model "b"))) "another value in force: another :env, every test reruns")
     (is (= (env cfg) (env (assoc cfg :seon.config.web/port 9999))) "a checkout's own TCP port is no input")
-    (is (= (:env (runner/inputs here cfg here))
-           (:env (runner/inputs here (assoc cfg :seon.config.root/runs-dir "/elsewhere/runs") "/elsewhere")))
+    (is (= (:env (proofs/inputs here cfg here))
+           (:env (proofs/inputs here (assoc cfg :seon.config.root/runs-dir "/elsewhere/runs") "/elsewhere")))
         "a path under the checkout is the same input in any checkout")))

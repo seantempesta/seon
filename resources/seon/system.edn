@@ -40,6 +40,8 @@
  {:echo {:perform seon.fx/echo :workers 1}
   :file {:perform seon.fx/write-file :workers 1}
   :source {:perform seon.fx/read-source :workers 1}
+  ;; the source checkout's proof inputs (git and every file read: a worker's, never root's own thread)
+  :proof-inputs {:perform seon.proofs/perform-inputs :workers 1}
   :git {:perform seon.fx/git-commit :workers 1}
   :deps {:perform seon.fx/resolve-deps :workers 1}
   ;; the next generation (my.root/build!): bin/build seon of the last merges commit, niced, ~25-45 s

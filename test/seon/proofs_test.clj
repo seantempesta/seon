@@ -46,7 +46,8 @@
     (is (every? proofs/green? (vals (:ran first-run))) "and each is green")
     (is (= [] (:run second-run)) "the same tree again: nothing runs")
     (is (= ts (set (keys (:reused second-run)))) "every result is reused from its digest")
-    (is (= (:cand first-run) (:cand second-run)) "the digests are the tree's, not the run's")))
+    (is (= (:cand first-run) (:cand second-run)) "the digests are the tree's, not the run's")
+    (is (= {} (proofs/greens dir (vals {}))) "a branch holding no test reads no greens (an agent died on this)")))
 
 (deftest a-one-defn-change-runs-only-what-reaches-it
   (let [db (schema (prog) :app.pv-calc/n "int?") dir (scratch-dir)
