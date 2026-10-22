@@ -22,7 +22,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [ring-chez.adapter :as adapter]
-            [seon.lib :as lib] [seon.contract :as contract] [seon.config :as config] [seon.render.ui :as ui] [seon.web.html :as h]))
+            [seon.lib :as lib] [seon.contract :as contract] [seon.config :as config] [seon.render.ui :as ui] [seon.web.html :as h] [seon.step :as step]))
 
 ;;; --- the files it serves ------------------------------------------------------------
 
@@ -223,42 +223,39 @@
                            (str "/feed?view=" (if (= :root view) "root" (name view)))
                            (h/raw body))))))
 
-(defn- step-out {:malli/schema [:=> [:cat :seon.host/volatile :keyword :any] :nil]}
-  [o port m] (vswap! o update port (fnil conj []) m) nil)
-
 (defn- http-in
   "A request from the edge."
   {:malli/schema [:=> [:cat :map :seon.host/volatile :map] :map]}
   [st o m]
   (case (:op m)
-    :listener (do (step-out o :to-api {:op :web :listening (boolean (:listening st)) :port (:port st) :error (:error st)}) st)
+    :listener (do (step/out! o :to-api {:op :web :listening (boolean (:listening st)) :port (:port st) :error (:error st)}) st)
     :open (let [k (inc (:next st 0))
                 st (-> st (assoc :next k) (assoc-in [:tabs k] {:ch (:ch m) :view (:view m)}) (update :stale conj k))]
-            (step-out o :to-render (views-msg st))
-            (step-out o :to-render {:op :keyframe :view (:view m)})
+            (step/out! o :to-render (views-msg st))
+            (step/out! o :to-render {:op :keyframe :view (:view m)})
             st)
     :page (let [k (inc (:next st 0))]
-            (step-out o :to-render {:op :page :view (:view m) :k k})
+            (step/out! o :to-render {:op :page :view (:view m) :k k})
             (-> st (assoc :next k) (assoc-in [:waiting k] [(:p m) (:view m)])))
     (:context :render-stats)
              (let [k (inc (:next st 0))]
-               (step-out o :to-render {:op (if (= :context (:op m)) :context :stats) :k k})
+               (step/out! o :to-render {:op (if (= :context (:op m)) :context :stats) :k k})
                (-> st (assoc :next k) (assoc-in [:waiting k] [(:p m) :text])))
     :stats (do (deliver (:p m) {:tabs (count (:tabs st)) :stale (count (:stale st)) :sent-bytes (:bytes st 0)
                                 :patches (:patches st 0) :chunk-p50-bytes (lib/p50 (:chunk-bytes st)) :listening (:listening st)
                                 :port (:port st) :calls (:calls st 0) :error (:error st)})
                st)
     :call (let [c (:call m)
-                n (inc (:calls st 0))
                 reqs (requests c (:index st {}))]
             (when (= 'seon.root/interrupt! (:var c))
               (some-> (get-in st [:index (:agent c) :pid]) (lib/c-kill lib/SIGUSR1)))
-            (doseq [[i [req target]] (map-indexed vector reqs)]
-              (step-out o :to-api {:op :request :req req :route [:render :answers] :tag [:web (+ (* 1000 n) i) (:var c) target]}))
+            ;; answered to the render proc, which shows each in the stream by its tag
+            (doseq [[req target] reqs]
+              (step/out! o :to-api {:op :request :req req :route [:render :answers] :tag [:web (:var c) target]}))
             (when (contains? root-verbs (:var c))
-              (step-out o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (record-tx c)}}
-                                   :route [:render :answers] :tag [:web-record n]}))
-            (assoc st :calls n))
+              (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (record-tx c)}}
+                                   :route [:render :answers] :tag [:web-record]}))
+            (update st :calls (fnil inc 0)))
     st))
 
 (defn- render-in
@@ -274,7 +271,7 @@
                         (update :chunk-bytes #(lib/push-window % (count chunk) 200)))]
              ;; a tab fallen behind gets the view's keyframe next
              (when (some #(= (:view m) (get-in st [:tabs % :view])) (:stale st))
-               (step-out o :to-render {:op :keyframe :view (:view m)}))
+               (step/out! o :to-render {:op :keyframe :view (:view m)}))
              st)
     :keyframe (keyframe! st (:view m) (:html m))
     :page (if-let [[p view] (get-in st [:waiting (:k m)])]
@@ -333,5 +330,5 @@
          ;; a tab whose channel closed (found at an offer) is gone: the views watched may change
          st (update st :stale (fn [s] (into #{} (filter #(contains? (:tabs st) %)) s)))]
      (when (and (not= :open (:op m)) (not= before (into #{} (map :view (vals (:tabs st))))))
-       (step-out o :to-render (views-msg st)))
+       (step/out! o :to-render (views-msg st)))
      [st @o])))

@@ -27,7 +27,7 @@
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.ai :as ai]
             [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.context :as context] [seon.print :as print]
-            [seon.config :as config]))
+            [seon.config :as config] [seon.step :as step]))
 
 (def EVENT-CAP "Events the stream keeps." 60)
 (def SERIES-CAP "Points a sparkline keeps: the newest changes (a writer batch, a fork, a main commit)." 60)
@@ -37,40 +37,17 @@
 ;;; --- requests -------------------------------------------------------------------------
 
 (defn- ask
-  "st with a request to the api pending under kind, and the request message."
-  {:malli/schema [:=> [:cat :map :any :map] [:tuple :map :map]]}
-  [st kind req]
-  (let [rid (inc (:rid st))]
-    [(-> st (assoc :rid rid) (assoc-in [:pending rid] kind) (assoc-in [:asked rid] (System/currentTimeMillis)))
-     {:op :request :req req :route [:render :answers] :tag rid}]))
-
-(def ASK-BOUND-MS
-  "A request unanswered this long counts as gone and is asked again: a step that threw
-  keeps its old state (Flow's rule), so its answer's pass never ran; the defect itself is
-  in root's errors, shown on the next pass."
-  2000)
-
-(defn- pending? {:malli/schema [:=> [:cat :map :any] :boolean]}
-  [st kind]
-  (let [now (System/currentTimeMillis)]
-    (boolean (some (fn [[rid k]] (and (= kind k) (< (- now (get-in st [:asked rid] now)) ASK-BOUND-MS))) (:pending st)))))
-
-(defn- ask-state
-  "Ask for root's view unless that request is already in flight (then the answer's pass
-  covers what queued meanwhile: the coalescing window)."
-  {:malli/schema [:=> [:cat :map :seon.host/volatile] :map]}
-  [st o]
-  (if (pending? st :state)
+  "Ask the api for req under kind (seon.step/ask) unless kind is already in flight: the
+  answer's pass covers what queued meanwhile (the coalescing window). No clock re-asks: the
+  api answers every request it took, a defect included (seon.root/a-proc-answers-every-request-it-took)."
+  {:malli/schema [:=> [:cat :map :seon.host/volatile :any :map] :map]}
+  [st o kind req]
+  (if (some #{kind} (vals (:pending st)))
     st
-    (let [[st m] (ask st :state {:op :state})] (vswap! o update :to-api (fnil conj []) m) st)))
+    (let [[st m] (step/ask st [:render :answers] kind req)] (step/out! o :to-api m) st)))
 
-(defn- ask-db
-  "Ask the writer (through the api) for branch's db, unless in flight."
-  {:malli/schema [:=> [:cat :map :seon.host/volatile :any :keyword] :map]}
-  [st o kind branch]
-  (if (pending? st kind)
-    st
-    (let [[st m] (ask st kind {:op :write :req {:op :branch-db :branch branch}})] (vswap! o update :to-api (fnil conj []) m) st)))
+(defn- ask-state "Ask for root's view." {:malli/schema [:=> [:cat :map :seon.host/volatile] :map]}
+  [st o] (ask st o :state {:op :state}))
 
 ;;; --- the system value ------------------------------------------------------------------
 
@@ -405,10 +382,10 @@
                                [st []] (sort-by str views))
           idx (index-of (:agents sys))
           ms (lib/ms-since t0)]
-      (doseq [p patches] (vswap! o update :to-web (fnil conj []) p))
-      (when (not= idx (:index st)) (vswap! o update :to-web (fnil conj []) {:op :index :agents idx}))
-      (doseq [[k v] (:waiting st)] (vswap! o update :to-web (fnil conj []) {:op :page :k k :view v :html (page-html st v)}))
-      (doseq [v (:kf-wanted st)] (vswap! o update :to-web (fnil conj []) {:op :keyframe :view v :html (page-html st v)}))
+      (doseq [p patches] (step/out! o :to-web p))
+      (when (not= idx (:index st)) (step/out! o :to-web {:op :index :agents idx}))
+      (doseq [[k v] (:waiting st)] (step/out! o :to-web {:op :page :k k :view v :html (page-html st v)}))
+      (doseq [v (:kf-wanted st)] (step/out! o :to-web {:op :keyframe :view v :html (page-html st v)}))
       (-> st (assoc :index idx :waiting {} :kf-wanted #{})
           (update :passes (fnil inc 0))
           (cond-> (seq patches) (assoc :render-ms (lib/r2 ms) :patches (reduce + (map #(+ (count (:frags %)) (count (:appends %)) (count (:prepends %)) (count (:removes %))) patches))))
@@ -454,12 +431,12 @@
     (= :state kind)
     (let [st (assoc st :view r)
           tx (get-in r [:writer :tx-count])
-          st (if (not= tx (:main-tx st)) (-> st (assoc :main-tx tx) (ask-db o :main :db)) st)
+          st (if (not= tx (:main-tx st)) (-> st (assoc :main-tx tx) (ask o :main {:op :write :req {:op :branch-db :branch :db}})) st)
           ;; a watched agent's branch moved: read its branch db (its evaluations, its task)
           st (reduce (fn [st id]
                        (let [a (get-in r [:agents id])]
                          (if (and a (:branch a) (not= (:t a) (get-in st [:zoom id :t])))
-                           (-> st (assoc-in [:zoom id :t] (:t a)) (ask-db o [:branch id] (:branch a)))
+                           (-> st (assoc-in [:zoom id :t] (:t a)) (ask o [:branch id] {:op :write :req {:op :branch-db :branch (:branch a)}}))
                            st)))
                      st (filter keyword? (:watch st)))]
       (pass st o))
@@ -501,28 +478,28 @@
    (let [o (volatile! {})
          st (case in
               :events (if (nil? m) st (ask-state (reduce on-event st (drain m (:events-ch st) 2048)) o))
-              :answers (if-let [kind (get-in st [:pending (:tag m)])]
-                         (answered (-> st (update :pending dissoc (:tag m)) (update :asked dissoc (:tag m))) o kind (:r m))
-                         ;; the web proc's calls are answered here: shown in the stream
-                         (if (and (vector? (:tag m)) (= :web (first (:tag m))))
-                           (ask-state (on-event st {:type :ui :call (str (nth (:tag m) 2)) :agent (nth (:tag m) 3 nil)
-                                                    :at-ms (System/currentTimeMillis)
-                                                    :detail (let [r (:r m)] (cond (and (map? r) (string? (or (:seon.error/message r) (:error r)))) (str "error: " (or (:seon.error/message r) (:error r)))
-                                                                                  (map? r) (print/text (dissoc r :reports) 40)
-                                                                                  :else nil))
-                                                    :error (when (map? (:r m)) (let [x (or (:seon.error/message (:r m)) (:error (:r m)))] (when (string? x) x)))})
-                                      o)
-                           st))
+              :answers (let [[st' kind] (step/answered st (:tag m))
+                             r (:r m)
+                             err (when (map? r) (let [x (or (:seon.error/message r) (:error r))] (when (string? x) x)))]
+                         (cond
+                           kind (answered st' o kind r)
+                           ;; the web proc's calls ([:web var agent]) are answered here: shown in the stream
+                           (and (vector? (:tag m)) (= :web (first (:tag m))))
+                           (let [[_ v agent] (:tag m)]
+                             (ask-state (on-event st {:type :ui :call (str v) :agent agent :at-ms (System/currentTimeMillis) :error err
+                                                      :detail (cond err (str "error: " err) (map? r) (print/text (dissoc r :reports) 40))})
+                                        o))
+                           :else st))
               :from-web (case (:op m)
                           :views (ask-state (assoc st :watch (:views m) :tabs (:tabs m)) o)
                           :page (if (and (get-in st [:views (:view m)]) (contains? (:watch st) (:view m)))
-                                  (do (vswap! o update :to-web (fnil conj []) {:op :page :k (:k m) :view (:view m) :html (page-html st (:view m))}) st)
+                                  (do (step/out! o :to-web {:op :page :k (:k m) :view (:view m) :html (page-html st (:view m))}) st)
                                   (ask-state (assoc-in st [:waiting (:k m)] (:view m)) o))
                           :keyframe (if (get-in st [:views (:view m)])
-                                      (do (vswap! o update :to-web (fnil conj []) {:op :keyframe :view (:view m) :html (page-html st (:view m))}) st)
+                                      (do (step/out! o :to-web {:op :keyframe :view (:view m) :html (page-html st (:view m))}) st)
                                       (ask-state (update st :kf-wanted conj (:view m)) o))
-                          :context (do (vswap! o update :to-web (fnil conj []) {:op :text :k (:k m) :text (:context st "")}) st)
-                          :stats (do (vswap! o update :to-web (fnil conj []) {:op :text :k (:k m) :text (pr-str (stats st))}) st)
+                          :context (do (step/out! o :to-web {:op :text :k (:k m) :text (:context st "")}) st)
+                          :stats (do (step/out! o :to-web {:op :text :k (:k m) :text (pr-str (stats st))}) st)
                           st)
               st)]
      [st @o])))

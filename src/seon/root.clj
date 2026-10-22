@@ -137,9 +137,8 @@
   "Answer the caller waiting on rid; answers st."
   {:malli/schema [:=> [:cat :seon.root/api-state :int :any] :seon.root/api-state]}
   [st rid r]
-  (if-let [{:keys [p]} (get-in st [:pending rid])]
-    (-> (reply! st p r) (update :pending dissoc rid) (update :writes disj rid))
-    st))
+  (let [[st' {:keys [p]}] (step/answered st rid)]
+    (if p (-> (reply! st' p r) (update :writes disj rid)) st)))
 
 (defn- view! {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/fn [:* :any]] :seon.root/api-state]}
   [st f & args] (apply update st :view f args))
@@ -231,11 +230,10 @@
       (-> st (update :agents dissoc agent) (update :agent-procs dissoc agent) (assoc ::update true)
           (set-agent agent {:status (or stopped :dead) :ended-ms (System/currentTimeMillis) :running nil})))))
 
-(defn- rid! {:malli/schema [:=> [:cat :seon.root/api-state] [:tuple :seon.root/api-state :int]]}
-  [st] (let [r (inc (:rid st))] [(assoc st :rid r) r]))
-
-(defn- pend {:malli/schema [:=> [:cat :seon.root/api-state :int [:maybe [:or :seon.host/promise :map]] :keyword [:maybe :seon.agent/id]] :seon.root/api-state]}
-  [st rid p kind agent] (if p (assoc-in st [:pending rid] {:p p :kind kind :agent agent}) st))
+(defn- pend
+  "st with caller p awaiting the answer to a new request id (seon.step/pend), and the id."
+  {:malli/schema [:=> [:cat :seon.root/api-state [:maybe [:or :seon.host/promise :map]] :keyword [:maybe :seon.agent/id]] [:tuple :seon.root/api-state :int]]}
+  [st p kind agent] (step/pend st (when p {:p p :kind kind :agent agent})))
 
 (defn- ext-op {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.root/request] :seon.root/api-state]}
   [st o m]
@@ -270,15 +268,15 @@
                  (reply! st p (refused 'seon.root/clone! (str "no live agent " parent) {:ok false}))
                  (let [[st aid fd] (start-agent st (merge {:task (get-in st [:view :agents parent :task])} (:opts m) {:cloned-from parent}))
                        {:keys [branch lease]} (get-in st [:agents aid])
-                       [st rid] (rid! st)]
+                       [st rid] (pend st p :clone parent)]
                    ;; the clone's socket goes to its parent with the request
-                   (to-agent (pend st rid p :clone parent) parent
+                   (to-agent st parent
                              {:op :req :rid rid :kind :clone :new aid :branch branch :pass-fd fd :lease lease
                               :msg {:op :clone :agent aid :branch branch}}))))
       (:eval :tests :merge-tests :stats :ping :merge-main)
       (if (nil? (get-in st [:agents id]))
         (reply! st p (no-agent op (gone id (str "no live agent " id))))
-        (let [[st rid] (rid! st)
+        (let [[st rid] (pend st p op id)
               msg (case op
                     :eval (cond-> {:op :eval :forms (:forms m)} (:ticks m) (assoc :ticks (:ticks m)) (:origin m) (assoc :origin (:origin m)))
                     (:tests :merge-tests) (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m))
@@ -286,16 +284,16 @@
                     :stats {:op :stats}
                     :ping {:op :ping}
                     :merge-main {:op :merge-main :data-attrs (:data-attrs m)})]
-          (to-agent (pend st rid p op id) id {:op :req :rid rid :kind op :msg msg :merge-branch (:merge-branch m) :data-attrs (:data-attrs m)})))
+          (to-agent st id {:op :req :rid rid :kind op :msg msg :merge-branch (:merge-branch m) :data-attrs (:data-attrs m)})))
       ;; requests for the writer: answered by rid; a collection only while no agent is live,
       ;; the store's only writer then being root's writer (seon.db/collect!)
       :write (if (and (= :collect (get-in m [:req :op])) (seq (:agents st)))
                (reply! st p (refused 'seon.root/collect "a collection waits until no agent is live" {:agents (vec (sort (keys (:agents st))))}))
-               (let [[st rid] (rid! st)
+               (let [[st rid] (pend st p (get-in m [:req :op]) nil)
                    req (:req m)
                    dest (case (:op req) :merge-main {:merge-main (:agent req) :rid rid} :merge {:merged (:agent req) :rid rid} {:rid rid})]
                (step/out! o :to-writer (assoc (dissoc req :agent) :dest dest))
-               (-> (pend st rid p (:op req) nil) (update :writes (fnil conj #{}) rid))))
+               (update st :writes (fnil conj #{}) rid)))
       :kill (cond-> (if (get-in st [:agents id])
                       ;; :ended when root stops it because its attempt ended (the reconciler says so)
                       (-> st (set-agent id {:status (if (:ended m) :ended :killed)}) (to-agent id {:op :kill}))
@@ -307,13 +305,13 @@
       ;; kind's owner, answered by rid like the writer's answers
       :fx (let [owner (keyword "fx" (name (:kind m)))]
             (if (contains? (system/fx-owners (get-in st [:system :procs])) owner)
-              (let [[st rid] (rid! st)]
+              (let [[st rid] (pend st p :fx nil)]
                 (step/out! o [owner :in] {:req (:req m) :prio 0 :dest {:rid rid}})
-                (pend st rid p :fx nil))
+                st)
               (reply! st p (contract/error :seon.fx/unknown-kind 'seon.fx/call (str "no effect kind " (:kind m))))))
-      :fs (let [[st rid] (rid! st)]
+      :fs (let [[st rid] (pend st p :fs nil)]
             (step/out! o :to-fs (assoc (:req m) :rid rid))
-            (pend st rid p :fs nil))
+            st)
       :state (reply! st p (:view st))
       :errors (reply! st p (::errors st {}))
       :shutdown (assoc st :shutdown-p p)
@@ -438,7 +436,7 @@
     (and (= in :ext) (nil? m))
     ;; the entrance closed: agents drain and exit; then the writer's in-port closes
     (let [st (assoc st :closing true)]
-      (reduce (fn [st aid] (let [[st rid] (rid! st)] (to-agent st aid {:op :drain :rid rid}))) st (keys (:agents st))))
+      (reduce (fn [st aid] (let [[st rid] (step/pend st nil)] (to-agent st aid {:op :drain :rid rid}))) st (keys (:agents st))))
     (= in :ext) (ext-op st o m)
     (nil? m) st
     :else (back-op st o m)))

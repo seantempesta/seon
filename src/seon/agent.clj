@@ -139,10 +139,13 @@
 (defn- fx-record!
   "The outcome joins this eval request's recording transaction (the asker records): its
   status, latency and queue wait, its error's type, and a model call's tokens (prompt,
-  completion, reasoning, cache hits) when the provider reported them."
-  {:malli/schema [:=> [:cat :int :keyword :map] :any]}
-  [k kind r]
-  (let [c (or (:value r) r)]
+  completion, reasoning, cache hits) when the provider reported them. The effect k is no
+  longer pending (:fx-pending, its kind by key). Answers its kind."
+  {:malli/schema [:=> [:cat :int :map] [:maybe :keyword]]}
+  [k r]
+  (let [c (or (:value r) r)
+        kind (get-in @state [:fx-pending k])]
+    (swap! state update :fx-pending dissoc k)
     (swap! state assoc-in [:defs [:fx k]]
            [(cond-> (into {:seon.fx/id (str (name (:id @state)) "-" (lib/c-getpid) "-fx" k) :seon.fx/kind kind
                            :seon.fx/status (if (:seon.error/type r) :error :ok)
@@ -150,7 +153,8 @@
                           (for [[f a] model-cost-attrs :let [v (when (map? c) (get c f))] :when (int? v)] [a (long v)]))
               (:cost r) (assoc :seon.fx/cost (long (:cost r)))
               (:seon.error/type r) (assoc :seon.fx/error (str (:seon.error/type r) ": " (:seon.error/message r))
-                                          :seon.fx/error-type (:seon.error/type r)))])))
+                                          :seon.fx/error-type (:seon.error/type r)))])
+    kind))
 
 (defn- fx-test
   "An effect asked inside a test fork: the stub's outcome, or the declared refusal."
@@ -160,23 +164,6 @@
     (*fx-stub* kind req)
     (contract/error :seon.fx/in-test 'seon.fx/call "an effect inside a test does not leave the test's process: bind seon.agent/*fx-stub*"
                     {:seon.fx/kind kind})))
-
-(defn fx!
-  "The effect kind with req, through root's owner proc, answered here: its outcome
-  {:value ...} or its declared error. Recorded with this eval request. No lock: an
-  interrupt may end the wait; the outcome then arrives later as an async one does."
-  {:malli/schema [:=> [:cat :keyword :map :map] :map]}
-  [kind req opts]
-  (if (= :test (:mode @state))
-    (fx-test kind req)
-    (let [k (:tx-seq (swap! state update :tx-seq inc))
-          _ (swap! state update :fx-pending (fnil assoc {}) k kind)
-          _ (when (= :dead (send! (merge opts {:op :fx :k k :kind kind :req req}))) (lib/c-exit 0))
-          m (await-op! :fx-reply k)
-          r (dissoc m :op :k)]
-      (swap! state update :fx-pending dissoc k)
-      (fx-record! k kind r)
-      r)))
 
 (defn fx-send!
   "The effect kind with req, started: answers its key k at once. The outcome arrives as a
@@ -189,6 +176,19 @@
       (when (= :dead (send! (merge opts {:op :fx :k k :kind kind :req req}))) (lib/c-exit 0))
       (swap! state update :fx-pending (fnil assoc {}) k kind)
       k)))
+
+(defn fx!
+  "The effect kind with req, through root's owner proc, answered here: its outcome
+  {:value ...} or its declared error. Recorded with this eval request. No lock: an
+  interrupt may end the wait; the outcome then arrives later as an async one does."
+  {:malli/schema [:=> [:cat :keyword :map :map] :map]}
+  [kind req opts]
+  (if (= :test (:mode @state))
+    (fx-test kind req)
+    (let [k (fx-send! kind req opts)
+          r (dissoc (await-op! :fx-reply k) :op :k)]
+      (fx-record! k r)
+      r)))
 
 ;; ---- merging main into this branch (seon.merge; lane M1) -------------------------------
 
@@ -454,11 +454,8 @@
                                                               (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{}))
              :mem-mb (mem-mb)}]
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
-    :fx-reply (let [kind (get-in @state [:fx-pending (:k m)])
-                    r (dissoc m :op :k)]
-                (swap! state (fn [s] (-> s (update :fx-pending dissoc (:k m))
-                                         (update :inbox (fnil conj []) {:from :fx :k (:k m) :kind kind :body r}))))
-                (fx-record! (:k m) kind r)
+    :fx-reply (let [r (dissoc m :op :k)]
+                (swap! state update :inbox (fnil conj []) {:from :fx :k (:k m) :kind (fx-record! (:k m) r) :body r})
                 nil)
     ;; root asks this agent to merge main into its branch (it owns the branch's writes)
     :merge-main [{:op :merged-main :id (:id m) :result (merge-main! (:data-attrs m #{}))}]

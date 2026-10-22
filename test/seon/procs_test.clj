@@ -9,7 +9,7 @@
             [datahike.api :as d]
             [seon.step :as step] [seon.db :as pdb] [seon.sock :as sock]
             [seon.writer :as writer] [seon.reconcile :as reconcile] [seon.fork-server :as server]
-            [seon.agent-proc :as ap] [seon.root :as root] [seon.repl :as repl]
+            [seon.agent-proc :as ap] [seon.root :as root] [seon.repl :as repl] [seon.render.proc]
             [taoensso.trove :as trove]))
 
 (trove/set-log-fn! nil)
@@ -165,6 +165,42 @@
     (let [p (promise)
           [_ outs] (step #'root/api-proc st :ext {:op :write :req {:op :collect} :p p})]
       (is (= :collect (:op (first (:to-writer outs))))))))
+
+;; ---- request/answer: one asker's table (seon.step/pend, ask, answered) ---------------------
+
+(deftest one-asker-table-answers-each-request-once
+  (let [st {:rid 0 :pending {}}
+        [st m1] (step/ask st [:render :answers] :state {:op :state})
+        [st m2] (step/ask st [:render :answers] [:branch :a1] {:op :write})
+        [st r3] (step/pend st nil)]
+    (testing "each request a new id, routed back to the asker, what awaits it pending by id"
+      (is (= {:op :request :req {:op :state} :route [:render :answers] :tag 1} m1))
+      (is (= 2 (:tag m2)))
+      (is (= 3 r3 (:rid st)))
+      (is (= {1 :state 2 [:branch :a1]} (:pending st)) "an id nothing awaits holds no entry"))
+    (testing "an answer takes its entry once: a second answer to the same id finds nothing"
+      (let [[st v] (step/answered st 2)
+            [st again] (step/answered st 2)]
+        (is (= [:branch :a1] v))
+        (is (nil? again))
+        (is (= {1 :state} (:pending st)))))
+    (testing "an id never asked finds nothing"
+      (is (nil? (second (step/answered st 99)))))))
+
+(deftest the-render-proc-asks-for-root-s-view-once-per-round-trip
+  ;; the coalescing window is the request in flight, not a clock (ASK-BOUND-MS is gone)
+  (let [events (a/chan 8)
+        st {:events-ch events :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events []
+            :event-rows [] :views {} :zoom {} :merges 0 :main {:t 1}}
+        asks (fn [outs] (filter #(= {:op :state} (:req %)) (:to-api outs)))
+        [st o1] (#'seon.render.proc/render-proc st :events {:type :spawned :agent :a1 :at-ms 1})
+        [st o2] (#'seon.render.proc/render-proc st :events {:type :ready :agent :a1 :at-ms 2})]
+    (is (= 1 (count (asks o1))) "an event asks for the view")
+    (is (empty? (asks o2)) "while that request is in flight, more events only queue")
+    (let [[st _] (#'seon.render.proc/render-proc st :answers {:tag (:tag (first (asks o1))) :r {:agents {} :writer {:tx-count 1 :recent []} :server {:status :up} :stats {} :store {} :boot {}}})
+          [_ o3] (#'seon.render.proc/render-proc st :events {:type :ready :agent :a2 :at-ms 3})]
+      (is (not-any? #{:state} (vals (:pending st))) "the answer took its request")
+      (is (= 1 (count (asks o3))) "the next event asks again"))))
 
 ;; ---- task seon.root/a-proc-answers-every-request-it-took (census #2) ----------------------
 
