@@ -45,7 +45,7 @@
   ;; this process takes a lease on a test branch as a forked agent does (seon.db/after-fork!
   ;; -> lease!), mints all but two of its ids, then asks for five more
   (ts/test-branch! (fn [c conn] (let [sid (get-in c [:store :id])
-        lease (pdb/lease-base conn)
+        lease (pdb/lease-block! @conn)
         ceiling (+ lease (cfg/value :seon.config.store/eid-lease))
         notes (fn [n tag] (vec (for [i (range n)] {:note/text (str tag i)})))]
     (try
@@ -90,7 +90,7 @@
   ;; main merged into the branch brings entities minted in a later agent's block (ids past
   ;; this lease's ceiling): this process still mints inside its own block, never above them
   (ts/test-branch! (fn [c conn] (let [sid (get-in c [:store :id])
-        lease (pdb/lease-base conn)
+        lease (pdb/lease-block! @conn)
         ceiling (+ lease (cfg/value :seon.config.store/eid-lease))
         theirs (+ ceiling 10)
         new-id (fn [r] (d/q '[:find ?e . :in $ ?t :where [?e :note/text ?t]] (:db-after r) "mine"))]

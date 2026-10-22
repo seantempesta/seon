@@ -228,3 +228,20 @@
                       {:sets [":seon.config.ai/provider=:none"]
                        :decls [{:seon.task/name "m" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= [:error :seon.model/no-provider [:seon.model/no-provider]] (edn/read-string (:printed r))) (pr-str r))))
+
+(deftest no-entity-of-main-is-inside-an-agents-lease
+  ;; bin/check lease, nondeterministic (2026-10-22): agent a's db held id lease+50, its
+  ;; ceiling, which no agent mints. Root handed out leases from a base it read once at boot,
+  ;; before its own writes to main (the source import's program, later facts) went on minting
+  ;; from under that base, through the agents' blocks: an agent's "new" ids are main's
+  ;; entities. With eid-lease 50 and root writing 150 more entities after a1 holds its lease,
+  ;; no entity of main may lie in a1's block
+  (let [[r] (in-agent [{:op :eval :agent "root"
+                        :code (str "(do @(seon.root/transact-main! sys (vec (for [i (range 150)] {:note/text (str \"root-\" i)})))"
+                                   " (let [db @(:conn sys) ids (:ids @(seon.root/agent-stats! sys :a1))"
+                                   " inside (into #{} (comp (map :e) (filter #(< (:from ids) % (+ (:from ids) (:of ids))))) (datahike.api/datoms db :eavt))]"
+                                   " [(:of ids) (count inside)]))")}]
+                      {:sets [":seon.config.store/eid-lease=50"]})
+        [of inside] (edn/read-string (:printed r))]
+    (is (= 50 of) (pr-str r))
+    (is (= 0 inside) "main's entities stay out of the agent's block")))

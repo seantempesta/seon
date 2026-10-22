@@ -166,16 +166,18 @@
       ;; the agent's branch (new: a pointer to main's head), then its fork: the agent opens
       ;; the branch itself and owns its writes (run-ahead, committed by the agent), and holds
       ;; the task and attempt it works from its first form
+      ;; its block of entity ids is reserved here, from the counter main's writes mint from
       :spawn (let [{:keys [agent branch]} m
-                   resumed? (exists? branch)]
+                   resumed? (exists? branch)
+                   lease (pdb/lease-block! @conn)]
                (when-not resumed? (d/branch! conn main branch))
                ;; main's commit and t, which this branch starts at and the image it forks from holds
                (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :task (:task m) :attempt (:attempt m) :ns (:ns m) :fd (:fd m)
-                                              :cfg (:cfg st) :lease (:lease m) :resumed resumed?
+                                              :cfg (:cfg st) :lease lease :resumed resumed?
                                               :commit (d/commit-id @conn) :t (:max-tx @conn)})
                (reply st {:ok true :t (:max-tx @conn) :resumed resumed?}))
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
-                        (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st) :lease (:lease m)}))
+                        (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st) :lease (pdb/lease-block! @conn)}))
       :merge-train (let [[st r] (merge-train st o (vec (:branches m)) (:data-attrs m #{}))] (reply st r))
       :merge (if (exists? (:branch m))
                (let [[st r] (merge-branch st o (:branch m) (:data-attrs m #{}))] (reply st r))

@@ -317,21 +317,24 @@
   "Record items (with the defs their forms recorded) on this branch through the agent's
   write path (each item's :origin says who asked, when not the agent itself). Answers items.
   When the agent's entity ids are spent (:seon.db/lease-spent) the record cannot be written
-  on its branch: root is told ({:op :unrecorded}) and records it as a problem on main."
+  on its branch: root is told ({:op :unrecorded}) and records it as a problem on main, and
+  each item says :unrecorded, so its asker knows that fact is coming."
   {:malli/schema [:=> [:cat :seon.agent/items] :seon.agent/items]}
   [items]
   ;; the effects asked during the request (seon.agent/fx-record!) join its recording
   (let [defs (into [] (mapcat val) (:defs @agent/state))]
     (swap! agent/state dissoc :defs)
-    (when (and contract/record? (= :agent (:mode @agent/state)) (seq items))
+    (if (and contract/record? (= :agent (:mode @agent/state)) (seq items))
       (try
         (agent/transact! (into defs (record-tx (:id @agent/state) (str (name (:id @agent/state)) "-" (lib/c-getpid) "-" (profile/now-ns))
                                                items (:max-tx (agent/db)))))
+        items
         (catch clojure.lang.ExceptionInfo e
           (if (= :seon.db/lease-spent (:seon.error/type (ex-data e)))
-            (agent/send! {:op :unrecorded :error (ex-data e) :forms (count items)})
-            (throw e)))))
-    items))
+            (do (agent/send! {:op :unrecorded :error (ex-data e) :forms (count items)})
+                (mapv #(assoc % :unrecorded true) items))
+            (throw e))))
+      items)))
 
 (defn eval-string
   "Evaluate code through the one REPL path: the handler and its middleware, its answers

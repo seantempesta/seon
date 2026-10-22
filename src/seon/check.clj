@@ -1118,9 +1118,13 @@
         stats @(c/agent-stats! sys a)
         _ @(c/submit! sys b (notes "b" 10))
         b-min (read-string (:printed (first @(c/submit! sys b "(q '[:find (min ?n) . :where [?n :note/text]])"))))
-        ;; parks on main's commits until root has recorded a's unrecorded evals (no deadline)
+        ;; the reply says whether its record was written: when it was not (:unrecorded), root
+        ;; was told before the reply came and its fact is on its way to main, so this parks on
+        ;; main's commits until it lands; a record that was written is the answer, now
         lease-q '[:find ?c . :where [?e :seon.error/type :seon.db/lease-spent] [?e :seon.error/count ?c]]
-        recorded (d/q lease-q (seon.e2e/await-db sys #(d/q lease-q %)))
+        recorded (if (:unrecorded r-past)
+                   (d/q lease-q (seon.e2e/await-db sys #(d/q lease-q %)))
+                   :recorded-on-its-branch)
         spent? #(and (= :err (:tag %)) (re-find #"entity ids are spent" (str (:printed %))))]
       {:report {:past-its-lease (select-keys r-past [:tag :printed :err]) :notes-after (:printed r-count)
                 :next-write (select-keys r-next [:tag :printed]) :ids (:ids stats) :recorded-on-main recorded :b-lowest-id b-min}

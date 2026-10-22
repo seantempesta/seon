@@ -107,7 +107,7 @@
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
         [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a"}] :dest {:rid 1}})
         b (pdb/on-main (:branch cfg) :a1)
-        [_ outs] (step #'writer/writer-proc st :in {:op :spawn :agent :a1 :branch b :ns 0 :fd 0 :lease 0 :dest {:rid 2}})
+        [_ outs] (step #'writer/writer-proc st :in {:op :spawn :agent :a1 :branch b :ns 0 :fd 0 :dest {:rid 2}})
         fork (first (filter #(= :fork (:op %)) (:to-fork-server outs)))]
     (is (= (d/commit-id @conn) (:commit fork)) "main's commit")
     (is (= (:max-tx @conn) (:t fork)) "main's t")

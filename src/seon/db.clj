@@ -331,10 +331,16 @@
     {:used-bytes (.length (java.io.File. (str (get-in cfg [:store :path]) "/data.mdb")))
      :map-bytes (get-in cfg [:store :lmdb :map-size])}))
 
-(defn lease-base
-  "The first entity id past every branch head of the store: agents' leases start here."
-  {:malli/schema [:=> [:cat :seon.host/conn] :int]}
-  [conn] (+ (cfg/value :seon.config.store/eid-lease) (max (:max-eid @conn) (#'datahike.writing/roster-max-eid (:store @conn)))))
+(defn lease-block!
+  "Reserve the next block of eid-lease entity ids from this process's one counter for db's
+  store (the counter its own writes mint from, seeded past every branch head): answers the
+  block's lease, its ids lease+1 up to lease+eid-lease (exclusive, lease!). The process's
+  later ids start past it, so a block and the writes to main never meet."
+  {:malli/schema [:=> [:cat :seon.host/db] :int]}
+  [db]
+  (let [^java.util.concurrent.atomic.AtomicLong a (datahike.writing/eid-allocator db)
+        n (cfg/value :seon.config.store/eid-lease)]
+    (loop [] (let [c (.get a)] (if (.compareAndSet a c (+ c n)) c (recur))))))
 
 (defn head
   "Branch b's committed value, read from the store (another process may have committed it)."

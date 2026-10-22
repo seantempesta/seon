@@ -80,7 +80,7 @@
            (let [st (cond-> (to-proc! st (assoc msg (if (= kind :clone) :k :id) rid))
                       ;; a clone's socket follows in its own frame once the agent asks
                       (= kind :clone) (assoc :holding rid)
-                      true (update :inflight assoc rid (cond-> (select-keys m [:kind :branch :new :merge-branch :data-attrs :pass-fd :lease])
+                      true (update :inflight assoc rid (cond-> (select-keys m [:kind :branch :new :merge-branch :data-attrs :pass-fd])
                                                          ;; an eval's text, for its :started event
                                                          (string? (:forms msg)) (assoc :form (:forms msg))))
                       ;; what root last asked of it, for a stall or a death (seon.agent/last-op)
@@ -146,8 +146,8 @@
       ;; the typed error is recorded on main as its problem
       :unrecorded (do (step/out! o :to-api {:op :problem :class :agent :agent id :error (:error m)}) st)
       :fd-ready (send-fd! st (:k m) (get-in st [:inflight (:k m) :pass-fd]))
-      :branch-me (let [{:keys [branch lease]} (get-in st [:inflight (:k m)])]
-                   (step/out! o :to-writer {:op :clone-branch :from (:branch st) :branch branch :lease lease
+      :branch-me (let [branch (get-in st [:inflight (:k m) :branch])]
+                   (step/out! o :to-writer {:op :clone-branch :from (:branch st) :branch branch
                                        :dest {:agent id :op :branched :k (:k m)}})
                    st)
       (:cloned :clone-failed)
