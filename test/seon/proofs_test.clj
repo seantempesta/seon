@@ -4,7 +4,7 @@
   reaches it (through macros, schemas and the inputs with no program facts), a bin/check step
   is keyed like a test by what its functions reach, and the run is forked shards that store
   each result."
-  (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d]
+  (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [clojure.java.shell] [datahike.api :as d]
             [seon.test-store :as ts] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
             [seon.program-test :refer [record]] [test-runner :as runner]))
 
@@ -130,6 +130,26 @@
     (is (moved 'seon.task-files-test/the-shipped-task-files-load) "a test reading the task files (my.root/task-files, not in :env): the tree is its input")
     (is (moved 'seon.program-test/a-result-recorded-in-one-checkout-is-reused-in-another) "a test reading files itself (test-runner/inputs): the tree is its input")
     (is (< (count moved) (quot (count a) 2)) (str (count moved) " of " (count a) " tests take the tree: fewer than half"))))
+
+(deftest the-same-tree-gives-the-same-digests-in-any-checkout-and-any-run
+  ;; root 2026-10-22: every bin/test --reach run reused nothing. One producer cause: a quoted
+  ;; name counted as a ref only when its var existed yet (seon.program/quoted-vars), so the
+  ;; digests depended on what the process had analyzed before (43 of 387 equal on a second
+  ;; import of the same tree). The same commit, imported twice and from a copy at another path,
+  ;; gives the same digest for every test, so a second run runs nothing and two worktrees share
+  (let [here (System/getProperty "user.dir")
+        copy (str here "/target/tmp/prove-copy-" (random-uuid))
+        _ (.mkdirs (java.io.File. copy))
+        _ (clojure.java.shell/sh "zsh" "-c" (str "git -C '" here "' archive HEAD src test | tar -x -C '" copy "'"))
+        in {:env "e" :tree "t"}
+        a (program/reach-digests (runner/program-db here) in)
+        b (program/reach-digests (runner/program-db here) in)
+        c (program/reach-digests (runner/program-db copy) in)]
+    (is (< 300 (count a)) "the whole suite")
+    (is (= a b) "the same tree imported twice in one process: every digest equal")
+    (is (= a c) "the same commit in another checkout: every digest equal, so its results are shared")
+    (is (= [] (:run (proofs/plan nil a (into {} (for [d (vals a)] [d {:pass 1 :fail 0 :error 0}])) #{})))
+        "with each green stored, a second run on the unchanged tree runs nothing")))
 
 (defn plan-input
   "The input of size n: n keys with stored greens, one in a hundred moved since."

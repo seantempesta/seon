@@ -143,11 +143,14 @@
           :else (conj acc {:class "*" :answers (answers d)}))))
 
 (defn- quoted-vars
-  "The qualified symbols in a quoted datum (walked: a collection's too) that name a var now:
-  a syntax-quoted or quoted name resolved later (`requiring-resolve`, a macro's template, a
-  proc or render named in data). A symbol naming no var is data."
+  "The qualified symbols in a quoted datum (walked: a collection's too) whose namespace
+  exists: a syntax-quoted or quoted name resolved later (`requiring-resolve`, a macro's
+  template, a proc or render named in data). A symbol of no namespace is data. By namespace,
+  not by var: whether the var exists yet depends on what this process analyzed before (an
+  import of the same files twice gave 43 of 387 tests the same reach digest, lane PROVE
+  2026-10-22), while every imported file's namespace exists before any form is analyzed."
   {:malli/schema [:=> [:cat :any] [:set :qualified-symbol]]}
-  [x] (into #{} (filter #(and (qualified-symbol? %) (find-var %))) (tree-seq coll? seq x)))
+  [x] (into #{} (filter #(and (qualified-symbol? %) (find-ns (symbol (namespace %))))) (tree-seq coll? seq x)))
 
 (defn unit-account
   "What the compiler says one analyzed top-level node does, from its IR by resolved var
