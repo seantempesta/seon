@@ -30,3 +30,14 @@
           (is (< 1.0 mb (* 1.05 (:phys-fp p 0))) (str "real " mb " MB, footprint " (:phys-fp p)))))
       (finally (lmdb/close-env small) (lmdb/close-env large)
                (clojure.java.shell/sh "rm" "-rf" (str dir "-small") (str dir "-large"))))))
+
+(deftest a-fork-beside-a-running-thread-is-refused-and-says-how-many-run
+  ;; lib/fork! is the one spawning skeleton: a second active Chez thread breaks a forked
+  ;; child (E11/E13), so it forks nothing and answers its refused branch with the count
+  (let [stop (promise)
+        spin (doto (Thread. #(loop [] (when-not (realized? stop) (recur)))) (.start))
+        r (lib/fork! {:child #(lib/c-exit 3) :parent (fn [pid] [:forked pid]) :refused (fn [n] [:refused n])})]
+    (deliver stop true)
+    (.join spin)
+    (is (= :refused (first r)) (str "answered " r))
+    (is (<= 2 (second r)) (str "active threads " (second r)))))
