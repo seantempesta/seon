@@ -152,14 +152,15 @@
         exists? (fn [b] (pdb/branch? conn b))
         reply (fn [st r] (answer o dest r) st)]
     (case op
-      ;; an agent process committed its branch: the store is dirty until the next flush
-      :agent-commit (assoc st :dirty true)
+      ;; an agent process committed its branch: a commit the next flush covers
+      :agent-commit (-> st (assoc :dirty true) (update :commits inc))
       ;; the agent's branch (new: a pointer to main's head), then its fork: the agent opens
-      ;; the branch itself and owns its writes (run-ahead, committed by the agent)
+      ;; the branch itself and owns its writes (run-ahead, committed by the agent), and holds
+      ;; the task and attempt it works from its first form
       :spawn (let [{:keys [agent branch]} m
                    resumed? (exists? branch)]
                (when-not resumed? (d/branch! conn main branch))
-               (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :ns (:ns m) :fd (:fd m)
+               (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :task (:task m) :attempt (:attempt m) :ns (:ns m) :fd (:fd m)
                                               :cfg (:cfg st) :lease (:lease m) :resumed resumed?})
                (reply st {:ok true :t (:max-tx @conn) :resumed resumed?}))
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
@@ -176,12 +177,12 @@
                                   :unmerged (mapv :key (pm/unmerged head (pm/program head #{})))
                                   :vars (into (sorted-set) (keep (fn [[k s]] (when (= :var k) s))) (keys (:ours r)))})
                                (refused (str "no branch " (:branch m)) {})))
-      ;; root's read of a branch (or main): its committed value from the store; :base-t is
-      ;; main's t at the branch's merge base (what of main it holds)
+      ;; root's read of a branch (or main): its committed value from the store; :base is the
+      ;; db at the branch's merge base, :base-t main's t there (what of main it holds)
       :branch-db (reply st (cond
                              (= main (:branch m)) {:ok true :db @conn}
-                             (exists? (:branch m)) {:ok true :db (pdb/head conn (:branch m))
-                                                    :base-t (:max-tx (pdb/branch-base conn main (:branch m)))}
+                             (exists? (:branch m)) (let [base (pdb/branch-base conn main (:branch m))]
+                                                     {:ok true :db (pdb/head conn (:branch m)) :base base :base-t (:max-tx base)})
                              :else (refused (str "no branch " (:branch m)) {})))
       :branch-info (reply st (if (exists? (:branch m))
                                (let [h (pdb/head conn (:branch m))] {:ok true :datoms (count (d/datoms h :eavt)) :t (:max-tx h)})
@@ -223,8 +224,11 @@
   commits and forks, FIFO), :to-api (answers {:dest :r}, after the batch's flush, and
   {:op :writer :tx-count :p50-ms :commits}), :main (main's commits), :events.
   A closed :in is the end of the flow: everything taken is committed and flushed, then
-  {:op :drained} goes out. Answers leave when their batch is committed; the flusher's
-  window makes them durable (seon.db/flush-ms), a :flush? request before its answer."
+  {:op :drained} goes out. Continuous group commit (owner, 2026-10-21: no window): answers
+  leave when their batch is committed in memory; a dirty store with no notice out tells the
+  flusher {:op :dirty :commits n}, and its {:op :flushed :commits n} makes the store clean
+  when n is still the commit count, else the flusher is told again. A :flush? request (an
+  outside effect follows) is synced before its answer."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:conn "main's connection" :cfg "the store config" :to-writer "its in-port channel"}
        :outs {:to-fork-server "commits and forks, FIFO" :to-api "answers {:dest :r}" :main "main's commits"
@@ -245,45 +249,48 @@
            o (volatile! {})
            c0 (:commits st)
            t0 (profile/now-ns)
-           flush-due? (some #(= :flush (:op %)) ms)
-           reqs (remove #(= :flush (:op %)) ms)
+           ;; the flusher's answers: the commit count its sync covered
+           covered (some->> (seq (keep #(when (= :flushed (:op %)) (:commits %)) ms)) (apply max))
+           reqs (remove #(= :flushed (:op %)) ms)
            st (commit-batch (reduce #(writer-one %1 o %2) st reqs) o)
            commits (- (:commits st) c0)
-           dirty (or (:dirty st) (pos? commits))  ; root's commits, or an agent's (:agent-commit)
-           ;; one flush covers every commit since the last: when the flusher's window ends, or
-           ;; now for a write an outside effect follows (:flush?); otherwise the answers go
-           ;; out unflushed and the flusher is told once that the store is dirty
-           flush-now? (and (:durable? st) dirty (or flush-due? (some :flush? reqs)))
+           st (cond-> st (pos? commits) (assoc :dirty true))  ; root's commits, or an agent's (:agent-commit)
+           f0 (:flushes st 0)
+           ;; now for a write an outside effect follows (:flush?), inline before its answer
+           flush-now? (and (:durable? st) (:dirty st) (some :flush? reqs))
            _ (when flush-now? (pdb/sync! (:cfg st)))
-           st (cond
-                (not (:durable? st)) st
-                flush-now? (-> st (assoc :dirty false :notified false) (update :flushes (fnil inc 0)))
-                (and dirty (not (:notified st))) (do (step/out! o :to-flusher {:op :dirty :since (profile/now-ns)})
-                                                     (assoc st :dirty true :notified true))
-                :else (assoc st :dirty dirty))
+           st (cond-> st
+                flush-now? (-> (assoc :dirty false) (update :flushes (fnil inc 0)))
+                covered (assoc :notified false)
+                (and covered (:dirty st) (= covered (:commits st))) (-> (assoc :dirty false) (update :flushes (fnil inc 0))))
+           ;; still dirty and no notice out: the flusher is told what is committed so far
+           st (if (and (:durable? st) (:dirty st) (not (:notified st)))
+                (do (step/out! o :to-flusher {:op :dirty :commits (:commits st) :since (profile/now-ns)})
+                    (assoc st :notified true))
+                st)
            n-tx (count (filter #(= :tx (:op %)) reqs))
            st (-> st (update :tx-count + n-tx) (update :batches inc))]
        ;; what changed, to root's view: a batch, or a flush (its count is shown, never pinged)
-       (when (or (seq reqs) flush-now?)
+       (when (or (seq reqs) (not= f0 (:flushes st 0)))
          (step/out! o :to-api {:op :writer :tx-count (:tx-count st) :batch-ms (profile/ms-since t0) :n-tx n-tx :commits commits
                                :flushes (:flushes st 0)}))
        [st @o]))))
 
 (defn flusher-proc
-  "The group flush's clock: told once that the store is dirty ({:op :dirty :since ns}), it
-  waits out the rest of the flush window (seon.db/flush-ms) and asks the writer to flush
-  ({:op :flush} on the writer's in-port). The wait blocks only this proc; notices that
-  queued meanwhile are covered by the one flush."
+  "The group flush: parked until the writer says the store is dirty ({:op :dirty :commits
+  n}), it syncs at once (seon.db/sync! on the store config; commits during the sync share
+  the next one) and answers the writer {:op :flushed :commits n}, the commits it covered.
+  An idle system never syncs."
   {:malli/schema :seon.step/step-fn}
-  ([] {:params {:to-writer "the writer's in-port" :flush-ms "the window"}
+  ([] {:params {:to-writer "the writer's in-port" :cfg "the store config"}
        :ins {:in "dirty notices from the writer"} :outs {}
-       :workload :io
-       :ping-map-fn (fn [st] {:flushes-asked (:asked st 0) :flush-ms (:flush-ms st)})})
-  ([args] (assoc args :asked 0 ::flow/out-ports {:to-writer (:to-writer args)}))
+       ;; its own thread: the env sync is a blocking foreign call
+       :workload :mixed
+       :ping-map-fn (fn [st] {:flushes (:flushes st 0)})})
+  ([args] (assoc args :flushes 0 ::flow/out-ports {:to-writer (:to-writer args)}))
   ([st _] st)
   ([st _ m]
    (if (nil? m)
      [st nil]
-     (let [left-ms (- (:flush-ms st) (quot (- (profile/now-ns) (:since m)) 1000000))]
-       (when (pos? left-ms) (Thread/sleep (long left-ms)))
-       [(update st :asked inc) {:to-writer [{:op :flush}]}]))))
+     (do (pdb/sync! (:cfg st))
+         [(update st :flushes inc) {:to-writer [{:op :flushed :commits (:commits m)}]}]))))

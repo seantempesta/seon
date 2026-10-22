@@ -10,10 +10,10 @@
             [seon.db :as pdb]
             [seon.merge :as pm]
             [seon.program :as program] [seon.context :as context]
-            [seon.edn :as sedn]
+            [seon.edn :as sedn] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg]
             [my.schema :as schema]
             [seon.source :as source]
-            [clojure.string :as str]))
+            [clojure.string :as str] [clojure.edn :as edn]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -135,6 +135,18 @@
       (let [b2 (d/db-with b1 (pm/unmerged-tx b1 cs 43))]
         (is (= [43] (map :main-t (pm/entries b2))))))))
 
+(deftest a-conflict-value-reads-a-pulled-entry
+  ;; task seon.merge/conflict-value-states-its-input: its input is a merge entry's members
+  ;; (census generated nil and 0 from its `:any` input, which state no conflict)
+  (let [c (first (:conflicts (tw (with (base) (var-tx "f" "(inc x)")) (with (base) (var-tx "f" "(dec x)")))))
+        db (d/db-with (base) [(pm/conflict-tx c)])
+        e (d/q '[:find ?e . :where [?e :seon.merge/key]] db)]
+    (is (= c (pm/conflict-value (pm/conflict-tx c))) "the inverse of conflict-tx")
+    (is (= c (pm/conflict-value (d/pull db '[*] e))) "a pulled entry")
+    (is (nil? (mg/check (m/deref (contract/schema (contract/contract #'pm/conflict-value))) pm/conflict-value
+                        {:registry contract/registry :num-tests 100 :seed 42}))
+        "census: every input its contract generates states a conflict")))
+
 (deftest behind-means-main-program-moved
   (let [observed (with (base) [{:seon.agent/id :root :seon.agent/answered-t 9} {:note/text "attempt facts"}])]
     (is (empty? (:theirs (tw (base) observed))))
@@ -169,7 +181,10 @@
   ;; changed resource is written back with only its entry changed
   (let [text (slurp facts-path)
         main (let [db (empty-db)] (d/db-with db (source/import-tx db {facts-path text})))
-        status [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ended :dead}} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed :refused :paused]]
+        ;; the entry's line as the file has it (a property added to the entry moves with it), and
+        ;; its form with :paused added, read from that text
+        status-line (some #(when (str/starts-with? % " :seon.attempt/status ") %) (str/split-lines text))
+        status (edn/read-string (str/replace (subs status-line (count " :seon.attempt/status ")) ":closed :refused]]" ":closed :refused :paused]]"))
         ours (-> main (registered :seon.attempt/status status) (registered :user/qty :int))
         theirs (registered main :seon.attempt/pid [:int {:min 1}])
         prog #(pm/program % #{})
@@ -183,8 +198,7 @@
       (let [r2 (pm/three-way (prog main) (prog ours) (prog (registered main :seon.attempt/status [:enum :running])))]
         (is (= [[:schema :seon.attempt/status] :both-modified] ((juxt :key :kind) (first (:conflicts r2)))))))
     (testing "merged into main: the entry is main's, no longer the binary's, and write-back changes only its bytes"
-      (let [main2 (d/db-with main (pm/apply-tx main (into {} (for [[k [_ o]] (:ours r)] [k o]))))
-            status-line " :seon.attempt/status [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ended :dead}} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed :refused]]"]
+      (let [main2 (d/db-with main (pm/apply-tx main (into {} (for [[k [_ o]] (:ours r)] [k o]))))]
         (is (= #{:seon.attempt/status} (set (keys (program/schema-changes main2)))))
         (is (= [facts-path] (source/changed-files main2 (:ours r))))
         (is (= {facts-path (str/replace text status-line (str/replace status-line ":closed :refused]]" ":closed :refused :paused]]"))}

@@ -8,11 +8,12 @@
                           {:running "running: an attempt works it now"
                            :blocked "blocked: a task it needs is not done (its blocked-by)"
                            :open "open: released, no attempt running yet"
+                           :failed "failed: marked failed with a reason; held for root ((my.root/run! sys [id]) releases it again)"
                            :held "held: declared in a task file and loaded (load-tasks! creates every task held), not yet released by root or the owner, who order the work; (my.root/run! sys [id]) releases it"
                            :done "done: its proofs pass on its branch; its merge task merges it"
                            :merged "merged into main"
                            :cancelled "cancelled: no task file declares it any more"}}
-                   :running :blocked :open :held :done :merged :cancelled]
+                   :running :blocked :open :failed :held :done :merged :cancelled]
  :seon.task/config [:map {:closed true} [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
                     [:seon.config.merge/max-conflicts {:optional true} nat-int?]
                     [:seon.config.merge/max-merge-turns {:optional true} nat-int?]]
@@ -45,7 +46,8 @@
                  [:seon.task/generation {:optional true} :seon.task/generation]
                  [:seon.task/budget {:optional true} :seon.task/budget]
                  [:seon.task/references {:optional true} :seon.task/references]
-                 [:seon.task/stuck {:optional true} :seon.task/stuck]]
+                 [:seon.task/stuck {:optional true} :seon.task/stuck]
+                 [:seon.task/failure {:optional true} :seon.task/failure]]
  ;; its plan and proofs accumulated along :needs (derived by the reader)
  :seon.task/task [:and {:seon.render/html seon.render.ui/task-box} :seon.task/own [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]
  ;; the environment an attempt runs in; desired (the task's) = observed (the attempt's), or restart
@@ -114,7 +116,7 @@
                              ;; a :design task's accumulated plan now and as its attempt began
                              [:plan {:optional true} :seon.task/plan] [:plan-before {:optional true} :seon.task/plan]]
  :seon.reconcile/refusal [:map {:closed true}
-                          [:refusal [:enum :no-proofs :proof-red :regression :stray-red :contract-gap :unmerged :no-design]]
+                          [:refusal [:enum :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design]]
                           [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string]]
  :seon.reconcile/action [:multi {:dispatch :op}
                          [:reap [:map {:closed true} [:op [:= :reap]] [:attempt :seon.attempt/id]]]

@@ -391,3 +391,16 @@
                        :seon.attempt/failures {'app.t/a-test [{:type :fail :expected "1" :actual "2"}]
                                                'app.t/other-test [{:type :fail :expected "3" :actual "4"}]}}])
     (is (= ['app.t/a-test] (mapv :test (get-in (problems/report @conn) [:classes :red :rows])))))))
+
+(deftest a-lost-attempt-is-a-death
+  ;; task seon.render/one-owner-per-view-path (A1): the failed attempt statuses are the
+  ;; declared set (:seon.status/failed), not a literal in the reader
+  (let [db (:db-after (d/with (seeded 1 5)
+                              [{:seon.task/id "t/l" :seon.task/ns 't :seon.task/name "l" :seon.task/plan "p" :seon.task/execution :running
+                                :seon.task/branch :l :seon.task/kind :work}
+                               {:seon.attempt/id "t/l#1" :seon.attempt/task [:seon.task/id "t/l"] :seon.attempt/boot "b" :seon.attempt/agent :a9
+                                :seon.attempt/start-ms 1 :seon.attempt/end-ms 9 :seon.attempt/branch :l :seon.attempt/max-turns 2
+                                :seon.attempt/status :lost}]))
+        rows (get-in (problems/report db) [:classes :dead :rows])]
+    (is (= :lost (:status (first (filter #(= "t/l#1" (:attempt %)) rows)))))
+    (is (not-any? #(= "t/l#1" (:attempt %)) (get-in (problems/report db) [:classes :error :rows])))))

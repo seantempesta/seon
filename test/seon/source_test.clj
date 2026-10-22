@@ -289,9 +289,12 @@
   (let [text (slurp (str here "/" facts-path))
         db (empty-db)
         db (d/db-with db (source/import-tx db {facts-path text}))
-        status-line " :seon.attempt/status [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ended :dead}} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed :refused]]"
+        ;; the entry's line as the file has it (a property added to the entry moves with it), and
+        ;; its form with :paused added, as an edit would write it
+        status-line (some #(when (str/starts-with? % " :seon.attempt/status ") %) (str/split-lines text))
+        paused (str/trim (subs (str/replace status-line ":closed :refused]]" ":closed :refused :paused]]") (count " :seon.attempt/status ")))
         edit (fn [tx] (get (source/files (d/db-with db tx) [facts-path]) facts-path))]
-    (is (str/includes? text status-line) "the fixture line is the file's")
+    (is (str/ends-with? status-line ":closed :refused]]") "the entry's line ends its enum as the edit expects")
     (testing "every schema resource imported and written back unchanged is the same text"
       (let [dir (java.io.File. (str here "/resources/seon/schemas"))
             files (into {} (for [f (.listFiles dir) :when (str/ends-with? (.getName f) ".edn")]
@@ -303,7 +306,7 @@
     (testing "a replaced value: only its changed part"
       (is (= (str/replace text status-line (str/replace status-line ":closed :refused]]" ":closed :refused :paused]]"))
              (edit [{:schema/key :seon.attempt/status
-                     :schema/form "[:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ended :dead}} [:enum :running :ended :killed :dead :lost :done :merged :behind :bailed :closed :refused :paused]]"}]))))
+                     :schema/form paused}]))))
     (testing "a removed entry takes its line"
       (is (= (str/replace text "\n :seon.attempt/pid :int" "")
              (edit [[:db/retractEntity [:schema/key :seon.attempt/pid]]]))))

@@ -13,6 +13,11 @@
     (let [s (str/replace v #"^#'" "")]
       (when (str/includes? s "/") (symbol s)))))
 
+(defn red?
+  "Is test run t red: any failing or erroring assertion (a run's or a tests event's counts)?"
+  {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
+  [t] (pos? (+ (:fail t 0) (:error t 0))))
+
 (defn results
   "{test-symbol status} of a run: :error or :fail when any assertion of the test was,
   else :pass. A test with no assertion has no entry (a proof missing here is :none)."

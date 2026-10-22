@@ -22,7 +22,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [ring-chez.adapter :as adapter]
-            [seon.lib :as lib] [seon.contract :as contract] [seon.config :as config] [seon.render.ui :as ui] [seon.web.html :as h] [seon.step :as step] [seon.repl :as repl] [seon.root :as c]))
+            [seon.lib :as lib] [seon.contract :as contract] [seon.config :as config] [seon.render.ui :as ui] [seon.web.html :as h] [seon.step :as step] [seon.root :as c]))
 
 ;;; --- the files it serves ------------------------------------------------------------
 
@@ -69,9 +69,6 @@
                       (str sym " is not callable from the UI: mark it ^:seon/callable")
                       {:seon.render/fn sym}))))
 
-(defn- live? {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
-  [a] (boolean (and a (not (#{:dead :killed :ended} (:status a))))))
-
 (defn requests
   "A UI call as root's requests: [[req target-agent] ...]. Root's verb is the request its
   fn sends (seon.root/request; none when root refuses it); any other fn is an eval of it in
@@ -82,7 +79,7 @@
     (case f
       seon.root/spawn! (vec (repeat (min 100 (max 1 (or (:n args) 1))) [(c/request 'spawn! nil (cond-> {} (not (str/blank? (:task args))) (assoc :task (:task args))) nil) nil]))
       seon.root/submit! (cond (str/blank? forms) []
-                              (= :all agent) (vec (for [[id a] (sort-by (comp str key) index) :when (live? a)] [(c/request 'submit! id {:forms forms :origin :ui} a) id]))
+                              (= :all agent) (vec (for [[id a] (sort-by (comp str key) index) :when (not (c/gone-statuses (:status a)))] [(c/request 'submit! id {:forms forms :origin :ui} a) id]))
                               :else (one 'submit! agent {:forms forms :origin :ui}))
       ;; seon.root/interrupt! is no request: an effect on a process, performed by this proc
       (if (= "seon.root" (namespace f))
@@ -155,7 +152,7 @@
 ;;; --- the proc ------------------------------------------------------------------------------
 
 (defn- views-msg {:malli/schema [:=> [:cat :map] :map]}
-  [st] {:op :views :views (into #{} (map :view (vals (:tabs st)))) :tabs (count (:tabs st)) :bytes-per-s (:bytes-per-s st 0)})
+  [st] {:op :views :views (into #{} (map :view (vals (:tabs st)))) :tabs (count (:tabs st))})
 
 (defn- offer-all
   "Offer chunk to every fresh tab of view; full tabs turn stale, closed ones leave.
@@ -205,18 +202,18 @@
   [st o m]
   (case (:op m)
     :listener (do (step/out! o :to-api {:op :web :listening (boolean (:listening st)) :port (:port st) :error (:error st)}) st)
-    :open (let [k (inc (:next st 0))
-                st (-> st (assoc :next k) (assoc-in [:tabs k] {:ch (:ch m) :view (:view m)}) (update :stale conj k))]
+    :open (let [[st k] (step/pend st nil)
+                st (-> st (assoc-in [:tabs k] {:ch (:ch m) :view (:view m)}) (update :stale conj k))]
             (step/out! o :to-render (views-msg st))
             (step/out! o :to-render {:op :keyframe :view (:view m)})
             st)
-    :page (let [k (inc (:next st 0))]
+    :page (let [[st k] (step/pend st [(:p m) (:view m)])]
             (step/out! o :to-render {:op :page :view (:view m) :k k})
-            (-> st (assoc :next k) (assoc-in [:waiting k] [(:p m) (:view m)])))
+            st)
     (:context :render-stats)
-             (let [k (inc (:next st 0))]
+             (let [[st k] (step/pend st [(:p m) :text])]
                (step/out! o :to-render {:op (if (= :context (:op m)) :context :stats) :k k})
-               (-> st (assoc :next k) (assoc-in [:waiting k] [(:p m) :text])))
+               st)
     :stats (do (deliver (:p m) {:tabs (count (:tabs st)) :stale (count (:stale st)) :sent-bytes (:bytes st 0)
                                 :patches (:patches st 0) :chunk-p50-bytes (lib/p50 (:chunk-bytes st)) :listening (:listening st)
                                 :port (:port st) :calls (:calls st 0) :error (:error st)})
@@ -225,16 +222,14 @@
                 reqs (requests c (:index st {}))]
             (when (= 'seon.root/interrupt! (:var c))
               (some-> (get-in st [:index (:agent c) :pid]) (lib/c-kill lib/SIGUSR1)))
-            ;; answered to the render proc, which shows each in the stream by its tag
-            (doseq [[req target] reqs]
-              (step/out! o :to-api {:op :request :req req :route [:render :answers] :tag [:web (:var c) target]}))
-            ;; root's verb is root's evaluation, recorded on main (origin :ui) as root's REPL records one
-            (when (= "seon.root" (namespace (:var c)))
-              (let [{f :var :keys [agent args forms]} c
-                    it {:id 0 :tag :ret :printed "requested" :origin :ui
-                        :form (pr-str (cond-> (list f) agent (concat [agent]) (seq args) (concat [args]) forms (concat [forms])))}]
-                (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx :root (str "root-ui-" (profile/now-ns)) [it] nil)}}
-                                     :route [:render :answers] :tag [:web-record]})))
+            ;; answered to the render proc, which shows each in the stream by its tag; root's
+            ;; verb is root's evaluation, its form in the tag: the render proc records it on
+            ;; main (origin :ui) with what root answered, as root's REPL records one
+            (doseq [[req target] reqs
+                    :let [{f :var :keys [agent args forms]} c
+                          form (when (= "seon.root" (namespace f))
+                                 (pr-str (cond-> (list f) agent (concat [agent]) (seq args) (concat [args]) forms (concat [forms]))))]]
+              (step/out! o :to-api {:op :request :req req :route [:render :answers] :tag (cond-> [:web f target] form (conj form))}))
             (update st :calls (fnil inc 0)))
     st))
 
@@ -254,12 +249,9 @@
                (step/out! o :to-render {:op :keyframe :view (:view m)}))
              st)
     :keyframe (keyframe! st (:view m) (:html m))
-    :page (if-let [[p view] (get-in st [:waiting (:k m)])]
-            (do (deliver p (page-doc view (:html m))) (update st :waiting dissoc (:k m)))
-            st)
-    :text (if-let [[p] (get-in st [:waiting (:k m)])]
-            (do (deliver p (:text m)) (update st :waiting dissoc (:k m)))
-            st)
+    (:page :text) (let [[st [p view]] (step/answered st (:k m))]
+                    (some-> p (deliver (if (= :page (:op m)) (page-doc view (:html m)) (:text m))))
+                    st)
     :index (assoc st :index (:agents m))
     st))
 
@@ -279,7 +271,7 @@
   ([args]
    (let [port (:port args)
          http (a/chan 256)
-         st {:port port :http http :tabs {} :stale #{} :waiting {} :bytes 0 :index {}
+         st {:port port :http http :tabs {} :stale #{} :rid 0 :pending {} :bytes 0 :index {}
              ::flow/in-ports {:http http}}
          ;; whether it listens is an event to the api's view (its first message, on its own
          ;; in-port: init has no outputs), never a ping (owner, 2026-10-21)
@@ -287,15 +279,15 @@
      (if (and port (pos? port))
        (let [server (try (adapter/run-server (handler http) {:port port :host "127.0.0.1" :strategy :fibers
                                                              :keep-alive-timeout-ms 600000 :write-timeout-ms 60000})
-                         (catch Throwable e {:error (or (ex-message e) (str (type e)))}))]
-         (if (:error server)
-           (assoc st :listening false :error (:error server))
+                         (catch Throwable e (contract/error :seon.web/unbound 'seon.web/web-proc (step/error-msg e) {:port port})))]
+         (if (contract/error? server)
+           (assoc st :listening false :error server)
            (assoc st :listening true :server server :port (:port server))))
        (assoc st :listening false))))
   ([st tr]
    (if (= tr ::flow/stop)
      (do (doseq [{:keys [ch]} (vals (:tabs st))] (a/close! ch))
-         (doseq [[p] (vals (:waiting st))] (deliver p nil))
+         (doseq [[p] (vals (:pending st))] (deliver p nil))
          (when-let [s (:server st)] (adapter/stop-server s {:drain-timeout-ms 0}))
          (assoc st :tabs {} :listening false :server nil))
      st))

@@ -57,7 +57,8 @@
 
 (defn done-refusals
   "Why an attempt's measured facts do not make its task done; empty means done. Refused:
-  no proofs (never proven); a proof not passing; a regression (a test green on main, the
+  no proofs (never proven); a proof not passing (red), or with no result (unknown: it
+  never ran); a regression (a test green on main, the
   proofs of merged tasks, red here); a stray red (a red test that is no task's open
   proof); a contract gap (a function the attempt defined without a contract); an
   unmerged entry on the branch (a merge conflict not resolved). A :design task readies
@@ -71,8 +72,10 @@
     (vec (concat
            (when (and (empty? proofs) (not design?)) [{:refusal :no-proofs}])
            (when (and design? (or (nil? plan-before) (= plan plan-before))) [{:refusal :no-design}])
+           ;; a proof with no result never ran: unknown, not red (v1's reading)
            (when-not design?
-             (for [p (sort-by str proofs) :when (not= :pass (get results p :none))] {:refusal :proof-red :symbol p}))
+             (for [p (sort-by str proofs) :let [s (get results p)] :when (not= :pass s)]
+               {:refusal (if s :proof-red :proof-unknown) :symbol p}))
            (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t))] {:refusal :regression :symbol t})
            (for [t (sort-by str (keys results))
                  :when (and (red? t) (not (proofs t)) (not (main-green t)) (not (allowed-red t)))]
@@ -476,7 +479,7 @@
           (idx-done? idx id) (if (get-in idx [:done id :merged-t]) :merged :done)
           (some #(= :running (get-in idx [:attempts % :seon.attempt/status])) (get-in idx [:by-task id])) :running
           (seq (blocked-by idx id)) :blocked
-          (= :held x) :held
+          (= :held x) (if (get-in idx [:tasks id :seon.task/failure]) :failed :held)
           :else :open)))
 
 ;; ---- what an attempt's agent wrote on its branch ----
@@ -535,7 +538,7 @@
         agent (:seon.attempt/agent a)
         one (fn [[st o]] [st [o]])]
     (case op
-      :spawn (one (request st attempt :spawned {:op :spawn :opts {:branch (get-in act [:env :branch]) :task (:task act)}}))
+      :spawn (one (request st attempt :spawned {:op :spawn :opts {:branch (get-in act [:env :branch]) :task (:task act) :attempt attempt}}))
       :reap (one (write st attempt :done (cas-tx attempt :running :lost {:seon.attempt/end-ms (System/currentTimeMillis) :seon.attempt/reason "root restarted"})))
       :close (one (write st attempt :done (cas-tx attempt :ended :closed {})))
       :accept (one (write st attempt :done (cas-tx attempt :ended :done {})))
@@ -559,9 +562,11 @@
 (defn- judge-tx
   "Attempt aid's end on main from MEASURED facts: the end its agent wrote on the branch,
   root's own proof results, the branch's merge entries and unmerged keys, the contract gaps
-  against main, its improved plan carried to the task."
-  {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db]] [:set :string]] [:vector :any]]}
-  [st {:keys [act run-problems worked-error]} results {:keys [db base-t]} changed]
+  against main; the task content the branch changed carried to main, or its conflicts with
+  main's recorded on the attempt for root (seon.task/carry-tx); and a failure it marked
+  (my.task/fail!) carried with the task held."
+  {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db]] [:set :string]] [:vector :any]]}
+  [st {:keys [act run-problems worked-error]} results {:keys [db base base-t]} changed]
   (let [main (:db st)
         aid (:attempt act) id (:task act)
         end (pull-end db aid)
@@ -569,7 +574,8 @@
         unc (into #{} (for [[[k sym] e] (pm/program db #{})
                             :when (and (= :var k) (= :fn (:kind e)) (nil? (:contract e)) (not= e (get mp [k sym])))]
                         sym))
-        plan (:seon.task/plan (task/task db id))]
+        carried (task/carry-tx base db main)
+        failure (:seon.task/failure (task/task db id))]
     (into (cas-tx aid :running :ended
                     ;; spend is what the end measured: no end (died, killed, never reached
                     ;; seon.turn/end!) is outcome :no-end with its turns, calls and tokens absent
@@ -589,8 +595,12 @@
                       (seq (:failures run-problems)) (assoc :seon.attempt/failures (:failures run-problems))
                       (seq (:costs run-problems)) (assoc :seon.attempt/costs (:costs run-problems))
                       (or (:error end) worked-error) (assoc :seon.attempt/error (error-text (or (:error end) worked-error)))
-                      (seq (:waste end)) (assoc :seon.attempt/waste (:waste end)))))
-            (when (and plan (not= plan (:seon.task/plan (task/task main id)))) (task/plan-tx id plan)))))
+                      (seq (:waste end)) (assoc :seon.attempt/waste (:waste end))
+                      (seq (:conflicts carried)) (assoc :seon.attempt/task-conflicts (:conflicts carried)))))
+            (concat (:tx carried)
+                    ;; marked failed in this attempt (my.task/fail!): the failure on main and the
+                    ;; task held for root, so the judge closes the attempt (no refinement)
+                    (when (= aid (:attempt failure)) [{:seon.task/id id :seon.task/failure failure :seon.task/execution :held}])))))
 
 (defn- dead-tx
   "Attempt aid's death on main: the end its agent wrote on its branch before it exited (its

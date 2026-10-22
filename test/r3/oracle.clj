@@ -67,7 +67,7 @@
     (vec (concat
            (when (and (empty? proofs) (not design?)) [{:refusal :no-proofs}])
            (when-not design?
-             (for [p (sort-by str proofs) :when (not= :pass (get results p :none))] {:refusal :proof-red :symbol p}))
+             (for [p (sort-by str proofs) :let [s (get results p)] :when (not= :pass s)] {:refusal (if s :proof-red :proof-unknown) :symbol p}))
            (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t))] {:refusal :regression :symbol t})
            (for [t (sort-by str (keys results))
                  :when (and (red? t) (not (proofs t)) (not (main-green t)) (not (allowed-red t)))]

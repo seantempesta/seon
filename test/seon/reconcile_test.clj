@@ -7,7 +7,7 @@
             [seon.db :as pdb]
             [seon.task :as task]
             [seon.reconcile :as r]
-            [seon.template :as tpl] [seon.problems :as problems] [seon.sock :as sock] [clojure.edn] [seon.contract :as contract]
+            [seon.template :as tpl] [seon.problems :as problems] [seon.merge :as pm] [seon.sock :as sock] [clojure.edn] [seon.contract :as contract]
             [clojure.string :as str] [clojure.set] [seon.config :as cfg]))
 
 (defn- empty-db [] (ts/test-db))
@@ -127,9 +127,9 @@
     ;; its proof red: a refinement chain attaches (the budget has room)
     (attempt "a" 1 :ended :outcome :cap :results {(t "a") :fail})
     [{:op :attach :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended cap: proof-red demo-test/a-test"}]
-    ;; its proof never ran
+    ;; its proof never ran: unknown, which refuses done as red does
     (attempt "a" 1 :ended :outcome :green :results {})
-    [{:op :attach :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended green: proof-red demo-test/a-test"}]
+    [{:op :attach :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended green: proof-unknown demo-test/a-test"}]
     ;; b needs a, so b carries a's proof (accumulated along :needs): red there is b's own red
     (concat (merged "a") (attempt "b" 1 :ended :outcome :green :results {(t "a") :fail (t "b") :pass}))
     [{:op :attach :attempt "demo/b#1" :task "demo/b" :problem "attempt demo/b#1 ended green: proof-red demo-test/a-test"}
@@ -149,7 +149,7 @@
   ;; task seon.model/budgets-are-data-and-spend-is-measured: the agent wrote no end (it died
   ;; or was killed before end!), so its turns, tokens and time are unknown: absent, never 0
   (let [db (db-of diamond :extra (attempt "a" 1 :running))
-        tx (#'r/judge-tx {:db db :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:attempt "demo/a#1" :task "demo/a"}} {} {:db db} #{})
+        tx (#'r/judge-tx {:db db :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:attempt "demo/a#1" :task "demo/a"}} {} {:db db :base db} #{})
         ended (first (filter #(and (map? %) (= "demo/a#1" (:seon.attempt/id %)) (:seon.attempt/outcome %)) tx))]
     (is (= :no-end (:seon.attempt/outcome ended)))
     (is (= #{} (set (filter #{:seon.attempt/turns :seon.attempt/model-calls :seon.attempt/tokens :seon.attempt/ms} (keys ended)))))))
@@ -175,7 +175,7 @@
     (testing "the turn loop threw and the agent lives: its error is the attempt's reason"
       (let [db (db-of diamond :extra (attempt "a" 1 :running))
             tx (#'r/judge-tx {:db db :boot "boot-1" :rid 0 :flights {} :pending {}}
-                             {:act {:attempt "demo/a#1" :task "demo/a"} :worked-error cause} {} {:db db} #{})]
+                             {:act {:attempt "demo/a#1" :task "demo/a"} :worked-error cause} {} {:db db :base db} #{})]
         (is (= "seon.turn/work! threw: boom" (:seon.attempt/reason (row tx))))
         (is (= "boom" (:seon.error/message (err tx))))))))
 
@@ -189,6 +189,8 @@
     {:proofs #{'p/a} :results {'p/a :pass} :main-green #{} :allowed-red #{} :uncontracted #{}} []
     {:proofs #{} :results {} :main-green #{} :allowed-red #{} :uncontracted #{}} [[:no-proofs nil]]
     {:proofs #{'p/a} :results {'p/a :error} :main-green #{} :allowed-red #{} :uncontracted #{}} [[:proof-red 'p/a]]
+    ;; a proof that never ran is unknown, not red
+    {:proofs #{'p/a} :results {} :main-green #{} :allowed-red #{} :uncontracted #{}} [[:proof-unknown 'p/a]]
     {:proofs #{'p/a} :results {'p/a :pass 'p/m :fail} :main-green #{'p/m} :allowed-red #{} :uncontracted #{}} [[:regression 'p/m]]
     {:proofs #{'p/a} :results {'p/a :pass 'p/o :fail} :main-green #{} :allowed-red #{'p/o} :uncontracted #{}} []
     {:proofs #{'p/a} :results {'p/a :pass 'p/s :fail} :main-green #{} :allowed-red #{} :uncontracted #{}} [[:stray-red 'p/s]]
@@ -346,7 +348,7 @@
   ;; root's judge carried the plan the attempt improved on its branch to main (judge-tx)
   (is (= [{:op :accept :attempt "demo/a#1" :task "demo/a"}]
          (r/reconcile (design-db (concat (attempt "a" 1 :ended :outcome :green :results {(t "a") :fail})
-                                         (task/plan-tx "demo/a" "Make a true. Design: (defn f [xs] ...) one pass over xs.")))))))
+                                         [{:seon.task/id "demo/a" :seon.task/plan "Make a true. Design: (defn f [xs] ...) one pass over xs."}]))))))
 
 (deftest failed-merge-attaches-four-tasks
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])]
@@ -354,7 +356,7 @@
                                (attempt "a-merge" 1 :ended :outcome :cap :results {(t "a") :fail}
                                         :conflicts [conflict-f] :unmerged ["[:var app/f]"])
                                ;; the plan as the failed merge's agent improved it (root's judge carried it to main)
-                               (task/plan-tx "demo/a-merge" "Make a true. Learned: main's f now decrements.")))
+                               [{:seon.task/id "demo/a-merge" :seon.task/plan "Make a true. Learned: main's f now decrements."}]))
         acts (r/reconcile db)]
     (is (= [{:op :attach :attempt "demo/a-merge#1" :task "demo/a-merge"
              :problem "attempt demo/a-merge#1 ended cap: proof-red demo-test/a-test; unmerged [:var app/f]"}] acts))
@@ -531,3 +533,47 @@
   (let [db (db-of [(decl "a") (decl "b" :needs ["a"])]
                   :extra (concat (attempt "a" 1 :refused) [{:seon.attempt/id "demo/a#1" :seon.attempt/reason held-why}]))]
     (is (= [{:task "demo/a" :cause held-why :attempt "demo/a#1" :blocks ["demo/b"]}] (r/stuck (r/index db))))))
+
+(deftest a-task-marked-failed-is-held-for-root
+  ;; owner, 2026-10-22: a failure is task data and root reacts to it; D2(a): held for root,
+  ;; no automatic retry. my.task/fail! writes the failure on the branch; root's judge
+  ;; carries this attempt's onto main with the task held, and the attempt closes
+  (let [main (db-of [(decl "a")] :extra (attempt "a" 1 :running))
+        f {:reason "the premise is refuted" :counterexample "(= 1 2)" :attempt "demo/a#1"}
+        branch (d/db-with main [{:seon.task/id "demo/a" :seon.task/failure f}])
+        judge #(#'r/judge-tx {:db main :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:attempt "demo/a#1" :task "demo/a"}} {} {:db % :base main} #{})
+        judged (d/db-with main (judge branch))
+        idx (r/index judged)]
+    (is (= :held (:seon.task/execution (task/task judged "demo/a"))) "held for root, without a merge")
+    (is (= f (:seon.task/failure (task/task judged "demo/a"))) "the failure, on main")
+    (is (= :failed (r/task-state idx "demo/a")))
+    (is (= [{:op :close :attempt "demo/a#1"}] (r/reconcile judged)) "the attempt ends; nothing refines or retries it")
+    (let [[row & more] (get-in (problems/report judged) [:classes :failed :rows])]
+      (is (nil? more))
+      (is (= {:task "demo/a" :reason "the premise is refuted" :counterexample "(= 1 2)" :open? true}
+             (select-keys row [:task :reason :counterexample :open?])) "root is told: a :failed row, the one producer of what is wrong"))
+    (let [released (d/db-with judged (task/execution-tx ["demo/a"] :running))]
+      (is (not= :failed (r/task-state (r/index released) "demo/a")) "a release is root's answer")
+      (is (false? (:open? (first (get-in (problems/report released) [:classes :failed :rows])))) "and the row closes"))
+    (is (nil? (:seon.task/failure (task/task (d/db-with main (judge (d/db-with main [{:seon.task/id "demo/a" :seon.task/failure (assoc f :attempt "demo/a#0")}])))
+                                            "demo/a")))
+        "an earlier attempt's failure on a reused branch is not this attempt's")))
+
+(deftest a-branch-carries-every-task-it-changed-and-records-a-two-sided-edit
+  ;; owner, 2026-10-22 (D4): when a branch's attempt ends, a task version newer than main's
+  ;; overwrites it; one edited on both sides differently is a conflict for root
+  (let [base (db-of [(decl "a") (decl "b") (decl "c")] :extra (attempt "a" 1 :running))
+        branch (d/db-with base [{:seon.task/id "demo/b" :seon.task/plan "b, as a's agent learned it"}
+                                {:seon.task/id "demo/c" :seon.task/plan "c, the branch's"}])
+        main (d/db-with base [{:seon.task/id "demo/c" :seon.task/plan "c, main's"}])
+        judged (d/db-with main (#'r/judge-tx {:db main :boot "boot-1" :rid 0 :flights {} :pending {}}
+                                             {:act {:attempt "demo/a#1" :task "demo/a"}} {} {:db branch :base base} #{}))
+        conflict {:task "demo/c" :attr :seon.task/plan :base "Make c true." :ours "c, the branch's" :theirs "c, main's"}]
+    (is (= "b, as a's agent learned it" (:seon.task/plan (task/task judged "demo/b"))) "another task's edit reaches main at the attempt's end")
+    (is (= "Make a true." (:seon.task/plan (task/task judged "demo/a"))) "an unchanged task stays as main holds it")
+    (is (= "c, main's" (:seon.task/plan (task/task judged "demo/c"))) "a two-sided edit is never resolved here")
+    (is (= [conflict] (:seon.attempt/task-conflicts (d/pull judged [:seon.attempt/task-conflicts] [:seon.attempt/id "demo/a#1"]))))
+    (is (= [(assoc conflict :from "demo/a#1")] (map :evidence (get-in (problems/report judged) [:classes :task-conflict :rows])))
+        "root sees it among the problems")
+    (testing "main's task plans never put a landing behind: landing merges the program, no task data"
+      (is (empty? (:theirs (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program main #{}))))))))

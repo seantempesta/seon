@@ -87,6 +87,17 @@
     (mr/composite-registry (m/default-schemas) host-schemas (mr/simple-registry @compiled))))
 
 (def forms "Every named schema form of the platform (seon.config/schema-forms, baked once)." config/schema-forms)
+
+(clojure.core/defn properties
+  "The properties map of named schema k's form ([:type {props} ...]), or nil: what a
+  schema declares of its values (a status set, a render, a unit), read here only."
+  {:malli/schema [:=> [:cat :any] [:maybe :map]]}
+  [k] (let [form (get forms k)] (when (and (vector? form) (map? (second form))) (second form))))
+
+(clojure.core/defn enum-values
+  "The members of named [:enum {props} ...] schema k, in their declared order."
+  {:malli/schema [:=> [:cat :qualified-keyword] [:vector :any]]}
+  [k] (let [form (get forms k)] (vec (drop (if (map? (second form)) 2 1) form))))
 (def registry (registry-of forms))
 
 (def options

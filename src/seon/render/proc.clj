@@ -25,7 +25,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
-            [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.ai :as ai]
+            [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
             [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.context :as context] [seon.print :as print]
             [seon.config :as config] [seon.step :as step]))
 
@@ -90,18 +90,12 @@
   {:malli/schema [:=> [:cat :map :int :int] :seon.render/system]}
   [st now-ns now-ms]
   (let [v (:view st)
-        {:keys [batches commits batched-tx lag-ms fork-ms]} (:stats v)
-        ;; main's transactions per group commit (one Datahike commit takes every queued
-        ;; transaction): at least 1 by construction. Writer cycles that committed nothing for
-        ;; main (an agent's commit, a flush) are not commits.
-        tpc (when (and commits (pos? commits)) (lib/r2 (/ (double (or batched-tx 0)) commits)))
+        ;; root's numbers as root's own `state` shows them (the one decoration)
+        n (c/view-numbers v)
         agents (:agents v {})]
     {:agents agents
      :order (or (:order st) (order agents now-ms))
-     :writer (-> (:writer v) (dissoc :recent :batch-ms)
-                 (assoc :batch-p50-ms (lib/p50 (get-in v [:writer :batch-ms])) :tx-per-commit tpc :commits commits))
-     :server (assoc (:server v) :lag-ms (lib/p50 lag-ms) :fork-ms-p50 (lib/p50 fork-ms))
-     :store (cond-> (:store v) batches (assoc :batches batches :commits commits :tx-per-commit tpc))
+     :writer (:writer n) :server (:server n) :store (:store n)
      :boot (:boot v) :root-errors (:root-errors v []) :root-errors-total (:root-errors-total v 0)
      ;; health is what flows: each declared proc with the defects root recorded of it (a
      ;; step that threw); no ping, no beat
@@ -217,12 +211,6 @@
 
 ;;; --- one agent, zoomed ------------------------------------------------------------------------
 
-(defn- attempt-of
-  "The newest attempt agent id works (from main's attempts), or nil."
-  {:malli/schema [:=> [:cat :map :keyword] [:maybe :map]]}
-  [attempts id]
-  (last (sort-by :seon.attempt/start-ms (filter #(= id (:seon.attempt/agent %)) (vals attempts)))))
-
 (defn- eval-records
   "The evaluations recorded on branch db for agent id: [[eval-id record] ...], oldest
   first, the newest HISTORY-CAP, with the count of all of them as its metadata (:total)."
@@ -246,22 +234,23 @@
                                 " its REPL and evaluations are above. A task's agent is started by the reconciler"
                                 " (my.root/run! sys [task-id]) or attached through root's entrance ({:op :attach :task id}).")}
       (nil? r) {:why (str "no context read yet in attempt " (:seon.attempt/id attempt))}
-      :else {:text (:text r) :tokens (ai/tokens (:text r)) :origin (:origin r) :turn (:turn r)})))
+      :else {:text (:text r) :tokens (select/estimate (:text r)) :origin (:origin r) :turn (:turn r)})))
 
 (defn- zoom-value
   "The agent page's value (:seon.render/agent-page) for agent id, and the zoom's state with
   each new evaluation's row rendered once."
   {:malli/schema [:=> [:cat :map :keyword] [:tuple :map :map]]}
   [st id]
-  (let [ag (assoc (get-in st [:view :agents id] {:status :unknown}) :id id)
+  (let [ag (assoc (get-in st [:view :agents id] {}) :id id)
         z (get-in st [:zoom id] {})
-        attempt (attempt-of (:attempts st) id)
+        ;; the newest attempt it works (main-info's index of each agent's newest)
+        attempt (get-in st [:agent-attempt id])
         db (:db z)
         records (if db (eval-records db id) (vec (map-indexed (fn [i e] [(str "v/" i) e]) (:evals ag))))
         rows (reduce (fn [rows [eid r]]
                        (if (contains? rows eid)
                          rows
-                         (assoc rows eid (h/html (:seon.render/html (ui/history-row r {:seon.render/budget 400}))))))
+                         (assoc rows eid (h/html (:seon.render/html (ui/history-row r {:seon.render/budget (config/value :seon.config.render/history-row-budget)}))))))
                      (select-keys (:rows z {}) (map first records)) records)
         ctx-key [(:t z) (:seon.attempt/id attempt) (:seon.attempt/turns attempt) (:tests ag)]
         ;; a new context read is a new evaluation of the agent's
@@ -353,8 +342,8 @@
           st (ordered st now-ms)
           sys (system-value st t0 now-ms)
           ;; root's context: the system's AI face, also a unit of root's layout
-          ctx (render/ai sys {:seon.render/schema :seon.render/system :seon.render/budget 700})
-          sys (assoc sys :context {:text ctx :tokens (ai/tokens ctx)} :problems (ai/problems sys))
+          ctx (render/ai sys {:seon.render/schema :seon.render/system})
+          sys (assoc sys :context {:text ctx :tokens (select/estimate ctx)} :problems (ai/problems sys))
           st (assoc st :context ctx)
           views (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st)))
           [st patches] (reduce (fn [[st ps] v]
@@ -387,11 +376,10 @@
 
 (defn stats
   "The render proc's own numbers: passes, pass ms (all, the ones that patched, the quiet
-  ones) as p50/p95/max over the last 200, patch bytes, units rendered and skipped."
+  ones) as seon.lib/summ over the last 200 (none yet: nil), patch bytes, units rendered and skipped."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
-  (let [q (fn [xs] (when (seq xs) (let [v (vec (sort xs)) n (count v)]
-                                    {:n n :p50 (lib/r2 (v (quot n 2))) :p95 (lib/r2 (v (min (dec n) (int (* 0.95 n))))) :max (lib/r2 (peek v))})))]
+  (let [q #(some-> % lib/summ)]
     {:passes (:passes st 0) :pass-ms (q (:pass-ms st)) :patch-pass-ms (q (:patch-pass-ms st)) :quiet-pass-ms (q (:quiet-pass-ms st))
      :patch-bytes (q (:patch-bytes st)) :event-age-ms (q (:event-age-ms st)) :rendered (get-in st [:counts :rendered] 0) :same-bytes (get-in st [:counts :same] 0)
      :agents (count (get-in st [:view :agents])) :views (vec (keys (:views st)))}))
@@ -434,7 +422,7 @@
     ;; an agent's branch db; a branch that is gone (merged and removed) is recorded as such
     (and (vector? kind) (= :branch (first kind)))
     (let [z [:zoom (second kind)]
-          st (assoc-in st (conj z :db-error) (when-not (:ok r) (or (:seon.error/message r) (:error r))))]
+          st (assoc-in st (conj z :db-error) (when-not (:ok r) (:seon.error/message r)))]
       (pass (if (:ok r) (assoc-in st (conj z :db) (:db r)) st) o))
     :else st))
 
@@ -470,15 +458,19 @@
               :events (if (nil? m) st (ask-state (reduce on-event st (drain m (:events-ch st) 2048)) o))
               :answers (let [[st' kind] (step/answered st (:tag m))
                              r (:r m)
-                             err (when (map? r) (let [x (or (:seon.error/message r) (:error r))] (when (string? x) x)))]
+                             err (:seon.error/message r)]
                          (cond
                            kind (answered st' o kind r)
-                           ;; the web proc's calls ([:web var agent]) are answered here: shown in the stream
+                           ;; the web proc's calls ([:web var agent form?]) are answered here: shown in
+                           ;; the stream; root's verb (its form) recorded on main with this answer
                            (and (vector? (:tag m)) (= :web (first (:tag m))))
-                           (let [[_ v agent] (:tag m)]
-                             (ask-state (on-event st {:type :ui :call (str v) :agent agent :at-ms (System/currentTimeMillis) :error err
-                                                      :detail (cond err (str "error: " err) (map? r) (print/text (dissoc r :reports) 40))})
-                                        o))
+                           (let [[_ v agent form] (:tag m)
+                                 detail (cond err (str "error: " err) (map? r) (print/text (dissoc r :reports) 40))]
+                             (when form
+                               (let [it (cond-> {:id 0 :tag (if err :err :ret) :form form :origin :ui :printed (or detail (print/text r 40))} err (assoc :err r))]
+                                 (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx :root (str "root-ui-" (profile/now-ns)) [it] nil)}}
+                                                       :route [:render :answers] :tag [:web-record]})))
+                             (ask-state (on-event st {:type :ui :call (str v) :agent agent :at-ms (System/currentTimeMillis) :error err :detail detail}) o))
                            :else st))
               :from-web (case (:op m)
                           :views (ask-state (assoc st :watch (:views m) :tabs (:tabs m)) o)

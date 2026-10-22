@@ -14,7 +14,9 @@ MAIN=$(cd "$(dirname "$0")/.." && pwd); MERGES=${MAIN:h}/next-merges
 fail() { print -u2 "update: $*"; print "UPDATE FAILED"; exit 1 }
 cd "$MAIN" || fail "no main tree"
 [[ $(git branch --show-current) == main ]] || fail "the main tree is not on main"
-git diff --quiet && git diff --cached --quiet || fail "the main tree has uncommitted changes"
+# submodules are left out: a landing that bumps a pin leaves the checkout behind it, and the
+# submodule step below moves every submodule to main's pins
+git diff --quiet --ignore-submodules && git diff --cached --quiet --ignore-submodules || fail "the main tree has uncommitted changes"
 if git rev-parse -q --verify jolt/merges >/dev/null; then
   n=$(git rev-list --count main..jolt/merges)
   if (( n > 0 )); then

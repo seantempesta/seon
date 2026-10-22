@@ -6,7 +6,7 @@
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.render.proc :as p]
-            [seon.web.html :as h] [seon.config] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [datahike.api :as d]))
+            [seon.web.html :as h] [seon.config] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -57,7 +57,7 @@
     (testing "over the budget: later sections are named, not silently cut"
       (let [small (r/ai sys {:seon.render/schema :seon.render/system :seon.render/budget 40})]
         (is (str/includes? small "not shown, over the budget"))
-        (is (<= (ai/tokens (first (str/split small #"\n\(not shown"))) 40))))))
+        (is (<= (seon.print.select/estimate (first (str/split small #"\n\(not shown"))) 40))))))
 
 (defn- answer
   "The render proc's step on an api :state answer for st (the request it had in flight)."
@@ -267,8 +267,8 @@
 (deftest no-render-calls-clip
   (is (nil? (resolve 'seon.render.ui/clip)))
   (is (nil? (resolve 'seon.render.ui/line)))
-  (testing "root's context sizes tokens by the printer's own measure"
-    (is (= (seon.print.select/estimate (apply str (repeat 320 "x"))) (ai/tokens (apply str (repeat 320 "x")))))))
+  (testing "root's context sizes tokens by the printer's own measure (seon.print.select/estimate), no alias of it"
+    (is (nil? (resolve 'seon.render.ai/tokens)))))
 
 (deftest a-capped-list-says-how-many-more
   (testing "the agent page's history: the newest rows, and how many older its branch records"
@@ -394,3 +394,24 @@
     (testing "root's context prints the page's own tiles, one line each"
       (is (some #(str/starts-with? % "- writer 4 txs, batch") (str/split-lines text)))
       (is (some #(str/starts-with? % "- fork server up – ms fork p50, forked –") (str/split-lines text))))))
+
+(deftest a-recorded-error-shows-its-message
+  ;; task seon.render/one-owner-per-view-path (A13): an evaluation's text is its printed text,
+  ;; live (:printed) or recorded (:shown), for an error too: never its error map printed as text
+  (let [e (seon.contract/error :seon.agent/eval-error 'seon.repl/eval-code "Divide by zero" {:class "ArithmeticException"})
+        it {:id 1 :tag :err :form "(/ 1 0)" :err e :printed "ArithmeticException: Divide by zero" :ms 0.1}
+        rec (some :seon.cluster.eval/record (seon.repl/record-tx :a1 "r-1" [it] nil))]
+    (doseq [[what x] [["live" it] ["recorded" rec]]
+            :let [html (h/html (:seon.render/html (ui/history-row x {})))]]
+      (is (str/includes? html "Divide by zero") what)
+      (is (not (str/includes? html "seon.error/type")) what))))
+
+(deftest a-refused-merge-says-why-once
+  ;; task seon.render/one-owner-per-view-path (B2, A14): a refusal is the one error map; the
+  ;; card's pill and the stream's row read its message, once
+  (let [r (seon.contract/error :seon.root/refused 'seon.root/merge! "2 functions have no contract" {:merged? false})
+        card (h/html (:seon.render/html (ui/agent-card {:id :a1 :status :idle :evals [] :merged r} {})))
+        row (ui/event-detail {:type :merged :agent :a1 :result r})]
+    (is (str/includes? card "2 functions have no contract") "the pill's title says why, not that its tests were red")
+    (is (= 1 (count (re-seq #"no contract" row))) row)
+    (is (str/includes? (ui/event-detail {:type :merged-main :result (assoc r :ok false)}) "no contract"))))

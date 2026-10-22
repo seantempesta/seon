@@ -5,7 +5,7 @@
   under that main, and a recovery step reopens the same store on the same main."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d]
-            [seon.db :as pdb]))
+            [seon.db :as pdb] [clojure.core.async :as a] [seon.check]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
@@ -81,3 +81,16 @@
           (is (not (in2 b1)) "a later test sees no branch the earlier one made")
           (is (= (disj in1 b1) (disj in2 b2)) "and nothing else changed")))
       (finally (clojure.java.shell/sh "rm" "-rf" path (str path "-agents"))))))
+
+(deftest records-are-read-at-the-agents-commit
+  ;; task seon.check/mcp-reads-the-agents-records-once-committed: the branch is read again at
+  ;; each of the agent's commit events, never before one when its records are not there yet
+  (let [ev (a/chan 8)
+        reads (atom 0)
+        ;; the branch shows the records from its second read on: after a commit
+        read #(if (= 1 (swap! reads inc)) [] [:r1 :r2])]
+    (doseq [e [{:type :reply :agent :a1} {:type :commit :agent :a2 :t 5} {:type :commit :agent :a1 :t 7} {:type :ready :agent :a3}]]
+      (a/>!! ev e))
+    (is (= [:r1 :r2] (#'seon.check/await-records ev :a1 read #(= 2 (count %)))))
+    (is (= 2 @reads) "once at the start, once at a1's commit")
+    (is (= {:type :ready :agent :a3} (a/poll! ev)) "it waited through a1's commit, not a2's or a reply")))

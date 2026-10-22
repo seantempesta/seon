@@ -2,18 +2,37 @@
   "Root's verbs on tasks (lanes R1 and M1's proto.agents.root): write desired state on main;
   the reconciler proc does the rest. Each takes root's system (seon.root/start!)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [seon.config :as config]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [seon.config :as config]
             [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl]))
+
+(defn- write-declared!
+  "Declared state's tx written on main: the refusal that built it as it is; an empty tx
+  writes nothing ({:ok true :changed 0}); else the writer's answer, with counts, the datoms
+  written and the citation problems of decls (seon.task/citation-problems) when any."
+  {:malli/schema [:=> [:cat :seon.root/sys :any :map [:maybe [:sequential :any]]] :map]}
+  [sys tx counts decls]
+  (cond (contract/error? tx) tx
+        (empty? tx) (assoc counts :ok true :changed 0)
+        :else (let [ps (when decls (task/citation-problems @(:conn sys) (vec decls)))]
+                (cond-> (merge @(root/transact-main! sys tx) counts {:datoms (count tx)}) (seq ps) (assoc :problems ps)))))
 
 (defn create!
   "Write task declarations as held tasks. Answers the writer's answer, or the refusal."
   {:malli/schema [:=> [:cat :seon.root/sys [:vector :seon.task/declaration]] :map]}
-  [sys decls]
-  (let [tx (task/create-tx @(:conn sys) decls)]
+  [sys decls] (write-declared! sys (task/create-tx @(:conn sys) decls) {} decls))
+
+(defn request!
+  "Work request decl (seon.template/request: design -> implement -> merge on one branch):
+  the linked set written released in one transaction on main (seon.template/request-tx),
+  so no agent forks before every task of it is set. Answers the writer's answer with the
+  set's ids, or the refusal."
+  {:malli/schema [:=> [:cat :seon.root/sys :seon.task/declaration] :map]}
+  [sys decl]
+  (let [tx (tpl/request-tx @(:conn sys) decl)]
     (if (:seon.error/type tx)
       tx
-      (let [ps (task/citation-problems @(:conn sys) decls)]
-        (cond-> @(root/transact-main! sys tx) (seq ps) (assoc :problems ps))))))
+      (assoc @(root/transact-main! sys tx)
+             :tasks (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) (tpl/request decl))))))
 
 (defn run!
   "Release tasks ids: the one release (nothing autoruns)."
@@ -39,7 +58,7 @@
                           :let [n (.getName f)] :when (.endsWith n ".edn")
                           :let [ns-sym (symbol (subs n 0 (- (count n) 4)))]]
                       [ns-sym (task/file-declarations ns-sym (slurp f))]))
-         refused (into {} (filter (comp :seon.error/type val)) read)]
+         refused (into {} (filter (comp contract/error? val)) read)]
      (if (seq refused)
        read
        (merge (zipmap (keys read) (repeat []))
@@ -52,13 +71,8 @@
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-tasks! sys nil))
   ([sys dir]
-   (let [files (if dir (task-files dir) (task-files))
-         tx (task/load-tx @(:conn sys) files)]
-     (cond (:seon.error/type tx) tx
-           (empty? tx) {:ok true :files (count files) :changed 0}
-           :else (let [ps (task/citation-problems @(:conn sys) (vec (mapcat identity (vals files))))]
-                   (cond-> (assoc @(root/transact-main! sys tx) :files (count files) :datoms (count tx))
-                     (seq ps) (assoc :problems ps)))))))
+   (let [files (if dir (task-files dir) (task-files))]
+     (write-declared! sys (task/load-tx @(:conn sys) files) {:files (count files)} (mapcat identity (vals files))))))
 
 (defn load-docs!
   "Load the wiki (the pages under dir of the checkout, docs by default) into main as section
@@ -68,11 +82,8 @@
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-docs! sys "docs"))
   ([sys dir]
-   (let [pages (docs/pages (config/checkout) dir)
-         tx (docs/load-tx @(:conn sys) dir pages)]
-     (cond (:seon.error/type tx) tx
-           (empty? tx) {:ok true :pages (count pages) :changed 0}
-           :else (assoc @(root/transact-main! sys tx) :pages (count pages) :datoms (count tx))))))
+   (let [pages (docs/pages (config/checkout) dir)]
+     (write-declared! sys (docs/load-tx @(:conn sys) dir pages) {:pages (count pages)} nil))))
 
 (defn problems
   "Every problem recorded on main, by class (seon.problems/report): recorded errors counted
@@ -114,7 +125,7 @@
   [sys]
   (when-let [commit (reconcile/last-commit @(:conn sys))]
     (let [r @(root/effect! sys :build {:repo (get-in sys [:bindings :source :root]) :commit commit})
-          g (if (:seon.error/type r)
+          g (if (contract/error? r)
               {:commit commit :ms (/ (:seon.fx/us r 0) 1000.0) :error (:seon.error/message r)}
               (:value r))]
       @(root/transact-main! sys [{:seon.root/id :root :seon.root/generation g}])

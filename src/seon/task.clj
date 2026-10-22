@@ -164,18 +164,31 @@
     (seq changed) (assoc :seon.attempt/changed (vec changed))
     reason (assoc :seon.attempt/reason reason)))
 
-(defn plan-tx
-  "The task's plan as its attempt left it (read from the branch by root's judge), carried
-  to main: the plan keeps improving; the next agents start from it."
-  {:malli/schema [:=> [:cat :seon.task/id :seon.task/plan] [:vector :map]]}
-  [id plan] [{:seon.task/id id :seon.task/plan plan}])
+(defn carry-tx
+  "The task content (seon.merge/carried-platform-attrs) branch changed since base, carried
+  onto main (owner, 2026-10-22, D4): a member the branch changed and main did not overwrites
+  main's, so the next agents start from it; one main also changed since base, to another
+  value, is a conflict for root (never resolved here). Tasks main does not hold are left.
+  Answers {:tx :conflicts [{:task :attr :base :ours :theirs}]}. Cost: the carried datoms of
+  the three dbs, read once."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:map [:tx [:vector :any]] [:conflicts :seon.attempt/task-conflicts]]]}
+  [base branch main]
+  (let [vs (fn [db] (into {} (for [a (sort pm/carried-platform-attrs) dt (d/datoms db :aevt a)] [[(:e dt) a] (:v dt)])))
+        b (vs base) o (vs branch) m (vs main)]
+    (reduce (fn [acc [e a :as k]]
+              (let [id (:seon.task/id (d/entity branch e)) bv (b k) ov (o k) mv (m k)]
+                (cond (or (nil? id) (nil? (eid main :seon.task/id id)) (= mv ov)) acc
+                      (= mv bv) (update acc :tx conj (if (some? ov) [:db/add [:seon.task/id id] a ov] [:db/retract [:seon.task/id id] a mv]))
+                      :else (update acc :conflicts conj {:task id :attr a :base bv :ours ov :theirs mv}))))
+            {:tx [] :conflicts []}
+            (sort (for [k (into (set (keys b)) (keys o)) :when (not= (b k) (o k))] k)))))
 
 ;; ---- the reader ------------------------------------------------------------------
 
 (def ^:private task-pull
   [:seon.task/id :seon.task/ns :seon.task/name :seon.task/plan :seon.task/instructions :seon.task/proofs
    :seon.task/branch :seon.task/model :seon.task/execution :seon.task/problem
-   :seon.task/kind :seon.task/evidence :seon.task/generation :seon.task/budget :seon.task/stuck
+   :seon.task/kind :seon.task/evidence :seon.task/generation :seon.task/budget :seon.task/stuck :seon.task/failure
    :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns
    {:seon.task/needs [:seon.task/id]}])
 
