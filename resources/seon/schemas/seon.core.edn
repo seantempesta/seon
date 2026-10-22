@@ -55,6 +55,12 @@
  :seon.wire/msg [:map-of [:or :string :keyword] :any]
  :seon.wire/seon-msg [:map [:op :keyword]]
  ;; agents
+ ;; an agent's lifecycle as root's view holds it, in the dashboard's order: live, then gone
+ ;; (stopped by root: a kill, or the end of its attempt; or dead). The sets are the
+ ;; lifecycle's one declaration (seon.root/gone, seon.render.ui/live): a new status is one entry
+ :seon.agent/status [:enum {:seon.status/live #{:spawning :busy :idle} :seon.status/stopped #{:ended :killed}
+                            :seon.status/gone #{:ended :killed :dead}}
+                     :spawning :busy :idle :ended :killed :dead]
  :seon.agent/tx-result [:map [:t :int] [:datoms nat-int?]]
  :seon.agent/item [:map {:seon.render/html seon.render.ui/history-row :description "One form's reply at root: the printed value (the live one stays in the agent under :handle) or the error."}
                    [:tag [:enum :ret :err]] [:printed {:optional true} [:maybe :string]]]

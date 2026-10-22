@@ -4,8 +4,8 @@
 
   `system` is root's context: the whole system (:seon.render/system) as a compact text
   root reads before it acts. The printer of the same value would spend its budget on the
-  first agents' maps; this one focuses: what is wrong first (procs not running, root's
-  defects, dead agents, red tests, refused merges), then the work (tasks and attempts),
+  first agents' maps; this one focuses: what is wrong first (root's defects, then what
+  main recorded: dead agents, red tests, refused merges among them), then the work (tasks and attempts),
   then the load (writer, fork server, main), then what is costly (the functions the
   newest evaluations spent most in), then the newest events. Sections are added in that
   order until the token budget is spent; what did not fit is named, never silently cut.
@@ -24,34 +24,17 @@
 
 (defn problems
   "What is wrong now, most urgent first: root's procs' defects (what flows: no proc is
-  pinged), the problems main recorded (seon.problems/report, by class), live agents with
-  red tests or a refused merge, agents whose process died. An
-  agent root stopped after its attempt finished is not a problem."
+  pinged), then the problems main recorded (seon.problems/report, by class): one producer,
+  so the banner and root's context cannot disagree. An agent's death, red run or refused
+  merge is recorded by root (seon.root/set-agent, end-agent), never re-derived here."
   {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}
-  [{:keys [root-errors root-errors-total agents agent-attempt recorded]}]
+  [{:keys [root-errors root-errors-total recorded]}]
   (let [n-errs (or root-errors-total (count root-errors))
         [shown more] (print/bounded (reverse (map-indexed vector root-errors)) :seon.config.render.list/top "(:root-errors (seon.root/state sys)) holds the newest 20" n-errs)
         errs (concat
                (for [[i e] shown]
                  (str "defect in " (ui/kname (:pid e)) ": " (print/line (:message e) 50 (list :message (list 'nth '(:root-errors (seon.root/state sys)) i)))))
                (some-> more vector))
-        ;; a live agent's red run or refused merge, or an agent whose process died; an agent
-        ;; root stopped (an attempt that ended) is not a problem, whatever its last run said
-        ;; one pass over the agents; only the few with a problem are sorted
-        ags (for [[id a] (sort-by (comp str key) (filter (fn [[_ a]] (or (:error a) (:tests a) (:merged a) (= :dead (:status a)))) agents))
-                  :let [t (:tests a) m (:merged a) live? (not (ui/ended-statuses (:status a)))
-                        finished? (:ended-as (ui/ended-as a id (or agent-attempt {})))]
-                  :when (or (and (= :dead (:status a)) (not finished?)) (:error a)
-                            (and live? (or (pos? (+ (or (:fail t) 0) (or (:error t) 0))) (and m (false? (:merged? m))))))]
-              (str (ui/kname id) " " (ui/kname (:status a)) ": "
-                   (str/join "; " (remove nil? [(when (= :dead (:status a)) "its process died")
-                                                (when (:error a) (print/line (:error a) 35 (list :error (list 'get '(:agents (seon.root/state sys)) id))))
-                                                (when (pos? (+ (or (:fail t) 0) (or (:error t) 0)))
-                                                  (str "tests " (or (:pass t) 0) " pass " (or (:fail t) 0) " fail " (or (:error t) 0) " error"
-                                                       (when-let [r (first (remove #(= :pass (:type %)) (:reports t)))]
-                                                         (str " (" (:var r) ")"))))
-                                                (when (and m (false? (:merged? m)))
-                                                  (str "merge refused" (when (seq (:conflicts m)) (str ", " (count (:conflicts m)) " conflicts"))))]))))
         ;; what main recorded (seon.problems/report): one line per class with open problems,
         ;; its count and its newest or commonest example
         rec (for [[c {:keys [n rows]}] (sort-by (comp str key) (:classes recorded))
@@ -65,7 +48,7 @@
                                (pr-str (select-keys r [:producer :owner-ns])))
                            40))
                    (when-let [ts (seq (:answered-by r))] (str " (answered by " (str/join ", " ts) ")"))))]
-    (vec (concat errs rec ags))))
+    (vec (concat errs rec))))
 
 (defn- section-work {:malli/schema [:=> [:cat :seon.render/system] [:vector :string]]}
   [{:keys [tasks attempts task-rows]}]
@@ -130,7 +113,7 @@
   [sys env]
   (let [budget (or (:seon.render/budget env) 700)
         problems (problems sys)
-        sections [["problems" (if (seq problems) problems [(str "none: no defect in root's " (count (:health sys)) " procs, no problem recorded on main, no red live agent")])]
+        sections [["problems" (if (seq problems) problems [(str "none: no defect in root's " (count (:health sys)) " procs, no problem recorded on main")])]
                   ["work" (section-work sys)]
                   ["load" (section-load sys)]
                   ["costliest functions in the newest evaluations" (section-costly sys)]

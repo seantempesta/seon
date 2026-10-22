@@ -158,7 +158,10 @@
 
 ;;; --- status -------------------------------------------------------------------
 
-(def status-order [:spawning :busy :idle :ended :killed :dead])
+(def status-order "Agent statuses in the swarm's order (:seon.agent/status)." (vec (drop 2 (get seon.contract/forms :seon.agent/status))))
+(def live "The live agent statuses (:seon.agent/status)." (:seon.status/live (render/properties :seon.agent/status)))
+(def ^:private gone (:seon.status/gone (render/properties :seon.agent/status)))
+(def ^:private finished (:seon.status/finished (render/properties :seon.attempt/status)))
 
 (defn shown-status
   "The word for how an agent is: its live status, or how its process ended: :ended when
@@ -166,11 +169,9 @@
   when its process died on its own (an agent entry carries :ended-as from main's attempt)."
   {:malli/schema [:=> [:cat :map] :keyword]}
   [a]
-  (cond (= :ended (:status a)) :ended
-        (and (#{:killed :dead} (:status a)) (:ended-as a)) :ended
+  (cond (or (= :ended (:status a)) (:ended-as a)) :ended
         (= :dead (:status a)) :died
         :else (or (:status a) :unknown)))
-(def ended-statuses #{:killed :dead :ended :died})
 
 ;;; --- metric tiles -------------------------------------------------------------
 
@@ -199,7 +200,7 @@
   {:malli/schema [:=> [:cat :map :seon.render/env] :seon.render/out]}
   [{:keys [cells off retire-ms]} env]
   (let [freq (frequencies (map second cells))
-        alive (reduce + 0 (map val (remove (comp ended-statuses key) freq)))
+        alive (reduce + 0 (map val (filter (comp live key) freq)))
         segs (for [s (concat status-order (sort-by str (remove (set status-order) (keys freq)))) :let [n (get freq s 0)] :when (pos? n)] [s n])]
     (metric-tile
       {:id "t-agents" :kicker "agents" :big (str alive) :unit "live"
@@ -271,21 +272,10 @@
                 [:li {:class "muted"} "effect owners' lanes, busy, done, queued, spent: not reported yet (needs an event from each owner)"])]}
       env)))
 
-(def task-state-order [:running :blocked :open :held :done :merged :cancelled])
-
-(defn state-title
-  "What a task's observed state means, for its pill's title."
-  {:malli/schema [:=> [:cat :any] :string]}
-  [st]
-  (case st
-    :held "held: declared in a task file and loaded (load-tasks! creates every task held), not yet released by root or the owner, who order the work; (my.root/run! sys [id]) releases it"
-    :blocked "blocked: a task it needs is not done (its blocked-by)"
-    :open "open: released, no attempt running yet"
-    :running "running: an attempt works it now"
-    :done "done: its proofs pass on its branch; its merge task merges it"
-    :merged "merged into main"
-    :cancelled "cancelled: no task file declares it any more"
-    (str st)))
+(def task-state-order "A task's observed states in the tile's order (:seon.task/state)."
+  (vec (drop 2 (get seon.contract/forms :seon.task/state))))
+(def state-title "What each observed state means, for its pill's title (:seon.task/state)."
+  (:seon.status/title (render/properties :seon.task/state)))
 
 (defn waiting-on
   "What blocked tasks wait on: each blocker once with how many tasks it holds up, the one
@@ -673,12 +663,13 @@
 ;;; --- root's layout ------------------------------------------------------------------
 
 (defn ended-as
-  "Agent entry a, with :ended-as when its process ended after its attempt finished (main's
-  attempt done or merged); a live agent's entry as it is (identical: inputs compare O(1))."
+  "Agent id's entry, or an event of its stream (x), with :ended-as when its process ended
+  (its status, or the event's type, is gone) after its attempt finished (main's attempt
+  done or merged); else x as it is (identical: inputs compare O(1))."
   {:malli/schema [:=> [:cat [:maybe :map] :any :map] [:maybe :map]]}
-  [a id agent-attempt]
+  [x id agent-attempt]
   (let [st (:seon.attempt/status (get agent-attempt id))]
-    (if (and a (#{:killed :ended :dead} (:status a)) (#{:done :merged} st)) (assoc a :ended-as st) a)))
+    (if (and x (gone (or (:status x) (:type x))) (finished st)) (assoc x :ended-as st) x)))
 
 (defn tile-problems
   "What is wrong now, at the top of the page: the same lines root's context leads with."

@@ -72,6 +72,7 @@ owns the concept. A new concept gets its word here before it appears in code.
 | **template** | a task kind's defaults: work, design, implement, test, merge | `seon.template` |
 | **merge task** | an ordinary task (kind `:merge`) whose new agent merges main into the branch and goes green | `seon.template/with-merge` |
 | **attach** | a failed merge's design → implement → test → merge tasks, each a new agent | `seon.template/attach-tx` |
+| **observed state** | what happened to a task (running, blocked, open, held, done, merged, cancelled; `:seon.task/state`), derived once from the index | `seon.reconcile/task-state` |
 | **done rule** | why an attempt's measured facts do not make its task done; empty means done | `seon.reconcile/done-refusals` |
 | **reconciler** | the pure function of main's db to actions, and the proc that carries them out | `seon.reconcile/reconcile`, `reconciler-proc` |
 | **flight** | one action carried out as a chain of requests and answers in the reconciler proc | `seon.reconcile/advance` |

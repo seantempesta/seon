@@ -192,6 +192,25 @@
             [_ o] (step st :from-fs {:ev :exit :pid 78 :status {:exit 0}})]
         (is (= [] (writes o)))))))
 
+(deftest root-records-what-went-wrong-in-an-agent
+  ;; the one producer of what is wrong (seon.render.ai/problems reads only what is recorded):
+  ;; root records a red run or a refused merge of an agent with no task, and a refused spawn
+  (let [view {:agents {:a1 {:status :idle} :a2 {:status :idle :task "t/x"}}}
+        red {:pass 1 :fail 1 :error 0 :reports [{:type :pass :var "#'app.t/ok"} {:type :fail :var "#'app.t/red"}]}
+        written (fn [[_ o]] (mapv (juxt :seon.error/class :seon.error/type :seon.error/message :seon.error/last-agent) (first (writes o))))]
+    (testing "a red run of an agent with no task"
+      (is (= [[:agent :seon.agent/failed "tests red: #'app.t/red" :a1]]
+             (written (step (api view) :back {:op :status :agent :a1 :set {:tests red}})))))
+    (testing "a task's agent: its attempt records its reds at its end, not root"
+      (is (= [] (written (step (api view) :back {:op :status :agent :a2 :set {:tests red}})))))
+    (testing "a merge the writer refused is recorded as the writer's refusal"
+      (let [r (contract/error :seon.merge/behind 'seon.writer/merge-branch "main changed 2 key(s)" {:merged? false :tx 1 :behind 2})]
+        (is (= [[:agent :seon.merge/behind "main changed 2 key(s)" :a1]]
+               (written (step (api view) :from-writer {:dest {:merged :a1 :rid 5} :r r}))))))
+    (testing "a refused spawn, of any agent"
+      (is (= [[:agent :seon.agent/failed "fork server went down before the fork" :a2]]
+             (written (step (api view) :back {:op :status :agent :a2 :set {:error "fork server went down before the fork"}})))))))
+
 (deftest a-stall-is-observed-by-the-stand-in
   (let [end {:in (a/chan 4) :out (a/chan 16)}
         st (#'ap/agent-proc {:id :a1 :end end :branch :b1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4) :fx-kinds #{:fx/model}})

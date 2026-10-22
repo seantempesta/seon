@@ -126,6 +126,9 @@
    :attempts {} :by-task {} :done {} :ready (sorted-set) :ready-key {}
    :live #{} :reap #{} :kill {} :judge #{} :merging #{}})
 
+(def finished "Attempt statuses that make its task done (:seon.attempt/status)." (get-in contract/forms [:seon.attempt/status 1 :seon.status/finished]))
+(def ^:private judged (get-in contract/forms [:seon.attempt/status 1 :seon.status/judged]))
+
 (defn- live-in?
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.attempt/attempt] :boolean]}
   [idx a] (and (= :running (:seon.attempt/status a)) (= (:boot (:root idx)) (:seon.attempt/boot a))))
@@ -136,7 +139,7 @@
   [idx id]
   (let [as (map (:attempts idx) (get-in idx [:by-task id]))
         ms (keep #(when (= :merged (:seon.attempt/status %)) (:seon.attempt/merged-t % 0)) as)]
-    {:any? (boolean (some #(#{:merged :done} (:seon.attempt/status %)) as))
+    {:any? (boolean (some #(finished (:seon.attempt/status %)) as))
      :merged-t (when (seq ms) (apply min ms))}))
 
 (defn- idx-done? {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}
@@ -148,7 +151,7 @@
   (let [t (get-in idx [:tasks id])]
     (boolean (and t (= :running (:seon.task/execution t)) (not (idx-done? idx id)) (nil? (:seon.task/stuck t))
                   (every? #(idx-done? idx %) (:seon.task/needs t))
-                  (not-any? #(let [a (get-in idx [:attempts %])] (or (live-in? idx a) (#{:ended :dead} (:seon.attempt/status a))))
+                  (not-any? #(let [a (get-in idx [:attempts %])] (or (live-in? idx a) (judged (:seon.attempt/status a))))
                             (get-in idx [:by-task id]))))))
 
 (defn- refresh-done
@@ -235,7 +238,7 @@
         (mark :live live?)
         (mark :reap (and a (= :running st) (not live?)))
         (update :kill #(if kill (assoc % aid kill) (dissoc % aid)))
-        (mark :judge (boolean (#{:ended :dead} st)))
+        (mark :judge (boolean (judged st)))
         (mark :merging (and a (= :merge (:seon.task/kind t)) (or live? (= :ended st)))))))
 
 (defn- settle
@@ -462,6 +465,19 @@
   "The needs of task id that are not done."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:set :seon.task/id]]}
   [idx id] (into #{} (remove #(idx-done? idx %)) (get-in idx [:tasks id :seon.task/needs])))
+
+(defn task-state
+  "What happened to task id (:seon.task/state), from the index; its desired execution stays
+  on the task. The one derivation every task row reads (seon.render.proc/task-rows)."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :seon.task/state]}
+  [idx id]
+  (let [x (get-in idx [:tasks id :seon.task/execution])]
+    (cond (= :cancelled x) :cancelled
+          (idx-done? idx id) (if (get-in idx [:done id :merged-t]) :merged :done)
+          (some #(= :running (get-in idx [:attempts % :seon.attempt/status])) (get-in idx [:by-task id])) :running
+          (seq (blocked-by idx id)) :blocked
+          (= :held x) :held
+          :else :open)))
 
 ;; ---- what an attempt's agent wrote on its branch ----
 

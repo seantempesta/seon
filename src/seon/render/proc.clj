@@ -125,31 +125,22 @@
 ;;; --- main --------------------------------------------------------------------------------
 
 (defn task-rows
-  "Each task's observed state, from main's tasks, attempts and the reconciler's index:
-  {id {:state :merged|:done|:running|:blocked|:open|:held|:cancelled :blocked-by #{id}
-  :attempts n :tokens n :newest attempt :green n :red n}}. The desired execution stays on
-  the task; this is what happened."
-  {:malli/schema [:=> [:cat :map :map :map] :map]}
-  [tasks attempts idx]
-  (let [by-task (group-by :seon.attempt/task (vals attempts))]
-    (into {} (for [[id t] tasks
-                   :let [as (sort-by :seon.attempt/start-ms (get by-task id))
-                         newest (last as)
-                         blocked (into #{} (remove #(reconcile/done? idx %)) (:seon.task/needs t))
-                         results (:seon.attempt/results newest {})
-                         own (get-in t [:seon.task/accumulated :proofs] #{})
-                         state (cond (= :cancelled (:seon.task/execution t)) :cancelled
-                                     (reconcile/done? idx id) (if (some #(= :merged (:seon.attempt/status %)) as) :merged :done)
-                                     (some #(= :running (:seon.attempt/status %)) as) :running
-                                     (seq blocked) :blocked
-                                     (= :held (:seon.task/execution t)) :held
-                                     :else :open)]]
-               [id {:state state :blocked-by blocked :needs (:seon.task/needs t) :attempts (count as)
-                    :tokens (reduce + 0 (keep :seon.attempt/tokens as)) :newest newest :kind (:seon.task/kind t)
-                    ;; its own proofs (red blocks it) apart from other tasks' (an allowed red)
-                    :green (count (filter #(= :pass (get results %)) own)) :red (count (filter #(and (contains? results %) (not= :pass (get results %))) own))
-                    :allowed-red (count (filter (fn [[p r]] (and (not= :pass r) (not (contains? own p)))) results))
-                    :proofs (count own)}]))))
+  "Each task's row as observed, read from the reconciler's index (`seon.reconcile/task-state`):
+  {id {:state :blocked-by #{id} :needs :attempts n :tokens n :newest attempt :kind :green n
+  :red n :allowed-red n :proofs n}}. The desired execution stays on the task; this is what
+  happened."
+  {:malli/schema [:=> [:cat :seon.reconcile/index] :map]}
+  [idx]
+  (into {} (for [[id t] (:tasks idx)
+                 :let [as (sort-by :seon.attempt/start-ms (map (:attempts idx) (get-in idx [:by-task id])))
+                       results (:seon.attempt/results (last as) {})
+                       own (get-in idx [:acc id] #{})]]
+             [id {:state (reconcile/task-state idx id) :blocked-by (reconcile/blocked-by idx id) :needs (:seon.task/needs t)
+                  :attempts (count as) :tokens (reduce + 0 (keep :seon.attempt/tokens as)) :newest (last as) :kind (:seon.task/kind t)
+                  ;; its own proofs (red blocks it) apart from other tasks' (an allowed red)
+                  :green (count (filter #(= :pass (get results %)) own)) :red (count (filter #(and (contains? results %) (not= :pass (get results %))) own))
+                  :allowed-red (count (filter (fn [[p r]] (and (not= :pass r) (not (contains? own p)))) results))
+                  :proofs (count own)}])))
 
 (defn- main-info
   "What the tiles show of main's db value: t, datoms, program vars, tasks and attempts
@@ -158,7 +149,7 @@
   [st db]
   (if (= (:max-tx db) (get-in st [:main :t]))
     st
-    (let [tasks (task/tasks db) attempts (task/attempts db)
+    (let [tasks (task/tasks db) idx (reconcile/index db) attempts (:attempts idx)
           n (count (d/datoms db :eavt))]
       (assoc st :main {:t (:max-tx db) :datoms n :vars (count (d/datoms db :aevt :var/name))}
              ;; one point per main commit this proc read
@@ -168,7 +159,7 @@
              :config (config/from-db db)
              ;; the problems recorded on main (D2's one read; ~2.7 ms, costs the problems)
              :recorded (problems/report db)
-             :task-rows (task-rows tasks attempts (reconcile/index db))
+             :task-rows (task-rows idx)
              ;; how each agent's work ended, for the words its card and its events use
              :agent-attempt (into {} (for [a (sort-by :seon.attempt/start-ms (vals attempts))] [(:seon.attempt/agent a) a]))))))
 
@@ -333,10 +324,7 @@
           now-ms (System/currentTimeMillis)
           ;; the stream: each new event's row rendered once
           ;; an agent that ended after its attempt finished ended normally: its event says so
-          evs (mapv (fn [e] (if-let [a (and (#{:killed :ended :dead} (:type e)) (get-in st [:agent-attempt (:agent e)]))]
-                              (cond-> e (#{:done :merged} (:seon.attempt/status a)) (assoc :ended-as (:seon.attempt/status a) :outcome (:seon.attempt/outcome a)))
-                              e))
-                    (:new-events st))
+          evs (mapv #(ui/ended-as % (:agent %) (:agent-attempt st {})) (:new-events st))
           ;; each new event's row rendered once, with its own id: the stream patch prepends the
           ;; new rows and removes the ones past the cap (not the whole list)
           seq0 (:ev-seq st 0)
@@ -350,10 +338,9 @@
                true (assoc :new-events []))
           ;; a stop that arrived before main recorded how the attempt ended: its row again,
           ;; now that main says (60 rows at most)
-          late (for [[i e] (map-indexed vector (:events st))
-                     :let [a (get-in st [:agent-attempt (:agent e)])]
-                     :when (and (#{:killed :ended :dead} (:type e)) (not (:ended-as e)) (#{:done :merged} (:seon.attempt/status a)))]
-                 [i (assoc e :ended-as (:seon.attempt/status a))])
+          late (for [[i e] (map-indexed vector (:events st)) :when (not (:ended-as e))
+                     :let [e (ui/ended-as e (:agent e) (:agent-attempt st {}))] :when (:ended-as e)]
+                 [i e])
           st (reduce (fn [st [i e]]
                        (-> st (assoc-in [:events i] e)
                            (update :event-rows (fn [rows] (mapv #(if (= (first %) (:seq e)) [(:seq e) (h/html (:seon.render/html (ui/event-row e {})))] %) rows)))))
