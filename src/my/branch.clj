@@ -1,7 +1,7 @@
 (ns my.branch
-  "The merge agent's verbs (git's words): merge main into this branch, see what is still
+  "The merge agent's functions (git's words): merge main into this branch, see what is still
   unmerged, resolve an entry. The writer does the merge (seon.merge/three-way, the one
-  derivation); this branch sees main's changes only through these verbs."
+  derivation); this branch sees main's changes only through these functions."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.repl :as repl] [seon.merge :as pm] [seon.harvest :as harvest]))
 

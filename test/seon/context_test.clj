@@ -359,7 +359,7 @@
   ;; task seon.context/a-stable-prefix-is-sent-once: a provider caches a byte-identical message
   ;; prefix, so each request starts with the whole of the one before but its last message (the
   ;; turn sections), even after the program the task cites changed
-  (pdb/test-branch!
+  (ts/test-branch!
     (fn [_ conn]
       (d/transact conn (program-facts '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))" []]]))
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/f``` triple."
@@ -438,7 +438,7 @@
   ;; task seon.context/the-context-names-the-helpers-a-task-needs: R4's lever, from the call
   ;; graph: what the cited vars and the proofs call, most-called first, the named left out
   (let [helpers (for [i (range 3)] (symbol "geo" (str "h" i)))
-        db (d/db-with (pdb/test-db)
+        db (d/db-with (ts/test-db)
                       (program-facts (concat [['geo/area "(defn area [r] (* pi (sq r)))" (into '[geo/sq geo/pi clojure.core/* geo/defg geo/wrap geo/plumb] helpers)]
                                               ['geo/defg "(defmacro defg [n] `(wrap ~n))" '[geo/wrap]]
                                               ['geo/wrap "(defn wrap [x] x)" []]
@@ -450,7 +450,7 @@
                                              (for [h helpers] [h (str "(defn " (name h) " [] 0)") []])
                                              ;; plumb is the program's plumbing: as many more forms name it as the
                                              ;; seed's program holds (seon.contract/checked: 864 of about 1,700)
-                                             (for [i (range (max 8 (count (d/datoms (pdb/test-db) :aevt :form/id))))]
+                                             (for [i (range (max 8 (count (d/datoms (ts/test-db) :aevt :form/id))))]
                                                [(symbol "geo" (str "u" i)) (str "(defn u" i " [] (plumb " i "))") '[geo/plumb]]))))
         db (d/db-with db [{:var/name 'geo/defg :var/kind :macro}])
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'geo :seon.task/name "v" :seon.task/plan "Make `geo/vol` right; see `geo/area`."

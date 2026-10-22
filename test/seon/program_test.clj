@@ -359,7 +359,7 @@
 (deftest divergence-names-each-change-a-merge-carries
   ;; owner D4 (2026-10-22): the agent sees, every turn, every change its branch's merge will
   ;; carry back to main: what it added, redefined and removed, and the schemas it registered
-  (let [base (d/db-with (pdb/test-db)
+  (let [base (d/db-with (ts/test-db)
                         [{:db/id "a" :var/name 'app/a :var/form "fa"} {:db/id "fa" :form/id "a1" :form/src "(def a 1)"}
                          {:db/id "b" :var/name 'app/b :var/form "fb"} {:db/id "fb" :form/id "b1" :form/src "(def b 1)"}
                          {:db/id "k" :schema/key :app/k :schema/form ":int"}])

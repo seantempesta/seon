@@ -1,5 +1,5 @@
 (ns my.turn
-  "The agent's turn verb: wait ends the turn loop after this turn's forms."
+  "The agent's turn function: wait ends the turn loop after this turn's forms."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.turn :as turn]))
 

@@ -1,5 +1,5 @@
 (ns my.agent
-  "An agent's own verbs (from proto/flow f2-final proto.agent's agent API). Referred into
+  "An agent's own functions (from proto/flow f2-final proto.agent's agent API). Referred into
   every agent namespace.
     ($ handle)                the live value of an earlier result (also result/h3)
     (whoami)                  {:id :branch :pid}

@@ -23,7 +23,7 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 | an outside agent works a task | `seon_attach`, `seon_context`, `seon_done` | new |
 | refusals and defects answered per request | a defect answers that request the typed `:seon.entrance/defect` and the door goes on (`seon.entrance/serve-connection!`); a refused attach still writes the task's state first (`seon.entrance/attach-writes-nothing-when-it-is-refused`) | partial |
 
-The door's verbs are one table, `seon.entrance/verbs`: MCP lists each as the tool `seon_<op>` (`seon.mcp/reply`), so a new verb is one row. An eval as root goes through the agents' REPL path (`seon.repl/eval-string`: the one printer, cost, error maps, `*1` and `*e`), in `root.repl` with `sys` a local, recorded on main by `seon.repl/record-tx` like an agent's evaluation. The dashboard's calls of root's verbs are the requests the API fns send (`seon.root/request`), so the UI and `seon.root/merge!` cannot disagree on a request or a refusal. Not this: a second read/eval loop, a second recorder, or a verb's request map written again in `seon.web`.
+The server's `:op`s are one table, ``seon.entrance/ops`` (renamed from `seon.entrance/verbs`): MCP lists each as the tool `seon_<op>` (`seon.mcp/reply`), so a new `:op` is one row. An eval as root goes through the agents' REPL path (`seon.repl/eval-string`: the one printer, cost, error maps, `*1` and `*e`), in `root.repl` with `sys` a local, recorded on main by `seon.repl/record-tx` like an agent's evaluation. The dashboard's calls of root's functions are the requests the API fns send (`seon.root/request`), so the UI and `seon.root/merge!` cannot disagree on a request or a refusal. Not this: a second read/eval loop, a second recorder, or an `:op`'s request map written again in `seon.web`.
 
 `seon_agents` returns every task (230+, mostly cancelled): too much context for an outside agent.
 
@@ -33,12 +33,12 @@ The door's verbs are one table, `seon.entrance/verbs`: MCP lists each as the too
 |---|---|---|
 | `my.task/current`, `update!`, `send-back!`; `my.turn/wait` | `current`, `update!`, `fail!` (send-back replaced: a failure is task data, held for root: [tasks](tasks.md#a-failed-task-is-held-for-root)); `my.turn/wait` | present (an agent holds its task from the fork: [tasks](tasks.md#the-agent-knows-its-task)) |
 | `my.program/callers`, `source`, `tests-reaching` | `my.agent/callers`, `callees`, `grep`, `source`; `seon.program/reach-digests` | present |
-| `my.program/history` | none yet; the store keeps history now ([storage](storage.md#history)), the verb is not built | missing |
+| `my.program/history` | none yet; the store keeps history now ([storage](storage.md#history)), the function is not built | missing |
 | `my.program/search`, `similar` (embeddings) | none; decided (DECISIONS, "Embeddings join the context"), not built; the context's `:found` finds helpers by the call graph meanwhile (`seon.context/found`) | missing |
 | `my.program/diff`, `sizes`, `breaks` | `seon.root/branch-diff` (root only) | partial |
 | `my.program/write-branch!` | write-back at merge (`seon.source`, the `:git` effect) | present, better |
 | `my.message/inbox`, `send` (stored facts) | `my.agent/messages`, `send-message`, held in the agent's process | partial |
-| `my.test/run`, `check` | proofs run by themselves after each evaluation | partial (no agent verb) |
+| `my.test/run`, `check` | proofs run by themselves after each evaluation | partial (no agent function) |
 | `my.web/fetch`, `search` | none (no `:web` effect) | missing |
 | `my.fs/*` (read, write, list files), `my.edit/*` (exact-span text edits), `my.shell/run!` (a command, its output and exit) | none yet; they go through the effect owner (`my.fx/call`), like every outside-world call. Seon does any work its user wants (AGENTS §1); only Seon's own code changes at the REPL | missing |
 | `my.schema/register!`, `my.branch/merge-main!`, `unmerged`, `resolve!` | the same names | present |
@@ -94,7 +94,7 @@ The door's verbs are one table, `seon.entrance/verbs`: MCP lists each as the too
 
 ## The gaps, in order
 
-1. History: kept since 2026-10-22 (A.2); the `my.program/history` verb is not built.
+1. History: kept since 2026-10-22 (A.2); the `my.program/history` function is not built.
 2. Storage: collection beside live agents (docs/storage.md#collection's design); a trained zstd dictionary once a representative corpus exists; log rotation.
 3. The door: health through MCP, a compact `seon_agents`; an outside attempt whose agent dies ends (`seon.reconcile/an-outside-attempts-agent-death-ends-it`); the turns, inspection and restore/replay of `archive/jolt/door` (the tasks in `seon.entrance`).
 4. The owner's view: `/ns` pages and the message input bar, with messages stored as facts.
@@ -103,5 +103,5 @@ The door's verbs are one table, `seon.entrance/verbs`: MCP lists each as the too
 7. Embeddings and `similar`.
 8. A turns-to-green report.
 9. Operator commands: `open`, `logs`, `reset`.
-10. File and shell verbs (`my.fs`, `my.edit`, `my.shell`) through the effect owner.
+10. File and shell functions (`my.fs`, `my.edit`, `my.shell`) through the effect owner.
 11. Scheduled work, web fetch.

@@ -56,7 +56,7 @@ The agent's REPL binds malli's dynamic registry to its branch's population befor
 
 The merge carries an entry per key, `[:schema k]` -> `{:form text :file path}`, like a var (v1's `[:seon.schema/key k]` identity): two branches changing different keys of one resource merge clean, one key changed two ways conflicts at its key, and a scratch entry (no resource) is never program. Applied to main, the entry is main's (its `:schema/source` retracted), and the Datahike declarations its population needs come in the same transaction (`seon.program/schema-declarations`). The changed resource is then written back like a namespace's file (`changed-files` names it). Reading 457 entries adds 8 ms to `seon.merge/program` (80 ms to 88 ms on the test store) (`seon.merge-test/a-schema-entry-merges-per-key`).
 
-```my.schema/register!``` is the verb and ```my.schema/registration``` judges it; ```seon.program/schema-changes``` and ```seon.program/schema-registry``` derive the branch's population; ```seon.contract/registry-of``` compiles one.
+```my.schema/register!``` is the function and ```my.schema/registration``` judges it; ```seon.program/schema-changes``` and ```seon.program/schema-registry``` derive the branch's population; ```seon.contract/registry-of``` compiles one.
 
 ## Write-back: main's files, byte for byte
 

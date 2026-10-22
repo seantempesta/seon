@@ -1,5 +1,5 @@
 (ns my.db
-  "An agent's database verbs, on its own branch (from proto/flow f2-final proto.agent's
+  "An agent's database functions, on its own branch (from proto/flow f2-final proto.agent's
   agent API). Referred into every agent namespace.
     (db)                the branch's current db value, in this process
     (q query & inputs)  d/q against (db)

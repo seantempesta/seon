@@ -1,5 +1,5 @@
 (ns my.task
-  "The agent's task verbs (Seon's my.task): read its task, improve it, or mark it failed.
+  "The agent's task functions (Seon's my.task): read its task, improve it, or mark it failed.
   Writes go to the agent's own branch; root sees them when the branch merges, and a
   failure at the attempt's end (root's judge reads the branch)."
   (:refer-clojure :exclude [defn defn-])

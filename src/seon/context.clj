@@ -338,7 +338,7 @@
 
 (defn reader-text
   "What a turn's reader got beyond the help page and the scrollback: its attempt sections and
-  its turn sections, as one text (the door's context, the page's panel)."
+  its turn sections, as one text (the server's context, the page's panel)."
   {:malli/schema [:=> [:cat [:vector :seon.model/message]] :string]}
   [msgs] (str (:content (second msgs)) "\n\n" (:content (peek msgs))))
 
