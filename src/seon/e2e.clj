@@ -12,7 +12,7 @@
   the run's numbers and its verdict."
   (:require [seon.root :as c] [my.root :as root] [seon.task :as task] [seon.context :as context] [seon.reconcile :as r]
             [seon.fixtures :as fx] [datahike.api :as d] [seon.lib :as lib] [clojure.string :as str] [seon.config] [clojure.java.shell :as sh]
-            [clojure.core.async :as a] [seon.server :as server]))
+            [clojure.core.async :as a] [seon.server :as server] [seon.contract :as contract]))
 
 (defn- now [] (System/currentTimeMillis))
 (defn- db [sys] @(:conn sys))
@@ -100,7 +100,7 @@
   (let [ev (c/events sys) ag (c/spawn! sys {})]
     (loop [] (let [e (a/<!! ev)] (when-not (and (= :ready (:type e)) (= ag (:agent e))) (recur))))
     (a/untap (:events-mult sys) ev)
-    (let [r (mapv :printed @(c/submit! sys ag forms))] (c/kill! sys ag) r)))
+    (let [r @(c/submit! sys ag forms)] (c/kill! sys ag) (if (contract/error? r) r (mapv :printed r)))))
 
 (defn- quiet! "await-quiet from main's t now." [sys] (await-quiet sys (:max-tx (db sys))))
 

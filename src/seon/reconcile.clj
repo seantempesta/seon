@@ -11,38 +11,17 @@
             [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
             [seon.config :as cfg]))
 
-(def default-max-turns
-  "Turns an attempt may take when its task sets no :seon.config.agent/max-turns: the config's."
-  (cfg/value :seon.config.agent/max-turns))
-
-(def default-max-running
-  "Parallel attempts when main's root entity states no :seon.config.agent/max-running: the config's."
-  (cfg/value :seon.config.agent/max-running))
-
-(def default-max-merging
-  "Merge attempts at once when main's root entity states no :seon.config.merge/max-running:
-  the config's (1: octopus merges stay off, DECISIONS). They run together only when the
-  definitions they change are disjoint (an octopus merge); 1 is git's one-at-a-time merge queue."
-  (cfg/value :seon.config.merge/max-running))
-
-(def merge-defaults
-  "The merge limits' defaults, when the task sets none (:seon.config.merge/*): the config's."
-  {:max-conflicts (cfg/value :seon.config.merge/max-conflicts) :max-merge-turns (cfg/value :seon.config.merge/max-merge-turns)})
-
-(def default-budget
-  "Refinement chains a task's failures may attach when it declares no :seon.task/budget: the config's."
-  (cfg/value :seon.config.task/budget))
-
 (defn refine?
   "Has task t budget left for one more refinement chain (its generation below its budget)?"
   {:malli/schema [:=> [:cat :seon.task/own] :boolean]}
-  [t] (< (:seon.task/generation t 0) (:seon.task/budget t default-budget)))
+  [t] (< (:seon.task/generation t 0) (:seon.task/budget t (cfg/value :seon.config.task/budget))))
 
 (defn merge-limits
-  "Task t's merge limits: its own :seon.config.merge/* over the defaults."
+  "Task t's merge limits (:seon.config.merge/*), through the one resolver."
   {:malli/schema [:=> [:cat :seon.task/own] :seon.reconcile/merge-limits]}
   [t]
-  (into {} (for [[k v] merge-defaults] [k (get t (keyword "seon.config.merge" (name k)) v)])))
+  {:max-conflicts (cfg/value :seon.config.merge/max-conflicts {:task t :model (:seon.task/model t)})
+   :max-merge-turns (cfg/value :seon.config.merge/max-merge-turns {:task t :model (:seon.task/model t)})})
 
 ;; ---- the view: one read of main ---------------------------------------------------
 
@@ -51,7 +30,7 @@
   {:malli/schema [:=> [:cat :seon.task/own] :seon.task/env]}
   [t]
   {:branch (:seon.task/branch t) :model (:seon.task/model t)
-   :max-turns (or (:seon.config.agent/max-turns t) default-max-turns)})
+   :max-turns (cfg/value :seon.config.agent/max-turns {:task t :model (:seon.task/model t)})})
 
 ;; ---- the done rule -----------------------------------------------------------------
 
@@ -129,8 +108,8 @@
    :attempts {} :by-task {} :done {} :ready (sorted-set) :ready-key {}
    :live #{} :reap #{} :kill {} :judge #{} :merging #{}})
 
-(def finished "Attempt statuses that make its task done (:seon.attempt/status)." (get-in contract/forms [:seon.attempt/status 1 :seon.status/finished]))
-(def ^:private judged (get-in contract/forms [:seon.attempt/status 1 :seon.status/judged]))
+(def finished "Attempt statuses that make its task done (:seon.attempt/status)." (:seon.status/finished (contract/properties :seon.attempt/status)))
+(def ^:private judged (:seon.status/judged (contract/properties :seon.attempt/status)))
 
 (defn- live-in?
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.attempt/attempt] :boolean]}
@@ -207,14 +186,20 @@
         (assoc :attempts (if a (assoc (:attempts idx) aid a) (dissoc (:attempts idx) aid)))
         (update-in [:by-task tid] (fnil (if a conj disj) #{}) aid))))
 
+(defn- downstream
+  "ids and every task that needs one of them, transitively (a walk over :needed-by)."
+  {:malli/schema [:=> [:cat :seon.reconcile/index [:set :seon.task/id]] [:set :seon.task/id]]}
+  [idx ids]
+  (loop [front (vec ids) seen (set ids)]
+    (if-let [[x & more] (seq front)]
+      (let [ns (remove seen (get-in idx [:needed-by x]))] (recur (into (vec more) ns) (into seen ns)))
+      seen)))
+
 (defn- topo
   "ids and every task that needs one of them, transitively, each after its needs among them."
   {:malli/schema [:=> [:cat :seon.reconcile/index [:set :seon.task/id]] [:vector :seon.task/id]]}
   [idx ids]
-  (let [all (loop [front (vec ids) seen (set ids)]
-              (if-let [[x & more] (seq front)]
-                (let [ns (remove seen (get-in idx [:needed-by x]))] (recur (into (vec more) ns) (into seen ns)))
-                seen))
+  (let [all (downstream idx ids)
         deg (into {} (for [x all] [x (count (filter all (get-in idx [:tasks x :seon.task/needs])))]))]
     (loop [q (vec (sort (filter #(zero? (deg %)) all))) deg deg out []]
       (if-let [[x & more] (seq q)]
@@ -331,7 +316,7 @@
   index's sets: its cost is the attempts to reap, kill and judge plus the starts."
   {:malli/schema [:=> [:cat :seon.reconcile/index] :seon.reconcile/actions]}
   [idx]
-  (let [root (or (:root idx) {:boot "" :max-running default-max-running :max-merging default-max-merging})
+  (let [root (merge {:max-running (cfg/value :seon.config.agent/max-running) :max-merging (cfg/value :seon.config.merge/max-running)} (:root idx))
         att (:attempts idx)
         reaps (for [aid (sort (:reap idx))] {:op :reap :attempt aid})
         kills (for [[aid r] (sort-by key (:kill idx))] {:op :kill :attempt aid :reason r})
@@ -352,7 +337,7 @@
                        (and (empty? rs) merge?) {:op :ready-to-merge :attempt aid :task id}
                        (empty? rs) {:op :accept :attempt aid :task id}
                        :else
-                       (failed aid id t (str "attempt " aid " ended " (name (:seon.attempt/outcome a :error))
+                       (failed aid id t (str "attempt " aid " ended" (some->> (:seon.attempt/outcome a) name (str " "))
                                              (some->> (:seon.attempt/reason a) (str " (") (#(str % ")")))
                                              ": " (refusals-text rs)))))))
         ;; the octopus merge (bors, GitHub's merge queue): green merge attempts merge together in
@@ -365,9 +350,9 @@
         octopus (when (and (seq ready) (not live-merge?))
                 [{:op :octopus-merge :attempt (:attempt (first ready)) :members (mapv #(select-keys % [:attempt :task]) ready)}])
         closed? (some #(= :ended (get-in idx [:attempts % :seon.attempt/status])) (:merging idx))
-        room (max 0 (- (:max-running root default-max-running) (- (count (:live idx)) (count (:kill idx)))))
+        room (max 0 (- (:max-running root) (- (count (:live idx)) (count (:kill idx)))))
         merge? (fn [id] (= :merge (get-in idx [:tasks id :seon.task/kind])))
-        merge-room (max 0 (- (:max-merging root default-max-merging) (count (:merging idx))))
+        merge-room (max 0 (- (:max-merging root) (count (:merging idx))))
         ;; a merge joins only when what it changes is disjoint from every merge in flight;
         ;; one whose changes are unknown runs alone; conflicting merges serialize
         flying (map #(merge-keys idx (get-in idx [:attempts % :seon.attempt/task])) (:merging idx))
@@ -383,7 +368,7 @@
                        :else (recur more (inc n) m taken (conj acc id))))
         spawns (for [id starts :let [t (get-in idx [:tasks id])]]
                  {:op :spawn :task id :env (desired-env t)
-                  :attempt (str id "#" (inc (count (get-in idx [:by-task id]))))})]
+                  :attempt (task/attempt-id id (inc (count (get-in idx [:by-task id]))))})]
     (vec (concat reaps kills judged octopus spawns))))
 
 ;; ---- stuck: observed, never held ------------------------------------------------------
@@ -392,11 +377,8 @@
   "The released tasks not done that need task id, transitively, sorted."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:vector :seon.task/id]]}
   [idx id]
-  (loop [front [id] seen #{}]
-    (if-let [[x & more] (seq front)]
-      (let [ns (remove seen (get-in idx [:needed-by x]))]
-        (recur (into (vec more) ns) (into seen ns)))
-      (vec (sort (filter #(and (= :running (get-in idx [:tasks % :seon.task/execution])) (not (idx-done? idx %))) seen))))))
+  (vec (sort (filter #(and (= :running (get-in idx [:tasks % :seon.task/execution])) (not (idx-done? idx %)))
+                     (disj (downstream idx #{id}) id)))))
 
 (defn stuck
   "Why released work is not done, as root causes: each task whose stuck fact holds (its
@@ -411,7 +393,7 @@
              :let [s (:seon.task/stuck t)
                    ex (:seon.task/execution t)
                    ;; attempts are numbered in order (actions' spawns), so the latest is the count's
-                   latest (get-in idx [:attempts (str id "#" (count (get-in idx [:by-task id])))])
+                   latest (let [n (count (get-in idx [:by-task id]))] (when (pos? n) (get-in idx [:attempts (task/attempt-id id n)])))
                    refused (when (= :refused (:seon.attempt/status latest)) latest)
                    bs (blocks idx id)]
              :when (if (= :running ex) (or s refused) (seq bs))]
@@ -486,18 +468,12 @@
 
 (defn pull-end
   "The end attempt aid's turn loop wrote on branch db ({:outcome :reason :turns :tokens},
-  and the error that ended it and its waste as data), or {}."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.attempt/id] :map]}
+  and the error that ended it and its waste as data), or nil: it wrote none."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.attempt/id] [:maybe :map]]}
   [db aid]
-  (into {} (for [[k v] (d/pull db [:seon.end/outcome :seon.end/reason :seon.end/turns :seon.end/tokens :seon.end/error :seon.end/waste]
-                                [:seon.end/attempt aid])]
-              [(keyword (name k)) v])))
-
-(defn- error-text
-  "Error map e as an attempt's stored error (:seon.attempt/error): the one error map, its
-  protocol members (a test count, :ok, :merged?) left out."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [e] (dissoc e :pass :fail :error :reports :merged? :ok :tx :applied :conflicts))
+  (some->> (d/pull db [:seon.end/outcome :seon.end/reason :seon.end/turns :seon.end/tokens :seon.end/error :seon.end/waste]
+                   [:seon.end/attempt aid])
+           (into {} (map (fn [[k v]] [(keyword (name k)) v])))))
 
 ;; ---- the reconciler proc: actions carried out as requests, every answer as data ----------
 ;; Root's executor (R1's proto.agents.root, a thread per attempt) as one step-fn: main's
@@ -561,29 +537,26 @@
 
 (defn- judge-tx
   "Attempt aid's end on main from MEASURED facts: the end its agent wrote on the branch,
-  root's own proof results, the branch's merge entries and unmerged keys, the contract gaps
-  against main; the task content the branch changed carried to main, or its conflicts with
-  main's recorded on the attempt for root (seon.task/carry-tx); and a failure it marked
-  (my.task/fail!) carried with the task held."
-  {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db]] [:set :string]] [:vector :any]]}
-  [st {:keys [act run-problems worked-error]} results {:keys [db base base-t]} changed]
+  root's own proof results, the branch's merge entries, and diff, the writer's diff of the
+  branch (:branch-diff: the keys it changed, its unmerged keys, its contract gaps); the
+  task content the branch changed carried to main, or its conflicts with main's recorded on
+  the attempt for root (seon.task/carry-tx); and a failure it marked (my.task/fail!)
+  carried with the task held."
+  {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db]] [:map [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]]] [:vector :any]]}
+  [st {:keys [act run-problems worked-error]} results {:keys [db base base-t]} diff]
   (let [main (:db st)
         aid (:attempt act) id (:task act)
         end (pull-end db aid)
-        mp (pm/program main #{})
-        unc (into #{} (for [[[k sym] e] (pm/program db #{})
-                            :when (and (= :var k) (= :fn (:kind e)) (nil? (:contract e)) (not= e (get mp [k sym])))]
-                        sym))
         carried (task/carry-tx base db main)
         failure (:seon.task/failure (task/task db id))]
     (into (cas-tx aid :running :ended
                     ;; spend is what the end measured: no end (died, killed, never reached
                     ;; seon.turn/end!) is outcome :no-end with its turns, calls and tokens absent
                     (merge (task/end-members (cond-> (merge (select-keys end [:turns :model-calls :tokens])
-                                                      {:outcome (:outcome end :no-end) :results results :uncontracted unc
+                                                      {:outcome (:outcome end :no-end) :results results :uncontracted (set (:uncontracted diff))
                                                        :conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
-                                                       :unmerged (mapv #(sedn/encode (:key %)) (pm/unmerged db (pm/program db #{})))
-                                                       :changed changed})
+                                                       :unmerged (mapv sedn/encode (:unmerged diff))
+                                                       :changed (into #{} (map sedn/encode) (:ours diff))})
                                         (:reason end) (assoc :reason (:reason end))
                                         (not (:outcome end)) (assoc :reason (if worked-error
                                                                              (str "seon.turn/work! threw: " (:seon.error/message worked-error))
@@ -594,7 +567,7 @@
                     (cond-> {}
                       (seq (:failures run-problems)) (assoc :seon.attempt/failures (:failures run-problems))
                       (seq (:costs run-problems)) (assoc :seon.attempt/costs (:costs run-problems))
-                      (or (:error end) worked-error) (assoc :seon.attempt/error (error-text (or (:error end) worked-error)))
+                      (or (:error end) worked-error) (assoc :seon.attempt/error (or (:error end) worked-error))
                       (seq (:waste end)) (assoc :seon.attempt/waste (:waste end))
                       (seq (:conflicts carried)) (assoc :seon.attempt/task-conflicts (:conflicts carried)))))
             (concat (:tx carried)
@@ -606,11 +579,11 @@
   "Attempt aid's death on main: the end its agent wrote on its branch before it exited (its
   reason, and its error as the cause), beside e, the death root observed (:seon.agent/died:
   exit status, stderr tail, last op; or :seon.root/no-agent). A silent death wrote no end."
-  {:malli/schema [:=> [:cat :seon.attempt/id :seon.error/base :map] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.attempt/id :seon.error/base [:maybe :map]] [:vector :any]]}
   [aid e end]
   (cas-tx aid :running :dead {:seon.attempt/end-ms (System/currentTimeMillis)
                               :seon.attempt/reason (if (:reason end) (str (:reason end) " (" (:seon.error/message e) ")") (:seon.error/message e))
-                              :seon.attempt/error (error-text (cond-> e (:error end) (assoc :cause (:error end))))}))
+                              :seon.attempt/error (cond-> e (:error end) (assoc :cause (:error end)))}))
 
 (defn- advance
   "Attempt aid's flight takes answer r of its step. Answers [st outputs]."
@@ -623,11 +596,17 @@
         ;; status, last op, stderr tail; or :seon.root/no-agent), and the end the agent wrote
         ;; on its branch before it exited, read from the branch
         dead (fn [st e] (one (request (assoc-in st [:flights aid :died] e) aid :dead-read
-                                      {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}})))]
+                                      {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}})))
+        ;; the writer refused to read or diff its branch: its agent is stopped and the attempt
+        ;; ends with the refusal as its error, not judged on facts nobody measured
+        refused (fn [st e] (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
+                                 [st o2] (write st aid :done (cas-tx aid :running :ended {:seon.attempt/end-ms (System/currentTimeMillis)
+                                                                                          :seon.attempt/reason (:seon.error/message e) :seon.attempt/error e}))]
+                             [st [o1 o2]]))]
     (case step
       :ignored [st []]
       :done (done st)
-      :dead-read (one (write st aid :done (dead-tx aid (:died f) (if (:db r) (pull-end (:db r) aid) {}))))
+      :dead-read (one (write st aid :done (dead-tx aid (:died f) (some-> (:db r) (pull-end aid)))))
       :spawned (if-let [ag (:id r)]
                  (one (write (assoc-in st [:flights aid :agent] ag) aid :started
                              (task/attempt-start-tx aid (:task act) (:boot st) ag (:env act) (System/currentTimeMillis)
@@ -640,7 +619,7 @@
                                 (-> (first (task/attempt-start-tx aid (:task act) (:boot st) nil (:env act) now
                                                                   (:plan (task/accumulate (get-in st [:idx :tasks]) (:task act)))))
                                     (assoc :seon.attempt/status :refused :seon.attempt/end-ms now
-                                           :seon.attempt/reason (:seon.error/message r) :seon.attempt/error (error-text r))))])))
+                                           :seon.attempt/reason (:seon.error/message r) :seon.attempt/error r)))])))
       ;; an outside agent works this attempt (seon.server): no turn loop; it hands it back
       :started (if (= "outside" (get-in act [:env :model]))
                  (done st)
@@ -651,8 +630,8 @@
       ;; the turn loop answered: died (no live agent), or judge it from measured facts
       ;; work! that threw was answered by the agent's REPL (the process lives): its error
       ;; names the attempt's end when the loop wrote none
-      :worked (if (= -1 (:id (first r)))
-                (dead st (:err (first r)))
+      :worked (if (contract/error? r)
+                (dead st r)
                 (one (request (cond-> st (= :err (:tag (first r))) (assoc-in [:flights aid :worked-error] (:err (first r))))
                               aid :tested {:op :tests :id agent})))
       :tested (if (contract/error? r)
@@ -661,13 +640,17 @@
                                   (assoc-in [:flights aid :run-problems] {:failures (proofs/failures r) :costs (proofs/costs r)}))
                               aid :read {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}})))
       ;; what the branch changed since its merge base (three-way's :ours), measured for the octopus merge
-      :read (one (request (assoc-in st [:flights aid :branch-db] r) aid :diffed
-                          {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}}))
+      :read (if (contract/error? r)
+              (refused st r)
+              (one (request (assoc-in st [:flights aid :branch-db] r) aid :diffed
+                            {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}})))
       ;; every attempt is a new agent: none is reused
       ;; root stops it because its attempt ended: its view says :ended, not :killed
-      :diffed (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
-                    [st o2] (write st aid :done (judge-tx st f (:results f) (:branch-db f) (into #{} (map sedn/encode) (:ours r))))]
-                [st [o1 o2]])
+      :diffed (if (contract/error? r)
+                (refused st r)
+                (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
+                      [st o2] (write st aid :done (judge-tx st f (:results f) (:branch-db f) r))]
+                  [st [o1 o2]]))
       ;; each member's answer, as one write: merged at the octopus merge's t, behind (its merge task
       ;; runs again, a new agent), or refused: a failed attempt like any other (a refinement
       ;; chain while the budget lasts, else stuck)
@@ -684,11 +667,11 @@
                                             (cond
                                               (:merged? r) (cas-tx attempt :ended :merged {:seon.attempt/merged-t (long (:tx r))})
                                               (= :seon.merge/behind (:seon.error/type r)) (cas-tx attempt :ended :behind {:seon.attempt/reason (:seon.error/message r)
-                                                                                                                          :seon.attempt/error (error-text r)})
+                                                                                                                          :seon.attempt/error r})
                                               (refine? (get-in st [:idx :tasks task]))
                                               (conj (tpl/attach-tx (:db st) {:attempt attempt :task task :problem problem})
-                                                    {:seon.attempt/id attempt :seon.attempt/error (error-text r)})
-                                              :else (into (cas-tx attempt :ended :bailed {:seon.attempt/error (error-text r)})
+                                                    {:seon.attempt/id attempt :seon.attempt/error r})
+                                              :else (into (cas-tx attempt :ended :bailed {:seon.attempt/error r})
                                                           (stuck-tx (:idx st) attempt task problem)))))
                                         (:members act) (:results r))))))
       :write-back (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))

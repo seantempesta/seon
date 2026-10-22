@@ -69,6 +69,21 @@
       (is (= (fid "f" "(inc x)") (:form (:ours c))))
       (is (= (fid "f" "(dec x)") (:form (:theirs c)))))))
 
+(deftest uncontracted-is-what-the-branch-changed
+  ;; one question for the writer's merge gate and root's judge: which functions the branch's
+  ;; own changes (a three-way's :ours) define without a contract
+  (let [ours {[:var 'app/f] [nil {:kind :fn}]
+              [:var 'app/g] [nil {:kind :fn :contract "[:=> [:cat] :int]"}]
+              [:var 'app/v] [nil {:kind :def}]
+              [:var 'app/e] [{:kind :fn} {:kind :fn}]}]
+    (is (= '[app/e app/f] (pm/uncontracted ours)))
+    (is (= [] (pm/uncontracted {}))))
+  (testing "over recorded programs: a branch that adds an uncontracted fn and edits a contracted one"
+    (let [u (fn [db] (program/record-tx db {:id "app/(defn u [x] x)" :src "(defn u [x] x)" :ns 'app :ns-form? false
+                                            :defs [{:var 'app/u :kind :fn}]
+                                            :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}}))]
+      (is (= '[app/u] (pm/uncontracted (:ours (tw (with (base) u (var-tx "f" "(inc x)")) (base)))))))))
+
 (deftest identical-defs-on-two-branches-merge-clean
   ;; one side makes an unrelated entity first, so app/n gets a different entity id on each
   (let [o (with (base) [{:note/text "scratch"}] (var-tx "n" "(* 2 x)"))

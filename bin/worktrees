@@ -27,13 +27,13 @@ show() {
     stores=$(du -sk "$wt/runs" "$wt/target/runs" "$wt/target/check-store" 2>/dev/null | awk '{s+=$1} END {printf "%dM", s/1024}')
     printf '%-22s %-22s %6s %-28s %5s %6s %8s %7s %8s\n' "${wt:t}" "${br:-detached}" "${ahead:-?}" "${root:-no root}" $n $cpu $rss $th "$stores"
   done
-  print -P "%B-- seon processes no checkout claims (orphans)%b"
+  print -P "%B-- seon processes no checkout claims (orphans; end one with its group, kill -9 -PGID, never a fork server by pid)%b"
   awk '/\.\/seon|bin\/root run/ && !/awk/ {print $1, $2, $4, $0}' /tmp/worktrees.$$ | while read pid ppid rss rest; do
     [[ $claimed == *" $pid "* ]] && continue
     cwd=$(lsof -a -p $pid -d cwd -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}')
     # bin/root's holder (parent 1 by design: it keeps a root's stdin open) is claimed while its root lives
     pgrep -P $pid -f '\./seon' >/dev/null && continue
-    [[ $ppid == 1 || ( -n $cwd && ! -d $cwd ) ]] && printf '  pid %s parent %s %dMB cwd %s\n' $pid $ppid $((rss/1024)) ${cwd:-?}
+    [[ $ppid == 1 || ( -n $cwd && ! -d $cwd ) ]] && printf '  pid %s parent %s group %s %dMB cwd %s\n' $pid $ppid $(ps -o pgid= -p $pid | tr -d ' ') $((rss/1024)) ${cwd:-?}
   done
   print -P "%B-- heaviest processes%b"
   sort -k3 -rn /tmp/worktrees.$$ | head -5 | awk '{printf "  pid %-6s %5s%% cpu %6d MB  %s\n", $1, $3, $4/1024, substr($0, index($0,$5), 90)}'

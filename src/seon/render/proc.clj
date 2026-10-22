@@ -368,6 +368,21 @@
   (cond-> (update st :new-events conj ev)
     (and (= :merged (:type ev)) (get-in ev [:result :merged?])) (update :merges (fnil inc 0))))
 
+(defn- web-answered
+  "The web proc's call (tag [:web var agent form?]) answered r: shown in the stream; root's
+  function (its form) recorded on main with this answer, as root's REPL records one."
+  {:malli/schema [:=> [:cat :map :seon.host/volatile [:vector :any] :any] :map]}
+  [st o [_ v agent form] r]
+  (let [err (:seon.error/message r)
+        ;; its text as the REPL answers it: the error's render, else the answer's (the
+        ;; stream's row cuts it to a cell, seon.render.ui/event-detail)
+        detail (if err (render/ai r {}) (:text (render/printed r nil)))]
+    (when form
+      (let [it (cond-> {:id 0 :tag (if err :err :ret) :form form :origin :ui :printed detail} err (assoc :err r))]
+        (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx :root (str "root-ui-" (profile/now-ns)) [it] nil)}}
+                              :route [:render :answers] :tag [:web-record]})))
+    (ask-state (on-event st {:type :ui :call (str v) :agent agent :at-ms (System/currentTimeMillis) :error err :detail detail}) o)))
+
 (defn- answered
   "The api's answer to request kind."
   {:malli/schema [:=> [:cat :map :seon.host/volatile :any :any] :map]}
@@ -388,12 +403,12 @@
                            st)))
                      st (filter keyword? (:watch st)))]
       (pass st o))
-    (= :main kind) (if (:ok r) (pass (main-info st (:db r)) o) st)
+    (= :main kind) (if (seon.contract/error? r) st (pass (main-info st (:db r)) o))
     ;; an agent's branch db; a branch that is gone (merged and removed) is recorded as such
     (and (vector? kind) (= :branch (first kind)))
     (let [z [:zoom (second kind)]
-          st (assoc-in st (conj z :db-error) (when-not (:ok r) (:seon.error/message r)))]
-      (pass (if (:ok r) (assoc-in st (conj z :db) (:db r)) st) o))
+          st (assoc-in st (conj z :db-error) (:seon.error/message r))]
+      (pass (if (seon.contract/error? r) st (assoc-in st (conj z :db) (:db r))) o))
     :else st))
 
 (defn render-proc
@@ -430,21 +445,12 @@
                              err (:seon.error/message r)]
                          (cond
                            kind (answered st' o kind r)
-                           ;; the web proc's calls ([:web var agent form?]) are answered here: shown in
-                           ;; the stream; root's function (its form) recorded on main with this answer
-                           (and (vector? (:tag m)) (= :web (first (:tag m))))
-                           (let [[_ v agent form] (:tag m)
-                                 ;; its text as the REPL answers it: the error's render, else the answer's
-                                 ;; (the stream's row cuts it to a cell, seon.render.ui/event-detail)
-                                 detail (if err (render/ai r {}) (:text (render/printed r nil)))]
-                             (when form
-                               (let [it (cond-> {:id 0 :tag (if err :err :ret) :form form :origin :ui :printed detail} err (assoc :err r))]
-                                 (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx :root (str "root-ui-" (profile/now-ns)) [it] nil)}}
-                                                       :route [:render :answers] :tag [:web-record]})))
-                             (ask-state (on-event st {:type :ui :call (str v) :agent agent :at-ms (System/currentTimeMillis) :error err :detail detail}) o))
+                           (and (vector? (:tag m)) (= :web (first (:tag m)))) (web-answered st o (:tag m) r)
                            :else st))
               :from-web (case (:op m)
                           :views (ask-state (assoc st :watch (:views m) :tabs (:tabs m)) o)
+                          ;; a UI call root refused before it became a request: answered as root's are
+                          :refused (web-answered st o (:tag m) (:r m))
                           :page (if (and (get-in st [:views (:view m)]) (contains? (:watch st) (:view m)))
                                   (do (step/out! o :to-web {:op :page :k (:k m) :view (:view m) :html (page-html st (:view m))}) st)
                                   (ask-state (assoc-in st [:waiting (:k m)] (:view m)) o))
