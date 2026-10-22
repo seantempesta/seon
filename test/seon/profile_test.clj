@@ -57,4 +57,4 @@
         (is (= "8955050" (:printed (first items))) (pr-str items))
         (is (= {'seon.profile-test/branch 1 'seon.profile-test/leaf 300}
                (into {} (map (juxt :var :calls)) fns)))
-        (is (re-find #":fns \[\{:var seon.profile-test/" (:seon.cluster.eval/record (first (repl/record-tx :a "r" items nil)))))))))
+        (is (= fns (:fns (:seon.cluster.eval/record (first (repl/record-tx :a "r" items nil))))))))))

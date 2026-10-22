@@ -154,7 +154,7 @@
   (let [died (contract/error :seon.agent/died 'seon.root/api-proc "agent a1 died: exit 70" {:agent :a1 :exit {:exit 70}})
         cause (contract/error :seon.agent/eval-error 'seon.repl/serve! "boom" {:class "clojure.lang.ExceptionInfo"})
         row (fn [tx] (first (filter #(and (map? %) (:seon.attempt/reason %)) tx)))
-        err (fn [tx] (clojure.edn/read-string (:seon.attempt/error (row tx))))]
+        err (fn [tx] (:seon.attempt/error (row tx)))]
     (testing "an end written before the death: its reason and cause, and the exit"
       (let [tx (#'r/dead-tx "demo/a#1" died {:outcome :error :reason "the agent's process died: boom" :error cause})]
         (is (= "the agent's process died: boom (agent a1 died: exit 70)" (:seon.attempt/reason (row tx))))
@@ -452,7 +452,7 @@
                                (r/stuck-tx (r/index (mdb [(decl "add") (decl "twice" :needs ["add"])])) "demo/add#1" "demo/add" "capped")))
         commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
         step (fn [st db ops] (let [[st outs] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns (sock/now-ns)})] [st (:to-api outs)]))
-        report-in (fn [outs] (some #(some-> (get-in % [:req :req :tx-data 0 :seon.root/quiescent]) clojure.edn/read-string) outs))
+        report-in (fn [outs] (some #(get-in % [:req :req :tx-data 0 :seon.root/quiescent]) outs))
         [st outs] (step (r/reconciler-proc {:boot "boot-1"}) db [])
         report (report-in outs)
         blocked ["demo/add-merge" "demo/twice" "demo/twice-merge"]]
@@ -460,7 +460,7 @@
       (is (empty? (:flights st)))
       (is (= {:t (:max-tx db) :stuck [{:task "demo/add" :cause "capped" :attempt "demo/add#1" :blocks blocked}]} report))
       (is (:quiet st)))
-    (let [[db2 ops2] (commit db [{:seon.root/id :root :seon.root/quiescent (pr-str report)}])
+    (let [[db2 ops2] (commit db [{:seon.root/id :root :seon.root/quiescent report}])
           [st2 outs2] (step st db2 ops2)]
       (testing "the report's own commit (root only) makes no second report; main holds it"
         (is (:quiet st2))

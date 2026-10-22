@@ -260,10 +260,10 @@
   inverse of `conflict-tx`): one decoder for a branch's entries and an attempt's evidence."
   {:malli/schema [:=> [:cat :any] :seon.merge/conflict]}
   [m]
-  (cond-> {:key (sedn/decode (:seon.merge/key m)) :kind (:seon.merge/kind m)}
-    (:seon.merge/base m) (assoc :base (sedn/decode (:seon.merge/base m)))
-    (:seon.merge/ours m) (assoc :ours (sedn/decode (:seon.merge/ours m)))
-    (:seon.merge/theirs m) (assoc :theirs (sedn/decode (:seon.merge/theirs m)))))
+  (cond-> {:key (:seon.merge/key m) :kind (:seon.merge/kind m)}
+    (:seon.merge/base m) (assoc :base (:seon.merge/base m))
+    (:seon.merge/ours m) (assoc :ours (:seon.merge/ours m))
+    (:seon.merge/theirs m) (assoc :theirs (:seon.merge/theirs m))))
 
 (defn entries
   "Every merge entry on db, as conflict values with :main-t and :resolved?."
@@ -279,17 +279,17 @@
   and an attempt's evidence alike."
   {:malli/schema [:=> [:cat :seon.merge/conflict] :map]}
   [{:keys [key kind base ours theirs]}]
-  (cond-> {:seon.merge/key (sedn/encode key) :seon.merge/kind kind}
-    base (assoc :seon.merge/base (sedn/encode base))
-    ours (assoc :seon.merge/ours (sedn/encode ours))
-    theirs (assoc :seon.merge/theirs (sedn/encode theirs))))
+  (cond-> {:seon.merge/key key :seon.merge/kind kind}
+    base (assoc :seon.merge/base base)
+    ours (assoc :seon.merge/ours ours)
+    theirs (assoc :seon.merge/theirs theirs)))
 
 (defn unmerged-tx
   "The branch's unmerged entries for conflicts, against main at t main-t: an earlier entry
   for the same key is replaced."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.merge/conflict] :int] :seon.db/tx-data]}
   [db conflicts main-t]
-  (let [ks (set (map (comp sedn/encode :key) conflicts))]
+  (let [ks (set (map :key conflicts))]
     (into (vec (for [e (entry-eids db)
                      :when (ks (:seon.merge/key (d/entity db e)))]
                  [:db/retractEntity e]))
@@ -307,5 +307,5 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key] :seon.db/tx-data]}
   [db k]
   (vec (for [e (entry-eids db)
-             :when (= (sedn/encode k) (:seon.merge/key (d/entity db e)))]
+             :when (= k (:seon.merge/key (d/entity db e)))]
          [:db/add e :seon.merge/resolved? true])))

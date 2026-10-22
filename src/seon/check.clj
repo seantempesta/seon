@@ -1030,8 +1030,7 @@
 (defn- eval-records
   "The evaluation records on db of agent id: [{:form :origin ...}]."
   [db id]
-  (mapv clojure.edn/read-string
-        (d/q '[:find [?r ...] :in $ ?id :where [?a :seon.agent/id ?id] [?e :seon.cluster.eval/agent ?a] [?e :seon.cluster.eval/record ?r]] db id)))
+  (vec (d/q '[:find [?r ...] :in $ ?id :where [?a :seon.agent/id ?id] [?e :seon.cluster.eval/agent ?a] [?e :seon.cluster.eval/record ?r]] db id)))
 
 (defn mcp-proof
   "The MCP phase's proof: an outside client (a separate process: target/seon mcp PORT, fed

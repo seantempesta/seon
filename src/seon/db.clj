@@ -69,7 +69,7 @@
                    :default-serializer :FaslSerializer}
             (= backend :lmdb) (assoc :lmdb {:flags MDB_NOSYNC :map-size (cfg/value :seon.config.store/lmdb-map-bytes)})
             ;; konserve's per-value compressor (its header names it, so stored values of either kind read)
-            (= :lz4 (cfg/value :seon.config.store/compressor)) (assoc-in [:config :compressor] {:type :lz4})
+            (#{:lz4 :zstd} (cfg/value :seon.config.store/compressor)) (assoc-in [:config :compressor] {:type (cfg/value :seon.config.store/compressor)})
             (= backend :file) (assoc :config {:defer-immutable-sync? true}))
    :schema-flexibility :write
    :writer writer-cfg
@@ -99,12 +99,23 @@
 
 (defn- install-missing!
   "Transact the attributes of `schema` the db under conn lacks, in one transaction, and
-  answer how many: a kept store seeded before an attribute existed gains it when a root
+  answer how many (an attribute it holds as another value type is refused, :seon.db/types-differ:
+  a value type is fixed once installed): a kept store seeded before an attribute existed gains it when a root
   opens it (Datahike accepts new attribute definitions at any time). Nothing missing
   writes nothing."
   {:malli/schema [:=> [:cat :seon.host/conn] :int]}
   [conn]
   (let [have (d/schema @conn)
+        differ (into {} (for [{k :db/ident t :db/valueType} schema
+                              :let [stored (get-in have [k :db/valueType])]
+                              :when (and stored (not= stored t))]
+                          [k {:stored stored :declared t}]))
+        _ (when (seq differ)
+            (let [e (contract/error :seon.db/types-differ 'seon.db/open!
+                                    (str "the store holds " (count differ) " attributes as another value type than the schema declares: " (pr-str (keys differ)))
+                                    {:seon.db/attributes differ
+                                     :seon.error/fix "An attribute's value type is fixed once installed: open a store made with this schema (a fresh one), or keep running the build that made this store."})]
+              (throw (ex-info (:seon.error/message e) e))))
         missing (vec (remove #(contains? have (:db/ident %)) schema))]
     (when (seq missing) (d/transact conn {:tx-data missing}))
     (count missing)))

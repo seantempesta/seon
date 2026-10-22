@@ -2,9 +2,9 @@
   "One store, many branches, as in production (owner, 2026-10-21): bin/test seeds one test
   store and each test takes a branch of it through one helper (seon.db/test-branch!)."
   (:require [clojure.test :refer [deftest is testing]]
-            [clojure.java.shell] [clojure.java.io] [clojure.string] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
+            [clojure.java.shell] [clojure.java.io] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.config :as cfg] [seon.contract :as contract] [seon.edn]
-            [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.core :as k] [hasch.core] [datahike.gc]))
+            [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
@@ -151,6 +151,23 @@
         (some-> (:conn r) d/release))
       (finally (clojure.java.shell/sh "rm" "-rf" base moved)))))
 
+(deftest a-kept-store-whose-types-differ-is-refused
+  ;; an attribute's value type is fixed once installed (Datahike refuses to alter it), so a
+  ;; kept store holding an attribute as another type than the schema declares (the EDN-text
+  ;; attributes before they became plain data, 2026-10-22) is refused at open, naming each such
+  ;; attribute: never opened to fail at its first write. A store on disk of this test's own,
+  ;; the last resort: what is proved is a root's open of a kept store; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-types-" (random-uuid))
+        made (pdb/made-cfg (pdb/store-cfg :lmdb path))
+        old (mapv #(if (= :seon.turn/basis (:db/ident %)) (assoc % :db/valueType :db.type/string) %) pdb/schema)]
+    (try
+      (d/create-database made)
+      (let [c0 (d/connect made)] (d/transact c0 {:tx-data old}) (d/release c0))
+      (let [r (try (pdb/open! :lmdb path 0 :db) (catch Exception e (ex-data e)))]
+        (is (= :seon.db/types-differ (:seon.error/type r)) (pr-str r))
+        (is (= {:seon.turn/basis {:stored :db.type/string :declared :db.type/data}} (:seon.db/attributes r))))
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
 ;; ---- history (task seon.db/history-is-kept: v1's ruling 23, Datahike's default) --------------
 
 (deftest the-store-keeps-history
@@ -216,11 +233,11 @@
   than real turn text and made LZ4 look like the fix (2026-10-22)."
   [k]
   [{:seon.turn/id (str "att/" k) :seon.turn/attempt "att" :seon.turn/n k :seon.turn/origin :model
-    :seon.turn/basis (seon.edn/encode {:commit (random-uuid) :task "t/x" :attempt "att" :turn k :max-turns 8 :origin :model
+    :seon.turn/basis {:commit (random-uuid) :task "t/x" :attempt "att" :turn k :max-turns 8 :origin :model
                                        :observed {:results {'t-test/x :fail} :run-errors [] :refusals [{:refusal :proof-red :symbol 't-test/x}]
-                                                  :reds [{:test 't-test/x :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))"}]}})
+                                                  :reds [{:test 't-test/x :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))"}]}}
     :seon.turn/reply (slice @prose k 1500)
-    :seon.turn/calls (seon.edn/encode [{:id "call-0" :code "(f 2)" :evals (slice @code k 2000)}])}])
+    :seon.turn/calls [{:id "call-0" :code "(f 2)" :evals (slice @code k 2000)}]}])
 
 (defn- write-turns!
   "Bytes the store at path gains when branch b gets n turns through the agent's run-ahead
@@ -238,17 +255,19 @@
 
 ;; ---- node compression (task seon.db/nodes-compress: :seon.config.store/compressor) ----------
 
-(deftest nodes-compress-through-the-lz4-the-build-made
-  ;; the store's nodes are LZ4 frames through the liblz4 bin/build makes from Chez's vendored
-  ;; lz4 (target/lib/liblz4.dylib, bin/env's JOLT_LZ4_LIB), never a system library; a frame
-  ;; round-trips, and real text (the checkout's docs) compresses
-  (is (= (str (cfg/checkout) "/target/lib/liblz4.dylib") konserve.jolt.lz4/lib-path))
-  (let [text (.getBytes ^String (slice @prose 0 65536) "UTF-8")
-        frame (konserve.jolt.lz4/compress text)]
-    (is (= (seq text) (seq (konserve.jolt.lz4/decompress frame))) "a frame round-trips")
-    (is (< (alength frame) (/ (alength text) 1.5)) (str "64 KiB of docs compress to " (alength frame) " bytes"))))
-
-;; ---- values out of line (task seon.db/values-out-of-line: :seon.config.store/value-out-of-line-bytes) ----
+(deftest stored-values-compress-through-the-codecs-the-build-made
+  ;; the store's values are zstd frames (the default) or LZ4 frames, through the libzstd and
+  ;; liblz4 bin/build makes from their pinned sources (reference-code/zstd; Chez's vendored
+  ;; lz4), target/lib, bin/env's JOLT_ZSTD_LIB and JOLT_LZ4_LIB, never a system library; a
+  ;; frame round-trips, and real text (the checkout's docs) compresses
+  (let [text (.getBytes ^String (slice @prose 0 65536) "UTF-8")]
+    (doseq [[lib compress decompress] [[konserve.jolt.zstd/lib-path konserve.jolt.zstd/compress konserve.jolt.zstd/decompress]
+                                       [konserve.jolt.lz4/lib-path konserve.jolt.lz4/compress konserve.jolt.lz4/decompress]]]
+      (is (str/starts-with? lib (str (cfg/checkout) "/target/lib/")) lib)
+      (let [frame (compress text)]
+        (is (= (seq text) (seq (decompress frame))) (str lib ": a frame round-trips"))
+        (is (< (alength frame) (/ (alength text) 1.5)) (str lib ": 64 KiB of docs compress to " (alength frame) " bytes"))))
+    (is (= :zstd (cfg/value :seon.config.store/compressor)) "the store's default codec")))
 
 (deftest a-large-value-lives-once-under-its-own-key
   ;; a value past :seon.config.store/value-out-of-line-bytes is stored once under its content

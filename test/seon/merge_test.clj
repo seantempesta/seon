@@ -100,7 +100,7 @@
 
 (deftest scratch-and-observations-never-merge
   (let [ours (with (base) [{:note/text "scratch" :note/agent :a1}
-                         {:seon.cluster.eval/id "r/1" :seon.cluster.eval/record "{:tag :ret :form \"(+ 1 2)\"}"}
+                         {:seon.cluster.eval/id "r/1" :seon.cluster.eval/record {:tag :ret :form "(+ 1 2)"}}
                          {:seon.agent/id :a1 :seon.agent/answered-t 7}
                          {:task/name :x/y :task/status :done}])]
     (is (= (pm/program (base) #{}) (pm/program ours #{})))
@@ -144,7 +144,7 @@
   ;; root's records on main (boot, quiescence, recorded errors) are platform records: with
   ;; all data merged (the writer's :all) they change no key a branch carries; the task
   ;; content an agent may improve (my.task/update!) is carried
-  (let [rooted (with (base) [{:seon.root/id :root :seon.root/quiescent "{:t 9 :stuck []}"}])
+  (let [rooted (with (base) [{:seon.root/id :root :seon.root/quiescent {:t 9 :stuck []}}])
         tasked (with (base) [{:seon.task/id "t/x" :seon.task/plan "better"}])
         p #(pm/program % :all)]
     (is (empty? (:theirs (pm/three-way (p (base)) (p (base)) (p rooted)))))

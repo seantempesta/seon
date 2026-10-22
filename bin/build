@@ -2,10 +2,10 @@
 # bin/build — the runtime from the pinned sources: Chez (our fork) -> Jolt (our fork)
 # -> target/hello (a binary that requires Datahike and opens an in-memory db), then
 # target/lib/libprobe.dylib (native/probe.c), target/lib/liblmdb.dylib (LMDB, robust locks),
-# target/lib/liblz4.dylib (lz4, the store's node compressor) and target/seon (the platform, -main seon.check).
+# target/lib/liblz4.dylib and target/lib/libzstd.dylib (the store's compressors) and target/seon (the platform, -main seon.check).
 #
 #   bin/build            every step; chez and jolt are skipped when their output matches their pin
-#   bin/build chez|jolt|hello|native|lmdb|lz4|seon   one step (and the steps before it when their output is missing)
+#   bin/build chez|jolt|hello|native|lmdb|lz4|zstd|seon   one step (and the steps before it when their output is missing)
 #   BUILD_FORCE=1 bin/build     rebuild every step
 #
 # Everything is written under target/; nothing is installed outside it. Dependency
@@ -135,6 +135,23 @@ build_lz4() {
   echo "$pin" > "$T/lz4.stamp"
 }
 
+# libzstd (konserve.jolt.zstd: the store's compressor, :seon.config.store/compressor :zstd) from
+# reference-code/zstd, the official repository pinned as a submodule (owner, 2026-10-22: zstd
+# for stored values, a trained dictionary once a representative corpus exists, so dictBuilder
+# is built too). Plain C, no assembly, single-threaded: one value is compressed at a time.
+ZSTD_SRC=$RC/zstd/lib
+build_zstd() {
+  [ -f "$ZSTD_SRC/zstd.h" ] || die "missing zstd source at $ZSTD_SRC (the reference-code/zstd submodule)"
+  pin="$(git -C "$RC/zstd" rev-parse HEAD)"
+  if fresh zstd "$pin" && [ -f "$T/lib/libzstd.dylib" ]; then say "zstd up to date ($pin)"; return; fi
+  mkdir -p "$T/lib"
+  say "zstd: $ZSTD_SRC at $pin -> target/lib/libzstd.dylib"
+  cc -shared -O3 -DZSTD_DISABLE_ASM -I"$ZSTD_SRC" -I"$ZSTD_SRC/common" -install_name @rpath/libzstd.dylib -o "$T/lib/libzstd.dylib" \
+    "$ZSTD_SRC"/common/*.c "$ZSTD_SRC"/compress/*.c "$ZSTD_SRC"/decompress/*.c "$ZSTD_SRC"/dictBuilder/*.c > "$T/zstd-build.log" 2>&1 ||
+    die "zstd build failed; see target/zstd-build.log"
+  echo "$pin" > "$T/zstd.stamp"
+}
+
 build_seon() {
   [ -x "$JOLT" ] || build_jolt
   [ -f "$T/lib/libprobe.dylib" ] || build_native
@@ -142,6 +159,7 @@ build_seon() {
   # generation's worktree (seon.fx/build) holds its checkout's build, not ../vendor-c
   [ -f "$T/lib/liblmdb.dylib" ] || build_lmdb
   [ -f "$T/lib/liblz4.dylib" ] || build_lz4
+  [ -f "$T/lib/libzstd.dylib" ] || build_zstd
   # the shared compile caches (bin/env): a schema file seon.contract reads, or one added to the
   # directory it lists, moves the key of every namespace compiled against it
   . "$ROOT/bin/env"
@@ -159,7 +177,8 @@ case $STEP in
   native) build_native ;;
   lmdb) build_lmdb ;;
   lz4) build_lz4 ;;
+  zstd) build_zstd ;;
   seon) build_seon ;;
-  all) build_chez; build_jolt; build_hello; build_native; build_lmdb; build_lz4; build_seon ;;
-  *) die "unknown step $STEP (chez | jolt | hello | native | lmdb | lz4 | seon | all)" ;;
+  all) build_chez; build_jolt; build_hello; build_native; build_lmdb; build_lz4; build_zstd; build_seon ;;
+  *) die "unknown step $STEP (chez | jolt | hello | native | lmdb | lz4 | zstd | seon | all)" ;;
 esac

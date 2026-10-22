@@ -109,11 +109,15 @@
  ;; Provenance: measured 2026-10-22 on seon.db-test/a-commit-costs-what-it-writes
  ;; (docs/storage.md#values-out-of-line); v1 kept values up to 4,096 bytes inline (seon.blob).
  :seon.config.store/value-out-of-line-bytes 1024
- ;; Codec: konserve's per-value compressor, LZ4 frames through liblz4 (konserve.jolt.lz4).
- ;; Provenance: measured 2026-10-22 on 190 index nodes that 20 per-turn commits of real turn
- ;; text wrote (2,544 KB): LZ4 1,178 KB (2.2x less); compressing the 12.7 MB five times took
- ;; 15.9 ms and decompressing 7.5 ms (about 800 MB/s and 1.7 GB/s), against a commit's ~5 ms fsync.
- :seon.config.store/compressor :lz4
+ ;; Codec: konserve's per-value compressor for every stored value (index nodes, values out of
+ ;; line, commits): zstd frames at level 3 through libzstd (konserve.jolt.zstd, built from
+ ;; reference-code/zstd), :lz4 frames (liblz4), or :none; a value's header names its codec, so a
+ ;; store holding several reads them all. Provenance, 2026-10-22: on 5,006 real eval records
+ ;; compressed one by one, zstd-3 2.05x against LZ4 1.49x (replies 2.16x vs 1.56x); on
+ ;; seon.db-test/a-commit-costs-what-it-writes, 20 per-turn commits 194 KB vs LZ4's 233 KB at the
+ ;; same ~1.9 ms a commit. A trained dictionary (7.3x on the records) waits for a representative
+ ;; corpus (owner, 2026-10-22).
+ :seon.config.store/compressor :zstd
 
  ;; ==== agents =================================================================================
 

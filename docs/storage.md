@@ -25,11 +25,20 @@ Cost, measured 2026-10-22:
 - Appended turns: the same with history on or off (20 turns: 1,598 vs 1,674 KB uncompressed). Datahike's temporal indexes hold only replaced and retracted datoms, and a turn only adds.
 - Replacing one cardinality-one value: 13.5 → 20.7 KB per commit (1.5×), because the commit also writes a path in the temporal `:eavt` and `:aevt`. LZ4: 9.4 → 14.5 KB.
 
-## Node compression
+## Compression
 
-When `:seon.config.store/compressor` is `:lz4` (the default), konserve stores every value (index nodes and commits) as an LZ4 frame, and the value's header names its compressor, so a store holding both kinds reads them all. The codec is `konserve.jolt.lz4`, liblz4's frame API over `jolt.ffi`, in the [konserve fork](forks.md). Its library is built from source, never taken from the system: `bin/build lz4` compiles the lz4 that Chez itself vendors (`reference-code/chez/lz4`, 1.10.0 at Chez's pin) into `target/lib/liblz4.dylib`, and `bin/env` exports `JOLT_LZ4_LIB`, as it does for LMDB (`bin/build lmdb`). Proof: `seon.db-test/nodes-compress-through-the-lz4-the-build-made`.
+konserve compresses every stored value (index nodes, values out of line, commits) with the codec `:seon.config.store/compressor` names: `:zstd` (the default), `:lz4` or `:none`. Each value's header names its codec, so a store holding several kinds reads them all. The codecs are `konserve.jolt.zstd` (libzstd's simple API, one frame per value at level 3) and `konserve.jolt.lz4` (liblz4's frame API), both over `jolt.ffi` in the [konserve fork](forks.md). Their libraries are built from pinned source, never taken from the system: `bin/build zstd` compiles `reference-code/zstd` (the official repository, a submodule at v1.5.7) and `bin/build lz4` the lz4 Chez itself vendors (`reference-code/chez/lz4`), into `target/lib`. `bin/env` exports `JOLT_ZSTD_LIB` and `JOLT_LZ4_LIB`, as it does for LMDB. Proof: `seon.db-test/stored-values-compress-through-the-codecs-the-build-made`.
 
-Measured 2026-10-22 on the checkout's own src and docs: ratio 1.41 at 4 KB, 1.65 at 64 KB, 2.10 at 1.1 MB. It compresses at 600–800 MB/s and decompresses at 1.8–1.9 GB/s, the same order as Homebrew's build of the same version. That is well under a commit's ~5 ms fsync. On the proof's workload, LZ4 alone takes per-turn commits from 1,485 to 862 KB (1.7×), which still fails the bound: the values have to leave the leaf.
+Measured 2026-10-22 on data from the standing root's kept runs, each value compressed by itself as the store does:
+
+| data (median size) | LZ4 | zstd-3 | zstd-19 | zstd-3 with a trained dictionary |
+|---|---|---|---|---|
+| model replies (0.4 KB) | 1.56× | 2.16× | 2.23× | 4.17× |
+| eval records (0.5 KB) | 1.49× | 2.05× | 2.13× | 7.29× |
+| source forms (0.5 KB) | 1.45× | 2.02× | 2.08× | 2.92× |
+| task plans (0.2 KB) | 1.24× | 1.74× | 1.78× | 2.94× |
+
+On 0.9 KB records, zstd-3 compresses at ~260 MB/s and decompresses at ~580 MB/s (LZ4: 1,330 and 7,550 MB/s). A 2 KB value takes 1–3 µs either way, well under a commit's fsync. On the proof's workload with values out of line, zstd writes 194 KB per 20 per-turn commits, against 233 KB with LZ4, at the same ~1.9 ms a commit. A dictionary trained on our own values compresses small ones 2–5× better, and is faster too. It waits until we have a corpus that represents the running system (owner, 2026-10-22); it would live in the store under its content key, named by each frame.
 
 ## Values out of line
 
@@ -41,5 +50,11 @@ A datom value at least `:seon.config.store/value-out-of-line-bytes` large (1,024
 The size is a lower bound of the value's serialized size: a string's characters, a collection's elements. Hashing a 2 KB value and asking the store for it each cost about 15–18 µs on Jolt, and a commit rewrites the tail nodes with every large value in them. So the key of a value known to be stored (read back, or found by the store) is kept in the node cache under its datom, whose hash the datom caches. A value only queued for writing is not kept there, so a commit that fails before the write leaves no reference to a value the store lacks. Stored nodes describe themselves, so a store holding both kinds reads either, whatever the dial says now. Proof: `seon.db-test/a-large-value-lives-once-under-its-own-key`.
 
 Thresholds measured at 20 turns with LZ4: 4,096 B moves nothing (a turn's values are 1.5–2.5 KB) and costs 862 KB per turn; 1,024 B costs 237 KB; 256 B costs 223 KB (it also moves the basis, ~400 B). 1,024 is the default: it takes nearly all the gain, and every value it moves is its own LMDB key.
+
+## Plain values
+
+A value that is plain data (a map, vector, set or list of strings, numbers, keywords, symbols, uuids and instants) is stored as data: its attribute is `:db.type/data` in [our Datahike](forks.md), and the store's serializer (jfasl) writes it with no text in between. Seon marks such an attribute `{:seon.db/data true}` on its schema (```seon.schema.datahike/declaration```): a turn's basis, calls and split, a task's evidence, an attempt's failures and errors, the config's maps, merge entries. `datahike.datom/compare-value` gives plain data a total order consistent with `=`, so such values sit in an index like any other. A kept store that holds an attribute as another value type is refused at open with `:seon.db/types-differ`, naming the attributes, because a value type is fixed once installed. Proofs: `seon.db-test/a-kept-store-whose-types-differ-is-refused`, and every test that writes these attributes.
+
+Measured on 5,006 real eval records: jfasl is the same size as EDN text (4.65 vs 4.67 MB). A record reads in 1.3 µs instead of 11 µs and writes in 1.6 µs instead of 14.4 µs, and instants, uuids and keywords come back as themselves. It compresses about 10% less well than EDN text without a dictionary (zstd-3: 1.84× vs 2.05×), 4% less with one.
 
 Related: [source](source.md) (merges read a branch's history by commit), [DRAGONS](DRAGONS.md).

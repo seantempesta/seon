@@ -211,7 +211,7 @@
                   :refusals [{:refusal :proof-red :symbol 'demo-test/f-test} {:refusal :contract-gap :symbol 'demo/helper}]}
         basis (fn [db n] {:commit (d/commit-id db) :task "demo/f" :attempt "demo/f#1" :turn n :max-turns 4 :origin :model :observed observed})
         record! (fn [b more] (d/transact conn [(merge {:seon.turn/id (str "demo/f#1/" (:turn b)) :seon.turn/attempt "demo/f#1"
-                                                       :seon.turn/n (:turn b) :seon.turn/origin :model :seon.turn/basis (seon.edn/encode b)
+                                                       :seon.turn/n (:turn b) :seon.turn/origin :model :seon.turn/basis b
                                                        :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1 :seon.turn/tokens 1}
                                                       more)]))
         ;; turn 0: what the model was sent, the old way
@@ -221,7 +221,7 @@
         code0 "(defn f [x] (* 3 x)"
         evals0 (context/evaluations-text [{:id 0 :tag :ret :form "(defn f [x] (* 3 x))" :printed "#'demo/f"}])
         calls0 [{:id "call-0" :code code0 :evals evals0}]
-        _ (record! b0 {:seon.turn/reply "f triples." :seon.turn/calls (seon.edn/encode calls0) :seon.turn/truncated true})
+        _ (record! b0 {:seon.turn/reply "f triples." :seon.turn/calls calls0 :seon.turn/truncated true})
         ;; the reply changed the program: turn 0's text must come from its own commit
         _ (d/transact conn (program "(defn f \"Triples.\" [x] (* 3 x))"))
         db1 @conn
@@ -230,7 +230,7 @@
         sent1 (:content (peek (context/messages (context/current-state db1 (task/task db1 "demo/f")
                                                                        (assoc observed :turn 1 :max-turns 4 :truncated? true :source text :repairs repairs))
                                                 [{:reply "f triples." :calls calls0 :context sent0}])))
-        _ (record! b1 {:seon.turn/reply "" :seon.turn/calls (seon.edn/encode [{:id "call-1" :code "(my.turn/wait)" :evals ""}])})
+        _ (record! b1 {:seon.turn/reply "" :seon.turn/calls [{:id "call-1" :code "(my.turn/wait)" :evals ""}]})
         _ (d/transact conn (program "(defn f \"Later.\" [x] x)"))
         db @conn
         e-of (fn [id] (d/q '[:find ?e . :in $ ?id :where [?e :seon.turn/id ?id]] db id))]

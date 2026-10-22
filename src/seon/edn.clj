@@ -1,6 +1,7 @@
 (ns seon.edn
-  "The EDN text codec of a `{:seon.db/edn true}` attribute: the text a value is stored as and
-  the value read back. It requires no Seon namespace, so seon.error, seon.config and
+  "The EDN text codec: the text a value is printed as where text is wanted (a form's
+  contract, a schema's source, a stable sort key) and the value read back. A stored value
+  is plain data (`{:seon.db/data true}`), not this text. It requires no Seon namespace, so seon.error, seon.config and
   seon.contract (which load first) use it like every other caller; its two functions carry
   their schemas as metadata, armed at boot."
   (:require [clojure.edn :as edn]))

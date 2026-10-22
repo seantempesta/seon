@@ -142,10 +142,10 @@
           read-failure? (and (= 2 (count sq-turns))
                              (str/includes? (second (second sq-turns)) ":assert \"(= 9 (app.calc/square 3))\"")
                              (str/includes? (second (second sq-turns)) ":got \"(= 9 0)\"")
-                             (every? #(every? (set (keys (edn/read-string (nth % 2)))) [:tests-ms :context-ms :model-ms :eval-ms :record-ms]) sq-turns))]
+                             (every? #(every? (set (keys (nth % 2))) [:tests-ms :context-ms :model-ms :eval-ms :record-ms]) sq-turns))]
       (println :done-all? done? :abs-blocked-by blocked :agents-reused reused :fresh-agent fresh-r
                :square-turns (count sq-turns) :square-read-its-failure? read-failure?
-               :square-splits (mapv #(edn/read-string (nth % 2)) sq-turns))
+               :square-splits (mapv #(nth % 2) sq-turns))
       (when-not read-failure? (println :square-second-context (second (second sq-turns))))
       (doseq [[id s] (summary (db sys))] (println :task id s))
       (println :numbers (numbers sys t0))
@@ -265,7 +265,7 @@
         cloned (sh/sh "git" "clone" "-q" "--local" repo tree)
         head (git "rev-parse" "HEAD")
         sys (c/start! {:datoms 300 :max-running 2 :source {:root tree :dirs ["src"] :branch "jolt/seon-merges"}})
-        src (some-> (d/q '[:find ?s . :where [?e :seon.root/source ?s]] (db sys)) read-string)]
+        src (d/q '[:find ?s . :where [?e :seon.root/source ?s]] (db sys))]
     (println :clone (:exit cloned) tree :head head)
     (println :source src)
     (let [{:keys [commits commit-errors turn-ms spans root agent] sha :commit} (loop-turn! sys)

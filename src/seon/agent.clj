@@ -250,8 +250,8 @@
                 turns (assoc :seon.end/turns turns)
                 tokens (assoc :seon.end/tokens tokens)
                 reason (assoc :seon.end/reason reason)
-                error (assoc :seon.end/error (pr-str error))
-                (seq waste) (assoc :seon.end/waste (pr-str waste)))])
+                error (assoc :seon.end/error error)
+                (seq waste) (assoc :seon.end/waste waste))])
   (commit!))
 
 (defn died!

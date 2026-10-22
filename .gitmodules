@@ -37,3 +37,7 @@
 [submodule "reference-code/awesome-jolt"]
 	path = reference-code/awesome-jolt
 	url = https://github.com/jlt-commons/awesome-jolt
+[submodule "reference-code/zstd"]
+	path = reference-code/zstd
+	url = https://github.com/facebook/zstd.git
+	ignore = dirty

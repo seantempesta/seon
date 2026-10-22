@@ -551,7 +551,7 @@
         fact (cond-> {:root root :files (count (:value r)) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (lib/ms-since t0)}
                (contract/error? r) (assoc :error (:seon.error/message r))
                (and w (not (:ok w))) (assoc :error (:seon.error/message w)))]
-    @(call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/source (pr-str fact)}]}})
+    @(call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/source fact}]}})
     fact))
 
 (defn start!

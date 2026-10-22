@@ -6,6 +6,8 @@
  :seon.agent/eval-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/eval-error]]
                                                 [:class :string] [:data {:optional true} :string] [:phase {:optional true} :keyword]
                                                 [:causes {:optional true} [:vector :string]]]]
+ :seon.db/types-differ [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/types-differ]]
+                                                [:seon.db/attributes [:map-of :qualified-keyword [:map [:stored :keyword] [:declared :keyword]]]]]]
  :seon.db/lease-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/lease-spent]]
                                               [:lease :int] [:ceiling :int] [:entity-id {:optional true} [:maybe :int]]]]
  :seon.root/no-agent [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-agent]] [:agent {:optional true} [:maybe :keyword]]]]
@@ -56,7 +58,7 @@
  :seon.error/last-task :string
  :seon.error/form :string
  ;; the first occurrence's error map, as EDN
- :seon.error/example [:map {:seon.db/edn true}]
+ :seon.error/example [:map {:seon.db/data true}]
  :seon.error/recorded-fact [:map {:seon.db/attributes true}
                             [:seon.error/signature :seon.error/signature] [:seon.error/class :seon.error/class]
                             [:seon.error/count :seon.error/count] [:seon.error/agents :seon.error/agents]
@@ -83,7 +85,7 @@
 
  ;; ---- problem members of an attempt's end (main; the judge writes them) and of the agent's end (branch) ----
  ;; the error that ended the attempt: the agent's death, the turn loop's error, a merge refusal
- :seon.attempt/error [:map {:seon.db/edn true}]
+ :seon.attempt/error [:map {:seon.db/data true}]
  ;; failing assertions per red test (at most 8 each, printed by seon.print under :part)
  :seon.problems/assertion [:map [:type [:enum :fail :error]] [:message {:optional true} [:maybe :string]]
                            [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]]
@@ -95,15 +97,15 @@
                     ;; a run stopped by its tick budget: the typed error, on the test that was running
                     [:seon.error/type {:optional true} :qualified-keyword] [:ticks {:optional true} :int] [:budget {:optional true} :int]
                     [:cost {:optional true} :seon.cost/report]]
- :seon.attempt/failures [:map-of {:seon.db/edn true} :qualified-symbol [:vector :seon.problems/assertion]]
+ :seon.attempt/failures [:map-of {:seon.db/data true} :qualified-symbol [:vector :seon.problems/assertion]]
  ;; a cost proof's measured rows and verdict per test (seon.cost/proof's report)
  :seon.cost/report [:map [:rows [:vector :seon.cost/row]] [:verdict :seon.cost/verdict]]
- :seon.attempt/costs [:map-of {:seon.db/edn true} :qualified-symbol :seon.cost/report]
+ :seon.attempt/costs [:map-of {:seon.db/data true} :qualified-symbol :seon.cost/report]
  ;; waste charged to the producer of what the agent was shown (R4, census idea 14)
- :seon.learn/waste [:map-of {:seon.db/edn true} :any [:map [:forms :int] [:turns :int]]]
+ :seon.learn/waste [:map-of {:seon.db/data true} :any [:map [:forms :int] [:turns :int]]]
  :seon.attempt/waste :seon.learn/waste
  :seon.end/waste :seon.learn/waste
- :seon.end/error [:map {:seon.db/edn true}]
+ :seon.end/error [:map {:seon.db/data true}]
  :seon.fx/error-type :qualified-keyword
  :seon.problems/attempt-fact [:map {:seon.db/attributes true}
                               [:seon.attempt/error {:optional true} :seon.attempt/error]
