@@ -3,6 +3,7 @@
 # on the runtime bin/build made (target/jolt/jolt), with dependencies cached in target/home.
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+"$ROOT/bin/ports" --write   # the port keys under their current names (bin/ports)
 JOLT=$ROOT/target/jolt/jolt
 [ -x "$JOLT" ] || { echo "test: no target/jolt/jolt; run bin/build jolt first" >&2; exit 1; }
 . "$ROOT/bin/env"

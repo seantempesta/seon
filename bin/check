@@ -23,6 +23,7 @@
 # seon.db/delete-main!): a green step's branches when the run ends, a failed step's at that
 # step's next run. Only logs stay, in target/check/<time>/.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+"$ROOT/bin/ports" --write   # the port keys under their current names (bin/ports)
 # a full run is niced; full runs from different worktrees run in parallel (no lock: each
 # uses its own stores under its run directory and kernel-assigned ports; owner, 2026-10-21)
 if [[ -z ${SEON_CHECK_NICED:-} && ( -z ${1:-} || ${1} =~ ^[0-9]+$ ) ]]; then

@@ -1,6 +1,8 @@
 #!/bin/zsh
 # bin/ports [FILE]   this checkout's own ports, "SERVER WEB", as its config resolves them
 # (:seon.config.root/server-port, :seon.config.web/port; `seon ports`).
+# bin/ports --write   only (re)write the port keys of an existing config/local.edn, booting
+# nothing: what bin/build, bin/test and bin/check run first, since their config reads the file.
 #
 # The ports live in the checkout's own config layer, config/local.edn (gitignored, or FILE): the
 # main tree (next/) gets 7888 7777, the owner's; each worktree (next-NAME) its own block K from
@@ -12,7 +14,9 @@
 # Edit the numbers to move this checkout's ports; this reads what the config resolves.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 NAME=${ROOT:t}
+WRITE=; [[ ${1:-} == --write ]] && { WRITE=1; shift }
 LOCAL=${1:-$ROOT/config/local.edn}
+[[ -n $WRITE && ! -f $LOCAL ]] && exit 0
 port_of() { [[ -f $LOCAL ]] && sed -nE "s#.*$1 .*[^0-9]([0-9]+)\].*#\1#p" "$LOCAL" | head -1 }
 E=$(port_of ':seon\.config\.root/server-port'); E=${E:-$(port_of ':seon\.config\.root/entrance-port')}
 W=$(port_of ':seon\.config\.web/port')
@@ -56,7 +60,10 @@ mkdir -p "${LOCAL:h}"
   print -n " :seon.config.web/port #long #or [#env SEON_WEB_PORT $W]"
   for o in $others; do print; print -n "$o"; done
   print "}"
-} > "$LOCAL.new" && mv "$LOCAL.new" "$LOCAL"
+} > "$LOCAL.new"
+# written only when it changes (nothing changed, nothing done)
+if cmp -s "$LOCAL.new" "$LOCAL"; then rm -f "$LOCAL.new"; else mv "$LOCAL.new" "$LOCAL"; fi
+[[ -n $WRITE ]] && exit 0
 . "$ROOT/bin/env"
 layer=(); [[ -n ${1:-} ]] && layer=(--config "$LOCAL")
 cd "$ROOT/target" && exec ./seon ports $layer
