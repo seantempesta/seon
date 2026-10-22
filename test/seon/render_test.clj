@@ -513,7 +513,7 @@
                                           :red {:n 0 :rows []}}}
                 {:seon.render/schema :seon.problems/report})
           text (:text (r/printed rep 'result/h1))]
-      (is (= ["problems recorded on main at t 90" "# failed 1" "- failed calc/add: not total" "# budget spent 1" "- budget spent calc/sub: held (closed)"
+      (is (= ["problems recorded on main at t 90" "# budget spent 1" "- budget spent calc/sub: held (closed)" "# failed 1" "- failed calc/add: not total"
               "the whole value as data: (with-meta result/h1 nil)"]
              (str/split-lines text))))))
 
