@@ -46,7 +46,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **contract** | a function's `:malli/schema`, checked from its definition on (inputs, arity, output) | `seon.contract/defn` |
 | **registry** | the named schemas, data in `resources/seon/schemas/*.edn` | `seon.contract/registry` |
 | **invalid** (was refusal) | a contract's failure, explained (`m/explain`), thrown as the one error map (`:seon.error/type`) | `seon.contract/refusal` |
-| **instrument** (was admit) | an agent's def armed by its contract, or warned (the uncontracted set grows) | `seon.repl/wrap-admit` |
+| **instrument** (was admit) | an agent's def armed by its contract, or warned (the uncontracted set grows) | `seon.repl/wrap-instrument` |
 | **instrument mode** (was guarantees) | `:seon.config.contract/guarantees` (`SEON_GUARANTEES`): `:on`, `:contracts` (no recording), `:off` | `seon.contract/on?`, `record?` |
 
 ## Data (Datahike's and git's words)

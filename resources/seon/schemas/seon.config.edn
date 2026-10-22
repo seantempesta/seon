@@ -97,7 +97,7 @@
   [:seon.config.render/value-budget :seon.config.render/value-budget]
   [:seon.config.render/root-context-budget :seon.config.render/root-context-budget]
   [:seon.config.render/history-row-budget :seon.config.render/history-row-budget]
-  ;; the web, the guarantees, the native probe
+  ;; the web, instrumentation, the native probe
   [:seon.config.web/port :seon.config.web/port]
   [:seon.config.root/entrance-port :seon.config.root/entrance-port]
   [:seon.config.web/public-dir :seon.config.web/public-dir]

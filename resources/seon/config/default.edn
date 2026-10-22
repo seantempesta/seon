@@ -421,7 +421,7 @@
  ;; proc renders each row once). Provenance: the render proc's literal 400.
  :seon.config.render/history-row-budget 400
 
- ;; ==== the web, the guarantees, the native probe ==============================================
+ ;; ==== the web, instrumentation, the native probe ==============================================
 
  ;; Unit: TCP port on 127.0.0.1 (session W2). 0 (the shipped value): no dashboard. A checkout's
  ;; own config/local.edn names its port (bin/ports writes it: the main tree 7777, worktree k
@@ -443,7 +443,7 @@
 
  ;; Contracts and their recording (session G1): :on, :contracts (wrappers, no recording
  ;; transaction: the two measured apart), :off (no wrapper, no recording: the same binary
- ;; measured with the guarantees off; test/r3's benches).
+ ;; measured with instrumentation off; test/r3's benches).
  :seon.config.contract/guarantees #keyword #or [#env SEON_GUARANTEES "on"]
 
  ;; native/probe.c's library (bin/build native): Mach memory probes and qfork. T5 points it at

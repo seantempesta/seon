@@ -22,7 +22,7 @@
   writes the resolved config as facts on main's root entity (`facts`), platform records a
   merge never carries, where agents, the dashboard and the context read it.
 
-  A foundational namespace, below seon.contract (which reads the guarantees config key here): its
+  A foundational namespace, below seon.contract (which reads the instrument config key here): its
   functions carry contracts in their metadata and are armed at boot."
   (:refer-clojure :exclude [resolve])
   (:require [aero.core :as aero] [malli.core :as m] [malli.registry :as mr] [clojure.edn :as edn]

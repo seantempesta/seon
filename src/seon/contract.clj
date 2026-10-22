@@ -1,5 +1,5 @@
 (ns seon.contract
-  "From proto/core 9f5100a proto.contract (session G1). The guarantee: every platform function carries a Malli function schema over named,
+  "From proto/core 9f5100a proto.contract (session G1). The rule: every platform function carries a Malli function schema over named,
   registered schemas, and every call is checked on entry (inputs, arity) and on exit
   (output) by malli's own `m/-instrument`, as Seon's `seon.instrument/compiled-wrapper`
   does. A refusal throws an ex-info whose data is the one error map
@@ -16,7 +16,7 @@
   - `arm!` is the same for one var: an agent's `defn` with `:malli/schema` metadata is
     armed when it is defined, and main's program when it loads.
   - `:seon.config.contract/guarantees :off` (the config, read once at load) installs no
-    wrapper and no recording transaction: the same binary measured with the guarantees off;
+    wrapper and no recording transaction: the same binary measured with instrumentation off;
     `:contracts` arms the wrappers without the recording transaction."
   (:refer-clojure :exclude [defn defn-])
   (:require [malli.core :as m] [malli.registry :as mr]
@@ -160,7 +160,7 @@
 
 (clojure.core/defn checked
   "f checked by contract form c (compiled once, here: seon.contract/wrap), refusals
-  named fn-sym; f itself when the guarantees are off."
+  named fn-sym; f itself when instrumentation is off."
   {:malli/schema [:=> [:cat :qualified-symbol :any :seon.host/fn] :seon.host/fn]}
   [fn-sym c f]
   (if on? (wrap fn-sym (schema c) f) f))
@@ -244,7 +244,7 @@
 
 (defn arm!
   "Instrument var v by its contract: inputs and arity checked on entry, the output on
-  exit. Answers :armed, :unchanged (its root already is its wrapper), :off (guarantees
+  exit. Answers :armed, :unchanged (its root already is its wrapper), :off (instrumentation
   off), :uncontracted, or an error map (:seon.contract/invalid: the contract does not
   compile). Re-arming a redefined var wraps its new root."
   {:malli/schema [:=> [:cat :seon.host/var] [:or :seon.contract/arm-result :seon.contract/invalid]]}

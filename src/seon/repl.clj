@@ -286,8 +286,8 @@
     (let [ef (:repl/eval-fn req eval)]
       (h (assoc req :repl/eval-fn (fn [form] (binding [mr/*registry* (branch-registry)] (ef form))))))))
 
-(defn- admit
-  "Admit a definition by its contract (G1's proto.agent/admit!, Seon's rule): a function var
+(defn- instrument
+  "Instrument a definition by its contract (G1's proto.agent/admit!, Seon's rule): a function var
   with :malli/schema is armed and leaves the agent's uncontracted set; one without joins
   it, and the response carries the warning naming every uncontracted definition so far.
   Answers the response's additions (its reply item's keys)."
@@ -307,9 +307,9 @@
                                                          "A branch carrying an uncontracted function is refused at merge.")
                                      :uncontracted (vec (sort-by str u)) :count (count u)}]})))))
 
-(defn wrap-admit
-  "Each var a form defined (wrap-record's :repl/defined) is admitted by its contract
-  (admit): armed, or a growing warning."
+(defn wrap-instrument
+  "Each var a form defined (wrap-record's :repl/defined) is instrumented by its contract
+  (instrument): armed, or a growing warning."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
@@ -317,14 +317,14 @@
          (fn [m]
            ;; arming compiles the contract: against the branch's population, as its eval did
            (binding [mr/*registry* (if (seq (:repl/defined m)) (branch-registry) {})]
-             (reduce (fn [m s] (if-let [v (find-var s)] (merge m (admit v)) m)) m (:repl/defined m))))))))
+             (reduce (fn [m s] (if-let [v (find-var s)] (merge m (instrument v)) m)) m (:repl/defined m))))))))
 
 (def middleware
-  "Outermost first. Answers pass innermost first: record, cost, admit, caught, print. The
+  "Outermost first. Answers pass innermost first: record, cost, instrument, caught, print. The
   eval fn is the registry's binding around record's around cost's around eval, so an eval's
   cost is the eval's (with the compiler's tap in it, as part of compiling); keying the
   branch's registry, read before each form, is not the form's (0.7 ms measured)."
-  [wrap-print wrap-caught wrap-admit wrap-cost wrap-record wrap-registry])
+  [wrap-print wrap-caught wrap-instrument wrap-cost wrap-record wrap-registry])
 
 (defn handler
   "The base handler (base-handler, else base) with the middleware mw composed over it, outermost first."

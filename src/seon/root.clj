@@ -711,7 +711,7 @@
               :store {:backend backend :path path :main main :agents-dir agents-dir :recovered? (boolean recovered?)
                       :recovered-branches recovered :open-ms (lib/r2 open-ms) :preload-ms (lib/r2 preload-ms)}
               :boot {:gc-sweepers sweepers :load-ms (lib/r2 load-ms) :program (assoc program :ms (lib/r2 program-ms))
-                     :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :guarantees (if contract/on? :on :off)}}
+                     :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :instrument (if contract/on? :on :off)}}
         graph-p (promise)
         root-procs-p (promise)
         ;; what the declaration (resources/seon/system.edn) names as :bind/<name>
