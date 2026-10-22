@@ -432,7 +432,7 @@
                 :refused (short-items r2) :printed-chars (mapv #(count (:printed %)) r3) :read-error (short-items r4)
                 :spin (select-keys t5 [:error :reports :ms]) :test-exits (select-keys t6 [:error :reports :exit])
                 :oom (short-items r9) :interrupt (short-items r12) :ticks (short-items r11)
-                :out [(:out (first r10)) (:reports t10)] :fork-server [(:server (c/state sys)) (short-items r7) (short-items r8)]}
+                :out [(:out (first r10)) t10] :fork-server [(:server (c/state sys)) (short-items r7) (short-items r8)]}
        :checks {"agent calling System/exit mid-request dies alone, named by its exit status"
                 (and (= :seon.agent/died (:seon.error/type r1)) (= {:exit 3} (:exit r1))
                      (= :dead (get-in (c/state sys) [:agents a :status])))
@@ -451,7 +451,7 @@
                 (and (= :seon.repl/ticks-spent (get-in (second r11) [:err :seon.error/type]))
                      (<= 1000000000 (get-in (second r11) [:err :ticks])) (= "8" (:printed (nth r11 2))))
                 "printed output comes back as :out; a busy thread blocks the test fork instead of breaking it"
-                (and (= "hello from :a3\n" (:out (first r10))) (= 1 (:error t10)) (re-find #"Chez threads active" (str (:message (first (:reports t10))))))
+                (and (= "hello from :a3\n" (:out (first r10))) (= :seon.test/fork-refused (:seon.error/type t10)) (re-find #"Chez threads active" (:seon.error/message t10)))
                 "the fork server dies: agents keep working, a new server forks the next agent (whose tick budget works)"
                 (and (= "7" (:printed (first r7))) (= "360" (:printed (first r8)))
                      (= :seon.repl/ticks-spent (get-in (second r8) [:err :seon.error/type])) (= ":after" (:printed (nth r8 2))))}}))))
