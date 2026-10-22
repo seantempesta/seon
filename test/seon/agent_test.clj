@@ -228,3 +228,14 @@
                       {:sets [":seon.config.ai/provider=:none"]
                        :decls [{:seon.task/name "m" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= [:error :seon.model/no-provider [:seon.model/no-provider]] (edn/read-string (:printed r))) (pr-str r))))
+
+(deftest a-turn-that-repeats-the-last-from-the-same-state-ends-the-attempt
+  ;; root's research, lever 2 (2026-10-22): loops took 45% of tokens, and the step E dry run's
+  ;; first real design made one pair of calls 18 times from an unchanged state. A turn whose
+  ;; calls repeat the last turn's, from the same observed state, ends the attempt as
+  ;; :no-progress, naming the code; the judge refines from that evidence
+  (let [[end] (in-agent ["(seon.turn/work! {:task \"demo/t\" :attempt \"demo/t#loop\" :max-turns 5})"]
+                        {:sets [":seon.config.ai/script=seon.fixtures/same-call"]})
+        end (edn/read-string {:default tagged-literal} (:printed end))]
+    (is (= [:no-progress 2] [(:outcome end) (:model-calls end)]) (pr-str end))
+    (is (str/includes? (str (:reason end)) "(+ 1 1)") "the reason names the repeated code")))

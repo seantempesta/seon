@@ -523,3 +523,14 @@
         assistant (first (filter #(= "assistant" (:role %)) msgs))]
     (is (= "Square it first." (:reasoning assistant)))
     (is (not-any? :reasoning (remove #{assistant} msgs)))))
+
+(deftest an-unknown-proof-says-what-to-write
+  ;; a proof with no result: the refusal names the deftest to write in its namespace and how
+  ;; to run it (the dry run's agents read `{:refusal :proof-unknown}` and searched for 25 turns)
+  (let [db (db-with-program)
+        b (context/current-state db (task-f db) {:results {} :refusals [{:refusal :proof-unknown :symbol 'demo-test/f-test}] :turn 1 :max-turns 4})
+        r (first (:refused b))]
+    (is (= :proof-unknown (:refusal r)))
+    (is (= 'demo-test/f-test (:test r)))
+    (is (re-find #"deftest f-test" (pr-str (:do r))) (pr-str r))
+    (is (re-find #"run-test" (pr-str (:do r))) (pr-str r))))

@@ -180,7 +180,7 @@
                            :seon.turn/split (cond-> {:context-ms context-ms :model-ms model-ms :eval-ms eval-ms
                                                      :record-ms (long (profile/ms-since t3))}
                                               tests-ms (assoc :tests-ms tests-ms))}])
-        (cond-> (-> (assoc st :turn (inc turn) :tokens (when (and tokens used) (+ tokens used)))
+        (cond-> (-> (assoc st :turn (inc turn) :tokens (when (and tokens used) (+ tokens used)) :calls (mapv :code calls))
                     ;; what this turn's block showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
                                                  :shown {'seon.context/resolve-ref (set (keep :symbol (:references block)))
@@ -210,7 +210,10 @@
 
 (defn work!
   "Work task `task` as attempt `attempt` (the model `model` when set, else root's), at most
-  max-turns model calls.
+  max-turns model calls. A turn whose calls repeat the last turn's, made from the same
+  observed state (its refusals and proof results), ends the attempt :no-progress, naming
+  the code (root's research, lever 2: loops took 45% of tokens; the step E dry run's first
+  real design repeated one pair of calls 18 times): the judge refines from that evidence.
   Answers the end ({:outcome :turns :model-calls :tokens :ms}); the same end is written on
   the branch."
   {:malli/schema [:=> [:cat [:map [:task :seon.task/id] [:attempt :seon.attempt/id] [:model {:optional true} :string]
@@ -237,5 +240,10 @@
           stop (end! st (:outcome stop) (:reason stop) nil)
           hairy (end! st :merge-failed (:reason hairy) nil)
           (>= (:turn st) max-turns) (end! st :cap (r/refusals-text refusals) nil)
-          :else (let [st' (act! st obs model)]
-                  (if (:seon.error/type st') (end! st :error (:seon.error/message st') st') (recur st'))))))))
+          :else (let [st' (act! st obs model)
+                      seen [(select-keys obs [:refusals :results]) (:calls st')]]
+                  (cond
+                    (:seon.error/type st') (end! st :error (:seon.error/message st') st')
+                    (= seen (:seen st)) (end! st' :no-progress (str "turn " (:turn st) " repeated turn " (dec (:turn st))
+                                                                   "'s calls from the same state: " (str/join " " (:calls st'))) nil)
+                    :else (recur (assoc st' :seen seen)))))))))

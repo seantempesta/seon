@@ -187,6 +187,11 @@
                                           (assoc :failures (mapv failure (filter #(= symbol (:test %)) reds))))
                :no-design {:refusal refusal :unchanged :seon.task/plan
                            :do '(my.task/update! :seon.task/plan str "\n\n" "<what the implement step must do>")}
+               ;; no result: never written, or never run; what writes and runs it
+               :proof-unknown {:refusal refusal :test symbol
+                               :do (list 'do (list 'in-ns (list 'quote (clojure.core/symbol (namespace symbol))))
+                                         (list 'clojure.test/deftest (clojure.core/symbol (name symbol)) '(clojure.test/is "<the behaviour, on data>"))
+                                         (list 'clojure.test/run-test-var (list 'var symbol)))}
                {:refusal refusal}))
            (when (seq gaps) [{:refusal :contract-gap :vars gaps}])
            (when (seq unmerged) [{:refusal :unmerged :keys unmerged}])))))

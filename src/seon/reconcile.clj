@@ -62,9 +62,9 @@
   proofs of merged tasks, red here); a stray red (a red test that is no task's open
   proof); a contract gap (a function the attempt defined without a contract); an
   unmerged entry on the branch (a merge conflict not resolved). A :design task readies
-  the interface and plan for its implement step, so its own proofs may stay red, and it is
-  refused :no-design until its plan differs from the one its attempt began with (or that
-  one is unknown)."
+  the interface and plan for its implement step, so its own proofs may stay red but not
+  unknown (each written and run), and it is refused :no-design until its plan differs from
+  the one its attempt began with (or that one is unknown)."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/refusal]]}
   [{:keys [proofs results main-green allowed-red uncontracted unmerged kind plan plan-before]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))
@@ -72,10 +72,10 @@
     (vec (concat
            (when (and (empty? proofs) (not design?)) [{:refusal :no-proofs}])
            (when (and design? (or (nil? plan-before) (= plan plan-before))) [{:refusal :no-design}])
-           ;; a proof with no result never ran: unknown, not red (v1's reading)
-           (when-not design?
-             (for [p (sort-by str proofs) :let [s (get results p)] :when (not= :pass s)]
-               {:refusal (if s :proof-red :proof-unknown) :symbol p}))
+           ;; a proof with no result never ran: unknown, not red (v1's reading); a design
+           ;; leaves its proofs red, never unknown (the implement step needs them written)
+           (for [p (sort-by str proofs) :let [s (get results p)] :when (if design? (nil? s) (not= :pass s))]
+             {:refusal (if s :proof-red :proof-unknown) :symbol p})
            (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t))] {:refusal :regression :symbol t})
            (for [t (sort-by str (keys results))
                  :when (and (red? t) (not (proofs t)) (not (main-green t)) (not (allowed-red t)))]

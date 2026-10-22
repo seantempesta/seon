@@ -184,7 +184,7 @@
  :seon.attempt/branch :keyword
  :seon.attempt/model :string
  :seon.attempt/max-turns :int
- :seon.attempt/outcome [:enum :green :red :waiting :cap :failed :merge-failed :error :no-end]
+ :seon.attempt/outcome [:enum :green :red :waiting :cap :failed :merge-failed :error :no-end :no-progress]
  :seon.attempt/reason :string
  :seon.attempt/turns :int
  :seon.attempt/model-calls :int

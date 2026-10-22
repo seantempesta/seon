@@ -211,6 +211,12 @@
   namespace named after it, e.g. conflict/b-merge)."
   (into calc-replies (for [[k {:keys [replies]}] scenarios [nm r] replies] [(str (name k) "/" nm) r])))
 
+(defn same-call
+  "The stand-in for a model in a loop (seon.agent-test): every reply makes the same call,
+  whatever it saw (the step E dry run's first real design made one pair of calls 18 times)."
+  {:malli/schema [:=> [:cat :seon.model/request] :string]}
+  [_] "(+ 1 1)")
+
 (defn two-calls
   "The stand-in that proves a turn's rhythm (seon.agent-test): its first call evaluates
   (+ 20 21); each later call adds one to the answer the last call's result printed, so its
