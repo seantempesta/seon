@@ -166,15 +166,37 @@
            (let [conn (d/connect cfg)] (seed! conn 2000) (d/release conn))
            cfg)))
 
-(defn test-branch!
-  "A fresh branch of the test store (its seed: the schema and about 2,000 datoms of the
-  example program), for one test: [cfg conn], cfg naming the branch. What the test writes
-  stays on its branch."
-  {:malli/schema [:=> [:cat] [:tuple :seon.db/cfg :seon.host/conn]]}
+(defn delete-main!
+  "Delete main and every branch held under it (of-main) from the store of conn, a connection
+  to :db (datahike.api/delete-branch!; a branch's connections are released first): what a
+  check step or a test made for itself, deleted by the run that made it. Real agent runs are
+  never deleted this way (owner, 2026-10-22: kept as evidence). Answers the deleted branches;
+  a main the store lacks deletes nothing."
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch] [:vector :seon.db/branch]]}
+  [conn main]
+  (let [under (mapv #(on-main main %) (of-main main (d/branches conn)))
+        bs (cond-> under (branch? conn main) (conj main))]
+    (doseq [b bs] (d/delete-branch! conn b))
+    bs))
+
+(defn test-db
+  "The test store's seed as a db value (the schema and about 2,000 datoms of the example
+  program), for a test that only reads or uses d/db-with: no branch is made."
+  {:malli/schema [:=> [:cat] :seon.host/db]}
   []
-  (let [cfg (assoc @test-store :branch (keyword (str "test-" (random-uuid))))
-        [conn _] (open-main! (dissoc cfg :branch) (:branch cfg))]
-    [cfg conn]))
+  (let [c (d/connect @test-store)] (try @c (finally (d/release c)))))
+
+(defn test-branch!
+  "(f cfg conn) on a fresh branch of the test store (its seed: the schema and about 2,000
+  datoms of the example program), cfg naming the branch; the branch is deleted when f
+  returns or throws (a fixture: a test leaves the test store as it found it). Answers f's value."
+  {:malli/schema [:=> [:cat [:=> [:cat :seon.db/cfg :seon.host/conn] :any]] :any]}
+  [f]
+  (let [b (keyword (str "test-" (random-uuid)))
+        [conn _] (open-main! @test-store b)
+        seed (d/connect @test-store)]
+    (try (f (assoc @test-store :branch b) conn)
+         (finally (d/release conn) (delete-main! seed b) (d/release seed)))))
 
 (defn preload!
   "Read every node of db's indexes, so this process holds the whole db in its heap and
@@ -184,6 +206,11 @@
   [db]
   (count (d/datoms db :aevt)) (count (d/datoms db :avet))
   (count (d/datoms db :eavt)))
+
+(defn store?
+  "Does a durable LMDB store exist at path (its data file)?"
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [path] (boolean (posix/exists? (str path "/data.mdb"))))
 
 (defn open!
   "Root's main on the durable store at path. A store that does not exist is created and

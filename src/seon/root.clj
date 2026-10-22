@@ -558,7 +558,7 @@
   the one store (owner, 2026-10-21: one store, many branches, as in production). opts:
   {:path dir (the store, created when missing, holding the schema and, given :datoms n,
    about n datoms of an example program on :db; a root holds no program it was not given)
-   :main branch (root's main; an existing branch is recovered; :db is production's main)
+   :main branch (root's main; an existing branch is resumed; :db is the seed itself)
    :backend :lmdb|:file :log? true :max-running n (parallel attempts) :provider p (the
    attempts' model) :flush-ms and :stall-ms (fences, seon.db/flush-ms and
    seon.agent-proc/stall-ms, for the checks that move them) :source s}. s: Seon's own source
@@ -566,8 +566,7 @@
    dirs at boot when it holds none of them (seon.source), and each merge that changes them
    is committed on branch (the reconciler's write-back); absent, the config's
    :seon.config.source/* (no :seon.config.source/root: no source). What opts leave out is the config's: :seon.config.root/store-path,
-  :seon.config.root/main (absent: a new branch <:seon.config.root/run-name>-<time>-<id> of
-  :db), :seon.config.store/backend, :seon.config.agent/max-running and the provider of
+  :seon.config.root/main (resumed; made from :db when the store has none), :seon.config.store/backend, :seon.config.agent/max-running and the provider of
   :seon.config.ai/*. The config in force is written on main's root entity."
   {:malli/schema [:=> [:cat :map] :seon.root/sys]}
   [{:keys [datoms log? path main backend max-running provider flush-ms stall-ms source] :or {datoms 0}}]
@@ -575,13 +574,11 @@
   (when-not log? (trove/set-log-fn! nil))
   (let [t0 (lib/now-ns)
         ;; agents write their own branches, so the store is shared: the one durable store
-        ;; (bin/check's run, the kept runs store, a test's), never deleted: a run is a record
-        ;; frozen in time (owner, 2026-10-21). This root works on its own main, a branch of
-        ;; the store's seed, and names its agents' branches under it
-        stamp (.format (java.text.SimpleDateFormat. "yyyyMMdd'T'HHmmss") (java.util.Date.))
+        ;; (the kept runs store, bin/check's, a test's). This root resumes its main, a branch
+        ;; of the store's seed, and names its agents' branches under it; a run's record is
+        ;; main's commit history (owner, 2026-10-22: one main, resumed)
         path (or path (cfg/value :seon.config.root/store-path))
-        main (or main (some-> (get cfg/config :seon.config.root/main) keyword)
-                 (keyword (str (cfg/value :seon.config.root/run-name) "-" stamp "-" (subs (str (random-uuid)) 0 8))))
+        main (or main (keyword (cfg/value :seon.config.root/main)))
         backend (or backend (cfg/value :seon.config.store/backend))
         max-running (or max-running (cfg/value :seon.config.agent/max-running))
         {store-cfg :cfg conn :conn recovered? :recovered?} (pdb/open! backend path datoms main)

@@ -1,7 +1,8 @@
 (ns seon.repl-test
   "An agent's REPL answers: asked of an agent in a root of its own (seon.agent-test/in-agent), and a form bounded by the work it does, never by a clock (seon.intr/run under a tick budget)."
   (:require [clojure.test :refer [deftest is]] [clojure.string :as str] [seon.agent-test :as at]
-            [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]))
+            [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]
+            [seon.ref :as ref] [seon.template :as template]))
 
 (deftest source-answers-a-platform-var-from-the-program
   ;; task seon.repl/source-reads-the-program: clojure.repl's source and source-fn, as at any
@@ -72,6 +73,41 @@
     (is (= :err (:tag bad)) "a form of the file that fails to compile fails the require, as in Clojure")
     (is (str/includes? (str (:printed bad)) "no-such-fn") (str "named by its cause: " (pr-str bad)))
     (is (str/includes? (str (:printed nsk2)) "agent.") "and the agent's namespace is restored")))
+
+(defn- runnable
+  "The forms text tells an agent to run, in order: each single-backticked code span that is a
+  form (a double-backticked one is a pattern to fill in, never run)."
+  {:malli/schema [:=> [:cat :string] [:vector :string]]}
+  [text]
+  (vec (for [{:seon.ref/keys [code width]} (:seon.ref/spans (ref/scan text))
+             :when (and (= 1 width) (str/starts-with? code "("))]
+         code)))
+
+(deftest the-template-instructions-run
+  ;; owner, 2026-10-22: every stage gets detailed instructions on moving around the system;
+  ;; each form an instruction tells an agent to run must work in a real agent. One agent,
+  ;; reading its context first (as a model's turn does, which makes the my.* verbs act on
+  ;; its task), runs every kind's forms in order; the ending verbs come last
+  (let [forms (into [] (comp (mapcat (comp runnable val)) (distinct)) (sort-by key template/instructions))
+        ends #{"(my.turn/wait)"}
+        forms (concat (remove #(or (ends %) (str/starts-with? % "(my.task/send-back!")) forms)
+                      (filter #(str/starts-with? % "(my.task/send-back!") forms)
+                      (filter ends forms))
+        cited "(seon.task/citation-problems (my.db/db) (vec (for [[k v] seon.template/instructions] {:seon.task/ns 'demo :seon.task/name (name k) :seon.task/plan \"\" :seon.task/instructions v})))"
+        [problems & items] (rest (at/in-agent (into [{:op :context :agent "a1"} cited] forms)))]
+    (is (= "[]" (:printed problems)) (str "every name the instructions cite resolves in the program: " (pr-str problems)))
+    (is (< 20 (count forms)) "the instructions show the agent how to move around")
+    (doseq [[form item] (map vector forms items)]
+      (is (not= :err (:tag item)) (str form " -> " (pr-str item))))
+    (is (= (count forms) (count items)) "every form answered")
+    (let [by (zipmap forms items)
+          printed #(str (:printed (by %)))]
+      ;; the navigation verbs answer from the program facts the branch records
+      (is (str/includes? (printed "(my.agent/callers 'seon.task/accumulate)") "seon.task/tasks") "callers, from :form/refs")
+      (is (str/includes? (printed "(my.agent/callees 'seon.task/accumulate)") "clojure.core/reduce") "callees, from its form's :form/refs")
+      (is (str/includes? (printed "(my.agent/grep \"accumulated\")") "seon.task/accumulate") "grep, over :form/src")
+      (is (str/includes? (printed "(get (my.schema/forms) :seon.task/task)") ":seon.task/own") "a schema's form")
+      (is (str/includes? (printed "(my.schema/register! :app.workout/set [:map [:reps :int] [:kg :double]])") ":app.workout/set") "a new schema registers"))))
 
 (defn- outcome [ticks thunk]
   (try {:value (intr/run ticks thunk)} (catch Throwable e {:error e})))

@@ -18,7 +18,7 @@
             [test-runner :as runner]
             [jolt.analyzer]))
 
-(defn- empty-db [] @(second (pdb/test-branch!)))
+(defn- empty-db [] (pdb/test-db))
 
 (defn- ns-form? [form nsx]
   (boolean (and (seq? form) (symbol? (first form)) (= #'clojure.core/ns (ns-resolve nsx (first form))))))

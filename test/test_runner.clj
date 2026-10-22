@@ -53,7 +53,7 @@
   (seon.source/import-tx: analyzed, not run)."
   [root]
   (let [files (into {} (filter #(str/ends-with? (key %) ".clj")) (:value (fx/read-source {:req {:root root :dirs ["src" "test"]}})))
-        db @(second (pdb/test-branch!))]
+        db (pdb/test-db)]
     (d/db-with db (source/import-tx db files))))
 
 (defn- green? [r] (and (zero? (:fail r)) (zero? (:error r))))

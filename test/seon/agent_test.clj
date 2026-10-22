@@ -12,19 +12,24 @@
 (defn in-agent
   "A root on the checkout's src (its source root), one agent on a task of its own, each of
   forms evaluated in that agent (a string) or sent to the entrance as it is (a map): the
-  first item of every reply, or the answer that holds no items, in order. Its store is removed.
+  first item of every reply, or the answer that holds no items, in order. The root works on a
+  main of its own, a branch of the one test store (target/runs/test-store), deleted with
+  every branch under it when the root has stopped (seon.check/drop-mains).
   opts: :dirs, the source dirs root imports (default [\"src\"]); :proofs, the task's proofs."
   ([forms] (in-agent forms {}))
   ([forms {:keys [dirs proofs] :or {dirs ["src"] proofs '#{demo-test/t}}}]
   (let [checkout (.getCanonicalPath (java.io.File. "."))
-        path (str checkout "/target/runs/in-agent-" (random-uuid))
+        main (str "in-agent-" (random-uuid))
+        store (str checkout "/target/runs/test-store")
+        path (str checkout "/target/runs/" main)
         port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
         ask (fn [m] (str "printf '%s\\n' " (pr-str (pr-str m)) " | nc -w 60 127.0.0.1 " port))
         script (str "mkdir -p '" path "-tasks'; mkfifo '" path "-in';"
                     " echo " (pr-str (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}]))
                     " > '" path "-tasks/demo.edn'; ./seon root"
                     " --set ':seon.config.source/root=" (pr-str checkout) "' --set ':seon.config.source/dirs=" (pr-str dirs) "'"
-                    " --set ':seon.config.root/store-path=" (pr-str path) "' --set ':seon.config.root/entrance-port=" port "' --set ':seon.config.web/port=0'"
+                    " --set ':seon.config.root/store-path=" (pr-str store) "' --set ':seon.config.root/main=" (pr-str main) "'"
+                    " --set ':seon.config.root/entrance-port=" port "' --set ':seon.config.web/port=0'"
                     " < '" path "-in' > '" path ".log' 2>&1 & R=$!; exec 3>'" path "-in';"
                     " until grep -q 'ROOT LISTENING' '" path ".log' || ! kill -0 $R 2>/dev/null; do sleep 0.1; done;"
                     (ask {:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str (str path "-tasks")) ")")}) " >/dev/null;"
@@ -33,7 +38,8 @@
                     (str/join (for [f forms] (str (ask (if (map? f) f {:op :eval :agent "a1" :code f})) ";")))
                     " exec 3>&-; wait $R")
         {:keys [out]} (sh/sh "zsh" "-c" script :dir "target")]
-    (sh/sh "rm" "-rf" path (str path "-in") (str path ".log") (str path "-tasks") (str path "-agents"))
+    (sh/sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
+    (sh/sh "rm" "-rf" (str path "-in") (str path ".log") (str path "-tasks"))
     (mapv #(let [a (edn/read-string {:default tagged-literal} %)] (if (contains? a :items) (first (:items a)) a)) (str/split-lines (str/replace out #"(?s)^.*ROOT LISTENING[^\n]*\n" ""))))))
 
 (deftest an-agent-holds-mains-tests-and-runs-its-proofs

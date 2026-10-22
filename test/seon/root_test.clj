@@ -5,6 +5,15 @@
   (:require [clojure.test :refer [deftest is]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.db :as pdb] [datahike.api :as d]))
 
+(defn- test-store "The one store these tests' roots take a branch of." []
+  (str (.getCanonicalPath (java.io.File. ".")) "/target/runs/test-store"))
+
+(defn- drop-main!
+  "Delete main and every branch under it from the test store (seon.check/drop-mains), once
+  the root that made them has stopped."
+  [main]
+  (sh/sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str (test-store))) :dir "target"))
+
 (deftest root-threads-are-what-root-declares
   ;; three start!/stop! cycles in one process: while running (three agents just
   ;; evaluated) and after each stop!, every thread is one seon.root/declared-threads
@@ -12,7 +21,11 @@
   ;; nothing else. A diff of {} is exact; anything else names what differs. No web
   ;; listener (SEON_WEB_PORT=0): its adapter's threads outlive stop! (task
   ;; web-server-threads-are-joined-at-stop).
-  (let [{:keys [exit out err]} (sh/sh "env" "SEON_WEB_PORT=0" "./seon" "threads-declared" "3" :dir "target")
+  ;; On a main of its own on the test store, deleted at the end.
+  (let [main (str "root-test-" (random-uuid))
+        {:keys [exit out err]} (sh/sh "env" "SEON_WEB_PORT=0" (str "SEON_STORE=" (test-store)) (str "SEON_MAIN=" main)
+                                      "./seon" "threads-declared" "3" :dir "target")
+        _ (drop-main! main)
         res (edn/read-string (last (str/split-lines out)))]
     (is (= 0 exit) (str out err))
     (is (= 3 (count (:running res)) (count (:stopped res))))
@@ -24,15 +37,18 @@
   ;; importing src and test runs each test file's ns form, and seon.print-test's requires
   ;; fipp.engine, which needs Jolt's stdlib clojure.core.rrb-vector; a binary finds only
   ;; what it compiled. The root boots, imports, and exits when its stdin (empty) closes.
-  ;; Its store: target/runs/root-test-store, one kept store whose every boot is a new
-  ;; branch, under runs/ so a worktree's clone of target/ leaves it out (bin/worktree: a
-  ;; store's identity is its path, so a cloned one refuses every boot in the worktree).
+  ;; Its store: a main of its own on the one test store, target/runs/test-store (under runs/
+  ;; so a worktree's clone of target/ leaves it out: a store's identity is its path), deleted
+  ;; with its branches when the root has stopped.
   (let [checkout (.getCanonicalPath (java.io.File. "."))
+        main (str "root-test-" (random-uuid))
         {:keys [exit out err]} (sh/sh "env" "SEON_WEB_PORT=0" "./seon" "root"
                                       "--set" (str ":seon.config.source/root=" (pr-str checkout))
                                       "--set" ":seon.config.source/dirs=[\"src\" \"test\"]"
-                                      "--set" (str ":seon.config.root/store-path=" (pr-str (str checkout "/target/runs/root-test-store")))
+                                      "--set" (str ":seon.config.root/store-path=" (pr-str (test-store)))
+                                      "--set" (str ":seon.config.root/main=" (pr-str main))
                                       :in "" :dir "target")]
+    (drop-main! main)
     (is (= 0 exit) "the root boots with src and test imported")
     (is (str/includes? out "ROOT LISTENING") "and listens")
     (is (not (str/includes? (str out err) "Could not locate")) "every required library located")))
@@ -89,17 +105,46 @@
       (is (str/includes? out "EXIT 0") "and it stops when its stdin closes")
       (finally (sh/sh "rm" "-rf" path (str path "-in") (str path ".log") (str path "-agents"))))))
 
+(deftest a-second-boot-resumes-the-same-main
+  ;; task seon.root/one-main-resumed: a root started with no main named works on the
+  ;; config's main ("main"), and a second root on the same store resumes it: the task the
+  ;; first loaded and the attempt it started are still there. A store of this test's own, the
+  ;; last resort: what is proved is the default main of a store, which a shared test store's
+  ;; other users would also resume; removed at the end.
+  (let [checkout (.getCanonicalPath (java.io.File. "."))
+        path (str checkout "/target/runs/root-test-main-" (random-uuid))
+        tasks (str path "-tasks")
+        _ (.mkdirs (java.io.File. tasks))
+        _ (spit (str tasks "/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]))
+        main {:op :eval :agent "root" :code "(name (seon.db/conn-main (:conn sys)))"}
+        held {:op :eval :agent "root" :code "[(count (seon.task/tasks @(:conn sys))) (set (map str (keys (seon.task/attempts @(:conn sys)))))]"}
+        first-boot (str/split-lines (root-answers path [] [main {:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str tasks) ")")}
+                                                           {:op :attach :task "demo/t"} held]))
+        second-boot (str/split-lines (root-answers path [] [main held]))
+        printed (fn [l] (:printed (first (:items (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil))))))]
+    (try
+      (is (= "\"main\"" (printed (first first-boot))) "a boot with no main named works on the config's main")
+      (is (= "\"main\"" (printed (first second-boot))) "the second boot resumes the same main")
+      (let [[tasks-1 attempts-1] (edn/read-string (printed (nth first-boot 3)))
+            [tasks-2 attempts-2] (edn/read-string (printed (second second-boot)))]
+        (is (= [2 1] [tasks-1 (count attempts-1)]) "the first boot holds root's task and the one it loaded, and the attempt it started")
+        (is (= 2 tasks-2) "the second boot still holds both tasks")
+        (is (every? attempts-2 attempts-1) "and the first boot's attempt (it reaps it and starts the next)"))
+      (finally (sh/sh "rm" "-rf" path tasks (str path "-in") (str path ".log") (str path "-agents"))))))
+
 (deftest a-built-root-reads-a-line-citation
   ;; task jolt.ns/whole-program-inference-keeps-nil-checks: compiled, `[from to]` destructured
   ;; from `(if dash [a b] [suffix])` typed `to` a string, so `(nil? to)` folded false and
   ;; `src/a.clj:50` reached parse-long as nil; my.root/load-tasks! failed on every task file
-  ;; citing `path:N`. On the kept root-test store (every boot a new branch).
-  (let [path (str (.getCanonicalPath (java.io.File. ".")) "/target/runs/root-test-store")
-        out (root-answers path [] [{:op :eval :agent "root" :code "((resolve 'seon.ref/line-citation) \"src/a.clj:50\")"}])
+  ;; citing `path:N`. On a main of its own on the test store, deleted at the end.
+  (let [path (test-store)
+        main (str "root-test-" (random-uuid))
+        out (root-answers path [(str "--set ':seon.config.root/main=" (pr-str main) "'")]
+                          [{:op :eval :agent "root" :code "((resolve 'seon.ref/line-citation) \"src/a.clj:50\")"}])
         answer (try (edn/read-string {:default tagged-literal} (first (str/split-lines out))) (catch Exception _ nil))]
     (try
       (is (= "\"src/a.clj\"" (:printed (first (:items answer)))) out)
-      (finally (sh/sh "rm" "-f" (str path "-in") (str path ".log"))))))
+      (finally (drop-main! main) (sh/sh "rm" "-f" (str path "-in") (str path ".log"))))))
 
 (deftest a-build-without-whole-program-inference-reads-with-tools-reader
   ;; task jolt.ns/a-build-without-whole-program-inference-compiles-tools-reader: with

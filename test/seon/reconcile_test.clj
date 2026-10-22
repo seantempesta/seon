@@ -10,7 +10,7 @@
             [seon.template :as tpl] [seon.problems :as problems] [seon.sock :as sock] [clojure.edn] [seon.contract :as contract]
             [clojure.string :as str] [clojure.set] [seon.config :as cfg]))
 
-(defn- empty-db [] @(second (pdb/test-branch!)))
+(defn- empty-db [] (pdb/test-db))
 
 (defn- decl [nm & {:keys [needs proofs model]}]
   (cond-> {:seon.task/ns 'demo :seon.task/name nm :seon.task/plan (str "Make " nm " true.")

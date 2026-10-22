@@ -27,8 +27,7 @@
     (arity-0 v)))
 
 (deftest writer
-  (let [[cfg conn] (pdb/test-branch!)
-        in (a/chan 16)
+  (pdb/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
         t0 (:max-tx @conn)]
     (testing "a main transaction: committed once, its report to the reconciler, its commit to the fork server, its answer by dest"
@@ -50,15 +49,14 @@
       (let [[_ outs] (step #'writer/writer-proc st :in nil)]
         (is (= :drained (:op (first (:to-api outs)))))))
     (testing "the stop transition releases the branch connections"
-      (is (map? (#'writer/writer-proc st ::flow/stop))))))
+      (is (map? (#'writer/writer-proc st ::flow/stop))))))))
 
 (deftest the-flush-is-continuous-group-commit
   ;; owner 2026-10-21 (notes/DECISIONS.md, "Durability is batched everywhere", superseded
   ;; paragraph): no window. A write is answered when committed in memory; the flusher parks
   ;; until something is unflushed, syncs once for everything committed so far, and says what it
   ;; covered; commits during a sync share the next one; an idle system never syncs.
-  (let [[cfg conn] (pdb/test-branch!)
-        in (a/chan 16)
+  (pdb/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? true :to-writer in :events (a/chan 16)})]
     (testing "the flusher syncs at once and tells the writer which commits it covered"
       ;; :flush-ms 0: the window the implementation deletes, at none, so today's flusher answers
@@ -80,11 +78,10 @@
           (let [[st3 _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "b"}] :dest {:rid 2}})
                 [st4 outs] (step #'writer/writer-proc st3 :in {:op :flushed :commits (:commits st)})]
             (is (true? (:dirty st4)))
-            (is (= [{:op :dirty :commits (:commits st3)}] (mapv #(select-keys % [:op :commits]) (:to-flusher outs))))))))))
+            (is (= [{:op :dirty :commits (:commits st3)}] (mapv #(select-keys % [:op :commits]) (:to-flusher outs))))))))))))
 
 (deftest reconciler
-  (let [[_ conn] (pdb/test-branch!)
-        st (#'reconcile/reconciler-proc {:boot "b" :provider {:kind :scripted :script 'seon.fixtures/reply}})]
+  (pdb/test-branch! (fn [_ conn] (let [st (#'reconcile/reconciler-proc {:boot "b" :provider {:kind :scripted :script 'seon.fixtures/reply}})]
     (testing "a main commit with no tasks: the reconciler reads it and starts nothing (quiescence: seon.reconcile-test)"
       (let [[st outs] (step #'reconcile/reconciler-proc st :main {:t 7 :ops [] :db @conn :ns (sock/now-ns)})]
         (is (= 1 (:seen st)))
@@ -93,7 +90,7 @@
     (testing "an answer nobody asked for changes nothing"
       (let [[st2 outs] (step #'reconcile/reconciler-proc st :answers {:tag 99 :r {:ok true}})]
         (is (= (:flights st) (:flights st2)))
-        (is (empty? (:to-api outs)))))))
+        (is (empty? (:to-api outs)))))))))
 
 (deftest fork-server-events
   (let [st {:waiters (conj clojure.lang.PersistentQueue/EMPTY {:rid 5 :req {:op :stats}}) :pid 1 :log []}]
@@ -178,22 +175,22 @@
         (is (= "boom" (:seon.error/message (answer p))))))))
 
 (defn- answering-sys
-  "A sys whose entrance answers every request with r (a stand-in for the api), on a branch of
-  the test store."
-  [r]
-  (let [[cfg conn] (pdb/test-branch!) ext (a/chan 4)]
+  "(f sys), sys's entrance answering every request with r (a stand-in for the api), on a
+  branch of the test store deleted when f returns."
+  [r f]
+  (pdb/test-branch! (fn [cfg conn] (let [ext (a/chan 4)]
     (a/go-loop [] (when-let [m (a/<! ext)] (deliver (:p m) r) (recur)))
-    {:ext ext :cfg cfg :conn conn :graph nil}))
+    (f {:ext ext :cfg cfg :conn conn :graph nil})))))
 
 (deftest root-state-never-answers-an-empty-system
   ;; "Unknown is not {}": what the api answers is what the caller gets; a defect stays a defect
-  (let [e (seon.contract/error :seon.root/proc-defect 'seon.root/api-proc "boom" {:pid :api})
-        sys (answering-sys e)]
-    (testing "state: the defect, not a view decorated around it"
-      (is (= e (root/state sys))))
-    (testing "errors: the defect, not an empty fold"
-      (is (= e (root/errors sys))))
-    (a/close! (:ext sys))))
+  (let [e (seon.contract/error :seon.root/proc-defect 'seon.root/api-proc "boom" {:pid :api})]
+    (answering-sys e (fn [sys]
+      (testing "state: the defect, not a view decorated around it"
+        (is (= e (root/state sys))))
+      (testing "errors: the defect, not an empty fold"
+        (is (= e (root/errors sys))))
+      (a/close! (:ext sys))))))
 
 (deftest the-step-loop-runs-flows-contract-in-one-thread
   ;; a counter step-fn run by seon.step/run-loop over an in-memory transport
@@ -212,8 +209,7 @@
     (is (= [[:in 4]] @inbox) "nothing is taken after stop")))
 
 (deftest the-fork-server-step
-  (let [[_ conn] (pdb/test-branch!)
-        db @conn
+  (pdb/test-branch! (fn [_ conn] (let [db @conn
         st (#'server/server-step {:db db :conn nil})]
     (testing "a main commit is applied to its replica"
       (let [rep (d/with db [{:note/text "z"}])
@@ -222,7 +218,7 @@
         (is (= (:max-tx (:db-after rep)) (:max-tx (:db st))))
         (is (= [:applied] (map :ev (:ev outs))))
         (testing "and a commit it already holds is skipped"
-          (is (= [st nil] (#'server/server-step st :cmd {:op :tx :t (:max-tx (:db st)) :tx-data ops}))))))))
+          (is (= [st nil] (#'server/server-step st :cmd {:op :tx :t (:max-tx (:db st)) :tx-data ops}))))))))))
 
 (defn -main [& _]
   (let [{:keys [fail error]} (run-tests 'seon.procs-test)]

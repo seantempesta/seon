@@ -74,7 +74,7 @@
 (deftest the-shipped-file-validates-under-every-profile
   (doseq [p [:default :deepseek]]
     (let [c (read-file (config/path (config/checkout)) p (config/checkout))]
-      (is (= (set (keys c)) (set (remove #{:seon.config.ai/reasoning-effort :seon.config.root/main :seon.config.source/root} (config/keys-declared)))) p)))
+      (is (= (set (keys c)) (set (remove #{:seon.config.ai/reasoning-effort :seon.config.source/root} (config/keys-declared)))) p)))
   (is (= :scripted (:seon.config.ai/provider (read-file (config/path (config/checkout)) :default (config/checkout)))))
   (is (= :openai-compat (:seon.config.ai/provider (read-file (config/path (config/checkout)) :deepseek (config/checkout))))))
 
@@ -128,8 +128,7 @@
 ;; ---- facts on main, read from the db -------------------------------------------------------
 
 (deftest root-writes-the-config-on-main-and-the-db-answers-it
-  (let [[cfg conn] (pdb/test-branch!)
-        child (keyword (str (name (:branch cfg)) "-a1"))
+  (pdb/test-branch! (fn [cfg conn] (let [child (keyword (str (name (:branch cfg)) "-a1"))
         c (assoc config/config :seon.config.agent/max-running 6)]
     (is (nil? (config/from-db @conn)))
     (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6) (config/facts c {:seon.config.web/port "--set"}))})
@@ -139,7 +138,7 @@
     (is (= {:boot "boot-1" :max-running 6 :max-merging (config/value :seon.config.merge/max-running)} (task/root @conn)))
     ;; a branch made from main holds them too (what an agent forked onto it reads)
     (d/branch! conn (:branch cfg) child)
-    (is (= c (config/from-db @(d/connect (assoc cfg :branch child)))))))
+    (is (= c (config/from-db @(d/connect (assoc cfg :branch child)))))))))
 
 ;; ---- no environment read outside the loader -------------------------------------------------
 
@@ -236,8 +235,8 @@
   (is (= #{"deepseek-flash" "deepseek-v4-pro"} (set (keys (:seon.config.ai/models config/config)))))
   (is (= :invalid (:problem (first (:seon.config/problems
                                     (refused #(config/resolved (assoc-in config/config [:seon.config.ai/models "deepseek-flash" :seon.ai.model/input-usd-per-mtok] "cheap"))))))))
-  (let [[cfg conn] (pdb/test-branch!)]
+  (pdb/test-branch! (fn [cfg conn]
     (d/transact conn {:tx-data (config/facts config/config config/sources)})
     (is (= 0.15 (d/q '[:find ?p . :where [?m :seon.ai.model/id "deepseek-flash"] [?m :seon.ai.model/input-usd-per-mtok ?p]] @conn)))
     (is (= "DEEPSEEK_API_KEY" (d/q '[:find ?v . :where [?p :seon.ai.model/provider-id "deepseek"] [?p :seon.config.ai/api-key-variable ?v]] @conn)))
-    (is (= config/config (config/from-db @conn)))))
+    (is (= config/config (config/from-db @conn))))))

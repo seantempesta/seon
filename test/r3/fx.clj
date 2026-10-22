@@ -35,10 +35,10 @@
       9 [])))
 
 (defn load!
-  "A fresh in-memory main holding n work tasks (2n tasks) and their attempts; answers conn."
-  [n max-running]
-  (let [[_ conn] (pdb/test-branch!)
-        ds (decls n)]
+  "(f conn) on a branch of the test store holding n work tasks (2n tasks) and their
+  attempts; the branch is deleted when f returns."
+  [n max-running f]
+  (pdb/test-branch! (fn [_ conn] (let [ds (decls n)]
     (d/transact conn {:tx-data (task/boot-tx boot max-running)})
     (doseq [part (partition-all 400 ds)]
       (d/transact conn {:tx-data (task/create-tx @conn (vec part))}))
@@ -46,4 +46,4 @@
       (d/transact conn {:tx-data (task/execution-tx (vec part) :running)}))
     (doseq [part (partition-all 200 (range n))]
       (d/transact conn {:tx-data (vec (mapcat #(attempts-tx % 1000) part))}))
-    conn))
+    (f conn)))))

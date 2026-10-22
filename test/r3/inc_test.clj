@@ -38,9 +38,8 @@
 
 (deftest incremental-equals-full
   (doseq [seed [1 2 3 4 5]]
-    (let [rng (java.util.Random. seed)
-          conn (fx/load! 30 6)
-          ;; one merge at a time: the train degenerates to M1's merge queue, the oracle's rule
+    (fx/load! 30 6 (fn [conn] (let [rng (java.util.Random. seed)
+                    ;; one merge at a time: the train degenerates to M1's merge queue, the oracle's rule
           _ (d/transact conn {:tx-data [{:seon.root/id :root :seon.config.merge/max-running 1}]})]
       (loop [k 0 idx (r/index @conn) bad 0]
         (if (= k 150)
@@ -64,4 +63,4 @@
                   (println :seed seed :k k :tx (pr-str tx))
                   (println :full (pr-str (remove (set incr) full)))
                   (println :inc (pr-str (remove (set full) incr))))
-                (recur (inc k) idx' (if ok bad (inc bad)))))))))))
+                (recur (inc k) idx' (if ok bad (inc bad)))))))))))))

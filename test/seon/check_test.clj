@@ -51,3 +51,33 @@
           (d/release (:conn r))))
       (finally
         (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(defn- entries "The names in directory p (none when it does not exist)." [p]
+  (set (map #(.getName %) (or (.listFiles (java.io.File. p)) []))))
+
+(deftest a-check-leaves-its-store-as-it-found-it
+  ;; task seon.check/a-run-takes-a-branch-and-deletes-it: a check step run against a store
+  ;; works on a branch of it (its main, check-<step>) and deletes what it made when it is
+  ;; green; a test's branch of the test store is deleted by its fixture (seon.db/test-branch!);
+  ;; neither makes a store. The store given is this test's own (the last resort: what is
+  ;; proved is what a run leaves in the store it is given); removed at the end.
+  (let [dir (System/getProperty "user.dir")
+        path (str dir "/target/runs/check-test-given-" (random-uuid))
+        _ (d/release (:conn (pdb/open! :lmdb path 300 :db)))
+        branches #(let [c (d/connect (pdb/store-cfg :lmdb path))] (try (d/branches c) (finally (d/release c))))
+        before (branches)
+        stores {:check (entries (str dir "/target/check")) :runs (entries (str dir "/target/runs"))}
+        run (clojure.java.shell/sh "env" (str "SEON_STORE=" path) "SEON_WEB_PORT=0" "bin/check" "config" :dir dir)]
+    (try
+      (is (= 0 (:exit run)) (str "the step is green: " (:out run)))
+      (is (= before (branches)) "the store's branch set holds nothing the step made")
+      (is (= stores {:check (entries (str dir "/target/check")) :runs (entries (str dir "/target/runs"))}) "and no new store or run directory exists")
+      (testing "a test's branch of the test store is deleted when the test ends"
+        (let [seen (fn [cfg conn] [(:branch cfg) (d/branches conn) (count (d/datoms @conn :eavt))])
+              [b1 in1 datoms] (pdb/test-branch! seen)
+              [b2 in2] (pdb/test-branch! seen)]
+          (is (pos? datoms) "the fixture hands the test a branch holding the seed")
+          (is (in1 b1) "the branch exists while the test runs")
+          (is (not (in2 b1)) "a later test sees no branch the earlier one made")
+          (is (= (disj in1 b1) (disj in2 b2)) "and nothing else changed")))
+      (finally (clojure.java.shell/sh "rm" "-rf" path (str path "-agents"))))))

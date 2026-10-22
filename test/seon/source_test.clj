@@ -15,7 +15,7 @@
             [seon.source :as source]
             [seon.program-test :as pt]))
 
-(defn- empty-db [] @(second (pdb/test-branch!)))
+(defn- empty-db [] (pdb/test-db))
 
 (def ^:private here (System/getProperty "user.dir"))
 

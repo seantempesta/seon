@@ -63,13 +63,12 @@
  ;; when missing; every root works on its own main, a branch of the store's seed. bin/check
  ;; sets SEON_STORE to its run's store.
  :seon.config.root/store-path #or [#env SEON_STORE #join [#ref [:seon.config.root/runs-dir] "/store"]]
- ;; Root's main, as a branch name. Absent (unset): each boot a new branch of :db named
- ;; <run-name>-<time>-<id>; a named existing branch is recovered (bin/root: SEON_MAIN=<branch>
- ;; resumes one; SEON_MAIN=db is production's main).
- :seon.config.root/main #env SEON_MAIN
- ;; The prefix of a new main's branch name. bin/check sets SEON_RUN to each step's name, so a
- ;; step's records are found by its name in the one store.
- :seon.config.root/run-name #or [#env SEON_RUN "run"]
+ ;; Root's main, as a branch name: one main per store, resumed at every boot (owner,
+ ;; 2026-10-22: "why are we not resuming one main by default"); a store without it makes it
+ ;; from the seed (:db). A run's record is main's commit history. bin/check names each step's
+ ;; own main (SEON_MAIN=check-<step>, deleted when the step is green); SEON_MAIN=db is :db itself.
+ ;; Provenance: notes/PLAN-branches.md point 1. At the bound: n/a.
+ :seon.config.root/main #or [#env SEON_MAIN "main"]
  ;; Root's system declaration (owner, 2026-10-20: the definition lives in a file).
  :seon.config.root/system-path #seon/checkout "resources/seon/system.edn"
  ;; The task files (resources/seon/tasks/<owning-ns>.edn, AGENTS.md "How work is handed out").

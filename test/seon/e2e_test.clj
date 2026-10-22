@@ -9,11 +9,9 @@
             [seon.fixtures :as fx] [seon.ref :as ref] [seon.reader :as reader] [seon.task :as task] [seon.template :as tpl]
             [clojure.string :as str]))
 
-(defn- conn [] (second (pdb/test-branch!)))
 
 (deftest await-quiet-ends-on-a-recorded-defect
-  (let [c (conn)
-        sys {:conn c}
+  (pdb/test-branch! (fn [_ c] (let [sys {:conn c}
         t (:max-tx @c)
         start (System/currentTimeMillis)
         waiting (future (e2e/await-quiet sys t))]
@@ -26,9 +24,9 @@
       (is (= :defect (:ended r)))
       (is (= "seon.reconcile/reconciler-proc: boom" (get-in r [:problem :seon.error/message])) "the problem, as recorded"))
     (testing "quiescence ends it as before"
-      (let [c (conn) t (:max-tx @c) waiting (future (e2e/await-quiet {:conn c} t))]
+      (pdb/test-branch! (fn [_ c] (let [t (:max-tx @c) waiting (future (e2e/await-quiet {:conn c} t))]
         (d/transact c {:tx-data [{:seon.root/id :root :seon.root/quiescent (pr-str {:t (inc t) :stuck []})}]})
-        (is (= {:t (inc t) :stuck []} (deref waiting)))))))
+        (is (= {:t (inc t) :stuck []} (deref waiting)))))))))))
 
 ;; ---- the first real DeepSeek runs (task seon.e2e/the-scenarios-measure-real-agents) ----------
 
@@ -69,7 +67,7 @@
 (deftest turns-count-the-work-attempts
   (let [decls (tpl/with-merge (vec (for [nm ["a" "b" "c"]]
                                      {:seon.task/ns 'demo :seon.task/name nm :seon.task/plan "Make it true." :seon.task/proofs #{(symbol "demo-test" nm)}})))
-        empty-db @(second (pdb/test-branch!))
+        empty-db (pdb/test-db)
         db (d/db-with empty-db (task/create-tx empty-db decls))
         att (fn [id n status turns]
               (let [tid (str "demo/" id) branch (task/default-branch (str "demo/" (first (str/split id #"-"))))]
