@@ -16,14 +16,15 @@
 # What it sets up, so the worktree builds and tests on its own at once:
 # - each submodule of reference-code/ is a worktree of the main tree's submodule repo, detached at
 #   the pinned commit: objects are shared, `git status` is clean, a pin bump on main is taken with
-#   `git -C ../next-NAME submodule update` (no network; the repos are local);
+#   `bin/worktree --sync NAME` from the main tree (never `git submodule` in a worktree);
 # - jolt's own nested submodules (vendor/*) are APFS clones of the main tree's (the build copies them);
 # - target/ is an APFS clone of the main tree's (blocks shared until written; chez and jolt stay
 #   fresh, so `bin/build seon` is the only build needed), without Jolt's compile caches: every
 #   checkout shares main's target/cache (bin/env);
-# - runs (stores) default to its own target/runs.
-# Builds run niced, in parallel (no lock). Landing: when its bin/check is green, its commits are
-# cherry-picked (or merged) onto main by explicit paths; the worktree never edits the main tree.
+# - its stores are its own: its root's runs/store (bin/root), and a check run takes a store of its own
+#   (SEON_STORE=$PWD/target/check-store bin/check ...).
+# Builds run niced, in parallel (no lock). Landing: the lane reports and root merges its branch
+# (docs/landing.md); the worktree never edits the main tree.
 set -eu
 MAIN=$(cd "$(dirname "$0")/.." && pwd)
 die() { print -u2 "worktree: $*"; exit 1; }
@@ -35,6 +36,12 @@ setup() {
   git -C "$WT" ls-tree HEAD reference-code/ | while read -r mode type sha sub; do
     [[ $type == commit ]] || continue
     rmdir "$WT/$sub" 2>/dev/null || true
+    # a submodule the main tree has not checked out yet (one a lane added, before root's landing
+    # initializes it, docs/landing.md) or a pin it lacks: said and left out, not a half-made worktree
+    if [[ ! -e $MAIN/$sub/.git ]] || ! git -C "$MAIN/$sub" cat-file -e "$sha^{commit}" 2>/dev/null; then
+      print -u2 "worktree: $sub at $sha is not in the main tree's checkout; left out (root initializes it at landing)"
+      continue
+    fi
     git -C "$MAIN/$sub" worktree add -q --detach "$WT/$sub" "$sha"
     # nested submodules (jolt's vendor/*): clones of the main tree's checked-out copies
     if [[ -f $MAIN/$sub/.gitmodules ]]; then
