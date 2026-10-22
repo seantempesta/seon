@@ -15,8 +15,11 @@
     2026-10-22): the reconciler forks only from a committed main, so every agent of the
     set starts from the same graph.
   - `attach-tx`: a failed attempt (any kind: refused by the done rule, its merge refused,
-    its agent dead) attaches design -> implement -> test -> merge on a fresh branch from
-    main, while the task's budget lasts (seon.reconcile/refine?). Each starts from the failed
+    its agent dead) attaches design -> implement -> test -> merge while the task's budget
+    lasts (seon.reconcile/refine?): on the failed branch, so its proofs, plan and code carry
+    (\"linked tasks continue its branch\"), unless the branch met main badly or its agent died
+    (a merge task, conflicts or unmerged entries, :dead), which starts fresh from main with
+    the vars the failed branch changed cited in the plan. Each starts from the failed
     task's improved plan and its measured evidence (the problem, the conflicts with base,
     ours and theirs; the red proofs). The failed task and the rest of its branch's chain
     (the tasks on its branch that need it: a work task's merge) are cancelled, and every
@@ -135,11 +138,31 @@
   {:malli/schema [:=> [:cat :seon.task/name] :string]}
   [nm] (-> nm (str/replace #"-r[0-9]+-(design|implement|test|merge)$" "") (str/replace #"-merge$" "")))
 
+(defn fresh?
+  "Does failed attempt a of task m leave a branch its refinement must not continue: a merge
+  refused or met conflicts (a merge task, its conflicts or unmerged entries), or its agent
+  died? Any other refusal (a red proof, a contract gap, a regression) is continued on the
+  branch, where its proofs and code are (root's ruling, 2026-10-22)."
+  {:malli/schema [:=> [:cat :seon.task/task :seon.attempt/attempt] :boolean]}
+  [m a]
+  (boolean (or (= :merge (:seon.task/kind m)) (= :dead (:seon.attempt/status a))
+               (seq (:seon.attempt/conflicts a)) (seq (:seon.attempt/unmerged a)))))
+
+(defn- changed-text
+  "What failed attempt a's branch changed (:seon.attempt/changed, the judge's divergence), as
+  plan text citing each var, or nil when it recorded none."
+  {:malli/schema [:=> [:cat :seon.attempt/attempt] [:maybe :string]]}
+  [a]
+  (when-let [vs (seq (sort (for [k (:seon.attempt/changed a) :let [[kind sym] (read-string k)] :when (= :var kind)] sym)))]
+    (str "\n\nThe failed branch (" (:seon.attempt/id a) ") changed: " (str/join ", " (map #(str "`" % "`") vs))
+         "; it is not carried, read its forms there if they help.")))
+
 (defn attach-tx
   "The tasks a failed attempt attaches, in one transaction: design -> implement -> test ->
-  merge, released, on one fresh branch, one generation on, under the failed task's budget;
-  the failed task and the tasks on its branch that need it cancelled; every other task
-  that needed one of them moved to the new merge; the failed attempt closed. db: main."
+  merge, released, one generation on, under the failed task's budget, on the failed task's
+  branch, or on a fresh one when it must not be continued (fresh?, the changed vars cited in
+  design's plan); the failed task and the tasks on its branch that need it cancelled; every
+  other task that needed one of them moved to the new merge; the failed attempt closed. db: main."
   {:malli/schema [:=> [:cat :seon.host/db [:map [:attempt :seon.attempt/id] [:task :seon.task/id] [:problem {:optional true} :string]]] [:vector :any]]}
   [db {:keys [attempt task problem]}]
   (let [m (task/task db task)
@@ -148,7 +171,8 @@
         base (str (stem (:seon.task/name m)) "-r" g)
         tns (:seon.task/ns m)
         tid #(task/task-id tns (str base "-" %))
-        branch (task/default-branch (task/task-id tns base))
+        new? (fresh? m a)
+        branch (if new? (task/default-branch (task/task-id tns base)) (:seon.task/branch m))
         ev (evidence a problem)
         dials (select-keys m [:seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
         all (task/tasks db)
@@ -165,7 +189,7 @@
                (cond-> {:seon.task/ns tns :seon.task/name (str base "-" (name kind)) :seon.task/kind kind
                         :seon.task/plan "" :seon.task/instructions (instructions kind)
                         :seon.task/branch branch :seon.task/evidence ev :seon.task/generation g}
-                 (nil? needs) (assoc :seon.task/plan (:plan (:seon.task/accumulated m))
+                 (nil? needs) (assoc :seon.task/plan (str (:plan (:seon.task/accumulated m)) (when new? (changed-text a)))
                                      :seon.task/proofs (:proofs (:seon.task/accumulated m)))
                  needs (assoc :seon.task/needs #{needs})
                  (:seon.task/model m) (assoc :seon.task/model (:seon.task/model m))

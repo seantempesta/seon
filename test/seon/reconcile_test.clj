@@ -400,8 +400,11 @@
     (is (= #{"demo/add-r1-merge"} (:seon.task/needs (task/task db' "demo/twice"))))
     (is (= 1 (:seon.task/generation (task/task db' "demo/add-r1-design"))))
     (is (= "attempt demo/add#1 ended cap: proof-red demo-test/add-test" (:problem (:seon.task/evidence (task/task db' "demo/add-r1-design")))))
+    ;; a red proof is not a merge conflict: the refinement continues the failed branch, so
+    ;; its proofs and code carry (root's ruling, 2026-10-22: the step E dry run's r1 began
+    ;; on a fresh branch with design's proof undefined)
     (is (= [{:op :spawn :task "demo/add-r1-design" :attempt "demo/add-r1-design#1"
-             :env {:branch :task-demo-add-r1 :model nil :max-turns r/default-max-turns}}]
+             :env {:branch :task-demo-add :model nil :max-turns r/default-max-turns}}]
            (r/reconcile db')))
     (testing "a chain task's own failure refines from the same stem, one generation on"
       (let [db2 (d/db-with db' (concat (attempt "add-r1-design" 1 :done)
@@ -413,6 +416,19 @@
         (is (= [:cancelled :cancelled :cancelled]
                (map #(:seon.task/execution (task/task db3 %)) ["demo/add-r1-implement" "demo/add-r1-test" "demo/add-r1-merge"])))
         (is (= 2 (:seon.task/generation (task/task db3 "demo/add-r2-design"))))))))
+
+(deftest a-dead-agents-refinement-starts-fresh-citing-what-it-changed
+  ;; a dead agent (or a merge conflict) leaves a branch nobody can trust: the refinement starts
+  ;; fresh from main, and its plan cites what the failed branch changed, so design can look
+  (let [db (mdb [(decl "add")]
+                :extra (attempt "add" 1 :dead :changed #{"[:var app/f]" "[:var app/g]"}))
+        [act] (r/reconcile db)
+        db' (d/db-with db (tpl/attach-tx db act))
+        design (task/task db' "demo/add-r1-design")]
+    (is (= :attach (:op act)))
+    (is (= :task-demo-add-r1 (:seon.task/branch design)) "a fresh branch")
+    (is (str/includes? (:seon.task/plan design) "`app/f`") (:seon.task/plan design))
+    (is (str/includes? (:seon.task/plan design) "`app/g`") (:seon.task/plan design))))
 
 (deftest a-spent-budget-is-a-stuck-fact-naming-what-it-blocks
   (let [db (mdb [(decl "add") (decl "twice" :needs ["add"])]

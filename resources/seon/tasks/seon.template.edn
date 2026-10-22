@@ -11,4 +11,8 @@
                       seon.agent-test/a-forked-agent-knows-its-task
                       seon.reconcile-test/a-task-marked-failed-is-held-for-root
                       seon.agent-test/a-failure-marked-through-the-door-holds-the-task
-                      seon.reconcile-test/a-branch-carries-every-task-it-changed-and-records-a-two-sided-edit}}]
+                      seon.reconcile-test/a-branch-carries-every-task-it-changed-and-records-a-two-sided-edit}}
+ {:seon.task/name "a-refinement-keeps-the-failed-branchs-work"
+  :seon.task/plan "Found by step E's dry run (2026-10-22, worktree dry-run): a request's implement attempt was refused `:contract-gap` (its defn lacked a contract); `seon.template/attach-tx` attached r1 design -> implement -> test -> merge on a fresh branch from main, as its docstring says. Design's proof deftest and implement's change existed only on the failed branch, so on r1 the proof was `:undefined` and the carried plan said \"Implemented ... the proof is green\" about code that was not there: the refinement redid both steps. The evidence carried only the problem text. Waiting on root's ruling (sent 2026-10-22): continue the failed attempt's branch when the refusal is not a merge conflict (contract-gap, proof-red, regression, no-proofs) and start fresh from main for conflicts and dead agents; or stay fresh and carry the failed branch's changed forms (`:seon.attempt/changed`) as evidence the design step can re-evaluate. Proof (for the first): a refused implement attempt whose branch defined a proof attaches a refinement whose design agent resolves that proof var."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.template-test/a-refinement-keeps-the-failed-branchs-work}}]

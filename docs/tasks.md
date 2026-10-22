@@ -17,7 +17,7 @@ All three check out design's branch, so implement holds design's schemas, stubs 
 
 The two other templates make linked sets the same way:
 - `seon.template/with-merge` follows each declared work task (the task files, `my.root/load-tasks!`) with its merge task;
-- `seon.template/attach-tx` attaches design → implement → test → merge to a failed attempt, in the one transaction that cancels the failed chain.
+- `seon.template/attach-tx` attaches design → implement → test → merge to a failed attempt, in the one transaction that cancels the failed chain. The refinement continues the failed branch, where its proofs, plan and code are; only a branch that met main badly or lost its agent (```seon.template/fresh?```: a merge task, conflicts or unmerged entries, a dead agent) starts fresh from main, its plan citing the vars the failed branch changed (root's ruling, 2026-10-22, from the step E dry run, where a contract gap's refinement began without design's proof).
 
 What is not settled: proofs accumulate along `:needs`, so a design step's own check would block implement (DESIGN-tasks §11 #14), and the proofs design writes reach main only as its plan's text (§11 #11, #16).
 
