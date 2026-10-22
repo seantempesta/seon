@@ -7,7 +7,7 @@
   paragraph boundaries) in one pass over the text."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.db :as pdb] [seon.reader :as reader]
-            [clojure.string :as str] [clojure.java.io :as io] [datahike.api :as d] [seon.config :as cfg]))
+            [clojure.string :as str] [clojure.java.io :as io] [datahike.api :as d] [seon.config :as cfg] [seon.fx :as fx]))
 
 (def roots
   "The checkout's top-level entries (docs, src, AGENTS.md, ...), read at first use: the bases
@@ -428,23 +428,20 @@
 
 (defn- sections
   "The sections of a scan's blocks, each heading's: its address (path#anchor, anchors as GitHub
-  writes them, a repeat suffixed -1, -2), heading, level, lines (to the line before the next
-  heading of its level or above, else the last line), parent, and its next block's text as its
-  lead when a paragraph, else as its opening. One fold with a stack of the open sections (v1's
-  with-sections)."
-  {:malli/schema [:=> [:cat [:maybe :string] [:vector :seon.ref/block] nat-int?] [:vector :seon.ref/section]]}
-  [path bs line-count]
-  (let [nb (count bs)
-        end-at (fn [out [_ k] last-line] (assoc! out k (assoc (nth out k) :seon.ref/end-line (max (:seon.ref/line (nth out k)) last-line))))]
+  writes them, a repeat suffixed -1, -2), heading, level, line, parent, and its next block's
+  text as its lead when a paragraph, else as its opening. One fold with a stack of the open
+  sections (v1's with-sections)."
+  {:malli/schema [:=> [:cat [:maybe :string] [:vector :seon.ref/block]] [:vector :seon.ref/section]]}
+  [path bs]
+  (let [nb (count bs)]
     ;; stack: [level index-in-out] of the sections still open
     (loop [i 0 seen {} stack [] out (transient [])]
       (if (= i nb)
-        (persistent! (reduce #(end-at %1 %2 line-count) out stack))
+        (persistent! out)
         (let [{:seon.ref/keys [kind heading-level heading line]} (nth bs i)]
           (if (not= :heading kind)
             (recur (inc i) seen stack out)
             (let [closing (take-while #(>= (first %) heading-level) (rseq stack))
-                  out (reduce #(end-at %1 %2 (dec line)) out closing)
                   stack (subvec stack 0 (- (count stack) (count closing)))
                   base (slug heading)
                   anchor (if-let [m (seen base)] (str base "-" m) base)
@@ -452,19 +449,25 @@
                   {nkind :seon.ref/kind body :seon.ref/text} (when (< (inc i) nb) (nth bs (inc i)))]
               (recur (inc i) (assoc seen base (inc (get seen base 0))) (conj stack [heading-level (count out)])
                      (conj! out (cond-> {:seon.ref/address address :seon.ref/anchor anchor :seon.ref/heading heading
-                                         :seon.ref/heading-level heading-level :seon.ref/line line :seon.ref/end-line line}
+                                         :seon.ref/heading-level heading-level :seon.ref/line line}
                                   (seq stack) (assoc :seon.ref/parent (:seon.ref/address (nth out (second (peek stack)))))
                                   (and body (= :para nkind)) (assoc :seon.ref/lead body)
                                   (and body (not= :para nkind)) (assoc :seon.ref/opening body)))))))))))
 
 (defn parse
-  "Markdown text at path (nil for a plan or a docstring) read once: its sections and every
-  citation its text makes, each mention with its depth and line, in order. This is the value
-  the docs store keeps; `cited` gives each name once."
+  "Markdown text at path (nil for a plan or a docstring) read once: its sections, each with
+  its own text (the lines after its heading up to the next heading, absent when blank), and
+  every citation its text makes, each mention with its depth and line, in order. This is the
+  value the docs store keeps; `cited` gives each name once."
   {:malli/schema [:=> [:cat [:maybe :string] :string] :seon.ref/document]}
   [path text]
-  (let [{:seon.ref/keys [blocks spans line-count]} (scan text)]
-    {:seon.ref/sections (sections path blocks line-count)
+  (let [{:seon.ref/keys [blocks spans]} (scan text)
+        secs (sections path blocks)
+        lines (vec (str/split-lines text))
+        ends (conj (mapv #(dec (:seon.ref/line %)) (rest secs)) (count lines))]
+    {:seon.ref/sections (mapv (fn [s end] (let [t (str/trim (str/join "\n" (subvec lines (min (:seon.ref/line s) end) end)))]
+                                            (cond-> s (not (str/blank? t)) (assoc :seon.ref/text t))))
+                              secs ends)
      :seon.ref/citations (into [] (keep #(candidate path %)) spans)}))
 
 (defn shown
@@ -518,34 +521,17 @@
                depth)))))
 
 (defn- pin
-  "The revision a reference-code submodule at path is checked out at (what the checkout pins,
-  looked up from the submodule's git directory), or nil for any other path."
+  "The revision the checkout pins the reference-code submodule at path to (its gitlink, as
+  `git ls-files -s` lists it), or nil for any other path."
   {:malli/schema [:=> [:cat :string :string] [:maybe :string]]}
   [checkout path]
-  (let [parts (str/split path #"/")]
-    (when (and (= "reference-code" (first parts)) (second parts))
-      (let [sub (io/file checkout "reference-code" (second parts))
-            dot-git (io/file sub ".git")
-            ;; git writes a submodule's gitdir relative to the submodule's own directory
-            named (when (.isFile dot-git) (io/file (str/trim (subs (slurp dot-git) (count "gitdir:")))))
-            gitdir (cond (nil? named) dot-git (.isAbsolute named) named :else (io/file sub (str named)))
-            head (io/file gitdir "HEAD")
-            ;; a worktree's refs live in its common dir (git's commondir file, relative to gitdir)
-            common (let [f (io/file gitdir "commondir")] (if (.isFile f) (io/file gitdir (str/trim (slurp f))) gitdir))
-            ;; a symbolic HEAD (a branch checked out) names its ref: the loose ref file, else packed-refs
-            resolve (fn [ref] (or (some #(let [f (io/file % ref)] (when (.isFile f) (str/trim (slurp f)))) [gitdir common])
-                                  (some #(let [f (io/file % "packed-refs")]
-                                           (when (.isFile f)
-                                             (some (fn [l] (let [[sha r] (str/split l #" ")] (when (= r ref) sha)))
-                                                   (str/split-lines (slurp f)))))
-                                        [gitdir common])))]
-        (when (.isFile head)
-          (let [h (str/trim (slurp head))]
-            (if (str/starts-with? h "ref: ") (resolve (subs h 5)) h)))))))
+  (let [[top sub] (str/split path #"/")]
+    (when (and (= "reference-code" top) sub)
+      (second (re-find #"^160000 ([0-9a-f]{40}) " (fx/git! {} checkout ["ls-files" "-s" "--" (str top "/" sub)] nil))))))
 
 (defn file-view
   "File path of the checkout as depth shows it, read now: a Markdown file by the one parse and
-  the one rule (`view`, anchor or else its first section; at :code the section's lines), any
+  the one rule (`view`, anchor or else its first section; at :code its own text), any
   other file by its address and line count, the text whole at :code. A file of reference-code
   carries the revision it is pinned at. nil when there is no such file or no such anchor."
   {:malli/schema [:=> [:cat :string :string [:maybe :string] :seon.ref/depth] [:maybe :seon.ref/view]]}
@@ -557,14 +543,11 @@
             secs (:seon.ref/sections doc)
             address (if anchor (str path "#" anchor) (:seon.ref/address (first secs)))
             v (if (seq secs)
-                (some-> (view doc address depth)
-                        (cond-> (= :code depth)
-                          (as-> v (let [s (first (filter #(= address (:seon.ref/address %)) secs))]
-                                    (assoc v :seon.ref/text (str/join "\n" (subvec (vec (str/split-lines text)) (dec (:seon.ref/line s)) (:seon.ref/end-line s))))))))
+                (view doc address depth)
                 (when-not anchor
                   (cond-> {:seon.ref/address path :seon.ref/heading path :seon.ref/lines (count (str/split-lines text))}
                     (= :code depth) (assoc :seon.ref/text text))))]
-        (some-> v (cond-> (pin checkout path) (assoc :seon.ref/pin (pin checkout path))))))))
+        (when v (if-let [p (pin checkout path)] (assoc v :seon.ref/pin p) v))))))
 
 ;; ---- resolution ---------------------------------------------------------------------------
 

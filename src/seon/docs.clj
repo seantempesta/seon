@@ -10,34 +10,22 @@
 
 ;; ---- one page, parsed into sections ----------------------------------------------------
 
-(defn- own-text
-  "Lines from (exclusive) to (exclusive) of lines, joined and trimmed; nil when blank."
-  {:malli/schema [:=> [:cat [:vector :string] :int :int] [:maybe :string]]}
-  [lines from to]
-  (let [s (str/trim (str/join "\n" (subvec lines (min from (count lines)) (min (max from (dec to)) (count lines)))))]
-    (when-not (str/blank? s) s)))
-
 (defn page-sections
-  "The sections of the page at path, read once: each its address, heading, lead, own text
-  (the lines after its heading up to the next heading of any level), its parent's address
-  and the citations its own text makes, each once at its strongest depth (seon.ref/cited)."
+  "The sections of the page at path, read once (seon.ref/parse): each its address, heading,
+  lead, own text, its parent's address and the citations its own text makes, each once at its
+  strongest depth (seon.ref/cited)."
   {:malli/schema [:=> [:cat :string :string] [:vector :seon.section/parsed]]}
   [path text]
   (let [{:seon.ref/keys [sections citations]} (ref/parse path text)
-        lines (str/split-lines text)
         starts (mapv :seon.ref/line sections)
-        n (count sections)
         ;; the index of the last section whose heading is at or before line l, or nil
         owner (fn [l] (let [i (dec (count (take-while #(<= % l) starts)))] (when-not (neg? i) i)))
         by-section (group-by #(owner (:seon.ref/line %)) citations)]
-    (vec (for [i (range n)
-               :let [{:seon.ref/keys [address heading lead parent line]} (nth sections i)
-                     next-line (if (< (inc i) n) (nth starts (inc i)) (inc (count lines)))
-                     body (own-text lines line next-line)]]
+    (vec (for [[i {:seon.ref/keys [address heading lead parent text]}] (map-indexed vector sections)]
            (cond-> {:seon.section/address address :seon.section/heading heading
                     :seon.ref/citations (ref/cited (vec (get by-section i [])))}
              lead (assoc :seon.section/lead lead)
-             body (assoc :seon.section/text body)
+             text (assoc :seon.section/text text)
              parent (assoc :seon.ref/parent parent))))))
 
 ;; ---- resolving a section's citations ----------------------------------------------------

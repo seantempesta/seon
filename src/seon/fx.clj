@@ -69,7 +69,7 @@
         (zero? (:exit head)) (assoc :commit (str/trim (:out head)))))
     (catch Throwable e (error :seon.fx/io-error (or (ex-message e) (str (type e))) {:path root}))))
 
-(defn- git!
+(defn git!
   "git in dir with args, under the environment variables env adds ({name value}), its
   trimmed output; a failure throws its stderr (git-commit answers it as :seon.fx/io-error)."
   {:malli/schema [:=> [:cat [:map-of :string :string] :string [:sequential :string] [:maybe :string]] :string]}

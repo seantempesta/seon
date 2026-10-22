@@ -6,7 +6,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.docs :as docs]))
+            [seon.docs :as docs] [seon.ref]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -70,3 +70,14 @@
       (let [db (load-pages db (assoc pages "demo/quiet.md" (str/replace quiet "flow.md#idioms" "flow.md")))]
         (is (= ["demo/quiet.md#counting"] (backlinks db "demo/flow.md#flow")))
         (is (= ["demo/async.md#waiting"] (backlinks db "demo/flow.md#idioms")) "the dropped link is retracted")))))
+
+(deftest one-address-shows-one-text-through-ref-and-docs
+  ;; research row 15: the stored section and the file read now are one parse's, so a section
+  ;; with sections below shows the same own text from either, at every depth
+  (let [db (load-pages (empty-db) pages)
+        doc (seon.ref/parse "demo/flow.md" flow)]
+    (doseq [a ["demo/flow.md#flow" "demo/flow.md#quiet"] depth [:summary :doc :code]]
+      (is (= (dissoc (seon.ref/view doc a depth) :seon.ref/anchor :seon.ref/heading-level :seon.ref/line :seon.ref/parent)
+             (docs/view db a depth))
+          (str a " at " depth)))
+    (is (= "Flow runs procs." (:seon.ref/text (docs/view db "demo/flow.md#flow" :code))) "its own text, its sections below by address")))
