@@ -3,12 +3,12 @@
   into main. A new entry is created held; an unchanged one costs nothing and keeps what main
   learned (the improved plan); a changed one updates what it states; a removed one is
   cancelled, never deleted."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.task :as task] [my.root :as root]))
 
-(defn- empty-db [] (pdb/test-db))
+(defn- empty-db [] (ts/test-db))
 
 (def ^:private file-a
   "[{:seon.task/name \"parse\" :seon.task/plan \"Parse the rows.\" :seon.task/proofs #{demo-test/parse-test}}

@@ -8,7 +8,7 @@
   Run: bin/test seon.agent-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
-            [datahike.api :as d] [seon.db :as pdb] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]))
+            [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]))
 
 (defn in-agent
   "A root on the checkout's src (its source root), one agent on a task of its own, each of
@@ -17,9 +17,10 @@
   main of its own, a branch of the one test store (target/runs/test-store), deleted with
   every branch under it when the root has stopped (seon.check/drop-mains).
   opts: :dirs, the source dirs root imports (default [\"src\"]); :proofs, the task's proofs;
-  :sets, more --set config overrides for the root (e.g. its scripted model)."
+  :sets, more --set config overrides for the root (e.g. its scripted model); :decls, more
+  task declarations in demo's file beside demo/t."
   ([forms] (in-agent forms {}))
-  ([forms {:keys [dirs proofs sets] :or {dirs ["src"] proofs '#{demo-test/t}}}]
+  ([forms {:keys [dirs proofs sets decls] :or {dirs ["src"] proofs '#{demo-test/t}}}]
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         main (str "in-agent-" (random-uuid))
         store (str checkout "/target/runs/test-store")
@@ -27,7 +28,7 @@
         port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
         ask (fn [m] (str "printf '%s\\n' " (pr-str (pr-str m)) " | nc -w 60 127.0.0.1 " port))
         script (str "mkdir -p '" path "-tasks'; mkfifo '" path "-in';"
-                    " echo " (pr-str (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}]))
+                    " echo " (pr-str (pr-str (into [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}] decls)))
                     " > '" path "-tasks/demo.edn'; ./seon root"
                     " --set ':seon.config.source/root=" (pr-str checkout) "' --set ':seon.config.source/dirs=" (pr-str dirs) "'"
                     " --set ':seon.config.root/store-path=" (pr-str store) "' --set ':seon.config.root/main=" (pr-str main) "'"
@@ -170,7 +171,7 @@
   ;; its branch from what it changed since :base. merge-main! left :base at the main the agent
   ;; forked from, so main's own changes, merged in, counted as the agent's. In this process,
   ;; on a branch of the test store, with a socketpair standing for root
-  (pdb/test-branch!
+  (ts/test-branch!
    (fn [cfg conn]
      (let [ab (pdb/on-main (:branch cfg) :agent-base)
            _ (d/branch! conn (:branch cfg) ab)
@@ -197,7 +198,7 @@
 (deftest an-agents-transactions-name-their-runtime
   ;; task seon.db/each-commit-names-its-runtime: what an agent writes on its branch
   ;; (seon.agent/transact!, the run-ahead writer) carries the runtime that made it
-  (pdb/test-branch!
+  (ts/test-branch!
    (fn [cfg conn]
      (let [ab (pdb/on-main (:branch cfg) :agent-tx)
            _ (d/branch! conn (:branch cfg) ab)

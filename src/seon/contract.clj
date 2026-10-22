@@ -19,8 +19,8 @@
     wrapper and no recording transaction: the same binary measured with the guarantees off;
     `:contracts` arms the wrappers without the recording transaction."
   (:refer-clojure :exclude [defn defn-])
-  (:require [malli.core :as m] [malli.registry :as mr] [clojure.edn :as edn]
-            [clojure.java.io :as io] [clojure.string :as str] [seon.profile :as profile] [seon.print :as print]
+  (:require [malli.core :as m] [malli.registry :as mr]
+            [clojure.string :as str] [seon.profile :as profile] [seon.print :as print]
             [seon.config :as config]))
 
 (def on?
@@ -65,22 +65,6 @@
 
 ;; ---- the registry ------------------------------------------------------------------
 
-(def schemas-dir
-  "Where the platform's schema resources live, relative to the checkout: the files the
-  build compiles in, and the schema resources seon.source imports and writes back."
-  "resources/seon/schemas")
-
-(clojure.core/defn schema-forms
-  "Every named schema form of the platform: the maps in resources/seon/schemas/*.edn,
-  read when this namespace compiles (the build host has the directory; a built binary
-  carries the forms)."
-  {:malli/schema [:=> [:cat] [:map-of :qualified-keyword :any]]}
-  []
-  (let [dir (io/file (config/checkout) schemas-dir)]
-    (reduce merge {} (for [f (sort-by #(.getName %) (file-seq dir))
-                           :when (.endsWith (.getName f) ".edn")]
-                       (edn/read-string (slurp f))))))
-
 (clojure.core/defn registry-of
   "A registry whose every named form is compiled once (names resolve to the compiled
   schema of their own name, compiled on first reference). A form that does not compile
@@ -102,12 +86,7 @@
     (doseq [k (keys forms)] (mr/-schema lazy k))
     (mr/composite-registry (m/default-schemas) host-schemas (mr/simple-registry @compiled))))
 
-(defmacro ^:private baked-forms
-  "The schema forms, read when this namespace compiles: a built binary carries them
-  (it bakes no resource files of this project's own paths)."
-  [] (list 'quote (schema-forms)))
-
-(def forms (baked-forms))
+(def forms "Every named schema form of the platform (seon.config/schema-forms, baked once)." config/schema-forms)
 
 (clojure.core/defn properties
   "The properties map of named schema k's form ([:type {props} ...]), or nil: what a
@@ -304,7 +283,7 @@
   :uncontracted [sym] :invalid [error] :ms}."
   {:malli/schema [:=> [:cat [:sequential :symbol]] :seon.contract/report]}
   [nss]
-  (let [t0 (System/nanoTime)
+  (let [t0 (profile/now-ns)
         rs (for [n nss v (vals (ns-interns (the-ns n))) :when (contract v)] [v (arm! v)])
         r (reduce (fn [acc [v r]] (if (error? r) (update acc :invalid conj r) (update acc r (fnil inc 0)))) {:invalid []} rs)]
-    (assoc r :uncontracted (uncontracted nss) :ms (/ (- (System/nanoTime) t0) 1e6))))
+    (assoc r :uncontracted (uncontracted nss) :ms (profile/ms-since t0))))

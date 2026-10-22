@@ -2,7 +2,7 @@
   "Cost proofs (idea 16): the judge's laws on stated measurements, and seon.cost/proof end
   to end on real functions, red when the body does more than the work needs."
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]]
             [seon.cost :as cost] [seon.profile :as profile] [datahike.api :as d] [seon.db :as pdb] [clojure.edn :as edn]))
 
 ;; ---- the judge ------------------------------------------------------------------------
@@ -173,12 +173,12 @@
                  :f (fn [v] (pr-str v)) :per-char true}
    ;; a pull from a branch of the in-memory test store (lane D2: every read of facts is pulls)
    :db/pull {:what "d/pull of one attribute of an entity, by entity id (per pull)"
-             :setup (fn [n] (pdb/test-branch! (fn [_ conn]
+             :setup (fn [n] (ts/test-branch! (fn [_ conn]
                               (d/transact conn (vec (for [i (range n)] {:note/text (str "n" i) :note/agent :u})))
                               [(d/db conn) (mapv :e (d/datoms (d/db conn) :aevt :note/text))])))
              :f (fn [db es] (reduce (fn [a e] (d/pull db [:note/text] e) a) 0 es))}
    :db/pull-attr {:what "each attribute of a d/pull beyond its first (per attribute)"
-                  :setup (fn [n] (pdb/test-branch! (fn [_ conn]
+                  :setup (fn [n] (ts/test-branch! (fn [_ conn]
                                    (d/transact conn [{:note/text "x" :note/agent :u}])
                                    [(d/db conn) (first (map :e (d/datoms (d/db conn) :aevt :note/text))) n])))
                   :f (fn [db e n] (dotimes [_ n] (d/pull db [:note/text :note/agent] e)))

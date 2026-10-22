@@ -1,15 +1,26 @@
 (ns seon.db-test
   "One store, many branches, as in production (owner, 2026-10-21): bin/test seeds one test
-  store and each test takes a branch of it through one helper (seon.db/test-branch!)."
-  (:require [clojure.test :refer [deftest is testing]]
+  store and each test takes a branch of it through one helper (seon.test-store/test-branch!)."
+  (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [clojure.java.io] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.config :as cfg] [seon.contract :as contract] [seon.edn]
             [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
+(deftest eid-is-the-entity-of-a-unique-value
+  (let [db (ts/test-db)]
+    (testing "a unique attribute's value names its entity: the one a query finds"
+      (is (= (d/q '[:find ?e . :where [?e :var/name app.m0/f1]] db) (pdb/eid db :var/name 'app.m0/f1)))
+      (is (= 'app.m0/f1 (:var/name (d/entity db (pdb/eid db :var/name 'app.m0/f1))))))
+    (testing "a value no entity holds is nil, not an id"
+      (is (nil? (pdb/eid db :var/name 'app.m0/no-such)))
+      (is (nil? (pdb/eid db :seon.root/id :root))))
+    (testing "root's facts pulled by lookup ref are nil before root's first boot: no eid guard is needed"
+      (is (nil? (d/pull db [:seon.root/boot] [:seon.root/id :root]))))))
+
 (deftest a-test-takes-a-branch-of-the-test-store
-  (pdb/test-branch! (fn [cfg-a a] (pdb/test-branch! (fn [cfg-b b] (let [seed (d/connect (dissoc cfg-a :branch))]
+  (ts/test-branch! (fn [cfg-a a] (ts/test-branch! (fn [cfg-b b] (let [seed (d/connect (dissoc cfg-a :branch))]
     (testing "both are branches of one store, each named apart"
       (is (= (get-in cfg-a [:store :id]) (get-in cfg-b [:store :id])))
       (is (not= (:branch cfg-a) (:branch cfg-b)))
@@ -33,7 +44,7 @@
 (deftest minting-past-the-lease-is-refused-not-shared
   ;; this process takes a lease on a test branch as a forked agent does (seon.db/after-fork!
   ;; -> lease!), mints all but two of its ids, then asks for five more
-  (pdb/test-branch! (fn [c conn] (let [sid (get-in c [:store :id])
+  (ts/test-branch! (fn [c conn] (let [sid (get-in c [:store :id])
         lease (pdb/lease-base conn)
         ceiling (+ lease (cfg/value :seon.config.store/eid-lease))
         notes (fn [n tag] (vec (for [i (range n)] {:note/text (str tag i)})))]
@@ -72,13 +83,13 @@
         (d/transact conn [{:note/text (apply str (repeat 100000 "x"))}])
         (pdb/sync! cfg)
         (is (< used-bytes (:used-bytes (pdb/map-use cfg))) "it grows as the store does"))
-      (is (nil? (pdb/map-use (pdb/test-branch! (fn [c _] c)))) "an in-memory store has no map")
+      (is (nil? (pdb/map-use (ts/test-branch! (fn [c _] c)))) "an in-memory store has no map")
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest a-lease-mints-in-its-own-block-after-a-merge
   ;; main merged into the branch brings entities minted in a later agent's block (ids past
   ;; this lease's ceiling): this process still mints inside its own block, never above them
-  (pdb/test-branch! (fn [c conn] (let [sid (get-in c [:store :id])
+  (ts/test-branch! (fn [c conn] (let [sid (get-in c [:store :id])
         lease (pdb/lease-base conn)
         ceiling (+ lease (cfg/value :seon.config.store/eid-lease))
         theirs (+ ceiling 10)
@@ -200,7 +211,7 @@
   ;; with :seon.config.store/keep-history? (default true) a store keeps its temporal indexes:
   ;; a retraction stays visible in d/history, and a transaction keeps its :db/txInstant
   ;; (Datahike applies a transaction's tx-meta only with history: off, it was silently dropped)
-  (pdb/test-branch!
+  (ts/test-branch!
    (fn [_ conn]
      (let [{tx :tempids} (d/transact conn [{:db/id "n" :note/text "kept"}])
            e (get tx "n")
@@ -400,9 +411,9 @@
         n 20]
     (try
       (let [once (write-turns! conn cfg path :once n n)
-            t0 (System/nanoTime)
+            t0 (profile/now-ns)
             per-turn (write-turns! conn cfg path :per-turn n 1)
-            ms (/ (- (System/nanoTime) t0) 1e6)
+            ms (profile/ms-since t0)
             bound (+ once (* n 32 1024))]
         (println (str "a-commit-costs-what-it-writes: " n " turns, one commit " once " B, per turn " per-turn " B, bound " bound " B, "
                       (format "%.1f" (/ ms n)) " ms per turn (compressor " (cfg/value :seon.config.store/compressor)

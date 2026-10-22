@@ -5,7 +5,7 @@
   its file marked :line-reference, a section's summary is its heading and its lead's first
   sentence; the scanner meets CommonMark 0.31.2's examples for its subset in one pass."
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest is are testing]] [seon.contract :refer [defn defn-]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is are testing]] [seon.contract :refer [defn defn-]]
             [clojure.string :as str] [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.ref :as ref]))
 
 (defn- kinds
@@ -19,7 +19,7 @@
   "A branch of the seeded test store (app.m0/f0 ... are its vars) with one namespace and var more."
   {:malli/schema [:=> [:cat] :seon.host/db]}
   []
-  (d/db-with (pdb/test-db) [{:db/id "ns" :ns/name 'demo.calc} {:var/name 'demo.calc/add :var/ns "ns"}]))
+  (d/db-with (ts/test-db) [{:db/id "ns" :ns/name 'demo.calc} {:var/name 'demo.calc/add :var/ns "ns"}]))
 
 (defn- names-on
   "The names of the references text makes on db."

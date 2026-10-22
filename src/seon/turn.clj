@@ -16,7 +16,7 @@
   Root starts it by evaluating (seon.turn/work! '{...}) in the agent; the attempt's end is
   a fact on the branch (:seon.end/*), which root's judge reads."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.set :as set]
+  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.set :as set]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context]
             [seon.harvest :as harvest] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
@@ -66,9 +66,9 @@
   the branch holds it (its plan may have improved)."
   {:malli/schema [:=> [:cat :seon.task/id [:set :qualified-symbol] :seon.task/plan] :map]}
   [id gaps-before plan-before]
-  (let [t0 (System/nanoTime)
+  (let [t0 (profile/now-ns)
         run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks) (:proofs (:seon.task/accumulated (task/task (agent/db) id))))
-        tests-ms (long (lib/ms-since t0))
+        tests-ms (long (profile/ms-since t0))
         results (proofs/results run)
         db (agent/db)
         unc (set/difference (harvest/uncontracted db) gaps-before)
@@ -86,7 +86,7 @@
   (agent/write-end! attempt {:outcome outcome :turns turn :tokens tokens :reason reason :error error
                              :waste (learn/summary (learn/waste (or log []) (learn/final-symbols (or log []))))})
   (cond-> {:outcome outcome :turns turn :model-calls turn :results {} :uncontracted #{}
-           :ms (lib/ms-since t0)}
+           :ms (profile/ms-since t0)}
     tokens (assoc :tokens tokens)
     reason (assoc :reason reason)))
 
@@ -123,29 +123,29 @@
   [{:keys [turn tokens max-turns merge? attempt] :as st} {:keys [results tests-ms] :as obs} model-name]
   (let [t (:task obs)
         proofs (:proofs (:seon.task/accumulated t))
-        t0 (System/nanoTime)
+        t0 (profile/now-ns)
         basis (basis! (:seon.task/id t) attempt turn max-turns :model
                       (cond-> (observed obs) merge? (assoc :merge? true)))
         {:keys [block messages]} (context/render (agent/db) basis)
-        context-ms (long (lib/ms-since t0))
-        t1 (System/nanoTime)
+        context-ms (long (profile/ms-since t0))
+        t1 (profile/now-ns)
         r (agent/fx! :model (cond-> {:messages messages :task (:seon.task/id t) :turn turn}
                               model-name (assoc :model model-name))
                      {})
-        model-ms (long (lib/ms-since t1))
+        model-ms (long (profile/ms-since t1))
         c (:value r)]
     (if (:seon.error/type r)
       r
-      (let [t2 (System/nanoTime)
+      (let [t2 (profile/now-ns)
             ;; each eval call through the one REPL path, in order; its answer is the call's result
             calls (mapv (fn [{:keys [id code]}] {:id id :code code :items (repl/eval-string (:text (reader/forgive code)))})
                         (:tool-calls c))
             items (into [] (mapcat :items) calls)
-            eval-ms (long (lib/ms-since t2))
+            eval-ms (long (profile/ms-since t2))
             _ (swap! agent/state assoc-in [:turn :evals] items)
             ;; unknown when the provider sent no usage: absent, never 0
             used (when (and (:prompt-tokens c) (:completion-tokens c)) (+ (:prompt-tokens c) (:completion-tokens c)))
-            t3 (System/nanoTime)]
+            t3 (profile/now-ns)]
         ;; what the model read, as its basis (seon.context/render makes the text from it), what
         ;; it answered and how it stopped, what its forms evaluated to as the next turns show it,
         ;; and where the turn's time went as this agent saw it
@@ -163,7 +163,7 @@
                             (:reasoning c) (assoc :seon.turn/reasoning (:reasoning c)))])
         (agent/transact! [{:seon.turn/id (str attempt "/" turn)
                            :seon.turn/split (cond-> {:context-ms context-ms :model-ms model-ms :eval-ms eval-ms
-                                                     :record-ms (long (lib/ms-since t3))}
+                                                     :record-ms (long (profile/ms-since t3))}
                                               tests-ms (assoc :tests-ms tests-ms))}])
         (cond-> (-> (assoc st :turn (inc turn) :tokens (when (and tokens used) (+ tokens used)))
                     ;; what this turn's block showed, by producer, and what it evaluated (waste)
@@ -183,13 +183,13 @@
   (let [{:keys [gaps-before plan-before]} (begin! task attempt)
         {:keys [tests-ms] :as obs} (observe task gaps-before plan-before)
         n (get-in (swap! agent/state update-in [:turn :reads] (fnil inc 0)) [:turn :reads])
-        t0 (System/nanoTime)
+        t0 (profile/now-ns)
         basis (basis! task attempt n 1 :outside (assoc (observed obs) :merge? true))
         text (:content (peek (:messages (context/render (agent/db) basis))))]
     ;; the read is a turn of this attempt, as a model turn is: what it was built from and what it cost
     (agent/transact! [{:seon.turn/id (str attempt "/read-" n) :seon.turn/attempt attempt :seon.turn/n n
                        :seon.turn/origin :outside :seon.turn/basis basis
-                       :seon.turn/split (cond-> {:context-ms (long (lib/ms-since t0))} tests-ms (assoc :tests-ms tests-ms))}])
+                       :seon.turn/split (cond-> {:context-ms (long (profile/ms-since t0))} tests-ms (assoc :tests-ms tests-ms))}])
     text))
 
 (defn work!
@@ -206,7 +206,7 @@
         merge? (= :merge (:seon.task/kind t0-task))
         dials (r/dials t0-task)]
     (when merge? (branch/merge-main!))
-    (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (System/nanoTime) :attempt attempt
+    (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (profile/now-ns) :attempt attempt
                :max-turns max-turns :merge? merge? :gaps-before gaps-before}]
       (let [{:keys [refusals unmerged] :as obs} (observe task (:gaps-before st) plan-before)
             stop (get-in @agent/state [:turn :stop])

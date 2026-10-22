@@ -5,7 +5,7 @@
   (konserve.jolt.fasl-store, FaslSerializer), and the JVM-written-store reader stays behind
   (BAGGAGE.md)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-] :as contract] [seon.schema.datahike :as sd] [seon.config :as cfg]
+  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-] :as contract] [seon.schema.datahike :as sd] [seon.config :as cfg]
             [datahike.connections] [datahike.writing] [datahike.config] [datahike.store] [konserve.store] [datahike.db.transaction :as dbt] [hasch.core :as hasch] [datahike.api :as d] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
             [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix]))
 
@@ -13,6 +13,13 @@
   "The Datahike schema, derived from the registry's entity schemas (resources/seon/schemas,
   seon.schema.datahike; lane D1): one source of truth with the contracts."
   (sd/declarations contract/registry))
+
+(defn eid
+  "The entity id of the entity whose unique attribute a has value v on db, or nil: one seek
+  in a's AVET index, never a query (a Datalog query here cost ~95 us and 100 KB at 100
+  tasks, planned on every call). The one entity lookup (docs/storage.md#entity-ids)."
+  {:malli/schema [:=> [:cat :seon.host/db :keyword :any] [:maybe :int]]}
+  [db a v] (:e (first (d/datoms db :avet a v))))
 
 (defn seed-tx
   "Transactions of an example program sized by n (the test store's and the check store's
@@ -135,7 +142,9 @@
       (when (seq others) (d/transact conn {:tx-data (vec others) :tx-meta (tx-meta)})))
     (count missing)))
 
-(defn- seed! {:malli/schema [:=> [:cat :seon.host/conn :int] :any]}
+(defn seed!
+  "Seed the empty store under conn: the schema (install-missing!), then (seed-tx n)."
+  {:malli/schema [:=> [:cat :seon.host/conn :int] :any]}
   [conn n]
   (install-missing! conn)
   (doseq [tx (seed-tx n)] (d/transact conn {:tx-data tx :tx-meta (tx-meta)})))
@@ -182,7 +191,7 @@
   {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch] :boolean]}
   [conn b] (boolean (k/exists? (:store @conn) b {:sync? true})))
 
-(defn- open-main!
+(defn open-main!
   "main on the store of cfg, whose :db exists: made from :db's head when the store has no
   such branch (one pointer write). Answers [conn existed?]."
   {:malli/schema [:=> [:cat :seon.db/cfg :seon.db/branch] [:tuple :seon.host/conn :boolean]]}
@@ -200,15 +209,6 @@
   {:malli/schema [:=> [:cat :seon.db/cfg] [:maybe :string]]}
   [cfg] (when-let [p (get-in cfg [:store :path])] (str p "-agents/" (name (main-branch cfg)))))
 
-(def ^:private test-store
-  "This process's one in-memory store for tests and cost setups, seeded once on :db
-  (bin/test makes it on first use): each test takes a branch of it (test-branch!)."
-  (delay (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write
-                        :writer writer-cfg}]
-           (d/create-database (made-cfg cfg))
-           (let [conn (d/connect cfg)] (seed! conn 2000) (d/release conn))
-           cfg)))
-
 (defn delete-main!
   "Delete main and every branch held under it (of-main) from the store of conn, a connection
   to :db (datahike.api/delete-branch!; a branch's connections are released first): what a
@@ -221,25 +221,6 @@
         bs (cond-> under (branch? conn main) (conj main))]
     (doseq [b bs] (d/delete-branch! conn b))
     bs))
-
-(defn test-db
-  "The test store's seed as a db value (the schema and about 2,000 datoms of the example
-  program), for a test that only reads or uses d/db-with: no branch is made."
-  {:malli/schema [:=> [:cat] :seon.host/db]}
-  []
-  (let [c (d/connect @test-store)] (try @c (finally (d/release c)))))
-
-(defn test-branch!
-  "(f cfg conn) on a fresh branch of the test store (its seed: the schema and about 2,000
-  datoms of the example program), cfg naming the branch; the branch is deleted when f
-  returns or throws (a fixture: a test leaves the test store as it found it). Answers f's value."
-  {:malli/schema [:=> [:cat [:=> [:cat :seon.db/cfg :seon.host/conn] :any]] :any]}
-  [f]
-  (let [b (keyword (str "test-" (random-uuid)))
-        [conn _] (open-main! @test-store b)
-        seed (d/connect @test-store)]
-    (try (f (assoc @test-store :branch b) conn)
-         (finally (d/release conn) (delete-main! seed b) (d/release seed)))))
 
 (defn preload!
   "Read every node of db's indexes, so this process holds the whole db in its heap and
@@ -286,7 +267,7 @@
   (:collect) and root refuses it while an agent is live (docs/storage.md#collection)."
   {:malli/schema [:=> [:cat :seon.host/conn] [:or [:map [:skipped :boolean]] :seon.root/collected]]}
   [conn]
-  (let [last (d/q '[:find ?c . :where [?e :seon.root/id :root] [?e :seon.root/collected ?c]] @conn)
+  (let [last (:seon.root/collected (d/pull @conn [:seon.root/collected] [:seon.root/id :root]))
         now (set (d/branches conn))
         gone (count (remove now (:branches last)))]
     (cond
@@ -296,9 +277,9 @@
       ;; spawns behind root's writer for seconds (scale: 8.2 s to ready, 2026-10-22)
       (zero? gone) {:swept 0 :ms 0.0 :branches now :gone 0}
       :else
-      (let [t0 (System/nanoTime)
+      (let [t0 (profile/now-ns)
             swept @(d/gc-storage conn (java.util.Date. 0))]
-        {:swept (count swept) :ms (/ (- (System/nanoTime) t0) 1e6) :branches now :gone gone}))))
+        {:swept (count swept) :ms (profile/ms-since t0) :branches now :gone gone}))))
 
 (defn lease!
   "Make this process mint the store's entity ids from its lease: from lease, up to (not

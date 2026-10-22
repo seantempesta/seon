@@ -10,7 +10,7 @@
   connection is an outside caller of root's API, as bin/check is. Try it:
   printf '{:op :agents}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.reconcile :as r]
+  (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.reconcile :as r]
             [seon.lib :as lib] [seon.repl :as repl] [clojure.edn :as edn]))
 
 (defn- refused
@@ -57,24 +57,28 @@
                     (binding [*sys* sys]
                       (repl/eval-string code {"ns" "root.repl" :origin :outside :ticks 0
                                               :repl/eval-fn (fn [form] (eval (list 'let '[sys seon.entrance/*sys*] form)))})))]
-    @(c/transact-main! sys (repl/record-tx :root (str "root-outside-" (lib/now-ns)) items nil))
+    @(c/transact-main! sys (repl/record-tx :root (str "root-outside-" (profile/now-ns)) items nil))
     items))
 
 (defn- attach!
   "Start an outside attempt of task id: its desired model is \"outside\", so the
-  reconciler starts no turn loop for it and does not kill it. Answers {:agent :task :attempt}."
+  reconciler starts no turn loop for it and does not kill it. The agent is spawned first;
+  only once it exists are its env, the release and the attempt written, in one transaction,
+  so a refused spawn writes nothing and the reconciler never sees a release with no attempt
+  (it would spawn a second agent for it). Answers {:agent :task :attempt}."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.task/id] :map]}
   [sys id]
-  (if-not (task/task @(:conn sys) id)
-    (refused (str "no task " id))
-    (do @(c/transact-main! sys (into (task/env-tx id {:model "outside"}) (task/execution-tx [id] :running)))
-        (let [db @(:conn sys)
-              env (r/desired-env (task/task db id))
-              aid (str id "#" (inc (count (filter #(= id (:seon.attempt/task %)) (vals (task/attempts db))))))
-              ag (c/spawn! sys {:branch (:branch env) :task id :attempt aid})]
-          @(c/transact-main! sys (task/attempt-start-tx aid id (:boot sys) ag env (System/currentTimeMillis)
-                                                       (:plan (:seon.task/accumulated (task/task db id)))))
-          {:agent ag :task id :attempt aid}))))
+  (let [db @(:conn sys)
+        t (task/task db id)]
+    (if-not t
+      (refused (str "no task " id))
+      (let [env (assoc (r/desired-env t) :model "outside")
+            aid (str id "#" (inc (count (filter #(= id (:seon.attempt/task %)) (vals (task/attempts db))))))
+            ag (c/spawn! sys {:branch (:branch env) :task id :attempt aid})]
+        @(c/transact-main! sys (vec (concat (task/env-tx id {:model "outside"}) (task/execution-tx [id] :running)
+                                            (task/attempt-start-tx aid id (:boot sys) ag env (System/currentTimeMillis)
+                                                                   (:plan (:seon.task/accumulated t))))))
+        {:agent ag :task id :attempt aid}))))
 
 (defn- attempt-of
   "The live attempt agent ag works, from main: {:attempt :task :env}, or nil."

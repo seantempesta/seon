@@ -35,7 +35,7 @@ site is red, and a fixed one leaves this list in the fix's commit.
 
 ## Time measured (recorded, never compared to decide)
 
-- `seon.lib/now-ns`, `seon.lib/ms-since`, `seon.profile/now-ns`, `seon.sock/now-ns`: the clock reads themselves; their callers are judged here one by one.
+- `seon.profile/now-ns`, `seon.profile/ms-since`: the one clock read ([machine](machine.md#the-clock)); their callers are judged here one by one.
 - `seon.step/event`, `seon.agent-proc/agent-in`, `seon.root/end-agent`, `seon.root/record-death`, `seon.root/set-agent`, `seon.root/previous-end`, `seon.reconcile/judge-tx`, `seon.reconcile/start`, `seon.reconcile/dead-tx`, `seon.entrance/attach!`, `seon.writer/main-commit`, `seon.repl/wrap-caught`, `seon.web/render-in`: a wall-clock stamp on an event, an attempt, a death, a root's end, a problem, an error, a commit or a dashboard chunk.
 - `seon.repl/record!`, `seon.web/http-in`: a record's id made unique by the clock read.
 - `seon.turn/act!`, `seon.turn/work!`, `seon.turn/observe`, `seon.turn/context-block`, `seon.model/openai-compat`, `seon.model/scripted`, `seon.fx/build`, `seon.fx/lane-proc`, `seon.contract/instrument!`, `seon.cost/once`, `seon.repl/wrap-cost`, `seon.agent/clone!`, `seon.agent/run-tests-forked`, `seon.db/collect!`, `seon.fork-server/server-step`, `seon.root/import-source!`, `seon.entrance/root-eval`: a duration recorded on the work's own fact or reply.
