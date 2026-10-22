@@ -487,3 +487,6 @@ li.turn .result { display: flex; gap: 6px; align-items: baseline; font-size: 11p
 .box .changed { color: var(--warning); }
 details.fns summary { cursor: pointer; font-size: 10.5px; color: var(--text-500); }
 .winput textarea { flex: 1; resize: vertical; font: 12px/1.45 var(--font-mono); background: var(--base-900); color: var(--text-100); border: 1px solid var(--base-700); border-radius: 6px; padding: 6px 8px; }
+.zhead .stats { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px; }
+.zhead .stats em { font-style: normal; color: var(--text-500); margin-right: 5px; }
+.hr pre.lead { margin: 0; color: var(--text-400); font-style: italic; white-space: pre-wrap; font-size: 10.5px; }

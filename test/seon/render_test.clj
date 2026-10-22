@@ -262,7 +262,7 @@
   (let [rows {"t/a" {:state :blocked :blocked-by #{"t/root"}} "t/b" {:state :blocked :blocked-by #{"t/root" "t/other"}}
               "t/c" {:state :blocked :blocked-by #{"t/root"}} "t/d" {:state :done :blocked-by #{}}}
         text (r/ai (assoc sys :tasks {"t/a" {}} :task-rows rows) {:schema :seon.render/system :budget 2000})]
-    (is (str/includes? text "3 blocked, waiting on: t/root (3), t/other (1)") "each blocker once, the one holding most first")
+    (is (str/includes? text "3 with needs not done, waiting on: t/root (3), t/other (1)") "each blocker once, the one holding most first")
     (is (not (str/includes? text "t/a blocked by")) "not one line per blocked task")))
 
 ;; ---- the FENCES audit's names for the same law (seon.fences/no-clip-in-renders) -------------

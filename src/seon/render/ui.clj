@@ -812,7 +812,7 @@
       (kicker (str "task · " (:seon.task/id t))
               (str (kname (:seon.task/kind t)) " · "
                    ;; what happened (the reconciler's observed state, when the producer carries it), else the desired execution
-                   (if-let [st (:seon.task/state t)] (str (kname st) " (" (kname (:seon.task/execution t)) ")") (kname (:seon.task/execution t)))))
+                   (if-let [st (:seon.task/state t)] (str (kname st) " · execution " (kname (:seon.task/execution t))) (kname (:seon.task/execution t)))))
       [:pre {:class "plan" :title "its plan, accumulated along its needs: theirs first"} plan]
       (when (:seon.task/instructions t) [:p {:class "muted"} (:seon.task/instructions t)])
       (when (:seon.task/problem t) [:p {:class "err"} (:seon.task/problem t)])
@@ -820,7 +820,11 @@
         [:p {:class "err"} "failed" (when attempt (str " in " attempt)) ": " reason (when counterexample (list " · counterexample " [:code counterexample]))])
       (when-let [{:keys [cause blocks]} (:seon.task/stuck t)]
         [:p {:class "warn"} "budget spent: " cause (when (seq blocks) (str " · blocks " (str/join ", " (sort blocks))))])
-      (when (seq (:seon.task/needs t)) [:p {:class "muted"} "needs " (str/join ", " (sort (:seon.task/needs t)))])
+      (when (seq (:seon.task/needs t))
+        [:p {:class "muted"} "needs "
+         ;; met or not, when the producer carries what blocks it (seon.reconcile/blocked-by)
+         (interpose ", " (for [n (sort (:seon.task/needs t)) :let [b (:seon.task/blocked-by t)]]
+                           (cond (nil? b) n (contains? b n) [:span {:class "warn"} (str n " (not done)")] :else (str n " (done)"))))])
       [:p {:class "muted"} (str (count proofs) (if (= 1 (count proofs)) " proof: " " proofs: ")) (str/join " " (map str (sort-by str proofs)))]
       (when-let [ev (:seon.task/evidence t)]
         [:div {:class "muted"} "evidence " (render/print-html ev {:budget (config/value :seon.config.render/part-budget)})])]))
@@ -906,6 +910,7 @@
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [e opts]
        [:li {:class (str "hr tag-" (kname (or (:tag e) :ret)))}
+      (when (:lead e) [:pre {:class "lead"} (prose (:lead e) (form-budget))])
       [:div {:class "hf"} [:code (prose (:form e) (form-budget))]]
       [:div {:class "hv"} (eval-out e (or (:budget opts) (config/value :seon.config.render/value-budget)) (part) nil true)]
       (when (and (seq (:out e)) (not (context-read? e))) [:pre {:class "out"} (prose (:out e) (part))])
@@ -969,7 +974,7 @@
         (cond model model attempt (str (config/value :seon.config.ai/model) " (root's default)") :else "–")]
        [:span {:title "the attempt's start, local time (:seon.config.web/utc-offset)"} [:em "started"] (str (clock start-ms) " UTC" (config/value :seon.config.web/utc-offset))]
        (when end-ms [:span {:title "the attempt's end, local time"} [:em "ended"] (clock end-ms)])
-       (when (and start-ms end-ms) [:span {:title "start to end"} [:em "took"] (ms-str (- end-ms start-ms))])
+       (when (and start-ms end-ms) [:span {:title "wall time, the attempt's start to its end: its fork, every turn and its judging"} [:em "took (wall)"] (ms-str (- end-ms start-ms))])
        [:span [:em "turns"] (str (:n turns))]
        [:span [:em "tokens"] (group3 (:tokens turns))]
        [:span {:title "at the model's configured prices, off-peak (the provider charges twice at peak); a turn whose provider did not split cached from uncached prompt tokens, or whose model has no prices, is not priced"}

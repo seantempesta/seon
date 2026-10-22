@@ -342,7 +342,9 @@
                             (assoc acc k {:input v :seq (inc (reduce max 0 (map :seq (vals acc))))
                                           :html (h/html [:div {:class "wtile" :id (str "tile-" (name k))} (render/html v {:schema schema :as :tile})])}))))
                       (:tiles z {})
-                      [[:task (when task (assoc task :seon.task/state (get-in st [:task-rows (:seon.task/id task) :state]))) :seon.task/task]
+                      [[:task (when task (assoc task :seon.task/state (get-in st [:task-rows (:seon.task/id task) :state])
+                                                :seon.task/blocked-by (set (get-in st [:task-rows (:seon.task/id task) :blocked-by]))))
+                        :seon.task/task]
                        [:proofs {:tests (:tests agent) :results (:seon.attempt/results attempt)
                                  :seen (not-empty (get-in newest [:seon.turn/basis :observed :results])) :seen-turn (:seon.turn/id newest)
                                  :own (get-in task [:seon.task/accumulated :proofs])

@@ -254,7 +254,7 @@
              ;; blocked tasks by what blocks them (ui/waiting-on): each blocker once, with how
              ;; many it holds up (the root cause first), not one line per blocked task
              (when-let [w (seq (ui/waiting-on task-rows))]
-               [(str (count (filter (comp seq :blocked-by val) task-rows)) " blocked, waiting on: "
+               [(str (count (filter (comp seq :blocked-by val) task-rows)) " with needs not done, waiting on: "
                      (str/join ", " (for [[b n] w] (str b " (" n ")"))))])
              (map line running)
              (some-> more-running vector)
