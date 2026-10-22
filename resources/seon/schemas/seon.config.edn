@@ -47,6 +47,7 @@
   [:seon.config.agent/heap-extra-bytes :seon.config.agent/heap-extra-bytes]
   [:seon.config.agent/sock-buf-bytes :seon.config.agent/sock-buf-bytes]
   [:seon.config.agent/form-ticks :seon.config.agent/form-ticks]
+  [:seon.config.agent/form-top-fns :seon.config.agent/form-top-fns]
   [:seon.config.agent/test-ticks :seon.config.agent/test-ticks]
   ;; merges and refinement
   [:seon.config.merge/max-running :seon.config.merge/max-running]
@@ -65,7 +66,7 @@
   ;; effects and the model
   [:seon.config.fx/buf :seon.config.fx/buf]
   [:seon.config.ai/provider :seon.config.ai/provider]
-  [:seon.config.ai/script :seon.config.ai/script]
+  [:seon.config.ai/script {:optional true} :seon.config.ai/script]
   [:seon.config.ai/model :seon.config.ai/model]
   [:seon.config.ai/max-tokens :seon.config.ai/max-tokens]
   [:seon.config.ai/thinking {:optional true} :seon.config.ai/thinking]

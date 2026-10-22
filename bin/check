@@ -44,6 +44,8 @@ export SEON_STORE=${SEON_STORE:-$ROOT/target/check-store}
 # step's root that found it free took it (the owner's browser then showed a throwaway check
 # root). A run that wants one names its port: SEON_WEB_PORT=7790 bin/root
 export SEON_WEB_PORT=${SEON_WEB_PORT:-0}
+# agents' turns are the scripted provider's (a test fixture; a root with no profile has no model provider)
+export SEON_PROFILE=${SEON_PROFILE:-scripted}
 # --steps DIR: a full run of the steps DIR/steps names, its greens written to DIR/green
 SEL=
 [[ ${1:-} == --steps ]] && { SEL=$2; shift 2; set -- 100 }

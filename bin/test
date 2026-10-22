@@ -15,6 +15,8 @@ JOLT=$ROOT/target/jolt/jolt
 cd "$ROOT"
 # a root a test boots listens on no dashboard port
 export SEON_WEB_PORT=${SEON_WEB_PORT:-0}
+# agents' turns are the scripted provider's (a test fixture; a root with no profile has no model provider)
+export SEON_PROFILE=${SEON_PROFILE:-scripted}
 runner() { HOME=$ROOT/target/home JOLT_PWD=$ROOT "$JOLT" -A:test run -m test-runner "$@" }
 case ${1:-} in
   --plan|--shard|--store-steps) runner "$@"; exit $? ;;
