@@ -262,7 +262,7 @@
     (is (str/includes? text "3 blocked, waiting on: t/root (3), t/other (1)") "each blocker once, the one holding most first")
     (is (not (str/includes? text "t/a blocked by")) "not one line per blocked task")))
 
-;; ---- the FENCES audit's names for the same law (seon.fences/no-clip-in-renders) -------------
+;; ---- the FENCES audit's names for the same law (seon.guards/no-clip-in-renders) -------------
 
 (deftest no-render-calls-clip
   (is (nil? (resolve 'seon.render.ui/clip)))

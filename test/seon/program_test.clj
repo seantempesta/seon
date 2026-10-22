@@ -106,7 +106,7 @@
   (is (empty? (:banned (eval-account 'app.pt-ban "(defn fine [m] (assoc m :intern 1))"))) "a keyword named like it is nothing"))
 
 (deftest catches-and-clocks-are-recorded
-  ;; for the fence detectors (session PATTERNS): a hiding guard is a catch answering a constant;
+  ;; for the guard detectors (session PATTERNS): a hiding guard is a catch answering a constant;
   ;; time deciding is a sleep, a deref with a timeout, or core.async's timeout
   (let [a (eval-account 'app.pt-guard (str "(defn guarded [f p] (Thread/sleep 1) (deref p 10 :late)"
                                            " (try (f) (catch IllegalStateException e nil) (catch Exception e (throw e)) (catch Throwable t (str t))))"))]

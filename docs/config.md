@@ -13,7 +13,7 @@ map, so an unknown key, an invalid value or a missing required key refuses boot 
 `:seon.config/refused`, naming each key. Machine-dependent values are derived at load:
 `#seon/checkout "p"` is `p` under the checkout (`SEON_CHECKOUT`, else `JOLT_PWD`). No key is a
 clock (owner: no clocks or timers decide anything); the stall silence and
-the stop bound are fences in their owners, not keys.
+the stop bound are guards in their owners, not keys.
 
 The file is `resources/seon/config/default.edn`, its schema `:seon.config/config` (in `resources/seon/schemas/seon.config.edn`); ```seon.config/config``` is the loaded, validated map, built by ```seon.config/resolved``` and checked against ```seon.config/keys-declared```.
 

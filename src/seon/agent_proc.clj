@@ -43,12 +43,12 @@
   "Silence, ms, after which a busy agent is observed stalled once (a recorded fact, never an
   end; session D2). A guessed tolerance (FENCES finding 5) and a clock (owner 2026-10-21: no
   clocks decide anything), so not a config key; it goes with
-  seon.fences/a-stall-is-past-the-requests-own-bound. root's start! takes :stall-ms (the
+  seon.guards/a-stall-is-past-the-requests-own-bound. root's start! takes :stall-ms (the
   problems check provokes a stall at 1,000). 0: no check."
   30000)
 
 (def stop-bound-ms
-  "How long an agent may take to exit after :stop before it is SIGKILLed. A fence, not a
+  "How long an agent may take to exit after :stop before it is SIGKILLed. A guard, not a
   config key (FENCES finding 3: a clock standing in for the exit event); it goes with
   seon.root/shutdown-and-death-are-dataflow."
   2000)

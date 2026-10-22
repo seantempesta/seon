@@ -647,7 +647,7 @@
    about n datoms of an example program on :db; a root holds no program it was not given)
    :main branch (root's main; an existing branch is resumed; :db is the seed itself)
    :backend :lmdb|:file :log? true :max-running n (parallel attempts) :provider p (the
-   attempts' model) :stall-ms (a fence, seon.agent-proc/stall-ms, for the checks that
+   attempts' model) :stall-ms (a guard, seon.agent-proc/stall-ms, for the checks that
    move it) :source s}. s: Seon's own source
    is the program, {:root dir :dirs [\"src\"] :branch \"jolt/seon-merges\"}: main's program follows
    root's dirs at boot (import-source!: replaced when they read otherwise than main's last

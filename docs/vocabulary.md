@@ -80,7 +80,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **turn loop** | inside an agent: observe, then end or act (context to the model, forms through the REPL path) | `seon.turn/work!` |
 | **three-way** | git's merge of program maps (base, ours, theirs) keyed `[:var sym]`, `[:form id]`, `[:schema k]` (a schema entry) | `seon.merge/three-way` |
 | **unmerged entry** | a conflict kept on the branch (base, ours, theirs) until re-defn or `resolve!` | `seon.merge/unmerged` |
-| **stage** (was harvest) | staging the live runtime onto the branch (unmaps, plain defs as values, aliases) | `seon.harvest/harvest!` |
+| **stage** (was harvest) | staging the live runtime onto the branch (unmaps, plain defs as values, aliases) | `seon.stage/stage!` |
 | **failure point** (was dragon) | a place where the outside world can fail us, met by one named edge function | `docs/failure-points.md` |
 | **section** | one heading of a wiki page as an entity on main: address `path#anchor`, heading, lead, own text, parent, and references (what its own text cites); its backlinks are who cites it | `seon.docs/load-tx` |
 
@@ -106,6 +106,6 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | `proto.lib`, `proto.sock`, `proto.wire`, `proto.intr`, `proto.program`, `proto.db`, `proto.repl` | `seon.lib`, `seon.sock`, `seon.wire`, `seon.intr`, `seon.program`, `seon.db`, `seon.repl` |
 | `x1.codec` | `konserve.jolt.fasl` (in the konserve fork) |
 | `proto.smoke` | `seon.check` |
-| `proto.agents.*` (R1, M1) | `seon.task`, `seon.reconcile`, `seon.template`, `seon.turn`, `seon.context`, `seon.model`, `seon.proofs`, `seon.harvest`, `seon.fixtures`, `seon.e2e`; `proto.merge` → `seon.merge` |
+| `proto.agents.*` (R1, M1) | `seon.task`, `seon.reconcile`, `seon.template`, `seon.turn`, `seon.context`, `seon.model`, `seon.proofs`, `seon.stage`, `seon.fixtures`, `seon.e2e`; `proto.merge` → `seon.merge` |
 | `proto.agents.root` (executor thread, observer threads) | `seon.reconcile/reconciler-proc` (one step-fn) and `my.root` |
 | `PROTO_<DIAL>` | `SEON_<DIAL>` |

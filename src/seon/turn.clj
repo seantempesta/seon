@@ -11,7 +11,7 @@
   A merge task's agent first merges main into the branch (no model call) and merges main
   again each time all is green, until a merge brings nothing new; it stops early when the
   merge is too hairy (seon.reconcile/hairy). Either way the live runtime is staged onto the
-  branch at the end (seon.harvest/harvest!), so the next agent on the branch holds it.
+  branch at the end (seon.stage/stage!), so the next agent on the branch holds it.
 
   Root starts it by evaluating (seon.turn/work! '{...}) in the agent; the attempt's end is
   a fact on the branch (:seon.end/*), which root's judge reads."
@@ -19,7 +19,7 @@
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.set :as set]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context] [seon.program :as program]
-            [seon.harvest :as harvest] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
+            [seon.stage :as stage] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
             [datahike.api :as d]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: the attempt it
@@ -41,7 +41,7 @@
   (if (= attempt (get-in @agent/state [:turn :attempt]))
     (:turn @agent/state)
     (let [db (agent/db)]
-      (:turn (swap! agent/state assoc :turn {:attempt attempt :gaps-before (harvest/uncontracted db)
+      (:turn (swap! agent/state assoc :turn {:attempt attempt :gaps-before (stage/uncontracted db)
                                              :plan-before (:plan (:seon.task/accumulated (task/task db task)))})))))
 
 (defn last-evals
@@ -71,7 +71,7 @@
         tests-ms (long (profile/ms-since t0))
         results (proofs/results run)
         db (agent/db)
-        unc (set/difference (harvest/uncontracted db) gaps-before)
+        unc (set/difference (stage/uncontracted db) gaps-before)
         unmerged (branch/unmerged)]
     {:run run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :task (task/task db id)
      :will-merge (program/divergence (:base @agent/state) db)
@@ -83,7 +83,7 @@
   (a turn's end commits the agent's run-ahead writes)."
   {:malli/schema [:=> [:cat :map :seon.attempt/outcome [:maybe :string] [:maybe :map]] :seon.turn/end]}
   [{:keys [turn tokens t0 attempt log]} outcome reason error]
-  (harvest/harvest!)
+  (stage/stage!)
   (agent/write-end! attempt {:outcome outcome :turns turn :tokens tokens :reason reason :error error
                              :waste (learn/summary (learn/waste (or log []) (learn/final-symbols (or log []))))})
   (cond-> {:outcome outcome :turns turn :model-calls turn :results {} :uncontracted #{}

@@ -31,7 +31,7 @@
  :form/inline-defs [:set :qualified-symbol]
  ;; the calls it bounds by a clock (deref with a timeout; Thread/sleep and core.async's
  ;; timeout are in its refs), and its catch clauses as EDN {:class name ("*" for a catch-all)
- ;; :answers :constant|:rethrows|:expr}: the facts the fence detectors query
+ ;; :answers :constant|:rethrows|:expr}: the facts the guard detectors query
  :form/timeouts [:set {:seon.db/index true} :qualified-symbol]
  :form/catches [:set :string]
  :ns/name [:and {:seon.db/identity true} :symbol]
