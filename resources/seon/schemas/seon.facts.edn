@@ -138,7 +138,7 @@
  :seon.task/evidence [:map {:seon.db/data true}
                       [:from :seon.attempt/id] [:conflicts [:vector :seon.merge/conflict]]
                       [:unmerged [:vector :string]] [:red [:vector :qualified-symbol]]
-                      ;; why the attempt failed: its refusals or its death, as the reconciler stated it
+                      ;; why the attempt failed: its reasons or its death, as the reconciler stated it
                       [:problem {:optional true} :string]]
  :seon.task/generation :int
  ;; the refinement chains a task's failures may attach (generations; :seon.reconcile/default-budget
@@ -196,7 +196,7 @@
  :seon.attempt/commit-error :string
  :seon.attempt/basis-t :int
  ;; the task's accumulated plan as the attempt began (seon.task/accumulate): a design step is
- ;; done only when the plan differs from it (seon.reconcile/done-refusals :no-design)
+ ;; done only when the plan differs from it (seon.reconcile/done-explain :no-design)
  :seon.attempt/plan :seon.task/plan
  :seon.attempt/uncontracted [:set :qualified-symbol]
  :seon.proof/test :qualified-symbol
@@ -295,7 +295,7 @@
  :seon.turn/origin [:enum :model :outside]
  ;; what the reader's context was built from, never its text (a model call stores its basis,
  ;; not its prompt): the commit it read, its task, attempt and turn, the observations no db
- ;; holds (the proofs' results, red assertions, refusals, the run's errors), whether the
+ ;; holds (the proofs' results, red assertions, reasons, the run's errors), whether the
  ;; branch's unmerged entries show, and the last evaluations' transcript while no earlier turn
  ;; shows them. seon.context/render makes the exact user message from it on that commit.
  :seon.turn/basis [:map {:seon.db/data true} [:commit :uuid] [:task :seon.task/id] [:attempt :seon.attempt/id]

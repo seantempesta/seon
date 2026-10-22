@@ -754,7 +754,7 @@
         ]
     (flow/resume g)
     ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is; a root
-    ;; whose boot fact was refused cannot start anything, so its refusal ends the boot
+    ;; whose boot fact was refused cannot start anything, so its error ends the boot
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
           r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running) (into (cfg/facts config cfg/sources))
@@ -831,7 +831,7 @@
   "The op (named as its fn below: spawn! clone! submit! run-tests! kill! merge!
   merge-main!) on agent id with args, as the api request it is: one table for these fns
   and the dashboard's calls (seon.web). a: the agent's entry in root's view, which merge!
-  and merge-main! read; an op the agent cannot take answers its refusal."
+  and merge-main! read; an op the agent cannot take answers its error."
   {:malli/schema [:=> [:cat :symbol [:maybe :seon.agent/id] [:maybe :map] [:maybe :map]] :map]}
   [op id args a]
   (let [live? (boolean (and a (not (gone-statuses (:status a)))))
@@ -856,7 +856,7 @@
 
 (defn- request!
   "Call root's op on agent id with args (request): a promise of its answer, or of its
-  refusal."
+  error."
   {:malli/schema [:=> [:cat :seon.root/sys :symbol [:maybe :seon.agent/id] [:maybe :map]] :seon.host/promise]}
   [sys op id args]
   (let [r (request op id args (when (#{'merge! 'merge-main!} op) (agent-entry sys id)))]

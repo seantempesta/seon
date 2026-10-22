@@ -115,8 +115,8 @@
                              [:kind {:optional true} :seon.task/kind]
                              ;; a :design task's accumulated plan now and as its attempt began
                              [:plan {:optional true} :seon.task/plan] [:plan-before {:optional true} :seon.task/plan]]
- :seon.reconcile/refusal [:map {:closed true}
-                          [:refusal [:enum :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design]]
+ :seon.reconcile/not-done [:map {:closed true}
+                          [:reason [:enum :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design]]
                           [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string]]
  :seon.reconcile/action [:multi {:dispatch :op}
                          [:reap [:map {:closed true} [:op [:= :reap]] [:attempt :seon.attempt/id]]]

@@ -89,7 +89,7 @@
 (defn elision
   "One cut node: what was omitted, where, and the form that reads the rest."
   {:malli/schema [:=> [:cat :map] :seon.print/node]}
-  [{:seon.print/keys [requery-id requery-refusal omitted elision-unit prefix bound-by]
+  [{:seon.print/keys [requery-id requery-refused omitted elision-unit prefix bound-by]
     supplied :seon.print/continuation profile-id :seon.render.profile/id path :seon.render.data/path
     next-offset :seon.render.data/next-offset total :seon.render.data/total}]
   (let [requery-form (when (or (symbol? requery-id) (seq? requery-id))
@@ -111,9 +111,9 @@
       (assoc :seon.print/continuation (continuation {:seon.print/requery-id requery-id :seon.print/elision-unit elision-unit
                                                      :seon.render.data/path (or path [])
                                                      :seon.render.data/next-offset next-offset}))
-      (and (nil? requery-id) (some? requery-refusal)) (assoc :seon.print/requery-refusal requery-refusal)
-      (and (nil? requery-id) (nil? requery-refusal))
-      (assoc :seon.print/requery-refusal "the source has no stable requery identity"))))
+      (and (nil? requery-id) (some? requery-refused)) (assoc :seon.print/requery-refused requery-refused)
+      (and (nil? requery-id) (nil? requery-refused))
+      (assoc :seon.print/requery-refused "the source has no stable requery identity"))))
 
 ;;; Emission: one walk appends a node tree's fipp-style operation maps to one vector; text is
 ;;; the layout of that stream, hiccup a fold over the same stream.
@@ -153,7 +153,7 @@
   (let [prefix (or (:seon.print/prefix node) "")
         shown (when (= :characters (:seon.print/elision-unit node)) prefix)
         label (if shown (subs text (count (string-literal prefix))) text)
-        reason (when-not (:seon.print/continuation node) (:seon.print/requery-refusal node))
+        reason (when-not (:seon.print/continuation node) (:seon.print/requery-refused node))
         marker [:span (cond-> {:class (css-class :seon.print/elision)} reason (assoc :title reason)) label]]
     (if shown
       [:span [:span {:class (css-class :seon.print/string)} shown] marker]

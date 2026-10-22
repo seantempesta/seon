@@ -107,7 +107,7 @@
 (defn request-tx
   "The one transaction that writes request decl's linked tasks (request) on main, released:
   the reconciler sees the whole set at once and forks its first agent only once it is
-  committed. A refusal (seon.task/create-tx's) answers as it is."
+  committed. An error (seon.task/create-tx's) answers as it is."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/declaration]
                   [:or [:vector :any] [:map [:seon.error/type [:= :seon.task/refused]] [:seon.error/message :string]]]]}
   [db decl]

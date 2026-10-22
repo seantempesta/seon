@@ -158,8 +158,8 @@
 (defn wrap-print
   "The value through the one value printer (seon.print), its cuts reading the rest through
   the value's result handle: `value`, with the printer's tokens, truncation and elision
-  count. A value whose first part does not fit the budget answers the printer's refusal
-  message, with the refusal beside it."
+  count. A value whose first part does not fit the budget answers the printer's error
+  message, with the error beside it."
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]

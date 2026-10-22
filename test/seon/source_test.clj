@@ -344,9 +344,9 @@
       (is (= (str/replace text "\n :seon.attempt/pid :int" "")
              (edit [[:db/retractEntity [:schema/key :seon.attempt/pid]]]))))
     (testing "a new key after the last entry, read back as written"
-      (let [out (edit [{:schema/key :seon.attempt/refusal :schema/form "[:map [:seon.error/message :string]]" :schema/file facts-path}])]
-        (is (= (str (subs text 0 (- (count text) 2)) "\n :seon.attempt/refusal [:map [:seon.error/message :string]]}\n") out))
-        (is (= (assoc (edn/read-string text) :seon.attempt/refusal [:map [:seon.error/message :string]])
+      (let [out (edit [{:schema/key :seon.attempt/invalid :schema/form "[:map [:seon.error/message :string]]" :schema/file facts-path}])]
+        (is (= (str (subs text 0 (- (count text) 2)) "\n :seon.attempt/invalid [:map [:seon.error/message :string]]}\n") out))
+        (is (= (assoc (edn/read-string text) :seon.attempt/invalid [:map [:seon.error/message :string]])
                (edn/read-string out)))))))
 
 ;; ---- a merge loads in place (BUILD plan P4) ---------------------------------------------

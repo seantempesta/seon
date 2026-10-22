@@ -278,7 +278,7 @@
     (is (not (str/includes? (h/html (:seon.render/html (ui/history-list {:rows ["<li>r</li>"] :total 1} {}))) "more")))))
 
 (deftest a-context-read-is-shown-once
-  (let [ctx (str "{:turn \"1 of 8\" :refused [{:refusal :contract-gap :vars [" (str/join " " (for [i (range 360)] (str "app.m/f" i))) "]}]}")
+  (let [ctx (str "{:turn \"1 of 8\" :refused [{:reason :contract-gap :vars [" (str/join " " (for [i (range 360)] (str "app.m/f" i))) "]}]}")
         read {:id 0 :tag :ret :form "(print (seon.turn/context-block \"t/x\" \"t/x#1\"))" :printed "nil" :out ctx :origin :context}
         card (h/html (:seon.render/html (ui/agent-card {:id :a14 :status :idle :evals [read]} {})))
         row (h/html (:seon.render/html (ui/history-row read {})))]
@@ -300,7 +300,7 @@
             ;; an outside read whose done rule refused 360 contract gaps: its basis, never its text
             b {:commit (d/commit-id @conn) :task "t/x" :attempt "t/x#1" :turn 1 :max-turns 1 :origin :outside
                :observed {:results {} :reds [] :run-errors []
-                          :refusals (vec (for [i (range 360)] {:refusal :contract-gap :symbol (symbol "app.m" (str "f" i))}))}}
+                          :reasons (vec (for [i (range 360)] {:reason :contract-gap :symbol (symbol "app.m" (str "f" i))}))}}
             _ (d/transact conn [{:seon.turn/id "t/x#1/read-1" :seon.turn/attempt "t/x#1" :seon.turn/n 1
                                  :seon.turn/origin :outside :seon.turn/basis b}])
             db @conn
@@ -409,7 +409,7 @@
       (is (not (str/includes? html "seon.error/type")) what))))
 
 (deftest a-refused-merge-says-why-once
-  ;; task seon.render/one-owner-per-view-path (B2, A14): a refusal is the one error map; the
+  ;; task seon.render/one-owner-per-view-path (B2, A14): a refused answer is the one error map; the
   ;; card's pill and the stream's row read its message, once
   (let [r (seon.contract/error :seon.root/refused 'seon.root/merge! "2 functions have no contract" {:merged? false})
         card (h/html (:seon.render/html (ui/agent-card {:id :a1 :status :idle :evals [] :merged r} {})))

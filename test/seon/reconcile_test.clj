@@ -184,8 +184,8 @@
          (r/reconcile (db-of diamond :extra (concat (attempt "a" 1 :ended :outcome :green :results {(t "a") :pass})
                                                     (task/execution-tx ["demo/a"] :cancelled)))))))
 
-(deftest done-refusals-table
-  (are [in expected] (= expected (mapv (juxt :refusal :symbol) (r/done-refusals in)))
+(deftest done-explain-table
+  (are [in expected] (= expected (mapv (juxt :reason :symbol) (r/done-explain in)))
     {:proofs #{'p/a} :results {'p/a :pass} :main-green #{} :allowed-red #{} :uncontracted #{}} []
     {:proofs #{} :results {} :main-green #{} :allowed-red #{} :uncontracted #{}} [[:no-proofs nil]]
     {:proofs #{'p/a} :results {'p/a :error} :main-green #{} :allowed-red #{} :uncontracted #{}} [[:proof-red 'p/a]]
@@ -217,7 +217,7 @@
 (deftest contracts-are-checked
   ;; dev/test.clj arms every contract before the tests run: a call outside its contract is
   ;; refused at entry with the one error map
-  (when (not= "off" (System/getenv "PROTO_GUARANTEES"))
+  (when contract/on?
     (is (= :seon.instrument/contract-error
            (:seon.error/type (try (task/task-id "not-a-symbol" "x") (catch Exception e (ex-data e))))))))
 
@@ -250,8 +250,8 @@
       (is (= #{(t "a") (t "b")} (:proofs (acc "demo/b-merge")))))
     (testing "the done rule judges every accumulated proof"
       (is (= [[:proof-red (t "a")]]
-             (mapv (juxt :refusal :symbol)
-                   (r/done-refusals (r/done-input (r/index db) "demo/b-merge" {(t "b") :pass (t "a") :fail} #{} [] nil nil))))))))
+             (mapv (juxt :reason :symbol)
+                   (r/done-explain (r/done-input (r/index db) "demo/b-merge" {(t "b") :pass (t "a") :fail} #{} [] nil nil))))))))
 
 (deftest with-merge-chains-work-through-merges
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])])]
@@ -318,7 +318,7 @@
 
 (deftest design-may-leave-its-proofs-red
   ;; a design step's work is the plan: done only when the plan differs from the one it began with
-  (are [in expected] (= expected (mapv :refusal (r/done-refusals in)))
+  (are [in expected] (= expected (mapv :reason (r/done-explain in)))
     {:kind :design :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{} :plan "B" :plan-before "A"} []
     {:kind :design :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{'app/f} :plan "B" :plan-before "A"} [:contract-gap]
     {:kind :design :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{} :plan "A" :plan-before "A"} [:no-design]
@@ -338,7 +338,7 @@
   (testing "at its start (the plan as it began), the done rule refuses :no-design"
     (let [db (design-db (attempt "a" 1 :running))]
       (is (= [:no-design]
-             (mapv :refusal (r/done-refusals (r/done-input (r/index db) "demo/a" {(t "a") :fail} #{} []
+             (mapv :reason (r/done-explain (r/done-input (r/index db) "demo/a" {(t "a") :fail} #{} []
                                                            nil (:seon.attempt/plan (task/attempt db "demo/a#1")))))))))
   (testing "ended green with the plan unchanged: refused, so a refinement attaches, never accepted"
     (is (= [{:op :attach :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended green: no-design"}]
@@ -492,22 +492,22 @@
 (def ^:private held-why "branch :demo/a is held by live agent a9")
 
 (deftest a-refused-spawn-writes-a-refused-attempt
-  ;; root refuses the spawn (the branch is held, or too many live agents): the refusal is
+  ;; root refuses the spawn (the branch is held, or too many live agents): the refused answer is
   ;; the attempt, written on main, and the next pass starts the task again
   (let [db (db-of [(decl "a")])
         [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1"}) :main {:t (:max-tx db) :ops [] :db db :ns (profile/now-ns)})
         asked (first (filter #(= :spawn (get-in % [:req :op])) (:to-api outs)))
-        refusal (contract/error :seon.root/refused 'seon.root/spawn! held-why {:branch :demo/a :agent :a9})
-        [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r refusal})
+        held (contract/error :seon.root/refused 'seon.root/spawn! held-why {:branch :demo/a :agent :a9})
+        [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r held})
         written (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= :write (get-in % [:req :op])) (:to-api outs2))))
         attempt (first (filter #(= "demo/a#1" (:seon.attempt/id %)) written))]
     (is (some? asked) "the first pass asks for the spawn")
-    (is (= :refused (:seon.attempt/status attempt)) "the refusal is written as the attempt")
+    (is (= :refused (:seon.attempt/status attempt)) "the refused answer is written as the attempt")
     (is (= held-why (:seon.attempt/reason attempt)) "with root's reason")
     (is (= [(spawn "a" 2)] (r/reconcile (d/db-with db written))) "the next pass starts the task again")))
 
 (deftest a-refused-task-asks-again-when-main-moves
-  ;; if nothing has changed, asking again is refused again: neither the refusal's answer nor
+  ;; if nothing has changed, asking again is refused again: neither the refused answer nor
   ;; its own commit starts the task; other work on main lets it ask again, as its next attempt
   (let [commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
         main (fn [st db ops] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns (profile/now-ns)}))
@@ -524,7 +524,7 @@
         [_ outs5] (main st db3 ops3)]
     (is (= ["demo/a"] (spawns outs)))
     (is (= [] (spawns outs3)) "the write's answer starts nothing")
-    (is (= [] (spawns outs4)) "nor does the refusal's own commit")
+    (is (= [] (spawns outs4)) "nor does the refused answer's own commit")
     (is (= [{:task "demo/a" :cause held-why :attempt "demo/a#1" :blocks []}] (get-in st [:quiescent :stuck])) "quiet, naming it")
     (is (= ["demo/a"] (spawns outs5)) "other work on main: it asks again")))
 

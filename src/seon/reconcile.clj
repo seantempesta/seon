@@ -2,7 +2,7 @@
   "The one reconciler (sessions R1 and M1's proto.agents.reconcile): a pure function of main's
   db value (desired state: the tasks; observed state: attempts, their ends and proof
   results, root's boot) to the minimal actions that close the gap, and the done rule
-  `done-refusals` (one function, used by root to judge and by the agent to know when to
+  `done-explain` (one function, used by root to judge and by the agent to know when to
   stop). `reconciler-proc` is the root proc that runs it on main's commits and carries the
   actions out as requests to the api, each action's facts written by the writer."
   (:refer-clojure :exclude [defn defn-])
@@ -55,7 +55,7 @@
 
 ;; ---- the done rule -----------------------------------------------------------------
 
-(defn done-refusals
+(defn done-explain
   "Why an attempt's measured facts do not make its task done; empty means done. Refused:
   no proofs (never proven); a proof not passing (red), or with no result (unknown: it
   never ran); a regression (a test green on main, the
@@ -65,23 +65,23 @@
   the interface and plan for its implement step, so its own proofs may stay red, and it is
   refused :no-design until its plan differs from the one its attempt began with (or that
   one is unknown)."
-  {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/refusal]]}
+  {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
   [{:keys [proofs results main-green allowed-red uncontracted unmerged kind plan plan-before]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))
         design? (= :design kind)]
     (vec (concat
-           (when (and (empty? proofs) (not design?)) [{:refusal :no-proofs}])
-           (when (and design? (or (nil? plan-before) (= plan plan-before))) [{:refusal :no-design}])
+           (when (and (empty? proofs) (not design?)) [{:reason :no-proofs}])
+           (when (and design? (or (nil? plan-before) (= plan plan-before))) [{:reason :no-design}])
            ;; a proof with no result never ran: unknown, not red (v1's reading)
            (when-not design?
              (for [p (sort-by str proofs) :let [s (get results p)] :when (not= :pass s)]
-               {:refusal (if s :proof-red :proof-unknown) :symbol p}))
-           (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t))] {:refusal :regression :symbol t})
+               {:reason (if s :proof-red :proof-unknown) :symbol p}))
+           (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t))] {:reason :regression :symbol t})
            (for [t (sort-by str (keys results))
                  :when (and (red? t) (not (proofs t)) (not (main-green t)) (not (allowed-red t)))]
-             {:refusal :stray-red :symbol t})
-           (for [s (sort-by str uncontracted)] {:refusal :contract-gap :symbol s})
-           (for [k (sort unmerged)] {:refusal :unmerged :key k})))))
+             {:reason :stray-red :symbol t})
+           (for [s (sort-by str uncontracted)] {:reason :contract-gap :symbol s})
+           (for [k (sort unmerged)] {:reason :unmerged :key k})))))
 
 (defn hairy
   "Is a merge too hairy to keep resolving, from measured facts: more conflicts than the
@@ -106,10 +106,10 @@
       (> merge-turns max-merge-turns)
       {:rule :merge-turns :reason (str merge-turns " turns without green > :seon.config.merge/max-merge-turns " max-merge-turns)})))
 
-(defn refusals-text
-  "One line naming each refusal."
-  {:malli/schema [:=> [:cat [:vector :seon.reconcile/refusal]] :string]}
-  [rs] (str/join "; " (map #(str (name (:refusal %)) (some->> (or (:symbol %) (:key %)) (str " "))) rs)))
+(defn explain-text
+  "One line naming each reason."
+  {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done]] :string]}
+  [rs] (str/join "; " (map #(str (name (:reason %)) (some->> (or (:symbol %) (:key %)) (str " "))) rs)))
 
 ;; ---- the incremental reconciler: an index watched through main's tx reports --------------
 ;; k8s's informer + W1's engine: list once (index), then each commit's resolved datoms name the
@@ -296,7 +296,7 @@
 (defn done-input
   "The done rule's input for attempt results of task id, observed against main at t basis
   (nil: main as idx holds it), over the index: the regression and allowed-red sets restricted to the tests
-  that ran (the only ones done-refusals asks about), each test looked up by its claimants; for
+  that ran (the only ones done-explain asks about), each test looked up by its claimants; for
   a :design task, its accumulated plan now and plan-before, the one its attempt began with
   (:seon.attempt/plan; nil: unknown)."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:maybe :int] [:maybe :seon.task/plan]] :seon.reconcile/done-input]}
@@ -346,7 +346,7 @@
                    (= :dead (:seon.attempt/status a))
                    (failed aid id t (str "its agent died" (some->> (:seon.attempt/reason a) (str ": "))))
                    :else
-                   (let [rs (done-refusals (done-input idx id (:seon.attempt/results a {}) (:seon.attempt/uncontracted a #{})
+                   (let [rs (done-explain (done-input idx id (:seon.attempt/results a {}) (:seon.attempt/uncontracted a #{})
                                                            (:seon.attempt/unmerged a []) (:seon.attempt/basis-t a) (:seon.attempt/plan a)))]
                      (cond
                        (and (empty? rs) merge?) {:op :ready-to-merge :attempt aid :task id}
@@ -354,7 +354,7 @@
                        :else
                        (failed aid id t (str "attempt " aid " ended " (name (:seon.attempt/outcome a :error))
                                              (some->> (:seon.attempt/reason a) (str " (") (#(str % ")")))
-                                             ": " (refusals-text rs)))))))
+                                             ": " (explain-text rs)))))))
         ;; the octopus merge (bors, GitHub's merge queue): green merge attempts merge together in
         ;; one commit once no merge attempt is still running, so every member merged the same
         ;; main; an octopus merge closes when its first member ends (no new member joins until it
@@ -632,7 +632,7 @@
                  (one (write (assoc-in st [:flights aid :agent] ag) aid :started
                              (task/attempt-start-tx aid (:task act) (:boot st) ag (:env act) (System/currentTimeMillis)
                                                    (:plan (task/accumulate (get-in st [:idx :tasks]) (:task act))))))
-                 ;; root refused it (the branch is held, or too many live agents): the refusal
+                 ;; root refused it (the branch is held, or too many live agents): the refused answer
                  ;; is the attempt, written on main with root's reason; the task starts again,
                  ;; as its next attempt, once main moves for another reason (:refused, pass)
                  (one (write (update st :refused (fnil conj #{}) (:task act)) aid :done
@@ -763,14 +763,14 @@
                  ;; a commit touching tasks, attempts or config keys ends a quiet spell (root's own
                  ;; quiescent fact does not)
                  work? (or (not next?) (some (fn [[_ _ a]] (and (keyword? a) (watched-ns (namespace a)) (not= "seon.root" (namespace a)))) (:ops m)))
-                 ;; a commit holding only refused attempts (the refusals' own writes) changes
+                 ;; a commit holding only refused attempts (the refused attempts' own writes) changes
                  ;; nothing that refused them; any other work lets a refused task ask again
-                 refusals? (and next? (every? (fn [[_ e a]] (or (not (and (keyword? a) (watched-ns (namespace a))))
+                 only-refused? (and next? (every? (fn [[_ e a]] (or (not (and (keyword? a) (watched-ns (namespace a))))
                                                                (= :refused (get-in idx [:attempts (second (get-in idx [:keys e])) :seon.attempt/status]))))
                                               (:ops m)))
                  st (assoc st :db db :t t :idx idx :seen (inc (:seen st)) :lists (cond-> (:lists st 0) (not= t (inc (:t st -2))) inc)
                            :quiet (boolean (and (:quiet st) (not work?)))
-                           :refused (if (and work? (not refusals?)) #{} (:refused st #{})))
+                           :refused (if (and work? (not only-refused?)) #{} (:refused st #{})))
                  [st outs] (pass st)]
              [st {:to-api (into [{:op :stat :k :main-seen-us :v (/ (- (profile/now-ns) (:ns m)) 1000.0)}] outs)}])
      ;; an outside agent handed its attempt back: judged as a turn loop's end is

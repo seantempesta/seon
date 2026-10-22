@@ -48,7 +48,7 @@
   (let [db (load-pages (empty-db) pages)
         r (docs/load-tx db "demo" (assoc pages "demo/async.md" (str/replace async "flow.md#idioms" "flow.md#nowhere")))]
     (is (= :seon.docs/refused (:seon.error/type r)))
-    (is (= "demo/flow.md#nowhere" (:seon.ref/address r)) "the refusal names the link")
+    (is (= "demo/flow.md#nowhere" (:seon.ref/address r)) "the error names the link")
     (is (= "demo/async.md#waiting" (:seon.section/address r)) "and the section that makes it")
     (is (str/includes? (:seon.error/message r) "demo/flow.md#nowhere"))))
 

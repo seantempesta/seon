@@ -4,5 +4,5 @@
  :seon.config.root/entrance-port [:int {:min 0 :max 65535 :seon.config/unit "TCP port" :description "Root's entrance on 127.0.0.1 (bin/mcp, outside agents). 0: none."}]
  :seon.config.web/public-dir [:string {:min 1 :seon.config/unit "path" :description "Where app.css and datastar.js are read (per request)."}]
  :seon.config.web/utc-offset [:string {:min 5 :max 5 :seon.config/unit "+hhmm" :description "The local offset clocks are shown in (Jolt has no time zones)."}]
- :seon.config.contract/guarantees [:enum {:seon.config/unit "mode" :description "Contracts and their recording: on, contracts (wrappers, no recording), off."} :on :contracts :off]
+ :seon.config.contract/instrument [:enum {:seon.config/unit "mode" :description "Contracts and their recording: on, contracts (wrappers, no recording), off."} :on :contracts :off]
  :seon.config.native/probe-lib [:string {:min 1 :seon.config/unit "path" :description "native/probe.c's library (bin/build native)."}]}

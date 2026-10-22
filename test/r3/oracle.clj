@@ -1,7 +1,7 @@
 (ns r3.oracle
   "The reconciler as a full recompute, kept as r3.inc-test's oracle: `reconcile-view` of
   `view` (one read of main) gives the actions the incremental `seon.reconcile` must match,
-  and `done-refusals` the done rule."
+  and `done-explain` the done rule."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.task :as task] [clojure.string :as str]
             [seon.config :as cfg]))
@@ -53,27 +53,27 @@
 
 ;; ---- the done rule -----------------------------------------------------------------
 
-(defn done-refusals
+(defn done-explain
   "Why an attempt's measured facts do not make its task done; empty means done. Refused:
   no proofs (never proven); a proof not passing; a regression (a test green on main, the
   proofs of merged tasks, red here); a stray red (a red test that is no task's open
   proof); a contract gap (a function the attempt defined without a contract); an
   unmerged entry on the branch (a merge conflict not resolved). A :design task readies
   the interface for its implement step, so its own proofs may stay red."
-  {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/refusal]]}
+  {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
   [{:keys [proofs results main-green allowed-red uncontracted unmerged kind]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))
         design? (= :design kind)]
     (vec (concat
-           (when (and (empty? proofs) (not design?)) [{:refusal :no-proofs}])
+           (when (and (empty? proofs) (not design?)) [{:reason :no-proofs}])
            (when-not design?
-             (for [p (sort-by str proofs) :let [s (get results p)] :when (not= :pass s)] {:refusal (if s :proof-red :proof-unknown) :symbol p}))
-           (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t))] {:refusal :regression :symbol t})
+             (for [p (sort-by str proofs) :let [s (get results p)] :when (not= :pass s)] {:reason (if s :proof-red :proof-unknown) :symbol p}))
+           (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t))] {:reason :regression :symbol t})
            (for [t (sort-by str (keys results))
                  :when (and (red? t) (not (proofs t)) (not (main-green t)) (not (allowed-red t)))]
-             {:refusal :stray-red :symbol t})
-           (for [s (sort-by str uncontracted)] {:refusal :contract-gap :symbol s})
-           (for [k (sort unmerged)] {:refusal :unmerged :key k})))))
+             {:reason :stray-red :symbol t})
+           (for [s (sort-by str uncontracted)] {:reason :contract-gap :symbol s})
+           (for [k (sort unmerged)] {:reason :unmerged :key k})))))
 
 (defn- done-by?
   "Was task id merged into main at or before main's t `basis` (nil: at any t)?"
@@ -99,10 +99,10 @@
      :uncontracted uncontracted
      :unmerged (vec unmerged)}))
 
-(defn refusals-text
-  "One line naming each refusal."
-  {:malli/schema [:=> [:cat [:vector :seon.reconcile/refusal]] :string]}
-  [rs] (str/join "; " (map #(str (name (:refusal %)) (some->> (or (:symbol %) (:key %)) (str " "))) rs)))
+(defn explain-text
+  "One line naming each reason."
+  {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done]] :string]}
+  [rs] (str/join "; " (map #(str (name (:reason %)) (some->> (or (:symbol %) (:key %)) (str " "))) rs)))
 
 ;; ---- queries ------------------------------------------------------------------------
 
@@ -157,7 +157,7 @@
 (defn reconcile-view
   "The actions for view v, in the order root executes them: reap attempts a previous root
   left running; kill live attempts whose task changed; judge ended attempts from their
-  measured facts (no refusal: a merge task merges into main, another task is accepted on
+  measured facts (no reason: a merge task merges into main, another task is accepted on
   its branch; a failed merge attaches design -> implement -> test -> merge; anything else
   bails to root); bail tasks whose agent died; start ready tasks up to max-running. A
   merge root found behind leaves its task ready: its next attempt is a new agent."
@@ -178,7 +178,7 @@
                    {:op (if (< (:seon.task/generation t 0) (:seon.task/budget t default-budget)) :attach :bail)
                     :attempt aid :task id :problem (str "its agent died" (some->> (:seon.attempt/reason a) (str ": ")))}
                    :else
-                   (let [rs (done-refusals (done-input v id (:seon.attempt/results a {}) (:seon.attempt/uncontracted a #{})
+                   (let [rs (done-explain (done-input v id (:seon.attempt/results a {}) (:seon.attempt/uncontracted a #{})
                                                        (:seon.attempt/unmerged a []) (:seon.attempt/basis-t a)))]
                      (cond
                        (and (empty? rs) merge?) {:op :merge :attempt aid :task id}
@@ -189,7 +189,7 @@
                        {:op (if (< (:seon.task/generation t 0) (:seon.task/budget t default-budget)) :attach :bail) :attempt aid :task id
                         :problem (str "attempt " aid " ended " (name (:seon.attempt/outcome a :error))
                                       (some->> (:seon.attempt/reason a) (str " (") (#(str % ")")))
-                                      ": " (refusals-text rs))}))))
+                                      ": " (explain-text rs))}))))
         live-after (- (count (filter #(live? v %) all)) (count kills))
         room (max 0 (- (:max-running (:root v) default-max-running) live-after))
         ;; git's merge queue: a merge attempt running, or ended and awaiting root's merge,

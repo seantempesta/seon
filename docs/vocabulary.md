@@ -45,9 +45,9 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 |---|---|---|
 | **contract** | a function's `:malli/schema`, checked from its definition on (inputs, arity, output) | `seon.contract/defn` |
 | **registry** | the named schemas, data in `resources/seon/schemas/*.edn` | `seon.contract/registry` |
-| **invalid** (was refusal) | a contract's failure, explained (`m/explain`), thrown as the one error map (`:seon.error/type`) | `seon.contract/refusal` |
+| **invalid** (was error) | a contract's failure, explained (`m/explain`), thrown as the one error map (`:seon.error/type`) | `seon.contract/invalid` |
 | **instrument** (was admit) | an agent's def armed by its contract, or warned (the uncontracted set grows) | `seon.repl/wrap-instrument` |
-| **instrument mode** (was guarantees) | `:seon.config.contract/guarantees` (`SEON_GUARANTEES`): `:on`, `:contracts` (no recording), `:off` | `seon.contract/on?`, `record?` |
+| **instrument mode** (was guarantees) | `:seon.config.contract/instrument` (`SEON_INSTRUMENT`): `:on`, `:contracts` (no recording), `:off` | `seon.contract/on?`, `record?` |
 
 ## Data (Datahike's and git's words)
 
@@ -74,7 +74,7 @@ owns the concept. A new concept gets its word here before it appears in code. Th
 | **request** | what someone asked, as design → implement → merge tasks on one branch, written in one transaction | `seon.template/request` |
 | **attach** | a failed merge's design → implement → test → merge tasks, each a new agent | `seon.template/attach-tx` |
 | **observed state** | what happened to a task (running, blocked, open, held, done, merged, cancelled; `:seon.task/state`), derived once from the index | `seon.reconcile/task-state` |
-| **done rule** | why an attempt's measured facts do not make its task done; empty means done | `seon.reconcile/done-refusals` |
+| **done rule** | why an attempt's measured facts do not make its task done; empty means done | `seon.reconcile/done-explain` |
 | **reconciler** | the pure function of main's db to actions, and the proc that carries them out | `seon.reconcile/reconcile`, `reconciler-proc` |
 | **flight** | one action carried out as a chain of requests and answers in the reconciler proc | `seon.reconcile/advance` |
 | **turn loop** | inside an agent: observe, then end or act (context to the model, forms through the REPL path) | `seon.turn/work!` |

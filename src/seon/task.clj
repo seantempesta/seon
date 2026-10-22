@@ -53,7 +53,7 @@
 
 (defn citation-problems
   "Each citation of decls' text that resolves to nothing on db, as {:task :name :problem
-  :unresolved}: answered beside the write, never a refusal (docs/references.md)."
+  :unresolved}: answered beside the write, never an error (docs/references.md)."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.task/declaration]] [:vector :map]]}
   [db decls]
   (vec (for [decl decls
@@ -314,7 +314,7 @@
    :seon.task/kind :seon.task/evidence :seon.task/generation :seon.task/budget :seon.task/references
    :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
 
-(defn- file-refusal
+(defn- file-refused
   {:malli/schema [:=> [:cat :symbol :string] :map]}
   [ns-sym m]
   {:seon.error/type :seon.task/refused :seon.error/operation 'seon.task/file-declarations
@@ -331,17 +331,17 @@
         forms (try (vec (take-while #(not= ::eof %) (repeatedly #(edn/read {:eof ::eof} r))))
                    (catch Exception e (ex-message e)))]
     (cond
-      (string? forms) (file-refusal ns-sym (str "not readable EDN: " forms))
-      (not (and (= 1 (count forms)) (vector? (first forms)))) (file-refusal ns-sym "not exactly one vector of declarations")
+      (string? forms) (file-refused ns-sym (str "not readable EDN: " forms))
+      (not (and (= 1 (count forms)) (vector? (first forms)))) (file-refused ns-sym "not exactly one vector of declarations")
       :else (let [ds (mapv #(if (map? %) (assoc % :seon.task/ns ns-sym) %) (first forms))]
               (if-let [bad (first (remove #(contract/valid? :seon.task/declaration %) ds))]
-                (file-refusal ns-sym (str "an entry is not a :seon.task/declaration: " (print/text bad (:part print/budgets))))
+                (file-refused ns-sym (str "an entry is not a :seon.task/declaration: " (print/text bad (:part print/budgets))))
                 ds)))))
 
 (defn load-tx
   "The transaction reconciling task files into main db. files: {owning-ns declarations or
-  refusal}, every file read (a file not given is not judged). Answers the tx-data, or the
-  first refusal: a file's own, or needs that name no task or form a cycle."
+  error}, every file read (a file not given is not judged). Answers the tx-data, or the
+  first error: a file's own, or needs that name no task or form a cycle."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :symbol :any]] [:or [:vector :any] [:map [:seon.error/type :keyword]]]]}
   [db files]
   (if-let [r (first (filter :seon.error/type (vals files)))]
@@ -358,8 +358,8 @@
                        (into {} (for [[id d] decls] [id (set (:seon.task/needs d))])))
           declared (fn [id d] {:seon.task/id id :seon.task/declared (sedn/encode d)})]
       (cond
-        missing (file-refusal (first owners) (str "needs name no task: " (str/join ", " missing)))
-        (cycle-in graph) (file-refusal (first owners) (str "needs form a cycle through " (cycle-in graph)))
+        missing (file-refused (first owners) (str "needs name no task: " (str/join ", " missing)))
+        (cycle-in graph) (file-refused (first owners) (str "needs form a cycle through " (cycle-in graph)))
         :else
         (vec (concat
                (when (seq new) (create-tx db new))

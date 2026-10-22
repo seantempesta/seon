@@ -136,7 +136,7 @@
 (deftest a-refused-wiki-is-a-recorded-problem-and-the-boot-goes-on
   ;; root's boot loads the wiki (seon.root/wiki-tx) in its boot fact's commit; one link to no
   ;; section in any page used to end the boot (bin/root start and next with it). Now the
-  ;; refusal is a recorded :platform error my.root/problems shows, and the root boots. A
+  ;; error is a recorded :platform error my.root/problems shows, and the root boots. A
   ;; checkout of this test's own: this one's files, its docs/ with one broken page more
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         tmp (str checkout "/target/runs/root-test-wiki-" (random-uuid))

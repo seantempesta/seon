@@ -35,7 +35,7 @@
   {:malli/schema [:=> [:cat :string :map] :seon.writer/refused]}
   [why members] (contract/error :seon.writer/refused 'seon.writer/writer-proc why (merge {:ok false} members)))
 
-(defn- merge-refusal
+(defn- merge-refused
   "Why branch head (its three-way r against main) cannot merge into main now (session M1), or
   nil: main's program (and declared data) changed since the branch's merge base
   (:seon.merge/behind: a merge task merges main first); the branch has unmerged entries
@@ -86,19 +86,19 @@
         judged (reduce (fn [{:keys [taken] :as acc} b]
                          (let [have? (pdb/branch? conn b)
                                [head r] (when have? (branch-merge st b data-attrs))
-                               refusal (if have? (merge-refusal main head r) (refused (str "no branch " b) {:merged? false}))
-                               refusal (or refusal
+                               why-not (if have? (merge-refused main head r) (refused (str "no branch " b) {:merged? false}))
+                               why-not (or why-not
                                            (when (some taken (keys (:ours r)))
                                              (contract/error :seon.merge/behind 'seon.writer/octopus-merge
                                                              "another member of the octopus merge changes the same definitions: merge main into the branch first"
                                                              {:merged? false :tx (:max-tx main) :behind (count (filter taken (keys (:ours r))))})))]
-                           (-> acc (update :members conj {:branch b :r r :refusal refusal})
-                               (cond-> (nil? refusal) (update :taken into (keys (:ours r)))))))
+                           (-> acc (update :members conj {:branch b :r r :refused why-not})
+                               (cond-> (nil? why-not) (update :taken into (keys (:ours r)))))))
                        {:taken #{} :members []} branches)
-        ok (remove :refusal (:members judged))
+        ok (remove :refused (:members judged))
         changed (into {} (for [{:keys [r]} ok [k [_ ov]] (:ours r)] [k ov]))]
     (if (empty? changed)
-      [st {:results (mapv #(or (:refusal %) {:merged? true :tx (:max-tx main) :datoms 0 :keys 0}) (:members judged))}]
+      [st {:results (mapv #(or (:refused %) {:merged? true :tx (:max-tx main) :datoms 0 :keys 0}) (:members judged))}]
       ;; git: each member's head becomes a parent, so its merge base moves to it
       (let [rep (d/merge-db conn (set (map :branch ok)) (pm/apply-tx main changed) (pdb/tx-meta))
             t (:max-tx (:db-after rep))
@@ -106,7 +106,7 @@
         [(main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep))
          {:tx t :datoms (count ops)
           ;; :files, the source files (namespaces' and schema resources') its changes touch: what a write-back rewrites
-          :results (mapv #(or (:refusal %) {:merged? true :tx t :keys (count (:ours (:r %))) :files (source/changed-files (:db-after rep) (:ours (:r %)))}) (:members judged))}]))))
+          :results (mapv #(or (:refused %) {:merged? true :tx t :keys (count (:ours (:r %))) :files (source/changed-files (:db-after rep) (:ours (:r %)))}) (:members judged))}]))))
 
 (defn- merge-branch
   "Merge the branch into main (git: only a branch that contains main's head; session M1): a

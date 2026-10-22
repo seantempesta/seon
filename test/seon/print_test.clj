@@ -83,7 +83,7 @@
         "the form reads exactly the rest")))
 
 (deftest a-refused-argument-is-shown-by-the-one-printer
-  ;; seon.contract's refusal shows the offending value within the part budget, cut the printer's way
+  ;; seon.contract's error shows the offending value within the part budget, cut the printer's way
   (let [f (seon.contract/checked 'seon.print-test/takes-an-int [:=> [:cat :int] :int] inc)
         e (try (f (vec (range 10000))) nil (catch Exception e (ex-data e)))
         shown (:value (first (:seon.error/problems e)))]
@@ -91,7 +91,7 @@
     (is (re-find #"…\d+" shown) "a long value is cut with the printer's marker")
     (is (<= (select/estimate shown) (:part seon/budgets)))))
 
-(deftest text-is-the-printed-text-or-the-refusal
+(deftest text-is-the-printed-text-or-the-error
   (is (= "{:a 1}" (seon/text {:a 1})))
   (is (string? (seon/text (vec (range 100)) 1))))
 

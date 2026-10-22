@@ -115,7 +115,7 @@
       (swap! state assoc :db (:db-after r))
       {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
     (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta)})]
-      ;; past this process's block of entity ids: the typed refusal, nothing applied
+      ;; past this process's block of entity ids: the typed error, nothing applied
       (when-let [e (and (not (map? r)) (pdb/lease-spent r (:lease @state)))] (throw (ex-info (:seon.error/message e) e)))
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
       (swap! state assoc :db (:db-after r) :dirty? true)
@@ -155,7 +155,7 @@
     kind))
 
 (defn- fx-test
-  "An effect asked inside a test fork: the stub's outcome, or the declared refusal."
+  "An effect asked inside a test fork: the stub's outcome, or the declared error."
   {:malli/schema [:=> [:cat :keyword :map] :map]}
   [kind req]
   (if *fx-stub*
@@ -224,7 +224,7 @@
 (defn error-map
   "An exception caught at one of the agent's entrant boundaries (operation: the REPL's
   seon.repl/eval-code by default) as the one error map: its ex-data when that already is
-  one (a contract refusal names its operation, member and problems), else the
+  one (a contract's error names its operation, member and problems), else the
   :seon.agent/eval-error variant, with the exception's class, its ex-data printed by the one
   printer, and its cause chain (each cause's class and message)."
   {:malli/schema [:function [:=> [:cat :seon.host/throwable] :seon.error/base]
@@ -299,7 +299,7 @@
 (defn test-vars
   "The tests that judge branch db, as this process holds them: proofs, and every test that
   reaches a var the branch changed since base (main at its merge base), the changed tests
-  among them (seon.reconcile/done-refusals reads only these). A proof with no var here does
+  among them (seon.reconcile/done-explain reads only these). A proof with no var here does
   not run; scratch namespaces (user, ^:scratch) never merge, so their tests never judge."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :qualified-symbol]] [:sequential :seon.host/var]]}
   [db base proofs]

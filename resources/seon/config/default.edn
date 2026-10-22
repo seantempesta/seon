@@ -320,7 +320,7 @@
    :seon.ai.model/input-usd-per-mtok 0.15
    :seon.ai.model/cached-input-usd-per-mtok 0.003
    :seon.ai.model/output-usd-per-mtok 0.6
-   :seon.ai.model/thinking-dials #{:enabled :disabled}
+   :seon.ai.model/thinking-modes #{:enabled :disabled}
    :seon.ai.model/provider-max-in-flight 2500
    :seon.ai.model/source "api-docs.deepseek.com/quick_start/pricing and /rate_limit, read 2026-10-21"}
   "deepseek-v4-pro"
@@ -331,7 +331,7 @@
    :seon.ai.model/input-usd-per-mtok 0.66
    :seon.ai.model/cached-input-usd-per-mtok 0.022
    :seon.ai.model/output-usd-per-mtok 1.98
-   :seon.ai.model/thinking-dials #{:enabled :disabled}
+   :seon.ai.model/thinking-modes #{:enabled :disabled}
    :seon.ai.model/provider-max-in-flight 500
    :seon.ai.model/source "api-docs.deepseek.com/quick_start/pricing and /rate_limit, read 2026-10-21"}}
  ;; Unit: tokens per second the provider admits, cluster-wide: the :model owner's token bucket
@@ -444,7 +444,7 @@
  ;; Contracts and their recording (session G1): :on, :contracts (wrappers, no recording
  ;; transaction: the two measured apart), :off (no wrapper, no recording: the same binary
  ;; measured with instrumentation off; test/r3's benches).
- :seon.config.contract/guarantees #keyword #or [#env SEON_GUARANTEES "on"]
+ :seon.config.contract/instrument #keyword #or [#env SEON_INSTRUMENT "on"]
 
  ;; native/probe.c's library (bin/build native): Mach memory probes and qfork. T5 points it at
  ;; next's build from a snapshot that has none.

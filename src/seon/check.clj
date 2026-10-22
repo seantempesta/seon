@@ -289,7 +289,7 @@
 
 (defn problems-check
   "Provoke every class of problem through the paths agents and root use (:stall-ms 1000
-  for the stall), then read my.root/problems: an eval error and a contract refusal, an
+  for the stall), then read my.root/problems: an eval error and a contract's error, an
   effect's io error, a platform defect in the api, a stall, an agent's death with its exit
   status and stderr, a red proof's assertions and a cost proof's verdict. It reads them
   once main holds each (seon.e2e/await-db over seon.problems/report)."

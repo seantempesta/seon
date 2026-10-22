@@ -11,7 +11,7 @@
   (readable, whole). Renders (seon.render) decide what to show; this decides how a value
   looks within a budget.
 
-  A foundational namespace, like seon.contract (which calls it for refusals): its functions
+  A foundational namespace, like seon.contract (which calls it for errors): its functions
   carry contracts in their metadata and are armed at boot."
   (:require [clojure.string :as str] [seon.print.select :as select] [seon.config :as config]))
 
@@ -32,7 +32,7 @@
   what it omitted and names no form; :budget tokens (default-budget); :max-depth
   (:seon.config.render.agent/max-depth); :width (:seon.config.render/width); :outputs, a
   subset of #{:text :hiccup} (#{:text}). Answers {:text :tokens :truncated? :elisions :cuts}
-  plus :html (hiccup) when asked, or the insufficient-budget refusal (an error map) when the
+  plus :html (hiccup) when asked, or the insufficient-budget error (an error map) when the
   budget cannot show the value's first part."
   {:malli/schema [:function [:=> [:cat :any] :seon.print/result] [:=> [:cat :any :seon.print/opts] :seon.print/result]]}
   ([v] (print-value v {}))
@@ -43,7 +43,7 @@
    (select/show v {:handle handle :budget budget :max-depth max-depth :width width :outputs outputs})))
 
 (defn text
-  "`v` as text under budget tokens: the printed text, or the refusal's message when even
+  "`v` as text under budget tokens: the printed text, or the error's message when even
   its first part does not fit."
   {:malli/schema [:function [:=> [:cat :any] :string] [:=> [:cat :any pos-int?] :string]]}
   ([v] (text v default-budget))

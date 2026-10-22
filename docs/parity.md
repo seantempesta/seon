@@ -21,9 +21,9 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 | `eval_clj` (an agent's REPL or root's) | `seon_eval` (one evaluator: no JVM mode) | present |
 | `runtime_status` (health, problems, flow, readiness) | `seon_agents` lists agents and tasks; health only on the dashboard | partial |
 | an outside agent works a task | `seon_attach`, `seon_context`, `seon_done` | new |
-| refusals and defects answered per request | a defect answers that request the typed `:seon.server/defect` and the server goes on (`seon.server/respond`); a refused attach still writes the task's state first (`seon.server/attach-writes-nothing-when-it-is-refused`) | partial |
+| refused answers and defects answered per request | a defect answers that request the typed `:seon.server/defect` and the server goes on (`seon.server/respond`); a refused attach still writes the task's state first (`seon.server/attach-writes-nothing-when-it-is-refused`) | partial |
 
-The server's ops are one table, `seon.server/ops`: MCP lists each as the tool `seon_<op>` (`seon.server/mcp-reply`, answered by the server itself on its one port; `bin/mcp` is a stdio relay of a few MB, no Seon binary), so a new op is one row. An eval as root goes through the agents' REPL path (`seon.repl/eval-string`: the one printer, cost, error maps, `*1` and `*e`), in `root.repl` with `sys` a local, recorded on main by `seon.repl/record-tx` like an agent's evaluation. The dashboard's calls of root's functions are the requests the API fns send (`seon.root/request`), so the UI and `seon.root/merge!` cannot disagree on a request or a refusal. Not this: a second read/eval loop, a second recorder, or an `:op`'s request map written again in `seon.web`.
+The server's ops are one table, `seon.server/ops`: MCP lists each as the tool `seon_<op>` (`seon.server/mcp-reply`, answered by the server itself on its one port; `bin/mcp` is a stdio relay of a few MB, no Seon binary), so a new op is one row. An eval as root goes through the agents' REPL path (`seon.repl/eval-string`: the one printer, cost, error maps, `*1` and `*e`), in `root.repl` with `sys` a local, recorded on main by `seon.repl/record-tx` like an agent's evaluation. The dashboard's calls of root's functions are the requests the API fns send (`seon.root/request`), so the UI and `seon.root/merge!` cannot disagree on a request or a reason. Not this: a second read/eval loop, a second recorder, or an `:op`'s request map written again in `seon.web`.
 
 `seon_agents` returns every task (230+, mostly cancelled): too much context for an outside agent.
 
@@ -53,7 +53,7 @@ The server's ops are one table, `seon.server/ops`: MCP lists each as the tool `s
 | three-way program merge, conflicts as entries, forward merge | `seon.merge`, `my.branch/merge-main!` | present |
 | many agents merging onto shared definitions at once (v1's swarm) | `bin/check swarm` (`seon.e2e`'s swarm row: 20 tasks over 5 shared vars, 8 agents at once; red unless conflicts arose and every one was resolved, every task done, and a fresh agent on main gets every proof's value) | present |
 | main wins a conflict (MERGE-STEP 5a) | ours is kept | missing |
-| one done rule shared with merge | `seon.reconcile/done-refusals` (a proof that never ran counts red, not unknown) | partial |
+| one done rule shared with merge | `seon.reconcile/done-explain` (a proof that never ran counts red, not unknown) | partial |
 | tests selected by reach; results reused by reach digest | `seon.program/reach-digests`; `bin/test --reach` reuses green results in `../test-results` | present for `bin/test`; agents' proof runs don't reuse |
 | contracts armed at definition; cost proofs; per-function profile | `seon.contract`, `seon.cost`, `seon.profile` | present |
 | turns-to-green report (median, p90) | `seon.learn` charges overrun per attempt | partial |

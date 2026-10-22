@@ -102,7 +102,7 @@
   [:seon.config.root/entrance-port :seon.config.root/entrance-port]
   [:seon.config.web/public-dir :seon.config.web/public-dir]
   [:seon.config.web/utc-offset :seon.config.web/utc-offset]
-  [:seon.config.contract/guarantees :seon.config.contract/guarantees]
+  [:seon.config.contract/instrument :seon.config.contract/instrument]
   [:seon.config.native/probe-lib :seon.config.native/probe-lib]]
 
  ;; which layer each key came from (seon.config/sources): the shipped file, config/local.edn,

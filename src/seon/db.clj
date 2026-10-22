@@ -304,8 +304,8 @@
   (lease! cfg lease))
 
 (defn lease-spent
-  "The typed refusal :seon.db/lease-spent when x (what a transaction answered) is Datahike's
-  refusal to mint past this process's ceiling (after-fork!), for the agent whose lease
+  "The typed error :seon.db/lease-spent when x (what a transaction answered) is Datahike's
+  error to mint past this process's ceiling (after-fork!), for the agent whose lease
   starts at lease; else nil."
   {:malli/schema [:=> [:cat :any [:maybe :int]] [:maybe :seon.db/lease-spent]]}
   [x lease]

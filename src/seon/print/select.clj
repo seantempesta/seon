@@ -303,7 +303,7 @@
     (if (and (< to limit) (> line-end (:shown node))) line-end to)))
 
 (defn- insufficient-budget
-  "The declared refusal when the budget cannot show the root or its first member."
+  "The declared error when the budget cannot show the root or its first member."
   {:malli/schema [:=> [:cat :seon.print/context number?] :seon.error/base]}
   [context needed]
   {:seon.error/type :seon.render.value/insufficient-floor-budget-error
@@ -620,7 +620,7 @@
           (sized context node)))))
 
 (defn- select
-  "`value` allotted under the context's budget, or the insufficient-budget refusal when its least
+  "`value` allotted under the context's budget, or the insufficient-budget error when its least
   form, or its first member's, cannot fit."
   {:malli/schema [:=> [:cat :any :seon.print/context] :map]}
   [value context]
@@ -710,7 +710,7 @@
 
 (defn show
   "`value` selected under `opts` and emitted: `{:text :tokens :truncated? :elisions :cuts}` plus
-  `:html` (hiccup) when `outputs` holds `:hiccup`, or the insufficient-budget refusal.
+  `:html` (hiccup) when `outputs` holds `:hiccup`, or the insufficient-budget error.
   opts: `:handle` (what cuts read through: a `result/…` symbol, or a form that reads the value), `:budget` tokens, `:max-depth`, `:width`,
   `:outputs`. A value whose metadata holds `:seon.print/full true` prints whole, and
   `:seon.print/budget n` raises its own budget."
@@ -718,7 +718,7 @@
   [value {:keys [handle budget max-depth width outputs]}]
   (let [requery (if (or (and (qualified-symbol? handle) (= "result" (namespace handle))) (seq? handle))
                   {:seon.print/requery-id handle}
-                  {:seon.print/requery-refusal "the value has no result handle"})
+                  {:seon.print/requery-refused "the value has no result handle"})
         own (when (instance? clojure.lang.IMeta value) (:seon.print/budget (meta value)))
         budget-tokens (if (pos-int? own) own budget)
         full? (and (instance? clojure.lang.IMeta value) (true? (:seon.print/full (meta value))))
