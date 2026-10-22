@@ -8,7 +8,7 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 
 | v1 | next | Status |
 |---|---|---|
-| `bin/seon start`, `start --head`, `status`, `stop` | `bin/root start`, `next` (the newest built generation), `status`, `stop` | present |
+| `bin/seon start`, `start --head`, `status`, `stop` | `bin/root start`, `next` (the newest built generation), `status`, `stop`; every end is a fact on main (`:seon.root/stopped` with its cause, `:seon.root/previous-end` at the next boot, `:unclean` after a SIGKILL or a crash: `seon.root/stop!`) | present |
 | `bin/seon logs` | `runs/root.log`, no command | partial |
 | `bin/seon open`, `init`, `reset`, `nuke` | none (one root per checkout; per-checkout ports, `bin/ports`) | missing |
 | `bin/seon config apply` (sparse, per branch) | config layers plus `--set`; `seon.root/apply!` re-reads `system.edn` | partial |
@@ -21,7 +21,7 @@ Status words: **present** (the code exists here; not a claim that it passes), **
 | `eval_clj` (an agent's REPL or root's) | `seon_eval` (one evaluator: no JVM mode) | present |
 | `runtime_status` (health, problems, flow, readiness) | `seon_agents` lists agents and tasks; health only on the dashboard | partial |
 | an outside agent works a task | `seon_attach`, `seon_context`, `seon_done` | new |
-| refusals and defects answered per request | on the unmerged branch `jolt/door` | partial |
+| refusals and defects answered per request | a defect answers that request the typed `:seon.entrance/defect` and the door goes on (`seon.entrance/serve-connection!`); a refused attach still writes the task's state first (`seon.entrance/attach-writes-nothing-when-it-is-refused`) | partial |
 
 The door's verbs are one table, `seon.entrance/verbs`: MCP lists each as the tool `seon_<op>` (`seon.mcp/reply`), so a new verb is one row. An eval as root goes through the agents' REPL path (`seon.repl/eval-string`: the one printer, cost, error maps, `*1` and `*e`), in `root.repl` with `sys` a local, recorded on main by `seon.repl/record-tx` like an agent's evaluation. The dashboard's calls of root's verbs are the requests the API fns send (`seon.root/request`), so the UI and `seon.root/merge!` cannot disagree on a request or a refusal. Not this: a second read/eval loop, a second recorder, or a verb's request map written again in `seon.web`.
 
@@ -51,6 +51,7 @@ The door's verbs are one table, `seon.entrance/verbs`: MCP lists each as the too
 | `chain!` and `:seon.task/next` | `:needs` only | dropped |
 | step templates (design, prove, implement, merge) | `seon.template/request`: design → implement → merge on one branch, one transaction ([tasks](tasks.md#a-request-is-one-transaction)) | present |
 | three-way program merge, conflicts as entries, forward merge | `seon.merge`, `my.branch/merge-main!` | present |
+| many agents merging onto shared definitions at once (v1's swarm) | `bin/check swarm` (`seon.e2e`'s swarm row: 20 tasks over 5 shared vars, 8 agents at once; red unless conflicts arose and every one was resolved, every task done, and a fresh agent on main gets every proof's value) | present |
 | main wins a conflict (MERGE-STEP 5a) | ours is kept | missing |
 | one done rule shared with merge | `seon.reconcile/done-refusals` (a proof that never ran counts red, not unknown) | partial |
 | tests selected by reach; results reused by reach digest | `seon.program/reach-digests`; `bin/test --reach` reuses green results in `../test-results` | present for `bin/test`; agents' proof runs don't reuse |
@@ -94,10 +95,10 @@ The door's verbs are one table, `seon.entrance/verbs`: MCP lists each as the too
 
 1. History: kept since 2026-10-22 (A.2); the `my.program/history` verb is not built.
 2. Storage: collection beside live agents (docs/storage.md#collection's design); a trained zstd dictionary once a representative corpus exists; log rotation.
-3. The door: health through MCP, a compact `seon_agents`, and `jolt/door`'s refusals as data.
+3. The door: health through MCP, a compact `seon_agents`; an outside attempt whose agent dies ends (`seon.reconcile/an-outside-attempts-agent-death-ends-it`); the turns, inspection and restore/replay of `archive/jolt/door` (the tasks in `seon.entrance`).
 4. The owner's view: `/ns` pages and the message input bar, with messages stored as facts.
 5. Main wins a conflict; an unrun proof is unknown, not red.
-6. The unmerged wiki work and `bin/check docs`.
+6. The wiki's missing concept pages (`seon.docs/every-concept-has-its-page`) and its health measures (`seon.docs/the-wiki-stays-true-and-healthy`).
 7. Embeddings and `similar`.
 8. A turns-to-green report.
 9. Operator commands: `open`, `logs`, `reset`.
