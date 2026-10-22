@@ -300,12 +300,13 @@
 
 (deftest an-agent-that-throws-ends-with-its-cause
   ;; task seon.agent/a-death-names-its-cause: a defect that no request's own boundary
-  ;; catches (here the agent redefined a function its own loop calls, as a real REPL may)
+  ;; catches (here the agent redefines, at its REPL as an agent changes the platform, a
+  ;; function its own loop calls after each request: seon.agent/db)
   ;; ends the process at its entrant boundary: the cause is the attempt's end on its branch,
   ;; written before the process exits, and root answers the request it died in with the
   ;; exit status the fork server reaped
   (let [[_ died end] (in-agent [{:op :context :agent "a1"}
-                                "(intern 'seon.agent 'db (fn [& _] (throw (ex-info \"boom: the loop's own function\" {:x 1}))))"
+                                "(in-ns 'seon.agent) (clojure.core/defn db [] (throw (ex-info \"boom: the loop's own function\" {:x 1})))"
                                 {:op :eval :agent "root"
                                  :code (str "(let [a (first (filter #(= :a1 (:seon.attempt/agent %)) (vals (seon.task/attempts @(:conn sys)))))]"
                                             " (seon.reconcile/pull-end (:db @(seon.root/branch-db sys (seon.task/default-branch \"demo/t\"))) (:seon.attempt/id a)))")}])
