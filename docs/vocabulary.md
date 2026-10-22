@@ -88,7 +88,7 @@ owns the concept. A new concept gets its word here before it appears in code.
 | ns | verbs |
 |---|---|
 | `my.db` | `db`, `q`, `pull`, `transact!` (on the agent's own branch) |
-| `my.agent` | `$`, `whoami`, `messages`, `send-message` |
+| `my.agent` | `$`, `whoami`, `messages`, `send-message`, `help`, `callers`, `callees`, `grep`, `source` |
 | `my.task` | `current`, `update!`, `send-back!` |
 | `my.turn` | `wait` |
 | `my.branch` | `merge-main!`, `unmerged`, `resolve!` |

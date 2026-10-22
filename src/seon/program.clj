@@ -712,14 +712,29 @@
 
 ;; ---- reach: which tests a change reaches ----------------------------------------------
 
+(defn divergence
+  "What branch db-to changed since db-from (the main it forked from), the changes its merge
+  carries to main: the vars it added, redefined (points to another form) and removed, and the
+  schema keys it registered or changed; each sorted, an empty kind left out. Cost: each db's
+  :var/form and :schema/form datoms."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db]
+                  [:map-of [:enum :added :changed :removed :schemas] [:vector [:or :qualified-symbol :qualified-keyword]]]]}
+  [db-from db-to]
+  (let [by (fn [db a] (into {} (map (juxt :e :v)) (d/datoms db :aevt a)))
+        a (by db-from :var/form) b (by db-to :var/form)
+        sa (by db-from :schema/form) sb (by db-to :schema/form)
+        kind (fn [e] (cond (nil? (a e)) :added (nil? (b e)) :removed :else :changed))
+        vars (for [e (into (set (keys a)) (keys b)) :when (not= (a e) (b e))]
+               [(kind e) (:var/name (d/entity (if (b e) db-to db-from) e))])
+        schemas (for [e (keys sb) :when (not= (sa e) (sb e))] [:schemas (:schema/key (d/entity db-to e))])]
+    (into {} (for [[k xs] (group-by first (concat vars schemas))] [k (vec (sort-by str (map second xs)))]))))
+
 (defn changed-vars
   "The vars db-to points to another form than db-from does (new, redefined or removed):
-  what a branch changed since the main it forked from. Cost: each db's :var/form datoms."
+  what a branch changed since the main it forked from (divergence's vars)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :qualified-symbol]]}
   [db-from db-to]
-  (let [forms (fn [db] (into {} (map (juxt :e :v)) (d/datoms db :aevt :var/form)))
-        a (forms db-from) b (forms db-to)]
-    (into #{} (keep #(when (not= (a %) (b %)) (:var/name (d/entity db-to %)))) (into (set (keys a)) (keys b)))))
+  (into #{} cat (vals (dissoc (divergence db-from db-to) :schemas))))
 
 (defn reaching-tests
   "The program's tests on db that reach one of syms (fully qualified var names): from each

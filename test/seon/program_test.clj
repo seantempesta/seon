@@ -355,3 +355,20 @@
     (is (not= (before 'app.pt-sc-test/h-test) (after-base 'app.pt-sc-test/h-test)) "and a schema that schema names, on")
     (is (= (before 'app.pt-sc-test/plain-test) (after 'app.pt-sc-test/plain-test) (after-base 'app.pt-sc-test/plain-test))
         "a test not reaching h kept its digest")))
+
+(deftest divergence-names-each-change-a-merge-carries
+  ;; owner D4 (2026-10-22): the agent sees, every turn, every change its branch's merge will
+  ;; carry back to main: what it added, redefined and removed, and the schemas it registered
+  (let [base (d/db-with (pdb/test-db)
+                        [{:db/id "a" :var/name 'app/a :var/form "fa"} {:db/id "fa" :form/id "a1" :form/src "(def a 1)"}
+                         {:db/id "b" :var/name 'app/b :var/form "fb"} {:db/id "fb" :form/id "b1" :form/src "(def b 1)"}
+                         {:db/id "k" :schema/key :app/k :schema/form ":int"}])
+        e (fn [db sym] (d/q '[:find ?e . :in $ ?n :where [?e :var/name ?n]] db sym))
+        b-form (:db/id (:var/form (d/entity base (e base 'app/b))))
+        branch (d/db-with base [{:db/id (e base 'app/a) :var/form "fa2"} {:db/id "fa2" :form/id "a2" :form/src "(def a 2)"}
+                                [:db/retract (e base 'app/b) :var/form b-form]
+                                {:db/id "c" :var/name 'app/c :var/form "fc"} {:db/id "fc" :form/id "c1" :form/src "(def c 1)"}
+                                {:schema/key :app/k :schema/form ":string"} {:schema/key :app/n :schema/form ":int"}])]
+    (is (= {:added ['app/c] :changed ['app/a] :removed ['app/b] :schemas [:app/k :app/n]} (program/divergence base branch)))
+    (is (= #{'app/a 'app/b 'app/c} (program/changed-vars base branch)) "the changed vars are its vars")
+    (is (= {} (program/divergence base base)) "an unchanged branch carries nothing")))

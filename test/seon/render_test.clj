@@ -303,7 +303,7 @@
                                  :seon.turn/origin :outside :seon.turn/basis b}])
             db @conn
             ctxv (#'p/context-of db {:seon.attempt/id "t/x#1" :seon.attempt/task "t/x"} {:evals [read]})]
-        (is (= {:text (:content (peek (:messages (seon.context/render db b)))) :origin :outside} (select-keys ctxv [:text :origin]))
+        (is (= {:text (seon.context/reader-text (:messages (seon.context/render db b))) :origin :outside} (select-keys ctxv [:text :origin]))
             "the text it read, made again from its basis")
         (is (str/includes? (:text ctxv) "app.m/f0") "what the read showed")
         (is (:why (#'p/context-of db {:seon.attempt/id "t/x#2" :seon.attempt/task "t/x"} {:evals []})) "an attempt that read nothing says why")))))))

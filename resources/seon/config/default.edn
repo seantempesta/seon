@@ -358,6 +358,15 @@
  ;; turn (owner: "wtf"); 32000 keeps the last several whole turns (a turn is a reply of ~1-3k
  ;; plus its evaluations up to the evals budget), so a turn sends ~20-55k with the block.
  :seon.config.render/history-budget 32000
+ ;; Unit: tokens of one cited var's source in the context (cited in three backticks). Past it
+ ;; the var shows at doc depth with how many tokens were left out and the form that reads them,
+ ;; (clojure.repl/source ns/f). Provenance: v1's must-reads per-function cap, reference-tokens
+ ;; 3000 (audit notes/AUDIT-v1-to-next-2026-10-22.md 2.3).
+ :seon.config.render/reference-tokens 3000
+ ;; Unit: vars. The helpers the context names that the plan does not (:found): program functions
+ ;; the plan's cited vars and the proofs call. 0 shows none. Provenance: R4's k = 5
+ ;; (notes/option3-R4-learning.md 5: 14 of 16 needed helpers in the top 5).
+ :seon.config.render/found 5
  ;; Unit: items. A list shown in part (seon.print/bounded) shows this many, then `+N more:
  ;; where` (docs/render.md#bounded-lists). Provenance: the literals each list carried before
  ;; (render.ui and render.ai, 2026-10-22), kept as they were.

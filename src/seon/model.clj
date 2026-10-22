@@ -120,7 +120,7 @@
 
 (defn reply-of
   "A 200 reply (its chat-completion JSON as data) as the completion: its text, its eval calls
-  ({:id :code}, in order), what it cost (prompt, completion, reasoning and cache-hit tokens)
+  ({:id :code}, in order), what it cost (prompt, completion, reasoning, cache-hit and cache-miss tokens)
   and ms; or the declared failure: no content and no call, or an empty content beside
   non-empty reasoning and no call (:seon.model/reasoning-ate-reply: thinking spent the
   budget of max-tokens)."
@@ -132,6 +132,7 @@
         reasoning (:reasoning_content msg)
         u (:usage j)
         rt (get-in u [:completion_tokens_details :reasoning_tokens])
+        cached (or (:prompt_cache_hit_tokens u) (get-in u [:prompt_tokens_details :cached_tokens]))
         ;; the reply stopped at max-tokens: its text is cut (kept; the forgiving reader repairs it)
         cut? (= "length" (get-in j [:choices 0 :finish_reason]))]
     (cond
@@ -153,7 +154,9 @@
         (string? (:model j)) (assoc :model (:model j))
         (and (string? reasoning) (not (str/blank? reasoning))) (assoc :reasoning reasoning)
         rt (assoc :reasoning-tokens (long rt))
-        (:prompt_cache_hit_tokens u) (assoc :cache-hit-tokens (long (:prompt_cache_hit_tokens u)))
+        ;; DeepSeek's names, then the OpenAI-compatible cached count
+        cached (assoc :cache-hit-tokens (long cached))
+        (:prompt_cache_miss_tokens u) (assoc :cache-miss-tokens (long (:prompt_cache_miss_tokens u)))
         cut? (assoc :truncated? true))
       :else (provider-error "the reply carries no message content" 200 {}))))
 

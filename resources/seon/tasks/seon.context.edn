@@ -41,4 +41,9 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.repl-test/the-help-page-runs
                       seon.repl-test/help-answers-a-section}}
+ {:seon.task/name "the-turn-shows-what-will-merge"
+  :seon.task/plan "Owner D4 (2026-10-22, relayed by root): the agent's dynamic context carries a concise list of every change that will merge back to main, its branch's divergence from main, compact, every turn, in the per-turn part, not the cached prefix. The agent holds the main it forked from (`seon.agent/state` :base) and already diffs it every test run (`seon.program/changed-vars`, for the tests a change reaches). Correct: `seon.program/divergence` names the vars the branch added, redefined and removed and the schema keys it registered or changed (each db's :var/form and :schema/form datoms, as changed-vars read them; changed-vars becomes its vars); the turn observes it (`seon.turn/observe`) into its basis, and `seon.context/current-state` shows it as `:will-merge` among the turn sections. Replaces nothing; the help page says what it is. Not covered: data entities a branch writes (`seon.merge/program`'s :datum keys) and multimethod and protocol definitions, which the full program merge sees (`seon.merge/program`, 440 ms per db, too slow for every turn)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.program-test/divergence-names-each-change-a-merge-carries
+                      seon.context-test/the-turn-names-what-the-merge-will-carry}}
 ]

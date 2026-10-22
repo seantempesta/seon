@@ -421,7 +421,7 @@
                        :else stop)))]
     (if stop (subs flat 0 (inc stop)) flat)))
 
-(defn- lead-sentence
+(defn lead-sentence
   "The first sentence of a section's lead paragraph, on one line."
   {:malli/schema [:=> [:cat :string] :string]}
   [lead] (first-sentence (str/join " " (map str/trim (str/split-lines lead)))))

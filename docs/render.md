@@ -29,5 +29,17 @@ Nothing is pinged and nothing runs on a beat (owner, 2026-10-21). A render pass 
 
 ## A context read is shown once
 
-An outside agent reads its current-state block through root's entrance (`{:op :context}`, recorded with origin `:context`). The agent's page shows the text it last read, made again from that turn's basis (`seon.context/recorded`, `seon.context/render`: a turn records the commit it read and the observations no db holds, never the text); every other view of that read (a card, a history row, the stream) refers to it (`read its current-state block · ≈N tokens`), never repeats it. The agent's own turn and the door print the block the same way (`seon.context/messages`, 16,000 tokens).
+An outside agent reads its current-state block through root's entrance (`{:op :context}`, recorded with origin `:context`). The agent's page shows the text it last read, made again from that turn's basis (`seon.context/recorded`, `seon.context/render`: a turn records the commit it read and the observations no db holds, never the text); every other view of that read (a card, a history row, the stream) refers to it (`read its current-state block · ≈N tokens`), never repeats it. The agent's own turn and the door print the block the same way (`seon.context/messages`, `seon.context/reader-text`: the attempt sections, then the turn sections, each under 16,000 tokens).
+
+## The model's context: a cached prefix, then the turn
+
+A model request sends what does not change first, so the provider serves it from its prefix cache, and sends nothing twice.
+
+```seon.context/messages``` makes every request in one order:
+1. **The help page** ([agent](agent.md)) as the system message: the same bytes for every agent and every turn (`seon.context/help-text`).
+2. **The attempt sections** (`seon.context/attempt-keys`: the task and its plan, the references, the helpers it does not name, the cited sections, the evidence), made from the attempt's first turn's basis on the commit it read, so they stay byte-identical while the attempt works even when the program they cite changes.
+3. **The scrollback**: each earlier turn's reply, its eval calls and each call's answer as a tool message, whole turns within `:seon.config.render/history-budget`, the newest kept.
+4. **The turn sections**: everything else in the block (the turn, the proofs, refused, the test run, the last reply, unmerged entries, and `:will-merge`, every change the branch's merge will carry to main, from `seon.program/divergence` against the main the agent forked from: owner, D4), the last evaluations while no earlier turn shows them, and how many earlier turns the history budget left out.
+
+So each request starts with the whole of the one before but its last message (`seon.context-test/the-prefix-stays-byte-identical-across-turns`), and the plan, its references and its sections go out once a request (`seon.context-test/each-section-is-sent-once-per-request`). Before (2026-10-22), the block went out twice a request, in the first turn's message and again in the current one, and the overflow note edited the first message, breaking the prefix every turn after overflow. v1 measured the same split live: stable attempt sections of about 8.5k tokens, turn sections of about 0.75k, 85-91% cache hits. What the provider served from its cache is recorded on each turn (`:seon.turn/cache-hit-tokens`, `:seon.turn/cache-miss-tokens`, by `seon.turn/usage`), absent when it did not say.
 

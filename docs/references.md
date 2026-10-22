@@ -21,6 +21,8 @@ Only a span of exactly one qualified symbol or keyword is a name. A form, an ali
 
 ```seon.ref/references``` resolves names against the program's `:var/name` facts, keywords against the schema registry and paths against the checkout; ```seon.ref/names``` is the qualified symbols alone (what `seon.reconcile/hairy` and the context use). ```seon.ref/view``` shows a section at a depth: at summary its heading and its lead's first sentence, at doc its lead and the headings below, at code the whole section. A section with no lead answers `:no-lead` at summary and doc depth, so every section should open with one sentence that stands alone.
 
+A var is shown by the same depths (```seon.context/resolve-ref```): at summary its arglists and its docstring's first sentence, at doc its arglists, docstring and contract, at code its recorded source. A source over `:seon.config.render/reference-tokens` (3,000, v1's per-function cap) shows the doc instead, with `:left-out` (how many tokens) and `:read`, the `(clojure.repl/source ns/f)` that reads it; a var with no docstring shows its source at doc depth. Before (2026-10-22) every cited var showed its whole source, uncapped: 82-88% of a measured task's context.
+
 ## Cost
 
 One parse is linear in the text. Most of its allocation is reading each candidate name with `seon.reader/read-text` (about 13 µs and 18 KB per name, half of it `seon.reader/opts` rebuilt per call): `AGENTS.md` (21 KB) parses in 0.8 ms and 1.2 MB. The proof is `seon.ref-test/one-parse-costs-one-pass`. Edamame on Jolt allocates about 2 KB per symbol it reads (100 KB for a 100-byte vector of 50 symbols, measured 2026-10-21), so the reads, not the scan, are where a cheaper parse would come from.
@@ -44,6 +46,8 @@ Cost (2026-10-21, `docs/` at 8 pages, 60 KB, 60 sections, on a test branch): a f
 ## Sections in a task's context
 
 The context shows each wiki section the task's plan or instructions cite, at the depth the citation asks for.
+
+Beside them, `:found` names the helpers the plan does not (```seon.context/found```): the program functions the plan's cited vars and the task's proofs name in their recorded definitions (`:form/refs`, one hop), most-called first, at doc depth, at most `:seon.config.render/found` (R4's k = 5) and then `+N more` with the form that lists them. R4 measured this lever with embeddings (7/32 green without it, 22/24 with); the call graph finds a helper something already calls, and an embedding index will find the rest.
 
 `seon.context/current-state` keeps the citations that carry a path and an anchor (```seon.ref/references``` over the same text that gives the names) and shows each as `:sections`: ```seon.docs/view``` reads the section main holds and ```seon.ref/shown``` renders it, the one rule `seon.ref/view` also uses for a freshly parsed document. A link or one backtick shows the lead (or opening) and the sections below; three backticks show the section whole (its own text); a section main does not hold shows `:unresolved` beside the same message as an unresolved name. Stored sections keep no opening block, so a section whose first block is not a paragraph shows no lead at doc depth, and its sections below come in the order the wiki was written. A link with no anchor (a whole page) is not shown yet, because main stores no page entity: the first section's address would have to be derived. A prose bare address is a summary, and `seon.ref/references` keeps it only when it names a file, so a bare section address does not reach the context; write the link.
 

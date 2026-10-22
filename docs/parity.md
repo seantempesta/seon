@@ -34,7 +34,7 @@ The door's verbs are one table, `seon.entrance/verbs`: MCP lists each as the too
 | `my.task/current`, `update!`, `send-back!`; `my.turn/wait` | the same names | present (`my.task/current` answers nil in released agents: RESUME's plan, A) |
 | `my.program/callers`, `source`, `tests-reaching` | `my.agent/callers`, `callees`, `grep`, `source`; `seon.program/reach-digests` | present |
 | `my.program/history` | none yet; the store keeps history now ([storage](storage.md#history)), the verb is not built | missing |
-| `my.program/search`, `similar` (embeddings) | none; decided (DECISIONS, "Embeddings join the context"), not built | missing |
+| `my.program/search`, `similar` (embeddings) | none; decided (DECISIONS, "Embeddings join the context"), not built; the context's `:found` finds helpers by the call graph meanwhile (`seon.context/found`) | missing |
 | `my.program/diff`, `sizes`, `breaks` | `seon.root/branch-diff` (root only) | partial |
 | `my.program/write-branch!` | write-back at merge (`seon.source`, the `:git` effect) | present, better |
 | `my.message/inbox`, `send` (stored facts) | `my.agent/messages`, `send-message`, held in the agent's process | partial |
@@ -63,7 +63,8 @@ The door's verbs are one table, `seon.entrance/verbs`: MCP lists each as the too
 | v1 | next | Status |
 |---|---|---|
 | generated task context; one reference rule (`seon.ref`); forgiving reader | `seon.context`, `seon.ref`, `seon.reader/forgive` | present |
-| `(help)` checked against the program | template instructions only | partial |
+| `(help)` checked against the program | [agent](agent.md), the system message; `my.agent/help`; every form on it run in an agent by `seon.repl-test/the-help-page-runs` | present |
+| context: stable attempt sections, cached; small turn sections; must-reads capped | `seon.context/messages` (the help, the attempt sections, the scrollback, the turn); vars at their citation's depth, `:seon.config.render/reference-tokens`; cache hits on each turn | present |
 | one printer with a budget and runnable continuations; renders on schemas | `seon.print`, `seon.render` | present |
 | wiki sections in the context | `seon.docs` | new |
 | Datastar pages: `/`, `/agent/{id}` | `seon.web` | present |
