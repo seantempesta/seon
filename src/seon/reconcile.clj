@@ -486,10 +486,10 @@
 
 (defn pull-end
   "The end attempt aid's turn loop wrote on branch db ({:outcome :reason :turns :tokens},
-  and the error that ended it and its overrun as data), or {}."
+  and the error that ended it and its waste as data), or {}."
   {:malli/schema [:=> [:cat :seon.host/db :seon.attempt/id] :map]}
   [db aid]
-  (into {} (for [[k v] (d/pull db [:seon.end/outcome :seon.end/reason :seon.end/turns :seon.end/tokens :seon.end/error :seon.end/overrun]
+  (into {} (for [[k v] (d/pull db [:seon.end/outcome :seon.end/reason :seon.end/turns :seon.end/tokens :seon.end/error :seon.end/waste]
                                 [:seon.end/attempt aid])]
               [(keyword (name k)) v])))
 
@@ -590,12 +590,12 @@
                                                                              "the agent wrote no end")))
                                       (System/currentTimeMillis) (or base-t (:max-tx main)))
                     ;; the problems measured at its end (session D2): red assertions, cost verdicts,
-                    ;; the error that ended it, its overrun
+                    ;; the error that ended it, its waste
                     (cond-> {}
                       (seq (:failures run-problems)) (assoc :seon.attempt/failures (:failures run-problems))
                       (seq (:costs run-problems)) (assoc :seon.attempt/costs (:costs run-problems))
                       (or (:error end) worked-error) (assoc :seon.attempt/error (error-text (or (:error end) worked-error)))
-                      (seq (:overrun end)) (assoc :seon.attempt/overrun (:overrun end))
+                      (seq (:waste end)) (assoc :seon.attempt/waste (:waste end))
                       (seq (:conflicts carried)) (assoc :seon.attempt/task-conflicts (:conflicts carried)))))
             (concat (:tx carried)
                     ;; marked failed in this attempt (my.task/fail!): the failure on main and the

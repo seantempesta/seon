@@ -87,7 +87,7 @@
 (defn problems
   "Every problem recorded on main, by class (seon.problems/report): recorded errors counted
   by signature (:platform :eval :agent :effect) and attempts' red proofs, cost verdicts,
-  merges, deaths, errors and overrun, each row with its producer, owning namespace, evidence
+  merges, deaths, errors and waste, each row with its producer, owning namespace, evidence
   as data, reproducing proofs and the tasks already answering it. Reads main and the api's fold (the true counts of repeats not yet on main); costs
   the problems, not the program."
   {:malli/schema [:=> [:cat :seon.root/sys] :seon.problems/report]}

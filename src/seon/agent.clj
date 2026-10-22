@@ -243,15 +243,15 @@
 (defn write-end!
   "Attempt's end on this branch (:seon.end/*, which root's judge reads), committed: its
   outcome, and when known its reason, the error that ended it (as data), its turns, tokens
-  and overrun. The turn loop's end and the process's death write it the same way."
+  and waste. The turn loop's end and the process's death write it the same way."
   {:malli/schema [:=> [:cat :seon.attempt/id [:map [:outcome :seon.attempt/outcome]]] :any]}
-  [attempt {:keys [outcome reason error turns tokens overrun]}]
+  [attempt {:keys [outcome reason error turns tokens waste]}]
   (transact! [(cond-> {:seon.end/attempt attempt :seon.end/outcome outcome}
                 turns (assoc :seon.end/turns turns)
                 tokens (assoc :seon.end/tokens tokens)
                 reason (assoc :seon.end/reason reason)
                 error (assoc :seon.end/error error)
-                (seq overrun) (assoc :seon.end/overrun overrun))])
+                (seq waste) (assoc :seon.end/waste waste))])
   (commit!))
 
 (defn died!

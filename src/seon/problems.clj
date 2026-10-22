@@ -15,7 +15,7 @@
     :merge                          conflicts, unmerged keys, behind, a refused merge
     :dead                           an attempt whose agent died or was lost
     :error                          an attempt the turn loop ended on an error (the model)
-    :overrun                        forms charged to the producer of what was shown
+    :waste                          forms charged to the producer of what was shown
     :stuck                          a task whose failures spent its budget: its root cause and
                                     the released tasks it blocks (seon.reconcile/stuck-tx)
     :task-conflict                  task content a branch and main both changed, differently,
@@ -27,7 +27,7 @@
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses "Attempt statuses of a death (:seon.attempt/status)." (:seon.status/failed (contract/properties :seon.attempt/status)))
-(def attempt-classes [:red :cost :merge :dead :error :overrun :task-conflict])
+(def attempt-classes [:red :cost :merge :dead :error :waste :task-conflict])
 
 (defn- es
   "The entities carrying attribute a (its aevt index: only the entities that have it)."
@@ -74,7 +74,7 @@
   "What a problem row reads of an attempt: one pull (its conflicts are read only when it has
   them)."
   [:seon.attempt/id :seon.attempt/status :seon.attempt/outcome :seon.attempt/reason :seon.attempt/end-ms :seon.attempt/agent
-   :seon.attempt/unmerged :seon.attempt/failures :seon.attempt/costs :seon.attempt/error :seon.attempt/overrun :seon.attempt/task-conflicts
+   :seon.attempt/unmerged :seon.attempt/failures :seon.attempt/costs :seon.attempt/error :seon.attempt/waste :seon.attempt/task-conflicts
    {:seon.attempt/task [:db/id :seon.task/id :seon.task/ns :seon.task/proofs]}
    {:seon.attempt/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
@@ -132,7 +132,7 @@
         failures (select-keys (:seon.attempt/failures p) own)
         costs (select-keys (:seon.attempt/costs p) own)
         err (:seon.attempt/error p)
-        overrun (:seon.attempt/overrun p)
+        waste (:seon.attempt/waste p)
         merge? (or (seq conflicts) (seq unmerged) (= :behind status) (= :merge-failed (:outcome base))
                    (some-> err :seon.error/type namespace #{"seon.merge" "seon.writer"}))]
     (cond-> {}
@@ -156,8 +156,8 @@
       (assoc :dead [(assoc base :error err :producer (:seon.error/operation err) :evidence (cond-> {:from aid} err (assoc :error err)))])
       (and err (not merge?) (not (death-statuses status)))
       (assoc :error [(assoc base :error err :producer (:seon.error/operation err) :evidence {:from aid :error err})])
-      (seq overrun)
-      (assoc :overrun [(assoc base :overrun overrun :evidence {:from aid :overrun overrun})]))))
+      (seq waste)
+      (assoc :waste [(assoc base :waste waste :evidence {:from aid :waste waste})]))))
 
 (defn report
   "Every problem recorded on main db, by class: {:t :classes {class {:n :rows}}}. Counted
@@ -174,7 +174,7 @@
         errors (group-by :class (map #(let [r (error-row db ans %)] (update r :count max (get live (:signature r) 0)))
                                      (es db :seon.error/signature)))
         attempts (into (sorted-set)
-                       (concat (mapcat #(es db %) [:seon.attempt/failures :seon.attempt/costs :seon.attempt/error :seon.attempt/overrun
+                       (concat (mapcat #(es db %) [:seon.attempt/failures :seon.attempt/costs :seon.attempt/error :seon.attempt/waste
                                                    :seon.attempt/conflicts :seon.attempt/unmerged :seon.attempt/task-conflicts])
                                (mapcat (fn [s] (map :e (d/datoms db :avet :seon.attempt/status s))) (conj death-statuses :behind))))
         by-class (apply merge-with into (map #(attempt-rows db ans %) attempts))
