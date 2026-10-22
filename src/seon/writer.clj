@@ -121,18 +121,27 @@
 
 (defn- commit-batch
   "Group commit of root's writes to main: every queued transaction, one Datahike commit
-  (datahike.writer/transact-batch!), in arrival order. Answers st."
+  (datahike.writer/transact-batch!), in arrival order. A commit the store refuses (its codec
+  has no encoding for a value; main stays as it was, Datahike moves it only after the write)
+  is retried one transaction at a time, so only the one that carried the value is answered
+  refused. Answers st."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile] :seon.writer/state]}
   [st o]
   (if-let [ms (seq (:pend st))]
-    (reduce (fn [st [m rep]]
-              (if-not (map? rep)
-                (do (answer o (:dest m) (refused (step/error-msg rep) {})) st)
-                (let [t (:max-tx (:db-after rep)) ops (pdb/report->tx rep)]
-                  (answer o (:dest m) {:ok true :t t :datoms (count ops)})
-                  (main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep)))))
-            (-> st (dissoc :pend) (update :commits inc))
-            (map vector ms (dw/transact-batch! (:conn st) (mapv (fn [m] {:tx-data (:tx-data m) :tx-meta (pdb/tx-meta)}) ms))))
+    (let [reps (try (dw/transact-batch! (:conn st) (mapv (fn [m] {:tx-data (:tx-data m) :tx-meta (pdb/tx-meta)}) ms))
+                    (catch Throwable e e))]
+      (cond
+        (sequential? reps)
+        (reduce (fn [st [m rep]]
+                  (if-not (map? rep)
+                    (do (answer o (:dest m) (refused (step/error-msg rep) {})) st)
+                    (let [t (:max-tx (:db-after rep)) ops (pdb/report->tx rep)]
+                      (answer o (:dest m) {:ok true :t t :datoms (count ops)})
+                      (main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep)))))
+                (-> st (dissoc :pend) (update :commits inc))
+                (map vector ms reps))
+        (next ms) (reduce (fn [st m] (commit-batch (assoc st :pend [m]) o)) (dissoc st :pend) ms)
+        :else (do (answer o (:dest (first ms)) (refused (step/error-msg reps) {})) (dissoc st :pend))))
     st))
 
 (defn- other-op

@@ -583,7 +583,7 @@
 
 (defn- import-source!
   "Main's program follows Seon's own source (seon.source): root's dirs read through the
-  :source effect (their files and the tree's HEAD commit). When what they read differs from
+  :source effect (their files, the tree's HEAD commit and its reference-code pins). When what they read differs from
   what main last imported (the digest on root's :seon.root/source fact, or none recorded),
   main's program becomes theirs in one transaction (seon.source/replace-tx: each form
   analyzed in the running generation's namespaces, never run; data untouched), and what
@@ -594,7 +594,7 @@
   (let [t0 (profile/now-ns)
         r @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs}})
         files (:value r)
-        digest (when files (err/digest (pr-str files)))
+        digest (when files (err/digest (pr-str [files (:pins r)])))
         held (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))]
     (if (and digest (= digest (:digest held)))
       held
@@ -602,6 +602,7 @@
             w (when tx @(call! sys {:op :write :req {:op :tx :branch :db :tx-data tx}}))
             fact (cond-> {:root root :files (count files) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (profile/ms-since t0)}
                    (:commit r) (assoc :commit (:commit r))
+                   (seq (:pins r)) (assoc :pins (:pins r))
                    (and w (not (contract/error? w))) (assoc :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx)))
                    (contract/error? r) (assoc :error (:seon.error/message r))
                    (contract/error? w) (assoc :error (:seon.error/message w)))]
