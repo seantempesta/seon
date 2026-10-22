@@ -183,6 +183,41 @@
     (is (= {proof :pass reached :pass} (edn/read-string (:printed run)))
         "the proof and the one test reaching the change ran, green; nothing else ran")))
 
+(deftest a-wide-reach-reuses-unchanged-results
+  ;; task seon.proofs/prove-runs-what-a-change-reaches (and seon.agent/a-wide-reach-stays-cheap):
+  ;; root's boot records its source tree's inputs on its :seon.root/source fact (its binary is
+  ;; built from that tree: bin/test built it), the agent keys its digests by them and selects
+  ;; against the main it forked from, and each green goes to its root's results directory
+  ;; through root's :file owner, so the next run (the next turn's observe, the judge's :tests,
+  ;; the merge gate) of an unchanged branch reruns nothing and answers the same results
+  (let [proof 'seon.reader-test/prose-without-a-fence-is-a-comment
+        reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
+        run "(let [r @(seon.root/run-tests! sys :a1)] [(seon.proofs/results r) (:ran r) (:reused r)])"
+        own "(select-keys (prove) [:results :ran :reused])"
+        stored "(count (filter #(.endsWith (.getName %) \".edn\") (.listFiles (java.io.File. (seon.agent/results-dir)))))"
+        [_ inputs first-run files judged second-run]
+        (in-agent ["(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent.a1)"
+                   {:op :eval :agent "root" :code "(let [r (datahike.api/entity @(:conn sys) [:seon.root/id :root])] [(set (keys (:inputs (:seon.root/source r)))) (= (:boot (:seon.root/source r)) (:seon.root/boot r))])"}
+                   own
+                   {:op :eval :agent "root" :code stored}
+                   {:op :eval :agent "root" :code run}
+                   own]
+                  {:dirs ["src" "test"] :proofs #{proof}})]
+    (is (= [#{:env :tree :data-refs} true] (edn/read-string (:printed inputs))) "root's boot recorded its source tree's inputs, this boot's")
+    (is (= {:results {proof :pass reached :pass} :ran 2 :reused 0} (edn/read-string (:printed first-run))) "the agent's own run runs the proof and the reached test")
+    (is (= 2 (edn/read-string (:printed files))) "and stores both through root's :file owner, in its root's results directory")
+    (is (= [{proof :pass reached :pass} 0 2] (edn/read-string (:printed judged))) "root's :tests (the judge's) runs nothing: both reused from it, the same results")
+    (is (= {:results {proof :pass reached :pass} :ran 0 :reused 2} (edn/read-string (:printed second-run))) "and so does the agent's next run")))
+
+(deftest a-previous-roots-inputs-are-not-shared
+  ;; re-review 2026-10-22: the :root entity outlives its root, so a restart (or a root with no
+  ;; source on the same main) must not key its agents' results by a fact an earlier boot wrote
+  (let [inputs {:env "e" :tree "t" :data-refs {}}
+        source {:root "/r" :files 0 :forms 0 :ms 0 :boot "b1" :inputs inputs}
+        db (fn [boot] (datahike.api/db-with (ts/test-db) [{:seon.root/id :root :seon.root/boot boot :seon.root/source source}]))]
+    (is (some? (:dir (agent/test-plan (db "b1") (db "b1") #{}))) "this boot's inputs: its results are kept")
+    (is (nil? (:dir (agent/test-plan (db "b2") (db "b2") #{}))) "an earlier boot's: nothing is shared or reused")))
+
 (deftest a-forked-agent-knows-its-task
   ;; task seon.template/a-request-is-one-linked-transaction: root forks the agent for its
   ;; task, so my.task/current answers it at the agent's first form, before any turn loop

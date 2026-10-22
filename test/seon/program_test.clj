@@ -12,6 +12,8 @@
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.program :as program]
+            [seon.proofs :as proofs]
+            [seon.fx :as fx]
             [seon.merge :as pm]
             [seon.source :as source]
             [clojure.java.shell :as sh]
@@ -157,11 +159,18 @@
     (is (= {:test 2 :pass 2 :fail 0 :error 0}
            (select-keys (binding [clojure.test/*test-out* (java.io.StringWriter.)] (clojure.test/test-ns 'app.pt-calc-test)) [:test :pass :fail :error])))))
 
+(defn- selected
+  "What a change from db to db' selects, as every run selects it: seon.proofs/plan's :selected
+  over the two dbs' reach digests."
+  [db db']
+  (let [in {:env "e" :tree "t"}]
+    (set (:selected (proofs/plan (program/reach-digests db in) (program/reach-digests db' in) {} #{})))))
+
 (deftest a-test-reaches-what-it-calls
   (let [db (apply record (empty-db) calc-srcs)]
-    (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/sum3-test} (program/reaching-tests db '#{app.pt-calc/add}))
+    (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/sum3-test} (selected db (record db 'app.pt-calc "(defn add [a b] (+ b a))")))
         "add-test calls add through its :refer; sum3-test reaches add through sum3")
-    (is (= '#{} (program/reaching-tests db '#{app.pt-calc/neg})))))
+    (is (= '#{} (selected db (record db 'app.pt-calc "(defn neg [x] (- 0 x))"))) "no test reaches neg")))
 
 (deftest a-file-analyzed-gives-the-repl-facts
   (let [text "(ns app.pt-file\n  (:require [clojure.string :as s]))\n\n;; doubles\n(defn twice [x] (* 2 x))\n\n(comment (twice 2))\n(defmulti m :k)\n(defmethod m :a [_] (s/join [\"a\"]))\n"
@@ -243,7 +252,7 @@
         after (select-keys (program/reach-digests db' {:env "e" :tree "t"}) calc-tests)]
     (is (= calc-tests (set (keys before))) "every test has a digest")
     (is (= 3 (count (set (vals before)))) "each test its own")
-    (is (= (program/reaching-tests db' '#{app.pt-calc/add})
+    (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/sum3-test}
            (set (for [[t d] after :when (not= d (before t))] t)))
         "add changed: exactly the tests reaching it moved (sum3-test through sum3), neg-test kept its digest")
     (is (not= before (select-keys (program/reach-digests db {:env "e2" :tree "t"}) calc-tests))
@@ -253,14 +262,18 @@
   (let [db (calc-db)
         dir (scratch-dir "results")
         digests (select-keys (program/reach-digests db {:env "e" :tree "t"}) calc-tests)
-        first-plan (runner/plan digests dir)
-        ran (binding [clojure.test/*test-out* (java.io.StringWriter.)] (runner/run-vars! (:run first-plan) digests dir))
-        second-plan (runner/plan digests dir)]
+        plan #(proofs/plan nil digests (proofs/greens dir (vec (vals digests))) #{})
+        first-plan (plan)
+        ran (doto (proofs/run-tests! (:run first-plan) digests (fn [_])) (->> (proofs/store-greens! #(fx/write-file {:req %}) dir)))
+        second-plan (plan)]
     (is (= calc-tests (set (:run first-plan))) "nothing recorded: every test runs")
     (is (= {:pass 1 :fail 0 :error 0} (select-keys (ran 'app.pt-calc-test/add-test) [:pass :fail :error])))
     (is (= [] (:run second-plan)) "the second run runs nothing")
     (is (= calc-tests (set (keys (:reused second-plan)))) "and reports every result reused")
     (is (= (digests 'app.pt-calc-test/neg-test) (:digest ((:reused second-plan) 'app.pt-calc-test/neg-test))))))
+
+(defn- run-plan "bin/test's plan of digests against the results in dir." [digests dir]
+  (proofs/plan nil digests (proofs/greens dir (vec (vals digests))) #{}))
 
 (defn- checkout!
   "A git checkout at a new directory holding files ({relative path text}), all added."
@@ -277,16 +290,16 @@
         b (checkout! "b" files)
         dir (scratch-dir "shared")
         db (calc-db)
-        in-a (runner/inputs a)
+        in-a (fx/inputs a)
         da (select-keys (program/reach-digests db in-a) calc-tests)]
-    (is (= in-a (runner/inputs b)) "the same content at another path: the same inputs")
-    (binding [clojure.test/*test-out* (java.io.StringWriter.)] (runner/run-vars! (:run (runner/plan da dir)) da dir))
-    (is (= [] (:run (runner/plan (select-keys (program/reach-digests db (runner/inputs b)) calc-tests) dir)))
+    (is (= in-a (fx/inputs b)) "the same content at another path: the same inputs")
+    (proofs/store-greens! #(fx/write-file {:req %}) dir (proofs/run-tests! (:run (run-plan da dir)) da (fn [_])))
+    (is (= [] (:run (run-plan (select-keys (program/reach-digests db (fx/inputs b)) calc-tests) dir)))
         "checkout b reuses every result checkout a recorded")
     (spit (str b "/docs/a.md") "# a, edited")
-    (is (= (:env in-a) (:env (runner/inputs b))) "prose is no input of a test that reads no files")
+    (is (= (:env in-a) (:env (fx/inputs b))) "prose is no input of a test that reads no files")
     (spit (str b "/resources/seon/schemas/x.edn") "{:x :string}")
-    (is (= calc-tests (set (:run (runner/plan (select-keys (program/reach-digests db (runner/inputs b)) calc-tests) dir))))
+    (is (= calc-tests (set (:run (run-plan (select-keys (program/reach-digests db (fx/inputs b)) calc-tests) dir))))
         "a changed schema resource is an input of every test")))
 
 ;; ---- refs the expansion and the quote leave (task seon.program/refs-name-quoted-symbols-and-macro-uses)
@@ -322,7 +335,7 @@
         after (select-keys (program/reach-digests db' {:env "e" :tree "t"}) ts)]
     (is (not= (before 'app.pt-qr-test/q-test) (after 'app.pt-qr-test/q-test)) "g changed: the test resolving it by name moved")
     (is (= (before 'app.pt-qr-test/other-test) (after 'app.pt-qr-test/other-test)) "the test not reaching g kept its digest")
-    (is (contains? (program/reaching-tests db' '#{app.pt-qr/g}) 'app.pt-qr-test/q-test) "and an agent's selection finds it")))
+    (is (= '#{app.pt-qr-test/q-test} (selected db db')) "and every run's selection finds it")))
 
 (deftest a-changed-macro-moves-the-digest-of-each-test-that-expands-it
   (let [db (record (empty-db) 'user "(ns app.pt-mac)" 'app.pt-mac "(defmacro m [x] `(inc ~x))"
@@ -335,7 +348,7 @@
         after (select-keys (program/reach-digests db' {:env "e" :tree "t"}) ts)]
     (is (not= (before 'app.pt-mac-test/m-test) (after 'app.pt-mac-test/m-test)) "the macro's body changed: the test expanding it moved (no stale green)")
     (is (= (before 'app.pt-mac-test/plain-test) (after 'app.pt-mac-test/plain-test)) "a test not expanding it kept its digest")
-    (is (= '#{app.pt-mac-test/m-test} (program/reaching-tests db' '#{app.pt-mac/m})) "and an agent's selection finds exactly it")))
+    (is (= '#{app.pt-mac-test/m-test} (selected db db')) "and every run's selection finds exactly it")))
 
 (deftest a-changed-contract-schema-moves-the-digest-of-tests-reaching-the-contracted-var
   (let [schema (fn [db k form] (d/db-with db [{:schema/key k :schema/form form}]))
@@ -414,9 +427,10 @@
     (is (< 300 (count a)) "the whole suite")
     (is (= a b) "the same tree imported twice in one process: every digest equal")
     (is (= a c) "the same commit in another checkout: every digest equal, so its results are shared")
-    (let [dir (scratch-dir "same-tree")]
-      (doseq [[t dg] a] (spit (str dir "/" dg ".edn") (pr-str {:test t :digest dg :pass 1 :fail 0 :error 0})))
-      (is (= [] (:run (runner/plan a dir))) "with each green stored, a second run on the unchanged tree runs nothing"))))
+    (is (= [] (:run (run-plan a (let [dir (scratch-dir "same-tree")]
+                                  (proofs/store-greens! #(fx/write-file {:req %}) dir (into {} (for [[t dg] a] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
+                                  dir))))
+        "with each green stored, a second run on the unchanged tree runs nothing")))
 
 (deftest only-a-test-reading-the-tree-takes-its-digest
   ;; seon.program/env-readers: platform reads of resources/ (the baked schemas every contract
@@ -428,7 +442,7 @@
         moved (set (for [[t d] a :when (not= d (b t))] t))]
     (is (not (moved 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a reader test reaches only :env reads: the tree is no input")
     (is (moved 'seon.task-files-test/the-shipped-task-files-load) "a test reading the task files (my.root/task-files, not in :env): the tree is its input")
-    (is (moved 'seon.program-test/a-result-recorded-in-one-checkout-is-reused-in-another) "a test reading files itself (test-runner/inputs): the tree is its input")
+    (is (moved 'seon.program-test/a-result-recorded-in-one-checkout-is-reused-in-another) "a test reading files itself (test-fx/inputs): the tree is its input")
     (is (< (count moved) (quot (count a) 2)) (str (count moved) " of " (count a) " tests take the tree: fewer than half"))))
 
 (deftest a-test-naming-another-test-does-not-reach-it
@@ -443,7 +457,7 @@
         after (program/reach-digests db' {:env "e" :tree "t"})]
     (is (not= (before 'app.pt-calc-test/add-test) (after 'app.pt-calc-test/add-test)) "the named test reaches add: it moves")
     (is (= (before k) (after k)) "the test only naming it keeps its digest")
-    (is (not (contains? (program/reaching-tests db' '#{app.pt-calc/add}) k)) "and an agent's selection leaves it out")))
+    (is (not (contains? (selected db db') k)) "and every run's selection leaves it out")))
 
 ;; ---- inputs the reach digest must hold (review 2026-10-22: each let a stale green be reused)
 
@@ -458,7 +472,7 @@
         in {:env "e" :tree "t" :data-refs '{app.pt-sys/read-decl #{app.pt-procs/writer-proc}}}
         k 'app.pt-sys-test/boot-test]
     (is (not= ((program/reach-digests db in) k) ((program/reach-digests db' in) k)) "the proc changed: the test booting through the declaration moves")
-    (is (contains? (get (runner/declared-refs (System/getProperty "user.dir")) 'seon.system/read-decl) 'seon.writer/writer-proc)
+    (is (contains? (get (fx/declared-refs (str (System/getProperty "user.dir") "/resources/seon/system.edn")) 'seon.system/read-decl) 'seon.writer/writer-proc)
         "the shipped declaration's procs are the reader's data refs")))
 
 (deftest a-test-running-the-binary-takes-the-tree
@@ -477,9 +491,9 @@
   ;; checkout's config was reused in another's
   (let [here (System/getProperty "user.dir")
         cfg {:seon.config.ai/model "a" :seon.config.root/runs-dir (str here "/runs") :seon.config.web/port 8451}
-        env #(:env (runner/inputs here % here))]
+        env #(:env (fx/inputs here % here))]
     (is (not= (env cfg) (env (assoc cfg :seon.config.ai/model "b"))) "another value in force: another :env, every test reruns")
     (is (= (env cfg) (env (assoc cfg :seon.config.web/port 9999))) "a checkout's own TCP port is no input")
-    (is (= (:env (runner/inputs here cfg here))
-           (:env (runner/inputs here (assoc cfg :seon.config.root/runs-dir "/elsewhere/runs") "/elsewhere")))
+    (is (= (:env (fx/inputs here cfg here))
+           (:env (fx/inputs here (assoc cfg :seon.config.root/runs-dir "/elsewhere/runs") "/elsewhere")))
         "a path under the checkout is the same input in any checkout")))
