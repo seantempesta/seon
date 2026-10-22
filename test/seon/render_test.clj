@@ -27,10 +27,9 @@
   (testing "no declaration: the one value printer's hiccup"
     (let [out (r/html {:k [1 2 3]} {})]
       (is (= "seon-data-panel" (get-in out [1 :class])))))
-  (testing "both faces when asked; the AI face of an undeclared value is the printer's text"
-    (let [out (r/render {:k 1} {:seon.render/faces #{:html :ai}})]
-      (is (= "{:k 1}" (:seon.render/ai out)))
-      (is (vector? (:seon.render/html out))))))
+  (testing "the AI face of an undeclared value is the printer's text"
+    (is (= "{:k 1}" (r/ai {:k 1} {})))
+    (is (vector? (r/html {:k 1} {})))))
 
 (def ^:private sys
   {:agents {:a1 {:status :idle :tests {:pass 1 :fail 1 :error 0 :reports [{:type :fail :var 'agent.a1/c}]}}
