@@ -111,6 +111,10 @@
  ;; sits above the measured p90. Tokens are the paid resource; task
  ;; seon.fences/budgets-are-data-and-spend-is-measured makes them the budget.
  :seon.config.agent/max-turns 40
+ ;; Unit: path, every agent process's working directory, shared, made at the fork server's boot.
+ ;; No repository above it: an agent changes code through its REPL, never git (owner, 2026-10-22:
+ ;; "no git in agents"); it reads and writes any file by its absolute path. At the bound: n/a.
+ :seon.config.agent/cwd "/tmp/seon-agents"
  ;; Unit: messages in each agent channel's buffer (v1's :seon.config.agent/inbox-size 64).
  ;; Small on purpose: a full channel pushes back on its sender (the reader leaves frames in
  ;; the socket).

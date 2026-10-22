@@ -41,39 +41,6 @@
     (doseq [[[form k expected] item] (map vector rows items)]
       (is (str/includes? (str (get item k)) expected) (str form " -> " (pr-str item))))))
 
-(deftest an-edited-file-reloaded-is-the-branchs-program
-  ;; task seon.repl/a-reloaded-file-is-the-branchs-change: the Clojure workflow (edit the file,
-  ;; require it :reload, or load-file it) changes the agent's branch exactly as evaluating the
-  ;; same forms at its REPL does; the file is the agent's own copy, in its directory
-  (let [edit (fn [body] (str "(spit \"src/my/turn.clj\" (clojure.string/replace (slurp \"src/my/turn.clj\")"
-                             " #\"\\[\\] \\(turn/last-evals\\)\\)|\\[\\] \\[\\{:edited \\d\\}\\]\\)\" " (pr-str (str "[] " body ")")) "))"))
-        recorded "(seon.context/source-of (seon.agent/db) 'my.turn/evals)"
-        [_ req ran rec src _ lf ran2 rec2 nsk _ bad nsk2]
-        (at/in-agent [(edit "[{:edited 1}]")
-                      "(require 'my.turn :reload)"
-                      "(my.turn/evals)"
-                      recorded
-                      "(with-out-str (clojure.repl/source my.turn/evals))"
-                      (edit "[{:edited 2}]")
-                      "(load-file \"src/my/turn.clj\")"
-                      "(my.turn/evals)"
-                      recorded
-                      "*ns*"
-                      "(spit \"src/my/turn.clj\" (str (slurp \"src/my/turn.clj\") \"\\n(defn broken [] (no-such-fn))\\n\"))"
-                      "(require 'my.turn :reload)"
-                      "*ns*"])]
-    (is (= "nil" (:printed req)) "require :reload answers nil, as Clojure's does")
-    (is (= "[{:edited 1}]" (:printed ran)) "(a) the edited definition runs")
-    (is (str/includes? (str (:printed rec)) "[] [{:edited 1}]") (str "(b) the branch records the edited text: " (:printed rec)))
-    (is (str/includes? (str (:printed src)) "[{:edited 1}]") (str "and clojure.repl/source shows it: " (:printed src)))
-    (is (not= :err (:tag lf)) (str "(c) load-file of the same file loads: " (pr-str lf)))
-    (is (= "[{:edited 2}]" (:printed ran2)) "the load-file's definition runs")
-    (is (str/includes? (str (:printed rec2)) "[] [{:edited 2}]") "and is the branch's")
-    (is (str/includes? (str (:printed nsk)) "agent.") "the agent's namespace is restored after both loads")
-    (is (= :err (:tag bad)) "a form of the file that fails to compile fails the require, as in Clojure")
-    (is (str/includes? (str (:printed bad)) "no-such-fn") (str "named by its cause: " (pr-str bad)))
-    (is (str/includes? (str (:printed nsk2)) "agent.") "and the agent's namespace is restored")))
-
 (defn- runnable
   "The forms text tells an agent to run, in order: each single-backticked code span that is a
   form (a double-backticked one is a pattern to fill in, never run)."

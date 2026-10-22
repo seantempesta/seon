@@ -22,9 +22,9 @@ One load adds what a change reaches, as v1's declaration-reload-rule and clj-rel
 
 Measured on 2026-10-21 (lane INPLACE, `bin/check loop` on a clone, 1,646 forms): the merged `seon.fixtures/generation` answers 2 in root and in an agent forked after the merge; the turn from release to quiet is 13.4-13.9 s (the implement attempt ~5 s, the merge attempt ~7 s, the commit and quiescence ~1.6 s), down from 84-96 s with a build per merge. What remains is whole-program reads per merge (`seon.merge/program-cost-follows-what-changed`).
 
-## A file an agent loads is its REPL's
+## An agent changes code at its REPL
 
-An agent works the way a Clojure user does: it edits a file in its own directory (its private copy of the source root) and `(require 'that.ns :reload)` or `(load-file "src/that/ns.clj")`. Each form the load reads from a file in that directory goes through the agent's REPL path, as if typed at it: its REPL binds `jolt.host/*load-form*` (a loader hook, [forks](forks.md)) to ```seon.repl/loaded-form```, which evaluates the form through the same middleware that makes a typed form the branch's program (registry, record, admit) and keeps its exact text; a form that did not change records nothing new. Clojure's semantics stay: `require` answers nil, `*ns*` is restored, and a form that fails fails the load with its cause. A file written and never loaded is the agent's scratch; a library's file (the reference-code link resolves outside the agent's directory) loads as the loader would.
+An agent changes the program by `in-ns` and `defn` at its REPL: each form it evaluates there is its branch's change. `require` and `load-file` load as in Clojure and record nothing. Its working directory is a scratch dir with no repository above it (`:seon.config.agent/cwd`, made by ```seon.fork-server/main```): it reads and writes any file by its path, git finds nothing, and editing source files is not how Seon develops (owner, 2026-10-22).
 
 ## Tests run by reach
 
