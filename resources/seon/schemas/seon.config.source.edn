@@ -7,4 +7,4 @@
  :seon.config.source/committer-name [:string {:min 1 :seon.config/unit "name" :description "The author and committer of Seon's commits on the merges branch."}]
  :seon.config.source/committer-email [:string {:min 1 :seon.config/unit "email" :description "The email of Seon's commits on the merges branch."}]
  :seon.config.source/generations-dir [:string {:min 1 :seon.config/unit "path" :description "Where each generation is built: <dir>/<commit>, a worktree of the merges commit whose target/seon the next root runs."}]
- :seon.config.source/test-results-dir [:string {:min 1 :seon.config/unit "path" :description "The one content-addressed directory of test results, shared by every checkout and worktree: one file per reach digest (bin/test --reach)."}]}
+ :seon.config.source/test-results-dir [:string {:min 1 :seon.config/unit "path" :description "The one content-addressed directory of test results, shared by every checkout and worktree: one file per reach digest (seon.proofs/plan: bin/prove, bin/test)."}]}

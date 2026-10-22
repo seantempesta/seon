@@ -590,31 +590,39 @@
 
 (defn- import-source!
   "Main's program follows Seon's own source (seon.source): root's dirs read through the
-  :source effect (their files, the tree's HEAD commit and its reference-code pins). When what they read differs from
+  :source effect (their files, the tree's HEAD commit and its reference-code pins, and the
+  tree's inputs with no program facts, seon.fx/inputs). When what they read differs from
   what main last imported (the digest on root's :seon.root/source fact, or none recorded),
   main's program becomes theirs in one transaction (seon.source/replace-tx: each form
-  analyzed in the running generation's namespaces, never run; data untouched), and what
-  happened is root's new :seon.root/source fact; a tree that reads the same writes nothing.
-  Answers the fact in force."
+  analyzed in the running generation's namespaces, never run; data untouched); a tree that
+  reads the same imports nothing. Either way the fact is this boot's (:boot), holding the
+  inputs only when the running binary was built from this very tree (target/seon.tree,
+  written by bin/build) and why not otherwise (:unshared), so agents never key results by a
+  previous root's inputs or by code the binary does not run. Answers the fact in force."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [sys {:keys [root dirs]}]
   (let [t0 (profile/now-ns)
-        r @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs}})
+        r @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs :binary-tree (str (cfg/checkout) "/target/seon.tree")}})
         files (:value r)
         digest (when files (err/digest (sedn/encode [files (:pins r)])))
-        held (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))]
-    (if (and digest (= digest (:digest held)))
-      held
-      (let [tx (when files (source/replace-tx @(:conn sys) files))
-            w (when tx @(call! sys {:op :write :req {:op :tx :branch :db :tx-data tx}}))
-            fact (cond-> {:root root :files (count files) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (profile/ms-since t0)}
-                   (:commit r) (assoc :commit (:commit r))
-                   (seq (:pins r)) (assoc :pins (:pins r))
-                   (:ok w) (assoc :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx)))
-                   (contract/error? r) (assoc :error (:seon.error/message r))
-                   (and w (not (:ok w))) (assoc :error (:seon.error/message w)))]
-        @(call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/source fact}]}})
-        fact))))
+        held (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))
+        built? (and (:inputs r) (= (:binary r) (:tree (:inputs r))))
+        this-boot (fn [fact] (cond-> (assoc (dissoc fact :inputs :unshared) :boot (:boot sys))
+                               built? (assoc :inputs (:inputs r))
+                               (and (:inputs r) (not built?)) (assoc :unshared (str "the binary was built from tree " (or (:binary r) "unknown")
+                                                                                       ", the source is tree " (:tree (:inputs r))))))
+        fact (if (and digest (= digest (:digest held)))
+               (this-boot held)
+               (let [tx (when files (source/replace-tx @(:conn sys) files))
+                     w (when tx @(call! sys {:op :write :req {:op :tx :branch :db :tx-data tx}}))]
+                 (this-boot (cond-> {:root root :files (count files) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (profile/ms-since t0)}
+                              (:commit r) (assoc :commit (:commit r))
+                              (seq (:pins r)) (assoc :pins (:pins r))
+                              (:ok w) (assoc :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx)))
+                              (contract/error? r) (assoc :error (:seon.error/message r))
+                              (and w (not (:ok w))) (assoc :error (:seon.error/message w))))))]
+    @(call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/source fact}]}})
+    fact))
 
 (defn wiki-tx
   "The wiki (the checkout's docs/) onto main db, written in the boot fact's own commit so main
