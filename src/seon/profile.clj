@@ -83,14 +83,19 @@
          (if (null? cs) acc
              (let ([c (car cs)])
                (loop (cdr cs) (f acc (vector-ref c 4) (vector-ref c 0) (vector-ref c 2) (vector-ref c 3)))))))
-     (define (seon-profile-alloc) (sstats-bytes (statistics)))
+     ;; the calling thread's own allocation, never another thread's or the collector's copying
+     ;; (Chez jolt/thread-bytes: S_thread_bytes_allocated)
+     (define seon-profile-alloc (foreign-procedure \"(cs)thread_bytes_allocated\" () uptr))
+     ;; CLOCK_THREAD_CPUTIME_ID is 16 on macOS: the calling thread's CPU time
+     (define seon-profile-cpu
+       (let ([clock (foreign-procedure \"clock_gettime_nsec_np\" (int) unsigned-64)]) (lambda () (clock 16))))
      (define (seon-profile-calls)
        (let loop ([cs seon-profile-touched] [n 0])
          (if (null? cs) n (loop (cdr cs) (+ n (vector-ref (car cs) 0))))))"))
 
 (def ^:private procs
   "The Scheme procedures above, by name (host procedures, resolved once)."
-  (into {} (for [k [:cell :counted :begin! :fold :calls :now :alloc]]
+  (into {} (for [k [:cell :counted :begin! :fold :calls :now :alloc :cpu]]
              [k (scm/proc (str "seon-profile-" (name k)))])))
 
 (defn now-ns
@@ -104,9 +109,19 @@
   {:malli/schema [:=> [:cat :seon.lib/ns-time] :seon.lib/ms]}
   [t0] (/ (- (now-ns) t0) 1e6))
 
+(defn cpu-ns
+  "The calling thread's CPU time in nanoseconds (CLOCK_THREAD_CPUTIME_ID): what a cost
+  proof times, so another thread's work and the scheduler's pauses are not the measured
+  call's (task seon.cost/a-proof-measures-only-its-own-thread). Not a clock that orders
+  events: that is now-ns."
+  {:malli/schema [:=> [:cat] :int]}
+  [] ((:cpu procs)))
+
 (defn alloc-bytes
-  "Bytes this process has allocated since it started (Chez's sstats, counted, never
-  sampled; GC does not lower it). Not itself counted, so measuring adds no calls."
+  "Bytes the calling thread has allocated since it started (Chez jolt/thread-bytes: its
+  allocation areas less the tails it dropped, and its large objects; never another
+  thread's allocation or the collector's copying). Counted, never sampled; GC does not
+  lower it. Not itself counted, so measuring adds no calls."
   {:malli/schema [:=> [:cat] :int]}
   [] ((:alloc procs)))
 
