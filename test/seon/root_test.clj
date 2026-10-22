@@ -57,18 +57,19 @@
   "The output of a built root on the store at path (extra --set args), asked each request
   in turn on its entrance: one answer line per request, then EXIT and its log. The root's
   stdin is a fifo held open until every answer is in; its listening line (or its death)
-  ends the wait, as bin/root's start does."
-  [path args requests]
+  ends the wait, as bin/root's start does. env: variables the root starts with (\"K=v \")."
+  ([path args requests] (root-answers path args requests ""))
+  ([path args requests env]
   (let [port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
         ask (fn [m] (str "printf '%s\\n' " (pr-str (pr-str m)) " | nc -w 30 127.0.0.1 " port ";"))
-        script (str "mkfifo '" path "-in'; ./seon root"
+        script (str "mkfifo '" path "-in'; " env "./seon root"
                     " --set ':seon.config.root/store-path=" (pr-str path) "' " (str/join " " args)
                     " --set ':seon.config.root/entrance-port=" port "' --set ':seon.config.web/port=0'"
                     " < '" path "-in' > '" path ".log' 2>&1 & R=$!; exec 3>'" path "-in';"
                     " until grep -q 'ROOT LISTENING' '" path ".log' || ! kill -0 $R 2>/dev/null; do sleep 0.1; done;"
                     (apply str (map ask requests))
                     " exec 3>&-; wait $R; echo EXIT $?; cat '" path ".log'")]
-    (:out (sh/sh "zsh" "-c" script :dir "target"))))
+    (:out (sh/sh "zsh" "-c" script :dir "target")))))
 
 (deftest a-root-resumes-a-store-an-earlier-build-wrote
   ;; task seon.root/a-root-resumes-a-store-an-earlier-build-wrote: the store as builds of
@@ -131,6 +132,27 @@
         (is (= 2 tasks-2) "the second boot still holds both tasks")
         (is (every? attempts-2 attempts-1) "and the first boot's attempt (it reaps it and starts the next)"))
       (finally (sh/sh "rm" "-rf" path tasks (str path "-in") (str path ".log") (str path "-agents"))))))
+
+(deftest a-refused-wiki-is-a-recorded-problem-and-the-boot-goes-on
+  ;; root's boot loads the wiki (seon.root/wiki-tx) in its boot fact's commit; one link to no
+  ;; section in any page used to end the boot (bin/root start and next with it). Now the
+  ;; refusal is a recorded :platform error my.root/problems shows, and the root boots. A
+  ;; checkout of this test's own: this one's files, its docs/ with one broken page more
+  (let [checkout (.getCanonicalPath (java.io.File. "."))
+        tmp (str checkout "/target/runs/root-test-wiki-" (random-uuid))
+        path (str tmp "-store")
+        _ (.mkdirs (java.io.File. (str tmp "/docs")))
+        _ (doseq [f (.listFiles (java.io.File. checkout)) :let [n (.getName f)] :when (not (#{"docs" ".git"} n))]
+            (sh/sh "ln" "-s" (.getPath f) (str tmp "/" n)))
+        _ (doseq [f (.listFiles (java.io.File. checkout "docs"))] (sh/sh "cp" (.getPath f) (str tmp "/docs/")))
+        _ (spit (str tmp "/docs/zz-broken.md") "# Broken\n\nIt links to [nowhere](agent.md#nowhere).\n")
+        out (root-answers path [] [{:op :eval :agent "root" :code "(boolean (re-find #\"links to docs/agent.md#nowhere\" (pr-str (my.root/problems sys))))"}]
+                          (str "SEON_CHECKOUT='" tmp "' "))
+        printed (:printed (first (:items (try (edn/read-string {:default tagged-literal} (first (str/split-lines out))) (catch Exception _ nil)))))]
+    (try
+      (is (str/includes? out "ROOT LISTENING") (str "the root boots: " out))
+      (is (= "true" printed) "and the refused wiki is a recorded problem")
+      (finally (sh/sh "rm" "-rf" tmp path (str path "-in") (str path ".log") (str path "-agents"))))))
 
 (deftest every-end-of-a-root-is-a-fact
   ;; task seon.root/every-end-of-a-root-is-a-fact: a clean stop is a fact naming its cause

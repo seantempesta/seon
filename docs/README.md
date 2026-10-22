@@ -31,6 +31,7 @@ References and their depths: [references](references.md).
 - [source](source.md): agents change Seon's own functions at the REPL on their branches; a merge lands them on main, writes the files back and runs them next.
 - [references](references.md): what a text cites, read by one parser (`seon.ref`), becomes its references, pulled into a context at the depth its delimiter asks.
 - [render](render.md): every view, the model's context included, is the one value printer or a render declared on the value's schema; nothing clips.
+- [agent](agent.md): the help page, what every agent reads first and `my.agent/help` answers.
 
 ## How work moves
 
