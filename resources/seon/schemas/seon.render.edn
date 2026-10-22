@@ -6,7 +6,6 @@
 {:seon.render/hiccup [:vector :any]
  :seon.render/face [:enum :ai :html]
  :seon.render/env [:map
-                   [:seon.render/faces {:optional true} [:set :seon.render/face]]
                    ;; the producer's declared schema of the value, when known
                    [:seon.render/schema {:optional true} [:maybe :qualified-keyword]]
                    ;; tokens for the printer (the AI face's budget, and the HTML face's)
@@ -40,6 +39,8 @@
 
  ;; a UI call naming a var not marked ^:seon/callable (seon.web/ui-call)
  :seon.render/not-callable [:and :seon.error/base [:map [:seon.render/fn :symbol]]]
+ ;; the web listener that cannot bind its port (seon.web/web-proc): boot goes on without the web
+ :seon.web/unbound [:and :seon.error/base [:map [:seon.error/type [:= :seon.web/unbound]] [:port :int]]]
  ;; ---- the procs' messages ----
  ;; a UI call: the /call route's payload (DECISIONS: callbacks are data naming a var)
  :seon.render/call [:map [:var :symbol] [:agent {:optional true} [:maybe :keyword]]

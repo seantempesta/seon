@@ -19,9 +19,10 @@
     :stuck                          a task whose failures spent its budget: its root cause and
                                     the released tasks it blocks (seon.reconcile/stuck-tx)"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.merge :as pm] [seon.reconcile :as reconcile]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [seon.merge :as pm] [seon.reconcile :as reconcile]))
 
 (def counted-classes [:platform :eval :agent :effect])
+(def ^:private failed "Attempt statuses of a death (:seon.attempt/status)." (:seon.status/failed (contract/properties :seon.attempt/status)))
 (def attempt-classes [:red :cost :merge :dead :error :waste])
 
 (defn- es
@@ -132,9 +133,9 @@
                             :evidence (cond-> {:from aid :conflicts conflicts :unmerged unmerged
                                                :red []}
                                         err (assoc :error err)))])
-      (#{:dead :lost} status)
+      (failed status)
       (assoc :dead [(assoc base :error err :producer (:seon.error/operation err) :evidence (cond-> {:from aid} err (assoc :error err)))])
-      (and err (not merge?) (not (#{:dead :lost} status)))
+      (and err (not merge?) (not (failed status)))
       (assoc :error [(assoc base :error err :producer (:seon.error/operation err) :evidence {:from aid :error err})])
       (seq waste)
       (assoc :waste [(assoc base :waste waste :evidence {:from aid :waste waste})]))))
@@ -156,7 +157,7 @@
         attempts (into (sorted-set)
                        (concat (mapcat #(es db %) [:seon.attempt/failures :seon.attempt/costs :seon.attempt/error :seon.attempt/waste
                                                    :seon.attempt/conflicts :seon.attempt/unmerged])
-                               (mapcat (fn [s] (map :e (d/datoms db :avet :seon.attempt/status s))) [:dead :lost :behind])))
+                               (mapcat (fn [s] (map :e (d/datoms db :avet :seon.attempt/status s))) (conj failed :behind))))
         by-class (apply merge-with into (map #(attempt-rows db ans %) attempts))
         stuck (mapv #(stuck-row db ans %) (es db :seon.task/stuck))]
     {:t (:max-tx db)

@@ -7,11 +7,16 @@
 
     target/seon mcp PORT        (root runs the entrance on PORT)"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.entrance :as entrance] [clojure.data.json :as json] [clojure.edn :as edn] [clojure.string :as str]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.entrance :as entrance] [clojure.data.json :as json] [clojure.edn :as edn] [clojure.string :as str]))
+
+(defn- unreachable
+  "The tool's text when root's entrance on port answered nothing: the one error map."
+  {:malli/schema [:=> [:cat pos-int? :string] :string]}
+  [port why] (pr-str (contract/error :seon.root/refused 'seon.mcp/request! (str "root's entrance on port " port ": " why))))
 
 (defn- request!
   "One entrance request on 127.0.0.1:port, its answer as text. The interop edge: a refused
-  connection is the tool's error text."
+  connection, or no answer, is the tool's text: the one error map."
   {:malli/schema [:=> [:cat pos-int? :map] :string]}
   [port req]
   (try
@@ -20,8 +25,8 @@
           in (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s)))]
       (.write out (.getBytes (str (pr-str req) "\n") "UTF-8"))
       (.flush out)
-      (let [line (.readLine in)] (.close s) (or line "{:error \"no answer\"}")))
-    (catch Throwable e (pr-str {:error (str "root's entrance on port " port ": " (or (ex-message e) (str (type e))))}))))
+      (let [line (.readLine in)] (.close s) (or line (unreachable port "it closed the connection with no answer"))))
+    (catch Throwable e (unreachable port (step/error-msg e)))))
 
 (defn- tool-text
   "What a tool call answers: the context's text itself for seon_context (the model's own

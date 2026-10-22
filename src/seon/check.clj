@@ -52,7 +52,7 @@
       ids
       (let [e (await-event ev #(left (:agent %)))]
         (cond (types (:type e)) (recur (disj left (:agent e)))
-              (#{:dead :killed :ended} (:type e)) (throw (ex-info (str "agent " (:agent e) " " (name (:type e)) " first") e))
+              (c/gone-statuses (:type e)) (throw (ex-info (str "agent " (:agent e) " " (name (:type e)) " first") e))
               :else (recur left))))))
 
 (defn- ready!
