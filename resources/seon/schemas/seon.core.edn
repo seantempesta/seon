@@ -21,8 +21,6 @@
  :seon.db/op [:tuple [:enum :db/add :db/retract] :int :keyword :any]
  :seon.db/resolved-tx [:vector :seon.db/op]
  :seon.db/tx-report [:map [:tx-data :any] [:db-after :seon.host/db]]
- :seon.db/delta [:map [:tx-data :seon.db/resolved-tx] [:touched [:set [:tuple :int :keyword]]]]
- :seon.db/conflict [:map [:e :int] [:a :keyword]]
  :seon.db/open [:map [:cfg :seon.db/cfg] [:conn :seon.host/conn] [:recovered? :boolean]]
  ;; the program as facts
  :seon.program/error [:map [:ns :symbol] [:message [:maybe :string]]]
@@ -42,28 +40,21 @@
                      [:=> [:cat :map :seon.step/transition] :map]
                      [:=> [:cat :map :keyword :any] [:tuple :map :seon.step/outputs]]]
  :seon.step/control [:maybe [:enum :pause :resume :ping :stop]]
- :seon.step/out [:maybe :seon.host/volatile]
  ;; the writer's state and requests (seon.writer)
  :seon.writer/state [:map [:conn :seon.host/conn] [:cfg :seon.db/cfg]]
  :seon.writer/request [:map [:op :keyword]]
  ;; an effect owner's token bucket (seon.fx, lane R3): tokens now, capacity, the refill rate
  ;; per ms now and as dialed, the ms it was last refilled at
  :seon.fx/bucket [:map [:tokens number?] [:cap number?] [:per-ms number?] [:rate-ms {:optional true} number?] [:at :int]]
- :seon.writer/answer [:map [:dest :map] [:r :any]]
  ;; the fork server (seon.fork-server)
- :seon.fork-server/state [:map [:db :seon.host/db]]
  :seon.fork-server/event [:map [:ev :keyword]]
- :seon.fork-server/root-state [:map [:waiters :seon.host/persistent-queue] [:log vector?]]
  :seon.fork-server/forked [:map [:pid :seon.lib/pid] [:fd :seon.lib/fd]]
  ;; the wire: nREPL messages (string keys on the wire; keyword keys are in-process values)
  :seon.sock/conn [:map [:fd :seon.lib/fd] [:fds :seon.host/volatile]]
  :seon.sock/sent [:or :boolean [:= :epipe]]
- :seon.sock/read [:or :seon.host/bytes [:enum :again :eof]]
- :seon.wire/reader [:map [:conn :seon.sock/conn] [:buf :seon.host/volatile]]
  :seon.wire/msg [:map-of [:or :string :keyword] :any]
  :seon.wire/seon-msg [:map [:op :keyword]]
  ;; agents
- :seon.agent/printed [:map [:printed :string]]
  :seon.agent/tx-result [:map [:t :int] [:datoms nat-int?]]
  :seon.agent/item [:map {:seon.render/html seon.render.ui/history-row :description "One form's reply at root: the printed value (the live one stays in the agent under :handle) or the error."}
                    [:tag [:enum :ret :err]] [:printed {:optional true} [:maybe :string]]]
