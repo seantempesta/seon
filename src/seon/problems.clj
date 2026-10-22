@@ -1,5 +1,5 @@
 (ns seon.problems
-  "The one read of every problem Seon recorded (session D2, notes/option3-D2-problems.md):
+  "The one read of every problem Seon recorded (session D2, ../notes/archive/option3-D2-problems.md):
   main's db value in, one report out, by class. Root and the owner mine tasks from it by
   hand: each row carries what a task-file declaration needs (its producer and owning
   namespace, its evidence as data, the proofs that reproduce it) and the tasks that already
