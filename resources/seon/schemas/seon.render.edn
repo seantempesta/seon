@@ -30,6 +30,37 @@
  ;; the current-state block its model reads. Its HTML face is the agent's page.
  :seon.render/agent-page [:map {:seon.render/html seon.render.ui/agent-page}
                           [:agent :seon.render/agent]]
+ ;; ---- the parts of root's layout: each unit's input, its render declared here ----
+ ;; (a unit names its input's schema, never a render function: docs/render.md#the-frame-and-its-units)
+ ;; what is wrong now, the lines root's context leads with (seon.render.ai/problems)
+ :seon.render/problems-banner [:sequential {:seon.render/html seon.render.ui/tile-problems} :string]
+ ;; a tile as data (seon.render.ui/load-tiles; every tile's own render builds one)
+ :seon.render/tile [:map {:seon.render/html seon.render.ui/metric-tile} [:id :string]]
+ ;; the swarm: one cell per agent shown [id status evals-seen], and how many ended off the grid
+ :seon.render/swarm [:map {:seon.render/html seon.render.ui/tile-agents}
+                     [:cells [:sequential [:tuple :any :any nat-int?]]] [:off :int]]
+ ;; every declared root proc's health, by proc id
+ :seon.render/procs-health [:map {:seon.render/html seon.render.ui/tile-health} [:health :map]]
+ ;; the work: every task's row (seon.render.proc/task-rows), main's attempts, main's t
+ :seon.render/work [:map {:seon.render/html seon.render.ui/tile-tasks}
+                    [:rows [:maybe :map]] [:attempts [:maybe :map]]]
+ ;; root's own defects, the boot's numbers and the store
+ :seon.render/root-errors [:map {:seon.render/html seon.render.ui/tile-errors}]
+ ;; root's context: the system's AI face as root reads it
+ :seon.render/context [:map {:seon.render/html seon.render.ui/context-panel}
+                       [:text {:optional true} [:maybe :string]]]
+ ;; the stream's header: events kept, of those seen since boot
+ :seon.render/events-count [:map {:seon.render/html seon.render.ui/events-count} [:kept nat-int?] [:seen nat-int?]]
+ ;; the web proc's own numbers (tabs open)
+ :seon.render/web [:map {:seon.render/html seon.render.ui/web-stats}]
+ ;; the zoomed agent's head (its entry as root holds it, its card's numbers)
+ :seon.render/zoom-head [:map {:seon.render/html seon.render.ui/zoom-head} [:id :keyword]]
+ ;; the zoomed agent's work on main: its attempt and task
+ :seon.render/zoom-work [:map {:seon.render/html seon.render.ui/zoom-work}]
+ ;; the zoomed agent's last test run, and main's results of its attempt
+ :seon.render/proofs [:map {:seon.render/html seon.render.ui/proofs-box}]
+ ;; the current-state block the zoomed agent's model reads, or why there is none
+ :seon.render/zoom-context [:map {:seon.render/html seon.render.ui/zoom-context}]
  ;; one event of root's stream
  :seon.render/event [:map {:seon.render/html seon.render.ui/event-row} [:type :keyword]]
  ;; a declared proc's health as what flows: the defects root recorded of it (no ping)
