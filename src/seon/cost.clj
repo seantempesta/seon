@@ -32,8 +32,8 @@
   under (a third of the estimate or less at the largest size: the estimate is loose, a
   finding, not red), unmeasured (a stated dimension with nothing measured)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.profile :as profile] [datahike.api :as d] [seon.db :as pdb]
-            [clojure.test :as t] [clojure.string :as str] [clojure.edn :as edn]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.profile :as profile]
+            [clojure.test :as t] [clojure.string :as str]))
 
 ;; ---- the judge (pure) -----------------------------------------------------------------
 
@@ -227,94 +227,15 @@
 
 ;; ---- the unit table -------------------------------------------------------------------------
 
-(defn- unit-inc "A contracted function of one int, for the :fn/armed-call unit."
-  {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))
-
-(defn- repl-defined
-  "Evaluate forms in seon.cost.unit, as a REPL would, and answer the function named sym there."
-  {:malli/schema [:=> [:cat :any :symbol] :seon.host/fn]}
-  [forms sym]
-  (binding [*ns* (create-ns 'seon.cost.unit)]
-    (refer-clojure)
-    (eval forms)
-    @(ns-resolve 'seon.cost.unit sym)))
-
-(def unit-benches
-  "How each unit operation is measured: (f n) does n units on (setup n). The table below
-  is these, divided by n, on the release binary (bin/check units)."
-  {:seq/reduce {:what "one step of reduce over a vector" :setup #(vector (vec (range %))) :f (fn [v] (reduce + 0 v))}
-   ;; defined by eval, as an agent's REPL defines code (a release build direct-links its own
-   ;; calls: 2.3 ns there, against 7.4 for code defined at the REPL)
-   :fn/call {:what "a reduce step calling one plain function, both defined at the REPL"
-             :setup (fn [n] [(vec (range n)) (repl-defined '(do (defn f [x] (inc x)) (defn g [v] (reduce (fn [a x] (f a)) 0 v))) 'g)])
-             :f (fn [v g] (g v))}
-   :fn/armed-call {:what "a reduce step calling one contracted function ([:=> [:cat :int] :int])" :setup #(vector (vec (range %)))
-                   :f (fn [v] (reduce (fn [a x] (unit-inc a)) 0 v))}
-   :vec/conj {:what "conj onto a persistent vector" :setup #(vector (vec (range %))) :f (fn [v] (reduce conj [] v))}
-   :vec/conj! {:what "conj! onto a transient vector" :setup #(vector (vec (range %))) :f (fn [v] (persistent! (reduce conj! (transient []) v)))}
-   :vec/nth {:what "nth of a vector" :setup #(vector (vec (range %))) :f (fn [v] (reduce (fn [a i] (+ a (nth v i))) 0 v))}
-   :map/get {:what "get of an integer key in a hash map of n" :setup (fn [n] [(vec (range n)) (zipmap (range n) (range n))])
-             :f (fn [v m] (reduce (fn [a k] (+ a (get m k))) 0 v))}
-   :map/assoc {:what "assoc of a new integer key into a persistent hash map" :setup #(vector (vec (range %)))
-               :f (fn [v] (reduce (fn [m k] (assoc m k k)) {} v))}
-   :map/assoc! {:what "assoc! of a new integer key into a transient hash map" :setup #(vector (vec (range %)))
-                :f (fn [v] (persistent! (reduce (fn [m k] (assoc! m k k)) (transient {}) v)))}
-   :map/update {:what "update of a counter in a hash map (frequencies' step)" :setup #(vector (vec (map (fn [i] (mod i 64)) (range %))))
-                :f (fn [v] (reduce (fn [m k] (update m k (fnil inc 0))) {} v))}
-   :set/conj! {:what "conj! of a new integer into a transient hash set" :setup #(vector (vec (range %)))
-               :f (fn [v] (persistent! (reduce conj! (transient #{}) v)))}
-   :sorted/assoc {:what "assoc of a new integer key into a sorted map" :setup #(vector (vec (shuffle (range %))))
-                  :f (fn [v] (reduce (fn [m k] (assoc m k k)) (sorted-map) v))}
-   :sort/compare {:what "sort of shuffled integers, per n log2 n" :setup #(vector (vec (shuffle (range %)))) :f (fn [v] (sort v))
-                  :per :n-log-n}
-   :str/seq-char {:what "one step of a seq over a String's chars (doseq, reduce)" :setup #(vector (apply str (repeat % \a)))
-                  :f (fn [s] (reduce (fn [n c] (inc n)) 0 s))}
-   :str/append {:what "StringBuilder append of one char" :setup #(vector (apply str (repeat % \a)))
-                :f (fn [s] (let [sb (StringBuilder.) n (count s)] (loop [i 0] (when (< i n) (.append sb (.charAt ^String s i)) (recur (inc i)))) (.toString sb)))}
-   :map/literal {:what "a small map literal of 5 keys built per element" :setup #(vector (vec (range %)))
-                 :f (fn [v] (reduce (fn [a x] {:kind :leaf :n x :w a :f 1 :u 2}) nil v))}
-   :map/seq-step {:what "one step of reduce over a hash map's entries (each a map entry)" :setup #(vector (zipmap (range %) (range %)))
-                  :f (fn [m] (reduce (fn [a e] (+ a (val e))) 0 m))}
-   :map/reduce-kv {:what "one step of reduce-kv over a hash map" :setup #(vector (zipmap (range %) (range %)))
-                   :f (fn [m] (reduce-kv (fn [a k v] (+ a v)) 0 m))}
-   :edn/read-char {:what "clojure.edn/read-string, per character of a vector of integers" :setup #(vector (pr-str (vec (range (quot % 6)))))
-                   :f (fn [s] (edn/read-string s)) :per-char true}
-   :pr-str/char {:what "pr-str, per character printed (a vector of integers)" :setup #(vector (vec (range (quot % 6))))
-                 :f (fn [v] (pr-str v)) :per-char true}
-   ;; a pull from a branch of the in-memory test store (lane D2: every read of facts is pulls)
-   :db/pull {:what "d/pull of one attribute of an entity, by entity id (per pull)"
-             :setup (fn [n] (pdb/test-branch! (fn [_ conn]
-                              (d/transact conn (vec (for [i (range n)] {:note/text (str "n" i) :note/agent :u})))
-                              [(d/db conn) (mapv :e (d/datoms (d/db conn) :aevt :note/text))])))
-             :f (fn [db es] (reduce (fn [a e] (d/pull db [:note/text] e) a) 0 es))}
-   :db/pull-attr {:what "each attribute of a d/pull beyond its first (per attribute)"
-                  :setup (fn [n] (pdb/test-branch! (fn [_ conn]
-                                   (d/transact conn [{:note/text "x" :note/agent :u}])
-                                   [(d/db conn) (first (map :e (d/datoms (d/db conn) :aevt :note/text))) n])))
-                  :f (fn [db e n] (dotimes [_ n] (d/pull db [:note/text :note/agent] e)))
-                  :minus :db/pull}})
-
-(defn measure-unit
-  "Unit k measured at n units: {:ns :bytes} per unit."
-  {:malli/schema [:=> [:cat :keyword pos-int?] [:map [:ns :double] [:bytes :double]]]}
-  [k n]
-  (let [{:keys [setup f per per-char minus]} (unit-benches k)
-        args (setup n)
-        units (cond per-char (double (count (if (string? (first args)) (first args) (pr-str (first args)))))
-                    per (work per n) :else (double n))
-        m (measure f args)
-        ;; a unit measured as the difference from another (an attribute beyond a pull's first)
-        b (when minus (measure-unit minus n))]
-    {:ns (- (/ (:ns m) units) (:ns b 0.0)) :bytes (- (/ (:bytes m) units) (:bytes b 0.0))}))
-
 (def units
   "Measured costs of unit operations on this runtime (release seon binary, M5 Max, load 5,
   2026-10-20, at 10k units; source mode is within 10% except a plain call, 7 ns; the last
   five rows were measured in source mode after P2 found :str/append mislabeled: the 308 B
   per char it showed was the String's seq, not the StringBuilder; :fn/armed-call and the
-  pull rows re-measured on Jolt 00a3b321, J3's try/catch: 990 -> 354 B per armed call), per unit: estimates price their :ops with these. `bin/check
-  units` measures them again, and seon.cost-test/the-unit-table-is-current is red when a
-  row has drifted past 3x, so estimates stay derived from today's physics."
+  pull rows re-measured on Jolt 00a3b321, J3's try/catch: 990 -> 354 B per armed call), per unit: estimates price their :ops with these.
+  seon.cost-test/the-unit-table-is-current measures them again (seon.cost-test/unit-benches)
+  and is red when a row has drifted past 3x, naming the row it measured, so estimates stay
+  derived from today's physics."
   {:seq/reduce {:ns 1.4 :bytes 0.0 :what "one step of reduce over a vector"}
    :fn/call {:ns 7.4 :bytes 0.0 :what "a reduce step calling one plain function, both defined at the REPL"}
    :fn/armed-call {:ns 32.8 :bytes 353.53 :what "a reduce step calling one contracted function ([:=> [:cat :int] :int])"}

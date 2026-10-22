@@ -16,6 +16,8 @@ Builds run as `nice -n 15 bin/build`, in parallel, with no lock (owner, 2026-10-
 
 Full checks run one at a time, niced (there is no lock: the owner removed it). Iterate with single modes.
 
+A check mode is its body over one harness, `seon.check/run-check`: it boots root, runs the body, prints the body's report and its checks map, stops root, and ends on the one verdict line `NAME OK` or `NAME FAILED` with the exit status to match (`:then :kill` makes the mode phase 1 of a kill/reopen pair). A mode waits only on what the system emits: root's events on a tap taken before their cause (`seon.check/ready!` for spawns and clones, `seon.check/await-agents`, `seon.check/await-event`), or a watch on a reference (`seon.check/await-ref`, `seon.e2e/await-db`). It never polls and has no deadline, so a mode run without what it waits for (lease without `--set :seon.config.store/eid-lease=50`) waits until it is stopped. The sleeps left are measurement windows (idle, backpressure, window) or waits with no fact to wait on yet (an eval having started, Flow's unanswered pause), each commented where it stands. An outside client a mode drives reads its stdin from a file, so its EOF cannot hang on a pipe end held elsewhere (`mcp-proof`).
+
 ## Processes
 
 Anything that can make threads or processes starts at n ≤ 100 under `nice -n 15`. Watch `ps -M -p PID | wc -l`, and kill your own process past 200 threads. One experiment at a time.

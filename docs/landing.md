@@ -6,7 +6,7 @@ How a branch lands on main: what it runs, how batches are proven, and how confli
 
 A lane is a separate instance of the whole system: `bin/worktree NAME` (run from the main tree) makes `../next-NAME` on branch `jolt/NAME` from main, with its own submodule checkouts at their pins, an APFS clone of `target/` (so `nice -n 15 bin/build seon` is the only build), its own ports (`config/local.edn`, `bin/ports`) and its own stores under its `runs/`. In it:
 - `bin/root start | status | stop` runs that worktree's own root, never the standing one (7888); a Claude session started in the worktree reaches it through the committed `.mcp.json` (`./bin/mcp` asks this checkout's root);
-- `bin/test` and single check modes iterate; a full check runs on a store of its own, `SEON_STORE=$PWD/target/check-store bin/check 100`: `runs/store` is the worktree root's, made without the example program the checks seed, so reusing it fails steps falsely;
+- `bin/test` and single check modes iterate; `bin/check` (one mode or the full run) works on a store of the checks' own, `target/check-store`, seeded when missing (`SEON_STORE` names another): `runs/store` is the worktree root's, made without the example program the checks seed, so reusing it fails steps falsely;
 - after each landing on main: `git merge main` in the worktree, then `bin/worktree --sync NAME` from the main tree (never `git submodule` in a worktree);
 - a submodule the lane adds (`reference-code/X`) is written as a `.gitmodules` entry and a gitlink, with its checkout cloned from a local copy; root initializes it in the main tree when it lands (`git submodule update --init reference-code/X`), so later worktrees get it.
 
