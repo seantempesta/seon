@@ -350,7 +350,7 @@
   ;; after what it sent the tabs), never while a request is out; the web proc puts a
   ;; settled comment on every feed
   (let [st {:events-ch (a/chan 8) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events []
-            :event-rows [] :views {} :zoom {} :merges 0 :main {:t 1}}
+            :views {} :zoom {} :merges 0 :main {:t 1}}
         settled? (fn [outs] (some #(= :settled (:op %)) (:to-web outs)))
         [st o1] (#'seon.render.proc/render-proc st :events {:type :spawned :agent :a1 :at-ms 1})
         tag (:tag (first (filter #(= {:op :state} (:req %)) (:to-api o1))))
@@ -368,7 +368,7 @@
   ;; the coalescing window is the request in flight, not a clock (ASK-BOUND-MS is gone)
   (let [events (a/chan 8)
         st {:events-ch events :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events []
-            :event-rows [] :views {} :zoom {} :merges 0 :main {:t 1}}
+            :views {} :zoom {} :merges 0 :main {:t 1}}
         asks (fn [outs] (filter #(= {:op :state} (:req %)) (:to-api outs)))
         [st o1] (#'seon.render.proc/render-proc st :events {:type :spawned :agent :a1 :at-ms 1})
         [st o2] (#'seon.render.proc/render-proc st :events {:type :ready :agent :a1 :at-ms 2})]

@@ -154,13 +154,13 @@
 (defn shown-evals
   "The last evaluations (folded) as the model reads them: each folded item printed by the
   one printer within an equal share of last-evals-budget, its cuts reading through
-  (nth (my.turn/evals) k): [{:times n :text :cuts}] (the printer's answer)."
+  (nth (my.turn/evals) k): [{:times n :text}] (the printer's answer)."
   {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
   [folded]
   (let [share (max 32 (quot last-evals-budget (max 1 (count folded))))]
     (vec (for [{:keys [k item times]} folded
                :let [r (print/print-value (shown-eval item) {:handle (list 'nth '(my.turn/evals) k) :budget share})]]
-           (assoc (if (:text r) r {:text (:seon.error/message r) :cuts []}) :times times)))))
+           (assoc (if (:text r) r {:text (:seon.error/message r)}) :times times)))))
 
 (defn- transcript
   "The shown evaluations as one text, a repeated one headed by how many times it repeated."

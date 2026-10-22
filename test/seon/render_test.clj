@@ -73,7 +73,7 @@
    :writer {:tx-count 1 :recent []} :fork-server {:status :up} :stats {} :store {} :boot {}})
 
 (defn- fresh-state []
-  {:rid 1 :pending {} :watch #{:root} :waiting {} :kf-wanted #{} :new-events [] :events [] :event-rows []
+  {:rid 1 :pending {} :watch #{:root} :waiting {} :kf-wanted #{} :new-events [] :events []
    :views {} :zoom {} :merges 0 :main {:t 1}})
 
 (deftest render-step
@@ -181,8 +181,8 @@
 
 (deftest stop-row-says-how-it-ended-once-main-knows
   (let [[st1 _] (answer (fresh-state) view0)
-        [st2 _] (answer (assoc st1 :new-events [{:type :killed :agent :a7 :at-ms 1}]) view0)
-        row (second (first (:event-rows st2)))
+        [st2 out2] (answer (assoc st1 :new-events [{:type :killed :agent :a7 :at-ms 1}]) view0)
+        row (second (first (:prepends (first (filter #(= :patch (:op %)) (:to-web out2))))))
         _ (is (str/includes? row "KILLED") "before main records the attempt's end, a stop reads as a kill")
         [_ out] (answer (assoc st2 :agent-attempt {:a7 {:seon.attempt/status :merged}}) view0)
         frag (some #(when (= "ev-1" (first %)) (second %)) (:frags (first (filter #(= :patch (:op %)) (:to-web out)))))]
@@ -275,10 +275,31 @@
 
 (deftest a-capped-list-says-how-many-more
   (testing "the agent page's history: the newest rows, and how many older its branch records"
-    (let [html (h/html (:seon.render/html (ui/history-list {:rows ["<li>r</li>"] :total 140} {})))]
+    (let [html (h/html (:seon.render/html (ui/history-more {:shown 1 :total 140} {})))]
       (is (str/includes? html "+139 more: older evaluations, recorded on its branch"))))
-  (testing "nothing capped, nothing said"
-    (is (not (str/includes? (h/html (:seon.render/html (ui/history-list {:rows ["<li>r</li>"] :total 1} {}))) "more")))))
+  (testing "nothing capped, nothing said; no evaluation, that none is yet"
+    (is (str/includes? (h/html (:seon.render/html (ui/history-more {:shown 1 :total 1} {}))) "hidden"))
+    (is (str/includes? (h/html (:seon.render/html (ui/history-more {:shown 0 :total 0} {}))) "no evaluations yet"))))
+
+(deftest history-prepends-new-rows
+  ;; an agent's page: each evaluation is a unit of the page, rendered once and prepended when
+  ;; it is new; the list is not sent again (it was, whole, at every evaluation)
+  (let [ev (fn [i] {:id i :tag :ret :form (str "(+ " i " 1)") :printed (str (inc i)) :ms 0.1})
+        view (fn [n] (assoc-in view0 [:agents :a1 :evals] (mapv ev (range n))))
+        st0 (assoc (fresh-state) :watch #{:a1})
+        [st1 out1] (answer st0 (view 2))
+        [st2 out2] (answer st1 (view 3))
+        patch (fn [out] (first (filter #(and (= :patch (:op %)) (= :a1 (:view %))) (:to-web out))))
+        [[sel html]] (:prepends (patch out2))]
+    (is (= "#z-history" (ffirst (:prepends (patch out1)))) "the first pass adds the rows there are")
+    (is (= "#z-history" sel))
+    (is (str/includes? html "(+ 2 1)") "the new evaluation's row")
+    (is (str/includes? html "id=\"hr-v_2\""))
+    (is (not (str/includes? html "(+ 1 1)")) "an earlier row is not sent again")
+    (is (not-any? #(str/starts-with? (first %) "hr-") (:frags (patch out2))))
+    (testing "the page, composed, holds every row, newest first"
+      (let [page (p/page-html st2 :a1)]
+        (is (< (str/index-of page "id=\"hr-v_2\"") (str/index-of page "id=\"hr-v_1\"") (str/index-of page "id=\"hr-v_0\"")))))))
 
 (deftest a-context-read-is-shown-once
   (let [ctx (str "{:turn \"1 of 8\" :refused [{:refusal :contract-gap :vars [" (str/join " " (for [i (range 360)] (str "app.m/f" i))) "]}]}")

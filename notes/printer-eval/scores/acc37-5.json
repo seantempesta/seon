@@ -1,0 +1,72 @@
+[
+ {
+  "section": 1,
+  "answer": "No. The shown text stops partway through section 5 (Laws), at the proc-buffers bullet, so section 8 (The machine) is not shown.",
+  "left_out": "7279 characters of the AGENTS.md text",
+  "read_form": "(subs result/h3 19523)",
+  "confident": true
+ },
+ {
+  "section": 2,
+  "answer": "The text marks 36 datoms as not shown ('\u202636'). It shows 365 datom rows by line count, which does not match the 364 implied by the read form, so the total is not certain (400 or 401).",
+  "left_out": "36 datoms (the marker says \u202636)",
+  "read_form": "(drop 364 result/h3)",
+  "confident": false
+ },
+ {
+  "section": 3,
+  "answer": "The value holds 2 turns: the first turn (calc/square#1/0) is shown and one more turn is not. The first turn's :seon.turn/calls holds 1 eval call, and that call is not shown.",
+  "left_out": "1 eval call of the first turn, and 1 whole turn after it",
+  "read_form": "(get-in result/h3 [0 :seon.turn/calls])",
+  "confident": true
+ },
+ {
+  "section": 4,
+  "answer": "Not shown. calc/neg appears only as a key, and its task map is elided as 11 members.",
+  "left_out": "11 members of the calc/neg task map",
+  "read_form": "(val (nth (seq result/h3) 4))",
+  "confident": true
+ },
+ {
+  "section": 5,
+  "answer": "Not shown. The text names no stuck task and no cause; the :stuck class is elided as 2 rows.",
+  "left_out": "the 2 :stuck rows, the 2 :red rows, and 1 more class key under :classes",
+  "read_form": "(get-in result/h3 [:classes :stuck])",
+  "confident": true
+ },
+ {
+  "section": 6,
+  "answer": "HTTP 400.",
+  "left_out": "10964 characters of the response body",
+  "read_form": "(subs (get-in result/h3 [:seon.error/data :body]) 289)",
+  "confident": true
+ },
+ {
+  "section": 7,
+  "answer": "Not shown. The map shows 17 of 90 keys, and seon.config.root/max-agents is not among them.",
+  "left_out": "73 config keys",
+  "read_form": "(drop 17 result/h3)",
+  "confident": true
+ },
+ {
+  "section": 8,
+  "answer": "Not shown. The attempt calc/neg#1 is elided as 10 members, so its status is not in the text.",
+  "left_out": "10 members of the calc/neg#1 attempt map",
+  "read_form": "(val (nth (seq result/h3) 2))",
+  "confident": true
+ },
+ {
+  "section": 9,
+  "answer": "400 datoms in total: 66 are shown and 334 are not.",
+  "left_out": "334 datoms",
+  "read_form": "(drop 66 (get-in (nth (my.turn/evals) 2) [:value]))",
+  "confident": true
+ },
+ {
+  "section": 10,
+  "answer": "The evaluation with :tag :err, form (seon.model/call provider request), raised the error: 'The provider answered HTTP 400: the request's messages exceed the model's context window.'",
+  "left_out": "5524 characters of the response body",
+  "read_form": "(subs (get-in (nth (my.turn/evals) 2) [:value :seon.error/data :body]) 5729)",
+  "confident": false
+ }
+]
