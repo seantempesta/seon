@@ -6,7 +6,7 @@
   stored."
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d]
             [seon.test-store :as ts] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
-            [seon.program-test :refer [record]] [seon.fx :as fx] [seon.config] [test-runner :as runner]))
+            [seon.program-test :refer [record]] [seon.fx :as fx] [seon.config] [seon.source] [test-runner :as runner]))
 
 (defn- prog []
   (record (ts/test-db)
@@ -183,3 +183,49 @@
      :per-n {:ns 100 :bytes 120}
      :fixed {:ns 20000 :bytes 40000 :calls 1}
      :sizes [100 1000 10000]}))
+
+;; ---- a test reads no input its digest misses (pure-tests 2026-10-23) ---------------------
+
+(def hidden-inputs
+  "Reads whose answer no reach digest holds: a clock, an unseeded random, the inherited
+  environment, a sleep or a deadline. A test form that references one is named in
+  named-hidden-inputs with why its verdict does not depend on it."
+  '#{seon.profile/now-ns seon.profile/ms-since seon.profile/cpu-ns System/currentTimeMillis System/nanoTime
+     System/getenv clojure.core/rand clojure.core/rand-int clojure.core/rand-nth clojure.core/shuffle
+     Thread/sleep clojure.core.async/timeout})
+
+(def named-hidden-inputs
+  "{[test-namespace var, the read] why its verdict is a function of its digest anyway}."
+  '{[seon.db-test/a-commit-costs-what-it-writes seon.profile/now-ns] "printed ms per turn; the verdict is on bytes"
+    [seon.db-test/a-commit-costs-what-it-writes seon.profile/ms-since] "printed ms per turn; the verdict is on bytes"
+    [seon.lib-test/a-forked-child-runs-go-blocks-and-makes-a-store clojure.core.async/timeout] "a go block's timeout is the behaviour forked; its child's verdict is its exit status"
+    [seon.lib-test/probe-ms seon.profile/now-ns] "the probe's cost as a wall ratio of medians: open, FINDINGS (no counted stand-in for kernel time)"
+    [seon.lib-test/probe-ms seon.profile/ms-since] "the same"
+    [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it Thread/sleep] "the stream's pacing is the subject: a deadline can only turn it red (FINDINGS #13)"
+    [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it clojure.core/rand-int] "a port: a collision can only turn it red (FINDINGS #14)"
+    [seon.problems-test/a-defect-in-the-reconciler-does-not-feed-itself seon.profile/now-ns] "a message's :ns stamp, data the verdict does not read"
+    [seon.problems-test/an-agent-death-is-recorded-with-its-cause seon.profile/now-ns] "a fresh directory's name"
+    [seon.procs-test/reconciler seon.profile/now-ns] "a message's :ns stamp, data the verdict does not read"
+    [seon.profile-test/a-measures-time-is-what-its-thread-does Thread/sleep] "the wait whose absence from CPU time is the subject (1000x margin)"
+    [seon.profile-test/a-measures-time-is-what-its-thread-does seon.profile/now-ns] "the same"
+    [seon.profile-test/a-threads-allocation-is-its-own Thread/sleep] "a window in which bytes are counted; the verdict is on bytes"
+    [seon.profile-test/reading-the-clock-allocates-nothing seon.profile/now-ns] "the clock read is the subject; the verdict is on bytes"
+    [seon.profile-test/the-clock-is-the-one-every-process-reads seon.profile/now-ns] "the clock's identity is the subject"
+    [seon.reconcile-test/a-refused-spawn-writes-a-refused-attempt seon.profile/now-ns] "a message's :ns stamp"
+    [seon.reconcile-test/a-refused-task-asks-again-when-main-moves seon.profile/now-ns] "a message's :ns stamp"
+    [seon.reconcile-test/quiescence-is-reported-when-nothing-can-move seon.profile/now-ns] "a message's :ns stamp"
+    [seon.source-test/a-restart-catches-up-and-a-new-generation-resumes Thread/sleep] "polls a killed pid's end: can only make it slower"
+    [test-runner/prove! seon.profile/now-ns] "the runner's printed selection time"
+    [test-runner/shard! seon.profile/now-ns] "the runner's printed shard time"})
+
+(deftest a-test-reads-no-input-its-digest-misses
+  ;; the compiler's facts of test/ (:form/refs of each defining form): a new clock read, random,
+  ;; environment read, sleep or deadline in a test is red until it is named with its reason
+  (let [here (System/getProperty "user.dir")
+        files (into {} (filter #(str/ends-with? (key %) ".clj")) (:value (fx/read-source {:req {:root here :dirs ["test"]}})))
+        db (let [db (ts/test-db)] (d/db-with db (seon.source/import-tx db files)))
+        ;; (the two lists above name the reads as data: their own forms are no read)
+        found (set (remove (comp '#{seon.proofs-test/hidden-inputs seon.proofs-test/named-hidden-inputs} first)
+                           (d/q '[:find ?v ?r :in $ [?r ...] :where [?f :form/refs ?r] [?f :form/defines ?d] [?d :var/name ?v]] db (vec hidden-inputs))))]
+    (is (empty? (remove named-hidden-inputs found)) (str "unnamed (name each in seon.proofs-test/named-hidden-inputs, or take it out of the test): " (vec (sort-by str (remove named-hidden-inputs found)))))
+    (is (empty? (remove found (keys named-hidden-inputs))) (str "named, no longer read: " (vec (remove found (keys named-hidden-inputs)))))))
