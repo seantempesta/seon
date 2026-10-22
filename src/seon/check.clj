@@ -1122,14 +1122,12 @@
         ;; was told before the reply came and its fact is on its way to main, so this parks on
         ;; main's commits until it lands; a record that was written is the answer, now
         lease-q '[:find ?c . :where [?e :seon.error/type :seon.db/lease-spent] [?e :seon.error/count ?c]]
-        recorded (if (:unrecorded r-past)
-                   (d/q lease-q (seon.e2e/await-db sys #(d/q lease-q %)))
-                   :recorded-on-its-branch)
+        recorded (when (:unrecorded r-past) (d/q lease-q (seon.e2e/await-db sys #(d/q lease-q %))))
         spent? #(and (= :err (:tag %)) (re-find #"entity ids are spent" (str (:printed %))))]
       {:report {:past-its-lease (select-keys r-past [:tag :printed :err]) :notes-after (:printed r-count)
-                :next-write (select-keys r-next [:tag :printed]) :ids (:ids stats) :recorded-on-main recorded :b-lowest-id b-min}
+                :next-write (select-keys r-next [:tag :printed]) :ids (:ids stats) :unrecorded (:unrecorded r-past) :recorded-on-main recorded :b-lowest-id b-min}
        :checks {:past-its-lease-refused (spent? r-past) :nothing-applied (= "0" (:printed r-count)) :next-write-refused (spent? r-next)
-                :its-lease-was-50 (= 50 (get-in stats [:ids :of])) :recorded-on-main (pos-int? recorded)
+                :its-lease-was-50 (= 50 (get-in stats [:ids :of])) :its-record-was-refused (true? (:unrecorded r-past)) :recorded-on-main (pos-int? recorded)
                 :used-under-the-lease (< (get-in stats [:ids :used] 0) 50)
                 :b's-ids-past-a's-lease (>= b-min (+ (get-in stats [:ids :from]) 50))}}))))
 

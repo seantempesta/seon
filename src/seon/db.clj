@@ -338,9 +338,7 @@
   later ids start past it, so a block and the writes to main never meet."
   {:malli/schema [:=> [:cat :seon.host/db] :int]}
   [db]
-  (let [^java.util.concurrent.atomic.AtomicLong a (datahike.writing/eid-allocator db)
-        n (cfg/value :seon.config.store/eid-lease)]
-    (loop [] (let [c (.get a)] (if (.compareAndSet a c (+ c n)) c (recur))))))
+  (.getAndAdd ^java.util.concurrent.atomic.AtomicLong (datahike.writing/eid-allocator db) (cfg/value :seon.config.store/eid-lease)))
 
 (defn head
   "Branch b's committed value, read from the store (another process may have committed it)."

@@ -423,7 +423,7 @@
                  ", so the bound is " bound " (" (format "%.1f" (/ (double per-turn) bound)) "x over)")))
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
-(deftest root-mints-in-its-own-block-after-a-merge
+(deftest root-mints-past-every-reserved-block-after-a-merge
   ;; task seon.db/root-mints-in-a-block-of-its-own: an agent's block is reserved from the one
   ;; counter root's own writes mint from (seon.db/lease-block!), so after a merge brings an
   ;; entity from inside that block onto main, root's next id still lies past the block
