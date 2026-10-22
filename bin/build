@@ -86,6 +86,10 @@ build_jolt() {
 
 build_hello() {
   [ -x "$JOLT" ] || build_jolt
+  # Datahike's store loads its codecs' libraries (liblz4, libzstd) at load: built first, named by bin/env
+  [ -f "$T/lib/liblz4.dylib" ] || build_lz4
+  [ -f "$T/lib/libzstd.dylib" ] || build_zstd
+  . "$ROOT/bin/env"
   say "hello: jolt build -m build.hello (Datahike from reference-code/) -> target/hello"
   ( cd "$ROOT"
     HOME=$T/home JOLT_PWD=$ROOT "$JOLT" -A:hello build -m build.hello -o "$T/hello" ) > "$T/hello-build.log" 2>&1 ||
@@ -179,6 +183,6 @@ case $STEP in
   lz4) build_lz4 ;;
   zstd) build_zstd ;;
   seon) build_seon ;;
-  all) build_chez; build_jolt; build_hello; build_native; build_lmdb; build_lz4; build_zstd; build_seon ;;
+  all) build_chez; build_jolt; build_native; build_lmdb; build_lz4; build_zstd; build_hello; build_seon ;;
   *) die "unknown step $STEP (chez | jolt | hello | native | lmdb | lz4 | zstd | seon | all)" ;;
 esac
