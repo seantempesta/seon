@@ -42,7 +42,10 @@
   ;; with its branches when the root has stopped.
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         main (str "root-test-" (random-uuid))
-        {:keys [exit out err]} (sh/sh "env" "SEON_WEB_PORT=0" "./seon" "root"
+        ;; a free port of its own, as seon.agent-test/in-agent's root takes: the checkout's
+        ;; configured one is its standing root's (the step E dry run's root held it, 2026-10-22)
+        port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
+        {:keys [exit out err]} (sh/sh "env" "SEON_WEB_PORT=0" (str "SEON_ENTRANCE_PORT=" port) "./seon" "root"
                                       "--set" (str ":seon.config.source/root=" (pr-str checkout))
                                       "--set" ":seon.config.source/dirs=[\"src\" \"test\"]"
                                       "--set" (str ":seon.config.root/store-path=" (pr-str (test-store)))
