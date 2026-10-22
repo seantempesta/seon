@@ -164,7 +164,7 @@ build_zstd() {
 build_seon() {
   # each step decides by its own stamp (its sources' pin), never by its output existing: a sync
   # to a new pin rebuilds what moved (task seon.check/a-build-rebuilds-what-its-pin-moved); a
-  # generation's worktree (seon.fx/build) holds its checkout's build, not ../vendor-c
+  # generation's worktree (seon.fx/build) holds its checkout's build, not a shared one
   build_jolt
   build_native
   build_lmdb

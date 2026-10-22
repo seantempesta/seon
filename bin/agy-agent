@@ -1,24 +1,24 @@
 #!/bin/sh
-# bin/agy-agent — run Antigravity (agy) lanes: Gemini 3.8 Flash (high) by default, Gemini 4 Argon on request.
+# bin/agy-agent — run Antigravity (agy) reviewers: Gemini 3.8 Flash (high) by default, Gemini 4 Argon on request.
 #
-#   bin/agy-agent run <name> [spec]        launch a lane; spec as one argument or on stdin
+#   bin/agy-agent run <name> [spec]        launch a reviewer; spec as one argument or on stdin
 #                                          (quoted heredoc). Streams a readable transcript to
 #                                          stdout; the final answer -> summary.
-#   bin/agy-agent resume <name> [followup] continue the lane's conversation with full prior
-#                                          context (id from the lane's retained sid file).
-#   bin/agy-agent stop <name>              stop the lane's agy process tree; the sid is kept.
+#   bin/agy-agent resume <name> [followup] continue the reviewer's conversation with full prior
+#                                          context (id from the reviewer's retained sid file).
+#   bin/agy-agent stop <name>              stop the reviewer's agy process tree; the sid is kept.
 #   bin/agy-agent summary <name>           print the final answer and its usage.
 #   bin/agy-agent watch <name>             follow a live transcript.
-#   bin/agy-agent status                   running lanes, and summaries of the last hour.
+#   bin/agy-agent status                   running reviewers, and summaries of the last hour.
 #
-# Dials (env): AGY_MODEL (gemini-3.8-flash-high; also -low, -medium, gemini-4-argon-low|medium|high),
+# Config (env): AGY_MODEL (gemini-3.8-flash-high; also -low, -medium, gemini-4-argon-low|medium|high),
 # AGY_TIMEOUT (0 = until the turn completes; e.g. 30m), AGY_SID (resume another conversation),
 # AGY_TREE (scratch = the default here: run in runs/agy/<name>/work, an empty directory holding only what the
 # caller copies in (e.g. a brief); archive = run in runs/agy/<name>/tree, a `git archive HEAD` copy of this
 # checkout that is not a git repository, with only runs/agy/<name>/out added writable).
 #
 # Moved into next/bin from ~/src/seon-jolt/bin (2026-10-23; that was a copy of ~/src/seon/bin/agy-agent,
-# 2026-10-21), its state from ../tmp/agy to this checkout's runs/agy (gitignored, as runs/ is): lanes are
+# 2026-10-21), its state from ../tmp/agy to this checkout's runs/agy (gitignored, as runs/ is): reviewers are
 # READ-ONLY REVIEWERS. They never run in the checkout; all state lives in runs/agy/<name>/: sid, pid, prompt, stream.jsonl (raw events),
 # transcript.log, summary.txt, usage.json, work/ or tree/, out/. Lanes run with
 # --dangerously-skip-permissions only because headless agy otherwise refuses every tool call; the
@@ -31,7 +31,7 @@ cd "$root"
 model=${AGY_MODEL:-gemini-3.8-flash-high}
 timeout=${AGY_TIMEOUT:-0}
 tree=${AGY_TREE:-scratch}
-lane_rule="You are NAME, a READ-ONLY REVIEWER for the Seon-on-Jolt project, run through bin/agy-agent. You change nothing: no edits outside your own out directory, no git commands, no builds, no network writes. Your answer is your review, given as your final message. Say plainly when you are unsure, and never invent numbers, bounds or APIs: mark anything from memory as such."
+reviewer_rule="You are NAME, a READ-ONLY REVIEWER for the Seon-on-Jolt project, run through bin/agy-agent. You change nothing: no edits outside your own out directory, no git commands, no builds, no network writes. Your answer is your review, given as your final message. Say plainly when you are unsure, and never invent numbers, bounds or APIs: mark anything from memory as such."
 
 usage() { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
 
@@ -97,7 +97,7 @@ case "$cmd" in
     if live "$state"; then echo "bin/agy-agent: $name is running (pid $(cat "$state/pid"))" >&2; exit 1; fi
     text=$(text_arg "$@")
     [ -n "$text" ] || { echo "bin/agy-agent: empty spec" >&2; exit 64; }
-    rule=$(printf '%s' "$lane_rule" | sed "s/NAME/$name/")
+    rule=$(printf '%s' "$reviewer_rule" | sed "s/NAME/$name/")
     if [ "$cmd" = run ]; then
       [ -f "$state/sid" ] && { echo "bin/agy-agent: $name exists; resume it or pick a new name" >&2; exit 1; }
       printf '%s\n' "$text" > "$state/prompt"
