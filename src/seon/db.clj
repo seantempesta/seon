@@ -66,6 +66,8 @@
   {:store (cond-> {:backend backend :path path :id (hasch/uuid path)
                    :default-serializer :FaslSerializer}
             (= backend :lmdb) (assoc :lmdb {:flags MDB_NOSYNC :map-size (cfg/value :seon.config.store/lmdb-map-bytes)})
+            ;; konserve's per-value compressor (its header names it, so stored values of either kind read)
+            (= :lz4 (cfg/value :seon.config.store/compressor)) (assoc-in [:config :compressor] {:type :lz4})
             (= backend :file) (assoc :config {:defer-immutable-sync? true}))
    :schema-flexibility :write :keep-history? false
    :writer writer-cfg

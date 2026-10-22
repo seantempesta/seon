@@ -95,6 +95,11 @@
  ;; mean fewer bytes printed and written per commit. Provenance: dev/dur.clj measured 512 -> 64
  ;; cut a small commit 27 -> 16 ms with fsync, before the node emitter.
  :seon.config.store/branching-factor 64
+ ;; Codec: konserve's per-value compressor, LZ4 frames through liblz4 (konserve.jolt.lz4).
+ ;; Provenance: measured 2026-10-22 on 190 index nodes that 20 per-turn commits of real turn
+ ;; text wrote (2,544 KB): LZ4 1,178 KB (2.2x less); compressing the 12.7 MB five times took
+ ;; 15.9 ms and decompressing 7.5 ms (about 800 MB/s and 1.7 GB/s), against a commit's ~5 ms fsync.
+ :seon.config.store/compressor :lz4
 
  ;; ==== agents =================================================================================
 
