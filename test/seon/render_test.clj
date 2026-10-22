@@ -6,7 +6,8 @@
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.render.proc :as p]
-            [seon.web.html :as h] [seon.config] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]))
+            [seon.web.html :as h] [seon.config] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
+            [seon.fx] [seon.source] [seon.program]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -506,3 +507,51 @@
           text (:text (r/printed rep 'result/h1))]
       (is (= ["problems recorded on main at t 90" "# failed 1" "- failed calc/add: not total" "# stuck 1" "- stuck calc/sub: held (closed)"]
              (str/split-lines text))))))
+
+
+;;; --- the law, from the compiler's facts: one printer, and no cut before it -------------
+
+(def ^:private printer-vars
+  "The vars that turn a value into text beside the one printer."
+  '#{clojure.core/pr-str clojure.core/prn-str clojure.core/print-str clojure.core/with-out-str
+     clojure.core/pr clojure.core/prn clojure.pprint/pprint clojure.pprint/pp})
+
+(def ^:private cut-vars
+  "The vars that shorten what is shown, where output is made for a person or a model."
+  '#{clojure.core/subs clojure.core/take clojure.core/take-last clojure.core/drop-last})
+
+(defn- src-program
+  "Main's db with every file of src imported (each form analyzed, never run: the running
+  generation's namespaces), as seon.source-test imports it."
+  []
+  (let [files (:value (seon.fx/read-source {:req {:root (System/getProperty "user.dir") :dirs ["src"]}}))]
+    (doseq [n (keep #(seon.source/file-ns (val %)) files)] (require n))
+    (let [db (ts/test-db)] (d/db-with db (seon.source/import-tx db files)))))
+
+(defn- sites
+  "The vars of src whose forms reference one of marks (the compiler's :form/refs), in
+  namespaces ns? holds."
+  [forms marks ns?]
+  (sort (distinct (for [f forms :when (and (ns? (:ns f)) (some marks (:refs f)))
+                        [k sym] (:defines f) :when (= :var k)]
+                    sym))))
+
+(deftest one-printer-and-no-cut-before-it
+  ;; owner, 2026-10-22: "Do not create more than one value printer and no clipping happens
+  ;; before then". Every var of src that prints beside seon.print, and every var of a
+  ;; display namespace that cuts, is named in docs/render.md#one-printer with its reason
+  ;; (the wire, storage, code text, or a cut of data, not of output); a new one is red.
+  (let [forms (seon.program/live-forms (src-program))
+        doc (let [t (slurp "docs/render.md")] (subs t (str/index-of t "## One printer") (or (str/index-of t "\n## " (+ 3 (str/index-of t "## One printer"))) (count t))))
+        ;; a site is named by a list item, before its reason (`- `ns/f`, `ns/g`: why`)
+        named (set (for [[_ head] (re-seq #"(?m)^- (.*?): " doc) [_ n] (re-seq #"`([a-z][\w.\-]*/[^`\s]+)`" head)] (symbol n)))
+        printer? #(not (str/starts-with? (str %) "seon.print"))
+        display? #(re-find #"^seon\.(render|web|context|mcp|entrance)" (str %))]
+    (testing "src is imported: the check reads facts, not nothing"
+      (is (< 1000 (count forms))))
+    (testing "every var printing beside the one printer is named with its reason"
+      (is (= [] (remove named (sites forms printer-vars printer?)))))
+    (testing "every var cutting in a display namespace is named with its reason"
+      (is (= [] (remove named (sites forms cut-vars display?)))))
+    (testing "a site named that no longer prints or cuts is gone from the page too"
+      (is (= [] (remove (set (concat (sites forms printer-vars printer?) (sites forms cut-vars display?))) (sort named)))))))

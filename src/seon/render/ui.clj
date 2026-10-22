@@ -70,7 +70,7 @@
          {:keys [shown truncated? omitted lines]} (print/prose s budget {:one-line? (boolean one-line?)})]
      (if-not truncated?
        shown
-       (let [words (str (print/cut-words omitted lines nil) (when whole (str " · the whole value: " (pr-str whole) " at its REPL")))
+       (let [words (str (print/cut-words omitted lines nil) (when whole (str " · the whole value: " (print/text whole form-budget) " at its REPL")))
              cut (if href
                    [:a {:class "seon-print-elision" :href href :title "the whole on this page"} words]
                    [:span {:class "seon-print-elision" :title s} words])]
