@@ -19,6 +19,10 @@
   (testing "merge!: gated by the agent's tests, on its branch; no deadline (the child's exit ends a run)"
     (is (= {:op :merge-tests :id :a1 :merge-branch :agent-1 :data-attrs :all}
            (ffirst (w/requests {:var 'seon.root/merge! :agent :a1} index)))))
+  (testing "merge! of an ended agent: root refuses it (seon.root/request, the API fn's own table), so no request"
+    (is (= [] (w/requests {:var 'seon.root/merge! :agent :a2} index))))
+  (testing "interrupt!: an effect this proc performs, no request"
+    (is (= [] (w/requests {:var 'seon.root/interrupt! :agent :a1} index))))
   (testing "run-tests!: the agent's tests, with no deadline"
     (is (= [[{:op :tests :id :a1} :a1]] (w/requests {:var 'seon.root/run-tests! :agent :a1} index))))
   (testing "spawn n with the form's task"

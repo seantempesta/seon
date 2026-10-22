@@ -3,20 +3,15 @@
   127.0.0.1, one request per line in, one answer per line out (R1's proto.agents.entrance,
   on the flow core). An outside agent evaluates in any running agent's process (recorded on
   that agent's branch, origin :outside) or as root (in root's process, with root's verbs,
-  recorded on main), and can work a task as a Seon agent:
-
-    {:op :agents}                         live agents and every task
-    {:op :eval :agent \"a3\"|\"root\" :code s} the reply items
-    {:op :context :agent \"a3\"}            the agent's current-state block (its task's), as the model sees it
-    {:op :attach :task \"ns/name\"}          work the task here: an agent on its branch, model \"outside\"
-    {:op :done :agent \"a3\"}               hand the attempt back: root judges it, as a turn loop's end
+  through the same REPL path, recorded on main), and can work a task as a Seon agent. Its
+  verbs are one table (`verbs`: {:op k ...args}), which MCP lists as its tools.
 
   The listener and each connection are edge threads (blocking accept and reads); a
   connection is an outside caller of root's API, as bin/check is. Try it:
   printf '{:op :agents}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.reconcile :as r]
-            [seon.lib :as lib] [datahike.api :as d] [clojure.edn :as edn] [clojure.string :as str]))
+            [seon.lib :as lib] [seon.repl :as repl] [clojure.edn :as edn]))
 
 (defn- agents-answer
   "Live agents (id, branch, status, task) and every task (execution, done, blocked-by, problem)."
@@ -29,30 +24,25 @@
                                  [id (cond-> {:execution (:seon.task/execution t) :done (r/done? idx id) :blocked-by (r/blocked-by idx id)}
                                        (:seon.task/problem t) (assoc :problem (:seon.task/problem t)))]))}))
 
+(def ^:dynamic *sys*
+  "This root while its REPL evaluates a form: the `sys` each form reads (root-eval)."
+  nil)
+
 (defn- root-eval
-  "Evaluate code in root's process, form by form, in the namespace `root.repl` where `sys`
-  is this root (my.root's verbs take it), recorded on main as root's evaluations, origin
-  :outside. Answers the reply items."
-  {:malli/schema [:=> [:cat :seon.root/sys :string] [:vector :map]]}
+  "Evaluate code as root through the one REPL path (seon.repl/eval-string: the printer,
+  cost, error maps, *1 and *e), in root.repl (my.root as root, seon.root as c, datahike as
+  d) with `sys` a local bound to this root, unbounded (root's own forms take no tick
+  budget); its items recorded on main as root's evaluations, origin :outside
+  (seon.repl/record-tx)."
+  {:malli/schema [:=> [:cat :seon.root/sys :string] :seon.agent/items]}
   [sys code]
-  (let [nsx (or (find-ns 'root.repl)
-                (let [n (create-ns 'root.repl)]
-                  (binding [*ns* n] (refer-clojure) (require '[my.root :as root] '[seon.root :as c] '[datahike.api :as d]))
-                  n))
-        _ (intern nsx 'sys sys)
-        rd (java.io.PushbackReader. (java.io.StringReader. code))
-        items (loop [acc [] n 0]
-                (let [form (read {:eof ::eof} rd)]
-                  (if (= ::eof form)
-                    acc
-                    (let [t0 (lib/now-ns)
-                          v (binding [*ns* nsx] (eval form))]
-                      (recur (conj acc {:id n :tag :ret :form (pr-str form) :printed (pr-str v) :ms (lib/ms-since t0)}) (inc n))))))
-        run (str "root-outside-" (lib/now-ns))]
-    @(c/transact-main! sys (conj (vec (for [it items]
-                                        {:seon.cluster.eval/id (str run "/" (:id it)) :seon.cluster.eval/agent "agent"
-                                         :seon.cluster.eval/record (assoc (select-keys it [:tag :form :ms]) :shown (:printed it) :origin :outside)}))
-                                 {:db/id "agent" :seon.agent/id :root}))
+  (when-not (find-ns 'root.repl)
+    (binding [*ns* (create-ns 'root.repl)] (refer-clojure) (require '[my.root :as root] '[seon.root :as c] '[datahike.api :as d])))
+  (let [items (mapv #(assoc % :origin :outside)
+                    (binding [*sys* sys]
+                      (repl/eval-string code {"ns" "root.repl" :origin :outside :ticks 0
+                                              :repl/eval-fn (fn [form] (eval (list 'let '[sys seon.entrance/*sys*] form)))})))]
+    @(c/transact-main! sys (repl/record-tx :root (str "root-outside-" (lib/now-ns)) items nil))
     items))
 
 (defn- attach!
@@ -79,30 +69,48 @@
                   {:attempt (:seon.attempt/id a) :task (:seon.attempt/task a) :env (:seon.attempt/env a)}))
         (vals (task/attempts @(:conn sys)))))
 
+(def verbs
+  "The entrance's verbs, the one table: each op's description, its arguments (JSON Schema
+  properties; :required, the ones it needs) and its answer, a fn of root's system, the
+  agent the request names (:root, an agent's keyword, or nil) and the request. MCP lists
+  each as the tool seon_<op> (seon.mcp)."
+  (array-map
+   :agents {:doc "Live agents (id, branch, status, task) and every task (execution, done, blocked-by, problem)."
+            :args {} :answer (fn [sys _ _] (agents-answer sys))}
+   :eval {:doc "Evaluate Clojure in a running agent's process (recorded on its branch, origin :outside) or as \"root\" in root's process (root.repl: `sys` is root; my.root/run!, my.root/cancel!, seon.root/merge! ...), each through the one REPL path. Answers one reply item per form."
+          :args {:agent {:type "string" :description "an agent id (a3) or root"} :code {:type "string" :description "Clojure forms"}}
+          :required ["agent" "code"]
+          :answer (fn [sys ag req]
+                    {:items (mapv #(select-keys % [:tag :form :printed :out :recorded :handle])
+                                  (if (= :root ag) (root-eval sys (:code req)) @(c/submit! sys ag (:code req) {:origin :outside})))})}
+   ;; the block's text as the model reads it: printed to the agent's output, not as a
+   ;; value (a value comes back as a string literal, escaped, under the reply's budget);
+   ;; recorded with origin :context, a context read, which renders refer to, not repeat
+   :context {:doc "The current-state block of the task an agent works: what the model would read now."
+             :args {:agent {:type "string"}} :required ["agent"]
+             :answer (fn [sys ag _]
+                       (if-let [{:keys [task attempt]} (attempt-of sys ag)]
+                         (let [it (last @(c/submit! sys ag (pr-str (list 'print (list 'seon.turn/context-block task attempt))) {:origin :context}))]
+                           (if (= :err (:tag it)) {:error (:printed it)} {:context (:out it)}))
+                         {:error (str ag " works no task: attach one first")}))}
+   :attach {:doc "Work a task as a Seon agent: root starts an agent on the task's branch (model outside) and answers its id."
+            :args {:task {:type "string" :description "ns/name"}} :required ["task"]
+            :answer (fn [sys _ req] (attach! sys (:task req)))}
+   :done {:doc "Hand the attempt the agent works back to root: its proofs run, it is judged, and merged when the done rule has no refusal."
+          :args {:agent {:type "string"}} :required ["agent"]
+          :answer (fn [sys ag _]
+                    (if-let [{:keys [attempt task env]} (attempt-of sys ag)]
+                      (do (c/judge! sys {:attempt attempt :task task :env env :agent ag})
+                          {:judging attempt})
+                      {:error (str ag " works no task")}))}))
+
 (defn answer
-  "One request's answer."
+  "One request's answer: its verb's."
   {:malli/schema [:=> [:cat :seon.root/sys :map] :map]}
   [sys req]
-  (let [ag (some-> (:agent req) (#(if (= "root" %) :root (keyword %))))]
-    (case (:op req)
-      :agents (agents-answer sys)
-      :eval (if (= :root ag)
-              {:items (root-eval sys (:code req))}
-              {:items (mapv #(select-keys % [:tag :form :printed :out :recorded :handle])
-                            @(c/submit! sys ag (:code req) {:origin :outside}))})
-      ;; the block's text as the model reads it: printed to the agent's output, not as a
-      ;; value (a value comes back as a string literal, escaped, under the reply's budget);
-      ;; recorded with origin :context, a context read, which renders refer to, not repeat
-      :context (if-let [{:keys [task attempt]} (attempt-of sys ag)]
-                 (let [it (last @(c/submit! sys ag (pr-str (list 'print (list 'seon.turn/context-block task attempt))) {:origin :context}))]
-                   (if (= :err (:tag it)) {:error (:printed it)} {:context (:out it)}))
-                 {:error (str ag " works no task: attach one first")})
-      :attach (attach! sys (:task req))
-      :done (if-let [{:keys [attempt task env]} (attempt-of sys ag)]
-              (do (c/judge! sys {:attempt attempt :task task :env env :agent ag})
-                  {:judging attempt})
-              {:error (str ag " works no task")})
-      {:error (str "unknown op " (:op req))})))
+  (if-let [v (verbs (:op req))]
+    ((:answer v) sys (some-> (:agent req) (#(if (= "root" %) :root (keyword %)))) req)
+    {:error (str "unknown op " (:op req))}))
 
 (defn- serve-connection!
   "Answer one connection's requests, line by line, until it closes. The entrant boundary:
