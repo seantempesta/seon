@@ -265,7 +265,8 @@
  ;; starts at once (test-runner/shards), its greens stored by digest when it has run. Provenance:
  ;; worktree session PROVE 2026-10-22 on the 16 GB M1 target (AGENTS section 8): 4 keeps the machine
  ;; responsive beside a standing root and other worktree sessions (measured in docs/merging.md#a-merge-runs-what-the-change-reaches).
- ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected.
+ ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected. bin/check
+ ;; runs this many steps at once too, and mg-check in this many shards (pure-tests 2026-10-23).
  :seon.config.proofs/jobs 4
  ;; Unit: a salt (integer), 0 normally. Salt of every generative check's seed (seon.proofs/seed): a
  ;; seed is derived from what its check reaches (a test's reach digest, a contract's var and the
