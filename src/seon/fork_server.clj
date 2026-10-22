@@ -13,7 +13,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program]
             [seon.step :as step] [seon.sock :as sock] [seon.config :as cfg] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.ffi :as ffi]
-            [jolt.deps] [clojure.edn :as edn] [clojure.java.io :as io]))
+            [jolt.deps] [clojure.edn :as edn]))
 
 (defn- reap
   "Every child that exited, as :exit events (non-blocking waitpid)."
@@ -26,27 +26,6 @@
         evs))))
 
 (declare main)
-
-(defn- private-cwd!
-  "A copy of the source root's tree for this agent process to work in (its src, test, resources, docs and
-  deps.edn; reference-code linked, read through), under the runs dir: what an agent writes to a
-  file there reaches no other agent and not the tree root imports at boot (on 2026-10-21 an
-  agent's direct edit of src/my/schema.clj in the shared source root stopped root's next boot).
-  Its program changes reach main the one way, through its branch and the merge. Answers the dir."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [root]
-  ;; named by this process's pid: agent ids restart in every root, a live pid does not; a dir
-  ;; left by a dead process whose pid this one reuses is its, so it goes first
-  (let [dir (str (get cfg/config :seon.config.root/runs-dir) "/cwd/" (lib/c-getpid))]
-    (doseq [f (reverse (file-seq (io/file dir)))] (.delete f))
-    (doseq [top ["src" "test" "resources" "docs" "deps.edn"]
-            f (file-seq (io/file root top)) :when (.isFile f)
-            :let [rel (subs (.getPath f) (inc (count root))) to (io/file dir rel)]]
-      (io/make-parents to)
-      (io/copy f to))
-    (java.nio.file.Files/createSymbolicLink (.toPath (io/file dir "reference-code")) (.toPath (io/file root "reference-code"))
-                                            (into-array java.nio.file.attribute.FileAttribute []))
-    dir))
 
 (defn server-step
   "The fork server's step-fn. In :cmd ({:op :tx|:fork|:stats|:static}, and :tick when the
@@ -76,10 +55,7 @@
                  t0 (lib/now-ns)
                  pid (if (= 1 act) (lib/c-fork) -1)]
              (cond
-               ;; the agent works in its own copy of the program's source root, as a REPL started in a
-               ;; project does, its file writes its own
                (zero? pid) (do (sock/close! (:fd (:conn st))) (sock/close-pending-fds! (:conn st))
-                               (some-> (get cfg/config :seon.config.source/root) private-cwd! lib/c-chdir)
                                (repl/run! fd m (:db st) (:ns m)))
                (neg? pid) (do (sock/close! fd) [st {:ev [{:ev :fork-failed :agent (:agent m) :active-threads act}]}])
                :else [(do (sock/close! fd) st) {:ev (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
@@ -109,15 +85,14 @@
   "The source root's deps.edn roots added to the loader (jolt.deps/add-deps, the twin of
   clojure.repl.deps/add-libs), so every agent forked from here resolves a library's files as a
   REPL started in that project does: io/resource, clojure.repl/source, requiring an uncompiled
-  namespace. A built binary carries no dependency roots of its own (Jolt #1232). Once, before
-  the first fork."
+  namespace. A built binary carries no dependency roots of its own (Jolt #1232). Its
+  :local/root paths are made absolute (add-deps resolves them against the cwd, and an agent
+  works elsewhere). Once, before the first fork."
   {:malli/schema [:=> [:cat] :any]}
   []
   (when-let [root (get cfg/config :seon.config.source/root)]
-    (let [cwd (.getCanonicalPath (java.io.File. "."))]
-      (lib/c-chdir root)
-      (jolt.deps/add-deps (edn/read-string (slurp "deps.edn")))
-      (lib/c-chdir cwd))))
+    (jolt.deps/add-deps (update (edn/read-string (slurp (str root "/deps.edn"))) :deps update-vals
+                                #(cond-> % (:local/root %) (update :local/root (partial str root "/")))))))
 
 (defn main
   "The fork server's loop, on its socket to root. The boot server makes a process group
@@ -126,7 +101,10 @@
   returns."
   {:malli/schema [:=> [:cat :seon.host/db :seon.lib/fd :boolean] :any]}
   [db0 fd boot?]
-  (when boot? (lib/c-setpgid 0 0) (dev-classpath!))
+  ;; every agent forked from here works in the scratch dir, with no repository above it: an
+  ;; agent changes code through its REPL and git finds nothing (owner, 2026-10-22)
+  (when boot? (lib/c-setpgid 0 0) (dev-classpath!)
+    (let [dir (get cfg/config :seon.config.agent/cwd)] (.mkdirs (java.io.File. dir)) (lib/c-chdir dir)))
   (let [conn (sock/conn fd)
         recv! (fn [] (let [m (sock/recv-within! conn 100)]
                        (case m :eof nil :timeout [:cmd {:op :tick}] [:cmd m])))]

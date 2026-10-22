@@ -28,7 +28,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract] [clojure.edn] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
             [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
-            [jolt.ffi :as ffi] [seon.edn :as sedn] [seon.config :as cfg] [clojure.string :as str]))
+            [jolt.ffi :as ffi] [seon.edn :as sedn] [seon.config :as cfg]))
 
 (defchecked ^:private chunk-writer [:=> [:cat :seon.host/fn] :seon.host/writer] @#'jolt.nrepl/chunk-writer)
 (defchecked ^:private ex-class-strings [:=> [:cat :seon.host/throwable [:maybe :keyword]] [:tuple :string [:maybe :string]]] @#'jolt.nrepl/ex-class-strings)
@@ -66,12 +66,10 @@
 
 (defn- keep-source!
   "A definition keeps its exact text on its var (owner: source reads the live var), so
-  clojure.repl/source shows what this process runs, a REPL-typed or reloaded defn included."
+  clojure.repl/source shows what this process runs, a REPL-typed defn included."
   {:malli/schema [:=> [:cat :any [:maybe :string]] :any]}
   [v src]
   (when (and (var? v) src) (alter-meta! v assoc :source src)))
-
-(declare loaded-form)
 
 (defn- eval-code
   "Read code once, form by form, and evaluate each with (:repl/eval-fn req) under
@@ -112,7 +110,7 @@
                 ;; *1 *2 *3 *e as clojure.main/repl and nREPL's session keep them, per session
                 rk [:repl-vars (or sid :default)]
                 {v1 :v1 v2 :v2 v3 :v3 e1 :e} (get-in @agent/state rk)
-                [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err *1 v1 *2 v2 *3 v3 *e e1 jolt.host/*load-form* loaded-form]
+                [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err *1 v1 *2 v2 *3 v3 *e e1]
                                          (let [v (intr/run ticks #(eval-fn form))] [:ret v *ns*]))
                                        (catch Throwable e [:err e ns (outer-frames)])
                                        (finally (.flush out) (.flush err)))
@@ -351,46 +349,6 @@
   ([mw base] (reduce (fn [h m] (m h)) base (reverse mw))))
 
 (def ^:private the-handler (delay (handler)))
-
-;; ---- a file the REPL loads: its forms through the same path ------------------------
-
-(defn- load-form
-  "The base of a loaded form's request: the form a file load read, evaluated by the request's
-  eval fn, answered with its exact text. Its throw is the load's (Clojure's require and
-  load-file throw it), so nothing here catches."
-  {:malli/schema [:=> [:cat :seon.wire/msg] :any]}
-  [{:keys [reply] :repl/keys [form src] :as req}]
-  (let [v ((:repl/eval-fn req eval) form)]
-    (keep-source! v src)
-    (reply {:repl/form form :repl/src src :repl/value v})))
-
-(def ^:private load-handler
-  "A loaded form's request: the REPL's middleware that makes a form the branch's program
-  (registry, record, admit) over load-form. No print, *1 or result handle: as in Clojure, a
-  load answers its caller's form once; its error is the caller's form's."
-  (delay (handler [wrap-admit wrap-record wrap-registry] load-form)))
-
-(defn- own-file?
-  "Is path a file in this process's own directory (an agent's private copy of the source root)?
-  The reference-code link resolves outside it: a library's file is not the agent's."
-  {:malli/schema [:=> [:cat :string] :boolean]}
-  [path]
-  (str/starts-with? (.getCanonicalPath (java.io.File. path)) (str (.getCanonicalPath (java.io.File. ".")) "/")))
-
-(defn loaded-form
-  "What the REPL binds as jolt.host/*load-form*: a top-level form that require (:reload
-  included), load-file or load reads from a file in this process's own directory is evaluated
-  through the REPL's path (load-handler), so it is recorded on the branch exactly as if typed
-  at the REPL; a form that did not change records nothing new (seon.program/record-tx
-  supersedes by content). Any other file's form is evaluated as the loader would. Answers the
-  form's value."
-  {:malli/schema [:=> [:cat :string :any :string] :any]}
-  [path form text]
-  (if (own-file? path)
-    (let [ans (volatile! nil)]
-      (@load-handler {:repl/form form :repl/src text :reply #(vreset! ans %)})
-      (:repl/value @ans))
-    (eval form)))
 
 ;; ---- reply items and their recording (root folds the wire; the agent folds in-process) ----
 

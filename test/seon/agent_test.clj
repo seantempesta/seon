@@ -76,17 +76,15 @@
     (is (= {proof :pass reached :pass} (edn/read-string (:printed run)))
         "the proof and the one test reaching the change ran, green; nothing else ran")))
 
-(deftest a-relative-path-reads-from-the-source-root
-  ;; task seon.agent/an-agent-works-in-its-source-root: a program file is read by the path
-  ;; it has in its repository, as at any Clojure REPL started in the project
-  (let [[rel abs wrote] (in-agent ["(count (slurp \"src/seon/reconcile.clj\"))"
-                                   (str "(count (slurp " (pr-str (.getCanonicalPath (java.io.File. "src/seon/reconcile.clj"))) "))")
-                                   "(do (spit \"src/seon/written_by_an_agent.clj\" \"(ns x)\") (slurp \"src/seon/written_by_an_agent.clj\"))"])]
-    (is (not= :err (:tag rel)) "the relative path reads")
-    (is (= (:printed abs) (:printed rel)) "and is the source root's file")
-    ;; an agent's direct edit of the shared source root stopped root's next boot (2026-10-21)
-    (is (= "\"(ns x)\"" (:printed wrote)) "the agent writes and reads back its own file")
-    (is (not (.exists (java.io.File. "src/seon/written_by_an_agent.clj"))) "the source root never sees it")))
+(deftest an-agent-finds-no-repository
+  ;; owner, 2026-10-22: no git in agents, and no source-file editing as the way to develop
+  ;; Seon; an agent works in a scratch dir with no repository above it
+  ;; (:seon.config.agent/cwd) and still reads any file by its path
+  (let [[abs git] (in-agent [(str "(count (slurp " (pr-str (.getCanonicalPath (java.io.File. "src/seon/reconcile.clj"))) "))")
+                             "(clojure.java.shell/sh \"git\" \"rev-parse\" \"--git-dir\")"])]
+    (is (= (str (count (slurp "src/seon/reconcile.clj"))) (:printed abs)) "a file reads by its absolute path")
+    (is (str/includes? (str (:printed git)) ":exit 128") (str "git finds no repository: " (pr-str git)))
+    (is (str/includes? (str (:printed git)) "not a git repository") (pr-str git))))
 
 (deftest each-eval-call-is-answered-before-the-next
   ;; owner, 2026-10-22 (DECISIONS "Agents work at the REPL, through tool calls"): a reply was a
