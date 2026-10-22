@@ -77,7 +77,9 @@
 (def ^:private kept
   "Names that keep a word of AGENTS.md section 7a's table in another sense, each with its reason."
   {'seon.fx/admit "admission by workload (a token bucket and free workers: AGENTS.md section 4), not a contract"
-   'seon.fx-admit-test "the same admission"
+   'seon.fx-admit-test "the same admission (the namespace and its vars)"
+   'seon.fx-test/owner-admits-by-workers-and-priority "the same admission"
+   'seon.reader-test/prose-without-a-fence-is-a-comment "a Markdown code fence"
    "test/seon/fx_admit_test.clj" "the same admission"
    'seon.reader/fence "a Markdown code fence, CommonMark's word"
    'seon.fixtures/fenced "a reply in a Markdown code fence"})
@@ -113,6 +115,6 @@
                         x))]
     (is (contains? words "lane") "the table is read")
     (is (not (contains? words "stuck")) "a row still stored under its old name waits for its migration")
-    (is (empty? (for [n names w words :when (and (uses? w (str n)) (not (kept n)))] [w n]))
+    (is (empty? (for [n names w words :when (and (uses? w (str n)) (not (kept n)) (not (and (qualified-symbol? n) (kept (symbol (namespace n))))))] [w n]))
         "every name uses Clojure's, a library's or Jolt's word")))
 
