@@ -6,7 +6,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.docs :as docs]))
+            [seon.docs :as docs] [seon.ref]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -70,3 +70,18 @@
       (let [db (load-pages db (assoc pages "demo/quiet.md" (str/replace quiet "flow.md#idioms" "flow.md")))]
         (is (= ["demo/quiet.md#counting"] (backlinks db "demo/flow.md#flow")))
         (is (= ["demo/async.md#waiting"] (backlinks db "demo/flow.md#idioms")) "the dropped link is retracted")))))
+
+(deftest one-address-shows-one-text-through-ref-and-docs
+  ;; research row 15: a section's text at code depth is its own text, the lines after its
+  ;; heading up to the next heading of any level, whichever reader shows it: the expected
+  ;; texts are written here from the page above, not read through either
+  (let [db (load-pages (empty-db) pages)
+        doc (seon.ref/parse "demo/flow.md" flow)
+        own {"demo/flow.md#flow" "Flow runs procs."
+             "demo/flow.md#idioms" "Park on a channel, as ```app.m0/f0``` does."
+             "demo/flow.md#quiet" "Count messages, with `app.m0/f1`."}]
+    (doseq [[a text] own]
+      (is (= text (:seon.ref/text (seon.ref/view doc a :code))) (str "ref: " a))
+      (is (= text (:seon.ref/text (docs/view db a :code))) (str "docs: " a)))
+    (is (= ["demo/flow.md#idioms" "demo/flow.md#quiet"] (mapv :seon.ref/address (:seon.ref/below (docs/view db "demo/flow.md#flow" :code))))
+        "the sections below by address, not inline")))

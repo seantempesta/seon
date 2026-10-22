@@ -424,3 +424,11 @@
     (is (= [] errs))
     (is (= 2 (some-> (resolve (symbol (str nsym) "b")) deref (apply []))) "the imported form is loaded where main's program runs")
     (is (= [] (harvest/stage-tx (:db-after rep))) "so staging this runtime unmaps nothing")))
+
+(deftest the-source-read-carries-each-reference-code-pin
+  ;; land6 review, must-fix 4: a cited reference-code file shows the revision main's source
+  ;; pins it at; the :source effect reads each gitlink once, at import, so no render runs git
+  (let [r (fx/read-source {:req {:root here :dirs ["src"]}})
+        head-tree (str/trim (:out (sh/sh "git" "rev-parse" "HEAD:reference-code/malli")))]
+    (is (= head-tree (get (:pins r) "reference-code/malli")) "the gitlink HEAD's tree records for it")
+    (is (every? #(str/starts-with? % "reference-code/") (keys (:pins r))))))

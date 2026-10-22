@@ -16,7 +16,7 @@
   Root starts it by evaluating (seon.turn/work! '{...}) in the agent; the attempt's end is
   a fact on the branch (:seon.end/*), which root's judge reads."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.set :as set]
+  (:require [seon.profile :as profile] [seon.intr :as intr] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.set :as set]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context] [seon.program :as program]
             [seon.harvest :as harvest] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
@@ -152,6 +152,8 @@
     (if (:seon.error/type r)
       r
       (let [t2 (profile/now-ns)
+            ;; an interrupt left from before this turn's evals is not theirs
+            _ (intr/clear-pending!)
             ;; each eval call through the one REPL path, in order; its answer is the call's result
             calls (mapv (fn [{:keys [id code]}] {:id id :code code :items (repl/eval-string (:text (reader/forgive code)))})
                         (:tool-calls c))
