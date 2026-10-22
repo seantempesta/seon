@@ -155,11 +155,12 @@
       ;; an agent process committed its branch: the store is dirty until the next flush
       :agent-commit (assoc st :dirty true)
       ;; the agent's branch (new: a pointer to main's head), then its fork: the agent opens
-      ;; the branch itself and owns its writes (run-ahead, committed by the agent)
+      ;; the branch itself and owns its writes (run-ahead, committed by the agent), and holds
+      ;; the task and attempt it works from its first form
       :spawn (let [{:keys [agent branch]} m
                    resumed? (exists? branch)]
                (when-not resumed? (d/branch! conn main branch))
-               (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :ns (:ns m) :fd (:fd m)
+               (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :task (:task m) :attempt (:attempt m) :ns (:ns m) :fd (:fd m)
                                               :cfg (:cfg st) :lease (:lease m) :resumed resumed?})
                (reply st {:ok true :t (:max-tx @conn) :resumed resumed?}))
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
@@ -176,12 +177,12 @@
                                   :unmerged (mapv :key (pm/unmerged head (pm/program head #{})))
                                   :vars (into (sorted-set) (keep (fn [[k s]] (when (= :var k) s))) (keys (:ours r)))})
                                (refused (str "no branch " (:branch m)) {})))
-      ;; root's read of a branch (or main): its committed value from the store; :base-t is
-      ;; main's t at the branch's merge base (what of main it holds)
+      ;; root's read of a branch (or main): its committed value from the store; :base is the
+      ;; db at the branch's merge base, :base-t main's t there (what of main it holds)
       :branch-db (reply st (cond
                              (= main (:branch m)) {:ok true :db @conn}
-                             (exists? (:branch m)) {:ok true :db (pdb/head conn (:branch m))
-                                                    :base-t (:max-tx (pdb/branch-base conn main (:branch m)))}
+                             (exists? (:branch m)) (let [base (pdb/branch-base conn main (:branch m))]
+                                                     {:ok true :db (pdb/head conn (:branch m)) :base base :base-t (:max-tx base)})
                              :else (refused (str "no branch " (:branch m)) {})))
       :branch-info (reply st (if (exists? (:branch m))
                                (let [h (pdb/head conn (:branch m))] {:ok true :datoms (count (d/datoms h :eavt)) :t (:max-tx h)})

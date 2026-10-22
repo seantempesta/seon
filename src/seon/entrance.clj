@@ -58,7 +58,7 @@
         (let [db @(:conn sys)
               env (r/desired-env (task/task db id))
               aid (str id "#" (inc (count (filter #(= id (:seon.attempt/task %)) (vals (task/attempts db))))))
-              ag (c/spawn! sys {:branch (:branch env) :task id})]
+              ag (c/spawn! sys {:branch (:branch env) :task id :attempt aid})]
           @(c/transact-main! sys (task/attempt-start-tx aid id (:boot sys) ag env (System/currentTimeMillis)
                                                        (:plan (:seon.task/accumulated (task/task db id)))))
           {:agent ag :task id :attempt aid}))))
