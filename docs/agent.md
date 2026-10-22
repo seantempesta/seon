@@ -22,7 +22,7 @@ The attempt's part:
 - `:references`: each var the plan cites, at the depth its delimiter asks (`docs/references.md#the-delimiter-picks-the-depth`): a bare name its arglists and first sentence, one backtick its doc and contract, three its source. A source past the cap shows `:left-out` and `:read`, the form that reads it.
 - `:found`: program functions the cited vars and your proofs call that the plan does not name; often the helpers the task needs.
 - `:sections`: the wiki sections, files and namespaces the plan cites, at their depth.
-- `:evidence`: why an earlier attempt failed (`:problem`) and what it measured: conflicts, red proofs.
+- `:evidence`: why the last attempt on this branch was refused (`:problem`) and what it measured: conflicts, unmerged keys, red proofs. Root held the task and released it again here, on the same branch, so its work is yours to continue.
 
 The turn's part:
 - `:turn`: this turn of the most you have.
@@ -55,7 +55,7 @@ The program as your branch records it answers where things are, so read before y
 
 ## Done
 
-Your task is done when every proof passes and the done rule refuses nothing; the proofs run after each of your replies.
+Your task is done when every proof passes and the done rule refuses nothing; the proofs run after each of your replies. An attempt that ends refused (a red or unrun proof, a refusal, no progress, a dead agent, a refused merge) is not retried: its task is held for root, which decides whether to run it again (`docs/tasks.md#a-refused-attempt-is-held-for-root`).
 
 - A proof is a deftest in a test namespace: `(ns app.workout-test (:require [clojure.test :refer [deftest is]] [app.workout :as w]))`, then `(deftest total-sums (is (= 6 (w/total [1 2 3]))))`, run with `(clojure.test/run-tests 'app.workout-test)`.
 - A cost proof (`seon.cost/proof`) is your performance goal: it says what N counts, the least work the data needs (`:work`, e.g. one pass with one lookup per row), how that grows and what it may cost. Read it before writing code and do no more work than it states.
@@ -73,5 +73,5 @@ A merge task's branch has main merged in, and each of its unmerged entries shows
 Record what you learned in the plan, so the next step starts from it, then stop.
 
 - `(my.task/update! :seon.task/plan str "\n\nFound: seon.task/accumulate owns the plan's accumulation.")`.
-- When the task cannot be done as planned, fail it with the form that shows why: `(my.task/fail! "the premise is refuted" '(seon.task/accumulate {} "x"))`. The failure goes on the task, your attempt ends, and the task is held for root (`docs/tasks.md#a-failed-task-is-held-for-root`).
+- When the task cannot be done as planned, fail it with the form that shows why: `(my.task/fail! "the premise is refuted" '(seon.task/accumulate {} "x"))`. The failure goes on the task, your attempt ends, and the task is held for root (`docs/tasks.md#a-refused-attempt-is-held-for-root`).
 - `(my.turn/wait)` ends your turn and waits for root.
