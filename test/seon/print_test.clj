@@ -14,15 +14,16 @@
             [fipp.engine :as fipp]))
 
 (defn cuts-of
-  "Every cut in printed text, read as an agent reads it: how many it says it left (:n), whether
-  in characters (:chars?), and the form after it that reads the rest (:form, nil when none)."
+  "Every cut in printed text, read as an agent reads it: how many it says it left (:n, nil for
+  `…?`, members not yet counted), whether in characters (:chars?; a long name's cut is `…+N`
+  with neither, :name?), and the form after it that reads the rest (:form, nil when none)."
   [text]
   (loop [from 0 cuts []]
     (if-let [i (str/index-of text "…" from)]
-      (let [[m plus n chars?] (re-find #"^…(\+?)(\d+)( chars(?: in \d+ more lines?)?)?" (subs text i))
+      (let [[m plus n chars?] (re-find #"^…(\+?)(\d+|\?)( chars(?: in \d+ more lines?)?)?" (subs text i))
             after (when m (subs text (+ i (count m))))
             form (when (and after (re-find #"^ [(r]" after)) (edn/read-string (subs after 1)))]
-        (recur (inc i) (cond-> cuts m (conj {:n (parse-long n) :chars? (some? chars?) :plus? (= "+" plus) :form form}))))
+        (recur (inc i) (cond-> cuts m (conj {:n (parse-long n) :chars? (some? chars?) :name? (and (= "+" plus) (not chars?)) :form form}))))
       cuts)))
 
 (defn read-rest
@@ -33,21 +34,31 @@
 (defn reads-exactly?
   "Does cut c of text, printed of v through handle h, read exactly what it says it left? A
   string's form `(subs s k)` reads its last n characters and text shows s's first k before the
-  cut; a collection's reads at least its n members (all of a sorted one)."
+  cut; a collection's `(drop k c)` reads its last n members; a collection's own form reads all
+  of it: n members when it shows none, and a map or set shown sorted (its members' order is not
+  the collection's) is read whole with at most n left."
   [text h v {:keys [n chars? form]}]
-  (let [rest (read-rest form h v)]
-    (if chars?
-      (let [[whole k] (if (and (seq? form) (= 'subs (first form))) [(read-rest (second form) h v) (nth form 2)] [rest 0])]
-        (and (= n (count rest)) (= rest (subs whole k))
-             (str/includes? text (str (emit/string-literal (subs whole 0 k)) "…+" n))))
-      (<= n (count rest)))))
+  (let [rest (read-rest form h v)
+        drop? (and (seq? form) (= 'drop (first form)))]
+    (cond
+      chars? (let [[whole k] (if (and (seq? form) (= 'subs (first form))) [(read-rest (second form) h v) (nth form 2)] [rest 0])]
+               (and (= n (count rest)) (= rest (subs whole k))
+                    (str/includes? text (str (emit/string-literal (subs whole 0 k)) "…+" n))))
+      (nil? n) (some? (seq rest))
+      drop? (let [c (read-rest (nth form 2) h v)]
+              (and (= (nth form 1) (- (count c) n)) (= (seq rest) (seq (drop (- (count c) n) c)))))
+      (or (map? rest) (set? rest)) (<= n (count rest))
+      :else (= n (count rest)))))
 
 (defn- lawful? [raw budget]
   (let [h 'result/e0123456789ab
-        {:keys [text truncated?]} (seon/print-value raw {:budget budget :handle h})]
+        {:keys [text truncated? elisions]} (seon/print-value raw {:budget budget :handle h})
+        cuts (cuts-of text)]
     (boolean
      (and (<= (select/estimate text) budget)
-          (every? #(or (nil? (:form %)) (reads-exactly? text h raw %)) (cuts-of text))
+          (= elisions (count cuts))
+          ;; through a handle every cut names its form, but a long name's
+          (every? #(if (:name? %) (nil? (:form %)) (and (:form %) (reads-exactly? text h raw %))) cuts)
           (or truncated? (= raw (edn/read-string text)))))))
 
 (def ^:private line-gen
@@ -70,6 +81,15 @@
   (let [r (tc/quick-check 150 (prop/for-all [raw value-gen budget (gen/elements [60 200 800 1500])] (lawful? raw budget))
                           :seed 202610071 :max-size 40)]
     (is (:pass? r) "a printed value broke its budget or a cut's continuation")))
+
+(deftest a-cut-counts-the-lines-it-left
+  ;; the line breaks are found once per string (select/line-breaks), and each cut counts the
+  ;; lines after it by binary search: the same count as reading the text after the cut
+  (let [naive (fn [^String s at] (+ (if (and (< at (count s)) (or (zero? at) (= \newline (.charAt s (dec at))))) 1 0)
+                                    (count (filter #(and (= \newline (.charAt s %)) (< (inc %) (count s))) (range at (count s))))))]
+    (doseq [s ["" "a" "\n" "a\n" "\na" "a\nb" "a\n\nb\n" "\n\n\n" (str/join "\n" (repeat 40 "a line"))]
+            at (range (inc (count s)))]
+      (is (= (naive s at) (select/lines-after (select/line-breaks s) (count s) at)) (pr-str s at)))))
 
 (deftest escaped-strings-stay-printable-under-a-small-budget
   (doseq [raw [(apply str (repeat 64 "\"")) (apply str (repeat 64 "\\")) (apply str (repeat 64 "\t")) [(apply str (repeat 64 "\""))]]]

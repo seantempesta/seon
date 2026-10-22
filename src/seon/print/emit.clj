@@ -88,7 +88,7 @@
   [node]
   (let [form (:seon.print/continuation node)]
     (case (:seon.print/elision-unit node)
-      :characters (str (string-literal (or (:seon.print/prefix node) "")) (cut-words (:seon.print/omitted node) (:seon.print/lines node 0) form))
+      :characters (str (string-literal (or (:seon.print/prefix node) "")) (cut-words (:seon.print/omitted node) (:seon.print/lines node) form))
       (cond-> (if (= :pending (:seon.print/elision-unit node)) "…?" (str "…" (:seon.print/omitted node "?")))
         form (str " " (form-text form))))))
 
@@ -129,7 +129,8 @@
   [node text]
   (let [prefix (or (:seon.print/prefix node) "")
         shown (when (= :characters (:seon.print/elision-unit node)) prefix)
-        label (if shown (subs text (count (string-literal prefix))) text)
+        ;; a string's label is its cut's words (the text after its prefix's literal)
+        label (if shown (cut-words (:seon.print/omitted node) (:seon.print/lines node) (:seon.print/continuation node)) text)
         reason (when-not (:seon.print/continuation node) (:seon.print/requery-refusal node))
         marker [:span (cond-> {:class (css-class :seon.print/elision)} reason (assoc :title reason)) label]]
     (if shown

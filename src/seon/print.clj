@@ -90,13 +90,14 @@
        {:text s :shown s :truncated? false}
        (let [form (fn [at] (when source (list 'subs source at)))
              ;; the cut's words at their widest (every character omitted) bound its room
-             room (max 0 (- cap 1 (count (emit/cut-words (count whole) (select/lines-after whole 0) (form (count whole))))))
+             breaks (select/line-breaks whole)
+             room (max 0 (- cap 1 (count (emit/cut-words (count whole) (select/lines-after breaks (count whole) 0) (form (count whole))))))
              at (select/break-at s (min room total))
              shown (subs s 0 at)
              ;; in the source's own offsets: what (subs source at) reads
              at (if one-line? (source-offset whole at) at)
              omitted (- (count whole) at)
-             lines (select/lines-after whole at)
+             lines (select/lines-after breaks (count whole) at)
              cont (form at)
              words (emit/cut-words omitted lines cont)]
          (cond-> {:text (if (str/ends-with? shown "\n") (str shown words) (str shown (when-not (or (empty? shown) (str/ends-with? shown " ")) " ") words))

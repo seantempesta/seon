@@ -252,14 +252,28 @@
           (and (pos? room) (>= sp (- room (quot room 4)))) (inc sp)
           :else room)))
 
-(defn lines-after
-  "Lines that begin in s after offset: each line break at or past it starts one, and the
-  offset itself starts one when it sits at a line's start."
-  {:malli/schema [:=> [:cat :string nat-int?] nat-int?]}
-  [^String s at]
-  (loop [i (long at) n (if (and (< at (count s)) (or (zero? at) (= \newline (.charAt s (dec at))))) 1 0)]
+(defn line-breaks
+  "Where s's line breaks are, ascending: found once per string, so a cut counts its lines
+  (`lines-after`) without reading the text again."
+  {:malli/schema [:=> [:cat :string] [:vector nat-int?]]}
+  [^String s]
+  (loop [i 0 breaks (transient [])]
     (let [j (.indexOf s "\n" (int i))]
-      (if (or (neg? j) (>= (inc j) (count s))) n (recur (inc j) (inc n))))))
+      (if (neg? j) (persistent! breaks) (recur (inc j) (conj! breaks j))))))
+
+(defn lines-after
+  "Lines that begin after offset at of a text total characters long whose line breaks are
+  breaks (`line-breaks`): each line break at or past it starts one (but one that ends the
+  text), and the offset itself starts one when it sits at a line's start. A binary search."
+  {:malli/schema [:=> [:cat [:vector nat-int?] nat-int? nat-int?] nat-int?]}
+  [breaks total at]
+  (let [k (loop [lo 0 hi (count breaks)]
+            (if (< lo hi)
+              (let [mid (quot (+ lo hi) 2)] (if (< (nth breaks mid) at) (recur (inc mid) hi) (recur lo mid)))
+              lo))
+        after (- (count breaks) k (if (and (< k (count breaks)) (= (peek breaks) (dec total))) 1 0))
+        start? (and (< at total) (or (zero? at) (and (pos? k) (= (nth breaks (dec k)) (dec at)))))]
+    (+ after (if start? 1 0))))
 
 (defn- cut-text
   "The cut's text after a node's shown part, as `emit/elided-text` prints it."
@@ -267,7 +281,7 @@
   [node]
   (let [form (node-continuation node)]
     (case (:kind node)
-      :string (emit/cut-words (- (:total node) (:shown node)) (lines-after (:value node) (:shown node)) form)
+      :string (emit/cut-words (- (:total node) (:shown node)) (lines-after (:breaks node) (:total node) (:shown node)) form)
       :name (str "…+" (- (:total node) (:shown node)))
       (cond-> (if (:pending? node) "…?" (str "…" (- (:total node) (:n node)))) form (str " " (emit/form-text form))))))
 
@@ -349,7 +363,7 @@
     :scalar (leaf (:node c))
     ;; a name longer than :max-name
     :name (assoc (placed context depth path indent) :kind :name :node (:node c) :text (:text c) :value (:text c) :total (count (:text c)))
-    :string (assoc (placed context depth path indent) :kind :string :value (:value c) :total (:total c))
+    :string (assoc (placed context depth path indent) :kind :string :value (:value c) :total (:total c) :breaks (line-breaks (:value c)))
     (merge (placed context depth path indent)
            (select-keys c [:kind :face :open :close :total :pending? :prefix :ordered? :indexed? :sorted? :lookup?])
            {:pending (:members c)})))
@@ -652,7 +666,7 @@
              :seon.print/elision-unit (cond text? :characters (:pending? node) :pending :else :children)}
       (not (:pending? node)) (assoc :seon.print/omitted (max 1 (- (:total node) (if text? (:shown node) (:n node)))))
       text? (assoc :seon.print/prefix (subs (if (= :name (:kind node)) (:text node) (:value node)) 0 (:shown node)))
-      (= :string (:kind node)) (assoc :seon.print/lines (lines-after (:value node) (:shown node)))
+      (= :string (:kind node)) (assoc :seon.print/lines (lines-after (:breaks node) (:total node) (:shown node)))
       form (assoc :seon.print/continuation form)
       (nil? form) (assoc :seon.print/requery-refusal (get-in context [:requery :seon.print/requery-refusal] "the source has no stable requery identity")))))
 
