@@ -1,27 +1,27 @@
 [#:seon.task{:name
              "a-graph-counts-its-messages-and-says-when-it-is-quiet",
              :plan
-             "Seen (e6_quiescence, e7_one_system): with each message counted when it is promised (a step's outputs, an inject, a message an edge owes the proc) and uncounted when a step has consumed it, the count reaching 0 is exact quiescence, delivered as an event: E6.2 quiet 1.5 ms after a 50-join burst, E6.4 not quiet until an owed child exit arrived (1008 ms for sleep 1), E7 ends a check run on it. Prototype: a step wrapper and an atom (e6 counted, move!); cost 150-230 ns per step (estimate 50-100). Correct: in flow/impl.clj, the graph keeps an AtomicLong; send-outputs adds the step's output count before putting, the proc loop subtracts one after transform, inject adds its count, a state key ::flow/promised adds owed messages; the 0-transition puts the busy spell's number on a ::flow/quiet out (sliding 1). Quiet with a proc whose ping says :waiting is stuck, and the ping names why (E6.3). Replaces: timeouts that end runs, settled? polling, the reconciler's own quiet heuristic for the procs it does not see.",
+             "Reproduction (prototypes e6_quiescence, e7_one_system): with each message counted when it is promised (a step's outputs, an inject, a message an edge owes the proc) and uncounted when a step has consumed it, the count reaching 0 is exact quiescence, delivered as an event: quiet 1.5 ms after a 50-join burst; not quiet until an owed child exit arrived (1008 ms for sleep 1); a check run ends on it. The prototype (a step wrapper and an atom) cost 150-230 ns per step (estimate 50-100). Correct, in flow/impl.clj: the graph keeps an AtomicLong; send-outputs adds the step's output count before putting, the proc loop subtracts one after transform, inject adds its count, a state key ::flow/promised adds owed messages; the 0-transition puts the busy spell's number on a ::flow/quiet out (sliding 1). Quiet with a proc whose ping says :waiting is blocked, and the ping names why. Replaces: timeouts that end runs, settled? polling, and the reconciler's own quiet heuristic for the procs it does not see.",
              :kind :work,
              :proofs
              #{jolt.flow-test/quiet-arrives-exactly-when-the-last-message-is-consumed
                jolt.flow-test/an-owed-message-holds-quiet-off}}
  #:seon.task{:name "ping-says-where-a-proc-is-parked",
              :plan
-             "Seen (e6 E6.6): a back-pressure deadlock (a join that reads only what it lacks, fed by one sequential producer) leaves every proc :running with frozen counts, 99 messages in flight and no quiet event; nothing names the wait-for cycle. Cause: the proc loop (flow/impl.clj proc run, send-outputs) parks either in alts!! over its read set or in alts!! putting one output, and ping reports neither. Correct: the proc keeps its park site in the loop ({:reading #{cids}} or {:writing coord}), and ping answers it as ::flow/parked. With a-channel-shows-its-fill, a wait-for graph (writing -> a full in-chan -> its reader's park site) finds the cycle; the stuck row names it.",
+             "Reproduction (prototype e6): a back-pressure deadlock (a join that reads only what it lacks, fed by one sequential producer) leaves every proc :running with frozen counts, 99 messages in flight and no quiet event; nothing names the wait-for cycle. Cause: the proc loop (flow/impl.clj proc run, send-outputs) parks either in alts!! over its read set or in alts!! putting one output, and ping reports neither. Correct: the proc keeps its park site in the loop ({:reading #{cids}} or {:writing coord}), and ping answers it as ::flow/parked. With `jolt.async/a-channel-shows-its-fill`, a wait-for graph (writing -> a full in-chan -> its reader's park site) finds the cycle, and the blocked row names it.",
              :kind :work,
              :needs #{"jolt.async/a-channel-shows-its-fill"},
              :proofs
              #{jolt.flow-test/ping-names-the-port-a-proc-waits-on}}
  #:seon.task{:name "no-timeout-in-the-proc-loop",
              :plan
-             "Seen (reading flow/impl.clj proc): a :compute step is futurized and .get with compute-timeout-ms 5000; past it the step throws TimeoutException to the error chan, its message is lost, and the step keeps running on the pool. finish-outputs! bounds each output put at stop by 1000 ms and drops past it. Both are clocks standing in for a dependency (AGENTS.md 'Mistakes'). Correct: a :compute step is awaited (the loop's fiber parks on the future); a slow step is visible through ping (a park site of {:computing since}) and is a fact if anyone asks, not an exception.",
+             "What exists (flow/impl.clj proc): a :compute step is futurized and .get with compute-timeout-ms 5000; past it the step throws TimeoutException to the error chan, its message is lost, and the step keeps running on the pool. finish-outputs! bounds each output put at stop by 1000 ms and drops past it. Both are clocks standing in for a dependency (AGENTS.md §9). Correct: a :compute step is awaited (the loop's fiber parks on the future); a slow step is visible through ping (a park site of {:computing since}) and is a fact if anyone asks, not an exception.",
              :kind :work,
              :proofs
              #{jolt.flow-test/a-long-compute-step-completes-and-loses-nothing}}
  #:seon.task{:name "update-reports-a-message-a-stopped-proc-held",
              :plan
-             "Seen (e3_failure E3.4): update! restarting a proc whose state held a failed message lost that message, and the report said :lost {} (only dropped in-chans are counted). Correct: a proc's ::flow/stop transition may answer messages it held under ::flow/held, which update! puts back at the front of the new proc's in-chan (or counts in :lost when the in-port is gone).",
+             "Reproduction (prototype e3_failure): update! restarting a proc whose state held a failed message lost that message, and the report said :lost {} (only dropped in-chans are counted). Correct: a proc's ::flow/stop transition may answer messages it held under ::flow/held, which update! puts back at the front of the new proc's in-chan (or counts in :lost when the in-port is gone).",
              :kind :work,
              :proofs
              #{jolt.flow-test/a-restart-keeps-the-held-message}}]
