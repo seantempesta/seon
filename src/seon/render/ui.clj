@@ -802,7 +802,7 @@
 
 (defn task-box
   "A task: its kind and execution, its plan (accumulated along its needs), instructions, what
-  is wrong (its problem, failure, blocked fact), its needs and proofs, and its evidence."
+  is wrong (its problem, failure, budget-spent fact), its needs and proofs, and its evidence."
   {:malli/schema [:=> [:cat :seon.task/task :seon.render/env] :seon.render/out]}
   [t _]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)]
@@ -815,7 +815,7 @@
       (when-let [{:keys [reason counterexample attempt]} (:seon.task/failure t)]
         [:p {:class "err"} "failed" (when attempt (str " in " attempt)) ": " reason (when counterexample (list " · counterexample " [:code counterexample]))])
       (when-let [{:keys [cause blocks]} (:seon.task/stuck t)]
-        [:p {:class "warn"} "blocked: " cause (when (seq blocks) (str " · blocks " (str/join ", " (sort blocks))))])
+        [:p {:class "warn"} "budget spent: " cause (when (seq blocks) (str " · blocks " (str/join ", " (sort blocks))))])
       (when (seq (:seon.task/needs t)) [:p {:class "muted"} "needs " (str/join ", " (sort (:seon.task/needs t)))])
       [:p {:class "muted"} (str (count proofs) (if (= 1 (count proofs)) " proof: " " proofs: ")) (str/join " " (map str (sort-by str proofs)))]
       (when-let [ev (:seon.task/evidence t)]

@@ -462,7 +462,7 @@
     (let [text (:text (r/printed (with-meta failed-task {:seon.render/schema :seon.task/task}) 'result/h2))]
       (is (str/starts-with? text "task calc/add · work · held · needs calc/sub"))
       (is (str/includes? text "failed: add cannot be total over longs · counterexample (add Long/MAX_VALUE 1)"))
-      (is (str/includes? text "blocked: failed: held for root · blocks calc/div, calc/mul"))
+      (is (str/includes? text "budget spent: failed: held for root · blocks calc/div, calc/mul"))
       (testing "a long plan shows whole under the REPL's reply budget"
         (is (str/includes? text "Step 399")))
       (testing "(the part budget when the env names none)"
@@ -471,10 +471,10 @@
         (is (str/includes? text "12 proofs: app.proofs/add-0-test"))
         (is (str/includes? text "+4 more: (get-in result/h2 [:seon.task/accumulated :proofs])")))
       (is (str/includes? text "evidence: {:from \"calc/add#2\""))))
-  (testing "the page's task box shows the failure and the blocked fact too"
+  (testing "the page's task box shows the failure and the budget-spent fact too"
     (let [html (h/html (r/html failed-task {:seon.render/schema :seon.task/task}))]
       (is (str/includes? html "failed in calc/add#2: add cannot be total over longs"))
-      (is (str/includes? html "blocked: failed: held for root · blocks calc/div, calc/mul")))))
+      (is (str/includes? html "budget spent: failed: held for root · blocks calc/div, calc/mul")))))
 
 (deftest an-attempt-reads-in-one-line
   (is (= "running calc/add#1 on a3, turn 2, 1840 tokens"
@@ -497,7 +497,7 @@
     (is (= "task-conflict calc/add calc/add#3 plan: {:base \"Make add.\", :ours \"Make add total.\", :theirs \"Make add pass.\"}"
            (line :task-conflict {:task "calc/add" :attempt "calc/add#3" :attr :plan :open? true
                                  :evidence {:task "calc/add" :attr :plan :base "Make add." :ours "Make add total." :theirs "Make add pass." :from "calc/add#3"}})))
-    (is (= "blocked calc/add calc/add#2: failed: held for root · blocks calc/div, calc/mul"
+    (is (= "budget spent calc/add calc/add#2: failed: held for root · blocks calc/div, calc/mul"
            (line :stuck {:task "calc/add" :attempt "calc/add#2" :cause "failed: held for root" :blocks ["calc/div" "calc/mul"]})))
     (is (= "failed calc/add calc/add#2: add cannot be total over longs"
            (line :failed {:task "calc/add" :attempt "calc/add#2" :reason "add cannot be total over longs" :counterexample "(add Long/MAX_VALUE 1)"})))
@@ -513,7 +513,7 @@
                                           :red {:n 0 :rows []}}}
                 {:seon.render/schema :seon.problems/report})
           text (:text (r/printed rep 'result/h1))]
-      (is (= ["problems recorded on main at t 90" "# failed 1" "- failed calc/add: not total" "# blocked 1" "- blocked calc/sub: held (closed)"
+      (is (= ["problems recorded on main at t 90" "# failed 1" "- failed calc/add: not total" "# budget spent 1" "- budget spent calc/sub: held (closed)"
               "the whole value as data: (with-meta result/h1 nil)"]
              (str/split-lines text))))))
 

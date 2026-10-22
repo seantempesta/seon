@@ -100,7 +100,7 @@
 
 (defn task
   "A task as an agent or root reads it: its id, kind, desired execution, needs, branch and
-  model, what is wrong with it (its problem, failure and blocked fact), its plan
+  model, what is wrong with it (its problem, failure and budget-spent fact), its plan
   (accumulated along its needs) as prose whose cut names the form that reads the rest, its
   instructions, proofs and evidence, every other key it carries, and the form that reads
   the whole."
@@ -121,7 +121,7 @@
        (when (:seon.task/problem t) (cat-parts [["problem: " false] (line (:seon.task/problem t) (read-of env :seon.task/problem))]))
        (when reason (cat-parts [["failed: " false] (line reason (read-of env [:seon.task/failure :reason]))
                                 (when counterexample (cat-parts [[" · counterexample " false] (line counterexample (read-of env [:seon.task/failure :counterexample]))]))]))
-       (when cause (cat-parts [["blocked: " false] (line cause (read-of env [:seon.task/stuck :cause]))
+       (when cause (cat-parts [["budget spent: " false] (line cause (read-of env [:seon.task/stuck :cause]))
                                (when (seq blocks) (cat-parts [[" · blocks " false] (names-part (sort blocks) :seon.config.render.list/rows (read-of env [:seon.task/stuck :blocks]))]))]))
        (when plan (cat-parts [["plan: " false] (prose-part plan (or (:seon.render/budget env) (part-budget))
                                                            (read-of env (if acc [:seon.task/accumulated :plan] :seon.task/plan)) false)]))
@@ -151,9 +151,10 @@
        (n :seon.attempt/uncontracted "without a contract")])))
 
 (defn- class-word
-  "A problem class as its line says it: the stored class :stuck reads as blocked (AGENTS §7a)."
+  "A problem class as its line says it: the stored class :stuck reads as budget spent (owner's
+  ruling, 2026-10-22; :blocked is a task waiting on its needs)."
   {:malli/schema [:=> [:cat [:maybe :keyword]] :string]}
-  [c] (if (= :stuck c) "blocked" (ui/kname c)))
+  [c] (if (= :stuck c) "budget spent" (ui/kname c)))
 
 (defn problem-row
   "One problem row (seon.problems/report), :class (and its class's open count :n) assoc'd by
