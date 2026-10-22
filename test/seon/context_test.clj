@@ -443,13 +443,15 @@
                                               ['geo/defg "(defmacro defg [n] `(wrap ~n))" '[geo/wrap]]
                                               ['geo/wrap "(defn wrap [x] x)" []]
                                               ['geo/plumb "(defn plumb [f] f)" []]
-                                              ['geo/u1 "(defn u1 [] (plumb 1))" '[geo/plumb]]
-                                              ['geo/u2 "(defn u2 [] (plumb 2))" '[geo/plumb]]
-                                              ['geo/vol "(defn vol [r h] (* h (sq r)))" '[geo/sq geo/area]]
+                                              ['geo/vol "(defn vol [r h] (* h (sq r)))" '[geo/sq geo/area geo/plumb]]
                                               ['geo/sq "(defn sq [x] (* x x))" []]
                                               ['geo/pi "(def pi 3.14)" []]
-                                              ['geo-test/vol-test "(deftest vol-test (is (= 2 (vol 1 1))))" '[geo/vol geo/pi]]]
-                                             (for [h helpers] [h (str "(defn " (name h) " [] 0)") []]))))
+                                              ['geo-test/vol-test "(deftest vol-test (is (= 2 (vol 1 1))))" '[geo/vol geo/pi geo/plumb]]]
+                                             (for [h helpers] [h (str "(defn " (name h) " [] 0)") []])
+                                             ;; plumb is the program's plumbing: as many more forms name it as the
+                                             ;; seed's program holds (seon.contract/checked: 864 of about 1,700)
+                                             (for [i (range (max 8 (count (d/datoms (pdb/test-db) :aevt :form/id))))]
+                                               [(symbol "geo" (str "u" i)) (str "(defn u" i " [] (plumb " i "))") '[geo/plumb]]))))
         db (d/db-with db [{:var/name 'geo/defg :var/kind :macro}])
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'geo :seon.task/name "v" :seon.task/plan "Make `geo/vol` right; see `geo/area`."
                                                :seon.task/proofs #{'geo-test/vol-test}}]))
@@ -457,7 +459,7 @@
     (is (= ['geo/pi 'geo/sq 'geo/h0 'geo/h1 'geo/h2] (mapv :symbol (butlast fs)))
         "pi (called by area and the proof) and sq (by area and vol) first, then the most specific; area and vol are named")
     (is (= "+2 more: (my.agent/callees 'ns/f) of each cited var" (last fs))
-        "what it left and how to read it: wrap and plumb, called from more of the program, rank after the specific helpers")
+        "what it left and how to read it: wrap and plumb (called by three of the sources, and across the program) rank after the specific helpers")
     (is (not-any? #{'geo/defg} (map :symbol (butlast fs))) "a macro is no helper")
     (is (not-any? #{'clojure.core/*} (map :symbol (butlast fs))) "only program functions")))
 

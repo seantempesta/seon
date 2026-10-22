@@ -66,9 +66,10 @@
   (let [pairs (d/q '[:find ?s ?r :in $ [?s ...] :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r] [?v :var/name ?r] [?v :var/form _]]
                    db sources)
         macro? #(= :macro (:var/kind (d/entity db [:var/name %])))
-        ;; tf-idf: called by more of the sources, and by fewer forms of the program (a defn's
-        ;; contract plumbing is named by every contracted form, so it sinks)
-        score (fn [[r k]] (/ k (Math/log (+ 2 (count (d/datoms db :avet :form/refs r))))))
+        ;; tf-idf: called by more of the sources (k), and by fewer of the program's n forms (a
+        ;; defn's contract plumbing is named by every contracted form, so it sinks)
+        n (count (d/datoms db :aevt :form/id))
+        score (fn [[r k]] (* k (Math/log (/ n (inc (count (d/datoms db :avet :form/refs r)))))))
         hits (->> pairs (map second) (remove #(or (named %) (macro? %))) frequencies
                   (sort-by (juxt (comp - score) (comp str key))) (mapv key))
         [shown more] (print/bounded hits :seon.config.render/found "(my.agent/callees 'ns/f) of each cited var")]
