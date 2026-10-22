@@ -8,7 +8,8 @@
             [seon.task :as task]
             [seon.reconcile :as r]
             [seon.template :as tpl] [seon.problems :as problems] [seon.merge :as pm] [seon.sock :as sock] [clojure.edn] [seon.contract :as contract]
-            [clojure.string :as str] [clojure.set] [seon.config :as cfg]))
+            [clojure.string :as str] [clojure.set] [seon.config :as cfg]
+            [seon.program :as program] [seon.writer :as writer] [seon.turn :as turn] [clojure.core.async :as a]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -26,7 +27,7 @@
   [nm n status & {:keys [boot model results outcome conflicts unmerged changed plan] :or {boot "boot-1" plan (str "Make " nm " true.")}}]
   (let [id (str "demo/" nm) aid (str id "#" n)]
     (into (task/attempt-start-tx aid id boot (keyword (str "a-" nm n))
-                                 {:branch (task/default-branch id) :model model :max-turns r/default-max-turns} 1000 plan)
+                                 {:branch (task/default-branch id) :model model :max-turns (cfg/value :seon.config.agent/max-turns)} 1000 plan)
           [(cond-> {:seon.attempt/id aid :seon.attempt/status status}
              results (assoc :seon.attempt/results (vec (for [[t s] results] {:seon.proof/test t :seon.proof/status s})))
              outcome (assoc :seon.attempt/outcome outcome)
@@ -48,7 +49,7 @@
 (defn- merged [nm] (attempt nm 1 :merged))
 (defn- spawn [nm n & {:keys [model]}]
   {:op :spawn :task (str "demo/" nm) :attempt (str "demo/" nm "#" n)
-   :env {:branch (task/default-branch (str "demo/" nm)) :model model :max-turns r/default-max-turns}})
+   :env {:branch (task/default-branch (str "demo/" nm)) :model model :max-turns (cfg/value :seon.config.agent/max-turns)}})
 (defn- t [nm] (symbol "demo-test" (str nm "-test")))
 
 (deftest task-state-is-what-happened
@@ -134,7 +135,7 @@
     (concat (merged "a") (attempt "b" 1 :ended :outcome :green :results {(t "a") :fail (t "b") :pass}))
     [{:op :attach :attempt "demo/b#1" :task "demo/b" :problem "attempt demo/b#1 ended green: proof-red demo-test/a-test"}
      {:op :spawn :task "demo/c" :attempt "demo/c#1"
-      :env {:branch :task-demo-c :model nil :max-turns r/default-max-turns}}]
+      :env {:branch :task-demo-c :model nil :max-turns (cfg/value :seon.config.agent/max-turns)}}]
     ;; a stray red: a red test that is no task's proof
     (attempt "a" 1 :ended :outcome :green :results {(t "a") :pass 'demo-test/other :error})
     [{:op :attach :attempt "demo/a#1" :task "demo/a" :problem "attempt demo/a#1 ended green: stray-red demo-test/other"}]
@@ -149,10 +150,53 @@
   ;; task seon.model/budgets-are-data-and-spend-is-measured: the agent wrote no end (it died
   ;; or was killed before end!), so its turns, tokens and time are unknown: absent, never 0
   (let [db (db-of diamond :extra (attempt "a" 1 :running))
-        tx (#'r/judge-tx {:db db :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:attempt "demo/a#1" :task "demo/a"}} {} {:db db :base db} #{})
+        tx (#'r/judge-tx {:db db :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:attempt "demo/a#1" :task "demo/a"}} {} {:db db :base db} {:ours [] :uncontracted [] :unmerged []})
         ended (first (filter #(and (map? %) (= "demo/a#1" (:seon.attempt/id %)) (:seon.attempt/outcome %)) tx))]
     (is (= :no-end (:seon.attempt/outcome ended)))
     (is (= #{} (set (filter #{:seon.attempt/turns :seon.attempt/model-calls :seon.attempt/tokens :seon.attempt/ms} (keys ended)))))))
+
+(defn- fn-tx
+  "A recorded definition of fn app.gaps/nm (as seon.program/record-tx writes it), with its
+  contract c or none."
+  [db nm c]
+  (program/record-tx db {:id (str "app.gaps/" nm (when c "-contracted")) :src (str "(defn " nm (when c (str " {:malli/schema " c "}")) " [x] x)")
+                         :ns 'app.gaps :ns-form? false :defs [(cond-> {:var (symbol "app.gaps" nm) :kind :fn} c (assoc :contract c))]
+                         :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}}))
+
+(deftest the-judge-and-the-merge-gate-agree-on-contract-gaps
+  ;; one question, asked by the agent's done check (seon.turn), the writer's diff that root's
+  ;; judge reads, and the merge gate: which functions the BRANCH adds without a contract. A
+  ;; branch behind a main that fixed its own gap after the fork still holds main's old
+  ;; uncontracted g; that gap is main's, not the branch's (the judge used to refuse it while
+  ;; the gate took the branch). With contracts off (seon.contract/on? false, a process
+  ;; setting) all three answer none: they ask the one function, seon.merge/uncontracted.
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [c "[:=> [:cat :int] :int]"
+           _ (d/transact conn (fn-tx @conn "g" nil))
+           ab (pdb/on-main (:branch cfg) :gaps)
+           _ (d/branch! conn (:branch cfg) ab)
+           base @conn
+           _ (d/transact conn (fn-tx @conn "g" c))
+           bc (d/connect (assoc cfg :branch ab))]
+       (try
+         (d/transact bc (fn-tx @bc "u" nil))
+         (let [w (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 4) :events (a/chan 4)})
+               ask (fn [req] (:r (first (:to-api (second (#'writer/writer-proc w :in (assoc req :dest {:rid 1})))))))
+               diff (ask {:op :branch-diff :branch ab})
+               gate (ask {:op :merge :branch ab})
+               judged (first (filter #(and (map? %) (:seon.attempt/outcome %))
+                                     (#'r/judge-tx {:db @conn :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:attempt "demo/a#1" :task "demo/a"}} {}
+                                                   {:db @bc :base base} diff)))]
+           (is (= #{'app.gaps/u} (#'turn/added-gaps base @bc)) "the agent's done check")
+           (is (= '[app.gaps/u] (:uncontracted diff)) "the writer's diff")
+           (is (= '#{app.gaps/u} (set (:seon.attempt/uncontracted judged))) "root's judge: g is main's gap, fixed on main")
+           (is (= :seon.merge/behind (:seon.error/type gate)) "the gate: behind first, its gaps judged once main merges in"))
+         (finally (d/release bc)))))))
+
+(deftest an-attempt-without-an-end-reads-nil
+  ;; no end written (a silent death) is nothing to read, not an empty end
+  (is (nil? (r/pull-end (db-of diamond :extra (attempt "a" 1 :running)) "demo/a#1"))))
 
 (deftest a-death-names-its-cause
   ;; task seon.agent/a-death-names-its-cause: a dead agent's attempt carries the end it wrote
@@ -169,15 +213,40 @@
         (is (= "boom" (get-in (err tx) [:cause :seon.error/message])))
         (is (= {:exit 70} (:exit (err tx))))))
     (testing "a silent death: named by its exit"
-      (let [tx (#'r/dead-tx "demo/a#1" (assoc died :exit {:signal 9} :seon.error/message "agent a1 died: signal 9") {})]
+      (let [tx (#'r/dead-tx "demo/a#1" (assoc died :exit {:signal 9} :seon.error/message "agent a1 died: signal 9") nil)]
         (is (= "agent a1 died: signal 9" (:seon.attempt/reason (row tx))))
         (is (= {:signal 9} (:exit (err tx))))))
     (testing "the turn loop threw and the agent lives: its error is the attempt's reason"
       (let [db (db-of diamond :extra (attempt "a" 1 :running))
             tx (#'r/judge-tx {:db db :boot "boot-1" :rid 0 :flights {} :pending {}}
-                             {:act {:attempt "demo/a#1" :task "demo/a"} :worked-error cause} {} {:db db :base db} #{})]
+                             {:act {:attempt "demo/a#1" :task "demo/a"} :worked-error cause} {} {:db db :base db} {:ours [] :uncontracted [] :unmerged []})]
         (is (= "seon.turn/work! threw: boom" (:seon.attempt/reason (row tx))))
         (is (= "boom" (:seon.error/message (err tx))))))))
+
+(deftest an-agent-dead-in-its-turn-loop-records-its-cause
+  ;; root answers the turn loop's eval with the death itself (the one error map, no eval
+  ;; item): the flight reads the branch's end next and keeps the death, exit and stderr,
+  ;; rather than asking the dead agent for tests and recording "no live agent"
+  (let [died (contract/error :seon.agent/died 'seon.root/api-proc "agent a1 died: exit 70" {:agent :a1 :exit {:exit 70}})
+        st {:db (db-of [(decl "a")]) :boot "boot-1" :rid 0 :pending {}
+            :flights {"demo/a#1" {:act {:attempt "demo/a#1" :task "demo/a" :env {:branch :demo/a}} :agent :a1 :step :worked}}}
+        [st' outs] (#'r/advance st "demo/a#1" :worked died)]
+    (is (= died (get-in st' [:flights "demo/a#1" :died])) "the death is the flight's cause")
+    (is (= [{:op :write :req {:op :branch-db :branch :demo/a}}] (mapv :req outs)) "its end is read from the branch next")))
+
+(deftest a-refused-diff-ends-the-attempt-with-its-cause
+  ;; the writer refuses to diff the branch: the attempt is not judged on facts nobody
+  ;; measured (no changed keys, no gaps); its agent is stopped and the attempt ends with the
+  ;; refused answer as its error, the read not asked again
+  (let [no (contract/error :seon.writer/refused 'seon.writer/writer-proc "no branch :demo/a" {})
+        st {:db (db-of [(decl "a")]) :boot "boot-1" :rid 0 :pending {}
+            :flights {"demo/a#1" {:act {:attempt "demo/a#1" :task "demo/a" :env {:branch :demo/a}} :agent :a1 :step :diffed}}}
+        [st' outs] (#'r/advance st "demo/a#1" :diffed no)]
+    (is (= {:op :kill :id :a1 :ended true} (:req (first outs))))
+    (is (= [[:db/cas [:seon.attempt/id "demo/a#1"] :seon.attempt/status :running :ended]
+            {:seon.attempt/id "demo/a#1" :seon.attempt/reason "no branch :demo/a" :seon.attempt/error no}]
+           (update (get-in (second outs) [:req :req :tx-data]) 1 dissoc :seon.attempt/end-ms)))
+    (is (= :done (get-in st' [:pending (:tag (second outs)) 1])) "its flight ends with the write")))
 
 (deftest an-ended-attempt-of-a-cancelled-task-is-closed
   (is (= [{:op :close :attempt "demo/a#1"}]
@@ -237,7 +306,7 @@
     (cond-> db (seq extra) (d/db-with extra))))
 
 (defn- mspawn [nm n] {:op :spawn :task (str "demo/" nm) :attempt (str "demo/" nm "#" n)
-                      :env {:branch (task/default-branch (str "demo/" (str/replace nm #"-merge$" ""))) :model nil :max-turns r/default-max-turns}})
+                      :env {:branch (task/default-branch (str "demo/" (str/replace nm #"-merge$" ""))) :model nil :max-turns (cfg/value :seon.config.agent/max-turns)}})
 
 (deftest plan-and-proofs-accumulate-along-needs
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])])
@@ -293,7 +362,7 @@
   ;; DECISIONS: octopus merges stay off (one merge at a time) until the octopus merge's combined test run
   ;; and the par-200 hang are fixed; the config value in force is a fact on main a person can read
   (let [db (d/db-with (empty-db) (into (task/boot-tx "boot-1" 4) (cfg/facts cfg/config {})))]
-    (is (= 1 r/default-max-merging))
+    (is (= 1 (cfg/value :seon.config.merge/max-running)))
     (is (= {:boot "boot-1" :max-running 4 :max-merging 1} (task/root db)) "both config keys are recorded at boot")))
 
 (deftest two-ready-disjoint-merges-run-one-at-a-time-by-default
@@ -385,7 +454,7 @@
         (is (= #{"demo/a-r1-merge"} (:seon.task/needs (task/task db' "demo/b")))))
       (testing "the next pass starts only the design task, as a new attempt; nothing relaunches the old attempts"
         (is (= [{:op :spawn :task "demo/a-r1-design" :attempt "demo/a-r1-design#1"
-                 :env {:branch (:seon.task/branch (first ts)) :model nil :max-turns r/default-max-turns}}]
+                 :env {:branch (:seon.task/branch (first ts)) :model nil :max-turns (cfg/value :seon.config.agent/max-turns)}}]
                (r/reconcile db')))))))
 
 (deftest a-capped-attempt-attaches-a-refinement-not-a-hold
@@ -401,7 +470,7 @@
     (is (= 1 (:seon.task/generation (task/task db' "demo/add-r1-design"))))
     (is (= "attempt demo/add#1 ended cap: proof-red demo-test/add-test" (:problem (:seon.task/evidence (task/task db' "demo/add-r1-design")))))
     (is (= [{:op :spawn :task "demo/add-r1-design" :attempt "demo/add-r1-design#1"
-             :env {:branch :task-demo-add-r1 :model nil :max-turns r/default-max-turns}}]
+             :env {:branch :task-demo-add-r1 :model nil :max-turns (cfg/value :seon.config.agent/max-turns)}}]
            (r/reconcile db')))
     (testing "a chain task's own failure refines from the same stem, one generation on"
       (let [db2 (d/db-with db' (concat (attempt "add-r1-design" 1 :done)
@@ -541,7 +610,7 @@
   (let [main (db-of [(decl "a")] :extra (attempt "a" 1 :running))
         f {:reason "the premise is refuted" :counterexample "(= 1 2)" :attempt "demo/a#1"}
         branch (d/db-with main [{:seon.task/id "demo/a" :seon.task/failure f}])
-        judge #(#'r/judge-tx {:db main :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:attempt "demo/a#1" :task "demo/a"}} {} {:db % :base main} #{})
+        judge #(#'r/judge-tx {:db main :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:attempt "demo/a#1" :task "demo/a"}} {} {:db % :base main} {:ours [] :uncontracted [] :unmerged []})
         judged (d/db-with main (judge branch))
         idx (r/index judged)]
     (is (= :held (:seon.task/execution (task/task judged "demo/a"))) "held for root, without a merge")
@@ -567,7 +636,7 @@
                                 {:seon.task/id "demo/c" :seon.task/plan "c, the branch's"}])
         main (d/db-with base [{:seon.task/id "demo/c" :seon.task/plan "c, main's"}])
         judged (d/db-with main (#'r/judge-tx {:db main :boot "boot-1" :rid 0 :flights {} :pending {}}
-                                             {:act {:attempt "demo/a#1" :task "demo/a"}} {} {:db branch :base base} #{}))
+                                             {:act {:attempt "demo/a#1" :task "demo/a"}} {} {:db branch :base base} {:ours [] :uncontracted [] :unmerged []}))
         conflict {:task "demo/c" :attr :seon.task/plan :base "Make c true." :ours "c, the branch's" :theirs "c, main's"}]
     (is (= "b, as a's agent learned it" (:seon.task/plan (task/task judged "demo/b"))) "another task's edit reaches main at the attempt's end")
     (is (= "Make a true." (:seon.task/plan (task/task judged "demo/a"))) "an unchanged task stays as main holds it")

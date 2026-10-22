@@ -29,7 +29,7 @@
   {:malli/schema [:=> [:cat :seon.root/sys :seon.task/declaration] :map]}
   [sys decl]
   (let [tx (tpl/request-tx @(:conn sys) decl)]
-    (if (:seon.error/type tx)
+    (if (contract/error? tx)
       tx
       (assoc @(root/transact-main! sys tx)
              :tasks (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) (tpl/request decl))))))

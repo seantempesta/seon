@@ -71,17 +71,18 @@
 
 (defn requests
   "A UI call as root's requests: [[req target-agent] ...]. Root's function is the request it
-  sends (seon.root/request; none when root refuses it); any other fn is an eval of it in
+  sends (seon.root/request; its refused answer when root refuses it); any other fn is an eval of it in
   the agent, through the allowlist (ui-call). index {agent {:pid :branch :status}}."
   {:malli/schema [:=> [:cat :seon.render/call :map] [:vector [:tuple :map [:maybe :keyword]]]]}
   [{f :var :keys [agent args forms]} index]
-  (let [one (fn [op id args] (let [r (c/request op id args (get index id))] (if (contract/error? r) [] [[r id]])))]
+  (let [one (fn [op id args] [[(c/request op id args (get index id)) id]])]
     (case f
       seon.root/spawn! (vec (repeat (min 100 (max 1 (or (:n args) 1))) [(c/request 'spawn! nil (cond-> {} (not (str/blank? (:task args))) (assoc :task (:task args))) nil) nil]))
       seon.root/submit! (cond (str/blank? forms) []
                               (= :all agent) (vec (for [[id a] (sort-by (comp str key) index) :when (not (c/gone-statuses (:status a)))] [(c/request 'submit! id {:forms forms :origin :ui} a) id]))
                               :else (one 'submit! agent {:forms forms :origin :ui}))
       ;; seon.root/interrupt! is no request: an effect on a process, performed by this proc
+      seon.root/interrupt! []
       (if (= "seon.root" (namespace f))
         (one (symbol (name f)) agent args)
         (one 'submit! agent {:origin :ui :forms (sedn/encode (list 'seon.web/ui-call (list 'quote f) (merge args (dissoc (:fields args) :forms))))})))))
@@ -232,7 +233,10 @@
                     :let [{f :var :keys [agent args forms]} c
                           form (when (= "seon.root" (namespace f))
                                  (sedn/encode (cond-> (list f) agent (concat [agent]) (seq args) (concat [args]) forms (concat [forms]))))]]
-              (step/out! o :to-api {:op :request :req req :route [:render :answers] :tag (cond-> [:web f target] form (conj form))}))
+              (let [tag (cond-> [:web f target] form (conj form))]
+                (if (contract/error? req)
+                  (step/out! o :to-render {:op :refused :tag tag :r req})
+                  (step/out! o :to-api {:op :request :req req :route [:render :answers] :tag tag}))))
             (update st :calls (fnil inc 0)))
     st))
 

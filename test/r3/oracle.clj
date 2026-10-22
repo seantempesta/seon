@@ -187,7 +187,7 @@
                        ;; the budget lasts; spent, its budget is spent (bail)
                        :else
                        {:op (if (< (:seon.task/generation t 0) (:seon.task/budget t default-budget)) :attach :bail) :attempt aid :task id
-                        :problem (str "attempt " aid " ended " (name (:seon.attempt/outcome a :error))
+                        :problem (str "attempt " aid " ended" (some->> (:seon.attempt/outcome a) name (str " "))
                                       (some->> (:seon.attempt/reason a) (str " (") (#(str % ")")))
                                       ": " (explain-text rs))}))))
         live-after (- (count (filter #(live? v %) all)) (count kills))

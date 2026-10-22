@@ -548,7 +548,7 @@
        (status-pill ag st)]
       (when-let [t (:task ag)] [:p {:class "task"} (prose t (one-line) {:href href})])
       (agent-stats ag total nil)
-      (when (:error ag) [:p {:class "err"} (prose (:error ag) (one-line))])
+      (when (:error ag) [:p {:class "err"} (prose (:seon.error/message (:error ag)) (one-line))])
       (when running [:p {:class "running" :title "evaluating now"} "▶ " [:code (prose (:form running) (cell) {:one-line? true :href href})]])
       (if last-e
         (let [[shown more] (print/bounded (rseq (vec evals)) :seon.config.render.list/newest "earlier evaluations on its page" total)]
@@ -611,7 +611,7 @@
     :merged (let [[k why] (merge-words (:result ev))] (if (= :merged k) why (str (str/upper-case (name k)) " · " (print/line why (cell)))))
     :tests (str (run-words ev) (when (:ms ev) (str " · " (ms-str (:ms ev)))))
     :merged-main (let [r (:result ev)]
-                   (if (:ok r) (str "main → branch · " (count (:applied r)) " applied · " (count (:conflicts r)) " conflicts")
+                   (if-not (contract/error? r) (str "main → branch · " (count (:applied r)) " applied · " (count (:conflicts r)) " conflicts")
                        (str "refused: " (print/line (:seon.error/message r) (cell)))))
     :fork-server-down (str "fork server pid " (:pid ev) " is gone · agents keep running")
     :fork-server-up (str "root forked a new fork server · pid " (:pid ev))
@@ -633,7 +633,7 @@
                (and (= :tests (:type ev)) (proofs/red? ev))
                (and (= :dead (:type ev)) (not (:ended-as ev)))
                (#{:fork-server-down :fork-server-lost} (:type ev))
-               (false? (get-in ev [:result :merged?]))
+               (contract/error? (:result ev))
                (and (= :ui (:type ev)) (some? (:error ev))))))
 
 (defn event-row

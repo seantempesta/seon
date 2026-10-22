@@ -173,7 +173,7 @@
         [st o1] (end st {:op :ended :agent :a1 :rid nil :pid 77 :inflight [3]})
         ;; the caller is answered when the fork server reaps the child (its exit is the death's)
         _ (step st :from-fs {:ev :exit :pid 77 :status {:signal 9}})
-        died (:err (first @p))]
+        died @p]
     (testing "the caller in flight is answered with the death as the one error map, once its exit is known"
       (is (= :seon.agent/died (:seon.error/type died)))
       (is (contract/valid? :seon.agent/died died))
@@ -204,12 +204,13 @@
     (testing "a task's agent: its attempt records its reds at its end, not root"
       (is (= [] (written (step (api view) :back {:op :status :agent :a2 :set {:tests red}})))))
     (testing "a merge the writer refused is recorded as the writer's refused answer"
-      (let [r (contract/error :seon.merge/behind 'seon.writer/merge-branch "main changed 2 key(s)" {:merged? false :tx 1 :behind 2})]
+      (let [r (contract/error :seon.merge/behind 'seon.writer/merge-branch "main changed 2 key(s)" {:tx 1 :behind 2})]
         (is (= [[:agent :seon.merge/behind "main changed 2 key(s)" :a1]]
                (written (step (api view) :from-writer {:dest {:merged :a1 :rid 5} :r r}))))))
     (testing "a refused spawn, of any agent"
       (is (= [[:agent :seon.agent/failed "fork server went down before the fork" :a2]]
-             (written (step (api view) :back {:op :status :agent :a2 :set {:error "fork server went down before the fork"}})))))))
+             (written (step (api view) :back {:op :status :agent :a2
+                                              :set {:error (contract/error :seon.agent/failed 'seon.root/spawn! "fork server went down before the fork" {:agent :a2})}})))))))
 
 (deftest a-stall-is-observed-by-the-agent-proc
   (let [end {:in (a/chan 4) :out (a/chan 16)}
@@ -287,7 +288,7 @@
       (is (= [] (:answered-by e)))
       (is (some? s)))
     (testing "a merge: its conflicts, unmerged keys and the writer's refused answer, as evidence"
-      (let [behind (contract/error :seon.merge/behind 'seon.writer/merge-branch "main changed 2 key(s)" {:merged? false :behind 2})
+      (let [behind (contract/error :seon.merge/behind 'seon.writer/merge-branch "main changed 2 key(s)" {:behind 2})
             db2 (:db-after (d/with db [{:seon.task/id "t/m" :seon.task/ns 't :seon.task/name "m" :seon.task/plan "p" :seon.task/execution :running
                                          :seon.task/branch :b :seon.task/kind :merge}
                                         {:seon.attempt/id "t/m#1" :seon.attempt/task [:seon.task/id "t/m"] :seon.attempt/boot "b" :seon.attempt/agent :a2
