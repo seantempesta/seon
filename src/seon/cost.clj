@@ -132,13 +132,13 @@
 ;; ---- measuring ----------------------------------------------------------------------------
 
 (defn- once
-  "One call of f on args: its wall ns, allocated bytes and contracted calls (calls only
+  "One call of f on args: its ns of this thread's CPU, the bytes this thread allocated, and contracted calls (calls only
   when the contracts are on: seon.profile counts armed functions)."
   {:malli/schema [:=> [:cat :seon.host/fn [:sequential :any]] :seon.cost/dims]}
   [f args]
-  (let [a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/now-ns)
+  (let [a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/cpu-ns)
         _ (apply f args)
-        t1 (profile/now-ns) c (profile/calls) a1 (profile/alloc-bytes)]
+        t1 (profile/cpu-ns) c (profile/calls) a1 (profile/alloc-bytes)]
     (cond-> {:ns (double (- t1 t0)) :bytes (double (- a1 a0))}
       contract/on? (assoc :calls (double c)))))
 

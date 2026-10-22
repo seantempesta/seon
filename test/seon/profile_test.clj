@@ -2,7 +2,7 @@
   "seon.profile: every contracted call counted exactly, one in 64 timed, read per epoch."
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :as contract :refer [defn defn-]]
-            [seon.profile :as profile] [seon.repl :as repl] [seon.agent :as agent] [jolt.ffi :as ffi]))
+            [seon.profile :as profile] [seon.cost] [seon.repl :as repl] [seon.agent :as agent] [jolt.ffi :as ffi]))
 
 (defn- leaf {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))
 
@@ -77,3 +77,32 @@
         empty-loop (bytes #(dotimes [_ n] nil))
         reads (bytes #(dotimes [_ n] (profile/now-ns)))]
     (is (<= (- reads empty-loop) 1024) (str n " reads allocated " reads " bytes, an empty loop " empty-loop))))
+
+(defn- allocating-thread
+  "A thread allocating until stop is set (a vector of 100 longs, again and again). Answers [thread stop]."
+  []
+  (let [stop (atom false)
+        t (Thread. ^Runnable (fn [] (loop [] (when-not @stop (dotimes [_ 1000] (vec (range 100))) (recur)))))]
+    (.start t)
+    [t stop]))
+
+(deftest a-threads-allocation-is-its-own
+  ;; task seon.cost/a-proof-measures-only-its-own-thread: alloc-bytes counted the whole
+  ;; process (1,712 B idle against 1.4 GB in 200 ms while another thread allocated), so a cost
+  ;; proof read other threads' work as its own. Now it is the calling thread's count alone.
+  (let [window #(let [a0 (profile/alloc-bytes) _ (Thread/sleep 200)] (- (profile/alloc-bytes) a0))]
+    (is (< (window) 65536) "idle, the caller allocates next to nothing")
+    (let [[t stop] (allocating-thread)]
+      (try (Thread/sleep 50)
+           (let [w (window)] (is (< w 65536) (str "another thread allocating moves the caller's count by " w " B")))
+           (finally (reset! stop true) (.join ^Thread t))))
+    (let [a0 (profile/alloc-bytes) b (byte-array 1000000) a1 (profile/alloc-bytes)]
+      (is (<= 1000000 (- a1 a0) 1100000) (str "the caller's own " (count b) " bytes counted as " (- a1 a0))))))
+
+(deftest a-measure-is-the-same-beside-another-thread
+  ;; the measured call's bytes are the same alone and while another thread allocates
+  (let [f (fn [] (reduce + (map leaf (range 1000))))
+        alone (seon.cost/measure f [])
+        [t stop] (allocating-thread)
+        beside (try (Thread/sleep 50) (seon.cost/measure f []) (finally (reset! stop true) (.join ^Thread t)))]
+    (is (<= (:bytes beside) (* 1.25 (max 1.0 (:bytes alone)))) (str "alone " alone ", beside " beside))))
