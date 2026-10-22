@@ -258,10 +258,10 @@
 (defn collect!
   "Collect the store under conn (datahike.api/gc-storage: every key no branch reaches, nodes
   and values out of line, is swept) when a branch the last record saw is gone (main's
-  :seon.root/collected), or no record exists yet: the record to write, {:swept :ms :branches
-  :gone}. With none gone but branches made since, the record of them, nothing swept, so a
-  branch seen at one quiescence and gone at a later one is reclaimed; {:skipped true} when the
-  branches are the ones recorded. Only while no
+  :seon.root/collected): the record to write, {:swept :ms :branches :gone}. With no record yet
+  (a new main) or none gone but branches made since, the record of what is here, nothing swept,
+  so a branch seen at one quiescence and gone at a later one is reclaimed; {:skipped true} when
+  the branches are the ones recorded. Only while no
   other process writes the store (owner, 2026-10-22, simplest first): root's writer runs it
   (:collect) and root refuses it while an agent is live (docs/storage.md#collection)."
   {:malli/schema [:=> [:cat :seon.host/conn] [:or [:map [:skipped :boolean]] :seon.root/collected]]}
@@ -271,7 +271,10 @@
         gone (count (remove now (:branches last)))]
     (cond
       (and last (zero? gone) (= now (:branches last))) {:skipped true}
-      (and last (zero? gone)) {:swept 0 :ms 0.0 :branches now :gone 0}
+      ;; no record yet (a new main: every check step's) or nothing gone: record what is here,
+      ;; sweep nothing; a full sweep on a store of hundreds of branches held a check step's
+      ;; spawns behind root's writer for seconds (scale: 8.2 s to ready, 2026-10-22)
+      (zero? gone) {:swept 0 :ms 0.0 :branches now :gone 0}
       :else
       (let [t0 (System/nanoTime)
             swept @(d/gc-storage conn (java.util.Date. 0))]

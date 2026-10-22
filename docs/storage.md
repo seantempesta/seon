@@ -62,7 +62,7 @@ Measured on 5,006 real eval records: jfasl is the same size as EDN text (4.65 vs
 ## Collection
 
 Root collects the store while it is the store's only writer: at quiescence, with no agent live (owner, 2026-10-22, simplest first). The reconciler asks once per quiet spell (```seon.reconcile/quiet```), root refuses while an agent is live (`seon.root/api-proc`, `:collect`), and the writer runs ```seon.db/collect!```:
-- When a branch named in main's `:seon.root/collected` record is gone (or there is no record yet), it runs `datahike.api/gc-storage`. That sweeps every key no branch reaches: nodes, and the values out of line that the mark keeps while a tree reaches them.
+- When a branch named in main's `:seon.root/collected` record is gone, it runs `datahike.api/gc-storage`. A new main with no record yet only records the branches it sees: every check step boots a new main on one store of hundreds of branches, and a full sweep at its first quiescence held its spawns behind root's writer for seconds (scale 8.2 s to ready, 2026-10-22). That sweeps every key no branch reaches: nodes, and the values out of line that the mark keeps while a tree reaches them.
 - When branches were only added, it records them as seen and sweeps nothing. So a branch that exists at one quiescence and is gone at a later one gets reclaimed.
 - The record (`{:swept :ms :branches :gone}`) is committed on main through the writer's batch.
 

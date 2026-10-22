@@ -321,8 +321,9 @@
 
 (deftest a-collection-runs-when-a-branch-is-gone
   ;; seon.db/collect! (root's writer runs it, :collect, at quiescence when no agent is live:
-  ;; owner, 2026-10-22, simplest first): the first collection of a store sweeps and answers its
-  ;; record (:swept, the branches it saw); the same branches again: nothing; a branch made
+  ;; owner, 2026-10-22, simplest first): the first collection of a main records the branches it
+  ;; saw and sweeps nothing (every check step boots a new main on one store of hundreds of
+  ;; branches); the same branches again: nothing; a branch made
   ;; since is recorded as seen, nothing swept; once a branch named in the record is gone, its nodes and its values out of line are swept and
   ;; every live branch reads as before. A store on disk of this test's own, the last resort:
   ;; the in-memory store has no nodes to collect; removed at the end
@@ -334,9 +335,13 @@
         record! (fn [r] (when-not (:skipped r) (d/transact conn [{:seon.root/id :root :seon.root/collected r}])) r)]
     (try
       (d/transact conn [{:note/text "main's"}])
+      ;; garbage before the first collection: a branch made and deleted
+      (d/branch! conn :db :early)
+      (on :early #(d/transact % {:tx-data [{:seon.turn/id "att/e" :seon.turn/reply (slice @prose 3 3000)}]}))
+      (d/delete-branch! conn :early)
       (let [r1 (record! (pdb/collect! conn))]
         (is (= #{:db} (:branches r1)) "the first collection records the branches it saw")
-        (is (nat-int? (:swept r1))))
+        (is (zero? (:swept r1)) "and sweeps nothing: a new main must not hold its first work behind a full sweep"))
       (is (:skipped (pdb/collect! conn)) "the same branches: nothing to reclaim, nothing written")
       (d/branch! conn :db :gone)
       (on :gone #(d/transact % {:tx-data [{:seon.turn/id "att/0" :seon.turn/reply reply}]}))
