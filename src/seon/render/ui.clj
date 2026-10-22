@@ -600,6 +600,8 @@
                (str "cloned from " (kname (:cloned-from ev)) " · pid " (:pid ev))
                (str "forked in " (ms-str (:fork-ms ev)) (when (:pid ev) (str " · pid " (:pid ev)))))
     :ready (str "ready" (when (:start-ms ev) (str " in " (ms-str (:start-ms ev)))))
+    :started (str "began " (print/line (or (:form ev) "") 30))
+    :tests-started (str "test child forked · pid " (:pid ev))
     :killed (if (:ended-as ev) (str "stopped by root after its attempt ended " (kname (:ended-as ev))) "KILLED")
     :ended (str "stopped by root: its attempt ended" (when (:ended-as ev) (str " " (kname (:ended-as ev)))))
     :dead (if (:ended-as ev) (str "exited after its attempt ended " (kname (:ended-as ev))) "its process died")
