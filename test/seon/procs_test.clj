@@ -2,7 +2,7 @@
   "Every proc's step-fn, called as a plain function (no graph, no Flow), checked against
   its `:malli/schema` (seon.step/step-schema) and against what each arity must do.
   Run: bin/test seon.procs-test (proto/flow f2-final test/proto/procs_test.clj)"
-  (:require [clojure.test :refer [deftest is testing run-tests]]
+  (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is testing run-tests]]
             [malli.core :as m] [seon.contract]
             [clojure.core.async :as a] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec]
             [clojure.core.async.flow :as flow]
@@ -27,7 +27,7 @@
     (arity-0 v)))
 
 (deftest writer
-  (pdb/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
         t0 (:max-tx @conn)]
     (testing "a main transaction: committed once, its report to the reconciler, its commit to the fork server, its answer by dest"
@@ -56,7 +56,7 @@
   ;; paragraph): no window. A write is answered when committed in memory; the flusher parks
   ;; until something is unflushed, syncs once for everything committed so far, and says what it
   ;; covered; commits during a sync share the next one; an idle system never syncs.
-  (pdb/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? true :to-writer in :events (a/chan 16)})]
     (testing "the flusher syncs at once and tells the writer which commits it covered"
       (let [fl (#'writer/flusher-proc {:to-writer in :cfg cfg})
@@ -79,9 +79,9 @@
             (is (= [{:op :dirty :commits (:commits st3)}] (mapv #(select-keys % [:op :commits]) (:to-flusher outs))))))))))))
 
 (deftest reconciler
-  (pdb/test-branch! (fn [_ conn] (let [st (#'reconcile/reconciler-proc {:boot "b" :provider {:kind :scripted :script 'seon.fixtures/reply}})]
+  (ts/test-branch! (fn [_ conn] (let [st (#'reconcile/reconciler-proc {:boot "b" :provider {:kind :scripted :script 'seon.fixtures/reply}})]
     (testing "a main commit with no tasks: the reconciler reads it and starts nothing (quiescence: seon.reconcile-test)"
-      (let [[st outs] (step #'reconcile/reconciler-proc st :main {:t 7 :ops [] :db @conn :ns (sock/now-ns)})]
+      (let [[st outs] (step #'reconcile/reconciler-proc st :main {:t 7 :ops [] :db @conn :ns (profile/now-ns)})]
         (is (= 1 (:seen st)))
         (is (= :main-seen-us (:k (first (:to-api outs)))))
         (is (empty? (:flights st)))))
@@ -250,7 +250,7 @@
   "(f sys), sys's entrance answering every request with r (a stand-in for the api), on a
   branch of the test store deleted when f returns."
   [r f]
-  (pdb/test-branch! (fn [cfg conn] (let [ext (a/chan 4)]
+  (ts/test-branch! (fn [cfg conn] (let [ext (a/chan 4)]
     (a/go-loop [] (when-let [m (a/<! ext)] (deliver (:p m) r) (recur)))
     (f {:ext ext :cfg cfg :conn conn :graph nil})))))
 
@@ -281,7 +281,7 @@
     (is (= [[:in 4]] @inbox) "nothing is taken after stop")))
 
 (deftest the-fork-server-step
-  (pdb/test-branch! (fn [_ conn] (let [db @conn
+  (ts/test-branch! (fn [_ conn] (let [db @conn
         st (#'server/server-step {:db db :conn nil})]
     (testing "a main commit is applied to its replica"
       (let [rep (d/with db [{:note/text "z"}])

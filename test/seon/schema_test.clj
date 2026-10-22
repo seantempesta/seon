@@ -3,7 +3,7 @@
   2026-10-21): an agent changes a schema at its REPL with my.schema/register! (v1's
   seon.schema/register!), validated against the whole population, refused as data, written
   on its branch, and seen at once by the code it evaluates next."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.agent :as agent]
@@ -24,7 +24,7 @@
 (defn- main-db
   "A test branch with every schema resource imported, as a root's main holds them."
   []
-  (let [db (pdb/test-db)]
+  (let [db (ts/test-db)]
     (d/db-with db (source/import-tx db (schema-files)))))
 
 (defn- evals

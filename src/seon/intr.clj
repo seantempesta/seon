@@ -24,8 +24,6 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn- defchecked]] [jolt.scheme :as scm] [seon.lib :as lib]))
 
-(def SIGUSR1 lib/SIGUSR1)
-
 ;; The live bounded evals of this process, innermost first. The signal handlers run
 ;; on this (the only) thread at a Chez safe point and must find them; this is the
 ;; process's one interrupt cell.
@@ -57,9 +55,6 @@
 (defchecked ^:private install-kick* [:=> [:cat :int :seon.host/fn] :any]
   (scm/eval-string
     "(lambda (sig f) (register-signal-handler sig (lambda (s) (when (eq? #t (f)) (set-timer 1)))))"))
-;; without the one-tick kick: the token is seen at run-interruptible's next own poll
-(defchecked ^:private install-poll* [:=> [:cat :int :seon.host/fn] :any]
-  (scm/eval-string "(lambda (sig f) (register-signal-handler sig (lambda (s) (f))))"))
 
 ;; Outside any run-interruptible the engine timer has Chez's default handler, which
 ;; raises; a kick that lands just outside one (a token set between push and entry)
@@ -67,14 +62,13 @@
 (defchecked ^:private quiet-timer* [:=> [:cat] :any] (scm/eval-string "(lambda () (timer-interrupt-handler (lambda () (void))))"))
 
 (defn install!
-  "Register root's interrupt handler (a forked child inherits it). kick? (default true) arms
-  the engine timer for one tick when a token was newly set; false leaves it to the poll."
-  {:malli/schema [:function [:=> [:cat] :boolean] [:=> [:cat :boolean] :boolean]]}
-  ([] (install! true))
-  ([kick?]
-   (quiet-timer*)
-   ((if kick? install-kick* install-poll*) SIGUSR1 on-usr1)
-   true))
+  "Register root's interrupt handler (a forked child inherits it): it arms the engine timer
+  for one tick when a token was newly set, so the stop lands at once."
+  {:malli/schema [:=> [:cat] :boolean]}
+  []
+  (quiet-timer*)
+  (install-kick* lib/SIGUSR1 on-usr1)
+  true)
 
 (defn run
   "(thunk) under its own token, stopped by root's SIGUSR1 or once it has run ticks engine

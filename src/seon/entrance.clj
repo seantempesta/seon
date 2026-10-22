@@ -13,7 +13,7 @@
   printf '{:op :agents}\\n' | nc -w 5 127.0.0.1 PORT
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.reconcile :as r]
+  (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.reconcile :as r]
             [seon.lib :as lib] [seon.repl :as repl] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str]))
 
 (defn- refused
@@ -60,7 +60,7 @@
                     (binding [*sys* sys]
                       (repl/eval-string code {"ns" "root.repl" :origin :outside :ticks 0
                                               :repl/eval-fn (fn [form] (eval (list 'let '[sys seon.entrance/*sys*] form)))})))]
-    @(c/transact-main! sys (repl/record-tx :root (str "root-outside-" (lib/now-ns)) items nil))
+    @(c/transact-main! sys (repl/record-tx :root (str "root-outside-" (profile/now-ns)) items nil))
     items))
 
 (defn- attach!

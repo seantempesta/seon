@@ -76,3 +76,11 @@
                              "```" "```clojure\n" "```text\n" "\n```\n" "#{" "#(" "`" "~" "@" "^" ","])
         r (tc/quick-check 300 (prop/for-all [ps (gen/vector piece 0 40)] (laws-hold? (apply str ps))) :seed 42)]
     (is (:pass? r) (pr-str (get-in r [:shrunk :smallest])))))
+
+(deftest line-starts-are-each-lines-offset
+  (is (= [0] (reader/line-starts "")) "empty text is one line, at 0")
+  (is (= [0 4 5] (reader/line-starts "abc\n\nd")) "each line starts just past the newline before it")
+  (is (= [0 3] (reader/line-starts "ab\n")) "a trailing newline starts an empty last line")
+  (let [text "(ns a)\n(defn f [] 1)\n;; c\n"]
+    (is (= (str/split-lines text) (map #(subs text %1 (dec %2)) (reader/line-starts text) (rest (reader/line-starts text))))
+        "the text between two starts is the line, newline excluded")))

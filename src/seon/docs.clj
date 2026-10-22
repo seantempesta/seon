@@ -5,7 +5,7 @@
   resolved on the db (a link to a section, a name to a var), so its backlinks are who cites
   it. Loading writes only what differs from what main holds, as task files do."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.ref :as ref] [seon.task :as task]
+  (:require [seon.contract :refer [defn defn-]] [seon.ref :as ref] [seon.task :as task] [seon.db :as pdb]
             [datahike.api :as d] [clojure.string :as str] [clojure.java.io :as io]))
 
 ;; ---- one page, parsed into sections ----------------------------------------------------
@@ -57,7 +57,7 @@
                   [:maybe [:tuple :keyword :any]]]}
   [db dir stored loaded firsts {:seon.ref/keys [name path anchor]}]
   (cond
-    (symbol? name) (when-let [e (task/eid db :var/name name)] [:var e])
+    (symbol? name) (when-let [e (pdb/eid db :var/name name)] [:var e])
     (and path anchor) (let [a (str path "#" anchor)]
                         (if (or (loaded a) (and (not (under? dir a)) (stored a))) [:section a] [:missing a]))
     path (when-let [a (firsts path)] [:section a])))
@@ -118,7 +118,7 @@
   names, or nil."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :map]]}
   [db address]
-  (when (task/eid db :seon.section/address address)
+  (when (pdb/eid db :seon.section/address address)
     (let [s (d/pull db [:seon.section/address :seon.section/heading :seon.section/lead :seon.section/text
                         {:seon.section/parent [:seon.section/address]}
                         {:seon.section/references [:seon.section/address :var/name]}]
@@ -134,7 +134,7 @@
   wiki was written), and at :code its own text whole. nil when main holds no such section."
   {:malli/schema [:=> [:cat :seon.host/db :string :seon.ref/depth] [:maybe :seon.ref/view]]}
   [db address depth]
-  (when-let [e (task/eid db :seon.section/address address)]
+  (when-let [e (pdb/eid db :seon.section/address address)]
     (let [{:seon.section/keys [heading lead text]} (d/pull db [:seon.section/heading :seon.section/lead :seon.section/text] e)
           below (for [c (sort (d/q '[:find [?c ...] :in $ ?p :where [?c :seon.section/parent ?p]] db e))
                       :let [s (d/pull db [:seon.section/address :seon.section/heading] c)]]

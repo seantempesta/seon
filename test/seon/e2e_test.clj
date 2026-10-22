@@ -2,7 +2,7 @@
   "A run ends on what the system observes: quiescence, or a recorded defect (audit FENCES
   #26: a flight whose answer is lost never ends, so quiescence never comes; a root proc's
   defect recorded on main ends the wait instead). No clock."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.e2e :as e2e]
@@ -11,7 +11,7 @@
 
 
 (deftest await-quiet-ends-on-a-recorded-defect
-  (pdb/test-branch! (fn [_ c] (let [sys {:conn c}
+  (ts/test-branch! (fn [_ c] (let [sys {:conn c}
         t (:max-tx @c)
         start (System/currentTimeMillis)
         waiting (future (e2e/await-quiet sys t))]
@@ -24,7 +24,7 @@
       (is (= :defect (:ended r)))
       (is (= "seon.reconcile/reconciler-proc: boom" (get-in r [:problem :seon.error/message])) "the problem, as recorded"))
     (testing "quiescence ends it as before"
-      (pdb/test-branch! (fn [_ c] (let [t (:max-tx @c) waiting (future (e2e/await-quiet {:conn c} t))]
+      (ts/test-branch! (fn [_ c] (let [t (:max-tx @c) waiting (future (e2e/await-quiet {:conn c} t))]
         (d/transact c {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t (inc t) :stuck []}}]})
         (is (= {:t (inc t) :stuck []} (deref waiting)))))))))))
 
@@ -67,7 +67,7 @@
 (deftest turns-count-the-work-attempts
   (let [decls (tpl/with-merge (vec (for [nm ["a" "b" "c"]]
                                      {:seon.task/ns 'demo :seon.task/name nm :seon.task/plan "Make it true." :seon.task/proofs #{(symbol "demo-test" nm)}})))
-        empty-db (pdb/test-db)
+        empty-db (ts/test-db)
         db (d/db-with empty-db (task/create-tx empty-db decls))
         att (fn [id n status turns]
               (let [tid (str "demo/" id) branch (task/default-branch (str "demo/" (first (str/split id #"-"))))]

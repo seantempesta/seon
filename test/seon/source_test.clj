@@ -4,7 +4,7 @@
   account and its exact text, written back byte for byte, a merged change rewriting only
   its form, and the written files committed on the merges branch through the :git effect's
   performer. Never the live tree: write-back and commits go to a copy under target/."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell :as sh]
             [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
             [datahike.api :as d]
@@ -15,7 +15,7 @@
             [seon.source :as source]
             [seon.program-test :as pt]))
 
-(defn- empty-db [] (pdb/test-db))
+(defn- empty-db [] (ts/test-db))
 
 (def ^:private here (System/getProperty "user.dir"))
 

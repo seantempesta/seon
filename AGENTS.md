@@ -1,6 +1,6 @@
 # AGENTS.md: how we build Seon
 
-Seon is where many agents do real work for their user, each in its own process on its own branch, and the good changes accrete into one program that gets smaller, faster and more certain as it grows. This one document serves every Claude lane and every Seon agent: **one process for both** (owner, 2026-10-21: "a self reinforcing system where agents learn from each other be it claude agents or seon agents"). The same tasks, the same door, the same context from the same wiki, and lessons land in the same sections.
+Seon is where many agents do real work for their user, each in its own process on its own branch, and the good changes accrete into one program that gets smaller, faster and more certain as it grows. This one document serves every Claude session and every Seon agent: **one process for both** (owner, 2026-10-21: "a self reinforcing system where agents learn from each other be it claude agents or seon agents"). The same tasks, the same server, the same context from the same wiki, and lessons go into the same sections.
 
 ## 0. Start here
 
@@ -8,7 +8,7 @@ You are in `next/`, **Seon on Jolt, built to replace Seon** (`~/src/seon`, the J
 
 Read before acting: this file (§§1–3 first), then `../RESUME.md` (what is in flight, and THE PLAN), then `docs/README.md` (the wiki's map) and `docs/parity.md`, then your task (`resources/seon/tasks/<ns>.edn`) and what its plan cites.
 
-The running system: `bin/root status|start` (the owner's main tree: entrance 7888, dashboard http://127.0.0.1:7777/); Claude reaches it through the `seon` MCP server (§6). The standing root's store (`runs/store`) holds kept runs, which are evidence: never experiment on it. Experiments run in a worktree (`bin/worktree NAME`) on that worktree's own root and stores.
+The running system: `bin/root status|start` (the owner's main tree: server port 7888, dashboard http://127.0.0.1:7777/); Claude reaches it through the `seon` MCP server (§6). The standing root's store (`runs/store`) holds kept runs, which are evidence: never experiment on it. Experiments run in a worktree (`bin/worktree NAME`) on that worktree's own root and stores.
 
 ## 1. What Seon is for, and what moving forward means
 
@@ -28,14 +28,14 @@ How we keep the first version's spirit: run, then right, then fast; the demo is 
 ## 2. Who does what
 
 - **The owner (Sean)** sets direction and makes the rulings. Bring him one decision at a time, with evidence and, for a big one, priced options (the simplest viable first, your recommendation marked).
-- **Root** (the orchestrating session; in Seon, the root agent) owns **direction, THE PLAN, landing and the docs**. Its output is the whole system moving forward, not findings it made itself. Root:
-  - keeps several things in flight at once (lanes implementing, agents researching, a batch landing) and records them in RESUME's "In flight";
-  - **delegates investigation, debugging, measurement, research and implementation**: subagents (Explore or general-purpose) for reading many files, auditing or research; `../bin/agy-agent` (Gemini) for root-cause hunts and web search; lane sessions in worktrees for code. Independent questions go to agents launched in parallel, in one message;
+- **Root** (the orchestrating session; in Seon, the root agent) owns **direction, THE PLAN, merging into main and the docs**. Its output is the whole system moving forward, not findings it made itself. Root:
+  - keeps several things in flight at once (worktrees implementing, agents researching, a batch merging) and records them in RESUME's "In flight";
+  - **delegates investigation, debugging, measurement, research and implementation**: subagents (Explore or general-purpose) for reading many files, auditing or research; `../bin/agy-agent` (Gemini) for root-cause hunts and web search; sessions in their own worktrees for code. Independent questions go to agents launched in parallel, in one message;
   - **investigates personally only what fits in a few tool calls** (one status, one grep, one file). Past that, or once a guess has failed, root writes a brief, launches an agent and turns to other work;
   - checks what agents return (a reproduction, a file:line, a number) before acting on it, and puts the result into a task, the plan or the wiki section it concerns;
-  - lands verified work (§3) and keeps RESUME and the wiki true.
-- **Lanes** are sessions in their own worktrees, each working one task (§3): they write the proofs, the code and the wiki edit, prove their slice, and report. A lane that has found no cause or clearly correct fix after about fifteen minutes stops and reports what it measured. A lane whose code contradicts its plan stops and sends the plan back with the evidence; nobody redesigns on the fly.
-- **Seon agents** are forked processes working tasks through the same door, tasks and context (§6). What our lanes find missing from that context is a task for Seon.
+  - merges verified work into main (§3) and keeps RESUME and the wiki true.
+- **Worktree sessions** are Claude sessions each in its own git worktree on its own branch, working one task (§3): they write the proofs, the code and the wiki edit, prove their change, and report. One that has found no cause or clearly correct fix after about fifteen minutes stops and reports what it measured. One whose code contradicts its plan stops and sends the plan back with the evidence; nobody redesigns on the fly.
+- **Seon agents** are forked processes working tasks through the same server, tasks and context (§6). What our worktree sessions find missing from that context is a task for Seon.
 
 ### Briefing an agent
 
@@ -44,9 +44,9 @@ A brief is complete, or the agent spends its turns rediscovering. Every brief st
 2. **what is known**, as paths: the task entry, wiki sections, notes, the exact failing command and its output, earlier agents' findings;
 3. **the scope**: read-only or which worktree it may write; what not to touch (the standing store, `~/src/seon`);
 4. **what done looks like**: the shape of the answer and the evidence it must carry (a reproduction form, file:line, measured numbers, proofs red → green);
-5. **where the result goes**: a file in the lane's worktree or `notes/`, plus a short reply.
+5. **where the result goes**: a file in its worktree or `notes/`, plus a short reply.
 
-For a lane, the brief is its task entry (§3) plus its worktree name. When the cause of a problem is unclear, send two agents with independent briefs; neither sees the other.
+For a worktree session, the brief is its task entry (§3) plus its worktree name. When the cause of a problem is unclear, send two agents with independent briefs; neither sees the other.
 
 ### Forest before trees
 
@@ -60,31 +60,31 @@ Then write down what is known, hand the detail to an agent with a brief, and ret
 
 ## 3. How work moves
 
-The same method serves our lanes and Seon's agents: small changes, integrated often, testing the merged result and running only what the change reaches.
+The same method serves our worktree sessions and Seon's agents: small changes, integrated often, testing the merged result and running only what the change reaches.
 
 **Work is tasks.** All work is a task in `resources/seon/tasks/<owning-ns>.edn` (`my.root/load-tasks!`):
 - `:seon.task/plan`: what exists, what v1 did, the cause, what it replaces and deletes;
 - `:seon.task/proofs`: the deftests and cost proofs that say it is done;
-- `:seon.task/needs`: what must land first.
+- `:seon.task/needs`: what must merge first.
 
-Its references are derived from the plan's citations by the one parser ([references](docs/references.md)), and the names it changes are its write set. **A lane's brief is its task** (owner, 2026-10-21: process, not whim): root writes what the lane needs into the task and the wiki sections it cites. What anyone learns goes back into the task or that section, never only into a report. Order: delete first, then foundations (a shared interface lands first as its own small task), then fixes.
+Its references are derived from the plan's citations by the one parser ([references](docs/references.md)), and the names it changes are its write set. **A worktree session's brief is its task** (owner, 2026-10-21: process, not whim): root writes what it needs into the task and the wiki sections it cites. What anyone learns goes back into the task or that section, never only into a report. Order: delete first, then foundations (a shared interface merges first as its own small task), then fixes.
 
-**Every ready task runs now, in parallel** (owner, 2026-10-21: "get rid of all of it": no lane cap, no locks, no waiting). Lanes are truly independent (owner, 2026-10-22: "Each lane should be able to do anything they want to the codebase, fully test it and then we can shut it down and merge it"): each works in its own worktree (`bin/worktree NAME`: `../next-NAME` on `jolt/NAME`) on its own root and stores, may change any file, runs the full `bin/test` and `bin/check` there, and stops; root merges and resolves conflicts at landing. Write sets inform root's landing order; they never fence a lane. Lanes waiting on a dependency read and plan, and keep nothing running.
+**Every ready task runs now, in parallel** (owner, 2026-10-21: "get rid of all of it": no cap, no locks, no waiting). Worktrees are truly independent (owner, 2026-10-22: "Each lane should be able to do anything they want to the codebase, fully test it and then we can shut it down and merge it"): each works in its own worktree (`bin/worktree NAME`: `../next-NAME` on `jolt/NAME`) on its own root and stores, may change any file, tests there what its change reaches, and stops; root merges and resolves conflicts. Write sets inform root's merge order; they never restrict a worktree. One waiting on a dependency reads and plans, and keeps nothing running.
 
-**A lane's method:**
+**A worktree session's method:**
 1. **Learn:** find the wiki sections, tasks and code for the problem; read what v1 did (`~/src/seon`, read-only); research the field's best known way (web, `../bin/agy-agent`), and verify it. Cite what you find in the plan; where a section and the code disagree, that is a wiki edit the task owes.
 2. **Plan in a few lines:** the primitive, the write set, what it deletes, the tests, its wiki section. A change to a dependency or a design rule waits for root's go. No new layers, runners or wrappers.
 3. **Prove first:** prove the idea in a REPL at n ≤ 100, write a cost proof for anything whose input grows, and write the proofs and watch them fail for the right reason.
 4. **Act:** write the simplest code that passes, at the cause, in the owner of the bad value.
-5. **Work it as a Seon agent would**, through the door (§6): attach, read the context, evaluate, `seon_done`. What the context lacked is a task. If the owner will see it (a page, a render), have a subagent with the browser compare the page against the facts.
+5. **Work it as a Seon agent would**, through the server (§6): attach, read the context, evaluate, `seon_done`. What the context lacked is a task. If the owner will see it (a page, a render), have a subagent with the browser compare the page against the facts.
 
-**Integrate small and often.** Branches live hours; merge main in after every landing. While iterating, run only what the change reaches. To land, a lane merges main in, proves its own tests red → green, and reports: commits, numbers against estimates, what it deleted, and that nothing of its is running. **Root lands** by merging (never copying files), in batches of ready, file-disjoint branches. Before approving it reads each landing's verdict (a subagent may read a long log for it) and its `src` diff stat; a landing that grows `src` names what it deletes. The mechanics (exit statuses, what a landing runs, batching, conflicts, pin bumps): [landing](docs/landing.md).
+**Integrate small and often.** Branches live hours; merge main in after every merge into main. **Run only what the change reaches** (owner, 2026-10-22): `bin/test --reach` (results reused by reach digest), the `bin/check` steps whose code changed, and `bin/check smoke`; the full `bin/test` and `bin/check 100` run daily and before a change to boot, the writer, the reconciler or the build. To be merged, a worktree session merges main in, proves its own tests red → green, and reports: commits, numbers against estimates, what it deleted, and that nothing of its is running. **Root merges** branches into main (never copying files), in batches of ready branches proven together. Before approving it reads each batch's verdict (a subagent may read a long log for it) and its `src` diff stat; a merge that grows `src` names what it deletes. The mechanics (exit statuses, what a merge runs, batching, conflicts, pin bumps): [landing](docs/landing.md) (to be renamed).
 
 **Root's gate, before approving any plan, format, key or rule** (owner, 2026-10-21): (1) which existing mechanism does this, ours, v1's or the dependency's? (2) what did v1 do here? (3) what is the field's best known way? (4) does it add a format, key, layer or rule, and why can't the existing one do it? An agent gathers the evidence; root shows it to the owner. No evidence, no approval.
 
-**Learn as we go.** Each landing's lesson goes into the wiki in the same commit (the section where the problem lives, linked from the others like it). A failed attempt's cause stays on its task. A problem outside your task is filed as a task (what you saw, the cause, what correct looks like, its proofs), never fixed in passing.
+**Learn as we go.** Each merge's lesson goes into the wiki in the same commit (the section where the problem lives, linked from the others like it). A failed attempt's cause stays on its task. A problem outside your task is filed as a task (what you saw, the cause, what correct looks like, its proofs), never fixed in passing.
 
-## 4. The pillars: everything is data flowing through the system
+## 4. The principles: everything is data flowing through the system
 
 **If nothing has changed, we do nothing.**
 - No proc steps, renders, pings, flushes or polls on an idle system.
@@ -111,7 +111,7 @@ Every need is met by one of these. If one doesn't fit, stop and say so; never ro
 - **A render.** Every view, the model's context included, is a render declared on the value's schema, over the one printer.
 - **An error is data**, flowing to whoever can fix it. A defect holds its message (per key) until the code is fixed. A typed error goes to the requester, agent or task that can act on it.
 
-**A mechanism is built once, as a pillar, and reused everywhere.**
+**A mechanism is built once, and reused everywhere.**
 - Before building anything that waits, retries, admits, holds, spawns, watches a process, answers a request or reads config, find its one implementation: the wiki section where that mechanism lives states the pattern and names its one implementation and owner.
 - If it doesn't exist, its owner builds it; nobody builds a second one.
 
@@ -129,8 +129,8 @@ Every need is met by one of these. If one doesn't fit, stop and say so; never ro
   - No literals, no `System/getenv` outside the loader.
   - Ports too: each checkout has its own (`bin/ports`).
 - **One store, many branches,** as in production. Tests, checks and runs take a branch of one seeded store. A separate store is a last resort, and says why where it is made.
-- **Contracts on every function,** armed at definition, and every contract must generate (`mg/check` in `bin/check`).
-- **No guards or fences.** Every outside-world failure point is named in `DRAGONS.md`, with its one edge function and declared error. Nothing else catches: `bin/dragons catch` lists every `catch` and is red on one the page does not name.
+- **Contracts (Malli function schemas) on every function,** instrumented at definition, and every contract must generate (`mg/check` in `bin/check`).
+- **No guards.** Every outside-world failure point is named in the failure points page (`docs/DRAGONS.md`, to be renamed), with its one edge function and declared error. Nothing else catches: `bin/dragons catch` lists every `catch` and is red on one the page does not name.
 - **Effects go through their owner** (`my.fx/call`, `my.fx/send`). The asker records the outcome on its own branch.
 - **Durability is continuous group commit.** A write is answered when committed in memory. One followed by an outside effect waits for the sync that covers it.
 - **Every definition happens once, where it is defined.**
@@ -170,12 +170,37 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
 
 - **Pages:** `docs/<topic>.md`, one concept per page; `docs/README.md` is the map, and it states how the wiki is kept (one home per concept, a leading sentence that stands alone, patterns in their topic sections, everything linked, current truth rather than a dated log). Sections are addressed `topic#slug` and mirrored in the database.
 - **References are what the text cites, read by one parser**, at the depth the delimiter asks: [references](docs/references.md). Prefer citing a var to a `file:line`.
-- **Landing a change updates its section in the same commit.** Before landing, read your task's context through the door and confirm it pulls what the task needs.
+- **Merging a change updates its section in the same commit.** Before reporting, read your task's context through the server and confirm it pulls what the task needs.
+
+## 7a. Words
+
+**Name things with Clojure's, its libraries' or Jolt's words** (owner, 2026-10-22: "stop using names that aren't clojure or clojure library or jolt or whatever related"; §5, "Use the library's words"). Write the right word in every new text, and **fix an old word wherever you come across it** in what you are already changing (code, docstring, doc, task, commit message). A file or command name and a stored keyword keep their old spelling until the rename task moves them; your prose still uses the new word.
+
+| Old house word | Say instead | Whose word |
+|---|---|---|
+| verb | function (by its var, `my.task/fail!`); an `:op` for a request type | Clojure; nREPL `op`, MCP `tool` |
+| lane | worktree session (a session in its own git worktree, on its own branch) | git |
+| landing, land | merge (into main) | git |
+| door, entrance | server (root's request server; the `seon_*` MCP tools) | nREPL, MCP |
+| dragon | failure point (and its edge function) | plain English |
+| census | `mg/check` (the generative check of every contract) | Malli |
+| pillar | principle | plain English |
+| fence | guard | plain English |
+| merge train | octopus merge (branches merged into main in one commit) | git |
+| harvest | stage (onto the branch) | git |
+| stand-in | proc | core.async Flow |
+| dial | config key | Clojure map, Datahike config |
+| admit, guarantees | instrument | Malli `malli.instrument` |
+| stuck | blocked | plain English (stored as `:seon.task/stuck` until migrated) |
+| waste | overrun | plain English (stored as `:seon.attempt/waste` until migrated) |
+| refusal | invalid, explained (a contract's); refused (a merge's) | Malli `m/explain` (stored as `:seon.attempt/refusal` until migrated) |
+
+Library words stay: proc, step-fn, transact, branch, merge, schema, registry, contract (a Malli function schema), flusher, group commit, fork server, lease, generation.
 
 ## 8. The machine
 
 - **The target is a 16 GB MacBook M1** (owner, 2026-10-22). Seon stays within `:seon.config.machine/memory-mb`, and `bin/check scale` fails past it.
-- **Builds:** `nice -n 15 bin/build`, in parallel, no lock. Full checks run niced, each lane in its own worktree. Every process on a store uses the same LMDB build. Details, and the disk rules (worktrees removed at landing, no new top-level directories, pruning): [machine](docs/machine.md).
+- **Builds:** `nice -n 15 bin/build`, in parallel, no lock. Full checks run niced, each in its own worktree. Every process on a store uses the same LMDB build. Details, and the disk rules (worktrees removed at merge, no new top-level directories, pruning): [machine](docs/machine.md).
 - **Never flood it.** Anything that makes threads or processes starts at n ≤ 100 under `nice -n 15`; kill your own process past 200 threads. One experiment at a time.
 - **Leave nothing running when you finish,** and say so. Kill only PIDs you started; never `pkill` or `killall`. Delete only paths you created. A process that must outlive a tool call is double-forked (`bin/root` does).
 - **Git in a worktree:** `git -C` on your own checkout only; never `git submodule` in a worktree (after merging main, `bin/worktree --sync NAME` from the main tree); never bare `git stash`; never `checkout`, `restore` or `reset` on paths you don't own; commit explicit paths; never push.
@@ -188,7 +213,7 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
 - **Serial work:** one agent at a time, or waiting on one result with independent work ready.
 - **A clock, timer, sleep, poll, deadline, ping or fixed slot** standing in for a dependency or a workload. "Never came" is a recorded fact (stuck, stalled, dead).
 - **A swallowed error, an ignored answer, a fake default.** Unknown is not `{}`, `0`, `nil` or `:ok`, and a proc answers every request it took.
-- **Routing around a pillar:**
+- **Routing around a principle:**
   - a fallback instead of an error fact;
   - a new runner or wrapper beside the reconciler;
   - a store per test;
@@ -199,10 +224,10 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
   - stdin as a lifecycle.
 - **Building a mechanism twice,** or two producers of one view.
 - **Reinventing what v1 already solved,** or designing before researching.
-- **A half-baked plan that got built,** or too many lanes at once on overlapping work.
+- **A half-baked plan that got built,** or too many worktrees at once on overlapping work.
 - **A clipping function** (`clip`, `subs`, `take n` for output). Output improves only through the one printer, or a render declared on the value's schema. Every cut says what it left and how to read the rest.
 - **A check that cannot fail,** or that only prints. Every check mode ends on `X OK` / `X FAILED` and an exit status. When a rule changes, read every step it touches.
-- **Landing on a check nobody read,** or copying whole files over newer changes.
+- **Merging on a check nobody read,** or copying whole files over newer changes.
 - **Re-running everything on every change.**
 - **Deleting a record** (a store, a branch, history). Runs are kept, and reclaiming space is the owner's act.
 - **Flooding the machine,** killing by pattern, or leaving things running.

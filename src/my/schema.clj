@@ -6,7 +6,7 @@
   carries it per key, and write-back rewrites only its entry of its resource (seon.source).
   Platform code compiled into the binary keeps the built schemas until the next generation."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.agent :as agent] [seon.program :as program]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.agent :as agent] [seon.program :as program] [seon.db :as pdb] [seon.config :as config]
             [datahike.api :as d] [seon.edn :as sedn] [malli.core :as m]))
 
 (defn- refused
@@ -36,7 +36,7 @@
                               f))]
     (if (seq counts)
       (key (first (sort-by (fn [[f n]] [(- n) f]) counts)))
-      (str contract/schemas-dir "/" (namespace k) ".edn"))))
+      (str config/schemas-dir "/" (namespace k) ".edn"))))
 
 (defn- usage-check
   "How many of attribute k's stored values on db the schema reg names k refuses (v1's
@@ -64,7 +64,7 @@
                 (refused k :unreadable "a schema form is EDN data: it must print and read back equal"))]
     (if (contract/error? judged)
       judged
-      (let [e (some->> (first (d/datoms db :avet :schema/key k)) :e (d/entity db))
+      (let [e (some->> (pdb/eid db :schema/key k) (d/entity db))
             file (cond scratch? nil (:schema/file e) (:schema/file e) :else (new-key-file db k))]
         {:tx (into (cond-> [(cond-> {:schema/key k :schema/form text} file (assoc :schema/file file))]
                      (:schema/source e) (conj [:db/retract (:db/id e) :schema/source true]))

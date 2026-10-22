@@ -14,16 +14,8 @@
   the base its write-back edits, entry by entry, with rewrite-clj (v1's `schema-file-text`):
   every other byte as it was."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.program :as program] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.program :as program] [seon.db :as pdb] [seon.reader :as reader] [seon.config :as config] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn]
             [rewrite-clj.zip :as z] [rewrite-clj.node :as node] [rewrite-clj.parser :as parser] [jolt.analyzer] [jolt.host] [seon.edn :as sedn]))
-
-(defn- line-starts
-  "The offset in text where each line starts."
-  {:malli/schema [:=> [:cat :string] [:vector :int]]}
-  [^String text]
-  (loop [acc [0] i 0]
-    (let [j (.indexOf text "\n" (int i))]
-      (if (neg? j) acc (recur (conj acc (inc j)) (inc j))))))
 
 (defn- lead-end
   "Where the first form starts in text from i to end: past whitespace, commas and ; comments."
@@ -50,7 +42,7 @@
   ([nsym text] (read-forms nsym text identity))
   ([nsym ^String text step]
    (let [r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. text))
-         starts (line-starts text)
+         starts (reader/line-starts text)
          off (fn [line col] (+ (starts (dec line)) (dec col)))]
      (loop [acc [] prev 0 nsym nsym]
        (let [form (binding [*ns* (or (find-ns nsym) *ns*)] (read {:eof ::eof} r))]
@@ -146,9 +138,9 @@
     (:requires (program/unit-account (analyze nsym form)))))
 
 (defn schema-resource?
-  "Is the relative path a schema resource: an .edn file under seon.contract/schemas-dir?"
+  "Is the relative path a schema resource: an .edn file under seon.config/schemas-dir?"
   {:malli/schema [:=> [:cat :string] :boolean]}
-  [path] (and (str/starts-with? path (str contract/schemas-dir "/")) (str/ends-with? path ".edn")))
+  [path] (and (str/starts-with? path (str config/schemas-dir "/")) (str/ends-with? path ".edn")))
 
 (defn schema-tx
   "The facts of one schema resource's text at path: the file with its text (write-back's
@@ -203,7 +195,7 @@
   [db files]
   (let [nss (into (set (map :e (d/datoms db :aevt :ns/file)))
                   (for [[p t] files :when (str/ends-with? p ".clj") :let [n (file-ns t)] :when n
-                        :let [e (:e (first (d/datoms db :avet :ns/name n)))] :when e]
+                        :let [e (pdb/eid db :ns/name n)] :when e]
                     e))
         forms (set (for [e nss dt (d/datoms db :avet :form/ns e)] (:e dt)))
         of (fn [a s] (for [dt (d/datoms db :aevt a) :when (s (:v dt))] (:e dt)))
@@ -230,7 +222,7 @@
   then the text after its last form (a newline when it has none)."
   {:malli/schema [:=> [:cat :seon.host/db :symbol] :string]}
   [db nsym]
-  (let [ne (:e (first (d/datoms db :avet :ns/name nsym)))
+  (let [ne (pdb/eid db :ns/name nsym)
         fs (sort-by :order (for [dt (d/datoms db :avet :form/ns ne) :when (program/live? db (:e dt))] (program/form-row db (:e dt))))]
     (str (apply str (map-indexed (fn [i f] (str (or (:lead f) (if (zero? i) "" "\n\n")) (:src f))) fs))
          (or (:ns/tail (d/entity db ne)) "\n"))))
@@ -328,7 +320,7 @@
   the text holds that db no longer does removed, and new keys added (schema-file-text)."
   {:malli/schema [:=> [:cat :seon.host/db :string] :string]}
   [db path]
-  (let [fe (:e (first (d/datoms db :avet :schema.file/path path)))
+  (let [fe (pdb/eid db :schema.file/path path)
         base (if fe (:schema.file/text (d/entity db fe)) "{}\n")
         held (edn/read-string base)
         now (into {} (for [dt (d/datoms db :avet :schema/file path) :let [x (d/entity db (:e dt))]]

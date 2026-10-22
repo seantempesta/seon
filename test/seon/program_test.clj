@@ -8,7 +8,7 @@
   order of their real references; a test reaches what it calls; banned calls and inline
   definitions are recorded for the merge to judge; a file analyzed without running gives
   the REPL's facts."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.program :as program]
@@ -18,7 +18,7 @@
             [test-runner :as runner]
             [jolt.analyzer]))
 
-(defn- empty-db [] (pdb/test-db))
+(defn- empty-db [] (ts/test-db))
 
 (defn- ns-form? [form nsx]
   (boolean (and (seq? form) (symbol? (first form)) (= #'clojure.core/ns (ns-resolve nsx (first form))))))

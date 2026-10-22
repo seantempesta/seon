@@ -10,6 +10,10 @@ The machine Seon is built on and for, and the rules that keep builds, disk and p
 
 The target is a 16 GB MacBook M1 (owner, 2026-10-22: "I want this system to run well on a 16GB Macbook M1"). Seon itself stays within `:seon.config.machine/memory-mb` (4096: root, the fork server and the default number of agents), and `bin/check scale` fails past it. A cost that grows with something other than the work (a probe walking a 64 GiB address-space reservation took 100 agents from 0.6 s to 18 s) is found by a cost proof sized by what it walks. Like every bound, the key lives in `resources/seon/config/default.edn` ([config](config.md)).
 
+## The clock
+
+Seon has one clock: `seon.profile/now-ns`, the machine's monotonic CLOCK_UPTIME_RAW read by a Chez foreign procedure (9.5 ns a read, nothing allocated, 41 ns resolution; measured 2026-10-22), and `seon.profile/ms-since` for "milliseconds since t0". Every process reads the same timeline, so a stamp one process sends (the writer's `:main` commit, a message's `:ns`) is a t0 another can subtract from. The profiler's samples use the same read. `System/nanoTime` (Jolt's, 1 µs and counted from the process's start) and Chez's `current-time` are not used; a new reading of time goes through `seon.profile` (lane DUP-HELPERS, task ``seon.profile/one-monotonic-clock``). Time is measured and recorded, never acted on ([AGENTS.md §4](../AGENTS.md)); [clocks](clocks.md) names every function that reads it.
+
 ## Builds and checks
 
 Builds run as `nice -n 15 bin/build`, in parallel, with no lock (owner, 2026-10-21: "WTF is there a build lock?"; one machine-wide lock queued every lane's build single-file on an 18-core, 128 GB machine where a build peaks under ~2 GB; each worktree builds into its own `target/`, so builds share no mutable state). Every process on a store must use the same LMDB build (`target/lib/liblmdb.dylib`, robust locks); stop a store's processes before a build that changes it.
