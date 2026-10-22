@@ -26,7 +26,7 @@ Every tracked file outside `reference-code/` and `notes/` was grepped for `../`,
 | `~/src/seon-jolt/next` in the clone line | README.md:9 | — | **done [branch]** (`PATH/TO/next`) |
 | `~/src/seon-jolt/...` fork homes | docs/forks.md:5–77 | provenance | rewritten in step C **[root]** |
 | `~/src/seon` (v1) | AGENTS.md, docs/parity.md, README.md, tasks | v1, read-only reference | **stays**. It is the project being replaced, not part of next. Also, `~/src/seon-jolt/seon` (1.1 GB) is a clone of it whose HEAD is in `~/src/seon` |
-| `/Users/sean/src/seon-jolt/notes/option3-PKG-plan.md` | seon.fx.edn:2 | an absolute path | fixed with the notes/archive copy **[root]** |
+| `/Users/sean/src/seon-jolt/notes/option3-PKG-plan.md` | seon.fx.edn:2 | an absolute path | fixed with the notes/archive copy **[root]**; also `seon.main.edn:7` (task `shrink-dead-code`'s plan) cites `/Users/sean/src/seon-jolt/notes/AUDIT-2026-10-21-growth.md`, to `notes/archive/AUDIT-2026-10-21-growth.md` in step E |
 | deps.edn `:local/root` | deps.edn | all are `reference-code/*` | already inside |
 | `.mcp.json` | — | `./bin/mcp` | already inside |
 | `#include "../../../resources/..."` | test/seon/config/*.edn | inside the repo | fine |
