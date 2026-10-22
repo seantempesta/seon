@@ -13,13 +13,18 @@
  :seon.section/parent :seon.db/ref
  ;; what its own text cites and resolves to: a section (a link) or a var (a name)
  :seon.section/references [:set :seon.db/ref]
+ ;; the names its own text cites as references (seon.ref/kept: a prose word only when it named
+ ;; something at load), kept as names: a var deleted later leaves its name here, and a name that
+ ;; no longer names something is a dead citation (seon.problems, class :dead-citation)
+ :seon.section/names [:set :qualified-symbol]
  :seon.section/fact [:map {:seon.db/attributes true}
                      [:seon.section/address :seon.section/address]
                      [:seon.section/heading :seon.section/heading]
                      [:seon.section/lead {:optional true} :seon.section/lead]
                      [:seon.section/text {:optional true} :seon.section/text]
                      [:seon.section/parent {:optional true} :seon.section/parent]
-                     [:seon.section/references {:optional true} :seon.section/references]]
+                     [:seon.section/references {:optional true} :seon.section/references]
+                     [:seon.section/names {:optional true} :seon.section/names]]
  ;; a section as one parse reads it, before it is stored: its fact's values, its parent's
  ;; address, and the citations of its own text
  :seon.section/parsed [:map {:closed true}

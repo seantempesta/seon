@@ -53,16 +53,17 @@
 (defn- wanted
   "Section s as the attributes it should state: {attribute value}, a section named by its
   stored entity id or, when this load creates it, its tempid (its address)."
-  {:malli/schema [:=> [:cat [:map-of :string :int] :seon.section/parsed [:vector :any]] :map]}
-  [stored s targets]
+  {:malli/schema [:=> [:cat [:map-of :string :int] :seon.section/parsed [:vector :any] [:set :qualified-symbol]] :map]}
+  [stored s targets names]
   (let [ref (fn [a] (get stored a a))]
     (cond-> (select-keys s [:seon.section/heading :seon.section/lead :seon.section/text])
+      (seq names) (assoc :seon.section/names names)
       (:seon.ref/parent s) (assoc :seon.section/parent (ref (:seon.ref/parent s)))
       (seq targets) (assoc :seon.section/references (into #{} (map (fn [[k x]] (if (= :var k) x (ref x)))) targets)))))
 
 (def ^:private section-attrs
   "A stored section's stated attributes (seon.task/entity-tx makes them exactly what its text says)."
-  [:seon.section/heading :seon.section/lead :seon.section/text :seon.section/parent :seon.section/references])
+  [:seon.section/heading :seon.section/lead :seon.section/text :seon.section/parent :seon.section/references :seon.section/names])
 
 ;; ---- the load ---------------------------------------------------------------------------
 
@@ -91,7 +92,8 @@
        :seon.ref/address a :seon.section/address from}
       (vec (concat
              (mapcat (fn [s]
-                       (let [a (:seon.section/address s) want (wanted stored s (targets a))]
+                       (let [a (:seon.section/address s) want (wanted stored s (targets a)
+                                            (into #{} (comp (map :seon.ref/name) (filter qualified-symbol?)) (ref/kept db (:seon.ref/citations s))))]
                          (if-let [e (stored a)]
                            (task/entity-tx db e section-attrs want)
                            [(assoc want :db/id a :seon.section/address a)])))

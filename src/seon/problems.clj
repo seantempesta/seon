@@ -21,9 +21,16 @@
     :task-conflict                  task content a branch and main both changed, differently,
                                     recorded at its attempt's end (seon.task/carry-tx)
     :failed                         a task marked failed (my.task/fail!, root or a check): its
-                                    reason and counterexample; open while it is held"
+                                    reason and counterexample; open while it is held
+    :dead-citation                  a name a wiki section cites (:seon.section/names) that names
+                                    nothing now (seon.ref/names-something?): derived when read,
+                                    never written, so it is open exactly while it is true
+
+  `report` reads what was recorded, at a cost that follows the problems. `health` adds the
+  derived classes, which read the program's names once (a set): their cost follows the
+  citations (seon.problems-test/dead-citations-follow-the-citations)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [seon.merge :as pm] [seon.reconcile :as reconcile]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [seon.merge :as pm] [seon.reconcile :as reconcile] [seon.ref :as ref]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses "Attempt statuses of a death (:seon.attempt/status)." (:seon.status/failed (contract/properties :seon.attempt/status)))
@@ -67,6 +74,25 @@
                          (:seon.error/form r) (assoc :form (:seon.error/form r)))
              :proofs [] :answered-by (get-in ans [:signature s] []) :at-ms (:seon.error/last-ms r)}
       (:seon.error/form r) (assoc :form (:seon.error/form r)))))
+
+;; ---- derived: what the program's facts make true now ------------------------------------
+
+(defn dead-citations
+  "Each name a wiki section cites (:seon.section/names) that names nothing on db
+  (seon.ref/names-something?, the one rule), as a :dead-citation row: open while it is true,
+  since nothing writes it. Cost: main's var names read once into a set and one set lookup per
+  cited name; the rule runs only on a name the set misses."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (let [vars (into #{} (map :v) (d/datoms db :aevt :var/name))]
+    (vec (for [{:keys [e v]} (d/datoms db :aevt :seon.section/names)
+               :when (not (or (vars v) (ref/names-something? db {:seon.ref/name v :seon.ref/depth :summary :seon.ref/line 1})))
+               :let [a (:seon.section/address (d/pull db [:seon.section/address] e))
+                     s (str "dead-citation " a " " v)]]
+           {:signature s :section a :name v :open? true
+            :message (str a " cites " v ", which names nothing")
+            :producer nil :owner-ns (symbol (namespace v)) :proofs []
+            :evidence {:kind :dead-citation :section a :name v} :answered-by (get-in ans [:signature s] []) :at-ms nil}))))
 
 ;; ---- attempts ------------------------------------------------------------------------
 
@@ -188,3 +214,15 @@
                                 [c {:n (count rows) :rows rows}]))
                      {:stuck {:n (count stuck) :rows (vec (sort-by #(- (or (:at-ms %) 0)) stuck))}
                       :failed {:n (count failed) :rows (vec (sort-by #(- (or (:at-ms %) 0)) failed))}})})))
+
+(defn health
+  "Every open problem on db, one value by class: what was recorded (`report`) and what the
+  program's facts make true now (`dead-citations`). What the page, an agent's context and
+  the done and merge gates read: computed when read, never stored, never polled."
+  {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.problems/report]
+                  [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}
+  ([db] (health db {}))
+  ([db fold]
+   (let [dead (dead-citations db (answers db))]
+     (vary-meta (assoc-in (report db fold) [:classes :dead-citation] {:n (count dead) :rows dead})
+                assoc :seon.render/schema :seon.problems/report))))

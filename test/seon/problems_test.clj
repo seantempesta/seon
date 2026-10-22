@@ -7,7 +7,7 @@
             [seon.contract :as contract] [seon.db :as pdb] [seon.error :as err] [seon.agent :as agent]
             [seon.repl :as repl] [seon.proofs :as proofs] [seon.root :as root] [seon.agent-proc :as ap]
             [seon.reconcile :as rec] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.cost :as cost]))
+            [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.cost :as cost] [seon.docs]))
 
 (defn- refusal [op v]
   (contract/error :seon.instrument/contract-error op (str op " invalid-input: its arguments do not satisfy its contract")
@@ -405,3 +405,52 @@
         rows (get-in (problems/report db) [:classes :dead :rows])]
     (is (= :lost (:status (first (filter #(= "t/l#1" (:attempt %)) rows)))))
     (is (not-any? #(= "t/l#1" (:attempt %)) (get-in (problems/report db) [:classes :error :rows])))))
+
+;; ---- derived: a dead citation is true while it is true (notes/health-design-2026-10-23.md) ----
+
+(deftest a-deleted-var-makes-its-citation-dead-until-it-is-back
+  (let [db (ts/test-db)
+        v (:v (first (d/datoms db :aevt :var/name)))
+        e (:e (first (d/datoms db :aevt :var/name)))
+        none (symbol (namespace v) "no-such-var")
+        page (str "# Health\n\nThe check reads `" v "` and `" none "`; a prose word " (namespace v) "/nor-this is no citation.\n")
+        db (d/db-with db (seon.docs/load-tx db "demo" {"demo/h.md" page}))
+        dead #(get-in (problems/health %) [:classes :dead-citation])]
+    (testing "the loader keeps the names the text cites as references: a backticked name, never a prose word naming nothing"
+      (is (= #{v none} (set (:seon.section/names (d/pull db [:seon.section/names] [:seon.section/address "demo/h.md#health"]))))))
+    (testing "a backticked name that never named anything is dead from its load"
+      (is (= [[none "demo/h.md#health"]] (mapv (juxt :name :section) (:rows (dead db))))))
+    (let [gone (d/db-with db [[:db/retractEntity e]])]
+      (testing "the var deleted: its citation is dead, with what a row needs"
+        (let [rows (:rows (dead gone))
+              r (first (filter #(= v (:name %)) rows))]
+          (is (= 2 (:n (dead gone))))
+          (is (= (str "demo/h.md#health cites " v ", which names nothing") (:message r)))
+          (is (= (symbol (namespace v)) (:owner-ns r)) "owned by the namespace that lost it")
+          (is (contract/valid? :seon.problems/report (problems/health gone)))
+          (is (empty? (get-in (problems/report gone) [:classes :dead-citation])) "report is what was recorded: a derived class is health's")))
+      (testing "the var back: the citation names it again; nothing was written to close it"
+        (let [back (d/db-with gone [{:var/name v}])]
+          (is (= [none] (mapv :name (:rows (dead back))))))))))
+
+(defn citing-input
+  "The cost proof's input at n: a wiki page of n sections, each citing one of the seed's vars
+  (cycling past its count), every cited var then deleted, so every citation is dead."
+  [n] (let [db0 (ts/test-db)
+            vs (vec (take n (map :v (d/datoms db0 :aevt :var/name))))
+            page (apply str "# Cited\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\nIt reads `" (nth vs (mod i (count vs))) "`.\n")))
+            db (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/c.md" page}))
+            cited (into #{} (map :v) (d/datoms db :aevt :seon.section/names))]
+        [(d/db-with db (vec (for [s cited :let [e (pdb/eid db :var/name s)] :when e] [:db/retractEntity e]))) {}]))
+
+(deftest dead-citations-follow-the-citations
+  (cost/proof {:of 'seon.problems/dead-citations :input 'seon.problems-test/citing-input
+               :n "sections, each citing one var, every one deleted (each a dead citation)"
+               :work (str "fixed: main's var names read once into a set (the seed's ~300 vars). Per cited name: one set "
+                          "lookup; a dead one also runs seon.ref/names-something? (an AVET seek for the var, two for a task, "
+                          "one for its namespace: ~4 seeks at ~17 us and ~33 KB, seon.db/avet-seek-allocates) and pulls its "
+                          "section's address (one pull)")
+               :growth :linear
+               :per-n {:ns 90000 :bytes 170000 :calls 6}
+               :fixed {:ns 2000000 :bytes 3000000 :calls 5}
+               :sizes [10 100 1000]}))
