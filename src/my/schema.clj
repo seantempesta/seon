@@ -61,6 +61,12 @@
                    decls)
          :registration {:seon.schema/key k :seon.schema/definition v}}))))
 
+(defn forms
+  "The schema population this agent's branch sees, {key form}: the binary's forms with the
+  branch's registrations. (get (forms) k) is k's form; (keys (forms)) are every key."
+  {:malli/schema [:=> [:cat] [:map-of :qualified-keyword :any]]}
+  [] (merge contract/forms (program/schema-changes (agent/db))))
+
 (defn register!
   "Register form v as schema k on this agent's branch. Answers {:seon.schema/key k
   :seon.schema/definition v}, or :seon.schema/registration-refused naming why; a refused
@@ -70,8 +76,8 @@
   ## Examples
 
   ```clojure
-  (my.schema/register! :seon.attempt/status [:enum :running :ended :refused])
   (my.schema/register! :app.shape/area [:int {:min 0}])
+  (get (my.schema/forms) :seon.attempt/status) ; an existing key: start from its form, never retype it
   ```"
   {:malli/schema [:=> [:cat :qualified-keyword :any] [:or :seon.schema/registration :seon.schema/registration-refused]]}
   [k v]
