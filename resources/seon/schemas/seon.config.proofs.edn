@@ -1,3 +1,3 @@
 ;; Proof runs by reach digest (seon.proofs/prove: bin/prove, bin/test, bin/check without a run
 ;; size, an agent's test run). Values, units and provenance: resources/seon/config/default.edn.
-{:seon.config.proofs/jobs [:int {:min 1 :seon.config/unit "processes" :description "Forked shards a lane's or root's proof run (bin/prove, bin/test) runs its selected tests in at once."}]}
+{:seon.config.proofs/jobs [:int {:min 1 :seon.config/unit "processes" :description "Shards a worktree session's or root's proof run (bin/prove, bin/test) runs its selected tests in at once."}]}

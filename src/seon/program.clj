@@ -147,7 +147,7 @@
   exists: a syntax-quoted or quoted name resolved later (`requiring-resolve`, a macro's
   template, a proc or render named in data). A symbol of no namespace is data. By namespace,
   not by var: whether the var exists yet depends on what this process analyzed before (an
-  import of the same files twice gave 43 of 387 tests the same reach digest, lane PROVE
+  import of the same files twice gave 43 of 387 tests the same reach digest, worktree session PROVE
   2026-10-22), while every imported file's namespace exists before any form is analyzed."
   {:malli/schema [:=> [:cat :any] [:set :qualified-symbol]]}
   [x] (into #{} (filter #(and (qualified-symbol? %) (find-ns (symbol (namespace %))))) (tree-seq coll? seq x)))
@@ -774,7 +774,7 @@
   "The platform vars whose file reads are of inputs every digest already holds (:env:
   resources/, deps.edn, web/) or of no checkout file at all, so reaching them does not make a
   test read the tree. A reader not named here counts as reading the tree (conservative: a
-  missed name reruns more, never reuses a stale green). Measured 2026-10-22 (lane PROVE): with
+  missed name reruns more, never reuses a stale green). Measured 2026-10-22 (worktree session PROVE): with
   seon.config/baked-schema-forms (a macro every contracted form expands) counted, 327 of 368
   tests took the tree, so any edit anywhere reran them."
   '#{seon.config/baked-schema-forms ;; resources/seon/schemas, in :env

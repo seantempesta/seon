@@ -1,6 +1,6 @@
 (ns seon.proofs
   "Proofs: what a change must run, and what a run proved. prove's selection (task
-  seon.proofs/prove-runs-what-a-change-reaches, docs/landing.md#a-landing-runs-what-the-change-reaches):
+  seon.proofs/prove-runs-what-a-change-reaches, docs/landing.md#a-merge-runs-what-the-change-reaches):
   a key (a test var, or a bin/check step of check-steps) runs only when no green result is
   stored at its reach digest (seon.program/reach-digests), in the one directory every checkout
   shares; bin/prove, bin/test, bin/check without a run size and an agent's test run all
@@ -82,7 +82,7 @@
   step it does not name), as prove keys them: each step name (a bin/check --steps unit) to the
   seon.check mode functions its body runs, whose reach is the step's (seon.program/
   reach-digests with roots), with the checkout's :env (bin/, native/, resources/, the pins:
-  the binary's other inputs) in every digest. dragons censuses the whole tree and has no
+  the binary's other inputs) in every digest. dragons (bin/dragons) reads the whole tree and has no
   functions: its key is the tree's digest (step-digests)."
   '{"dragons" :tree "lmdb-kill" [] "contracts" [seon.check/contracts] "census" [seon.check/census] "fx" [seon.check/fx]
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
@@ -97,7 +97,7 @@
 
 (defn step-digests
   "Of check-steps, {:digests {step digest} :missing [step ...]}: the reach digests (digests-of,
-  seon.program/reach-digests over the steps' functions) and, for a step censusing the tree, the
+  seon.program/reach-digests over the steps' functions) and, for a step reading the whole tree, the
   digest of its name and :tree; missing, the steps naming a function the program does not
   define (renamed, not imported), which a run reports red rather than keying by :env alone."
   {:malli/schema [:=> [:cat :seon.host/fn [:map [:env :string] [:tree :string]]]
@@ -135,7 +135,7 @@
   nil: none), found ({digest result}, the greens stored at cand's digests: greens) and proofs
   (keys that always judge), {:selected :run :reused}. With a base (an agent's branch against the
   main it forked from), selected is the keys whose digest moved or is new, and the proofs cand
-  holds: what judges the change. With none (a lane's or root's tree), the proofs and every key
+  holds: what judges the change. With none (a worktree session's or root's tree), the proofs and every key
   with no green at its digest. run is the selected with no green at their digest (sorted), what
   runs; reused {key result} every key green at its digest. So an unchanged tree runs nothing.
   Cost: one lookup per key, then a sort of what is selected."

@@ -254,8 +254,8 @@
  ;; Unit: processes. A proof run's selected tests (seon.proofs/prove: bin/prove, bin/test) are dealt,
  ;; a namespace (with its fixtures) at a time, into this many shards, each run in a child forked at
  ;; once from the runner that loaded them (copy-on-write), its results written by digest. Provenance:
- ;; lane PROVE 2026-10-22 on the 16 GB M1 target (AGENTS section 8): 4 keeps the machine responsive
- ;; beside a standing root and other lanes (measured in docs/landing.md#a-landing-runs-what-the-change-reaches).
+ ;; worktree session PROVE 2026-10-22 on the 16 GB M1 target (AGENTS section 8): 4 keeps the machine responsive
+ ;; beside a standing root and other worktree sessions (measured in docs/landing.md#a-merge-runs-what-the-change-reaches).
  ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected.
  :seon.config.proofs/jobs 4
 

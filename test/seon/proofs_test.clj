@@ -82,7 +82,7 @@
     (is (= #{"smoke" "idle"} (set (keys before))) "each step its own digest")
     (is (not= (before "smoke") (after "smoke")) "add changed: the step whose function calls it moves")
     (is (= (before "idle") (after "idle")) "the step not reaching add keeps its digest, so its green is reused")
-    (testing "a step that censuses the tree is keyed by the tree; the others by their functions"
+    (testing "a step reading the whole tree is keyed by the tree; the others by their functions"
       (let [all (fn [roots] (zipmap (keys roots) (map str (keys roots))))
             sd (proofs/step-digests all {:env "e" :tree "t1"})]
         (is (= (set (keys proofs/check-steps)) (set (keys (:digests sd)))))
