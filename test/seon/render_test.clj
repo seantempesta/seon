@@ -59,7 +59,7 @@
 (defn- answer
   "The render proc's step on an api :state answer for st (the request it had in flight)."
   [st view]
-  (let [st (assoc st :pending {1 :state} :asked {1 (System/currentTimeMillis)} :main-tx (get-in view [:writer :tx-count]))]
+  (let [st (assoc st :pending {1 :state} :main-tx (get-in view [:writer :tx-count]))]
     (#'p/render-proc st :answers {:tag 1 :r view})))
 
 (def ^:private view0

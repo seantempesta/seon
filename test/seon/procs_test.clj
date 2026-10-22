@@ -9,7 +9,7 @@
             [datahike.api :as d]
             [seon.step :as step] [seon.db :as pdb] [seon.sock :as sock]
             [seon.writer :as writer] [seon.reconcile :as reconcile] [seon.fork-server :as server]
-            [seon.agent-proc :as ap] [seon.root :as root] [seon.repl :as repl]
+            [seon.agent-proc :as ap] [seon.root :as root] [seon.repl :as repl] [seon.render.proc]
             [taoensso.trove :as trove]))
 
 (trove/set-log-fn! nil)
@@ -166,6 +166,42 @@
           [_ outs] (step #'root/api-proc st :ext {:op :write :req {:op :collect} :p p})]
       (is (= :collect (:op (first (:to-writer outs))))))))
 
+;; ---- request/answer: one asker's table (seon.step/pend, ask, answered) ---------------------
+
+(deftest one-asker-table-answers-each-request-once
+  (let [st {:rid 0 :pending {}}
+        [st m1] (step/ask st [:render :answers] :state {:op :state})
+        [st m2] (step/ask st [:render :answers] [:branch :a1] {:op :write})
+        [st r3] (step/pend st nil)]
+    (testing "each request a new id, routed back to the asker, what awaits it pending by id"
+      (is (= {:op :request :req {:op :state} :route [:render :answers] :tag 1} m1))
+      (is (= 2 (:tag m2)))
+      (is (= 3 r3 (:rid st)))
+      (is (= {1 :state 2 [:branch :a1]} (:pending st)) "an id nothing awaits holds no entry"))
+    (testing "an answer takes its entry once: a second answer to the same id finds nothing"
+      (let [[st v] (step/answered st 2)
+            [st again] (step/answered st 2)]
+        (is (= [:branch :a1] v))
+        (is (nil? again))
+        (is (= {1 :state} (:pending st)))))
+    (testing "an id never asked finds nothing"
+      (is (nil? (second (step/answered st 99)))))))
+
+(deftest the-render-proc-asks-for-root-s-view-once-per-round-trip
+  ;; the coalescing window is the request in flight, not a clock (ASK-BOUND-MS is gone)
+  (let [events (a/chan 8)
+        st {:events-ch events :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events []
+            :event-rows [] :views {} :zoom {} :merges 0 :main {:t 1}}
+        asks (fn [outs] (filter #(= {:op :state} (:req %)) (:to-api outs)))
+        [st o1] (#'seon.render.proc/render-proc st :events {:type :spawned :agent :a1 :at-ms 1})
+        [st o2] (#'seon.render.proc/render-proc st :events {:type :ready :agent :a1 :at-ms 2})]
+    (is (= 1 (count (asks o1))) "an event asks for the view")
+    (is (empty? (asks o2)) "while that request is in flight, more events only queue")
+    (let [[st _] (#'seon.render.proc/render-proc st :answers {:tag (:tag (first (asks o1))) :r {:agents {} :writer {:tx-count 1 :recent []} :server {:status :up} :stats {} :store {} :boot {}}})
+          [_ o3] (#'seon.render.proc/render-proc st :events {:type :ready :agent :a2 :at-ms 3})]
+      (is (not-any? #{:state} (vals (:pending st))) "the answer took its request")
+      (is (= 1 (count (asks o3))) "the next event asks again"))))
+
 ;; ---- task seon.root/a-proc-answers-every-request-it-took (census #2) ----------------------
 
 (defn- api-state []
@@ -188,7 +224,29 @@
             sent (first (:to-writer outs))]
         (step #'root/api-proc st :back {:op :error :pid :writer :message "boom" :msg sent})
         (is (= :seon.root/proc-defect (:seon.error/type (answer p))))
-        (is (= "boom" (:seon.error/message (answer p))))))))
+        (is (= "boom" (:seon.error/message (answer p))))))
+    (testing "the api's step threw on a later message of its batch (Flow names only the first): each message it took is answered"
+      (let [first-msg {:op :state :p (promise)}]
+        (a/>!! (:back st) {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data []}} :route [:reconciler :answers] :tag 3})
+        (a/>!! (:back st) {:op :status :agent "not-an-id" :set {}})
+        (is (thrown? Exception (#'root/api-proc st :ext first-msg)) "the third message throws: Flow keeps st, drops the outputs")
+        (let [[_ outs] (step #'root/api-proc st :back {:op :error :pid :api :message "boom" :msg first-msg})
+              again (get outs [:reconciler :answers])]
+          (is (= [3] (map :tag again)) "the second message, a proc's write request, is answered on its route")
+          (is (= :seon.root/proc-defect (:seon.error/type (:r (first again))))))))
+    (testing "a proc threw on the answer it took: the api answers it again on the proc's :answers route, once"
+      (let [[_ outs] (step #'root/api-proc st :back {:op :error :pid :render :message "boom" :msg {:tag 7 :r {:agents {}}}})
+            again (get outs [:render :answers])]
+        (is (= [7] (map :tag again)))
+        (is (= :seon.root/proc-defect (:seon.error/type (:r (first again)))))
+        (testing "and a step that throws on that defect is not answered again"
+          (let [[_ outs] (step #'root/api-proc st :back {:op :error :pid :render :message "boom" :msg (first again)})]
+            (is (empty? (get outs [:render :answers])))))
+        (testing "the render proc takes the defect: its view request answered, the view as it was"
+          (let [rs {:rid 7 :pending {7 :state} :view {:agents {:a1 {}}}}
+                [rs2 _] (#'seon.render.proc/render-proc rs :answers (first again))]
+            (is (empty? (:pending rs2)))
+            (is (= (:view rs) (:view rs2)))))))))
 
 (defn- answering-sys
   "(f sys), sys's entrance answering every request with r (a stand-in for the api), on a
