@@ -60,12 +60,6 @@
     (is (= [:ticks] (distinct (map :dim (:over v)))))
     (is (re-find #"OVER: ticks" (cost/explain e (rows e (fn [n] {:ticks (* 400.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})) v)))))
 
-(deftest a-measure-counts-ticks
-  (let [m (cost/measure #(reduce + (range 1000)) [])
-        m2 (cost/measure #(reduce + (range 1000)) [])]
-    (is (pos? (:ticks m)))
-    (is (= (:ticks m) (:ticks m2)) "counted: the same call measures the same ticks")))
-
 (deftest a-second-pass-is-steeper-even-inside-the-slack
   ;; quadratic bytes that stay under the linear estimate at every size: only the growth sees them
   (let [e (assoc linear :per-n {:bytes 100.0} :fixed {} :sizes [10 100 1000])
@@ -208,8 +202,8 @@
                   :minus :db/pull}})
 
 (defn measure-unit
-  "Unit k measured at n units: {:ticks :ns :bytes} per unit."
-  {:malli/schema [:=> [:cat :keyword pos-int?] [:map [:ticks :double] [:ns :double] [:bytes :double]]]}
+  "Unit k measured at n units: {:ns :bytes} per unit."
+  {:malli/schema [:=> [:cat :keyword pos-int?] [:map [:ns :double] [:bytes :double]]]}
   [k n]
   (let [{:keys [setup f per per-char minus]} (unit-benches k)
         args (setup n)
@@ -218,17 +212,17 @@
         m (cost/measure f args)
         ;; a unit measured as the difference from another (an attribute beyond a pull's first)
         b (when minus (measure-unit minus n))]
-    {:ticks (- (/ (:ticks m) units) (:ticks b 0.0)) :ns (- (/ (:ns m) units) (:ns b 0.0)) :bytes (- (/ (:bytes m) units) (:bytes b 0.0))}))
+    {:ns (- (/ (:ns m) units) (:ns b 0.0)) :bytes (- (/ (:bytes m) units) (:bytes b 0.0))}))
 
 (deftest the-unit-table-is-current
-  ;; every row of the table measured again at 10k units: its ticks and bytes within 1.25x (both
-  ;; counted, the same at any load); a drifted row means the estimates priced by it are stale.
+  ;; every row of the table measured again at 10k units: its bytes within 1.25x (counted, the
+  ;; same at any load; ticks join when jolt.host/ticks-of's pin lands); a drifted row means the
+  ;; estimates priced by it are stale.
   ;; Its ns (CPU time) no verdict decides on (seon.cost/exact): measured, not asserted
   ;; (pure-tests 2026-10-23: within 3x of a table measured under another day's load was no
   ;; function of the digest)
-  (doseq [[k {:keys [ticks bytes]}] cost/units
+  (doseq [[k {:keys [bytes]}] cost/units
           :let [m (measure-unit k 10000) row (assoc m :what (:what (unit-benches k)))]]
-    (is (<= (/ ticks 1.25) (:ticks m) (* ticks 1.25)) (str k " ticks: table " ticks ", measured " (:ticks m) "; the row now: " row))
     (is (<= (- (/ bytes 1.25) 1.0) (:bytes m) (+ (* bytes 1.25) 1.0)) (str k " bytes: table " bytes ", measured " (:bytes m) "; the row now: " row))))
 
 (deftest an-open-overrun-is-accepted-until-it-regresses

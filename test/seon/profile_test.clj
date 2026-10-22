@@ -123,21 +123,3 @@
     (is (>= wall 20000000) (str "wall " wall " ns: the wait is real"))
     (is (< measured 2000000) (str "measured " measured " ns: what the call did, not its wait"))))
 
-(defn- spin
-  "Sum 0..n-1 in a loop of fixnums: work that allocates nothing, so no collection can run on
-  this thread while it is measured."
-  [n] (loop [i 0 s 0] (if (< i n) (recur (inc i) (+ s i)) s)))
-
-(deftest ticks-count-the-work-not-the-time
-  ;; pure-tests 2026-10-23 (owner: "Work done, not scheduled time slices"): a cost proof's time
-  ;; is engine ticks, the same count at any load; CPU time moved 36-860% over the same runs
-  (let [a (profile/ticks-of #(spin 100000))
-        b (profile/ticks-of #(spin 100000))
-        busy (busy-threads 4 #(spin 1000))
-        beside (try (profile/ticks-of #(spin 100000)) (finally (end-threads! busy)))
-        twice (profile/ticks-of #(spin 200000))]
-    (is (pos? a))
-    (is (= a b) "the same work counts the same ticks")
-    (is (= a beside) "and the same beside four busy threads")
-    (is (< 1.99 (/ (double twice) a) 2.01) (str "twice the work, twice the ticks: " a " then " twice))
-    (is (< (profile/ticks-of (fn [] (Thread/sleep 20))) 10000) "a wait is no work")))

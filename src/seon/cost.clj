@@ -48,7 +48,8 @@
   "The dimensions a verdict is decided on: counted, so the same code on the same input
   measures the same on any machine at any load, and a green is a function of its reach
   digest (AGENTS.md section 5, results reused by input digest). Cost is work done: ticks
-  (seon.profile/ticks-of, the time dimension), bytes and calls. CPU time (:ns) moves with load
+  (the time dimension: jolt.host/ticks-of, measured once Jolt's jolt/thread-ticks pin lands;
+  judged wherever an estimate and a measure both have them), bytes and calls. CPU time (:ns) moves with load
   (158 to 210 us for one function between load 10 and 17, check-events 2026-10-23): it is
   measured, recorded and shown, never red."
   #{:ticks :bytes :calls})
@@ -154,9 +155,9 @@
   {:malli/schema [:=> [:cat :seon.host/fn [:sequential :any]] :seon.cost/dims]}
   [f args]
   (let [a0 (profile/alloc-bytes) _ (profile/begin!) t0 (profile/cpu-ns)
-        k (profile/ticks-of #(apply f args))
+        _ (apply f args)
         t1 (profile/cpu-ns) c (profile/calls) a1 (profile/alloc-bytes)]
-    (cond-> {:ticks (double k) :ns (double (- t1 t0)) :bytes (double (- a1 a0))}
+    (cond-> {:ns (double (- t1 t0)) :bytes (double (- a1 a0))}
       contract/on? (assoc :calls (double c)))))
 
 (def ^:private baseline
@@ -263,35 +264,34 @@
   per char it showed was the String's seq, not the StringBuilder; :fn/armed-call and the
   pull rows re-measured on Jolt 00a3b321, J3's try/catch: 990 -> 354 B per armed call), per unit: estimates price their :ops with these.
   seon.cost-test/the-unit-table-is-current measures them again (seon.cost-test/unit-benches)
-  and is red when a row's ticks or bytes have drifted past 1.25x, naming the row it measured,
-  so estimates stay derived from today's physics. :ticks (the work done, seon.profile/ticks-of,
-  exact at any load) measured 2026-10-23 at 10k units on Jolt and Chez as pinned then, worktree
-  session pure-tests; :ns is CPU time, shown, never judged."
-  {:seq/reduce {:ticks 1.16 :ns 1.4 :bytes 0.0 :what "one step of reduce over a vector"}
-   :fn/call {:ticks 5.16 :ns 7.4 :bytes 0.0 :what "a reduce step calling one plain function, both defined at the REPL"}
-   :fn/armed-call {:ticks 12.2 :ns 32.8 :bytes 353.53 :what "a reduce step calling one contracted function ([:=> [:cat :int] :int])"}
-   :vec/nth {:ticks 8.15 :ns 12.4 :bytes 0.0 :what "nth of a vector"}
-   :vec/conj {:ticks 29.18 :ns 30.7 :bytes 245.99 :what "conj onto a persistent vector"}
-   :vec/conj! {:ticks 7.49 :ns 12.3 :bytes 43.28 :what "conj! onto a transient vector"}
-   :map/get {:ticks 10.44 :ns 35.6 :bytes 0.0 :what "get of an integer key in a hash map of n"}
-   :map/assoc {:ticks 43.53 :ns 117.5 :bytes 825.01 :what "assoc of a new integer key into a persistent hash map"}
-   :map/assoc! {:ticks 29.25 :ns 83.2 :bytes 123.72 :what "assoc! of a new integer key into a transient hash map"}
-   :map/update {:ticks 117.14 :ns 238.2 :bytes 1074.43 :what "update of a counter in a hash map (frequencies' step)"}
-   :set/conj! {:ticks 20.25 :ns 79.1 :bytes 91.72 :what "conj! of a new integer into a transient hash set"}
-   :sorted/assoc {:ticks 837.9 :ns 1334.7 :bytes 3327.21 :what "assoc of a new integer key into a sorted map"}
-   :sort/compare {:ticks 10.97 :ns 13.51 :bytes 39.04 :what "sort of shuffled integers, per n log2 n"}
-   :str/append {:ticks 4.1 :ns 9.9 :bytes 36.0 :what "StringBuilder append of one char"}
-   :str/seq-char {:ticks 15.0 :ns 29.9 :bytes 272.0 :what "one step of a seq over a String's chars (doseq, reduce)"}
-   :map/literal {:ticks 3.16 :ns 5.2 :bytes 144.0 :what "a small map literal of 5 keys built per element"}
-   :map/seq-step {:ticks 15.79 :ns 28.3 :bytes 127.1 :what "one step of reduce over a hash map's entries (each a map entry)"}
-   :map/reduce-kv {:ticks 1.24 :ns 4.7 :bytes 0.0 :what "one step of reduce-kv over a hash map"}
-   :edn/read-char {:ticks 22.29 :ns 29.22 :bytes 38.02 :what "clojure.edn/read-string, per character of a vector of integers"}
-   :pr-str/char {:ticks 43.33 :ns 61.9 :bytes 25.67 :what "pr-str, per character printed (a vector of integers)"}
+  and is red when a row's bytes have drifted past 1.25x, naming the row it measured, so
+  estimates stay derived from today's physics. :ns is CPU time, shown, never judged; each row
+  gains :ticks (jolt.host/ticks-of, Jolt jolt/thread-ticks) when that pin lands."
+  {:seq/reduce {:ns 1.4 :bytes 0.0 :what "one step of reduce over a vector"}
+   :fn/call {:ns 7.4 :bytes 0.0 :what "a reduce step calling one plain function, both defined at the REPL"}
+   :fn/armed-call {:ns 32.8 :bytes 353.53 :what "a reduce step calling one contracted function ([:=> [:cat :int] :int])"}
+   :vec/nth {:ns 12.4 :bytes 0.0 :what "nth of a vector"}
+   :vec/conj {:ns 30.7 :bytes 245.99 :what "conj onto a persistent vector"}
+   :vec/conj! {:ns 12.3 :bytes 43.28 :what "conj! onto a transient vector"}
+   :map/get {:ns 35.6 :bytes 0.0 :what "get of an integer key in a hash map of n"}
+   :map/assoc {:ns 117.5 :bytes 825.01 :what "assoc of a new integer key into a persistent hash map"}
+   :map/assoc! {:ns 83.2 :bytes 123.72 :what "assoc! of a new integer key into a transient hash map"}
+   :map/update {:ns 238.2 :bytes 1074.43 :what "update of a counter in a hash map (frequencies' step)"}
+   :set/conj! {:ns 79.1 :bytes 91.72 :what "conj! of a new integer into a transient hash set"}
+   :sorted/assoc {:ns 1334.7 :bytes 3327.21 :what "assoc of a new integer key into a sorted map"}
+   :sort/compare {:ns 13.51 :bytes 39.04 :what "sort of shuffled integers, per n log2 n"}
+   :str/append {:ns 9.9 :bytes 36.0 :what "StringBuilder append of one char"}
+   :str/seq-char {:ns 29.9 :bytes 272.0 :what "one step of a seq over a String's chars (doseq, reduce)"}
+   :map/literal {:ns 5.2 :bytes 144.0 :what "a small map literal of 5 keys built per element"}
+   :map/seq-step {:ns 28.3 :bytes 127.1 :what "one step of reduce over a hash map's entries (each a map entry)"}
+   :map/reduce-kv {:ns 4.7 :bytes 0.0 :what "one step of reduce-kv over a hash map"}
+   :edn/read-char {:ns 29.22 :bytes 38.02 :what "clojure.edn/read-string, per character of a vector of integers"}
+   :pr-str/char {:ns 61.9 :bytes 25.67 :what "pr-str, per character printed (a vector of integers)"}
    ;; session D2, source mode, load 3, 2026-10-20, at 2k: a pull is 21 us and 28 KB, each further
    ;; attribute 9.7 us and 13 KB (a finding: the pull's own allocation, like seon.db/eid's seek)
    ;; session STORES, 2026-10-21, load 8, at 10k, three runs: measured on a branch of the seeded test
    ;; store (seon.test-store/test-branch!: ~2,000 datoms beside the setup's) instead of an empty store,
    ;; a pull 21 us and 24.6 KB, each further attribute 11.3-15.1 us and 11.6 KB: pull-attr's one
    ;; entity sat in a one-level index before, the seed makes it the two levels real dbs have
-   :db/pull {:ticks 7991.67 :ns 21200.3 :bytes 24612.49 :what "d/pull of one attribute of an entity, by entity id (per pull)"}
-   :db/pull-attr {:ticks 4670.35 :ns 11801.8 :bytes 11576.64 :what "each attribute of a d/pull beyond its first (per attribute)"}})
+   :db/pull {:ns 21200.3 :bytes 24612.49 :what "d/pull of one attribute of an entity, by entity id (per pull)"}
+   :db/pull-attr {:ns 11801.8 :bytes 11576.64 :what "each attribute of a d/pull beyond its first (per attribute)"}})

@@ -212,3 +212,18 @@ Scripts and raw data (edn lines): the session scratchpad
 (measure.clj, probe2.clj, probe3.clj, drive.sh, analyse.py, data-idle.edn,
 data-loaded.edn, scale-idle.edn, scale-loaded.edn). Nothing left running; the 4 burners
 (PIDs 2396-2399) were killed by PID.
+
+## Appendix: the unit table in ticks (pure-tests, 2026-10-23)
+
+Measured with a set-timer read in seon.profile (since withdrawn: Jolt's `jolt.host/ticks-of` on
+`jolt/thread-ticks` is the one owner of the timer), at 10k units, twice, identical both times.
+Re-measure with `jolt.host/ticks-of` when its pin lands; these show the scale.
+
+| unit | ticks per unit |
+|---|---|
+| :seq/reduce 1.16 | :fn/call 5.16 | :fn/armed-call 12.20 | :vec/nth 8.15 |
+| :vec/conj 29.18 | :vec/conj! 7.49 | :map/get 10.44 | :map/assoc 43.53 |
+| :map/assoc! 29.25 | :map/update 117.14 | :set/conj! 20.25 | :sorted/assoc 837.90 |
+| :sort/compare 10.97 | :str/append 4.10 | :str/seq-char 15.00 | :map/literal 3.16 |
+| :map/seq-step 15.79 | :map/reduce-kv 1.24 | :edn/read-char 22.29 | :pr-str/char 43.33 |
+| :db/pull 7991.67 | :db/pull-attr 4670.35 | | |
