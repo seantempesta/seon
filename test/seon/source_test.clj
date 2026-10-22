@@ -251,38 +251,25 @@
   ;; turns (~14 s each), three boots (~3-9 s each with the import) and one build (~25-60 s).
   (let [dir (scratch-dir "nextgen")
         tree (str dir "/tree")
-        port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
-        ;; its root's own store and main, named: an inherited SEON_STORE or SEON_MAIN (a bin/check
-        ;; run's) otherwise opens a store whose main already holds these merges, made in another
-        ;; run's clone (task seon.source/the-restart-test-runs-its-root-on-its-own-store)
-        env ["env" (str "SEON_RUNS=" dir "/runs") (str "SEON_STORE=" dir "/runs/store") "SEON_MAIN=main"
-             (str "SEON_ENTRANCE_PORT=" port) "SEON_WEB_PORT=0"]
-        root! (fn [& args] (apply ts/binary-sh (concat env [(str here "/bin/root")] args)))
-        ;; one request line, then its one reply line: the read ends on the reply, or on EOF when the
-        ;; root closes the connection or dies (nil, a recorded verdict); nc -w never times out on macOS
-        ask (fn [code] (with-open [s (java.net.Socket. "127.0.0.1" (int port))]
-                         (let [out (.getOutputStream s)
-                               _ (doto out (.write (.getBytes (str (pr-str {:op :eval :agent "root" :code code}) "\n") "UTF-8")) (.flush))
-                               line (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s) "UTF-8")))
-                               a (try (clojure.edn/read-string {:default tagged-literal} line) (catch Exception _ nil))]
-                           (some-> a :items first :printed clojure.edn/read-string))))
-        pids (fn [] (str/split (str/trim (slurp (str dir "/runs/root.pids"))) #" "))
+        ;; its root's own store and main, named (seon.test-store/start-root!: an inherited
+        ;; SEON_STORE or SEON_MAIN opened a store whose main already held these merges)
+        root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")}
         cloned (sh/sh "git" "clone" "-q" "--local" here tree)
-        started (root! "start" "--set" (str ":seon.config.source/root=" (pr-str tree))
-                       "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]")]
+        root (atom (ts/start-root! (assoc root0 :args ["--set" (str ":seon.config.source/root=" (pr-str tree))
+                                                       "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]"])))
+        ask (fn [code] (let [a (try (clojure.edn/read-string {:default tagged-literal} (ts/ask @root {:op :eval :agent "root" :code code}))
+                                    (catch Exception _ nil))]
+                         (some-> a :items first :printed clojure.edn/read-string)))]
     (try
       (is (zero? (:exit cloned)) (:err cloned))
-      (is (zero? (:exit started)) (str (:out started) (:err started)))
+      (is (some? (:port @root)) (str "the root started: " (slurp (str dir "/runs/root.log"))))
       (let [t1 (ask "(seon.e2e/loop-turn! sys)")
             t2 (ask "(seon.e2e/loop-turn! sys :loop-2)")
             args (ask "(my.root/resume-args sys)")]
         (is (= [2 2] [(:root t1) (:root t2)]) (str "each merge live in place: " (pr-str [t1 t2])))
         (is (= 2 (count (:commits t2))) "two merges committed")
-        (let [[holder pid] (pids)]
-          (sh/sh "kill" "-9" pid)
-          (while (zero? (:exit (sh/sh "kill" "-0" pid))) (Thread/sleep 50))
-          ;; bin/root's holder of the dead root's stdin
-          (sh/sh "kill" holder))
+        ;; a crash: answered at the root's death, as its holder reaped it
+        (ts/kill-root! @root)
         ;; the tree changes a test namespace's ns form while root is down (as a merge to test/
         ;; does): main still holds the old one, which load-all! runs at boot (and another test
         ;; namespace's require marks it loaded), and the import must still apply the new
@@ -290,20 +277,20 @@
         (let [f (str tree "/test/seon/program_test.clj")]
           (spit f (str (str/replace-first (slurp f) "(:require " "(:require [clojure.set :as restart-set] ")
                        "\n(defn restart-probe [] (restart-set/union #{1} #{2}))\n")))
-        (let [restarted (apply root! "start" args)]
-          (is (zero? (:exit restarted)) (str (:out restarted) (:err restarted)))
+        (let [restarted (reset! root (ts/start-root! (assoc root0 :args args)))]
+          (is (some? (:port restarted)) (str "restarted: " (slurp (str dir "/runs/root.log"))))
           (is (true? (ask "(some? (seon.db/eid @(:conn sys) :var/name 'seon.program-test/restart-probe))"))
               "the changed ns form's alias analyzed: the form using it is main's program")
           (is (= [2 [1 2]] (ask "[(seon.fixtures/generation) (seon.fixtures/generations)]"))
               "the binary older than both merges runs both, caught up at boot on the same main"))
         (let [g (ask "(my.root/build! sys)")
-              nxt (root! "next")]
+              nxt (reset! root (ts/next-root! @root))]
           (is (nil? (:error g)) (str "the generation built: " (pr-str g)))
-          (is (zero? (:exit nxt)) (str (:out nxt) (:err nxt)))
+          (is (some? (:port nxt)) (str "the next generation started: " (slurp (str dir "/runs/root.log"))))
           (is (= [2 [1 2] (:commit g)] (ask "[(seon.fixtures/generation) (seon.fixtures/generations) (:commit (my.root/generation sys))]"))
               "the new generation runs both, resumed on main holding its generation")))
       (finally
-        (root! "stop")
+        (ts/stop-root! @root)
         (doseq [g (.listFiles (java.io.File. (str dir "/runs/generations")))]
           (sh/sh (str here "/bin/worktree") "--remove-at" (.getPath g)))
         (sh/sh "rm" "-rf" dir)))))

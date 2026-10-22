@@ -989,7 +989,8 @@
   until stdin closes (bin/root stop) or SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks):
   what an outside agent's MCP relay (bin/mcp) talks to. Its end is a fact on main
   naming that cause (seon.root/stop!). A checkout whose config names no server port (0)
-  serves none, and says so."
+  serves none, and says so; -1 asks the kernel for a free port. ROOT LISTENING names the port
+  it bound (what bin/root and seon.test-store/start-root! read), never one picked beforehand."
   []
   (let [port (seon.config/value :seon.config.root/entrance-port)
         _ (when (zero? port)
@@ -1002,8 +1003,7 @@
                  (when (= why @cause) (out! "ROOT STOPPED " (shown (select-keys (c/stop! sys why) [:cause :ms :stop-fact-refused]))) (deliver stopped true))
                  @stopped)]
       (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (end! :signal))))
-      (seon.server/serve! sys port)
-      (out! "ROOT LISTENING " port)
+      (out! "ROOT LISTENING " (.getLocalPort ^java.net.ServerSocket (seon.server/serve! sys (max port 0))))
       (loop [] (when (read-line) (recur)))
       (end! :stdin-eof))
     (lib/c-exit 0)))

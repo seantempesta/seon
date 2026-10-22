@@ -25,26 +25,24 @@
         main (str "in-agent-" (random-uuid))
         store (str checkout "/target/runs/test-store")
         path (str checkout "/target/runs/" main)
-        port (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s))))
-        ask (fn [m] (str "printf '%s\\n' " (pr-str (pr-str m)) " | nc -w 60 127.0.0.1 " port))
-        script (str "mkdir -p '" path "-tasks'; mkfifo '" path "-in';"
-                    " echo " (pr-str (pr-str (into [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}] decls)))
-                    " > '" path "-tasks/demo.edn'; ./seon root"
-                    " --set ':seon.config.source/root=" (pr-str checkout) "' --set ':seon.config.source/dirs=" (pr-str dirs) "'"
-                    " --set ':seon.config.root/store-path=" (pr-str store) "' --set ':seon.config.root/main=" (pr-str main) "'"
-                    " --set ':seon.config.root/entrance-port=" port "' --set ':seon.config.web/port=0'"
-                    (str/join (for [x sets] (str " --set '" x "'")))
-                    " < '" path "-in' > '" path ".log' 2>&1 & R=$!; exec 3>'" path "-in';"
-                    " until grep -q 'ROOT LISTENING' '" path ".log' || ! kill -0 $R 2>/dev/null; do sleep 0.1; done;"
-                    (ask {:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str (str path "-tasks")) ")")}) " >/dev/null;"
-                    (ask {:op :attach :task "demo/t"}) " >/dev/null;"
-                    " for i in {1..300}; do " (ask {:op :agents}) " | grep -q idle && break; sleep 0.2; done;"
-                    (str/join (for [f forms] (str (ask (if (map? f) f {:op :eval :agent "a1" :code f})) ";")))
-                    " exec 3>&-; wait $R")
-        {:keys [out]} (ts/binary-sh "zsh" "-c" script :dir "target")]
+        _ (.mkdirs (java.io.File. (str path "-tasks")))
+        _ (spit (str path "-tasks/demo.edn") (pr-str (into [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}] decls)))
+        ;; its store and main named (seon.test-store/start-root!), never inherited
+        root (ts/start-root! {:store store :main main :runs (str path "-runs")
+                              :args (into ["--set" (str ":seon.config.source/root=" (pr-str checkout)) "--set" (str ":seon.config.source/dirs=" (pr-str dirs))]
+                                          (mapcat (fn [x] ["--set" x])) sets)})
+        ask (fn [m] (let [l (ts/ask root m)] (when l (edn/read-string {:default tagged-literal} l))))
+        out (when (:port root)
+              (ask {:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str (str path "-tasks")) ")")})
+              (ask {:op :attach :task "demo/t"})
+              ;; the attached agent ready: asked until it is idle (bound: 300 asks, as before; an
+              ;; event for an agent's readiness at the server is task seon.check/a-test-root-names-its-store-and-main's note)
+              (loop [i 0] (when (and (< i 300) (not (re-find #"idle" (pr-str (ask {:op :agents}))))) (Thread/sleep 200) (recur (inc i))))
+              (mapv #(ask (if (map? %) % {:op :eval :agent "a1" :code %})) forms))]
+    (ts/stop-root! root)
     (ts/binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target")
-    (sh/sh "rm" "-rf" (str path "-in") (str path ".log") (str path "-tasks"))
-    (mapv #(let [a (edn/read-string {:default tagged-literal} %)] (if (contains? a :items) (first (:items a)) a)) (str/split-lines (str/replace out #"(?s)^.*ROOT LISTENING[^\n]*\n" ""))))))
+    (sh/sh "rm" "-rf" (str path "-runs") (str path "-tasks"))
+    (mapv #(if (contains? % :items) (first (:items %)) %) out))))
 
 (deftest an-agent-holds-mains-tests-and-runs-them
   ;; task seon.agent/an-agent-holds-mains-tests: main holds the source root's test namespaces
