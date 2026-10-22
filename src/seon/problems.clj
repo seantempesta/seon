@@ -180,6 +180,7 @@
         by-class (apply merge-with into (map #(attempt-rows db ans %) attempts))
         spent (mapv #(budget-spent-row db ans %) (es db :seon.task/budget-spent))
         failed (mapv #(failed-row db ans %) (es db :seon.task/failure))]
+    ^{:seon.render/schema :seon.problems/report}
     {:t (:max-tx db)
      :classes (merge (into {} (for [c counted-classes :let [rows (vec (sort-by (comp - :count) (get errors c)))]]
                                 [c {:n (reduce + 0 (map :count rows)) :rows rows}]))

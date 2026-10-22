@@ -6,7 +6,7 @@
              #{seon.reconcile-test/a-capped-attempt-attaches-a-refinement-not-a-hold}}
  #:seon.task{:name "stuck-is-observed-data",
              :plan
-             "When the budget is spent, a derived :seon.task/budget-spent fact names the attempt, its cause and the tasks it blocks; problem class :stuck; the reconciler reports quiescence positively (:seon.root/quiescent). The harness (t5/src/t5/run.clj) and e2e end on quiescence and print the root causes: their time limits and settled? polling go (owner: a timeout that ends a run is a guard).",
+             "When the budget is spent, a derived :seon.task/budget-spent fact names the attempt, its cause and the tasks it blocks; problem class :budget-spent; the reconciler reports quiescence positively (:seon.root/quiescent). The harness (t5/src/t5/run.clj) and e2e end on quiescence and print the root causes: their time limits and settled? polling go (owner: a timeout that ends a run is a guard).",
              :kind :work,
              :needs
              #{"seon.reconcile/a-failure-attaches-a-refinement"},

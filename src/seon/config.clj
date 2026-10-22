@@ -25,7 +25,7 @@
   A foundational namespace, below seon.contract (which reads the instrument config key here): its
   functions carry contracts in their metadata and are armed at boot."
   (:refer-clojure :exclude [resolve])
-  (:require [aero.core :as aero] [malli.core :as m] [malli.registry :as mr] [clojure.edn :as edn]
+  (:require [seon.edn :as sedn] [aero.core :as aero] [malli.core :as m] [malli.registry :as mr] [clojure.edn :as edn]
             [clojure.java.io :as io] [clojure.string :as str] [datahike.api :as d]))
 
 ;; ---- where: the checkout and the profile (the loader's own two environment reads) ----------
@@ -104,7 +104,7 @@
   (let [ps (vec (for [{:keys [path in type value]} (:errors (m/explain config-schema m))]
                   {:key (or (first in) (first path))
                    :problem (case type :malli.core/extra-key :unknown-key :malli.core/missing-key :missing-key :invalid)
-                   :value (pr-str value)}))]
+                   :value (sedn/encode value)}))]
     {:seon.error/type :seon.config/refused :seon.error/operation 'seon.config/resolved
      :seon.error/message (str "the config does not satisfy :seon.config/config: "
                               (str/join ", " (for [{:keys [key problem]} ps] (str key " " (name problem)))))

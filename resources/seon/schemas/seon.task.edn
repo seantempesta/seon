@@ -49,11 +49,11 @@
                  [:seon.task/budget-spent {:optional true} :seon.task/budget-spent]
                  [:seon.task/failure {:optional true} :seon.task/failure]]
  ;; its plan and proofs accumulated along :needs (derived by the reader)
- :seon.task/task [:and {:seon.render/html seon.render.ui/task-box} :seon.task/own [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]
+ :seon.task/task [:and {:seon.render/html seon.render.ui/task-box :seon.render/ai seon.render.ai/task} :seon.task/own [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]
  ;; the environment an attempt runs in; desired (the task's) = observed (the attempt's), or restart
  :seon.task/env [:map {:closed true} [:branch :keyword] [:model [:maybe :string]] [:max-turns pos-int?]]
  :seon.proof/results [:map-of :qualified-symbol :seon.proof/status]
- :seon.attempt/attempt [:map {:seon.render/html seon.render.ui/attempt-row}
+ :seon.attempt/attempt [:map {:seon.render/html seon.render.ui/attempt-row :seon.render/ai seon.render.ai/attempt}
                         [:seon.attempt/id :seon.attempt/id] [:seon.attempt/task :seon.task/id]
                         [:seon.attempt/status :seon.attempt/status] [:seon.attempt/boot :string]
                         [:seon.attempt/agent {:optional true} :keyword] [:seon.attempt/start-ms :int]

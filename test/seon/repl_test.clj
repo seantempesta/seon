@@ -1,6 +1,6 @@
 (ns seon.repl-test
   "An agent's REPL answers: asked of an agent in a root of its own (seon.agent-test/in-agent), and a form bounded by the work it does, never by a clock (seon.intr/run under a tick budget)."
-  (:require [clojure.test :refer [deftest is]] [clojure.string :as str] [seon.agent-test :as at]
+  (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [seon.agent-test :as at]
             [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]
             [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.context :as context] [seon.docs :as docs]
             [seon.config :as cfg] [seon.test-store :as ts] [datahike.api :as d]))
@@ -37,7 +37,15 @@
               ["(some? *e)" :printed "true"]
               ["(pst)" :out "Divide by zero"]
               ["(in-ns 'seon.reconcile)" :printed "seon.reconcile"]
-              ["(clojure.repl/source root-causes)" :out "(defn root-causes"]]
+              ["(clojure.repl/source root-causes)" :out "(defn root-causes"]
+              ;; a value its producer names the schema of reads by its declared render, and
+              ;; shows whole as data without that metadata; a map that only holds a key is data
+              ["(my.task/current)" :printed "task demo/t · work"]
+              ["(my.task/current)" :printed "the whole value as data: (with-meta result/h"]
+              ["(:seon.task/id (with-meta (my.task/current) nil))" :printed "\"demo/t\""]
+              ["(pr-str (keys (with-meta (my.task/current) nil)))" :printed ":seon.task/plan"]
+              ["{:seon.task/id \"x/y\" :n 1}" :printed ":n 1"]
+              ["(seon.contract/error :seon.root/refused 'a/b \"m\")" :printed "#:seon.error{:type :seon.root/refused"]]
         items (at/in-agent (mapv first rows))]
     (doseq [[[form k expected] item] (map vector rows items)]
       (is (str/includes? (str (get item k)) expected) (str form " -> " (pr-str item))))))
@@ -59,7 +67,9 @@
       (is (= ['seon.repl-test.scratch/uncontracted-g] (:uncontracted (first (:warnings d)))))
       (is (every? number? (map :ms [d e])))
       (is (= :seon.agent/eval-error (:seon.error/type (:err e))) "the error map itself")
-      (is (= (:seon.error/message (:err e)) (:printed e)))
+      (testing "its text is the error's render: the message first, then its type and where it was raised"
+        (is (str/starts-with? (:printed e) (:seon.error/message (:err e))))
+        (is (str/includes? (:printed e) "(seon.agent/eval-error in seon.repl/eval-code")))
       (is (str/includes? (str (:err-text e)) "Divide by zero") (pr-str e)))))
 
 (defn- runnable
@@ -154,7 +164,7 @@
                       "(do (seon.lib/c-kill (seon.lib/c-getpid) seon.lib/SIGUSR1) (loop [] (recur)))"
                       "(+ 2 2)"])]
     (is (= "3" (:printed after-idle)) (str "the request after an idle interrupt runs: " (pr-str after-idle)))
-    (is (= "interrupted by root" (:printed stopped)) (pr-str stopped))
+    (is (str/starts-with? (:printed stopped) "interrupted by root\n") (pr-str stopped))
     (is (= "4" (:printed after-stop)) (pr-str after-stop))))
 
 (deftest an-interrupt-after-the-request-began-stops-it
@@ -165,7 +175,7 @@
   (#'intr/on-usr1)
   (try (let [[it] (repl/eval-string "(+ 1 2)" {"ns" "user" :origin :outside})]
          (is (= :err (:tag it)) (pr-str it))
-         (is (= "interrupted by root" (:printed it))))
+         (is (str/starts-with? (:printed it) "interrupted by root\n")))
        (finally (intr/clear-pending!))))
 
 (deftest a-handler-defect-answers-what-ran-and-its-error

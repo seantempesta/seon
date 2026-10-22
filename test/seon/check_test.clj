@@ -67,7 +67,7 @@
         branches #(let [c (d/connect (pdb/store-cfg :lmdb path))] (try (d/branches c) (finally (d/release c))))
         before (branches)
         stores {:check (entries (str dir "/target/check")) :runs (entries (str dir "/target/runs"))}
-        run (clojure.java.shell/sh "env" (str "SEON_STORE=" path) "SEON_WEB_PORT=0" "bin/check" "config" :dir dir)]
+        run (ts/binary-sh "env" (str "SEON_STORE=" path) "SEON_WEB_PORT=0" "bin/check" "config" :dir dir)]
     (try
       (is (= 0 (:exit run)) (str "the step is green: " (:out run)))
       (is (= before (branches)) "the store's branch set holds nothing the step made")

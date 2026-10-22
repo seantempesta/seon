@@ -257,7 +257,7 @@
         ;; run's clone (task seon.source/the-restart-test-runs-its-root-on-its-own-store)
         env ["env" (str "SEON_RUNS=" dir "/runs") (str "SEON_STORE=" dir "/runs/store") "SEON_MAIN=main"
              (str "SEON_SERVER_PORT=" port) "SEON_WEB_PORT=0"]
-        root! (fn [& args] (apply sh/sh (concat env [(str here "/bin/root")] args)))
+        root! (fn [& args] (apply ts/binary-sh (concat env [(str here "/bin/root")] args)))
         ;; one request line, then its one reply line: the read ends on the reply, or on EOF when the
         ;; root closes the connection or dies (nil, a recorded verdict); nc -w never times out on macOS
         ask (fn [code] (with-open [s (java.net.Socket. "127.0.0.1" (int port))]

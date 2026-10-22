@@ -6,7 +6,8 @@
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.render.proc :as p]
-            [seon.web.html :as h] [seon.config] [seon.docs] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]))
+            [seon.web.html :as h] [seon.config] [seon.docs] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
+            [seon.fx] [seon.source] [seon.program]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -51,7 +52,9 @@
       (is (not (re-find #"\d\d:\d\d:\d\d" (first lines))) "no clock: an unchanged system gives the same text")
       (is (not-any? #(str/includes? % "UNKNOWN") lines) "no ping, so no unanswered ping")
       (is (some #(str/includes? % "defect in render: boom") lines))
-      (is (some #(str/includes? % "recorded agent 3: tests red: agent.a1/c") lines)))
+      (is (some #(str/includes? % "recorded agent 3: tests red: agent.a1/c") lines))
+      (testing "a class's other open rows are named, with where they all are"
+        (is (some #(str/includes? % "tests red: agent.a1/c · +1 more: open, all in (get-in (my.root/problems sys) [:classes :agent :rows])") lines))))
     (testing "the live view is not a second producer: an agent's own entry makes no problem line"
       (is (not-any? #(re-find #"^- a\d" %) lines)))
     (testing "over the budget: later sections are named, not silently cut"
@@ -127,7 +130,7 @@
       (is (< (str/index-of html "id=\"ev-2\"") (str/index-of html "id=\"ev-1\"")))
       (is (not-any? #(= "events" (first %)) (:frags patch))))
     (testing "past the cap, the oldest rows are removed by id"
-      (let [st (assoc st2 :new-events (vec (for [i (range p/EVENT-CAP)] {:type :ready :agent :a1 :at-ms i})))
+      (let [st (assoc st2 :new-events (vec (for [i (range (seon.config/value :seon.config.render.list/stream))] {:type :ready :agent :a1 :at-ms i})))
             [_ out] (answer st view0)
             patch (first (filter #(= :patch (:op %)) (:to-web out)))]
         (is (= #{"ev-1" "ev-2"} (set (filter #(str/starts-with? % "ev-") (:removes patch)))))))))
@@ -417,3 +420,182 @@
     (is (str/includes? card "2 functions have no contract") "the pill's title says why, not that its tests were red")
     (is (= 1 (count (re-seq #"no contract" row))) row)
     (is (str/includes? (ui/event-detail {:type :merged-main :result (assoc r :ok false)}) "no contract"))))
+
+;;; --- the values agents and root read: declared AI and HTML renders, one per value --------
+
+(def ^:private behind
+  ;; as seon.writer/merge-refused makes it
+  (seon.contract/error :seon.merge/behind 'seon.writer/merge-branch
+                       "main changed 3 key(s) since the branch's merge base: merge main into the branch first"
+                       {:merged? false :tx 812 :behind 3
+                        :seon.error/fix "A merge task merges main into the branch (my.branch/merge-main!), resolves any conflict, and its proofs run on the combined program."}))
+
+(deftest an-error-reads-its-message-fix-and-variant
+  (testing "an error map's schema is its variant: the base's render, whatever the variant"
+    (is (= :seon.merge/behind (r/schema-of behind nil)))
+    (is (= :seon.error/base (r/schema-of {:seon.error/type :no.such/variant :seon.error/operation 'a/b :seon.error/message "m"} nil))))
+  (let [text (r/ai behind {:seon.render/handle 'result/h4})]
+    (testing "the message first, as a REPL answers; the fix; then its variant, where, and its own keys"
+      (is (str/starts-with? text "main changed 3 key(s)"))
+      (is (str/includes? text "fix: A merge task merges main into the branch (my.branch/merge-main!)"))
+      (is (str/includes? text "(seon.merge/behind in seon.writer/merge-branch {"))
+      (is (str/includes? text ":behind 3"))
+      (is (str/includes? text "the whole value as data: (with-meta result/h4 nil)"))))
+  (testing "the page shows the same facts"
+    (let [html (h/html (r/html behind {}))]
+      (is (str/includes? html "main changed 3 key(s)"))
+      (is (str/includes? html "fix: A merge task merges main"))
+      (is (str/includes? html "seon.merge/behind in seon.writer/merge-branch")))))
+
+(def ^:private failed-task
+  (assoc task :seon.task/execution :held :seon.task/needs #{"calc/sub"}
+         :seon.task/accumulated {:plan (str/join "\n" (cons "Make `app.calc/add` pass." (for [i (range 400)] (str "Step " i ": read `app.calc/f" i "` and its proof."))))
+                                 :proofs (set (for [i (range 12)] (symbol "app.proofs" (str "add-" i "-test"))))}
+         :seon.task/failure {:reason "add cannot be total over longs" :counterexample "(add Long/MAX_VALUE 1)" :attempt "calc/add#2"}
+         :seon.task/budget-spent {:attempt "calc/add#2" :cause "failed: held for root" :blocks ["calc/div" "calc/mul"]}
+         :seon.task/evidence {:from "calc/add#2" :conflicts [] :unmerged [] :red ['app.proofs/add-0-test] :problem "red"}))
+
+(deftest a-task-reads-its-state-plan-proofs-and-failure
+  (testing "a key present in a map names no render at the REPL: it prints as the data it is"
+    (is (str/starts-with? (:text (r/printed failed-task 'result/h2)) "#:seon.task{")))
+  (testing "a task its producer names (seon.task/task's metadata) reads at the REPL by its declared render"
+    (let [text (:text (r/printed (with-meta failed-task {:seon.render/schema :seon.task/task}) 'result/h2))]
+      (is (str/starts-with? text "task calc/add · work · held · needs calc/sub"))
+      (is (str/includes? text "failed: add cannot be total over longs · counterexample (add Long/MAX_VALUE 1)"))
+      (is (str/includes? text "budget spent: failed: held for root · blocks calc/div, calc/mul"))
+      (testing "a long plan shows whole under the REPL's reply budget"
+        (is (str/includes? text "Step 399")))
+      (testing "(the part budget when the env names none)"
+        (is (re-find #"…\+\d+ chars in \d+ more lines \(subs \(get-in result/h2 \[:seon.task/accumulated :plan\]\) \d+\)" (r/ai failed-task {:seon.render/handle 'result/h2}))))
+      (testing "the proofs are a bounded list: how many more and where"
+        (is (str/includes? text "12 proofs: app.proofs/add-0-test"))
+        (is (str/includes? text "+4 more: (get-in result/h2 [:seon.task/accumulated :proofs])")))
+      (is (str/includes? text "evidence: {:from \"calc/add#2\""))))
+  (testing "the page's task box shows the failure and the budget-spent fact too"
+    (let [html (h/html (r/html failed-task {:seon.render/schema :seon.task/task}))]
+      (is (str/includes? html "failed in calc/add#2: add cannot be total over longs"))
+      (is (str/includes? html "budget spent: failed: held for root · blocks calc/div, calc/mul")))))
+
+(deftest an-attempt-reads-in-one-line
+  (is (= "running calc/add#1 on a3, turn 2, 1840 tokens"
+         (r/ai {:seon.attempt/id "calc/add#1" :seon.attempt/status :running :seon.attempt/agent :a3 :seon.attempt/turns 2 :seon.attempt/tokens 1840} {})))
+  (let [line (r/ai {:seon.attempt/id "calc/add#2" :seon.attempt/status :failed :seon.attempt/outcome :merge-failed
+                    :seon.attempt/reason (str "merge refused: " (:seon.error/message behind))
+                    :seon.attempt/conflicts [{:key "var app.calc/add" :kind :var :base "a" :ours "b" :theirs "c"}]
+                    :seon.attempt/unmerged ["var app.calc/add"]}
+                   {:seon.render/handle '(get atts "calc/add#2")})]
+    (is (str/starts-with? line "ended calc/add#2 merge-failed: merge refused: main changed 3 key(s)"))
+    (is (str/includes? line " · 1 conflicts in (:seon.attempt/conflicts (get atts \"calc/add#2\")) · 1 unmerged in (:seon.attempt/unmerged (get atts \"calc/add#2\"))"))))
+
+(defn- row
+  "A problem row as seon.problems/report makes it: every row's members, then its class's."
+  [m] (merge {:producer nil :owner-ns 'calc :evidence {} :proofs [] :answered-by [] :at-ms 1761170000000} m))
+
+(deftest every-problem-class-reads-what-it-is-about-and-why
+  ;; rows as seon.problems/report makes them, one per class that had no line of its own
+  (let [line #(r/ai (row (assoc %2 :class %1)) {:seon.render/schema :seon.problems/row})]
+    (is (= "task-conflict calc/add calc/add#3 plan: {:base \"Make add.\", :ours \"Make add total.\", :theirs \"Make add pass.\"}"
+           (line :task-conflict {:task "calc/add" :attempt "calc/add#3" :attr :plan :open? true
+                                 :evidence {:task "calc/add" :attr :plan :base "Make add." :ours "Make add total." :theirs "Make add pass." :from "calc/add#3"}})))
+    (is (= "budget spent calc/add calc/add#2: failed: held for root · blocks calc/div, calc/mul"
+           (line :budget-spent {:task "calc/add" :attempt "calc/add#2" :cause "failed: held for root" :blocks ["calc/div" "calc/mul"]})))
+    (is (= "failed calc/add calc/add#2: add cannot be total over longs"
+           (line :failed {:task "calc/add" :attempt "calc/add#2" :reason "add cannot be total over longs" :counterexample "(add Long/MAX_VALUE 1)"})))
+    (is (= "merge calc/add calc/add#2: main changed 3 key(s) since the branch's merge base: merge main into the branch first · 1 conflicts · unmerged var app.calc/add"
+           (line :merge {:task "calc/add" :attempt "calc/add#2" :error behind :conflicts 1 :unmerged ["var app.calc/add"]})))
+    (is (= "red calc/add calc/add#1 app.proofs/add-test: tests-red"
+           (line :red {:task "calc/add" :attempt "calc/add#1" :test 'app.proofs/add-test :outcome :tests-red})))
+    (is (= "platform ×4: Datahike transact refused (answered by calc/fix-store)"
+           (line :platform {:signature "s" :message "Datahike transact refused" :count 4 :answered-by ["calc/fix-store"]}))))
+  (testing "the whole report at root's REPL: by class, each row by its render, closed rows marked"
+    (let [rep (with-meta {:t 90 :classes {:failed {:n 1 :rows [(row {:task "calc/add" :reason "not total" :open? true})]}
+                                          :budget-spent {:n 1 :rows [(row {:task "calc/sub" :cause "held" :open? false})]}
+                                          :red {:n 0 :rows []}}}
+                {:seon.render/schema :seon.problems/report})
+          text (:text (r/printed rep 'result/h1))]
+      (is (= ["problems recorded on main at t 90" "# failed 1" "- failed calc/add: not total" "# budget spent 1" "- budget spent calc/sub: held (closed)"
+              "the whole value as data: (with-meta result/h1 nil)"]
+             (str/split-lines text))))))
+
+
+;;; --- the law, from the compiler's facts: one printer, and no cut before it -------------
+
+(def ^:private printer-vars
+  "The vars that turn a value into text beside the one printer."
+  '#{clojure.core/pr-str clojure.core/prn-str clojure.core/print-str clojure.core/with-out-str
+     clojure.core/pr clojure.core/prn clojure.core/printf clojure.pprint/pprint clojure.pprint/pp
+     clojure.pprint/write clojure.pprint/cl-format})
+
+(def ^:private budgeted-vars
+  "The printer's calls that cut to a budget: a cut where a value is made, outside a render."
+  '#{seon.print/text seon.print/line seon.print/prose})
+
+(def ^:private cut-vars
+  "The vars that shorten what is shown, where output is made for a person or a model."
+  '#{clojure.core/subs clojure.core/take clojure.core/take-last clojure.core/drop-last})
+
+(defn- src-program
+  "Main's db with every file of src imported (each form analyzed, never run: the running
+  generation's namespaces), as seon.source-test imports it."
+  []
+  (let [files (:value (seon.fx/read-source {:req {:root (System/getProperty "user.dir") :dirs ["src"]}}))]
+    (doseq [n (keep #(seon.source/file-ns (val %)) files)] (require n))
+    (let [db (ts/test-db)] (d/db-with db (seon.source/import-tx db files)))))
+
+(defn- sites
+  "The vars of src whose forms reference one of marks (the compiler's :form/refs), in
+  namespaces ns? holds."
+  [forms marks ns?]
+  (sort (distinct (for [f forms :when (and (ns? (:ns f)) (some marks (:refs f)))
+                        ;; a var's form, or a method's (named by its multi)
+                        [k sym] (:defines f) :when (#{:var :method} k)]
+                    sym))))
+
+(deftest one-printer-and-no-cut-before-it
+  ;; owner, 2026-10-22: "Do not create more than one value printer and no clipping happens
+  ;; before then". Every var of src that prints beside seon.print, and every var of a
+  ;; display namespace that cuts, is named in docs/render.md#one-printer with its reason
+  ;; (the wire, storage, code text, or a cut of data, not of output); a new one is red.
+  (let [forms (seon.program/live-forms (src-program))
+        doc (let [t (slurp "docs/render.md")] (subs t (str/index-of t "## One printer") (or (str/index-of t "\n## " (+ 3 (str/index-of t "## One printer"))) (count t))))
+        ;; a site is named by a list item, before its reason (`- `ns/f`, `ns/g`: why`)
+        named (set (for [[_ head] (re-seq #"(?m)^- (.*?): " doc) [_ n] (re-seq #"`([a-z][\w.\-]*/[^`\s]+)`" head)] (symbol n)))
+        printer? #(not (str/starts-with? (str %) "seon.print"))
+        display? #(re-find #"^(my\.|seon\.(render|web|context|mcp|server|cost|repl|agent|problems)($|\.))" (str %))]
+    (testing "src is imported: the check reads facts, not nothing"
+      (is (< 1000 (count forms))))
+    (testing "every var printing beside the one printer is named with its reason"
+      (is (= [] (remove named (sites forms printer-vars printer?)))))
+    (testing "every var cutting in a display namespace is named with its reason"
+      (is (= [] (remove named (sites forms cut-vars display?)))))
+    (testing "every var cutting to a budget where a value is made, outside a display namespace, is named"
+      (is (= [] (remove named (sites forms budgeted-vars #(and (printer? %) (not (display? %))))))))
+    (testing "a site named that no longer prints or cuts is gone from the page too"
+      (is (= [] (remove (set (concat (sites forms printer-vars printer?) (sites forms cut-vars display?)
+                                     (sites forms budgeted-vars #(and (printer? %) (not (display? %))))))
+                        (sort named)))))))
+
+(deftest an-outside-model-reads-an-evaluation-as-the-repl-says-it
+  ;; seon_eval's tool text (seon.server/mcp-reply): reply items as a REPL shows them, never
+  ;; the items' map printed with its strings escaped
+  (let [text (ai/items [{:id 0 :tag :ret :form "(def outside-x 41)" :printed "#'user/outside-x" :handle :h0}
+                        {:id 1 :tag :ret :form "(println \"hi\") (inc outside-x)" :out "hi\n" :printed "42" :handle :h1}
+                        {:id 2 :tag :err :form "(/ 1 0)" :printed "Divide by zero\n(seon.agent/eval-error in seon.repl/eval-code)"}])]
+    (is (= (str "(def outside-x 41)\n=> #'user/outside-x\n;; result/h0\n\n"
+                "(println \"hi\") (inc outside-x)\nhi\n=> 42\n;; result/h1\n\n"
+                "(/ 1 0)\nx Divide by zero\n(seon.agent/eval-error in seon.repl/eval-code)")
+           text))))
+
+(deftest the-model-reads-a-rendered-value-as-its-repl-did
+  ;; the context's last evaluations (seon.context/shown-evals): a value whose producer named
+  ;; its render shows that render's text, as the agent's REPL answered it; other values print
+  ;; structurally from the live value
+  (let [t (with-meta failed-task {:seon.render/schema :seon.task/task})
+        [shown plain] (seon.context/shown-evals [{:k 0 :times 1 :item {:tag :ret :form "(my.task/current)" :value t :printed (:text (r/printed t '(nth (my.turn/evals) 0)))}}
+                                                 {:k 1 :times 1 :item {:tag :ret :form "{:n 1}" :value {:n 1} :printed "{:n 1}"}}])]
+    (is (str/includes? (:text shown) "task calc/add · work · held"))
+    (testing "the render's text as text, its lines real lines, never an escaped string literal"
+      (is (str/includes? (:text shown) "\nfailed: add cannot be total"))
+      (is (not (str/includes? (:text shown) "\\n"))))
+    (is (not (str/includes? (:text shown) ":seon.task/accumulated")))
+    (is (str/includes? (:text plain) ":value {:n 1}"))))

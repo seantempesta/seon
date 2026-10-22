@@ -10,8 +10,11 @@
                    [:seon.render/schema {:optional true} [:maybe :qualified-keyword]]
                    ;; tokens for the printer (the AI face's budget, and the HTML face's)
                    [:seon.render/budget {:optional true} pos-int?]
-                   [:seon.render/handle {:optional true} [:maybe :symbol]]]
- :seon.render/out [:map [:seon.render/html {:optional true} :any] [:seon.render/ai {:optional true} :any]]
+                   ;; what a cut reads the value through: its result handle (result/h3) or a form
+                   [:seon.render/handle {:optional true} :any]]
+ :seon.render/out [:map [:seon.render/html {:optional true} :any] [:seon.render/ai {:optional true} :any]
+                   ;; the render cut something (each cut names what it left and how to read it)
+                   [:seon.render/truncated? {:optional true} :boolean]]
 
  ;; ---- what root's dashboard shows: the whole system as one value ----
  ;; the api's view (agents, writer, fork server, store, boot, root errors) joined with every
@@ -34,7 +37,7 @@
                            [:pid :keyword] [:defects nat-int?] [:newest {:optional true} [:maybe :string]]]
  ;; a cost proof's report as the agent's test run holds it: the estimate's function, the
  ;; rows measured and the verdict (seon.cost/proof's :actual)
- :seon.render/cost-report [:map {:seon.render/html seon.render.ui/cost-report :seon.render/ai seon.render.ai/cost-report}
+ :seon.render/cost-report [:map {:seon.render/html seon.render.ui/cost-report}
                            [:rows [:vector :seon.cost/row]] [:verdict :seon.cost/verdict]]
 
  ;; a UI call naming a var not marked ^:seon/callable (seon.web/ui-call)
