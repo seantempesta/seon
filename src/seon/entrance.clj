@@ -104,7 +104,7 @@
           :args {:agent {:type "string" :description "an agent id (a3) or root"} :code {:type "string" :description "Clojure forms"}}
           :required ["agent" "code"]
           :answer (fn [sys ag req]
-                    {:items (mapv #(select-keys % [:tag :form :printed :out :recorded :handle])
+                    {:items (mapv #(cond-> (select-keys % [:tag :form :printed :out :err :recorded :handle]) (:err %) (dissoc :printed))
                                   (if (= :root ag) (root-eval sys (:code req)) @(c/submit! sys ag (:code req) {:origin :outside})))})}
    ;; the block's text as the model reads it: printed to the agent's output, not as a
    ;; value (a value comes back as a string literal, escaped, under the reply's budget);

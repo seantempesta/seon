@@ -494,3 +494,17 @@
         refs (:references (context/current-state db (task/task db "demo/u") {:turn 0 :max-turns 4}))]
     (is (= ['demo/f] (keep :symbol refs)) "the resolved name as itself")
     (is (= {:unresolved ['demo/x 'demo/y] :problem (:unresolved seon.ref/problem-messages)} (last refs)) "the others, one problem")))
+
+(deftest an-error-shows-what-its-contract-says
+  ;; a contract refusal is data (its problems, the fix): the transcript shows that, not only
+  ;; the message (the step E dry run's agent read "invalid-input: its arguments do not
+  ;; satisfy its contract" with no word of which, 2026-10-22)
+  (let [em {:seon.error/type :seon.instrument/contract-error :seon.error/operation 'seon.e2e/agents-reused
+            :seon.error/member :malli.core/invalid-output
+            :seon.error/message "seon.e2e/agents-reused invalid-output: its value does not satisfy its contract"
+            :seon.error/fix "Fix seon.e2e/agents-reused (the producer), or its contract."
+            :seon.error/problems [{:path [0] :in [0] :expected :keyword :value nil}]}
+        text (context/evaluations-text [{:id 0 :tag :err :form "(seon.e2e/agents-reused db)" :printed (:seon.error/message em) :err em}])]
+    (is (str/includes? text ":expected :keyword") text)
+    (is (str/includes? text "Fix seon.e2e/agents-reused") text)
+    (is (= 1 (count (re-seq #"its value does not satisfy" text))) "the message once")))

@@ -140,12 +140,14 @@
 
 (defn- shown-eval
   "One evaluation as the transcript shows it: its form, its live value (else its printed
-  answer), its output; an error keeps :tag :err. A sub-map of the item, so every cut's path
-  reads the item itself."
+  answer), its output; an error keeps :tag :err and shows its error map (:err: a contract's
+  problems and fix, an exception's class and causes) in place of its message. A sub-map of
+  the item, so every cut's path reads the item itself."
   {:malli/schema [:=> [:cat :map] :map]}
   [item]
-  (cond-> (select-keys item [:form :tag :value :printed :out])
+  (cond-> (select-keys item [:form :tag :value :printed :out :err])
     (contains? item :value) (dissoc :printed)
+    (contains? item :err) (dissoc :printed)
     (= :ret (:tag item)) (dissoc :tag)))
 
 (defn shown-evals

@@ -46,11 +46,11 @@
 
 (defn last-evals
   "The items of this process's last model turn, in order: each one's form, printed value or
-  error, output, and its live value (:value) while this process holds it."
+  error (an error's map, :err), output, and its live value (:value) while this process holds it."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
   (let [rs (:results @agent/state)]
-    (mapv (fn [it] (cond-> (select-keys it [:id :tag :form :printed :out :handle])
+    (mapv (fn [it] (cond-> (select-keys it [:id :tag :form :printed :out :err :handle])
                      (contains? rs (:handle it)) (assoc :value (get rs (:handle it)))))
           (get-in @agent/state [:turn :evals]))))
 
