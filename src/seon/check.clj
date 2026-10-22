@@ -1262,46 +1262,56 @@
     (out! "DROP OK")
     (lib/c-exit 0)))
 
+(def ^:private modes
+  "Every mode -main runs, by name: (f n more), n the first argument after it. The one list:
+  an unknown mode prints these names (bin/check passes its mode here)."
+  (let [n-or (fn [n d] (Long/parseLong (or n d)))]
+    (sorted-map
+     "seed" (fn [n more] (seed (n-or n "2000")))
+     "drop" (fn [n more] (drop-mains (remove nil? (cons n more))))
+     ;; the store bin/check is given, its size and branch count: "PATH KB BRANCHES"
+     "store" (fn [n more] (let [path (seon.config/value :seon.config.root/store-path)
+                  c (d/connect (seon.db/store-cfg :lmdb path))]
+              (println path (quot (dir-bytes path) 1024) (count (d/branches c))) (d/release c) (lib/c-exit 0)))
+     "durable-write" (fn [n more] (durable-write n))
+     "durable-read" (fn [n more] (durable-read n))
+     "window-write" (fn [n more] (window-write n))
+     "window-read" (fn [n more] (window-read n))
+     "scale" (fn [n more] (scale (n-or n "100")))
+     "robust" (fn [n more] (robust))
+     "lifecycle" (fn [n more] (lifecycle (n-or n "10")))
+     "threads-declared" (fn [n more] (threads-declared (n-or n "3")))
+     "drain" (fn [n more] (drain (n-or n "32")))
+     "backpressure" (fn [n more] (backpressure (n-or n "200")))
+     "contracts" (fn [n more] (contracts))
+     "mg-check" (fn [n more] (mg-check n))
+     "e2e" (fn [n more] (lib/c-exit (if (seon.e2e/run n more) 0 1)))
+     ;; swarm N M: seon.e2e's swarm row (N tasks over 5 shared vars, max-running M), SWARM OK/FAILED
+     "swarm" (fn [n more] (lib/c-exit (if (seon.e2e/run "swarm" [(or n "20") (or (first more) "8")]) 0 1)))
+     "instrument" (fn [n more] (instrument))
+     "record" (fn [n more] (record))
+     "orphan" (fn [n more] (orphan))
+     "lease" (fn [n more] (lease))
+     "fx" (fn [n more] (fx (n-or n "1000")))
+     "system" (fn [n more] (system-check))
+     "config" (fn [n more] (config-check))
+     "problems" (fn [n more] (problems-check))
+     "threads" (fn [n more] (threads-check))
+     "root" (fn [n more] (root-serve))
+     ;; this checkout's ports as the config resolves them, "SERVER WEB" (bin/ports)
+     "ports" (fn [n more] (do (println (seon.config/value :seon.config.root/entrance-port) (seon.config/value :seon.config.web/port)) (lib/c-exit 0)))
+     "mcp-proof" (fn [n more] (mcp-proof))
+     "hotreload" (fn [n more] (hotreload))
+     "idle" (fn [n more] (idle (n-or n "5000")))
+     "smoke" (fn [_ _] (smoke)))))
+
 (defn -main [& args]
   ;; --config FILE and --set :k=v are the config's (seon.config reads them from the command
   ;; line); the mode reads the rest
-  (let [[mode n & more] (seon.config/without-overrides args)
-        n-or (fn [d] (Long/parseLong (or n d)))]
-  (case mode
-    "seed" (seed (n-or "2000"))
-    "drop" (drop-mains (remove nil? (cons n more)))
-    ;; the store bin/check is given, its size and branch count: "PATH KB BRANCHES"
-    "store" (let [path (seon.config/value :seon.config.root/store-path)
-                  c (d/connect (seon.db/store-cfg :lmdb path))]
-              (println path (quot (dir-bytes path) 1024) (count (d/branches c))) (d/release c) (lib/c-exit 0))
-    "durable-write" (durable-write n)
-    "durable-read" (durable-read n)
-    "window-write" (window-write n)
-    "window-read" (window-read n)
-    "scale" (scale (n-or "100"))
-    "robust" (robust)
-    "lifecycle" (lifecycle (n-or "10"))
-    "threads-declared" (threads-declared (n-or "3"))
-    "drain" (drain (n-or "32"))
-    "backpressure" (backpressure (n-or "200"))
-    "contracts" (contracts)
-    "mg-check" (mg-check n)
-    "e2e" (lib/c-exit (if (seon.e2e/run n more) 0 1))
-    ;; swarm N M: seon.e2e's swarm row (N tasks over 5 shared vars, max-running M), SWARM OK/FAILED
-    "swarm" (lib/c-exit (if (seon.e2e/run "swarm" [(or n "20") (or (first more) "8")]) 0 1))
-    "instrument" (instrument)
-    "record" (record)
-    "orphan" (orphan)
-    "lease" (lease)
-    "fx" (fx (n-or "1000"))
-    "system" (system-check)
-    "config" (config-check)
-    "problems" (problems-check)
-    "threads" (threads-check)
-    "root" (root-serve)
-    ;; this checkout's ports as the config resolves them, "SERVER WEB" (bin/ports)
-    "ports" (do (println (seon.config/value :seon.config.root/entrance-port) (seon.config/value :seon.config.web/port)) (lib/c-exit 0))
-    "mcp-proof" (mcp-proof)
-    "hotreload" (hotreload)
-    "idle" (idle (n-or "5000"))
-    (smoke))))
+  (let [[mode n & more] (seon.config/without-overrides args)]
+    (if-let [f (get modes mode)]
+      (f n more)
+      ;; a mode that is not one: its verdict, never another mode's
+      (do (out! "no mode " (pr-str mode) "; the modes: " (clojure.string/join " " (keys modes)))
+          (out! (if mode (clojure.string/upper-case mode) "MODE") " FAILED")
+          (lib/c-exit 1)))))
