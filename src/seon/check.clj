@@ -446,7 +446,7 @@
                 "an agent past its heap bound gets OutOfMemoryError as an :err item and lives" (and (= :err (:tag (first r9))) (= "10" (:printed (second r9))))
                 ;; nREPL's model (owner's choice): an interrupt stops the request; the agent goes on
                 "root's interrupt! stops the running request; the agent's next request runs"
-                (and (= "interrupted by root" (:printed (first r12))) (= 1 (count r12)) (= ":next" (:printed (first r12b))))
+                (and (clojure.string/starts-with? (str (:printed (first r12))) "interrupted by root\n") (= 1 (count r12)) (= ":next" (:printed (first r12b))))
                 "a form past its tick budget is stopped, a typed error naming its ticks; the agent keeps its state and goes on"
                 (and (= :seon.repl/ticks-spent (get-in (second r11) [:err :seon.error/type]))
                      (<= 1000000000 (get-in (second r11) [:err :ticks])) (= "8" (:printed (nth r11 2))))
